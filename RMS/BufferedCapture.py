@@ -28,7 +28,7 @@ class BufferedCapture(Process):
     cameraID = 0
     
     def __init__(self, framesList):
-        """Populate queue with (startTime, frames) after startCapture is called.
+        """Populate list with (startTime, frames) after startCapture is called.
         
         @param framesList: list in shared memory that is going to be filled with frames and start times
         """

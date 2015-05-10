@@ -22,30 +22,37 @@ import time
 import struct
 
 class Compression(Process):
-    """Compress list of numpy arrays (video frames) into FF_*.bin format (CAMS format).
+    """Compress list of numpy arrays (video frames).
+    Output is in Flat-field Temporal Pixel (FTP) format like the one used by CAMS project (P. Jenniskens et al., 2011).
     """
 
     running = False
     
     def __init__(self, framesList, camNum):
+        """
+        
+        @param framesList: list in shared memory of 2d numpy arrays (grayscale video frames)
+        @param camNum: camera ID (ie. 459)
+        """
+        
         super(Compression, self).__init__()
         self.framesList = framesList
         self.camNum = camNum
     
-    def convert(self, framesList):
-        """Convert formats.
+    def swap(self, frames):
+        """Convert from (256, 576, 720) to (576, 720, 256).
         
-        @param framesList: list of 2d numpy arrays (grayscale video frames)
-        @return: grayscale frames stored as 3d numpy array ready for Compression.compress()
+        @param frames: video frames as 3d numpy array
+        @return: video frames as 3d numpy array ready for Compression.compress()
         """
         
-        frames = np.swapaxes(framesList, 0, 2)
+        frames = np.swapaxes(frames, 0, 2)
         frames = np.swapaxes(frames, 0, 1)
         
         return frames
     
     def compress(self, frames):
-        """Compress frames to the FF_*.bin format compatible array using C code with a help of a scipy.weave.inline().
+        """Compress frames to the FTP-compatible array.
         
         @param frames: grayscale frames stored as 3d numpy array
         @return: 3d numpy array in format: (N, y, x) where N is [0, 4)
@@ -104,7 +111,7 @@ class Compression(Process):
         return out
     
     def save(self, arr, startTime, N, camNum):
-        """Writes metadata and data array to FF_*.bin file (CAMS format).
+        """Writes metadata and data array to FTP .bin file.
         
         @param arr: 3d numpy array in format: (N, y, x) where N is [0, 4)
         @param startTime: seconds and fractions of a second from epoch to first frame

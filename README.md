@@ -1,2 +1,3 @@
-# RMS
-RPi Meteor Station
+# RPi Meteor Station
+
+Meteor station for under $100.
