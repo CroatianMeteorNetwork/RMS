@@ -15,8 +15,8 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from multiprocessing import Process
-from scipy import weave
 from math import floor
+from scipy import weave
 import numpy as np
 import time
 import struct
@@ -39,12 +39,16 @@ class Compression(Process):
         self.framesList = framesList
         self.camNum = camNum
     
-    def swap(self, frames):
-        """Convert from (256, 576, 720) to (576, 720, 256).
+    def convert(self, frames):
+        """Convert from (256, 576, 720) to (576, 720, 256) and handle dropped frames.
         
         @param frames: video frames as 3d numpy array
         @return: video frames as 3d numpy array ready for Compression.compress()
         """
+        
+        for i, frame in enumerate(frames):
+            if(frame == None):
+                frames[i] = np.zeros((576, 720), np.uint8) #TODO: increase dropped frames counter
         
         frames = np.swapaxes(frames, 0, 2)
         frames = np.swapaxes(frames, 0, 1)

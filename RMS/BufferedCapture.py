@@ -24,6 +24,8 @@ class BufferedCapture(Process):
     """Capture from device to buffer in memory.
     """
     
+    TIME_FOR_DROP = 0.05
+    
     running = False
     cameraID = 0
     
@@ -61,11 +63,20 @@ class BufferedCapture(Process):
         
         while self.running:
             frames = np.empty((256, 576, 720), np.uint8)
+            t = 0
+            last_time = time.time()
             
             for i in range(256):
                 ret, frame = device.read()
                 
-                if i == 0: startTime = time.time()
+                t = time.time()
+                if i == 0: 
+                    startTime = t
+                elif last_time - t > self.TIME_FOR_DROP: #check if frame is dropped TODO: better frame dropping detection
+                    frames[i] = None
+                    i += 1
+                    print "frame dropped!"
+                last_time = t
                 
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 frames[i] = gray

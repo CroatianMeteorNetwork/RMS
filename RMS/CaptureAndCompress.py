@@ -14,8 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from RMS import BufferedCapture
-from RMS import Compression
+from BufferedCapture import BufferedCapture
+from Compression import Compression
 from multiprocessing import Manager
 
 if __name__ == "__main__":
