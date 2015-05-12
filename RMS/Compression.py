@@ -39,23 +39,21 @@ class Compression(Process):
         self.framesList = framesList
         self.camNum = camNum
     
-    def convert(self, frames):
+    @staticmethod
+    def convert(frames):
         """Convert from (256, 576, 720) to (576, 720, 256) and handle dropped frames.
         
         @param frames: video frames as 3d numpy array
         @return: video frames as 3d numpy array ready for Compression.compress()
         """
         
-        for i, frame in enumerate(frames):
-            if(frame == None):
-                frames[i] = np.zeros((576, 720), np.uint8) #TODO: increase dropped frames counter
-        
         frames = np.swapaxes(frames, 0, 2)
         frames = np.swapaxes(frames, 0, 1)
         
         return frames
     
-    def compress(self, frames):
+    @staticmethod
+    def compress(frames):
         """Compress frames to the FTP-compatible array.
         
         @param frames: grayscale frames stored as 3d numpy array
@@ -114,7 +112,8 @@ class Compression(Process):
         weave.inline(code, ['frames', 'rands', 'out'])
         return out
     
-    def save(self, arr, startTime, N, camNum):
+    @staticmethod
+    def save(arr, startTime, N, camNum):
         """Writes metadata and data array to FTP .bin file.
         
         @param arr: 3d numpy array in format: (N, y, x) where N is [0, 4)
@@ -163,11 +162,11 @@ class Compression(Process):
                 
             startTime = self.framesList[0][0] #retrieve time of first frame
             
-            frames = self.convert(self.framesList[0][1]) #convert frames
+            frames = Compression.convert(self.framesList[0][1]) #convert frames
             del self.framesList[0]                       #and clean buffer
             
-            frames = self.compress(frames)
+            frames = Compression.compress(frames)
             
-            self.save(frames, startTime, n, self.camNum)
+            Compression.save(frames, startTime, n, self.camNum)
             n += 1
     

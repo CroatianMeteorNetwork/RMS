@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from multiprocessing import Process, Queue
+from multiprocessing import Process
 import numpy as np
 import cv2
 import time
@@ -63,7 +63,6 @@ class BufferedCapture(Process):
         
         while self.running:
             frames = np.empty((256, 576, 720), np.uint8)
-            t = 0
             last_time = time.time()
             
             for i in range(256):
@@ -73,8 +72,7 @@ class BufferedCapture(Process):
                 if i == 0: 
                     startTime = t
                 elif last_time - t > self.TIME_FOR_DROP: #check if frame is dropped TODO: better frame dropping detection
-                    frames[i] = None
-                    i += 1
+                    #TODO: increase dropped frames counter
                     print "frame dropped!"
                 last_time = t
                 
