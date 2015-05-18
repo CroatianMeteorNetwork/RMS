@@ -16,7 +16,7 @@
 
 """ Timings of compression algorithm with various cases.
 
-Averaged results (20 runs) for Raspberry Pi 2 at xxghz:
+Averaged results (20 runs) for Raspberry Pi 2 at 1000MHz ARM, 500MHz core, 500MHz SDRAM, 2 overvolt:
 black: 10.0018053055
 white: 9.9432981679
 uniform noise: 5.16999864578
