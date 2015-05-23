@@ -27,10 +27,12 @@ from RMS.Compression import Compression
 import numpy as np
 import time
 
+comp = Compression(None, None, None, None, 000)
+
 def timing(img, s):
     t = time.time()
-    img = Compression.convert(img)
-    Compression.compress(img)
+    img = comp.convert(img)
+    comp.compress(img)
     print s + ": " + str(time.time() - t) + "s"
    
 def create(f):

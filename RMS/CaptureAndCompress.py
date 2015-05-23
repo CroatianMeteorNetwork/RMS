@@ -30,12 +30,12 @@ def wait():
 if __name__ == "__main__":
     logging.basicConfig(filename="log.log", level=logging.DEBUG)
     
-    sharedArrayBase = Array(ctypes.c_uint, 256*576*720)
+    sharedArrayBase = Array(ctypes.c_uint8, 256*576*720)
     sharedArray = np.ctypeslib.as_array(sharedArrayBase.get_obj())
     sharedArray = sharedArray.reshape(256, 576, 720)
     startTime = Value('d', 0.0)
     
-    sharedArrayBase2 = Array(ctypes.c_uint, 256*576*720)
+    sharedArrayBase2 = Array(ctypes.c_uint8, 256*576*720)
     sharedArray2 = np.ctypeslib.as_array(sharedArrayBase2.get_obj())
     sharedArray2 = sharedArray2.reshape(256, 576, 720)
     startTime2 = Value('d', 0.0)
