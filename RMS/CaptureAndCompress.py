@@ -17,8 +17,11 @@
 from BufferedCapture import BufferedCapture
 from Compression import Compression
 from multiprocessing import Manager
+import logging
 
 if __name__ == "__main__":
+    logging.basicConfig(filename="log.log", level=logging.DEBUG)
+    
     manager = Manager()
     framesList = manager.list()
     
