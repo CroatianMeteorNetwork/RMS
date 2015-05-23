@@ -29,32 +29,36 @@ class Compression(Process):
 
     running = False
     
-    def __init__(self, framesList, camNum):
+    def __init__(self, array1, startTime1, array2, startTime2, camNum):
         """
         
-        @param framesList: list in shared memory of 2d numpy arrays (grayscale video frames)
+        @param array1: first numpy array in shared memory of grayscale video frames
+        @param startTime1: float in shared memory that holds time of first frame in array1
+        @param array2: second numpy array in shared memory
+        @param startTime1: float in shared memory that holds time of first frame in array2
         @param camNum: camera ID (ie. 459)
         """
         
         super(Compression, self).__init__()
-        self.framesList = framesList
+        self.array1 = array1
+        self.startTime1 = startTime1
+        self.array2 = array2
+        self.startTime2 = startTime2
         self.camNum = camNum
     
-    @staticmethod
-    def convert(frames):
+    def convert(self, arr):
         """Convert from (256, 576, 720) to (576, 720, 256).
         
-        @param frames: video frames as 3d numpy array
+        @param arr: video frames as 3d numpy array
         @return: video frames as 3d numpy array ready for Compression.compress()
         """
         
-        frames = np.swapaxes(frames, 0, 2)
+        frames = np.swapaxes(arr, 0, 2)
         frames = np.swapaxes(frames, 0, 1)
         
         return frames
     
-    @staticmethod
-    def compress(frames):
+    def compress(self, frames):
         """Compress frames to the FTP-compatible array.
         
         @param frames: grayscale frames stored as 3d numpy array
@@ -113,8 +117,7 @@ class Compression(Process):
         weave.inline(code, ['frames', 'rands', 'out'])
         return out
     
-    @staticmethod
-    def save(arr, startTime, N, camNum):
+    def save(self, arr, startTime, N, camNum):
         """Writes metadata and data array to FTP .bin file.
         
         @param arr: 3d numpy array in format: (N, y, x) where N is [0, 4)
@@ -158,18 +161,31 @@ class Compression(Process):
         n = 0
         
         while not self.exit.is_set():
-            while len(self.framesList) > 0: #block until frames are available   
-                t = time.time()
+            while self.startTime1.value==0 and self.startTime2.value==0: #block until frames are available
+                if self.exit.is_set():    #exit function if process was stopped
+                    return
                 
-                startTime = self.framesList[0][0] #retrieve time of first frame
-                
-                frames = Compression.convert(self.framesList[0][1]) #convert frames
-                del self.framesList[0]                       #and clean buffer
-                
-                frames = Compression.compress(frames)
-                
-                Compression.save(frames, startTime, n, self.camNum)
-                n += 1
-                
-                logging.debug("compression: " + str(time.time() - t) + "s")
+            t = time.time()
+            
+            if self.startTime1.value != 0:
+                startTime = self.startTime1.value #retrieve time of first frame
+                frames = self.convert(self.array1) #copy and convert frames
+                self.startTime1.value = 0
+            else:
+                startTime = self.startTime2.value #retrieve time of first frame
+                frames = self.convert(self.array2) #copy and convert frames
+                self.startTime2.value = 0
+            
+            logging.debug("conversion: " + str(time.time() - t) + "s")
+            t = time.time()
+            
+            frames = self.compress(frames)
+            
+            logging.debug("compression: " + str(time.time() - t) + "s")
+            t = time.time()
+            
+            self.save(frames, startTime, n, self.camNum)
+            n += 1
+            
+            logging.debug("saving: " + str(time.time() - t) + "s")
     

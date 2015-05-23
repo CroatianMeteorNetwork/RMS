@@ -29,14 +29,23 @@ class BufferedCapture(Process):
     running = False
     cameraID = 0
     
-    def __init__(self, framesList):
-        """Populate list with (startTime, frames) after startCapture is called.
+    def __init__(self, array1, startTime1, array2, startTime2):
+        """Populate arrays with (startTime, frames) after startCapture is called.
         
-        @param framesList: list in shared memory that is going to be filled with frames and start times
+        @param array1: numpy array in shared memory that is going to be filled with frames
+        @param startTime1: float in shared memory that holds time of first frame in array1
+        @param array2: second numpy array in shared memory
+        @param startTime2: float in shared memory that holds time of first frame in array2
         """
         
         super(BufferedCapture, self).__init__()
-        self.framesList = framesList
+        self.array1 = array1
+        self.startTime1 = startTime1
+        self.array2 = array2
+        self.startTime2 = startTime2
+        
+        self.startTime1.value = 0
+        self.startTime2.value = 0
     
     def startCapture(self, cameraID=0):
         """Start capture using specified camera.
@@ -60,10 +69,15 @@ class BufferedCapture(Process):
         """
         
         device = cv2.VideoCapture(self.cameraID)
-        frames = np.empty((256, 576, 720), np.uint8)
+        first = True
         
         while not self.exit.is_set():
             timing = lastTime = time.time()
+            
+            if first:
+                self.startTime1.value = 0
+            else:
+                self.startTime2.value = 0
             
             for i in range(256):
                 ret, frame = device.read()
@@ -77,13 +91,18 @@ class BufferedCapture(Process):
                 lastTime = t
                 
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                frames[i] = gray
+                if first:
+                    self.array1[i] = gray
+                else:
+                    self.array2[i] = gray
+            
+            if first:
+                self.startTime1.value = startTime
+            else:
+                self.startTime2.value = startTime
+            first = not first
             
             logging.debug("capture: " + str(time.time() - timing) + "s")
-            
-            self.framesList.append((startTime, frames))
-            
-            logging.debug("capture & append to memory: " + str(time.time() - timing) + "s")
         
         device.release()
     
