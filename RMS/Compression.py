@@ -20,6 +20,7 @@ from scipy import weave
 import numpy as np
 import time
 import struct
+import logging
 
 class Compression(Process):
     """Compress list of numpy arrays (video frames).
@@ -93,13 +94,13 @@ class Compression(Process):
                     }
                 }
                 acc -= max;
-                acc = acc >> 8;
+                acc /= 256;
     
                 for(n=0; n<256&&n!=max_frame; n++) {
                     pixel = FRAMES3(y, x, n) - acc;
                     var += pixel*pixel;
                 }
-                var = sqrt(var >> 8);
+                var = sqrt(var / 256);
                 
                 OUT3(0, y, x) = max;
                 OUT3(1, y, x) = max_frame;
@@ -160,6 +161,8 @@ class Compression(Process):
                 if not self.running:      #exit function if process was stopped
                     return
                 
+            t = time.time()
+            
             startTime = self.framesList[0][0] #retrieve time of first frame
             
             frames = Compression.convert(self.framesList[0][1]) #convert frames
@@ -169,4 +172,6 @@ class Compression(Process):
             
             Compression.save(frames, startTime, n, self.camNum)
             n += 1
+            
+            logging.debug("compression: " + str(time.time() - t) + "s")
     

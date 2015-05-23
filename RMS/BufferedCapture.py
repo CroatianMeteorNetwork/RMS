@@ -18,7 +18,7 @@ from multiprocessing import Process
 import numpy as np
 import cv2
 import time
-
+import logging
 
 class BufferedCapture(Process):
     """Capture from device to buffer in memory.
@@ -60,10 +60,10 @@ class BufferedCapture(Process):
         """
         
         device = cv2.VideoCapture(self.cameraID)
+        frames = np.empty((256, 576, 720), np.uint8)
         
         while self.running:
-            frames = np.empty((256, 576, 720), np.uint8)
-            last_time = time.time()
+            timing = lastTime = time.time()
             
             for i in range(256):
                 ret, frame = device.read()
@@ -71,16 +71,17 @@ class BufferedCapture(Process):
                 t = time.time()
                 if i == 0: 
                     startTime = t
-                elif last_time - t > self.TIME_FOR_DROP: #check if frame is dropped TODO: better frame dropping detection
+                elif lastTime - t > self.TIME_FOR_DROP: #check if frame is dropped TODO: better frame dropping detection
                     #TODO: increase dropped frames counter
-                    print "frame dropped!"
-                last_time = t
+                    logging.warn("frame dropped!")
+                lastTime = t
                 
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 frames[i] = gray
             
             self.framesList.append((startTime, frames))
-            frames = None
+            
+            logging.debug("capture: " + str(time.time() - timing) + "s")
         
         device.release()
     
