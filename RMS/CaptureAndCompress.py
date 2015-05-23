@@ -19,6 +19,12 @@ from Compression import Compression
 from multiprocessing import Manager
 import logging
 
+def wait():
+    try:
+        raw_input("Press Enter to stop...")
+    except EOFError:
+        pass
+
 if __name__ == "__main__":
     logging.basicConfig(filename="log.log", level=logging.DEBUG)
     
@@ -32,7 +38,7 @@ if __name__ == "__main__":
     bc.startCapture()
     c.start()
     
-    raw_input("Press Enter to stop...")
+    wait()
     
     bc.stopCapture()
     c.stop()

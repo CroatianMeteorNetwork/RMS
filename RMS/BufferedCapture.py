@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from multiprocessing import Process
+from multiprocessing import Process, Event
 import numpy as np
 import cv2
 import time
@@ -45,14 +45,14 @@ class BufferedCapture(Process):
         """
         
         self.cameraID = cameraID
-        self.running = True
+        self.exit = Event()
         self.start()
     
     def stopCapture(self):
         """Stop capture.
         """
         
-        self.running = False
+        self.exit.set()
         self.join()
 
     def run(self):
@@ -62,7 +62,7 @@ class BufferedCapture(Process):
         device = cv2.VideoCapture(self.cameraID)
         frames = np.empty((256, 576, 720), np.uint8)
         
-        while self.running:
+        while not self.exit.is_set():
             timing = lastTime = time.time()
             
             for i in range(256):
@@ -79,9 +79,11 @@ class BufferedCapture(Process):
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 frames[i] = gray
             
+            logging.debug("capture: " + str(time.time() - timing) + "s")
+            
             self.framesList.append((startTime, frames))
             
-            logging.debug("capture: " + str(time.time() - timing) + "s")
+            logging.debug("capture & append to memory: " + str(time.time() - timing) + "s")
         
         device.release()
     

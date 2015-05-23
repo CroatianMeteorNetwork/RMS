@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from multiprocessing import Process
+from multiprocessing import Process, Event
 from math import floor
 from scipy import weave
 import numpy as np
@@ -42,7 +42,7 @@ class Compression(Process):
     
     @staticmethod
     def convert(frames):
-        """Convert from (256, 576, 720) to (576, 720, 256) and handle dropped frames.
+        """Convert from (256, 576, 720) to (576, 720, 256).
         
         @param frames: video frames as 3d numpy array
         @return: video frames as 3d numpy array ready for Compression.compress()
@@ -141,13 +141,14 @@ class Compression(Process):
         """Stop process.
         """
         
-        self.running = False
+        self.exit.set()
         self.join()
         
     def start(self):
         """Start process.
         """
-        self.running = True
+        
+        self.exit = Event()
         super(Compression, self).start()
         
     def run(self):
@@ -156,22 +157,19 @@ class Compression(Process):
         
         n = 0
         
-        while self.running:
-            while len(self.framesList)<1: #block until frames are available
-                if not self.running:      #exit function if process was stopped
-                    return
+        while not self.exit.is_set():
+            while len(self.framesList) > 0: #block until frames are available   
+                t = time.time()
                 
-            t = time.time()
-            
-            startTime = self.framesList[0][0] #retrieve time of first frame
-            
-            frames = Compression.convert(self.framesList[0][1]) #convert frames
-            del self.framesList[0]                       #and clean buffer
-            
-            frames = Compression.compress(frames)
-            
-            Compression.save(frames, startTime, n, self.camNum)
-            n += 1
-            
-            logging.debug("compression: " + str(time.time() - t) + "s")
+                startTime = self.framesList[0][0] #retrieve time of first frame
+                
+                frames = Compression.convert(self.framesList[0][1]) #convert frames
+                del self.framesList[0]                       #and clean buffer
+                
+                frames = Compression.compress(frames)
+                
+                Compression.save(frames, startTime, n, self.camNum)
+                n += 1
+                
+                logging.debug("compression: " + str(time.time() - t) + "s")
     
