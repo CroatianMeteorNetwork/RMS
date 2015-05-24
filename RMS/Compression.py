@@ -65,7 +65,7 @@ class Compression(Process):
         @return: 3d numpy array in format: (N, y, x) where N is [0, 4)
         """
         
-        out = np.empty((4, 576, 720), np.uint8)
+        out = np.empty((4, frames.shape[1], frames.shape[2]), np.uint8)
         rands = np.random.uniform(low = 0.0, high = 1.0, size = 1048576)
         
         code = """
@@ -73,15 +73,15 @@ class Compression(Process):
         float num_equal;
         unsigned int rand_count = 0;
     
-        for(y=0; y<576; y++) {
-            for(x=0; x<720; x++) {
+        for(y=0; y<Nframes[0]; y++) {
+            for(x=0; x<Nframes[1]; x++) {
                 acc = 0;
                 var = 0;
                 max = 0;
                 max_frame = 0;
                 num_equal = 0;
                 
-                for(n=0; n<256; n++) {
+                for(n=0; n<Nframes[2]; n++) {
                     pixel = FRAMES3(y, x, n);
                     acc += pixel;
                     if(pixel > max) {
@@ -98,13 +98,13 @@ class Compression(Process):
                     }
                 }
                 acc -= max;
-                acc /= 256;
+                acc /= Nframes[2];
     
-                for(n=0; n<256&&n!=max_frame; n++) {
+                for(n=0; n<Nframes[2] && n!=max_frame; n++) {
                     pixel = FRAMES3(y, x, n) - acc;
                     var += pixel*pixel;
                 }
-                var = sqrt(var / 256);
+                var = sqrt(var / Nframes[2]);
                 
                 OUT3(0, y, x) = max;
                 OUT3(1, y, x) = max_frame;
