@@ -72,7 +72,7 @@ class BufferedCapture(Process):
         first = True
         
         while not self.exit.is_set():
-            timing = lastTime = time.time()
+            lastTime = 0
             
             if first:
                 self.startTime1.value = 0
@@ -101,8 +101,6 @@ class BufferedCapture(Process):
             else:
                 self.startTime2.value = startTime
             first = not first
-            
-            logging.debug("capture: " + str(time.time() - timing) + "s")
         
         device.release()
     
