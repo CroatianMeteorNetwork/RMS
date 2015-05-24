@@ -65,7 +65,7 @@ class Compression(Process):
         @return: 3d numpy array in format: (N, y, x) where N is [0, 4)
         """
         
-        out = np.empty((4, frames.shape[1], frames.shape[2]), np.uint8)
+        out = np.empty((4, frames.shape[0], frames.shape[1]), np.uint8)
         rands = np.random.uniform(low = 0.0, high = 1.0, size = 1048576)
         
         code = """

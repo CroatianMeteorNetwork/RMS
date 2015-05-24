@@ -10,7 +10,7 @@ class Extractor(Process):
     
     @staticmethod
     def scale(frames, compressed):
-        out = np.empty((256, frames.shape[1]/16, frames.shape[2]/16), np.int32)
+        out = np.zeros((frames.shape[0], frames.shape[1]/16, frames.shape[2]/16), np.int32)
         
         code = """
         unsigned int x, y, n, pixel;
@@ -32,13 +32,12 @@ class Extractor(Process):
     
     @staticmethod
     def extract(frames, arr):
-        out = np.zeros((256, 80, 80), np.uint8)
-        pos = np.zeros((256, 2), np.uint8)
+        out = np.zeros((frames.shape[0], 80, 80), np.uint8)
+        pos = np.zeros((frames.shape[0], 2), np.uint8)
         
         code = """
-        unsigned int x, y, x2, y2, n, pixel, max, maxX, maxY;
-        float num_equal;
-        unsigned int rand_count = 0;
+        unsigned int x, y, x2, y2, n, pixel, max, max_x, max_y;
+        float max_x2, max_y2, num_equal;
     
         for(n=0; n<Narr[0]; n++) {
             max = 0;
@@ -46,66 +45,72 @@ class Extractor(Process):
             for(y=0; y<Narr[1]; y++) {
                 for(x=0; x<Narr[2]; x++) {
                     pixel = ARR3(n, y, x);
-                    if(pixel > 40960 && pixel > max) {
+                    if(pixel > 45056 && pixel > max) {
                         max = pixel;
-                        maxY = y;
-                        maxX = x;
+                        max_y = y;
+                        max_x = x;
                     }
                 }
             }
             
             if(max > 0) {
-                maxY = maxY * 16 + 8;
-                maxX = maxX * 16 + 8;
+                max_y = max_y * 16 + 8;
+                max_x = max_x * 16 + 8;
                 
-                if(maxY < 16) {
-                    maxY = 16;
-                } else if(maxY > Nframes[1]+15) {
-                    maxY = Nframes[1]+15;
+                if(max_y < 16) {
+                    max_y = 16;
+                } else if(max_y > Nframes[1]+15) {
+                    max_y = Nframes[1]+15;
                 }
-                if(maxX < 16) {
-                    maxX = 16;
-                } else if(maxX > Nframes[2]+15) {
-                    maxX = Nframes[2]+15;
+                if(max_x < 16) {
+                    max_x = 16;
+                } else if(max_x > Nframes[2]+15) {
+                    max_x = Nframes[2]+15;
                 }
                 
-                num_equal = 0;
-                max = 160; //40960 = 160 * 16 * 16
+                max = 176; //45056 = 176 * 16 * 16
+                max_y2 = max_y;
+                max_x2 = max_x;
+                num_equal = 1;
                 
-                for(y=maxY-16; y<maxY+16; y++) {
-                    for(x=maxX-16; x<maxX+16; x++) {
+                for(y=max_y-16; y<max_y+16; y++) {
+                    for(x=max_x-16; x<max_x+16; x++) {
                         pixel = FRAMES3(n, y, x);
                         if(pixel > max) {
                             max = pixel;
-                            maxY = y;
-                            maxX = x;
+                            max_y2 = y;
+                            max_x2 = x;
+                            num_equal = 1;
+                        } else if(pixel == max) {
+                            max_y2 += y;
+                            max_x2 += x;
+                            num_equal++;
                         }
                     }
                 }
                 
-                if(maxY < 40) {
-                    maxY = 40;
-                } else if(maxY > Nframes[1]+39) {
-                    maxY = Nframes[1]+39;
+                max_y = max_y2/num_equal;
+                max_x = max_x2/num_equal;
+                
+                if(max_y < 40) {
+                    max_y = 40;
+                } else if(max_y > Nframes[1]+39) {
+                    max_y = Nframes[1]+39;
                 }
-                if(maxX < 40) {
-                    maxX = 40;
-                } else if(maxX > Nframes[2]+39) {
-                    maxX = Nframes[2]+39;
+                if(max_x < 40) {
+                    max_x = 40;
+                } else if(max_x > Nframes[2]+39) {
+                    max_x = Nframes[2]+39;
                 }
                 
-                POS2(n, 0) = maxY;
-                POS2(n, 1) = maxX;
+                POS2(n, 0) = max_y;
+                POS2(n, 1) = max_x;
                 
-                y2 = 0, x2 = 0;
-                for(y=maxY-40; y<maxY+40; y++) {
-                    for(x=maxX-40; x<maxX+40; x++) {
-                        if(y<0 || x<0 || y>=Nframes[1] || x>=Nframes[2]) {
-                            pixel = 0;
-                        } else {
-                            pixel = FRAMES3(n, y, x);
-                        }
-                        OUT3(n, y2, x2) = pixel;
+                y2 = 0;
+                for(y=max_y-40; y<max_y+40; y++) {
+                    x2 = 0;
+                    for(x=max_x-40; x<max_x+40; x++) {
+                        OUT3(n, y2, x2) = FRAMES3(n, y, x);
                         x2++;
                     }
                     y2++;
@@ -123,7 +128,7 @@ class Extractor(Process):
 if __name__ ==  "__main__":
     cap = cv2.VideoCapture("/home/pi/RMS/m20050320_012752.wmv")
     
-    frames = np.empty((256, 480, 640), np.uint8)
+    frames = np.empty((224, 480, 640), np.uint8)
     
     for i in range(224):
         ret, frame = cap.read()
@@ -138,17 +143,33 @@ if __name__ ==  "__main__":
     compressed = comp.convert(frames)
     compressed = comp.compress(compressed)
     
-    print np.amax(compressed[3])
-    print np.amin(compressed[3])
+    print compressed.shape
     
     arr = Extractor.scale(frames, compressed)
     
-    print np.amax(arr[100])
+    print arr.shape
     
     out, pos = Extractor.extract(frames, arr)
     
+    print out.shape
+    
+    background = compressed[2]
+    
     for i in range(out.shape[0]):
+        frame = out[i]
+        position = pos[i]
+        
+        y2 = 0
+        for y in range(position[0]-40, position[0]+40):
+            x2 = 0
+            for x in range(position[1]-40, position[1]+40):
+                pixel = frame[y2, x2]
+                if pixel > 0:
+                    background[y, x] = pixel
+                x2 = x2 + 1
+            y2 = y2 + 1
+        
         print i
-        cv2.imshow("bla", out[i])
-        cv2.waitKey(100)
+        cv2.imshow("bla", background)
+        cv2.waitKey(50)
     
