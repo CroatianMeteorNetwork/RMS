@@ -122,7 +122,7 @@ class Compression(Process):
         
         @param arr: 3d numpy array in format: (N, y, x) where N is [0, 4)
         @param startTime: seconds and fractions of a second from epoch to first frame
-        @param N: frame counter (ie. 0000353)
+        @param N: frame counter (ie. 0000512)
         @param camNum: camera ID (ie. 459)
         """
         
@@ -184,7 +184,7 @@ class Compression(Process):
             logging.debug("compression: " + str(time.time() - t) + "s")
             t = time.time()
             
-            self.save(frames, startTime, n, self.camNum)
+            self.save(frames, startTime, n*256, self.camNum)
             n += 1
             
             logging.debug("saving: " + str(time.time() - t) + "s")
