@@ -1,10 +1,12 @@
 from multiprocessing import Process
 import numpy as np
-from scipy import weave
+from scipy import weave, stats
 import cv2
 from RMS.Compression import Compression
 from math import floor
 import time
+import matplotlib.pyplot as plt
+import statsmodels.api as sm
 
 class Extractor(Process):
     def __init__(self):
@@ -12,7 +14,7 @@ class Extractor(Process):
     
     @staticmethod
     def scale(frames, compressed):
-        out = np.zeros((frames.shape[0], floor(frames.shape[1]/16), floor(frames.shape[2]/16)), np.uint16)
+        out = np.zeros((frames.shape[0], floor(frames.shape[1]//16), floor(frames.shape[2]//16)), np.uint16)
         
         code = """
         unsigned int x, y, n, pixel;
@@ -21,7 +23,7 @@ class Extractor(Process):
             for(y=0; y<Nframes[1]; y++) {
                 for(x=0; x<Nframes[2]; x++) {
                     pixel = FRAMES3(n, y, x);
-                    if(pixel - COMPRESSED3(y, x, 2) >= 0.95*COMPRESSED3(y, x, 3)) {
+                    if(pixel - COMPRESSED3(2, y, x) >= 0.95 * COMPRESSED3(3, y, x)) {
                         OUT3(n, y/16, x/16) += pixel;
                     }
                }
@@ -33,14 +35,15 @@ class Extractor(Process):
         return out
     
     @staticmethod
-    def extract(frames, arr):
-        out = np.zeros((frames.shape[0], 80, 80), np.uint8)
-        pos = np.zeros((frames.shape[0], 2), np.uint16)
+    def findCenters(frames, arr):
+        position = np.zeros((3, frames.shape[0]), np.uint16)
         
         code = """
-        unsigned int x, y, x2, y2, n, pixel, max, max_x, max_y;
+        unsigned int x, y, n, pixel, max, max_x, max_y;
         float max_x2, max_y2, num_equal;
-    
+        
+        unsigned int i = 0;
+        
         for(n=0; n<Narr[0]; n++) {
             max = 0;
             max_y = 0;
@@ -87,36 +90,77 @@ class Extractor(Process):
                 max_y = max_y2/num_equal;
                 max_x = max_x2/num_equal;
                 
-                y2 = 0;
-                for(y=max_y-40; y<max_y+40; y++) {
-                    x2 = 0;
-                    for(x=max_x-40; x<max_x+40; x++) {
-                        if(!(y<0 || x<0 || y>=Nframes[1] || x>=Nframes[2])) {
-                            OUT3(n, y2, x2) = FRAMES3(n, y, x);
-                        }
-                        x2++;
-                    }
-                    y2++;
-                }
-                
-                POS2(n, 0) = max_y;
-                POS2(n, 1) = max_x;
+                POSITION2(0, i) = max_y;
+                POSITION2(1, i) = max_x;
+                POSITION2(2, i) = n;
+                i++;
             }
         }
         """
         
-        weave.inline(code, ['frames', 'arr', 'out', 'pos'])
-        return (out, pos)
+        weave.inline(code, ['frames', 'arr', 'position'])
     
+        y = np.trim_zeros(position[0], 'b')
+        x = np.trim_zeros(position[1], 'b')
+        z = np.trim_zeros(position[2], 'b')
+        return x, y, z
     
+    @staticmethod
+    def extract(frames, alphaZX, betaZX, alphaZY, betaZY, firstFrame, lastFrame):
+        firstFrame -= 15
+        if firstFrame < 0:
+            firstFrame = 0
+        lastFrame += 16 #15 + 1 because index starts from 0
+        if lastFrame > frames.shape[0]:
+            lastFrame = frames.shape[0]
         
+        out = np.empty((frames.shape[0], 80, 80), np.uint16)
+        pos = np.zeros((frames.shape[0], 2), np.uint16)
+        
+        code = """
+        unsigned int x, y, x2, y2, n;
+        float max_x, max_y;
+        
+        for(n=firstFrame; n<lastFrame; n++) {
+            max_x = alphaZX + betaZX * n;
+            if(max_x < 40) {
+                max_x = 40;
+            } else if(max_x >= Nframes[2]) {
+                max_x = Nframes[2] - 1;
+            }
+            
+            max_y = alphaZY + betaZY * n;
+            if(max_y < 40) {
+                max_y = 40;
+            } else if(max_y >= Nframes[1]) {
+                max_y = Nframes[1] - 1;
+            }
+            
+            POS2(n, 0) = max_y;
+            POS2(n, 1) = max_x;
+            
+            y2 = 0;
+            for(y=max_y-40; y<max_y+40; y++) {
+                x2 = 0;
+                for(x=max_x-40; x<max_x+40; x++) {
+                    OUT3(n, y2, x2) = FRAMES3(n, y, x);
+                    x2++;
+                }
+                y2++;
+            }
+        }
+        """
+        
+        weave.inline(code, ['frames', 'alphaZX', 'betaZX', 'alphaZY', 'betaZY', 'firstFrame', 'lastFrame', 'out', 'pos'])
+        
+        return pos, out
     
 if __name__ ==  "__main__":
-    cap = cv2.VideoCapture("/home/pi/RMS/m20031214_044425.wmv")
+    cap = cv2.VideoCapture("/home/dario/Videos/m20050320_012752.wmv")
     
     frames = np.empty((224, 480, 640), np.uint8)
     
-    for i in range(200):
+    for i in range(224):
         ret, frame = cap.read()
     
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -131,21 +175,41 @@ if __name__ ==  "__main__":
     
     t = time.time()
     
-    arr = Extractor.scale(frames, comp.convert(compressed))
+    arr = Extractor.scale(frames, compressed)
     
     print "scale: " + str(time.time() - t)
     t = time.time()
     
-    out, pos = Extractor.extract(frames, arr)
+    x, y, z = Extractor.findCenters(frames, arr)
     
     print "extract: " + str(time.time() - t)
+    t = time.time()
+    
+    regressionZX = stats.linregress(z, x)
+    regressionZY = stats.linregress(z, y)
+    
+    print "regression: " + str(time.time() - t)
+    t = time.time()
+    
+    alphaZX = np.asscalar(regressionZX[1])
+    betaZX = np.asscalar(regressionZX[0])
+    alphaZY = np.asscalar(regressionZY[1])
+    betaZY = np.asscalar(regressionZY[0])
+    firstFrame = np.asscalar(z[0])
+    lastFrame = np.asscalar(z[z.size-1])
+    pos, extracted = Extractor.extract(frames, alphaZX, betaZX, alphaZY, betaZY, firstFrame, lastFrame)
+    
+    print "extraction: " + str(time.time() - t)
+    t = time.time()
     
     background = compressed[2]
     
-    for i in range(out.shape[0]):
-        output = out[i]
+    for i in range(extracted.shape[0]):
+        output = extracted[i]
         position = pos[i]
         
+        y = 0
+        x = 0
         y2 = 0
         for y in range(position[0]-40, position[0]+39):
             x2 = 0
@@ -156,7 +220,5 @@ if __name__ ==  "__main__":
                 x2 = x2 + 1
             y2 = y2 + 1
         
-        print "i="+str(i)
         cv2.imshow("bla", background)
-        cv2.waitKey(10)
-    
+        cv2.waitKey(50)
