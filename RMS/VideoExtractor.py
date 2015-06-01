@@ -5,8 +5,6 @@ import cv2
 from RMS.Compression import Compression
 from math import floor
 import time
-import matplotlib.pyplot as plt
-import statsmodels.api as sm
 
 class Extractor(Process):
     def __init__(self):
@@ -114,7 +112,7 @@ class Extractor(Process):
         if lastFrame > frames.shape[0]:
             lastFrame = frames.shape[0]
         
-        out = np.empty((frames.shape[0], 80, 80), np.uint16)
+        out = np.zeros((frames.shape[0], 80, 80), np.uint16)
         pos = np.zeros((frames.shape[0], 2), np.uint16)
         
         code = """
@@ -156,7 +154,7 @@ class Extractor(Process):
         return pos, out
     
 if __name__ ==  "__main__":
-    cap = cv2.VideoCapture("/home/dario/Videos/m20050320_012752.wmv")
+    cap = cv2.VideoCapture("/home/pi/RMS/m20050320_012752.wmv")
     
     frames = np.empty((224, 480, 640), np.uint8)
     
@@ -221,4 +219,4 @@ if __name__ ==  "__main__":
             y2 = y2 + 1
         
         cv2.imshow("bla", background)
-        cv2.waitKey(50)
+        cv2.waitKey(10)
