@@ -118,13 +118,13 @@ class Extractor(Process):
                     }
                 }
                 
-                dist_y = dist_y / num_equal * 1.2;
-                if(dist_y < 32) {
-                    dist_y = 32;
+                dist_y = dist_y / num_equal * 2;
+                if(dist_y < 8) {
+                    dist_y = 8;
                 }
-                dist_x = dist_x / num_equal * 1.2;
-                if(dist_x < 32) {
-                    dist_x = 32;
+                dist_x = dist_x / num_equal * 2;
+                if(dist_x < 8) {
+                    dist_x = 8;
                 }
                 
                 SIZE2(0, n) = dist_y;
@@ -154,12 +154,10 @@ class Extractor(Process):
         pos = np.zeros((frames.shape[0], 2), np.uint16)
         
         code = """
-        unsigned int x, y, x2, y2, n, i, half_width, half_height,
-        k_width = 0, k_height = 0,
+        unsigned int x, y, x2, y2, n, i, half_width, half_height;
+        float max_x, max_y, k_width = 0, k_height = 0,
         first_forward_frame = 0, first_forward_width = 0,  first_forward_height= 0,
         first_backwards_frame = 0, first_backwards_width = 0, first_backwards_height = 0;
-        
-        float max_x, max_y;
         
         for(n=firstFrame; n<lastFrame; n++) {
             
@@ -195,9 +193,12 @@ class Extractor(Process):
                 
             } else { //size & coefficients missing
                 // find coefficients for extrapolating between previous and next defined size
+                
+                first_forward_width = 0;
+                first_backwards_width = 0;
                 for(i=n+1; i<lastFrame; i++) {
                     first_forward_height = SIZE2(0, i);
-                    if(half_height != 0) {
+                    if(first_forward_height != 0) {
                         first_forward_width = SIZE2(1, i);
                         first_forward_frame = i;
                         break;
@@ -205,18 +206,29 @@ class Extractor(Process):
                 }
                 for(i=n-1; i>=firstFrame; i--) {
                     first_backwards_height = SIZE2(0, i);
-                    if(half_height != 0) {
+                    if(first_backwards_height != 0) {
                         first_backwards_width = SIZE2(1, i);
                         first_backwards_frame = i;
                         break;
                     }
                 }
-                k_height = (first_forward_height - first_backwards_height) / (first_forward_frame - first_backwards_frame);
-                k_width = (first_forward_width - first_backwards_width) / (first_forward_frame - first_backwards_frame);
+                if(first_forward_width == 0) { // we are dealing with frames at end of the sequence
+                    first_forward_frame = 0; // don't use coefficients
+                    half_height = first_backwards_height; // and copy size from last frame with defined size
+                    half_width = first_backwards_width;
+                } else if(first_backwards_width == 0) { //we are dealing with frames at start of the sequence 
+                    first_forward_frame = 0; // don't use coefficients
+                    half_height = first_forward_height; // and copy size from next frame with defined size
+                    half_width = first_forward_width;
+                } else {
+                    k_height = (first_forward_height - first_backwards_height) / (first_forward_frame - first_backwards_frame);
+                    k_width = (first_forward_width - first_backwards_width) / (first_forward_frame - first_backwards_frame);
+                    
                 
-                // find size from coefficients
-                half_height = first_backwards_height + k_height * (n - first_backwards_frame + 1);
-                half_width = first_backwards_width + k_width * (n - first_backwards_frame + 1);
+                    // find size from coefficients
+                    half_height = first_backwards_height + k_height * (n - first_backwards_frame + 1);
+                    half_width = first_backwards_width + k_width * (n - first_backwards_frame + 1);
+                }
             }
             
             // extract part of frame specified by position (max_x, max_y) and size (half_width, half_height)
@@ -238,7 +250,7 @@ class Extractor(Process):
         return pos, out
     
 if __name__ ==  "__main__":
-    cap = cv2.VideoCapture("/home/pi/RMS/m20050320_012752.wmv")
+    cap = cv2.VideoCapture("/home/dario/Videos/m20050320_012752.wmv")
     
     frames = np.empty((224, 480, 640), np.uint8)
     
@@ -263,6 +275,8 @@ if __name__ ==  "__main__":
     t = time.time()
     
     x, y, z, size = Extractor.findCenters(frames, arr)
+    
+    print size
     
     print "extract: " + str(time.time() - t)
     t = time.time()
@@ -296,7 +310,7 @@ if __name__ ==  "__main__":
         y2 = 0
         for y in range(position[0]-output.shape[0]/2, position[0]+output.shape[0]/2-1):
             x2 = 0
-            for x in range(position[1]-output.shape[1]/2, position[1]++output.shape[1]/2-1):
+            for x in range(position[1]-output.shape[1]/2, position[1]+output.shape[1]/2-1):
                 pixel = output[y2, x2]
                 if pixel > 0:
                     background[y, x] = pixel
@@ -304,4 +318,4 @@ if __name__ ==  "__main__":
             y2 = y2 + 1
         
         cv2.imshow("bla", background)
-        cv2.waitKey(10)
+        cv2.waitKey(50)
