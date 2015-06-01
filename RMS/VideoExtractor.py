@@ -150,8 +150,9 @@ class Extractor(Process):
         if lastFrame > frames.shape[0]:
             lastFrame = frames.shape[0]
         
-        out = np.zeros((frames.shape[0], 80, 80), np.uint16)
-        pos = np.zeros((frames.shape[0], 2), np.uint16)
+        out = np.zeros((frames.shape[0], 256, 256), np.uint8) # y, x
+        pos = np.zeros((frames.shape[0], 2), np.uint16) # y, x
+        outsize = np.zeros((frames.shape[0], 2), np.uint8) # half-height, half-width
         
         code = """
         unsigned int x, y, x2, y2, n, i, half_width, half_height;
@@ -160,25 +161,6 @@ class Extractor(Process):
         first_backwards_frame = 0, first_backwards_width = 0, first_backwards_height = 0;
         
         for(n=firstFrame; n<lastFrame; n++) {
-            
-            // calculate center from regression coefficients
-            
-            max_x = alphaZX + betaZX * n;
-            if(max_x < 40) {
-                max_x = 40;
-            } else if(max_x >= Nframes[2]) {
-                max_x = Nframes[2] - 1;
-            }
-            
-            max_y = alphaZY + betaZY * n;
-            if(max_y < 40) {
-                max_y = 40;
-            } else if(max_y >= Nframes[1]) {
-                max_y = Nframes[1] - 1;
-            }
-            
-            POS2(n, 0) = max_y;
-            POS2(n, 1) = max_x;
             
             // calculate size
             
@@ -231,6 +213,28 @@ class Extractor(Process):
                 }
             }
             
+            OUTSIZE2(n, 0) = half_height;
+            OUTSIZE2(n, 1) = half_width;
+            
+            // calculate center from regression coefficients
+            
+            max_x = alphaZX + betaZX * n;
+            if(max_x < half_width) {
+                max_x = half_width;
+            } else if(max_x >= Nframes[2]-half_width) {
+                max_x = Nframes[2] - half_width - 1;
+            }
+            
+            max_y = alphaZY + betaZY * n;
+            if(max_y < half_height) {
+                max_y = half_height;
+            } else if(max_y >= Nframes[1] - half_height) {
+                max_y = Nframes[1] - half_height - 1;
+            }
+            
+            POS2(n, 0) = max_y;
+            POS2(n, 1) = max_x;
+            
             // extract part of frame specified by position (max_x, max_y) and size (half_width, half_height)
             
             y2 = 0;
@@ -245,9 +249,9 @@ class Extractor(Process):
         }
         """
         
-        weave.inline(code, ['frames', 'size', 'alphaZX', 'betaZX', 'alphaZY', 'betaZY', 'firstFrame', 'lastFrame', 'out', 'pos'])
+        weave.inline(code, ['frames', 'size', 'alphaZX', 'betaZX', 'alphaZY', 'betaZY', 'firstFrame', 'lastFrame', 'outsize', 'out', 'pos'])
         
-        return pos, out
+        return pos, outsize, out
     
 if __name__ ==  "__main__":
     cap = cv2.VideoCapture("/home/dario/Videos/m20050320_012752.wmv")
@@ -276,8 +280,6 @@ if __name__ ==  "__main__":
     
     x, y, z, size = Extractor.findCenters(frames, arr)
     
-    print size
-    
     print "extract: " + str(time.time() - t)
     t = time.time()
     
@@ -294,7 +296,7 @@ if __name__ ==  "__main__":
     firstFrame = np.asscalar(z[0])
     lastFrame = np.asscalar(z[z.size-1])
     
-    pos, extracted = Extractor.extract(frames, size, alphaZX, betaZX, alphaZY, betaZY, firstFrame, lastFrame)
+    pos, size, extracted = Extractor.extract(frames, size, alphaZX, betaZX, alphaZY, betaZY, firstFrame, lastFrame)
     
     print "extraction: " + str(time.time() - t)
     t = time.time()
@@ -304,13 +306,15 @@ if __name__ ==  "__main__":
     for i in range(extracted.shape[0]):
         output = extracted[i]
         position = pos[i]
+        hh = size[i, 0]
+        hw = size[i, 1]
         
         y = 0
         x = 0
         y2 = 0
-        for y in range(position[0]-output.shape[0]/2, position[0]+output.shape[0]/2-1):
+        for y in range(position[0]-hh, position[0]+hh-1):
             x2 = 0
-            for x in range(position[1]-output.shape[1]/2, position[1]+output.shape[1]/2-1):
+            for x in range(position[1]-hw, position[1]+hw-1):
                 pixel = output[y2, x2]
                 if pixel > 0:
                     background[y, x] = pixel
