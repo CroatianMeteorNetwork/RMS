@@ -34,11 +34,12 @@ class Extractor(Process):
     
     @staticmethod
     def findCenters(frames, arr):
-        position = np.zeros((3, frames.shape[0]), np.uint16)
+        position = np.zeros((3, frames.shape[0]), np.uint16) # x, y, frameNum (z)
+        size = np.zeros((2, frames.shape[0]), np.uint8) # half-height, half-width
         
         code = """
         unsigned int x, y, n, pixel, max, max_x, max_y;
-        float max_x2, max_y2, num_equal;
+        float max_x2, max_y2, dist_x, dist_y, num_equal;
         
         unsigned int i = 0;
         
@@ -46,6 +47,8 @@ class Extractor(Process):
             max = 0;
             max_y = 0;
             max_x = 0;
+            
+            // find brightest segment brighter than threshold 
             
             for(y=0; y<Narr[1]; y++) {
                 for(x=0; x<Narr[2]; x++) {
@@ -59,6 +62,8 @@ class Extractor(Process):
             }
             
             if(max > 0) {
+                // find center
+                
                 max_y = max_y * 16 + 8;
                 max_x = max_x * 16 + 8;
                 
@@ -85,26 +90,59 @@ class Extractor(Process):
                     }
                 }
                 
-                max_y = max_y2/num_equal;
-                max_x = max_x2/num_equal;
+                max_y = max_y2 / num_equal;
+                max_x = max_x2 / num_equal;
                 
                 POSITION2(0, i) = max_y;
                 POSITION2(1, i) = max_x;
                 POSITION2(2, i) = n;
+                
                 i++;
+                
+                // find size
+                
+                dist_x = 0;
+                dist_y = 0;
+                num_equal = 0;
+                
+                for(y=max_y-64; y<max_y+64; y++) {
+                    for(x=max_x-64; x<max_x+64; x++) {
+                        if(!(y<0 || x<0 || y>=Nframes[1] || x>=Nframes[2])) {
+                            pixel = FRAMES3(n, y, x);
+                            if(pixel == max) {
+                                dist_y += abs(max_y - y);
+                                dist_x += abs(max_x - x);
+                                num_equal++;
+                            }
+                        }
+                    }
+                }
+                
+                dist_y = dist_y / num_equal * 1.2;
+                if(dist_y < 32) {
+                    dist_y = 32;
+                }
+                dist_x = dist_x / num_equal * 1.2;
+                if(dist_x < 32) {
+                    dist_x = 32;
+                }
+                
+                SIZE2(0, n) = dist_y;
+                SIZE2(1, n) = dist_x;
             }
         }
         """
         
-        weave.inline(code, ['frames', 'arr', 'position'])
+        weave.inline(code, ['frames', 'arr', 'position', 'size'])
     
         y = np.trim_zeros(position[0], 'b')
         x = np.trim_zeros(position[1], 'b')
         z = np.trim_zeros(position[2], 'b')
-        return x, y, z
+        
+        return x, y, z, size
     
     @staticmethod
-    def extract(frames, alphaZX, betaZX, alphaZY, betaZY, firstFrame, lastFrame):
+    def extract(frames, size, alphaZX, betaZX, alphaZY, betaZY, firstFrame, lastFrame):
         firstFrame -= 15
         if firstFrame < 0:
             firstFrame = 0
@@ -116,10 +154,17 @@ class Extractor(Process):
         pos = np.zeros((frames.shape[0], 2), np.uint16)
         
         code = """
-        unsigned int x, y, x2, y2, n;
+        unsigned int x, y, x2, y2, n, i, half_width, half_height,
+        k_width = 0, k_height = 0,
+        first_forward_frame = 0, first_forward_width = 0,  first_forward_height= 0,
+        first_backwards_frame = 0, first_backwards_width = 0, first_backwards_height = 0;
+        
         float max_x, max_y;
         
         for(n=firstFrame; n<lastFrame; n++) {
+            
+            // calculate center from regression coefficients
+            
             max_x = alphaZX + betaZX * n;
             if(max_x < 40) {
                 max_x = 40;
@@ -137,10 +182,49 @@ class Extractor(Process):
             POS2(n, 0) = max_y;
             POS2(n, 1) = max_x;
             
+            // calculate size
+            
+            half_height = SIZE2(0, n);
+            if(half_height != 0) { // size is available in SIZE2 array
+                half_width = SIZE2(1, n);
+                
+            } else if(n < first_forward_frame) { // size missing from SIZE2 array
+                // find size from coefficients
+                half_height = first_backwards_height + k_height * (n - first_backwards_frame + 1);
+                half_width = first_backwards_width + k_width * (n - first_backwards_frame + 1);
+                
+            } else { //size & coefficients missing
+                // find coefficients for extrapolating between previous and next defined size
+                for(i=n+1; i<lastFrame; i++) {
+                    first_forward_height = SIZE2(0, i);
+                    if(half_height != 0) {
+                        first_forward_width = SIZE2(1, i);
+                        first_forward_frame = i;
+                        break;
+                    }
+                }
+                for(i=n-1; i>=firstFrame; i--) {
+                    first_backwards_height = SIZE2(0, i);
+                    if(half_height != 0) {
+                        first_backwards_width = SIZE2(1, i);
+                        first_backwards_frame = i;
+                        break;
+                    }
+                }
+                k_height = (first_forward_height - first_backwards_height) / (first_forward_frame - first_backwards_frame);
+                k_width = (first_forward_width - first_backwards_width) / (first_forward_frame - first_backwards_frame);
+                
+                // find size from coefficients
+                half_height = first_backwards_height + k_height * (n - first_backwards_frame + 1);
+                half_width = first_backwards_width + k_width * (n - first_backwards_frame + 1);
+            }
+            
+            // extract part of frame specified by position (max_x, max_y) and size (half_width, half_height)
+            
             y2 = 0;
-            for(y=max_y-40; y<max_y+40; y++) {
+            for(y=max_y-half_height; y<max_y+half_height; y++) {
                 x2 = 0;
-                for(x=max_x-40; x<max_x+40; x++) {
+                for(x=max_x-half_width; x<max_x+half_width; x++) {
                     OUT3(n, y2, x2) = FRAMES3(n, y, x);
                     x2++;
                 }
@@ -149,7 +233,7 @@ class Extractor(Process):
         }
         """
         
-        weave.inline(code, ['frames', 'alphaZX', 'betaZX', 'alphaZY', 'betaZY', 'firstFrame', 'lastFrame', 'out', 'pos'])
+        weave.inline(code, ['frames', 'size', 'alphaZX', 'betaZX', 'alphaZY', 'betaZY', 'firstFrame', 'lastFrame', 'out', 'pos'])
         
         return pos, out
     
@@ -178,7 +262,7 @@ if __name__ ==  "__main__":
     print "scale: " + str(time.time() - t)
     t = time.time()
     
-    x, y, z = Extractor.findCenters(frames, arr)
+    x, y, z, size = Extractor.findCenters(frames, arr)
     
     print "extract: " + str(time.time() - t)
     t = time.time()
@@ -195,7 +279,8 @@ if __name__ ==  "__main__":
     betaZY = np.asscalar(regressionZY[0])
     firstFrame = np.asscalar(z[0])
     lastFrame = np.asscalar(z[z.size-1])
-    pos, extracted = Extractor.extract(frames, alphaZX, betaZX, alphaZY, betaZY, firstFrame, lastFrame)
+    
+    pos, extracted = Extractor.extract(frames, size, alphaZX, betaZX, alphaZY, betaZY, firstFrame, lastFrame)
     
     print "extraction: " + str(time.time() - t)
     t = time.time()
@@ -209,13 +294,13 @@ if __name__ ==  "__main__":
         y = 0
         x = 0
         y2 = 0
-        for y in range(position[0]-40, position[0]+39):
+        for y in range(position[0]-output.shape[0]/2, position[0]+output.shape[0]/2-1):
             x2 = 0
-            for x in range(position[1]-40, position[1]+39):
+            for x in range(position[1]-output.shape[1]/2, position[1]++output.shape[1]/2-1):
                 pixel = output[y2, x2]
                 if pixel > 0:
                     background[y, x] = pixel
-                x2 = x2 + 1
+                x2 = x2 + 1 
             y2 = y2 + 1
         
         cv2.imshow("bla", background)
