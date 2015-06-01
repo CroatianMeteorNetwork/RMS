@@ -129,7 +129,9 @@ class Compression(Process):
         dateTime = time.strftime("%Y%m%d_%H%M%S", time.localtime(startTime))
         millis = int((startTime - floor(startTime))*1000)
         
-        image = "FF" + str(camNum).zfill(3) +  "_" + dateTime + "_" + str(millis).zfill(3) + "_" + str(N).zfill(7) + ".bin"
+        fileName = str(camNum).zfill(3) +  "_" + dateTime + "_" + str(millis).zfill(3) + "_" + str(N).zfill(7)
+        
+        image = "FF" + fileName + ".bin"
         
         with open(image, "wb") as f:
             f.write(struct.pack('I', arr.shape[1]))  # nrows
