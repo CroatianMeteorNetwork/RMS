@@ -3,35 +3,124 @@ import numpy as np
 from scipy import weave, stats
 import cv2
 from RMS.Compression import Compression
-from math import floor
+from math import floor, sqrt
+from RMS.processFrames import calculateMeanAndStdDev
 import time
 import statsmodels.api as sm
 
 class Extractor(Process):
+    factor = 0
+    
     def __init__(self):
         super(Extractor, self).__init__()
     
-    def scale(self, frames, compressed):
-        out = np.zeros((frames.shape[0], floor(frames.shape[1]//16), floor(frames.shape[2]//16)), np.uint16)
+    def findPoints(self, frames, average, stddev, k=6, min_level=20, min_points = 2, f=16):
+        """Treshold and subsample frames then extract points.
+        
+        @param frames: numpy array, for example (256, 576, 720), with all frames
+        @param average: average frame (or median)
+        @param stddev: standard deviation frame
+        @return: (y, x, z) of found points
+        """
+     
+        count = np.zeros((frames.shape[0], floor(frames.shape[1]//f), floor(frames.shape[2]//f)), np.uint8)
+        pointsy = np.empty((frames.shape[0]*floor(frames.shape[1]//f)*floor(frames.shape[2]//f)), np.uint16)
+        pointsx = np.empty((frames.shape[0]*floor(frames.shape[1]//f)*floor(frames.shape[2]//f)), np.uint16)
+        pointsz = np.empty((frames.shape[0]*floor(frames.shape[1]//f)*floor(frames.shape[2]//f)), np.uint16)
         
         code = """
-        unsigned int x, y, n, pixel;
-    
-        for(n=0; n<Nframes[0]; n++) {
-            for(y=0; y<Nframes[1]; y++) {
-                for(x=0; x<Nframes[2]; x++) {
-                    pixel = FRAMES3(n, y, x);
-                    if(pixel - COMPRESSED3(2, y, x) >= 0.95 * COMPRESSED3(3, y, x)) {
-                        OUT3(n, y/16, x/16) += pixel;
+        unsigned int x, y, x2, y2, n, threshold;
+        unsigned int num = 0;
+        
+        for(y=0; y<Nframes[1]; y++) {
+            for(x=0; x<Nframes[2]; x++) {
+                // calculate threshold from parameters
+                threshold =  AVERAGE2(y, x) + k * STDDEV2(y, x);
+                if(threshold > 254) { //make sure it's in range
+                    threshold = 254;
+                } else if(threshold < min_level) {
+                    threshold = min_level;
+                }
+                
+                for(n=0; n<Nframes[0]; n++) {
+                    if(FRAMES3(n, y, x) > threshold) { //check if current pixel is over threshold
+                        y2 = y/f; // subsample frame in f*f squares
+                        x2 = x/f;
+                        
+                        if(COUNT3(n, y2, x2) >= min_points) { // check if there is enough of threshold passers inside of this square
+                            POINTSY1(num) = y;
+                            POINTSX1(num) = x;
+                            POINTSZ1(num) = n;
+                            num++;
+                        } else { // increase counter if not
+                            COUNT3(n, y2, x2) += 1;
+                        }
                     }
                }
-            }
+            }    
         }
+        
+        return_val = num + 1; // output length of POINTS arrays
         """
         
-        weave.inline(code, ['frames', 'compressed', 'out'])
-        return out
+        length = weave.inline(code, ['frames', 'average', 'stddev', 'k', 'min_level', 'min_points', 'f', 'count', 'pointsy', 'pointsx', 'pointsz'])
+        
+        y = pointsy[0 : length]
+        x = pointsx[0 : length]
+        z = pointsz[0 : length]
+        
+        return y, x, z
     
+    def testPoints(self, points, min_points=5, gap_treshold=70):
+        """ Test if points are interesting (ie. something is detected).
+        
+        @return: true if video should be further checked for meteors, false otherwise
+        """
+        
+        y, x, z = points
+        
+        # check if there is enough points
+        if(len(y) < min_points):
+            return False
+        
+        # check how many points are close to each other (along the time line)
+        code = """
+        unsigned int distance, i, count = 0,
+        y_dist, x_dist, z_dist,
+        y_prev = 0, x_prev = 0, z_prev = 0;
+        
+        for(i=1; i<Ny[0]; i++) {
+            y_dist = Y1(i) - y_prev;
+            x_dist = X1(i) - x_prev;
+            z_dist = Z1(i) - z_prev;
+            
+            distance = sqrt(y_dist*y_dist + z_dist*z_dist + z_dist*z_dist);
+            
+            if(distance < gap_treshold) {
+                count++;
+            }
+            
+            y_prev = Y1(i);
+            x_prev = X1(i);
+            z_prev = Z1(i);
+        }
+        
+        return_val = count;
+        """
+        
+        count = weave.inline(code, ['gap_treshold', 'y', 'x', 'z'])
+        
+        return count >= min_points
+
+    def normalizeParameter(self, param):
+        """ Normalize detection parameter to be size independent.
+        
+        @param param: parameter to be normalized
+        @return: normalized parameter
+        """
+    
+        return param * self.factor
+        
     def findCenters(self, frames, arr):
         position = np.zeros((3, frames.shape[0]), np.uint16) # x, y, frameNum (z)
         size = np.zeros((frames.shape[0]), np.uint8) # half-height, half-width
@@ -52,7 +141,7 @@ class Extractor(Process):
             for(y=0; y<Narr[1]; y++) {
                 for(x=0; x<Narr[2]; x++) {
                     pixel = ARR3(n, y, x);
-                    if(pixel > 45000 && pixel >= max) {
+                    if(pixel > 10000 && pixel >= max) {
                         max = pixel;
                         max_y = y;
                         max_x = x;
@@ -66,7 +155,7 @@ class Extractor(Process):
                 max_y = max_y * 16 + 8;
                 max_x = max_x * 16 + 8;
                 
-                max = 160;
+                max = 0;
                 max_y2 = max_y;
                 max_x2 = max_x;
                 num_equal = 1;
@@ -118,12 +207,12 @@ class Extractor(Process):
                 }
                 
                 dist_y = dist_y / num_equal * 2;
-                if(dist_y < 8) {
-                    dist_y = 8;
+                if(dist_y < 40) {
+                    dist_y = 40;
                 }
                 dist_x = dist_x / num_equal * 2;
-                if(dist_x < 8) {
-                    dist_x = 8;
+                if(dist_x < 40) {
+                    dist_x = 40;
                 }
                 
                 if(dist_y > dist_x) {
@@ -256,21 +345,21 @@ class Extractor(Process):
                 f.write(struct.pack('I', position[n, 1]))               # x of center
                 f.write(struct.pack('I', size[n]))          
                 np.resize(extracted[n], (size[n], size[n])).tofile(f)   # frame
+
+    
+    
         
     
 if __name__ ==  "__main__":
-    cap = cv2.VideoCapture("/home/dario/Videos/m20050320_012752.wmv")
+    cap = cv2.VideoCapture("/home/dario/Videos/AVSEQ02.MPG")
     
-    frames = np.empty((224, 480, 640), np.uint8)
-    
-    for i in range(224):
+    frames = np.empty((256, 576, 480), np.uint8)
+    for i in range(256):
         ret, frame = cap.read()
     
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     
         frames[i] = gray
-    
-    cap.release()
     
     comp = Compression(None, None, None, None, 0)
     converted = comp.convert(frames)
@@ -278,54 +367,23 @@ if __name__ ==  "__main__":
     
     extractor = Extractor()
     
+    extractor.factor = sqrt(frames.shape[1]*frames.shape[2]) / sqrt(720*576) # calculate normalization factor
+    
     t = time.time()
     
-    arr = extractor.scale(frames, compressed)
-    
-    print "scale: " + str(time.time() - t)
-    t = time.time()
-    
-    x, y, z, size = extractor.findCenters(frames, arr)
-    
-    print "find centers: " + str(time.time() - t)
-    t = time.time()
-    
-    constant = sm.add_constant(z)
-    regressionZX = sm.RLM(x, constant, M=sm.robust.norms.HuberT()).fit().params
-    regressionZY = sm.RLM(y, constant, M=sm.robust.norms.HuberT()).fit().params
-    
-    alphaZX = np.asscalar(regressionZX[0])
-    betaZX = np.asscalar(regressionZX[1])
-    alphaZY = np.asscalar(regressionZY[0])
-    betaZY = np.asscalar(regressionZY[1])
-    firstFrame = np.asscalar(z[0])
-    lastFrame = np.asscalar(z[z.size-1])
-    
-    print "regression: " + str(time.time() - t)
-    t = time.time()
-    
-    pos, size, extracted = extractor.extract(frames, size, alphaZX, betaZX, alphaZY, betaZY, firstFrame, lastFrame)
-    
-    print "extraction: " + str(time.time() - t)
-    t = time.time()
-    
-    background = compressed[2]
-    
-    for i in range(extracted.shape[0]):
-        output = extracted[i]
-        position = pos[i]
+    points = extractor.findPoints(frames, compressed[2], compressed[3])
         
-        y = 0
-        x = 0
-        y2 = 0
-        for y in range(position[0]-size[i]/2, position[0]+size[i]/2-1):
-            x2 = 0
-            for x in range(position[1]-size[i]/2, position[1]+size[i]/2-1):
-                pixel = output[y2, x2]
-                if pixel > 0:
-                    background[y, x] = pixel
-                x2 = x2 + 1 
-            y2 = y2 + 1
+    print "time for thresholding and subsampling: " + str(time.time() - t)
+    t = time.time()
+    
+    should_continue = extractor.testPoints(points)
+    
+    if not should_continue:
+        print "nothing found, not extracting anything"
         
-        cv2.imshow("bla", background)
-        cv2.waitKey(50)
+        
+        
+    print "time for test: " + str(time.time() - t)
+    t = time.time()
+        
+    cap.release()
