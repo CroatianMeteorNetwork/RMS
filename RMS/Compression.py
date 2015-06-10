@@ -98,9 +98,9 @@ class Compression(Process):
                     }
                 }
                 acc -= max;
-                acc /= Nframes[2];
+                acc /= Nframes[2] - 1;
     
-                for(n=0; n<Nframes[2] && n!=max_frame; n++) {
+                for(n=0; n<Nframes[2]; n++) {
                     pixel = FRAMES3(y, x, n) - acc;
                     var += pixel*pixel;
                 }
