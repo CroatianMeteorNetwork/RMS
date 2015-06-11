@@ -26,14 +26,15 @@ Gaussian noise: 5.31156075001
 from RMS.Compression import Compression
 import numpy as np
 import time
+import sys
 
 comp = Compression(None, None, None, None, 000)
 
-def timing(img, s):
+def timing(img):
     t = time.time()
     img = comp.convert(img)
     comp.compress(img)
-    print s + ": " + str(time.time() - t) + "s"
+    return time.time() - t
    
 def create(f):
     arr = np.empty((256, 576, 720), np.uint8)
@@ -53,11 +54,34 @@ def uniform():
 def gauss():
     return np.random.normal(128, 2, (576, 720))
 
+def test(filename):
+    npzFile = np.load(filename)
+    
+    t = [0, 0, 0, 0]
+    
+    for i in range(4):
+        arr = npzFile["arr_"+str(i)]
+        for n in range(20):
+            t[i] += timing(arr)
+    
+    print "Black:", t[0]/20
+    print "White:", t[1]/20
+    print "Uniform noise:", t[2]/20
+    print "Gaussian noise:", t[3]/20
+       
+def generate(filename):    
+    blackArr = create(black)
+    whiteArr = create(white)
+    uniformArr = create(uniform)
+    gaussArr = create(gauss)
+    
+    np.savez(filename, blackArr, whiteArr, uniformArr, gaussArr)
+
 if __name__ == "__main__":
-    timing(create(black), "black")
-        
-    timing(create(white), "white")
-        
-    timing(create(uniform), "uniform noise")
-        
-    timing(create(gauss), "Gaussian noise")
+    if len(sys.argv) == 2:
+        test(sys.argv[1])
+    elif len(sys.argv) == 3:
+        generate(sys.argv[1])
+    else:
+        print "Usage: python -m Tests.CompressionTimings filename.npz"
+        print "or:    python -m Tests.CompressionTimings filename.npz  --generate"
