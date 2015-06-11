@@ -72,16 +72,21 @@ class Compression(Process):
         unsigned int x, y, n, acc, var, max, max_frame, pixel;
         float num_equal;
         unsigned int rand_count = 0;
-    
-        for(y=0; y<Nframes[0]; y++) {
-            for(x=0; x<Nframes[1]; x++) {
+        
+        unsigned int height = Nframes[0];
+        unsigned int width = Nframes[1];
+        unsigned int frames_num = Nframes[2];
+        unsigned int frames_num_minus_one = Nframes[2] - 1;
+            
+        for(y=0; y<height; y++) {
+            for(x=0; x<width; x++) {
                 acc = 0;
                 var = 0;
                 max = 0;
                 max_frame = 0;
                 num_equal = 0;
                 
-                for(n=0; n<Nframes[2]; n++) {
+                for(n=0; n<frames_num; n++) {
                     pixel = FRAMES3(y, x, n);
                     acc += pixel;
                     if(pixel > max) {
@@ -98,13 +103,13 @@ class Compression(Process):
                     }
                 }
                 acc -= max;
-                acc /= Nframes[2] - 1;
+                acc /= frames_num_minus_one;
     
-                for(n=0; n<Nframes[2]; n++) {
+                for(n=0; n<frames_num; n++) {
                     pixel = FRAMES3(y, x, n) - acc;
                     var += pixel*pixel;
                 }
-                var = sqrt(var / Nframes[2]);
+                var = sqrt(var / frames_num);
                 
                 OUT3(0, y, x) = max;
                 OUT3(1, y, x) = max_frame;
