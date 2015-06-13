@@ -75,7 +75,7 @@ class Compression(Process):
         unsigned int height = Nframes[0];
         unsigned int width = Nframes[1];
         unsigned int frames_num = Nframes[2];
-        unsigned int frames_num_minus_one = Nframes[2] - 1;
+        unsigned int frames_num_minus_one = frames_num - 1;
             
         for(y=0; y<height; y++) {
             for(x=0; x<width; x++) {
@@ -85,6 +85,7 @@ class Compression(Process):
                 max_frame = 0;
                 num_equal = 0;
                 
+                // calculate mean, max, and max frame
                 for(n=0; n<frames_num; n++) {
                     pixel = FRAMES3(y, x, n);
                     acc += pixel;
@@ -92,24 +93,26 @@ class Compression(Process):
                         max = pixel;
                         max_frame = n;
                         num_equal = 1;
-                    } else if(pixel == max) {
+                    } else if(pixel == max) { // randomize taken frame number for max pixel
                         num_equal++;
                         
-                        rand_count++;
+                        rand_count++; //rand_count is unsigned short, which means it will overflow back to 0 after 65,535
                         if(num_equal <= RANDS1(rand_count)) {
                             max_frame = n;
                         }
                     }
                 }
-                acc -= max;
+                acc -= max; // remove max pixel from average
                 acc /= frames_num_minus_one;
-    
+                
+                // calculate standard deviation
                 for(n=0; n<frames_num; n++) {
                     pixel = FRAMES3(y, x, n) - acc;
                     var += pixel*pixel;
                 }
                 var = sqrt(var / frames_num);
                 
+                // output results
                 OUT3(0, y, x) = max;
                 OUT3(1, y, x) = max_frame;
                 OUT3(2, y, x) = acc;

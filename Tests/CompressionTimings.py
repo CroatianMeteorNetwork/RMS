@@ -84,4 +84,4 @@ if __name__ == "__main__":
         generate(sys.argv[1])
     else:
         print "Usage: python -m Tests.CompressionTimings filename.npz"
-        print "or:    python -m Tests.CompressionTimings filename.npz  --generate"
+        print "or:    python -m Tests.CompressionTimings filename.npz --generate"
