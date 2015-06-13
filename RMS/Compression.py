@@ -66,12 +66,11 @@ class Compression(Process):
         """
         
         out = np.empty((4, frames.shape[0], frames.shape[1]), np.uint8)
-        rands = np.random.uniform(low = 0.0, high = 1.0, size = 1048576)
+        rands = np.random.randint(low = 0, high = 256, size = 65536)
         
         code = """
-        unsigned int x, y, n, acc, var, max, max_frame, pixel;
-        float num_equal;
-        unsigned int rand_count = 0;
+        unsigned int x, y, n, acc, var, max, max_frame, pixel, num_equal;
+        unsigned short rand_count = 0;
         
         unsigned int height = Nframes[0];
         unsigned int width = Nframes[1];
@@ -96,8 +95,8 @@ class Compression(Process):
                     } else if(pixel == max) {
                         num_equal++;
                         
-                        rand_count = (rand_count + 1) % 1048576L;
-                        if(RANDS1(rand_count) <= 1/num_equal) {
+                        rand_count++;
+                        if(num_equal <= RANDS1(rand_count)) {
                             max_frame = n;
                         }
                     }
