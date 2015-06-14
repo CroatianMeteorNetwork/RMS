@@ -5,8 +5,11 @@ import cv2
 from RMS.Compression import Compression
 from math import floor, sqrt
 from RMS.processFrames import calculateMeanAndStdDev
+from mpl_toolkits.mplot3d import Axes3D
 import time
 import statsmodels.api as sm
+import matplotlib.pyplot as plt
+import RMS.grouping3D
 
 class Extractor(Process):
     factor = 0
@@ -14,7 +17,7 @@ class Extractor(Process):
     def __init__(self):
         super(Extractor, self).__init__()
     
-    def findPoints(self, frames, average, stddev, k=6, min_level=20, min_points = 2, f=16):
+    def findPoints(self, frames, max, maxframe, min_level=20, min_points=32, f=16):
         """Treshold and subsample frames then extract points.
         
         @param frames: numpy array, for example (256, 576, 720), with all frames
@@ -23,7 +26,7 @@ class Extractor(Process):
         @return: (y, x, z) of found points
         """
      
-        count = np.zeros((frames.shape[0], floor(frames.shape[1]//f), floor(frames.shape[2]//f)), np.uint8)
+        count = np.zeros((frames.shape[0], floor(frames.shape[1]//f), floor(frames.shape[2]//f)), np.int16)
         pointsy = np.empty((frames.shape[0]*floor(frames.shape[1]//f)*floor(frames.shape[2]//f)), np.uint16)
         pointsx = np.empty((frames.shape[0]*floor(frames.shape[1]//f)*floor(frames.shape[2]//f)), np.uint16)
         pointsz = np.empty((frames.shape[0]*floor(frames.shape[1]//f)*floor(frames.shape[2]//f)), np.uint16)
@@ -34,36 +37,29 @@ class Extractor(Process):
         
         for(y=0; y<Nframes[1]; y++) {
             for(x=0; x<Nframes[2]; x++) {
-                // calculate threshold from parameters
-                threshold =  AVERAGE2(y, x) + k * STDDEV2(y, x);
-                if(threshold > 254) { //make sure it's in range
-                    threshold = 254;
-                } else if(threshold < min_level) {
-                    threshold = min_level;
-                }
-                
-                for(n=0; n<Nframes[0]; n++) {
-                    if(FRAMES3(n, y, x) > threshold) { //check if current pixel is over threshold
-                        y2 = y/f; // subsample frame in f*f squares
-                        x2 = x/f;
-                        
-                        if(COUNT3(n, y2, x2) >= min_points) { // check if there is enough of threshold passers inside of this square
-                            POINTSY1(num) = y;
-                            POINTSX1(num) = x;
-                            POINTSZ1(num) = n;
-                            num++;
-                        } else { // increase counter if not
-                            COUNT3(n, y2, x2) += 1;
-                        }
+                if(MAX2(y, x) > min_level) {
+                    n = MAXFRAME2(y, x);
+                    
+                    y2 = y/f; // subsample frame in f*f squares
+                    x2 = x/f;
+                    
+                    if(COUNT3(n, y2, x2) >= min_points) { // check if there is enough of threshold passers inside of this square
+                        POINTSY1(num) = y2;
+                        POINTSX1(num) = x2;
+                        POINTSZ1(num) = n;
+                        num++;
+                        COUNT3(n, y2, x2) = -1; //don't repeat this number
+                    } else if(COUNT3(n, y2, x2) != -1) { // increase counter if not enough threshold passers and this number isn't written already
+                        COUNT3(n, y2, x2) += 1;
                     }
-               }
+                }
             }    
         }
         
-        return_val = num + 1; // output length of POINTS arrays
+        return_val = num; // output length of POINTS arrays
         """
         
-        length = weave.inline(code, ['frames', 'average', 'stddev', 'k', 'min_level', 'min_points', 'f', 'count', 'pointsy', 'pointsx', 'pointsz'])
+        length = weave.inline(code, ['frames', 'max', 'maxframe', 'min_level', 'min_points', 'f', 'count', 'pointsy', 'pointsx', 'pointsz'])
         
         y = pointsy[0 : length]
         x = pointsx[0 : length]
@@ -232,6 +228,7 @@ class Extractor(Process):
         
         return x, y, z, size
     
+    ###TODO
     def extract(self, frames, size, alphaZX, betaZX, alphaZY, betaZY, firstFrame, lastFrame):
         firstFrame -= 15
         if firstFrame < 0:
@@ -334,6 +331,7 @@ class Extractor(Process):
         
         return pos, outsize, out
     
+    ###TODO
     def save(self, position, size, extracted, fileName):
         file = "FR" + fileName + ".bin"
         
@@ -346,10 +344,6 @@ class Extractor(Process):
                 f.write(struct.pack('I', size[n]))          
                 np.resize(extracted[n], (size[n], size[n])).tofile(f)   # frame
 
-    
-    
-        
-    
 if __name__ ==  "__main__":
     cap = cv2.VideoCapture("/home/dario/Videos/AVSEQ02.MPG")
     
@@ -360,20 +354,21 @@ if __name__ ==  "__main__":
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     
         frames[i] = gray
+        
+    cap.release()
     
     comp = Compression(None, None, None, None, 0)
-    converted = comp.convert(frames)
-    compressed = comp.compress(converted)
+    compressed = comp.compress(frames)
     
     extractor = Extractor()
     
     extractor.factor = sqrt(frames.shape[1]*frames.shape[2]) / sqrt(720*576) # calculate normalization factor
     
-    t = time.time()
+    bigT = t = time.time()
     
-    points = extractor.findPoints(frames, compressed[2], compressed[3])
-        
-    print "time for thresholding and subsampling: " + str(time.time() - t)
+    points = extractor.findPoints(frames, compressed[0], compressed[1])
+    print points[0].shape
+    print "time for thresholding and subsampling: ", time.time() - t
     t = time.time()
     
     should_continue = extractor.testPoints(points)
@@ -381,9 +376,21 @@ if __name__ ==  "__main__":
     if not should_continue:
         print "nothing found, not extracting anything"
         
-        
-        
-    print "time for test: " + str(time.time() - t)
-    t = time.time()
-        
-    cap.release()
+    print "time for test: ", time.time() - t
+    
+    y, x, z = points
+
+    # Plot points in 3D
+    ax.scatter(x, y, z, s = 5)
+    
+    ax.set_zlim(0, 255)
+    plt.xlim([0,30])
+    plt.ylim([0,36])
+    plt.show()
+
+    print "Total time:", time.time() - bigT
+    
+    
+    
+    
+    
