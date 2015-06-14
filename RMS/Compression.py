@@ -46,18 +46,6 @@ class Compression(Process):
         self.startTime2 = startTime2
         self.camNum = camNum
     
-    def convert(self, arr):
-        """Convert from (256, 576, 720) to (576, 720, 256).
-        
-        @param arr: video frames as 3d numpy array
-        @return: video frames as 3d numpy array ready for Compression.compress()
-        """
-        
-        frames = np.swapaxes(arr, 0, 2)
-        frames = np.swapaxes(frames, 0, 1)
-        
-        return frames
-    
     def compress(self, frames):
         """Compress frames to the FTP-compatible array.
         
@@ -65,16 +53,16 @@ class Compression(Process):
         @return: 3d numpy array in format: (N, y, x) where N is [0, 4)
         """
         
-        out = np.empty((4, frames.shape[0], frames.shape[1]), np.uint8)
+        out = np.empty((4, frames.shape[1], frames.shape[2]), np.uint8)
         rands = np.random.randint(low = 0, high = 256, size = 65536)
         
         code = """
         unsigned int x, y, n, acc, var, max, max_frame, pixel, num_equal;
         unsigned short rand_count = 0;
         
-        unsigned int height = Nframes[0];
-        unsigned int width = Nframes[1];
-        unsigned int frames_num = Nframes[2];
+        unsigned int height = Nframes[1];
+        unsigned int width = Nframes[2];
+        unsigned int frames_num = Nframes[0];
         unsigned int frames_num_minus_one = frames_num - 1;
             
         for(y=0; y<height; y++) {
@@ -87,7 +75,7 @@ class Compression(Process):
                 
                 // calculate mean, max, and max frame
                 for(n=0; n<frames_num; n++) {
-                    pixel = FRAMES3(y, x, n);
+                    pixel = FRAMES3(n, y, x);
                     acc += pixel;
                     if(pixel > max) {
                         max = pixel;
@@ -107,7 +95,7 @@ class Compression(Process):
                 
                 // calculate standard deviation
                 for(n=0; n<frames_num; n++) {
-                    pixel = FRAMES3(y, x, n) - acc;
+                    pixel = FRAMES3(n, y, x) - acc;
                     var += pixel*pixel;
                 }
                 var = sqrt(var / frames_num);
@@ -178,11 +166,11 @@ class Compression(Process):
             
             if self.startTime1.value != 0:
                 startTime = self.startTime1.value #retrieve time of first frame
-                frames = self.convert(self.array1) #copy and convert frames
+                frames = self.array1 #copy frames
                 self.startTime1.value = 0
             else:
                 startTime = self.startTime2.value #retrieve time of first frame
-                frames = self.convert(self.array2) #copy and convert frames
+                frames = self.array2 #copy frames
                 self.startTime2.value = 0
             
             logging.debug("conversion: " + str(time.time() - t) + "s")

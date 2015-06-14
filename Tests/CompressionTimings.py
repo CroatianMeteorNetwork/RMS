@@ -32,7 +32,6 @@ comp = Compression(None, None, None, None, 000)
 
 def timing(img):
     t = time.time()
-    img = comp.convert(img)
     comp.compress(img)
     return time.time() - t
    
