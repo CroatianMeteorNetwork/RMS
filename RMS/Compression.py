@@ -57,26 +57,27 @@ class Compression(Process):
         rands = np.random.randint(low = 0, high = 256, size = 65536)
         
         code = """
-        unsigned int x, y, n, acc, var, max, max_frame, pixel, num_equal;
+        unsigned int x, y, n, acc, var, max, max_frame, pixel, num_equal, mean;
         unsigned short rand_count = 0;
         
         unsigned int height = Nframes[1];
         unsigned int width = Nframes[2];
         unsigned int frames_num = Nframes[0];
         unsigned int frames_num_minus_one = frames_num - 1;
+        unsigned int frames_num_minus_two = frames_num - 2;
             
         for(y=0; y<height; y++) {
             for(x=0; x<width; x++) {
                 acc = 0;
                 var = 0;
                 max = 0;
-                max_frame = 0;
-                num_equal = 0;
                 
-                // calculate mean, max, and max frame
+                // calculate mean, stddev, max, and max frame
                 for(n=0; n<frames_num; n++) {
                     pixel = FRAMES3(n, y, x);
                     acc += pixel;
+                    var += pixel*pixel;
+                    
                     if(pixel > max) {
                         max = pixel;
                         max_frame = n;
@@ -90,20 +91,20 @@ class Compression(Process):
                         }
                     }
                 }
-                acc -= max; // remove max pixel from average
-                acc /= frames_num_minus_one;
                 
-                // calculate standard deviation
-                for(n=0; n<frames_num; n++) {
-                    pixel = FRAMES3(n, y, x) - acc;
-                    var += pixel*pixel;
-                }
-                var = sqrt(var / frames_num);
+                //mean
+                acc -= max;    // remove max pixel from average
+                mean = acc / frames_num_minus_one;
+                
+                //stddev
+                var -= max*max;     // remove max pixel
+                var -= acc*mean;    // subtract average squared sum of all values (acc*mean = acc*acc/frames_num_minus_one)
+                var = sqrt(var / frames_num_minus_two);
                 
                 // output results
                 OUT3(0, y, x) = max;
                 OUT3(1, y, x) = max_frame;
-                OUT3(2, y, x) = acc;
+                OUT3(2, y, x) = mean;
                 OUT3(3, y, x) = var;
             }
         }
