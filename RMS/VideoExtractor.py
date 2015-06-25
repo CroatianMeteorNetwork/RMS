@@ -14,7 +14,7 @@ class Extractor(Process):
     def __init__(self):
         super(Extractor, self).__init__()
     
-    def findPoints(self, frames, max, maxframe, min_level=40, min_points=32, max_per_frame_factor=20, f=16):
+    def findPoints(self, frames, compressed, min_level=40, min_points=24, k1=1.8, max_per_frame_factor=20, f=16):
         """Treshold and subsample frames then extract points.
         
         @param frames: numpy array, for example (256, 576, 720), with all frames
@@ -29,15 +29,16 @@ class Extractor(Process):
         pointsz = np.empty((frames.shape[0]*floor(frames.shape[1]//f)*floor(frames.shape[2]//f)), np.uint16)
         
         code = """
-        unsigned int x, y, x2, y2, n, i;
+        unsigned int x, y, x2, y2, n, i, max;
         unsigned int num = 0, acc = 0;
         
         unsigned int counter[Nframes[0]] = {0}; // counts threshold passers per frame
         
         for(y=0; y<Nframes[1]; y++) {
             for(x=0; x<Nframes[2]; x++) {
-                if(MAX2(y, x) > min_level) {
-                    n = MAXFRAME2(y, x);
+                max = COMPRESSED3(0, y, x);
+                if((max > min_level) && (max >= COMPRESSED3(2, y, x) + k1 * COMPRESSED3(3, y, x))) {
+                    n = COMPRESSED3(1, y, x);
                     
                     y2 = y/f; // subsample frame in f*f squares
                     x2 = x/f;
@@ -78,7 +79,7 @@ class Extractor(Process):
         return_val = num; // output length of POINTS arrays
         """
         
-        length = weave.inline(code, ['frames', 'max', 'maxframe', 'min_level', 'min_points', 'max_per_frame_factor', 'f', 'count', 'pointsy', 'pointsx', 'pointsz'])
+        length = weave.inline(code, ['frames', 'compressed', 'min_level', 'min_points', 'k1', 'max_per_frame_factor', 'f', 'count', 'pointsy', 'pointsx', 'pointsz'])
         
         # cut away extra long array
         y = pointsy[0 : length]
@@ -566,7 +567,7 @@ if __name__ ==  "__main__":
     
     bigT = t = time.time()
     
-    points = extractor.findPoints(frames, compressed[0], compressed[1])
+    points = extractor.findPoints(frames, compressed)
     print points[0].shape
     print "time for thresholding and subsampling: ", time.time() - t
     t = time.time()
@@ -606,14 +607,14 @@ if __name__ ==  "__main__":
     line_distance_const = 3
 
     # Maximum gap between consecutive points allowed
-    gap_treshold = 70
+    gap_treshold = 100
     gap_treshold = normalizeParameter(gap_treshold, y_dim, x_dim)
 
     # Minimum points required to form a line
     minimum_points = 4
 
     # Ratio of how many points must be close to the line before considering searching for another line
-    point_ratio_treshold = 0.8
+    point_ratio_treshold = 0.9
 
     ###########################
     line_list = []

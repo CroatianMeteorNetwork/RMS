@@ -60,13 +60,13 @@ def test(filename):
     
     for i in range(4):
         arr = npzFile["arr_"+str(i)]
-        for n in range(20):
+        for n in range(2):
             t[i] += timing(arr)
     
-    print "Black:", t[0]/20
-    print "White:", t[1]/20
-    print "Uniform noise:", t[2]/20
-    print "Gaussian noise:", t[3]/20
+    print "Black:", t[0]/2
+    print "White:", t[1]/2
+    print "Uniform noise:", t[2]/2
+    print "Gaussian noise:", t[3]/2
        
 def generate(filename):    
     blackArr = create(black)
