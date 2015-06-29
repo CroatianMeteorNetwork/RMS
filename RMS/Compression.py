@@ -21,6 +21,8 @@ import numpy as np
 import time
 import struct
 import logging
+from os import uname
+from RMS.VideoExtractor import Extractor
 
 class Compression(Process):
     """Compress list of numpy arrays (video frames).
@@ -110,11 +112,14 @@ class Compression(Process):
         }
         """
         
-        weave.inline(code, ['frames', 'rands', 'out'])
+        args = []
+        if uname()[4] == "armv7l":
+            args = ["-O3", "-mfpu=neon", "-mfloat-abi=hard", "-fdump-tree-vect-details", "-funsafe-loop-optimizations", "-ftree-loop-if-convert-stores"]
+        weave.inline(code, ['frames', 'rands', 'out'], verbose=2, extra_compile_args=args, extra_link_args=args)
         return out
     
     def save(self, arr, startTime, N, camNum):
-        """Writes metadata and data array to FTP .bin file.
+        """Write metadata and data array to FTP .bin file.
         
         @param arr: 3d numpy array in format: (N, y, x) where N is [0, 4)
         @param startTime: seconds and fractions of a second from epoch to first frame
@@ -125,9 +130,9 @@ class Compression(Process):
         dateTime = time.strftime("%Y%m%d_%H%M%S", time.localtime(startTime))
         millis = int((startTime - floor(startTime))*1000)
         
-        fileName = str(camNum).zfill(3) +  "_" + dateTime + "_" + str(millis).zfill(3) + "_" + str(N).zfill(7)
+        filename = str(camNum).zfill(3) +  "_" + dateTime + "_" + str(millis).zfill(3) + "_" + str(N).zfill(7)
         
-        image = "FF" + fileName + ".bin"
+        image = "FF" + filename + ".bin"
         
         with open(image, "wb") as f:
             f.write(struct.pack('I', arr.shape[1]))  # nrows
@@ -137,16 +142,18 @@ class Compression(Process):
             f.write(struct.pack('I', camNum))        # camera number
         
             arr.tofile(f)                            # image array
+        
+        return filename
     
     def stop(self):
-        """Stop process.
+        """Stop the process.
         """
         
         self.exit.set()
         self.join()
         
     def start(self):
-        """Start process.
+        """Start the process.
         """
         
         self.exit = Event()
@@ -174,16 +181,19 @@ class Compression(Process):
                 frames = self.array2 #copy frames
                 self.startTime2.value = 0
             
-            logging.debug("conversion: " + str(time.time() - t) + "s")
+            logging.debug("memory copy: " + str(time.time() - t) + "s")
             t = time.time()
             
-            frames = self.compress(frames)
+            compressed = self.compress(frames)
             
             logging.debug("compression: " + str(time.time() - t) + "s")
             t = time.time()
             
-            self.save(frames, startTime, n*256, self.camNum)
+            filename = self.save(compressed, startTime, n*256, self.camNum)
             n += 1
             
             logging.debug("saving: " + str(time.time() - t) + "s")
+            
+            ve = Extractor()
+            ve.start(frames, compressed, filename)
     

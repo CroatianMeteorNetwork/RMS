@@ -60,6 +60,7 @@ def test(filename):
     
     for i in range(4):
         arr = npzFile["arr_"+str(i)]
+        timing(arr) # warmup
         for n in range(2):
             t[i] += timing(arr)
     
