@@ -394,8 +394,8 @@ class Extractor(Process):
             logging.debug("nothing found, not extracting anything")
             return
         
-        y_dim = frames[1]/16
-        x_dim = frames[2]/16
+        y_dim = frames.shape[1]/16
+        x_dim = frames.shape[2]/16
         
         event_points = []
         for i in range(len(points[0])):
