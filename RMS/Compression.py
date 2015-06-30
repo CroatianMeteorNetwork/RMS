@@ -56,7 +56,6 @@ class Compression(Process):
         """
         
         out = np.empty((4, frames.shape[1], frames.shape[2]), np.uint8)
-        rands = np.random.randint(low = 0, high = 256, size = 65536)
         
         code = """
         unsigned int x, y, n, acc, var, max, max_frame, pixel, num_equal, mean;
@@ -67,6 +66,13 @@ class Compression(Process):
         unsigned int frames_num = Nframes[0];
         unsigned int frames_num_minus_one = frames_num - 1;
         unsigned int frames_num_minus_two = frames_num - 2;
+        
+        unsigned char randomN[65536] = {};
+        unsigned int arand = 1;
+        for(n=0; n<65536; n++) {
+            arand = (arand * 32719 + 3) % 32749;
+            randomN[n] = (unsigned char)(32767.0 / (double)(1 + arand % 32767));
+        }
             
         for(y=0; y<height; y++) {
             for(x=0; x<width; x++) {
@@ -88,7 +94,7 @@ class Compression(Process):
                         num_equal++;
                         
                         rand_count++; //rand_count is unsigned short, which means it will overflow back to 0 after 65,535
-                        if(num_equal <= RANDS1(rand_count)) {
+                        if(num_equal <= randomN[rand_count]) {
                             max_frame = n;
                         }
                     }
@@ -115,7 +121,7 @@ class Compression(Process):
         args = []
         if uname()[4] == "armv7l":
             args = ["-O3", "-mfpu=neon", "-mfloat-abi=hard", "-fdump-tree-vect-details", "-funsafe-loop-optimizations", "-ftree-loop-if-convert-stores"]
-        weave.inline(code, ['frames', 'rands', 'out'], verbose=2, extra_compile_args=args, extra_link_args=args)
+        weave.inline(code, ['frames', 'out'], verbose=2, extra_compile_args=args, extra_link_args=args)
         return out
     
     def save(self, arr, startTime, N, camNum):

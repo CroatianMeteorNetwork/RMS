@@ -349,7 +349,7 @@ class Extractor(Process):
                     f.write(struct.pack('I', sizepos[i, 2]))  # time
                     size = sizepos[i, 3]
                     f.write(struct.pack('I', size))           # cropped frame size
-                    frame[:size, :size].tofile(f)  # cropped frame
+                    frame[:size, :size].tofile(f)             # cropped frame
     
     def stop(self):
         """Stop the process.
@@ -394,8 +394,8 @@ class Extractor(Process):
             logging.debug("nothing found, not extracting anything")
             return
         
-        y_dim = 576/16
-        x_dim = 480/16
+        y_dim = frames[1]/16
+        x_dim = frames[2]/16
         
         event_points = []
         for i in range(len(points[0])):
