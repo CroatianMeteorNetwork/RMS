@@ -14,25 +14,40 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from BufferedCapture import BufferedCapture
-from Compression import Compression
-from multiprocessing import Manager
+from RMS.BufferedCapture import BufferedCapture
+from RMS.Compression import Compression
+from multiprocessing import Array, Value
+import numpy as np
+import ctypes
 import logging
+
+def wait():
+    try:
+        raw_input("Press Enter to stop...")
+    except EOFError:
+        pass
 
 if __name__ == "__main__":
     logging.basicConfig(filename="log.log", level=logging.DEBUG)
     
-    manager = Manager()
-    framesList = manager.list()
+    sharedArrayBase = Array(ctypes.c_uint8, 256*576*720)
+    sharedArray = np.ctypeslib.as_array(sharedArrayBase.get_obj())
+    sharedArray = sharedArray.reshape(256, 576, 720)
+    startTime = Value('d', 0.0)
     
-    bc = BufferedCapture(framesList)
+    sharedArrayBase2 = Array(ctypes.c_uint8, 256*576*720)
+    sharedArray2 = np.ctypeslib.as_array(sharedArrayBase2.get_obj())
+    sharedArray2 = sharedArray2.reshape(256, 576, 720)
+    startTime2 = Value('d', 0.0)
     
-    c = Compression(framesList, 499)
+    bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2)
+    
+    c = Compression(sharedArray, startTime, sharedArray2, startTime2, 499)
     
     bc.startCapture()
     c.start()
     
-    raw_input("Press Enter to stop...")
+    wait()
     
     bc.stopCapture()
     c.stop()
