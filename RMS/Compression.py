@@ -21,6 +21,8 @@ import numpy as np
 import time
 import struct
 import logging
+from os import uname
+from RMS.VideoExtractor import Extractor
 
 class Compression(Process):
     """Compress list of numpy arrays (video frames).
@@ -46,18 +48,6 @@ class Compression(Process):
         self.startTime2 = startTime2
         self.camNum = camNum
     
-    def convert(self, arr):
-        """Convert from (256, 576, 720) to (576, 720, 256).
-        
-        @param arr: video frames as 3d numpy array
-        @return: video frames as 3d numpy array ready for Compression.compress()
-        """
-        
-        frames = np.swapaxes(arr, 0, 2)
-        frames = np.swapaxes(frames, 0, 1)
-        
-        return frames
-    
     def compress(self, frames):
         """Compress frames to the FTP-compatible array.
         
@@ -66,59 +56,76 @@ class Compression(Process):
         """
         
         out = np.empty((4, frames.shape[1], frames.shape[2]), np.uint8)
-        rands = np.random.uniform(low = 0.0, high = 1.0, size = 1048576)
         
         code = """
-        unsigned int x, y, n, acc, var, max, max_frame, pixel;
-        float num_equal;
-        unsigned int rand_count = 0;
-    
-        for(y=0; y<Nframes[0]; y++) {
-            for(x=0; x<Nframes[1]; x++) {
+        unsigned int x, y, n, acc, var, max, max_frame, pixel, num_equal, mean;
+        unsigned short rand_count = 0;
+        
+        unsigned int height = Nframes[1];
+        unsigned int width = Nframes[2];
+        unsigned int frames_num = Nframes[0];
+        unsigned int frames_num_minus_one = frames_num - 1;
+        unsigned int frames_num_minus_two = frames_num - 2;
+        
+        unsigned char randomN[65536] = {};
+        unsigned int arand = 1;
+        for(n=0; n<65536; n++) {
+            arand = (arand * 32719 + 3) % 32749;
+            randomN[n] = (unsigned char)(32767.0 / (double)(1 + arand % 32767));
+        }
+            
+        for(y=0; y<height; y++) {
+            for(x=0; x<width; x++) {
                 acc = 0;
                 var = 0;
                 max = 0;
-                max_frame = 0;
-                num_equal = 0;
                 
-                for(n=0; n<Nframes[2]; n++) {
-                    pixel = FRAMES3(y, x, n);
+                // calculate mean, stddev, max, and max frame
+                for(n=0; n<frames_num; n++) {
+                    pixel = FRAMES3(n, y, x);
                     acc += pixel;
+                    var += pixel*pixel;
+                    
                     if(pixel > max) {
                         max = pixel;
                         max_frame = n;
                         num_equal = 1;
-                    } else if(pixel == max) {
+                    } else if(pixel == max) { // randomize taken frame number for max pixel
                         num_equal++;
                         
-                        rand_count = (rand_count + 1) % 1048576L;
-                        if(RANDS1(rand_count) <= 1/num_equal) {
+                        rand_count++; //rand_count is unsigned short, which means it will overflow back to 0 after 65,535
+                        if(num_equal <= randomN[rand_count]) {
                             max_frame = n;
                         }
                     }
                 }
-                acc -= max;
-                acc /= Nframes[2];
-    
-                for(n=0; n<Nframes[2] && n!=max_frame; n++) {
-                    pixel = FRAMES3(y, x, n) - acc;
-                    var += pixel*pixel;
-                }
-                var = sqrt(var / Nframes[2]);
                 
+                //mean
+                acc -= max;    // remove max pixel from average
+                mean = acc / frames_num_minus_one;
+                
+                //stddev
+                var -= max*max;     // remove max pixel
+                var -= acc*mean;    // subtract average squared sum of all values (acc*mean = acc*acc/frames_num_minus_one)
+                var = sqrt(var / frames_num_minus_two);
+                
+                // output results
                 OUT3(0, y, x) = max;
                 OUT3(1, y, x) = max_frame;
-                OUT3(2, y, x) = acc;
+                OUT3(2, y, x) = mean;
                 OUT3(3, y, x) = var;
             }
         }
         """
         
-        weave.inline(code, ['frames', 'rands', 'out'])
+        args = []
+        if uname()[4] == "armv7l":
+            args = ["-O3", "-mfpu=neon", "-mfloat-abi=hard", "-fdump-tree-vect-details", "-funsafe-loop-optimizations", "-ftree-loop-if-convert-stores"]
+        weave.inline(code, ['frames', 'out'], verbose=2, extra_compile_args=args, extra_link_args=args)
         return out
     
     def save(self, arr, startTime, N, camNum):
-        """Writes metadata and data array to FTP .bin file.
+        """Write metadata and data array to FTP .bin file.
         
         @param arr: 3d numpy array in format: (N, y, x) where N is [0, 4)
         @param startTime: seconds and fractions of a second from epoch to first frame
@@ -129,7 +136,9 @@ class Compression(Process):
         dateTime = time.strftime("%Y%m%d_%H%M%S", time.localtime(startTime))
         millis = int((startTime - floor(startTime))*1000)
         
-        image = "FF" + str(camNum).zfill(3) +  "_" + dateTime + "_" + str(millis).zfill(3) + "_" + str(N).zfill(7) + ".bin"
+        filename = str(camNum).zfill(3) +  "_" + dateTime + "_" + str(millis).zfill(3) + "_" + str(N).zfill(7)
+        
+        image = "FF" + filename + ".bin"
         
         with open(image, "wb") as f:
             f.write(struct.pack('I', arr.shape[1]))  # nrows
@@ -139,16 +148,18 @@ class Compression(Process):
             f.write(struct.pack('I', camNum))        # camera number
         
             arr.tofile(f)                            # image array
+        
+        return filename
     
     def stop(self):
-        """Stop process.
+        """Stop the process.
         """
         
         self.exit.set()
         self.join()
         
     def start(self):
-        """Start process.
+        """Start the process.
         """
         
         self.exit = Event()
@@ -169,23 +180,26 @@ class Compression(Process):
             
             if self.startTime1.value != 0:
                 startTime = self.startTime1.value #retrieve time of first frame
-                frames = self.convert(self.array1) #copy and convert frames
+                frames = self.array1 #copy frames
                 self.startTime1.value = 0
             else:
                 startTime = self.startTime2.value #retrieve time of first frame
-                frames = self.convert(self.array2) #copy and convert frames
+                frames = self.array2 #copy frames
                 self.startTime2.value = 0
             
-            logging.debug("conversion: " + str(time.time() - t) + "s")
+            logging.debug("memory copy: " + str(time.time() - t) + "s")
             t = time.time()
             
-            frames = self.compress(frames)
+            compressed = self.compress(frames)
             
             logging.debug("compression: " + str(time.time() - t) + "s")
             t = time.time()
             
-            self.save(frames, startTime, n*256, self.camNum)
+            filename = self.save(compressed, startTime, n*256, self.camNum)
             n += 1
             
             logging.debug("saving: " + str(time.time() - t) + "s")
+            
+            ve = Extractor()
+            ve.start(frames, compressed, filename)
     
