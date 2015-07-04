@@ -18,7 +18,7 @@ from multiprocessing import Process, Event
 import numpy as np
 from scipy import weave, stats
 from RMS import Grouping3D
-from math import floor, sqrt
+from math import floor, sqrt, ceil
 import time
 import struct
 from os import uname
@@ -29,7 +29,7 @@ class Extractor(Process):
         super(Extractor, self).__init__()
     
     def findPoints(self, frames, compressed, min_level=40, min_points=8, k1=4, max_per_frame_factor=10, max_points_per_frame=30, max_points=190, min_frames=4, f=16):
-        """Threshold and subsample frames then extract points.
+        """Threshold and subsample frames and return as list of points.
         
         @param frames: numpy array, for example (256, 576, 720), with all frames
         @param average: average frame (or median)
@@ -76,31 +76,36 @@ class Extractor(Process):
             args = ["-O3", "-mfpu=neon", "-mfloat-abi=hard", "-fdump-tree-vect-details", "-funsafe-loop-optimizations", "-ftree-loop-if-convert-stores"]
         length = weave.inline(code, ['frames', 'compressed', 'min_level', 'min_points', 'k1', 'f', 'count', 'pointsy', 'pointsx', 'pointsz'], verbose=2, extra_compile_args=args, extra_link_args=args)
         
+        # return empty list if there is no points
+        if length == 0:
+            return []
+        
         # cut away extra long array
         y = pointsy[0 : length]
         x = pointsx[0 : length]
         z = pointsz[0 : length]
         
-        # Find median number of points on the images and remove all outliers (aka frames with a large flare)
-        # Also remove all frames with number of points greater than a treshold value
-        if z.any():
-            freq = stats.itemfreq(z)
-            
-            # Reject the image if there are too little event frames
-            if len(freq) <= min_frames:
-                return np.empty(shape=(0)), np.empty(shape=(0)), np.empty(shape=(0))
-  
-            outlier_treshold = max_per_frame_factor * np.median(freq[:, 1])
-            
-            for i, item in enumerate(freq):
-                frameNum, count = item
-                if count >= outlier_treshold or count >= max_points_per_frame:
-                    indices = np.where(z != frameNum)
-                    y = y[indices]
-                    x = x[indices]
-                    z = z[indices]
+        freq = stats.itemfreq(z) # return list with number of occurance of each frame num (Z axis)
         
-        # randomize points if there are too many
+        # reject the image if there are too little event frames
+        if len(freq) <= min_frames:
+            return []
+        
+        # calculate a threshold based on factors and median number of points on the images per frame
+        outlier_treshold = max_per_frame_factor * np.median(freq[:, 1])
+        if outlier_treshold > max_points_per_frame:
+            outlier_treshold = max_points_per_frame
+        
+        # remove all outliers (aka frames with a strong flare
+        for i, item in enumerate(freq):
+            frameNum, count = item
+            if count >= outlier_treshold:
+                indices = np.where(z != frameNum)
+                y = y[indices]
+                x = x[indices]
+                z = z[indices]
+                
+        # randomize points if there are too many in total
         if len(z) > max_points:
             indices = np.random.randint(0, len(z), max_points)
             y = y[indices]
@@ -113,15 +118,25 @@ class Extractor(Process):
         x = x[indices].astype(np.float)
         z = z[indices].astype(np.float)
         
-        return y, x, z
+        # test points
+        if not self.testPoints(y, x, z):
+            return []
+        
+        # convert to python list
+        event_points = []
+        for i in range(len(z)):
+            event_points.append([y[i], x[i], z[i]])
+        
+        return event_points
     
-    def testPoints(self, points, min_points=5, gap_treshold=70):
+    def testPoints(self, y, x, z, min_points=5, gap_treshold=70):
         """ Test if points are interesting (ie. something is detected).
         
+        @param y: 1D numpy array with Y coords of points
+        @param x: 1D numpy array with X coords of points
+        @param z: 1D numpy array with Z coords of points
         @return: true if video should be further checked for meteors, false otherwise
         """
-        
-        y, x, z = points
         
         # check if there is enough points
         if(len(y) < min_points):
@@ -159,7 +174,7 @@ class Extractor(Process):
         
         return count >= min_points
     
-    def extract(self, frames, compressed, coefficients, before=7, after=15, f=16, limitForSize=0.90, minSize=8, maxSize=192):
+    def extract(self, frames, compressed, coefficients, before=0.15, after=0.25, f=16, limitForSize=0.90, minSize=8, maxSize=192):
         """ Determinate window size and crop out frames.
         
         @param frames: raw video frames
@@ -178,26 +193,25 @@ class Extractor(Process):
             firstFrame = int(firstFrame)
             lastFrame = int(lastFrame)
             
+            diff = lastFrame - firstFrame
+            firstFrame = firstFrame - ceil(diff*before) # extrapolate before first detected point
+            if firstFrame < 0:
+                firstFrame = 0
+            lastFrame = lastFrame + ceil(diff*after) # extrapolate after last detected point
+            if lastFrame >= frames.shape[0]:
+                lastFrame = frames.shape[0] - 1
+            
             out = np.zeros((frames.shape[0], maxSize, maxSize), np.uint8)
             sizepos = np.empty((frames.shape[0], 4), np.uint16) # y, x, size
             
             code = """
                 int x_m, x_p, x_t, y_m, y_p, y_t, k,
-                first_frame = firstFrame - before,
-                last_frame = lastFrame + after,
                 half_max_size = maxSize / 2,
                 half_f = f / 2;
                 unsigned int x, y, i, x2, y2, num = 0,
                 max, pixel, limit, max_width, max_height, size, half_size, num_equal;
                 
-                if(first_frame < 0) {
-                    first_frame = 0;
-                }
-                if(last_frame >= Nframes[0]) {
-                    last_frame = Nframes[0] - 1;
-                }
-                
-                for(i = first_frame; i < last_frame; i++) {
+                for(i = firstFrame; i < lastFrame; i++) {
                     // calculate point at current time
                     k = i - POINT1(2);
                     y_t = (POINT1(0) + slopeYZ * k) * f + half_f;
@@ -323,7 +337,7 @@ class Extractor(Process):
             args = []
             if uname()[4] == "armv7l":
                 args = ["-O3", "-mfpu=neon", "-mfloat-abi=hard", "-fdump-tree-vect-details", "-funsafe-loop-optimizations", "-ftree-loop-if-convert-stores"]
-            length = weave.inline(code, ['frames', 'compressed', 'point', 'slopeXZ', 'slopeYZ', 'firstFrame', 'lastFrame', 'before', 'after', 'f', 'limitForSize', 'minSize', 'maxSize', 'sizepos', 'out'], verbose=2, extra_compile_args=args, extra_link_args=args)
+            length = weave.inline(code, ['frames', 'compressed', 'point', 'slopeXZ', 'slopeYZ', 'firstFrame', 'lastFrame', 'f', 'limitForSize', 'minSize', 'maxSize', 'sizepos', 'out'], verbose=2, extra_compile_args=args, extra_link_args=args)
             
             out = out[:length]
             sizepos = sizepos[:length]
@@ -333,6 +347,9 @@ class Extractor(Process):
         return clips
     
     def save(self, clips, fileName):
+        """ Save extracted clips to FR*.bin file
+        """
+        
         file = "FR" + fileName + ".bin"
         
         with open(file, "wb") as f:
@@ -377,33 +394,22 @@ class Extractor(Process):
     
     def executeAll(self, frames, compressed, filename):
         # Check if the maxpixel is all white (or close to it) and skip it
-        if np.average(compressed[0]) > 240:
-            logging.debug("frames are all white")
+        if np.average(compressed[0]) > 220:
+            logging.debug("[" + filename + "] frames are all white")
             return
         
         t = time.time()
-        points = self.findPoints(frames, compressed)
-        logging.debug("time for thresholding and subsampling: " + str(time.time() - t) + "s")
+        event_points = self.findPoints(frames, compressed)
+        logging.debug("[" + filename + "] time for thresholding and subsampling: " + str(time.time() - t) + "s")
         
         t = time.time()
-        should_continue = self.testPoints(points)
-        logging.debug("time for test:  " + str(time.time() - t) + "s")
-        t = time.time()
         
-        if not should_continue:
-            logging.debug("nothing found, not extracting anything")
+        if len(event_points) == 0:
+            logging.debug("[" + filename + "] nothing found, not extracting anything")
             return
         
-        y_dim = frames.shape[1]/16
-        x_dim = frames.shape[2]/16
-        
-        event_points = []
-        for i in range(len(points[0])):
-            event_points.append([points[0][i], points[1][i], points[2][i]])
-        
-        logging.debug("time for conversion to python list: " + str(time.time() - t) + "s")
-        
-        t = time.time()
+        y_dim = frames[1]/16
+        x_dim = frames[2]/16
     
         ############################
         # Define parameters
@@ -416,27 +422,27 @@ class Extractor(Process):
         point_ratio_treshold = 0.7
         ###########################
         
-        logging.debug("time for defining parameters: " + str(time.time() - t) + "s")
+        logging.debug("[" + filename + "] time for defining parameters: " + str(time.time() - t) + "s")
         
         t = time.time()
         # Find lines in 3D space and store them to line_list
         line_list = Grouping3D.find3DLines(list(event_points), [], distance_treshold, line_distance_const, gap_treshold, minimum_points, point_ratio_treshold)
-        logging.debug("Time for finding lines: " + str(time.time() - t) + "s")
+        logging.debug("[" + filename + "] Time for finding lines: " + str(time.time() - t) + "s")
         
         if line_list == None:
-            logging.debug("no lines found, not extracting anything")
+            logging.debug("[" + filename + "] no lines found, not extracting anything")
             return
         
         t = time.time()
         coeff = Grouping3D.findCoefficients(event_points, line_list)
-        logging.debug("Time for finding coefficients: " + str(time.time() - t) + "s")
+        logging.debug("[" + filename + "] Time for finding coefficients: " + str(time.time() - t) + "s")
         
         t = time.time()
         clips = self.extract(frames, compressed, coeff)
-        logging.debug("Time for extracting: " + str(time.time() - t) + "s")
+        logging.debug("[" + filename + "] Time for extracting: " + str(time.time() - t) + "s")
         t = time.time()
          
         t = time.time()
         self.save(clips, filename)
-        logging.debug("Time for saving: " + str(time.time() - t) + "s")
+        logging.debug("[" + filename + "] Time for saving: " + str(time.time() - t) + "s")
         t = time.time()

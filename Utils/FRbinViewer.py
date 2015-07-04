@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-import sys
+import sys, os
 
 # FFbin handling stolen from FF_bin_suite.py in CMN_binViewer
 
@@ -86,7 +86,13 @@ def readFR(filename):
     return fr
 
 def view(ff, fr):
-    background = ff.maxpixel
+    if ff == None:
+        background = np.zeros((576, 720), np.uint8)
+    else:
+        background = readFF(ff).maxpixel
+    
+    name = fr
+    fr = readFR(fr)
     
     print "Number of lines:", fr.lines
     
@@ -107,10 +113,25 @@ def view(ff, fr):
                     x2 += 1
                 y2 += 1
             
-            cv2.imshow("view", background)
+            cv2.imshow(name, background)
             cv2.waitKey(200)
+    
+    cv2.destroyWindow(name)
             
 
 if __name__ == "__main__":
-    if len(sys.argv) == 2:
-        view(readFF("FF"+sys.argv[1]), readFR("FR"+sys.argv[1]))
+    fr_list = [fr for fr in os.listdir(".") if fr[0:2]=="FR"]
+    if(len(fr_list) == None):
+        print "No files found!"
+        sys.exit()
+    
+    ff_list = [ff for ff in os.listdir(".") if ff[0:2]=="FF"]
+    
+    for fr in fr_list:
+        ffbin = None
+        for ff in ff_list:
+            if ff[2:] == fr[2:]:
+                ffbin = ff
+                break
+        
+        view(ffbin, fr)
