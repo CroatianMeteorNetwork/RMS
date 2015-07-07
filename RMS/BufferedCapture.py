@@ -69,6 +69,7 @@ class BufferedCapture(Process):
         """
         
         device = cv2.VideoCapture(self.cameraID)
+        device.read() # throw away first frame
         first = True
         
         while not self.exit.is_set():

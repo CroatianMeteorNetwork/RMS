@@ -15,6 +15,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import numpy as np
+from math import sqrt
 
 def line3DDistance_simple(x1, y1, z1, x2, y2, z2, x0, y0, z0):
     """ Calculate distance from line to a point in 3D using simple operations.
@@ -28,7 +29,7 @@ def line3DDistance_simple(x1, y1, z1, x2, y2, z2, x0, y0, z0):
     @param x0: X coordinate of a point whose distance is to be calculated
     @param y0: Y coordinate of a point whose distance is to be calculated
     @param z0: Z coordinate of a point whose distance is to be calculated
-    @return: distance
+    @return: squared distance
     """
 
     # Original function:
@@ -59,7 +60,7 @@ def point3DDistance(x1, y1, z1, x2, y2, z2):
     @param x2: X coordinate of second point
     @param y2: Y coordinate of second point
     @param z2: Z coordinate of second point
-    @return: distance
+    @return: squared distance
     """
 
     return (x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2
@@ -273,6 +274,14 @@ def findCoefficients(event_points, line_list):
         # slope
         slope1 = point3[1]/point3[2] # speed on Y axis
         slope2 = point3[0]/point3[2] # speed on X axis
+        
+        # length of velocity vector
+        total = sqrt(slope1**2 + slope2**2)
+        
+        # ignore line if too fast
+        # TODO: this limit should be read from config file and calculated for FOV
+        if total > 1.6:
+            continue
         
         coeff.append([point1, slope1, slope2, detected_line[1], detected_line[2]]) #first point, frame of first point, slope of XZ, slope of YZ, first frame, last frame
         
