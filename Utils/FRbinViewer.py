@@ -58,10 +58,10 @@ class fr_struct:
         
 def readFR(filename):
     fid = open(filename, 'rb')
-    fr = fr_struct()
-    fr.lines = np.fromfile(fid, dtype=np.uint32, count = 1)
+    fr_strc = fr_struct()
+    fr_strc.lines = np.fromfile(fid, dtype=np.uint32, count = 1)
     
-    for i in range(fr.lines):
+    for i in range(fr_strc.lines):
         frameNum = np.fromfile(fid, dtype=np.uint32, count = 1)
         yc = []
         xc = []
@@ -76,14 +76,14 @@ def readFR(filename):
             size.append(np.fromfile(fid, dtype=np.uint32, count = 1))
             frames.append(np.reshape(np.fromfile(fid, dtype=np.uint8, count = size[-1]**2), (size[-1], size[-1])))
         
-        fr.frameNum.append(frameNum)
-        fr.yc.append(yc)
-        fr.xc.append(xc)
-        fr.t.append(t)
-        fr.size.append(size)
-        fr.frames.append(frames)
+        fr_strc.frameNum.append(frameNum)
+        fr_strc.yc.append(yc)
+        fr_strc.xc.append(xc)
+        fr_strc.t.append(t)
+        fr_strc.size.append(size)
+        fr_strc.frames.append(frames)
 
-    return fr
+    return fr_strc
 
 def view(ff, fr):
     if ff == None:
@@ -120,12 +120,12 @@ def view(ff, fr):
             
 
 if __name__ == "__main__":
-    fr_list = [fr for fr in os.listdir(".") if fr[0:2]=="FR"]
+    fr_list = [fr for fr in os.listdir(".") if fr[0:2]=="FR" and fr[-3:]=="bin"]
     if(len(fr_list) == None):
         print "No files found!"
         sys.exit()
     
-    ff_list = [ff for ff in os.listdir(".") if ff[0:2]=="FF"]
+    ff_list = [ff for ff in os.listdir(".") if ff[0:2]=="FF" and ff[-3:]=="bin"]
     
     for fr in fr_list:
         ffbin = None

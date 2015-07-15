@@ -29,7 +29,7 @@ class BufferedCapture(Process):
     running = False
     cameraID = 0
     
-    def __init__(self, array1, startTime1, array2, startTime2):
+    def __init__(self, array1, startTime1, array2, startTime2, config):
         """Populate arrays with (startTime, frames) after startCapture is called.
         
         @param array1: numpy array in shared memory that is going to be filled with frames
@@ -46,6 +46,8 @@ class BufferedCapture(Process):
         
         self.startTime1.value = 0
         self.startTime2.value = 0
+        
+        self.config = config
     
     def startCapture(self, cameraID=0):
         """Start capture using specified camera.
@@ -69,6 +71,7 @@ class BufferedCapture(Process):
         """
         
         device = cv2.VideoCapture(self.cameraID)
+        device.read() # throw away first frame
         first = True
         
         while not self.exit.is_set():

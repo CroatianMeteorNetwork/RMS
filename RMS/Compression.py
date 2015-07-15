@@ -31,7 +31,7 @@ class Compression(Process):
 
     running = False
     
-    def __init__(self, array1, startTime1, array2, startTime2, camNum):
+    def __init__(self, array1, startTime1, array2, startTime2, camNum, config):
         """
         
         @param array1: first numpy array in shared memory of grayscale video frames
@@ -47,6 +47,7 @@ class Compression(Process):
         self.array2 = array2
         self.startTime2 = startTime2
         self.camNum = camNum
+        self.config = config
     
     def compress(self, frames):
         """Compress frames to the FTP-compatible array.
@@ -118,10 +119,7 @@ class Compression(Process):
         }
         """
         
-        args = []
-        if uname()[4] == "armv7l":
-            args = ["-O3", "-mfpu=neon", "-mfloat-abi=hard", "-fdump-tree-vect-details", "-funsafe-loop-optimizations", "-ftree-loop-if-convert-stores"]
-        weave.inline(code, ['frames', 'out'], verbose=2, extra_compile_args=args, extra_link_args=args)
+        weave.inline(code, ['frames', 'out'], verbose=2, extra_compile_args=self.config.weaveArgs, extra_link_args=self.config.weaveArgs)
         return out
     
     def save(self, arr, startTime, N, camNum):
@@ -200,6 +198,6 @@ class Compression(Process):
             
             logging.debug("saving: " + str(time.time() - t) + "s")
             
-            ve = Extractor()
+            ve = Extractor(self.config)
             ve.start(frames, compressed, filename)
     
