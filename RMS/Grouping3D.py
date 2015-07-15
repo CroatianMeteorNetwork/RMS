@@ -131,6 +131,7 @@ def find3DLines(point_list, line_list=[], distance_treshold=2500, line_distance_
     @param gap_treshold: maximum gap between consecutive points allowed
     @param minimum_points: minimum points required to form a line
     @param point_ratio_treshold: ratio of how many points must be close to the line before considering searching for another line
+    @param max_lines: maximum number of recursive calls
     @return: list of found lines
     """
     

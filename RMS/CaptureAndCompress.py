@@ -17,6 +17,7 @@
 from RMS.BufferedCapture import BufferedCapture
 from RMS.Compression import Compression
 from multiprocessing import Array, Value
+import RMS.ConfigReader as cr
 import numpy as np
 import ctypes
 import logging
@@ -29,6 +30,10 @@ def wait():
 
 if __name__ == "__main__":
     logging.basicConfig(filename="log.log", level=logging.DEBUG)
+    logging.debug("########## START #########")
+    logging.debug(time.time())
+    
+    config = cr.parse(".config")
     
     sharedArrayBase = Array(ctypes.c_uint8, 256*576*720)
     sharedArray = np.ctypeslib.as_array(sharedArrayBase.get_obj())
@@ -40,9 +45,9 @@ if __name__ == "__main__":
     sharedArray2 = sharedArray2.reshape(256, 576, 720)
     startTime2 = Value('d', 0.0)
     
-    bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2)
+    bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config)
     
-    c = Compression(sharedArray, startTime, sharedArray2, startTime2, 499)
+    c = Compression(sharedArray, startTime, sharedArray2, startTime2, 499, config)
     
     bc.startCapture()
     c.start()
