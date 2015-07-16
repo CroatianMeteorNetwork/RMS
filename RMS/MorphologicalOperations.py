@@ -10,20 +10,23 @@ def clean(image):
     bool p2, p3, p4, p5, p6, p7, p8, p9;
     unsigned int y, x;
     
-    for(y = 1; y < Nimage[0]-1; y++) {
-        for(x = 1; x < Nimage[1]-1; x++) {
+    unsigned int ym = Nimage[0] - 1;
+    unsigned int xm = Nimage[1] - 1;
+    
+    for(y = 0; y < Nimage[0]; y++) {
+        for(x = 0; x < Nimage[1]; x++) {
             if(!IMAGE2(y, x)){
                 continue;
             }
             
-            p2 = IMAGE2(y-1, x);
-            p3 = IMAGE2(y-1, x+1);
-            p4 = IMAGE2(y, x+1);
-            p5 = IMAGE2(y+1, x+1);
-            p6 = IMAGE2(y+1, x);
-            p7 = IMAGE2(y+1, x-1);
-            p8 = IMAGE2(y, x-1);
-            p9 = IMAGE2(y-1, x-1);
+            p2 = y==0 ? 0 : IMAGE2(y-1, x);
+            p3 = y==0 || x==xm ? 0 : IMAGE2(y-1, x+1);
+            p4 = x==xm ? 0 : IMAGE2(y, x+1);
+            p5 = y==ym || x==xm ? 0 : IMAGE2(y+1, x+1);
+            p6 = y==ym ? 0 : IMAGE2(y+1, x);
+            p7 = y==ym || x==0 ? 0 : IMAGE2(y+1, x-1);
+            p8 = x==0 ? 0 : IMAGE2(y, x-1);
+            p9 = y==0 || x==0 ? 0 : IMAGE2(y-1, x-1);
 
             if(!p2 && !p3 && !p4 && !p5 && !p6 && !p7 && !p8 && !p9) {
                 IMAGE2(y, x) = 0;
@@ -41,20 +44,23 @@ def spur(image):
     bool p2, p3, p4, p5, p6, p7, p8, p9;
     unsigned int y, x;
     
-    for(y = 1; y < Nimage[0]-1; y++) {
-        for(x = 1; x < Nimage[1]-1; x++) {
+    unsigned int ym = Nimage[0] - 1;
+    unsigned int xm = Nimage[1] - 1;
+    
+    for(y = 0; y < Nimage[0]; y++) {
+        for(x = 0; x < Nimage[1]; x++) {
             if(!IMAGE2(y, x)){
                 continue;
             }
             
-            p2 = IMAGE2(y-1, x);
-            p3 = IMAGE2(y-1, x+1);
-            p4 = IMAGE2(y, x+1);
-            p5 = IMAGE2(y+1, x+1);
-            p6 = IMAGE2(y+1, x);
-            p7 = IMAGE2(y+1, x-1);
-            p8 = IMAGE2(y, x-1);
-            p9 = IMAGE2(y-1, x-1);
+            p2 = y==0 ? 0 : IMAGE2(y-1, x);
+            p3 = y==0 || x==xm ? 0 : IMAGE2(y-1, x+1);
+            p4 = x==xm ? 0 : IMAGE2(y, x+1);
+            p5 = y==ym || x==xm ? 0 : IMAGE2(y+1, x+1);
+            p6 = y==ym ? 0 : IMAGE2(y+1, x);
+            p7 = y==ym || x==0 ? 0 : IMAGE2(y+1, x-1);
+            p8 = x==0 ? 0 : IMAGE2(y, x-1);
+            p9 = y==0 || x==0 ? 0 : IMAGE2(y-1, x-1);
 
             if((p2 && !p3 && !p4 && !p5 && !p6 && !p7 && !p8 && !p9) ||
                (!p2 && p3 && !p4 && !p5 && !p6 && !p7 && !p8 && !p9) ||
