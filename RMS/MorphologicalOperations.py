@@ -5,6 +5,23 @@ from RMS import ConfigReader
 
 config = ConfigReader.Config()
 
+def repeat(func, image, N):
+    if N == None:
+        # repeat until previous iteration and current are same
+        image = func(image)
+        previous = None
+        
+        while not np.array_equal(image, previous):
+            previous = np.copy(image)
+            image = func(image)
+        
+    else:
+        # repeat N times
+        for _ in range(N):
+            func(image)
+    
+    return image
+
 def clean(image):
     code = """
     bool p2, p3, p4, p5, p6, p7, p8, p9;
@@ -117,16 +134,6 @@ def bridge(image):
     weave.inline(code, ['image', 'mask'], extra_compile_args=config.weaveArgs, extra_link_args=config.weaveArgs)
     
     np.bitwise_or(image, mask, image)
-    
-    return image
-
-def thinning(image):
-    image = thin(image)
-    previous = None
-    
-    while not np.array_equal(image, previous):
-        previous = np.copy(image)
-        image = thin(image)
     
     return image
 

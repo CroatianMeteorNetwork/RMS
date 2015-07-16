@@ -76,14 +76,13 @@ def reconstructWindows(filename):
         
         cv2.imshow(str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " close", img.astype(np.uint8)*255)
         cv2.waitKey(0)
-        
+    
         img = morph.skeleton(img)
         
         cv2.imshow(str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " thin", img.astype(np.uint8)*255)
         cv2.waitKey(0)
         
-        img = morph.spur(img)
-        img = morph.spur(img)
+        img = morph.repeat(morph.spur, img, 2)
         
         cv2.imshow(str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " spur", img.astype(np.uint8)*255)
         cv2.waitKey(0)
