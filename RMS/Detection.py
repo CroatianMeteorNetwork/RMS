@@ -79,9 +79,10 @@ def reconstructWindows(filename):
         
         img = morph.skeleton(img)
         
-        cv2.imshow(str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " skeleton", img.astype(np.uint8)*255)
+        cv2.imshow(str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " thin", img.astype(np.uint8)*255)
         cv2.waitKey(0)
         
+        img = morph.spur(img)
         img = morph.spur(img)
         
         cv2.imshow(str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " spur", img.astype(np.uint8)*255)

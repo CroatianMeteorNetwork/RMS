@@ -70,13 +70,16 @@ def spur(image):
                (!p2 && !p3 && !p4 && !p5 && !p6 && p7 && !p8 && !p9) ||
                (!p2 && !p3 && !p4 && !p5 && !p6 && !p7 && p8 && !p9) ||
                (!p2 && !p3 && !p4 && !p5 && !p6 && !p7 && !p8 && p9)) {
-                IMAGE2(y, x) = 0;
+                MASK2(y, x) = 0;
             }
         }
     }
     """
     
-    weave.inline(code, ['image'], extra_compile_args=config.weaveArgs, extra_link_args=config.weaveArgs)
+    mask = np.ones_like(image)
+    weave.inline(code, ['image', 'mask'], extra_compile_args=config.weaveArgs, extra_link_args=config.weaveArgs)
+    
+    np.bitwise_and(image, mask, image)
     
     return image
 
@@ -99,8 +102,11 @@ def bridge(image):
             p7 = IMAGE2(y+1, x-1);
             p8 = IMAGE2(y, x-1);
             p9 = IMAGE2(y-1, x-1);
-
-            if((p2 && p6) || (p9 && p5) || (p8 && p4) || (p7 && p3)) {
+            
+            if((p2 && !p3 && !p4 && !p5 && p6 && !p7 && !p8 && !p9) ||
+               (!p2 && !p3 && !p4 && p5 && !p6 && !p7 && !p8 && p9) ||
+               (!p2 && !p3 && p4 && !p5 && !p6 && !p7 && p8 && !p9) ||
+               (!p2 && p3 && !p4 && !p5 && !p6 && p7 && !p8 && !p9)){
                 MASK2(y, x) = 1;
             }
         }
@@ -111,6 +117,64 @@ def bridge(image):
     weave.inline(code, ['image', 'mask'], extra_compile_args=config.weaveArgs, extra_link_args=config.weaveArgs)
     
     np.bitwise_or(image, mask, image)
+    
+    return image
+
+def thinning(image):
+    image = thin(image)
+    previous = None
+    
+    while not np.array_equal(image, previous):
+        previous = np.copy(image)
+        image = thin(image)
+    
+    return image
+
+def thin(image):
+    #Zhang-Suen algorithm    
+    code = """
+    bool p2, p3, p4, p5, p6, p7, p8, p9;
+    unsigned int y, x, A, B, m1_1, m2_1, m1_2, m2_2;
+    
+    for(y = 1; y < Nimage[0]-1; y++) {
+        for(x = 1; x < Nimage[1]-1; x++) {
+            if(!MASK2(y, x)){
+                continue;
+            }
+            
+            p2 = IMAGE2(y-1, x  );
+            p3 = IMAGE2(y-1, x+1);
+            p4 = IMAGE2(y  , x+1);
+            p5 = IMAGE2(y+1, x+1);
+            p6 = IMAGE2(y+1, x  );
+            p7 = IMAGE2(y+1, x-1);
+            p8 = IMAGE2(y  , x-1);
+            p9 = IMAGE2(y-1, x-1);
+            
+            A = (p2 == 0 && p3 == 1) + (p3 == 0 && p4 == 1) + 
+                (p4 == 0 && p5 == 1) + (p5 == 0 && p6 == 1) + 
+                (p6 == 0 && p7 == 1) + (p7 == 0 && p8 == 1) +
+                (p8 == 0 && p9 == 1) + (p9 == 0 && p2 == 1);
+                
+            B  = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9;
+            
+            m1_1 = (p2 * p4 * p6);
+            m2_1 = (p4 * p6 * p8);
+            
+            m1_2 = (p2 * p4 * p8);
+            m2_2 = (p2 * p6 * p8);
+            
+            if(A == 1 && (B >= 2 && B <= 6) && ((m1_1 == 0 && m2_1 == 0) || (m1_2 == 0 && m2_2 == 0))) {
+                MASK2(y, x) = 0;
+            }
+        }
+    }
+    """
+
+    mask = np.ones((image.shape[0], image.shape[1]), np.bool_)    
+    weave.inline(code, ['image', 'mask'], extra_compile_args=config.weaveArgs, extra_link_args=config.weaveArgs)
+    
+    image = np.bitwise_and(image, mask)
     
     return image
 
