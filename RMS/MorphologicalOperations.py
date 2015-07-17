@@ -6,6 +6,14 @@ from RMS import ConfigReader
 config = ConfigReader.Config()
 
 def repeat(func, image, N):
+    """ Repeat specified morphological operation N number of times.
+    
+    @param func: morphological operation to be repeated
+    @param image: input image
+    @param N: number of times to repeat func or None in which case it's repeated until result of operation doesn't changes
+    @return image
+    """
+    
     if N == None:
         # repeat until previous iteration and current are same
         image = func(image)
@@ -23,6 +31,15 @@ def repeat(func, image, N):
     return image
 
 def clean(image):
+    """ Clean isolated pixels, as in:
+     0  0  0      0  0  0
+     0  1  0  =>  0  0  0
+     0  0  0      0  0  0
+    
+    @param image: input image
+    @return cleaned image
+    """
+    
     code = """
     bool p2, p3, p4, p5, p6, p7, p8, p9;
     unsigned int y, x;
@@ -57,6 +74,16 @@ def clean(image):
     return image
 
 def spur(image):
+    """ Remove pixels that have only one neighbor, as in:
+     0  0  0  0      0  0  0  0
+     0  1  0  0  =>  0  0  0  0
+     0  0  1  1      0  0  1  1
+     0  0  0  1      0  0  0  1
+    
+    @param image: input image
+    @return cleaned image
+    """
+    
     code = """
     bool p2, p3, p4, p5, p6, p7, p8, p9;
     unsigned int y, x;
@@ -101,6 +128,15 @@ def spur(image):
     return image
 
 def bridge(image):
+    """ Connect pixels on opposite sides, if other pixels are 0, as in:
+     0  0  1      0  0  1
+     0  0  0  =>  0  1  0
+     1  0  0      1  0  0
+    
+    @param image: input image
+    @return bridged image
+    """
+    
     code = """
     bool p2, p3, p4, p5, p6, p7, p8, p9;
     unsigned int y, x;
@@ -138,6 +174,12 @@ def bridge(image):
     return image
 
 def thin(image):
+    """ Zhang-Suen fast thinning algorithm, modified to only single pass.
+        
+    @param image: input image
+    @return thinned image
+    """
+    
     #Zhang-Suen algorithm    
     code = """
     bool p2, p3, p4, p5, p6, p7, p8, p9;
@@ -186,6 +228,12 @@ def thin(image):
     return image
 
 def skeleton(image): # TODO: weave implementation on np.bool_ instead of OpenCV
+    """ Skeletize image
+    
+    @param image: input image
+    @return skeleton of input image
+    """
+    
     image = image.astype(np.uint8)*255
     size = np.size(image)
     skel = np.zeros_like(image)
@@ -206,6 +254,12 @@ def skeleton(image): # TODO: weave implementation on np.bool_ instead of OpenCV
     return skel.astype(np.bool_)
 
 def close(image): # TODO: weave implementation on np.bool_ instead of OpenCV
+    """ Morphological closing (dilation followed by erosion).
+    
+    @param image: input image
+    @return cleaned image
+    """
+    
     kernel = np.ones((3, 3), np.uint8)
     
     image = cv2.morphologyEx(image.astype(np.uint8)*255, cv2.MORPH_CLOSE, kernel)
