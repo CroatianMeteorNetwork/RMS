@@ -22,9 +22,9 @@ import time
 import struct
 import logging
 from os import uname
-from RMS.VideoExtractor import Extractor
+from RMS.VideoExtraction import Extractor
 
-class Compression(Process):
+class Compressor(Process):
     """Compress list of numpy arrays (video frames).
     Output is in Flat-field Temporal Pixel (FTP) format like the one used by CAMS project (P. Jenniskens et al., 2011).
     """
@@ -41,7 +41,8 @@ class Compression(Process):
         @param camNum: camera ID (ie. 459)
         """
         
-        super(Compression, self).__init__()
+        super(Compressor, self).__init__()
+        
         self.array1 = array1
         self.startTime1 = startTime1
         self.array2 = array2
@@ -161,7 +162,7 @@ class Compression(Process):
         """
         
         self.exit = Event()
-        super(Compression, self).start()
+        super(Compressor, self).start()
         
     def run(self):
         """Retrieve frames from list, convert, compress and save them.

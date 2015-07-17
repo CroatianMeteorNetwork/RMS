@@ -17,12 +17,12 @@
 """ Timings of compression algorithm with various cases.
 """
 
-from RMS.Compression import Compression
+from RMS.Compression import Compressor
 import numpy as np
 import time
 import sys
 
-comp = Compression(None, None, None, None, 000)
+comp = Compressor(None, None, None, None, 000)
 
 def timing(img):
     t = time.time()

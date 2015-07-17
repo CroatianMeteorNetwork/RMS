@@ -17,11 +17,10 @@
 from multiprocessing import Process, Event
 import numpy as np
 from scipy import weave, stats
-from RMS import Grouping3D
+from RMS.Routines import Grouping3D
 from math import floor, sqrt, ceil
 import time
 import struct
-from os import uname
 import logging
 
 class Extractor(Process):
