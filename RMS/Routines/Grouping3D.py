@@ -256,7 +256,7 @@ def normalizeParameter(param, y_dim, x_dim):
 
 
 def findCoefficients(event_points, line_list):
-    """ Extract coefficients from list of lines that can be consumed by RMS.VideoExtractor
+    """ Extract coefficients from list of lines that can be consumed by RMS.VideoExtraction
     
     @param event_points: list of all points
     @param line_list: list of detected lines
