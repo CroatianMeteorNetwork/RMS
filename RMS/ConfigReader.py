@@ -18,6 +18,11 @@ from ConfigParser import RawConfigParser
 
 class Config:
     def __init__(self):
+        ##### Capture
+        self.width = 720
+        self.height = 576
+        self.deviceID = 0
+        
         self.weaveArgs = ["-O3"]
         
         ##### VideoExtraction
@@ -55,28 +60,41 @@ def parse(filename):
     
     config = Config()
     
+    if parser.has_section("Capture"):
+        parseCapture(config, parser)
+    
     if parser.has_section("Build"):
-        parseArgs(config, parser)
+        parseBuildArgs(config, parser)
     
     if parser.has_section("Compression"):
         parseCompression(config, parser)
     
     if parser.has_section("VideoExtraction"):
-        parseExtractionParams(config, parser)
+        parseExtraction(config, parser)
     
     return config
 
-def parseArgs(config, parser):
+def parseCapture(config, parser):
+    if parser.has_option("Capture", "width"):
+        config.width = parser.getint("Capture", "width")
+       
+    if parser.has_option("Capture", "height"):
+        config.height = parser.getint("Capture", "height")
+    
+    if parser.has_option("Capture", "device"):
+        config.deviceID = parser.getint("Capture", "device")
+
+def parseBuildArgs(config, parser):
     if parser.has_option("Build", "weave"):
         config.weaveArgs = parser.get("Build", "weave").split()
         
     if parser.has_option("Build", "extension"):
-        config.weaveArgs = parser.get("Build", "extension").split()
+        config.extension = parser.get("Build", "extension").split()
 
 def parseCompression(config, parser):
     pass
 
-def parseExtractionParams(config, parser):
+def parseExtraction(config, parser):
     if parser.has_option("VideoExtraction", "subsampling_size"):
         config.f = parser.getint("VideoExtraction", "subsampling_size")
     
@@ -132,4 +150,7 @@ def parseExtractionParams(config, parser):
         config.point_ratio_treshold = parser.getfloat("VideoExtraction", "point_ratio_treshold")        
     
     if parser.has_option("VideoExtraction", "max_lines"):
+        config.max_lines = parser.getint("VideoExtraction", "max_lines")
+    
+    if parser.has_option("VideoExtraction", "min_lines"):
         config.max_lines = parser.getint("VideoExtraction", "max_lines")

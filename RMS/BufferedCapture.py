@@ -27,7 +27,6 @@ class BufferedCapture(Process):
     TIME_FOR_DROP = 0.05
     
     running = False
-    cameraID = 0
     
     def __init__(self, array1, startTime1, array2, startTime2, config):
         """Populate arrays with (startTime, frames) after startCapture is called.
@@ -70,7 +69,7 @@ class BufferedCapture(Process):
         """Capture frames.
         """
         
-        device = cv2.VideoCapture(self.cameraID)
+        device = cv2.VideoCapture(self.config.deviceID)
         device.read() # throw away first frame
         first = True
         
