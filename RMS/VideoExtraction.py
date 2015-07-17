@@ -164,7 +164,7 @@ class Extractor(Process):
         return_val = count;
         """
         
-        dictionary = {'gap_treshold': self.gap_treshold, 'y': y, 'x': x, 'z': z}
+        dictionary = {'gap_treshold': self.config.gap_treshold, 'y': y, 'x': x, 'z': z}
         count = weave.inline(code, dictionary.keys(), dictionary, verbose=2, extra_compile_args=self.config.weaveArgs, extra_link_args=self.config.weaveArgs)
         
         return count >= self.config.min_points
@@ -332,7 +332,7 @@ class Extractor(Process):
             dict = {'frames': self.frames, 'compressed': self.compressed, 'point': point, 'slopeXZ': slopeXZ, 'slopeYZ': slopeYZ,
                     'firstFrame': firstFrame, 'lastFrame': lastFrame, 'f': self.config.f, 'limitForSize': self.config.limitForSize,
                     'minSize': self.config.minSize, 'maxSize': self.config.maxSize, 'sizepos': sizepos, 'out': out}
-            length = weave.inline(code, [], verbose=2, extra_compile_args=self.config.weaveArgs, extra_link_args=self.config.weaveArgs)
+            length = weave.inline(code, dict.keys(), dict, verbose=2, extra_compile_args=self.config.weaveArgs, extra_link_args=self.config.weaveArgs)
             
             out = out[:length]
             sizepos = sizepos[:length]
@@ -345,7 +345,7 @@ class Extractor(Process):
         """ Save extracted clips to FR*.bin file
         """
         
-        file = "FR" + self.fileName + ".bin"
+        file = "FR" + self.filename + ".bin"
         
         with open(file, "wb") as f:
             f.write(struct.pack('I', len(clips)))             # number of extracted lines
@@ -391,17 +391,17 @@ class Extractor(Process):
     def executeAll(self):
         # Check if the average is all white (or close to it) and skip it
         if np.average(self.compressed[2]) > 220:
-            logging.debug("[" + filename + "] frames are all white")
+            logging.debug("[" + self.filename + "] frames are all white")
             return
         
         t = time.time()
         event_points = self.findPoints()
-        logging.debug("[" + filename + "] time for thresholding and subsampling: " + str(time.time() - t) + "s")
+        logging.debug("[" + self.filename + "] time for thresholding and subsampling: " + str(time.time() - t) + "s")
         
         t = time.time()
         
         if len(event_points) == 0:
-            logging.debug("[" + filename + "] nothing found, not extracting anything 1")
+            logging.debug("[" + self.filename + "] nothing found, not extracting anything 1")
             return
         
         y_dim = self.frames.shape[1]/16
@@ -411,31 +411,31 @@ class Extractor(Process):
         distance_treshold = Grouping3D.normalizeParameter(self.config.distance_treshold, y_dim, x_dim)
         gap_treshold = Grouping3D.normalizeParameter(self.config.gap_treshold, y_dim, x_dim)
         
-        logging.debug("[" + filename + "] time for defining parameters: " + str(time.time() - t) + "s")
+        logging.debug("[" + self.filename + "] time for defining parameters: " + str(time.time() - t) + "s")
         
         t = time.time()
         # Find lines in 3D space and store them to line_list
-        line_list = Grouping3D.find3DLines(event_points, [], distance_treshold, self.config.line_distance_const, gap_treshold, self.config.min_points_in_line, self.config.point_ratio_treshold, self.config.max_lines)
-        logging.debug("[" + filename + "] Time for finding lines: " + str(time.time() - t) + "s")
+        line_list = Grouping3D.find3DLines(event_points, [], distance_treshold, self.config.line_distance_const, gap_treshold, self.config.min_points, self.config.point_ratio_treshold, self.config.max_lines)
+        logging.debug("[" + self.filename + "] Time for finding lines: " + str(time.time() - t) + "s")
         
         if line_list == None:
-            logging.debug("[" + filename + "] no lines found, not extracting anything")
+            logging.debug("[" + self.filename + "] no lines found, not extracting anything")
             return
         
         t = time.time()
         coeff = Grouping3D.findCoefficients(event_points, line_list)
-        logging.debug("[" + filename + "] Time for finding coefficients: " + str(time.time() - t) + "s")
+        logging.debug("[" + self.filename + "] Time for finding coefficients: " + str(time.time() - t) + "s")
         
         if len(coeff) == 0:
-            logging.debug("[" + filename + "] nothing found, not extracting anything 2")
+            logging.debug("[" + self.filename + "] nothing found, not extracting anything 2")
             return
         
         t = time.time()
-        clips = self.extract(frames, compressed, coeff)
-        logging.debug("[" + filename + "] Time for extracting: " + str(time.time() - t) + "s")
+        clips = self.extract(coeff)
+        logging.debug("[" + self.filename + "] Time for extracting: " + str(time.time() - t) + "s")
         t = time.time()
          
         t = time.time()
-        self.save(clips, filename)
-        logging.debug("[" + filename + "] Time for saving: " + str(time.time() - t) + "s")
+        self.save(clips)
+        logging.debug("[" + self.filename + "] Time for saving: " + str(time.time() - t) + "s")
         t = time.time()
