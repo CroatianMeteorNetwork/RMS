@@ -27,6 +27,7 @@ class Config:
         
         ##### VideoExtraction
         self.f = 16                    # subsampling factor
+        self.max_time = 25             # maximum time for line finding
         
         # params for Extractor.findPoints()
         self.min_level = 40            # ignore pixel if below this level

@@ -16,6 +16,7 @@
 
 import numpy as np
 from math import sqrt
+from time import time
 
 def line3DDistance_simple(x1, y1, z1, x2, y2, z2, x0, y0, z0):
     """ Calculate distance from line to a point in 3D using simple operations.
@@ -121,24 +122,33 @@ def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_treshold=2500, gap
     return line_points
 
 
-def find3DLines(point_list, line_list=[], distance_treshold=2500, line_distance_const=9, gap_treshold=10000, minimum_points=3, point_ratio_treshold=0.7, max_lines=5):
+def find3DLines(point_list, line_list=[], startTime, distance_treshold=2500, line_distance_const=9, gap_treshold=10000, minimum_points=3, point_ratio_treshold=0.7, max_lines=5, max_time=25):
     """ Iteratively find N straight lines in 3D space.
     
     @param point_list: list of all points
     @param line_list: list of lines found previously
+    @param startTime: time of first call
     @param distance_treshold: maximum distance between the line and the point to be takes as a part of the same line
     @param line_distance_const: constant that determines the influence of average point distance on the line quality
     @param gap_treshold: maximum gap between consecutive points allowed
     @param minimum_points: minimum points required to form a line
     @param point_ratio_treshold: ratio of how many points must be close to the line before considering searching for another line
     @param max_lines: maximum number of recursive calls
+    @param max_time: maximum executing time
     @return: list of found lines
     """
     
-    # return None if too many lines 
+    # stop iterating if too many lines 
     if len(line_list) >= max_lines:
-        return None
+        return line_list
 
+    # stop iterating if running for too long
+    if time() - startTime > max_time:
+        if len(line_list) > 0:
+            return line_list
+        else:
+            return None
+    
     results_list = []
     for i, point1 in enumerate(point_list):
         for point2 in point_list[i:]:
@@ -221,7 +231,7 @@ def find3DLines(point_list, line_list=[], distance_treshold=2500, line_distance_
     # if there are more lines on the image
     if line_ratio < point_ratio_treshold and point_num > 10:
         # Recursively find lines until the condition is met
-        find3DLines(point_list, line_list, distance_treshold, line_distance_const, gap_treshold, minimum_points, point_ratio_treshold, max_lines)
+        find3DLines(point_list, line_list, startTime, distance_treshold, line_distance_const, gap_treshold, minimum_points, point_ratio_treshold, max_lines)
 
     return line_list
 

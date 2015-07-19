@@ -415,7 +415,7 @@ class Extractor(Process):
         
         t = time.time()
         # Find lines in 3D space and store them to line_list
-        line_list = Grouping3D.find3DLines(event_points, [], distance_treshold, self.config.line_distance_const, gap_treshold, self.config.min_points, self.config.point_ratio_treshold, self.config.max_lines)
+        line_list = Grouping3D.find3DLines(event_points, [], t, distance_treshold, self.config.line_distance_const, gap_treshold, self.config.min_points, self.config.point_ratio_treshold, self.config.max_lines, self.config.max_time)
         logging.debug("[" + self.filename + "] Time for finding lines: " + str(time.time() - t) + "s")
         
         if line_list == None:
