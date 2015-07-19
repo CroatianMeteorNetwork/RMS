@@ -196,10 +196,22 @@ def thin(image):
     @return thinned image
     """
     
-    #Zhang-Suen algorithm    
+    image = thinningPass(image, 1)
+    image = thinningPass(image, 0)
+    
+    return image
+
+def thinningPass(image, first):
+    """ Single Zhang-Suen thinning pass.
+    
+    @param image: input image
+    @param first: 1 on first thinning pass, 0 on second
+    @return half-thinned image (official term, right?)
+    """
+    
     code = """
     bool p2, p3, p4, p5, p6, p7, p8, p9;
-    unsigned int y, x, A, B, m1_1, m2_1, m1_2, m2_2;
+    unsigned int y, x, A, B, m1, m2;
     
     for(y = 1; y < Nimage[0]-1; y++) {
         for(x = 1; x < Nimage[1]-1; x++) {
@@ -223,22 +235,23 @@ def thin(image):
                 
             B  = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9;
             
-            m1_1 = (p2 * p4 * p6);
-            m2_1 = (p4 * p6 * p8);
+            if(first) {
+                m1 = (p2 * p4 * p6);
+                m2 = (p4 * p6 * p8);
+            } else {
+                m1 = (p2 * p4 * p8);
+                m2 = (p2 * p6 * p8);
+            }
             
-            m1_2 = (p2 * p4 * p8);
-            m2_2 = (p2 * p6 * p8);
-            
-            if(A == 1 && (B >= 2 && B <= 6) && ((m1_1 == 0 && m2_1 == 0) || (m1_2 == 0 && m2_2 == 0))) {
+            if(A == 1 && (B >= 2 && B <= 6) && (m1 == 0 && m2 == 0)) {
                 MASK2(y, x) = 0;
             }
         }
     }
     """
-
-    mask = np.ones((image.shape[0], image.shape[1]), np.bool_)    
-    weave.inline(code, ['image', 'mask'], extra_compile_args=config.weaveArgs, extra_link_args=config.weaveArgs)
     
+    mask = np.ones((image.shape[0], image.shape[1]), np.bool_)
+    weave.inline(code, ['image', 'mask', 'first'], extra_compile_args=config.weaveArgs, extra_link_args=config.weaveArgs)
     image = np.bitwise_and(image, mask)
     
     return image
