@@ -62,7 +62,7 @@ def readFF(filename):
     return ff
 
 def treshold(window, ff):
-    return window >= (ff.avepixel + k1 * ff.stdpixel + j1)
+    return window > (ff.avepixel + k1 * ff.stdpixel + j1)
 
 def show(name, img):
     cv2.imshow(name, img.astype(np.uint8)*255)
@@ -92,8 +92,6 @@ def reconstructWindows(path, filename):
         
         img = morph.repeat(morph.thin, img, None)
         
-        imt = morph.spur(img)
-        
         img = morph.clean(img)
         
         print "time for morph:", time() - t
@@ -104,7 +102,7 @@ if __name__ == "__main__":
     time_window_size = 64
     time_slide = 32
     k1 = 1.5
-    j1 = 10
+    j1 = 9
     
     if len(sys.argv) == 1:
         print "Usage: python -m RMS.Detection /path/to/bin/files/"
