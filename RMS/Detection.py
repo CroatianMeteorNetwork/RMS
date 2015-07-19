@@ -18,6 +18,8 @@ import numpy as np
 import cv2
 from RMS.Routines import MorphologicalOperations as morph
 from time import time
+import sys
+import os
 
 class ff_struct:
     """ Default structure for a FF*.bin file.
@@ -62,8 +64,13 @@ def readFF(filename):
 def treshold(window, ff):
     return window >= (ff.avepixel + k1 * ff.stdpixel + j1)
 
-def reconstructWindows(filename):    
-    ff = readFF(filename)
+def show(name, img):
+    cv2.imshow(name, img.astype(np.uint8)*255)
+    cv2.moveWindow(name, 0, 0)
+    cv2.waitKey(0)
+
+def reconstructWindows(path, filename):    
+    ff = readFF(path + filename)
     
     for i in range(0, 256/time_slide-1):
         indices = np.where((ff.maxframe >= i*time_slide) & (ff.maxframe < i*time_slide+time_window_size))
@@ -71,13 +78,9 @@ def reconstructWindows(filename):
         img = np.zeros((ff.nrows, ff.ncols))
         img[indices] = ff.maxpixel[indices]
         
-        cv2.imshow(str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " raw", img.astype(np.uint8)*255)
-        cv2.waitKey(0)
-        
         img = treshold(img, ff)
         
-        cv2.imshow(str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " treshold", img.astype(np.uint8)*255)
-        cv2.waitKey(0)
+        show(filename + " " + str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " treshold", img)
         
         t = time()
         
@@ -89,19 +92,29 @@ def reconstructWindows(filename):
         
         img = morph.repeat(morph.thin, img, None)
         
-        img = morph.repeat(morph.spur, img, 2)
+        imt = morph.spur(img)
         
         img = morph.clean(img)
         
-        print "time for morph: ", time() - t
+        print "time for morph:", time() - t
         
-        cv2.imshow(str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " morph", img.astype(np.uint8)*255)
-        cv2.waitKey(0)
+        show(filename + " " + str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " morph", img)
 
 if __name__ == "__main__":
     time_window_size = 64
     time_slide = 32
     k1 = 1.5
-    j1 = 9
+    j1 = 10
     
-    reconstructWindows("FF453_20150106_031308_605_0989952.bin")
+    if len(sys.argv) == 1:
+        print "Usage: python -m RMS.Detection /path/to/bin/files/"
+        sys.exit()
+    
+    ff_list = [ff for ff in os.listdir(sys.argv[1]) if ff[0:2]=="FF" and ff[-3:]=="bin"]
+    
+    if(len(ff_list) == None):
+        print "No files found!"
+        sys.exit()
+    
+    for ff in ff_list:
+        reconstructWindows(sys.argv[1], ff)
