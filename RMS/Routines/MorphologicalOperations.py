@@ -196,63 +196,68 @@ def thin(image):
     @return thinned image
     """
     
-    image = thinningPass(image, 1)
-    image = thinningPass(image, 0)
-    
-    return image
-
-def thinningPass(image, first):
-    """ Single Zhang-Suen thinning pass.
-    
-    @param image: input image
-    @param first: 1 on first thinning pass, 0 on second
-    @return half-thinned image (official term, right?)
-    """
-    
     code = """
     bool p2, p3, p4, p5, p6, p7, p8, p9;
     unsigned int y, x, A, B, m1, m2;
     
-    for(y = 1; y < Nimage[0]-1; y++) {
-        for(x = 1; x < Nimage[1]-1; x++) {
-            if(!MASK2(y, x)){
-                continue;
-            }
-            
-            p2 = IMAGE2(y-1, x  );
-            p3 = IMAGE2(y-1, x+1);
-            p4 = IMAGE2(y  , x+1);
-            p5 = IMAGE2(y+1, x+1);
-            p6 = IMAGE2(y+1, x  );
-            p7 = IMAGE2(y+1, x-1);
-            p8 = IMAGE2(y  , x-1);
-            p9 = IMAGE2(y-1, x-1);
-            
-            A = (p2 == 0 && p3 == 1) + (p3 == 0 && p4 == 1) + 
-                (p4 == 0 && p5 == 1) + (p5 == 0 && p6 == 1) + 
-                (p6 == 0 && p7 == 1) + (p7 == 0 && p8 == 1) +
-                (p8 == 0 && p9 == 1) + (p9 == 0 && p2 == 1);
+    bool first = true;
+    
+    do {
+        // one thinning pass
+        for(y = 1; y < Nimage[0]-1; y++) {
+            for(x = 1; x < Nimage[1]-1; x++) {
+                if(!MASK2(y, x)){
+                    continue;
+                }
                 
-            B  = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9;
-            
-            if(first) {
-                m1 = (p2 * p4 * p6);
-                m2 = (p4 * p6 * p8);
-            } else {
-                m1 = (p2 * p4 * p8);
-                m2 = (p2 * p6 * p8);
-            }
-            
-            if(A == 1 && (B >= 2 && B <= 6) && (m1 == 0 && m2 == 0)) {
-                MASK2(y, x) = 0;
+                p2 = IMAGE2(y-1, x  );
+                p3 = IMAGE2(y-1, x+1);
+                p4 = IMAGE2(y  , x+1);
+                p5 = IMAGE2(y+1, x+1);
+                p6 = IMAGE2(y+1, x  );
+                p7 = IMAGE2(y+1, x-1);
+                p8 = IMAGE2(y  , x-1);
+                p9 = IMAGE2(y-1, x-1);
+                
+                A = (p2 == 0 && p3 == 1) + (p3 == 0 && p4 == 1) + 
+                    (p4 == 0 && p5 == 1) + (p5 == 0 && p6 == 1) + 
+                    (p6 == 0 && p7 == 1) + (p7 == 0 && p8 == 1) +
+                    (p8 == 0 && p9 == 1) + (p9 == 0 && p2 == 1);
+                    
+                B  = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9;
+                
+                if(first) {
+                    m1 = (p2 * p4 * p6);
+                    m2 = (p4 * p6 * p8);
+                } else {
+                    m1 = (p2 * p4 * p8);
+                    m2 = (p2 * p6 * p8);
+                }
+                
+                if(A == 1 && (B >= 2 && B <= 6) && (m1 == 0 && m2 == 0)) {
+                    MASK2(y, x) = 0;
+                }
             }
         }
-    }
+        
+        // image &= mask; and reset mask to ones if first pass
+        for(y = 1; y < Nimage[0]-1; y++) {
+            for(x = 1; x < Nimage[1]-1; x++) {
+                IMAGE2(y, x) &= MASK2(y, x);
+                
+                if(first) { // reset MASK2
+                    MASK2(y, x) = 1;
+                }
+            }
+        }
+    
+        first = false;
+        
+    } while(first);
     """
     
     mask = np.ones((image.shape[0], image.shape[1]), np.bool_)
-    weave.inline(code, ['image', 'mask', 'first'], extra_compile_args=config.weaveArgs, extra_link_args=config.weaveArgs)
-    image = np.bitwise_and(image, mask)
+    weave.inline(code, ['image', 'mask'], extra_compile_args=config.weaveArgs, extra_link_args=config.weaveArgs)
     
     return image
 
