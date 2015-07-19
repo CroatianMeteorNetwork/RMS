@@ -15,8 +15,9 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import numpy as np
-iamport cv2
-from RMS import MorphologicalOperations as morph
+import cv2
+from RMS.Routines import MorphologicalOperations as morph
+from time import time
 
 class ff_struct:
     """ Default structure for a FF*.bin file.
@@ -78,34 +79,23 @@ def reconstructWindows(filename):
         cv2.imshow(str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " treshold", img.astype(np.uint8)*255)
         cv2.waitKey(0)
         
-        img = morph.clean(img)
+        t = time()
         
-        cv2.imshow(str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " clean", img.astype(np.uint8)*255)
-        cv2.waitKey(0)
+        img = morph.clean(img)
         
         img = morph.bridge(img)
         
-        cv2.imshow(str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " bridge", img.astype(np.uint8)*255)
-        cv2.waitKey(0)
-        
         img = morph.close(img)
         
-        cv2.imshow(str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " close", img.astype(np.uint8)*255)
-        cv2.waitKey(0)
-    
-        img = morph.skeleton(img)
-        
-        cv2.imshow(str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " thin", img.astype(np.uint8)*255)
-        cv2.waitKey(0)
+        img = morph.repeat(morph.thin, img, None)
         
         img = morph.repeat(morph.spur, img, 2)
         
-        cv2.imshow(str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " spur", img.astype(np.uint8)*255)
-        cv2.waitKey(0)
-        
         img = morph.clean(img)
         
-        cv2.imshow(str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " clean", img.astype(np.uint8)*255)
+        print "time for morph: ", time() - t
+        
+        cv2.imshow(str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " morph", img.astype(np.uint8)*255)
         cv2.waitKey(0)
 
 if __name__ == "__main__":
