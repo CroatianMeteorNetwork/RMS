@@ -261,32 +261,6 @@ def thin(image):
     
     return image
 
-def skeleton(image): # TODO: weave implementation on np.bool_ instead of OpenCV
-    """ Skeletize image
-    
-    @param image: input image
-    @return skeleton of input image
-    """
-    
-    image = image.astype(np.uint8)*255
-    size = np.size(image)
-    skel = np.zeros_like(image)
-    
-    element = cv2.getStructuringElement(cv2.MORPH_CROSS, (3,3))
-    done = False
-     
-    while(not done):
-        eroded = cv2.erode(image, element)
-        temp = cv2.dilate(eroded, element)
-        temp = cv2.subtract(image, temp)
-        skel = cv2.bitwise_or(skel, temp)
-        image = eroded.copy()
-        
-        if cv2.countNonZero(image)==0:
-            done = True
-     
-    return skel.astype(np.bool_)
-
 def close(image): # TODO: weave implementation on np.bool_ instead of OpenCV
     """ Morphological closing (dilation followed by erosion).
     
