@@ -65,7 +65,7 @@ def point3DDistance(x1, y1, z1, x2, y2, z2):
 
     return (x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2
 
-def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_treshold=2500, gap_treshold=10000):
+def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, config):
     """ Return all points describing a particular line.
     
     @param point_list: list of all points
@@ -75,7 +75,6 @@ def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_treshold=2500, gap
     @param x2: X coordinate of second point representing line
     @param y2: Y coordinate of second point representing line
     @param z2: Z coordinate of second point representing line
-    @param distance_treshold: maximum distance between the line and the point to be takes as a part of the same line
     @return: list of points
     """
 
@@ -91,12 +90,12 @@ def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_treshold=2500, gap
 
             line_dist = line3DDistance_simple(x1, y1, z1, x2, y2, z2, x3, y3, z3)
 
-            if line_dist < distance_treshold:
+            if line_dist < config.distance_treshold:
 
                 # Calculate the gap from the previous point and reject the solution if the point is too far
-                if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_treshold:
+                if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > config.gap_treshold:
 
-                    if point3DDistance(x_prev, y_prev, z_prev, x2, y2, z2) > gap_treshold:
+                    if point3DDistance(x_prev, y_prev, z_prev, x2, y2, z2) > config.gap_treshold:
                         counter = 0
 
                     break
@@ -121,22 +120,16 @@ def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_treshold=2500, gap
     return line_points
 
 
-def find3DLines(point_list, line_list=[], distance_treshold=2500, line_distance_const=9, gap_treshold=10000, minimum_points=3, point_ratio_treshold=0.7, max_lines=5):
+def find3DLines(point_list, config, line_list=[]):
     """ Iteratively find N straight lines in 3D space.
     
     @param point_list: list of all points
     @param line_list: list of lines found previously
-    @param distance_treshold: maximum distance between the line and the point to be takes as a part of the same line
-    @param line_distance_const: constant that determines the influence of average point distance on the line quality
-    @param gap_treshold: maximum gap between consecutive points allowed
-    @param minimum_points: minimum points required to form a line
-    @param point_ratio_treshold: ratio of how many points must be close to the line before considering searching for another line
-    @param max_lines: maximum number of recursive calls
     @return: list of found lines
     """
     
     # return None if too many lines 
-    if len(line_list) >= max_lines:
+    if len(line_list) >= config.max_lines:
         return None
 
     results_list = []
@@ -169,13 +162,13 @@ def find3DLines(point_list, line_list=[], distance_treshold=2500, line_distance_
                 
                 line_dist = line3DDistance_simple(x1, y1, z1, x2, y2, z2, x3, y3, z3)
 
-                if line_dist < distance_treshold:
+                if line_dist < config.distance_treshold:
 
                     # Calculate the gap from the previous point and reject the solution if the point is too far
-                    if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_treshold:
+                    if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > config.gap_treshold:
 
                         # Reject solution (reset counter) if the last point is too far
-                        if point3DDistance(x2, y2, z2, x_prev, y_prev, z_prev) > gap_treshold:
+                        if point3DDistance(x2, y2, z2, x_prev, y_prev, z_prev) > config.gap_treshold:
                             counter = 0
 
                         break
@@ -187,7 +180,7 @@ def find3DLines(point_list, line_list=[], distance_treshold=2500, line_distance_
 
 
             # Skip if too little points were found
-            if (counter-2) < minimum_points:
+            if (counter-2) < config.min_points:
                 continue
 
             # Average distance between points and the line
@@ -195,7 +188,7 @@ def find3DLines(point_list, line_list=[], distance_treshold=2500, line_distance_
 
             # calculate a parameter for line quality
             # larger average distance = less quality
-            line_quality = counter - line_distance_const * line_dist_avg
+            line_quality = counter - config.line_distance_const * line_dist_avg
             results_list.append((point1, point2, counter, line_quality))
 
     # Return empty if no good match was found
@@ -211,7 +204,7 @@ def find3DLines(point_list, line_list=[], distance_treshold=2500, line_distance_
     line_ratio = max_line[2] / float(point_num)
     
     # remove points that belong to line with the best quality
-    point_list, removed_points = remove3DPoints(point_list, max_line[0], max_line[1], distance_treshold, gap_treshold)
+    point_list, removed_points = remove3DPoints(point_list, max_line[0], max_line[1], config)
     
     # sort removed points by frame
     removed_points = sorted(removed_points, key=lambda x:x[2])
@@ -219,40 +212,36 @@ def find3DLines(point_list, line_list=[], distance_treshold=2500, line_distance_
     line_list.append([max_line, removed_points[0][2], removed_points[-1][2]])
     
     # if there are more lines on the image
-    if line_ratio < point_ratio_treshold and point_num > 10:
+    if line_ratio < config.point_ratio_treshold and point_num > 10:
         # Recursively find lines until the condition is met
-        find3DLines(point_list, line_list, distance_treshold, line_distance_const, gap_treshold, minimum_points, point_ratio_treshold, max_lines)
+        find3DLines(point_list, config, line_list)
 
     return line_list
 
-def remove3DPoints(point_list, point1, point2, distance_treshold=2500, gap_treshold=10000):
+def remove3DPoints(point_list, point1, point2, config):
     """ Remove points from a point list that belong to the given line described by point1 and point2.
     
     @param point_list: list of all points
     @param point1: first point describing a line
     @param point2: second point describing a line
-    @param distance_treshold: maximum distance between the line and the point to be takes as a part of the same line
-    @param gap_treshold: maximum gap between consecutive points allowed
     @return: tuple of list of points without those that belong to the given line and list of removed points
     """
 
     x1, y1, z1 = point1
     x2, y2, z2 = point2
 
-    line_points = getAllPoints(point_list, y1, x1, z1, y2, x2, z2, distance_treshold)
+    line_points = getAllPoints(point_list, y1, x1, z1, y2, x2, z2, config)
 
     return [x for x in point_list if x not in line_points], line_points
 
-def normalizeParameter(param, y_dim, x_dim):
+def normalizeParameter(param, config):
     """ Normalize detection parameter to be size independent.
     
     @param param: parameter to be normalized
-    @param y_dim: frame heigth
-    @param x_dim: frame width
     @return: normalized param
     """
 
-    return param**2 * y_dim * x_dim / (720*576)
+    return param * config.width/config.f * config.height/config.f / (720*576)
 
 
 def findCoefficients(event_points, line_list):

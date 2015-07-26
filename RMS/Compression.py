@@ -23,6 +23,7 @@ import struct
 import logging
 from os import uname
 from RMS.VideoExtraction import Extractor
+from RMS.Formats import FFbin
 
 class Compressor(Process):
     """Compress list of numpy arrays (video frames).
@@ -31,7 +32,7 @@ class Compressor(Process):
 
     running = False
     
-    def __init__(self, array1, startTime1, array2, startTime2, camNum, config):
+    def __init__(self, array1, startTime1, array2, startTime2, config):
         """
         
         @param array1: first numpy array in shared memory of grayscale video frames
@@ -47,7 +48,6 @@ class Compressor(Process):
         self.startTime1 = startTime1
         self.array2 = array2
         self.startTime2 = startTime2
-        self.camNum = camNum
         self.config = config
     
     def compress(self, frames):
@@ -123,30 +123,28 @@ class Compressor(Process):
         weave.inline(code, ['frames', 'out'], verbose=2, extra_compile_args=self.config.weaveArgs, extra_link_args=self.config.weaveArgs)
         return out
     
-    def save(self, arr, startTime, N, camNum):
+    def save(self, arr, startTime, N):
         """Write metadata and data array to FTP .bin file.
         
         @param arr: 3d numpy array in format: (N, y, x) where N is [0, 4)
         @param startTime: seconds and fractions of a second from epoch to first frame
         @param N: frame counter (ie. 0000512)
-        @param camNum: camera ID (ie. 459)
         """
         
         dateTime = time.strftime("%Y%m%d_%H%M%S", time.localtime(startTime))
         millis = int((startTime - floor(startTime))*1000)
         
-        filename = str(camNum).zfill(3) +  "_" + dateTime + "_" + str(millis).zfill(3) + "_" + str(N).zfill(7)
+        filename = str(self.config.stationID).zfill(3) +  "_" + dateTime + "_" + str(millis).zfill(3) + "_" + str(N).zfill(7)
         
-        image = "FF" + filename + ".bin"
+        ff = FFbin.ff_struct()
+        ff.array = arr
+        ff.nrows = arr.shape[1]
+        ff.ncols = arr.shape[2]
+        ff.nbits = 8
+        ff.first = N+256
+        ff.camno = self.config.stationID
         
-        with open(image, "wb") as f:
-            f.write(struct.pack('I', arr.shape[1]))  # nrows
-            f.write(struct.pack('I', arr.shape[2]))  # ncols
-            f.write(struct.pack('I', 8))             # nbits
-            f.write(struct.pack('I', N+256))         # first
-            f.write(struct.pack('I', camNum))        # camera number
-        
-            arr.tofile(f)                            # image array
+        FFbin.write(ff, "./", filename)
         
         return filename
     
@@ -194,7 +192,7 @@ class Compressor(Process):
             logging.debug("compression: " + str(time.time() - t) + "s")
             t = time.time()
             
-            filename = self.save(compressed, startTime, n*256, self.camNum)
+            filename = self.save(compressed, startTime, n*256)
             n += 1
             
             logging.debug("saving: " + str(time.time() - t) + "s")
