@@ -48,7 +48,7 @@ if __name__ == "__main__":
     
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config)
     
-    c = Compressor(sharedArray, startTime, sharedArray2, startTime2, 499, config)
+    c = Compressor(sharedArray, startTime, sharedArray2, startTime2, config)
     
     bc.startCapture()
     c.start()

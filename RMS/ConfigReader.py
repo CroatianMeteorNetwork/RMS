@@ -15,9 +15,13 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from ConfigParser import RawConfigParser
+from RMS.Routines import Grouping3D
 
 class Config:
     def __init__(self):
+        ##### System
+        self.stationID = 499
+        
         ##### Capture
         self.width = 720
         self.height = 576
@@ -39,7 +43,7 @@ class Config:
         self.min_frames = 4            # minimum number of frames
         
         # params for Extractor.testPoints()
-        self.min_points = 5            # minimum number of event points
+        self.min_points = 4            # minimum number of event points
         
         # params for Extractor.extract()
         self.before = 0.15             # percentage of frames to extrapolate before detected start of meteor trail
@@ -49,8 +53,8 @@ class Config:
         self.maxSize = 192
         
         # params for Grouping3D
-        self.distance_treshold = 70    # maximum distance between the line and the point to be takes as a part of the same line
-        self.gap_treshold = 130        # maximum allowed gap between points
+        self.distance_treshold = 4900  # maximum distance between the line and the point to be takes as a part of the same line
+        self.gap_treshold = 16900      # maximum allowed gap between points
         self.line_distance_const = 4   # constant that determines the influence of average point distance on the line quality
         self.point_ratio_treshold = 0.7# ratio of how many points must be close to the line before considering searching for another line
         self.max_lines = 5             # maximum number of lines
@@ -60,6 +64,8 @@ def parse(filename):
     parser.read(filename)
     
     config = Config()
+    
+    parseSystem(config, parser)
     
     if parser.has_section("Capture"):
         parseCapture(config, parser)
@@ -74,6 +80,15 @@ def parse(filename):
         parseExtraction(config, parser)
     
     return config
+
+def parseSystem(config, parser):
+    if not parser.has_section("System"):
+        raise RuntimeError("Not configurated!")
+    
+    try:
+        config.stationID = parser.getint("System", "stationID")
+    except NoOptionError:
+        raise RuntimeError("Not configurated!")
 
 def parseCapture(config, parser):
     if parser.has_option("Capture", "width"):
@@ -139,10 +154,14 @@ def parseExtraction(config, parser):
         config.limitForSize = parser.getfloat("VideoExtraction", "threshold_for_size")
     
     if parser.has_option("VideoExtraction", "distance_treshold"):
-        config.distance_treshold = parser.getint("VideoExtraction", "distance_treshold")
+        config.distance_treshold = parser.getint("VideoExtraction", "distance_treshold")**2
+    
+    config.distance_treshold = Grouping3D.normalizeParameter(config.distance_treshold, config)
     
     if parser.has_option("VideoExtraction", "gap_treshold"):
-        config.gap_treshold = parser.getint("VideoExtraction", "gap_treshold")
+        config.gap_treshold = parser.getint("VideoExtraction", "gap_treshold")**2
+    
+    config.gap_treshold = Grouping3D.normalizeParameter(config.gap_treshold, config)
     
     if parser.has_option("VideoExtraction", "line_distance_const"):
         config.line_distance_const = parser.getint("VideoExtraction", "line_distance_const")

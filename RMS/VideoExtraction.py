@@ -22,6 +22,7 @@ from math import floor, sqrt, ceil
 import time
 import struct
 import logging
+from RMS.Formats import FRbin
 
 class Extractor(Process):
     
@@ -164,7 +165,7 @@ class Extractor(Process):
         return_val = count;
         """
         
-        dictionary = {'gap_treshold': self.config.gap_treshold, 'y': y, 'x': x, 'z': z}
+        dictionary = {'gap_treshold': sqrt(self.config.gap_treshold), 'y': y, 'x': x, 'z': z}
         count = weave.inline(code, dictionary.keys(), dictionary, verbose=2, extra_compile_args=self.config.weaveArgs, extra_link_args=self.config.weaveArgs)
         
         return count >= self.config.min_points
@@ -345,23 +346,7 @@ class Extractor(Process):
         """ Save extracted clips to FR*.bin file
         """
         
-        file = "FR" + self.filename + ".bin"
-        
-        with open(file, "wb") as f:
-            f.write(struct.pack('I', len(clips)))             # number of extracted lines
-            
-            for clip in clips:
-                frames, sizepos = clip
-                
-                f.write(struct.pack('I', len(frames)))        # number of extracted frames
-                
-                for i, frame in enumerate(frames):
-                    f.write(struct.pack('I', sizepos[i, 0]))  # y of center
-                    f.write(struct.pack('I', sizepos[i, 1]))  # x of center
-                    f.write(struct.pack('I', sizepos[i, 2]))  # time
-                    size = sizepos[i, 3]
-                    f.write(struct.pack('I', size))           # cropped frame size
-                    frame[:size, :size].tofile(f)             # cropped frame
+        FRbin.writeArray(clips, "./", self.filename)
     
     def stop(self):
         """Stop the process.
@@ -398,24 +383,13 @@ class Extractor(Process):
         event_points = self.findPoints()
         logging.debug("[" + self.filename + "] time for thresholding and subsampling: " + str(time.time() - t) + "s")
         
-        t = time.time()
-        
         if len(event_points) == 0:
             logging.debug("[" + self.filename + "] nothing found, not extracting anything 1")
             return
         
-        y_dim = self.frames.shape[1]/16
-        x_dim = self.frames.shape[2]/16
-        
-        # Define parameters
-        distance_treshold = Grouping3D.normalizeParameter(self.config.distance_treshold, y_dim, x_dim)
-        gap_treshold = Grouping3D.normalizeParameter(self.config.gap_treshold, y_dim, x_dim)
-        
-        logging.debug("[" + self.filename + "] time for defining parameters: " + str(time.time() - t) + "s")
-        
         t = time.time()
         # Find lines in 3D space and store them to line_list
-        line_list = Grouping3D.find3DLines(event_points, [], t, distance_treshold, self.config.line_distance_const, gap_treshold, self.config.min_points, self.config.point_ratio_treshold, self.config.max_lines, self.config.max_time)
+        line_list = Grouping3D.find3DLines(event_points, self.config)
         logging.debug("[" + self.filename + "] Time for finding lines: " + str(time.time() - t) + "s")
         
         if line_list == None:
