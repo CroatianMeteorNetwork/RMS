@@ -31,6 +31,8 @@
  * along with this program. If not, see http://www.gnu.org/licenses/.
  */
 
+#include "stdio.h"
+#include <time.h>
 #include "kht.h"
 #include "linking.h"
 #include "subdivision.h"
@@ -39,7 +41,9 @@
 
 // Kernel-based Hough transform (KHT) for detecting straight lines in images.
 void
-kht(lines_list_t &lines, unsigned char *binary_image, const size_t image_width, const size_t image_height, const size_t cluster_min_size, const double cluster_min_deviation, const double delta, const double kernel_min_height, const double n_sigmas)
+kht(lines_list_t &lines, unsigned char *binary_image, const size_t image_width, const size_t image_height,
+		const size_t cluster_min_size, const double cluster_min_deviation, const double delta, const double kernel_min_height,
+		const double n_sigmas)
 {
 	static strings_list_t strings;
 	static clusters_list_t clusters;
@@ -55,4 +59,36 @@ kht(lines_list_t &lines, unsigned char *binary_image, const size_t image_width, 
 
 	// Retrieve the most significant straight lines from the resulting voting map.
 	peak_detection( lines, accumulator );
+}
+
+extern "C" size_t
+kht_wrapper(double (*lines_array)[2], unsigned char *binary_image, const size_t image_width, const size_t image_height,
+			const size_t cluster_min_size, const double cluster_min_deviation, const double delta, const double kernel_min_height,
+			const double n_sigmas)
+{
+	static lines_list_t lines;
+
+    struct timespec before;
+    clock_gettime(CLOCK_MONOTONIC, &before);
+
+	kht( lines, binary_image, image_width, image_height, cluster_min_size, cluster_min_deviation, delta,
+		 kernel_min_height, n_sigmas );
+
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    double time_sec = now.tv_sec - before.tv_sec;
+    double time_nano = now.tv_nsec - before.tv_nsec;
+
+    printf("sec: %f\n", time_s,ec);
+    printf("nano: %f\n", time_nano);
+
+	size_t lines_count = lines.size();
+
+	for(size_t i=0; i<lines_count; i++) {
+		line_t &line = lines[i];
+		lines_array[i][0] = line.rho;
+		lines_array[i][1] = line.theta;
+	}
+
+	return lines_count;
 }

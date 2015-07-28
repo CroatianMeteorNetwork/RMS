@@ -82,6 +82,11 @@
  * It is important to notice that the linking procedure implemented by the kht()
  * function destroys the original image.
  */
-void kht(lines_list_t &lines, unsigned char *binary_image, const size_t image_width, const size_t image_height, const size_t cluster_min_size = 10, const double cluster_min_deviation = 2.0, const double delta = 0.5, const double kernel_min_height = 0.002, const double n_sigmas = 2.0);
+void kht(lines_list_t &lines, unsigned char *binary_image, const size_t image_width,
+		const size_t image_height, const size_t cluster_min_size = 10,
+		const double cluster_min_deviation = 2.0, const double delta = 0.5,
+		const double kernel_min_height = 0.002, const double n_sigmas = 2.0);
+
+//size_t kht_wrapper(lines_list_t &lines, unsigned char *binary_image, const size_t image_width, const size_t image_height, const size_t cluster_min_size = 10, const double cluster_min_deviation = 2.0, const double delta = 0.5, const double kernel_min_height = 0.002, const double n_sigmas = 2.0);
 
 #endif // !_KHT_
