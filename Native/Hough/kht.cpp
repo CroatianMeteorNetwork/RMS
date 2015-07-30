@@ -79,7 +79,7 @@ kht_wrapper(double (*lines_array)[2], unsigned char *binary_image, const size_t 
     double time_sec = now.tv_sec - before.tv_sec;
     double time_nano = now.tv_nsec - before.tv_nsec;
 
-    printf("sec: %f\n", time_s,ec);
+    printf("sec: %f\n", time_sec);
     printf("nano: %f\n", time_nano);
 
 	size_t lines_count = lines.size();
