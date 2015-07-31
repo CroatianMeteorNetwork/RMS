@@ -113,6 +113,9 @@ def parseCompression(config, parser):
 def parseExtraction(config, parser):
     if parser.has_option("VideoExtraction", "subsampling_size"):
         config.f = parser.getint("VideoExtraction", "subsampling_size")
+        
+    if parser.has_option("VideoExtraction", "max_time"):
+        config.max_time = parser.getint("VideoExtraction", "max_time")
     
     if parser.has_option("VideoExtraction", "minimal_level"):
         config.min_level = parser.getint("VideoExtraction", "minimal_level")

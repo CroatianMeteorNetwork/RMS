@@ -128,9 +128,16 @@ def find3DLines(point_list, config, line_list=[]):
     @return: list of found lines
     """
     
-    # return None if too many lines 
-    if len(line_list) >= config.max_lines:
-        return None
+    # stop iterating if too many lines 
+    if len(line_list) >= max_lines:
+        return line_list
+
+    # stop iterating if running for too long
+    if time() - startTime > config.max_time:
+        if len(line_list) > 0:
+            return line_list
+        else:
+            return None
 
     results_list = []
     for i, point1 in enumerate(point_list):
