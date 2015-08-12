@@ -1,12 +1,23 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-import sys, os
+import matplotlib.pyplot as plt
+import sys
 from RMS.Formats import FFbin
 from RMS import VideoExtraction
 import RMS.ConfigReader as cr
 
-def plot(points, x_dim, y_dim, name):
+def view(ff):
+    config = cr.parse(".config")
+    
+    ve = VideoExtraction.Extractor(config)
+    ve.frames = np.empty((256, ff.nrows, ff.ncols))
+    ve.compressed = ff.array
+    
+    points = np.array(ve.findPoints())
+    
+    plot(points, ff.nrows//config.f, ff.ncols//config.f)
+
+def plot(points, y_dim, x_dim):
     fig = plt.figure()
     
     ax = fig.add_subplot(111, projection='3d')
@@ -32,20 +43,6 @@ def plot(points, x_dim, y_dim, name):
 
 
 if __name__ == "__main__":
-    config = cr.parse(".config")
+    ff = FFbin.read(sys.argv[1], sys.argv[2], array=True)
     
-    ve = VideoExtraction.Extractor(config)
-    
-    ff_list = [ff for ff in os.listdir(sys.argv[1]) if ff[0:2]=="FF" and ff[-3:]=="bin"]
-    
-    for ff_file in ff_list:
-        ffbin = FFbin.read(sys.argv[1], ff_file, array=True)
-        
-        ve = VideoExtraction.Extractor(config)
-        ve.frames = np.empty((256, ffbin.nrows, ffbin.ncols))
-        ve.frames = np.empty((256, ffbin.nrows, ffbin.ncols))
-        ve.compressed = ffbin.array
-        
-        points = np.array(ve.findPoints())
-        
-        plot(points, ffbin.ncols//config.f, ffbin.nrows//config.f, ff_file)
+    view(ff)
