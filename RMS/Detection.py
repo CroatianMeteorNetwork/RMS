@@ -31,6 +31,11 @@ def show(name, img):
     cv2.imshow(name, img.astype(np.uint8)*255)
     cv2.moveWindow(name, 0, 0)
     cv2.waitKey(0)
+
+def show2(name, img):
+    cv2.imshow(name, img)
+    cv2.moveWindow(name, 0, 0)
+    cv2.waitKey(0)
     
 def reconstructFrame(ff, frameNum):
     img = np.zeros((ff.nrows, ff.ncols))
@@ -47,23 +52,27 @@ def getLightcurve(ff, stripe_indices, start, stop):
     stripe = np.zeros((ff.nrows, ff.ncols), np.uint8)
     stripe[stripe_indices] = ff.maxpixel[stripe_indices]
     
-    stripe = treshold(stripe, ff).astype(np.uint8)*255
+    stripe = treshold(stripe, ff)
     
-    cv2.imshow("stripe", stripe)
-    cv2.moveWindow("stripe", 0, 0)
-    cv2.waitKey(0)
+    show("stripe", stripe)    
     
-    for i in range(start, stop):
+    t = time()
+    
+    for i in range(0, 256):
         xaxis.append(i)
         
-        single_frame = np.zeros((ff.nrows, ff.ncols))
+        single_frame = np.zeros((ff.nrows, ff.ncols), np.bool_)
         
         single_frame_indices = np.where(ff.maxframe == i)
         single_frame[single_frame_indices] = stripe[single_frame_indices]
-                
+    
+        single_frame = morph.clean(single_frame)
+        
         sum = np.sum(single_frame)
         
         lightcurve.append(sum)
+        
+    print "Time for lightcurve:", time() - t
         
     return lightcurve, xaxis
 
@@ -128,112 +137,116 @@ def reconstructWindows(path, filename):
         
         print lines
         
+        img = img_cpy.astype(np.uint8)*255
+        
+        hh = img.shape[0] / 2.0
+        hw = img.shape[1] / 2.0
+        
+        for rho, theta in lines:
+            theta = np.deg2rad(theta)
+            
+            a = np.cos(theta)
+            b = np.sin(theta)
+            x0 = a*rho
+            y0 = b*rho
+
+            x1 = int(x0 + 1000*(-b) + hw)
+            y1 = int(y0 + 1000*(a) + hh)
+            x2 = int(x0 - 1000*(-b) + hw)
+            y2 = int(y0 - 1000*(a) + hh)
+            
+            cv2.line(img, (x1, y1), (x2, y2), (255, 0, 255), 1)
+            
+            print x1, y1, x2, y2
+            
+        show2(filename + " " + str(i*time_slide) + "-" + str(i*time_slide+time_window_size) + " KHT", img)
+        
         if len(lines) > 0:
             img = img_cpy.astype(np.uint8)*255
-            
+             
             hh = img.shape[0] / 2.0
             hw = img.shape[1] / 2.0
-            
+             
             mul = img.shape[0] if hh>hw else img.shape[1]
-                  
-            strip_width = 15
-            
+             
             print "line_num:", len(lines)
-                
+                 
             for rho, theta in lines:
-                
+                 
                 indicesy = []
                 indicesx = []
-                
+                 
                 if theta < 45 or (theta > 90 and theta < 135):
                     theta = np.deg2rad(theta)
                     half_limit = strip_width/2 / np.cos(theta)
                     a = -np.tan(theta)
                     b = rho/np.cos(theta)
-                    
+                     
                     print int(-hh), int(hh)
-                    
+                     
                     for y in range(int(-hh), int(hh)):
                         x0 = a*y + b
-                        
+                         
                         x1 = int(x0 - half_limit + hw)
                         x2 = int(x0 + half_limit + hw)
-                        
+                         
                         if x1 > x2:
                             x1, x2 = x2, x1
-                        
+                         
                         if x2 < 0 or x1 >= img.shape[1]:
                             continue
-                        
+                         
                         for x in range(x1, x2):
                             if x < 0 or x >= img.shape[1]:
                                 continue
-                            
+                             
                             indicesy.append(y+hh)
                             indicesx.append(x)
-                            
+                             
 #                     print indices
-                            
+                             
                 else:
                     theta = np.deg2rad(theta)
                     half_limit = strip_width/2 / np.sin(theta)
                     a = -1/np.tan(theta)
                     b = rho/np.sin(theta)
-                    
+                     
                     for x in range(int(-hw), int(hw)):
                         y0 = a*x + b
-                        
+                         
                         y1 = int(y0 - half_limit + hh)                        
                         y2 = int(y0 + half_limit + hh)
-                        
+                         
                         if y1 > y2:
                             y1, y2 = y2, y1
-                        
+                         
                         if y2 < 0 or y1 >= img.shape[0]:
                             continue
-                           
+                            
                         for y in range(y1, y2):
                             if y < 0 or y >= img.shape[0]:
                                 continue
-                            
+                             
                             indicesy.append(y)
                             indicesx.append(x+hw)
-                            
+                             
 #                 lightcurve, xaxis = getLightcurve(ff, np.swapaxes(np.array(indices, np.uint8), 0, 1))
                 lightcurve, xaxis = getLightcurve(ff, (np.array(indicesy, np.uint32), np.array(indicesx, np.uint32)),
                                                   i*time_slide, i*time_slide+time_window_size)
 #                 lightcurve, xaxis = getLightcurve(ff, ( np.array(indicesx, np.uint8), np.array(indicesy, np.uint8)))
-                
+                 
                 fig = plt.figure()
                 ax = fig.add_subplot(111)
                 ax.scatter(np.array(xaxis), np.array(lightcurve))
                 plt.xlim([0, 256])
                 plt.show()
-                
-                break
-#  *
-#  *      'cluster_min_size' : Minimum number of pixels in the clusters of approximately
-#  *                           collinear feature pixels. The default value is 10.
-#  *
-#  * 'cluster_min_deviation' : Minimum accepted distance between a feature pixel and
-#  *                           the line segment defined by the end points of its cluster.
-#  *                           The default value is 2.
-#  *
-#  *                 'delta' : Discretization step for the parameter space. The default
-#  *                           value is 0.5.
-#  *
-#  *     'kernel_min_height' : Minimum height for a kernel pass the culling operation.
-#  *                           This property is restricted to the [0,1] range. The
-#  *                           default value is 0.002.
-#  *
-#  *              'n_sigmas' : Number of standard deviations used by the Gaussian kernel
-#  *                           The default value is 2.
 
 if __name__ == "__main__":
     time_window_size = 64
     time_slide = 32
     k1 = 1.5
     j1 = 9
+    strip_width = 20
     
     if len(sys.argv) == 1:
         print "Usage: python -m RMS.Detection /path/to/bin/files/"
@@ -247,3 +260,4 @@ if __name__ == "__main__":
      
     for ff in ff_list:
         reconstructWindows(sys.argv[1], ff)
+        break
