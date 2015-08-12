@@ -16,6 +16,7 @@
 
 import numpy as np
 from math import sqrt
+from time import time
 
 def line3DDistance_simple(x1, y1, z1, x2, y2, z2, x0, y0, z0):
     """ Calculate distance from line to a point in 3D using simple operations.
@@ -120,7 +121,7 @@ def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, config):
     return line_points
 
 
-def find3DLines(point_list, config, line_list=[]):
+def find3DLines(point_list, startTime, config, line_list=[]):
     """ Iteratively find N straight lines in 3D space.
     
     @param point_list: list of all points
@@ -129,7 +130,7 @@ def find3DLines(point_list, config, line_list=[]):
     """
     
     # stop iterating if too many lines 
-    if len(line_list) >= max_lines:
+    if len(line_list) >= config.max_lines:
         return line_list
 
     # stop iterating if running for too long
@@ -221,7 +222,7 @@ def find3DLines(point_list, config, line_list=[]):
     # if there are more lines on the image
     if line_ratio < config.point_ratio_treshold and point_num > 10:
         # Recursively find lines until the condition is met
-        find3DLines(point_list, config, line_list)
+        find3DLines(point_list, startTime, config, line_list)
 
     return line_list
 

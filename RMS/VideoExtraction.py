@@ -96,9 +96,8 @@ class Extractor(Process):
         if outlier_treshold > self.config.max_points_per_frame:
             outlier_treshold = self.config.max_points_per_frame
         
-        # remove all outliers (aka frames with a strong flare
-        for i, item in enumerate(freq):
-            frameNum, count = item
+        # remove all outliers (aka frames with a strong flare)
+        for frameNum, count in freq:
             if count >= outlier_treshold:
                 indices = np.where(z != frameNum)
                 y = y[indices]
@@ -112,7 +111,7 @@ class Extractor(Process):
             x = x[indices]
             z = z[indices]
         
-        # sort by frame number
+        # sort by frame number and convert to float
         indices = np.argsort(z) # quicksort
         y = y[indices].astype(np.float)
         x = x[indices].astype(np.float)
@@ -389,7 +388,7 @@ class Extractor(Process):
         
         t = time.time()
         # Find lines in 3D space and store them to line_list
-        line_list = Grouping3D.find3DLines(event_points, self.config)
+        line_list = Grouping3D.find3DLines(event_points, time.time(), self.config)
         logging.debug("[" + self.filename + "] Time for finding lines: " + str(time.time() - t) + "s")
         
         if line_list == None:
