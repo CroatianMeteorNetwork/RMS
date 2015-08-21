@@ -102,3 +102,16 @@ def write(ff, dir, filename):
         fid.write(struct.pack('I', ff.camno))
     
         arr.tofile(fid)
+        
+def reconstruct(ff):
+    frames = np.zeros((256, ff.nrows, ff.ncols), np.uint8)
+    
+    if ff.array is not None:
+        ff.maxpixel = ff.array[0]
+        ff.maxframe = ff.array[1]
+    
+    for i in range(256):
+        indices = np.where(ff.maxframe == i)
+        frames[i][indices] = ff.maxpixel[indices]
+    
+    return frames
