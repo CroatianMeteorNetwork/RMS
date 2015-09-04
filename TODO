@@ -1,0 +1,13 @@
+refinement of KHT arguments
+centroiding along KHT line
+matched filter
+detection log
+
+cleaning daemon:
+	moves all processed compressed images to external storage
+	clean compressed images without detection after 24h
+	clean compressed images with detection when on low storage
+
+clean ALL docstrings
+add module docstrings and docopt argument parser to all modules that are called from terminal
+generate doc page
