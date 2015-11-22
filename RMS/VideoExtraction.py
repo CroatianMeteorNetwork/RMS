@@ -53,7 +53,8 @@ class Extractor(Process):
                 max = COMPRESSED3(0, y, x);
                 avg_std = COMPRESSED3(2, y, x) + k1 * COMPRESSED3(3, y, x);
                 
-                if((max > min_level) && (avg_std > 255 || max >= avg_std)) {
+                //if((max > min_level) && (avg_std > 255 || max >= avg_std)) {
+                if((max > min_level) && (max >= avg_std)) {
                     n = COMPRESSED3(1, y, x);
                     
                     y2 = y/f; // subsample frame in f*f squares

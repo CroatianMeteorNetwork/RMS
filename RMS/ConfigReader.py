@@ -55,6 +55,7 @@ class Config:
         # params for Grouping3D
         self.distance_treshold = 4900  # maximum distance between the line and the point to be takes as a part of the same line
         self.gap_treshold = 16900      # maximum allowed gap between points
+        self.line_minimum_frame_range = 3   # minimum range of frames that a line should cover (eliminates flash detections)
         self.line_distance_const = 4   # constant that determines the influence of average point distance on the line quality
         self.point_ratio_treshold = 0.7# ratio of how many points must be close to the line before considering searching for another line
         self.max_lines = 5             # maximum number of lines
@@ -165,6 +166,9 @@ def parseExtraction(config, parser):
         config.gap_treshold = parser.getint("VideoExtraction", "gap_treshold")**2
     
     config.gap_treshold = Grouping3D.normalizeParameter(config.gap_treshold, config)
+
+    if parser.has_option("VideoExtraction", "line_minimum_frame_range"):
+        config.line_minimum_frame_range = parser.getint("VideoExtraction", "line_minimum_frame_range")
     
     if parser.has_option("VideoExtraction", "line_distance_const"):
         config.line_distance_const = parser.getint("VideoExtraction", "line_distance_const")

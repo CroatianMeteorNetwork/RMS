@@ -26,6 +26,9 @@ if __name__ == "__main__":
         bin_dir = (os.sep).join(bin_name[:-1]) + os.sep
         bin_name = bin_name[-1]
 
+    # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/2015_06_20_19_33_11' + os.sep
+    # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/2015_06_23_19_33_43' + os.sep
+    # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/bins' + os.sep
     # bin_dir = '/home/anonymus/Dropbox/grouping3D/perzeidi2015/11 12 Aug' + os.sep
     # bin_dir = "/home/anonymus/Dropbox/grouping3D/perzeidi2015/12 13 Aug" + os.sep
     # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples' + os.sep
@@ -94,6 +97,11 @@ if __name__ == "__main__":
 
         # Run line finding
         line_list = find3DLines(event_points, time.time(), config)
+
+        if not line_list:
+            plt.clf()
+            plt.close()
+            continue
 
         print line_list
 

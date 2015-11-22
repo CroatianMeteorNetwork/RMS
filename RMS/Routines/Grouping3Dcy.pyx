@@ -216,6 +216,7 @@ def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, g
     cdef float distance_treshold = config.distance_treshold
     cdef float gap_treshold = config.gap_treshold
     cdef int min_points = config.min_points
+    cdef int line_minimum_frame_range = config.line_minimum_frame_range
     cdef float line_distance_const = config.line_distance_const
 
     cdef int i, j, z
@@ -329,9 +330,11 @@ def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, g
     first_frame = max_line_points[0,2]
     last_frame = max_line_points[len(max_line_points) - 1,2]
 
+    # Reject the line if all points are only in very close frames (eliminate flashes):
+    if abs(last_frame - first_frame) >= line_minimum_frame_range:
 
-    # Add max_line to results, as well as the first and the last frame of a meteor
-    line_list.append(_formatLine(max_line, first_frame, last_frame))
+        # Add max_line to results, as well as the first and the last frame of a meteor
+        line_list.append(_formatLine(max_line, first_frame, last_frame))
 
     # If only one line was desired, return it
     # if there are more lines on the image, recursively find lines
