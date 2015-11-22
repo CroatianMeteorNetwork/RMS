@@ -15,15 +15,25 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from RMS.Compression import Compressor
+import RMS.ConfigReader as cr
+
 import numpy as np
 from matplotlib import pyplot as plt
 
 if __name__ == "__main__":
+
+    config = cr.parse(".config")
+
     frames = np.empty((256, 576, 720), np.uint8)
     for i in range(256):
         frames[i] = np.random.normal(128, 2, (576, 720))
     
-    comp = Compressor(None, None, None, None, 000)
+    comp = Compressor(None, None, None, None, config)
     compressed = comp.compress(frames)
+    
     plt.hist(compressed[1].ravel(), 256, [0,256])
+    plt.xlim((0, 255))
+    plt.title('Randomness histogram')
+    plt.xlabel('Frame')
+    plt.ylabel('Random value count')
     plt.show()

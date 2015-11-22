@@ -37,7 +37,8 @@ class Extractor(Process):
         @return: (y, x, z) of found points
         """
      
-        count = np.zeros((self.frames.shape[0], floor(self.frames.shape[1]//self.config.f), floor(self.frames.shape[2]//self.config.f)), np.int16)
+        count = np.zeros((self.frames.shape[0], floor(self.frames.shape[1]//self.config.f), floor(self.frames.shape[2]//self.config.f)), np.int,
+            )
         pointsy = np.empty((self.frames.shape[0]*floor(self.frames.shape[1]//self.config.f)*floor(self.frames.shape[2]//self.config.f)), np.uint16)
         pointsx = np.empty((self.frames.shape[0]*floor(self.frames.shape[1]//self.config.f)*floor(self.frames.shape[2]//self.config.f)), np.uint16)
         pointsz = np.empty((self.frames.shape[0]*floor(self.frames.shape[1]//self.config.f)*floor(self.frames.shape[2]//self.config.f)), np.uint16)
@@ -45,11 +46,14 @@ class Extractor(Process):
         code = """
         unsigned int x, y, x2, y2, n, i, max;
         unsigned int num = 0, acc = 0;
+        unsigned int avg_std;
         
         for(y=0; y<Nframes[1]; y++) {
             for(x=0; x<Nframes[2]; x++) {
                 max = COMPRESSED3(0, y, x);
-                if((max > min_level) && (max >= COMPRESSED3(2, y, x) + k1 * COMPRESSED3(3, y, x))) {
+                avg_std = COMPRESSED3(2, y, x) + k1 * COMPRESSED3(3, y, x);
+                
+                if((max > min_level) && (avg_std > 255 || max >= avg_std)) {
                     n = COMPRESSED3(1, y, x);
                     
                     y2 = y/f; // subsample frame in f*f squares
@@ -65,7 +69,7 @@ class Extractor(Process):
                         COUNT3(n, y2, x2) += 1;
                     }
                 }
-            }    
+            }     
         }
         
         return_val = num; // output length of POINTS arrays
@@ -396,7 +400,7 @@ class Extractor(Process):
             return
         
         t = time.time()
-        coeff = Grouping3D.findCoefficients(event_points, line_list)
+        coeff = Grouping3D.findCoefficients(line_list)
         logging.debug("[" + self.filename + "] Time for finding coefficients: " + str(time.time() - t) + "s")
         
         if len(coeff) == 0:

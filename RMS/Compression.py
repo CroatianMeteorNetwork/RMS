@@ -21,7 +21,6 @@ import numpy as np
 import time
 import struct
 import logging
-from os import uname
 from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFbin
 
