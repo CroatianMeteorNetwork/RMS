@@ -313,7 +313,7 @@ def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, g
         return None
 
     # Get Line with the best quality
-    max_line = Line()
+    max_line = results_list[0]
     for i in range(results_counter):
         if results_list[i].line_quality > max_line.line_quality:
             max_line = results_list[i]
@@ -322,6 +322,7 @@ def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, g
     cdef float line_ratio = max_line.counter / results_counter
 
     # Remove points from the point cloud that belong to line with the best quality
+
     point_list, max_line_points = remove3DPoints(point_list, max_line, distance_treshold, gap_treshold)
 
     # Get the first and the last frame from the max_line point could

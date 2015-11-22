@@ -41,7 +41,7 @@ def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, config):
 
     return getAllPointsCy(point_list, x1, y1, z1, x2, y2, z2, config.distance_treshold, config.gap_treshold)
 
-def find3DLines(point_list, start_time, config, get_single=False, line_list=[]):
+def find3DLines(point_list, start_time, config, get_single=False):
     """ Only a Cython wrapper function!
     Iteratively find N straight lines in 3D space.
     
@@ -49,12 +49,13 @@ def find3DLines(point_list, start_time, config, get_single=False, line_list=[]):
     @param start_time: [time.time() object] starting time of the loop
     @param config: [config object] defines configuration parameters fro the config file
     @param get_single: [bool] returns only 1 line, does not perform recusrive line searching
-    @param line_list: [list] list of lines found previously
     @return: list of found lines
     """
 
     # Convert the point list to numpy array
     point_list = np.array(point_list, dtype = np.uint16)
+
+    line_list = []
 
     # Call a faster cython function
     return find3DLinesCy(point_list, start_time, config, get_single, line_list)

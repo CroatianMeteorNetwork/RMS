@@ -23,44 +23,29 @@ if __name__ == "__main__":
     bin_name = sys.argv[1]
     if os.sep in bin_name:
         bin_name = bin_name.split(os.sep)
-        dirname = (os.sep).join(bin_name[:-2])
+        bin_dir = (os.sep).join(bin_name[:-1]) + os.sep
         bin_name = bin_name[-1]
 
-    # 3 bina:
-    # dirname = '2015110506 bolid' + os.sep
-    # bin_name = 'FF454_20151105_190520_767_0043520.bin'
+    # bin_dir = '/home/anonymus/Dropbox/grouping3D/perzeidi2015/11 12 Aug' + os.sep
+    # bin_dir = "/home/anonymus/Dropbox/grouping3D/perzeidi2015/12 13 Aug" + os.sep
+    # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples' + os.sep
+    # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/2015110304 bolid' + os.sep
+    # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/2015110506 bolid' + os.sep
+    # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/20151111213 visnjan' + os.sep
+    # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/RIB2015062627 fireball' + os.sep
+    # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/sample_bins' + os.sep
 
-    # 3 bina:
-    # dirname = '2015110304 bolid' + os.sep
-    # bin_name = 'FF459_20151103_182709_210_0189440.bin'
-
-    # 2 bina
-    # dirname = '20151111213 visnjan' + os.sep
-    # bin_name =  'FF459_20151112_011549_770_0781312.bin'
-
-    # 1 bin:
-    # dirname = 'RIB2015062627 fireball' + os.sep
-    # bin_name =  'FF454_20150626_211351_964_0153088.bin'
-
-    # sample bins (2 komada)
-    # dirname = 'sample_bins' + os.sep 
-    # bin_name = 'FF459_20150704_230501_667_0313856.bin'
-    # bin_name = 'FF459_20150705_012154_094_0516096.bin'
-    # bin_name = 'FF459_20150705_220250_982_0224768.bin'
-
-    # dirname = ''
-    # bin_name = 'FF453_20150421_011431_274_0608512.bin'
-    # bin_name = 'FF494_20151121_235145_509_0733184.bin'
-    # bin_name = 'FF494_20151122_004543_852_0814080.bin'
+    # for bin_name in os.listdir(bin_dir):
+    #     if 'FF' in bin_name:
 
     # Load config file
     config = cr.parse(".config")
 
     # Load compressed file
-    compressed = FFbin.read('samples' + os.sep + dirname, bin_name, array=True).array
+    compressed = FFbin.read(bin_dir, bin_name, array=True).array
 
     # Show maxpixel
-    ff = FFbin.read('samples' + os.sep + dirname, bin_name)
+    ff = FFbin.read(bin_dir, bin_name)
     plt.imshow(ff.maxpixel, cmap='gray')
     plt.show()
 
@@ -108,7 +93,6 @@ if __name__ == "__main__":
         t1 = time.clock()
 
         # Run line finding
-
         line_list = find3DLines(event_points, time.time(), config)
 
         print line_list
@@ -138,7 +122,7 @@ if __name__ == "__main__":
 
             detected_points = getAllPoints(event_points, x1, y1, z1, x2, y2, z2, config)
 
-            if not detected_points.all():
+            if not detected_points.any():
                 continue
 
             detected_points = np.array(detected_points)
