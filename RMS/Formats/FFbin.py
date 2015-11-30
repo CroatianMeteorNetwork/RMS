@@ -104,6 +104,8 @@ def write(ff, dir, filename):
         arr.tofile(fid)
         
 def reconstruct(ff):
+    """ Reconstruct video frames from the FF bin file. """
+    
     frames = np.zeros((256, ff.nrows, ff.ncols), np.uint8)
     
     if ff.array is not None:
