@@ -111,7 +111,7 @@ class Extractor(Process):
                 
         # randomize points if there are too many in total
         if len(z) > self.config.max_points:
-            indices = np.random.randint(0, len(z), self.config.max_points)
+            indices = np.random.choice(len(z), self.config.max_points, replace=False)
             y = y[indices]
             x = x[indices]
             z = z[indices]

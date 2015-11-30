@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 from RMS.Formats import FFbin
+import RMS.ConfigReader as cr
 from RMS.Routines import MorphologicalOperations as morph
 from RMS.Routines.Grouping3D import find3DLines, getAllPoints
 
@@ -324,7 +325,7 @@ def plotLines(ff, line_list):
     show2("KHT", img)
 
 
-def show3DCloud(ff, stripe):
+def show3DCloud(ff, stripe, detected_line=[], stripe_points=None, config=None):
     """ Shows 3D point cloud of stripe points. """
 
     stripe_indices = stripe.nonzero()
@@ -339,7 +340,30 @@ def show3DCloud(ff, stripe):
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
 
-    ax.scatter(xs, ys, zs)
+    # ax.scatter(xs, ys, zs)
+
+    if detected_line and len(stripe_points):
+
+        xs = [detected_line[0][1], detected_line[1][1]]
+        ys = [detected_line[0][0], detected_line[1][0]]
+        zs = [detected_line[0][2], detected_line[1][2]]
+        ax.plot(ys, xs, zs, c = 'r')
+
+        x1, x2 = ys
+        y1, y2 = xs
+        z1, z2 = zs
+
+        detected_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config)
+
+        if detected_points.any():
+
+            detected_points = np.array(detected_points)
+
+            xs = detected_points[:,0]
+            ys = detected_points[:,1]
+            zs = detected_points[:,2]
+
+            ax.scatter(xs, ys, zs, c = 'r', s = 40)
 
     # Set limits
     plt.xlim((0, ff.ncols))
@@ -360,7 +384,7 @@ if __name__ == "__main__":
     stripe_width = 20
 
     # Minimum distance between KHT lines in Cartesian space to merge them
-    line_min_dist = 30
+    line_min_dist = 40
 
     kht_lib_path = "build/lib.linux-x86_64-2.7/kht_module.so"
 
@@ -377,7 +401,9 @@ if __name__ == "__main__":
     if(len(ff_list) == None):
         print "No files found!"
         sys.exit()
-    
+
+    # Load config file
+    config = cr.parse(".config")
 
     # Run meteor search on every file
     for ff_name in ff_list:
@@ -418,6 +444,9 @@ if __name__ == "__main__":
                 # Bounded the thresholded image by min and max frames
                 img = selectFrames(img_thres, ff, frame_min, frame_max)
 
+                # Remove lonely pixels
+                img = morph.clean(img)
+
                 # Get indices of stripe pixels around the line
                 stripe_indices = getStripeIndices(rho, theta, stripe_width, img.shape[0], img.shape[1])
 
@@ -429,4 +458,36 @@ if __name__ == "__main__":
                 show2("stripe", stripe*255)
 
                 # Show 3D could
-                show3DCloud(ff, stripe)
+                # show3DCloud(ff, stripe)
+
+                # Get stripe positions
+                stripe_positions = stripe.nonzero()
+                xs = stripe_positions[1]
+                ys = stripe_positions[0]
+                zs = ff.maxframe[stripe_positions]
+
+                # Limit the number of points to search if too large
+                if len(zs) > 700:
+                    indices = np.random.choice(len(zs), 700, replace=False)
+                    ys = ys[indices]
+                    xs = xs[indices]
+                    zs = zs[indices]
+
+                # Make an array to feed into the gropuing algorithm
+                stripe_points = np.vstack((xs, ys, zs))
+                stripe_points = np.swapaxes(stripe_points, 0, 1)
+                
+                # Sort stripe points by frame
+                stripe_points = stripe_points[stripe_points[:,2].argsort()]
+
+                # Find a single line in the point cloud
+                detected_line = find3DLines(stripe_points, time(), config, get_single=True)
+
+                # Extract the first and only line if any
+                if detected_line:
+                    detected_line = detected_line[0]
+
+                    print detected_line
+
+                    # Show 3D cloud
+                    show3DCloud(ff, stripe, detected_line, stripe_points, config)

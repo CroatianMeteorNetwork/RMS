@@ -146,7 +146,7 @@ def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_treshold, gap_tres
     # Get all points belonging to the best line
     max_line_points = np.zeros(shape=(max_array_size, 3), dtype = INT_TYPE)
 
-    # Get the indoex of the first point
+    # Get the index of the first point
     point1_index = np.where(np.all(point_list==np.array((x1, y1, z1)),axis=1))[0][0]
 
     # Spread point cloud forward
@@ -323,7 +323,6 @@ def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, g
     cdef float line_ratio = max_line.counter / results_counter
 
     # Remove points from the point cloud that belong to line with the best quality
-
     point_list, max_line_points = remove3DPoints(point_list, max_line, distance_treshold, gap_treshold)
 
     # Get the first and the last frame from the max_line point could
