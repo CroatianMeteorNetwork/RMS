@@ -74,6 +74,7 @@ kht_wrapper(double (*lines_array)[2], unsigned char *binary_image, const size_t 
 	kht( lines, binary_image, image_width, image_height, cluster_min_size, cluster_min_deviation, delta,
 		 kernel_min_height, n_sigmas );
 
+	/*
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
     double time_sec = now.tv_sec - before.tv_sec;
@@ -81,6 +82,7 @@ kht_wrapper(double (*lines_array)[2], unsigned char *binary_image, const size_t 
 
     printf("sec: %f\n", time_sec);
     printf("nano: %f\n", time_nano);
+    */
 
 	size_t lines_count = lines.size();
 
