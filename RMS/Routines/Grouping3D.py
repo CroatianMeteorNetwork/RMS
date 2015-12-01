@@ -41,7 +41,7 @@ def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, config):
 
     return getAllPointsCy(point_list, x1, y1, z1, x2, y2, z2, config.distance_treshold, config.gap_treshold)
 
-def find3DLines(point_list, start_time, config, get_single=False):
+def find3DLines(point_list, start_time, config, fireball_detection=True):
     """ Only a Cython wrapper function!
     Iteratively find N straight lines in 3D space.
     
@@ -52,13 +52,54 @@ def find3DLines(point_list, start_time, config, get_single=False):
     @return: list of found lines
     """
 
+    class GroupingConfig(object):
+        """ A special config used only for grouping3D algorithm. Default values are fireball detection values.
+        """
+        def __init__(self, config):
+            super(GroupingConfig, self).__init__()
+
+            self.max_lines = config.max_lines
+            self.point_ratio_treshold = config.point_ratio_treshold
+
+            self.max_time = config.max_time
+            self.distance_treshold = config.distance_treshold
+            self.gap_treshold = config.gap_treshold
+            self.min_points = config.min_points
+            self.line_minimum_frame_range = config.line_minimum_frame_range
+            self.line_distance_const = config.line_distance_const
+
+
     # Convert the point list to numpy array
     point_list = np.array(point_list, dtype = np.uint16)
 
     line_list = []
 
-    # Call a faster cython function
-    return find3DLinesCy(point_list, start_time, config, get_single, line_list)
+    # Choose proper algorithm parameters, whether finding fireballs or faint meteors
+    grouping_config = GroupingConfig(config) # Loads fireball detection parameters by default
+    if fireball_detection:
+        get_single = False
+
+    else:
+        ## Used for faint meteor detection
+
+        # Find only one line
+        get_single = True
+
+        # Load faint meteor detecion parameters instead of fireball detection parameters
+        grouping_config.max_time = config.max_time_det
+        grouping_config.distance_treshold = config.distance_treshold_det
+        grouping_config.gap_treshold = config.gap_treshold_det
+        grouping_config.min_points = config.min_pixels_det
+        grouping_config.line_minimum_frame_range = config.line_minimum_frame_range_det
+        grouping_config.line_distance_const = config.line_distance_const_det
+
+        # These parameters are important only in fireball detection, use these values for faint detection
+        grouping_config.max_lines = 1
+        grouping_config.point_ratio_treshold = 1
+
+
+    # Call a fast cython function for findind lines in 3D
+    return find3DLinesCy(point_list, start_time, grouping_config, get_single, line_list)
 
 def normalizeParameter(param, config):
     """ Normalize detection parameter to be size independent.

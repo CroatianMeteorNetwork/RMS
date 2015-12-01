@@ -79,6 +79,9 @@ def parse(filename):
     
     if parser.has_section("VideoExtraction"):
         parseExtraction(config, parser)
+
+    if parser.has_section("Detection"):
+        parseDetection(config, parser)
     
     return config
 
@@ -181,3 +184,58 @@ def parseExtraction(config, parser):
     
     if parser.has_option("VideoExtraction", "min_lines"):
         config.max_lines = parser.getint("VideoExtraction", "max_lines")
+
+
+def parseDetection(config, parser):
+    
+    if parser.has_option("Detection", "k1_det"):
+        config.k1_det = parser.getfloat("Detection", "k1_det")
+
+    if parser.has_option("Detection", "j1"):
+        config.j1 = parser.getint("Detection", "j1")
+
+    if parser.has_option("Detection", "max_white_ratio"):
+        config.max_white_ratio = parser.getfloat("Detection", "max_white_ratio")
+
+    if parser.has_option("Detection", "time_window_size"):
+        config.time_window_size = parser.getint("Detection", "time_window_size")
+
+    if parser.has_option("Detection", "time_slide"):
+        config.time_slide = parser.getint("Detection", "time_slide")
+
+    if parser.has_option("Detection", "max_lines_det"):
+        config.max_lines_det = parser.getint("Detection", "max_lines_det")
+
+    if parser.has_option("Detection", "line_min_dist"):
+        config.line_min_dist = parser.getint("Detection", "line_min_dist")
+
+    if parser.has_option("Detection", "distance_treshold_det"):
+        config.distance_treshold_det = parser.getint("Detection", "distance_treshold_det")**2
+
+    config.distance_treshold_det = Grouping3D.normalizeParameter(config.distance_treshold_det, config)
+
+    if parser.has_option("Detection", "gap_treshold_det"):
+        config.gap_treshold_det = parser.getint("Detection", "gap_treshold_det")**2
+
+    config.gap_treshold_det = Grouping3D.normalizeParameter(config.gap_treshold_det, config)
+
+    if parser.has_option("Detection", "min_pixels_det"):
+        config.min_pixels_det = parser.getint("Detection", "min_pixels_det")
+
+    if parser.has_option("Detection", "line_minimum_frame_range_det"):
+        config.line_minimum_frame_range_det = parser.getint("Detection", "line_minimum_frame_range_det")
+
+    if parser.has_option("Detection", "line_distance_const_det"):
+        config.line_distance_const_det = parser.getint("Detection", "line_distance_const_det")
+
+    if parser.has_option("Detection", "max_time_det"):
+        config.max_time_det = parser.getint("Detection", "max_time_det")
+
+    if parser.has_option("Detection", "stripe_width"):
+        config.stripe_width = parser.getint("Detection", "stripe_width")
+
+    if parser.has_option("Detection", "max_points_det"):
+        config.max_points_det = parser.getint("Detection", "max_points_det")
+    
+    if parser.has_option("Detection", "kht_lib_path"):
+        config.kht_lib_path = parser.get("Detection", "kht_lib_path")

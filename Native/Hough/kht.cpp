@@ -62,7 +62,7 @@ kht(lines_list_t &lines, unsigned char *binary_image, const size_t image_width, 
 }
 
 extern "C" size_t
-kht_wrapper(double (*lines_array)[2], unsigned char *binary_image, const size_t image_width, const size_t image_height,
+kht_wrapper(double (*lines_array)[2], unsigned char *binary_image, const size_t image_width, const size_t image_height, const size_t lines_max,
 			const size_t cluster_min_size, const double cluster_min_deviation, const double delta, const double kernel_min_height,
 			const double n_sigmas)
 {
@@ -85,6 +85,10 @@ kht_wrapper(double (*lines_array)[2], unsigned char *binary_image, const size_t 
     */
 
 	size_t lines_count = lines.size();
+
+	// Limit the number of lines to a max number
+	if (lines_count > lines_max)
+		lines_count = lines_max;
 
 	for(size_t i=0; i<lines_count; i++) {
 		line_t &line = lines[i];

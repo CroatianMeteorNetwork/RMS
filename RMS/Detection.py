@@ -211,14 +211,15 @@ def mergeLines(line_list, min_distance, last_count=0):
 
     return final_list
 
-def getLines(ff, k1, j1, time_slide, time_window_size, kht_lib_path):
+def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_ratio, kht_lib_path):
     """ Get (rho, phi) pairs for each meteor present on the image using KHT.
     @param: ff: [FF bin object] FF bin file loaded into the FF bin class
     @param: k1: [float] weight parameter for the standard deviation during thresholding
     @param: j1: [float] absolute threshold above average during thresholding
     @param time_slide: [int] subdivision size of the time axis (256 will be divided into 256/time_slide parts)
     @param time_window_size: [int] size of the time window which will be slided over the time axis
-    @param stripe_width: [int] width of the stripe around the line
+    @param max_lines: [int] maximum number of lines to find by KHT
+    @param max_white_ratio: [float] max ratio between write and all pixels after thresholding
     @param kht_lib_path: [string] path to the compiled KHT library
     @return
 
@@ -227,6 +228,7 @@ def getLines(ff, k1, j1, time_slide, time_window_size, kht_lib_path):
     kht = ctypes.cdll.LoadLibrary(kht_lib_path)
     kht.kht_wrapper.argtypes = [npct.ndpointer(dtype=np.double, ndim=2),
                                 npct.ndpointer(dtype=np.byte, ndim=1),
+                                ctypes.c_size_t,
                                 ctypes.c_size_t,
                                 ctypes.c_size_t,
                                 ctypes.c_size_t,
@@ -240,6 +242,12 @@ def getLines(ff, k1, j1, time_slide, time_window_size, kht_lib_path):
 
     # Threshold the image
     img_thres = thresholdImg(ff, k1, j1)
+
+    # Check if the image is too "white" and any futher processing makes no sense
+    # This checks the max percentage of white pixels in the thresholded image
+    print 'white ratio', np.count_nonzero(img_thres) / float(ff.nrows * ff.ncols)
+    if np.count_nonzero(img_thres) / float(ff.nrows * ff.ncols) > max_white_ratio:
+        return line_results
 
     # Subdivide the image by time into overlapping parts (decreases noise when searching for meteors)
     for i in range(0, 256/time_slide-1):
@@ -282,10 +290,10 @@ def getLines(ff, k1, j1, time_slide, time_window_size, kht_lib_path):
         img = (img.flatten().astype(np.byte)*255).astype(np.byte)
         
         # Predefine the line output
-        lines = np.empty((50, 2), np.double)
+        lines = np.empty((max_lines, 2), np.double)
         
         # Call the KHT line finding
-        length = kht.kht_wrapper(lines, img, w, h, 9, 2, 0.1, 0.002, 1)
+        length = kht.kht_wrapper(lines, img, w, h, max_lines, 9, 2, 0.1, 0.004, 1)
         
         # Cut the line array to the number of found lines
         lines = lines[:length]
@@ -340,7 +348,7 @@ def show3DCloud(ff, stripe, detected_line=[], stripe_points=None, config=None):
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
 
-    # ax.scatter(xs, ys, zs)
+    ax.scatter(xs, ys, zs)
 
     if detected_line and len(stripe_points):
 
@@ -377,16 +385,18 @@ def show3DCloud(ff, stripe, detected_line=[], stripe_points=None, config=None):
 
 
 if __name__ == "__main__":
-    time_window_size = 64
-    time_slide = 32
-    k1 = 1.5
-    j1 = 9
-    stripe_width = 20
+    # time_window_size = 64
+    # time_slide = 32
+    # k1 = 1.5
+    # j1 = 9
+    # stripe_width = 20
+
+    # max_points = 700
 
     # Minimum distance between KHT lines in Cartesian space to merge them
-    line_min_dist = 40
+    # line_min_dist = 40
 
-    kht_lib_path = "build/lib.linux-x86_64-2.7/kht_module.so"
+    # kht_lib_path = "build/lib.linux-x86_64-2.7/kht_module.so"
 
 
     
@@ -416,23 +426,25 @@ if __name__ == "__main__":
         ff = FFbin.read(sys.argv[1], ff_name)
 
         # Get lines on the image
-        line_list = getLines(ff, k1, j1, time_slide, time_window_size, kht_lib_path)
+        line_list = getLines(ff, config.k1_det, config.j1, config.time_slide, config.time_window_size, 
+            config.max_lines_det, config.max_white_ratio, config.kht_lib_path)
 
         # Only if there are some lines in the image
         if len(line_list):
 
             # Join similar lines
-            line_list = mergeLines(line_list, line_min_dist)
+            line_list = mergeLines(line_list, config.line_min_dist)
 
             print 'time for finding lines', time() - t1
 
+            print 'number of KHT lines:', len(line_list)
             print line_list
 
             # Plot lines
             plotLines(ff, line_list)
 
             # Threshold the image
-            img_thres = thresholdImg(ff, k1, j1)
+            img_thres = thresholdImg(ff, config.k1_det, config.j1)
 
             # Analyze stripes of each line
             for line in line_list:
@@ -448,7 +460,7 @@ if __name__ == "__main__":
                 img = morph.clean(img)
 
                 # Get indices of stripe pixels around the line
-                stripe_indices = getStripeIndices(rho, theta, stripe_width, img.shape[0], img.shape[1])
+                stripe_indices = getStripeIndices(rho, theta, config.stripe_width, img.shape[0], img.shape[1])
 
                 # Extract the stripe from the thresholded image
                 stripe = np.zeros((ff.nrows, ff.ncols), np.uint8)
@@ -467,8 +479,8 @@ if __name__ == "__main__":
                 zs = ff.maxframe[stripe_positions]
 
                 # Limit the number of points to search if too large
-                if len(zs) > 700:
-                    indices = np.random.choice(len(zs), 700, replace=False)
+                if len(zs) > config.max_points_det:
+                    indices = np.random.choice(len(zs), config.max_points_det, replace=False)
                     ys = ys[indices]
                     xs = xs[indices]
                     zs = zs[indices]
@@ -480,8 +492,12 @@ if __name__ == "__main__":
                 # Sort stripe points by frame
                 stripe_points = stripe_points[stripe_points[:,2].argsort()]
 
+                t1 = time()
+
                 # Find a single line in the point cloud
-                detected_line = find3DLines(stripe_points, time(), config, get_single=True)
+                detected_line = find3DLines(stripe_points, time(), config, fireball_detection=False)
+
+                print 'time for GROUPING: ', time() - t1
 
                 # Extract the first and only line if any
                 if detected_line:
