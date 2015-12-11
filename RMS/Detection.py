@@ -32,11 +32,13 @@ def show(name, img):
     cv2.imshow(name, img.astype(np.uint8)*255)
     cv2.moveWindow(name, 0, 0)
     cv2.waitKey(0)
+    cv2.destroyWindow(name)
 
 def show2(name, img):
     cv2.imshow(name, img)
     cv2.moveWindow(name, 0, 0)
     cv2.waitKey(0)
+    cv2.destroyWindow(name)
 
 def thresholdImg(ff, k1, j1):
     """ Threshold the image with given parameters. """
@@ -55,15 +57,42 @@ def selectFrames(img_thres, ff, frame_min, frame_max):
 
     return img
 
+def getPolarLine(x1, y1, x2, y2, img_h, img_w):
+    """ Calculate polar line coordinates (Hough transform coordinates) rho and theta given the 2 points that 
+        define a line. Coordinate system starts in the image center, to replicate the used HT implementation.
+    """
+
+    x0 = float(img_w)/2
+    y0 = float(img_h)/2
+
+    dx = float(x2 - x1)
+    dy = float(y2 - y1)
+
+    # Calculate polar line coordinates
+    theta = -np.arctan2(dx, dy)
+    rho = (dy * x0 - dx * y0 + x2*y1 - y2*x1) / np.sqrt(dy**2 + dx**2)
+    
+    # Correct for quadrant
+    if rho > 0:
+        theta += np.pi
+    else:
+        rho = -rho
+
+    return rho, np.degrees(theta)
+
 def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
     """ Get indices of a stripe centered on a lines.
     @param rho: [float] line distance from the center in HT space (pixels)
-    @param phi: [float] angle in degrees in HT space
+    @param theta: [float] angle in degrees in HT space
     @param stripe_width: [int] width of the stripe around the line
     @param img_h: [int] original image height
     @param img_w: [int] original image width
     @return (indicesx, indicesy): [tuple] a tuple of x and y indices of stripe pixels
     """
+
+    # Check for vertical lines
+    if (theta % 180 == 0):
+        theta += 0.001
 
     hh = img_h / 2.0
     hw = img_w / 2.0
@@ -77,7 +106,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
         a = -np.tan(theta)
         b = rho/np.cos(theta)
          
-        for y in range(int(-hh), int(hh)):
+        for y in xrange(int(-hh), int(hh)):
             x0 = a*y + b
              
             x1 = int(x0 - half_limit + hw)
@@ -89,7 +118,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
             if x2 < 0 or x1 >= img_w:
                 continue
              
-            for x in range(x1, x2):
+            for x in xrange(x1, x2):
                 if x < 0 or x >= img_w:
                     continue
                  
@@ -102,7 +131,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
         a = -1/np.tan(theta)
         b = rho/np.sin(theta)
          
-        for x in range(int(-hw), int(hw)):
+        for x in xrange(int(-hw), int(hw)):
             y0 = a*x + b
              
             y1 = int(y0 - half_limit + hh)                        
@@ -114,7 +143,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
             if y2 < 0 or y1 >= img_h:
                 continue
                 
-            for y in range(y1, y2):
+            for y in xrange(y1, y2):
                 if y < 0 or y >= img_h:
                     continue
                  
@@ -208,6 +237,113 @@ def mergeLines(line_list, min_distance, last_count=0):
     # Use recursion until the number of lines stabilizes
     if len(final_list) != last_count:
         final_list = mergeLines(final_list, min_distance, len(final_list))
+
+    return final_list
+
+
+def merge3DLines(line_list, vect_angle_thresh, last_count=0):
+    """ Merges similar lines found by the 3D detector. It calculates the vector between the first point of the
+        first line and the last point of the second line, and then compares the angle difference to individual
+        line vectors. If all vecters have angles that are close enough, merge the line. Frame ranges also have
+        to overlap to merge the line.
+
+        @param: line_list: [list] a list of lines found by grouping3D algorithm
+        @param: vect_angle_thresh: [float] minimum angle between vectors to merge the lines
+        @param: last_count: [int] used for recursion, default is 0 and it should be left as is
+
+        @return: final_list: [list] a list of merged lines
+
+    """
+
+    def _vectorAngle(v1, v2):
+        """ Calculates an angle between two vectors in degrees. """
+
+        # Calculate angle between vectors
+        cosang = np.dot(v1, v2)
+        sinang = np.linalg.norm(np.cross(v1, v2))
+        return np.degrees(np.arctan2(sinang, cosang))
+
+
+    # Return if less than 2 lines
+    if len(line_list) < 2:
+        return line_list
+
+    final_list = []
+    paired_indices = []
+
+    for i, line1 in enumerate(line_list):
+
+        # Skip if the line is already paired
+        if i in paired_indices:
+            continue
+
+        # Extract first point
+        x11, y11, z11 = line1[0]
+
+        # Extract second point
+        x12, y12, z12 = line1[1]
+
+        # Get frame range
+        line1_fmin, line1_fmax = line1[4:6]
+
+        # Create a vector from line points
+        v1 = np.array([x12-x11, y12-y11, z12-z11])
+
+        found_pair = False
+
+        for j, line2 in enumerate(line_list[i+1:]):
+
+            # Extract first point
+            x21, y21, z21 = line2[0]
+
+            # Extract second point
+            x22, y22, z22 = line2[1]
+
+            # Get frame range
+            line2_fmin, line2_fmax = line2[4:6]
+
+            # Create a vector from line points
+            v2 = np.array([x22-x21, y22-y21, z22-z21])
+
+
+            # Create a vector from the first point of the first line and the last point of the second line
+            v_both = np.array([x22 - x11, y22 - y11, z22 - z11])
+
+            # Calculate the angle between the v_both and v1
+            vect_angle1 = _vectorAngle(v1, v_both)
+
+            # Calculate the angle between the v_both and v1
+            vect_angle2 = _vectorAngle(v2, v_both)
+
+
+            # Check if the vector angles are close enough to the vector that connects them
+            if (vect_angle1 < vect_angle_thresh) and (vect_angle2 < vect_angle_thresh):
+
+                # Check if the frames overlap
+                if set(range(line1_fmin, line1_fmax+1)).intersection(range(line2_fmin, line2_fmax+1)):
+
+                    # Choose the frame range
+                    frame_min = min((line1_fmin, line2_fmin))
+                    frame_max = max((line1_fmax, line2_fmax))
+
+                    # Remove old lines
+                    paired_indices.append(i)
+                    paired_indices.append(i + j + 1)
+
+                    found_pair = True
+
+                    # Add megred line to the list
+                    final_list.append([line1[0], line1[1], max(line1[2], line2[2]), max(line1[3], line2[3]), frame_min, frame_max])
+
+                    break
+
+        # Add point back to the list if pair was not found
+        if not found_pair:
+            final_list.append(line1)
+
+    # Use recursion until the number of lines stabilizes
+    if len(final_list) != last_count:
+        final_list = merge3DLines(final_list, vect_angle_thresh, len(final_list))
 
     return final_list
 
@@ -361,7 +497,8 @@ def show3DCloud(ff, stripe, detected_line=[], stripe_points=None, config=None):
         y1, y2 = xs
         z1, z2 = zs
 
-        detected_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config)
+        detected_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config, 
+            fireball_detection=False)
 
         if detected_points.any():
 
@@ -382,6 +519,8 @@ def show3DCloud(ff, stripe, detected_line=[], stripe_points=None, config=None):
 
     plt.clf()
     plt.close()
+
+
 
 
 if __name__ == "__main__":
@@ -415,6 +554,8 @@ if __name__ == "__main__":
     # Load config file
     config = cr.parse(".config")
 
+    vect_angle_thresh = 5
+
     # Run meteor search on every file
     for ff_name in ff_list:
 
@@ -446,6 +587,8 @@ if __name__ == "__main__":
             # Threshold the image
             img_thres = thresholdImg(ff, config.k1_det, config.j1)
 
+            filtered_lines = []
+
             # Analyze stripes of each line
             for line in line_list:
                 rho, theta, frame_min, frame_max = line
@@ -454,7 +597,7 @@ if __name__ == "__main__":
                 print rho, theta, frame_min, frame_max
 
                 # Bounded the thresholded image by min and max frames
-                img = selectFrames(img_thres, ff, frame_min, frame_max)
+                img = selectFrames(np.copy(img_thres), ff, frame_min, frame_max)
 
                 # Remove lonely pixels
                 img = morph.clean(img)
@@ -467,7 +610,7 @@ if __name__ == "__main__":
                 stripe[stripe_indices] = img[stripe_indices]
 
                 # Show stripe
-                show2("stripe", stripe*255)
+                # show2("stripe", stripe*255)
 
                 # Show 3D could
                 # show3DCloud(ff, stripe)
@@ -503,7 +646,104 @@ if __name__ == "__main__":
                 if detected_line:
                     detected_line = detected_line[0]
 
-                    print detected_line
+                    # print detected_line
 
-                    # Show 3D cloud
-                    show3DCloud(ff, stripe, detected_line, stripe_points, config)
+                    # # Show 3D cloud
+                    # show3DCloud(ff, stripe, detected_line, stripe_points, config)
+
+                    # Add the line to the results list
+                    filtered_lines.append(detected_line)
+
+            # Merge similar lines in 3D
+            filtered_lines = merge3DLines(filtered_lines, vect_angle_thresh)
+
+            print 'after filtering:'
+            print filtered_lines
+
+            for detected_line in filtered_lines:
+
+                print detected_line
+
+                # Get coordinates of 2 points that describe the line
+                x1, y1, z1 = detected_line[0]
+                x2, y2, z2 = detected_line[1]
+
+                # Convert Cartesian line coordinates to polar
+                rho, theta = getPolarLine(x1, y1, x2, y2, ff.nrows, ff.ncols)
+
+                print 'converted rho, theta'
+                print rho, theta
+
+                # Get frame range
+                frame_min = detected_line[4]
+                frame_max = detected_line[5]
+
+                # Bounded the thresholded image by min and max frames
+                img = selectFrames(np.copy(img_thres), ff, frame_min, frame_max)
+
+                # Remove lonely pixels
+                img = morph.clean(img)
+
+                # Get indices of stripe pixels around the line
+                stripe_indices = getStripeIndices(rho, theta, config.stripe_width, img.shape[0], img.shape[1])
+
+                # Extract the stripe from the thresholded image
+                stripe = np.zeros((ff.nrows, ff.ncols), np.uint8)
+                stripe[stripe_indices] = img[stripe_indices]
+
+
+                show('detected line', stripe)
+
+                # Get stripe positions
+                stripe_positions = stripe.nonzero()
+                xs = stripe_positions[1]
+                ys = stripe_positions[0]
+                zs = ff.maxframe[stripe_positions]
+
+                # Make an array to feed into the centroiding algorithm
+                stripe_points = np.vstack((xs, ys, zs))
+                stripe_points = np.swapaxes(stripe_points, 0, 1)
+                
+                # Sort stripe points by frame
+                stripe_points = stripe_points[stripe_points[:,2].argsort()]
+
+                # Get points of the given line
+                line_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config, 
+                    fireball_detection=False)
+
+                # Calculate centroids
+                centroids = []
+                for i in range(frame_min, frame_max):
+                    
+                    # Select pixel indicies belonging to a given frame
+                    frame_pixels_inds = np.where(line_points[:,2] == i)
+                    
+                    # Get pixel positions in a given frame
+                    frame_pixels = line_points[frame_pixels_inds].astype(np.int64)
+
+                    # Skip if there are no pixels in the frame
+                    if not len(frame_pixels):
+                        continue
+
+                    # Get maxpixel-avepixel values of given pixel indices (this will be used as weights)
+                    max_weights = (ff.maxpixel-ff.avepixel)[frame_pixels[:,1], frame_pixels[:,0]]
+
+                    # Calculate weighted centroids
+                    x_weighted = frame_pixels[:,0] * np.transpose(max_weights)
+                    x_centroid = np.sum(x_weighted) / float(np.sum(max_weights))
+
+                    y_weighted = frame_pixels[:,1] * np.transpose(max_weights)
+                    y_centroid = np.sum(y_weighted) / float(np.sum(max_weights))
+                    
+                    print "centroid: ", i, x_centroid, y_centroid
+
+                    centroids.append([i, x_centroid, y_centroid])
+
+                centroids = np.array(centroids)
+
+                # Plot centroids to image
+                plt.imshow(img_thres, cmap='gray')
+                plt.scatter(centroids[:,1], centroids[:,2], s=5, c='r', edgecolors='none')
+                plt.show()
+                plt.clf()
+                plt.close()

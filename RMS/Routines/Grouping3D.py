@@ -26,7 +26,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Routines.Grouping3Dcy import find3DLines as find3DLinesCy
 from RMS.Routines.Grouping3Dcy import getAllPoints as getAllPointsCy
 
-def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, config):
+def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, config, fireball_detection=True):
     """ Only a Cython wrapper function!
     Returns all points describing a particular line. 
     
@@ -36,10 +36,19 @@ def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, config):
     @return: [ndarray] array of all points belonging to a given line
     """
 
+    # Check if working with fireball data or HT data
+    if fireball_detection:
+        distance_treshold = config.distance_treshold
+        gap_treshold = config.gap_treshold
+
+    else:
+        distance_treshold = config.distance_treshold_det
+        gap_treshold = config.gap_treshold_det
+
     # Convert the point list to numpy array
     point_list = np.array(point_list, dtype = np.uint16)
 
-    return getAllPointsCy(point_list, x1, y1, z1, x2, y2, z2, config.distance_treshold, config.gap_treshold)
+    return getAllPointsCy(point_list, x1, y1, z1, x2, y2, z2, distance_treshold, gap_treshold)
 
 def find3DLines(point_list, start_time, config, fireball_detection=True):
     """ Only a Cython wrapper function!
