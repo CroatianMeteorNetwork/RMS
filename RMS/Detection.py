@@ -49,7 +49,7 @@ def selectFrames(img_thres, ff, frame_min, frame_max):
     """ Select only pixels in a given frame range. """
 
     # Get the indices of image positions with times correspondng to the subdivision
-    indices = np.where((ff.maxframe >= frame_min) & (ff.maxframe < frame_max))
+    indices = np.where((ff.maxframe >= frame_min) & (ff.maxframe <= frame_max))
 
     # Reconstruct the image with given indices
     img = np.zeros((ff.nrows, ff.ncols), dtype=np.uint8)
@@ -713,7 +713,8 @@ if __name__ == "__main__":
 
                 # Calculate centroids
                 centroids = []
-                for i in range(frame_min, frame_max):
+
+                for i in range(frame_min, frame_max+1):
                     
                     # Select pixel indicies belonging to a given frame
                     frame_pixels_inds = np.where(line_points[:,2] == i)
@@ -725,19 +726,32 @@ if __name__ == "__main__":
                     if not len(frame_pixels):
                         continue
 
-                    # Get maxpixel-avepixel values of given pixel indices (this will be used as weights)
-                    max_weights = (ff.maxpixel-ff.avepixel)[frame_pixels[:,1], frame_pixels[:,0]]
+                    # Calculate centroids by half-frame
+                    for half_frame in range(2):
+                        half_frame_pixels = frame_pixels[frame_pixels[:,1] % 2 == (config.deinterlace_order + half_frame) % 2]
 
-                    # Calculate weighted centroids
-                    x_weighted = frame_pixels[:,0] * np.transpose(max_weights)
-                    x_centroid = np.sum(x_weighted) / float(np.sum(max_weights))
+                        # Skip if there are no pixels in the half-frame
+                        if not len(frame_pixels):
+                            continue
 
-                    y_weighted = frame_pixels[:,1] * np.transpose(max_weights)
-                    y_centroid = np.sum(y_weighted) / float(np.sum(max_weights))
-                    
-                    print "centroid: ", i, x_centroid, y_centroid
+                        # Calculate half-frame value
+                        frame_no = i+half_frame*0.5
+                        
+                        print frame_no, half_frame_pixels
 
-                    centroids.append([i, x_centroid, y_centroid])
+                        # Get maxpixel-avepixel values of given pixel indices (this will be used as weights)
+                        max_weights = (ff.maxpixel-ff.avepixel)[half_frame_pixels[:,1], half_frame_pixels[:,0]]
+
+                        # Calculate weighted centroids
+                        x_weighted = half_frame_pixels[:,0] * np.transpose(max_weights)
+                        x_centroid = np.sum(x_weighted) / float(np.sum(max_weights))
+
+                        y_weighted = half_frame_pixels[:,1] * np.transpose(max_weights)
+                        y_centroid = np.sum(y_weighted) / float(np.sum(max_weights))
+                        
+                        print "centroid: ", frame_no, x_centroid, y_centroid
+
+                        centroids.append([frame_no, x_centroid, y_centroid])
 
                 centroids = np.array(centroids)
 

@@ -26,6 +26,7 @@ class Config:
         self.width = 720
         self.height = 576
         self.deviceID = 0
+        self.deinterlace_order = 1
         
         self.weaveArgs = ["-O3"]
         
@@ -103,6 +104,9 @@ def parseCapture(config, parser):
     
     if parser.has_option("Capture", "device"):
         config.deviceID = parser.getint("Capture", "device")
+
+    if parser.has_option("Capture", "deinterlace_order"):
+        config.deinterlace_order = parser.getint("Capture", "deinterlace_order")
 
 def parseBuildArgs(config, parser):
     if parser.has_option("Build", "weave"):
