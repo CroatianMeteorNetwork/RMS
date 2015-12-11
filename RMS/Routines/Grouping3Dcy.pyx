@@ -330,7 +330,7 @@ def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, g
     last_frame = max_line_points[len(max_line_points) - 1,2]
 
     # Reject the line if all points are only in very close frames (eliminate flashes):
-    if abs(last_frame - first_frame) >= line_minimum_frame_range:
+    if abs(last_frame - first_frame)+1 >= line_minimum_frame_range:
 
         # Add max_line to results, as well as the first and the last frame of a meteor
         line_list.append(_formatLine(max_line, first_frame, last_frame))

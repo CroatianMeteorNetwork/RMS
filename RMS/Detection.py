@@ -20,9 +20,13 @@ import cv2
 from time import time
 import sys, os
 import ctypes
+
+# Plotting
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 from mpl_toolkits.mplot3d import Axes3D
 
+# RMS imports
 from RMS.Formats import FFbin
 import RMS.ConfigReader as cr
 from RMS.Routines import MorphologicalOperations as morph
@@ -707,6 +711,9 @@ if __name__ == "__main__":
                 # Sort stripe points by frame
                 stripe_points = stripe_points[stripe_points[:,2].argsort()]
 
+                # Show 3D cloud
+                # show3DCloud(ff, stripe, detected_line, stripe_points, config)
+
                 # Get points of the given line
                 line_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config, 
                     fireball_detection=False)
@@ -731,13 +738,11 @@ if __name__ == "__main__":
                         half_frame_pixels = frame_pixels[frame_pixels[:,1] % 2 == (config.deinterlace_order + half_frame) % 2]
 
                         # Skip if there are no pixels in the half-frame
-                        if not len(frame_pixels):
+                        if not len(half_frame_pixels):
                             continue
 
                         # Calculate half-frame value
                         frame_no = i+half_frame*0.5
-                        
-                        print frame_no, half_frame_pixels
 
                         # Get maxpixel-avepixel values of given pixel indices (this will be used as weights)
                         max_weights = (ff.maxpixel-ff.avepixel)[half_frame_pixels[:,1], half_frame_pixels[:,0]]
@@ -748,16 +753,25 @@ if __name__ == "__main__":
 
                         y_weighted = half_frame_pixels[:,1] * np.transpose(max_weights)
                         y_centroid = np.sum(y_weighted) / float(np.sum(max_weights))
-                        
-                        print "centroid: ", frame_no, x_centroid, y_centroid
 
-                        centroids.append([frame_no, x_centroid, y_centroid])
+                        # Calculate intensity as the sum of white pixels
+                        intensity = np.sum(max_weights)
+                        
+                        print "centroid: ", frame_no, x_centroid, y_centroid, intensity
+
+                        centroids.append([frame_no, x_centroid, y_centroid, intensity])
 
                 centroids = np.array(centroids)
 
+                gs = gridspec.GridSpec(2, 1, width_ratios=[2,2], height_ratios=[2,1])
                 # Plot centroids to image
+                plt.subplot(gs[0])
                 plt.imshow(img_thres, cmap='gray')
                 plt.scatter(centroids[:,1], centroids[:,2], s=5, c='r', edgecolors='none')
+
+                plt.subplot(gs[1])
+                # Plot lightcurve
+                plt.plot(centroids[:,0], centroids[:,3])
                 plt.show()
                 plt.clf()
                 plt.close()
