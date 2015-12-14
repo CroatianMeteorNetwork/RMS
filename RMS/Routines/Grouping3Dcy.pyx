@@ -1,5 +1,3 @@
-#cython: boundscheck=False
-#cython: wraparound=False
 
 from time import time
 
@@ -10,7 +8,7 @@ cimport cython
 INT_TYPE = np.uint16
 ctypedef np.uint16_t INT_TYPE_t
 
-
+@cython.cdivision(True) # Don't check for zero division
 cdef float line3DDistance_simple(int x1, int y1, int z1, int x2, int y2, int z2, int x0, int y0, int z0):
     """ Calculate distance from line to a point in 3D using simple operations.
     
@@ -93,7 +91,8 @@ cdef class Line:
 
         return self.x1, self.y1, self.z1, self.x2, self.y2, self.z2
 
-def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_treshold, gap_treshold, max_array_size=0):
+@cython.boundscheck(False)
+def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_treshold, gap_treshold, max_array_size=0):
     """ Returns all points describing a particular line. 
     @param point_list: [ndarray] list of all points
     @params x1 to z2: [int] points defining a line in 3D space
@@ -109,8 +108,14 @@ def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_treshold, gap_tres
     # Number of points in the point list
     point_list_size = point_list.shape[0]
 
-    def propagateLine(propagation_list, i):
+    # Check if the point list is empty
+    if point_list_size == 0:
+        return np.array([[]])
+
+    def propagateLine(np.ndarray[INT_TYPE_t, ndim=2] max_line_points, np.ndarray[INT_TYPE_t, ndim=2] propagation_list, int i):
         """ Finds all points present on a line starting from a point on that line. """
+
+        cdef int x3, y3, z3, x_prev, y_prev, z_prev, z
 
         x_prev, y_prev, z_prev = x1, y1, z1
 
@@ -137,23 +142,30 @@ def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_treshold, gap_tres
 
                 x_prev, y_prev, z_prev = x3, y3, z3
 
-        return i
+        return max_line_points, i
 
 
     if max_array_size == 0:
         max_array_size = point_list_size
 
     # Get all points belonging to the best line
-    max_line_points = np.zeros(shape=(max_array_size, 3), dtype = INT_TYPE)
+    cdef np.ndarray[INT_TYPE_t, ndim=2] max_line_points = np.zeros(shape=(max_array_size, 3), dtype = INT_TYPE)
 
     # Get the index of the first point
-    point1_index = np.where(np.all(point_list==np.array((x1, y1, z1)),axis=1))[0][0]
+    point1_index = np.where(np.all(point_list==np.array((x1, y1, z1)),axis=1))[0]
+
+    # Check if the first point exists
+    if not point1_index:
+        return np.array([[]])
+
+    # Extract the first point
+    point1_index = point1_index[0]
 
     # Spread point cloud forward
-    i = propagateLine(point_list[point1_index:], i)
+    max_line_points, i = propagateLine(max_line_points, point_list[point1_index:], i)
 
     # Spread point cloud backwards
-    i = propagateLine((point_list[:point1_index])[::-1], i)
+    max_line_points, i = propagateLine(max_line_points, (point_list[:point1_index])[::-1], i)
 
     return max_line_points[:i]
 
@@ -185,8 +197,11 @@ def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, dis
     point_list = np.setdiff1d(point_list_rows, max_line_points_rows).view(point_list.dtype).reshape(-1, 
         point_list.shape[1])
 
+    # Sort max point only if there are any
+    if max_line_points.size:
+        max_line_points = max_line_points[max_line_points[:,2].argsort()]
+
     # Sort_points by frame 
-    max_line_points = max_line_points[max_line_points[:,2].argsort()]
     point_list = point_list[point_list[:,2].argsort()]
 
     return (point_list, max_line_points)
@@ -200,7 +215,8 @@ def _formatLine(line, first_frame, last_frame):
 
     return [(x1, y1, z1), (x2, y2, z2), line.counter, line.line_quality, first_frame, last_frame]
 
-# @cython.boundscheck(False)
+@cython.boundscheck(False)
+@cython.wraparound(False) 
 def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, get_single=False, line_list=[]):
     """ Iteratively find N straight lines in 3D space.
     
@@ -324,6 +340,10 @@ def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, g
 
     # Remove points from the point cloud that belong to line with the best quality
     point_list, max_line_points = remove3DPoints(point_list, max_line, distance_treshold, gap_treshold)
+
+    # Return nothing if no points were found
+    if not max_line_points.size:
+        return None
 
     # Get the first and the last frame from the max_line point could
     first_frame = max_line_points[0,2]

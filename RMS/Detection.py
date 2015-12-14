@@ -98,6 +98,9 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
     if (theta % 180 == 0):
         theta += 0.001
 
+    # Normalize theta to 0-360
+    theta = theta % 360
+
     hh = img_h / 2.0
     hw = img_w / 2.0
 
@@ -641,6 +644,8 @@ if __name__ == "__main__":
 
                 t1 = time()
 
+                print 'finding lines...'
+
                 # Find a single line in the point cloud
                 detected_line = find3DLines(stripe_points, time(), config, fireball_detection=False)
 
@@ -666,6 +671,15 @@ if __name__ == "__main__":
 
             for detected_line in filtered_lines:
 
+                # Get frame range
+                frame_min = detected_line[4]
+                frame_max = detected_line[5]
+
+                # Check if the lines convers a minimum frame range
+                if (abs(frame_max - frame_min) + 1 < config.line_minimum_frame_range):
+                    continue
+
+
                 print detected_line
 
                 # Get coordinates of 2 points that describe the line
@@ -677,10 +691,6 @@ if __name__ == "__main__":
 
                 print 'converted rho, theta'
                 print rho, theta
-
-                # Get frame range
-                frame_min = detected_line[4]
-                frame_max = detected_line[5]
 
                 # Bounded the thresholded image by min and max frames
                 img = selectFrames(np.copy(img_thres), ff, frame_min, frame_max)
@@ -717,6 +727,14 @@ if __name__ == "__main__":
                 # Get points of the given line
                 line_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config, 
                     fireball_detection=False)
+
+                # Skip if no points were returned
+                if not line_points.any():
+                    continue
+
+                # Skip if the points cover too small a frame range
+                if abs(np.max(line_points[:,2]) - np.min(line_points[:,2])) + 1 < config.line_minimum_frame_range:
+                    continue
 
                 # Calculate centroids
                 centroids = []
