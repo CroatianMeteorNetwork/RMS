@@ -103,7 +103,7 @@ def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, 
     @return: [ndarray] array of points belonging to a certain line
     """
 
-    i = 0
+    cdef int i = 0
 
     # Number of points in the point list
     point_list_size = point_list.shape[0]
@@ -154,9 +154,20 @@ def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, 
     # Get the index of the first point
     point1_index = np.where(np.all(point_list==np.array((x1, y1, z1)),axis=1))[0]
 
-    # Check if the first point exists
+    # Check if the first point exists, if not start from the point closes to the given point
     if not point1_index:
-        return np.array([[]])
+        best_distance = 999
+
+        for j in range(len(point_list)):
+            x_temp = point_list[j, 0]
+            y_temp = point_list[j, 1]
+            z_temp = point_list[j, 2]
+
+            temp_dist = point3DDistance(x1, y1, z1, x_temp, y_temp, z_temp)
+            
+            if temp_dist < best_distance:
+                best_distance = temp_dist
+                point1_index = [j]
 
     # Extract the first point
     point1_index = point1_index[0]

@@ -675,9 +675,19 @@ if __name__ == "__main__":
                 frame_min = detected_line[4]
                 frame_max = detected_line[5]
 
-                # Check if the lines convers a minimum frame range
+                # Check if the line covers a minimum frame range
                 if (abs(frame_max - frame_min) + 1 < config.line_minimum_frame_range):
                     continue
+
+                # Extand the frame range for several frames, just to be sure
+                frame_extension = 3
+                frame_min -= frame_extension
+                frame_max += frame_extension
+
+                # Cap values to 0-255
+                frame_min = max(frame_min, 0)
+                frame_max = min(frame_max, 255)
+
 
 
                 print detected_line
@@ -706,7 +716,7 @@ if __name__ == "__main__":
                 stripe[stripe_indices] = img[stripe_indices]
 
 
-                show('detected line', stripe)
+                show('detected line: '+str(frame_min)+'-'+str(frame_max), stripe)
 
                 # Get stripe positions
                 stripe_positions = stripe.nonzero()
@@ -727,6 +737,8 @@ if __name__ == "__main__":
                 # Get points of the given line
                 line_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config, 
                     fireball_detection=False)
+
+                print 'line_points:', line_points
 
                 # Skip if no points were returned
                 if not line_points.any():
@@ -751,6 +763,9 @@ if __name__ == "__main__":
                     if not len(frame_pixels):
                         continue
 
+                    # Calculate maxpixel and avepixel difference
+                    max_ave_diff = ff.maxpixel-ff.avepixel
+
                     # Calculate centroids by half-frame
                     for half_frame in range(2):
                         half_frame_pixels = frame_pixels[frame_pixels[:,1] % 2 == (config.deinterlace_order + half_frame) % 2]
@@ -763,7 +778,7 @@ if __name__ == "__main__":
                         frame_no = i+half_frame*0.5
 
                         # Get maxpixel-avepixel values of given pixel indices (this will be used as weights)
-                        max_weights = (ff.maxpixel-ff.avepixel)[half_frame_pixels[:,1], half_frame_pixels[:,0]]
+                        max_weights = max_ave_diff[half_frame_pixels[:,1], half_frame_pixels[:,0]]
 
                         # Calculate weighted centroids
                         x_weighted = half_frame_pixels[:,0] * np.transpose(max_weights)
@@ -778,6 +793,7 @@ if __name__ == "__main__":
                         print "centroid: ", frame_no, x_centroid, y_centroid, intensity
 
                         centroids.append([frame_no, x_centroid, y_centroid, intensity])
+
 
                 centroids = np.array(centroids)
 
