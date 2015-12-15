@@ -268,7 +268,15 @@ def merge3DLines(line_list, vect_angle_thresh, last_count=0):
         # Calculate angle between vectors
         cosang = np.dot(v1, v2)
         sinang = np.linalg.norm(np.cross(v1, v2))
-        return np.degrees(np.arctan2(sinang, cosang))
+        angle = np.degrees(np.arctan2(sinang, cosang))
+
+        if angle > 180:
+            angle = abs(angle - 360)
+
+        elif angle < 0:
+            angle = abs(angle)
+
+        return angle
 
 
     # Return if less than 2 lines
@@ -561,10 +569,8 @@ if __name__ == "__main__":
     # Load config file
     config = cr.parse(".config")
 
-    vect_angle_thresh = 5
-
     # Run meteor search on every file
-    for ff_name in ff_list:
+    for ff_name in sorted(ff_list):
 
         print ff_name
 
@@ -664,7 +670,7 @@ if __name__ == "__main__":
                     filtered_lines.append(detected_line)
 
             # Merge similar lines in 3D
-            filtered_lines = merge3DLines(filtered_lines, vect_angle_thresh)
+            filtered_lines = merge3DLines(filtered_lines, config.vect_angle_thresh)
 
             print 'after filtering:'
             print filtered_lines
@@ -679,15 +685,13 @@ if __name__ == "__main__":
                 if (abs(frame_max - frame_min) + 1 < config.line_minimum_frame_range):
                     continue
 
-                # Extand the frame range for several frames, just to be sure
-                frame_extension = 3
-                frame_min -= frame_extension
-                frame_max += frame_extension
+                # Extand the frame range for several frames, just to be sure to catch all parts of a meteor
+                frame_min -= config.frame_extension
+                frame_max += config.frame_extension
 
                 # Cap values to 0-255
                 frame_min = max(frame_min, 0)
                 frame_max = min(frame_max, 255)
-
 
 
                 print detected_line

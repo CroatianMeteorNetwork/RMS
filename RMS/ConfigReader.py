@@ -61,6 +61,29 @@ class Config:
         self.point_ratio_treshold = 0.7# ratio of how many points must be close to the line before considering searching for another line
         self.max_lines = 5             # maximum number of lines
 
+
+        # KHT detection parameters
+        self.k1_det = 1.5 # weight for stddev in thresholding for faint meteor detection
+        self.j1 = 9 # absolute levels above average in thresholding for faint meteor detection
+        self.max_white_ratio = 0.07 # maximum ratio of white to all pixels on a thresholded image (used to avoid searching on very messed up images)
+        self.time_window_size = 64 # size of the time window which will be slided over the time axis
+        self.time_slide = 32 # subdivision size of the time axis (256 will be divided into 256/time_slide parts)
+        self.max_lines_det = 30 # maximum number of lines to be found on the time segment with KHT
+        self.line_min_dist = 40 # Minimum distance between KHT lines in Cartesian space to merge them (used for merging similar lines after KHT)
+        self.stripe_width = 20 # width of the stripe around the line
+        self.kht_lib_path = "build/lib.linux-x86_64-2.7/kht_module.so" # path to the compiled KHT module
+
+        self.max_points_det = 600 # maximumum number of points during 3D line search in faint meteor detection (used to minimize runtime)
+        self.distance_treshold_det = 50**2 # maximum distance between the line and the point to be takes as a part of the same line
+        self.gap_treshold_det = 500**2 # maximum allowed gap between points
+        self.min_pixels_det = 10 # minimum number of pixels in a strip
+        self.line_minimum_frame_range_det = 4 # minimum number of frames per one detection
+        self.line_distance_const_det = 4 # constant that determines the influence of average point distance on the line quality
+        self.max_time_det = 10 # maximum time in seconds for which line finding algorithm can run
+
+        vect_angle_thresh = 20 # angle similarity between 2 lines in a stripe to be merged
+        self.frame_extension = 3 # how many frames to check during centroiding before and after the initially determined frame range
+
 def parse(filename):
     parser = RawConfigParser()
     parser.read(filename)
@@ -243,3 +266,9 @@ def parseDetection(config, parser):
     
     if parser.has_option("Detection", "kht_lib_path"):
         config.kht_lib_path = parser.get("Detection", "kht_lib_path")
+
+    if parser.has_option("Detection", "vect_angle_thresh"):
+        config.vect_angle_thresh = parser.getint("Detection", "vect_angle_thresh")
+
+    if parser.has_option("Detection", "frame_extension"):
+        config.frame_extension = parser.getint("Detection", "frame_extension")
