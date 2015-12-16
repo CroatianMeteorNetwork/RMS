@@ -454,6 +454,9 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
             for rho, theta in lines:
                 line_results.append([rho, theta, frame_min, frame_max])
 
+        # if line_results:
+        #     plotLines(ff, line_results)
+
 
     return line_results
 
@@ -536,21 +539,53 @@ def show3DCloud(ff, stripe, detected_line=[], stripe_points=None, config=None):
     plt.close()
 
 
+def filterCentroids(centroids, centroid_max_deviation):
+    """ Checks for linearity in centroid data and reject the points which are too far off. """
+
+    def _pointDistance(x1, y1, x2, y2):
+        return np.sqrt((x2-x1)**2 + (y2-y1)**2)
+
+    def LSQfit(y, x):
+        """ Least squares fit. """
+
+        A = np.vstack([x, np.ones(len(x))]).T
+        m, c = np.linalg.lstsq(A, y)[0]
+
+        return m, c
+
+    # Return if empty list
+    if not centroids:
+        return centroids
+
+    centroids_array = np.array(centroids)
+
+    frame_array = centroids_array[:,0]
+    x_array = centroids_array[:,1]
+    y_array = centroids_array[:,2]
+
+    # LSQ fit by both axes
+    mX, cX = LSQfit(x_array, frame_array)
+    mY, cY = LSQfit(y_array, frame_array)
+
+    filtered_centroids = []
+
+    # Distances between points and fitted line
+    point_deviations = _pointDistance(x_array, y_array, mX*frame_array + cX, mY*frame_array + cY)
+
+    # Calculate average deviation
+    mean_deviation = np.mean(point_deviations)
+
+    # Take points with satisfactory deviation
+    good_centroid_indices = np.where(np.logical_not(point_deviations > mean_deviation*centroid_max_deviation))
+    filtered_centroids = centroids_array[good_centroid_indices]
+
+
+    return filtered_centroids.tolist()
+
+
 
 
 if __name__ == "__main__":
-    # time_window_size = 64
-    # time_slide = 32
-    # k1 = 1.5
-    # j1 = 9
-    # stripe_width = 20
-
-    # max_points = 700
-
-    # Minimum distance between KHT lines in Cartesian space to merge them
-    # line_min_dist = 40
-
-    # kht_lib_path = "build/lib.linux-x86_64-2.7/kht_module.so"
 
 
     
@@ -579,9 +614,16 @@ if __name__ == "__main__":
         # Load the FF bin file
         ff = FFbin.read(sys.argv[1], ff_name)
 
+        # show2(ff_name+' maxpixel', ff.maxpixel)
+
         # Get lines on the image
         line_list = getLines(ff, config.k1_det, config.j1, config.time_slide, config.time_window_size, 
             config.max_lines_det, config.max_white_ratio, config.kht_lib_path)
+
+        # # Plot lines
+        # plotLines(ff, line_list)
+
+        # print line_list
 
         # Only if there are some lines in the image
         if len(line_list):
@@ -663,7 +705,7 @@ if __name__ == "__main__":
 
                     # print detected_line
 
-                    # # Show 3D cloud
+                    # Show 3D cloud
                     # show3DCloud(ff, stripe, detected_line, stripe_points, config)
 
                     # Add the line to the results list
@@ -713,7 +755,7 @@ if __name__ == "__main__":
                 img = morph.clean(img)
 
                 # Get indices of stripe pixels around the line
-                stripe_indices = getStripeIndices(rho, theta, config.stripe_width, img.shape[0], img.shape[1])
+                stripe_indices = getStripeIndices(rho, theta, int(config.stripe_width*1.5), img.shape[0], img.shape[1])
 
                 # Extract the stripe from the thresholded image
                 stripe = np.zeros((ff.nrows, ff.ncols), np.uint8)
@@ -739,10 +781,10 @@ if __name__ == "__main__":
                 # show3DCloud(ff, stripe, detected_line, stripe_points, config)
 
                 # Get points of the given line
-                line_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config, 
-                    fireball_detection=False)
+                # line_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config, 
+                #     fireball_detection=False)
 
-                print 'line_points:', line_points
+                line_points = stripe_points
 
                 # Skip if no points were returned
                 if not line_points.any():
@@ -798,7 +840,11 @@ if __name__ == "__main__":
 
                         centroids.append([frame_no, x_centroid, y_centroid, intensity])
 
+                
+                # Filter centroids
+                centroids = filterCentroids(centroids, 2)
 
+                # Convert to numpy array for easy slicing
                 centroids = np.array(centroids)
 
                 gs = gridspec.GridSpec(2, 1, width_ratios=[2,2], height_ratios=[2,1])
