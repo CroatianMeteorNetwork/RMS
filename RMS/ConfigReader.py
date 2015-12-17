@@ -81,8 +81,11 @@ class Config:
         self.line_distance_const_det = 4 # constant that determines the influence of average point distance on the line quality
         self.max_time_det = 10 # maximum time in seconds for which line finding algorithm can run
 
-        vect_angle_thresh = 20 # angle similarity between 2 lines in a stripe to be merged
+        self.vect_angle_thresh = 20 # angle similarity between 2 lines in a stripe to be merged
         self.frame_extension = 3 # how many frames to check during centroiding before and after the initially determined frame range
+
+        self.centroids_max_deviation = 2 # maximum deviation of a centroid point from a LSQ fitted line (if above max, it will be rejected)
+        self.centroids_max_distance =  30 # maximum distance in pixels between centroids (used for filtering spurious centroids)
 
 def parse(filename):
     parser = RawConfigParser()
@@ -272,3 +275,10 @@ def parseDetection(config, parser):
 
     if parser.has_option("Detection", "frame_extension"):
         config.frame_extension = parser.getint("Detection", "frame_extension")
+
+    if parser.has_option("Detection", "centroids_max_deviation"):
+        config.centroids_max_deviation = parser.getfloat("Detection", "centroids_max_deviation")
+
+    if parser.has_option("Detection", "centroids_max_distance"):
+        config.centroids_max_distance = parser.getint("Detection", "centroids_max_distance")
+

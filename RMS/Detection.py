@@ -201,6 +201,9 @@ def mergeLines(line_list, min_distance, last_count=0):
 
         for j, line2 in enumerate(line_list[i+1:]):
 
+            # Get real j index in respect to line_list
+            j = i + j + 1
+
             # Skip if the line was paired
             if j in paired_indices:
                 continue
@@ -216,7 +219,7 @@ def mergeLines(line_list, min_distance, last_count=0):
 
                 # Remove old lines
                 paired_indices.append(i)
-                paired_indices.append(i + j + 1)
+                paired_indices.append(j)
 
                 # Merge line
                 x_avg = (x1 + x2) / 2
@@ -308,6 +311,13 @@ def merge3DLines(line_list, vect_angle_thresh, last_count=0):
 
         for j, line2 in enumerate(line_list[i+1:]):
 
+            # Get real j index value with respect to line_list
+            j = j + i + 1
+
+            # Skip if the line is already paired
+            if j in paired_indices:
+                continue
+
             # Extract first point
             x21, y21, z21 = line2[0]
 
@@ -343,7 +353,7 @@ def merge3DLines(line_list, vect_angle_thresh, last_count=0):
 
                     # Remove old lines
                     paired_indices.append(i)
-                    paired_indices.append(i + j + 1)
+                    paired_indices.append(j)
 
                     found_pair = True
 
@@ -539,13 +549,13 @@ def show3DCloud(ff, stripe, detected_line=[], stripe_points=None, config=None):
     plt.close()
 
 
-def filterCentroids(centroids, centroid_max_deviation):
+def filterCentroids(centroids, centroid_max_deviation, max_distance):
     """ Checks for linearity in centroid data and reject the points which are too far off. """
 
     def _pointDistance(x1, y1, x2, y2):
         return np.sqrt((x2-x1)**2 + (y2-y1)**2)
 
-    def LSQfit(y, x):
+    def _LSQfit(y, x):
         """ Least squares fit. """
 
         A = np.vstack([x, np.ones(len(x))]).T
@@ -553,19 +563,72 @@ def filterCentroids(centroids, centroid_max_deviation):
 
         return m, c
 
-    # Return if empty list
-    if not centroids:
+    def _connectBrokenChains(centroids, max_distance, last_count=0):
+        """ Connect broken chains of centroids. """
+
+        filtered_chains = []
+        paired_indices = []
+        for i, chain1 in enumerate(chains):
+
+            # SKip if chain already connected
+            if i in paired_indices:
+                continue
+
+            # Get last point of first chain
+            x1 = chain1[-1][1]
+            y1 = chain1[-1][2]
+
+            found_pair = False
+            for j, chain2 in enumerate(chains[i+1:]):
+
+                # Correct for real position in the chain
+                j = j + i + 1
+
+                # Skip if chain already connected
+                if j in paired_indices:
+                    continue
+
+                # Get first point of the second chain
+                x2 = chain2[0][1]
+                y2 = chain2[0][2]
+
+                # Check if chains connect
+                if _pointDistance(x1, y1, x2, y2) <= max_distance:
+
+                    # Concatenate chains
+                    filtered_chains.append(chain1 + chain2)
+
+                    paired_indices.append(i)
+                    paired_indices.append(j)
+
+                    found_pair = True
+
+                    break
+
+            if not found_pair:
+                filtered_chains.append(chain1)
+
+        # Iteratively connect chains until all chains are connected
+        if len(filtered_chains) != last_count:
+            filtered_chains = _connectBrokenChains(centroids, max_distance, len(filtered_chains))
+
+        return filtered_chains
+
+
+    # Return if empty list of only 1 point
+    if len(centroids) < 2:
         return centroids
 
     centroids_array = np.array(centroids)
 
+    # Separate by individual columns of the centroid array
     frame_array = centroids_array[:,0]
     x_array = centroids_array[:,1]
     y_array = centroids_array[:,2]
 
     # LSQ fit by both axes
-    mX, cX = LSQfit(x_array, frame_array)
-    mY, cY = LSQfit(y_array, frame_array)
+    mX, cX = _LSQfit(x_array, frame_array)
+    mY, cY = _LSQfit(y_array, frame_array)
 
     filtered_centroids = []
 
@@ -577,10 +640,46 @@ def filterCentroids(centroids, centroid_max_deviation):
 
     # Take points with satisfactory deviation
     good_centroid_indices = np.where(np.logical_not(point_deviations > mean_deviation*centroid_max_deviation))
-    filtered_centroids = centroids_array[good_centroid_indices]
+    filtered_centroids = centroids_array[good_centroid_indices].tolist()
+
+    # Go through all points and separate by chains of centroids (divided by max distance)
+    chains = []
+    chain_index = 0
+    for i in range(len(filtered_centroids)-1):
+
+        if i == 0:
+            # Initialize the first chain on the first point
+            chains.append([filtered_centroids[i]])
+
+        # Current point position
+        x1 = filtered_centroids[i][1]
+        y1 = filtered_centroids[i][2]
+
+        # Next point position
+        x2 = filtered_centroids[i+1][1]
+        y2 = filtered_centroids[i+1][2]
+
+        # Check if the current and the next point are sufficiently close
+        if _pointDistance(x1, y1, x2, y2) <= max_distance:
+            chains[chain_index].append(filtered_centroids[i+1])
+        else:
+            # Make new chain
+            chains.append([filtered_centroids[i+1]])
+            chain_index += 1
+            
+
+    # Connect broken chains
+    filtered_chains = _connectBrokenChains(centroids, max_distance)
 
 
-    return filtered_centroids.tolist()
+    # Choose the chain with the greatest length
+    chain_lengths = [len(chain) for chain in filtered_chains]
+    max_chain_length = max(chain_lengths)
+
+    best_chain = filtered_chains[chain_lengths.index(max_chain_length)]
+
+
+    return best_chain
 
 
 
@@ -754,6 +853,12 @@ if __name__ == "__main__":
                 # Remove lonely pixels
                 img = morph.clean(img)
 
+                # Remove spurious pixels
+                img = morph.spur(img)
+
+                # Morphological closing
+                img = morph.close(img)
+
                 # Get indices of stripe pixels around the line
                 stripe_indices = getStripeIndices(rho, theta, int(config.stripe_width*1.5), img.shape[0], img.shape[1])
 
@@ -840,9 +945,10 @@ if __name__ == "__main__":
 
                         centroids.append([frame_no, x_centroid, y_centroid, intensity])
 
-                
+
                 # Filter centroids
-                centroids = filterCentroids(centroids, 2)
+                centroids = filterCentroids(centroids, config.centroids_max_deviation, 
+                    config.centroids_max_distance)
 
                 # Convert to numpy array for easy slicing
                 centroids = np.array(centroids)
