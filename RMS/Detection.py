@@ -914,8 +914,8 @@ if __name__ == "__main__":
                     if not len(frame_pixels):
                         continue
 
-                    # Calculate maxpixel and avepixel difference
-                    max_ave_diff = ff.maxpixel-ff.avepixel
+                    # Calculate weights for centroiding
+                    flattened_weights = (ff.maxpixel-ff.avepixel).astype(np.float32)/ff.stdpixel
 
                     # Calculate centroids by half-frame
                     for half_frame in range(2):
@@ -929,7 +929,7 @@ if __name__ == "__main__":
                         frame_no = i+half_frame*0.5
 
                         # Get maxpixel-avepixel values of given pixel indices (this will be used as weights)
-                        max_weights = max_ave_diff[half_frame_pixels[:,1], half_frame_pixels[:,0]]
+                        max_weights = flattened_weights[half_frame_pixels[:,1], half_frame_pixels[:,0]]
 
                         # Calculate weighted centroids
                         x_weighted = half_frame_pixels[:,0] * np.transpose(max_weights)
