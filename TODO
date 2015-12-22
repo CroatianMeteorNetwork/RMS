@@ -1,13 +1,23 @@
-refinement of KHT arguments
-centroiding along KHT line
-matched filter
-detection log
+add detection log
+add error log
 
-cleaning daemon:
-	moves all processed compressed images to external storage
-	clean compressed images without detection after 24h
-	clean compressed images with detection when on low storage
+post-detection:
+	star extraction
+	astrometry
+	photometry
 
+new multiprocessing:
+	capture keeps own process (higest priorty)
+	spawn new process for each new 256 frame block (high priorty):
+		do both compression and fireball extraction successively, in same process
+	detection runs on available cores, pausing on high load (lowest priorty)
+
+improve logging
 clean ALL docstrings
 add module docstrings and docopt argument parser to all modules that are called from terminal
 generate doc page
+
+cleaning daemon:
+	moves all processed compressed images to backup storage
+	clean compressed images without detection after X time
+	clean compressed images with detection when on low storage
