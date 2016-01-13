@@ -1,5 +1,5 @@
 # RPi Meteor Station
-# Copyright (C) 2015  Dario Zubovic
+# Copyright (C) 2015  Dario Zubovic, Denis Vida
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -854,10 +854,10 @@ if __name__ == "__main__":
                 img = morph.clean(img)
 
                 # Remove spurious pixels
-                img = morph.spur(img)
+                # img = morph.spur(img)
 
                 # Morphological closing
-                img = morph.close(img)
+                # img = morph.close(img)
 
                 # Get indices of stripe pixels around the line
                 stripe_indices = getStripeIndices(rho, theta, int(config.stripe_width*1.5), img.shape[0], img.shape[1])
@@ -886,10 +886,10 @@ if __name__ == "__main__":
                 # show3DCloud(ff, stripe, detected_line, stripe_points, config)
 
                 # Get points of the given line
-                # line_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config, 
-                #     fireball_detection=False)
+                line_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config, 
+                    fireball_detection=False)
 
-                line_points = stripe_points
+                # line_points = stripe_points
 
                 # Skip if no points were returned
                 if not line_points.any():
@@ -907,19 +907,30 @@ if __name__ == "__main__":
                     # Select pixel indicies belonging to a given frame
                     frame_pixels_inds = np.where(line_points[:,2] == i)
                     
-                    # Get pixel positions in a given frame
+                    # Get pixel positions in a given frame (pixels belonging to a found line)
                     frame_pixels = line_points[frame_pixels_inds].astype(np.int64)
+
+                    # Get pixel positions in a given frame (pixels belonging to the whole stripe)
+                    frame_pixels_stripe = stripe_points[frame_pixels_inds].astype(np.int64)
 
                     # Skip if there are no pixels in the frame
                     if not len(frame_pixels):
                         continue
 
                     # Calculate weights for centroiding
-                    flattened_weights = (ff.maxpixel-ff.avepixel).astype(np.float32)/ff.stdpixel
+                    max_avg_corrected = ff.maxpixel-ff.avepixel
+                    flattened_weights = (max_avg_corrected).astype(np.float32)/ff.stdpixel
 
                     # Calculate centroids by half-frame
                     for half_frame in range(2):
-                        half_frame_pixels = frame_pixels[frame_pixels[:,1] % 2 == (config.deinterlace_order + half_frame) % 2]
+
+                        # Deinterlace by fields (line lixels)
+                        half_frame_pixels = frame_pixels[frame_pixels[:,1] % 2 == (config.deinterlace_order 
+                            + half_frame) % 2]
+
+                        # Deinterlace by fields (stripe pixels)
+                        half_frame_pixels_stripe = frame_pixels_stripe[frame_pixels_stripe[:,1] % 2 == (config.deinterlace_order 
+                            + half_frame) % 2]
 
                         # Skip if there are no pixels in the half-frame
                         if not len(half_frame_pixels):
@@ -938,8 +949,11 @@ if __name__ == "__main__":
                         y_weighted = half_frame_pixels[:,1] * np.transpose(max_weights)
                         y_centroid = np.sum(y_weighted) / float(np.sum(max_weights))
 
-                        # Calculate intensity as the sum of white pixels
-                        intensity = np.sum(max_weights)
+                        # Calculate intensity as the sum of white pixels on the stripe
+                        #intensity_values = max_avg_corrected[half_frame_pixels[:,1], half_frame_pixels[:,0]]
+                        intensity_values = max_avg_corrected[half_frame_pixels_stripe[:,1], 
+                            half_frame_pixels_stripe[:,0]]
+                        intensity = np.sum(intensity_values)
                         
                         print "centroid: ", frame_no, x_centroid, y_centroid, intensity
 
