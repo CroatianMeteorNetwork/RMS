@@ -114,12 +114,19 @@ def twoD_Gaussian((x, y), amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
     return g.ravel()
 
 
-def fitPSF(ff, x2, y2):
+def fitPSF(ff, x2, y2, segment_radius=10, roundness_threshold=0.6, max_feature_ratio=0.5):
     """ Fit 2D Gaussian distribution as the PSF on the star image. 
 
     @param ff: [ff bin struct] FF bin file loaded in the FF bin structure
     @param x2: [list] a list of estimated star position (X axis)
     @param xy: [list] a list of estimated star position (Y axis)
+
+    @param segment_radius: [int] radius (in pixels) of image segment around the detected star on which to 
+        perform the fit
+    @param roundness_threshold: [float] minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars
+        (hot pixels are narrow, while stars are round)
+    @param max_feature_ratio: [float] maximum ratio between 2 sigma of the star and the image segment area
+
     """
 
     # Calculate the mean of the avepixel image
@@ -127,17 +134,16 @@ def fitPSF(ff, x2, y2):
 
     x_fitted = []
     y_fitted = []
+    intensity_fitted = []
     
     for star in zip(list(y2), list(x2)):
 
         y, x = star
 
-        star_radius = 10 # px
-
-        y_min = y - star_radius
-        y_max = y + star_radius
-        x_min = x - star_radius
-        x_max = x + star_radius
+        y_min = y - segment_radius
+        y_max = y + segment_radius
+        x_min = x - segment_radius
+        x_max = x + segment_radius
 
         if y_min < 0:
             y_min = 0
@@ -152,38 +158,54 @@ def fitPSF(ff, x2, y2):
         star_seg = ff.avepixel[y_min:y_max, x_min:x_max]
 
         # Create x and y indices
-        x_ind, y_ind = np.indices(star_seg.shape)
+        y_ind, x_ind = np.indices(star_seg.shape)
 
         # Fit a PSF to the star
-        initial_guess = (30.0, star_radius, star_radius, 1.0, 1.0, -10.0, avepixel_mean)
+        initial_guess = (30.0, segment_radius, segment_radius, 1.0, 1.0, -10.0, avepixel_mean)
 
         try:
-            popt, pcov = opt.curve_fit(twoD_Gaussian, (x_ind, y_ind), star_seg.ravel(), p0=initial_guess, maxfev=100)
+            popt, pcov = opt.curve_fit(twoD_Gaussian, (y_ind, x_ind), star_seg.ravel(), p0=initial_guess, maxfev=100)
             # print popt
         except:
             # print 'Fitting failed!'
             continue
 
-        amplitude, xo, yo, sigma_x, sigma_y, theta, offset = popt
+        # Unpack fitted gaussian parameters
+        amplitude, yo, xo, sigma_y, sigma_x, theta, offset = popt
 
+        # Filter hot pixels by looking at the ratio between x and y sigmas (HPs are very narrow)
+        if min(sigma_y/sigma_x, sigma_x/sigma_y) < roundness_threshold:
+            # Skip if it is a hot pixel
+            continue
+
+        # Reject the star candidate if it is too large 
+        if (4*sigma_x*sigma_y / segment_radius**2 > max_feature_ratio):
+            continue
+
+        # Calculate intensity (as a volume under 2 sigma 2D Gauss curve)
+        intensity = 8 * 3.14159 * amplitude * sigma_x * sigma_y + offset
+
+        # Add stars to the final list
         x_fitted.append(x_min + xo)
         y_fitted.append(y_min + yo)
+        intensity_fitted.append(intensity)
 
-
-        # # Plot fitted stars
-        # data_fitted = twoD_Gaussian((x_ind, y_ind), *popt)
+        # Plot fitted stars
+        # data_fitted = twoD_Gaussian((y_ind, x_ind), *popt) - offset
 
         # fig, ax = plt.subplots(1, 1)
         # ax.hold(True)
-        # ax.imshow(star_seg.reshape(star_radius*2, star_radius*2), cmap=plt.cm.jet, origin='bottom',
+        # plt.title(str(y_min)+' '+str(x_min))
+        # ax.imshow(star_seg.reshape(segment_radius*2, segment_radius*2), cmap=plt.cm.jet, origin='bottom',
         #     extent=(x_ind.min(), x_ind.max(), y_ind.min(), y_ind.max()))
-        # ax.contour(y_ind, x_ind, data_fitted.reshape(star_radius*2, star_radius*2), 8, colors='w')
+        # # ax.imshow(data_fitted.reshape(segment_radius*2, segment_radius*2), cmap=plt.cm.jet, origin='bottom')
+        # ax.contour(x_ind, y_ind, data_fitted.reshape(segment_radius*2, segment_radius*2), 8, colors='w')
 
         # plt.show()
         # plt.clf()
         # plt.close()
 
-    return x_fitted, y_fitted
+    return x_fitted, y_fitted, intensity_fitted
 
 
 
@@ -222,11 +244,14 @@ if __name__ == "__main__":
             continue
 
         # Fit a PSF to each star
-        x2, y2 = fitPSF(ff, x2, y2)
+        x2, y2, intensity = fitPSF(ff, x2, y2)
 
         print 'Time for finding: ', time.clock() - t1
 
-        print x2, y2
+        # Print found stars
+        print '   X      Y   intensity'
+        for x, y, intensity in zip(x2, y2, intensity):
+            print '{:06.2f} {:06.2f} {:06d}'.format(round(x, 2), round(y, 2), int(intensity))
 
 
         # Plot image
