@@ -77,7 +77,7 @@ def extractStars(ff, max_global_intensity=80, max_stars=50, star_threshold=0.6):
 
     # Check if the image is too bright
     if global_mean > max_global_intensity:
-        return np.array([]), np.array([])
+        return np.array([]), np.array([]), -1
 
     # Mask too bright regions of the image
     masked_average = maskBright(ff.avepixel, global_mean, max_abs_chunk_intensity=max_global_intensity)
@@ -91,7 +91,7 @@ def extractStars(ff, max_global_intensity=80, max_stars=50, star_threshold=0.6):
 
     # Skip if no local maxima found
     if not lm.shape:
-        return np.array([]), np.array([])
+        return np.array([]), np.array([]), -1
 
     y1, x1 = np.hsplit(lm, 2)
 
@@ -100,11 +100,12 @@ def extractStars(ff, max_global_intensity=80, max_stars=50, star_threshold=0.6):
     lim = star_threshold
     x2, y2 = x1[v > lim], y1[v > lim]
 
-    return x2, y2
+    return x2, y2, global_mean
 
 
 def twoD_Gaussian((x, y), amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
     """ Defines a 2D Gaussian distribution. """
+    
     xo = float(xo)
     yo = float(yo)    
     a = (np.cos(theta)**2)/(2*sigma_x**2) + (np.sin(theta)**2)/(2*sigma_y**2)
@@ -114,10 +115,11 @@ def twoD_Gaussian((x, y), amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
     return g.ravel()
 
 
-def fitPSF(ff, x2, y2, segment_radius=10, roundness_threshold=0.6, max_feature_ratio=0.5):
+def fitPSF(ff, avepixel_mean, x2, y2, segment_radius=7, roundness_threshold=0.6, max_feature_ratio=0.5):
     """ Fit 2D Gaussian distribution as the PSF on the star image. 
 
     @param ff: [ff bin struct] FF bin file loaded in the FF bin structure
+    @param avepixel_mean: [float] mean of the avepixel image
     @param x2: [list] a list of estimated star position (X axis)
     @param xy: [list] a list of estimated star position (Y axis)
 
@@ -128,9 +130,6 @@ def fitPSF(ff, x2, y2, segment_radius=10, roundness_threshold=0.6, max_feature_r
     @param max_feature_ratio: [float] maximum ratio between 2 sigma of the star and the image segment area
 
     """
-
-    # Calculate the mean of the avepixel image
-    avepixel_mean = np.mean(ff.avepixel)
 
     x_fitted = []
     y_fitted = []
@@ -190,12 +189,12 @@ def fitPSF(ff, x2, y2, segment_radius=10, roundness_threshold=0.6, max_feature_r
         y_fitted.append(y_min + yo)
         intensity_fitted.append(intensity)
 
-        # Plot fitted stars
+        # # Plot fitted stars
         # data_fitted = twoD_Gaussian((y_ind, x_ind), *popt) - offset
 
         # fig, ax = plt.subplots(1, 1)
         # ax.hold(True)
-        # plt.title(str(y_min)+' '+str(x_min))
+        # plt.title('Y: '+str(y_min)+', X:'+str(x_min))
         # ax.imshow(star_seg.reshape(segment_radius*2, segment_radius*2), cmap=plt.cm.jet, origin='bottom',
         #     extent=(x_ind.min(), x_ind.max(), y_ind.min(), y_ind.max()))
         # # ax.imshow(data_fitted.reshape(segment_radius*2, segment_radius*2), cmap=plt.cm.jet, origin='bottom')
@@ -235,16 +234,16 @@ if __name__ == "__main__":
         t1 = time.clock()
 
         # Run star extraction
-        x2, y2 = extractStars(ff)
+        x2, y2, img_mean = extractStars(ff)
 
         print x2, y2
 
         # Skip if no stars were found
-        if not (x2.shape and y2.shape):
+        if img_mean == -1:
             continue
 
         # Fit a PSF to each star
-        x2, y2, intensity = fitPSF(ff, x2, y2)
+        x2, y2, intensity = fitPSF(ff, img_mean, x2, y2)
 
         print 'Time for finding: ', time.clock() - t1
 
