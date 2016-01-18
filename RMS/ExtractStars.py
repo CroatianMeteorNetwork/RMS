@@ -160,10 +160,10 @@ def fitPSF(ff, avepixel_mean, x2, y2, segment_radius=7, roundness_threshold=0.6,
         y_ind, x_ind = np.indices(star_seg.shape)
 
         # Fit a PSF to the star
-        initial_guess = (30.0, segment_radius, segment_radius, 1.0, 1.0, -10.0, avepixel_mean)
+        initial_guess = (30.0, segment_radius, segment_radius, 1.5, 1.5, -10.0, avepixel_mean)
 
         try:
-            popt, pcov = opt.curve_fit(twoD_Gaussian, (y_ind, x_ind), star_seg.ravel(), p0=initial_guess, maxfev=100)
+            popt, pcov = opt.curve_fit(twoD_Gaussian, (y_ind, x_ind), star_seg.ravel(), p0=initial_guess, maxfev=150)
             # print popt
         except:
             # print 'Fitting failed!'
@@ -181,8 +181,12 @@ def fitPSF(ff, avepixel_mean, x2, y2, segment_radius=7, roundness_threshold=0.6,
         if (4*sigma_x*sigma_y / segment_radius**2 > max_feature_ratio):
             continue
 
-        # Calculate intensity (as a volume under 2 sigma 2D Gauss curve)
-        intensity = 8 * 3.14159 * amplitude * sigma_x * sigma_y + offset
+        # Calculate intensity (as a volume under 2 sigma 2D Gauss curve) - background intensity
+        intensity = 8 * 3.14159 * amplitude * sigma_x * sigma_y - offset
+
+        # Skip if the star intensity is below background level
+        if intensity < 2 * offset:
+            continue
 
         # Add stars to the final list
         x_fitted.append(x_min + xo)
