@@ -45,7 +45,7 @@ class Extractor(Process):
         
         code = """
         unsigned int x, y, x2, y2, n, i, max;
-        unsigned int num = 0, acc = 0;
+        unsigned int num = 0;
         unsigned int avg_std;
         
         for(y=0; y<Nframes[1]; y++) {
