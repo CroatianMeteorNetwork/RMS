@@ -82,6 +82,14 @@ def extractStars(ff, max_global_intensity=80, max_stars=50, star_threshold=0.6):
     # Mask too bright regions of the image
     masked_average = maskBright(ff.avepixel, global_mean, max_abs_chunk_intensity=max_global_intensity)
 
+
+    # Plot image
+    plt.imshow(masked_average, cmap='gray')
+    plt.show()
+    plt.clf()
+    plt.close()
+
+
     # Stretch image intensity with arcsinh
     limg = np.arcsinh(masked_average.astype(np.float32))
     limg = limg / limg.max()

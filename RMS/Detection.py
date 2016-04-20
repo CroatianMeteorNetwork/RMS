@@ -31,6 +31,7 @@ from RMS.Formats import FFbin
 import RMS.ConfigReader as cr
 from RMS.Routines import MorphologicalOperations as morph
 from RMS.Routines.Grouping3D import find3DLines, getAllPoints
+from RMS.Routines.CompareLines import compareLines
 
 def show(name, img):
     cv2.imshow(name, img.astype(np.uint8)*255)
@@ -159,7 +160,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
 
     return (indicesy, indicesx)
 
-def mergeLines(line_list, min_distance, last_count=0):
+def mergeLines(line_list, min_distance, img_w, img_h, last_count=0):
     """ Merge similar lines defined by rho and theta. 
 
     @param: line_list: [list] a list of (rho, phi, min_frame, max_frame) tuples which define a KHT line
@@ -196,8 +197,7 @@ def mergeLines(line_list, min_distance, last_count=0):
         # Get polar coordinates of line
         rho1, theta1 = line1[0:2]
 
-        # Get cartesian coordinates of a point described by the polar vector
-        x1, y1 = _getCartesian(rho1, theta1)
+        
 
         for j, line2 in enumerate(line_list[i+1:]):
 
@@ -211,15 +211,18 @@ def mergeLines(line_list, min_distance, last_count=0):
             # Get polar coordinates of line
             rho2, theta2 = line2[0:2]
 
-            # Get cartesian coordinates of a point described by the polar vector
-            x2, y2 = _getCartesian(rho2, theta2)
-
             # Check if the points are close enough
-            if _pointDist(x1, y1, x2, y2) <= min_distance:
+            if compareLines(rho1, theta1, rho2, theta2, img_w, img_h) < min_distance:
 
                 # Remove old lines
                 paired_indices.append(i)
                 paired_indices.append(j)
+
+                # Get cartesian coordinates of a point described by the polar vector
+                x1, y1 = _getCartesian(rho1, theta1)
+
+                # Get cartesian coordinates of a point described by the polar vector
+                x2, y2 = _getCartesian(rho2, theta2)
 
                 # Merge line
                 x_avg = (x1 + x2) / 2
@@ -246,7 +249,7 @@ def mergeLines(line_list, min_distance, last_count=0):
 
     # Use recursion until the number of lines stabilizes
     if len(final_list) != last_count:
-        final_list = mergeLines(final_list, min_distance, len(final_list))
+        final_list = mergeLines(final_list, min_distance, img_w, img_h, len(final_list))
 
     return final_list
 
@@ -454,6 +457,7 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
         lines = np.empty((max_lines, 2), np.double)
         
         # Call the KHT line finding
+        # Parameters: cluster_min_size (px), cluster_min_deviation, delta, kernel_min_height, n_sigmas
         length = kht.kht_wrapper(lines, img, w, h, max_lines, 9, 2, 0.1, 0.004, 1)
         
         # Cut the line array to the number of found lines
@@ -686,6 +690,8 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
 
 if __name__ == "__main__":
 
+    # Measure the time of the whole operation
+    time_whole = time()
 
     
     if len(sys.argv) == 1:
@@ -703,12 +709,19 @@ if __name__ == "__main__":
     # Load config file
     config = cr.parse(".config")
 
+    # Open a file for results
+    results_path = os.path.abspath(sys.argv[1]) + os.sep
+    results_name = results_path.split(os.sep)[-2]
+    results_file = open(results_path + results_name+'_results.txt', 'w')
+
     # Run meteor search on every file
     for ff_name in sorted(ff_list):
 
+        print '--------------------------------------------'
         print ff_name
 
         t1 = time()
+        t_all = time()
 
         # Load the FF bin file
         ff = FFbin.read(sys.argv[1], ff_name)
@@ -719,8 +732,10 @@ if __name__ == "__main__":
         line_list = getLines(ff, config.k1_det, config.j1, config.time_slide, config.time_window_size, 
             config.max_lines_det, config.max_white_ratio, config.kht_lib_path)
 
+        print line_list
+
         # # Plot lines
-        # plotLines(ff, line_list)
+        plotLines(ff, line_list)
 
         # print line_list
 
@@ -728,7 +743,7 @@ if __name__ == "__main__":
         if len(line_list):
 
             # Join similar lines
-            line_list = mergeLines(line_list, config.line_min_dist)
+            line_list = mergeLines(line_list, config.line_min_dist, ff.ncols, ff.nrows)
 
             print 'time for finding lines', time() - t1
 
@@ -736,7 +751,8 @@ if __name__ == "__main__":
             print line_list
 
             # Plot lines
-            plotLines(ff, line_list)
+            #COMMENTED
+            # plotLines(ff, line_list)
 
             # Threshold the image
             img_thres = thresholdImg(ff, config.k1_det, config.j1)
@@ -764,7 +780,7 @@ if __name__ == "__main__":
                 stripe[stripe_indices] = img[stripe_indices]
 
                 # Show stripe
-                # show2("stripe", stripe*255)
+                show2("stripe", stripe*255)
 
                 # Show 3D could
                 # show3DCloud(ff, stripe)
@@ -823,7 +839,7 @@ if __name__ == "__main__":
                 frame_max = detected_line[5]
 
                 # Check if the line covers a minimum frame range
-                if (abs(frame_max - frame_min) + 1 < config.line_minimum_frame_range):
+                if (abs(frame_max - frame_min) + 1 < config.line_minimum_frame_range_det):
                     continue
 
                 # Extand the frame range for several frames, just to be sure to catch all parts of a meteor
@@ -866,8 +882,8 @@ if __name__ == "__main__":
                 stripe = np.zeros((ff.nrows, ff.ncols), np.uint8)
                 stripe[stripe_indices] = img[stripe_indices]
 
-
-                show('detected line: '+str(frame_min)+'-'+str(frame_max), stripe)
+                #COMMENTED
+                # show('detected line: '+str(frame_min)+'-'+str(frame_max), stripe)
 
                 # Get stripe positions
                 stripe_positions = stripe.nonzero()
@@ -889,14 +905,12 @@ if __name__ == "__main__":
                 line_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config, 
                     fireball_detection=False)
 
-                # line_points = stripe_points
-
                 # Skip if no points were returned
                 if not line_points.any():
                     continue
 
                 # Skip if the points cover too small a frame range
-                if abs(np.max(line_points[:,2]) - np.min(line_points[:,2])) + 1 < config.line_minimum_frame_range:
+                if abs(np.max(line_points[:,2]) - np.min(line_points[:,2])) + 1 < config.line_minimum_frame_range_det:
                     continue
 
                 # Calculate centroids
@@ -911,7 +925,7 @@ if __name__ == "__main__":
                     frame_pixels = line_points[frame_pixels_inds].astype(np.int64)
 
                     # Get pixel positions in a given frame (pixels belonging to the whole stripe)
-                    frame_pixels_stripe = stripe_points[frame_pixels_inds].astype(np.int64)
+                    frame_pixels_stripe = stripe_points[np.where(stripe_points[:,2] == i)].astype(np.int64)
 
                     # Skip if there are no pixels in the frame
                     if not len(frame_pixels):
@@ -967,6 +981,13 @@ if __name__ == "__main__":
                 # Convert to numpy array for easy slicing
                 centroids = np.array(centroids)
 
+                # Reject the solution if there are too few centroids
+                if len(centroids) < config.line_minimum_frame_range_det:
+                    continue
+
+                print 'time for processing:', time() - t_all
+
+                #COMMENTED
                 gs = gridspec.GridSpec(2, 1, width_ratios=[2,2], height_ratios=[2,1])
                 # Plot centroids to image
                 plt.subplot(gs[0])
@@ -977,5 +998,16 @@ if __name__ == "__main__":
                 # Plot lightcurve
                 plt.plot(centroids[:,0], centroids[:,3])
                 plt.show()
-                plt.clf()
+                plt.clf() 
                 plt.close()
+
+                # Print detection to file
+                results_file.write('-------------------------------------------------------\n')
+                results_file.write(ff_name+'\n')
+                results_file.write(str(rho) + ',' + str(theta) + '\n')
+                results_file.write(str(centroids)+'\n')
+                
+
+
+print 'Time for the whole directory:', time() - time_whole
+results_file.close()
