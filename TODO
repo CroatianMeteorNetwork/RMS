@@ -1,18 +1,17 @@
 add detection log
 add error log
+add capture device specific initialization routines (ie. UTV007 weird behaviour with OpenCV before calling mplayer tv:// -tv device=/dev/video0)
 
 post-detection:
-	star extraction
-	astrometry
 	photometry
 
 new multiprocessing:
-	capture keeps own process (higest priorty)
-	spawn new process for each new 256 frame block (high priorty):
+	capture keeps own process (high priorty)
+	spawn new process for each new 256 frame block (medium priorty):
 		do both compression and fireball extraction successively, in same process
-	detection runs on available cores, pausing on high load (lowest priorty)
+	detection runs on available cores, pausing on high load (low priorty)
 
-improve logging
+improve logging (add messages that level more logging levels and not only debug level)
 clean ALL docstrings
 add module docstrings and docopt argument parser to all modules that are called from terminal
 generate doc page
@@ -21,3 +20,10 @@ cleaning daemon:
 	moves all processed compressed images to backup storage
 	clean compressed images without detection after X time
 	clean compressed images with detection when on low storage
+
+things to resolve before 1.0 release:
+	cleaning code for multiplatform use (ie. os.sep, abstracting away hardware interface layer)
+	Linux daemon for autostarting capture & processing runs
+	.deb installer & storing everything on usual locations (/var/log, /usr/local/bin, /opt...)
+	Windows daemon (maybe copy CAMS approach?)
+	Windows installer & storing everything in usual Win dirs (C:/Program Files/...)
