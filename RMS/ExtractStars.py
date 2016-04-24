@@ -83,11 +83,11 @@ def extractStars(ff, max_global_intensity=80, max_stars=50, star_threshold=0.6):
     masked_average = maskBright(ff.avepixel, global_mean, max_abs_chunk_intensity=max_global_intensity)
 
 
-    # Plot image
-    plt.imshow(masked_average, cmap='gray')
-    plt.show()
-    plt.clf()
-    plt.close()
+    # # Plot image
+    # plt.imshow(masked_average, cmap='gray')
+    # plt.show()
+    # plt.clf()
+    # plt.close()
 
 
     # Stretch image intensity with arcsinh
@@ -171,7 +171,7 @@ def fitPSF(ff, avepixel_mean, x2, y2, segment_radius=7, roundness_threshold=0.6,
         initial_guess = (30.0, segment_radius, segment_radius, 1.5, 1.5, -10.0, avepixel_mean)
 
         try:
-            popt, pcov = opt.curve_fit(twoD_Gaussian, (y_ind, x_ind), star_seg.ravel(), p0=initial_guess, maxfev=150)
+            popt, pcov = opt.curve_fit(twoD_Gaussian, (y_ind, x_ind), star_seg.ravel(), p0=initial_guess, maxfev=100)
             # print popt
         except:
             # print 'Fitting failed!'
@@ -248,8 +248,6 @@ if __name__ == "__main__":
         # Run star extraction
         x2, y2, img_mean = extractStars(ff)
 
-        print x2, y2
-
         # Skip if no stars were found
         if img_mean == -1:
             continue
@@ -259,11 +257,19 @@ if __name__ == "__main__":
 
         print 'Time for finding: ', time.clock() - t1
 
+        # Skip the rest if there are no good stars
+        if not x2:
+            continue
+
         # Print found stars
         print '   X      Y   intensity'
         for x, y, intensity in zip(x2, y2, intensity):
             print '{:06.2f} {:06.2f} {:06d}'.format(round(x, 2), round(y, 2), int(intensity))
 
+
+        # Show stars if there are only more then 10 of them
+        if len(x2) < 10:
+            continue
 
         # Plot image
         plt.imshow(np.arcsinh(ff.avepixel), cmap='gray')

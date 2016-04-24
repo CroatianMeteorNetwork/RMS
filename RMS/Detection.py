@@ -33,25 +33,32 @@ from RMS.Routines import MorphologicalOperations as morph
 from RMS.Routines.Grouping3D import find3DLines, getAllPoints
 from RMS.Routines.CompareLines import compareLines
 
-def show(name, img):
-    cv2.imshow(name, img.astype(np.uint8)*255)
-    cv2.moveWindow(name, 0, 0)
-    cv2.waitKey(0)
-    cv2.destroyWindow(name)
-
-def show2(name, img):
-    cv2.imshow(name, img)
-    cv2.moveWindow(name, 0, 0)
-    cv2.waitKey(0)
-    cv2.destroyWindow(name)
 
 def thresholdImg(ff, k1, j1):
-    """ Threshold the image with given parameters. """
+    """ Threshold the image with given parameters. "
+
+    @param ff: [FF object] input FF image object on which the thresholding will be applied
+    @param k1: [float] relative thresholding factor (how many standard deviations above mean shoud maxpix be)
+    @param j1: [float] absolute thresholding factor (how many minimum abuolute levels above mean soug maxpix be)
+
+    @return [ndarray] thresholded 2D image
+    """
 
     return ff.maxpixel - ff.avepixel > (k1 * ff.stdpixel + j1)
 
+
+
 def selectFrames(img_thres, ff, frame_min, frame_max):
-    """ Select only pixels in a given frame range. """
+    """ Select only pixels in a given frame range. 
+
+    @param img_thres: [ndarray] 2D numpy array containing the thresholded image
+    @param ff: [FF object] FF image object
+    @param frame_min: [int] first frame in a range to take
+    @param frame_max: [int] last frame in a range to take
+
+    @return [ndarray] image with pixels only from the given frame range
+
+    """
 
     # Get the indices of image positions with times correspondng to the subdivision
     indices = np.where((ff.maxframe >= frame_min) & (ff.maxframe <= frame_max))
@@ -64,7 +71,15 @@ def selectFrames(img_thres, ff, frame_min, frame_max):
 
 def getPolarLine(x1, y1, x2, y2, img_h, img_w):
     """ Calculate polar line coordinates (Hough transform coordinates) rho and theta given the 2 points that 
-        define a line. Coordinate system starts in the image center, to replicate the used HT implementation.
+        define a line in Cartesian coordinates. Coordinate system starts in the image center, to replicate 
+        the used HT implementation.
+
+    @param x1: [float] X component of the first point
+    @param y1: [float] Y component of the first point
+    @param x2: [float] X component of the second point
+    @param y2: [float] Y component of the second point
+
+    @return (rho, theta): [tuple] rho (distance in px) and theta (angle in degrees) polar line coordinates
     """
 
     x0 = float(img_w)/2
@@ -87,11 +102,13 @@ def getPolarLine(x1, y1, x2, y2, img_h, img_w):
 
 def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
     """ Get indices of a stripe centered on a lines.
+
     @param rho: [float] line distance from the center in HT space (pixels)
     @param theta: [float] angle in degrees in HT space
     @param stripe_width: [int] width of the stripe around the line
     @param img_h: [int] original image height
     @param img_w: [int] original image width
+
     @return (indicesx, indicesy): [tuple] a tuple of x and y indices of stripe pixels
     """
 
@@ -174,10 +191,6 @@ def mergeLines(line_list, min_distance, img_w, img_h, last_count=0):
     def _getCartesian(rho, theta):
         """ Convert rho and theta to cartesian x and y points. """
         return np.cos(np.radians(theta)) * rho, np.sin(np.radians(theta)) * rho
-
-    def _pointDist(x1, y1, x2, y2):
-        """ Euclidian distance between two points. """
-        return np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
 
     # Return if less than 2 lines
     if len(line_list) < 2:
@@ -385,7 +398,8 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
     @param max_lines: [int] maximum number of lines to find by KHT
     @param max_white_ratio: [float] max ratio between write and all pixels after thresholding
     @param kht_lib_path: [string] path to the compiled KHT library
-    @return
+    
+    @return [list]: a Python list of found lines
 
     """
 
@@ -425,6 +439,11 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
         # Show thresholded image
         # show(str(frame_min) + "-" + str(frame_max) + " treshold", img)
 
+        # # Show maxpixel of the thresholded part
+        # mask = np.zeros(shape=img.shape)
+        # mask[np.where(img)] = 1
+        # show('thresh max', ff.maxpixel*mask)
+
         ### Apply morphological operations to prepare the image for KHT
 
         # Remove lonely pixels
@@ -437,12 +456,18 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
         img = morph.close(img)
         
         # Thin all lines to 1px width
-        img = morph.repeat(morph.thin, img, None)
+        #img = morph.repeat(morph.thin, img, None)
+        img = morph.thin2(img)
         
         # Remove lonely pixels
         img = morph.clean(img)
 
-        # Show morphed image
+        # # Show morphed over maxpixel
+        # temp = ff.maxpixel - img.astype(np.int16)*255
+        # temp[temp>0] = 0
+        # show('compare', temp-ff.maxpixel)
+
+        # # Show morphed image
         # show(str(frame_min) + "-" + str(frame_max) + " morph", img)
 
         ###
@@ -451,22 +476,24 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
         w, h = img.shape[1], img.shape[0]
 
         # Convert the image to feed it into the KHT
-        img = (img.flatten().astype(np.byte)*255).astype(np.byte)
+        img_flatten = (img.flatten().astype(np.byte)*255).astype(np.byte)
         
         # Predefine the line output
         lines = np.empty((max_lines, 2), np.double)
         
         # Call the KHT line finding
         # Parameters: cluster_min_size (px), cluster_min_deviation, delta, kernel_min_height, n_sigmas
-        length = kht.kht_wrapper(lines, img, w, h, max_lines, 9, 2, 0.1, 0.004, 1)
+        length = kht.kht_wrapper(lines, img_flatten, w, h, max_lines, 9, 2, 0.1, 0.004, 1)
         
         # Cut the line array to the number of found lines
         lines = lines[:length]
+
 
         # Skip further operations if there are no lines
         if lines.any():
             for rho, theta in lines:
                 line_results.append([rho, theta, frame_min, frame_max])
+
 
         # if line_results:
         #     plotLines(ff, line_results)
@@ -475,88 +502,21 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
     return line_results
 
 
-def plotLines(ff, line_list):
-    """ Plot lines on the image. """
-
-    img = np.copy(ff.maxpixel)
-
-    hh = img.shape[0] / 2.0
-    hw = img.shape[1] / 2.0
-
-    for rho, theta, frame_min, frame_max in line_list:
-        theta = np.deg2rad(theta)
-        
-        a = np.cos(theta)
-        b = np.sin(theta)
-        x0 = a*rho
-        y0 = b*rho
-
-        x1 = int(x0 + 1000*(-b) + hw)
-        y1 = int(y0 + 1000*(a) + hh)
-        x2 = int(x0 - 1000*(-b) + hw)
-        y2 = int(y0 - 1000*(a) + hh)
-        
-        cv2.line(img, (x1, y1), (x2, y2), (255, 0, 255), 1)
-        
-    show2("KHT", img)
-
-
-def show3DCloud(ff, stripe, detected_line=[], stripe_points=None, config=None):
-    """ Shows 3D point cloud of stripe points. """
-
-    stripe_indices = stripe.nonzero()
-
-    xs = stripe_indices[1]
-    ys = stripe_indices[0]
-    zs = ff.maxframe[stripe_indices]
-
-    print 'points:', len(xs)
-
-    # Plot points in 3D
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-
-    ax.scatter(xs, ys, zs)
-
-    if detected_line and len(stripe_points):
-
-        xs = [detected_line[0][1], detected_line[1][1]]
-        ys = [detected_line[0][0], detected_line[1][0]]
-        zs = [detected_line[0][2], detected_line[1][2]]
-        ax.plot(ys, xs, zs, c = 'r')
-
-        x1, x2 = ys
-        y1, y2 = xs
-        z1, z2 = zs
-
-        detected_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config, 
-            fireball_detection=False)
-
-        if detected_points.any():
-
-            detected_points = np.array(detected_points)
-
-            xs = detected_points[:,0]
-            ys = detected_points[:,1]
-            zs = detected_points[:,2]
-
-            ax.scatter(xs, ys, zs, c = 'r', s = 40)
-
-    # Set limits
-    plt.xlim((0, ff.ncols))
-    plt.ylim((0, ff.nrows))
-    ax.set_zlim((0, 255))
-
-    plt.show()
-
-    plt.clf()
-    plt.close()
-
-
 def filterCentroids(centroids, centroid_max_deviation, max_distance):
-    """ Checks for linearity in centroid data and reject the points which are too far off. """
+    """ Checks for linearity in centroid data and reject the points which are too far off. 
+
+    @param centroids: [list] a list of [frame, X, Y, level] centroid coordinates
+    @param centroid_max_deviation: [float] max deviation from the fitted line, centroids above this get 
+        rejected
+    @param max_distance: [float] max distance between 2 ends of centroid chains which connects them
+
+    @return centroids: [list] a filtered list of centroids (see input centroids for details)
+
+    """
 
     def _pointDistance(x1, y1, x2, y2):
+        """ Distance between 2 points in 2D Cartesian coordinates. """
+
         return np.sqrt((x2-x1)**2 + (y2-y1)**2)
 
     def _LSQfit(y, x):
@@ -643,7 +603,7 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
     mean_deviation = np.mean(point_deviations)
 
     # Take points with satisfactory deviation
-    good_centroid_indices = np.where(np.logical_not(point_deviations > mean_deviation*centroid_max_deviation))
+    good_centroid_indices = np.where(np.logical_not(point_deviations > mean_deviation*centroid_max_deviation + 1))
     filtered_centroids = centroids_array[good_centroid_indices].tolist()
 
     # Go through all points and separate by chains of centroids (divided by max distance)
@@ -687,6 +647,414 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
 
 
 
+def show(name, img):
+    cv2.imshow(name, img.astype(np.uint8)*255)
+    cv2.moveWindow(name, 0, 0)
+    cv2.waitKey(0)
+    cv2.destroyWindow(name)
+
+
+
+def show2(name, img):
+    cv2.imshow(name, img)
+    cv2.moveWindow(name, 0, 0)
+    cv2.waitKey(0)
+    cv2.destroyWindow(name)
+
+
+
+def plotLines(ff, line_list):
+    """ Plot lines on the image. """
+
+    img = np.copy(ff.maxpixel)
+
+    hh = img.shape[0] / 2.0
+    hw = img.shape[1] / 2.0
+
+    for rho, theta, frame_min, frame_max in line_list:
+        theta = np.deg2rad(theta)
+        
+        a = np.cos(theta)
+        b = np.sin(theta)
+        x0 = a*rho
+        y0 = b*rho
+
+        x1 = int(x0 + 1000*(-b) + hw)
+        y1 = int(y0 + 1000*(a) + hh)
+        x2 = int(x0 - 1000*(-b) + hw)
+        y2 = int(y0 - 1000*(a) + hh)
+        
+        cv2.line(img, (x1, y1), (x2, y2), (255, 0, 255), 1)
+        
+    show2("KHT", img)
+
+
+
+def show3DCloud(ff, stripe, detected_line=[], stripe_points=None, config=None):
+    """ Shows 3D point cloud of stripe points. """
+
+    stripe_indices = stripe.nonzero()
+
+    xs = stripe_indices[1]
+    ys = stripe_indices[0]
+    zs = ff.maxframe[stripe_indices]
+
+    print 'points:', len(xs)
+
+    # Plot points in 3D
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+
+    ax.scatter(xs, ys, zs)
+
+    if detected_line and len(stripe_points):
+
+        xs = [detected_line[0][1], detected_line[1][1]]
+        ys = [detected_line[0][0], detected_line[1][0]]
+        zs = [detected_line[0][2], detected_line[1][2]]
+        ax.plot(ys, xs, zs, c = 'r')
+
+        x1, x2 = ys
+        y1, y2 = xs
+        z1, z2 = zs
+
+        detected_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config, 
+            fireball_detection=False)
+
+        if detected_points.any():
+
+            detected_points = np.array(detected_points)
+
+            xs = detected_points[:,0]
+            ys = detected_points[:,1]
+            zs = detected_points[:,2]
+
+            ax.scatter(xs, ys, zs, c = 'r', s = 40)
+
+    # Set limits
+    plt.xlim((0, ff.ncols))
+    plt.ylim((0, ff.nrows))
+    ax.set_zlim((0, 255))
+
+    plt.show()
+
+    plt.clf()
+    plt.close()
+
+
+def detectMeteors(ff_directory, ff_name, config):
+    """ Detect meteors on the given FF bin image. The input image (FF bin format file) is first thresholded,
+        then several morphological operations are applied to clean the image. Image image is then broken into
+        several image "windows". These "windows" are reconstructed from the input FF file, given an input
+        frame range (e.g. 64-128) which helps reduce the noise further. On each "window" the Kernel-based 
+        Hough transform is performed to find any lines on the image. The similar lines are joined, a stripe
+        around the lines is extracted and the 3D line finding (third dimension is time) is applied to check
+        if the line propagates in time. The then the centroiding is performed which calculates the positions
+        of meteor on each frame, as intensity of each point is calculated as well.
+    
+    @param ff_directory: [string] an absolute path to the input FF bin file
+    @param ff_name: [string] file name of the FF bin file on which to run the detection on
+    @param config: [config object] configuration object (loaded from the .config file)
+
+    @return meteor_detections: [list] a list of detected meteors:
+        rho: [float] meteor line distance from image center (polar coordinates, in pixels)
+        theta: [float] meteor line angle from image center (polar coordinates, in degrees)
+        centroids: [list] [frame, X, Y, level] list of meteor points
+
+    """
+
+
+    t1 = time()
+    t_all = time()
+
+    # Load the FF bin file
+    ff = FFbin.read(ff_directory, ff_name)
+
+    # show2(ff_name+' maxpixel', ff.maxpixel)
+
+    # Get lines on the image
+    line_list = getLines(ff, config.k1_det, config.j1, config.time_slide, config.time_window_size, 
+        config.max_lines_det, config.max_white_ratio, config.kht_lib_path)
+
+    print line_list
+
+
+    # Init meteor list
+    meteor_detections = []
+
+    # Only if there are some lines in the image
+    if len(line_list):
+
+        # Join similar lines
+        line_list = mergeLines(line_list, config.line_min_dist, ff.ncols, ff.nrows)
+
+        print 'time for finding lines', time() - t1
+
+        print 'number of KHT lines:', len(line_list)
+        print line_list
+
+        # Plot lines
+        # plotLines(ff, line_list)
+
+        # Threshold the image
+        img_thres = thresholdImg(ff, config.k1_det, config.j1)
+
+        filtered_lines = []
+
+        # Analyze stripes of each line
+        for line in line_list:
+            rho, theta, frame_min, frame_max = line
+
+            print 'rho, theta, frame_min, frame_max'
+            print rho, theta, frame_min, frame_max
+
+            # Bounded the thresholded image by min and max frames
+            img = selectFrames(np.copy(img_thres), ff, frame_min, frame_max)
+
+            # Remove lonely pixels
+            img = morph.clean(img)
+
+            # Get indices of stripe pixels around the line
+            stripe_indices = getStripeIndices(rho, theta, config.stripe_width, img.shape[0], img.shape[1])
+
+            # Extract the stripe from the thresholded image
+            stripe = np.zeros((ff.nrows, ff.ncols), np.uint8)
+            stripe[stripe_indices] = img[stripe_indices]
+
+            # Show stripe
+            #COMMENTED
+            #show2("stripe", stripe*255)
+
+            # Show 3D could
+            # show3DCloud(ff, stripe)
+
+            # Get stripe positions
+            stripe_positions = stripe.nonzero()
+            xs = stripe_positions[1]
+            ys = stripe_positions[0]
+            zs = ff.maxframe[stripe_positions]
+
+            # Limit the number of points to search if too large
+            if len(zs) > config.max_points_det:
+
+                # Extract weights of each point
+                maxpix_elements = ff.maxpixel[xs,ys].astype(np.float64)
+                weights = maxpix_elements / np.sum(maxpix_elements)
+
+                # Random sample the point, sampling is weighted by pixel intensity
+                indices = np.random.choice(len(zs), config.max_points_det, replace=False, p=weights)
+                ys = ys[indices]
+                xs = xs[indices]
+                zs = zs[indices]
+
+            # Make an array to feed into the gropuing algorithm
+            stripe_points = np.vstack((xs, ys, zs))
+            stripe_points = np.swapaxes(stripe_points, 0, 1)
+            
+            # Sort stripe points by frame
+            stripe_points = stripe_points[stripe_points[:,2].argsort()]
+
+            t1 = time()
+
+            print 'finding lines...'
+
+            # Find a single line in the point cloud
+            detected_line = find3DLines(stripe_points, time(), config, fireball_detection=False)
+
+            print 'time for GROUPING: ', time() - t1
+
+            # Extract the first and only line if any
+            if detected_line:
+                detected_line = detected_line[0]
+
+                # print detected_line
+
+                # Show 3D cloud
+                # show3DCloud(ff, stripe, detected_line, stripe_points, config)
+
+                # Add the line to the results list
+                filtered_lines.append(detected_line)
+
+        # Merge similar lines in 3D
+        filtered_lines = merge3DLines(filtered_lines, config.vect_angle_thresh)
+
+        print 'after filtering:'
+        print filtered_lines
+
+
+        for detected_line in filtered_lines:
+
+            # Get frame range
+            frame_min = detected_line[4]
+            frame_max = detected_line[5]
+
+            # Check if the line covers a minimum frame range
+            if (abs(frame_max - frame_min) + 1 < config.line_minimum_frame_range_det):
+                continue
+
+            # Extand the frame range for several frames, just to be sure to catch all parts of a meteor
+            frame_min -= config.frame_extension
+            frame_max += config.frame_extension
+
+            # Cap values to 0-255
+            frame_min = max(frame_min, 0)
+            frame_max = min(frame_max, 255)
+
+
+            print detected_line
+
+            # Get coordinates of 2 points that describe the line
+            x1, y1, z1 = detected_line[0]
+            x2, y2, z2 = detected_line[1]
+
+            # Convert Cartesian line coordinates to polar
+            rho, theta = getPolarLine(x1, y1, x2, y2, ff.nrows, ff.ncols)
+
+            print 'converted rho, theta'
+            print rho, theta
+
+            # Bounded the thresholded image by min and max frames
+            img = selectFrames(np.copy(img_thres), ff, frame_min, frame_max)
+
+            # Remove lonely pixels
+            img = morph.clean(img)
+
+
+            # Get indices of stripe pixels around the line
+            stripe_indices = getStripeIndices(rho, theta, int(config.stripe_width*1.5), img.shape[0], img.shape[1])
+
+            # Extract the stripe from the thresholded image
+            stripe = np.zeros((ff.nrows, ff.ncols), np.uint8)
+            stripe[stripe_indices] = img[stripe_indices]
+
+            #COMMENTED
+            # show('detected line: '+str(frame_min)+'-'+str(frame_max), stripe)
+
+            # Get stripe positions
+            stripe_positions = stripe.nonzero()
+            xs = stripe_positions[1]
+            ys = stripe_positions[0]
+            zs = ff.maxframe[stripe_positions]
+
+            # Make an array to feed into the centroiding algorithm
+            stripe_points = np.vstack((xs, ys, zs))
+            stripe_points = np.swapaxes(stripe_points, 0, 1)
+            
+            # Sort stripe points by frame
+            stripe_points = stripe_points[stripe_points[:,2].argsort()]
+
+            # Show 3D cloud
+            # show3DCloud(ff, stripe, detected_line, stripe_points, config)
+
+            # Get points of the given line
+            line_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config, 
+                fireball_detection=False)
+
+            # Skip if no points were returned
+            if not line_points.any():
+                continue
+
+            # Skip if the points cover too small a frame range
+            if abs(np.max(line_points[:,2]) - np.min(line_points[:,2])) + 1 < config.line_minimum_frame_range_det:
+                continue
+
+            # Calculate centroids
+            centroids = []
+
+            for i in range(frame_min, frame_max+1):
+                
+                # Select pixel indicies belonging to a given frame
+                frame_pixels_inds = np.where(line_points[:,2] == i)
+                
+                # Get pixel positions in a given frame (pixels belonging to a found line)
+                frame_pixels = line_points[frame_pixels_inds].astype(np.int64)
+
+                # Get pixel positions in a given frame (pixels belonging to the whole stripe)
+                frame_pixels_stripe = stripe_points[np.where(stripe_points[:,2] == i)].astype(np.int64)
+
+                # Skip if there are no pixels in the frame
+                if not len(frame_pixels):
+                    continue
+
+                # Calculate weights for centroiding
+                max_avg_corrected = ff.maxpixel-ff.avepixel
+                flattened_weights = (max_avg_corrected).astype(np.float32)/ff.stdpixel
+
+                # Calculate centroids by half-frame
+                for half_frame in range(2):
+
+                    # Deinterlace by fields (line lixels)
+                    half_frame_pixels = frame_pixels[frame_pixels[:,1] % 2 == (config.deinterlace_order 
+                        + half_frame) % 2]
+
+                    # Deinterlace by fields (stripe pixels)
+                    half_frame_pixels_stripe = frame_pixels_stripe[frame_pixels_stripe[:,1] % 2 == (config.deinterlace_order 
+                        + half_frame) % 2]
+
+                    # Skip if there are no pixels in the half-frame
+                    if not len(half_frame_pixels):
+                        continue
+
+                    # Calculate half-frame value
+                    frame_no = i+half_frame*0.5
+
+                    # Get maxpixel-avepixel values of given pixel indices (this will be used as weights)
+                    max_weights = flattened_weights[half_frame_pixels[:,1], half_frame_pixels[:,0]]
+
+                    # Calculate weighted centroids
+                    x_weighted = half_frame_pixels[:,0] * np.transpose(max_weights)
+                    x_centroid = np.sum(x_weighted) / float(np.sum(max_weights))
+
+                    y_weighted = half_frame_pixels[:,1] * np.transpose(max_weights)
+                    y_centroid = np.sum(y_weighted) / float(np.sum(max_weights))
+
+                    # Calculate intensity as the sum of white pixels on the stripe
+                    #intensity_values = max_avg_corrected[half_frame_pixels[:,1], half_frame_pixels[:,0]]
+                    intensity_values = max_avg_corrected[half_frame_pixels_stripe[:,1], 
+                        half_frame_pixels_stripe[:,0]]
+                    intensity = np.sum(intensity_values)
+                    
+                    print "centroid: ", frame_no, x_centroid, y_centroid, intensity
+
+                    centroids.append([frame_no, x_centroid, y_centroid, intensity])
+
+
+            # Filter centroids
+            centroids = filterCentroids(centroids, config.centroids_max_deviation, 
+                config.centroids_max_distance)
+
+            # Convert to numpy array for easy slicing
+            centroids = np.array(centroids)
+
+            # Reject the solution if there are too few centroids
+            if len(centroids) < config.line_minimum_frame_range_det:
+                continue
+
+
+            # Append the result to the meteor detections
+            meteor_detections.append([rho, theta, centroids])
+
+
+            print 'time for processing:', time() - t_all
+
+
+            #COMMENTED
+            # gs = gridspec.GridSpec(2, 1, width_ratios=[2,2], height_ratios=[2,1])
+            # # Plot centroids to image
+            # plt.subplot(gs[0])
+            # plt.imshow(img_thres, cmap='gray')
+            # plt.scatter(centroids[:,1], centroids[:,2], s=5, c='r', edgecolors='none')
+
+            # # Plot lightcurve
+            # plt.subplot(gs[1])
+            # plt.plot(centroids[:,0], centroids[:,3])
+            # plt.show()
+            # plt.clf() 
+            # plt.close()
+
+    
+    return meteor_detections
+
 
 if __name__ == "__main__":
 
@@ -720,294 +1088,23 @@ if __name__ == "__main__":
         print '--------------------------------------------'
         print ff_name
 
-        t1 = time()
-        t_all = time()
+        # Run the meteor detection algorithm
+        meteor_detections = detectMeteors(results_path, ff_name, config)
 
-        # Load the FF bin file
-        ff = FFbin.read(sys.argv[1], ff_name)
+        for meteor in meteor_detections:
 
-        # show2(ff_name+' maxpixel', ff.maxpixel)
+            rho, theta, centroids = meteor
 
-        # Get lines on the image
-        line_list = getLines(ff, config.k1_det, config.j1, config.time_slide, config.time_window_size, 
-            config.max_lines_det, config.max_white_ratio, config.kht_lib_path)
+            # Print detection to file
+            results_file.write('-------------------------------------------------------\n')
+            results_file.write(ff_name+'\n')
+            results_file.write(str(rho) + ',' + str(theta) + '\n')
+            results_file.write(str(centroids)+'\n')
 
-        print line_list
+    results_file.close()
 
-        # # Plot lines
-        plotLines(ff, line_list)
-
-        # print line_list
-
-        # Only if there are some lines in the image
-        if len(line_list):
-
-            # Join similar lines
-            line_list = mergeLines(line_list, config.line_min_dist, ff.ncols, ff.nrows)
-
-            print 'time for finding lines', time() - t1
-
-            print 'number of KHT lines:', len(line_list)
-            print line_list
-
-            # Plot lines
-            #COMMENTED
-            # plotLines(ff, line_list)
-
-            # Threshold the image
-            img_thres = thresholdImg(ff, config.k1_det, config.j1)
-
-            filtered_lines = []
-
-            # Analyze stripes of each line
-            for line in line_list:
-                rho, theta, frame_min, frame_max = line
-
-                print 'rho, theta, frame_min, frame_max'
-                print rho, theta, frame_min, frame_max
-
-                # Bounded the thresholded image by min and max frames
-                img = selectFrames(np.copy(img_thres), ff, frame_min, frame_max)
-
-                # Remove lonely pixels
-                img = morph.clean(img)
-
-                # Get indices of stripe pixels around the line
-                stripe_indices = getStripeIndices(rho, theta, config.stripe_width, img.shape[0], img.shape[1])
-
-                # Extract the stripe from the thresholded image
-                stripe = np.zeros((ff.nrows, ff.ncols), np.uint8)
-                stripe[stripe_indices] = img[stripe_indices]
-
-                # Show stripe
-                show2("stripe", stripe*255)
-
-                # Show 3D could
-                # show3DCloud(ff, stripe)
-
-                # Get stripe positions
-                stripe_positions = stripe.nonzero()
-                xs = stripe_positions[1]
-                ys = stripe_positions[0]
-                zs = ff.maxframe[stripe_positions]
-
-                # Limit the number of points to search if too large
-                if len(zs) > config.max_points_det:
-                    indices = np.random.choice(len(zs), config.max_points_det, replace=False)
-                    ys = ys[indices]
-                    xs = xs[indices]
-                    zs = zs[indices]
-
-                # Make an array to feed into the gropuing algorithm
-                stripe_points = np.vstack((xs, ys, zs))
-                stripe_points = np.swapaxes(stripe_points, 0, 1)
-                
-                # Sort stripe points by frame
-                stripe_points = stripe_points[stripe_points[:,2].argsort()]
-
-                t1 = time()
-
-                print 'finding lines...'
-
-                # Find a single line in the point cloud
-                detected_line = find3DLines(stripe_points, time(), config, fireball_detection=False)
-
-                print 'time for GROUPING: ', time() - t1
-
-                # Extract the first and only line if any
-                if detected_line:
-                    detected_line = detected_line[0]
-
-                    # print detected_line
-
-                    # Show 3D cloud
-                    # show3DCloud(ff, stripe, detected_line, stripe_points, config)
-
-                    # Add the line to the results list
-                    filtered_lines.append(detected_line)
-
-            # Merge similar lines in 3D
-            filtered_lines = merge3DLines(filtered_lines, config.vect_angle_thresh)
-
-            print 'after filtering:'
-            print filtered_lines
-
-            for detected_line in filtered_lines:
-
-                # Get frame range
-                frame_min = detected_line[4]
-                frame_max = detected_line[5]
-
-                # Check if the line covers a minimum frame range
-                if (abs(frame_max - frame_min) + 1 < config.line_minimum_frame_range_det):
-                    continue
-
-                # Extand the frame range for several frames, just to be sure to catch all parts of a meteor
-                frame_min -= config.frame_extension
-                frame_max += config.frame_extension
-
-                # Cap values to 0-255
-                frame_min = max(frame_min, 0)
-                frame_max = min(frame_max, 255)
-
-
-                print detected_line
-
-                # Get coordinates of 2 points that describe the line
-                x1, y1, z1 = detected_line[0]
-                x2, y2, z2 = detected_line[1]
-
-                # Convert Cartesian line coordinates to polar
-                rho, theta = getPolarLine(x1, y1, x2, y2, ff.nrows, ff.ncols)
-
-                print 'converted rho, theta'
-                print rho, theta
-
-                # Bounded the thresholded image by min and max frames
-                img = selectFrames(np.copy(img_thres), ff, frame_min, frame_max)
-
-                # Remove lonely pixels
-                img = morph.clean(img)
-
-                # Remove spurious pixels
-                # img = morph.spur(img)
-
-                # Morphological closing
-                # img = morph.close(img)
-
-                # Get indices of stripe pixels around the line
-                stripe_indices = getStripeIndices(rho, theta, int(config.stripe_width*1.5), img.shape[0], img.shape[1])
-
-                # Extract the stripe from the thresholded image
-                stripe = np.zeros((ff.nrows, ff.ncols), np.uint8)
-                stripe[stripe_indices] = img[stripe_indices]
-
-                #COMMENTED
-                # show('detected line: '+str(frame_min)+'-'+str(frame_max), stripe)
-
-                # Get stripe positions
-                stripe_positions = stripe.nonzero()
-                xs = stripe_positions[1]
-                ys = stripe_positions[0]
-                zs = ff.maxframe[stripe_positions]
-
-                # Make an array to feed into the centroiding algorithm
-                stripe_points = np.vstack((xs, ys, zs))
-                stripe_points = np.swapaxes(stripe_points, 0, 1)
-                
-                # Sort stripe points by frame
-                stripe_points = stripe_points[stripe_points[:,2].argsort()]
-
-                # Show 3D cloud
-                # show3DCloud(ff, stripe, detected_line, stripe_points, config)
-
-                # Get points of the given line
-                line_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config, 
-                    fireball_detection=False)
-
-                # Skip if no points were returned
-                if not line_points.any():
-                    continue
-
-                # Skip if the points cover too small a frame range
-                if abs(np.max(line_points[:,2]) - np.min(line_points[:,2])) + 1 < config.line_minimum_frame_range_det:
-                    continue
-
-                # Calculate centroids
-                centroids = []
-
-                for i in range(frame_min, frame_max+1):
-                    
-                    # Select pixel indicies belonging to a given frame
-                    frame_pixels_inds = np.where(line_points[:,2] == i)
-                    
-                    # Get pixel positions in a given frame (pixels belonging to a found line)
-                    frame_pixels = line_points[frame_pixels_inds].astype(np.int64)
-
-                    # Get pixel positions in a given frame (pixels belonging to the whole stripe)
-                    frame_pixels_stripe = stripe_points[np.where(stripe_points[:,2] == i)].astype(np.int64)
-
-                    # Skip if there are no pixels in the frame
-                    if not len(frame_pixels):
-                        continue
-
-                    # Calculate weights for centroiding
-                    max_avg_corrected = ff.maxpixel-ff.avepixel
-                    flattened_weights = (max_avg_corrected).astype(np.float32)/ff.stdpixel
-
-                    # Calculate centroids by half-frame
-                    for half_frame in range(2):
-
-                        # Deinterlace by fields (line lixels)
-                        half_frame_pixels = frame_pixels[frame_pixels[:,1] % 2 == (config.deinterlace_order 
-                            + half_frame) % 2]
-
-                        # Deinterlace by fields (stripe pixels)
-                        half_frame_pixels_stripe = frame_pixels_stripe[frame_pixels_stripe[:,1] % 2 == (config.deinterlace_order 
-                            + half_frame) % 2]
-
-                        # Skip if there are no pixels in the half-frame
-                        if not len(half_frame_pixels):
-                            continue
-
-                        # Calculate half-frame value
-                        frame_no = i+half_frame*0.5
-
-                        # Get maxpixel-avepixel values of given pixel indices (this will be used as weights)
-                        max_weights = flattened_weights[half_frame_pixels[:,1], half_frame_pixels[:,0]]
-
-                        # Calculate weighted centroids
-                        x_weighted = half_frame_pixels[:,0] * np.transpose(max_weights)
-                        x_centroid = np.sum(x_weighted) / float(np.sum(max_weights))
-
-                        y_weighted = half_frame_pixels[:,1] * np.transpose(max_weights)
-                        y_centroid = np.sum(y_weighted) / float(np.sum(max_weights))
-
-                        # Calculate intensity as the sum of white pixels on the stripe
-                        #intensity_values = max_avg_corrected[half_frame_pixels[:,1], half_frame_pixels[:,0]]
-                        intensity_values = max_avg_corrected[half_frame_pixels_stripe[:,1], 
-                            half_frame_pixels_stripe[:,0]]
-                        intensity = np.sum(intensity_values)
-                        
-                        print "centroid: ", frame_no, x_centroid, y_centroid, intensity
-
-                        centroids.append([frame_no, x_centroid, y_centroid, intensity])
-
-
-                # Filter centroids
-                centroids = filterCentroids(centroids, config.centroids_max_deviation, 
-                    config.centroids_max_distance)
-
-                # Convert to numpy array for easy slicing
-                centroids = np.array(centroids)
-
-                # Reject the solution if there are too few centroids
-                if len(centroids) < config.line_minimum_frame_range_det:
-                    continue
-
-                print 'time for processing:', time() - t_all
-
-                #COMMENTED
-                gs = gridspec.GridSpec(2, 1, width_ratios=[2,2], height_ratios=[2,1])
-                # Plot centroids to image
-                plt.subplot(gs[0])
-                plt.imshow(img_thres, cmap='gray')
-                plt.scatter(centroids[:,1], centroids[:,2], s=5, c='r', edgecolors='none')
-
-                plt.subplot(gs[1])
-                # Plot lightcurve
-                plt.plot(centroids[:,0], centroids[:,3])
-                plt.show()
-                plt.clf() 
-                plt.close()
-
-                # Print detection to file
-                results_file.write('-------------------------------------------------------\n')
-                results_file.write(ff_name+'\n')
-                results_file.write(str(rho) + ',' + str(theta) + '\n')
-                results_file.write(str(centroids)+'\n')
+        
                 
 
 
-print 'Time for the whole directory:', time() - time_whole
-results_file.close()
+    print 'Time for the whole directory:', time() - time_whole
