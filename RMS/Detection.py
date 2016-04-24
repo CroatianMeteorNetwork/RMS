@@ -838,7 +838,7 @@ def detectMeteors(ff_directory, ff_name, config):
             if len(zs) > config.max_points_det:
 
                 # Extract weights of each point
-                maxpix_elements = ff.maxpixel[xs,ys].astype(np.float64)
+                maxpix_elements = ff.maxpixel[ys,xs].astype(np.float64)
                 weights = maxpix_elements / np.sum(maxpix_elements)
 
                 # Random sample the point, sampling is weighted by pixel intensity
