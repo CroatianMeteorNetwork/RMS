@@ -1,5 +1,5 @@
 # RPi Meteor Station
-# Copyright (C) 2015  Dario Zubovic
+# Copyright (C) 2016  Dario Zubovic, Denis Vida
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -27,6 +27,8 @@ class Config:
         self.height = 576
         self.deviceID = 0
         self.fps = 25.0
+        self.fov_w = 64.0
+        self.fov_h = 48.0
         self.deinterlace_order = 1
         
         self.weaveArgs = ["-O3"]
@@ -134,6 +136,12 @@ def parseCapture(config, parser):
 
     if parser.has_option("Capture", "fps"):
         config.fps = parser.getfloat("Capture", "fps")
+
+    if parser.has_option("Capture", "fov_w"):
+        config.fov_w = parser.getfloat("Capture", "fov_w")
+
+    if parser.has_option("Capture", "fov_h"):
+        config.fov_h = parser.getfloat("Capture", "fov_h")
 
     if parser.has_option("Capture", "deinterlace_order"):
         config.deinterlace_order = parser.getint("Capture", "deinterlace_order")

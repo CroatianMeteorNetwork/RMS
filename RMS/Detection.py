@@ -1,5 +1,5 @@
 # RPi Meteor Station
-# Copyright (C) 2015  Dario Zubovic, Denis Vida
+# Copyright (C) 2016  Dario Zubovic, Denis Vida
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -642,6 +642,37 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
 
     return best_chain
 
+def checkAngularVelocity(centroids, config):
+    """ Check the angular velocity of the detection, and reject those too slow or too fast to be meteors. 
+
+        The minimum ang. velocity is 0.5 deg/s, ther maximum is 35 deg/s.
+
+        @param centroids: [ndarray] meteor centroids from the detector
+        @param config: [config object] configuration object (loaded from the .config file)
+
+        @return [bool] True if the velocity is in the meteor ang. velocity range, False otherwise
+    """
+
+    # Calculate the angular velocity in px/frame
+    first_centroid = centroids[0]
+    last_centroid = centroids[-1]
+    frame1, x1, y1, _ = first_centroid
+    frame2, x2, y2, _ = last_centroid
+    ang_vel = np.sqrt((x2 - x1)**2 + (y2 - y1)**2) / float(frame2 - frame1)
+
+    # Convert to px/sec
+    ang_vel = ang_vel*config.fps
+
+    # Convert to deg/sec
+    scale = (config.fov_h/float(config.height) + config.fov_w/float(config.width))/2.0
+    ang_vel = ang_vel*scale
+
+    if (ang_vel >= 0.5 and ang_vel <= 35.0):
+        return True
+
+    else:
+        return False
+
 
 
 def show(name, img):
@@ -1027,6 +1058,9 @@ def detectMeteors(ff_directory, ff_name, config):
             if len(centroids) < config.line_minimum_frame_range_det:
                 continue
 
+            # Check the detection if it has the proper angular velocity
+            if not checkAngularVelocity(centroids, config):
+                continue
 
             # Append the result to the meteor detections
             meteor_detections.append([rho, theta, centroids])
