@@ -107,7 +107,7 @@ def find3DLines(point_list, start_time, config, fireball_detection=True):
         grouping_config.point_ratio_treshold = 1
 
 
-    # Call a fast cython function for findind lines in 3D
+    # Call a fast cython function for finding lines in 3D
     return find3DLinesCy(point_list, start_time, grouping_config, get_single, line_list)
 
 def normalizeParameter(param, config):

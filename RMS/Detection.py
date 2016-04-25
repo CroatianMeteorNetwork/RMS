@@ -28,10 +28,15 @@ from mpl_toolkits.mplot3d import Axes3D
 
 # RMS imports
 from RMS.Formats import FFbin
+from RMS.Formats import FTPdetectinfo
 import RMS.ConfigReader as cr
-from RMS.Routines import MorphologicalOperations as morph
 from RMS.Routines.Grouping3D import find3DLines, getAllPoints
 from RMS.Routines.CompareLines import compareLines
+
+# Morphology - Cython init
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+import RMS.Routines.MorphCy as morph
 
 
 def thresholdImg(ff, k1, j1):
@@ -446,21 +451,13 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
 
         ### Apply morphological operations to prepare the image for KHT
 
-        # Remove lonely pixels
-        img = morph.clean(img)
-        
-        # Connect close pixels
-        img = morph.bridge(img)
-        
-        # Close surrounded pixels
-        img = morph.close(img)
-        
-        # Thin all lines to 1px width
-        #img = morph.repeat(morph.thin, img, None)
-        img = morph.thin2(img)
-        
-        # Remove lonely pixels
-        img = morph.clean(img)
+        # Morphological operations:
+            # 1 - clean (Remove lonely pixels)
+            # 2 - bridge (Connect close pixels)
+            # 3 - close (Close surrounded pixels)
+            # 4 - thin (Thin all lines to 1px width)
+            # 1 - Remove lonely pixels
+        img = morph.morphApply(img, [1, 2, 3, 4, 1])
 
         # # Show morphed over maxpixel
         # temp = ff.maxpixel - img.astype(np.int16)*255
@@ -1038,7 +1035,7 @@ def detectMeteors(ff_directory, ff_name, config):
             print 'time for processing:', time() - t_all
 
 
-            #COMMENTED
+            # #COMMENTED
             # gs = gridspec.GridSpec(2, 1, width_ratios=[2,2], height_ratios=[2,1])
             # # Plot centroids to image
             # plt.subplot(gs[0])
@@ -1077,6 +1074,9 @@ if __name__ == "__main__":
     # Load config file
     config = cr.parse(".config")
 
+    # Init results list
+    results_list = []
+
     # Open a file for results
     results_path = os.path.abspath(sys.argv[1]) + os.sep
     results_name = results_path.split(os.sep)[-2]
@@ -1091,6 +1091,7 @@ if __name__ == "__main__":
         # Run the meteor detection algorithm
         meteor_detections = detectMeteors(results_path, ff_name, config)
 
+        meteor_No = 1
         for meteor in meteor_detections:
 
             rho, theta, centroids = meteor
@@ -1101,9 +1102,16 @@ if __name__ == "__main__":
             results_file.write(str(rho) + ',' + str(theta) + '\n')
             results_file.write(str(centroids)+'\n')
 
+            # Append to the results list
+            results_list.append([ff_name, meteor_No, rho, theta, centroids])
+            meteor_No += 1
+
     results_file.close()
 
-        
+    ftpdetectinfo_name = os.path.join(results_path, 'FTPdetectinfo_' + results_name + '.txt')
+    # Write FTPdetectinfo file
+    FTPdetectinfo.makeFTPdetectinfo(results_list, ftpdetectinfo_name, results_path, results_path, 
+        config.stationID, config.fps)
                 
 
 
