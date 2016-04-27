@@ -33,7 +33,7 @@ class Config:
         
         self.weaveArgs = ["-O3"]
         
-        ##### VideoExtraction
+        ##### FireballDetection
         self.f = 16                    # subsampling factor
         self.max_time = 25             # maximum time for line finding
         
@@ -64,7 +64,8 @@ class Config:
         self.point_ratio_treshold = 0.7# ratio of how many points must be close to the line before considering searching for another line
         self.max_lines = 5             # maximum number of lines
 
-
+        ##### MeteorDetection
+        
         # KHT detection parameters
         self.k1_det = 1.5 # weight for stddev in thresholding for faint meteor detection
         self.j1 = 9 # absolute levels above average in thresholding for faint meteor detection
@@ -76,6 +77,7 @@ class Config:
         self.stripe_width = 20 # width of the stripe around the line
         self.kht_lib_path = "build/lib.linux-x86_64-2.7/kht_module.so" # path to the compiled KHT module
 
+        # 3D line finding for meteor detection
         self.max_points_det = 600 # maximumum number of points during 3D line search in faint meteor detection (used to minimize runtime)
         self.distance_treshold_det = 50**2 # maximum distance between the line and the point to be takes as a part of the same line
         self.gap_treshold_det = 500**2 # maximum allowed gap between points
@@ -84,11 +86,28 @@ class Config:
         self.line_distance_const_det = 4 # constant that determines the influence of average point distance on the line quality
         self.max_time_det = 10 # maximum time in seconds for which line finding algorithm can run
 
+        # 3D line merging parameters
         self.vect_angle_thresh = 20 # angle similarity between 2 lines in a stripe to be merged
         self.frame_extension = 3 # how many frames to check during centroiding before and after the initially determined frame range
 
+        # Centroid filtering parameters
         self.centroids_max_deviation = 2 # maximum deviation of a centroid point from a LSQ fitted line (if above max, it will be rejected)
         self.centroids_max_distance =  30 # maximum distance in pixels between centroids (used for filtering spurious centroids)
+
+
+        ##### StarExtraction
+
+        # Extraction parameters
+        self.max_global_intensity = 150 # maximum mean intensity of an image before it is discared as too bright
+        self.border = 10 #  apply a mask on the detections by removing all that are too close to the given image border (in pixels)
+        self.neighborhood_size = 10 # size of the neighbourhood for the maximum search (in pixels)
+        self.intensity_threshold = 5 # a threshold for cutting the detections which are too faint (0-255)
+
+        # PSF fit and filtering
+        self.segment_radius = 4 # radius (in pixels) of image segment around the detected star on which to perform the fit
+        self.roundness_threshold = 0.5 # minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars (hot pixels are narrow, while stars are round)
+        self.max_feature_ratio = 0.8 # maximum ratio between 2 sigma of the star and the image segment area
+
 
 def parse(filename):
     parser = RawConfigParser()
@@ -107,11 +126,14 @@ def parse(filename):
     if parser.has_section("Compression"):
         parseCompression(config, parser)
     
-    if parser.has_section("VideoExtraction"):
-        parseExtraction(config, parser)
+    if parser.has_section("FireballDetection"):
+        parseFireballDetection(config, parser)
 
-    if parser.has_section("Detection"):
-        parseDetection(config, parser)
+    if parser.has_section("MeteorDetection"):
+        parseMeteorDetection(config, parser)
+
+    if parser.has_section("StarExtraction"):
+        parseStarExtraction(config, parser)
     
     return config
 
@@ -156,141 +178,164 @@ def parseBuildArgs(config, parser):
 def parseCompression(config, parser):
     pass
 
-def parseExtraction(config, parser):
-    if parser.has_option("VideoExtraction", "subsampling_size"):
-        config.f = parser.getint("VideoExtraction", "subsampling_size")
+def parseFireballDetection(config, parser):
+    if parser.has_option("FireballDetection", "subsampling_size"):
+        config.f = parser.getint("FireballDetection", "subsampling_size")
         
-    if parser.has_option("VideoExtraction", "max_time"):
-        config.max_time = parser.getint("VideoExtraction", "max_time")
+    if parser.has_option("FireballDetection", "max_time"):
+        config.max_time = parser.getint("FireballDetection", "max_time")
     
-    if parser.has_option("VideoExtraction", "minimal_level"):
-        config.min_level = parser.getint("VideoExtraction", "minimal_level")
+    if parser.has_option("FireballDetection", "minimal_level"):
+        config.min_level = parser.getint("FireballDetection", "minimal_level")
     
-    if parser.has_option("VideoExtraction", "minimum_pixels"):
-        config.min_pixels = parser.getint("VideoExtraction", "minimum_pixels")
+    if parser.has_option("FireballDetection", "minimum_pixels"):
+        config.min_pixels = parser.getint("FireballDetection", "minimum_pixels")
     
-    if parser.has_option("VideoExtraction", "k1"):
-        config.k1 = parser.getint("VideoExtraction", "k1")
+    if parser.has_option("FireballDetection", "k1"):
+        config.k1 = parser.getint("FireballDetection", "k1")
     
-    if parser.has_option("VideoExtraction", "max_points_per_frame"):
-        config.max_points_per_frame = parser.getint("VideoExtraction", "max_points_per_frame")
+    if parser.has_option("FireballDetection", "max_points_per_frame"):
+        config.max_points_per_frame = parser.getint("FireballDetection", "max_points_per_frame")
     
-    if parser.has_option("VideoExtraction", "max_per_frame_factor"):
-        config.max_per_frame_factor = parser.getint("VideoExtraction", "max_per_frame_factor")
+    if parser.has_option("FireballDetection", "max_per_frame_factor"):
+        config.max_per_frame_factor = parser.getint("FireballDetection", "max_per_frame_factor")
     
-    if parser.has_option("VideoExtraction", "max_points"):
-        config.max_points = parser.getint("VideoExtraction", "max_points")
+    if parser.has_option("FireballDetection", "max_points"):
+        config.max_points = parser.getint("FireballDetection", "max_points")
     
-    if parser.has_option("VideoExtraction", "min_frames"):
-        config.min_frames = parser.getint("VideoExtraction", "min_frames")
+    if parser.has_option("FireballDetection", "min_frames"):
+        config.min_frames = parser.getint("FireballDetection", "min_frames")
     
-    if parser.has_option("VideoExtraction", "min_points"):
-        config.min_points = parser.getint("VideoExtraction", "min_points")
+    if parser.has_option("FireballDetection", "min_points"):
+        config.min_points = parser.getint("FireballDetection", "min_points")
     
-    if parser.has_option("VideoExtraction", "extend_before"):
-        config.before = parser.getfloat("VideoExtraction", "extend_before")
+    if parser.has_option("FireballDetection", "extend_before"):
+        config.before = parser.getfloat("FireballDetection", "extend_before")
     
-    if parser.has_option("VideoExtraction", "extend_after"):
-        config.after = parser.getfloat("VideoExtraction", "extend_after")
+    if parser.has_option("FireballDetection", "extend_after"):
+        config.after = parser.getfloat("FireballDetection", "extend_after")
     
-    if parser.has_option("VideoExtraction", "min_window_size"):
-        config.minSize = parser.getint("VideoExtraction", "min_window_size")
+    if parser.has_option("FireballDetection", "min_window_size"):
+        config.minSize = parser.getint("FireballDetection", "min_window_size")
     
-    if parser.has_option("VideoExtraction", "max_window_size"):
-        config.maxSize = parser.getint("VideoExtraction", "max_window_size")
+    if parser.has_option("FireballDetection", "max_window_size"):
+        config.maxSize = parser.getint("FireballDetection", "max_window_size")
     
-    if parser.has_option("VideoExtraction", "threshold_for_size"):
-        config.limitForSize = parser.getfloat("VideoExtraction", "threshold_for_size")
+    if parser.has_option("FireballDetection", "threshold_for_size"):
+        config.limitForSize = parser.getfloat("FireballDetection", "threshold_for_size")
     
-    if parser.has_option("VideoExtraction", "distance_treshold"):
-        config.distance_treshold = parser.getint("VideoExtraction", "distance_treshold")**2
+    if parser.has_option("FireballDetection", "distance_treshold"):
+        config.distance_treshold = parser.getint("FireballDetection", "distance_treshold")**2
     
     config.distance_treshold = Grouping3D.normalizeParameter(config.distance_treshold, config)
     
-    if parser.has_option("VideoExtraction", "gap_treshold"):
-        config.gap_treshold = parser.getint("VideoExtraction", "gap_treshold")**2
+    if parser.has_option("FireballDetection", "gap_treshold"):
+        config.gap_treshold = parser.getint("FireballDetection", "gap_treshold")**2
     
     config.gap_treshold = Grouping3D.normalizeParameter(config.gap_treshold, config)
 
-    if parser.has_option("VideoExtraction", "line_minimum_frame_range"):
-        config.line_minimum_frame_range = parser.getint("VideoExtraction", "line_minimum_frame_range")
+    if parser.has_option("FireballDetection", "line_minimum_frame_range"):
+        config.line_minimum_frame_range = parser.getint("FireballDetection", "line_minimum_frame_range")
     
-    if parser.has_option("VideoExtraction", "line_distance_const"):
-        config.line_distance_const = parser.getint("VideoExtraction", "line_distance_const")
+    if parser.has_option("FireballDetection", "line_distance_const"):
+        config.line_distance_const = parser.getint("FireballDetection", "line_distance_const")
     
-    if parser.has_option("VideoExtraction", "point_ratio_treshold"):
-        config.point_ratio_treshold = parser.getfloat("VideoExtraction", "point_ratio_treshold")        
+    if parser.has_option("FireballDetection", "point_ratio_treshold"):
+        config.point_ratio_treshold = parser.getfloat("FireballDetection", "point_ratio_treshold")        
     
-    if parser.has_option("VideoExtraction", "max_lines"):
-        config.max_lines = parser.getint("VideoExtraction", "max_lines")
+    if parser.has_option("FireballDetection", "max_lines"):
+        config.max_lines = parser.getint("FireballDetection", "max_lines")
     
-    if parser.has_option("VideoExtraction", "min_lines"):
-        config.max_lines = parser.getint("VideoExtraction", "max_lines")
+    if parser.has_option("FireballDetection", "min_lines"):
+        config.max_lines = parser.getint("FireballDetection", "max_lines")
 
 
-def parseDetection(config, parser):
+def parseMeteorDetection(config, parser):
     
-    if parser.has_option("Detection", "k1_det"):
-        config.k1_det = parser.getfloat("Detection", "k1_det")
+    if parser.has_option("MeteorDetection", "k1_det"):
+        config.k1_det = parser.getfloat("MeteorDetection", "k1_det")
 
-    if parser.has_option("Detection", "j1"):
-        config.j1 = parser.getint("Detection", "j1")
+    if parser.has_option("MeteorDetection", "j1"):
+        config.j1 = parser.getint("MeteorDetection", "j1")
 
-    if parser.has_option("Detection", "max_white_ratio"):
-        config.max_white_ratio = parser.getfloat("Detection", "max_white_ratio")
+    if parser.has_option("MeteorDetection", "max_white_ratio"):
+        config.max_white_ratio = parser.getfloat("MeteorDetection", "max_white_ratio")
 
-    if parser.has_option("Detection", "time_window_size"):
-        config.time_window_size = parser.getint("Detection", "time_window_size")
+    if parser.has_option("MeteorDetection", "time_window_size"):
+        config.time_window_size = parser.getint("MeteorDetection", "time_window_size")
 
-    if parser.has_option("Detection", "time_slide"):
-        config.time_slide = parser.getint("Detection", "time_slide")
+    if parser.has_option("MeteorDetection", "time_slide"):
+        config.time_slide = parser.getint("MeteorDetection", "time_slide")
 
-    if parser.has_option("Detection", "max_lines_det"):
-        config.max_lines_det = parser.getint("Detection", "max_lines_det")
+    if parser.has_option("MeteorDetection", "max_lines_det"):
+        config.max_lines_det = parser.getint("MeteorDetection", "max_lines_det")
 
-    if parser.has_option("Detection", "line_min_dist"):
-        config.line_min_dist = parser.getint("Detection", "line_min_dist")
+    if parser.has_option("MeteorDetection", "line_min_dist"):
+        config.line_min_dist = parser.getint("MeteorDetection", "line_min_dist")
 
-    if parser.has_option("Detection", "distance_treshold_det"):
-        config.distance_treshold_det = parser.getint("Detection", "distance_treshold_det")**2
+    if parser.has_option("MeteorDetection", "distance_treshold_det"):
+        config.distance_treshold_det = parser.getint("MeteorDetection", "distance_treshold_det")**2
 
     config.distance_treshold_det = Grouping3D.normalizeParameter(config.distance_treshold_det, config)
 
-    if parser.has_option("Detection", "gap_treshold_det"):
-        config.gap_treshold_det = parser.getint("Detection", "gap_treshold_det")**2
+    if parser.has_option("MeteorDetection", "gap_treshold_det"):
+        config.gap_treshold_det = parser.getint("MeteorDetection", "gap_treshold_det")**2
 
     config.gap_treshold_det = Grouping3D.normalizeParameter(config.gap_treshold_det, config)
 
-    if parser.has_option("Detection", "min_pixels_det"):
-        config.min_pixels_det = parser.getint("Detection", "min_pixels_det")
+    if parser.has_option("MeteorDetection", "min_pixels_det"):
+        config.min_pixels_det = parser.getint("MeteorDetection", "min_pixels_det")
 
-    if parser.has_option("Detection", "line_minimum_frame_range_det"):
-        config.line_minimum_frame_range_det = parser.getint("Detection", "line_minimum_frame_range_det")
+    if parser.has_option("MeteorDetection", "line_minimum_frame_range_det"):
+        config.line_minimum_frame_range_det = parser.getint("MeteorDetection", "line_minimum_frame_range_det")
 
-    if parser.has_option("Detection", "line_distance_const_det"):
-        config.line_distance_const_det = parser.getint("Detection", "line_distance_const_det")
+    if parser.has_option("MeteorDetection", "line_distance_const_det"):
+        config.line_distance_const_det = parser.getint("MeteorDetection", "line_distance_const_det")
 
-    if parser.has_option("Detection", "max_time_det"):
-        config.max_time_det = parser.getint("Detection", "max_time_det")
+    if parser.has_option("MeteorDetection", "max_time_det"):
+        config.max_time_det = parser.getint("MeteorDetection", "max_time_det")
 
-    if parser.has_option("Detection", "stripe_width"):
-        config.stripe_width = parser.getint("Detection", "stripe_width")
+    if parser.has_option("MeteorDetection", "stripe_width"):
+        config.stripe_width = parser.getint("MeteorDetection", "stripe_width")
 
-    if parser.has_option("Detection", "max_points_det"):
-        config.max_points_det = parser.getint("Detection", "max_points_det")
+    if parser.has_option("MeteorDetection", "max_points_det"):
+        config.max_points_det = parser.getint("MeteorDetection", "max_points_det")
     
-    if parser.has_option("Detection", "kht_lib_path"):
-        config.kht_lib_path = parser.get("Detection", "kht_lib_path")
+    if parser.has_option("MeteorDetection", "kht_lib_path"):
+        config.kht_lib_path = parser.get("MeteorDetection", "kht_lib_path")
 
-    if parser.has_option("Detection", "vect_angle_thresh"):
-        config.vect_angle_thresh = parser.getint("Detection", "vect_angle_thresh")
+    if parser.has_option("MeteorDetection", "vect_angle_thresh"):
+        config.vect_angle_thresh = parser.getint("MeteorDetection", "vect_angle_thresh")
 
-    if parser.has_option("Detection", "frame_extension"):
-        config.frame_extension = parser.getint("Detection", "frame_extension")
+    if parser.has_option("MeteorDetection", "frame_extension"):
+        config.frame_extension = parser.getint("MeteorDetection", "frame_extension")
 
-    if parser.has_option("Detection", "centroids_max_deviation"):
-        config.centroids_max_deviation = parser.getfloat("Detection", "centroids_max_deviation")
+    if parser.has_option("MeteorDetection", "centroids_max_deviation"):
+        config.centroids_max_deviation = parser.getfloat("MeteorDetection", "centroids_max_deviation")
 
-    if parser.has_option("Detection", "centroids_max_distance"):
-        config.centroids_max_distance = parser.getint("Detection", "centroids_max_distance")
+    if parser.has_option("MeteorDetection", "centroids_max_distance"):
+        config.centroids_max_distance = parser.getint("MeteorDetection", "centroids_max_distance")
 
+
+def parseStarExtraction(config, parser):
+
+    if parser.has_option("StarExtraction", "max_global_intensity"):
+        config.max_global_intensity = parser.getint("StarExtraction", "max_global_intensity")
+
+    if parser.has_option("StarExtraction", "border"):
+        config.border = parser.getint("StarExtraction", "border")
+
+    if parser.has_option("StarExtraction", "neighborhood_size"):
+        config.neighborhood_size = parser.getint("StarExtraction", "neighborhood_size")
+
+    if parser.has_option("StarExtraction", "intensity_threshold"):
+        config.intensity_threshold = parser.getint("StarExtraction", "intensity_threshold")
+
+    if parser.has_option("StarExtraction", "segment_radius"):
+        config.segment_radius = parser.getint("StarExtraction", "segment_radius")
+
+    if parser.has_option("StarExtraction", "roundness_threshold"):
+        config.roundness_threshold = parser.getfloat("StarExtraction", "roundness_threshold")
+
+    if parser.has_option("StarExtraction", "max_feature_ratio"):
+        config.max_feature_ratio = parser.getfloat("StarExtraction", "max_feature_ratio")

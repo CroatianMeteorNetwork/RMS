@@ -27,18 +27,22 @@ import scipy.ndimage as ndimage
 import scipy.ndimage.filters as filters
 
 # RMS imports
+import RMS.ConfigReader as cr
 from RMS.Formats import FFbin
 from RMS.Formats import CALSTARS
 
 
 
-def extractStars(ff_dir, ff_name, max_global_intensity=150, border=10, neighborhood_size=10, 
+
+
+def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=10, neighborhood_size=10, 
         intensity_threshold=5):
     """ Extracts stars on a given FF bin by searching for local maxima and applying PSF fit for star 
         confirmation.
 
     @param ff: [ff bin struct] FF bin file loaded in the FF bin structure
 
+    @param config: [config object] configuration object (loaded from the .config file)
     @param max_global_intensity: [int] maximum mean intensity of an image before it is discared as too bright
     @param border: [int] apply a mask on the detections by removing all that are too close to the given image 
         border (in pixels)
@@ -46,6 +50,14 @@ def extractStars(ff_dir, ff_name, max_global_intensity=150, border=10, neighborh
     @param intensity_threshold: [float] a threshold for cutting the detections which are too faint (0-255)
 
     """
+
+    # Load parameters from config if given
+    if config:
+        max_global_intensity = config.max_global_intensity
+        border = config.border
+        neighborhood_size = config.neighborhood_size
+        intensity_threshold = config.intensity_threshold
+        
 
     # Load the FF bin file
     ff = FFbin.read(ff_dir, ff_name)
@@ -81,7 +93,7 @@ def extractStars(ff_dir, ff_name, max_global_intensity=150, border=10, neighborh
     # plotStars(ff, x, y)
 
     # Fit a PSF to each star
-    x2, y2, background, intensity = fitPSF(ff, global_mean, x, y)
+    x2, y2, background, intensity = fitPSF(ff, global_mean, x, y, config=config)
     # x2, y2, background, intensity = list(x), list(y), [], []
 
     return x2, y2, background, intensity
@@ -111,7 +123,7 @@ def twoDGaussian((x, y), amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
     return g.ravel()
 
 
-def fitPSF(ff, avepixel_mean, x2, y2, segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8):
+def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8):
     """ Fit 2D Gaussian distribution as the PSF on the star image. 
 
     @param ff: [ff bin struct] FF bin file loaded in the FF bin structure
@@ -119,6 +131,7 @@ def fitPSF(ff, avepixel_mean, x2, y2, segment_radius=4, roundness_threshold=0.5,
     @param x2: [list] a list of estimated star position (X axis)
     @param xy: [list] a list of estimated star position (Y axis)
 
+    @param config: [config object] configuration object (loaded from the .config file)
     @param segment_radius: [int] radius (in pixels) of image segment around the detected star on which to 
         perform the fit
     @param roundness_threshold: [float] minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars
@@ -126,6 +139,13 @@ def fitPSF(ff, avepixel_mean, x2, y2, segment_radius=4, roundness_threshold=0.5,
     @param max_feature_ratio: [float] maximum ratio between 2 sigma of the star and the image segment area
 
     """
+
+    # Load parameters form config if present
+    if config:
+        segment_radius = config.segment_radius
+        roundness_threshold = config.roundness_threshold
+        max_feature_ratio = config.max_feature_ratio
+
 
     x_fitted = []
     y_fitted = []
@@ -162,7 +182,8 @@ def fitPSF(ff, avepixel_mean, x2, y2, segment_radius=4, roundness_threshold=0.5,
         # Fit a PSF to the star
 
         try:
-            popt, pcov = opt.curve_fit(twoDGaussian, (y_ind, x_ind), star_seg.ravel(), p0=initial_guess, maxfev=150)
+            popt, pcov = opt.curve_fit(twoDGaussian, (y_ind, x_ind), star_seg.ravel(), p0=initial_guess, 
+                maxfev=150)
             # print popt
         except:
             # print 'Fitting failed!'
@@ -232,6 +253,9 @@ def plotStars(ff, x2, y2):
 
 if __name__ == "__main__":
 
+    # Load config file
+    config = cr.parse(".config")
+
     if not len(sys.argv) == 2:
         print "Usage: python -m RMS.ExtractStars /path/to/bin/files/"
         sys.exit()
@@ -255,7 +279,7 @@ if __name__ == "__main__":
 
         t1 = time.clock()
 
-        x2, y2, background, intensity = extractStars(ff_dir, ff_name)
+        x2, y2, background, intensity = extractStars(ff_dir, ff_name, config)
 
         print 'Time for extraction: ', time.clock() - t1
 
