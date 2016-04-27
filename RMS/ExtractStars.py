@@ -18,109 +18,89 @@
 import time
 import sys
 import os
-import cv2
-from skimage import feature, data
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize as opt
 
-import skimage.morphology as morph
-import skimage.exposure as skie
+import scipy
+import scipy.ndimage as ndimage
+import scipy.ndimage.filters as filters
 
 # RMS imports
 from RMS.Formats import FFbin
+from RMS.Formats import CALSTARS
 
 
-def maskBright(img, global_mean, max_abs_chunk_intensity=80, divider=16):
-    """ Masks too bright parts of the image so that star extraction isn't performed on them. Image is divided
-        into 16x16 chunks and their mean intensity is checked. If it is too bright, it will be masked by the
-        image's mean value.
 
-    @param img: [ndarray] image on which to perform the masking
-    @param global_mean: [float] mean value of the given image
-
-    @param max_abs_chunk_intensity: [int] threshold intensity for the chunk (about it it will be masked)
-    @param divider: [int] size of the chunks (should be a common divisor of image width and height)
-    """
-
-    # Generate indices for subdivision
-    x_range = np.arange(0, ff.ncols, divider)
-    y_range = np.arange(0, ff.nrows, divider)
-    x_range[0] = 0
-    y_range[0] = 0
-
-    img_copy = np.copy(img)
-
-    global_std = np.std(img_copy)
-
-    for x in x_range:
-        for y in y_range:
-
-            # Extract image segment
-            img_chunk = ff.avepixel[y : y+divider, x : x+divider]
-
-            # Calcuate mean value of the segment
-            chunk_mean = np.mean(img_chunk)
-
-            # Check if the image sigment is too bright
-            if (chunk_mean > global_mean  + 1.3 * global_std or chunk_mean > max_abs_chunk_intensity):
-                img_copy[y : y+divider, x : x+divider] = global_mean
-
-    return img_copy
-
-
-def extractStars(ff, max_global_intensity=80, max_stars=50, star_threshold=0.6):
-    """ Extracts stars on a given FF bin by searching for local maxima. 
+def extractStars(ff_dir, ff_name, max_global_intensity=150, border=10, neighborhood_size=10, 
+        intensity_threshold=5):
+    """ Extracts stars on a given FF bin by searching for local maxima and applying PSF fit for star 
+        confirmation.
 
     @param ff: [ff bin struct] FF bin file loaded in the FF bin structure
 
     @param max_global_intensity: [int] maximum mean intensity of an image before it is discared as too bright
-    @param max_stars: [int] maximum number of stars to be returned by the local maxima detection algorithm
-    @param star_threshold: [float] a threshold for cutting the detections which are too faint
+    @param border: [int] apply a mask on the detections by removing all that are too close to the given image 
+        border (in pixels)
+    @param neighborhood_size: [int] size of the neighbourhood for the maximum search (in pixels)
+    @param intensity_threshold: [float] a threshold for cutting the detections which are too faint (0-255)
 
     """
+
+    # Load the FF bin file
+    ff = FFbin.read(ff_dir, ff_name)
 
     # Calculate image mean and stddev
     global_mean = np.mean(ff.avepixel)
 
-    # Check if the image is too bright
+    # Check if the image is too bright and skip the image
     if global_mean > max_global_intensity:
-        return np.array([]), np.array([]), -1
-
-    # Mask too bright regions of the image
-    masked_average = maskBright(ff.avepixel, global_mean, max_abs_chunk_intensity=max_global_intensity)
-
-
-    # # Plot image
-    # plt.imshow(masked_average, cmap='gray')
-    # plt.show()
-    # plt.clf()
-    # plt.close()
-
-
+        return [[], [], [], []]
+    
     # Stretch image intensity with arcsinh
-    limg = np.arcsinh(masked_average.astype(np.float32))
-    limg = limg / limg.max()
+    data = np.arcsinh(ff.avepixel.astype(np.float32))
+    data = data / data.max() * 255
 
-    # Find local maximums
-    lm = feature.peak_local_max(limg, min_distance=15, num_peaks=max_stars)
+    # Locate local maximums on the image
+    data_max = filters.maximum_filter(data, neighborhood_size)
+    maxima = (data == data_max)
+    data_min = filters.minimum_filter(data, neighborhood_size)
+    diff = ((data_max - data_min) > intensity_threshold)
+    maxima[diff == 0] = 0
 
-    # Skip if no local maxima found
-    if not lm.shape:
-        return np.array([]), np.array([]), -1
+    # Calculate centroids of the maximums
+    labeled, num_objects = ndimage.label(maxima)
+    xy = np.array(ndimage.center_of_mass(data, labeled, range(1, num_objects+1)))
 
-    y1, x1 = np.hsplit(lm, 2)
+    # Remove all detection on the border
+    xy = xy[np.where((xy[:, 1] > border) & (xy[:,1] < ff.ncols - border) & (xy[:,0] > border) & (xy[:,0] < ff.nrows - border))]
 
-    # Choose local maximums above a given intensity threshold
-    v = limg[(y1,x1)]
-    lim = star_threshold
-    x2, y2 = x1[v > lim], y1[v > lim]
+    # Unpack star coordinates
+    y, x = np.hsplit(xy, 2)
 
-    return x2, y2, global_mean
+    # plotStars(ff, x, y)
+
+    # Fit a PSF to each star
+    x2, y2, background, intensity = fitPSF(ff, global_mean, x, y)
+    # x2, y2, background, intensity = list(x), list(y), [], []
+
+    return x2, y2, background, intensity
 
 
-def twoD_Gaussian((x, y), amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
-    """ Defines a 2D Gaussian distribution. """
+
+def twoDGaussian((x, y), amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
+    """ Defines a 2D Gaussian distribution. 
+
+    @param (x, y): [tuple of floats] independant variables
+    @param amplitude: [float] amplitude of the PSF
+    @param xo: [float] PSF center, X component
+    @param yo: [float] PSF center, Y component
+    @param sigma_x: [float] standard deviation X component
+    @param sigma_y: [float] standard deviation Y component
+    @param theta: [float] PSF rotation in radians
+    @param offset: [float] PSF offset from the 0 (i.e. the "elevation" of the PSF)
+
+    """
     
     xo = float(xo)
     yo = float(yo)    
@@ -131,7 +111,7 @@ def twoD_Gaussian((x, y), amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
     return g.ravel()
 
 
-def fitPSF(ff, avepixel_mean, x2, y2, segment_radius=7, roundness_threshold=0.6, max_feature_ratio=0.5):
+def fitPSF(ff, avepixel_mean, x2, y2, segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8):
     """ Fit 2D Gaussian distribution as the PSF on the star image. 
 
     @param ff: [ff bin struct] FF bin file loaded in the FF bin structure
@@ -149,7 +129,11 @@ def fitPSF(ff, avepixel_mean, x2, y2, segment_radius=7, roundness_threshold=0.6,
 
     x_fitted = []
     y_fitted = []
+    background_fitted = []
     intensity_fitted = []
+
+    # Set the initial guess
+    initial_guess = (30.0, segment_radius, segment_radius, 1.0, 1.0, -10.0, avepixel_mean)
     
     for star in zip(list(y2), list(x2)):
 
@@ -176,10 +160,9 @@ def fitPSF(ff, avepixel_mean, x2, y2, segment_radius=7, roundness_threshold=0.6,
         y_ind, x_ind = np.indices(star_seg.shape)
 
         # Fit a PSF to the star
-        initial_guess = (30.0, segment_radius, segment_radius, 1.5, 1.5, -10.0, avepixel_mean)
 
         try:
-            popt, pcov = opt.curve_fit(twoD_Gaussian, (y_ind, x_ind), star_seg.ravel(), p0=initial_guess, maxfev=100)
+            popt, pcov = opt.curve_fit(twoDGaussian, (y_ind, x_ind), star_seg.ravel(), p0=initial_guess, maxfev=150)
             # print popt
         except:
             # print 'Fitting failed!'
@@ -201,16 +184,17 @@ def fitPSF(ff, avepixel_mean, x2, y2, segment_radius=7, roundness_threshold=0.6,
         intensity = 8 * 3.14159 * amplitude * sigma_x * sigma_y - offset
 
         # Skip if the star intensity is below background level
-        if intensity < 2 * offset:
+        if intensity < offset:
             continue
 
         # Add stars to the final list
         x_fitted.append(x_min + xo)
         y_fitted.append(y_min + yo)
+        background_fitted.append(offset)
         intensity_fitted.append(intensity)
 
         # # Plot fitted stars
-        # data_fitted = twoD_Gaussian((y_ind, x_ind), *popt) - offset
+        # data_fitted = twoDGaussian((y_ind, x_ind), *popt) - offset
 
         # fig, ax = plt.subplots(1, 1)
         # ax.hold(True)
@@ -224,8 +208,25 @@ def fitPSF(ff, avepixel_mean, x2, y2, segment_radius=7, roundness_threshold=0.6,
         # plt.clf()
         # plt.close()
 
-    return x_fitted, y_fitted, intensity_fitted
+    return x_fitted, y_fitted, background_fitted, intensity_fitted
 
+
+def plotStars(ff, x2, y2):
+    """ Plots detected stars on the input image. """
+
+    # Plot image
+    plt.imshow(np.arcsinh(ff.avepixel), cmap='gray')
+
+    # Plot stars
+    for star in zip(list(y2), list(x2)):
+        y, x = star
+        c = plt.Circle((x, y), 5, fill=False, color='r')
+        plt.gca().add_patch(c)
+
+    plt.show()
+
+    plt.clf()
+    plt.close()
 
 
 
@@ -236,61 +237,61 @@ if __name__ == "__main__":
         sys.exit()
     
     # Get paths to every FF bin file in a directory 
-    ff_list = [ff for ff in os.listdir(sys.argv[1]) if ff[0:2]=="FF" and ff[-3:]=="bin"]
+    ff_dir = os.path.abspath(sys.argv[1])
+    ff_list = [ff_name for ff_name in os.listdir(ff_dir) if ff_name[0:2]=="FF" and ff_name[-3:]=="bin"]
 
     # Check if there are any file in the directory
     if(len(ff_list) == None):
         print "No files found!"
         sys.exit()
 
+
+    star_list = []
+
     # Go through all files in the directory
     for ff_name in sorted(ff_list):
 
         print ff_name
 
-        # Load the FF bin file
-        ff = FFbin.read(sys.argv[1], ff_name)
-
         t1 = time.clock()
 
-        # Run star extraction
-        x2, y2, img_mean = extractStars(ff)
+        x2, y2, background, intensity = extractStars(ff_dir, ff_name)
+
+        print 'Time for extraction: ', time.clock() - t1
 
         # Skip if no stars were found
-        if img_mean == -1:
-            continue
-
-        # Fit a PSF to each star
-        x2, y2, intensity = fitPSF(ff, img_mean, x2, y2)
-
-        print 'Time for finding: ', time.clock() - t1
-
-        # Skip the rest if there are no good stars
         if not x2:
             continue
 
+        # Construct the table of the star parameters
+        star_data = zip(x2, y2, background, intensity)
+
+        # Add star info to the star list
+        star_list.append([ff_name, star_data])
+
         # Print found stars
-        print '   X      Y   intensity'
-        for x, y, intensity in zip(x2, y2, intensity):
-            print '{:06.2f} {:06.2f} {:06d}'.format(round(x, 2), round(y, 2), int(intensity))
+        print '   ROW    COL intensity'
+        for x, y, bg_level, level in star_data:
+            print ' {:06.2f} {:06.2f} {:6d} {:6d}'.format(round(y, 2), round(x, 2), int(bg_level), int(level))
 
 
-        # Show stars if there are only more then 10 of them
-        if len(x2) < 10:
-            continue
+        # # Show stars if there are only more then 10 of them
+        # if len(x2) < 20:
+        #     continue
 
-        # Plot image
-        plt.imshow(np.arcsinh(ff.avepixel), cmap='gray')
+        # # Load the FF bin file
+        # ff = FFbin.read(ff_dir, ff_name)
 
-        # Plot stars
-        for star in zip(list(y2), list(x2)):
-            y, x = star
-            c = plt.Circle((x, y), 5, fill=False, color='r')
-            plt.gca().add_patch(c)
+        # plotStars(ff, x2, y2)
 
-        plt.show()
+    # Load data about the image
+    ff = FFbin.read(ff_dir, ff_name)
 
-        plt.clf()
-        plt.close()
+    # Generate the name for the CALSTARS file
+    calstars_name = 'CALSTARS_' + "{:04d}".format(int(ff.camno)) + ff_dir.split(os.sep)[-1] + '.txt'
+
+
+    # Write detected stars to the CALSTARS file
+    CALSTARS.makeCALSTARS(star_list, calstars_name, ff_dir, ff.camno, ff.nrows, ff.ncols)
 
 

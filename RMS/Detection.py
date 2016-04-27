@@ -851,7 +851,7 @@ def detectMeteors(ff_directory, ff_name, config):
 
             # Show stripe
             #COMMENTED
-            #show2("stripe", stripe*255)
+            # show2("stripe", stripe*255)
 
             # Show 3D could
             # show3DCloud(ff, stripe)

@@ -1,5 +1,5 @@
 # RPi Meteor Station
-# Copyright (C) 2015  Dario Zubovic
+# Copyright (C) 2016  Dario Zubovic, Denis Vida
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import os
 import numpy as np
 import struct
 
@@ -37,27 +38,30 @@ class ff_struct:
         
         self.array = None
         
-def read(dir, filename, array=False):
+
+
+def read(directory, filename, array=False):
     """ Read FF*.bin file from specified directory.
     
-    @param dir: path to directory containing file
-    @param filename: name of FF*.bin file (either with FF and extension or without)
-    @param array: True in order to populate structure's array element (default is False)
-    @return: ff structure
+    @param directory: [str] path to directory containing file
+    @param filename: [str] name of FF*.bin file (either with FF and extension or without)
+    @param array: [ndarray] True in order to populate structure's array element (default is False)
+
+    @return [ff structure]
     """
     
     if filename[:2] == "FF":
-        fid = open(dir + filename, "rb")
+        fid = open(os.path.join(directory, filename), "rb")
     else:
-        fid = open(dir + "FF" + filename + ".bin", "rb")
+        fid = open(os.path.join(directory, "FF" + filename + ".bin"), "rb")
 
     ff = ff_struct()
     
-    ff.nrows = np.fromfile(fid, dtype=np.uint32, count = 1)
-    ff.ncols = np.fromfile(fid, dtype=np.uint32, count = 1)
-    ff.nbits = np.fromfile(fid, dtype=np.uint32, count = 1)
-    ff.first = np.fromfile(fid, dtype=np.uint32, count = 1)
-    ff.camno = np.fromfile(fid, dtype=np.uint32, count = 1)
+    ff.nrows = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+    ff.ncols = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+    ff.nbits = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+    ff.first = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+    ff.camno = int(np.fromfile(fid, dtype=np.uint32, count = 1))
     
     if array:
         N = 4 * ff.nrows * ff.ncols
@@ -74,16 +78,24 @@ def read(dir, filename, array=False):
 
     return ff
 
-def write(ff, dir, filename):
+
+
+def write(ff, directory, filename):
     """ Write FF*.bin structure to a file in specified directory.
+
+    @param ff: [ff bin struct] FF bin file loaded in the FF bin structure
+    @param directory: [str] path to the directory where the file will be written
+    @param filename: [str] name of the file which will be written
+
+    @return None
+
     """
     
     if filename[:2] == "FF":
-        image = dir + filename, 'rb'
+        image = os.path.join(directory, filename)
     else:
-        image = dir + "FF" + filename + ".bin"
+        image = os.path.join(directory, "FF" + filename + ".bin")
         
-    print image
     
     with open(image, "wb") as fid:
         if ff.array is not None:
@@ -103,8 +115,15 @@ def write(ff, dir, filename):
     
         arr.tofile(fid)
         
+
+
 def reconstruct(ff):
-    """ Reconstruct video frames from the FF bin file. """
+    """ Reconstruct video frames from the FF bin file. 
+
+    @param ff: [ff bin struct] FF bin file loaded in the FF bin structure
+
+    @return frames: [ndarray] an array of reconstructed video frames (255 x nrows x ncols)
+    """
     
     frames = np.zeros((256, ff.nrows, ff.ncols), np.uint8)
     

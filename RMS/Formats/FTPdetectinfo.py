@@ -20,7 +20,18 @@ import numpy as np
 
 
 def makeFTPdetectinfo(meteor_list, file_name, ff_directory, cal_directory, cam_code, fps):
-    """ Writes a FTPdetectinfo file from the list of detected meteors. """
+    """ Writes a FTPdetectinfo file from the list of detected meteors. 
+
+    @param meteor_list: [list] a list of meteor data, entries: 
+        ff_name, meteor_No, rho, theta, centroids
+    @param file_name: [str] file name of the file in which the data will be written
+    @param ff_directory: [str] path to the directory in which the file will be written
+    @param cal_directory: [str] path to the CAL directory (optional, used only in CAMS processing)
+    @param cam_code: [int] camera number
+    @param fps: [float] frames per second of the camera
+
+    @return None
+    """
 
 
     # Open a file
@@ -43,6 +54,7 @@ def makeFTPdetectinfo(meteor_list, file_name, ff_directory, cal_directory, cam_c
         # Write info for all meteors
         for meteor in meteor_list:
 
+            # Unpack the meteor data
             ff_name, meteor_No, rho, theta, centroids = meteor
 
             ftpdetect_file.write("-------------------------------------------------------\n")
@@ -71,20 +83,23 @@ def makeFTPdetectinfo(meteor_list, file_name, ff_directory, cal_directory, cam_c
                     "000.00 000.00 000.00 000.00 " + "{:06d}".format(int(level)) + "\n")
 
 
-meteor_list = [["FF453_20160419_184117_248_0020992.bin", 1, 271.953268044, 8.13010235416,
-[[ 124.5      ,   665.44095949,  235.00000979,  101.        ],
- [ 128.       ,   665.60121632,  235.9999914 ,  119.        ],
- [ 137.5      ,   666.54497978,  237.00000934,  195.        ],
- [ 151.5      ,   664.52378186,  238.99999005,  120.        ],
- [ 152.5      ,   666.        ,  239.        ,  47.        ]]]]
 
-file_name = 'FTPdetect_test.txt'
-ff_directory = 'here'
-cal_directory = 'there'
-cam_code = 450
-fps = 25
+# Test
+if __name__ == '__main__':
+    meteor_list = [["FF453_20160419_184117_248_0020992.bin", 1, 271.953268044, 8.13010235416,
+    [[ 124.5      ,   665.44095949,  235.00000979,  101.        ],
+     [ 128.       ,   665.60121632,  235.9999914 ,  119.        ],
+     [ 137.5      ,   666.54497978,  237.00000934,  195.        ],
+     [ 151.5      ,   664.52378186,  238.99999005,  120.        ],
+     [ 152.5      ,   666.        ,  239.        ,  47.        ]]]]
 
-makeFTPdetectinfo(meteor_list, file_name, ff_directory, cal_directory, cam_code, fps)
+    file_name = 'FTPdetect_test.txt'
+    ff_directory = 'here'
+    cal_directory = 'there'
+    cam_code = 450
+    fps = 25
+
+    makeFTPdetectinfo(meteor_list, file_name, ff_directory, cal_directory, cam_code, fps)
 
             
 
