@@ -80,7 +80,7 @@ def makeFTPdetectinfo(meteor_list, file_name, ff_directory, cal_directory, cam_c
                 frame, x, y, level = line
 
                 ftpdetect_file.write("{:06.1f} {:07.2f} {:07.2f}".format(frame, round(x, 2), round(y, 2)) + 
-                    "000.00 000.00 000.00 000.00 " + "{:06d}".format(int(level)) + "\n")
+                    " 000.00 000.00 000.00 000.00 " + "{:06d}".format(int(level)) + "\n")
 
 
 

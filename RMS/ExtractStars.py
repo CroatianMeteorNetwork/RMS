@@ -253,6 +253,8 @@ def plotStars(ff, x2, y2):
 
 if __name__ == "__main__":
 
+    time_start = time.clock()
+
     # Load config file
     config = cr.parse(".config")
 
@@ -312,10 +314,12 @@ if __name__ == "__main__":
     ff = FFbin.read(ff_dir, ff_name)
 
     # Generate the name for the CALSTARS file
-    calstars_name = 'CALSTARS_' + "{:04d}".format(int(ff.camno)) + ff_dir.split(os.sep)[-1] + '.txt'
+    calstars_name = 'CALSTARS' + "{:04d}".format(int(ff.camno)) + ff_dir.split(os.sep)[-1] + '.txt'
 
 
     # Write detected stars to the CALSTARS file
     CALSTARS.makeCALSTARS(star_list, calstars_name, ff_dir, ff.camno, ff.nrows, ff.ncols)
+
+    print 'Total time taken: ', time.clock() - time_start
 
 
