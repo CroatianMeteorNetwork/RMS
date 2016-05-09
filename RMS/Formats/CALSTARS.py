@@ -18,7 +18,7 @@
 import os
 
 
-def makeCALSTARS(star_list, file_name, ff_directory, cam_code, nrows, ncols):
+def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols):
     """ Writes the star list into the CAMS CALSTARS format. 
 
     @param star_list: [list] a list of star data, entries:
@@ -26,8 +26,8 @@ def makeCALSTARS(star_list, file_name, ff_directory, cam_code, nrows, ncols):
         star_data entries:
             x, y, bg_level, level
 
-    @param file_name: [str] file name in which the data will be written
     @param ff_directory: [str] path to the directory in which the file will be written
+    @param file_name: [str] file name in which the data will be written
     @param cam_code: [int] camera number
     @param nrows: [int] number of rows in the image
     @param ncols: [int] number of columns in the image
@@ -69,3 +69,67 @@ def makeCALSTARS(star_list, file_name, ff_directory, cam_code, nrows, ncols):
 
         # Write the end separator
         star_file.write("##########################################################################\n")
+
+
+
+def readCALSTARS(file_path, file_name):
+    """ Reads a list of detected stars from a CAMS CALSTARS format. 
+
+    @param file_path: [string] path to the directory where the CALSTARS file is located
+    @param file_name: [string] name of the CALSTARS file
+
+    @return star_list: [list] a list of star data, entries:
+        ff_name, star_data
+        star_data entries:
+            x, y, bg_level, level
+    """
+
+    
+    calstars_path = os.path.join(file_path, file_name)
+
+    # Check if the CALSTARS file exits
+    if not os.path.isfile(calstars_path):
+        return False
+
+    # Open the CALSTARS file for reading
+    with open(calstars_path) as star_file:
+
+        calibrationstars_list = []
+
+        ff_name = ''
+        star_data = []
+        skip_lines = 0
+        for line in star_file.readlines()[11:]:
+
+            # Skip lines if neccessary
+            if skip_lines > 0:
+                skip_lines -= 1
+                continue
+
+            # Check for end of star entry
+            if ("===" in line) or ("###" in line):
+
+                # Add the star list to the main list
+                calibrationstars_list.append([ff_name, star_data])
+
+                # Reset the star list
+                star_data = []
+                
+                continue
+
+            # Remove newline
+            line = line.replace('\n', '')
+
+            if 'FF' in line:
+                ff_name = line
+                skip_lines = 2
+                continue
+
+            # Split the line
+            line = line.split()
+
+            # Save star data
+            star_data.append([float(line[0]), float(line[1]), int(line[2]), int(line[3])])
+
+    
+    return calibrationstars_list

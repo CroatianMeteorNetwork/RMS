@@ -1144,7 +1144,7 @@ if __name__ == "__main__":
 
     ftpdetectinfo_name = os.path.join(results_path, 'FTPdetectinfo_' + results_name + '.txt')
     # Write FTPdetectinfo file
-    FTPdetectinfo.makeFTPdetectinfo(results_list, ftpdetectinfo_name, results_path, results_path, 
+    FTPdetectinfo.writeFTPdetectinfo(results_list, results_path, ftpdetectinfo_name, results_path, 
         config.stationID, config.fps)
                 
 

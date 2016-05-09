@@ -40,6 +40,9 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     """ Extracts stars on a given FF bin by searching for local maxima and applying PSF fit for star 
         confirmation.
 
+    Source of one part of the code: 
+    http://stackoverflow.com/questions/9111711/get-coordinates-of-local-maxima-in-2d-array-above-certain-value
+
     @param ff: [ff bin struct] FF bin file loaded in the FF bin structure
 
     @param config: [config object] configuration object (loaded from the .config file)
@@ -318,7 +321,7 @@ if __name__ == "__main__":
 
 
     # Write detected stars to the CALSTARS file
-    CALSTARS.makeCALSTARS(star_list, calstars_name, ff_dir, ff.camno, ff.nrows, ff.ncols)
+    CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, ff.camno, ff.nrows, ff.ncols)
 
     print 'Total time taken: ', time.clock() - time_start
 

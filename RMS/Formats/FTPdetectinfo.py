@@ -19,13 +19,13 @@ import datetime
 import numpy as np
 
 
-def makeFTPdetectinfo(meteor_list, file_name, ff_directory, cal_directory, cam_code, fps):
+def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_code, fps):
     """ Writes a FTPdetectinfo file from the list of detected meteors. 
 
     @param meteor_list: [list] a list of meteor data, entries: 
         ff_name, meteor_No, rho, theta, centroids
-    @param file_name: [str] file name of the file in which the data will be written
     @param ff_directory: [str] path to the directory in which the file will be written
+    @param file_name: [str] file name of the file in which the data will be written
     @param cal_directory: [str] path to the CAL directory (optional, used only in CAMS processing)
     @param cam_code: [int] camera number
     @param fps: [float] frames per second of the camera

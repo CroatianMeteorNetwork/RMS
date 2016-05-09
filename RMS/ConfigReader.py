@@ -109,6 +109,28 @@ class Config:
         self.max_feature_ratio = 0.8 # maximum ratio between 2 sigma of the star and the image segment area
 
 
+        ##### Calibration
+        self.star_catalog_path = 'Catalogs'
+        self.star_catalog_file = 'BSC5'
+
+        self.platepar_name = 'platepar_cmn2010.cal'
+
+        self.catalog_extraction_radius = 40.0 #deg
+        self.catalog_mag_limit = 4.5
+
+        self.calstars_files_N = 100 # How many calstars FF files to evaluate
+
+        self.calstars_min_stars = 500 # Minimum number of stars to use
+
+        self.stars_NN_radius = 10.0 # deg
+        self.refinement_star_NN_radius = 0.125 #deg
+        self.rotation_param_range = 5.0 # deg
+        self.min_matched_stars = 7
+        self.max_initial_iterations = 20
+
+        self.min_estimation_value = 0.4 # Minimum estimation parameter when to stop the iteration
+
+
 def parse(filename):
     parser = RawConfigParser()
     parser.read(filename)
@@ -134,6 +156,9 @@ def parse(filename):
 
     if parser.has_section("StarExtraction"):
         parseStarExtraction(config, parser)
+
+    if parser.has_section("Calibration"):
+        parseCalibration(config, parser)
     
     return config
 
@@ -339,3 +364,45 @@ def parseStarExtraction(config, parser):
 
     if parser.has_option("StarExtraction", "max_feature_ratio"):
         config.max_feature_ratio = parser.getfloat("StarExtraction", "max_feature_ratio")
+
+
+def parseCalibration(config, parser):
+
+    if parser.has_option("Calibration", "star_catalog_path"):
+        config.star_catalog_path = parser.get("Calibration", "star_catalog_path")
+
+    if parser.has_option("Calibration", "star_catalog_file"):
+        config.star_catalog_file = parser.get("Calibration", "star_catalog_file")
+
+    if parser.has_option("Calibration", "platepar_name"):
+        config.platepar_name = parser.get("Calibration", "platepar_name")
+
+    if parser.has_option("Calibration", "catalog_extraction_radius"):
+        config.catalog_extraction_radius = parser.getfloat("Calibration", "catalog_extraction_radius")
+
+    if parser.has_option("Calibration", "catalog_mag_limit"):
+        config.catalog_mag_limit = parser.getfloat("Calibration", "catalog_mag_limit")
+
+    if parser.has_option("Calibration", "calstars_files_N"):
+        config.calstars_files_N = parser.getint("Calibration", "calstars_files_N")
+
+    if parser.has_option("Calibration", "calstars_min_stars"):
+        config.calstars_min_stars = parser.getint("Calibration", "calstars_min_stars")
+
+    if parser.has_option("Calibration", "stars_NN_radius"):
+        config.stars_NN_radius = parser.getfloat("Calibration", "stars_NN_radius")
+
+    if parser.has_option("Calibration", "refinement_star_NN_radius"):
+        config.refinement_star_NN_radius = parser.getfloat("Calibration", "refinement_star_NN_radius")
+
+    if parser.has_option("Calibration", "rotation_param_range"):
+        config.rotation_param_range = parser.getfloat("Calibration", "rotation_param_range")
+
+    if parser.has_option("Calibration", "min_matched_stars"):
+        config.min_matched_stars = parser.getint("Calibration", "min_matched_stars")
+
+    if parser.has_option("Calibration", "max_initial_iterations"):
+        config.max_initial_iterations = parser.getint("Calibration", "max_initial_iterations")
+
+    if parser.has_option("Calibration", "min_estimation_value"):
+        config.min_estimation_value = parser.getfloat("Calibration", "min_estimation_value")
