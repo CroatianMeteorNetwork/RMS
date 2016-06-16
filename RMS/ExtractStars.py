@@ -99,6 +99,8 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     x2, y2, background, intensity = fitPSF(ff, global_mean, x, y, config=config)
     # x2, y2, background, intensity = list(x), list(y), [], []
 
+    # plotStars(ff, x2, y2)
+
     return x2, y2, background, intensity
 
 
@@ -126,7 +128,8 @@ def twoDGaussian((x, y), amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
     return g.ravel()
 
 
-def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8):
+def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_threshold=0.5, 
+    max_feature_ratio=0.8, bit_depth=8):
     """ Fit 2D Gaussian distribution as the PSF on the star image. 
 
     @param ff: [ff bin struct] FF bin file loaded in the FF bin structure
@@ -140,6 +143,7 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
     @param roundness_threshold: [float] minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars
         (hot pixels are narrow, while stars are round)
     @param max_feature_ratio: [float] maximum ratio between 2 sigma of the star and the image segment area
+    @param bit_depth: [float] bit depth of the camera
 
     """
 
@@ -148,6 +152,7 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
         segment_radius = config.segment_radius
         roundness_threshold = config.roundness_threshold
         max_feature_ratio = config.max_feature_ratio
+        bit_depth = config.bit_depth
 
 
     x_fitted = []
@@ -156,7 +161,7 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
     intensity_fitted = []
 
     # Set the initial guess
-    initial_guess = (30.0, segment_radius, segment_radius, 1.0, 1.0, -10.0, avepixel_mean)
+    initial_guess = (30.0, segment_radius, segment_radius, 1.0, 1.0, 0.0, avepixel_mean)
     
     for star in zip(list(y2), list(x2)):
 
@@ -204,12 +209,12 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
         if (4*sigma_x*sigma_y / segment_radius**2 > max_feature_ratio):
             continue
 
-        # Calculate intensity (as a volume under 2 sigma 2D Gauss curve) - background intensity
-        intensity = 8 * 3.14159 * amplitude * sigma_x * sigma_y - offset
+        # Calculate the intensity (as a volume under the 2D Gaussian)
+        intensity = 2*np.pi*amplitude*sigma_x*sigma_y
 
-        # Skip if the star intensity is below background level
-        if intensity < offset:
-            continue
+        # # Skip if the star intensity is below background level
+        # if intensity < offset:
+        #     continue
 
         # Add stars to the final list
         x_fitted.append(x_min + xo)
@@ -222,8 +227,8 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
 
         # fig, ax = plt.subplots(1, 1)
         # ax.hold(True)
-        # plt.title('Y: '+str(y_min)+', X:'+str(x_min))
-        # ax.imshow(star_seg.reshape(segment_radius*2, segment_radius*2), cmap=plt.cm.jet, origin='bottom',
+        # plt.title('Center Y: '+str(y_min[0])+', X:'+str(x_min[0]))
+        # ax.imshow(star_seg.reshape(segment_radius*2, segment_radius*2), cmap=plt.cm.inferno, origin='bottom',
         #     extent=(x_ind.min(), x_ind.max(), y_ind.min(), y_ind.max()))
         # # ax.imshow(data_fitted.reshape(segment_radius*2, segment_radius*2), cmap=plt.cm.jet, origin='bottom')
         # ax.contour(x_ind, y_ind, data_fitted.reshape(segment_radius*2, segment_radius*2), 8, colors='w')
@@ -299,7 +304,7 @@ if __name__ == "__main__":
         star_list.append([ff_name, star_data])
 
         # Print found stars
-        print '   ROW    COL intensity'
+        print '   ROW    COL   BGK  intensity'
         for x, y, bg_level, level in star_data:
             print ' {:06.2f} {:06.2f} {:6d} {:6d}'.format(round(y, 2), round(x, 2), int(bg_level), int(level))
 

@@ -10,6 +10,7 @@ import copy
 
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize
+from scipy.optimize import curve_fit
 
 # Import local modules
 import RMS.ConfigReader as cr
@@ -276,8 +277,15 @@ def findCorrectionDirection(platepar, catalog_stars, calstars_list, fps, UT_corr
         if rot_diff == 0:
             break
 
-    # Choose the lowest separation
-    min_ind = np.argmin(best_evaluation)
+    # Check if there are any good evaluations
+    if best_evaluation:
+        
+        # Choose the lowest separation
+        min_ind = np.argmin(best_evaluation)
+
+    else:
+        return None, None, None, None
+
 
     print 'Best values: '
     print 'EVAL, SEP, ANGLE, ROT'
@@ -290,7 +298,11 @@ def findCorrectionDirection(platepar, catalog_stars, calstars_list, fps, UT_corr
 def getMatchedStars(platepar, calstars_list, fps, UT_corr, catalog_stars, catalog_extraction_radius, catalog_mag_limit, stars_NN_radius, min_matched_stars):
     """ Get the matching catalogs stars with ones in each FF file from CALSTARS. """
 
-    matched_stars = {}
+    # Init the dectionary which contains matched stars from the catalog on each FF file
+    catalog_matched_stars = {}
+
+    # Init the list of all matching stars (catalog + FF file values)
+    matched_list = []
 
     for calstars_entry in calstars_list:
 
@@ -298,6 +310,9 @@ def getMatchedStars(platepar, calstars_list, fps, UT_corr, catalog_stars, catalo
 
         # Convert CalibrationStars from XY image coordinates to celestial equatorial coordinates (Ra, Dec)
         RA_data, dec_data = starsXY2RaDec(ff_name, np.array(star_data), platepar, fps, UT_corr)
+
+        # Extract levels data
+        levels_data = np.array(star_data)[:,3]
 
         # Calculate the difference in hours from the FF file recording time to the platepar time
         hour_diff = hourDifferenceFF(ff_name, platepar.time, fps)
@@ -317,16 +332,83 @@ def getMatchedStars(platepar, calstars_list, fps, UT_corr, catalog_stars, catalo
 
 
         # Get the indices of the matching stars
-        matched_indices = starsNNevaluation(stars_coords, ref_stars_coords, stars_NN_radius, min_matched_stars, ret_indices=1)
+        catalog_matched_indices, image_matched_indices = starsNNevaluation(stars_coords, ref_stars_coords, 
+            stars_NN_radius, min_matched_stars, ret_indices=1)
 
         # Continue if no stars were matched
-        if matched_indices == None:
+        if catalog_matched_indices == None:
             continue
 
         # Add matched stars to dictionary
-        matched_stars[ff_name] = extracted_catalog[matched_indices,:]
+        catalog_matched_stars[ff_name] = extracted_catalog[catalog_matched_indices,:]
 
-    return matched_stars
+        # Extract columns from the matched catalog stars
+        RA_cat, dec_cat, mag_cat = np.hsplit(extracted_catalog[catalog_matched_indices,:], 3)
+
+        # Add the matching entries to the list
+        matched_list.append([RA_cat, dec_cat, mag_cat, RA_data[image_matched_indices], 
+            dec_data[image_matched_indices], levels_data[image_matched_indices]])
+
+
+    return catalog_matched_stars, matched_list
+
+
+def photometryFit(matched_list):
+    """ Perform the photometry procedure on the given matched star data. """
+
+    def _stellarMagnitude(x, C2, m2):
+        """ Equation that relates instrumental brightness level (intensity) to stellar magnitude. 
+
+        @param x: [float] input instrumental level to be converted to stellar magnitude
+        @param C2: [float] fitted level parameter
+        @param m2: [float] fitted magnitude parameter
+
+        """
+
+        return -2.5*np.log10(x) + 2.5*np.log10(C2) + m2
+
+
+    mag_list = []
+    level_list = []
+
+    # TESTING ###########
+    for i, ff_stars in enumerate(matched_list):
+        print '------------------'
+        print 'Image: ', i+1
+
+        ra_cat, dec_cat, mag_cat, ra_img, dec_img, level_img = ff_stars
+
+        for j in range(len(ra_cat)):
+            # print ra_cat[j][0], dec_cat[j][0], mag_cat[j][0], ra_img[j], dec_img[j], level_img[j]
+            mag_list.append(mag_cat[j][0])
+            level_list.append(level_img[j])
+
+    # Convert brightness data to numpy arrays
+    magnitude_data = np.array(mag_list)
+    levels_data = np.array(level_list)
+
+    # Fit the magnitude relation curve
+    popt, pcov = curve_fit(_stellarMagnitude, levels_data, magnitude_data)
+
+    print popt
+
+    x_level_test = np.linspace(50, 10000, 100)
+
+    # Plot the fitted curve
+    plt.plot(x_level_test, _stellarMagnitude(x_level_test, *popt))
+
+    # Plot levels vs magnitudes
+    plt.scatter(levels_data, magnitude_data)
+    plt.gca().set_xscale('log')
+
+    plt.xlabel('Level')
+    plt.ylabel('Stellar magnitude')
+    plt.title('Magnitude fit')
+
+    plt.show()
+
+    return popt
+
 
 
 
@@ -413,11 +495,20 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
         # Get the coordinate shift
         evaluation, separation_corr, angle_corr, platepar.rot_param = findCorrectionDirection(platepar, catalog_stars, calstars_list, config.fps, UT_corr, config.catalog_extraction_radius, config.catalog_mag_limit, stars_NN_radius, config.min_matched_stars, rot_param_range_temp)
 
+        # Check if no good solutions were found
+        if evaluation == None:
+            
+            print 'No good solutions were found, the astrometry procedure failed!'     
+            return False   
+
+
         # Check if the separation is better than the last one, only then apply the correction
         if evaluation < previous_evaluation:
+            
             # Apply the correction to platepar
             platepar.RA_d, platepar.dec_d = applyCoordinateCorrection(platepar.RA_d, platepar.dec_d, separation_corr, angle_corr)
 
+            # Shrink the star search radius
             stars_NN_radius = stars_NN_radius/np.sqrt(2)
 
             print 'NEW CENTER'
@@ -439,14 +530,17 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
 
         # End the estimation if the evaluation does not change
         if (iter_no > 5) and (abs(previous_evaluation - evaluation) < 0.01):
-            break
+            
+            return False
 
 
 
         # Stop after too many iterations
         if iter_no > config.max_initial_iterations:
-            break
 
+            return False
+
+        # Shrink the search radius of the rotational parameter
         if rot_param_range_temp:
             rot_param_range_temp = rot_param_range_temp/np.sqrt(2)
 
@@ -454,34 +548,35 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
         iter_no += 1
 
     # Set a small search radius
-    #config.refinement_star_NN_radius = 0.125 #deg
+    # config.refinement_star_NN_radius = 0.125 #deg
 
     # Get matched stars
-    matched_stars = getMatchedStars(platepar, calstars_list, config.fps, UT_corr, catalog_stars, config.catalog_extraction_radius, config.catalog_mag_limit, config.refinement_star_NN_radius, config.min_matched_stars)
+    catalog_matched_stars, matched_list = getMatchedStars(platepar, calstars_list, config.fps, UT_corr, catalog_stars, config.catalog_extraction_radius, config.catalog_mag_limit, config.refinement_star_NN_radius, config.min_matched_stars)
+        
 
-    ### Start RA, Dec refinement
+    # ### Start RA, Dec refinement
 
-    # Define initial RA and Dec
-    initial_parameters = np.array([platepar.RA_d, platepar.dec_d])
+    # # Define initial RA and Dec
+    # initial_parameters = np.array([platepar.RA_d, platepar.dec_d])
 
-    extra_args = [platepar.rot_param, platepar, catalog_stars, calstars_list, config.fps, UT_corr, config.catalog_extraction_radius, config.catalog_mag_limit, config.refinement_star_NN_radius, config.min_matched_stars]
+    # extra_args = [platepar.rot_param, platepar, catalog_stars, calstars_list, config.fps, UT_corr, config.catalog_extraction_radius, config.catalog_mag_limit, config.refinement_star_NN_radius, config.min_matched_stars]
 
-    # Define an adapted function for refining
-    refineSoluton = lambda params: solutionEvaluation(params, *extra_args, matched_stars=matched_stars)[0]
+    # # Define an adapted function for refining
+    # refineSoluton = lambda params: solutionEvaluation(params, *extra_args, matched_stars=catalog_matched_stars)[0]
 
-    # Run SIMPLEX parameter refining
-    res = minimize(refineSoluton, initial_parameters, method='Nelder-Mead', options={'xtol': 1e-4, 'disp': True})
+    # # Run SIMPLEX parameter refining
+    # res = minimize(refineSoluton, initial_parameters, method='Nelder-Mead', options={'xtol': 1e-4, 'disp': True})
 
-    print res.x, platepar.rot_param
+    # print res.x, platepar.rot_param
 
-    # Update platepar with simplex results for Ra and Dec
-    platepar.RA_d, platepar.dec_d = res.x
+    # # Update platepar with simplex results for Ra and Dec
+    # platepar.RA_d, platepar.dec_d = res.x
 
     ### Start X distorsion parameter refinement
     initial_parameters = copy.deepcopy(platepar.x_poly)
 
     # Define an adapted function for refining
-    refineSoluton = lambda params: solutionEvaluation((platepar.RA_d, platepar.dec_d), platepar.rot_param, platepar, catalog_stars, calstars_list, config.fps, UT_corr, config.catalog_extraction_radius, config.catalog_mag_limit, config.refinement_star_NN_radius, config.min_matched_stars, x_poly=params, matched_stars=matched_stars)[0]
+    refineSoluton = lambda params: solutionEvaluation((platepar.RA_d, platepar.dec_d), platepar.rot_param, platepar, catalog_stars, calstars_list, config.fps, UT_corr, config.catalog_extraction_radius, config.catalog_mag_limit, config.refinement_star_NN_radius, config.min_matched_stars, x_poly=params, matched_stars=catalog_matched_stars)[0]
 
     # Run SIMPLEX parameter refining
     res = minimize(refineSoluton, initial_parameters, method='Nelder-Mead', options={'xtol': 1e-4, 'disp': True})
@@ -495,7 +590,7 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
     initial_parameters = copy.deepcopy(platepar.y_poly)
 
     # Define an adapted function for refining
-    refineSoluton = lambda params: solutionEvaluation((platepar.RA_d, platepar.dec_d), platepar.rot_param, platepar, catalog_stars, calstars_list, config.fps, UT_corr, config.catalog_extraction_radius, config.catalog_mag_limit, config.refinement_star_NN_radius, config.min_matched_stars, y_poly=params, matched_stars=matched_stars)[0]
+    refineSoluton = lambda params: solutionEvaluation((platepar.RA_d, platepar.dec_d), platepar.rot_param, platepar, catalog_stars, calstars_list, config.fps, UT_corr, config.catalog_extraction_radius, config.catalog_mag_limit, config.refinement_star_NN_radius, config.min_matched_stars, y_poly=params, matched_stars=catalog_matched_stars)[0]
 
     # Run SIMPLEX parameter refining
     res = minimize(refineSoluton, initial_parameters, method='Nelder-Mead', options={'xtol': 1e-4, 'disp': True})
@@ -506,15 +601,26 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
     platepar.y_poly = res.x
 
 
+    ## Do the photometry calibration
+    # Get matched stars
+    catalog_matched_stars, matched_list = getMatchedStars(platepar, calstars_list, config.fps, UT_corr, catalog_stars, config.catalog_extraction_radius, config.catalog_mag_limit, config.refinement_star_NN_radius, config.min_matched_stars)
+    
+
+    # Fit the magnitude curve
+    C2, m2 = photometryFit(matched_list)
+
+
     print 'FINAL RESULTS:'
     print platepar.RA_d, platepar.dec_d
     print platepar.rot_param
     print platepar.x_poly
     print platepar.y_poly
 
+    print 'Photometry parameters: ', C2, m2
+
     # Calculate the number of used stars
     n_stars = 0
-    for star_list in matched_stars.itervalues():
+    for star_list in catalog_matched_stars.itervalues():
         n_stars += len(star_list)
 
     print 'Number of stars used: ', n_stars

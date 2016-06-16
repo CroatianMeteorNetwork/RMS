@@ -257,10 +257,33 @@ def altAz2RADec(lat, lon, UT_corr, time_data, azimuth_data, altitude_data):
     return JD_data, RA_data, dec_data
 
 
-
-def calculateMagnitudes(level_data, ra_beg, ra_end, dec_beg, dec_end, duration, mag_0, mag_lev, 
-    w_pix):
+def calculateMagnitudes(level_data, C2, m2):
     """ Calculate the magnitude of the data points with given magnitude calibration parameters. 
+
+    @param level_data: [ndarray] levels of the meteor centroid (arbirtary units)
+    @param C2: [float] magnitude calibration equation parameter (fitted intensity)
+    @param m2: [float] magnitude calibration equation parameter (intercept)
+
+    @return magnitude_data: [ndarray] array of meteor's lightcurve apparent magnitudes
+    """
+
+    magnitude_data = np.zeros_like(level_data, dtype=np.float64)
+
+    # Go through all levels of a meteor
+    for i, level in enumerate(level_data):
+
+        # Save magnitude data to the output array
+        magnitude_data[i] = -2.5*np.log10(level) + 2.5*np.log10(C2) + m2
+
+
+    return magnitude_data
+
+
+
+def calculateMagnitudes_old(level_data, ra_beg, ra_end, dec_beg, dec_end, duration, mag_0, mag_lev, 
+    w_pix):
+    """ OLD CMN FUNCTION, DO NOT USE, HERE FOR LEGACY!
+    Calculate the magnitude of the data points with given magnitude calibration parameters. 
 
     @param level_data: [ndarray] levels of the meteor centroid (arbirtary units)
     @param ra_beg: [float] right ascension of the meteor's beginning (degrees)
@@ -297,9 +320,10 @@ def calculateMagnitudes(level_data, ra_beg, ra_end, dec_beg, dec_end, duration, 
             magnitude = -20*np.log10(level) + 64.5
 
 
-        # Correct the magnitude for angular velocity
-        if angular_v > w_pix:
-            magnitude = magnitude -2.5*np.log10(angular_v/w_pix)
+        # Not needed! There's a Bob Hawkes paper on this, don't mind the work of Bagrov
+        # # Correct the magnitude for angular velocity
+        # if angular_v > w_pix:
+        #     magnitude = magnitude -2.5*np.log10(angular_v/w_pix)
 
         # Save magnitude data to the output array
         magnitude_data[i] = magnitude
@@ -361,8 +385,7 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, UT_corr, lat, lon, 
     duration = (JD_data[-1] - JD_data[0])*86400
 
     # Calculate magnitudes
-    magnitude_data = calculateMagnitudes(levels_corrected, ra_beg, ra_end, dec_beg, dec_end, duration, 
-        mag_0, mag_lev, w_pix)
+    magnitude_data = calculateMagnitudes(levels_corrected, mag_0, mag_lev)
 
 
     return JD_data, RA_data, dec_data, magnitude_data

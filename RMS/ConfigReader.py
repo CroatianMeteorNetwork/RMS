@@ -25,6 +25,7 @@ class Config:
         ##### Capture
         self.width = 720
         self.height = 576
+        self.bit_depth = 8
         self.deviceID = 0
         self.fps = 25.0
         self.fov_w = 64.0
@@ -177,6 +178,9 @@ def parseCapture(config, parser):
        
     if parser.has_option("Capture", "height"):
         config.height = parser.getint("Capture", "height")
+
+    if parser.has_option("Capture", "bit_depth"):
+        config.bit_depth = parser.getint("Capture", "bit_depth")
     
     if parser.has_option("Capture", "device"):
         config.deviceID = parser.getint("Capture", "device")
@@ -192,6 +196,7 @@ def parseCapture(config, parser):
 
     if parser.has_option("Capture", "deinterlace_order"):
         config.deinterlace_order = parser.getint("Capture", "deinterlace_order")
+        
 
 def parseBuildArgs(config, parser):
     if parser.has_option("Build", "weave"):

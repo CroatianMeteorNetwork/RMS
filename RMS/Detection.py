@@ -426,6 +426,9 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
     # Threshold the image
     img_thres = thresholdImg(ff, k1, j1)
 
+    # # Show thresholded image
+    # show("thresholded ALL", img_thres)
+
     # Check if the image is too "white" and any futher processing makes no sense
     # This checks the max percentage of white pixels in the thresholded image
     print 'white ratio', np.count_nonzero(img_thres) / float(ff.nrows * ff.ncols)
@@ -441,7 +444,7 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
         # Select the time range of the thresholded image
         img = selectFrames(img_thres, ff, frame_min, frame_max)
 
-        # Show thresholded image
+        # # Show thresholded image
         # show(str(frame_min) + "-" + str(frame_max) + " treshold", img)
 
         # # Show maxpixel of the thresholded part

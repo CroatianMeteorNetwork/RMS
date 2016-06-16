@@ -130,8 +130,9 @@ def starsNNevaluation(np.ndarray[FLOAT_TYPE_t, ndim=2] stars, np.ndarray[FLOAT_T
     # Init evaluation parameter
     cdef double evaluation = 0
 
-    # Define difference vector's magnitude and directions
-    cdef np.ndarray[np.uint16_t, ndim=1] vect_idx = np.zeros(shape=(stars_len), dtype=np.uint16)
+    # Define difference vector's magnitude and directions, and the matched stars index vectors
+    cdef np.ndarray[np.uint16_t, ndim=1] catalog_matched_idx = np.zeros(shape=(stars_len), dtype=np.uint16)
+    cdef np.ndarray[np.uint16_t, ndim=1] image_matched_idx = np.zeros(shape=(stars_len), dtype=np.uint16)
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] vect_separation = np.zeros(shape=(stars_len), dtype=FLOAT_TYPE)
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] vect_bearing = np.zeros(shape=(stars_len), dtype=FLOAT_TYPE)
     cdef int k = 0
@@ -154,7 +155,8 @@ def starsNNevaluation(np.ndarray[FLOAT_TYPE_t, ndim=2] stars, np.ndarray[FLOAT_T
 
         # Add to the evaluation if the neighbour is close enough
         if min_dist < consideration_radius:
-            vect_idx[k] = min_idx
+            catalog_matched_idx[k] = min_idx
+            image_matched_idx[k] = i
             vect_separation[k] = min_dist
             vect_bearing[k] = calcBearing(stars[i, 0], stars[i, 1], ref_stars[min_idx, 0], ref_stars[min_idx, 1])
             k += 1
@@ -163,7 +165,7 @@ def starsNNevaluation(np.ndarray[FLOAT_TYPE_t, ndim=2] stars, np.ndarray[FLOAT_T
     if k < min_matched_stars:
         
         if ret_indices:
-            return None
+            return None, None
         else:
             return (None, None, None, None, None)
     
@@ -186,7 +188,7 @@ def starsNNevaluation(np.ndarray[FLOAT_TYPE_t, ndim=2] stars, np.ndarray[FLOAT_T
 
     # If ret_indices is 1, then only return indices of the matched stars
     if ret_indices:
-        return vect_idx[:k]
+        return catalog_matched_idx[:k], image_matched_idx[:k]
 
     else:
         return evaluation, ra_mean, ra_std, dec_mean, dec_std
