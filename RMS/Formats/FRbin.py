@@ -35,6 +35,7 @@ def read(dir, filename):
     
     @param dir: path to directory containing file
     @param filename: name of FR*.bin file (either with FR and extension or without)
+    
     @return: fr structure
     """
     

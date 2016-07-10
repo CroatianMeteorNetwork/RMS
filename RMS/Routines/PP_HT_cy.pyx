@@ -35,7 +35,6 @@ def generateAtan2Lookup(int img_h, int img_w):
     @param: img_w: [int] image width in pixels
 
     @return: atan2_lookup: [2D ndarray] atan2 looup table, usage: atan2_lookup[x, y]
-
     """
 
     # Preallocate memory for arctan2 values
@@ -51,12 +50,16 @@ def generateAtan2Lookup(int img_h, int img_w):
     return atan2_lookup
 
 def rebinMean(a, shape):
-    """ Rebin the given array into chuncks, average values in each chunk. """
+    """ Rebin the given array into chuncks, average values in each chunk.
+    """
+    
     sh = shape[0],a.shape[0]//shape[0],shape[1],a.shape[1]//shape[1]
     return a.reshape(sh).mean(-1).mean(1)
 
 def rebinStd(a, shape):
-    """ Rebin the given array into chuncks, find stddev of each chunk. """
+    """ Rebin the given array into chuncks, find stddev of each chunk.
+    """
+    
     sh = shape[0],a.shape[0]//shape[0],shape[1],a.shape[1]//shape[1]
     return a.reshape(sh).std(-1).std(1)
 
@@ -66,9 +69,9 @@ def rebinMax(a, shape):
     return a.reshape(sh).max(-1).max(1)
 
 def getSubFactor(size, sub_factor):
-    """ Generates a subdivision factor with which the axis is divisible, but is closest to a predefined 
-        number.
+    """ Generates a subdivision factor with which the axis is divisible, but is closest to a predefined number.
     """
+    
     for i in xrange(1,size/2+1):
         if size%i == 0:
             if i >= sub_factor:
@@ -87,21 +90,18 @@ def pixelPairHT(np.ndarray[INT_TYPE_t, ndim=2] points, int img_h, int img_w, int
     """ Do a pixel pair Hough Transform. Sacrifices processor time (N**2 operations), but removes butterfly
         noise, which is nice.
 
-        @param points: [2D ndarray uint16] (X, Y) positions of image points on which you want to perform HT
-        @param img_h: [int] image height in pixels
-        @param img_W: [int] image width in pixels
-        @param ht_sigma_factor: [int] standard deviations above avreage in HT space to take the line as valid
-        @param ht_sigma_abs: [int] minimum absolute counts above the usual threshold
-        @param sub_factor: [int] subdivision factor of the HT space for local peak estimates
-        @param atan2_lookup: [2D ndarray float32] preallocated atan2 values (bounded for image coordinates)
-        @param sin_lookup: [1D ndarray float32] preallocated sine values (bounded for -180, 180)
-        @param cos_lookup: [1D ndarray float32] preallocated cosine values (bounded for -180, 180)
-        @param delta: [float] subdivision of the HT space (e.g. if delta = 0.5, HT space will be subdivided 
-            every half degree)
+    @param points: [2D ndarray uint16] (X, Y) positions of image points on which you want to perform HT
+    @param img_h: [int] image height in pixels
+    @param img_W: [int] image width in pixels
+    @param ht_sigma_factor: [int] standard deviations above avreage in HT space to take the line as valid
+    @param ht_sigma_abs: [int] minimum absolute counts above the usual threshold
+    @param sub_factor: [int] subdivision factor of the HT space for local peak estimates
+    @param atan2_lookup: [2D ndarray float32] preallocated atan2 values (bounded for image coordinates)
+    @param sin_lookup: [1D ndarray float32] preallocated sine values (bounded for -180, 180)
+    @param cos_lookup: [1D ndarray float32] preallocated cosine values (bounded for -180, 180)
+    @param delta: [float] subdivision of the HT space (e.g. if delta = 0.5, HT space will be subdivided every half degree)
 
-        @return ht_lines: [2D ndarray] (rho, theta, count) which define the line in Hough space and their 
-            respective counts
-
+    @return ht_lines: [2D ndarray] (rho, theta, count) which define the line in Hough space and their respective counts
     """
 
     cdef int i, j

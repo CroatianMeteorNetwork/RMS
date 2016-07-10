@@ -88,7 +88,6 @@ def write(ff, directory, filename):
     @param filename: [str] name of the file which will be written
 
     @return None
-
     """
     
     if filename[:2] == "FF":

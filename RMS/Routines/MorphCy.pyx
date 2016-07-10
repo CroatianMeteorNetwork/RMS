@@ -50,6 +50,7 @@ def clean(np.ndarray[INT_TYPE_t, ndim=2] img):
      0  0  0      0  0  0
     
     @param img: input image
+    
     @return cleaned image
     """
 
@@ -94,6 +95,7 @@ def bridge(np.ndarray[INT_TYPE_t, ndim=2] img):
      1  0  0      1  0  0
     
     @param img: input image
+    
     @return bridged image
     """
 
@@ -146,6 +148,7 @@ def close_cy(np.ndarray[INT_TYPE_t, ndim=2] img):
         implementation.
     
     @param img: input image
+    
     @return cleaned image
     """
 
@@ -224,6 +227,7 @@ def close(np.ndarray[INT_TYPE_t, ndim=2] img):
     """ Morphological closing (dilation followed by erosion) with OpenCV.
     
     @param image: input image
+    
     @return closed image
     """
     

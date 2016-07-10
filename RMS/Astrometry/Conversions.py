@@ -223,7 +223,6 @@ def equatorialCoordPrecession(start_epoch, final_epoch, ra, dec):
     @param dec: [float] non-corrected declination in degrees
 
     @return (ra, dec): [tuple of floats] precessed equatorial coordinates in degrees
-
     """
 
     ra = math.radians(ra)

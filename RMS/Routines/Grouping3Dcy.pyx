@@ -21,6 +21,7 @@ cdef float line3DDistance_simple(int x1, int y1, int z1, int x2, int y2, int z2,
     @param x0: X coordinate of a point whose distance is to be calculated
     @param y0: Y coordinate of a point whose distance is to be calculated
     @param z0: Z coordinate of a point whose distance is to be calculated
+    
     @return: squared distance
     """
 
@@ -56,13 +57,15 @@ cdef int point3DDistance(int x1, int y1, int z1, int x2, int y2, int z2):
     @param x2: X coordinate of second point
     @param y2: Y coordinate of second point
     @param z2: Z coordinate of second point
+    
     @return: squared distance
     """
 
     return (x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2
 
 cdef class Line:
-    """ Structure that defines a line. """
+    """ Structure that defines a line.
+    """
 
     cdef int x1, y1, z1, x2, y2, z2
     cdef public int counter
@@ -81,25 +84,28 @@ cdef class Line:
         self.line_quality = line_quality
 
     def __str__(self):
-        """ String to print. """
+        """ String to print.
+        """
 
         return " ".join(map(str, (self.x1, self.y1, self.z1, self.x2, self.y2, self.z2, self.counter, 
             self.line_quality)))
 
     def get_points(self):
-        """ Return the starting and ending points of the line. """
+        """ Return the starting and ending points of the line.
+        """
 
         return self.x1, self.y1, self.z1, self.x2, self.y2, self.z2
 
 @cython.boundscheck(False)
 def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_treshold, gap_treshold, max_array_size=0):
     """ Returns all points describing a particular line. 
+    
     @param point_list: [ndarray] list of all points
-    @params x1 to z2: [int] points defining a line in 3D space
-    @param distance_treshold: [int] maximum distance between the line and the point to be takes as a part of 
-        the same line
+    @param x1, y1, z1, x2, y2, z2: [int] points defining a line in 3D space
+    @param distance_treshold: [int] maximum distance between the line and the point to be takes as a part of the same line
     @param gap_treshold: [float] maximum allowed gap between points
     @param max_array_size: [float] predefined size of max_line_points array (optional)
+    
     @return: [ndarray] array of points belonging to a certain line
     """
 
@@ -113,7 +119,8 @@ def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, 
         return np.array([[]])
 
     def propagateLine(np.ndarray[INT_TYPE_t, ndim=2] max_line_points, np.ndarray[INT_TYPE_t, ndim=2] propagation_list, int i):
-        """ Finds all points present on a line starting from a point on that line. """
+        """ Finds all points present on a line starting from a point on that line.
+        """
 
         cdef int x3, y3, z3, x_prev, y_prev, z_prev, z
 
@@ -187,9 +194,9 @@ def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, dis
     
     @param point_list: [ndarray] list of all points
     @param max_line: [Line object] given line
-    @param distance_treshold: [int] maximum distance between the line and the point to be takes as a part of 
-        the same line
+    @param distance_treshold: [int] maximum distance between the line and the point to be takes as a part of the same line
     @param gap_treshold: [int] maximum allowed gap between points
+    
     @return: [tuple of ndarrays] (array of all points minus the ones in the max_line), (points in the max_line)
     """
 
@@ -236,6 +243,7 @@ def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, g
     @param config: [config object] defines configuration parameters fro the config file
     @param get_single: [bool] returns only 1 line, does not perform recusrive line searching
     @param line_list: [list] list of lines found previously
+    
     @return: list of found lines
     """
 

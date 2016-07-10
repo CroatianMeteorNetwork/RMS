@@ -7,21 +7,19 @@ import math
 
 
 def frechetDist(P,Q):
-    """ Calculate the Frechet distance between 2 polygonal lines.
+    """ Calculates the Frechet distance between 2 polygonal lines.
 
     Source: http://www.kr.tuwien.ac.at/staff/eiter/et-archive/cdtr9464.pdf
 
-    Args:
-        P (ndarray): (x, y) pair of coordinates which make up the first line
-        Q (ndarray): (x, y) pair of coordinates which make up the secondline
+    @param P: ndarray; (x, y) pair of coordinates which make up the first line
+    @param Q: ndarray; (x, y) pair of coordinates which make up the secondline
 
-    Returns:
-        float: Frechet distance of the given lines
-
+    @return: Frechet distance of the given lines
     """
 
     def eucDist(pt1, pt2):
-        """ Eucledian distance between 2 points in 2D space. """
+        """ Eucledian distance between 2 points in 2D space.
+        """
 
         return math.sqrt((pt2[0] - pt1[0])**2 + (pt2[1] - pt1[1])**2)
 
@@ -49,19 +47,13 @@ def frechetDist(P,Q):
 def samplePolarLine(rho, theta, img_h, img_w, nsamples=10):
     """ Samples the line given in polar coordinates and returns Caretsian coordinates of the samples.
 
-    Args:
-        rho (float): distance parameter of the line in polar coordinates (px)
-        theta (float): angle parameter of the line in polar coordinates (degrees)
-        img_h (int): image height (px)
-        img_w (int): image width (px)
+    @param rho: distance parameter of the line in polar coordinates (px)
+    @param theta: angle parameter of the line in polar coordinates (degrees)
+    @param img_h: image height (px)
+    @param img_w: image width (px)
+    @param nsamples: number of samples to be taken on the line.
 
-
-    Kwargs:
-        nsamples (int): number of samples to be taken on the line.
-
-    Returns:
-        ndarray: 2D numpy array containing (x, y) coordinates of each sample
-
+    @return: 2D numpy array containing (x, y) coordinates of each sample
     """
 
     # Convert theta to radians
@@ -93,17 +85,14 @@ def compareLines(rho1, theta1, rho2, theta2, img_h, img_w):
     The similarity is defined as a Frechet distance between 10 sampled points on those lines. The sampled
     points are inside the image size which originally contained that line.
 
-    Args:
-        rho1 (float): distance parameter of the first line in polar coordinates (px)
-        theta1 (float): angle parameter of the first line in polar coordinates (degrees)
-        rho2 (float): distance parameter of the second line in polar coordinates (px)
-        theta2 (float): angle parameter of the second line in polar coordinates (degrees)
-        img_h (int): image height (px)
-        img_w (int): image width (px)
+    @param rho1: distance parameter of the first line in polar coordinates (px)
+    @param theta1: angle parameter of the first line in polar coordinates (degrees)
+    @param rho2: distance parameter of the second line in polar coordinates (px)
+    @param theta2: angle parameter of the second line in polar coordinates (degrees)
+    @param img_h: image height (px)
+    @param img_w: image width (px)
 
-    Returns:
-        float: Frechet distance of the given lines.
-
+    @return: Frechet distance of the given lines.
     """
 
     # Make sample points of each given line

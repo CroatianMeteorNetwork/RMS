@@ -137,6 +137,7 @@ class Extractor(Process):
         @param y: 1D numpy array with Y coords of points
         @param x: 1D numpy array with X coords of points
         @param z: 1D numpy array with Z coords of points
+        
         @return: true if video should be further checked for meteors, false otherwise
         """
         
@@ -353,14 +354,14 @@ class Extractor(Process):
         FRbin.writeArray(clips, "./", self.filename)
     
     def stop(self):
-        """Stop the process.
+        """ Stop the process.
         """
         
         self.exit.set()
         self.join()
         
     def start(self, frames, compressed, filename):
-        """Start the process.
+        """ Start the process.
         """
         
         self.exit = Event()
@@ -372,7 +373,7 @@ class Extractor(Process):
         super(Extractor, self).start()
     
     def run(self):
-        """Retrieve frames from list, convert, compress and save them.
+        """ Retrieve frames from list, convert, compress and save them.
         """
         
         self.executeAll()

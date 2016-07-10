@@ -27,6 +27,7 @@ def repeat(func, image, N):
     @param func: morphological operation to be repeated
     @param image: input image
     @param N: number of times to repeat func or None in which case it's repeated until result of operation doesn't changes
+    
     @return image
     """
     
@@ -53,6 +54,7 @@ def clean(image):
      0  0  0      0  0  0
     
     @param image: input image
+    
     @return cleaned image
     """
     
@@ -97,6 +99,7 @@ def spur(image):
      0  0  0  1      0  0  0  1
     
     @param image: input image
+    
     @return cleaned image
     """
     
@@ -150,6 +153,7 @@ def bridge(image):
      1  0  0      1  0  0
     
     @param image: input image
+    
     @return bridged image
     """
     
@@ -193,6 +197,7 @@ def thin(image):
     """ Zhang-Suen fast thinning algorithm, modified to only single pass.
         
     @param image: input image
+    
     @return thinned image
     """
     
@@ -297,7 +302,6 @@ def thin2(src):
     """ Zhang-Suen fast thinning algorithm.
 
     Source: https://github.com/bsdnoobz/zhang-suen-thinning/blob/master/thinning.py
-
     """
     src = src.astype(np.uint8)
     dst = src.copy()
@@ -320,6 +324,7 @@ def close(image): # TODO: weave implementation on np.bool_ instead of OpenCV
     """ Morphological closing (dilation followed by erosion).
     
     @param image: input image
+    
     @return cleaned image
     """
     

@@ -26,7 +26,8 @@ from RMS.Astrometry.CyFunctions import angularSeparation, calcBearing, subsetCat
 
 
 def sampleCALSTARS(calstars_list, N):
-    """ Randomly sample N number of FF files containing stars, weighted by the number of stars on the image. """
+    """ Randomly sample N number of FF files containing stars, weighted by the number of stars on the image
+    """
 
     weights = np.array([len(star[1]) for star in calstars_list], dtype=np.float64)
     weights = weights/np.sum(weights)
@@ -42,7 +43,6 @@ def getMiddleTimeFF(ff_name, fps, ret_milliseconds=True, ff_frames=256):
     @param ff_name: [str] name of the CAMS format FF file
 
     @return [datetime obj] moment of the file recording start
-
     """
 
     # Extract date and time of the FF file from its name
@@ -77,7 +77,6 @@ def getMiddleTimeFF(ff_name, fps, ret_milliseconds=True, ff_frames=256):
 
 def hourDifferenceFF(ff_name, platepar_datetime, fps):
     """ Calculate the difference in hours from the middle time of the FF file and the time in the platepar. 
-
     """
 
     # Get the FF file middle time of integration
@@ -144,7 +143,8 @@ def applyCoordinateCorrection(RA_c, dec_c, correction_separation, correction_ang
 
 
 def solutionEvaluation(transformation_parameters, rot_param, platepar, catalog_stars, calstars_list, fps, UT_corr, catalog_extraction_radius, catalog_mag_limit, stars_NN_radius, min_matched_stars, x_poly=None, y_poly=None, matched_stars=None):
-    """ Evaluate one Platepar solution. """
+    """ Evaluate one Platepar solution.
+    """
 
     # Copy the platepar, so no changes are made on the original one
     platepar = copy.deepcopy(platepar)
@@ -250,7 +250,8 @@ def solutionEvaluation(transformation_parameters, rot_param, platepar, catalog_s
 
 
 def findCorrectionDirection(platepar, catalog_stars, calstars_list, fps, UT_corr, catalog_extraction_radius, catalog_mag_limit, stars_NN_radius, min_matched_stars, rot_diff):
-    """ Find the direction of the shift between referent and calibration stars. """
+    """ Find the direction of the shift between referent and calibration stars.
+    """
 
     best_evaluation = []
     best_separations = []
@@ -296,7 +297,8 @@ def findCorrectionDirection(platepar, catalog_stars, calstars_list, fps, UT_corr
 
 
 def getMatchedStars(platepar, calstars_list, fps, UT_corr, catalog_stars, catalog_extraction_radius, catalog_mag_limit, stars_NN_radius, min_matched_stars):
-    """ Get the matching catalogs stars with ones in each FF file from CALSTARS. """
+    """ Get the matching catalogs stars with ones in each FF file from CALSTARS.
+    """
 
     # Init the dectionary which contains matched stars from the catalog on each FF file
     catalog_matched_stars = {}
@@ -354,7 +356,8 @@ def getMatchedStars(platepar, calstars_list, fps, UT_corr, catalog_stars, catalo
 
 
 def photometryFit(matched_list):
-    """ Perform the photometry procedure on the given matched star data. """
+    """ Perform the photometry procedure on the given matched star data.
+    """
 
     def _stellarMagnitude(x, C2, m2):
         """ Equation that relates instrumental brightness level (intensity) to stellar magnitude. 
@@ -362,7 +365,6 @@ def photometryFit(matched_list):
         @param x: [float] input instrumental level to be converted to stellar magnitude
         @param C2: [float] fitted level parameter
         @param m2: [float] fitted magnitude parameter
-
         """
 
         return -2.5*np.log10(x) + 2.5*np.log10(C2) + m2
@@ -413,9 +415,7 @@ def photometryFit(matched_list):
 
 
 def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
-    """ Checks the calibration parameters for the given night and recalibrates the calibration parameters if 
-        needed. 
-
+    """ Checks the calibration parameters for the given night and recalibrates the calibration parameters if needed. 
     """
 
     # Load several parameters from config to local variables

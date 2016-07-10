@@ -30,7 +30,8 @@ import numpy as np
 from RMS.Astrometry.Conversions import date2JD
 
 class stationData(object):
-    """ Holds information about one meteor station (location) and observed points. """
+    """ Holds information about one meteor station (location) and observed points.
+    """
 
     def __init__(self, file_name):
         self.file_name = file_name
@@ -45,7 +46,8 @@ class stationData(object):
 
 
 def parseInf(file_name):
-    """ Parse information from an INF file to a stationData object. """
+    """ Parse information from an INF file to a stationData object.
+    """
 
     station_data_obj = stationData(file_name)
 
@@ -75,7 +77,6 @@ def parseInf(file_name):
 
 class parsePlatepar(object):
     """ Load calibration parameters from a platepar file.
-
     """
 
     def parse(self, f):
@@ -84,7 +85,7 @@ class parsePlatepar(object):
         @param f: [file handle] file we want to read
 
         @return (a1, a2, ...): [tuple of floats] parsed data from the line
-         """
+        """
 
         return map(float, f.readline().split())
 

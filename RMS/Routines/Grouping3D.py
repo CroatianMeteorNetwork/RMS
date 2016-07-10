@@ -33,6 +33,7 @@ def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, config, fireball_detection=
     @param point_list: [ndarray] list of all points
     @params x1 to z2: [int] points defining a line in 3D space
     @param config: [config object] defines configuration parameters fro the config file
+    
     @return: [ndarray] array of all points belonging to a given line
     """
 
@@ -58,6 +59,7 @@ def find3DLines(point_list, start_time, config, fireball_detection=True):
     @param start_time: [time.time() object] starting time of the loop
     @param config: [config object] defines configuration parameters fro the config file
     @param get_single: [bool] returns only 1 line, does not perform recusrive line searching
+    
     @return: list of found lines
     """
 
@@ -114,6 +116,7 @@ def normalizeParameter(param, config):
     """ Normalize detection parameter to be size independent.
     
     @param param: parameter to be normalized
+    
     @return: normalized param
     """
 
@@ -124,6 +127,7 @@ def findCoefficients(line_list):
     """ Extract coefficients from list of lines that can be consumed by RMS.VideoExtraction
      
     @param line_list: list of detected lines
+    
     @return: coefficients for each detected line in format: [first point, slope of XZ, slope of YZ, first frame, last frame]
     """
     

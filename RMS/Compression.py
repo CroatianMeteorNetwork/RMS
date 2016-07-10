@@ -53,6 +53,7 @@ class Compressor(Process):
         """Compress frames to the FTP-compatible array.
         
         @param frames: grayscale frames stored as 3d numpy array
+        
         @return: 3d numpy array in format: (N, y, x) where N is [0, 4)
         """
         

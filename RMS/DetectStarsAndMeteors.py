@@ -12,8 +12,9 @@ from RMS.Detection import detectMeteors
 
 
 def detectStarsAndMeteors(ff_directory, ff_name, config):
-    """ Runs the star extraction and subsequently runs meteor detection on the FF bin file if there are enough
-        stars on the image. """
+    """ Run the star extraction and subsequently runs meteor detection on the FF bin file if there are enough
+        stars on the image.
+    """
 
 
     # Add to config!!!!

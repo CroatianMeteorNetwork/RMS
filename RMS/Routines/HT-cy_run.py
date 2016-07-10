@@ -19,17 +19,15 @@ def pixelPairHT_wrapper(img_array, img_h, img_w, ht_sigma_factor, ht_sigma_abs, 
         Do a pixel pair Hough Transform. Sacrifices processor time (N**2 operations), but removes butterfly
         noise, which is nice.
 
-        @param img_array: [2D ndarray] image on which to perfrom the pixel pair HT
-        @param img_h: [int] image height in pixels
-        @param img_W: [int] image width in pixels
-        @param ht_sigma_factor: [int] standard deviations above avreage in HT space to take the line as valid
-        @param ht_sigma_abs: [int] minimum absolute counts above the usual threshold
-        @param sub_factor: [int] subdivision factor of the HT space for local peak estimates
-        @param delta: [float] subdivision of the HT space (e.g. if delta = 0.5, HT space will be subdivided 
-            every half degree)
+    @param img_array: [2D ndarray] image on which to perfrom the pixel pair HT
+    @param img_h: [int] image height in pixels
+    @param img_W: [int] image width in pixels
+    @param ht_sigma_factor: [int] standard deviations above avreage in HT space to take the line as valid
+    @param ht_sigma_abs: [int] minimum absolute counts above the usual threshold
+    @param sub_factor: [int] subdivision factor of the HT space for local peak estimates
+    @param delta: [float] subdivision of the HT space (e.g. if delta = 0.5, HT space will be subdivided every half degree)
 
-        @return ht_lines: [2D ndarray] (rho, theta, count) which define the line in Hough space and their 
-            respective counts
+    @return ht_lines: [2D ndarray] (rho, theta, count) which define the line in Hough space and their respective counts
     """
 
     # Delta should never be 0, always must be > 0

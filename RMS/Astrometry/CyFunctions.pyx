@@ -23,13 +23,15 @@ cdef extern from "math.h":
 
 @cython.cdivision(True)
 cdef double radians(double deg):
-    """Converts degrees to radians. """
+    """Converts degrees to radians.
+    """
     
     return deg/180.0*(pi)
 
 @cython.cdivision(True)
 cdef double degrees(double deg):
-    """Converts radians to degrees. """
+    """Converts radians to degrees.
+    """
     
     return deg*180.0/pi
 
@@ -58,7 +60,8 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
 
 
 cpdef double calcBearing(double ra1, double dec1, double ra2, double dec2):
-    """ Calculate the bearing angle between 2 stars in equatorial celestial coordinates. """
+    """ Calculate the bearing angle between 2 stars in equatorial celestial coordinates.
+    """
 
     # Convert input coordinates to radians
     ra1 = radians(ra1)
@@ -72,7 +75,8 @@ cpdef double calcBearing(double ra1, double dec1, double ra2, double dec2):
 @cython.boundscheck(False)
 @cython.wraparound(False) 
 def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, double dec_c, double radius, double mag_limit):
-    """ Make a subset of stras from the given star catalog around the given coordinates with a given radius. """
+    """ Make a subset of stras from the given star catalog around the given coordinates with a given radius.
+    """
 
 
     # Define variables
@@ -121,7 +125,8 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
 @cython.boundscheck(False)
 @cython.wraparound(False)
 def starsNNevaluation(np.ndarray[FLOAT_TYPE_t, ndim=2] stars, np.ndarray[FLOAT_TYPE_t, ndim=2] ref_stars, double consideration_radius, int min_matched_stars, int ret_indices=0):
-    """ Finds nearest neighbours between the catalog stars and the calibration stars and evaluate their matching. """
+    """ Finds nearest neighbours between the catalog stars and the calibration stars and evaluate their matching.
+    """
 
     # Get the size of each point set
     cdef int stars_len = stars.shape[0]

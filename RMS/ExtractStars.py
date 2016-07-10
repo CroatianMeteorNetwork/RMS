@@ -44,14 +44,11 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     http://stackoverflow.com/questions/9111711/get-coordinates-of-local-maxima-in-2d-array-above-certain-value
 
     @param ff: [ff bin struct] FF bin file loaded in the FF bin structure
-
     @param config: [config object] configuration object (loaded from the .config file)
     @param max_global_intensity: [int] maximum mean intensity of an image before it is discared as too bright
-    @param border: [int] apply a mask on the detections by removing all that are too close to the given image 
-        border (in pixels)
+    @param border: [int] apply a mask on the detections by removing all that are too close to the given image border (in pixels)
     @param neighborhood_size: [int] size of the neighbourhood for the maximum search (in pixels)
     @param intensity_threshold: [float] a threshold for cutting the detections which are too faint (0-255)
-
     """
 
     # Load parameters from config if given
@@ -116,7 +113,6 @@ def twoDGaussian((x, y), amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
     @param sigma_y: [float] standard deviation Y component
     @param theta: [float] PSF rotation in radians
     @param offset: [float] PSF offset from the 0 (i.e. the "elevation" of the PSF)
-
     """
     
     xo = float(xo)
@@ -136,7 +132,6 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
     @param avepixel_mean: [float] mean of the avepixel image
     @param x2: [list] a list of estimated star position (X axis)
     @param xy: [list] a list of estimated star position (Y axis)
-
     @param config: [config object] configuration object (loaded from the .config file)
     @param segment_radius: [int] radius (in pixels) of image segment around the detected star on which to 
         perform the fit
@@ -144,7 +139,6 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
         (hot pixels are narrow, while stars are round)
     @param max_feature_ratio: [float] maximum ratio between 2 sigma of the star and the image segment area
     @param bit_depth: [float] bit depth of the camera
-
     """
 
     # Load parameters form config if present
@@ -241,7 +235,8 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
 
 
 def plotStars(ff, x2, y2):
-    """ Plots detected stars on the input image. """
+    """ Plots detected stars on the input image.
+    """
 
     # Plot image
     plt.imshow(np.arcsinh(ff.avepixel), cmap='gray')
