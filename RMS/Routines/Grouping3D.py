@@ -17,8 +17,7 @@
 import numpy as np
 from math import sqrt
 from time import time
-
-
+import logging
 
 # Cython init
 import pyximport
@@ -133,9 +132,14 @@ def findCoefficients(line_list):
     
     coeff = []
     
-    for i, detected_line in enumerate(line_list):
-        point1 = np.array(detected_line[0][0])
-        point2 = np.array(detected_line[0][1])        
+    for detected_line in line_list:        
+        point1 = np.array(detected_line[0])
+        point2 = np.array(detected_line[1])
+
+        # skip if points are on the same frame (that shouldn't happen, though)
+        if point1[2] == point2[2]:
+            logging.debug("[" + self.filename + "] Points on the same frame!")
+            continue
         
         # difference between last point and first point that represent a line
         point3 = point2 - point1
@@ -152,6 +156,6 @@ def findCoefficients(line_list):
         if total > 1.6:
             continue
         
-        coeff.append([point1, slope1, slope2, detected_line[1], detected_line[2]]) #first point, frame of first point, slope of XZ, slope of YZ, first frame, last frame
+        coeff.append([point1, slope1, slope2, detected_line[4], detected_line[5]]) #first point, frame of first point, slope of XZ, slope of YZ, first frame, last frame
         
     return coeff
