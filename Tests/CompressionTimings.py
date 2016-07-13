@@ -18,11 +18,13 @@
 """
 
 from RMS.Compression import Compressor
+import RMS.ConfigReader as cr
 import numpy as np
 import time
 import sys
 
-comp = Compressor(None, None, None, None, 000)
+config = cr.parse(".config")
+comp = Compressor(None, None, None, None, config)
 
 def timing(img):
     t = time.time()

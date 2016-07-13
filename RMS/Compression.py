@@ -38,7 +38,7 @@ class Compressor(Process):
         @param startTime1: float in shared memory that holds time of first frame in array1
         @param array2: second numpy array in shared memory
         @param startTime1: float in shared memory that holds time of first frame in array2
-        @param camNum: camera ID (ie. 459)
+        @param config: configuration class
         """
         
         super(Compressor, self).__init__()
