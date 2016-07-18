@@ -138,7 +138,7 @@ def findCoefficients(line_list):
 
         # skip if points are on the same frame (that shouldn't happen, though)
         if point1[2] == point2[2]:
-            logging.debug("[" + self.filename + "] Points on the same frame!")
+            logging.debug("Points on the same frame!")
             continue
         
         # difference between last point and first point that represent a line
