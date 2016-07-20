@@ -16,17 +16,13 @@ def detectStarsAndMeteors(ff_directory, ff_name, config):
         stars on the image.
     """
 
-
-    # Add to config!!!!
-    ff_min_stars = 5
-
     # Run star extraction on the FF bin
     star_list = extractStars(ff_directory, ff_name, config)
 
     print 'N STARS:', len(star_list[0])
 
     # Run meteor detection if there are enough stars on the image
-    if len(star_list[0]) >= ff_min_stars:
+    if len(star_list[0]) >= config.ff_min_stars:
         meteor_list = detectMeteors(ff_directory, ff_name, config)
     else:
         meteor_list = []
