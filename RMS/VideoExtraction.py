@@ -177,15 +177,14 @@ class Extractor(Process):
     def extract(self, coefficients):
         """ Determinate window size and crop out frames.
         
-        @param frames: raw video frames
-        @param compressed: compressed frames
         @param coefficients: linear coefficients for each detected meteor
-        @param before: number of frames to extract before detected meteor
-        @param after: number of frames to extract after detected meteor 
-        @param f: subsampling size
+        
+        @return: Cropped frames in format [frames, size and position]
         """
         
         clips = []
+        
+        # [first point, slope of XZ, slope of YZ, first frame, last frame]
         
         for point, slopeXZ, slopeYZ, firstFrame, lastFrame in coefficients:
             slopeXZ = float(slopeXZ)

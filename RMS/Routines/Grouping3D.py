@@ -132,12 +132,16 @@ def findCoefficients(line_list):
     
     coeff = []
     
-    for detected_line in line_list:        
-        point1 = np.array(detected_line[0])
-        point2 = np.array(detected_line[1])
-
+    for detected_line in line_list:
+        
+        if detected_line[0][2] < detected_line[1][2]:
+            point1 = np.array(detected_line[0], dtype=np.float)
+            point2 = np.array(detected_line[1], dtype=np.float)
+        elif detected_line[0][2] > detected_line[1][2]:
+            point1 = np.array(detected_line[1], dtype=np.float)
+            point2 = np.array(detected_line[0], dtype=np.float)
+        else:
         # skip if points are on the same frame (that shouldn't happen, though)
-        if point1[2] == point2[2]:
             logging.debug("Points on the same frame!")
             continue
         
@@ -145,17 +149,18 @@ def findCoefficients(line_list):
         point3 = point2 - point1
         
         # slope
-        slope1 = point3[1]/point3[2] # speed on Y axis
-        slope2 = point3[0]/point3[2] # speed on X axis
+        slopeXZ = point3[1]/point3[2] # speed on X axis
+        slopeYZ = point3[0]/point3[2] # speed on Y axis
         
         # length of velocity vector
-        total = sqrt(slope1**2 + slope2**2)
+        total = sqrt(slopeXZ**2 + slopeYZ**2)
         
         # ignore line if too fast
         # TODO: this limit should be read from config file and calculated for FOV
-        if total > 1.6:
+        # 1.6 is better estimate on upper speed limit, set to 2 for safety
+        if total > 2:
             continue
         
-        coeff.append([point1, slope1, slope2, detected_line[4], detected_line[5]]) #first point, frame of first point, slope of XZ, slope of YZ, first frame, last frame
+        coeff.append([point1, slopeXZ, slopeYZ, detected_line[4], detected_line[5]]) #first point, slope of XZ, slope of YZ, first frame, last frame
         
     return coeff
