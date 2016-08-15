@@ -1,6 +1,6 @@
 
 # RPi Meteor Station
-# Copyright (C) 2016  Denis Vida
+# Copyright (C) 2016 Denis Vida
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,6 +30,7 @@ import scipy.ndimage.filters as filters
 import RMS.ConfigReader as cr
 from RMS.Formats import FFbin
 from RMS.Formats import CALSTARS
+from RMS.Routines import MaskImage
 
 
 
@@ -62,6 +63,12 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     # Load the FF bin file
     ff = FFbin.read(ff_dir, ff_name)
 
+    # Load the mask file
+    mask = MaskImage.loadMask(config.mask_file)
+
+    # Mask the FF file
+    ff = MaskImage.applyMask(ff, mask, ff_flag=True)
+
     # Calculate image mean and stddev
     global_mean = np.mean(ff.avepixel)
 
@@ -69,9 +76,11 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     if global_mean > max_global_intensity:
         return [[], [], [], []]
     
-    # Stretch image intensity with arcsinh
-    data = np.arcsinh(ff.avepixel.astype(np.float32))
-    data = data / data.max() * 255
+
+    data = ff.avepixel.astype(np.float32)
+
+    # Apply a mean filter to the image to reduce noise
+    data = ndimage.filters.convolve(data, weights=np.full((2, 2), 1.0/4))
 
     # Locate local maximums on the image
     data_max = filters.maximum_filter(data, neighborhood_size)
@@ -80,22 +89,38 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     diff = ((data_max - data_min) > intensity_threshold)
     maxima[diff == 0] = 0
 
-    # Calculate centroids of the maximums
+    # Apply a border mask
+    border_mask = np.ones_like(maxima)*255
+    border_mask[:border,:] = 0
+    border_mask[-border:,:] = 0
+    border_mask[:,:border] = 0
+    border_mask[:,-border:] = 0
+    maxima = MaskImage.applyMask(maxima, (True, border_mask))
+
+    # Find and label the maxima
     labeled, num_objects = ndimage.label(maxima)
+
+    # Skip the image if there are too many maxima to process
+    if num_objects > config.max_stars:
+        return [[], [], [], []]
+
+    # Find centres of mass of each labeled objects
     xy = np.array(ndimage.center_of_mass(data, labeled, range(1, num_objects+1)))
 
     # Remove all detection on the border
-    xy = xy[np.where((xy[:, 1] > border) & (xy[:,1] < ff.ncols - border) & (xy[:,0] > border) & (xy[:,0] < ff.nrows - border))]
+    #xy = xy[np.where((xy[:, 1] > border) & (xy[:,1] < ff.ncols - border) & (xy[:,0] > border) & (xy[:,0] < ff.nrows - border))]
 
     # Unpack star coordinates
     y, x = np.hsplit(xy, 2)
 
+    # # Plot stars before the PSF fit
     # plotStars(ff, x, y)
 
     # Fit a PSF to each star
     x2, y2, background, intensity = fitPSF(ff, global_mean, x, y, config=config)
-    # x2, y2, background, intensity = list(x), list(y), [], []
+    # x2, y2, background, intensity = list(x), list(y), [], [] # Skip PSF fit
 
+    # # Plot stars after PSF fit filtering
     # plotStars(ff, x2, y2)
 
     return x2, y2, background, intensity
@@ -234,12 +259,47 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
     return x_fitted, y_fitted, background_fitted, intensity_fitted
 
 
+def adjustLevels(img_array, minv, gamma, maxv):
+    """Adjusts levels on image with given parameters.
+
+    @param img_array: [2D numpy array] input image array
+    @param minv: [int] minimum level value (levels below will be black)
+    @param gamma: [float] gamma value
+    @param maxv: [int] maximum level value (levels above will be white)
+
+    @return [2D numpy array] image with corrected levels and gamma
+    """
+    if (minv == None) and (gamma == None) and (maxv == None):
+        return img_array #Return the same array if parameters are None
+
+
+    minv = minv/255.0
+    maxv = maxv/255.0
+    _interval = maxv - minv
+    _invgamma = 1.0/gamma
+
+    img_array = img_array.astype(np.float)
+    
+    # Reduce array to 0-1 values
+    img_array = img_array/255.0 
+
+    # Calculate new levels
+    img_array = ((img_array - minv)/_interval)**_invgamma 
+
+    # Convert back to 0-255 values
+    img_array = img_array * 255.0
+    img_array = np.clip(img_array, 0, 255) 
+    img_array = img_array.astype(np.uint8)
+
+    return img_array
+
+
 def plotStars(ff, x2, y2):
     """ Plots detected stars on the input image.
     """
 
-    # Plot image
-    plt.imshow(np.arcsinh(ff.avepixel), cmap='gray')
+    # Plot image with adjusted levels to better see stars
+    plt.imshow(adjustLevels(ff.avepixel, 0, 1.3, 255), cmap='gray')
 
     # Plot stars
     for star in zip(list(y2), list(x2)):

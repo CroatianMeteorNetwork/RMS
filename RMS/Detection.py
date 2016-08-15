@@ -32,6 +32,7 @@ from RMS.Formats import FTPdetectinfo
 import RMS.ConfigReader as cr
 from RMS.Routines.Grouping3D import find3DLines, getAllPoints
 from RMS.Routines.CompareLines import compareLines
+from RMS.Routines import MaskImage
 
 # Morphology - Cython init
 import pyximport
@@ -444,7 +445,7 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
         # Select the time range of the thresholded image
         img = selectFrames(img_thres, ff, frame_min, frame_max)
 
-        # # Show thresholded image
+        # Show thresholded image
         # show(str(frame_min) + "-" + str(frame_max) + " treshold", img)
 
         # # Show maxpixel of the thresholded part
@@ -804,6 +805,14 @@ def detectMeteors(ff_directory, ff_name, config):
     # Load the FF bin file
     ff = FFbin.read(ff_directory, ff_name)
 
+    # Load the mask file
+    mask = MaskImage.loadMask(config.mask_file)
+
+    # Mask the FF file
+    ff = MaskImage.applyMask(ff, mask, ff_flag=True)
+
+
+    # # Show the maxpixel image
     # show2(ff_name+' maxpixel', ff.maxpixel)
 
     # Get lines on the image

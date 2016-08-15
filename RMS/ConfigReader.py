@@ -31,6 +31,7 @@ class Config:
         self.fov_w = 64.0
         self.fov_h = 48.0
         self.deinterlace_order = 1
+        self.mask_file = "mask.bmp"
         
         self.weaveArgs = ["-O3"]
         
@@ -105,6 +106,7 @@ class Config:
         self.border = 10 #  apply a mask on the detections by removing all that are too close to the given image border (in pixels)
         self.neighborhood_size = 10 # size of the neighbourhood for the maximum search (in pixels)
         self.intensity_threshold = 5 # a threshold for cutting the detections which are too faint (0-255)
+        self.max_stars = 200 # An upper limit on number of stars before the PSF fitting (more than that would take too long to process)
 
         # PSF fit and filtering
         self.segment_radius = 4 # radius (in pixels) of image segment around the detected star on which to perform the fit
@@ -192,6 +194,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "deinterlace_order"):
         config.deinterlace_order = parser.getint(section, "deinterlace_order")
+
+    if parser.has_option(section, "mask"):
+        config.mask_file = parser.get(section, "mask")
         
 
 def parseBuildArgs(config, parser):
@@ -374,6 +379,9 @@ def parseStarExtraction(config, parser):
 
     if parser.has_option(section, "intensity_threshold"):
         config.intensity_threshold = parser.getint(section, "intensity_threshold")
+
+    if parser.has_option(section, "max_stars"):
+        config.max_stars = parser.getint(section, "max_stars")
 
     if parser.has_option(section, "segment_radius"):
         config.segment_radius = parser.getint(section, "segment_radius")
