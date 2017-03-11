@@ -11,6 +11,12 @@ Connect the RTC module to the GPIO according to this image:
 
 ## Software setup
 
+#### 0. Note on editing files: Every time this guide tells you to edit a file, do it with:
+```
+sudo nano <file_name>
+```
+where you will replace `<file_name>` with the name of the file. After you are done, press `Ctrl + X` and press `y` when it asks you if you want to save changes.
+
 #### 1. Add the following lines at the end of `/boot/config.txt` in Raspbian Jessy:
 ```
 dtparam=i2c_arm=on
