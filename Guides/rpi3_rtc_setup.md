@@ -29,6 +29,7 @@ sudo apt-get remove fake-hwclock
 sudo update-rc.d hwclock.sh enable
 sudo update-rc.d fake-hwclock remove
 ```
+This module was used to store the current time to the SD card when the RPi was turned off, and it would load that time from the SD card during boot. Now that you have a real clock, you don't need it anymore.
 
 #### 3. Modify the file `/lib/udev/hwclock-set` by commenting out lines with `–systz`:
 ```
@@ -56,6 +57,7 @@ sudo dpkg-reconfigure tzdata
 sudo apt-get remove ntp
 sudo apt-get install ntpdate
 ```
+The NTP daemon tended to corrupt the time on the RTC, so we have to remove it.
 After the NTP daemon has been removed, you can still sync the system clock using `ntpdate-debian` which you might add to /etc/rc.local as well (after the hwclock command though) – just in case there is an Internet connection available during boot.
 
 #### 7. Edit /etc/rc.local and add the hwclock command above the line that says `exit 0`:
@@ -64,6 +66,7 @@ sleep 1
 hwclock -s
 ntpdate-debian
 ```
+This will read in the time from the RTC upon boot, and sync the time via Internet (if it is available).
 
 #### 8. The `/etc/init.d/hwclock.sh` shell scripts tends to corrupt this RTC clock module. In my case, the RTC clock was set to 2066/01/01 after every reboot. To prevent this from happening, edit `/etc/default/hwclock` and set `HWCLOCKACCESS` to no:
 ```
