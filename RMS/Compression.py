@@ -50,7 +50,11 @@ class Compressor(Process):
         self.config = config
     
     def compress(self, frames):
-        """Compress frames to the FTP-compatible array.
+        """ Compress frames to the FTP-compatible array.
+
+        NOTE: The standard deviation calculation is performed in a non-standard way due to performance 
+            concerns. The end result is the same as a proper calculation due to the usage of low-precision
+            8-bit unsigned integers, so the difference does not matter.
         
         @param frames: grayscale frames stored as 3d numpy array
         
