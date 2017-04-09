@@ -164,7 +164,7 @@ if __name__ == "__main__":
     log_file_name = "log.log"
         
     # Init logging
-    log = logging.getLogger(__name__)
+    log = logging.getLogger('logger')
     log.setLevel(logging.INFO)
 
     # Make a new log file each day
@@ -197,7 +197,7 @@ if __name__ == "__main__":
 
 
         log.info("Running for " + str(duration) + ' hours...')
-        
+
         # Run the capture for the given number of hours
         runCapture(duration*60*60)
 

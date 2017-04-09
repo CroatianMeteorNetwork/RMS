@@ -26,7 +26,7 @@ from RMS.Formats import FRbin
 
 
 # Get the logger from the main module
-log = logging.getLogger("__main__")
+log = logging.getLogger("logger")
 
 
 class Extractor(Process):

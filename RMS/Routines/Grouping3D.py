@@ -21,7 +21,7 @@ import logging
 
 
 # Get the logger from the main module
-log = logging.getLogger("__main__")
+log = logging.getLogger("logger")
 
 
 # Cython init
