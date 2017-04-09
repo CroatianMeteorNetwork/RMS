@@ -166,6 +166,7 @@ if __name__ == "__main__":
     # Init logging
     log = logging.getLogger('logger')
     log.setLevel(logging.INFO)
+    log.setLevel(logging.DEBUG)
 
     # Make a new log file each day
     handler = logging.handlers.TimedRotatingFileHandler(log_file_name, when='D', interval=1) #Log to a different file each day
@@ -182,8 +183,6 @@ if __name__ == "__main__":
     formatter = logging.Formatter(fmt='%(asctime)s-%(levelname)s: %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     ch.setFormatter(formatter)
     log.addHandler(ch)
-
-    log.info("Program start")
 
 
     # If the duration of capture was given, capture right away
