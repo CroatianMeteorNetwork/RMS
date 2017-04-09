@@ -231,6 +231,10 @@ if __name__ == "__main__":
 
     # Automatic running and stopping the capture at sunrise and sunset
     while True:
+
+        # Break the loop if capturing was stopped
+        if STOP_CAPTURE:
+            break
             
         # Calculate when and how should the capture run
         start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
