@@ -185,6 +185,9 @@ if __name__ == "__main__":
     log.addHandler(ch)
 
 
+    log.info('Program start')
+    
+
     # If the duration of capture was given, capture right away
     if cml_args.duration:
 
