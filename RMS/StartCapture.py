@@ -196,6 +196,8 @@ if __name__ == "__main__":
             print('Given duration is not a proper number of hours!')
 
 
+        log.info("Running for " + str(duration) + ' hours...')
+        
         # Run the capture for the given number of hours
         runCapture(duration*60*60)
 
