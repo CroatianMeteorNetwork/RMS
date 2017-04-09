@@ -24,6 +24,11 @@ import struct
 import logging
 from RMS.Formats import FRbin
 
+
+# Get the logger from the main module
+log = logging.getLogger("__main__")
+
+
 class Extractor(Process):
     
     def __init__(self, config):
@@ -379,40 +384,40 @@ class Extractor(Process):
     def executeAll(self):
         # Check if the average is all white (or close to it) and skip it
         if np.average(self.compressed[2]) > 220:
-            logging.debug("[" + self.filename + "] frames are all white")
+            log.debug("[" + self.filename + "] frames are all white")
             return
         
         t = time.time()
         event_points = self.findPoints()
-        logging.debug("[" + self.filename + "] time for thresholding and subsampling: " + str(time.time() - t) + "s")
+        log.debug("[" + self.filename + "] time for thresholding and subsampling: " + str(time.time() - t) + "s")
         
         if len(event_points) == 0:
-            logging.debug("[" + self.filename + "] nothing found, not extracting anything 1")
+            log.debug("[" + self.filename + "] nothing found, not extracting anything 1")
             return
         
         t = time.time()
         # Find lines in 3D space and store them to line_list
         line_list = Grouping3D.find3DLines(event_points, time.time(), self.config)
-        logging.debug("[" + self.filename + "] Time for finding lines: " + str(time.time() - t) + "s")
+        log.debug("[" + self.filename + "] Time for finding lines: " + str(time.time() - t) + "s")
         
         if line_list == None:
-            logging.debug("[" + self.filename + "] no lines found, not extracting anything")
+            log.debug("[" + self.filename + "] no lines found, not extracting anything")
             return
         
         t = time.time()
         coeff = Grouping3D.findCoefficients(line_list)
-        logging.debug("[" + self.filename + "] Time for finding coefficients: " + str(time.time() - t) + "s")
+        log.debug("[" + self.filename + "] Time for finding coefficients: " + str(time.time() - t) + "s")
         
         if len(coeff) == 0:
-            logging.debug("[" + self.filename + "] nothing found, not extracting anything 2")
+            log.debug("[" + self.filename + "] nothing found, not extracting anything 2")
             return
         
         t = time.time()
         clips = self.extract(coeff)
-        logging.debug("[" + self.filename + "] Time for extracting: " + str(time.time() - t) + "s")
+        log.debug("[" + self.filename + "] Time for extracting: " + str(time.time() - t) + "s")
         t = time.time()
          
         t = time.time()
         self.save(clips)
-        logging.debug("[" + self.filename + "] Time for saving: " + str(time.time() - t) + "s")
+        log.debug("[" + self.filename + "] Time for saving: " + str(time.time() - t) + "s")
         t = time.time()

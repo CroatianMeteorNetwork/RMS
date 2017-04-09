@@ -1,3 +1,7 @@
+# Recorded BIN files
+FF*.bin
+FR*.bin
+
 # Eclipse
 .project
 .pydevproject

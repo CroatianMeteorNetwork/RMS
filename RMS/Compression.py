@@ -24,6 +24,11 @@ import logging
 from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFbin
 
+
+# Get the logger from the main module
+log = logging.getLogger("__main__")
+
+
 class Compressor(Process):
     """Compress list of numpy arrays (video frames).
     Output is in Flat-field Temporal Pixel (FTP) format like the one used by CAMS project (P. Jenniskens et al., 2011).
@@ -188,18 +193,18 @@ class Compressor(Process):
                 frames = self.array2 #copy frames
                 self.startTime2.value = 0
             
-            logging.debug("memory copy: " + str(time.time() - t) + "s")
+            log.debug("memory copy: " + str(time.time() - t) + "s")
             t = time.time()
             
             compressed = self.compress(frames)
             
-            logging.debug("compression: " + str(time.time() - t) + "s")
+            log.debug("compression: " + str(time.time() - t) + "s")
             t = time.time()
             
             filename = self.save(compressed, startTime, n*256)
             n += 1
             
-            logging.debug("saving: " + str(time.time() - t) + "s")
+            log.debug("saving: " + str(time.time() - t) + "s")
             
             ve = Extractor(self.config)
             ve.start(frames, compressed, filename)

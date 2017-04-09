@@ -21,6 +21,9 @@ class Config:
     def __init__(self):
         ##### System
         self.stationID = 499
+        self.latitude = 0
+        self.longitude = 0
+        self.elevation = 0
         
         ##### Capture
         self.width = 720
@@ -157,13 +160,26 @@ def parseAllSections(config, parser):
     parseCalibration(config, parser)
 
 def parseSystem(config, parser):
-    if not parser.has_section("System"):
-        raise RuntimeError("Not configurated!")
+    
+    section= "System"
+    if not parser.has_section(section):
+        raise RuntimeError("Not configured!")
     
     try:
-        config.stationID = parser.getint("System", "stationID")
+        config.stationID = parser.getint(section, "stationID")
     except NoOptionError:
-        raise RuntimeError("Not configurated!")
+        raise RuntimeError("Not configured!")
+
+
+    if parser.has_option(section, "latitude"):
+        config.latitude = parser.getfloat(section, "latitude")
+
+    if parser.has_option(section, "longitude"):
+        config.longitude = parser.getfloat(section, "longitude")
+
+    if parser.has_option(section, "elevation"):
+        config.elevation = parser.getfloat(section, "elevation")
+
 
 def parseCapture(config, parser):
     section = "Capture"

@@ -20,6 +20,10 @@ import cv2
 import time
 import logging
 
+# Get the logger from the main module
+log = logging.getLogger("__main__")
+
+
 class BufferedCapture(Process):
     """Capture from device to buffer in memory.
     """
@@ -89,7 +93,7 @@ class BufferedCapture(Process):
                     startTime = t
                 elif lastTime - t > self.TIME_FOR_DROP: #check if frame is dropped TODO: better frame dropping detection
                     #TODO: increase dropped frames counter
-                    logging.warn("frame dropped!")
+                    log.warn("frame dropped!")
                 lastTime = t
                 
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)

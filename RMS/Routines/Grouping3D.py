@@ -19,6 +19,11 @@ from math import sqrt
 from time import time
 import logging
 
+
+# Get the logger from the main module
+log = logging.getLogger("__main__")
+
+
 # Cython init
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
@@ -142,7 +147,7 @@ def findCoefficients(line_list):
             point2 = np.array(detected_line[0], dtype=np.float)
         else:
         # skip if points are on the same frame (that shouldn't happen, though)
-            logging.debug("Points on the same frame!")
+            log.debug("Points on the same frame!")
             continue
         
         # difference between last point and first point that represent a line
