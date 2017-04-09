@@ -16,6 +16,7 @@
 
 from __future__ import print_function, absolute_import
 
+import os
 import sys
 import argparse
 import time
@@ -31,6 +32,7 @@ import RMS.ConfigReader as cr
 from RMS.BufferedCapture import BufferedCapture
 from RMS.Compression import Compressor
 from RMS.CaptureDuration import captureDuration
+from RMS.Misc import mkdirP
 
 
 # Flag indicating that capturing should be stopped
@@ -41,7 +43,7 @@ def breakHandler(signum, frame):
         
     global STOP_CAPTURE
 
-    # Set the flag to step capturing video
+    # Set the flag to stop capturing video
     STOP_CAPTURE = True
 
 
@@ -86,18 +88,32 @@ def wait(time_sec=None):
         if STOP_CAPTURE:
             break
 
-    STOP_CAPTURE = False
 
 
 
-
-def runCapture(duration=None):
+def runCapture(config, duration=None):
     """ Run capture and compression for the given time.given
 
     Arguments:
+        config: [config object] configuration read from the .config file
         duration: [float] Time in seconds to capture. None by default.
 
     """
+
+    global STOP_CAPTURE
+
+
+    # Create a directory for captured files
+    night_data_dir_name = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+
+    # Full path to the data directory
+    night_data_dir = os.path.join(os.path.abspath(config.data_dir), night_data_dir_name)
+
+    # Make a directory for the night
+    mkdirP(night_data_dir)
+
+    log.info('Data directory: ' + night_data_dir)
+
 
     # Init arrays for parallel compression on 2 cores
     sharedArrayBase = Array(ctypes.c_uint8, 256*config.width*config.height)
@@ -109,25 +125,37 @@ def runCapture(duration=None):
     sharedArray2 = np.ctypeslib.as_array(sharedArrayBase2.get_obj())
     sharedArray2 = sharedArray2.reshape(256, config.height, config.width)
     startTime2 = Value('d', 0.0)
+
     
     # Initialize buffered capture
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config)
     
     # Initialize compression
-    c = Compressor(sharedArray, startTime, sharedArray2, startTime2, config)
+    c = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config)
+
     
     # Start buffered capture
     bc.startCapture()
 
     # Start the compression
     c.start()
+
     
     # Capture until Ctrl+C is pressed
     wait(duration)
     
+
     # Stop the capture
     bc.stopCapture()
     c.stop()
+
+
+    # If capture was manually stopped, end program
+    if STOP_CAPTURE:
+
+        log.info('Ending program')
+        sys.exit()
+
 
 
 
@@ -152,16 +180,9 @@ if __name__ == "__main__":
 
     ######
 
+    ### LOGGING SETUP
 
-    # log_file_name = "log_" + datetime.datetime.now().strftime('%Y%m%d_%H%M%S.%f') + ".log"
-
-    # # Initialize logging
-    # logging.basicConfig(filename=log_file_name, level=logging.DEBUG)
-
-    # logging.debug("########## START #########")
-    # logging.debug("Start time:" + str(datetime.datetime.now()))
-
-    log_file_name = "log.log"
+    log_file_name = "log_" + datetime.datetime.now().strftime('%Y%m%d_%H%M%S.%f') + ".log"
         
     # Init logging
     log = logging.getLogger('logger')
@@ -169,7 +190,7 @@ if __name__ == "__main__":
     log.setLevel(logging.DEBUG)
 
     # Make a new log file each day
-    handler = logging.handlers.TimedRotatingFileHandler(log_file_name, when='D', interval=1) #Log to a different file each day
+    handler = logging.handlers.TimedRotatingFileHandler(log_file_name, when='D', interval=1) 
     handler.setLevel(logging.INFO)
 
     # Set the log formatting
@@ -184,9 +205,11 @@ if __name__ == "__main__":
     ch.setFormatter(formatter)
     log.addHandler(ch)
 
+    ######
+
 
     log.info('Program start')
-    
+
 
     # If the duration of capture was given, capture right away
     if cml_args.duration:
@@ -201,7 +224,7 @@ if __name__ == "__main__":
         log.info("Running for " + str(duration) + ' hours...')
 
         # Run the capture for the given number of hours
-        runCapture(duration*60*60)
+        runCapture(config, duration=duration*60*60)
 
         sys.exit()
 
@@ -239,7 +262,7 @@ if __name__ == "__main__":
 
 
         # Run capture and compression
-        runCapture(duration)
+        runCapture(config, duration=duration)
 
 
 

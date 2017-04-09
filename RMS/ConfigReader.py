@@ -14,7 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from ConfigParser import RawConfigParser
+import os
+from ConfigParser import RawConfigParser, NoOptionError
 from RMS.Routines import Grouping3D
 
 class Config:
@@ -26,6 +27,7 @@ class Config:
         self.elevation = 0
         
         ##### Capture
+        self.data_dir = "RMS_data"
         self.width = 720
         self.height = 576
         self.bit_depth = 8
@@ -186,6 +188,22 @@ def parseCapture(config, parser):
     
     if not parser.has_section(section):
         return
+
+    if parser.has_option(section, "data_dir"):
+        
+        config.data_dir = parser.get(section, "data_dir")
+
+        # Parse the home folder appropriately
+        if config.data_dir[0] == '~':
+            
+            config.data_dir = config.data_dir.replace('~', '')
+            
+            # Remove the directory separator if it is at the beginning of the path
+            if config.data_dir[0] == os.sep:
+                config.data_dir = config.data_dir[1:]
+            
+            config.data_dir = os.path.join(os.path.expanduser('~'), config.data_dir)
+            
     
     if parser.has_option(section, "width"):
         config.width = parser.getint(section, "width")

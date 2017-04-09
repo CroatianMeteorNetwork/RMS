@@ -36,7 +36,7 @@ class Compressor(Process):
 
     running = False
     
-    def __init__(self, array1, startTime1, array2, startTime2, config):
+    def __init__(self, data_dir, array1, startTime1, array2, startTime2, config):
         """
         
         @param array1: first numpy array in shared memory of grayscale video frames
@@ -48,6 +48,7 @@ class Compressor(Process):
         
         super(Compressor, self).__init__()
         
+        self.data_dir = data_dir
         self.array1 = array1
         self.startTime1 = startTime1
         self.array2 = array2
@@ -153,7 +154,8 @@ class Compressor(Process):
         ff.first = N+256
         ff.camno = self.config.stationID
         
-        FFbin.write(ff, "./", filename)
+        # Write the FFbin file
+        FFbin.write(ff, self.data_dir, filename)
         
         return filename
     
@@ -206,6 +208,6 @@ class Compressor(Process):
             
             log.debug("saving: " + str(time.time() - t) + "s")
             
-            ve = Extractor(self.config)
+            ve = Extractor(self.config, self.data_dir)
             ve.start(frames, compressed, filename)
     
