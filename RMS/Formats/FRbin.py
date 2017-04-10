@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import os
 import numpy as np
 import struct
 
@@ -72,15 +73,17 @@ def read(dir, filename):
 
     return fr
 
-def write(fr, dir, filename):
+def write(fr, dir_path, filename):
     """ Write FR*.bin structure to a file in specified directory.
     """
     
+
     if filename[:2] == "FR":
-        file = dir + filename
+        file = os.path.join(dir_path, filename)
     else:
-        file = dir + "FR" + filename + ".bin"
+        file = os.path.join(dir_path, "FR" + filename + ".bin")
     
+    file = os.path.join()
     with open(file, "wb") as fid:
         fid.write(struct.pack('I', fr.lines))
     
