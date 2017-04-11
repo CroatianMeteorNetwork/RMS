@@ -97,14 +97,15 @@ def write(fr, dir_path, filename):
                 fid.write(struct.pack('I', fr.size[i, z]))
                 fr.frames[i, z].tofile(fid)
 
-def writeArray(arr, dir, filename):
+def writeArray(arr, dir_path, filename):
     """ Write array with extracted clips to a file in specified directory.
     """
-    
+
     if filename[:2] == "FR":
-        file = dir + filename
+        file = os.path.join(dir_path, filename)
     else:
-        file = dir + "FR" + filename + ".bin"
+        file = os.path.join(dir_path, "FR" + filename + ".bin")
+        
             
     with open(file, "wb") as f:
         f.write(struct.pack('I', len(arr)))               # number of extracted lines

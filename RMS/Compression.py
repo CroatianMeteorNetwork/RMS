@@ -151,7 +151,7 @@ class Compressor(Process):
         ff.nrows = arr.shape[1]
         ff.ncols = arr.shape[2]
         ff.nbits = 8
-        ff.first = N+256
+        ff.first = N + 256
         ff.camno = self.config.stationID
         
         # Write the FFbin file

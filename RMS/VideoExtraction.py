@@ -378,7 +378,7 @@ class Extractor(Process):
         
         self.frames = frames
         self.compressed = compressed
-        self.filename = filename      
+        self.filename = filename
         
         super(Extractor, self).start()
     
