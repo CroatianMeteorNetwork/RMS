@@ -156,8 +156,12 @@ If you want to start capture right away, for a specified duration, run this comm
 python -m RMS.StartCapture -d 1.5
 ```
 
-The data will be saved in /home/pi/RMS_data/YYYYMMDD_hhmmss_uuuuuu, where YYYYMMDD_hhmmss_uuuuuu is the timestamp of the time when the recording was started, which is used as a name for the directory where the data for the night will be stored. You can view the recorded data using the [CMN_binViewer](https://github.com/CroatianMeteorNetwork/cmn_binviewer) software.
+The data will be saved in /home/pi/RMS_data/YYYYMMDD_hhmmss_uuuuuu, where YYYYMMDD_hhmmss_uuuuuu is the timestamp of the time when the recording was started, which is used as a name for the directory where the data for the night will be stored. 
 
+#### Viewing FF bin files (compressed video data)
+You can view the recorded data using the [CMN_binViewer](https://github.com/CroatianMeteorNetwork/cmn_binviewer) software.
+
+#### Viewing FR bin files (fireball detections)
 You may notice that there are some FR .bin files in the night directory (as opposed to FF .bin, which are storing the compressed video data). The FR .bin files are created by the fireball detector, which detects brighter meteors as well. To see the detection, run:
 
 ```
