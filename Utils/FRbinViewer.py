@@ -33,7 +33,7 @@ def view(ff, fr, config):
         ff: [str] path to the FF bin file
         fr: [str] path to the FR bin file
         config: [conf object] configuration structure
-        
+
     """
 
     if ff is None:
@@ -63,7 +63,7 @@ def view(ff, fr, config):
             # Get the size of the window
             size = fr.size[i][z]
             
-            print("  {:3d}, {:3d}, {:3d}, {:.f}".format(t, yc, xc, size))
+            print("  {:3d}, {:3d}, {:3d}, {:f}".format(t, yc, xc, size))
             
             
             y2 = 0
