@@ -26,7 +26,15 @@ import RMS.ConfigReader as cr
 from RMS.Formats import FFbin, FRbin
 
 
-def view(ff, fr):
+def view(ff, fr, config):
+    """ Shows the detected fireball stored in the FR file. 
+    
+    Arguments:
+        ff: [str] path to the FF bin file
+        fr: [str] path to the FR bin file
+        config: [conf object] configuration structure
+        
+    """
 
     if ff is None:
         background = np.zeros((config.height, config.width), np.uint8)
@@ -69,7 +77,7 @@ def view(ff, fr):
 
                     background[y, x] = fr.frames[i][z][y2, x2]
                     x2 += 1
-                    
+
                 y2 += 1
             
             cv2.imshow(name, background)
