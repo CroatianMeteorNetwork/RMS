@@ -45,7 +45,7 @@ def view(ff, fr, config):
     name = fr
     fr = FRbin.read(sys.argv[1], fr)
     
-    print("Number of lines:", fr.lines)
+    print("Number of lines:", fr.lines[0])
     
     for i in range(fr.lines):
 
@@ -63,17 +63,17 @@ def view(ff, fr, config):
             # Get the size of the window
             size = fr.size[i][z]
             
-            print("  {:3d}, {:3d}, {:3d}, {:f}".format(t, yc, xc, size))
+            print("  {:3d}, {:3d}, {:3d}, {:d}".format(t, yc, xc, size))
             
             
             y2 = 0
 
             # Assign the detection pixels to the background image
-            for y in range(yc - size/2, yc + size/2):
+            for y in range(yc - size//2, yc + size//2):
 
                 x2 = 0
 
-                for x in range(xc - size/2,  xc + size/2):
+                for x in range(xc - size//2,  xc + size//2):
 
                     background[y, x] = fr.frames[i][z][y2, x2]
                     x2 += 1
