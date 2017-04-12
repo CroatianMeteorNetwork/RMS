@@ -17,6 +17,7 @@
 import sys
 import os
 import time
+import datetime
 
 # RMS imports
 import RMS.ConfigReader as cr
@@ -51,7 +52,7 @@ def detectStarsAndMeteors(ff_directory, ff_name, config):
 
 if __name__ == "__main__":
 
-    time_start = time.clock()
+    time_start = datetime.datetime.now()
 
     # Load config file
     config = cr.parse(".config")
@@ -140,6 +141,6 @@ if __name__ == "__main__":
     FTPdetectinfo.writeFTPdetectinfo(meteor_list, ff_dir, ftpdetectinfo_name, ff_dir, 
         config.stationID, config.fps)
 
-    print 'Total time taken: ', time.clock() - time_start
+    print 'Total time taken: ', datetime.datetime.now() - time_start
 
 
