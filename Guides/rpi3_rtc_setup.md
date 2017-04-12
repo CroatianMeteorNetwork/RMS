@@ -4,7 +4,7 @@
 You will need:
 
 * Raspberry Pi 3 with Raspbian Jessie
-* [DS3231 RTC clock](https://www.aliexpress.com/item/1pc-DS3231-Precision-RTC-Module-Memory-Module-for-Arduino-Raspberry-Pi/32676041749.html)
+* [DS3231 RTC module](https://www.aliexpress.com/item/1pc-DS3231-Precision-RTC-Module-Memory-Module-for-Arduino-Raspberry-Pi/32676041749.html)
 
 Connect the RTC module to the GPIO according to this image:
 ![Connecting the RTC](rtc.jpg)
