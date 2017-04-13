@@ -44,7 +44,7 @@ def detectStarsAndMeteors(ff_directory, ff_name, config):
     else:
         meteor_list = []
 
-    return star_list, meteor_list
+    return ff_name, star_list, meteor_list
 
 
 
@@ -83,7 +83,7 @@ if __name__ == "__main__":
         t1 = time.clock()
 
         # Run star and meteor detection
-        star_data, meteor_data = detectStarsAndMeteors(ff_dir, ff_name, config)
+        _, star_data, meteor_data = detectStarsAndMeteors(ff_dir, ff_name, config)
 
         print 'Time for processing: ', time.clock() - t1
 
@@ -105,7 +105,7 @@ if __name__ == "__main__":
             print ' {:06.2f} {:06.2f} {:6d} {:6d}'.format(round(y, 2), round(x, 2), int(bg_level), int(level))
 
 
-        # # Show stars if there are only more then 10 of them
+        # # Show stars if there are only more then 20 of them
         # if len(x2) < 20:
         #     continue
 
@@ -129,7 +129,7 @@ if __name__ == "__main__":
     ff = FFbin.read(ff_dir, ff_name)
 
     # Generate the name for the CALSTARS file
-    calstars_name = 'CALSTARS' + "{:04d}".format(int(ff.camno)) + ff_dir.split(os.sep)[-1] + '.txt'
+    calstars_name = 'CALSTARS' + "{:04d}".format(int(ff.camno)) + os.path.basename(ff_dir) + '.txt'
 
     # Write detected stars to the CALSTARS file
     CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, ff.camno, ff.nrows, ff.ncols)

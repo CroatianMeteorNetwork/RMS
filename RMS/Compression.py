@@ -36,7 +36,7 @@ class Compressor(Process):
 
     running = False
     
-    def __init__(self, data_dir, array1, startTime1, array2, startTime2, config):
+    def __init__(self, data_dir, array1, startTime1, array2, startTime2, config, detector=None):
         """
         
         @param array1: first numpy array in shared memory of grayscale video frames
@@ -54,7 +54,11 @@ class Compressor(Process):
         self.array2 = array2
         self.startTime2 = startTime2
         self.config = config
+
+        self.detector = detector
     
+
+
     def compress(self, frames):
         """ Compress frames to the FTP-compatible array.
 
@@ -133,6 +137,8 @@ class Compressor(Process):
         weave.inline(code, ['frames', 'out'], verbose=2, extra_compile_args=self.config.weaveArgs, extra_link_args=self.config.weaveArgs)
         return out
     
+
+
     def save(self, arr, startTime, N):
         """Write metadata and data array to FTP .bin file.
         
@@ -159,20 +165,26 @@ class Compressor(Process):
         
         return filename
     
+
+
     def stop(self):
         """Stop the process.
         """
         
         self.exit.set()
         self.join()
-        
+    
+
+
     def start(self):
         """Start the process.
         """
         
         self.exit = Event()
         super(Compressor, self).start()
-        
+    
+
+
     def run(self):
         """Retrieve frames from list, convert, compress and save them.
         """
@@ -198,16 +210,26 @@ class Compressor(Process):
             log.debug("memory copy: " + str(time.time() - t) + "s")
             t = time.time()
             
+            # Run the compression
             compressed = self.compress(frames)
             
             log.debug("compression: " + str(time.time() - t) + "s")
             t = time.time()
             
+            # Save the compressed image
             filename = self.save(compressed, startTime, n*256)
             n += 1
             
             log.debug("saving: " + str(time.time() - t) + "s")
             
+            # Run the extractor
             ve = Extractor(self.config, self.data_dir)
             ve.start(frames, compressed, filename)
+
+            # Run the detection on the file, if the detector handle was given
+            if self.detector is not None:
+
+                # Add the file to the detector queue
+                self.detector.addJob([self.data_dir, filename, self.config])
+
     

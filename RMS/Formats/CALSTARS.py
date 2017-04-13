@@ -39,7 +39,7 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols):
 
         # Write the header
         star_file.write("==========================================================================\n")
-        star_file.write("Asteria star extractor" + "\n")
+        star_file.write("RMS star extractor" + "\n")
         star_file.write("Cal time = FF header time plus 255/(2*framerate_Hz) seconds" + "\n")
         star_file.write("Row  Column  Intensity-Backgnd  Intensity  (integrated values)" + "\n")
         star_file.write("==========================================================================\n")

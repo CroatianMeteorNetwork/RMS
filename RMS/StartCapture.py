@@ -29,9 +29,17 @@ import numpy as np
 from multiprocessing import Array, Value
 
 import RMS.ConfigReader as cr
+
+from RMS.Formats import FFbin
+from RMS.Formats import FTPdetectinfo
+from RMS.Formats import CALSTARS
+
 from RMS.BufferedCapture import BufferedCapture
 from RMS.Compression import Compressor
 from RMS.CaptureDuration import captureDuration
+from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
+
+from RMS.QueuedPool import QueuedPool
 from RMS.Misc import mkdirP
 
 
@@ -47,8 +55,21 @@ def breakHandler(signum, frame):
     STOP_CAPTURE = True
 
 
-# The breakHandler function will be called when Ctrl+C is pressed
-signal.signal(signal.SIGINT, breakHandler)
+# Save the original event for the Ctrl+C
+ORIGINAL_BREAK_HANDLE = signal.getsignal(signal.SIGINT)
+
+
+def setSIGINT():
+    """ Set the breakHandler function for the SIGINT signal, will be called when Ctrl+C is pressed. """
+
+    signal.signal(signal.SIGINT, breakHandler)
+
+def resetSIGINT():
+    """ Restore the original Ctrl+C action. """
+
+    signal.signal(signal.SIGINT, ORIGINAL_BREAK_HANDLE)
+
+
 
 
 
@@ -126,12 +147,16 @@ def runCapture(config, duration=None):
     sharedArray2 = sharedArray2.reshape(256, config.height, config.width)
     startTime2 = Value('d', 0.0)
 
+
+    # Initialize the detector
+    detector = QueuedPool(detectStarsAndMeteors, cores=1)
     
     # Initialize buffered capture
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config)
     
     # Initialize compression
-    c = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config)
+    c = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config, 
+        detector=detector)
 
     
     # Start buffered capture
@@ -143,11 +168,86 @@ def runCapture(config, duration=None):
     
     # Capture until Ctrl+C is pressed
     wait(duration)
-    
+        
+    # If capture was manually stopped, end capture
+    if STOP_CAPTURE:
+        log.info('Ending capture...')
 
     # Stop the capture
     bc.stopCapture()
     c.stop()
+
+    log.info('Finishing up the detection, ' + str(detector.input_queue.qsize()) + ' files to process...')
+
+    # Let the detector use 3 cores
+    detector.updateCoreNumber(3)
+
+    # Reset the Ctrl+C to KeyboardInterrupt
+    resetSIGINT()
+
+    # Wait for the detector to finish and close it
+    detector.closePool()
+
+    # Set the Ctrl+C back to 'soft' program kill
+    setSIGINT()
+
+    ### SAVE DETECTIONS TO FILE
+
+    # Init data lists
+    star_list = []
+    meteor_list = []
+
+    # Save the detections to a file
+    for ff_name, star_data, meteor_data in detector.getResults():
+
+        x2, y2, background, intensity = star_data
+
+        # Skip if no stars were found
+        if not x2:
+            continue
+
+        # Construct the table of the star parameters
+        star_data = zip(x2, y2, background, intensity)
+
+        # Add star info to the star list
+        star_list.append([ff_name, star_data])
+
+        # Print found stars
+        print('   ROW    COL intensity')
+        for x, y, bg_level, level in star_data:
+            print(' {:06.2f} {:06.2f} {:6d} {:6d}'.format(round(y, 2), round(x, 2), int(bg_level), int(level)))
+
+
+        # Handle the detected meteors
+        meteor_No = 1
+        for meteor in meteor_data:
+
+            rho, theta, centroids = meteor
+
+            # Append to the results list
+            meteor_list.append([ff_name, meteor_No, rho, theta, centroids])
+            meteor_No += 1
+
+
+    # Load data about the image
+    ff = FFbin.read(night_data_dir, ff_name)
+
+    # Generate the name for the CALSTARS file
+    calstars_name = 'CALSTARS' + "{:04d}".format(int(ff.camno)) + os.path.basename(night_data_dir) + '.txt'
+
+    # Write detected stars to the CALSTARS file
+    CALSTARS.writeCALSTARS(star_list, night_data_dir, calstars_name, ff.camno, ff.nrows, ff.ncols)
+
+    # Generate FTPdetectinfo file name
+    ftpdetectinfo_name = os.path.join(night_data_dir, 
+        'FTPdetectinfo_' + os.path.basename(night_data_dir) + '.txt')
+
+    # Write FTPdetectinfo file
+    FTPdetectinfo.writeFTPdetectinfo(meteor_list, night_data_dir, ftpdetectinfo_name, night_data_dir, 
+        config.stationID, config.fps)
+
+
+    ######
 
 
     # If capture was manually stopped, end program
@@ -209,6 +309,9 @@ if __name__ == "__main__":
 
 
     log.info('Program start')
+
+    # Change the Ctrl+C action to the special handles
+    setSIGINT()
 
 
     # If the duration of capture was given, capture right away
