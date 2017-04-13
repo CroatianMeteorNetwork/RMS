@@ -486,7 +486,7 @@ class Extractor(Process):
          
         t = time.time()
 
-        # Save the clips
+        # Save the extracted clips
         self.save(clips)
 
         log.debug("[" + self.filename + "] Time for saving: " + str(time.time() - t) + "s")

@@ -27,16 +27,23 @@ class Config:
         self.elevation = 0
         
         ##### Capture
-        self.data_dir = "RMS_data"
+        self.deviceID = 0
+
         self.width = 720
         self.height = 576
-        self.bit_depth = 8
-        self.deviceID = 0
         self.fps = 25.0
+
+        self.bit_depth = 8
+        
         self.fov_w = 64.0
         self.fov_h = 48.0
         self.deinterlace_order = 1
         self.mask_file = "mask.bmp"
+
+        self.data_dir = "~/RMS_data"
+        self.captured_dir = "CapturedFiles"
+        self.archived_dir = "ArchivedFiles"
+
         
         self.weaveArgs = ["-O3"]
         
@@ -204,7 +211,13 @@ def parseCapture(config, parser):
                 config.data_dir = config.data_dir[1:]
             
             config.data_dir = os.path.join(os.path.expanduser('~'), config.data_dir)
-            
+    
+
+    if parser.has_option(section, "captured_dir"):
+        config.captured_dir = parser.get(section, "captured_dir")
+    
+    if parser.has_option(section, "archived_dir"):
+        config.archived_dir = parser.get(section, "archived_dir")
     
     if parser.has_option(section, "width"):
         config.width = parser.getint(section, "width")

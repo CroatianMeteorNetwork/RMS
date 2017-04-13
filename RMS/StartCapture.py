@@ -30,7 +30,6 @@ import multiprocessing
 
 import RMS.ConfigReader as cr
 
-from RMS.Formats import FFbin
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats import CALSTARS
 
@@ -38,6 +37,7 @@ from RMS.BufferedCapture import BufferedCapture
 from RMS.Compression import Compressor
 from RMS.CaptureDuration import captureDuration
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
+from RMS.ArchiveDetections import archiveDetections
 
 from RMS.QueuedPool import QueuedPool
 from RMS.Misc import mkdirP
@@ -128,7 +128,7 @@ def runCapture(config, duration=None):
     night_data_dir_name = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
 
     # Full path to the data directory
-    night_data_dir = os.path.join(os.path.abspath(config.data_dir), night_data_dir_name)
+    night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, night_data_dir_name)
 
     # Make a directory for the night
     mkdirP(night_data_dir)
@@ -198,6 +198,7 @@ def runCapture(config, duration=None):
     # Init data lists
     star_list = []
     meteor_list = []
+    ff_detected = []
 
     # Save the detections to a file
     for ff_name, star_data, meteor_data in detector.getResults():
@@ -225,14 +226,15 @@ def runCapture(config, duration=None):
             meteor_No += 1
 
 
-    # Load data about the image
-    ff = FFbin.read(night_data_dir, ff_name)
+        ff_detected.append(ff_name)
+
 
     # Generate the name for the CALSTARS file
-    calstars_name = 'CALSTARS' + "{:04d}".format(int(ff.camno)) + os.path.basename(night_data_dir) + '.txt'
+    calstars_name = 'CALSTARS' + "{:04d}".format(config.stationID) + os.path.basename(night_data_dir) + '.txt'
 
     # Write detected stars to the CALSTARS file
-    CALSTARS.writeCALSTARS(star_list, night_data_dir, calstars_name, ff.camno, ff.nrows, ff.ncols)
+    CALSTARS.writeCALSTARS(star_list, night_data_dir, calstars_name, config.stationID, config.height, 
+        config.width)
 
     # Generate FTPdetectinfo file name
     ftpdetectinfo_name = os.path.join(night_data_dir, 
@@ -242,6 +244,14 @@ def runCapture(config, duration=None):
     FTPdetectinfo.writeFTPdetectinfo(meteor_list, night_data_dir, ftpdetectinfo_name, night_data_dir, 
         config.stationID, config.fps)
 
+
+
+    night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir, 
+        night_data_dir_name)
+
+
+    # Archive the detections
+    archiveDetections(night_data_dir, night_archive_dir, ff_detected)
 
     ######
 
