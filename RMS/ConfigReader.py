@@ -45,6 +45,7 @@ class Config:
         self.max_time = 25             # maximum time for line finding
         
         # params for Extractor.findPoints()
+        self.white_avg_level = 220     # ignore images which have the average frame above this level
         self.min_level = 40            # ignore pixel if below this level
         self.min_pixels = 8            # minimum number of pixels required to add event point
         self.k1 = 4                    # k1 factor for thresholding
@@ -259,6 +260,9 @@ def parseFireballDetection(config, parser):
         
     if parser.has_option(section, "max_time"):
         config.max_time = parser.getint(section, "max_time")
+
+    if parser.has_option(section, "white_avg_level"):
+        config.white_avg_level = parser.getint(section, "white_avg_level")
     
     if parser.has_option(section, "minimal_level"):
         config.min_level = parser.getint(section, "minimal_level")

@@ -22,7 +22,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize as opt
 
-import scipy
 import scipy.ndimage as ndimage
 import scipy.ndimage.filters as filters
 
@@ -34,22 +33,29 @@ from RMS.Routines import MaskImage
 
 
 
-
-
 def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=10, neighborhood_size=10, 
         intensity_threshold=5):
     """ Extracts stars on a given FF bin by searching for local maxima and applying PSF fit for star 
         confirmation.
 
-    Source of one part of the code: 
+        Source of one part of the code: 
     http://stackoverflow.com/questions/9111711/get-coordinates-of-local-maxima-in-2d-array-above-certain-value
+    
+    Arguments:
+        ff: [ff bin struct] FF bin file loaded in the FF bin structure
+        config: [config object] configuration object (loaded from the .config file)
+        max_global_intensity: [int] maximum mean intensity of an image before it is discared as too bright
+        border: [int] apply a mask on the detections by removing all that are too close to the given image 
+            border (in pixels)
+        neighborhood_size: [int] size of the neighbourhood for the maximum search (in pixels)
+        intensity_threshold: [float] a threshold for cutting the detections which are too faint (0-255)
 
-    @param ff: [ff bin struct] FF bin file loaded in the FF bin structure
-    @param config: [config object] configuration object (loaded from the .config file)
-    @param max_global_intensity: [int] maximum mean intensity of an image before it is discared as too bright
-    @param border: [int] apply a mask on the detections by removing all that are too close to the given image border (in pixels)
-    @param neighborhood_size: [int] size of the neighbourhood for the maximum search (in pixels)
-    @param intensity_threshold: [float] a threshold for cutting the detections which are too faint (0-255)
+    Return:
+        x2, y2, background, intensity: [list of ndarrays]
+            - x2: X axis coordinates of the star
+            - y2: Y axis coordinates of the star
+            - background: background intensity
+            - intensity: intensity of the star
     """
 
     # Load parameters from config if given
@@ -129,41 +135,50 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
 
 def twoDGaussian((x, y), amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
     """ Defines a 2D Gaussian distribution. 
+    
+    Arguments:
+        (x, y): [tuple of floats] independant variables
+        amplitude: [float] amplitude of the PSF
+        xo: [float] PSF center, X component
+        yo: [float] PSF center, Y component
+        sigma_x: [float] standard deviation X component
+        sigma_y: [float] standard deviation Y component
+        theta: [float] PSF rotation in radians
+        offset: [float] PSF offset from the 0 (i.e. the "elevation" of the PSF)
 
-    @param (x, y): [tuple of floats] independant variables
-    @param amplitude: [float] amplitude of the PSF
-    @param xo: [float] PSF center, X component
-    @param yo: [float] PSF center, Y component
-    @param sigma_x: [float] standard deviation X component
-    @param sigma_y: [float] standard deviation Y component
-    @param theta: [float] PSF rotation in radians
-    @param offset: [float] PSF offset from the 0 (i.e. the "elevation" of the PSF)
+    Return:
+        g: [ndarray] values of the given Gaussian at (x, y) coordinates
+
     """
     
     xo = float(xo)
-    yo = float(yo)    
+    yo = float(yo)
+
     a = (np.cos(theta)**2)/(2*sigma_x**2) + (np.sin(theta)**2)/(2*sigma_y**2)
     b = -(np.sin(2*theta))/(4*sigma_x**2) + (np.sin(2*theta))/(4*sigma_y**2)
     c = (np.sin(theta)**2)/(2*sigma_x**2) + (np.cos(theta)**2)/(2*sigma_y**2)
-    g = offset + amplitude*np.exp( - (a*((x-xo)**2) + 2*b*(x-xo)*(y-yo) + c*((y-yo)**2)))
+    g = offset + amplitude*np.exp(-(a*((x - xo)**2) + 2*b*(x - xo)*(y - yo) + c*((y - yo)**2)))
+
     return g.ravel()
+
 
 
 def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_threshold=0.5, 
     max_feature_ratio=0.8, bit_depth=8):
     """ Fit 2D Gaussian distribution as the PSF on the star image. 
-
-    @param ff: [ff bin struct] FF bin file loaded in the FF bin structure
-    @param avepixel_mean: [float] mean of the avepixel image
-    @param x2: [list] a list of estimated star position (X axis)
-    @param xy: [list] a list of estimated star position (Y axis)
-    @param config: [config object] configuration object (loaded from the .config file)
-    @param segment_radius: [int] radius (in pixels) of image segment around the detected star on which to 
-        perform the fit
-    @param roundness_threshold: [float] minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars
-        (hot pixels are narrow, while stars are round)
-    @param max_feature_ratio: [float] maximum ratio between 2 sigma of the star and the image segment area
-    @param bit_depth: [float] bit depth of the camera
+    
+    Arguments:
+        ff: [ff bin struct] FF bin file loaded in the FF bin structure
+        avepixel_mean: [float] mean of the avepixel image
+        x2: [list] a list of estimated star position (X axis)
+        xy: [list] a list of estimated star position (Y axis)
+        config: [config object] configuration object (loaded from the .config file)
+        segment_radius: [int] radius (in pixels) of image segment around the detected star on which to 
+            perform the fit
+        roundness_threshold: [float] minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars
+            (hot pixels are narrow, while stars are round)
+        max_feature_ratio: [float] maximum ratio between 2 sigma of the star and the image segment area
+        bit_depth: [float] bit depth of the camera
     """
 
     # Load parameters form config if present
@@ -207,7 +222,6 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
         y_ind, x_ind = np.indices(star_seg.shape)
 
         # Fit a PSF to the star
-
         try:
             popt, pcov = opt.curve_fit(twoDGaussian, (y_ind, x_ind), star_seg.ravel(), p0=initial_guess, 
                 maxfev=150)
@@ -259,15 +273,18 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
     return x_fitted, y_fitted, background_fitted, intensity_fitted
 
 
+
 def adjustLevels(img_array, minv, gamma, maxv):
     """Adjusts levels on image with given parameters.
 
-    @param img_array: [2D numpy array] input image array
-    @param minv: [int] minimum level value (levels below will be black)
-    @param gamma: [float] gamma value
-    @param maxv: [int] maximum level value (levels above will be white)
-
-    @return [2D numpy array] image with corrected levels and gamma
+    Arguments:
+        img_array: [2D numpy array] input image array
+        minv: [int] minimum level value (levels below will be black)
+        gamma: [float] gamma value
+        maxv: [int] maximum level value (levels above will be white)
+    
+    Return:
+        [2D numpy array] image with corrected levels and gamma
     """
     if (minv == None) and (gamma == None) and (maxv == None):
         return img_array #Return the same array if parameters are None
@@ -384,5 +401,3 @@ if __name__ == "__main__":
     CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, ff.camno, ff.nrows, ff.ncols)
 
     print 'Total time taken: ', time.clock() - time_start
-
-
