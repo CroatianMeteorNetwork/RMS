@@ -250,6 +250,8 @@ def runCapture(config, duration=None):
         night_data_dir_name)
 
 
+    log.info('Archiving detections to ' + night_archive_dir)
+    
     # Archive the detections
     archiveDetections(night_data_dir, night_archive_dir, ff_detected)
 
