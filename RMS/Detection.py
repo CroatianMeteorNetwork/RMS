@@ -14,12 +14,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import numpy as np
-import numpy.ctypeslib as npct
-import cv2
+import logging
 from time import time
 import sys, os
 import ctypes
+
+import numpy as np
+import numpy.ctypeslib as npct
+import cv2
 
 # Plotting
 import matplotlib.pyplot as plt
@@ -40,14 +42,22 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 import RMS.Routines.MorphCy as morph
 
 
+# Get the logger from the main module
+log = logging.getLogger("logger")
+
+
 def thresholdImg(ff, k1, j1):
     """ Threshold the image with given parameters.
-
-    @param ff: [FF object] input FF image object on which the thresholding will be applied
-    @param k1: [float] relative thresholding factor (how many standard deviations above mean shoud maxpix be)
-    @param j1: [float] absolute thresholding factor (how many minimum abuolute levels above mean soug maxpix be)
     
-    @return: [ndarray] thresholded 2D image
+    Arguments:
+        ff: [FF object] input FF image object on which the thresholding will be applied
+        k1: [float] relative thresholding factor (how many standard deviations above mean the maxpixel image 
+            should be)
+        j1: [float] absolute thresholding factor (how many minimum abuolute levels above mean the maxpixel 
+            image should be)
+    
+    Return:
+        [ndarray] thresholded 2D image
     """
 
     return ff.maxpixel - ff.avepixel > (k1 * ff.stdpixel + j1)
@@ -56,13 +66,15 @@ def thresholdImg(ff, k1, j1):
 
 def selectFrames(img_thres, ff, frame_min, frame_max):
     """ Select only pixels in a given frame range. 
-
-    @param img_thres: [ndarray] 2D numpy array containing the thresholded image
-    @param ff: [FF object] FF image object
-    @param frame_min: [int] first frame in a range to take
-    @param frame_max: [int] last frame in a range to take
-
-    @return: [ndarray] image with pixels only from the given frame range
+    
+    Arguments:
+        img_thres: [ndarray] 2D numpy array containing the thresholded image
+        ff: [FF object] FF image object
+        frame_min: [int] first frame in a range to take
+        frame_max: [int] last frame in a range to take
+    
+    Return:
+        [ndarray] image with pixels only from the given frame range
     """
 
     # Get the indices of image positions with times correspondng to the subdivision
@@ -74,17 +86,22 @@ def selectFrames(img_thres, ff, frame_min, frame_max):
 
     return img
 
+
+
 def getPolarLine(x1, y1, x2, y2, img_h, img_w):
     """ Calculate polar line coordinates (Hough transform coordinates) rho and theta given the 2 points that 
         define a line in Cartesian coordinates. Coordinate system starts in the image center, to replicate 
         the used HT implementation.
-
-    @param x1: [float] X component of the first point
-    @param y1: [float] Y component of the first point
-    @param x2: [float] X component of the second point
-    @param y2: [float] Y component of the second point
-
-    @return: (rho, theta): [tuple] rho (distance in px) and theta (angle in degrees) polar line coordinates
+    
+    Arguments:
+        x1: [float] X component of the first point
+        y1: [float] Y component of the first point
+        x2: [float] X component of the second point
+        y2: [float] Y component of the second point
+    
+    Return:
+        (rho, theta): [tuple of floats] rho (distance in px) and theta (angle in degrees) polar line 
+            coordinates
     """
 
     x0 = float(img_w)/2
@@ -105,38 +122,46 @@ def getPolarLine(x1, y1, x2, y2, img_h, img_w):
 
     return rho, np.degrees(theta)
 
-def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
-    """ Get indices of a stripe centered on a lines.
 
-    @param rho: [float] line distance from the center in HT space (pixels)
-    @param theta: [float] angle in degrees in HT space
-    @param stripe_width: [int] width of the stripe around the line
-    @param img_h: [int] original image height
-    @param img_w: [int] original image width
+
+def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
+    """ Get indices of the stripe centered on a line.
     
-    @return: (indicesx, indicesy): [tuple] a tuple of x and y indices of stripe pixels
+    Arguments:
+        rho: [float] line distance from the center in HT space (pixels)
+        theta: [float] angle in degrees in HT space
+        stripe_width: [int] width of the stripe around the line
+        img_h: [int] original image height
+        img_w: [int] original image width
+
+    Return:
+        (indicesx, indicesy): [tuple] a tuple of x and y indices of stripe pixels
+
     """
 
-    # Check for vertical lines
-    if (theta % 180 == 0):
+    # Check for vertical lines and set theta to a small angle
+    if (theta%180 == 0):
         theta += 0.001
 
-    # Normalize theta to 0-360
-    theta = theta % 360
+    # Normalize theta to 0-360 range
+    theta = theta%360
 
-    hh = img_h / 2.0
-    hw = img_w / 2.0
+    hh = img_h/2.0
+    hw = img_w/2.0
 
     indicesy = []
     indicesx = []
      
     if theta < 45 or (theta > 90 and theta < 135):
+
         theta = np.deg2rad(theta)
-        half_limit = stripe_width/2 / np.cos(theta)
+        half_limit = (stripe_width/2)/np.cos(theta)
+
         a = -np.tan(theta)
         b = rho/np.cos(theta)
          
-        for y in xrange(int(-hh), int(hh)):
+        for y in range(int(-hh), int(hh)):
+
             x0 = a*y + b
              
             x1 = int(x0 - half_limit + hw)
@@ -148,23 +173,25 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
             if x2 < 0 or x1 >= img_w:
                 continue
              
-            for x in xrange(x1, x2):
+            for x in range(x1, x2):
                 if x < 0 or x >= img_w:
                     continue
                  
-                indicesy.append(y+hh)
+                indicesy.append(y + hh)
                 indicesx.append(x)
                  
     else:
+
         theta = np.deg2rad(theta)
-        half_limit = stripe_width/2 / np.sin(theta)
+        half_limit = (stripe_width/2)/np.sin(theta)
+
         a = -1/np.tan(theta)
         b = rho/np.sin(theta)
          
-        for x in xrange(int(-hw), int(hw)):
+        for x in range(int(-hw), int(hw)):
             y0 = a*x + b
              
-            y1 = int(y0 - half_limit + hh)                        
+            y1 = int(y0 - half_limit + hh)
             y2 = int(y0 + half_limit + hh)
              
             if y1 > y2:
@@ -173,30 +200,36 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
             if y2 < 0 or y1 >= img_h:
                 continue
                 
-            for y in xrange(y1, y2):
+            for y in range(y1, y2):
                 if y < 0 or y >= img_h:
                     continue
                  
                 indicesy.append(y)
-                indicesx.append(x+hw)
+                indicesx.append(x + hw)
 
     return (indicesy, indicesx)
 
-def mergeLines(line_list, min_distance, img_w, img_h, last_count=0):
-    """ Merge similar lines defined by rho and theta. 
 
-    @param line_list: [list] a list of (rho, phi, min_frame, max_frame) tuples which define a KHT line
-    @param min_distance: [float] minimum distance between two vectors described by line parameters for the lines to be joined
-    @param last_count: [int] used for recursion, default is 0 and it should be left as is
+
+def mergeLines(line_list, min_distance, img_w, img_h, last_count=0):
+    """ Merge similar lines defined by rho and theta.
     
-    @return: final_list: [list] a list of (rho, phi, min_frame, max_frame) tuples after line merging
+    Arguments:
+        line_list: [list] a list of (rho, phi, min_frame, max_frame) tuples which define a KHT line
+        min_distance: [float] minimum distance between two vectors described by line parameters for the lines to be joined
+        last_count: [int] used for recursion, default is 0 and it should be left as is
+
+    Return:
+        final_list: [list] a list of (rho, phi, min_frame, max_frame) tuples after line merging
+
     """
 
     def _getCartesian(rho, theta):
         """ Convert rho and theta to cartesian x and y points.
         """
         
-        return np.cos(np.radians(theta)) * rho, np.sin(np.radians(theta)) * rho
+        return np.cos(np.radians(theta))*rho, np.sin(np.radians(theta))*rho
+
 
     # Return if less than 2 lines
     if len(line_list) < 2:
@@ -273,21 +306,33 @@ def mergeLines(line_list, min_distance, img_w, img_h, last_count=0):
     return final_list
 
 
-def merge3DLines(line_list, vect_angle_thresh, last_count=0):
-    """ Merge similar lines found by the 3D detector. Calculate the vector between the first point of the first
-        line and the last point of the second line, and then compares the angle difference to individual line
-        vectors. If all vecters have angles that are close enough, merge the line. Frame ranges also have to
-        overlap to merge the line.
 
-    @param line_list: [list] a list of lines found by grouping3D algorithm
-    @param vect_angle_thresh: [float] minimum angle between vectors to merge the lines
-    @param last_count: [int] used for recursion, default is 0 and it should be left as is
+def merge3DLines(line_list, vect_angle_thresh, last_count=0):
+    """ Merge similar lines found by the 3D detector. 
+
+        Calculate the vector between the first point of the first line and the last point of the second line, 
+        and then compares the angle difference to individual line vectors. If all vecters have angles that are 
+        close enough, merge the line. Frame ranges also have to overlap to merge the line.
     
-    @return: final_list: [list] a list of merged lines
+    Arguments:
+        line_list: [list] a list of lines found by grouping3D algorithm
+        vect_angle_thresh: [float] minimum angle between vectors to merge the lines
+        last_count: [int] used for recursion, default is 0 and it should be left as is
+    
+    Return:
+        final_list: [list] a list of merged lines
+
     """
 
     def _vectorAngle(v1, v2):
-        """ Calculate an angle between two vectors in degrees.
+        """ Calculate an angle (in degrees) between two vectors.
+
+        Arguments:
+            v1: [ndarray] first vector
+            v2: [ndarray] second vector
+
+        Return:
+            angle: [float] angle in degrees
         """
 
         # Calculate angle between vectors
@@ -394,21 +439,26 @@ def merge3DLines(line_list, vect_angle_thresh, last_count=0):
 
     return final_list
 
+
+
 def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_ratio, kht_lib_path):
     """ Get (rho, phi) pairs for each meteor present on the image using KHT.
+        
+    Arguments:
+        ff: [FF bin object] FF bin file loaded into the FF bin class
+        k1: [float] weight parameter for the standard deviation during thresholding
+        j1: [float] absolute threshold above average during thresholding
+        time_slide: [int] subdivision size of the time axis (256 will be divided into 256/time_slide parts)
+        time_window_size: [int] size of the time window which will be slided over the time axis
+        max_lines: [int] maximum number of lines to find by KHT
+        max_white_ratio: [float] max ratio between write and all pixels after thresholding
+        kht_lib_path: [string] path to the compiled KHT library
     
-    @param ff: [FF bin object] FF bin file loaded into the FF bin class
-    @param k1: [float] weight parameter for the standard deviation during thresholding
-    @param j1: [float] absolute threshold above average during thresholding
-    @param time_slide: [int] subdivision size of the time axis (256 will be divided into 256/time_slide parts)
-    @param time_window_size: [int] size of the time window which will be slided over the time axis
-    @param max_lines: [int] maximum number of lines to find by KHT
-    @param max_white_ratio: [float] max ratio between write and all pixels after thresholding
-    @param kht_lib_path: [string] path to the compiled KHT library
-     
-    @return: [list]: a Python list of found lines
+    Return:
+        [list] a list of all found lines
     """
 
+    # Load the KHT library
     kht = ctypes.cdll.LoadLibrary(kht_lib_path)
     kht.kht_wrapper.argtypes = [npct.ndpointer(dtype=np.double, ndim=2),
                                 npct.ndpointer(dtype=np.byte, ndim=1),
@@ -430,9 +480,11 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
     # # Show thresholded image
     # show("thresholded ALL", img_thres)
 
+
+    log.debug('white ratio: ' + str(np.count_nonzero(img_thres) / float(ff.nrows * ff.ncols)))
+
     # Check if the image is too "white" and any futher processing makes no sense
     # This checks the max percentage of white pixels in the thresholded image
-    print 'white ratio', np.count_nonzero(img_thres) / float(ff.nrows * ff.ncols)
     if np.count_nonzero(img_thres) / float(ff.nrows * ff.ncols) > max_white_ratio:
         return line_results
 
@@ -506,11 +558,14 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
 def filterCentroids(centroids, centroid_max_deviation, max_distance):
     """ Check for linearity in centroid data and reject the points which are too far off. 
 
-    @param centroids: [list] a list of [frame, X, Y, level] centroid coordinates
-    @param centroid_max_deviation: [float] max deviation from the fitted line, centroids above this get rejected
-    @param max_distance: [float] max distance between 2 ends of centroid chains which connects them
+    Arguments:
+        centroids: [list] a list of [frame, X, Y, level] centroid coordinates
+        centroid_max_deviation: [float] max deviation from the fitted line, centroids above this get rejected
+        max_distance: [float] max distance between 2 ends of centroid chains which connects them
     
-    @return: centroids: [list] a filtered list of centroids (see input centroids for details)
+    Return:
+        centroids: [list] a filtered list of centroids (see input centroids for details)
+
     """
 
     def _pointDistance(x1, y1, x2, y2):
@@ -518,6 +573,8 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
         """
 
         return np.sqrt((x2-x1)**2 + (y2-y1)**2)
+
+
 
     def _LSQfit(y, x):
         """ Least squares fit.
@@ -527,6 +584,8 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
         m, c = np.linalg.lstsq(A, y)[0]
 
         return m, c
+
+
 
     def _connectBrokenChains(centroids, max_distance, last_count=0):
         """ Connect broken chains of centroids.
@@ -581,7 +640,8 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
         return filtered_chains
 
 
-    # Return if empty list of only 1 point
+
+    # Skip centroid correction if there are not conteroids, of there's only one
     if len(centroids) < 2:
         return centroids
 
@@ -647,22 +707,29 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
 
     return best_chain
 
+
+
 def checkAngularVelocity(centroids, config):
     """ Check the angular velocity of the detection, and reject those too slow or too fast to be meteors. 
-        The minimum ang. velocity is 0.5 deg/s, while maximum is 35 deg/s.
+        The minimum ang. velocity is 0.5 deg/s, while maximum is 35 deg/s (Peter Gural, private comm.).
+    
+    Arguments:
+        centroids: [ndarray] meteor centroids from the detector
+        config: [config object] configuration object (loaded from the .config file)
+    
+    Return:
+        [bool] True if the velocity is in the meteor ang. velocity range, False otherwise
 
-    @param centroids: [ndarray] meteor centroids from the detector
-    @param config: [config object] configuration object (loaded from the .config file)
-
-    @return: [bool] True if the velocity is in the meteor ang. velocity range, False otherwise
     """
 
     # Calculate the angular velocity in px/frame
     first_centroid = centroids[0]
     last_centroid = centroids[-1]
+    
     frame1, x1, y1, _ = first_centroid
     frame2, x2, y2, _ = last_centroid
-    ang_vel = np.sqrt((x2 - x1)**2 + (y2 - y1)**2) / float(frame2 - frame1)
+
+    ang_vel = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)/float(frame2 - frame1 + 1)
 
     # Convert to px/sec
     ang_vel = ang_vel*config.fps
@@ -671,6 +738,7 @@ def checkAngularVelocity(centroids, config):
     scale = (config.fov_h/float(config.height) + config.fov_w/float(config.width))/2.0
     ang_vel = ang_vel*scale
 
+    # Check if the meteor is in the possible angular velocity range
     if (ang_vel >= 0.5 and ang_vel <= 35.0):
         return True
 
@@ -680,6 +748,8 @@ def checkAngularVelocity(centroids, config):
 
 
 def show(name, img):
+    """ COnvert the given image to uint8 and show it. """
+
     cv2.imshow(name, img.astype(np.uint8)*255)
     cv2.moveWindow(name, 0, 0)
     cv2.waitKey(0)
@@ -688,6 +758,8 @@ def show(name, img):
 
 
 def show2(name, img):
+    """ Show the given image. """
+
     cv2.imshow(name, img)
     cv2.moveWindow(name, 0, 0)
     cv2.waitKey(0)
@@ -723,9 +795,12 @@ def plotLines(ff, line_list):
 
 
 
-def show3DCloud(ff, stripe, detected_line=[], stripe_points=None, config=None):
+def show3DCloud(ff, stripe, detected_line=None, stripe_points=None, config=None):
     """ Shows 3D point cloud of stripe points.
     """
+
+    if detected_line is None:
+        detected_line = []
 
     stripe_indices = stripe.nonzero()
 
@@ -776,9 +851,10 @@ def show3DCloud(ff, stripe, detected_line=[], stripe_points=None, config=None):
     plt.close()
 
 
+
 def detectMeteors(ff_directory, ff_name, config):
-    """ Detect meteors on the given FF bin image. Processing pipeline is as following:
-            - input image (FF bin format file) is thresholded
+    """ Detect meteors on the given FF bin image. Here are the steps in the detection:
+            - input image (FF bin format file) is thresholded (converted to black and white)
             - several morphological operations are applied to clean the image
             - image is then broken into several image "windows" (these "windows" are reconstructed from the input FF file, given
               an input frame range (e.g. 64-128) which helps reduce the noise further)
@@ -788,14 +864,16 @@ def detectMeteors(ff_directory, ff_name, config):
             - 3D line finding (third dimension is time) is applied to check if the line propagates in time
             - centroiding is performed, which calculates the position and intensity of meteor on each frame
     
-    @param ff_directory: [string] an absolute path to the input FF bin file
-    @param ff_name: [string] file name of the FF bin file on which to run the detection on
-    @param config: [config object] configuration object (loaded from the .config file)
-
-    @return: meteor_detections: [list] a list of detected meteors:
-        rho: [float] meteor line distance from image center (polar coordinates, in pixels)
-        theta: [float] meteor line angle from image center (polar coordinates, in degrees)
-        centroids: [list] [frame, X, Y, level] list of meteor points
+    Arguments:
+        ff_directory: [string] an absolute path to the input FF bin file
+        ff_name: [string] file name of the FF bin file on which to run the detection on
+        config: [config object] configuration object (loaded from the .config file)
+    
+    Return:
+        meteor_detections: [list] a list of detected meteors, with these elements:
+            - rho: [float] meteor line distance from image center (polar coordinates, in pixels)
+            - theta: [float] meteor line angle from image center (polar coordinates, in degrees)
+            - centroids: [list] [frame, X, Y, level] list of meteor points
     """
 
 
@@ -819,7 +897,7 @@ def detectMeteors(ff_directory, ff_name, config):
     line_list = getLines(ff, config.k1_det, config.j1, config.time_slide, config.time_window_size, 
         config.max_lines_det, config.max_white_ratio, config.kht_lib_path)
 
-    print line_list
+    print 'List of lines:', line_list
 
 
     # Init meteor list
@@ -1102,6 +1180,7 @@ def detectMeteors(ff_directory, ff_name, config):
     return meteor_detections
 
 
+
 if __name__ == "__main__":
 
     # Measure the time of the whole operation
@@ -1157,7 +1236,9 @@ if __name__ == "__main__":
 
     results_file.close()
 
+
     ftpdetectinfo_name = os.path.join(results_path, 'FTPdetectinfo_' + results_name + '.txt')
+
     # Write FTPdetectinfo file
     FTPdetectinfo.writeFTPdetectinfo(results_list, results_path, ftpdetectinfo_name, results_path, 
         config.stationID, config.fps)
