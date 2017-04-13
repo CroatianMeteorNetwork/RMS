@@ -34,10 +34,12 @@ class BufferedCapture(Process):
     def __init__(self, array1, startTime1, array2, startTime2, config):
         """ Populate arrays with (startTime, frames) after startCapture is called.
         
-        @param array1: numpy array in shared memory that is going to be filled with frames
-        @param startTime1: float in shared memory that holds time of first frame in array1
-        @param array2: second numpy array in shared memory
-        @param startTime2: float in shared memory that holds time of first frame in array2
+        Arguments:
+            array1: numpy array in shared memory that is going to be filled with frames
+            startTime1: float in shared memory that holds time of first frame in array1
+            array2: second numpy array in shared memory
+            startTime2: float in shared memory that holds time of first frame in array2
+
         """
         
         super(BufferedCapture, self).__init__()
@@ -56,7 +58,9 @@ class BufferedCapture(Process):
     def startCapture(self, cameraID=0):
         """ Start capture using specified camera.
         
-        @param cameraID: ID of video capturing device (ie. ID for /dev/video3 is 3). Default is 0.
+        Arguments:
+            cameraID: ID of video capturing device (ie. ID for /dev/video3 is 3). Default is 0.
+            
         """
         
         self.cameraID = cameraID

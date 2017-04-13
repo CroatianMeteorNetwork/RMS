@@ -14,13 +14,17 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from multiprocessing import Process, Event
+import time
+import logging
+
 from math import floor
+
 from scipy import weave
 import numpy as np
-import time
-import struct
-import logging
+from multiprocessing import Process, Event
+
+
+
 from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFbin
 
@@ -31,19 +35,28 @@ log = logging.getLogger("logger")
 
 class Compressor(Process):
     """Compress list of numpy arrays (video frames).
-    Output is in Flat-field Temporal Pixel (FTP) format like the one used by CAMS project (P. Jenniskens et al., 2011).
+
+        Output is in Four-frame Temporal Pixel (FTP) format. See the Jenniskens et al., 2011 paper about the
+        CAMS project for more info.
+
     """
 
     running = False
     
     def __init__(self, data_dir, array1, startTime1, array2, startTime2, config, detector=None):
         """
-        
-        @param array1: first numpy array in shared memory of grayscale video frames
-        @param startTime1: float in shared memory that holds time of first frame in array1
-        @param array2: second numpy array in shared memory
-        @param startTime1: float in shared memory that holds time of first frame in array2
-        @param config: configuration class
+
+        Arguments:
+            array1: first numpy array in shared memory of grayscale video frames
+            startTime1: float in shared memory that holds time of first frame in array1
+            array2: second numpy array in shared memory
+            startTime1: float in shared memory that holds time of first frame in array2
+            config: configuration class
+
+        Keyword arguments:
+            detector: [Detector object] handle to Detector object used for running star extraction and
+                meteor detection
+
         """
         
         super(Compressor, self).__init__()
@@ -66,11 +79,15 @@ class Compressor(Process):
             concerns. The end result is the same as a proper calculation due to the usage of low-precision
             8-bit unsigned integers, so the difference does not matter.
         
-        @param frames: grayscale frames stored as 3d numpy array
+        Arguments:
+            frames: [3D ndarray] grayscale frames stored as 3d numpy array
         
-        @return: 3d numpy array in format: (N, y, x) where N is [0, 4)
+        Return:
+            [3D ndarray]: in format: (N, y, x) where N is a member of [0, 1, 2, 3]
+
         """
         
+        # Init the output FTP array
         out = np.empty((4, frames.shape[1], frames.shape[2]), np.uint8)
         
         code = """
@@ -83,6 +100,7 @@ class Compressor(Process):
         unsigned int frames_num_minus_one = frames_num - 1;
         unsigned int frames_num_minus_two = frames_num - 2;
         
+        // Populate the randomN array with 2**16 random numbers from 0 to 255
         unsigned char randomN[65536] = {};
         unsigned int arand = 1;
         for(n=0; n<65536; n++) {
@@ -96,7 +114,7 @@ class Compressor(Process):
                 var = 0;
                 max = 0;
                 
-                // calculate mean, stddev, max, and max frame
+                // Calculate mean, stddev, max, and max frame
                 for(n=0; n<frames_num; n++) {
                     pixel = FRAMES3(n, y, x);
                     acc += pixel;
@@ -106,26 +124,32 @@ class Compressor(Process):
                         max = pixel;
                         max_frame = n;
                         num_equal = 1;
-                    } else if(pixel == max) { // randomize taken frame number for max pixel
+
+                    // Randomize taken frame number for max pixel if there are several frames with the maximum
+                    // value
+                    } else if(pixel == max) { 
                         num_equal++;
                         
-                        rand_count++; //rand_count is unsigned short, which means it will overflow back to 0 after 65,535
+                        // rand_count is unsigned short, which means it will overflow back to 0 after 65535
+                        rand_count++; 
+
+                        // Select the frame by random
                         if(num_equal <= randomN[rand_count]) {
                             max_frame = n;
                         }
                     }
                 }
                 
-                //mean
+                // Calculate mean
                 acc -= max;    // remove max pixel from average
                 mean = acc / frames_num_minus_one;
                 
-                //stddev
+                // Calculate stddev
                 var -= max*max;     // remove max pixel
                 var -= acc*mean;    // subtract average squared sum of all values (acc*mean = acc*acc/frames_num_minus_one)
                 var = sqrt(var / frames_num_minus_two);
                 
-                // output results
+                // Output results
                 OUT3(0, y, x) = max;
                 OUT3(1, y, x) = max_frame;
                 OUT3(2, y, x) = mean;
@@ -134,23 +158,30 @@ class Compressor(Process):
         }
         """
         
-        weave.inline(code, ['frames', 'out'], verbose=2, extra_compile_args=self.config.weaveArgs, extra_link_args=self.config.weaveArgs)
+        # Run the weave code
+        weave.inline(code, ['frames', 'out'], verbose=2, extra_compile_args=self.config.weaveArgs, 
+            extra_link_args=self.config.weaveArgs)
+
         return out
     
 
 
     def save(self, arr, startTime, N):
-        """Write metadata and data array to FTP .bin file.
+        """ Write metadata and data array to FF .bin file.
         
-        @param arr: 3d numpy array in format: (N, y, x) where N is [0, 4)
-        @param startTime: seconds and fractions of a second from epoch to first frame
-        @param N: frame counter (ie. 0000512)
+        Arguments:
+            arr: [3D ndarray] 3D numpy array in format: (N, y, x) where N is [0, 4)
+            startTime: [float] seconds and fractions of a second from epoch to first frame
+            N: [int] frame counter (ie. 0000512)
         """
         
-        dateTime = time.strftime("%Y%m%d_%H%M%S", time.localtime(startTime))
+        # Generate the name for the file
+        date_string = time.strftime("%Y%m%d_%H%M%S", time.localtime(startTime))
+
+        # Calculate miliseconds
         millis = int((startTime - floor(startTime))*1000)
         
-        filename = str(self.config.stationID).zfill(3) +  "_" + dateTime + "_" + str(millis).zfill(3) + "_" + str(N).zfill(7)
+        filename = str(self.config.stationID).zfill(3) +  "_" + date_string + "_" + str(millis).zfill(3) + "_" + str(N).zfill(7)
         
         ff = FFbin.ff_struct()
         ff.array = arr
@@ -168,7 +199,7 @@ class Compressor(Process):
 
 
     def stop(self):
-        """Stop the process.
+        """ Stop compression.
         """
         
         self.exit.set()
@@ -177,7 +208,7 @@ class Compressor(Process):
 
 
     def start(self):
-        """Start the process.
+        """ Start compression.
         """
         
         self.exit = Event()
@@ -186,26 +217,43 @@ class Compressor(Process):
 
 
     def run(self):
-        """Retrieve frames from list, convert, compress and save them.
+        """ Retrieve frames from list, convert, compress and save them.
         """
         
         n = 0
         
+        # Repeat until the compressor is killed from the outside
         while not self.exit.is_set():
-            while self.startTime1.value==0 and self.startTime2.value==0: #block until frames are available
-                if self.exit.is_set():    #exit function if process was stopped
+
+            # Block until frames are available
+            while self.startTime1.value==0 and self.startTime2.value==0: 
+
+                # Exit function if process was stopped from the outside
+                if self.exit.is_set():    
                     return
+
                 
             t = time.time()
+
             
             if self.startTime1.value != 0:
-                startTime = self.startTime1.value #retrieve time of first frame
-                frames = self.array1 #copy frames
+
+                # Retrieve time of first frame
+                startTime = self.startTime1.value 
+
+                # Copy frames
+                frames = self.array1 
                 self.startTime1.value = 0
+
             else:
-                startTime = self.startTime2.value #retrieve time of first frame
-                frames = self.array2 #copy frames
+
+                # Retrieve time of first frame
+                startTime = self.startTime2.value 
+
+                # Copy frames
+                frames = self.array2 
                 self.startTime2.value = 0
+
             
             log.debug("memory copy: " + str(time.time() - t) + "s")
             t = time.time()
