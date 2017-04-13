@@ -15,7 +15,6 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from multiprocessing import Process, Event
-import numpy as np
 import cv2
 import time
 import logging
@@ -25,7 +24,7 @@ log = logging.getLogger("logger")
 
 
 class BufferedCapture(Process):
-    """Capture from device to buffer in memory.
+    """ Capture from device to buffer in memory.
     """
     
     TIME_FOR_DROP = 0.05
@@ -33,7 +32,7 @@ class BufferedCapture(Process):
     running = False
     
     def __init__(self, array1, startTime1, array2, startTime2, config):
-        """Populate arrays with (startTime, frames) after startCapture is called.
+        """ Populate arrays with (startTime, frames) after startCapture is called.
         
         @param array1: numpy array in shared memory that is going to be filled with frames
         @param startTime1: float in shared memory that holds time of first frame in array1
@@ -52,8 +51,10 @@ class BufferedCapture(Process):
         
         self.config = config
     
+
+
     def startCapture(self, cameraID=0):
-        """Start capture using specified camera.
+        """ Start capture using specified camera.
         
         @param cameraID: ID of video capturing device (ie. ID for /dev/video3 is 3). Default is 0.
         """
@@ -62,19 +63,27 @@ class BufferedCapture(Process):
         self.exit = Event()
         self.start()
     
+
+
     def stopCapture(self):
-        """Stop capture.
+        """ Stop capture.
         """
         
         self.exit.set()
         self.join()
 
+
+
     def run(self):
-        """Capture frames.
+        """ Capture frames.
         """
         
+        # Init the video device
         device = cv2.VideoCapture(self.config.deviceID)
-        device.read() # throw away first frame
+
+        # Throw away first frame
+        device.read()
+
         first = True
         
         while not self.exit.is_set():
@@ -86,17 +95,26 @@ class BufferedCapture(Process):
                 self.startTime2.value = 0
             
             for i in range(256):
+
+                # Read the frame
                 ret, frame = device.read()
                 
                 t = time.time()
+
                 if i == 0: 
                     startTime = t
-                elif lastTime - t > self.TIME_FOR_DROP: #check if frame is dropped TODO: better frame dropping detection
+
+                # check if frame is dropped TODO: better frame dropping detection
+                elif lastTime - t > self.TIME_FOR_DROP: 
+                    
                     #TODO: increase dropped frames counter
                     log.warn("frame dropped!")
+
                 lastTime = t
                 
+                # Convert the frame to grayscale
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
                 if first:
                     self.array1[i] = gray
                 else:
@@ -106,7 +124,9 @@ class BufferedCapture(Process):
                 self.startTime1.value = startTime
             else:
                 self.startTime2.value = startTime
+
             first = not first
         
+
         device.release()
     

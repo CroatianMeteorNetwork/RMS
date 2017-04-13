@@ -26,7 +26,7 @@ import ctypes
 import logging
 import logging.handlers
 import numpy as np
-from multiprocessing import Array, Value
+import multiprocessing
 
 import RMS.ConfigReader as cr
 
@@ -85,7 +85,7 @@ def wait(time_sec=None):
     global STOP_CAPTURE
 
     
-    print('Press Ctrl+C to stop capturing...')
+    log.info('Press Ctrl+C to stop capturing...')
 
     # Get the time of capture start
     time_start = datetime.datetime.now()
@@ -137,15 +137,15 @@ def runCapture(config, duration=None):
 
 
     # Init arrays for parallel compression on 2 cores
-    sharedArrayBase = Array(ctypes.c_uint8, 256*config.width*config.height)
+    sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, 256*config.width*config.height)
     sharedArray = np.ctypeslib.as_array(sharedArrayBase.get_obj())
     sharedArray = sharedArray.reshape(256, config.height, config.width)
-    startTime = Value('d', 0.0)
+    startTime = multiprocessing.Value('d', 0.0)
     
-    sharedArrayBase2 = Array(ctypes.c_uint8, 256*config.width*config.height)
+    sharedArrayBase2 = multiprocessing.Array(ctypes.c_uint8, 256*config.width*config.height)
     sharedArray2 = np.ctypeslib.as_array(sharedArrayBase2.get_obj())
     sharedArray2 = sharedArray2.reshape(256, config.height, config.width)
-    startTime2 = Value('d', 0.0)
+    startTime2 = multiprocessing.Value('d', 0.0)
 
 
     # Initialize the detector
@@ -179,8 +179,10 @@ def runCapture(config, duration=None):
 
     log.info('Finishing up the detection, ' + str(detector.input_queue.qsize()) + ' files to process...')
 
-    # Let the detector use 3 cores
-    detector.updateCoreNumber(3)
+    # Let the detector use all cores, but leave 1 free
+    available_cores = multiprocessing.cpu_count()
+    if available_cores > 1:
+        detector.updateCoreNumber(available_cores - 1)
 
     # Reset the Ctrl+C to KeyboardInterrupt
     resetSIGINT()
@@ -211,12 +213,6 @@ def runCapture(config, duration=None):
 
         # Add star info to the star list
         star_list.append([ff_name, star_data])
-
-        # Print found stars
-        print('   ROW    COL intensity')
-        for x, y, bg_level, level in star_data:
-            print(' {:06.2f} {:06.2f} {:6d} {:6d}'.format(round(y, 2), round(x, 2), int(bg_level), int(level)))
-
 
         # Handle the detected meteors
         meteor_No = 1
@@ -321,7 +317,7 @@ if __name__ == "__main__":
             duration = float(cml_args.duration)
 
         except:
-            print('Given duration is not a proper number of hours!')
+            log.error('Given duration is not a proper number of hours!')
 
 
         log.info("Running for " + str(duration) + ' hours...')
