@@ -131,8 +131,8 @@ class QueuedPool(object):
         results = []
 
         # Get all elements in the output queue
-        while workpool.output_queue.qsize():
-            results.append(workpool.output_queue.get())
+        while self.output_queue.qsize():
+            results.append(self.output_queue.get())
 
         return results
 
