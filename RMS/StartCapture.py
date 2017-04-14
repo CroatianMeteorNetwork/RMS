@@ -177,7 +177,6 @@ def runCapture(config, duration=None):
     if STOP_CAPTURE:
         log.info('Ending capture...')
 
-    
 
 
     # Stop the capture
@@ -205,6 +204,8 @@ def runCapture(config, duration=None):
 
     # Wait for the detector to finish and close it
     detector.closePool()
+
+    log.info('Detection finished!')
 
     # Set the Ctrl+C back to 'soft' program kill
     setSIGINT()

@@ -48,7 +48,7 @@ class QueuedPool(object):
 
             # The 'poison pill' for killing the worker when closing is requested
             if args is None:
-                break
+                return
 
             # Call the original worker function and collect results
             result = func(*args)
@@ -82,6 +82,8 @@ class QueuedPool(object):
                     # Insert the 'poison pill' to the queue, to kill all workers
                     for i in range(self.cores + 1):
                         self.input_queue.put(None)
+
+                    time.sleep(0.1)
 
                     # Close the pool and wait for all threads to terminate
                     self.pool.close()
