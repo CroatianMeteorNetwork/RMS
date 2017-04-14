@@ -175,7 +175,7 @@ def runCapture(config, duration=None):
         
     # If capture was manually stopped, end capture
     if STOP_CAPTURE:
-        log.info('\n----\nEnding capture...')
+        log.info('Ending capture...')
 
     
     live_view.stop()
@@ -185,7 +185,7 @@ def runCapture(config, duration=None):
     bc.stopCapture()
     c.stop()
 
-    log.info('\n----\nFinishing up the detection, ' + str(detector.input_queue.qsize()) + ' files to process...')
+    log.info('Finishing up the detection, ' + str(detector.input_queue.qsize()) + ' files to process...')
 
     # Let the detector use all cores, but leave 1 free
     available_cores = multiprocessing.cpu_count()

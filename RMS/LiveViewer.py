@@ -95,6 +95,7 @@ class LiveViewer(multiprocessing.Process):
 
             # If the 'poison pill' is received, exit the viewer
             if item is None:
+                print('Viewer killed!')
                 break
 
 
@@ -125,6 +126,7 @@ class LiveViewer(multiprocessing.Process):
         # Put the 'poison pill' in the queue which will exit the viewer
         self.img_queue.put(None)
         cv2.destroyAllWindows()
+        
         self.join()
 
 
@@ -140,10 +142,11 @@ if __name__ == "__main__":
     # Generate an example image
     img = np.zeros((500, 500))
 
-    for i in range(500):
+    for i in range(50):
+        i = i*3
         img[i, i] = 128
         live_view.updateImage(img, str(i))
-        time.sleep(0.01)
+        time.sleep(0.1)
 
     # img[::5, ::5] = 128
 
@@ -166,6 +169,4 @@ if __name__ == "__main__":
 
     # Stop the viewer
     live_view.stop()
-
-    time.sleep(3)
 
