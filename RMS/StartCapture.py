@@ -39,6 +39,7 @@ from RMS.CaptureDuration import captureDuration
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
 from RMS.ArchiveDetections import archiveDetections
 
+from RMS.LiveViewer import LiveViewer
 from RMS.QueuedPool import QueuedPool
 from RMS.Misc import mkdirP
 
@@ -153,10 +154,13 @@ def runCapture(config, duration=None):
     
     # Initialize buffered capture
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config)
+
+    # Initialize the live image viewer
+    live_view = LiveViewer()
     
     # Initialize compression
     c = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config, 
-        detector=detector)
+        detector=detector, live_view=live_view)
 
     
     # Start buffered capture
@@ -174,6 +178,7 @@ def runCapture(config, duration=None):
         log.info('Ending capture...')
 
     # Stop the capture
+    live_view.stop()
     bc.stopCapture()
     c.stop()
 

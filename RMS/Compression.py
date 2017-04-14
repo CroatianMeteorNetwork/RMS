@@ -43,7 +43,8 @@ class Compressor(Process):
 
     running = False
     
-    def __init__(self, data_dir, array1, startTime1, array2, startTime2, config, detector=None):
+    def __init__(self, data_dir, array1, startTime1, array2, startTime2, config, detector=None, 
+        live_view=None):
         """
 
         Arguments:
@@ -56,6 +57,8 @@ class Compressor(Process):
         Keyword arguments:
             detector: [Detector object] handle to Detector object used for running star extraction and
                 meteor detection
+            live_view: [LiveViewer object] handle to the LiveViewer object which will show in real time 
+                the latest maxpixel on the screen
 
         """
         
@@ -69,6 +72,7 @@ class Compressor(Process):
         self.config = config
 
         self.detector = detector
+        self.live_view = live_view
     
 
 
@@ -274,10 +278,18 @@ class Compressor(Process):
             ve = Extractor(self.config, self.data_dir)
             ve.start(frames, compressed, filename)
 
+
             # Run the detection on the file, if the detector handle was given
             if self.detector is not None:
 
                 # Add the file to the detector queue
                 self.detector.addJob([self.data_dir, filename, self.config])
+
+
+            # Refresh the maxpixel currently shown on the screen
+            if self.live_view is not None:
+
+                # Add the image to the image queue
+                self.live_view.updateImage(compressed[0], filename + " maxpixel")
 
     
