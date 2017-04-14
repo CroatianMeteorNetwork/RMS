@@ -7,18 +7,56 @@ import numpy as np
 import time
 import multiprocessing
 
+from PIL import Image
+from PIL import ImageFont
+from PIL import ImageDraw
+
+
+def drawText(ff_array, img_text):
+    """ Draws text on the image represented as a numpy array.
+
+    """
+
+    # Convert the array to PIL image
+    im = Image.fromarray(np.uint8(ff_array))
+    im = im.convert('RGB')
+    draw = ImageDraw.Draw(im)
+
+    # Load the default font
+    font = ImageFont.load_default()
+
+    # Draw the text on the image, in the upper left corent
+    draw.text((0, 0), img_text, (255,255,0), font=font)
+    draw = ImageDraw.Draw(im)
+
+    # Convert the type of the image to grayscale, with one color
+    try:
+        if len(ff_array[0][0]) != 3:
+            im = im.convert('L')
+    except:
+        im = im.convert('L')
+
+    return np.array(im)
+
 
 
 class LiveViewer(multiprocessing.Process):
     """ Uses OpenCV to show an image, which can be updated from another thread. """
 
-    def __init__(self):
+    def __init__(self, window_name=None):
+        """
+        Keyword arguments:
+            window_name: [str] name (title) of the window
+
+        """
 
         super(LiveViewer, self).__init__()
         
         self.img_queue = multiprocessing.Queue()
 
-        self.window_name = None
+        self.window_name = window_name
+
+        self.first_image = True
 
         self.start()
 
@@ -32,16 +70,16 @@ class LiveViewer(multiprocessing.Process):
 
 
 
-    def updateImage(self, img, window_name):
+    def updateImage(self, img, img_text=None):
         """ Update the image on the screen. 
         
         Arguments:
             img: [ndarray] array with the image
-            window_name: [str] name of the window
+            img_text: [str] text to be written on the image
             
         """
 
-        self.img_queue.put([img, window_name])
+        self.img_queue.put([img, img_text])
 
 
 
@@ -60,16 +98,23 @@ class LiveViewer(multiprocessing.Process):
                 break
 
 
-            img, window_name = item
+            img, img_text = item
 
-            # Kill the previous window
-            cv2.destroyWindow(self.window_name)
-            cv2.waitKey()
+            # Write text on the image if any is given
+            if img_text is not None:
+                img = drawText(img, img_text)
 
-            self.window_name = window_name
 
             # Update the image on the screen
             cv2.imshow(self.window_name, img)
+
+            # If this is the first image, move it to the upper left corner
+            if self.first_image:
+                
+                cv2.moveWindow(self.window_name, 0, 0)
+
+                self.first_image = False
+
 
             cv2.waitKey(100)
 
@@ -89,24 +134,24 @@ if __name__ == "__main__":
     ### Test the live viewer ###
 
     # Start the viewer
-    live_view = LiveViewer()
+    live_view = LiveViewer(window_name='Maxpixel')
 
     # Generate an example image
     img = np.zeros((500, 500))
-    img[::5, ::5] = 255
+    img[::5, ::5] = 128
 
     # Update the image in the Viewer
-    live_view.updateImage(img.astype(np.uint8), '1')
+    live_view.updateImage(img.astype(np.uint8), 'test 1')
 
     print 'updated'
 
     time.sleep(5)
 
     # Generate another image
-    img[::-2, ::-2] = 1
+    img[::-2, ::-2] = 128
 
     # Upate the image in the viewer
-    live_view.updateImage(img, '2')
+    live_view.updateImage(img, 'blah 2')
 
     time.sleep(2)
 
