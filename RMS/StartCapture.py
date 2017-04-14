@@ -178,12 +178,20 @@ def runCapture(config, duration=None):
         log.info('Ending capture...')
 
     
-    live_view.stop()
-    log.debug('Live view stopped...')
+
 
     # Stop the capture
     bc.stopCapture()
+    log.debug('Capture stopped')
+
+    # Stop the compressor
     c.stop()
+    log.debug('Compression stopped')
+
+    # Stop the live viewer
+    live_view.stop()
+    log.debug('Live view stopped')
+
 
     log.info('Finishing up the detection, ' + str(detector.input_queue.qsize()) + ' files to process...')
 
