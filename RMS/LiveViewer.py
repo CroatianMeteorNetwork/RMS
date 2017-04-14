@@ -124,6 +124,7 @@ class LiveViewer(multiprocessing.Process):
 
         # Put the 'poison pill' in the queue which will exit the viewer
         self.img_queue.put(None)
+        cv2.destroyAllWindows()
         self.join()
 
 
@@ -138,24 +139,30 @@ if __name__ == "__main__":
 
     # Generate an example image
     img = np.zeros((500, 500))
-    img[::5, ::5] = 128
 
-    # Update the image in the Viewer
-    live_view.updateImage(img.astype(np.uint8), 'test 1')
+    for i in range(500):
+        img[i, i] = 128
+        live_view.updateImage(img, str(i))
+        time.sleep(0.01)
 
-    print 'updated'
+    # img[::5, ::5] = 128
 
-    time.sleep(5)
+    # # Update the image in the Viewer
+    # live_view.updateImage(img.astype(np.uint8), 'test 1')
 
-    # Generate another image
-    img[::-2, ::-2] = 128
+    # print 'updated'
 
-    # Upate the image in the viewer
-    live_view.updateImage(img, 'blah 2')
+    # time.sleep(5)
 
-    time.sleep(2)
+    # # Generate another image
+    # img[::-2, ::-2] = 128
 
-    print 'close'
+    # # Upate the image in the viewer
+    # live_view.updateImage(img, 'blah 2')
+
+    # time.sleep(2)
+
+    # print 'close'
 
     # Stop the viewer
     live_view.stop()
