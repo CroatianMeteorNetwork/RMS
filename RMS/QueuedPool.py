@@ -33,18 +33,20 @@ class QueuedPool(object):
         self.func = func
         self.pool = None
 
+        self.total_jobs = 0
+
         # Start the pool with the given parameters - this will wait until the input queue is given jobs
         self.startPool()
 
 
 
-    def _workerFunc(self, func, input_queue, output_queue):
+    def _workerFunc(self, func):
         """ A wrapper function for the given worker function. Handles the queue operations. """
         
         while True:
 
-            # Get the function arguments
-            args = input_queue.get(True)
+            # Get the function arguments (block until available)
+            args = self.input_queue.get(True)
 
             # The 'poison pill' for killing the worker when closing is requested
             if args is None:
@@ -54,7 +56,7 @@ class QueuedPool(object):
             result = func(*args)
 
             # Save the results to an output queue
-            output_queue.put(result)
+            self.output_queue.put(result)
 
 
 
@@ -63,8 +65,7 @@ class QueuedPool(object):
 
         # Initialize the pool of workers with the given number of worker cores
         # Comma in the argument list is a must!
-        self.pool = multiprocessing.Pool(self.cores, self._workerFunc, (self.func, self.input_queue, 
-            self.output_queue, ))
+        self.pool = multiprocessing.Pool(self.cores, self._workerFunc, (self.func, ))
 
 
 
@@ -77,19 +78,18 @@ class QueuedPool(object):
             while True:
                 
                 # If all jobs are done, close the pool
-                if self.input_queue.qsize() == 0:
+                if self.output_queue.qsize() == self.total_jobs:
 
                     # Insert the 'poison pill' to the queue, to kill all workers
-                    for i in range(self.cores + 1):
+                    for i in range(self.cores):
                         self.input_queue.put(None)
 
-                    time.sleep(0.1)
 
                     # Close the pool and wait for all threads to terminate
                     self.pool.close()
                     self.pool.join()
 
-                    break
+                    return
 
                 else:
                     time.sleep(0.01)
@@ -119,6 +119,9 @@ class QueuedPool(object):
 
         """
 
+        # Track the total number of jobs received
+        self.total_jobs += 1
+
         if not isinstance(job, list):
             job = [job]
 
@@ -140,15 +143,17 @@ class QueuedPool(object):
 
 
 
+
 def exampleWorker(in_str, in_num):
     """ An example worker function. """
 
     print('Got:', in_str, in_num)
 
     # Simulate processing
-    time.sleep(0.5)
+    time.sleep(1.5)
 
     return in_str + " " + str(in_num) + " X"
+
 
 
 
@@ -158,7 +163,7 @@ if __name__ == "__main__":
     workpool = QueuedPool(exampleWorker, cores=1)
 
     # Give the pool something to do
-    for i in range(2):
+    for i in range(5):
 
         workpool.addJob(["hello", i])
 
@@ -171,12 +176,13 @@ if __name__ == "__main__":
 
 
     # Use all available cores
-    workpool.updateCoreNumber()
+    workpool.updateCoreNumber(3)
 
 
     # Give the pool some more work to do
     for i in range(4):
         workpool.addJob(["test1", i])
+        time.sleep(0.05)
         workpool.addJob(["test2", i])
 
 
