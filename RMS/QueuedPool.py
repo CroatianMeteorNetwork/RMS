@@ -108,15 +108,18 @@ class QueuedPool(object):
                 if self.output_queue.qsize() == self.total_jobs.value():
 
                     # Insert the 'poison pill' to the queue, to kill all workers
-                    for i in range(self.cores.value() + 1):
+                    for i in range(self.cores.value()):
                         self.input_queue.put(None)
 
 
-                    time.sleep(0.01)
-                    
+                    # Wait until the pills are 'swallowed'
+                    while self.input_queue.qsize():
+                        time.sleep(0.1)
+
 
                     # Close the pool and wait for all threads to terminate
                     self.pool.close()
+                    self.pool.terminate()
                     self.pool.join()
 
                     return

@@ -31,7 +31,7 @@ class BufferedCapture(Process):
     
     running = False
     
-    def __init__(self, array1, startTime1, array2, startTime2, config):
+    def __init__(self, array1, startTime1, array2, startTime2, config, video_file=None):
         """ Populate arrays with (startTime, frames) after startCapture is called.
         
         Arguments:
@@ -39,6 +39,9 @@ class BufferedCapture(Process):
             startTime1: float in shared memory that holds time of first frame in array1
             array2: second numpy array in shared memory
             startTime2: float in shared memory that holds time of first frame in array2
+
+        Keyword arguments:
+            video_file: [str] Path to the video file, if it was given as the video source. None by default.
 
         """
         
@@ -52,6 +55,8 @@ class BufferedCapture(Process):
         self.startTime2.value = 0
         
         self.config = config
+
+        self.video_file = video_file
     
 
 
@@ -82,8 +87,15 @@ class BufferedCapture(Process):
         """ Capture frames.
         """
         
-        # Init the video device
-        device = cv2.VideoCapture(self.config.deviceID)
+        # use a file as the video source
+        if self.video_file is not None:
+            device = cv2.VideoCapture(self.video_file)
+
+        # Use a device as the video source
+        else:
+            # Init the video device
+            device = cv2.VideoCapture(self.config.deviceID)
+
 
         # Throw away first 10 frame
         for i in range(10):
@@ -114,6 +126,7 @@ class BufferedCapture(Process):
                     
                     #TODO: increase dropped frames counter
                     log.warn("frame dropped!")
+                    
 
                 lastTime = t
                 
@@ -124,9 +137,21 @@ class BufferedCapture(Process):
                     self.array1[i] = gray
                 else:
                     self.array2[i] = gray
+
+
+                # If video is loaded from a file, simulate real FPS
+                if self.video_file is not None:
+
+                    time.sleep(1.0/self.config.fps)
+
+                    # If the video finished, stop the capture
+                    if not device.isOpened():
+                        self.exit.set()
+
             
             if first:
                 self.startTime1.value = startTime
+
             else:
                 self.startTime2.value = startTime
 

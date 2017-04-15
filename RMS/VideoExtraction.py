@@ -55,11 +55,17 @@ class Extractor(Process):
         Return:
             (y, x, z): [tuple] Coordinates of points that form the fireball, where Z is the frame number.
         """
-     
-        count = np.zeros((self.frames.shape[0], floor(self.frames.shape[1]//self.config.f), floor(self.frames.shape[2]//self.config.f)), np.int)
-        pointsy = np.empty((self.frames.shape[0]*floor(self.frames.shape[1]//self.config.f)*floor(self.frames.shape[2]//self.config.f)), np.uint16)
-        pointsx = np.empty((self.frames.shape[0]*floor(self.frames.shape[1]//self.config.f)*floor(self.frames.shape[2]//self.config.f)), np.uint16)
-        pointsz = np.empty((self.frames.shape[0]*floor(self.frames.shape[1]//self.config.f)*floor(self.frames.shape[2]//self.config.f)), np.uint16)
+
+        # Calculate the shapes of the subsamples image
+        shape_z = self.frames.shape[0]
+        shape_y = int(floor(self.frames.shape[1]//self.config.f))
+        shape_x = int(floor(self.frames.shape[2]//self.config.f))
+        
+        # Init subssampled image arrays
+        count = np.zeros((shape_z, shape_y, shape_x), np.int)
+        pointsy = np.empty((shape_z*shape_y*shape_x), np.uint16)
+        pointsx = np.empty((shape_z*shape_y*shape_x), np.uint16)
+        pointsz = np.empty((shape_z*shape_y*shape_x), np.uint16)
         
         code = """
         unsigned int x, y, x2, y2, n, i, max;

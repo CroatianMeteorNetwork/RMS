@@ -207,6 +207,10 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
                 indicesy.append(y)
                 indicesx.append(x + hw)
 
+    # Convert indices to integer
+    indicesx = list(map(int, indicesx))
+    indicesy = list(map(int, indicesy))
+
     return (indicesy, indicesx)
 
 

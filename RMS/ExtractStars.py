@@ -215,6 +215,12 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
         if x_max > ff.ncols:
             x_max = ff.ncols
 
+
+        x_min = int(x_min)
+        x_max = int(x_max)
+        y_min = int(y_min)
+        y_max = int(y_max)
+
         # Extract an image segment around each star
         star_seg = ff.avepixel[y_min:y_max, x_min:x_max]
 

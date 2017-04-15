@@ -113,12 +113,13 @@ def wait(time_sec=None):
 
 
 
-def runCapture(config, duration=None):
+def runCapture(config, duration=None, video_file=None):
     """ Run capture and compression for the given time.given
 
     Arguments:
-        config: [config object] configuration read from the .config file
+        config: [config object] Configuration read from the .config file
         duration: [float] Time in seconds to capture. None by default.
+        video_file: [str] Path to the video file, if it was given as the video source. None by default.
 
     """
 
@@ -153,7 +154,7 @@ def runCapture(config, duration=None):
     detector = QueuedPool(detectStarsAndMeteors, cores=1)
     
     # Initialize buffered capture
-    bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config)
+    bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file)
 
     # Initialize the live image viewer
     live_view = LiveViewer(window_name='Maxpixel')
@@ -301,6 +302,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-d', '--duration', metavar='DURATION_HOURS', help="""Start capturing right away, 
         with the given duration in hours. """)
 
+    arg_parser.add_argument('-i', '--input', metavar='FILE_PATH', help="""Use video from the given file, 
+        not from a video device. """)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -356,6 +360,15 @@ if __name__ == "__main__":
         runCapture(config, duration=duration*60*60)
 
         sys.exit()
+
+
+    # If a file with video input was give, use it as a video source
+    if cml_args.input:
+
+        log.info('Video source: ' + cml_args.input)
+
+        # Capture the video frames from the video file
+        runCapture(config, video_file=cml_args.input)
 
 
     # Automatic running and stopping the capture at sunrise and sunset

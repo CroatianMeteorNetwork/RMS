@@ -18,6 +18,19 @@ import os
 from ConfigParser import RawConfigParser, NoOptionError
 from RMS.Routines import Grouping3D
 
+
+
+def choosePlatform(rpi_conf, pc_conf):
+    """ Choose the setting depending on if this is running on the RPi or a PC. """
+
+    if 'arm' in os.uname()[4]:
+        return rpi_conf
+
+    else:
+        return pc_conf
+
+
+
 class Config:
     def __init__(self):
         ##### System
@@ -253,8 +266,16 @@ def parseBuildArgs(config, parser):
     if not parser.has_section(section):
         return
     
-    if parser.has_option(section, "weave"):
-        config.weaveArgs = parser.get(section, "weave").split()
+    if parser.has_option(section, "rpi_weave"):
+         rpi_weave = parser.get(section, "rpi_weave").split()
+
+    if parser.has_option(section, "pc_weave"):
+         pc_weave = parser.get(section, "pc_weave").split()
+
+    # Read in the KHT library path for both the PC and the RPi, but decide which one to take based on the 
+    # system this is running on
+    config.weaveArgs = choosePlatform(rpi_weave, pc_weave)
+
         
     if parser.has_option(section, "extension"):
         config.extension = parser.get(section, "extension").split()
@@ -396,9 +417,19 @@ def parseMeteorDetection(config, parser):
 
     if parser.has_option(section, "max_points_det"):
         config.max_points_det = parser.getint(section, "max_points_det")
+
     
-    if parser.has_option(section, "kht_lib_path"):
-        config.kht_lib_path = parser.get(section, "kht_lib_path")
+    # Read in the KHT library path for both the PC and the RPi, but decide which one to take based on the 
+    # system this is running on
+    if parser.has_option(section, "rpi_kht_lib_path"):
+         rpi_kht_lib_path = parser.get(section, "rpi_kht_lib_path")
+
+    if parser.has_option(section, "pc_kht_lib_path"):
+         pc_kht_lib_path = parser.get(section, "pc_kht_lib_path")
+
+    config.kht_lib_path = choosePlatform(rpi_kht_lib_path, pc_kht_lib_path)
+
+
 
     if parser.has_option(section, "vect_angle_thresh"):
         config.vect_angle_thresh = parser.getint(section, "vect_angle_thresh")
