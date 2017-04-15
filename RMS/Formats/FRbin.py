@@ -31,6 +31,8 @@ class fr_struct:
         self.size = []
         self.frames = []
         
+
+
 def read(dir, filename):
     """ Read FRF*.bin file from specified directory.
     
@@ -73,6 +75,8 @@ def read(dir, filename):
 
     return fr
 
+
+
 def write(fr, dir_path, filename):
     """ Write FR*.bin structure to a file in specified directory.
     """
@@ -96,6 +100,8 @@ def write(fr, dir_path, filename):
                 fid.write(struct.pack('I', fr.t[i, z]))
                 fid.write(struct.pack('I', fr.size[i, z]))
                 fr.frames[i, z].tofile(fid)
+
+
 
 def writeArray(arr, dir_path, filename):
     """ Write array with extracted clips to a file in specified directory.

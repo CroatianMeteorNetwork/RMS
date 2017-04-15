@@ -187,8 +187,9 @@ class Compressor(Process):
         # Calculate miliseconds
         millis = int((startTime - floor(startTime))*1000)
         
+
         filename = str(self.config.stationID).zfill(3) +  "_" + date_string + "_" + str(millis).zfill(3) + "_" + str(N).zfill(7)
-        
+
         ff = FFbin.ff_struct()
         ff.array = arr
         ff.nrows = arr.shape[1]
@@ -287,6 +288,11 @@ class Compressor(Process):
             # Run the extractor
             self.extractor = Extractor(self.config, self.data_dir)
             self.extractor.start(frames, compressed, filename)
+
+
+            # Fully format the filename (this could not have been done before as the extractor will add
+            # the FR prefix)
+            filename = "FF" + filename + ".bin"
 
 
             # Run the detection on the file, if the detector handle was given
