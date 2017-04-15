@@ -289,6 +289,8 @@ class Compressor(Process):
             # Run the detection on the file, if the detector handle was given
             if self.detector is not None:
 
+                print('TOTAL JOBS:', self.detector.total_jobs)
+
                 # Add the file to the detector queue
                 self.detector.addJob([self.data_dir, filename, self.config])
 

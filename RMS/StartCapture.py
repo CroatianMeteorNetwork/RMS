@@ -193,8 +193,7 @@ def runCapture(config, duration=None):
 
 
     log.info('Finishing up the detection, ' + str(detector.input_queue.qsize()) + ' files to process...')
-
-    print('TOTAL JOBS:', detector.total_jobs)
+    
 
     # Let the detector use all cores, but leave 1 free
     available_cores = multiprocessing.cpu_count()

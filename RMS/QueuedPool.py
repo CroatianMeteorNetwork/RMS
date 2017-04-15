@@ -4,6 +4,7 @@ import multiprocessing
 import time
 
 
+
 class QueuedPool(object):
     """ Provides capability of creating a pool of workers which will process jobs in a given queue, and the 
         input queue can be updated in another thread. 
