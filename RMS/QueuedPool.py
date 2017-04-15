@@ -4,6 +4,24 @@ import multiprocessing
 import time
 
 
+class Counter(object):
+    """ Thread safe counter. Uses locks. 
+    
+    Source: http://eli.thegreenplace.net/2012/01/04/shared-counter-with-pythons-multiprocessing
+    """
+    def __init__(self, initval=0):
+        self.val = multiprocessing.Value('i', initval)
+        self.lock = multiprocessing.Lock()
+
+    def increment(self):
+        with self.lock:
+            self.val.value += 1
+
+    def value(self):
+        with self.lock:
+            return self.val.value
+
+
 
 class QueuedPool(object):
     """ Provides capability of creating a pool of workers which will process jobs in a given queue, and the 
@@ -34,7 +52,7 @@ class QueuedPool(object):
         self.func = func
         self.pool = None
 
-        self.total_jobs = 0
+        self.total_jobs = Counter()
 
         # Start the pool with the given parameters - this will wait until the input queue is given jobs
         self.startPool()
@@ -78,10 +96,10 @@ class QueuedPool(object):
             # Wait until the input queue is empty, then close the pool
             while True:
 
-                print(self.output_queue.qsize(), self.total_jobs)
+                print(self.output_queue.qsize(), self.total_jobs.value())
                 
                 # If all jobs are done, close the pool
-                if self.output_queue.qsize() == self.total_jobs:
+                if self.output_queue.qsize() == self.total_jobs.value():
 
                     # Insert the 'poison pill' to the queue, to kill all workers
                     for i in range(self.cores):
@@ -124,7 +142,7 @@ class QueuedPool(object):
         """
 
         # Track the total number of jobs received
-        self.total_jobs += 1
+        self.total_jobs.increment()
 
         if not isinstance(job, list):
             job = [job]

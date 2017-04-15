@@ -191,7 +191,7 @@ def runCapture(config, duration=None):
     live_view.stop()
     log.debug('Live view stopped')
 
-    print('TOTAL JOBS:', detector.total_jobs)
+    print('TOTAL JOBS:', detector.total_jobs.value())
 
 
     log.info('Finishing up the detection, ' + str(detector.input_queue.qsize()) + ' files to process...')
