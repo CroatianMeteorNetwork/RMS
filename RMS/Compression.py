@@ -73,6 +73,8 @@ class Compressor(Process):
 
         self.detector = detector
         self.live_view = live_view
+
+        self.extractor = None
     
 
 
@@ -207,6 +209,11 @@ class Compressor(Process):
         """
         
         self.exit.set()
+
+        # Stop the extractor
+        if self.extractor is not None:
+            self.extractor.stop()
+
         self.join()
     
 
@@ -275,8 +282,8 @@ class Compressor(Process):
             log.debug("saving: " + str(time.time() - t) + "s")
             
             # Run the extractor
-            ve = Extractor(self.config, self.data_dir)
-            ve.start(frames, compressed, filename)
+            self.extractor = Extractor(self.config, self.data_dir)
+            self.extractor.start(frames, compressed, filename)
 
 
             # Run the detection on the file, if the detector handle was given

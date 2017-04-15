@@ -47,6 +47,7 @@ class Extractor(Process):
         self.config = config
         self.data_dir = data_dir
 
+
     
     def findPoints(self):
         """Threshold and subsample frames and return as list of points.
@@ -212,6 +213,7 @@ class Extractor(Process):
         
         return count >= self.config.min_points
     
+
 
     def extract(self, coefficients):
         """ Determinate window size and crop out frames.
@@ -394,6 +396,7 @@ class Extractor(Process):
         return clips
     
 
+
     def save(self, clips):
         """ Save extracted clips to FR*.bin file.
 
@@ -404,6 +407,7 @@ class Extractor(Process):
         FRbin.writeArray(clips, self.data_dir, self.filename)
     
 
+
     def stop(self):
         """ Stop the extractor.
         """
@@ -411,6 +415,7 @@ class Extractor(Process):
         self.exit.set()
         self.join()
         
+
 
     def start(self, frames, compressed, filename):
         """ Start the extractor.
@@ -431,12 +436,14 @@ class Extractor(Process):
         super(Extractor, self).start()
     
 
+
     def run(self):
         """ Retrieve frames from list, convert, compress and save them.
         """
         
         self.executeAll()
     
+
 
     def executeAll(self):
         """ Run the complete extraction procedure. """
