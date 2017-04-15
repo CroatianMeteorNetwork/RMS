@@ -76,6 +76,8 @@ class QueuedPool(object):
 
             # Wait until the input queue is empty, then close the pool
             while True:
+
+                print(self.output_queue.qsize(), self.total_jobs)
                 
                 # If all jobs are done, close the pool
                 if self.output_queue.qsize() == self.total_jobs:
@@ -85,7 +87,7 @@ class QueuedPool(object):
                         self.input_queue.put(None)
 
                     print('Sent pills!')
-                    
+
                     # Close the pool and wait for all threads to terminate
                     self.pool.close()
                     self.pool.join()
