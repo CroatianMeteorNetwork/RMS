@@ -184,7 +184,7 @@ def runCapture(config, duration=None):
     log.debug('Capture stopped')
 
     # Stop the compressor
-    c.stop()
+    detector, live_view = c.stop()
     log.debug('Compression stopped')
 
     # Stop the live viewer
@@ -193,7 +193,7 @@ def runCapture(config, duration=None):
 
 
     log.info('Finishing up the detection, ' + str(detector.input_queue.qsize()) + ' files to process...')
-    
+
 
     # Let the detector use all cores, but leave 1 free
     available_cores = multiprocessing.cpu_count()

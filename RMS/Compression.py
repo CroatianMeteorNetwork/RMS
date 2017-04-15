@@ -215,6 +215,9 @@ class Compressor(Process):
             self.extractor.stop()
 
         self.join()
+
+        # Return the detector and live viewer objects because they were updated in this namespace
+        return self.detector, self.live_view
     
 
 
@@ -288,8 +291,6 @@ class Compressor(Process):
 
             # Run the detection on the file, if the detector handle was given
             if self.detector is not None:
-
-                print('TOTAL JOBS:', self.detector.total_jobs)
 
                 # Add the file to the detector queue
                 self.detector.addJob([self.data_dir, filename, self.config])
