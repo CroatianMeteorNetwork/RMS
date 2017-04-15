@@ -108,7 +108,7 @@ class QueuedPool(object):
                 if self.output_queue.qsize() == self.total_jobs.value():
 
                     # Insert the 'poison pill' to the queue, to kill all workers
-                    for i in range(self.cores.value()):
+                    for i in range(self.cores.value() + 1):
                         self.input_queue.put(None)
 
                     print('Sent pills!', self.cores.value())

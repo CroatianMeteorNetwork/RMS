@@ -85,8 +85,9 @@ class BufferedCapture(Process):
         # Init the video device
         device = cv2.VideoCapture(self.config.deviceID)
 
-        # Throw away first frame
-        device.read()
+        # Throw away first 10 frame
+        for i in range(10):
+            device.read()
 
         first = True
         
