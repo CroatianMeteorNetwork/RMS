@@ -84,7 +84,8 @@ class QueuedPool(object):
                     for i in range(self.cores):
                         self.input_queue.put(None)
 
-
+                    print('Sent pills!')
+                    
                     # Close the pool and wait for all threads to terminate
                     self.pool.close()
                     self.pool.join()
