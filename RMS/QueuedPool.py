@@ -111,7 +111,9 @@ class QueuedPool(object):
                     for i in range(self.cores.value() + 1):
                         self.input_queue.put(None)
 
-                    print('Sent pills!', self.cores.value())
+
+                    time.sleep(0.01)
+                    
 
                     # Close the pool and wait for all threads to terminate
                     self.pool.close()
