@@ -327,6 +327,7 @@ if __name__ == "__main__":
     # Make a new log file each day
     handler = logging.handlers.TimedRotatingFileHandler(log_file_name, when='D', interval=1) 
     handler.setLevel(logging.INFO)
+    handler.setLevel(logging.DEBUG)
 
     # Set the log formatting
     formatter = logging.Formatter(fmt='%(asctime)s-%(levelname)s-%(module)s-line:%(lineno)d - %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
