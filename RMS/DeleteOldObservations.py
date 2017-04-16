@@ -129,6 +129,9 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
     ######
 
+    print('available', availableSpace(data_dir))
+    print('next night:', next_night_bytes)
+
 
     # If there's enough free space, don't do anything
     if availableSpace(data_dir) > next_night_bytes:
