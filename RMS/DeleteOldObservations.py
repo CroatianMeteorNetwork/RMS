@@ -68,7 +68,7 @@ def deleteNightFolders(dir_path, delete_all=False):
     for dir_name in dir_list:
         
         # Delete the next directory in the list, i.e. the oldes one
-        shutil.rmtree(os.path.join())
+        shutil.rmtree(os.path.join(dir_path, dir_name))
 
         # If only one (first) directory should be deleted, break the loop
         if not delete_all:
