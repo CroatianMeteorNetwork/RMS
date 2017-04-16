@@ -33,6 +33,7 @@ import RMS.ConfigReader as cr
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats import CALSTARS
 
+from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.BufferedCapture import BufferedCapture
 from RMS.Compression import Compressor
 from RMS.CaptureDuration import captureDuration
@@ -358,12 +359,25 @@ if __name__ == "__main__":
             log.error('Given duration is not a proper number of hours!')
 
 
+
+        log.info('Freeing up disk space...')
+        
+        # Free up disk space by deleting old files, if necessary
+        if not deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config, 
+            duration=duration):
+
+            log.error('No more disk space can be freed up! Stopping capture...')
+            sys.exit()
+
+
+
         log.info("Running for " + str(duration) + ' hours...')
 
         # Run the capture for the given number of hours
         runCapture(config, duration=duration*60*60)
 
         sys.exit()
+
 
 
     # If a file with video input was give, use it as a video source
@@ -373,6 +387,7 @@ if __name__ == "__main__":
 
         # Capture the video frames from the video file
         runCapture(config, video_file=cml_args.input)
+
 
 
     # Automatic running and stopping the capture at sunrise and sunset
@@ -410,6 +425,17 @@ if __name__ == "__main__":
         # Break the loop if capturing was stopped
         if STOP_CAPTURE:
             break
+
+
+
+        log.info('Freeing up disk space...')
+        
+        # Free up disk space by deleting old files, if necessary
+        if not deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config, 
+            duration=duration):
+
+            log.error('No more disk space can be freed up! Stopping capture...')
+            sys.exit()
 
 
         # Run capture and compression
