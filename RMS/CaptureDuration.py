@@ -55,7 +55,7 @@ def captureDuration(lat, lon, elevation, current_time=None):
         
 
     # Calculate how long should the capture run
-    if start_time:
+    if start_time == True:
         duration = next_rise - current_time
 
     else:
