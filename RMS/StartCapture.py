@@ -75,12 +75,12 @@ def resetSIGINT():
 
 
 
-def wait(time_sec=None):
+def wait(duration=None):
     """ The function will wait for the specified time, or it will stop when Enter is pressed. If no time was
         given (in seconds), it will wait until Enter is pressed. 
 
     Arguments:
-        time_sec: [float] time in seconds to wait
+        duration: [float] Time in seconds to wait
 
     """
 
@@ -99,12 +99,12 @@ def wait(time_sec=None):
         time.sleep(0.1)
 
         # If some wait time was given, check if it passed
-        if time_sec is not None:
+        if duration is not None:
 
             time_elapsed = (datetime.datetime.now() - time_start).total_seconds()
 
             # If the total time is elapsed, break the wait
-            if time_elapsed >= time_sec:
+            if time_elapsed >= duration:
                 break
 
 
@@ -180,16 +180,18 @@ def runCapture(config, duration=None, video_file=None):
         log.info('Ending capture...')
 
 
-
     # Stop the capture
+    log.debug('Stopping capture...')
     bc.stopCapture()
     log.debug('Capture stopped')
 
     # Stop the compressor
+    log.debug('Stopping compression...')
     detector, live_view = c.stop()
     log.debug('Compression stopped')
 
     # Stop the live viewer
+    log.debug('Stopping live viewer...')
     live_view.stop()
     log.debug('Live view stopped')
 
@@ -346,7 +348,7 @@ if __name__ == "__main__":
 
     log.info('Program start')
 
-    # Change the Ctrl+C action to the special handles
+    # Change the Ctrl+C action to the special handle
     setSIGINT()
 
 
@@ -404,8 +406,14 @@ if __name__ == "__main__":
             
             log.debug('Less than 15 minues left to record, waiting new recording session...')
             
+            # Reset the Ctrl+C to KeyboardInterrupt
+            resetSIGINT()
+
             # Wait for 30 mins before checking again
             time.sleep(30*60)
+
+            # Change the Ctrl+C action to the special handle
+            setSIGINT()
 
             continue
 
@@ -417,10 +425,17 @@ if __name__ == "__main__":
             time_now = datetime.datetime.now()
             waiting_time = start_time - time_now
 
-            log.info('Waiting ' + str(waiting_time) + ' to start recording')
+            log.info('Waiting ' + str(waiting_time) + ' to start recording for ' + str(duration/60/60) \
+                + ' hours')
+
+            # Reset the Ctrl+C to KeyboardInterrupt
+            resetSIGINT()
 
             # Wait until sunset
             time.sleep(int(waiting_time.total_seconds()))
+
+            # Change the Ctrl+C action to the special handle
+            setSIGINT()
 
 
         # Break the loop if capturing was stopped
@@ -438,6 +453,8 @@ if __name__ == "__main__":
             log.error('No more disk space can be freed up! Stopping capture...')
             sys.exit()
 
+
+        log.info('Starting capturing for ' + str(duration/60/60) + ' hours')
 
         # Run capture and compression
         runCapture(config, duration=duration)

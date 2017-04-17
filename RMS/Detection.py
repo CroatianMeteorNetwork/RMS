@@ -14,6 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import print_function, absolute_import, division
+
 import logging
 from time import time
 import sys, os
@@ -41,9 +43,25 @@ import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 import RMS.Routines.MorphCy as morph
 
+# If True, all detection details will be logged
+VERBOSE_DEBUG = False
+
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
+
+
+
+def logDebug(*log_str):
+    """ Log detection debug messages. """
+
+    if VERBOSE_DEBUG:
+
+        log_str = map(str, log_str)
+
+        log.debug(" ".join(*log_str))
+
+
 
 
 def thresholdImg(ff, k1, j1):
@@ -281,8 +299,8 @@ def mergeLines(line_list, min_distance, img_w, img_h, last_count=0):
                 x2, y2 = _getCartesian(rho2, theta2)
 
                 # Merge line
-                x_avg = (x1 + x2) / 2
-                y_avg = (y2 + y1) / 2
+                x_avg = (x1 + x2)/2
+                y_avg = (y2 + y1)/2
 
                 # Return to polar space
                 theta_avg = np.degrees(np.arctan2(y_avg, x_avg))
@@ -485,18 +503,18 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
     # show("thresholded ALL", img_thres)
 
 
-    log.debug('white ratio: ' + str(np.count_nonzero(img_thres) / float(ff.nrows * ff.ncols)))
+    logDebug('white ratio: ' + str(np.count_nonzero(img_thres)/float(ff.nrows*ff.ncols)))
 
     # Check if the image is too "white" and any futher processing makes no sense
     # This checks the max percentage of white pixels in the thresholded image
-    if np.count_nonzero(img_thres) / float(ff.nrows * ff.ncols) > max_white_ratio:
+    if np.count_nonzero(img_thres)/float(ff.nrows*ff.ncols) > max_white_ratio:
         return line_results
 
     # Subdivide the image by time into overlapping parts (decreases noise when searching for meteors)
-    for i in range(0, 256/time_slide-1):
+    for i in range(0, int(256/time_slide - 1)):
 
         frame_min = i*time_slide
-        frame_max = i*time_slide+time_window_size
+        frame_max = i*time_slide + time_window_size
 
         # Select the time range of the thresholded image
         img = selectFrames(img_thres, ff, frame_min, frame_max)
@@ -777,8 +795,8 @@ def plotLines(ff, line_list):
 
     img = np.copy(ff.maxpixel)
 
-    hh = img.shape[0] / 2.0
-    hw = img.shape[1] / 2.0
+    hh = img.shape[0]/2.0
+    hw = img.shape[1]/2.0
 
     for rho, theta, frame_min, frame_max in line_list:
         theta = np.deg2rad(theta)
@@ -812,7 +830,7 @@ def show3DCloud(ff, stripe, detected_line=None, stripe_points=None, config=None)
     ys = stripe_indices[0]
     zs = ff.maxframe[stripe_indices]
 
-    print 'points:', len(xs)
+    logDebug('points: ', len(xs))
 
     # Plot points in 3D
     fig = plt.figure()
@@ -901,7 +919,7 @@ def detectMeteors(ff_directory, ff_name, config):
     line_list = getLines(ff, config.k1_det, config.j1, config.time_slide, config.time_window_size, 
         config.max_lines_det, config.max_white_ratio, config.kht_lib_path)
 
-    print 'List of lines:', line_list
+    logDebug('List of lines:', line_list)
 
 
     # Init meteor list
@@ -913,10 +931,10 @@ def detectMeteors(ff_directory, ff_name, config):
         # Join similar lines
         line_list = mergeLines(line_list, config.line_min_dist, ff.ncols, ff.nrows)
 
-        print 'time for finding lines', time() - t1
+        logDebug('Time for finding lines:', time() - t1)
 
-        print 'number of KHT lines:', len(line_list)
-        print line_list
+        logDebug('Number of KHT lines: ', len(line_list))
+        logDebug(line_list)
 
         # Plot lines
         # plotLines(ff, line_list)
@@ -930,8 +948,8 @@ def detectMeteors(ff_directory, ff_name, config):
         for line in line_list:
             rho, theta, frame_min, frame_max = line
 
-            print 'rho, theta, frame_min, frame_max'
-            print rho, theta, frame_min, frame_max
+            logDebug('rho, theta, frame_min, frame_max')
+            logDebug(rho, theta, frame_min, frame_max)
 
             # Bounded the thresholded image by min and max frames
             img = selectFrames(np.copy(img_thres), ff, frame_min, frame_max)
@@ -964,7 +982,7 @@ def detectMeteors(ff_directory, ff_name, config):
 
                 # Extract weights of each point
                 maxpix_elements = ff.maxpixel[ys,xs].astype(np.float64)
-                weights = maxpix_elements / np.sum(maxpix_elements)
+                weights = maxpix_elements/np.sum(maxpix_elements)
 
                 # Random sample the point, sampling is weighted by pixel intensity
                 indices = np.random.choice(len(zs), config.max_points_det, replace=False, p=weights)
@@ -981,18 +999,18 @@ def detectMeteors(ff_directory, ff_name, config):
 
             t1 = time()
 
-            print 'finding lines...'
+            logDebug('finding lines...')
 
             # Find a single line in the point cloud
             detected_line = find3DLines(stripe_points, time(), config, fireball_detection=False)
 
-            print 'time for GROUPING: ', time() - t1
+            logDebug('time for GROUPING: ', time() - t1)
 
             # Extract the first and only line if any
             if detected_line:
                 detected_line = detected_line[0]
 
-                # print detected_line
+                # logDebug(detected_line)
 
                 # Show 3D cloud
                 # show3DCloud(ff, stripe, detected_line, stripe_points, config)
@@ -1003,8 +1021,8 @@ def detectMeteors(ff_directory, ff_name, config):
         # Merge similar lines in 3D
         filtered_lines = merge3DLines(filtered_lines, config.vect_angle_thresh)
 
-        print 'after filtering:'
-        print filtered_lines
+        logDebug('after filtering:')
+        logDebug(filtered_lines)
 
 
         for detected_line in filtered_lines:
@@ -1025,8 +1043,7 @@ def detectMeteors(ff_directory, ff_name, config):
             frame_min = max(frame_min, 0)
             frame_max = min(frame_max, 255)
 
-
-            print detected_line
+            logDebug(detected_line)
 
             # Get coordinates of 2 points that describe the line
             x1, y1, z1 = detected_line[0]
@@ -1035,8 +1052,8 @@ def detectMeteors(ff_directory, ff_name, config):
             # Convert Cartesian line coordinates to polar
             rho, theta = getPolarLine(x1, y1, x2, y2, ff.nrows, ff.ncols)
 
-            print 'converted rho, theta'
-            print rho, theta
+            logDebug('converted rho, theta')
+            logDebug(rho, theta)
 
             # Bounded the thresholded image by min and max frames
             img = selectFrames(np.copy(img_thres), ff, frame_min, frame_max)
@@ -1102,7 +1119,7 @@ def detectMeteors(ff_directory, ff_name, config):
                     continue
 
                 # Calculate weights for centroiding
-                max_avg_corrected = ff.maxpixel-ff.avepixel
+                max_avg_corrected = ff.maxpixel - ff.avepixel
                 flattened_weights = (max_avg_corrected).astype(np.float32)/ff.stdpixel
 
                 # Calculate centroids by half-frame
@@ -1127,11 +1144,11 @@ def detectMeteors(ff_directory, ff_name, config):
                     max_weights = flattened_weights[half_frame_pixels[:,1], half_frame_pixels[:,0]]
 
                     # Calculate weighted centroids
-                    x_weighted = half_frame_pixels[:,0] * np.transpose(max_weights)
-                    x_centroid = np.sum(x_weighted) / float(np.sum(max_weights))
+                    x_weighted = half_frame_pixels[:,0]*np.transpose(max_weights)
+                    x_centroid = np.sum(x_weighted)/float(np.sum(max_weights))
 
-                    y_weighted = half_frame_pixels[:,1] * np.transpose(max_weights)
-                    y_centroid = np.sum(y_weighted) / float(np.sum(max_weights))
+                    y_weighted = half_frame_pixels[:,1]*np.transpose(max_weights)
+                    y_centroid = np.sum(y_weighted)/float(np.sum(max_weights))
 
                     # Calculate intensity as the sum of white pixels on the stripe
                     #intensity_values = max_avg_corrected[half_frame_pixels[:,1], half_frame_pixels[:,0]]
@@ -1139,7 +1156,7 @@ def detectMeteors(ff_directory, ff_name, config):
                         half_frame_pixels_stripe[:,0]]
                     intensity = np.sum(intensity_values)
                     
-                    print "centroid: ", frame_no, x_centroid, y_centroid, intensity
+                    logDebug("centroid: ", frame_no, x_centroid, y_centroid, intensity)
 
                     centroids.append([frame_no, x_centroid, y_centroid, intensity])
 
@@ -1163,7 +1180,7 @@ def detectMeteors(ff_directory, ff_name, config):
             meteor_detections.append([rho, theta, centroids])
 
 
-            print 'time for processing:', time() - t_all
+            logDebug('time for processing:', time() - t_all)
 
 
             # #COMMENTED
@@ -1180,6 +1197,8 @@ def detectMeteors(ff_directory, ff_name, config):
             # plt.clf() 
             # plt.close()
 
+
+    log.debug(ff_name + ' detected meteors: ' + str(len(meteor_detections)))
     
     return meteor_detections
 
@@ -1192,7 +1211,7 @@ if __name__ == "__main__":
 
     
     if len(sys.argv) == 1:
-        print "Usage: python -m RMS.Detection /path/to/bin/files/"
+        print("Usage: python -m RMS.Detection /path/to/bin/files/")
         sys.exit()
     
     # Get paths to every FF bin file in a directory 
@@ -1200,7 +1219,7 @@ if __name__ == "__main__":
 
     # Check if there are any file in the directory
     if(len(ff_list) == None):
-        print "No files found!"
+        print("No files found!")
         sys.exit()
 
     # Load config file
@@ -1217,8 +1236,8 @@ if __name__ == "__main__":
     # Run meteor search on every file
     for ff_name in sorted(ff_list):
 
-        print '--------------------------------------------'
-        print ff_name
+        print('--------------------------------------------')
+        print(ff_name)
 
         # Run the meteor detection algorithm
         meteor_detections = detectMeteors(results_path, ff_name, config)
@@ -1249,4 +1268,4 @@ if __name__ == "__main__":
                 
 
 
-    print 'Time for the whole directory:', time() - time_whole
+    print('Time for the whole directory:', time() - time_whole)

@@ -55,7 +55,7 @@ class LiveViewer(multiprocessing.Process):
         self.img_queue = multiprocessing.Queue()
         self.window_name = window_name
         self.first_image = True
-        self.exited = multiprocessing.Event()
+        self.run_exited = multiprocessing.Event()
 
         self.start()
 
@@ -94,7 +94,7 @@ class LiveViewer(multiprocessing.Process):
 
             # If the 'poison pill' is received, exit the viewer
             if item is None:
-                self.exited.set()
+                self.run_exited.set()
                 return
 
 
@@ -123,22 +123,11 @@ class LiveViewer(multiprocessing.Process):
     def stop(self):
         """ Stop the viewer. """
 
-        # Empty the queue
-        while not self.img_queue.empty():
-            self.img_queue.get()
-
-        # Keep sending the kill signal until the viewer ends
-        while not self.exited.is_set():
-
-            # Put the 'poison pill' in the queue which will exit the viewer
-            self.img_queue.put(None)
-
-            time.sleep(0.1)
-
+        self.terminate()
 
         cv2.destroyAllWindows()
-        self.join()
 
+        self.join()
 
 
 

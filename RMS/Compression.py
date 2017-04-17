@@ -21,7 +21,7 @@ from math import floor
 
 from scipy import weave
 import numpy as np
-from multiprocessing import Process, Event
+import multiprocessing
 
 
 
@@ -33,7 +33,7 @@ from RMS.Formats import FFbin
 log = logging.getLogger("logger")
 
 
-class Compressor(Process):
+class Compressor(multiprocessing.Process):
     """Compress list of numpy arrays (video frames).
 
         Output is in Four-frame Temporal Pixel (FTP) format. See the Jenniskens et al., 2011 paper about the
@@ -74,7 +74,9 @@ class Compressor(Process):
         self.detector = detector
         self.live_view = live_view
 
-        self.extractor = None
+        self.exit = multiprocessing.Event()
+
+        self.run_exited = multiprocessing.Event()
     
 
 
@@ -154,6 +156,11 @@ class Compressor(Process):
                 var -= max*max;     // remove max pixel
                 var -= acc*mean;    // subtract average squared sum of all values (acc*mean = acc*acc/frames_num_minus_one)
                 var = sqrt(var / frames_num_minus_two);
+
+                // Make sure that the stddev is not 0, to prevent divide by zero afterwards
+                if (var == 0){
+                    var = 1;
+                }
                 
                 // Output results
                 OUT3(0, y, x) = max;
@@ -209,12 +216,19 @@ class Compressor(Process):
         """ Stop compression.
         """
         
+
         self.exit.set()
+        log.debug('Compression exit flag set')
 
-        # Stop the extractor
-        if self.extractor is not None:
-            self.extractor.stop()
+            
+        log.debug('Joining compression...')
 
+        while not self.run_exited.is_set():
+            time.sleep(0.01)
+
+        log.debug('Compression joined!')
+
+        self.terminate()
         self.join()
 
         # Return the detector and live viewer objects because they were updated in this namespace
@@ -226,7 +240,6 @@ class Compressor(Process):
         """ Start compression.
         """
         
-        self.exit = Event()
         super(Compressor, self).start()
     
 
@@ -241,11 +254,15 @@ class Compressor(Process):
         while not self.exit.is_set():
 
             # Block until frames are available
-            while self.startTime1.value==0 and self.startTime2.value==0: 
+            while self.startTime1.value == 0 and self.startTime2.value == 0: 
 
                 # Exit function if process was stopped from the outside
-                if self.exit.is_set():    
+                if self.exit.is_set():
+                    log.debug('Compression run exit')
+                    self.run_exited.set()
                     return
+
+                time.sleep(0.01)
 
                 
             t = time.time()
@@ -284,11 +301,11 @@ class Compressor(Process):
             n += 1
             
             log.debug("saving: " + str(time.time() - t) + "s")
-            
-            # Run the extractor
-            self.extractor = Extractor(self.config, self.data_dir)
-            self.extractor.start(frames, compressed, filename)
 
+
+            # Run the extractor
+            extractor = Extractor(self.config, self.data_dir)
+            extractor.start(frames, compressed, filename)
 
             # Fully format the filename (this could not have been done before as the extractor will add
             # the FR prefix)
@@ -307,5 +324,11 @@ class Compressor(Process):
 
                 # Add the image to the image queue
                 self.live_view.updateImage(compressed[0], filename + " maxpixel")
+
+
+
+        log.debug('Compression run exit')
+        self.run_exited.set()
+
 
     

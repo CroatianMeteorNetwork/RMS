@@ -1,0 +1,1117 @@
+{
+	"auto_complete":
+	{
+		"selected_items":
+		[
+			[
+				"rest",
+				"resetSIGINT\tfunction"
+			],
+			[
+				"set",
+				"setSIGINT\tfunction"
+			],
+			[
+				"sig",
+				"signal\tfunction"
+			],
+			[
+				"detec",
+				"detector\tstatement"
+			],
+			[
+				"dete",
+				"detector\tparam"
+			],
+			[
+				"file",
+				"filename\tstatement"
+			],
+			[
+				"detect",
+				"detectStarsAndMeteors\tfunction"
+			],
+			[
+				"Dete",
+				"DetectStarsAndMeteors\tmodule"
+			],
+			[
+				"print",
+				"print_function\tstatement"
+			],
+			[
+				"date",
+				"datetime\tclass"
+			],
+			[
+				"pri",
+				"print_function\tstatement"
+			],
+			[
+				"ff",
+				"ff_list\tstatement"
+			],
+			[
+				"v_ini",
+				"v_init_orig_y\tstatement"
+			],
+			[
+				"rms_cos",
+				"rms_cost_y\tstatement"
+			],
+			[
+				"rms_co",
+				"rms_cost_x\tstatement"
+			],
+			[
+				"PLATE",
+				"PLATES_DIR\tstatement"
+			],
+			[
+				"copy",
+				"copyPlates\tfunction"
+			],
+			[
+				"err",
+				"error_track\tstatement"
+			],
+			[
+				"FIR",
+				"PLATE_FIRST"
+			],
+			[
+				"plate",
+				"PLATES_SUFFIX\tstatement"
+			],
+			[
+				"error",
+				"error_msg\tforstmt"
+			],
+			[
+				"cop",
+				"copy_flat_status\tstatement"
+			],
+			[
+				"nigt_",
+				"night_name\tstatement"
+			],
+			[
+				"FLAT",
+				"FLAT_FILE_NAME\tstatement"
+			],
+			[
+				"flats",
+				"flats_found\tstatement"
+			],
+			[
+				"night",
+				"night_name\tparam"
+			],
+			[
+				"sitde",
+				"site_id"
+			],
+			[
+				"event",
+				"event_site_file_name\tforstmt"
+			],
+			[
+				"destinat",
+				"destination_dir\tparam"
+			],
+			[
+				"des",
+				"destination_dir\tparam"
+			],
+			[
+				"rege",
+				"regexCopy\tfunction"
+			],
+			[
+				"extra",
+				"extractNights\tfunction"
+			],
+			[
+				"proc",
+				"processEvents\tfunction"
+			],
+			[
+				"eve",
+				"event_dir\tstatement"
+			],
+			[
+				"WORK",
+				"WORK_DIR_SUFFIX\tstatement"
+			],
+			[
+				"meteo",
+				"meteor_pos\tstatement"
+			],
+			[
+				"jd2",
+				"jd2SolLonJPL\timport"
+			],
+			[
+				"sim_la",
+				"sim_lag_at_first_obs\tstatement"
+			],
+			[
+				"sim_tim",
+				"sim_time_at_first_obs\tstatement"
+			],
+			[
+				"obs_",
+				"obs_length\tstatement"
+			],
+			[
+				"sim_time",
+				"sim_time_part\tstatement"
+			],
+			[
+				"first",
+				"first_sim_at_obs\tstatement"
+			],
+			[
+				"sim_le",
+				"sim_len_interpol_full\tstatement"
+			],
+			[
+				"sim_he",
+				"sim_height\tparam"
+			],
+			[
+				"sim_len",
+				"sim_length_part\tstatement"
+			],
+			[
+				"ece",
+				"ecef_sum\tstatement"
+			],
+			[
+				"meteor",
+				"meteor_length\tstatement"
+			],
+			[
+				"rbe",
+				"rbeg_lat\tstatement"
+			],
+			[
+				"lines",
+				"linestyle\tparam"
+			],
+			[
+				"jaccha",
+				"jacchiaVelocityFunc\tfunction"
+			],
+			[
+				"mass",
+				"masses\tstatement"
+			],
+			[
+				"dir",
+				"dir_path\tstatement"
+			],
+			[
+				"inten",
+				"intens\tstatement"
+			],
+			[
+				"inter",
+				"interpolate\tmodule"
+			],
+			[
+				"mag",
+				"mag_abs\tstatement"
+			],
+			[
+				"ca",
+				"calcMass\tfunction"
+			],
+			[
+				"mag_a",
+				"mag_abs"
+			],
+			[
+				"time",
+				"time_mags\tstatement"
+			],
+			[
+				"qu",
+				"quart_len\tstatement"
+			],
+			[
+				"c_p",
+				"c_p_range"
+			],
+			[
+				"zeros",
+				"zeros_like\tfunction"
+			],
+			[
+				"zer",
+				"zero"
+			],
+			[
+				"calc",
+				"calcVelocity\tfunction"
+			],
+			[
+				"T_b",
+				"T_boil_range"
+			],
+			[
+				"resu",
+				"results_file\tstatement"
+			],
+			[
+				"traj",
+				"traj_pickle_file\tstatement"
+			],
+			[
+				"obs_e",
+				"obs_length"
+			],
+			[
+				"max",
+				"max_ht_obs\tstatement"
+			],
+			[
+				"obs",
+				"observations"
+			],
+			[
+				"load",
+				"loadPickle\tfunction"
+			],
+			[
+				"outp",
+				"output_dir"
+			],
+			[
+				"elev",
+				"elev_data\tstatement"
+			],
+			[
+				"azim",
+				"azim_data\tstatement"
+			],
+			[
+				"rade",
+				"raDec2Ecliptic\tfunction"
+			],
+			[
+				"ma",
+				"match\tstatement"
+			],
+			[
+				"fin",
+				"finditer\tfunction"
+			],
+			[
+				"gro",
+				"groups\tfunction"
+			],
+			[
+				"radian",
+				"radiant_eci_mini\tstatement"
+			],
+			[
+				"ve",
+				"velocity"
+			],
+			[
+				"state",
+				"state_vect_mini\tstatement"
+			],
+			[
+				"radia",
+				"radiant_eq\tstatement"
+			],
+			[
+				"plaen",
+				"plane_intersection\tforstmt"
+			],
+			[
+				"statio",
+				"station_id\tstatement"
+			],
+			[
+				"plane",
+				"plane_intersection\tforstmt"
+			],
+			[
+				"out",
+				"out_str\tstatement"
+			],
+			[
+				"plane_",
+				"plane_intersection"
+			],
+			[
+				"cost",
+				"costs\tstatement"
+			],
+			[
+				"rms_c",
+				"rms_cost_y\tstatement"
+			],
+			[
+				"alon",
+				"along_track_cost\tstatement"
+			],
+			[
+				"along",
+				"along_track_cost\tstatement"
+			],
+			[
+				"No",
+				"None"
+			],
+			[
+				"o",
+				"observations\tstatement"
+			],
+			[
+				"se",
+				"self"
+			],
+			[
+				"esti",
+				"estimate_timing_vel\tstatement"
+			],
+			[
+				"mat",
+				"matplotlib\tmodule"
+			],
+			[
+				"su",
+				"sum\tfunction"
+			],
+			[
+				"sub",
+				"subplots\tfunction"
+			],
+			[
+				"sol",
+				"solutions_v_init\tstatement"
+			],
+			[
+				"solut",
+				"solutions_v_init\tstatement"
+			],
+			[
+				"solutio",
+				"solutions_v_inti\tstatement"
+			],
+			[
+				"v_i",
+				"v_init\tforstmt"
+			],
+			[
+				"so",
+				"sort\tfunction"
+			],
+			[
+				"v_in",
+				"v_init_all\tstatement"
+			],
+			[
+				"show",
+				"show_plots\tparam"
+			],
+			[
+				"sim_",
+				"sim_height"
+			],
+			[
+				"eq",
+				"radiant_eq_mini\tstatement"
+			],
+			[
+				"__le",
+				"__len__\tfunction"
+			],
+			[
+				"pa",
+				"path\tmodule"
+			],
+			[
+				"end",
+				"end_ht\tstatement"
+			],
+			[
+				"jd",
+				"jd2Date\timport"
+			],
+			[
+				"firs",
+				"first_min\tstatement"
+			],
+			[
+				"squ",
+				"squared_diff\tstatement"
+			],
+			[
+				"best",
+				"best_solution\tstatement"
+			],
+			[
+				"find",
+				"findBestSolution\tfunction"
+			],
+			[
+				"top_s",
+				"top_solution_ind\tstatement"
+			],
+			[
+				"top_",
+				"top_params\tstatement"
+			],
+			[
+				"top",
+				"top_solutions\tstatement"
+			],
+			[
+				"radian_",
+				"radiant_eq_mini"
+			],
+			[
+				"or",
+				"orbit\tstatement"
+			],
+			[
+				"deg",
+				"degrees\tinstance"
+			],
+			[
+				"tru",
+				"true_anomaly\tstatement"
+			],
+			[
+				"v_h",
+				"v_h_mag\tstatement"
+			],
+			[
+				"JD",
+				"J2000_JD\timport"
+			],
+			[
+				"m_m",
+				"m_mass_scale\tstatement"
+			],
+			[
+				"m_",
+				"m_mass\tstatement"
+			],
+			[
+				"ini",
+				"init_mass\tstatement"
+			],
+			[
+				"min",
+				"minimize\tfunction"
+			],
+			[
+				"refine",
+				"refineSearchMetSim\tfunction"
+			]
+		]
+	},
+	"buffers":
+	[
+		{
+			"file": "Utils/FRbinViewer.py",
+			"settings":
+			{
+				"buffer_size": 3279,
+				"line_ending": "Unix"
+			}
+		}
+	],
+	"build_system": "",
+	"build_system_choices":
+	[
+		[
+			[
+				[
+					"Packages/C++/C++ Single File.sublime-build",
+					""
+				],
+				[
+					"Packages/C++/C++ Single File.sublime-build",
+					"Run"
+				]
+			],
+			[
+				"Packages/C++/C++ Single File.sublime-build",
+				""
+			]
+		],
+		[
+			[
+				[
+					"Packages/C++/C++ Single File.sublime-build",
+					""
+				],
+				[
+					"Packages/C++/C++ Single File.sublime-build",
+					"Run"
+				],
+				[
+					"Packages/User/cpp.sublime-build",
+					""
+				]
+			],
+			[
+				"Packages/C++/C++ Single File.sublime-build",
+				""
+			]
+		],
+		[
+			[
+				[
+					"Packages/C++/C++ Single File.sublime-build",
+					""
+				],
+				[
+					"Packages/C++/C++ Single File.sublime-build",
+					"Run"
+				],
+				[
+					"Packages/User/gcc.sublime-build",
+					""
+				]
+			],
+			[
+				"Packages/C++/C++ Single File.sublime-build",
+				""
+			]
+		],
+		[
+			[
+				[
+					"Packages/Python/Python.sublime-build",
+					""
+				],
+				[
+					"Packages/Python/Python.sublime-build",
+					"Syntax Check"
+				]
+			],
+			[
+				"Packages/Python/Python.sublime-build",
+				""
+			]
+		],
+		[
+			[
+				[
+					"Packages/Python/Python.sublime-build",
+					""
+				],
+				[
+					"Packages/Python/Python.sublime-build",
+					"Syntax Check"
+				],
+				[
+					"Packages/User/cpp.sublime-build",
+					""
+				]
+			],
+			[
+				"Packages/Python/Python.sublime-build",
+				""
+			]
+		]
+	],
+	"build_varint": "",
+	"command_palette":
+	{
+		"height": 92.0,
+		"last_filter": "install pa",
+		"selected_items":
+		[
+			[
+				"install pa",
+				"Package Control: Install Package"
+			],
+			[
+				"package control in",
+				"Package Control: Install Package"
+			],
+			[
+				"package co",
+				"Package Control: List Packages"
+			],
+			[
+				"package",
+				"Install Package Control"
+			]
+		],
+		"width": 449.0
+	},
+	"console":
+	{
+		"height": 0.0,
+		"history":
+		[
+		]
+	},
+	"distraction_free":
+	{
+		"menu_visible": true,
+		"show_minimap": false,
+		"show_open_files": false,
+		"show_tabs": false,
+		"side_bar_visible": false,
+		"status_bar_visible": false
+	},
+	"expanded_folders":
+	[
+		"/home/dvida/source/RMS"
+	],
+	"file_history":
+	[
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Utils/Earth.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Utils/SolarLongitude.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Trajectory/Orbit.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Formats/Milig.py",
+		"/home/dvida/source/RMS/Utils/FRbinViewer.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Trajectory/Trajectory.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/MetSim/FitSim.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/MetSim/MetalMass.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/CAMO/MirfitMonteCarlo.py",
+		"/home/dvida/Dropbox/UWO Master's/other/2017-04-10 supervisor meeting agenda.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/README.md",
+		"/home/dvida/source/QueuedPool/QueuedPool.py",
+		"/home/dvida/source/RMS/RMS/Routines/MaskImage.py",
+		"/home/dvida/source/RMS/RMS/Misc.py",
+		"/home/dvida/source/RMS/RMS/ExtractStars.py",
+		"/home/dvida/source/RMS/RMS/Detection.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20161007_052346_mir/20161007_052346_report.txt",
+		"/home/dvida/source/RMS/RMS/QueuedPool.py",
+		"/home/dvida/source/RMS/RMS/Formats/FTPdetectinfo.py",
+		"/home/dvida/source/RMS/RMS/Formats/CALSTARS.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/.git/config",
+		"/home/dvida/Dropbox/UWO Master's/Projects/RPi station/QueuedPool.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/RPi station/multiprocessing_pool_queue_test.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/RPi station/multiprocessing_test.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/MirfitPrepare.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/MetalPrepare.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/.gitignore",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/requirements.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/test.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/PyLIG report format.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/RPi station/parts_list.txt",
+		"/home/dvida/Desktop/krizy/20110204_232040_report.txt",
+		"/home/dvida/source/RMS/RMS/DetectStarsAndMeteors.py",
+		"/media/dvida/7083-A8D0/vida dokumenti/lozinka.txt",
+		"/home/dvida/Desktop/krizy (copy)/20110204_232040_report.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20161007_052749_mir/20161007_052749_report.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MetalPrepare/MetalPrepare.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/RPi station/RPi Video test scripts/video_test.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/RPi station/RPi Video test scripts/video_init.sh",
+		"/home/dvida/source/RMS/RMS/Compression.py",
+		"/home/dvida/source/RMS/RMS/VideoExtraction.py",
+		"/home/dvida/source/RMS/RMS/Formats/FRbin.py",
+		"/home/dvida/source/RMS/RMS/StartCapture.py",
+		"/home/dvida/source/RMS/RMS/BufferedCapture.py",
+		"/home/dvida/source/RMS/RMS/ConfigReader.py",
+		"/home/dvida/source/cmn_binviewer/.gitignore",
+		"/home/dvida/Desktop/milig_inputs/20110204_232040_report.txt",
+		"/home/dvida/Desktop/PyLIG_in_2011100809DUI0066/20111008_032811_report.txt",
+		"/home/dvida/Desktop/PyLIG_in_2011100809VIB0141/PyLIG_in_2011100809VIB0141.txt",
+		"/home/dvida/Desktop/milig_inputs/PyLIG_in_2011100809VIB0141.txt",
+		"/home/dvida/Desktop/PyLIG_in_2011100809VIB0142/20111008_033159_report.txt",
+		"/home/dvida/Desktop/milig_inputs/PyLIG¸_in_2011100809VIB0142.txt",
+		"/home/dvida/Desktop/milig_inputs/PyLIG_in_2011100809DUI0066.txt",
+		"/home/dvida/Desktop/milig_inputs/PyLIG_in_2011100809VIB0142.txt",
+		"/home/dvida/Desktop/milig_inputs/PyLIG_in_2011100809PUB0030.txt",
+		"/tmp/mozilla_dvida0/fancyarrow_demo-1.py",
+		"/home/dvida/Desktop/PyLIG_in_2011100809PUB0030.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20161007_052749_met/state.met",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20161007_052749_mir/state.met",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/test.py",
+		"/home/dvida/Desktop/input_krizy_01.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20161007_052749_mir/input_00.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20161007_052749_met/20161007_052746_met.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Utils/PlotOrbits.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Utils/Plotting.py",
+		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 9/L9_lecture.py",
+		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 9/PyDomainParallelizer.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/20160929_062945_mir_dump.txt",
+		"/home/dvida/Desktop/PyLIG report format.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20161007_052346_mir/zmili_00.txt",
+		"/home/dvida/source/meteor-uwo/morb/morbgeo.c",
+		"/home/dvida/source/meteor-uwo/perseid/utils/epoch.c",
+		"/home/dvida/source/meteor-uwo/perseid/utils/orbit.c",
+		"/home/dvida/source/meteor-uwo/perseid/utils/conv.c",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20160929_062945_mir/zmili_00.txt",
+		"/home/dvida/Desktop/test.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Trajectory/lib/TrajectorySolution.c",
+		"/home/dvida/github-codes/RMS/RMS/Compression.py",
+		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 8/L8_lecture.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/MetSim/native/met_calculate.h",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/MetSim/native/met_calculate.cpp",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/MetSim/Metsim0001_input.txt",
+		"/tmp/mozilla_dvida0/mmc8.txt",
+		"/home/dvida/Desktop/ParseTextFile.py",
+		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 7/TextFileParser.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Config.py",
+		"/home/dvida/Desktop/PlotOrbits.py",
+		"/home/dvida/source/mirfit-uwo/mirfit/main.h",
+		"/home/dvida/Desktop/krizevci_COORDIN.DAT",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Trajectory/GuralTrajectory.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/CMN/CMNFormats.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/CMN/CMNCalcTrajectory.py",
+		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 7/L7_lecture.py",
+		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 6/L6_lecture.py",
+		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 6/Task 1/L6_T1_solution.py",
+		"/home/dvida/Dropbox/HMM_backup/DMG - PyOpenCL Meteoroids Dynamical Modelling/Planets.py",
+		"/home/dvida/Dropbox/HMM_backup/DMG - PyOpenCL Meteoroids Dynamical Modelling/RADAU/RADAU15.py",
+		"/home/dvida/Dropbox/HMM_backup/DMG - PyOpenCL Meteoroids Dynamical Modelling/TO DO.txt",
+		"/home/dvida/Dropbox/HMM_backup/DMG - PyOpenCL Meteoroids Dynamical Modelling/planetPositions.py",
+		"/home/dvida/meteor/share/perseid/VSOP87D.ear",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Utils/PyDomainParallelizer.py",
+		"/home/dvida/github-codes/PyDomainParallelizer/PyDomainParallelizer.py",
+		"/home/dvida/Dropbox/HMM_backup/HMM_DBSCAN_ShowerSearch/DomainParallelizer.py",
+		"/home/dvida/Desktop/state.met",
+		"/home/dvida/Dropbox/UWO Master's/Projects/OPTICS meteor clustering/cyOPTICS.pyx",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/MetSim/MetToSim.py",
+		"/home/dvida/Dropbox/UWO Master's/Projects/RPi station/installing_RTC.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20170303_055055_mir/zmili_00.txt",
+		"/home/dvida/source/meteor-uwo/orbits2/mpsgen.c",
+		"/home/dvida/source/meteor-uwo/morb/morbhelp.sh",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20161009_064237_mir/zmili_00.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/CMN/cmn_fireball_2017030506/M_2017030506APO0001.txt",
+		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 5/L5_lecture.py",
+		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 5/Homework 2/L5_homework2_solution.py",
+		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 5/Homework 2/L5_homework_solution.py",
+		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 5/Homework 1/L5_homework_ulam_spiral.py",
+		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 6/Task 1/meteor_data.txt",
+		"/tmp/mozilla_dvida0/M_2017030506APO0001.inf",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20170303_055055_mir/ev_20170303_055055A_01T.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20161007_052749_mir/zmili_00.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20170219_055047_mir/zmili_00.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20160929_062945_mir/state.met",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/MetSim/test_out.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Trajectory/lib/TrajectorySolution.h",
+		"/home/dvida/source/meteor-uwo/mosaic/mirchk.c",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20170214_013129_mir/ev_20170214_013129A_01T.txt",
+		"/home/dvida/Desktop/20170219_055047_mir/ev_20170219_055047A_02K.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/mirchk_test_command.txt"
+	],
+	"find":
+	{
+		"height": 34.0
+	},
+	"find_in_files":
+	{
+		"height": 90.0,
+		"where_history":
+		[
+			"/home/dvida/source/meteor-uwo/",
+			"/home/dvida/source/meteor-uwo/perseid",
+			"/home/dvida/Dropbox/HMM_backup",
+			"/home/dvida/source/meteor-uwo/",
+			"/home/dvida/source/meteor-uwo/morb",
+			"/home/dvida/source/meteor-weryk-mirfit/",
+			"/home/dvida/source/meteor-weryk-mirfit/mirfit",
+			"/home/dvida/source/meteor-weryk-mirfit/",
+			"/home/dvida/source/meteor-weryk-mirfit/mirfit",
+			"/home/dvida/source/main/meteor-uwo",
+			"/home/dvida/source/meteor-mirfit-new/",
+			"/home/dvida/source/meteor-mirfit-new/mirfit",
+			"/home/dvida/source/meteor-uwo/starmap/",
+			"/home/dvida/source/meteor-uwo/",
+			"/home/dvida/source/meteor-uwo/starmap",
+			"/home/dvida/source/meteor-mirfit-new",
+			"/home/dvida/source/meteor-uwo/",
+			"/home/dvida/source/meteor-mirfit-new/",
+			"/home/dvida/source/meteor-mirfit-new/mirfit",
+			"/home/dvida/source/meteor-mirfit-new"
+		]
+	},
+	"find_state":
+	{
+		"case_sensitive": false,
+		"find_history":
+		[
+			"print",
+			"Arra",
+			"image and",
+			"workpool",
+			"ff_dir",
+			"data_di",
+			"reassignCores",
+			"config.",
+			"densit",
+			"warning",
+			"ErrorStatus",
+			"destionation",
+			"mircal",
+			"errno",
+			"mkdirP",
+			"working_dir_suffix",
+			"data_path",
+			"work_dir",
+			"rend_ele",
+			"ecef_",
+			"ecef_y",
+			"ecef_",
+			"ecef_avg",
+			"la_su",
+			"extractor",
+			".start",
+			".writ",
+			".write",
+			"write",
+			"extractni",
+			"extractnih",
+			"formateve",
+			".fps",
+			"part_len",
+			"_len",
+			"quart_len",
+			"sim_len_interpol_full",
+			"first_sim_at_obs",
+			"residual",
+			"sim_time",
+			"sim_length",
+			"sim_height",
+			"modelled",
+			"line",
+			"dir",
+			"lon_av",
+			"ObservedPoin",
+			"infill",
+			"quart_size",
+			"estimateti",
+			"jacch",
+			"met.m_init",
+			"inf",
+			"scale",
+			"starpic",
+			"sim",
+			"x_heights",
+			"sqrt",
+			"traj_pickle",
+			"zc",
+			"multiproc",
+			"savepl",
+			"output_d",
+			"dir_pa",
+			"true_an",
+			"show_pl",
+			"intersection_list",
+			"4",
+			"3",
+			"7",
+			"offse",
+			"pass",
+			"copy",
+			"time_data",
+			"weight",
+			"infilltra",
+			"infill",
+			"rms",
+			"line",
+			"obs.time_data",
+			"obs.length",
+			"ax1",
+			"simgoo",
+			"plt",
+			"veloci",
+			"a",
+			"init_mass",
+			"print_str",
+			"x",
+			"z",
+			"squared_diff",
+			"length",
+			"model_interpol_full",
+			"simgoo",
+			"test",
+			"ang",
+			"test",
+			"R_ear",
+			"half",
+			"quart_len",
+			"simgood",
+			"_corr",
+			"orbit",
+			"t1",
+			"runMet",
+			"runMetSi",
+			"< ",
+			"results_l",
+			"jd2",
+			"(float)",
+			"mor",
+			"rcamera_eci[",
+			"  ",
+			"   ",
+			"  ",
+			",",
+			"  ",
+			"   ",
+			"  ",
+			"    ",
+			"   ",
+			"  ",
+			"    ",
+			"   ",
+			"print(",
+			"print('solu",
+			"top_solution",
+			"'"
+		],
+		"highlight": true,
+		"in_selection": false,
+		"preserve_case": false,
+		"regex": false,
+		"replace_history":
+		[
+			"]",
+			"[",
+			"hv -",
+			"hu -",
+			"",
+			" ",
+			"",
+			"self.ax",
+			"cos",
+			"sin",
+			"cartesianDistance"
+		],
+		"reverse": false,
+		"show_context": true,
+		"use_buffer2": true,
+		"whole_word": false,
+		"wrap": true
+	},
+	"groups":
+	[
+		{
+			"selected": 0,
+			"sheets":
+			[
+				{
+					"buffer": 0,
+					"file": "Utils/FRbinViewer.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 3279,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								0,
+								0
+							]
+						],
+						"settings":
+						{
+							"git_gutter_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax"
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 0,
+					"type": "text"
+				}
+			]
+		}
+	],
+	"incremental_find":
+	{
+		"height": 23.0
+	},
+	"input":
+	{
+		"height": 0.0
+	},
+	"layout":
+	{
+		"cells":
+		[
+			[
+				0,
+				0,
+				1,
+				1
+			]
+		],
+		"cols":
+		[
+			0.0,
+			1.0
+		],
+		"rows":
+		[
+			0.0,
+			1.0
+		]
+	},
+	"menu_visible": true,
+	"output.exec":
+	{
+		"height": 149.0
+	},
+	"output.find_results":
+	{
+		"height": 0.0
+	},
+	"pinned_build_system": "",
+	"project": "RMS.sublime-project",
+	"replace":
+	{
+		"height": 42.0
+	},
+	"save_all_on_build": true,
+	"select_file":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_project":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_symbol":
+	{
+		"height": 392.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 392.0
+	},
+	"selected_group": 0,
+	"settings":
+	{
+	},
+	"show_minimap": true,
+	"show_open_files": false,
+	"show_tabs": true,
+	"side_bar_visible": true,
+	"side_bar_width": 150.0,
+	"status_bar_visible": true,
+	"template_settings":
+	{
+	}
+}
