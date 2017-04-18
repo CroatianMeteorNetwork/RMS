@@ -370,7 +370,8 @@ if __name__ == "__main__":
     if cml_args.duration:
 
         try:
-            duration = float(cml_args.duration)
+            # Get the duration in seconds
+            duration = float(cml_args.duration)*60*60
 
         except:
             log.error('Given duration is not a proper number of hours!')
@@ -388,10 +389,10 @@ if __name__ == "__main__":
 
 
 
-        log.info("Running for " + str(duration) + ' hours...')
+        log.info("Running for " + str(duration/60/60) + ' hours...')
 
         # Run the capture for the given number of hours
-        runCapture(config, duration=duration*60*60)
+        runCapture(config, duration=duration)
 
         sys.exit()
 
