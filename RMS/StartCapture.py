@@ -228,6 +228,8 @@ def runCapture(config, duration=None, video_file=None):
     ff_detected = []
 
 
+    log.info('Collecting results...')
+
     # Get the detection results from the queue
     detection_results = detector.getResults()
 
