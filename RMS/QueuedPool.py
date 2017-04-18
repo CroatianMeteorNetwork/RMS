@@ -197,6 +197,19 @@ class QueuedPool(object):
         self.input_queue.put(job)
 
 
+    def allDone(self):
+        """ If all jobs are done, return True.
+        """
+
+        if self.output_queue.qsize() == self.total_jobs.value():
+            return True
+
+        else:
+            return False
+
+
+
+
 
     def getResults(self):
         """ Get the results from the output queue and store them in a list. The output list will be returned. 

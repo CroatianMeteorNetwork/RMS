@@ -198,14 +198,19 @@ def runCapture(config, duration=None, video_file=None):
 
     log.info('Finishing up the detection, ' + str(detector.input_queue.qsize()) + ' files to process...')
 
+    # If there are some more files to process, preocess them on more cores
+    if not detector.allDone():
 
-    # Let the detector use all cores, but leave 1 free
-    available_cores = multiprocessing.cpu_count()
-    if available_cores > 1:
-        detector.updateCoreNumber(available_cores - 1)
+        # Let the detector use all cores, but leave 1 free
+        available_cores = multiprocessing.cpu_count()
+        if available_cores > 1:
+            detector.updateCoreNumber(available_cores - 1)
+
 
     # Reset the Ctrl+C to KeyboardInterrupt
     resetSIGINT()
+
+    log.info('Closing the detection thread...')
 
     # Wait for the detector to finish and close it
     detector.closePool()
