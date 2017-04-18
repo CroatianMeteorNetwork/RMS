@@ -226,6 +226,15 @@ def runCapture(config, duration=None, video_file=None):
     # Get the detection results from the queue
     detection_results = detector.getResults()
 
+    # Count the number of detected meteors
+    meteors_num = 0
+    for _, _, meteor_data in detection_results:
+        for meteor in meteor_data:
+            meteors_num += 1
+
+    log.info(str(meteors_num) + ' detected meteors.')
+
+
     # Save the detections to a file
     for ff_name, star_data, meteor_data in detection_results:
 
