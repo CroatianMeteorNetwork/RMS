@@ -4,6 +4,26 @@
 		"selected_items":
 		[
 			[
+				"out",
+				"output"
+			],
+			[
+				"val",
+				"value\tfunction"
+			],
+			[
+				"ki",
+				"kill_workers\tstatement"
+			],
+			[
+				"kill",
+				"kill_workers"
+			],
+			[
+				"cl",
+				"clock\tfunction"
+			],
+			[
 				"rest",
 				"resetSIGINT\tfunction"
 			],
@@ -340,10 +360,6 @@
 				"plane_intersection\tforstmt"
 			],
 			[
-				"out",
-				"out_str\tstatement"
-			],
-			[
 				"plane_",
 				"plane_intersection"
 			],
@@ -498,22 +514,6 @@
 			[
 				"m_m",
 				"m_mass_scale\tstatement"
-			],
-			[
-				"m_",
-				"m_mass\tstatement"
-			],
-			[
-				"ini",
-				"init_mass\tstatement"
-			],
-			[
-				"min",
-				"minimize\tfunction"
-			],
-			[
-				"refine",
-				"refineSearchMetSim\tfunction"
 			]
 		]
 	},
@@ -524,6 +524,32 @@
 			"settings":
 			{
 				"buffer_size": 3279,
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/QueuedPool.py",
+			"settings":
+			{
+				"buffer_size": 6846,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/StartCapture.py",
+			"settings":
+			{
+				"buffer_size": 13353,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "/home/dvida/Desktop/test.txt",
+			"settings":
+			{
+				"buffer_size": 9,
 				"line_ending": "Unix"
 			}
 		}
@@ -668,7 +694,8 @@
 	},
 	"expanded_folders":
 	[
-		"/home/dvida/source/RMS"
+		"/home/dvida/source/RMS",
+		"/home/dvida/source/RMS/RMS"
 	],
 	"file_history":
 	[
@@ -993,7 +1020,7 @@
 	"groups":
 	[
 		{
-			"selected": 0,
+			"selected": 3,
 			"sheets":
 			[
 				{
@@ -1017,6 +1044,118 @@
 						{
 							"git_gutter_enabled": true,
 							"syntax": "Packages/Python/Python.sublime-syntax"
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 3,
+					"type": "text"
+				},
+				{
+					"buffer": 1,
+					"file": "RMS/QueuedPool.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 6846,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								5614,
+								5614
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 2565.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 2,
+					"type": "text"
+				},
+				{
+					"buffer": 2,
+					"file": "RMS/StartCapture.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 13353,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								6121,
+								6121
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 2928.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 1,
+					"type": "text"
+				},
+				{
+					"buffer": 3,
+					"file": "/home/dvida/Desktop/test.txt",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 9,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								0,
+								0
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/Text/Plain text.tmLanguage"
 						},
 						"translation.x": 0.0,
 						"translation.y": 0.0,

@@ -18,6 +18,7 @@ import sys
 import os
 import time
 import datetime
+import logging
 
 # RMS imports
 import RMS.ConfigReader as cr
@@ -26,6 +27,10 @@ from RMS.Formats import FTPdetectinfo
 from RMS.Formats import CALSTARS
 from RMS.ExtractStars import extractStars
 from RMS.Detection import detectMeteors
+
+
+# Get the logger from the main module
+log = logging.getLogger("logger")
 
 
 def detectStarsAndMeteors(ff_directory, ff_name, config):
@@ -45,7 +50,7 @@ def detectStarsAndMeteors(ff_directory, ff_name, config):
     # Run star extraction on the FF bin
     star_list = extractStars(ff_directory, ff_name, config)
 
-    print 'N STARS:', len(star_list[0])
+    log.info('Detected stars: ' + str(len(star_list[0])))
 
     # Run meteor detection if there are enough stars on the image
     if len(star_list[0]) >= config.ff_min_stars:
