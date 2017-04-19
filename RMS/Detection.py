@@ -1196,9 +1196,6 @@ def detectMeteors(ff_directory, ff_name, config):
             # plt.show()
             # plt.clf() 
             # plt.close()
-
-
-    log.debug(ff_name + ' detected meteors: ' + str(len(meteor_detections)))
     
     return meteor_detections
 

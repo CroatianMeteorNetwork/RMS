@@ -54,9 +54,16 @@ def detectStarsAndMeteors(ff_directory, ff_name, config):
 
     # Run meteor detection if there are enough stars on the image
     if len(star_list[0]) >= config.ff_min_stars:
+
+        log.debug('More than ' + str(config.ff_min_stars) + ' stars, detecting meteors...')
+
         meteor_list = detectMeteors(ff_directory, ff_name, config)
+
+        log.debug(ff_name + ' detected meteors: ' + str(len(meteor_list)))
+
     else:
         meteor_list = []
+
 
     return ff_name, star_list, meteor_list
 

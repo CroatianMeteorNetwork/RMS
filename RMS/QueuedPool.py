@@ -64,9 +64,10 @@ class QueuedPool(object):
 
         self.cores = SafeValue(cores)
 
-        # Initialize queues
-        self.input_queue = multiprocessing.Queue()
-        self.output_queue = multiprocessing.Queue()
+        # Initialize queues (for some reason queues from Manager need to be created, otherwise they are 
+        # blocking when using get_nowait)
+        self.input_queue = multiprocessing.Manager().Queue()
+        self.output_queue = multiprocessing.Manager().Queue()
 
         self.func = func
         self.pool = None
@@ -142,7 +143,7 @@ class QueuedPool(object):
                     self.pool.terminate()
                     self.pool.join()
 
-                    return
+                    break
 
                 else:
                     time.sleep(0.01)
@@ -221,11 +222,10 @@ class QueuedPool(object):
         if not self.output_queue.empty():
             while True:
                 try:
-                    results.append(self.output_queue.get(False))
+                    results.append(self.output_queue.get_nowait())
                 except:
                     break
             
-
         return results
 
 
