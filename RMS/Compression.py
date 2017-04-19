@@ -19,7 +19,13 @@ import logging
 
 from math import floor
 
-from scipy import weave
+# New versions of scipy have weave as a separate module
+try:
+    from scipy import weave
+except ImportError:
+    import weave
+
+
 import numpy as np
 import multiprocessing
 

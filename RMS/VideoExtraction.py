@@ -14,13 +14,23 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from multiprocessing import Process, Event
-import numpy as np
-from scipy import weave, stats
-from RMS.Routines import Grouping3D
+
+
 from math import floor, sqrt, ceil
 import time
 import logging
+from multiprocessing import Process, Event
+
+# New versions of scipy have weave as a separate module
+try:
+    from scipy import weave
+except ImportError:
+    import weave
+
+import numpy as np
+from scipy import stats
+
+from RMS.Routines import Grouping3D
 from RMS.Formats import FRbin
 
 

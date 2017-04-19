@@ -14,8 +14,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+# New versions of scipy have weave as a separate module
+try:
+    from scipy import weave
+except ImportError:
+    import weave
+
 import cv2
-from scipy import weave
 import numpy as np
 from RMS import ConfigReader
 
