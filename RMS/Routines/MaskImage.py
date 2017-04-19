@@ -15,8 +15,16 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
+import logging
+
 import numpy as np
 from scipy import misc
+
+
+# Get the logger from the main module
+log = logging.getLogger("logger")
+
+
 
 def loadMask(mask_file):
 	""" Load the mask image. """
@@ -40,7 +48,7 @@ def maskImage(input_image, mask):
 
 	# If the image dimensions don't agree, dont apply the mask
 	if input_image.shape != mask.shape:
-		print 'Image and mask dimensions do not agree! Skipping masking...'
+		log.warning('Image and mask dimensions do not agree! Skipping masking...')
 		return input_image
 
 	# Set all image pixels where the mask is black to 0

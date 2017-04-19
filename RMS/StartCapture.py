@@ -341,18 +341,22 @@ if __name__ == "__main__":
     log = logging.getLogger('logger')
     log.setLevel(logging.INFO)
     log.setLevel(logging.DEBUG)
+    log.setLevel(logging.WARNING)
+    log.setLevel(logging.ERROR)
 
     # Make a new log file each day
     handler = logging.handlers.TimedRotatingFileHandler(log_file_name, when='D', interval=1) 
     handler.setLevel(logging.INFO)
     handler.setLevel(logging.DEBUG)
+    handler.setLevel(logging.WARNING)
+    handler.setLevel(logging.ERROR)
 
     # Set the log formatting
     formatter = logging.Formatter(fmt='%(asctime)s-%(levelname)s-%(module)s-line:%(lineno)d - %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     handler.setFormatter(formatter)
     log.addHandler(handler)
 
-    # Stream all logs to stdout as wll
+    # Stream all logs to stdout as well
     ch = logging.StreamHandler(sys.stdout)
     ch.setLevel(logging.DEBUG)
     formatter = logging.Formatter(fmt='%(asctime)s-%(levelname)s-%(module)s-line:%(lineno)d - %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
