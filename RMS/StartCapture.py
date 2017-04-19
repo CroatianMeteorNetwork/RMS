@@ -319,13 +319,15 @@ if __name__ == "__main__":
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description=""" Starting the capture and compression.
+    arg_parser = argparse.ArgumentParser(description=""" Starting capture and compression.
         """)
 
-    arg_parser.add_argument('-d', '--duration', metavar='DURATION_HOURS', help="""Start capturing right away, 
-        with the given duration in hours. """)
+    # Add a mutually exclusive for the parser (the arguments in the group can't be given at the same)
+    arg_group = arg_parser.add_mutually_exclusive_group()
 
-    arg_parser.add_argument('-i', '--input', metavar='FILE_PATH', help="""Use video from the given file, 
+    arg_group.add_argument('-d', '--duration', metavar='DURATION_HOURS', help="""Start capturing right away, 
+        with the given duration in hours. """)
+    arg_group.add_argument('-i', '--input', metavar='FILE_PATH', help="""Use video from the given file, 
         not from a video device. """)
 
     # Parse the command line arguments
@@ -341,15 +343,11 @@ if __name__ == "__main__":
     log = logging.getLogger('logger')
     log.setLevel(logging.INFO)
     log.setLevel(logging.DEBUG)
-    log.setLevel(logging.WARNING)
-    log.setLevel(logging.ERROR)
 
     # Make a new log file each day
     handler = logging.handlers.TimedRotatingFileHandler(log_file_name, when='D', interval=1) 
     handler.setLevel(logging.INFO)
     handler.setLevel(logging.DEBUG)
-    handler.setLevel(logging.WARNING)
-    handler.setLevel(logging.ERROR)
 
     # Set the log formatting
     formatter = logging.Formatter(fmt='%(asctime)s-%(levelname)s-%(module)s-line:%(lineno)d - %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
