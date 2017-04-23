@@ -4,52 +4,44 @@
 		"selected_items":
 		[
 			[
-				"in",
-				"info"
+				"WAR",
+				"WARNING\tstatement"
 			],
 			[
-				"ff",
-				"ff_name\tparam"
+				"WA",
+				"WARNING\tstatement"
 			],
 			[
-				"log",
-				"log_str\tparam"
+				"all",
+				"allDone\tfunction"
 			],
 			[
-				"abso",
-				"absolute_import\tstatement"
+				"out",
+				"output_queue\tstatement"
 			],
 			[
-				"time",
-				"timeout\tparam"
+				"val",
+				"value\tfunction"
+			],
+			[
+				"ki",
+				"kill_workers\tstatement"
 			],
 			[
 				"kill",
-				"kill_tries\tstatement"
+				"kill_workers"
 			],
 			[
-				"live",
-				"live_view\tstatement"
-			],
-			[
-				"exi",
-				"exited\tstatement"
-			],
-			[
-				"is",
-				"is_alive"
-			],
-			[
-				"loc",
-				"lock"
-			],
-			[
-				"set",
-				"setSIGINT"
+				"cl",
+				"clock\tfunction"
 			],
 			[
 				"rest",
 				"resetSIGINT\tfunction"
+			],
+			[
+				"set",
+				"setSIGINT\tfunction"
 			],
 			[
 				"sig",
@@ -86,6 +78,10 @@
 			[
 				"pri",
 				"print_function\tstatement"
+			],
+			[
+				"ff",
+				"ff_list\tstatement"
 			],
 			[
 				"v_ini",
@@ -268,6 +264,10 @@
 				"mag_abs"
 			],
 			[
+				"time",
+				"time_mags\tstatement"
+			],
+			[
 				"qu",
 				"quart_len\tstatement"
 			],
@@ -370,10 +370,6 @@
 			[
 				"plane",
 				"plane_intersection\tforstmt"
-			],
-			[
-				"out",
-				"out_str\tstatement"
 			],
 			[
 				"plane_",
@@ -514,18 +510,21 @@
 			[
 				"deg",
 				"degrees\tinstance"
+			],
+			[
+				"tru",
+				"true_anomaly\tstatement"
 			]
 		]
 	},
 	"buffers":
 	[
 		{
-			"file": "RMS/StartCapture.py",
+			"file": "Utils/FRbinViewer.py",
 			"settings":
 			{
-				"buffer_size": 13612,
-				"encoding": "UTF-8",
-				"line_ending": "Windows"
+				"buffer_size": 3279,
+				"line_ending": "Unix"
 			}
 		},
 		{
@@ -538,87 +537,52 @@
 			}
 		},
 		{
-			"file": "RMS/DetectStarsAndMeteors.py",
+			"file": "RMS/StartCapture.py",
 			"settings":
 			{
-				"buffer_size": 4916,
-				"encoding": "UTF-8",
-				"line_ending": "Unix"
-			}
-		},
-		{
-			"file": "RMS/Detection.py",
-			"settings":
-			{
-				"buffer_size": 40873,
-				"encoding": "UTF-8",
-				"line_ending": "Unix"
-			}
-		},
-		{
-			"file": "RMS/LiveViewer.py",
-			"settings":
-			{
-				"buffer_size": 3745,
-				"encoding": "UTF-8",
-				"line_ending": "Unix"
-			}
-		},
-		{
-			"file": "RMS/CaptureDuration.py",
-			"settings":
-			{
-				"buffer_size": 2049,
+				"buffer_size": 13779,
 				"encoding": "UTF-8",
 				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "/home/dvida/Desktop/UWO Master's/Projects/MirfitPrepare/MirfitPrepare.py",
+			"settings":
+			{
+				"buffer_size": 41886,
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/VideoExtraction.py",
+			"settings":
+			{
+				"buffer_size": 18201,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
 			}
 		},
 		{
 			"file": "RMS/Compression.py",
 			"settings":
 			{
-				"buffer_size": 10555,
+				"buffer_size": 10659,
 				"encoding": "UTF-8",
 				"line_ending": "Windows"
 			}
 		},
 		{
-			"file": "RMS/BufferedCapture.py",
+			"file": "RMS/DetectStarsAndMeteors.py",
 			"settings":
 			{
-				"buffer_size": 4519,
-				"encoding": "UTF-8",
-				"line_ending": "Windows"
+				"buffer_size": 4916,
+				"line_ending": "Unix"
 			}
 		}
 	],
-	"build_system": "Anaconda Python Builder",
+	"build_system": "",
 	"build_system_choices":
 	[
-		[
-			[
-				[
-					"Anaconda Python Builder",
-					""
-				],
-				[
-					"Packages/Python/Python.sublime-build",
-					""
-				],
-				[
-					"Packages/Python/Python.sublime-build",
-					"Syntax Check"
-				],
-				[
-					"Packages/User/cpp.sublime-build",
-					""
-				]
-			],
-			[
-				"Anaconda Python Builder",
-				""
-			]
-		],
 		[
 			[
 				[
@@ -716,13 +680,9 @@
 	"command_palette":
 	{
 		"height": 92.0,
-		"last_filter": "remove ",
+		"last_filter": "install pa",
 		"selected_items":
 		[
-			[
-				"remove ",
-				"Package Control: Remove Package"
-			],
 			[
 				"install pa",
 				"Package Control: Install Package"
@@ -740,7 +700,7 @@
 				"Install Package Control"
 			]
 		],
-		"width": 467.0
+		"width": 449.0
 	},
 	"console":
 	{
@@ -761,31 +721,20 @@
 	"expanded_folders":
 	[
 		"/home/dvida/source/RMS",
-		"/home/dvida/source/RMS/RMS"
+		"/home/dvida/source/RMS/RMS",
+		"/home/dvida/source/RMS/RMS/Formats"
 	],
 	"file_history":
 	[
-		"/tmp/mozilla_dvida0/vidaICARUS2017_104asher.txt",
-		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 2/L2_example1.py",
-		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 1/L1_lecture.py",
-		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 10/L10_lecture.py",
-		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 9/L9_lecture.py",
-		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 8/L8_lecture.py",
-		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 7/L7_lecture.py",
-		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 6/L6_lecture.py",
-		"/home/dvida/Desktop/test.py",
-		"/home/dvida/.config/sublime-text-3/Packages/User/Anaconda.sublime-settings",
-		"/home/dvida/.config/sublime-text-3/Packages/Anaconda/Anaconda.sublime-settings",
-		"/home/dvida/source/RMS/RMS.sublime-project",
-		"/home/dvida/.config/sublime-text-3/Packages/Package Control/Package Control.sublime-settings",
-		"/home/dvida/.config/sublime-text-3/Packages/User/Side Bar.sublime-settings",
-		"/home/dvida/.config/sublime-text-3/Packages/SideBarEnhancements/Side Bar.sublime-settings",
-		"/home/dvida/.config/sublime-text-3/Packages/User/Python.sublime-settings",
-		"/home/dvida/source/RMS/Utils/FRbinViewer.py",
+		"/home/dvida/source/RMS/RMS/Routines/MaskImage.py",
+		"/home/dvida/source/RMS/RMS/OLD/MorphologicalOperations.py",
+		"/home/dvida/source/RMS/RMS/Routines/MorphologicalOperations.py",
+		"/home/dvida/Desktop/test.txt",
 		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Utils/Earth.py",
 		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Utils/SolarLongitude.py",
 		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Trajectory/Orbit.py",
 		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Formats/Milig.py",
+		"/home/dvida/source/RMS/Utils/FRbinViewer.py",
 		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Trajectory/Trajectory.py",
 		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/MetSim/FitSim.py",
 		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/MetSim/MetalMass.py",
@@ -793,7 +742,6 @@
 		"/home/dvida/Dropbox/UWO Master's/other/2017-04-10 supervisor meeting agenda.txt",
 		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/README.md",
 		"/home/dvida/source/QueuedPool/QueuedPool.py",
-		"/home/dvida/source/RMS/RMS/Routines/MaskImage.py",
 		"/home/dvida/source/RMS/RMS/Misc.py",
 		"/home/dvida/source/RMS/RMS/ExtractStars.py",
 		"/home/dvida/source/RMS/RMS/Detection.py",
@@ -846,6 +794,7 @@
 		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20161007_052749_met/20161007_052746_met.txt",
 		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Utils/PlotOrbits.py",
 		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Utils/Plotting.py",
+		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 9/L9_lecture.py",
 		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 9/PyDomainParallelizer.py",
 		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/20160929_062945_mir_dump.txt",
 		"/home/dvida/Desktop/PyLIG report format.txt",
@@ -855,8 +804,10 @@
 		"/home/dvida/source/meteor-uwo/perseid/utils/orbit.c",
 		"/home/dvida/source/meteor-uwo/perseid/utils/conv.c",
 		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20160929_062945_mir/zmili_00.txt",
+		"/home/dvida/Desktop/test.py",
 		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Trajectory/lib/TrajectorySolution.c",
 		"/home/dvida/github-codes/RMS/RMS/Compression.py",
+		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 8/L8_lecture.py",
 		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/MetSim/native/met_calculate.h",
 		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/MetSim/native/met_calculate.cpp",
 		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/MetSim/Metsim0001_input.txt",
@@ -870,6 +821,8 @@
 		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Trajectory/GuralTrajectory.py",
 		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/CMN/CMNFormats.py",
 		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/CMN/CMNCalcTrajectory.py",
+		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 7/L7_lecture.py",
+		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 6/L6_lecture.py",
 		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 6/Task 1/L6_T1_solution.py",
 		"/home/dvida/Dropbox/HMM_backup/DMG - PyOpenCL Meteoroids Dynamical Modelling/Planets.py",
 		"/home/dvida/Dropbox/HMM_backup/DMG - PyOpenCL Meteoroids Dynamical Modelling/RADAU/RADAU15.py",
@@ -892,7 +845,15 @@
 		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 5/Homework 2/L5_homework2_solution.py",
 		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 5/Homework 2/L5_homework_solution.py",
 		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 5/Homework 1/L5_homework_ulam_spiral.py",
-		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 6/Task 1/meteor_data.txt"
+		"/home/dvida/Dropbox/UWO Master's/Python Immersion Course/Lecture 6/Task 1/meteor_data.txt",
+		"/tmp/mozilla_dvida0/M_2017030506APO0001.inf",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20170303_055055_mir/ev_20170303_055055A_01T.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20161007_052749_mir/zmili_00.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20170219_055047_mir/zmili_00.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20160929_062945_mir/state.met",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/MetSim/test_out.txt",
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Trajectory/lib/TrajectorySolution.h",
+		"/home/dvida/source/meteor-uwo/mosaic/mirchk.c"
 	],
 	"find":
 	{
@@ -903,6 +864,7 @@
 		"height": 90.0,
 		"where_history":
 		[
+			"/home/dvida/source/RMS/RMS",
 			"/home/dvida/source/meteor-uwo/",
 			"/home/dvida/source/meteor-uwo/perseid",
 			"/home/dvida/Dropbox/HMM_backup",
@@ -930,25 +892,9 @@
 		"case_sensitive": false,
 		"find_history":
 		[
-			"detectme",
-			"retu",
-			"signal",
-			"white",
-			"logdeb",
-			"print",
-			"logDe",
-			"print",
-			"/",
-			"self.exited",
-			"lint",
-			"linte",
-			"unus",
-			"self.ext",
-			"event",
-			"process",
-			"stopping con",
-			"self.exit",
-			"time_sec",
+			"maskImage",
+			"image and mask",
+			"weave",
 			"print",
 			"Arra",
 			"image and",
@@ -1057,7 +1003,23 @@
 			"runMetSi",
 			"< ",
 			"results_l",
-			"jd2"
+			"jd2",
+			"(float)",
+			"mor",
+			"rcamera_eci[",
+			"  ",
+			"   ",
+			"  ",
+			",",
+			"  ",
+			"   ",
+			"  ",
+			"    ",
+			"   ",
+			"  ",
+			"    ",
+			"   ",
+			"print("
 		],
 		"highlight": true,
 		"in_selection": false,
@@ -1091,49 +1053,28 @@
 			[
 				{
 					"buffer": 0,
-					"file": "RMS/StartCapture.py",
+					"file": "Utils/FRbinViewer.py",
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 13612,
+						"buffer_size": 3279,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								6189,
-								6189
+								0,
+								0
 							]
 						],
 						"settings":
 						{
-							"auto_complete_triggers":
-							[
-								{
-									"characters": ".",
-									"selector": "source.python - string - comment - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								}
-							],
 							"git_gutter_enabled": true,
-							"syntax": "Packages/Python/Python.sublime-syntax",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
+							"syntax": "Packages/Python/Python.sublime-syntax"
 						},
 						"translation.x": 0.0,
-						"translation.y": 1878.0,
+						"translation.y": 0.0,
 						"zoom_level": 1.0
 					},
 					"stack_index": 2,
@@ -1152,8 +1093,8 @@
 						"selection":
 						[
 							[
-								6119,
-								6119
+								5540,
+								5540
 							]
 						],
 						"settings":
@@ -1167,6 +1108,10 @@
 								{
 									"characters": ".",
 									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
 								}
 							],
 							"git_gutter_enabled": true,
@@ -1175,7 +1120,7 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 1530.0,
+						"translation.y": 0.0,
 						"zoom_level": 1.0
 					},
 					"stack_index": 3,
@@ -1183,19 +1128,19 @@
 				},
 				{
 					"buffer": 2,
-					"file": "RMS/DetectStarsAndMeteors.py",
+					"file": "RMS/StartCapture.py",
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 4916,
+						"buffer_size": 13779,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								1665,
-								1665
+								0,
+								0
 							]
 						],
 						"settings":
@@ -1209,6 +1154,10 @@
 								{
 									"characters": ".",
 									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
 								}
 							],
 							"git_gutter_enabled": true,
@@ -1217,7 +1166,7 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 225.0,
+						"translation.y": 4680.0,
 						"zoom_level": 1.0
 					},
 					"stack_index": 0,
@@ -1225,41 +1174,30 @@
 				},
 				{
 					"buffer": 3,
-					"file": "RMS/Detection.py",
+					"file": "/home/dvida/Desktop/UWO Master's/Projects/MirfitPrepare/MirfitPrepare.py",
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 40873,
+						"buffer_size": 41886,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								27743,
-								27743
+								33416,
+								33416
 							]
 						],
 						"settings":
 						{
-							"auto_complete_triggers":
-							[
-								{
-									"characters": ".",
-									"selector": "source.python - string - comment - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								}
-							],
 							"git_gutter_enabled": true,
 							"syntax": "Packages/Python/Python.sublime-syntax",
 							"tab_size": 4,
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 13355.0,
+						"translation.y": 16097.0,
 						"zoom_level": 1.0
 					},
 					"stack_index": 1,
@@ -1267,19 +1205,19 @@
 				},
 				{
 					"buffer": 4,
-					"file": "RMS/LiveViewer.py",
+					"file": "RMS/VideoExtraction.py",
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 3745,
+						"buffer_size": 18201,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								2907,
-								2907
+								1044,
+								1044
 							]
 						],
 						"settings":
@@ -1301,7 +1239,7 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 1350.0,
+						"translation.y": 0.0,
 						"zoom_level": 1.0
 					},
 					"stack_index": 4,
@@ -1309,19 +1247,19 @@
 				},
 				{
 					"buffer": 5,
-					"file": "RMS/CaptureDuration.py",
+					"file": "RMS/Compression.py",
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 2049,
+						"buffer_size": 10659,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								745,
-								745
+								749,
+								749
 							]
 						],
 						"settings":
@@ -1351,65 +1289,19 @@
 				},
 				{
 					"buffer": 6,
-					"file": "RMS/Compression.py",
+					"file": "RMS/DetectStarsAndMeteors.py",
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 10555,
+						"buffer_size": 4916,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								7814,
-								7814
-							]
-						],
-						"settings":
-						{
-							"auto_complete_triggers":
-							[
-								{
-									"characters": ".",
-									"selector": "source.python - string - comment - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								}
-							],
-							"git_gutter_enabled": true,
-							"syntax": "Packages/Python/Python.sublime-syntax",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 4282.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 7,
-					"type": "text"
-				},
-				{
-					"buffer": 7,
-					"file": "RMS/BufferedCapture.py",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 4519,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								3840,
-								3840
+								1664,
+								1664
 							]
 						],
 						"settings":
@@ -1431,7 +1323,7 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 1305.0,
+						"translation.y": 315.0,
 						"zoom_level": 1.0
 					},
 					"stack_index": 6,
@@ -1521,7 +1413,7 @@
 	"show_open_files": false,
 	"show_tabs": true,
 	"side_bar_visible": true,
-	"side_bar_width": 207.0,
+	"side_bar_width": 150.0,
 	"status_bar_visible": true,
 	"template_settings":
 	{

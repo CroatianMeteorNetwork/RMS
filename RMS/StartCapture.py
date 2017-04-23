@@ -268,7 +268,9 @@ def runCapture(config, duration=None, video_file=None):
             meteor_No += 1
 
 
-        ff_detected.append(ff_name)
+        # Add the FF file to the archive list if a meteor was detected on it
+        if meteor_data:
+            ff_detected.append(ff_name)
 
 
     # Generate the name for the CALSTARS file
