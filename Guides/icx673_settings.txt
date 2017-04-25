@@ -1,0 +1,50 @@
+LENS - MANUAL
+
+SHUTTER/AGC - MANUAL (ENTER)
+             MODE - SHT+AGC
+             SHUTTER - 1/50
+             AGC - 18
+
+WHITE BALLANCE - ANTI CR
+
+BACKLIGHT - OFF
+
+PICT ADJUSTMENT (ENTER)
+          MIRROR - OFF
+          BRIGHTNESS - 0
+          CONTRAST - 255
+          SHARPNESS - 0
+          HUE - 128
+          GAIN - 128
+          DEFOGG - OFF
+
+ATR - OFF
+
+MOTION DETECTION - OFF
+
+.........
+
+Press NEXT
+
+.........
+
+PRIVACY - OFF
+
+DAY/NIGHT - B/W (OFF,OFF,-,-)
+
+NR (ENTER)
+      NR MODE - OFF
+      Y LEVEL - -
+      C LEVEL - -
+
+CAM ID - OFF
+
+SYNC - INT
+
+LANG - ENG
+
+.........
+
+SAVE ALL
+
+EXIT

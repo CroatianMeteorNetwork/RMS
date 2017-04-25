@@ -4,6 +4,18 @@
 		"selected_items":
 		[
 			[
+				"max_w",
+				"max_white_ratio\tparam"
+			],
+			[
+				"white",
+				"white_ratio\tstatement"
+			],
+			[
+				"log_",
+				"log_file_prefix\tparam"
+			],
+			[
 				"WAR",
 				"WARNING\tstatement"
 			],
@@ -502,18 +514,6 @@
 			[
 				"radian_",
 				"radiant_eq_mini"
-			],
-			[
-				"or",
-				"orbit\tstatement"
-			],
-			[
-				"deg",
-				"degrees\tinstance"
-			],
-			[
-				"tru",
-				"true_anomaly\tstatement"
 			]
 		]
 	},
@@ -540,17 +540,9 @@
 			"file": "RMS/StartCapture.py",
 			"settings":
 			{
-				"buffer_size": 13779,
+				"buffer_size": 13016,
 				"encoding": "UTF-8",
 				"line_ending": "Windows"
-			}
-		},
-		{
-			"file": "/home/dvida/Desktop/UWO Master's/Projects/MirfitPrepare/MirfitPrepare.py",
-			"settings":
-			{
-				"buffer_size": 41886,
-				"line_ending": "Unix"
 			}
 		},
 		{
@@ -558,6 +550,15 @@
 			"settings":
 			{
 				"buffer_size": 18201,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/Logger.py",
+			"settings":
+			{
+				"buffer_size": 1994,
 				"encoding": "UTF-8",
 				"line_ending": "Unix"
 			}
@@ -575,7 +576,34 @@
 			"file": "RMS/DetectStarsAndMeteors.py",
 			"settings":
 			{
-				"buffer_size": 4916,
+				"buffer_size": 5064,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/Detection.py",
+			"settings":
+			{
+				"buffer_size": 41091,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": ".config",
+			"settings":
+			{
+				"buffer_size": 7475,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "/home/dvida/Dropbox/UWO Master's/Projects/RPi station/Events/FTPdetectinfo_Events.txt",
+			"settings":
+			{
+				"buffer_size": 6493,
 				"line_ending": "Unix"
 			}
 		}
@@ -726,6 +754,7 @@
 	],
 	"file_history":
 	[
+		"/home/dvida/Desktop/UWO Master's/Projects/MirfitPrepare/MirfitPrepare.py",
 		"/home/dvida/source/RMS/RMS/Routines/MaskImage.py",
 		"/home/dvida/source/RMS/RMS/OLD/MorphologicalOperations.py",
 		"/home/dvida/source/RMS/RMS/Routines/MorphologicalOperations.py",
@@ -852,8 +881,7 @@
 		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20170219_055047_mir/zmili_00.txt",
 		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20160929_062945_mir/state.met",
 		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/MetSim/test_out.txt",
-		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Trajectory/lib/TrajectorySolution.h",
-		"/home/dvida/source/meteor-uwo/mosaic/mirchk.c"
+		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Trajectory/lib/TrajectorySolution.h"
 	],
 	"find":
 	{
@@ -892,6 +920,9 @@
 		"case_sensitive": false,
 		"find_history":
 		[
+			"white_ra",
+			"white",
+			"handle",
 			"maskImage",
 			"image and mask",
 			"weave",
@@ -1016,10 +1047,7 @@
 			"  ",
 			"    ",
 			"   ",
-			"  ",
-			"    ",
-			"   ",
-			"print("
+			"  "
 		],
 		"highlight": true,
 		"in_selection": false,
@@ -1048,7 +1076,7 @@
 	"groups":
 	[
 		{
-			"selected": 2,
+			"selected": 7,
 			"sheets":
 			[
 				{
@@ -1071,13 +1099,15 @@
 						"settings":
 						{
 							"git_gutter_enabled": true,
-							"syntax": "Packages/Python/Python.sublime-syntax"
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
 						"translation.y": 0.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 2,
+					"stack_index": 7,
 					"type": "text"
 				},
 				{
@@ -1123,7 +1153,7 @@
 						"translation.y": 0.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 3,
+					"stack_index": 8,
 					"type": "text"
 				},
 				{
@@ -1132,15 +1162,15 @@
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 13779,
+						"buffer_size": 13016,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								0,
-								0
+								871,
+								871
 							]
 						],
 						"settings":
@@ -1158,6 +1188,10 @@
 								{
 									"characters": ".",
 									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
 								}
 							],
 							"git_gutter_enabled": true,
@@ -1166,45 +1200,14 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 4680.0,
+						"translation.y": 0.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 0,
+					"stack_index": 5,
 					"type": "text"
 				},
 				{
 					"buffer": 3,
-					"file": "/home/dvida/Desktop/UWO Master's/Projects/MirfitPrepare/MirfitPrepare.py",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 41886,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								33416,
-								33416
-							]
-						],
-						"settings":
-						{
-							"git_gutter_enabled": true,
-							"syntax": "Packages/Python/Python.sublime-syntax",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 16097.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 1,
-					"type": "text"
-				},
-				{
-					"buffer": 4,
 					"file": "RMS/VideoExtraction.py",
 					"semi_transient": false,
 					"settings":
@@ -1236,6 +1239,48 @@
 							"git_gutter_enabled": true,
 							"syntax": "Packages/Python/Python.sublime-syntax",
 							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 135.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 6,
+					"type": "text"
+				},
+				{
+					"buffer": 4,
+					"file": "RMS/Logger.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 1994,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								775,
+								775
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_enabled": true,
+							"open_with_edit": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
@@ -1284,7 +1329,7 @@
 						"translation.y": 0.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 5,
+					"stack_index": 9,
 					"type": "text"
 				},
 				{
@@ -1293,15 +1338,61 @@
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 4916,
+						"buffer_size": 5064,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								1664,
-								1664
+								2113,
+								2113
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 483.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 3,
+					"type": "text"
+				},
+				{
+					"buffer": 7,
+					"file": "RMS/Detection.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 41091,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								946,
+								946
 							]
 						],
 						"settings":
@@ -1323,10 +1414,67 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 315.0,
+						"translation.y": 180.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 6,
+					"stack_index": 0,
+					"type": "text"
+				},
+				{
+					"buffer": 8,
+					"file": ".config",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 7475,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								3172,
+								3172
+							]
+						],
+						"settings":
+						{
+							"git_gutter_enabled": true,
+							"syntax": "Packages/Text/Plain text.tmLanguage"
+						},
+						"translation.x": 0.0,
+						"translation.y": 665.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 1,
+					"type": "text"
+				},
+				{
+					"buffer": 9,
+					"file": "/home/dvida/Dropbox/UWO Master's/Projects/RPi station/Events/FTPdetectinfo_Events.txt",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 6493,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								525,
+								525
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/Text/Plain text.tmLanguage"
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 2,
 					"type": "text"
 				}
 			]
@@ -1338,7 +1486,7 @@
 	},
 	"input":
 	{
-		"height": 0.0
+		"height": 31.0
 	},
 	"layout":
 	{
