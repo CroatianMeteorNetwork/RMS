@@ -44,7 +44,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 import RMS.Routines.MorphCy as morph
 
 # If True, all detection details will be logged
-VERBOSE_DEBUG = False
+VERBOSE_DEBUG = True
 
 
 # Get the logger from the main module
@@ -507,8 +507,14 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
 
     # Check if the image is too "white" and any futher processing makes no sense
     # This checks the max percentage of white pixels in the thresholded image
-    if np.count_nonzero(img_thres)/float(ff.nrows*ff.ncols) > max_white_ratio:
+    white_ratio = np.count_nonzero(img_thres)/float(ff.nrows*ff.ncols)
+    if white_ratio > max_white_ratio:
+
+        log.debug(("Too many threshold passers! White ratio is {:.2f}, which is higher than the "\
+            "max_white_ratio threshold: {:.2f}").format(white_ratio, max_white_ratio))
+
         return line_results
+
 
     # Subdivide the image by time into overlapping parts (decreases noise when searching for meteors)
     for i in range(0, int(256/time_slide - 1)):
