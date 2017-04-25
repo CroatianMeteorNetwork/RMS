@@ -59,7 +59,7 @@ def logDebug(*log_str):
 
         log_str = map(str, log_str)
 
-        log.debug(" ".join(*log_str))
+        log.debug(" ".join(log_str))
 
 
 
