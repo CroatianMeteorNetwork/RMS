@@ -78,6 +78,17 @@ if __name__ == "__main__":
     # Load config file
     config = cr.parse(".config")
 
+
+    ### Init the logger
+
+    from RMS.Logger import initLogging
+    initLogging('detection_')
+
+    log = logging.getLogger("logger")
+
+    ######
+
+
     if not len(sys.argv) == 2:
         print "Usage: python -m RMS.ExtractStars /path/to/bin/files/"
         sys.exit()

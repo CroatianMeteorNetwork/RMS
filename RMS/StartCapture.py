@@ -24,11 +24,11 @@ import datetime
 import signal
 import ctypes
 import logging
-import logging.handlers
 import numpy as np
 import multiprocessing
 
 import RMS.ConfigReader as cr
+from RMS.Logger import initLogging
 
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats import CALSTARS
@@ -337,33 +337,12 @@ if __name__ == "__main__":
 
     ######
 
-    ### LOGGING SETUP
 
-    log_file_name = "log_" + datetime.datetime.now().strftime('%Y%m%d_%H%M%S.%f') + ".log"
-        
-    # Init logging
-    log = logging.getLogger('logger')
-    log.setLevel(logging.INFO)
-    log.setLevel(logging.DEBUG)
+    # Initialize the logger
+    initLogging()
 
-    # Make a new log file each day
-    handler = logging.handlers.TimedRotatingFileHandler(log_file_name, when='D', interval=1) 
-    handler.setLevel(logging.INFO)
-    handler.setLevel(logging.DEBUG)
-
-    # Set the log formatting
-    formatter = logging.Formatter(fmt='%(asctime)s-%(levelname)s-%(module)s-line:%(lineno)d - %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
-    handler.setFormatter(formatter)
-    log.addHandler(handler)
-
-    # Stream all logs to stdout as well
-    ch = logging.StreamHandler(sys.stdout)
-    ch.setLevel(logging.DEBUG)
-    formatter = logging.Formatter(fmt='%(asctime)s-%(levelname)s-%(module)s-line:%(lineno)d - %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
-    ch.setFormatter(formatter)
-    log.addHandler(ch)
-
-    ######
+    # Get the logger handle
+    log = logging.getLogger("logger")
 
 
     log.info('Program start')
