@@ -198,6 +198,11 @@ def runCapture(config, duration=None, video_file=None):
 
     log.info('Finishing up the detection, ' + str(detector.input_queue.qsize()) + ' files to process...')
 
+
+    # Reset the Ctrl+C to KeyboardInterrupt
+    resetSIGINT()
+    
+
     # If there are some more files to process, process them on more cores
     if detector.input_queue.qsize() > 0:
 
@@ -209,9 +214,6 @@ def runCapture(config, duration=None, video_file=None):
         if available_cores > 1:
             detector.updateCoreNumber(available_cores)
 
-
-    # Reset the Ctrl+C to KeyboardInterrupt
-    resetSIGINT()
 
     log.info('Closing the detection thread...')
 
