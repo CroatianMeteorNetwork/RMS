@@ -152,7 +152,7 @@ def runCapture(config, duration=None, video_file=None):
 
 
     # Initialize the detector
-    detector = QueuedPool(detectStarsAndMeteors, cores=1)
+    detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log)
     
     # Initialize buffered capture
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file)
@@ -201,7 +201,7 @@ def runCapture(config, duration=None, video_file=None):
 
     # Reset the Ctrl+C to KeyboardInterrupt
     resetSIGINT()
-    
+
 
     # If there are some more files to process, process them on more cores
     if detector.input_queue.qsize() > 0:
@@ -237,6 +237,9 @@ def runCapture(config, duration=None, video_file=None):
 
     # Get the detection results from the queue
     detection_results = detector.getResults()
+
+    # Remove all 'None' results, which were errors
+    detection_results = [res for res in detection_results if res is not None]
 
     # Count the number of detected meteors
     meteors_num = 0

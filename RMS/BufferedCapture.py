@@ -115,6 +115,18 @@ class BufferedCapture(Process):
 
                 # Read the frame
                 ret, frame = device.read()
+
+                # If the end of the file was reached, stop the capture
+                if (self.video_file is not None) and (frame is None):
+
+                    log.info('End of video file!')
+
+                    self.exit.set()
+                    
+                    time.sleep(0.1)
+
+                    break
+
                 
                 t = time.time()
 
@@ -148,7 +160,12 @@ class BufferedCapture(Process):
                     if not device.isOpened():
                         self.exit.set()
 
-            
+
+
+            if self.exit.is_set():
+                    break
+
+
             if first:
                 self.startTime1.value = startTime
 

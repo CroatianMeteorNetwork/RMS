@@ -1,5 +1,7 @@
 from __future__ import print_function
 
+import logging
+import traceback
 import multiprocessing
 import time
 
@@ -9,6 +11,7 @@ class SafeValue(object):
     
     Source: http://eli.thegreenplace.net/2012/01/04/shared-counter-with-pythons-multiprocessing
     """
+
     def __init__(self, initval=0):
         self.val = multiprocessing.Value('i', initval)
         self.lock = multiprocessing.Lock()
@@ -51,9 +54,11 @@ class QueuedPool(object):
 
     Keyword arguments:
         cores: [int] Number of CPU cores to use. None by default.
+        log: [logging handle] A logger object which will be used for logging.
 
     """
-    def __init__(self, func, cores=None):
+
+    def __init__(self, func, cores=None, log=None):
 
         # If the cores are not given, use all available cores
         if cores is None:
@@ -63,6 +68,7 @@ class QueuedPool(object):
             cores = 1
 
         self.cores = SafeValue(cores)
+        self.log = log
 
         # Initialize queues (for some reason queues from Manager need to be created, otherwise they are 
         # blocking when using get_nowait)
@@ -95,8 +101,23 @@ class QueuedPool(object):
             if args is None:
                 break
 
-            # Call the original worker function and collect results
-            result = func(*args)
+
+            # Catch errors in workers and handle them softly
+
+            try:
+                
+                # Call the original worker function and collect results
+                result = func(*args)
+
+            except:
+                tb = traceback.format_exc()
+
+                print(tb)
+                
+                if self.log is not None:
+                    self.log.error(tb)
+
+                result = None
 
             # Save the results to an output queue
             self.output_queue.put(result)
@@ -106,6 +127,7 @@ class QueuedPool(object):
                 break
 
         self.active_workers.decrement()
+
 
 
     def startPool(self):
@@ -126,7 +148,7 @@ class QueuedPool(object):
             while True:
                 
                 # If all jobs are done, close the pool
-                if self.output_queue.qsize() == self.total_jobs.value():
+                if self.output_queue.qsize() >= self.total_jobs.value():
 
                     # Insert the 'poison pill' to the queue, to kill all workers
                     for i in range(self.cores.value()):
@@ -238,8 +260,12 @@ def exampleWorker(in_str, in_num):
 
     t1 = time.time()
     while True:
-        if time.time() - t1 > 10:
+        if time.time() - t1 > 2:
             break
+
+
+    # Cause an error in the worker
+    5/in_num
 
 
     return in_str + " " + str(in_num) + " X"
@@ -253,7 +279,7 @@ if __name__ == "__main__":
     workpool = QueuedPool(exampleWorker, cores=1)
 
     # Give the pool something to do
-    for i in range(2):
+    for i in range(1, 3):
 
         workpool.addJob(["hello", i])
 
@@ -272,7 +298,7 @@ if __name__ == "__main__":
     print('Adding more jobs...')
 
     # Give the pool some more work to do
-    for i in range(4):
+    for i in range(0, 4):
         workpool.addJob(["test1", i])
         time.sleep(0.05)
         workpool.addJob(["test2", i])
