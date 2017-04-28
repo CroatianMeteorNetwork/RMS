@@ -119,7 +119,7 @@ class BufferedCapture(Process):
                 # If the end of the file was reached, stop the capture
                 if (self.video_file is not None) and (frame is None):
 
-                    log.info('End of video file!')
+                    log.info('End of video file! Press Ctrl+C to finish.')
 
                     self.exit.set()
                     
