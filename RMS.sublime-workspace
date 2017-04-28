@@ -4,6 +4,14 @@
 		"selected_items":
 		[
 			[
+				"abo",
+				"absolute_import\tstatement"
+			],
+			[
+				"in",
+				"info"
+			],
+			[
 				"detec",
 				"detection_results\tstatement"
 			],
@@ -506,14 +514,6 @@
 			[
 				"top_",
 				"top_params\tstatement"
-			],
-			[
-				"top",
-				"top_solutions\tstatement"
-			],
-			[
-				"radian_",
-				"radiant_eq_mini"
 			]
 		]
 	},
@@ -531,7 +531,7 @@
 			"file": "RMS/QueuedPool.py",
 			"settings":
 			{
-				"buffer_size": 7727,
+				"buffer_size": 8368,
 				"encoding": "UTF-8",
 				"line_ending": "Unix"
 			}
@@ -540,7 +540,7 @@
 			"file": "RMS/BufferedCapture.py",
 			"settings":
 			{
-				"buffer_size": 4887,
+				"buffer_size": 4911,
 				"encoding": "UTF-8",
 				"line_ending": "Windows"
 			}
@@ -585,7 +585,7 @@
 			"file": "RMS/DetectStarsAndMeteors.py",
 			"settings":
 			{
-				"buffer_size": 5064,
+				"buffer_size": 5609,
 				"encoding": "UTF-8",
 				"line_ending": "Unix"
 			}
@@ -594,7 +594,7 @@
 			"file": "RMS/Detection.py",
 			"settings":
 			{
-				"buffer_size": 41091,
+				"buffer_size": 41090,
 				"encoding": "UTF-8",
 				"line_ending": "Unix"
 			}
@@ -605,14 +605,6 @@
 			{
 				"buffer_size": 7475,
 				"encoding": "UTF-8",
-				"line_ending": "Unix"
-			}
-		},
-		{
-			"file": "/home/dvida/Dropbox/UWO Master's/Projects/RPi station/Events/FTPdetectinfo_Events.txt",
-			"settings":
-			{
-				"buffer_size": 6493,
 				"line_ending": "Unix"
 			}
 		}
@@ -787,6 +779,9 @@
 	],
 	"file_history":
 	[
+		"/home/dvida/Dropbox/UWO Master's/Projects/RPi station/Events/FTPdetectinfo_Events.txt",
+		"/home/dvida/RMS_data/CapturedFiles/20170428_005156_120087_test/FTPdetectinfo_20170428_005156_120087_test.txt",
+		"/home/dvida/RMS_data/CapturedFiles/20170428_005156_120087_test/CALSTARS049920170428_005156_120087_test.txt",
 		"/home/dvida/Desktop/UWO Master's/Projects/MirfitPrepare/MirfitPrepare.py",
 		"/home/dvida/source/RMS/RMS/Routines/MaskImage.py",
 		"/home/dvida/source/RMS/RMS/OLD/MorphologicalOperations.py",
@@ -911,10 +906,7 @@
 		"/tmp/mozilla_dvida0/M_2017030506APO0001.inf",
 		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20170303_055055_mir/ev_20170303_055055A_01T.txt",
 		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20161007_052749_mir/zmili_00.txt",
-		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20170219_055047_mir/zmili_00.txt",
-		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20160929_062945_mir/state.met",
-		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/MetSim/test_out.txt",
-		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/Trajectory/lib/TrajectorySolution.h"
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20170219_055047_mir/zmili_00.txt"
 	],
 	"find":
 	{
@@ -954,6 +946,10 @@
 		"case_sensitive": false,
 		"find_history":
 		[
+			"night_data_dir",
+			"white_ra",
+			"sys.",
+			"return",
 			"queuedp",
 			"queu",
 			"not extracting",
@@ -1077,10 +1073,6 @@
 			"mor",
 			"rcamera_eci[",
 			"  ",
-			"   ",
-			"  ",
-			",",
-			"  ",
 			"   "
 		],
 		"highlight": true,
@@ -1110,7 +1102,7 @@
 	"groups":
 	[
 		{
-			"selected": 2,
+			"selected": 9,
 			"sheets":
 			[
 				{
@@ -1126,8 +1118,8 @@
 						"selection":
 						[
 							[
-								0,
-								0
+								1009,
+								1009
 							]
 						],
 						"settings":
@@ -1141,7 +1133,7 @@
 						"translation.y": 0.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 10,
+					"stack_index": 1,
 					"type": "text"
 				},
 				{
@@ -1150,15 +1142,15 @@
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 7727,
+						"buffer_size": 8368,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								3903,
-								3903
+								2025,
+								2025
 							]
 						],
 						"settings":
@@ -1180,6 +1172,10 @@
 								{
 									"characters": ".",
 									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
 								}
 							],
 							"git_gutter_enabled": true,
@@ -1188,10 +1184,10 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 1702.0,
+						"translation.y": 532.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 2,
+					"stack_index": 4,
 					"type": "text"
 				},
 				{
@@ -1200,15 +1196,15 @@
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 4887,
+						"buffer_size": 4911,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								3512,
-								3512
+								3499,
+								3499
 							]
 						],
 						"settings":
@@ -1233,7 +1229,7 @@
 						"translation.y": 1395.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 0,
+					"stack_index": 6,
 					"type": "text"
 				},
 				{
@@ -1249,8 +1245,8 @@
 						"selection":
 						[
 							[
-								6339,
-								6339
+								8559,
+								8559
 							]
 						],
 						"settings":
@@ -1284,10 +1280,10 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 1040.0,
+						"translation.y": 3305.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 1,
+					"stack_index": 3,
 					"type": "text"
 				},
 				{
@@ -1329,7 +1325,7 @@
 						"translation.y": 135.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 3,
+					"stack_index": 8,
 					"type": "text"
 				},
 				{
@@ -1388,8 +1384,8 @@
 						"selection":
 						[
 							[
-								749,
-								749
+								10333,
+								10333
 							]
 						],
 						"settings":
@@ -1411,10 +1407,10 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 0.0,
+						"translation.y": 4265.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 4,
+					"stack_index": 5,
 					"type": "text"
 				},
 				{
@@ -1423,15 +1419,15 @@
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 5064,
+						"buffer_size": 5609,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								2918,
-								2918
+								3815,
+								3815
 							]
 						],
 						"settings":
@@ -1449,6 +1445,10 @@
 								{
 									"characters": ".",
 									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
 								}
 							],
 							"git_gutter_enabled": true,
@@ -1457,10 +1457,10 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 315.0,
+						"translation.y": 1580.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 5,
+					"stack_index": 2,
 					"type": "text"
 				},
 				{
@@ -1469,15 +1469,15 @@
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 41091,
+						"buffer_size": 41090,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								946,
-								946
+								1504,
+								1504
 							]
 						],
 						"settings":
@@ -1491,6 +1491,10 @@
 								{
 									"characters": ".",
 									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
 								}
 							],
 							"git_gutter_enabled": true,
@@ -1499,10 +1503,10 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 720.0,
+						"translation.y": 100.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 6,
+					"stack_index": 7,
 					"type": "text"
 				},
 				{
@@ -1518,8 +1522,8 @@
 						"selection":
 						[
 							[
-								3172,
-								3172
+								3174,
+								3174
 							]
 						],
 						"settings":
@@ -1531,35 +1535,7 @@
 						"translation.y": 665.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 7,
-					"type": "text"
-				},
-				{
-					"buffer": 10,
-					"file": "/home/dvida/Dropbox/UWO Master's/Projects/RPi station/Events/FTPdetectinfo_Events.txt",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 6493,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								525,
-								525
-							]
-						],
-						"settings":
-						{
-							"syntax": "Packages/Text/Plain text.tmLanguage"
-						},
-						"translation.x": 0.0,
-						"translation.y": 0.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 8,
+					"stack_index": 0,
 					"type": "text"
 				}
 			]
