@@ -275,8 +275,14 @@ def exampleWorker(in_str, in_num):
 
 if __name__ == "__main__":
 
+    # Init logging
+    logging.basicConfig()
+    log = logging.getLogger('logger')
+    log.setLevel(logging.INFO)
+    log.setLevel(logging.DEBUG)
+
     # Initialize the pool with only one core
-    workpool = QueuedPool(exampleWorker, cores=1)
+    workpool = QueuedPool(exampleWorker, cores=1, log=log)
 
     # Give the pool something to do
     for i in range(1, 3):
