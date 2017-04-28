@@ -47,6 +47,8 @@ def detectStarsAndMeteors(ff_directory, ff_name, config):
 
     """
 
+    log.info('Running detection on file: ' + ff_name)
+
     # Run star extraction on the FF bin
     star_list = extractStars(ff_directory, ff_name, config)
 
@@ -59,7 +61,7 @@ def detectStarsAndMeteors(ff_directory, ff_name, config):
 
         meteor_list = detectMeteors(ff_directory, ff_name, config)
 
-        log.debug(ff_name + ' detected meteors: ' + str(len(meteor_list)))
+        log.info(ff_name + ' detected meteors: ' + str(len(meteor_list)))
 
     else:
         meteor_list = []
