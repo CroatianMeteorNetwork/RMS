@@ -53,19 +53,35 @@ class QueuedPool(object):
         func: [function] Worker function to which the arguments from the queue will be passed
 
     Keyword arguments:
-        cores: [int] Number of CPU cores to use. None by default.
+        cores: [int] Number of CPU cores to use. None by default. If negative, then the number of cores to be 
+            used will be the total number available, minus the given number.
         log: [logging handle] A logger object which will be used for logging.
 
     """
 
     def __init__(self, func, cores=None, log=None):
 
+
         # If the cores are not given, use all available cores
         if cores is None:
             cores = multiprocessing.cpu_count()
 
-        if cores is None:
-            cores = 1
+
+        # If cores are negative, use the total available cores minus the given number
+        if cores < 0:
+
+            cores = multiprocessing.cpu_count() + cores
+
+            if cores < 1:
+                cores = 1
+
+            if cores > multiprocessing.cpu_count():
+                cores = multiprocessing.cpu_count()
+
+
+        if log is not None:
+            log.info('Using {:d} cores'.format(cores))
+
 
         self.cores = SafeValue(cores)
         self.log = log

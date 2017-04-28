@@ -14,6 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import print_function, division, absolute_import
+
 import sys
 import os
 import time
@@ -27,6 +29,7 @@ from RMS.Formats import FTPdetectinfo
 from RMS.Formats import CALSTARS
 from RMS.ExtractStars import extractStars
 from RMS.Detection import detectMeteors
+from RMS.QueuedPool import QueuedPool
 
 
 # Get the logger from the main module
@@ -92,34 +95,63 @@ if __name__ == "__main__":
 
 
     if not len(sys.argv) == 2:
-        print "Usage: python -m RMS.ExtractStars /path/to/bin/files/"
+        print("Usage: python -m RMS.ExtractStars /path/to/bin/files/")
         sys.exit()
     
+
     # Get paths to every FF bin file in a directory 
     ff_dir = os.path.abspath(sys.argv[1])
-    ff_list = [ff_name for ff_name in os.listdir(ff_dir) if ff_name[0:2]=="FF" and ff_name[-3:]=="bin"]
+    ff_list = [ff_name for ff_name in sorted(os.listdir(ff_dir)) if ff_name[0:2]=="FF" and ff_name[-3:]=="bin"]
+
 
     # Check if there are any file in the directory
     if(len(ff_list) == None):
-        print "No files found!"
+        print("No files found!")
         sys.exit()
 
+
+    # Initialize the detector
+    detector = QueuedPool(detectStarsAndMeteors, cores=-1, log=log)
+
+    # Give detector jobs
+    for ff_name in ff_list:
+        detector.addJob([ff_dir, ff_name, config])
+
+
+    log.info('Closing the detection thread...')
+
+    # Wait for the detector to finish and close it
+    detector.closePool()
+
+    log.info('Detection finished!')
+
+    ### SAVE DETECTIONS TO FILE
 
     # Init data lists
     star_list = []
     meteor_list = []
+    ff_detected = []
 
-    # Go through all files in the directory
-    for ff_name in sorted(ff_list):
 
-        print ff_name
+    log.info('Collecting results...')
 
-        t1 = time.clock()
+    # Get the detection results from the queue
+    detection_results = detector.getResults()
 
-        # Run star and meteor detection
-        _, star_data, meteor_data = detectStarsAndMeteors(ff_dir, ff_name, config)
+    # Remove all 'None' results, which were errors
+    detection_results = [res for res in detection_results if res is not None]
 
-        print 'Time for processing: ', time.clock() - t1
+    # Count the number of detected meteors
+    meteors_num = 0
+    for _, _, meteor_data in detection_results:
+        for meteor in meteor_data:
+            meteors_num += 1
+
+    log.info('TOTAL: ' + str(meteors_num) + ' detected meteors.')
+
+
+    # Save the detections to a file
+    for ff_name, star_data, meteor_data in detection_results:
 
         x2, y2, background, intensity = star_data
 
@@ -133,21 +165,6 @@ if __name__ == "__main__":
         # Add star info to the star list
         star_list.append([ff_name, star_data])
 
-        # Print found stars
-        print '   ROW    COL intensity'
-        for x, y, bg_level, level in star_data:
-            print ' {:06.2f} {:06.2f} {:6d} {:6d}'.format(round(y, 2), round(x, 2), int(bg_level), int(level))
-
-
-        # # Show stars if there are only more then 20 of them
-        # if len(x2) < 20:
-        #     continue
-
-        # # Load the FF bin file
-        # ff = FFbin.read(ff_dir, ff_name)
-
-        # plotStars(ff, x2, y2)
-
         # Handle the detected meteors
         meteor_No = 1
         for meteor in meteor_data:
@@ -159,22 +176,25 @@ if __name__ == "__main__":
             meteor_No += 1
 
 
-    # Load data about the image
-    ff = FFbin.read(ff_dir, ff_name)
+        # Add the FF file to the archive list if a meteor was detected on it
+        if meteor_data:
+            ff_detected.append(ff_name)
+
 
     # Generate the name for the CALSTARS file
-    calstars_name = 'CALSTARS' + "{:04d}".format(int(ff.camno)) + os.path.basename(ff_dir) + '.txt'
+    calstars_name = 'CALSTARS' + "{:04d}".format(config.stationID) + os.path.basename(ff_dir) + '.txt'
 
     # Write detected stars to the CALSTARS file
-    CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, ff.camno, ff.nrows, ff.ncols)
+    CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, config.stationID, config.height, 
+        config.width)
 
     # Generate FTPdetectinfo file name
-    ftpdetectinfo_name = os.path.join(ff_dir, 'FTPdetectinfo_' + os.path.basename(ff_dir) + '.txt')
+    ftpdetectinfo_name = os.path.join(ff_dir, 
+        'FTPdetectinfo_' + os.path.basename(ff_dir) + '.txt')
 
     # Write FTPdetectinfo file
     FTPdetectinfo.writeFTPdetectinfo(meteor_list, ff_dir, ftpdetectinfo_name, ff_dir, 
         config.stationID, config.fps)
 
-    print 'Total time taken: ', datetime.datetime.now() - time_start
 
-
+    print('Total time taken: ', datetime.datetime.now() - time_start)
