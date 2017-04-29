@@ -114,13 +114,16 @@ def wait(duration=None):
 
 
 
-def runCapture(config, duration=None, video_file=None):
+def runCapture(config, duration=None, video_file=None, nodetect=False):
     """ Run capture and compression for the given time.given
 
     Arguments:
         config: [config object] Configuration read from the .config file
+
+    Keyword arguments:
         duration: [float] Time in seconds to capture. None by default.
         video_file: [str] Path to the video file, if it was given as the video source. None by default.
+        nodetect: [bool] If True, detection will not be performed. False by defualt.
 
     """
 
@@ -151,8 +154,14 @@ def runCapture(config, duration=None, video_file=None):
     startTime2 = multiprocessing.Value('d', 0.0)
 
 
-    # Initialize the detector
-    detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log)
+    # Check if the detection should be performed or not
+    if nodetect:
+        detector = None
+
+    else:
+        # Initialize the detector
+        detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log)
+
     
     # Initialize buffered capture
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file)
@@ -196,105 +205,109 @@ def runCapture(config, duration=None, video_file=None):
     log.debug('Live view stopped')
 
 
-    log.info('Finishing up the detection, ' + str(detector.input_queue.qsize()) + ' files to process...')
-
-
-    # Reset the Ctrl+C to KeyboardInterrupt
-    resetSIGINT()
-
-
-    # If there are some more files to process, process them on more cores
-    if detector.input_queue.qsize() > 0:
-
-        # Let the detector use all cores, but leave 1 free
-        available_cores = multiprocessing.cpu_count() - 1
-
-        log.info('Running the detection on {:d} cores...'.format(available_cores))
-
-        if available_cores > 1:
-            detector.updateCoreNumber(available_cores)
-
-
-    log.info('Closing the detection thread...')
-
-    # Wait for the detector to finish and close it
-    detector.closePool()
-
-    log.info('Detection finished!')
-
-    # Set the Ctrl+C back to 'soft' program kill
-    setSIGINT()
-
-    ### SAVE DETECTIONS TO FILE
-
     # Init data lists
     star_list = []
     meteor_list = []
     ff_detected = []
 
 
-    log.info('Collecting results...')
+    # If detection should be performed
+    if not nodetect:
 
-    # Get the detection results from the queue
-    detection_results = detector.getResults()
-
-    # Remove all 'None' results, which were errors
-    detection_results = [res for res in detection_results if res is not None]
-
-    # Count the number of detected meteors
-    meteors_num = 0
-    for _, _, meteor_data in detection_results:
-        for meteor in meteor_data:
-            meteors_num += 1
-
-    log.info('TOTAL: ' + str(meteors_num) + ' detected meteors.')
+        log.info('Finishing up the detection, ' + str(detector.input_queue.qsize()) + ' files to process...')
 
 
-    # Save the detections to a file
-    for ff_name, star_data, meteor_data in detection_results:
-
-        x2, y2, background, intensity = star_data
-
-        # Skip if no stars were found
-        if not x2:
-            continue
-
-        # Construct the table of the star parameters
-        star_data = zip(x2, y2, background, intensity)
-
-        # Add star info to the star list
-        star_list.append([ff_name, star_data])
-
-        # Handle the detected meteors
-        meteor_No = 1
-        for meteor in meteor_data:
-
-            rho, theta, centroids = meteor
-
-            # Append to the results list
-            meteor_list.append([ff_name, meteor_No, rho, theta, centroids])
-            meteor_No += 1
+        # Reset the Ctrl+C to KeyboardInterrupt
+        resetSIGINT()
 
 
-        # Add the FF file to the archive list if a meteor was detected on it
-        if meteor_data:
-            ff_detected.append(ff_name)
+        # If there are some more files to process, process them on more cores
+        if detector.input_queue.qsize() > 0:
+
+            # Let the detector use all cores, but leave 1 free
+            available_cores = multiprocessing.cpu_count() - 1
+
+            log.info('Running the detection on {:d} cores...'.format(available_cores))
+
+            if available_cores > 1:
+                detector.updateCoreNumber(available_cores)
 
 
-    # Generate the name for the CALSTARS file
-    calstars_name = 'CALSTARS' + "{:04d}".format(config.stationID) + os.path.basename(night_data_dir) + '.txt'
+        log.info('Closing the detection thread...')
 
-    # Write detected stars to the CALSTARS file
-    CALSTARS.writeCALSTARS(star_list, night_data_dir, calstars_name, config.stationID, config.height, 
-        config.width)
+        # Wait for the detector to finish and close it
+        detector.closePool()
 
-    # Generate FTPdetectinfo file name
-    ftpdetectinfo_name = os.path.join(night_data_dir, 
-        'FTPdetectinfo_' + os.path.basename(night_data_dir) + '.txt')
+        log.info('Detection finished!')
 
-    # Write FTPdetectinfo file
-    FTPdetectinfo.writeFTPdetectinfo(meteor_list, night_data_dir, ftpdetectinfo_name, night_data_dir, 
-        config.stationID, config.fps)
+        # Set the Ctrl+C back to 'soft' program kill
+        setSIGINT()
+
+        ### SAVE DETECTIONS TO FILE
+
+
+        log.info('Collecting results...')
+
+        # Get the detection results from the queue
+        detection_results = detector.getResults()
+
+        # Remove all 'None' results, which were errors
+        detection_results = [res for res in detection_results if res is not None]
+
+        # Count the number of detected meteors
+        meteors_num = 0
+        for _, _, meteor_data in detection_results:
+            for meteor in meteor_data:
+                meteors_num += 1
+
+        log.info('TOTAL: ' + str(meteors_num) + ' detected meteors.')
+
+
+        # Save the detections to a file
+        for ff_name, star_data, meteor_data in detection_results:
+
+            x2, y2, background, intensity = star_data
+
+            # Skip if no stars were found
+            if not x2:
+                continue
+
+            # Construct the table of the star parameters
+            star_data = zip(x2, y2, background, intensity)
+
+            # Add star info to the star list
+            star_list.append([ff_name, star_data])
+
+            # Handle the detected meteors
+            meteor_No = 1
+            for meteor in meteor_data:
+
+                rho, theta, centroids = meteor
+
+                # Append to the results list
+                meteor_list.append([ff_name, meteor_No, rho, theta, centroids])
+                meteor_No += 1
+
+
+            # Add the FF file to the archive list if a meteor was detected on it
+            if meteor_data:
+                ff_detected.append(ff_name)
+
+
+        # Generate the name for the CALSTARS file
+        calstars_name = 'CALSTARS' + "{:04d}".format(config.stationID) + os.path.basename(night_data_dir) + '.txt'
+
+        # Write detected stars to the CALSTARS file
+        CALSTARS.writeCALSTARS(star_list, night_data_dir, calstars_name, config.stationID, config.height, 
+            config.width)
+
+        # Generate FTPdetectinfo file name
+        ftpdetectinfo_name = os.path.join(night_data_dir, 
+            'FTPdetectinfo_' + os.path.basename(night_data_dir) + '.txt')
+
+        # Write FTPdetectinfo file
+        FTPdetectinfo.writeFTPdetectinfo(meteor_list, night_data_dir, ftpdetectinfo_name, night_data_dir, 
+            config.stationID, config.fps)
 
 
 
@@ -339,6 +352,9 @@ if __name__ == "__main__":
         with the given duration in hours. """)
     arg_group.add_argument('-i', '--input', metavar='FILE_PATH', help="""Use video from the given file, 
         not from a video device. """)
+
+    arg_parser.add_argument('-n', '--nodetect', action="store_true", help="""Do not perform star extraction 
+        nor meteor detection. """)
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -385,7 +401,7 @@ if __name__ == "__main__":
         log.info("Running for " + str(duration/60/60) + ' hours...')
 
         # Run the capture for the given number of hours
-        runCapture(config, duration=duration)
+        runCapture(config, duration=duration, nodetect=cml_args.nodetect)
 
         sys.exit()
 
@@ -397,7 +413,7 @@ if __name__ == "__main__":
         log.info('Video source: ' + cml_args.input)
 
         # Capture the video frames from the video file
-        runCapture(config, video_file=cml_args.input)
+        runCapture(config, video_file=cml_args.input, nodetect=cml_args.nodetect)
 
 
 
@@ -465,7 +481,7 @@ if __name__ == "__main__":
         log.info('Starting capturing for ' + str(duration/60/60) + ' hours')
 
         # Run capture and compression
-        runCapture(config, duration=duration)
+        runCapture(config, duration=duration, nodetect=cml_args.nodetect)
 
 
 

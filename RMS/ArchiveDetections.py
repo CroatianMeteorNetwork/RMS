@@ -81,12 +81,15 @@ def archiveDetections(captured_path, archived_path, ff_detected):
     # Get the list of files to archive
     file_list = selectFiles(captured_path, ff_detected)
 
-    # Create the archive ZIP in the parent directory of the archive directory
-    archive_name = os.path.join(os.path.abspath(os.path.join(archived_path, os.pardir)), 
-        os.path.basename(captured_path) + '_detected')
 
-    # Archive the files
-    archiveDir(captured_path, file_list, archived_path, archive_name)
+    if file_list:
+
+        # Create the archive ZIP in the parent directory of the archive directory
+        archive_name = os.path.join(os.path.abspath(os.path.join(archived_path, os.pardir)), 
+            os.path.basename(captured_path) + '_detected')
+
+        # Archive the files
+        archiveDir(captured_path, file_list, archived_path, archive_name)
 
 
 
