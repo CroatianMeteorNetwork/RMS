@@ -227,13 +227,16 @@ def runCapture(config, duration=None, video_file=None, nodetect=False):
             # Let the detector use all cores, but leave 1 free
             available_cores = multiprocessing.cpu_count() - 1
 
+            if available_cores < 1:
+                available_cores = 1
+
             log.info('Running the detection on {:d} cores...'.format(available_cores))
 
-            if available_cores > 1:
-                detector.updateCoreNumber(available_cores)
+            # Start the detector
+            detector.startPool(cores=available_cores)
 
 
-        log.info('Closing the detection thread...')
+        log.info('Waiting for the detection to finish...')
 
         # Wait for the detector to finish and close it
         detector.closePool()

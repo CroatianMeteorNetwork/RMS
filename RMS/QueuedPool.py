@@ -79,10 +79,6 @@ class QueuedPool(object):
                 cores = multiprocessing.cpu_count()
 
 
-        if log is not None:
-            log.info('Using {:d} cores'.format(cores))
-
-
         self.cores = SafeValue(cores)
         self.log = log
 
@@ -97,9 +93,6 @@ class QueuedPool(object):
         self.total_jobs = SafeValue()
         self.active_workers = SafeValue()
         self.kill_workers = multiprocessing.Event()
-
-        # Start the pool with the given parameters - this will wait until the input queue is given jobs
-        self.startPool()
 
 
 
@@ -146,8 +139,15 @@ class QueuedPool(object):
 
 
 
-    def startPool(self):
+    def startPool(self, cores=None):
         """ Start the pool with the given worker function and number of cores. """
+
+        if cores is not None:
+            self.cores.set(cores)
+            
+
+        if self.log is not None:
+            self.log.info('Using {:d} cores'.format(self.cores.value()))
 
         # Initialize the pool of workers with the given number of worker cores
         # Comma in the argument list is a must!
@@ -309,6 +309,9 @@ if __name__ == "__main__":
 
         workpool.addJob(["world", i])
 
+
+    # Start the pool
+    workpool.startPool()
 
     time.sleep(2)
 
