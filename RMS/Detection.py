@@ -190,7 +190,8 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
              
             if x2 < 0 or x1 >= img_w:
                 continue
-             
+            
+            print("X1 X2 RANGE:", x1, x2)
             for x in range(x1, x2):
                 if x < 0 or x >= img_w:
                     continue
