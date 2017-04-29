@@ -144,7 +144,7 @@ class QueuedPool(object):
 
         if cores is not None:
             self.cores.set(cores)
-            
+
 
         if self.log is not None:
             self.log.info('Using {:d} cores'.format(self.cores.value()))

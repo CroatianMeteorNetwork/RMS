@@ -161,6 +161,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False):
     else:
         # Initialize the detector
         detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log)
+        detector.startPool()
 
     
     # Initialize buffered capture
@@ -227,13 +228,13 @@ def runCapture(config, duration=None, video_file=None, nodetect=False):
             # Let the detector use all cores, but leave 1 free
             available_cores = multiprocessing.cpu_count() - 1
 
-            if available_cores < 1:
-                available_cores = 1
 
-            log.info('Running the detection on {:d} cores...'.format(available_cores))
+            if available_cores > 1:
 
-            # Start the detector
-            detector.startPool(cores=available_cores)
+                log.info('Running the detection on {:d} cores...'.format(available_cores))
+
+                # Start the detector
+                detector.updateCoreNumber(cores=available_cores)
 
 
         log.info('Waiting for the detection to finish...')

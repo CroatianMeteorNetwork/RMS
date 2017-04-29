@@ -44,7 +44,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 import RMS.Routines.MorphCy as morph
 
 # If True, all detection details will be logged
-VERBOSE_DEBUG = True
+VERBOSE_DEBUG = False
 
 
 # Get the logger from the main module
