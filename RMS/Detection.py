@@ -143,23 +143,26 @@ def getPolarLine(x1, y1, x2, y2, img_h, img_w):
 
 
 def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
-    """ Get indices of the stripe centered on a line.
+    """ Get indices of the stripe centered on a line. Line parameters are in Hough Transform form.
     
     Arguments:
-        rho: [float] line distance from the center in HT space (pixels)
-        theta: [float] angle in degrees in HT space
-        stripe_width: [int] width of the stripe around the line
-        img_h: [int] original image height
-        img_w: [int] original image width
+        rho: [float] Line distance from the center in HT space (pixels).
+        theta: [float] Angle in degrees in HT space.
+        stripe_width: [int] Width of the stripe around the line.
+        img_h: [int] Original image height in pixels.
+        img_w: [int] Original image width in pixels.
 
     Return:
-        (indicesx, indicesy): [tuple] a tuple of x and y indices of stripe pixels
+        (indicesy, indicesx): [tuple] a tuple of x and y indices of stripe pixels
 
     """
 
-    # Check for vertical lines and set theta to a small angle
-    if (theta%180 == 0):
-        theta += 0.001
+    # minimum angle offset from 90 degrees
+    angle_eps = 0.2
+
+    # Check for vertical/horizontal lines and set theta to a small angle
+    if (theta%90 < angle_eps):
+        theta = 90 + angle_eps
 
     # Normalize theta to 0-360 range
     theta = theta%360
@@ -172,13 +175,13 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
      
     if theta < 45 or (theta > 90 and theta < 135):
 
-        theta = np.deg2rad(theta)
+        theta = np.radians(theta)
         half_limit = (stripe_width/2)/np.cos(theta)
 
         a = -np.tan(theta)
         b = rho/np.cos(theta)
          
-        for y in range(int(-hh), int(hh)):
+        for y in xrange(int(-hh), int(hh)):
 
             x0 = a*y + b
              
@@ -191,8 +194,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
             if x2 < 0 or x1 >= img_w:
                 continue
             
-            print("X1 X2 RANGE:", x1, x2)
-            for x in range(x1, x2):
+            for x in xrange(x1, x2):
                 if x < 0 or x >= img_w:
                     continue
                  
@@ -201,13 +203,13 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
                  
     else:
 
-        theta = np.deg2rad(theta)
+        theta = np.radians(theta)
         half_limit = (stripe_width/2)/np.sin(theta)
 
         a = -1/np.tan(theta)
         b = rho/np.sin(theta)
          
-        for x in range(int(-hw), int(hw)):
+        for x in xrange(int(-hw), int(hw)):
             y0 = a*x + b
              
             y1 = int(y0 - half_limit + hh)
@@ -219,7 +221,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
             if y2 < 0 or y1 >= img_h:
                 continue
                 
-            for y in range(y1, y2):
+            for y in xrange(y1, y2):
                 if y < 0 or y >= img_h:
                     continue
                  
