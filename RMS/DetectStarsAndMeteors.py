@@ -118,7 +118,11 @@ if __name__ == "__main__":
         detector.addJob([ff_dir, ff_name, config])
 
 
-    log.info('Closing the detection thread...')
+    # Start the detection
+    detector.startPool()
+
+
+    log.info('Waiting for the detection to finish...')
 
     # Wait for the detector to finish and close it
     detector.closePool()
