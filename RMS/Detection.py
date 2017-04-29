@@ -178,7 +178,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
         a = -np.tan(theta)
         b = rho/np.cos(theta)
          
-        for y in xrange(int(-hh), int(hh)):
+        for y in range(int(-hh), int(hh)):
 
             x0 = a*y + b
              
@@ -191,7 +191,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
             if x2 < 0 or x1 >= img_w:
                 continue
              
-            for x in xrange(x1, x2):
+            for x in range(x1, x2):
                 if x < 0 or x >= img_w:
                     continue
                  
@@ -206,7 +206,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
         a = -1/np.tan(theta)
         b = rho/np.sin(theta)
          
-        for x in xrange(int(-hw), int(hw)):
+        for x in range(int(-hw), int(hw)):
             y0 = a*x + b
              
             y1 = int(y0 - half_limit + hh)
@@ -218,7 +218,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
             if y2 < 0 or y1 >= img_h:
                 continue
                 
-            for y in xrange(y1, y2):
+            for y in range(y1, y2):
                 if y < 0 or y >= img_h:
                     continue
                  
@@ -517,7 +517,7 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
 
 
     # Subdivide the image by time into overlapping parts (decreases noise when searching for meteors)
-    for i in xrange(0, int(256/time_slide - 1)):
+    for i in range(0, int(256/time_slide - 1)):
 
         frame_min = i*time_slide
         frame_max = i*time_slide + time_window_size
@@ -699,7 +699,7 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
     # Go through all points and separate by chains of centroids (divided by max distance)
     chains = []
     chain_index = 0
-    for i in xrange(len(filtered_centroids)-1):
+    for i in range(len(filtered_centroids)-1):
 
         if i == 0:
             # Initialize the first chain on the first point
@@ -1109,7 +1109,7 @@ def detectMeteors(ff_directory, ff_name, config):
             # Calculate centroids
             centroids = []
 
-            for i in xrange(frame_min, frame_max+1):
+            for i in range(frame_min, frame_max+1):
                 
                 # Select pixel indicies belonging to a given frame
                 frame_pixels_inds = np.where(line_points[:,2] == i)
