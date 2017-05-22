@@ -791,14 +791,14 @@ struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy_Line {
 /* "RMS/Routines/Grouping3Dcy.pyx":95
  * 
  * @cython.boundscheck(False)
- * def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_treshold, gap_treshold, max_array_size=0):             # <<<<<<<<<<<<<<
+ * def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):             # <<<<<<<<<<<<<<
  *     """ Returns all points describing a particular line.
  *     @param point_list: [ndarray] list of all points
  */
 struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__getAllPoints {
   PyObject_HEAD
-  PyObject *__pyx_v_distance_treshold;
-  PyObject *__pyx_v_gap_treshold;
+  PyObject *__pyx_v_distance_threshold;
+  PyObject *__pyx_v_gap_threshold;
   PyObject *__pyx_v_x1;
   PyObject *__pyx_v_x2;
   PyObject *__pyx_v_y1;
@@ -1414,7 +1414,7 @@ static char __pyx_k_start_time[] = "start_time";
 static char __pyx_k_find3DLines[] = "find3DLines";
 static char __pyx_k_first_frame[] = "first_frame";
 static char __pyx_k_RuntimeError[] = "RuntimeError";
-static char __pyx_k_gap_treshold[] = "gap_treshold";
+static char __pyx_k_gap_threshold[] = "gap_threshold";
 static char __pyx_k_getAllPoints[] = "getAllPoints";
 static char __pyx_k_line_quality[] = "line_quality";
 static char __pyx_k_point1_index[] = "point1_index";
@@ -1430,10 +1430,10 @@ static char __pyx_k_point_list_rows[] = "point_list_rows";
 static char __pyx_k_point_list_size[] = "point_list_size";
 static char __pyx_k_results_counter[] = "results_counter";
 static char __pyx_k_propagation_list[] = "propagation_list";
-static char __pyx_k_distance_treshold[] = "distance_treshold";
+static char __pyx_k_distance_threshold[] = "distance_threshold";
 static char __pyx_k_line_distance_const[] = "line_distance_const";
 static char __pyx_k_max_line_points_rows[] = "max_line_points_rows";
-static char __pyx_k_point_ratio_treshold[] = "point_ratio_treshold";
+static char __pyx_k_point_ratio_threshold[] = "point_ratio_threshold";
 static char __pyx_k_line_minimum_frame_range[] = "line_minimum_frame_range";
 static char __pyx_k_RMS_Routines_Grouping3Dcy[] = "RMS.Routines.Grouping3Dcy";
 static char __pyx_k_ndarray_is_not_C_contiguous[] = "ndarray is not C contiguous";
@@ -1461,12 +1461,12 @@ static PyObject *__pyx_n_s_axis;
 static PyObject *__pyx_n_s_best_distance;
 static PyObject *__pyx_n_s_config;
 static PyObject *__pyx_n_s_counter;
-static PyObject *__pyx_n_s_distance_treshold;
+static PyObject *__pyx_n_s_distance_threshold;
 static PyObject *__pyx_n_s_dtype;
 static PyObject *__pyx_n_s_find3DLines;
 static PyObject *__pyx_n_s_first_frame;
 static PyObject *__pyx_n_s_formatLine;
-static PyObject *__pyx_n_s_gap_treshold;
+static PyObject *__pyx_n_s_gap_threshold;
 static PyObject *__pyx_n_s_getAllPoints;
 static PyObject *__pyx_n_s_getAllPoints_locals_propagateLin;
 static PyObject *__pyx_n_s_get_points;
@@ -1503,7 +1503,7 @@ static PyObject *__pyx_n_s_point1_index;
 static PyObject *__pyx_n_s_point_list;
 static PyObject *__pyx_n_s_point_list_rows;
 static PyObject *__pyx_n_s_point_list_size;
-static PyObject *__pyx_n_s_point_ratio_treshold;
+static PyObject *__pyx_n_s_point_ratio_threshold;
 static PyObject *__pyx_n_s_propagateLine;
 static PyObject *__pyx_n_s_propagation_list;
 static PyObject *__pyx_n_s_range;
@@ -1547,8 +1547,8 @@ static int __pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line_7counter_2__set__(struct
 static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line_12line_quality___get__(struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy_Line *__pyx_v_self); /* proto */
 static int __pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line_12line_quality_2__set__(struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy_Line *__pyx_v_self, PyObject *__pyx_v_value); /* proto */
 static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagateLine(PyObject *__pyx_self, PyArrayObject *__pyx_v_max_line_points, PyArrayObject *__pyx_v_propagation_list, int __pyx_v_i); /* proto */
-static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_point_list, PyObject *__pyx_v_x1, PyObject *__pyx_v_y1, PyObject *__pyx_v_z1, PyObject *__pyx_v_x2, PyObject *__pyx_v_y2, PyObject *__pyx_v_z2, PyObject *__pyx_v_distance_treshold, PyObject *__pyx_v_gap_treshold, PyObject *__pyx_v_max_array_size); /* proto */
-static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_point_list, struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy_Line *__pyx_v_max_line, PyObject *__pyx_v_distance_treshold, PyObject *__pyx_v_gap_treshold); /* proto */
+static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_point_list, PyObject *__pyx_v_x1, PyObject *__pyx_v_y1, PyObject *__pyx_v_z1, PyObject *__pyx_v_x2, PyObject *__pyx_v_y2, PyObject *__pyx_v_z2, PyObject *__pyx_v_distance_threshold, PyObject *__pyx_v_gap_threshold, PyObject *__pyx_v_max_array_size); /* proto */
+static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_point_list, struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy_Line *__pyx_v_max_line, PyObject *__pyx_v_distance_threshold, PyObject *__pyx_v_gap_threshold); /* proto */
 static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4_formatLine(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_line, PyObject *__pyx_v_first_frame, PyObject *__pyx_v_last_frame); /* proto */
 static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_point_list, PyObject *__pyx_v_start_time, PyObject *__pyx_v_config, PyObject *__pyx_v_get_single, PyObject *__pyx_v_line_list); /* proto */
 static int __pyx_pf_5numpy_7ndarray___getbuffer__(PyArrayObject *__pyx_v_self, Py_buffer *__pyx_v_info, int __pyx_v_flags); /* proto */
@@ -2418,14 +2418,14 @@ static int __pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line_12line_quality_2__set__(
 /* "RMS/Routines/Grouping3Dcy.pyx":95
  * 
  * @cython.boundscheck(False)
- * def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_treshold, gap_treshold, max_array_size=0):             # <<<<<<<<<<<<<<
+ * def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):             # <<<<<<<<<<<<<<
  *     """ Returns all points describing a particular line.
  *     @param point_list: [ndarray] list of all points
  */
 
 /* Python wrapper */
 static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_1getAllPoints(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
-static char __pyx_doc_3RMS_8Routines_12Grouping3Dcy_getAllPoints[] = " Returns all points describing a particular line. \n    @param point_list: [ndarray] list of all points\n    @params x1 to z2: [int] points defining a line in 3D space\n    @param distance_treshold: [int] maximum distance between the line and the point to be takes as a part of \n        the same line\n    @param gap_treshold: [float] maximum allowed gap between points\n    @param max_array_size: [float] predefined size of max_line_points array (optional)\n    @return: [ndarray] array of points belonging to a certain line\n    ";
+static char __pyx_doc_3RMS_8Routines_12Grouping3Dcy_getAllPoints[] = " Returns all points describing a particular line. \n    @param point_list: [ndarray] list of all points\n    @params x1 to z2: [int] points defining a line in 3D space\n    @param distance_threshold: [int] maximum distance between the line and the point to be takes as a part of \n        the same line\n    @param gap_threshold: [float] maximum allowed gap between points\n    @param max_array_size: [float] predefined size of max_line_points array (optional)\n    @return: [ndarray] array of points belonging to a certain line\n    ";
 static PyMethodDef __pyx_mdef_3RMS_8Routines_12Grouping3Dcy_1getAllPoints = {"getAllPoints", (PyCFunction)__pyx_pw_3RMS_8Routines_12Grouping3Dcy_1getAllPoints, METH_VARARGS|METH_KEYWORDS, __pyx_doc_3RMS_8Routines_12Grouping3Dcy_getAllPoints};
 static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_1getAllPoints(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
   PyArrayObject *__pyx_v_point_list = 0;
@@ -2435,8 +2435,8 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_1getAllPoints(PyObject *
   PyObject *__pyx_v_x2 = 0;
   PyObject *__pyx_v_y2 = 0;
   PyObject *__pyx_v_z2 = 0;
-  PyObject *__pyx_v_distance_treshold = 0;
-  PyObject *__pyx_v_gap_treshold = 0;
+  PyObject *__pyx_v_distance_threshold = 0;
+  PyObject *__pyx_v_gap_threshold = 0;
   PyObject *__pyx_v_max_array_size = 0;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
@@ -2445,7 +2445,7 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_1getAllPoints(PyObject *
   __Pyx_RefNannyDeclarations
   __Pyx_RefNannySetupContext("getAllPoints (wrapper)", 0);
   {
-    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_point_list,&__pyx_n_s_x1,&__pyx_n_s_y1,&__pyx_n_s_z1,&__pyx_n_s_x2,&__pyx_n_s_y2,&__pyx_n_s_z2,&__pyx_n_s_distance_treshold,&__pyx_n_s_gap_treshold,&__pyx_n_s_max_array_size,0};
+    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_point_list,&__pyx_n_s_x1,&__pyx_n_s_y1,&__pyx_n_s_z1,&__pyx_n_s_x2,&__pyx_n_s_y2,&__pyx_n_s_z2,&__pyx_n_s_distance_threshold,&__pyx_n_s_gap_threshold,&__pyx_n_s_max_array_size,0};
     PyObject* values[10] = {0,0,0,0,0,0,0,0,0,0};
     values[9] = ((PyObject *)__pyx_int_0);
     if (unlikely(__pyx_kwds)) {
@@ -2501,12 +2501,12 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_1getAllPoints(PyObject *
           __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, 6); {__pyx_filename = __pyx_f[0]; __pyx_lineno = 95; __pyx_clineno = __LINE__; goto __pyx_L3_error;}
         }
         case  7:
-        if (likely((values[7] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_distance_treshold)) != 0)) kw_args--;
+        if (likely((values[7] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_distance_threshold)) != 0)) kw_args--;
         else {
           __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, 7); {__pyx_filename = __pyx_f[0]; __pyx_lineno = 95; __pyx_clineno = __LINE__; goto __pyx_L3_error;}
         }
         case  8:
-        if (likely((values[8] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_gap_treshold)) != 0)) kw_args--;
+        if (likely((values[8] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_gap_threshold)) != 0)) kw_args--;
         else {
           __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, 8); {__pyx_filename = __pyx_f[0]; __pyx_lineno = 95; __pyx_clineno = __LINE__; goto __pyx_L3_error;}
         }
@@ -2542,8 +2542,8 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_1getAllPoints(PyObject *
     __pyx_v_x2 = values[4];
     __pyx_v_y2 = values[5];
     __pyx_v_z2 = values[6];
-    __pyx_v_distance_treshold = values[7];
-    __pyx_v_gap_treshold = values[8];
+    __pyx_v_distance_threshold = values[7];
+    __pyx_v_gap_threshold = values[8];
     __pyx_v_max_array_size = values[9];
   }
   goto __pyx_L4_argument_unpacking_done;
@@ -2555,7 +2555,7 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_1getAllPoints(PyObject *
   return NULL;
   __pyx_L4_argument_unpacking_done:;
   if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_point_list), __pyx_ptype_5numpy_ndarray, 1, "point_list", 0))) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 95; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
-  __pyx_r = __pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(__pyx_self, __pyx_v_point_list, __pyx_v_x1, __pyx_v_y1, __pyx_v_z1, __pyx_v_x2, __pyx_v_y2, __pyx_v_z2, __pyx_v_distance_treshold, __pyx_v_gap_treshold, __pyx_v_max_array_size);
+  __pyx_r = __pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(__pyx_self, __pyx_v_point_list, __pyx_v_x1, __pyx_v_y1, __pyx_v_z1, __pyx_v_x2, __pyx_v_y2, __pyx_v_z2, __pyx_v_distance_threshold, __pyx_v_gap_threshold, __pyx_v_max_array_size);
 
   /* function exit code */
   goto __pyx_L0;
@@ -2789,7 +2789,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
  *             # Check if the distance between the line and the point is close enough
  *             line_dist = line3DDistance_simple(x1, y1, z1, x2, y2, z2, x3, y3, z3)             # <<<<<<<<<<<<<<
  * 
- *             if line_dist < distance_treshold:
+ *             if line_dist < distance_threshold:
  */
     if (unlikely(!__pyx_cur_scope->__pyx_v_x1)) { __Pyx_RaiseClosureNameError("x1"); {__pyx_filename = __pyx_f[0]; __pyx_lineno = 130; __pyx_clineno = __LINE__; goto __pyx_L1_error;} }
     __pyx_t_2 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_x1); if (unlikely((__pyx_t_2 == (int)-1) && PyErr_Occurred())) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 130; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
@@ -2811,12 +2811,12 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
     /* "RMS/Routines/Grouping3Dcy.pyx":132
  *             line_dist = line3DDistance_simple(x1, y1, z1, x2, y2, z2, x3, y3, z3)
  * 
- *             if line_dist < distance_treshold:             # <<<<<<<<<<<<<<
+ *             if line_dist < distance_threshold:             # <<<<<<<<<<<<<<
  * 
  *                 # Calculate the gap from the previous point and reject the solution if the point is too far
  */
-    if (unlikely(!__pyx_cur_scope->__pyx_v_distance_treshold)) { __Pyx_RaiseClosureNameError("distance_treshold"); {__pyx_filename = __pyx_f[0]; __pyx_lineno = 132; __pyx_clineno = __LINE__; goto __pyx_L1_error;} }
-    __pyx_t_15 = PyObject_RichCompare(__pyx_v_line_dist, __pyx_cur_scope->__pyx_v_distance_treshold, Py_LT); __Pyx_XGOTREF(__pyx_t_15); if (unlikely(!__pyx_t_15)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 132; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
+    if (unlikely(!__pyx_cur_scope->__pyx_v_distance_threshold)) { __Pyx_RaiseClosureNameError("distance_threshold"); {__pyx_filename = __pyx_f[0]; __pyx_lineno = 132; __pyx_clineno = __LINE__; goto __pyx_L1_error;} }
+    __pyx_t_15 = PyObject_RichCompare(__pyx_v_line_dist, __pyx_cur_scope->__pyx_v_distance_threshold, Py_LT); __Pyx_XGOTREF(__pyx_t_15); if (unlikely(!__pyx_t_15)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 132; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
     __pyx_t_16 = __Pyx_PyObject_IsTrue(__pyx_t_15); if (unlikely(__pyx_t_16 < 0)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 132; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
     __Pyx_DECREF(__pyx_t_15); __pyx_t_15 = 0;
     if (__pyx_t_16) {
@@ -2824,14 +2824,14 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
       /* "RMS/Routines/Grouping3Dcy.pyx":135
  * 
  *                 # Calculate the gap from the previous point and reject the solution if the point is too far
- *                 if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_treshold:             # <<<<<<<<<<<<<<
+ *                 if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_threshold:             # <<<<<<<<<<<<<<
  *                     break
  * 
  */
       __pyx_t_15 = __Pyx_PyInt_From_int(__pyx_f_3RMS_8Routines_12Grouping3Dcy_point3DDistance(__pyx_v_x_prev, __pyx_v_y_prev, __pyx_v_z_prev, __pyx_v_x3, __pyx_v_y3, __pyx_v_z3)); if (unlikely(!__pyx_t_15)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 135; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
       __Pyx_GOTREF(__pyx_t_15);
-      if (unlikely(!__pyx_cur_scope->__pyx_v_gap_treshold)) { __Pyx_RaiseClosureNameError("gap_treshold"); {__pyx_filename = __pyx_f[0]; __pyx_lineno = 135; __pyx_clineno = __LINE__; goto __pyx_L1_error;} }
-      __pyx_t_17 = PyObject_RichCompare(__pyx_t_15, __pyx_cur_scope->__pyx_v_gap_treshold, Py_GT); __Pyx_XGOTREF(__pyx_t_17); if (unlikely(!__pyx_t_17)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 135; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
+      if (unlikely(!__pyx_cur_scope->__pyx_v_gap_threshold)) { __Pyx_RaiseClosureNameError("gap_threshold"); {__pyx_filename = __pyx_f[0]; __pyx_lineno = 135; __pyx_clineno = __LINE__; goto __pyx_L1_error;} }
+      __pyx_t_17 = PyObject_RichCompare(__pyx_t_15, __pyx_cur_scope->__pyx_v_gap_threshold, Py_GT); __Pyx_XGOTREF(__pyx_t_17); if (unlikely(!__pyx_t_17)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 135; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
       __Pyx_DECREF(__pyx_t_15); __pyx_t_15 = 0;
       __pyx_t_16 = __Pyx_PyObject_IsTrue(__pyx_t_17); if (unlikely(__pyx_t_16 < 0)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 135; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
       __Pyx_DECREF(__pyx_t_17); __pyx_t_17 = 0;
@@ -2839,7 +2839,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
 
         /* "RMS/Routines/Grouping3Dcy.pyx":136
  *                 # Calculate the gap from the previous point and reject the solution if the point is too far
- *                 if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_treshold:
+ *                 if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_threshold:
  *                     break             # <<<<<<<<<<<<<<
  * 
  *                 max_line_points[i,0] = x3
@@ -2849,7 +2849,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
         /* "RMS/Routines/Grouping3Dcy.pyx":135
  * 
  *                 # Calculate the gap from the previous point and reject the solution if the point is too far
- *                 if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_treshold:             # <<<<<<<<<<<<<<
+ *                 if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_threshold:             # <<<<<<<<<<<<<<
  *                     break
  * 
  */
@@ -2920,7 +2920,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
       /* "RMS/Routines/Grouping3Dcy.pyx":132
  *             line_dist = line3DDistance_simple(x1, y1, z1, x2, y2, z2, x3, y3, z3)
  * 
- *             if line_dist < distance_treshold:             # <<<<<<<<<<<<<<
+ *             if line_dist < distance_threshold:             # <<<<<<<<<<<<<<
  * 
  *                 # Calculate the gap from the previous point and reject the solution if the point is too far
  */
@@ -2983,12 +2983,12 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
 /* "RMS/Routines/Grouping3Dcy.pyx":95
  * 
  * @cython.boundscheck(False)
- * def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_treshold, gap_treshold, max_array_size=0):             # <<<<<<<<<<<<<<
+ * def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):             # <<<<<<<<<<<<<<
  *     """ Returns all points describing a particular line.
  *     @param point_list: [ndarray] list of all points
  */
 
-static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_point_list, PyObject *__pyx_v_x1, PyObject *__pyx_v_y1, PyObject *__pyx_v_z1, PyObject *__pyx_v_x2, PyObject *__pyx_v_y2, PyObject *__pyx_v_z2, PyObject *__pyx_v_distance_treshold, PyObject *__pyx_v_gap_treshold, PyObject *__pyx_v_max_array_size) {
+static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_point_list, PyObject *__pyx_v_x1, PyObject *__pyx_v_y1, PyObject *__pyx_v_z1, PyObject *__pyx_v_x2, PyObject *__pyx_v_y2, PyObject *__pyx_v_z2, PyObject *__pyx_v_distance_threshold, PyObject *__pyx_v_gap_threshold, PyObject *__pyx_v_max_array_size) {
   struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__getAllPoints *__pyx_cur_scope;
   int __pyx_v_i;
   npy_intp __pyx_v_point_list_size;
@@ -3064,12 +3064,12 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
   __pyx_cur_scope->__pyx_v_z2 = __pyx_v_z2;
   __Pyx_INCREF(__pyx_cur_scope->__pyx_v_z2);
   __Pyx_GIVEREF(__pyx_cur_scope->__pyx_v_z2);
-  __pyx_cur_scope->__pyx_v_distance_treshold = __pyx_v_distance_treshold;
-  __Pyx_INCREF(__pyx_cur_scope->__pyx_v_distance_treshold);
-  __Pyx_GIVEREF(__pyx_cur_scope->__pyx_v_distance_treshold);
-  __pyx_cur_scope->__pyx_v_gap_treshold = __pyx_v_gap_treshold;
-  __Pyx_INCREF(__pyx_cur_scope->__pyx_v_gap_treshold);
-  __Pyx_GIVEREF(__pyx_cur_scope->__pyx_v_gap_treshold);
+  __pyx_cur_scope->__pyx_v_distance_threshold = __pyx_v_distance_threshold;
+  __Pyx_INCREF(__pyx_cur_scope->__pyx_v_distance_threshold);
+  __Pyx_GIVEREF(__pyx_cur_scope->__pyx_v_distance_threshold);
+  __pyx_cur_scope->__pyx_v_gap_threshold = __pyx_v_gap_threshold;
+  __Pyx_INCREF(__pyx_cur_scope->__pyx_v_gap_threshold);
+  __Pyx_GIVEREF(__pyx_cur_scope->__pyx_v_gap_threshold);
   __Pyx_INCREF(__pyx_v_max_array_size);
   __pyx_pybuffer_max_line_points.pybuffer.buf = NULL;
   __pyx_pybuffer_max_line_points.refcount = 0;
@@ -3727,7 +3727,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
   /* "RMS/Routines/Grouping3Dcy.pyx":95
  * 
  * @cython.boundscheck(False)
- * def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_treshold, gap_treshold, max_array_size=0):             # <<<<<<<<<<<<<<
+ * def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):             # <<<<<<<<<<<<<<
  *     """ Returns all points describing a particular line.
  *     @param point_list: [ndarray] list of all points
  */
@@ -3770,20 +3770,20 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
 /* "RMS/Routines/Grouping3Dcy.pyx":185
  * 
  * 
- * def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, distance_treshold, gap_treshold):             # <<<<<<<<<<<<<<
+ * def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, distance_threshold, gap_threshold):             # <<<<<<<<<<<<<<
  *     """ Remove points from a point list that belong to the given line.
  * 
  */
 
 /* Python wrapper */
 static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_3remove3DPoints(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
-static char __pyx_doc_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints[] = " Remove points from a point list that belong to the given line.\n    \n    @param point_list: [ndarray] list of all points\n    @param max_line: [Line object] given line\n    @param distance_treshold: [int] maximum distance between the line and the point to be takes as a part of \n        the same line\n    @param gap_treshold: [int] maximum allowed gap between points\n    @return: [tuple of ndarrays] (array of all points minus the ones in the max_line), (points in the max_line)\n    ";
+static char __pyx_doc_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints[] = " Remove points from a point list that belong to the given line.\n    \n    @param point_list: [ndarray] list of all points\n    @param max_line: [Line object] given line\n    @param distance_threshold: [int] maximum distance between the line and the point to be takes as a part of \n        the same line\n    @param gap_threshold: [int] maximum allowed gap between points\n    @return: [tuple of ndarrays] (array of all points minus the ones in the max_line), (points in the max_line)\n    ";
 static PyMethodDef __pyx_mdef_3RMS_8Routines_12Grouping3Dcy_3remove3DPoints = {"remove3DPoints", (PyCFunction)__pyx_pw_3RMS_8Routines_12Grouping3Dcy_3remove3DPoints, METH_VARARGS|METH_KEYWORDS, __pyx_doc_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints};
 static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_3remove3DPoints(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
   PyArrayObject *__pyx_v_point_list = 0;
   struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy_Line *__pyx_v_max_line = 0;
-  PyObject *__pyx_v_distance_treshold = 0;
-  PyObject *__pyx_v_gap_treshold = 0;
+  PyObject *__pyx_v_distance_threshold = 0;
+  PyObject *__pyx_v_gap_threshold = 0;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
@@ -3791,7 +3791,7 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_3remove3DPoints(PyObject
   __Pyx_RefNannyDeclarations
   __Pyx_RefNannySetupContext("remove3DPoints (wrapper)", 0);
   {
-    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_point_list,&__pyx_n_s_max_line,&__pyx_n_s_distance_treshold,&__pyx_n_s_gap_treshold,0};
+    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_point_list,&__pyx_n_s_max_line,&__pyx_n_s_distance_threshold,&__pyx_n_s_gap_threshold,0};
     PyObject* values[4] = {0,0,0,0};
     if (unlikely(__pyx_kwds)) {
       Py_ssize_t kw_args;
@@ -3815,12 +3815,12 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_3remove3DPoints(PyObject
           __Pyx_RaiseArgtupleInvalid("remove3DPoints", 1, 4, 4, 1); {__pyx_filename = __pyx_f[0]; __pyx_lineno = 185; __pyx_clineno = __LINE__; goto __pyx_L3_error;}
         }
         case  2:
-        if (likely((values[2] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_distance_treshold)) != 0)) kw_args--;
+        if (likely((values[2] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_distance_threshold)) != 0)) kw_args--;
         else {
           __Pyx_RaiseArgtupleInvalid("remove3DPoints", 1, 4, 4, 2); {__pyx_filename = __pyx_f[0]; __pyx_lineno = 185; __pyx_clineno = __LINE__; goto __pyx_L3_error;}
         }
         case  3:
-        if (likely((values[3] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_gap_treshold)) != 0)) kw_args--;
+        if (likely((values[3] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_gap_threshold)) != 0)) kw_args--;
         else {
           __Pyx_RaiseArgtupleInvalid("remove3DPoints", 1, 4, 4, 3); {__pyx_filename = __pyx_f[0]; __pyx_lineno = 185; __pyx_clineno = __LINE__; goto __pyx_L3_error;}
         }
@@ -3838,8 +3838,8 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_3remove3DPoints(PyObject
     }
     __pyx_v_point_list = ((PyArrayObject *)values[0]);
     __pyx_v_max_line = ((struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy_Line *)values[1]);
-    __pyx_v_distance_treshold = values[2];
-    __pyx_v_gap_treshold = values[3];
+    __pyx_v_distance_threshold = values[2];
+    __pyx_v_gap_threshold = values[3];
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L5_argtuple_error:;
@@ -3851,7 +3851,7 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_3remove3DPoints(PyObject
   __pyx_L4_argument_unpacking_done:;
   if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_point_list), __pyx_ptype_5numpy_ndarray, 1, "point_list", 0))) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 185; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
   if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_max_line), __pyx_ptype_3RMS_8Routines_12Grouping3Dcy_Line, 1, "max_line", 0))) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 185; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
-  __pyx_r = __pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(__pyx_self, __pyx_v_point_list, __pyx_v_max_line, __pyx_v_distance_treshold, __pyx_v_gap_treshold);
+  __pyx_r = __pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(__pyx_self, __pyx_v_point_list, __pyx_v_max_line, __pyx_v_distance_threshold, __pyx_v_gap_threshold);
 
   /* function exit code */
   goto __pyx_L0;
@@ -3862,7 +3862,7 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_3remove3DPoints(PyObject
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_point_list, struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy_Line *__pyx_v_max_line, PyObject *__pyx_v_distance_treshold, PyObject *__pyx_v_gap_treshold) {
+static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_point_list, struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy_Line *__pyx_v_max_line, PyObject *__pyx_v_distance_threshold, PyObject *__pyx_v_gap_threshold) {
   int __pyx_v_x1;
   int __pyx_v_y1;
   int __pyx_v_z1;
@@ -4030,7 +4030,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
   /* "RMS/Routines/Grouping3Dcy.pyx":202
  * 
  *     # Get all points belonging to the max_line
- *     max_line_points = getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_treshold, gap_treshold,             # <<<<<<<<<<<<<<
+ *     max_line_points = getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold,             # <<<<<<<<<<<<<<
  *         max_array_size=max_line.counter)
  * 
  */
@@ -4065,12 +4065,12 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
   PyTuple_SET_ITEM(__pyx_t_8, 5, __pyx_t_3);
   __Pyx_GIVEREF(__pyx_t_2);
   PyTuple_SET_ITEM(__pyx_t_8, 6, __pyx_t_2);
-  __Pyx_INCREF(__pyx_v_distance_treshold);
-  __Pyx_GIVEREF(__pyx_v_distance_treshold);
-  PyTuple_SET_ITEM(__pyx_t_8, 7, __pyx_v_distance_treshold);
-  __Pyx_INCREF(__pyx_v_gap_treshold);
-  __Pyx_GIVEREF(__pyx_v_gap_treshold);
-  PyTuple_SET_ITEM(__pyx_t_8, 8, __pyx_v_gap_treshold);
+  __Pyx_INCREF(__pyx_v_distance_threshold);
+  __Pyx_GIVEREF(__pyx_v_distance_threshold);
+  PyTuple_SET_ITEM(__pyx_t_8, 7, __pyx_v_distance_threshold);
+  __Pyx_INCREF(__pyx_v_gap_threshold);
+  __Pyx_GIVEREF(__pyx_v_gap_threshold);
+  PyTuple_SET_ITEM(__pyx_t_8, 8, __pyx_v_gap_threshold);
   __pyx_t_7 = 0;
   __pyx_t_6 = 0;
   __pyx_t_5 = 0;
@@ -4080,7 +4080,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
 
   /* "RMS/Routines/Grouping3Dcy.pyx":203
  *     # Get all points belonging to the max_line
- *     max_line_points = getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_treshold, gap_treshold,
+ *     max_line_points = getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold,
  *         max_array_size=max_line.counter)             # <<<<<<<<<<<<<<
  * 
  *     # Get the point could minus points in the max_line
@@ -4095,7 +4095,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
   /* "RMS/Routines/Grouping3Dcy.pyx":202
  * 
  *     # Get all points belonging to the max_line
- *     max_line_points = getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_treshold, gap_treshold,             # <<<<<<<<<<<<<<
+ *     max_line_points = getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold,             # <<<<<<<<<<<<<<
  *         max_array_size=max_line.counter)
  * 
  */
@@ -4505,7 +4505,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
   /* "RMS/Routines/Grouping3Dcy.pyx":185
  * 
  * 
- * def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, distance_treshold, gap_treshold):             # <<<<<<<<<<<<<<
+ * def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, distance_threshold, gap_threshold):             # <<<<<<<<<<<<<<
  *     """ Remove points from a point list that belong to the given line.
  * 
  */
@@ -4949,8 +4949,8 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_7find3DLines(PyObject *_
 }
 
 static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_point_list, PyObject *__pyx_v_start_time, PyObject *__pyx_v_config, PyObject *__pyx_v_get_single, PyObject *__pyx_v_line_list) {
-  float __pyx_v_distance_treshold;
-  float __pyx_v_gap_treshold;
+  float __pyx_v_distance_threshold;
+  float __pyx_v_gap_threshold;
   int __pyx_v_min_points;
   int __pyx_v_line_minimum_frame_range;
   float __pyx_v_line_distance_const;
@@ -5050,32 +5050,32 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
   /* "RMS/Routines/Grouping3Dcy.pyx":243
  * 
  *     # Load config parameters
- *     cdef float distance_treshold = config.distance_treshold             # <<<<<<<<<<<<<<
- *     cdef float gap_treshold = config.gap_treshold
+ *     cdef float distance_threshold = config.distance_threshold             # <<<<<<<<<<<<<<
+ *     cdef float gap_threshold = config.gap_threshold
  *     cdef int min_points = config.min_points
  */
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_distance_treshold); if (unlikely(!__pyx_t_1)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 243; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_distance_threshold); if (unlikely(!__pyx_t_1)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 243; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_t_2 = __pyx_PyFloat_AsFloat(__pyx_t_1); if (unlikely((__pyx_t_2 == (float)-1) && PyErr_Occurred())) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 243; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_v_distance_treshold = __pyx_t_2;
+  __pyx_v_distance_threshold = __pyx_t_2;
 
   /* "RMS/Routines/Grouping3Dcy.pyx":244
  *     # Load config parameters
- *     cdef float distance_treshold = config.distance_treshold
- *     cdef float gap_treshold = config.gap_treshold             # <<<<<<<<<<<<<<
+ *     cdef float distance_threshold = config.distance_threshold
+ *     cdef float gap_threshold = config.gap_threshold             # <<<<<<<<<<<<<<
  *     cdef int min_points = config.min_points
  *     cdef int line_minimum_frame_range = config.line_minimum_frame_range
  */
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_gap_treshold); if (unlikely(!__pyx_t_1)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 244; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_gap_threshold); if (unlikely(!__pyx_t_1)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 244; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_t_2 = __pyx_PyFloat_AsFloat(__pyx_t_1); if (unlikely((__pyx_t_2 == (float)-1) && PyErr_Occurred())) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 244; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_v_gap_treshold = __pyx_t_2;
+  __pyx_v_gap_threshold = __pyx_t_2;
 
   /* "RMS/Routines/Grouping3Dcy.pyx":245
- *     cdef float distance_treshold = config.distance_treshold
- *     cdef float gap_treshold = config.gap_treshold
+ *     cdef float distance_threshold = config.distance_threshold
+ *     cdef float gap_threshold = config.gap_threshold
  *     cdef int min_points = config.min_points             # <<<<<<<<<<<<<<
  *     cdef int line_minimum_frame_range = config.line_minimum_frame_range
  *     cdef float line_distance_const = config.line_distance_const
@@ -5087,7 +5087,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
   __pyx_v_min_points = __pyx_t_3;
 
   /* "RMS/Routines/Grouping3Dcy.pyx":246
- *     cdef float gap_treshold = config.gap_treshold
+ *     cdef float gap_threshold = config.gap_threshold
  *     cdef int min_points = config.min_points
  *     cdef int line_minimum_frame_range = config.line_minimum_frame_range             # <<<<<<<<<<<<<<
  *     cdef float line_distance_const = config.line_distance_const
@@ -5477,43 +5477,43 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  *                 # Check if the distance between the line and the point is close enough
  *                 line_dist = line3DDistance_simple(x1, y1, z1, x2, y2, z2, x3, y3, z3)             # <<<<<<<<<<<<<<
  * 
- *                 if line_dist < distance_treshold:
+ *                 if line_dist < distance_threshold:
  */
         __pyx_v_line_dist = __pyx_f_3RMS_8Routines_12Grouping3Dcy_line3DDistance_simple(__pyx_v_x1, __pyx_v_y1, __pyx_v_z1, __pyx_v_x2, __pyx_v_y2, __pyx_v_z2, __pyx_v_x3, __pyx_v_y3, __pyx_v_z3);
 
         /* "RMS/Routines/Grouping3Dcy.pyx":310
  *                 line_dist = line3DDistance_simple(x1, y1, z1, x2, y2, z2, x3, y3, z3)
  * 
- *                 if line_dist < distance_treshold:             # <<<<<<<<<<<<<<
+ *                 if line_dist < distance_threshold:             # <<<<<<<<<<<<<<
  * 
  *                     # Calculate the gap from the previous point and reject the solution if the point is too far
  */
-        __pyx_t_7 = ((__pyx_v_line_dist < __pyx_v_distance_treshold) != 0);
+        __pyx_t_7 = ((__pyx_v_line_dist < __pyx_v_distance_threshold) != 0);
         if (__pyx_t_7) {
 
           /* "RMS/Routines/Grouping3Dcy.pyx":313
  * 
  *                     # Calculate the gap from the previous point and reject the solution if the point is too far
- *                     if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_treshold:             # <<<<<<<<<<<<<<
+ *                     if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_threshold:             # <<<<<<<<<<<<<<
  * 
  *                         # Reject solution (reset counter) if the last point is too far
  */
-          __pyx_t_7 = ((__pyx_f_3RMS_8Routines_12Grouping3Dcy_point3DDistance(__pyx_v_x_prev, __pyx_v_y_prev, __pyx_v_z_prev, __pyx_v_x3, __pyx_v_y3, __pyx_v_z3) > __pyx_v_gap_treshold) != 0);
+          __pyx_t_7 = ((__pyx_f_3RMS_8Routines_12Grouping3Dcy_point3DDistance(__pyx_v_x_prev, __pyx_v_y_prev, __pyx_v_z_prev, __pyx_v_x3, __pyx_v_y3, __pyx_v_z3) > __pyx_v_gap_threshold) != 0);
           if (__pyx_t_7) {
 
             /* "RMS/Routines/Grouping3Dcy.pyx":316
  * 
  *                         # Reject solution (reset counter) if the last point is too far
- *                         if point3DDistance(x2, y2, z2, x_prev, y_prev, z_prev) > gap_treshold:             # <<<<<<<<<<<<<<
+ *                         if point3DDistance(x2, y2, z2, x_prev, y_prev, z_prev) > gap_threshold:             # <<<<<<<<<<<<<<
  *                             counter = 0
  * 
  */
-            __pyx_t_7 = ((__pyx_f_3RMS_8Routines_12Grouping3Dcy_point3DDistance(__pyx_v_x2, __pyx_v_y2, __pyx_v_z2, __pyx_v_x_prev, __pyx_v_y_prev, __pyx_v_z_prev) > __pyx_v_gap_treshold) != 0);
+            __pyx_t_7 = ((__pyx_f_3RMS_8Routines_12Grouping3Dcy_point3DDistance(__pyx_v_x2, __pyx_v_y2, __pyx_v_z2, __pyx_v_x_prev, __pyx_v_y_prev, __pyx_v_z_prev) > __pyx_v_gap_threshold) != 0);
             if (__pyx_t_7) {
 
               /* "RMS/Routines/Grouping3Dcy.pyx":317
  *                         # Reject solution (reset counter) if the last point is too far
- *                         if point3DDistance(x2, y2, z2, x_prev, y_prev, z_prev) > gap_treshold:
+ *                         if point3DDistance(x2, y2, z2, x_prev, y_prev, z_prev) > gap_threshold:
  *                             counter = 0             # <<<<<<<<<<<<<<
  * 
  *                         break
@@ -5523,7 +5523,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
               /* "RMS/Routines/Grouping3Dcy.pyx":316
  * 
  *                         # Reject solution (reset counter) if the last point is too far
- *                         if point3DDistance(x2, y2, z2, x_prev, y_prev, z_prev) > gap_treshold:             # <<<<<<<<<<<<<<
+ *                         if point3DDistance(x2, y2, z2, x_prev, y_prev, z_prev) > gap_threshold:             # <<<<<<<<<<<<<<
  *                             counter = 0
  * 
  */
@@ -5541,7 +5541,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
             /* "RMS/Routines/Grouping3Dcy.pyx":313
  * 
  *                     # Calculate the gap from the previous point and reject the solution if the point is too far
- *                     if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_treshold:             # <<<<<<<<<<<<<<
+ *                     if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_threshold:             # <<<<<<<<<<<<<<
  * 
  *                         # Reject solution (reset counter) if the last point is too far
  */
@@ -5582,7 +5582,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
           /* "RMS/Routines/Grouping3Dcy.pyx":310
  *                 line_dist = line3DDistance_simple(x1, y1, z1, x2, y2, z2, x3, y3, z3)
  * 
- *                 if line_dist < distance_treshold:             # <<<<<<<<<<<<<<
+ *                 if line_dist < distance_threshold:             # <<<<<<<<<<<<<<
  * 
  *                     # Calculate the gap from the previous point and reject the solution if the point is too far
  */
@@ -5827,15 +5827,15 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
   /* "RMS/Routines/Grouping3Dcy.pyx":353
  * 
  *     # Remove points from the point cloud that belong to line with the best quality
- *     point_list, max_line_points = remove3DPoints(point_list, max_line, distance_treshold, gap_treshold)             # <<<<<<<<<<<<<<
+ *     point_list, max_line_points = remove3DPoints(point_list, max_line, distance_threshold, gap_threshold)             # <<<<<<<<<<<<<<
  * 
  *     # Return nothing if no points were found
  */
   __pyx_t_37 = __Pyx_GetModuleGlobalName(__pyx_n_s_remove3DPoints); if (unlikely(!__pyx_t_37)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 353; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
   __Pyx_GOTREF(__pyx_t_37);
-  __pyx_t_36 = PyFloat_FromDouble(__pyx_v_distance_treshold); if (unlikely(!__pyx_t_36)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 353; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
+  __pyx_t_36 = PyFloat_FromDouble(__pyx_v_distance_threshold); if (unlikely(!__pyx_t_36)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 353; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
   __Pyx_GOTREF(__pyx_t_36);
-  __pyx_t_35 = PyFloat_FromDouble(__pyx_v_gap_treshold); if (unlikely(!__pyx_t_35)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 353; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
+  __pyx_t_35 = PyFloat_FromDouble(__pyx_v_gap_threshold); if (unlikely(!__pyx_t_35)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 353; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
   __Pyx_GOTREF(__pyx_t_35);
   __pyx_t_34 = NULL;
   __pyx_t_4 = 0;
@@ -6093,13 +6093,13 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
   /* "RMS/Routines/Grouping3Dcy.pyx":371
  *     # If only one line was desired, return it
  *     # if there are more lines on the image, recursively find lines
- *     if (line_ratio < config.point_ratio_treshold) and (results_counter > 10) and (not get_single):             # <<<<<<<<<<<<<<
+ *     if (line_ratio < config.point_ratio_threshold) and (results_counter > 10) and (not get_single):             # <<<<<<<<<<<<<<
  *         # Recursively find lines until there are no more points or no lines is found to be good
  *         find3DLines(point_list, start_time, config, get_single=get_single, line_list = line_list)
  */
   __pyx_t_37 = PyFloat_FromDouble(__pyx_v_line_ratio); if (unlikely(!__pyx_t_37)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 371; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
   __Pyx_GOTREF(__pyx_t_37);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_point_ratio_treshold); if (unlikely(!__pyx_t_6)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 371; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
+  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_point_ratio_threshold); if (unlikely(!__pyx_t_6)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 371; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
   __Pyx_GOTREF(__pyx_t_6);
   __pyx_t_35 = PyObject_RichCompare(__pyx_t_37, __pyx_t_6, Py_LT); __Pyx_XGOTREF(__pyx_t_35); if (unlikely(!__pyx_t_35)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 371; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
   __Pyx_DECREF(__pyx_t_37); __pyx_t_37 = 0;
@@ -6124,7 +6124,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
   if (__pyx_t_44) {
 
     /* "RMS/Routines/Grouping3Dcy.pyx":373
- *     if (line_ratio < config.point_ratio_treshold) and (results_counter > 10) and (not get_single):
+ *     if (line_ratio < config.point_ratio_threshold) and (results_counter > 10) and (not get_single):
  *         # Recursively find lines until there are no more points or no lines is found to be good
  *         find3DLines(point_list, start_time, config, get_single=get_single, line_list = line_list)             # <<<<<<<<<<<<<<
  * 
@@ -6157,7 +6157,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
     /* "RMS/Routines/Grouping3Dcy.pyx":371
  *     # If only one line was desired, return it
  *     # if there are more lines on the image, recursively find lines
- *     if (line_ratio < config.point_ratio_treshold) and (results_counter > 10) and (not get_single):             # <<<<<<<<<<<<<<
+ *     if (line_ratio < config.point_ratio_threshold) and (results_counter > 10) and (not get_single):             # <<<<<<<<<<<<<<
  *         # Recursively find lines until there are no more points or no lines is found to be good
  *         find3DLines(point_list, start_time, config, get_single=get_single, line_list = line_list)
  */
@@ -8496,8 +8496,8 @@ static PyObject *__pyx_tp_new_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__
 static void __pyx_tp_dealloc_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__getAllPoints(PyObject *o) {
   struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__getAllPoints *p = (struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__getAllPoints *)o;
   PyObject_GC_UnTrack(o);
-  Py_CLEAR(p->__pyx_v_distance_treshold);
-  Py_CLEAR(p->__pyx_v_gap_treshold);
+  Py_CLEAR(p->__pyx_v_distance_threshold);
+  Py_CLEAR(p->__pyx_v_gap_threshold);
   Py_CLEAR(p->__pyx_v_x1);
   Py_CLEAR(p->__pyx_v_x2);
   Py_CLEAR(p->__pyx_v_y1);
@@ -8514,11 +8514,11 @@ static void __pyx_tp_dealloc_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__g
 static int __pyx_tp_traverse_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__getAllPoints(PyObject *o, visitproc v, void *a) {
   int e;
   struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__getAllPoints *p = (struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__getAllPoints *)o;
-  if (p->__pyx_v_distance_treshold) {
-    e = (*v)(p->__pyx_v_distance_treshold, a); if (e) return e;
+  if (p->__pyx_v_distance_threshold) {
+    e = (*v)(p->__pyx_v_distance_threshold, a); if (e) return e;
   }
-  if (p->__pyx_v_gap_treshold) {
-    e = (*v)(p->__pyx_v_gap_treshold, a); if (e) return e;
+  if (p->__pyx_v_gap_threshold) {
+    e = (*v)(p->__pyx_v_gap_threshold, a); if (e) return e;
   }
   if (p->__pyx_v_x1) {
     e = (*v)(p->__pyx_v_x1, a); if (e) return e;
@@ -8544,11 +8544,11 @@ static int __pyx_tp_traverse_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__g
 static int __pyx_tp_clear_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__getAllPoints(PyObject *o) {
   PyObject* tmp;
   struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__getAllPoints *p = (struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__getAllPoints *)o;
-  tmp = ((PyObject*)p->__pyx_v_distance_treshold);
-  p->__pyx_v_distance_treshold = Py_None; Py_INCREF(Py_None);
+  tmp = ((PyObject*)p->__pyx_v_distance_threshold);
+  p->__pyx_v_distance_threshold = Py_None; Py_INCREF(Py_None);
   Py_XDECREF(tmp);
-  tmp = ((PyObject*)p->__pyx_v_gap_treshold);
-  p->__pyx_v_gap_treshold = Py_None; Py_INCREF(Py_None);
+  tmp = ((PyObject*)p->__pyx_v_gap_threshold);
+  p->__pyx_v_gap_threshold = Py_None; Py_INCREF(Py_None);
   Py_XDECREF(tmp);
   tmp = ((PyObject*)p->__pyx_v_x1);
   p->__pyx_v_x1 = Py_None; Py_INCREF(Py_None);
@@ -8669,12 +8669,12 @@ static __Pyx_StringTabEntry __pyx_string_tab[] = {
   {&__pyx_n_s_best_distance, __pyx_k_best_distance, sizeof(__pyx_k_best_distance), 0, 0, 1, 1},
   {&__pyx_n_s_config, __pyx_k_config, sizeof(__pyx_k_config), 0, 0, 1, 1},
   {&__pyx_n_s_counter, __pyx_k_counter, sizeof(__pyx_k_counter), 0, 0, 1, 1},
-  {&__pyx_n_s_distance_treshold, __pyx_k_distance_treshold, sizeof(__pyx_k_distance_treshold), 0, 0, 1, 1},
+  {&__pyx_n_s_distance_threshold, __pyx_k_distance_threshold, sizeof(__pyx_k_distance_threshold), 0, 0, 1, 1},
   {&__pyx_n_s_dtype, __pyx_k_dtype, sizeof(__pyx_k_dtype), 0, 0, 1, 1},
   {&__pyx_n_s_find3DLines, __pyx_k_find3DLines, sizeof(__pyx_k_find3DLines), 0, 0, 1, 1},
   {&__pyx_n_s_first_frame, __pyx_k_first_frame, sizeof(__pyx_k_first_frame), 0, 0, 1, 1},
   {&__pyx_n_s_formatLine, __pyx_k_formatLine, sizeof(__pyx_k_formatLine), 0, 0, 1, 1},
-  {&__pyx_n_s_gap_treshold, __pyx_k_gap_treshold, sizeof(__pyx_k_gap_treshold), 0, 0, 1, 1},
+  {&__pyx_n_s_gap_threshold, __pyx_k_gap_threshold, sizeof(__pyx_k_gap_threshold), 0, 0, 1, 1},
   {&__pyx_n_s_getAllPoints, __pyx_k_getAllPoints, sizeof(__pyx_k_getAllPoints), 0, 0, 1, 1},
   {&__pyx_n_s_getAllPoints_locals_propagateLin, __pyx_k_getAllPoints_locals_propagateLin, sizeof(__pyx_k_getAllPoints_locals_propagateLin), 0, 0, 1, 1},
   {&__pyx_n_s_get_points, __pyx_k_get_points, sizeof(__pyx_k_get_points), 0, 0, 1, 1},
@@ -8711,7 +8711,7 @@ static __Pyx_StringTabEntry __pyx_string_tab[] = {
   {&__pyx_n_s_point_list, __pyx_k_point_list, sizeof(__pyx_k_point_list), 0, 0, 1, 1},
   {&__pyx_n_s_point_list_rows, __pyx_k_point_list_rows, sizeof(__pyx_k_point_list_rows), 0, 0, 1, 1},
   {&__pyx_n_s_point_list_size, __pyx_k_point_list_size, sizeof(__pyx_k_point_list_size), 0, 0, 1, 1},
-  {&__pyx_n_s_point_ratio_treshold, __pyx_k_point_ratio_treshold, sizeof(__pyx_k_point_ratio_treshold), 0, 0, 1, 1},
+  {&__pyx_n_s_point_ratio_threshold, __pyx_k_point_ratio_threshold, sizeof(__pyx_k_point_ratio_threshold), 0, 0, 1, 1},
   {&__pyx_n_s_propagateLine, __pyx_k_propagateLine, sizeof(__pyx_k_propagateLine), 0, 0, 1, 1},
   {&__pyx_n_s_propagation_list, __pyx_k_propagation_list, sizeof(__pyx_k_propagation_list), 0, 0, 1, 1},
   {&__pyx_n_s_range, __pyx_k_range, sizeof(__pyx_k_range), 0, 0, 1, 1},
@@ -8894,11 +8894,11 @@ static int __Pyx_InitCachedConstants(void) {
   /* "RMS/Routines/Grouping3Dcy.pyx":95
  * 
  * @cython.boundscheck(False)
- * def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_treshold, gap_treshold, max_array_size=0):             # <<<<<<<<<<<<<<
+ * def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):             # <<<<<<<<<<<<<<
  *     """ Returns all points describing a particular line.
  *     @param point_list: [ndarray] list of all points
  */
-  __pyx_tuple__18 = PyTuple_Pack(22, __pyx_n_s_point_list, __pyx_n_s_x1, __pyx_n_s_y1, __pyx_n_s_z1, __pyx_n_s_x2, __pyx_n_s_y2, __pyx_n_s_z2, __pyx_n_s_distance_treshold, __pyx_n_s_gap_treshold, __pyx_n_s_max_array_size, __pyx_n_s_i, __pyx_n_s_point_list_size, __pyx_n_s_propagateLine, __pyx_n_s_propagateLine, __pyx_n_s_max_line_points, __pyx_n_s_point1_index, __pyx_n_s_best_distance, __pyx_n_s_j, __pyx_n_s_x_temp, __pyx_n_s_y_temp, __pyx_n_s_z_temp, __pyx_n_s_temp_dist); if (unlikely(!__pyx_tuple__18)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 95; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
+  __pyx_tuple__18 = PyTuple_Pack(22, __pyx_n_s_point_list, __pyx_n_s_x1, __pyx_n_s_y1, __pyx_n_s_z1, __pyx_n_s_x2, __pyx_n_s_y2, __pyx_n_s_z2, __pyx_n_s_distance_threshold, __pyx_n_s_gap_threshold, __pyx_n_s_max_array_size, __pyx_n_s_i, __pyx_n_s_point_list_size, __pyx_n_s_propagateLine, __pyx_n_s_propagateLine, __pyx_n_s_max_line_points, __pyx_n_s_point1_index, __pyx_n_s_best_distance, __pyx_n_s_j, __pyx_n_s_x_temp, __pyx_n_s_y_temp, __pyx_n_s_z_temp, __pyx_n_s_temp_dist); if (unlikely(!__pyx_tuple__18)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 95; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
   __Pyx_GOTREF(__pyx_tuple__18);
   __Pyx_GIVEREF(__pyx_tuple__18);
   __pyx_codeobj__19 = (PyObject*)__Pyx_PyCode_New(10, 0, 22, 0, 0, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__18, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_home_anonymus_Dropbox_grouping3, __pyx_n_s_getAllPoints, 95, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__19)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 95; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
@@ -8906,11 +8906,11 @@ static int __Pyx_InitCachedConstants(void) {
   /* "RMS/Routines/Grouping3Dcy.pyx":185
  * 
  * 
- * def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, distance_treshold, gap_treshold):             # <<<<<<<<<<<<<<
+ * def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, distance_threshold, gap_threshold):             # <<<<<<<<<<<<<<
  *     """ Remove points from a point list that belong to the given line.
  * 
  */
-  __pyx_tuple__20 = PyTuple_Pack(13, __pyx_n_s_point_list, __pyx_n_s_max_line, __pyx_n_s_distance_treshold, __pyx_n_s_gap_treshold, __pyx_n_s_x1, __pyx_n_s_y1, __pyx_n_s_z1, __pyx_n_s_x2, __pyx_n_s_y2, __pyx_n_s_z2, __pyx_n_s_max_line_points, __pyx_n_s_point_list_rows, __pyx_n_s_max_line_points_rows); if (unlikely(!__pyx_tuple__20)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 185; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
+  __pyx_tuple__20 = PyTuple_Pack(13, __pyx_n_s_point_list, __pyx_n_s_max_line, __pyx_n_s_distance_threshold, __pyx_n_s_gap_threshold, __pyx_n_s_x1, __pyx_n_s_y1, __pyx_n_s_z1, __pyx_n_s_x2, __pyx_n_s_y2, __pyx_n_s_z2, __pyx_n_s_max_line_points, __pyx_n_s_point_list_rows, __pyx_n_s_max_line_points_rows); if (unlikely(!__pyx_tuple__20)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 185; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
   __Pyx_GOTREF(__pyx_tuple__20);
   __Pyx_GIVEREF(__pyx_tuple__20);
   __pyx_codeobj__21 = (PyObject*)__Pyx_PyCode_New(4, 0, 13, 0, 0, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__20, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_home_anonymus_Dropbox_grouping3, __pyx_n_s_remove3DPoints, 185, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__21)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 185; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
@@ -8934,7 +8934,7 @@ static int __Pyx_InitCachedConstants(void) {
  *     """ Iteratively find N straight lines in 3D space.
  * 
  */
-  __pyx_tuple__24 = PyTuple_Pack(38, __pyx_n_s_point_list, __pyx_n_s_start_time, __pyx_n_s_config, __pyx_n_s_get_single, __pyx_n_s_line_list, __pyx_n_s_distance_treshold, __pyx_n_s_gap_treshold, __pyx_n_s_min_points, __pyx_n_s_line_minimum_frame_range, __pyx_n_s_line_distance_const, __pyx_n_s_i, __pyx_n_s_j, __pyx_n_s_z, __pyx_n_s_x1, __pyx_n_s_y1, __pyx_n_s_z1, __pyx_n_s_x2, __pyx_n_s_y2, __pyx_n_s_z2, __pyx_n_s_x3, __pyx_n_s_y3, __pyx_n_s_z3, __pyx_n_s_x_prev, __pyx_n_s_y_prev, __pyx_n_s_z_prev, __pyx_n_s_counter, __pyx_n_s_results_counter, __pyx_n_s_line_dist_sum, __pyx_n_s_line_dist, __pyx_n_s_line_dist_avg, __pyx_n_s_point_list_size, __pyx_n_s_results_list, __pyx_n_s_line_quality, __pyx_n_s_max_line, __pyx_n_s_line_ratio, __pyx_n_s_max_line_points, __pyx_n_s_first_frame, __pyx_n_s_last_frame); if (unlikely(!__pyx_tuple__24)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 231; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
+  __pyx_tuple__24 = PyTuple_Pack(38, __pyx_n_s_point_list, __pyx_n_s_start_time, __pyx_n_s_config, __pyx_n_s_get_single, __pyx_n_s_line_list, __pyx_n_s_distance_threshold, __pyx_n_s_gap_threshold, __pyx_n_s_min_points, __pyx_n_s_line_minimum_frame_range, __pyx_n_s_line_distance_const, __pyx_n_s_i, __pyx_n_s_j, __pyx_n_s_z, __pyx_n_s_x1, __pyx_n_s_y1, __pyx_n_s_z1, __pyx_n_s_x2, __pyx_n_s_y2, __pyx_n_s_z2, __pyx_n_s_x3, __pyx_n_s_y3, __pyx_n_s_z3, __pyx_n_s_x_prev, __pyx_n_s_y_prev, __pyx_n_s_z_prev, __pyx_n_s_counter, __pyx_n_s_results_counter, __pyx_n_s_line_dist_sum, __pyx_n_s_line_dist, __pyx_n_s_line_dist_avg, __pyx_n_s_point_list_size, __pyx_n_s_results_list, __pyx_n_s_line_quality, __pyx_n_s_max_line, __pyx_n_s_line_ratio, __pyx_n_s_max_line_points, __pyx_n_s_first_frame, __pyx_n_s_last_frame); if (unlikely(!__pyx_tuple__24)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 231; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
   __Pyx_GOTREF(__pyx_tuple__24);
   __Pyx_GIVEREF(__pyx_tuple__24);
   __pyx_codeobj__25 = (PyObject*)__Pyx_PyCode_New(5, 0, 38, 0, 0, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__24, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_home_anonymus_Dropbox_grouping3, __pyx_n_s_find3DLines, 231, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__25)) {__pyx_filename = __pyx_f[0]; __pyx_lineno = 231; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
@@ -9131,7 +9131,7 @@ PyMODINIT_FUNC PyInit_Grouping3Dcy(void)
   /* "RMS/Routines/Grouping3Dcy.pyx":95
  * 
  * @cython.boundscheck(False)
- * def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_treshold, gap_treshold, max_array_size=0):             # <<<<<<<<<<<<<<
+ * def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):             # <<<<<<<<<<<<<<
  *     """ Returns all points describing a particular line.
  *     @param point_list: [ndarray] list of all points
  */
@@ -9143,7 +9143,7 @@ PyMODINIT_FUNC PyInit_Grouping3Dcy(void)
   /* "RMS/Routines/Grouping3Dcy.pyx":185
  * 
  * 
- * def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, distance_treshold, gap_treshold):             # <<<<<<<<<<<<<<
+ * def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, distance_threshold, gap_threshold):             # <<<<<<<<<<<<<<
  *     """ Remove points from a point list that belong to the given line.
  * 
  */

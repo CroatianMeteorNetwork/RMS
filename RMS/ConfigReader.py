@@ -85,11 +85,11 @@ class Config:
         self.maxSize = 192
         
         # params for Grouping3D
-        self.distance_treshold = 4900  # maximum distance between the line and the point to be takes as a part of the same line
-        self.gap_treshold = 16900      # maximum allowed gap between points
+        self.distance_threshold = 4900  # maximum distance between the line and the point to be takes as a part of the same line
+        self.gap_threshold = 16900      # maximum allowed gap between points
         self.line_minimum_frame_range = 3   # minimum range of frames that a line should cover (eliminates flash detections)
         self.line_distance_const = 4   # constant that determines the influence of average point distance on the line quality
-        self.point_ratio_treshold = 0.7# ratio of how many points must be close to the line before considering searching for another line
+        self.point_ratio_threshold = 0.7# ratio of how many points must be close to the line before considering searching for another line
         self.max_lines = 5             # maximum number of lines
 
         ##### MeteorDetection
@@ -109,8 +109,8 @@ class Config:
 
         # 3D line finding for meteor detection
         self.max_points_det = 600 # maximumum number of points during 3D line search in faint meteor detection (used to minimize runtime)
-        self.distance_treshold_det = 50**2 # maximum distance between the line and the point to be takes as a part of the same line
-        self.gap_treshold_det = 500**2 # maximum allowed gap between points
+        self.distance_threshold_det = 50**2 # maximum distance between the line and the point to be takes as a part of the same line
+        self.gap_threshold_det = 500**2 # maximum allowed gap between points
         self.min_pixels_det = 10 # minimum number of pixels in a strip
         self.line_minimum_frame_range_det = 4 # minimum number of frames per one detection
         self.line_distance_const_det = 4 # constant that determines the influence of average point distance on the line quality
@@ -337,15 +337,15 @@ def parseFireballDetection(config, parser):
     if parser.has_option(section, "threshold_for_size"):
         config.limitForSize = parser.getfloat(section, "threshold_for_size")
     
-    if parser.has_option(section, "distance_treshold"):
-        config.distance_treshold = parser.getint(section, "distance_treshold")**2
+    if parser.has_option(section, "distance_threshold"):
+        config.distance_threshold = parser.getint(section, "distance_threshold")**2
     
-    config.distance_treshold = Grouping3D.normalizeParameter(config.distance_treshold, config)
+    config.distance_threshold = Grouping3D.normalizeParameter(config.distance_threshold, config)
     
-    if parser.has_option(section, "gap_treshold"):
-        config.gap_treshold = parser.getint(section, "gap_treshold")**2
+    if parser.has_option(section, "gap_threshold"):
+        config.gap_threshold = parser.getint(section, "gap_threshold")**2
     
-    config.gap_treshold = Grouping3D.normalizeParameter(config.gap_treshold, config)
+    config.gap_threshold = Grouping3D.normalizeParameter(config.gap_threshold, config)
 
     if parser.has_option(section, "line_minimum_frame_range"):
         config.line_minimum_frame_range = parser.getint(section, "line_minimum_frame_range")
@@ -353,8 +353,8 @@ def parseFireballDetection(config, parser):
     if parser.has_option(section, "line_distance_const"):
         config.line_distance_const = parser.getint(section, "line_distance_const")
     
-    if parser.has_option(section, "point_ratio_treshold"):
-        config.point_ratio_treshold = parser.getfloat(section, "point_ratio_treshold")        
+    if parser.has_option(section, "point_ratio_threshold"):
+        config.point_ratio_threshold = parser.getfloat(section, "point_ratio_threshold")        
     
     if parser.has_option(section, "max_lines"):
         config.max_lines = parser.getint(section, "max_lines")
@@ -390,15 +390,15 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "line_min_dist"):
         config.line_min_dist = parser.getint(section, "line_min_dist")
 
-    if parser.has_option(section, "distance_treshold_det"):
-        config.distance_treshold_det = parser.getint(section, "distance_treshold_det")**2
+    if parser.has_option(section, "distance_threshold_det"):
+        config.distance_threshold_det = parser.getint(section, "distance_threshold_det")**2
 
-    config.distance_treshold_det = Grouping3D.normalizeParameter(config.distance_treshold_det, config)
+    config.distance_threshold_det = Grouping3D.normalizeParameter(config.distance_threshold_det, config)
 
-    if parser.has_option(section, "gap_treshold_det"):
-        config.gap_treshold_det = parser.getint(section, "gap_treshold_det")**2
+    if parser.has_option(section, "gap_threshold_det"):
+        config.gap_threshold_det = parser.getint(section, "gap_threshold_det")**2
 
-    config.gap_treshold_det = Grouping3D.normalizeParameter(config.gap_treshold_det, config)
+    config.gap_threshold_det = Grouping3D.normalizeParameter(config.gap_threshold_det, config)
 
     if parser.has_option(section, "min_pixels_det"):
         config.min_pixels_det = parser.getint(section, "min_pixels_det")

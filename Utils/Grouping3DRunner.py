@@ -9,9 +9,12 @@ import os
 import sys
 import time
 import numpy as np
+import scipy
+
 
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+import matplotlib.cm as cm
 
 # Cython init
 import pyximport
@@ -20,18 +23,18 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 if __name__ == "__main__":
 
     # Get bin path and name from the given argument
-    # bin_name = sys.argv[1]
-    # if os.sep in bin_name:
-    #     bin_name = bin_name.split(os.sep)
-    #     bin_dir = (os.sep).join(bin_name[:-1]) + os.sep
-    #     bin_name = bin_name[-1]
+    bin_name = sys.argv[1]
+    if os.sep in bin_name:
+        bin_name = bin_name.split(os.sep)
+        bin_dir = (os.sep).join(bin_name[:-1]) + os.sep
+        bin_name = bin_name[-1]
 
     # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/2015_06_20_19_33_11' + os.sep
     # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/2015_06_23_19_33_43' + os.sep
     # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/bins' + os.sep
     # bin_dir = '/home/anonymus/Dropbox/grouping3D/perzeidi2015/11 12 Aug' + os.sep
     # bin_dir = "/home/anonymus/Dropbox/grouping3D/perzeidi2015/12 13 Aug" + os.sep
-    bin_dir = '/home/anonymus/Dropbox/grouping3D/samples' + os.sep
+    # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples' + os.sep
     # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/2015110304 bolid' + os.sep
     # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/2015110506 bolid' + os.sep
     # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/20151111213 visnjan' + os.sep
@@ -60,7 +63,7 @@ if __name__ == "__main__":
             # Dummy frames (empty)
             frames = np.zeros(shape=(256, compressed.shape[1], compressed.shape[2]), dtype=np.uint8)
 
-            extract_obj = Extractor(config)
+            extract_obj = Extractor(config, bin_dir)
             extract_obj.compressed = compressed
             extract_obj.frames = frames
 
@@ -86,6 +89,14 @@ if __name__ == "__main__":
                 # Plot lines in 3D
                 fig = plt.figure()
                 ax = fig.add_subplot(111, projection='3d')
+
+                # Plot the image as a surface at frame 0
+                img_y_size = ff.maxpixel.shape[0]/config.f
+                img_x_size = ff.maxpixel.shape[1]/config.f
+                y, x = np.mgrid[0:img_y_size, :img_x_size]
+                img_resize = scipy.misc.imresize(ff.maxpixel, (img_y_size, img_x_size), interp='lanczos').astype(np.float64)
+                ax.plot_surface(x, y, np.zeros_like(x), rstride=1, cstride=1, 
+                    facecolors=cm.inferno(img_resize/np.max(img_resize)))
 
                 points = np.array(event_points, dtype = np.uint8)
 

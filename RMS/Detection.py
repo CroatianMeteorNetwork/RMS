@@ -529,7 +529,7 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
         img = selectFrames(img_thres, ff, frame_min, frame_max)
 
         # Show thresholded image
-        # show(str(frame_min) + "-" + str(frame_max) + " treshold", img)
+        # show(str(frame_min) + "-" + str(frame_max) + " threshold", img)
 
         # # Show maxpixel of the thresholded part
         # mask = np.zeros(shape=img.shape)

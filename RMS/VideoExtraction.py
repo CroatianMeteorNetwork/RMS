@@ -144,14 +144,14 @@ class Extractor(Process):
         
 
         # Calculate a threshold based on factors and median number of points on the images per frame
-        outlier_treshold = self.config.max_per_frame_factor * np.median(freq[:, 1])
-        if outlier_treshold > self.config.max_points_per_frame:
-            outlier_treshold = self.config.max_points_per_frame
+        outlier_threshold = self.config.max_per_frame_factor * np.median(freq[:, 1])
+        if outlier_threshold > self.config.max_points_per_frame:
+            outlier_threshold = self.config.max_points_per_frame
         
 
         # Remove all outliers (aka. frames with a strong flare)
         for frameNum, count in freq:
-            if count >= outlier_treshold:
+            if count >= outlier_threshold:
                 indices = np.where(z != frameNum)
                 y = y[indices]
                 x = x[indices]
@@ -212,7 +212,7 @@ class Extractor(Process):
             
             distance = sqrt(y_dist*y_dist + z_dist*z_dist + z_dist*z_dist);
             
-            if(distance < gap_treshold) {
+            if(distance < gap_threshold) {
                 count++;
             }
             
@@ -224,7 +224,7 @@ class Extractor(Process):
         return_val = count;
         """
         
-        dictionary = {'gap_treshold': sqrt(self.config.gap_treshold), 'y': y, 'x': x, 'z': z}
+        dictionary = {'gap_threshold': sqrt(self.config.gap_threshold), 'y': y, 'x': x, 'z': z}
         count = weave.inline(code, dictionary.keys(), dictionary, verbose=2, extra_compile_args=self.config.weaveArgs, extra_link_args=self.config.weaveArgs)
         
         return count >= self.config.min_points

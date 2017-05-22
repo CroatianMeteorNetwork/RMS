@@ -97,13 +97,13 @@ cdef class Line:
         return self.x1, self.y1, self.z1, self.x2, self.y2, self.z2
 
 @cython.boundscheck(False)
-def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_treshold, gap_treshold, max_array_size=0):
+def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):
     """ Returns all points describing a particular line. 
     
     @param point_list: [ndarray] list of all points
     @param x1, y1, z1, x2, y2, z2: [int] points defining a line in 3D space
-    @param distance_treshold: [int] maximum distance between the line and the point to be takes as a part of the same line
-    @param gap_treshold: [float] maximum allowed gap between points
+    @param distance_threshold: [int] maximum distance between the line and the point to be takes as a part of the same line
+    @param gap_threshold: [float] maximum allowed gap between points
     @param max_array_size: [float] predefined size of max_line_points array (optional)
     
     @return: [ndarray] array of points belonging to a certain line
@@ -136,10 +136,10 @@ def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, 
             # Check if the distance between the line and the point is close enough
             line_dist = line3DDistance_simple(x1, y1, z1, x2, y2, z2, x3, y3, z3)
 
-            if line_dist < distance_treshold:
+            if line_dist < distance_threshold:
 
                 # Calculate the gap from the previous point and reject the solution if the point is too far
-                if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_treshold:
+                if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_threshold:
                     break
 
                 max_line_points[i,0] = x3
@@ -190,13 +190,13 @@ def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, 
 
 
 
-def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, distance_treshold, gap_treshold):
+def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, distance_threshold, gap_threshold):
     """ Remove points from a point list that belong to the given line.
     
     @param point_list: [ndarray] list of all points
     @param max_line: [Line object] given line
-    @param distance_treshold: [int] maximum distance between the line and the point to be takes as a part of the same line
-    @param gap_treshold: [int] maximum allowed gap between points
+    @param distance_threshold: [int] maximum distance between the line and the point to be takes as a part of the same line
+    @param gap_threshold: [int] maximum allowed gap between points
     
     @return: [tuple of ndarrays] (array of all points minus the ones in the max_line), (points in the max_line)
     """
@@ -207,7 +207,7 @@ def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, dis
     x1, y1, z1, x2, y2, z2 = max_line.get_points()
     
     # Get all points belonging to the max_line
-    max_line_points = getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_treshold, gap_treshold, 
+    max_line_points = getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, 
         max_array_size=max_line.counter)
 
     # Get the point could minus points in the max_line
@@ -249,9 +249,10 @@ def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, g
     """
 
     # Load config parameters
-    cdef float distance_treshold = config.distance_treshold
-    cdef float gap_treshold = config.gap_treshold
+    cdef float distance_threshold = config.distance_threshold
+    cdef float gap_threshold = config.gap_threshold
     cdef int min_points = config.min_points
+    cdef int min_frames = config.min_frames
     cdef int line_minimum_frame_range = config.line_minimum_frame_range
     cdef float line_distance_const = config.line_distance_const
 
@@ -316,13 +317,13 @@ def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, g
                 # Check if the distance between the line and the point is close enough
                 line_dist = line3DDistance_simple(x1, y1, z1, x2, y2, z2, x3, y3, z3)
 
-                if line_dist < distance_treshold:
+                if line_dist < distance_threshold:
 
                     # Calculate the gap from the previous point and reject the solution if the point is too far
-                    if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_treshold:
+                    if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_threshold:
 
                         # Reject solution (reset counter) if the last point is too far
-                        if point3DDistance(x2, y2, z2, x_prev, y_prev, z_prev) > gap_treshold:
+                        if point3DDistance(x2, y2, z2, x_prev, y_prev, z_prev) > gap_threshold:
                             counter = 0
 
                         break
@@ -333,7 +334,7 @@ def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, g
                     x_prev, y_prev, z_prev = x3, y3, z3
 
             # Skip if too little points were found
-            if (counter) < min_points:
+            if counter < min_points:
                 continue
 
             # Average distance between points and the line
@@ -359,7 +360,7 @@ def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, g
     cdef float line_ratio = max_line.counter / results_counter
 
     # Remove points from the point cloud that belong to line with the best quality
-    point_list, max_line_points = remove3DPoints(point_list, max_line, distance_treshold, gap_treshold)
+    point_list, max_line_points = remove3DPoints(point_list, max_line, distance_threshold, gap_threshold)
 
     # Return nothing if no points were found
     if not max_line_points.size:
@@ -369,15 +370,16 @@ def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, g
     first_frame = max_line_points[0,2]
     last_frame = max_line_points[len(max_line_points) - 1,2]
 
+
     # Reject the line if all points are only in very close frames (eliminate flashes):
-    if abs(last_frame - first_frame)+1 >= line_minimum_frame_range:
+    if abs(last_frame - first_frame) + 1 >= line_minimum_frame_range:
 
         # Add max_line to results, as well as the first and the last frame of a meteor
         line_list.append(_formatLine(max_line, first_frame, last_frame))
 
     # If only one line was desired, return it
     # if there are more lines on the image, recursively find lines
-    if (line_ratio < config.point_ratio_treshold) and (results_counter > 10) and (not get_single):
+    if (line_ratio < config.point_ratio_threshold) and (results_counter > 10) and (not get_single):
         # Recursively find lines until there are no more points or no lines is found to be good
         find3DLines(point_list, start_time, config, get_single=get_single, line_list = line_list)
 
