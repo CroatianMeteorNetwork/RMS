@@ -144,7 +144,7 @@ class Compressor(multiprocessing.Process):
                     acc += pixel;
                     var += pixel*pixel;
                     
-                    if(pixel > max) 
+                    if(max < pixel)
                     {
                         max = pixel;
                         max_frame = n;
@@ -152,15 +152,15 @@ class Compressor(multiprocessing.Process):
                     }
                     // Randomize taken frame number for max pixel if there are several frames with the maximum
                     // value
-                    else if(pixel == max) 
+                    else if(max == pixel)
                     { 
                         num_equal++;
                         
                         // rand_count is unsigned short, which means it will overflow back to 0 after 65535
-                        rand_count++; 
+                        rand_count = (rand_count + 1)% 65536L;
 
                         // Select the frame by random
-                        if(num_equal <= randomN[rand_count]) 
+                        if(num_equal <= randomN[rand_count])
                         {
                             max_frame = n;
                         }
@@ -169,7 +169,7 @@ class Compressor(multiprocessing.Process):
                     // Calculate the current half frame index
                     half_frame_n = 2*n + (y + deinterlace_order)%2;
 
-                    // Add intensity to the intensitites per field array
+                    // Sum intensity per every field
                     FIELDSUM1(half_frame_n) += pixel;
 
                 }

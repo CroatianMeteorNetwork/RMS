@@ -26,9 +26,9 @@ def meteorIntensity(fr, frame_num):
     return intens
 
 
-def meteorSimulate(img_w, img_h, frame_num, psf_sigma):
+def meteorSimulate(img_w, img_h, frame_num, psf_sigma, speed=1):
 
-    frames = np.zeros((frame_num, img_h, img_w), np.uint8)
+    frames = np.zeros((frame_num, img_h, img_w), np.float64)
 
     # Get meteor intensitites
     frame_range = np.arange(0, 2*frame_num)
@@ -39,83 +39,98 @@ def meteorSimulate(img_w, img_h, frame_num, psf_sigma):
     slope = float(img_h)/img_w
 
 
+    x_indices, y_indices = np.meshgrid(np.arange(0, img_w), np.arange(0, img_h))
+
     # Simulate even-first interlaced video
     for i in range(frame_num):
 
-        for field in range(2):
+        if i < int(frame_num/speed):
+            for field in range(2):
 
-            # Calculate the even-first half-frame
-            half_frame = i + field/2.0
+                # Calculate the even-first half-frame
+                half_frame = i + field/2.0
 
-            # Get meteor intensity
-            intens = meteor_intens[int(half_frame*2)]
+                # Get meteor intensity
+                intens = meteor_intens[int(half_frame*2)]/4
 
-            # Calculate meteor position
-            x = (img_w/2)*float(i)/frame_num + img_w/4
-            y = slope*x
+                # The meteor is not a snapshot in time, but it is moving. Thus, simulate extra movement in 
+                # every frame
+                for j in range(-4, 5):
 
-            #print(x, y, intens)
+                    # Calculate meteor position
+                    x = (img_w/2)*float((i + 0.125*j)*speed)/frame_num + img_w/4
+                    y = slope*x
 
-            x_indices, y_indices = np.meshgrid(np.arange(0, img_w), np.arange(0, img_h))
+                    #print(x, y, intens)
 
-            # Generate a Gaussian PSF
-            gauss_values = twoDGaussian((x_indices, y_indices), intens, x, y, psf_sigma, psf_sigma, 0.0, 0.0)
+                    # Generate a Gaussian PSF
+                    gauss_values = twoDGaussian((x_indices, y_indices), intens, x, y, psf_sigma, psf_sigma, 0.0, 0.0)
 
-            # Construct an image from the Gaussian values
-            gauss_values = gauss_values.reshape(img_h, img_w)
+                    # Construct an image from the Gaussian values
+                    gauss_values = gauss_values.reshape(img_h, img_w)
 
-            # On full frames, take only even fields
-            if field == 0:
-                frames[i, ::2, :] = gauss_values[::2, :]
+                    # On full frames, take only even fields
+                    if field == 0:
+                        frames[i, ::2, :] += gauss_values[::2, :]
 
-            else:
+                    else:
 
-                # Take odd fields
-                frames[i, 1::2, :] = gauss_values[1::2, :]
+                        # Take odd fields
+                        frames[i, 1::2, :] += gauss_values[1::2, :]
+                        pass
 
         
 
         # Add gaussian noise to every frame
-        frames[i] += np.abs(np.random.normal(0, 1, gauss_values.shape)).astype(np.uint8)
+        frames[i] += np.abs(np.random.normal(0, 7, gauss_values.shape)).astype(np.uint8)
+
+        # Add a constant level to every frame
+        frames[i] += 30
+
         frames[i] = np.clip(frames[i], 0, 255)
 
 
 
-    return frames
+    return frames.astype(np.uint8)
 
 
 
 
 if __name__ == "__main__":
 
+    dir_path = "/home/dvida/Desktop/test"
+
     # Load config file
     config = cr.parse(".config")
 
     # Simulate a meteor
-    frames = meteorSimulate(720, 480, 256, 2.0)
+    frames = meteorSimulate(720, 480, 256, 2.0, speed=4)
 
 
     # # Show individual frames
-    # for i in range(20, 25):
+    # for i in range(120, 128):
     #     plt.imshow(frames[i])
     #     plt.show()
 
     
-    comp = Compressor(None, None, None, None, None, config)
+    comp = Compressor(dir_path, None, None, None, None, config)
 
     # Run the compression
     compressed, field_intensities = comp.compress(frames)
+
+    # Save FF file
+    comp.saveFF(compressed, 0, 0)
     
     # Save the extracted intensitites per every field
-    filename = FieldIntensities.saveFieldIntensitiesBin(field_intensities, '.', 'TEST')
+    filename = FieldIntensities.saveFieldIntensitiesBin(field_intensities, dir_path, 'TEST')
 
     ### TEST ###
-    FieldIntensities.convertFieldIntensityBinToTxt('.', filename)
+    FieldIntensities.convertFieldIntensityBinToTxt(dir_path, filename)
     ############
 
 
     # Show compressed images
-    plt.imshow(compressed[0])
+    plt.imshow(compressed[0], vmin=0, vmax=255, cmap='gray')
     plt.show()
 
     # Show field intensitites
