@@ -34,7 +34,7 @@ class fr_struct:
         
 
 
-def read(dir, filename):
+def read(dir_path, filename):
     """ Read FRF*.bin file from specified directory.
     
     @param dir: path to directory containing file
@@ -44,9 +44,9 @@ def read(dir, filename):
     """
     
     if filename[:2] == "FR":
-        fid = open(dir + filename, "rb")
+        fid = open(os.path.join(dir_path, filename), "rb")
     else:
-        fid = open(dir + "FRF" + filename + ".bin", "rb")
+        fid = open(os.path.join(dir_path, "FR" + filename + ".bin"), "rb")
     
     fr = fr_struct()
     

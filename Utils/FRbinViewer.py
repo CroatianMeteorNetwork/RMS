@@ -20,7 +20,8 @@ from __future__ import print_function, absolute_import, division
 
 import cv2
 import numpy as np
-import sys, os
+import os
+import sys
 
 import RMS.ConfigReader as cr
 from RMS.Formats import FFbin, FRbin
