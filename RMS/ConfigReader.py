@@ -451,11 +451,11 @@ def parseMeteorDetection(config, parser):
 
 
     if parser.has_option(section, "ang_vel_min"):
-        config.ang_vel_min = parser.getint(section, "ang_vel_min")
+        config.ang_vel_min = parser.getfloat(section, "ang_vel_min")
 
     if parser.has_option(section, "ang_vel_max"):
-        config.ang_vel_max = parser.getint(section, "ang_vel_max")
-        
+        config.ang_vel_max = parser.getfloat(section, "ang_vel_max")
+
 
 
 def parseStarExtraction(config, parser):
