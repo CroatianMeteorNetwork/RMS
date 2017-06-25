@@ -236,6 +236,14 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
 
 
 
+def _getCartesian(rho, theta):
+        """ Convert rho and theta to cartesian x and y points.
+        """
+        
+        return np.cos(np.radians(theta))*rho, np.sin(np.radians(theta))*rho
+
+
+
 def mergeLines(line_list, min_distance, img_w, img_h, last_count=0):
     """ Merge similar lines defined by rho and theta.
     
@@ -248,12 +256,6 @@ def mergeLines(line_list, min_distance, img_w, img_h, last_count=0):
         final_list: [list] a list of (rho, phi, min_frame, max_frame) tuples after line merging
 
     """
-
-    def _getCartesian(rho, theta):
-        """ Convert rho and theta to cartesian x and y points.
-        """
-        
-        return np.cos(np.radians(theta))*rho, np.sin(np.radians(theta))*rho
 
 
     # Return if less than 2 lines
@@ -1061,6 +1063,10 @@ def detectMeteors(ff_directory, ff_name, config):
             # Convert Cartesian line coordinates to polar
             rho, theta = getPolarLine(x1, y1, x2, y2, ff.nrows, ff.ncols)
 
+            # Convert Cartesian line coordinate to CAMS compatible polar coordinates (flipped Y axis)
+            rho_cams, theta_cams = getPolarLine(x1, ff.nrows - y1, x2, ff.nrows - y2, ff.nrows, ff.ncols)
+
+
             logDebug('converted rho, theta')
             logDebug(rho, theta)
 
@@ -1185,8 +1191,9 @@ def detectMeteors(ff_directory, ff_name, config):
             if not checkAngularVelocity(centroids, config):
                 continue
 
+
             # Append the result to the meteor detections
-            meteor_detections.append([rho, theta, centroids])
+            meteor_detections.append([rho_cams, theta_cams, centroids])
 
 
             logDebug('time for processing:', time() - t_all)
