@@ -82,7 +82,7 @@ def view(ff, fr, config):
                 y2 += 1
             
             cv2.imshow(name, background)
-            cv2.waitKey(200)
+            cv2.waitKey(2*int(1000.0/config.fps))
     
     cv2.destroyWindow(name)
             
