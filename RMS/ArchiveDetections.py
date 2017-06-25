@@ -36,6 +36,12 @@ def selectFiles(dir_path, ff_detected):
         if '.txt' in file_name:
             selected_list.append(file_name)
 
+
+        # Take all field sum files
+        if ('FF' in file_name) and ('fieldsum' in file_name):
+            selected_list.append(file_name)
+
+
         # Take all FR bin files, and their parent FF bin files
         if ('FR' in file_name) and ('.bin' in file_name):
 

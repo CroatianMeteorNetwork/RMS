@@ -28,8 +28,8 @@ if __name__ == "__main__":
     for i in range(256):
         frames[i] = np.random.normal(128, 2, (576, 720))
     
-    comp = Compressor(None, None, None, None, config)
-    compressed = comp.compress(frames)
+    comp = Compressor(None, None, None, None, None, config)
+    compressed, field_intensities = comp.compress(frames)
     
     plt.hist(compressed[1].ravel(), 256, [0,256])
     plt.xlim((0, 255))

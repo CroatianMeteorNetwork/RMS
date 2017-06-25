@@ -33,6 +33,7 @@ import multiprocessing
 
 from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFbin
+from RMS.Formats import FieldIntensities
 
 
 # Get the logger from the main module
@@ -87,7 +88,7 @@ class Compressor(multiprocessing.Process):
 
 
     def compress(self, frames):
-        """ Compress frames to the FTP-compatible array.
+        """ Compress frames to the FTP-compatible array and extract sums of intensities per every field.
 
         NOTE: The standard deviation calculation is performed in a non-standard way due to performance 
             concerns. The end result is the same as a proper calculation due to the usage of low-precision
@@ -103,6 +104,9 @@ class Compressor(multiprocessing.Process):
         
         # Init the output FTP array
         out = np.empty((4, frames.shape[1], frames.shape[2]), np.uint8)
+
+        # Init the field intensity sums array
+        fieldsum = np.zeros((2*frames.shape[0]), np.uint32)
         
         code = """
         unsigned int x, y, n, acc, var, max, max_frame, pixel, num_equal, mean;
@@ -113,45 +117,61 @@ class Compressor(multiprocessing.Process):
         unsigned int frames_num = Nframes[0];
         unsigned int frames_num_minus_one = frames_num - 1;
         unsigned int frames_num_minus_two = frames_num - 2;
+
+        unsigned int half_frame_n;
         
         // Populate the randomN array with 2**16 random numbers from 0 to 255
         unsigned char randomN[65536] = {};
         unsigned int arand = 1;
-        for(n=0; n<65536; n++) {
+        for(n=0; n<65536; n++) 
+        {
             arand = (arand * 32719 + 3) % 32749;
             randomN[n] = (unsigned char)(32767.0 / (double)(1 + arand % 32767));
         }
             
-        for(y=0; y<height; y++) {
-            for(x=0; x<width; x++) {
+        for(y=0; y<height; y++) 
+        {
+            for(x=0; x<width; x++) 
+            {
                 acc = 0;
                 var = 0;
                 max = 0;
                 
                 // Calculate mean, stddev, max, and max frame
-                for(n=0; n<frames_num; n++) {
+                for(n=0; n<frames_num; n++) 
+                {
                     pixel = FRAMES3(n, y, x);
                     acc += pixel;
                     var += pixel*pixel;
                     
-                    if(pixel > max) {
+                    if(pixel > max) 
+                    {
                         max = pixel;
                         max_frame = n;
                         num_equal = 1;
-
+                    }
                     // Randomize taken frame number for max pixel if there are several frames with the maximum
                     // value
-                    } else if(pixel == max) { 
+                    else if(pixel == max) 
+                    { 
                         num_equal++;
                         
                         // rand_count is unsigned short, which means it will overflow back to 0 after 65535
                         rand_count++; 
 
                         // Select the frame by random
-                        if(num_equal <= randomN[rand_count]) {
+                        if(num_equal <= randomN[rand_count]) 
+                        {
                             max_frame = n;
                         }
                     }
+
+                    // Calculate the current half frame index
+                    half_frame_n = 2*n + (y + deinterlace_order)%2;
+
+                    // Add intensity to the intensitites per field array
+                    FIELDSUM1(half_frame_n) += pixel;
+
                 }
                 
                 // Calculate mean
@@ -164,7 +184,8 @@ class Compressor(multiprocessing.Process):
                 var = sqrt(var / frames_num_minus_two);
 
                 // Make sure that the stddev is not 0, to prevent divide by zero afterwards
-                if (var == 0){
+                if (var == 0)
+                {
                     var = 1;
                 }
                 
@@ -176,16 +197,18 @@ class Compressor(multiprocessing.Process):
             }
         }
         """
+
+        deinterlace_order = self.config.deinterlace_order
         
         # Run the weave code
-        weave.inline(code, ['frames', 'out'], verbose=2, extra_compile_args=self.config.weaveArgs, 
-            extra_link_args=self.config.weaveArgs)
+        weave.inline(code, ['frames', 'out', 'fieldsum', 'deinterlace_order'], verbose=2, 
+            extra_compile_args=self.config.weaveArgs, extra_link_args=self.config.weaveArgs)
 
-        return out
+        return out, fieldsum
     
 
 
-    def save(self, arr, startTime, N):
+    def saveFF(self, arr, startTime, N):
         """ Write metadata and data array to FF .bin file.
         
         Arguments:
@@ -297,16 +320,20 @@ class Compressor(multiprocessing.Process):
             t = time.time()
             
             # Run the compression
-            compressed = self.compress(frames)
+            compressed, field_intensities = self.compress(frames)
             
             log.debug("compression: " + str(time.time() - t) + "s")
             t = time.time()
             
             # Save the compressed image
-            filename = self.save(compressed, startTime, n*256)
+            filename = self.saveFF(compressed, startTime, n*256)
             n += 1
             
             log.debug("saving: " + str(time.time() - t) + "s")
+
+
+            # Save the extracted intensitites per every field
+            FieldIntensities.saveFieldIntensitiesBin(field_intensities, self.data_dir, filename)
 
 
             # Run the extractor

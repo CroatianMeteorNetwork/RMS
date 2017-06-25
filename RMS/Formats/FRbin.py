@@ -18,6 +18,7 @@ import os
 import numpy as np
 import struct
 
+
 class fr_struct:
     """ Default structure for a FR*.bin file.
     """
