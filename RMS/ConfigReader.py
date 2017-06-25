@@ -124,6 +124,11 @@ class Config:
         self.centroids_max_deviation = 2 # maximum deviation of a centroid point from a LSQ fitted line (if above max, it will be rejected)
         self.centroids_max_distance =  30 # maximum distance in pixels between centroids (used for filtering spurious centroids)
 
+        # Angular veloicty filtering parameter - detections slower or faster than these angular velocities
+        # will be rejected (deg/s)
+        self.ang_vel_min = 0.5
+        self.ang_vel_max = 35.0
+
 
         ##### StarExtraction
 
@@ -437,11 +442,20 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "frame_extension"):
         config.frame_extension = parser.getint(section, "frame_extension")
 
+
     if parser.has_option(section, "centroids_max_deviation"):
         config.centroids_max_deviation = parser.getfloat(section, "centroids_max_deviation")
 
     if parser.has_option(section, "centroids_max_distance"):
         config.centroids_max_distance = parser.getint(section, "centroids_max_distance")
+
+
+    if parser.has_option(section, "ang_vel_min"):
+        config.ang_vel_min = parser.getint(section, "ang_vel_min")
+
+    if parser.has_option(section, "ang_vel_max"):
+        config.ang_vel_max = parser.getint(section, "ang_vel_max")
+        
 
 
 def parseStarExtraction(config, parser):

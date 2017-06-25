@@ -771,8 +771,8 @@ def checkAngularVelocity(centroids, config):
     scale = (config.fov_h/float(config.height) + config.fov_w/float(config.width))/2.0
     ang_vel = ang_vel*scale
 
-    # Check if the meteor is in the possible angular velocity range
-    if (ang_vel >= 0.5 and ang_vel <= 35.0):
+    # Check if the meteor is in the possible angular velocity range (deg/s)
+    if (ang_vel >= config.ang_vel_min and ang_vel <= config.ang_vel_max):
         return True
 
     else:
