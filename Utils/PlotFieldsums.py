@@ -18,10 +18,10 @@
 
 
 import os
-import datetime
-import shutil
+import sys
 
 import numpy as np
+
 import matplotlib.pyplot as plt
 
 import RMS.ConfigReader as cr
@@ -40,9 +40,9 @@ def plotFieldsums(dir_path, config):
         None
     """
 
-
     time_data = []
-    intensity_data = []
+    intensity_data_peak = []
+    intensity_data_avg = []
 
     # Get all fieldsum files in the directory
     for file_name in sorted(os.listdir(dir_path)):
@@ -53,41 +53,90 @@ def plotFieldsums(dir_path, config):
             # Read the field sums
             half_frames, intensity_array = readFieldIntensitiesBin(dir_path, file_name)
 
-            # Extract the date and time from the 
+            # Extract the date and time from the FF file
             dt = filenameToDatetime(file_name)
 
-            # Calculate the exact time of every half frame
-            for half_frame, intensity in zip(half_frames, intensity_array):
+            # Take the peak intensity value
+            intensity_data_peak.append(np.max(intensity_array))
 
-                frame_time = dt + datetime.timedelta(seconds=float(half_frame)/config.fps)
-
-                time_data.append(frame_time)
-                intensity_data.append(intensity)
+            # Take the average intensity value
+            intensity_data_avg.append(np.mean(intensity_array))
 
 
+            time_data.append(dt)
 
 
-    # Plot the intensity over time
-    #plt.scatter(time_data, intensity_data, s=0.05)
-    plt.plot(time_data, intensity_data, color='k', linewidth=0.01, zorder=3)
+
+
+    ### Plot the raw intensity over time ###
+    ##########################################################################################################
+    
+    # Plot peak intensitites
+    plt.plot(time_data, intensity_data_peak, color='r', linewidth=0.5, zorder=3, label='Peak')
+
+    # Plot average intensitites
+    plt.plot(time_data, intensity_data_avg, color='k', linewidth=0.5, zorder=3, label='Average')
 
     plt.gca().set_yscale('log')
 
     plt.xlim(np.min(time_data), np.max(time_data))
 
-    plt.ylim(np.min(intensity_data), np.max(intensity_data))
+    plt.ylim(np.min(intensity_data_peak), np.max(intensity_data_peak))
 
     plt.xlabel('Time')
     plt.ylabel('ADU')
 
     plt.grid(color='0.9', which='both')
 
-    plt.title('Field sums for ' + os.path.basename(dir_path))
+    plt.title('Peak field sums for ' + os.path.basename(dir_path))
+
+    plt.tight_layout()
+
+    plt.legend()
+
+
+    plt.savefig(os.path.join(dir_path, os.path.basename(dir_path) + '_fieldsums.png'), dpi=300)
+
+    plt.clf()
+    plt.close()
+
+    ##########################################################################################################
+
+
+    ### Plot intensities without the average value
+    ##########################################################################################################
+
+    intensity_data_peak = np.array(intensity_data_peak)
+    intensity_data_avg = np.array(intensity_data_avg)
+
+    # Calculate the difference between the peak values and the average values per every FF file
+    intensity_data_noavg = intensity_data_peak - intensity_data_avg
+
+
+    plt.plot(time_data, intensity_data_noavg, color='k', linewidth=0.5, zorder=3)
+
+    plt.gca().set_yscale('log')
+
+    plt.xlim(np.min(time_data), np.max(time_data))
+
+    plt.xlabel('Time')
+    plt.ylabel('Peak ADU - average')
+
+    plt.grid(color='0.9', which='both')
+
+    plt.title('Deaveraged field sums for ' + os.path.basename(dir_path))
 
     plt.tight_layout()
 
 
-    plt.savefig(os.path.join(dir_path, os.path.basename(dir_path) + '_fieldsums.png'), dpi=300)
+    plt.savefig(os.path.join(dir_path, os.path.basename(dir_path) + '_fieldsums_noavg.png'), dpi=300)
+
+    plt.clf()
+    plt.close()
+
+
+    ##########################################################################################################
+
 
 
 
@@ -100,7 +149,14 @@ if __name__ == "__main__":
     config = cr.parse(".config")
 
 
-    dir_path = '/home/dvida/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/20170626_020228_442736_detected'
+    if len(sys.argv) < 2:
+        print('Usage: python -m Utils.PlotFieldsums /dir/with/FS/files')
+
+        sys.exit()
+
+
+    # Read the argument as a path to the night directory
+    dir_path = " ".join(sys.argv[1:])
 
     plotFieldsums(dir_path, config)
 

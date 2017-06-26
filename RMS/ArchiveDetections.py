@@ -5,6 +5,8 @@ import os
 
 from RMS.Misc import archiveDir
 
+from Utils.GenerateThumbnails import generateThumbnails
+
 
 
 
@@ -37,8 +39,8 @@ def selectFiles(dir_path, ff_detected):
             selected_list.append(file_name)
 
 
-        # Take all PNG images
-        if '.png' in file_name:
+        # Take all PNG and JPG images
+        if ('.png' in file_name) or ('.jpg' in file_name):
             selected_list.append(file_name)
 
 
@@ -86,11 +88,22 @@ def selectFiles(dir_path, ff_detected):
 
 
 
-def archiveDetections(captured_path, archived_path, ff_detected):
+def archiveDetections(captured_path, archived_path, ff_detected, config):
+
+
+    # Generate captured thumbnails
+    generateThumbnails(captured_path, config, 'CAPTURED')
 
 
     # Get the list of files to archive
     file_list = selectFiles(captured_path, ff_detected)
+
+
+    # Generate detected thumbnails
+    mosaic_file = generateThumbnails(captured_path, config, 'DETECTED', file_list=sorted(file_list))
+
+    # Add the detected mosaic file to the selected list
+    file_list.append(mosaic_file)
 
 
     if file_list:

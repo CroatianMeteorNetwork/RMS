@@ -316,6 +316,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False):
             config.stationID, config.fps)
 
 
+    log.info('Plotting field sums...')
 
     # Plot field sums to a graph
     plotFieldsums(night_data_dir, config)
@@ -328,7 +329,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False):
     log.info('Archiving detections to ' + night_archive_dir)
     
     # Archive the detections
-    archiveDetections(night_data_dir, night_archive_dir, ff_detected)
+    archiveDetections(night_data_dir, night_archive_dir, ff_detected, config)
 
 
     # If capture was manually stopped, end program

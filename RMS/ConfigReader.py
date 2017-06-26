@@ -33,6 +33,7 @@ def choosePlatform(rpi_conf, pc_conf):
 
 class Config:
     def __init__(self):
+
         ##### System
         self.stationID = 499
         self.latitude = 0
@@ -167,6 +168,13 @@ class Config:
         self.min_estimation_value = 0.4 # Minimum estimation parameter when to stop the iteration
 
 
+        ##### Thumbnails
+        self.thumb_bin =  4
+        self.thumb_stack   =  5
+        self.thumb_n_width = 10
+
+
+
 def parse(filename):
     parser = RawConfigParser()
     parser.read(filename)
@@ -177,6 +185,8 @@ def parse(filename):
     
     return config
 
+
+
 def parseAllSections(config, parser):
     parseSystem(config, parser)
     parseCapture(config, parser)
@@ -186,6 +196,9 @@ def parseAllSections(config, parser):
     parseMeteorDetection(config, parser)
     parseStarExtraction(config, parser)
     parseCalibration(config, parser)
+    parseThumbnails(config, parser)
+
+
 
 def parseSystem(config, parser):
     
@@ -207,6 +220,7 @@ def parseSystem(config, parser):
 
     if parser.has_option(section, "elevation"):
         config.elevation = parser.getfloat(section, "elevation")
+
 
 
 def parseCapture(config, parser):
@@ -265,6 +279,7 @@ def parseCapture(config, parser):
         config.mask_file = parser.get(section, "mask")
         
 
+
 def parseBuildArgs(config, parser):
     section = "Build"
     
@@ -285,8 +300,12 @@ def parseBuildArgs(config, parser):
     if parser.has_option(section, "extension"):
         config.extension = parser.get(section, "extension").split()
 
+
+
 def parseCompression(config, parser):
     pass
+
+
 
 def parseFireballDetection(config, parser):
     section = "FireballDetection"
@@ -366,6 +385,7 @@ def parseFireballDetection(config, parser):
     
     if parser.has_option(section, "min_lines"):
         config.max_lines = parser.getint(section, "max_lines")
+
 
 
 def parseMeteorDetection(config, parser):
@@ -458,6 +478,7 @@ def parseMeteorDetection(config, parser):
 
 
 
+
 def parseStarExtraction(config, parser):
     section = "StarExtraction"
     
@@ -487,6 +508,7 @@ def parseStarExtraction(config, parser):
 
     if parser.has_option(section, "max_feature_ratio"):
         config.max_feature_ratio = parser.getfloat(section, "max_feature_ratio")
+
 
 
 def parseCalibration(config, parser):
@@ -533,3 +555,21 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "min_estimation_value"):
         config.min_estimation_value = parser.getfloat(section, "min_estimation_value")
+
+
+
+def parseThumbnails(config, parser):
+    section = "Thumbnails"
+    
+    if not parser.has_section(section):
+        return
+
+
+    if parser.has_option(section, "thumb_bin"):
+        config.thumb_bin = parser.getint(section, "thumb_bin")
+
+    if parser.has_option(section, "thumb_stack"):
+        config.thumb_stack = parser.getint(section, "thumb_stack")
+
+    if parser.has_option(section, "thumb_n_width"):
+        config.thumb_n_width = parser.getint(section, "thumb_n_width")
