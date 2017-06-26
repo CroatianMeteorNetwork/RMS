@@ -36,8 +36,11 @@ def loadMask(mask_file):
 	# Load the mask file
 	mask = misc.imread(mask_file, flatten=0)
 
-	# Convert the RGB image to one channel image
-	mask = mask[:,:,0]
+	# Convert the RGB image to one channel image (if not already one channel)
+	try:
+		mask = mask[:,:,0]
+	except:
+		pass
 
 	return (True, mask)
 
