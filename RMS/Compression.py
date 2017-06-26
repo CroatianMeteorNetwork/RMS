@@ -170,7 +170,7 @@ class Compressor(multiprocessing.Process):
                     half_frame_n = 2*n + (y + deinterlace_order)%2;
 
                     // Sum intensity per every field
-                    FIELDSUM1(half_frame_n) += pixel;
+                    FIELDSUM1(half_frame_n) += (unsigned long) pixel;
 
                 }
                 
