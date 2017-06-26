@@ -37,8 +37,13 @@ def selectFiles(dir_path, ff_detected):
             selected_list.append(file_name)
 
 
+        # Take all PNG images
+        if '.png' in file_name:
+            selected_list.append(file_name)
+
+
         # Take all field sum files
-        if ('FF' in file_name) and ('fieldsum' in file_name):
+        if ('FS' in file_name) and ('fieldsum' in file_name):
             selected_list.append(file_name)
 
 

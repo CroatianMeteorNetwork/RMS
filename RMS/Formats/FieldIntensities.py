@@ -32,7 +32,7 @@ def saveFieldIntensitiesText(intensity_array, dir_path, file_name):
 		file_name: [str] Name of the file in which the data will be saved.
 	"""
 
-	file_name = "FF" + file_name + '_fieldsum.txt'
+	file_name = "FS" + file_name + '_fieldsum.txt'
 
 
 	with open(os.path.join(dir_path, file_name), 'w') as f:
@@ -62,7 +62,7 @@ def saveFieldIntensitiesBin(intensity_array, dir_path, file_name):
 		file_name: [str] Name of the file in which the data will be saved.
 	"""
 
-	file_name = "FF" + file_name + '_fieldsum.bin'
+	file_name = "FS" + file_name + '_fieldsum.bin'
 
 
 	with open(os.path.join(dir_path, file_name), 'wb') as fid:
@@ -123,7 +123,7 @@ def convertFieldIntensityBinToTxt(dir_path, file_name):
 	half_frames, intensity_array = readFieldIntensitiesBin(dir_path, file_name)
 
 	# Replace the bin with txt
-	file_name = file_name.replace('FF', '')
+	file_name = file_name.replace('FS', '')
 	file_name = file_name.replace('_fieldsum.bin', '')
 
 	# Save the field sums to a text file

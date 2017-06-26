@@ -44,6 +44,8 @@ from RMS.LiveViewer import LiveViewer
 from RMS.QueuedPool import QueuedPool
 from RMS.Misc import mkdirP
 
+from Utils.PlotFieldsums import plotFieldsums
+
 
 # Flag indicating that capturing should be stopped
 STOP_CAPTURE = False
@@ -315,6 +317,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False):
 
 
 
+    # Plot field sums to a graph
+    plotFieldsums(night_data_dir, config)
+
+
     night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir, 
         night_data_dir_name)
 
@@ -323,8 +329,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False):
     
     # Archive the detections
     archiveDetections(night_data_dir, night_archive_dir, ff_detected)
-
-    ######
 
 
     # If capture was manually stopped, end program

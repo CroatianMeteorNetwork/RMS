@@ -15,8 +15,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
-import numpy as np
+import datetime
 import struct
+
+import numpy as np
+
 
 # FFbin handling stolen from FF_bin_suite.py from CMN_binViewer written by Denis Vida
 
@@ -135,3 +138,32 @@ def reconstruct(ff):
         frames[i][indices] = ff.maxpixel[indices]
     
     return frames
+
+
+
+def filenameToDatetime(file_name):
+    """ Converts FF bin file name to a datetime object.
+
+    Arguments:
+        file_name: [str] Name of a FF bin file.
+
+    """
+
+    # FF499_20170626_020520_353_0005120_fieldsum.bin
+
+    file_name = file_name.split('_')
+
+    date = file_name[1]
+    year = int(date[:4])
+    month = int(date[4:6])
+    day = int(date[6:8])
+
+    time = file_name[2]
+    hour = int(time[:2])
+    minute = int(time[2:4])
+    seconds = int(time[4:6])
+
+    ms = int(file_name[3])
+
+
+    return datetime.datetime(year, month, day, hour, minute, seconds, ms*1000)
