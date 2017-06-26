@@ -80,8 +80,7 @@ def plotFieldsums(dir_path, config):
     plt.gca().set_yscale('log')
 
     plt.xlim(np.min(time_data), np.max(time_data))
-
-    plt.ylim(np.min(intensity_data_peak), np.max(intensity_data_peak))
+    plt.ylim(np.min(intensity_data_avg), np.max(intensity_data_peak))
 
     plt.xlabel('Time')
     plt.ylabel('ADU')
