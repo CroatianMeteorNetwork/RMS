@@ -1,5 +1,6 @@
 """ Runs the compression on a simulated meteor. """
 
+import sys
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -98,7 +99,14 @@ def meteorSimulate(img_w, img_h, frame_num, psf_sigma, speed=1):
 
 if __name__ == "__main__":
 
-    dir_path = "/home/dvida/Desktop/test"
+    if len(sys.argv) < 2:
+        print('Usage: python -m Tests.CompressSimulatedMeteor /dir/with/FF/files')
+
+        sys.exit()
+
+
+    # Read the argument as a path to the night directory
+    dir_path = " ".join(sys.argv[1:])
 
     # Load config file
     config = cr.parse(".config")
@@ -129,12 +137,16 @@ if __name__ == "__main__":
     ############
 
 
+    # Read field intensitites from the written file
+    half_frames, field_intensities = FieldIntensities.readFieldIntensitiesBin(dir_path, filename)
+
+
     # Show compressed images
     plt.imshow(compressed[0], vmin=0, vmax=255, cmap='gray')
     plt.show()
 
     # Show field intensitites
-    plt.plot(np.arange(0, 2*256), field_intensities)
+    plt.plot(half_frames, field_intensities)
     plt.show()
 
 
