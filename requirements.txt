@@ -1,7 +1,6 @@
 numpy
 gitpython
 pyephem
-opencv-python
 cython
 matplotlib
 scipy
