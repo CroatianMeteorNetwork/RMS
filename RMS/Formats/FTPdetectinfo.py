@@ -15,7 +15,10 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
+
 import datetime
+import git
+
 import numpy as np
 
 
@@ -37,11 +40,23 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
     # Open a file
     with open(file_name, 'w') as ftpdetect_file:
 
+        try:
+            # Get latest version's commit hash and time of commit
+            repo = git.Repo(search_parent_directories=True)
+            commit_unix_time = repo.head.object.committed_date
+            sha = repo.head.object.hexsha
+            commit_time = datetime.datetime.fromtimestamp(commit_unix_time).strftime('%Y%m%d_%H%M%S')
+
+        except:
+            commit_time = ""
+            sha = ""
+
         # Write the number of meteors on the beginning fo the file
         total_meteors = len(meteor_list)
         ftpdetect_file.write("Meteor Count = "+str(total_meteors).zfill(6)+ "\n")
         ftpdetect_file.write("-----------------------------------------------------\n")
-        ftpdetect_file.write("Processed with RMS on " + str(datetime.datetime.now()) + "\n")
+        ftpdetect_file.write("Processed with RMS " + commit_time + " " + str(sha) + " on " \
+            + str(datetime.datetime.now()) + "\n")
         ftpdetect_file.write("-----------------------------------------------------\n")
         ftpdetect_file.write("FF  folder = " + ff_directory + "\n")
         ftpdetect_file.write("CAL folder = " + cal_directory + "\n")

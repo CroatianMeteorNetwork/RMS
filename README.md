@@ -56,13 +56,15 @@ Furthermore, you will need the following software and libraries to run the code:
 - mplayer
 - python2.7
 - python2.7-dev
-- OpenCV 2 for Python (2.4.9.1 or later)
-- PIL (i.e. python-imaging-tk)
-- numpy (1.8.2 or later)
-- scipy (0.18.1 or later)
-- matplotlib (1.4.2 or later)
-- cython (0.25.2 or later)
-- pyephem (3.7.6.0 or later)
+- Python libraries:
+	- gitpython
+	- OpenCV 2 for Python (2.4.9.1 or later)
+	- PIL (i.e. python-imaging-tk)
+	- numpy (1.8.2 or later)
+	- scipy (0.18.1 or later)
+	- matplotlib (1.4.2 or later)
+	- cython (0.25.2 or later)
+	- pyephem (3.7.6.0 or later)
 
 ## Setting up
 
