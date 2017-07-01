@@ -65,6 +65,8 @@ Furthermore, you will need the following software and libraries to run the code:
 	- matplotlib (1.4.2 or later)
 	- cython (0.25.2 or later)
 	- pyephem (3.7.6.0 or later)
+	
+All python libraries will be installed when you run the setup.py script (instructions below).
 
 ## Setting up
 
@@ -87,7 +89,7 @@ git clone git@github.com:CroatianMeteorNetwork/RMS.git
 This will download the code in this repository in the RMS directory. 
 
 
-### Compiling the Kernel-based Hough Transform module
+### Running setup.py and compiling the Kernel-based Hough Transform module
 Navigate with terminal to base git directory (e.g. /home/pi/RMS/), and run:
 
 ```
@@ -95,6 +97,12 @@ sudo python setup.py install
 ```
 
 This will compile the code in C++ which we are using as one of the processing steps in meteor detection. The method in question is called Kernel-based Hough Transform, and you can read more about it here: [KHT](http://www2.ic.uff.br/~laffernandes/projects/kht/)
+
+This will also install all Python libraries that you might need, except OpenCV. To install OpenCV, open the terminal and run:
+
+```
+sudo apt-get install libopencv-dev python-opencv
+```
 
 ### Checking video device and initializing proper settings
 Once you connect the EasyCap digitizer and the camera, you need to check if the video signal is being properly received.
