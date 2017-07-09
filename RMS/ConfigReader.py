@@ -15,19 +15,26 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
+import sys
 from ConfigParser import RawConfigParser, NoOptionError
 from RMS.Routines import Grouping3D
 
 
 
-def choosePlatform(rpi_conf, pc_conf):
-    """ Choose the setting depending on if this is running on the RPi or a PC. """
+def choosePlatform(win_conf, rpi_conf, linux_pc_conf):
+    """ Choose the setting depending on if this is running on the RPi or a Linux PC. """
 
-    if 'arm' in os.uname()[4]:
-        return rpi_conf
+    # Check if running on Windows
+    if 'win' in sys.platform:
+        return win_conf
 
     else:
-        return pc_conf
+
+        if 'arm' in os.uname()[4]:
+            return rpi_conf
+
+        else:
+            return linux_pc_conf
 
 
 
@@ -289,12 +296,15 @@ def parseBuildArgs(config, parser):
     if parser.has_option(section, "rpi_weave"):
          rpi_weave = parser.get(section, "rpi_weave").split()
 
-    if parser.has_option(section, "pc_weave"):
-         pc_weave = parser.get(section, "pc_weave").split()
+    if parser.has_option(section, "linux_pc_weave"):
+         linux_pc_weave = parser.get(section, "linux_pc_weave").split()
+
+    if parser.has_option(section, "win_pc_weave"):
+         win_pc_weave = parser.get(section, "win_pc_weave").split()
 
     # Read in the KHT library path for both the PC and the RPi, but decide which one to take based on the 
     # system this is running on
-    config.weaveArgs = choosePlatform(rpi_weave, pc_weave)
+    config.weaveArgs = choosePlatform(win_pc_weave, rpi_weave, linux_pc_weave)
 
         
     if parser.has_option(section, "extension"):
@@ -449,10 +459,13 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "rpi_kht_lib_path"):
          rpi_kht_lib_path = parser.get(section, "rpi_kht_lib_path")
 
-    if parser.has_option(section, "pc_kht_lib_path"):
-         pc_kht_lib_path = parser.get(section, "pc_kht_lib_path")
+    if parser.has_option(section, "linux_pc_kht_lib_path"):
+         linux_pc_kht_lib_path = parser.get(section, "linux_pc_kht_lib_path")
 
-    config.kht_lib_path = choosePlatform(rpi_kht_lib_path, pc_kht_lib_path)
+    if parser.has_option(section, "win_pc_kht_lib_path"):
+         win_pc_kht_lib_path = parser.get(section, "win_pc_kht_lib_path")
+
+    config.kht_lib_path = choosePlatform(win_pc_kht_lib_path, rpi_kht_lib_path, linux_pc_kht_lib_path)
 
 
 

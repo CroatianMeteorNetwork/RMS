@@ -27,10 +27,11 @@ import RMS.ConfigReader as cr
 from RMS.Formats import FFbin, FRbin
 
 
-def view(ff, fr, config):
+def view(dir_path, ff, fr, config):
     """ Shows the detected fireball stored in the FR file. 
     
     Arguments:
+        dir_path: [str] Current directory.
         ff: [str] path to the FF bin file
         fr: [str] path to the FR bin file
         config: [conf object] configuration structure
@@ -41,10 +42,10 @@ def view(ff, fr, config):
         background = np.zeros((config.height, config.width), np.uint8)
 
     else:
-        background = FFbin.read(sys.argv[1], ff).maxpixel
+        background = FFbin.read(dir_path, ff).maxpixel
     
     name = fr
-    fr = FRbin.read(sys.argv[1], fr)
+    fr = FRbin.read(dir_path, fr)
     
     print("Number of lines:", fr.lines[0])
     
@@ -92,9 +93,10 @@ if __name__ == "__main__":
     # Load the configuration file
     config = cr.parse(".config")
 
+    dir_path = sys.argv[1].replace('"', '')
 
     # Get the list of FR bin files (fireball detections) in the given directory
-    fr_list = [fr for fr in os.listdir(sys.argv[1]) if fr[0:2]=="FR" and fr[-3:]=="bin"]
+    fr_list = [fr for fr in os.listdir(dir_path) if fr[0:2]=="FR" and fr[-3:]=="bin"]
     fr_list = sorted(fr_list)
 
     if not fr_list:
@@ -103,7 +105,7 @@ if __name__ == "__main__":
         sys.exit()
 
     # Get the list of FF bin files (compressed video frames)
-    ff_list = [ff for ff in os.listdir(sys.argv[1]) if ff[0:2]=="FF" and ff[-3:]=="bin"]
+    ff_list = [ff for ff in os.listdir(dir_path) if ff[0:2]=="FF" and ff[-3:]=="bin"]
     ff_list = sorted(ff_list)
 
     for fr in fr_list:
@@ -117,4 +119,4 @@ if __name__ == "__main__":
                 break
         
         # View the fireball detection
-        view(ffbin, fr, config)
+        view(dir_path, ffbin, fr, config)
