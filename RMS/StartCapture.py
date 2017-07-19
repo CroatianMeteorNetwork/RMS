@@ -138,6 +138,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False):
     # Full path to the data directory
     night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, night_data_dir_name)
 
+    # Make the data directory
+    mkdirP(os.path.abspath(config.data_dir))
+
     # Make a directory for the night
     mkdirP(night_data_dir)
 
