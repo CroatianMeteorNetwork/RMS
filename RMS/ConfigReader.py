@@ -403,6 +403,9 @@ def parseMeteorDetection(config, parser):
     
     if not parser.has_section(section):
         return
+
+    if parser.has_option(section, "ff_min_stars"):
+        config.ff_min_stars = parser.getint(section, "ff_min_stars")
     
     if parser.has_option(section, "k1"):
         config.k1_det = parser.getfloat(section, "k1")

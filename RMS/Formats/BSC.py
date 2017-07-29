@@ -1,16 +1,22 @@
 import os
 import numpy as np
 
-def readBSC(file_path, file_name, years_from_J2000=0):
+def readBSC(file_path, file_name, years_from_J2000=0, lim_mag=None):
     """ Import the Bright Star Catalog in a numpy array. 
+    
+    Arguments:
+        file_path: [str] Path to the catalog file.
+        file_name: [str] Name of the catalog file.
 
-    @param file_path: [str] path to the catalog file
-    @param file_name: [str] name of the catalog file
-    @param years_from_J2000: [float] decimal years elapsed from the J2000 epoch (for applying poper motion 
-        correction, leave at 0 to read non-corrected coordinates)
-
-    @return BSC_data: [ndarray] an array of (RA, dec, mag) parameters for each star in the BSC corrected for
-        proper motion, coordinates are in degrees
+    Keyword arguments:
+        years_from_J2000: [float] Decimal years elapsed from the J2000 epoch (for applying poper motion 
+            correction, leave at 0 to read non-corrected coordinates).
+        lim_mag: [float] Limiting magnitude. Stars fainter than this magnitude will be filtered out. None by
+            defualt.
+    
+    Return:
+        BSC_data: [ndarray] Array of (RA, dec, mag) parameters for each star in the BSC corrected for
+            proper motion, coordinates are in degrees.
     """
 
     bsc_path = os.path.join(file_path, file_name)
@@ -64,6 +70,10 @@ def readBSC(file_path, file_name, years_from_J2000=0):
             BSC_data[i][1] = np.degrees(dec + dec_proper*years_from_J2000)
             BSC_data[i][2] = mag
 
+
+    # Filter out stars fainter than the limiting magnitude, if it was given
+    if lim_mag is not None:
+        BSC_data = BSC_data[BSC_data[:, 2] < lim_mag]
 
     # Sort stars by descending declination
     BSC_data = BSC_data[BSC_data[:,1].argsort()[::-1]]

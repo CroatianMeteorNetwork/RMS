@@ -464,7 +464,8 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
             break
 
     # Import stars from the BSC catalog
-    catalog_stars = BSC.readBSC(config.star_catalog_path, config.star_catalog_file)
+    catalog_stars = BSC.readBSC(config.star_catalog_path, config.star_catalog_file, 
+        lim_mag=config.catalog_mag_limit)
 
     # Check if the BSC exists
     if not catalog_stars.any():
