@@ -49,6 +49,8 @@ def view(dir_path, ff, fr, config):
     
     print("Number of lines:", fr.lines[0])
     
+    first_image = True
+
     for i in range(fr.lines):
 
         print('Frame,  Y ,  X , size')
@@ -83,6 +85,12 @@ def view(dir_path, ff, fr, config):
                 y2 += 1
             
             cv2.imshow(name, background)
+
+            # If this is the first image, move it to the upper left corner
+            if first_image:
+                cv2.moveWindow(name, 0, 0)
+                first_image = False
+
             cv2.waitKey(2*int(1000.0/config.fps))
     
     cv2.destroyWindow(name)
