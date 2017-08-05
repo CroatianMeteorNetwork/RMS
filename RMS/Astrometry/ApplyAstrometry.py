@@ -27,7 +27,7 @@
 import math
 import numpy as np
 
-from RMS.Astrometry.Conversions import date2JD
+from RMS.Astrometry.Conversions import date2JD, datetime2JD
 
 
 
@@ -49,9 +49,9 @@ def applyFieldCorrection(x_poly, y_poly, X_res, Y_res, F_scale, X_data, Y_data, 
         level_data: 1D numpy array containing vignetting corrected levels
     """
 
-    # Scale the resolution to CIF
-    X_scale = X_res/384.0
-    Y_scale = Y_res/288.0
+    # # Scale the resolution to CIF
+    # X_scale = X_res/384.0
+    # Y_scale = Y_res/288.0
 
     # Initialize final values containers
     X_corrected = np.zeros_like(X_data, dtype=np.float64)
@@ -65,13 +65,16 @@ def applyFieldCorrection(x_poly, y_poly, X_res, Y_res, F_scale, X_data, Y_data, 
     # Go through all given data points
     for Xdet, Ydet, level in data_matrix:
 
-        # Scale the point coordinates to CIF resolution
-        Xdet = (Xdet - X_res/2)/X_scale
-        Ydet = (Ydet - Y_res/2)/Y_scale
+        # # Scale the point coordinates to CIF resolution
+        # Xdet = (Xdet - X_res/2)/X_scale
+        # Ydet = (Ydet - Y_res/2)/Y_scale
 
-        # Apply vignetting correction
-        if (np.sqrt((Xdet - 192)**2 + (Ydet - 192)**2) > 120):
-            level = level * (1 + 0.00245*(np.sqrt((Xdet - 192)**2 + (Ydet - 192)**2) - 120))
+        # Xdet = (Xdet - X_res/2)
+        # Ydet = (Ydet - Y_res/2)
+
+        # # Apply vignetting correction
+        # if (np.sqrt((Xdet - 192)**2 + (Ydet - 192)**2) > 120):
+        #     level = level * (1 + 0.00245*(np.sqrt((Xdet - 192)**2 + (Ydet - 192)**2) - 120))
 
         X_pix = (
             Xdet 
@@ -104,9 +107,14 @@ def applyFieldCorrection(x_poly, y_poly, X_res, Y_res, F_scale, X_data, Y_data, 
             + y_poly[11] * Xdet * np.sqrt(Xdet**2 + Ydet**2))
 
 
-        # Scale back image coordinates
-        X_pix = X_pix/F_scale
-        Y_pix = Y_pix/F_scale
+        # # # Scale back image coordinates
+        # # X_pix = X_pix/F_scale
+        # # Y_pix = Y_pix/F_scale
+
+        # ### TEST!!!!!!!!!!!!
+        # # Scale back image coordinates
+        # X_pix = X_pix*X_scale
+        # Y_pix = Y_pix*Y_scale
 
         # Store values to final arrays
         X_corrected[i] = X_pix
@@ -144,8 +152,8 @@ def XY2altAz(lat, lon, RA_d, dec_d, Ho, rot_param, X_data, Y_data):
     dec_rad = math.radians(dec_d)
 
     # Precalculate some parameters
-    sl = math.sin(math.radians(lon))
-    cl = math.cos(math.radians(lon))
+    sl = math.sin(math.radians(lat))
+    cl = math.cos(math.radians(lat))
 
     i = 0
     data_matrix = np.vstack((X_data, Y_data)).T
@@ -155,16 +163,16 @@ def XY2altAz(lat, lon, RA_d, dec_d, Ho, rot_param, X_data, Y_data):
 
         # Caulucate the needed parameters
         radius = math.radians(np.sqrt(X_pix**2 + Y_pix**2))
-        theta = math.radians((90 - rot_param + math.degrees(math.atan2(Y_pix, X_pix))) % 360)
+        theta = math.radians((90 - rot_param + math.degrees(math.atan2(Y_pix, X_pix)))%360)
 
         sin_t = math.sin(dec_rad)*math.cos(radius) + math.cos(dec_rad)*math.sin(radius)*math.cos(theta)
         Dec0det = math.atan2(sin_t, math.sqrt(1 - sin_t**2))
 
         sin_t = math.sin(theta)*math.sin(radius)/math.cos(Dec0det)
         cos_t = (math.cos(radius) - math.sin(Dec0det)*math.sin(dec_rad))/(math.cos(Dec0det)*math.cos(dec_rad))
-        RA0det = RA_d - math.degrees(math.atan2(sin_t, cos_t)) % 360
+        RA0det = (RA_d - math.degrees(math.atan2(sin_t, cos_t)))%360
 
-        h = math.radians(Ho + lat - RA0det)
+        h = math.radians(Ho + lon - RA0det)
         sh = math.sin(h)
         sd = math.sin(Dec0det)
         ch = math.cos(h)
@@ -177,7 +185,7 @@ def XY2altAz(lat, lon, RA_d, dec_d, Ho, rot_param, X_data, Y_data):
         r = math.sqrt(x**2 + y**2)
 
         # Calculate azimuth and altitude
-        azimuth = math.degrees(math.atan2(y, x)) % 360
+        azimuth = math.degrees(math.atan2(y, x))%360
         altitude = math.degrees(math.atan2(z, r))
 
         # Save calculated values to an output array
@@ -190,22 +198,27 @@ def XY2altAz(lat, lon, RA_d, dec_d, Ho, rot_param, X_data, Y_data):
 
 
 
-def altAz2RADec(lat, lon, UT_corr, time_data, azimuth_data, altitude_data):
+def altAz2RADec(lat, lon, UT_corr, time_data, azimuth_data, altitude_data, dt_time=False):
     """ Convert the azimuth and altitude in a given time and position on Earth to right ascension and 
         declination. 
+    
+    Arguments:
+        lat: [float] latitude of the observer in degrees
+        lon: [float] longitde of the observer in degress
+        UT_corr: [float] UT correction in hours (difference from local time to UT)
+        time_data: [2D ndarray] numpy array containing time tuples of each data point (year, month, day, 
+            hour, minute, second, millisecond)
+        azimuth_data: [ndarray] 1D numpy array containing the azimuth of each data point (degrees)
+        altitude_data: [ndarray] 1D numpy array containing the altitude of each data point (degrees)
 
-    @param lat: [float] latitude of the observer in degrees
-    @param lon: [float] longitde of the observer in degress
-    @param UT_corr: [float] UT correction in hours (difference from local time to UT)
-    @param time_data: [2D ndarray] numpy array containing time tuples of each data point (year, month, day, 
-        hour, minute, second, millisecond)
-    @param azimuth_data: [ndarray] 1D numpy array containing the azimuth of each data point (degrees)
-    @param altitude_data: [ndarray] 1D numpy array containing the altitude of each data point (degrees)
+    Keyword arguments:
+        dt_time: [bool] If True, datetime objects can be passed for time_data.
 
-    @return (JD_data, RA_data, dec_data): [tuple of ndarrays]
-        JD_data: [ndarray] julian date of each data point
-        RA_data: [ndarray] right ascension of each point
-        dec_data: [ndarray] declination of each point
+    Return: 
+        (JD_data, RA_data, dec_data): [tuple of ndarrays]
+            JD_data: [ndarray] julian date of each data point
+            RA_data: [ndarray] right ascension of each point
+            dec_data: [ndarray] declination of each point
     """
 
     # Initialize final values containers
@@ -214,8 +227,8 @@ def altAz2RADec(lat, lon, UT_corr, time_data, azimuth_data, altitude_data):
     dec_data = np.zeros_like(azimuth_data, dtype=np.float64)
 
     # Precalculate some parameters
-    sl = math.sin(math.radians(lon))
-    cl = math.cos(math.radians(lon))
+    sl = math.sin(math.radians(lat))
+    cl = math.cos(math.radians(lat))
 
     i = 0
     data_matrix = np.vstack((azimuth_data, altitude_data)).T
@@ -223,8 +236,13 @@ def altAz2RADec(lat, lon, UT_corr, time_data, azimuth_data, altitude_data):
     # Go through all given data points
     for azimuth, altitude in data_matrix:
 
-        # Extract time
-        Y, M, D, h, m, s, ms = time_data[i]
+        if dt_time:
+            JD = datetime2JD(time_data[i], UT_corr=UT_corr)
+
+        else:
+            # Extract time
+            Y, M, D, h, m, s, ms = time_data[i]
+            JD = date2JD(Y, M, D, h, m, s, ms, UT_corr=UT_corr)
 
         # Convert altitude and azimuth to radians
         az_rad = math.radians(azimuth)
@@ -240,11 +258,11 @@ def altAz2RADec(lat, lon, UT_corr, time_data, azimuth_data, altitude_data):
         HA = math.degrees(math.atan2(x,y))
 
         # Calculate the referent hour angle
-        JD = date2JD(Y, M, D, h, m, s, ms, UT_corr=UT_corr)
-        T=(JD - 2451545.0)/36525.0
-        Ho = (280.46061837 + 360.98564736629*(JD - 2451545.0) + 0.000387933*T**2 - T**3/38710000.0) % 360
+        
+        T = (JD - 2451545.0)/36525.0
+        Ho = (280.46061837 + 360.98564736629*(JD - 2451545.0) + 0.000387933*T**2 - T**3/38710000.0)%360
 
-        RA = (Ho + lat - HA) % 360
+        RA = (Ho + lon - HA)%360
         dec = math.degrees(math.asin(sl*salt + cl*calt*caz))
 
         # Save calculated values to an output array
@@ -389,3 +407,71 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, UT_corr, lat, lon, 
 
 
     return JD_data, RA_data, dec_data, magnitude_data
+
+
+
+def raDecToXY(RA_data, dec_data, RA_d, dec_d, jd, ref_jd, rot_param, F_scale):
+    """ Convert RA, Dec to image coordinates. 
+
+    Arguments:
+        RA: [ndarray] Right ascension (degrees).
+        dec: [ndarray] Declination (degrees).
+        RA_d: [float] Right ascension of the FOV centre (degrees).
+        dec_d: [float] Declination of the FOV centre (degrees).
+        jd: [float] Julian date.
+        ref_jd: [float] Referent Julian date from platepar.
+        rot_param: [float] Rotation from the celestial meridial (degrees).
+        F_scale: [float] Sum of image scales per each image axis (arcsec per px).
+    
+    Return:
+        (x, y): [tuple of ndarrays] Image X and Y coordinates.
+    """
+    
+    RA_data = np.copy(RA_data)
+    dec_data = np.copy(dec_data)
+
+    # Correct RA for the hour angle
+    delta_RA_H = 24.0657098244*15*(jd - ref_jd)
+    RA_data -= delta_RA_H
+    RA_data = RA_data%360
+
+    RA_data = np.radians(RA_data)
+    dec_data = np.radians(dec_data)
+
+    RA_d = np.radians(RA_d)
+    dec_d = np.radians(dec_d)
+    rot_param = np.radians(rot_param)
+
+    x_array = []
+    y_array = []
+
+    for RA, dec in zip(RA_data, dec_data):
+        ad = np.arccos(np.sin(dec_d)*np.sin(dec) + np.cos(dec_d)*np.cos(dec)*np.cos(RA - RA_d))
+
+        radius = np.degrees(ad)
+
+        sinA = np.cos(dec)*np.sin(RA - RA_d)/np.sin(ad)
+
+        cosA = (np.sin(dec) - np.sin(dec_d)*np.cos(ad))/(np.cos(dec_d)*np.sin(ad))
+
+        theta = -np.arctan2(sinA, cosA)
+
+        theta = theta + rot_param - np.pi/2
+
+        x = radius*np.cos(theta)*F_scale
+        y = radius*np.sin(theta)*F_scale
+
+        x_array.append(x)
+        y_array.append(y)
+
+    x_array = np.array(x_array)
+    y_array = np.array(y_array)
+
+    return x_array, y_array
+
+
+
+
+if __name__ == "__main__":
+
+    pass

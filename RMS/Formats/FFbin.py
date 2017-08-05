@@ -167,3 +167,13 @@ def filenameToDatetime(file_name):
 
 
     return datetime.datetime(year, month, day, hour, minute, seconds, ms*1000)
+
+
+
+def validName(ff_file):
+    """ Checks if the given file is an FF bin file. """
+
+    if ('FF' in ff_file) and ('.bin' in ff_file):
+        return True
+    else:
+        return False

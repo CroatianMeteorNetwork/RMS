@@ -75,6 +75,7 @@ def getMiddleTimeFF(ff_name, fps, ret_milliseconds=True, ff_frames=256):
     else:
         return (year, month, day, hour, minute, second, microsecond)
 
+
 def hourDifferenceFF(ff_name, platepar_datetime, fps):
     """ Calculate the difference in hours from the middle time of the FF file and the time in the platepar. 
     """
@@ -473,7 +474,8 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
 
     # Import platepar
     platepar_path = os.path.join(ff_directory, config.platepar_name)
-    platepar = Platepar.parsePlatepar(platepar_path)
+    platepar = Platepar.PlateparCMN()
+    platepar.read(platepar_path)
 
     # Check if the platepar exists
     if not platepar:

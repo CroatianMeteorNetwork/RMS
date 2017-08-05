@@ -96,14 +96,36 @@ def date2JD(year, month, day, hour, minute, second, millisecond=0, UT_corr=0.0):
     @return :[float] julian date, epoch 2000.0
     """
 
+    # Convert all input arguments to integer (except milliseconds)
+    year, month, day, hour, minute, second = map(int, (year, month, day, hour, minute, second))
+
     # Create datetime object of current time
-    dt = datetime(year, month, day, hour, minute, second, millisecond*1000)
+    dt = datetime(year, month, day, hour, minute, second, int(millisecond*1000))
 
     # Calculate Julian date
     julian = dt - JULIAN_EPOCH + J2000_JD - timedelta(hours=UT_corr)
     
     # Convert seconds to day fractions
-    return julian.days + (julian.seconds + julian.microseconds/1000000.0) /86400.0
+    return julian.days + (julian.seconds + julian.microseconds/1000000.0)/86400.0
+
+
+
+def datetime2JD(dt, UT_corr=0.0):
+    """ Converts a datetime object to Julian date. 
+
+    Arguments:
+        dt: [datetime object]
+
+    Keyword arguments:
+        UT_corr: [float] UT correction in hours (difference from local time to UT)
+
+    Return:
+        jd: [float] Julian date
+    """
+
+    return date2JD(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000.0, 
+        UT_corr=UT_corr)
+
 
 
 def JD2LST(julian_date, lon):

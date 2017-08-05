@@ -23,6 +23,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+from __future__ import print_function, division, absolute_import
+
 import os
 import datetime
 import numpy as np
@@ -75,11 +77,44 @@ def parseInf(file_name):
     return station_data_obj
 
 
-class parsePlatepar(object):
+class PlateparCMN(object):
     """ Load calibration parameters from a platepar file.
     """
 
-    def parse(self, f):
+    def __init__(self):
+        """ Read platepar and return object to access the data externally. 
+
+        @param file_name: [string] path to the platepar file
+
+        @return self: [object] instance of this class with loaded platepar parameters
+        """
+
+        self.lat = self.lon = self.elev = None
+
+        self.time = 0
+        self.JD = 0
+
+        self.Ho = None
+        self.X_res = self.Y_res = self.focal_length = None
+
+        self.RA_d = self.RA_H = self.RA_M = self.RA_S = None
+        self.dec_d = self.dec_D = self.dec_M = self.dec_S = None
+        self.rot_param = None
+
+        self.F_scale = None
+        self.w_pix = None
+
+        self.mag_0 = self.mag_lev = None
+
+        self.x_poly = np.zeros(shape=(12,), dtype=np.float64)
+        self.y_poly = np.zeros(shape=(12,), dtype=np.float64)
+
+        self.station_code = None
+
+
+
+
+    def parseLine(self, f):
         """ Read next line, split the line and convert parameters to float.
 
         @param f: [file handle] file we want to read
@@ -90,13 +125,10 @@ class parsePlatepar(object):
         return map(float, f.readline().split())
 
 
-    def __init__(self, file_name):
-        """ Read platepar and return object to access the data externally. 
 
-        @param file_name: [string] path to the platepar file
+    def read(self, file_name):
+        """ Read the platepar. """
 
-        @return self: [object] instance of this class with loaded platepar parameters
-        """
 
         # Check if platepar exists
         if not os.path.isfile(file_name):
@@ -105,7 +137,7 @@ class parsePlatepar(object):
         with open(file_name) as f:
 
             # Parse latitude, longitude, elevation
-            self.lat, self.lon, self.elev = self.parse(f)
+            self.lat, self.lon, self.elev = self.parseLine(f)
 
             # Parse date and time as int
             D, M, Y, h, m, s = map(int, f.readline().split())
@@ -117,39 +149,101 @@ class parsePlatepar(object):
             self.JD = date2JD(Y, M, D, h, m, s)
 
             # Calculate the referent hour angle
-            T=(self.JD - 2451545.0)/36525.0
+            T = (self.JD - 2451545.0)/36525.0
             self.Ho = (280.46061837 + 360.98564736629*(self.JD - 2451545.0) + 0.000387933*T**2 - 
-                T**3/38710000.0) % 360
+                T**3/38710000.0)%360
 
             # Parse camera parameters
-            self.X_res, self.Y_res, self.focal_length = self.parse(f)
+            self.X_res, self.Y_res, self.focal_length = self.parseLine(f)
 
             # Parse the right ascension of the image centre
-            self.RA_d, self.RA_H, self.RA_M, self.RA_S = self.parse(f)
+            self.RA_d, self.RA_H, self.RA_M, self.RA_S = self.parseLine(f)
 
             # Parse the declination of the image centre
-            self.dec_d, self.dec_D, self.dec_M, self.dec_S = self.parse(f)
+            self.dec_d, self.dec_D, self.dec_M, self.dec_S = self.parseLine(f)
 
             # Parse the rotation parameter
-            self.rot_param = self.parse(f)[0]
+            self.rot_param = self.parseLine(f)[0]
 
             # Parse the sum of image scales per each image axis (arcsec per px)
-            self.F_scale = self.parse(f)[0]
+            self.F_scale = self.parseLine(f)[0]
             self.w_pix = 50*self.F_scale/3600
             self.F_scale = 3600/self.F_scale
 
             # Load magnitude slope parameters
-            self.mag_0, self.mag_lev = self.parse(f)
+            self.mag_0, self.mag_lev = self.parseLine(f)
 
             # Load X axis polynomial parameters
             self.x_poly = np.zeros(shape=(12,), dtype=np.float64)
             for i in range(12):
-                self.x_poly[i] = self.parse(f)[0]
+                self.x_poly[i] = self.parseLine(f)[0]
 
             # Load Y axis polynomial parameters
             self.y_poly = np.zeros(shape=(12,), dtype=np.float64)
             for i in range(12):
-                self.y_poly[i] = self.parse(f)[0]
+                self.y_poly[i] = self.parseLine(f)[0]
 
             # Read station code
             self.station_code = f.readline().replace('\r', '').replace('\n', '')
+
+
+    def write(self, file_name):
+        """ Write platepar to file. """
+
+        with open(file_name, 'w') as f:
+            
+            # Write geo coords
+            f.write('{:9.6f} {:9.6f} {:04d}\n'.format(self.lon, self.lat, int(self.elev)))
+
+            # Write the referent time
+            D, M, Y, h, m, s = self.time.day, self.time.month, self.time.year, self.time.hour, self.time.minute, self.time.second
+            f.write('{:02d} {:02d} {:04d} {:02d} {:02d} {:02d}\n'.format(D, M, Y, h, m, s))
+
+            # Write resolution and focal length
+            f.write('{:d} {:d} {:f}\n'.format(self.X_res, self.Y_res, self.focal_length))
+
+            # Write referent RA
+            self.RA_H = int(self.RA_d/15)
+            self.RA_M = int((self.RA_d/15 - self.RA_H)*60)
+            self.RA_S = int(((self.RA_d/15 - self.RA_H)*60 - self.RA_M)*60)
+
+            f.write("{:7.3f} {:02d} {:02d} {:02d}\n".format(self.RA_d, self.RA_H, self.RA_M, self.RA_S))
+
+            # Write referent Dec
+            self.dec_D = int(self.dec_d)
+            self.dec_M = int((self.dec_d - self.dec_D)*60)
+            self.dec_S = int(((self.dec_d - self.dec_D)*60 - self.dec_M)*60)
+
+            f.write("{:+7.3f} {:02d} {:02d} {:02d}\n".format(self.dec_d, self.dec_D, self.dec_M, self.dec_S))
+
+            # Write rotation parameter
+            f.write('{:<7.3}\n'.format(self.rot_param))
+
+            # Write F scale
+            f.write('{:<5.1f}\n'.format(3600/self.F_scale))
+
+            # Write magnitude fit
+            f.write("{:.3f} {:.3f}\n".format(self.mag_0, self.mag_lev))
+
+            # Write X distorsion polynomial
+            for x_elem in self.x_poly:
+                f.write('{:+E}\n'.format(x_elem))
+
+            # Write y distorsion polynomial
+            for y_elem in self.y_poly:
+                f.write('{:+E}\n'.format(y_elem))
+
+            # Write station code
+            f.write(str(self.station_code) + '\n')
+
+
+
+
+
+
+
+
+
+    
+
+        

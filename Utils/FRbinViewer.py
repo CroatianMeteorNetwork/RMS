@@ -98,10 +98,16 @@ def view(dir_path, ff, fr, config):
 
 if __name__ == "__main__":
 
+    if len(sys.argv) < 2:
+        print('Usage: python -m Utils.FRbinViewer /path/to/FRbin/dir/')
+        sys.exit()
+
+    dir_path = sys.argv[1].replace('"', '')
+
     # Load the configuration file
     config = cr.parse(".config")
 
-    dir_path = sys.argv[1].replace('"', '')
+    
 
     # Get the list of FR bin files (fireball detections) in the given directory
     fr_list = [fr for fr in os.listdir(dir_path) if fr[0:2]=="FR" and fr[-3:]=="bin"]
