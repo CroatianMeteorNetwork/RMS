@@ -23,6 +23,12 @@ dtparam=i2c_arm=on
 dtoverlay=i2c-rtc,ds3231
 ```
 
+Reboot your Raspberry Pi:
+
+```
+sudo reboot
+```
+
 #### 2. We don’t need fake-hwclock module anymore, so we are going to remove it:
 ```
 sudo apt-get remove fake-hwclock
