@@ -83,7 +83,7 @@ First, find directory where you want to download the code. If you don't care, I 
 The simplest way of obtaining this code is by opening the terminal and running:
 
 ```
-git clone git@github.com:CroatianMeteorNetwork/RMS.git
+git clone https://github.com/CroatianMeteorNetwork/RMS.git
 ```
 
 This will download the code in this repository in the RMS directory. 
