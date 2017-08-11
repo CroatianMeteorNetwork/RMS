@@ -56,6 +56,7 @@ Furthermore, you will need the following software and libraries to run the code:
 - mplayer
 - python2.7
 - python2.7-dev
+- libblas-dev liblapack-dev
 - Python libraries:
 	- gitpython
 	- OpenCV 2 for Python (2.4.9.1 or later)
