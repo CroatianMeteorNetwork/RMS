@@ -1,7 +1,10 @@
 """ Freeing up space for new observations by deleting old files. """
 
 
+import ctypes
 import os
+import platform
+import sys
 import shutil
 import datetime
 
@@ -9,16 +12,26 @@ from RMS.CaptureDuration import captureDuration
 
 
 
-def availableSpace(p):
+def availableSpace(dirname):
     """
     Returns the number of free bytes on the drive that p is on.
 
     Source: https://atlee.ca/blog/posts/blog20080223getting-free-diskspace-in-python.html
     """
 
-    s = os.statvfs(p)
+    if platform.system() == 'Windows':
 
-    return s.f_bsize*s.f_bavail
+        free_bytes = ctypes.c_ulonglong(0)
+
+        ctypes.windll.kernel32.GetDiskFreeSpaceExW(ctypes.c_wchar_p(dirname), None, None, \
+            ctypes.pointer(free_bytes))
+
+        return free_bytes.value
+
+    else:
+        st = os.statvfs(dirname)
+
+        return st.f_bavail*st.f_frsize
 
 
 

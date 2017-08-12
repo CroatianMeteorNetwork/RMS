@@ -84,8 +84,9 @@ class QueuedPool(object):
 
         # Initialize queues (for some reason queues from Manager need to be created, otherwise they are 
         # blocking when using get_nowait)
-        self.input_queue = multiprocessing.Manager().Queue()
-        self.output_queue = multiprocessing.Manager().Queue()
+        manager = multiprocessing.Manager()
+        self.input_queue = manager.Queue()
+        self.output_queue = manager.Queue()
 
         self.func = func
         self.pool = None
