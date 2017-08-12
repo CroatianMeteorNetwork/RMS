@@ -109,7 +109,7 @@ def starsXY2RaDec(ff_name, star_list, platepar, fps, UT_corr):
     # Convert to Ra,Dec
     JD_data, RA_data, dec_data, magnitude_data = Astrometry.XY2CorrectedRADec(time_data, x_data.T[0], y_data.T[0], level_data.T[0], UT_corr, platepar.lat, 
         platepar.lon, platepar.Ho, platepar.X_res, platepar.Y_res, platepar.RA_d, platepar.dec_d, 
-        platepar.rot_param, platepar.F_scale, platepar.w_pix, platepar.mag_0, platepar.mag_lev, 
+        platepar.pos_angle_ref, platepar.F_scale, platepar.w_pix, platepar.mag_0, platepar.mag_lev, 
         platepar.x_poly, platepar.y_poly)
 
     return RA_data, dec_data
@@ -156,7 +156,7 @@ def solutionEvaluation(transformation_parameters, rot_param, platepar, catalog_s
     # Assign given parameters to platepar
     platepar.RA_d = ra_d
     platepar.dec_d = dec_d
-    platepar.rot_param = rot_param
+    platepar.pos_angle_ref = rot_param
 
     # Define X and Y distorsion palynomials if they are provided
     if x_poly != None:
@@ -260,8 +260,8 @@ def findCorrectionDirection(platepar, catalog_stars, calstars_list, fps, UT_corr
     best_rotations = []
 
     # Check for +/- rot_diff degree rotations
-    rot_param_min = platepar.rot_param - rot_diff
-    rot_param_max = platepar.rot_param + rot_diff
+    rot_param_min = platepar.pos_angle_ref - rot_diff
+    rot_param_max = platepar.pos_angle_ref + rot_diff
 
     for rot_param in np.linspace(rot_param_min, rot_param_max, 9)%360:
 
@@ -496,7 +496,7 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
             rot_param_range_temp = config.rotation_param_range
 
         # Get the coordinate shift
-        evaluation, separation_corr, angle_corr, platepar.rot_param = findCorrectionDirection(platepar, catalog_stars, calstars_list, config.fps, UT_corr, config.catalog_extraction_radius, config.catalog_mag_limit, stars_NN_radius, config.min_matched_stars, rot_param_range_temp)
+        evaluation, separation_corr, angle_corr, platepar.pos_angle_ref = findCorrectionDirection(platepar, catalog_stars, calstars_list, config.fps, UT_corr, config.catalog_extraction_radius, config.catalog_mag_limit, stars_NN_radius, config.min_matched_stars, rot_param_range_temp)
 
         # Check if no good solutions were found
         if evaluation == None:
@@ -516,7 +516,7 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
 
             print 'NEW CENTER'
             print platepar.RA_d, platepar.dec_d
-            print platepar.rot_param
+            print platepar.pos_angle_ref
             print '--------'
 
         else:
@@ -562,7 +562,7 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
     # # Define initial RA and Dec
     # initial_parameters = np.array([platepar.RA_d, platepar.dec_d])
 
-    # extra_args = [platepar.rot_param, platepar, catalog_stars, calstars_list, config.fps, UT_corr, config.catalog_extraction_radius, config.catalog_mag_limit, config.refinement_star_NN_radius, config.min_matched_stars]
+    # extra_args = [platepar.pos_angle_ref, platepar, catalog_stars, calstars_list, config.fps, UT_corr, config.catalog_extraction_radius, config.catalog_mag_limit, config.refinement_star_NN_radius, config.min_matched_stars]
 
     # # Define an adapted function for refining
     # refineSoluton = lambda params: solutionEvaluation(params, *extra_args, matched_stars=catalog_matched_stars)[0]
@@ -570,7 +570,7 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
     # # Run SIMPLEX parameter refining
     # res = minimize(refineSoluton, initial_parameters, method='Nelder-Mead', options={'xtol': 1e-4, 'disp': True})
 
-    # print res.x, platepar.rot_param
+    # print res.x, platepar.pos_angle_ref
 
     # # Update platepar with simplex results for Ra and Dec
     # platepar.RA_d, platepar.dec_d = res.x
@@ -579,7 +579,7 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
     initial_parameters = copy.deepcopy(platepar.x_poly)
 
     # Define an adapted function for refining
-    refineSoluton = lambda params: solutionEvaluation((platepar.RA_d, platepar.dec_d), platepar.rot_param, platepar, catalog_stars, calstars_list, config.fps, UT_corr, config.catalog_extraction_radius, config.catalog_mag_limit, config.refinement_star_NN_radius, config.min_matched_stars, x_poly=params, matched_stars=catalog_matched_stars)[0]
+    refineSoluton = lambda params: solutionEvaluation((platepar.RA_d, platepar.dec_d), platepar.pos_angle_ref, platepar, catalog_stars, calstars_list, config.fps, UT_corr, config.catalog_extraction_radius, config.catalog_mag_limit, config.refinement_star_NN_radius, config.min_matched_stars, x_poly=params, matched_stars=catalog_matched_stars)[0]
 
     # Run SIMPLEX parameter refining
     res = minimize(refineSoluton, initial_parameters, method='Nelder-Mead', options={'xtol': 1e-4, 'disp': True})
@@ -593,7 +593,7 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
     initial_parameters = copy.deepcopy(platepar.y_poly)
 
     # Define an adapted function for refining
-    refineSoluton = lambda params: solutionEvaluation((platepar.RA_d, platepar.dec_d), platepar.rot_param, platepar, catalog_stars, calstars_list, config.fps, UT_corr, config.catalog_extraction_radius, config.catalog_mag_limit, config.refinement_star_NN_radius, config.min_matched_stars, y_poly=params, matched_stars=catalog_matched_stars)[0]
+    refineSoluton = lambda params: solutionEvaluation((platepar.RA_d, platepar.dec_d), platepar.pos_angle_ref, platepar, catalog_stars, calstars_list, config.fps, UT_corr, config.catalog_extraction_radius, config.catalog_mag_limit, config.refinement_star_NN_radius, config.min_matched_stars, y_poly=params, matched_stars=catalog_matched_stars)[0]
 
     # Run SIMPLEX parameter refining
     res = minimize(refineSoluton, initial_parameters, method='Nelder-Mead', options={'xtol': 1e-4, 'disp': True})
@@ -615,7 +615,7 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
 
     print 'FINAL RESULTS:'
     print platepar.RA_d, platepar.dec_d
-    print platepar.rot_param
+    print platepar.pos_angle_ref
     print platepar.x_poly
     print platepar.y_poly
 

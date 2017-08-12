@@ -29,7 +29,7 @@ import os
 import datetime
 import numpy as np
 
-from RMS.Astrometry.Conversions import date2JD
+from RMS.Astrometry.Conversions import date2JD, jd2Date
 
 class stationData(object):
     """ Holds information about one meteor station (location) and observed points.
@@ -89,23 +89,30 @@ class PlateparCMN(object):
         @return self: [object] instance of this class with loaded platepar parameters
         """
 
+        # Station coordinates
         self.lat = self.lon = self.elev = None
 
+        # Referent time and date
         self.time = 0
         self.JD = 0
 
         self.Ho = None
         self.X_res = self.Y_res = self.focal_length = None
 
+        # FOV centre
         self.RA_d = self.RA_H = self.RA_M = self.RA_S = None
         self.dec_d = self.dec_D = self.dec_M = self.dec_S = None
-        self.rot_param = None
+        self.pos_angle_ref = None
 
+        self.az_centre = self.alt_centre = None
+
+        # FOV scale
         self.F_scale = None
         self.w_pix = None
 
         self.mag_0 = self.mag_lev = None
 
+        # Distortion fit
         self.x_poly = np.zeros(shape=(12,), dtype=np.float64)
         self.y_poly = np.zeros(shape=(12,), dtype=np.float64)
 
@@ -163,7 +170,7 @@ class PlateparCMN(object):
             self.dec_d, self.dec_D, self.dec_M, self.dec_S = self.parseLine(f)
 
             # Parse the rotation parameter
-            self.rot_param = self.parseLine(f)[0]
+            self.pos_angle_ref = self.parseLine(f)[0]
 
             # Parse the sum of image scales per each image axis (arcsec per px)
             self.F_scale = self.parseLine(f)[0]
@@ -195,12 +202,14 @@ class PlateparCMN(object):
             # Write geo coords
             f.write('{:9.6f} {:9.6f} {:04d}\n'.format(self.lon, self.lat, int(self.elev)))
 
+            # Calculate referent time from referent JD
+            Y, M, D, h, m, s, ms = list(map(int, jd2Date(self.JD)))
+
             # Write the referent time
-            D, M, Y, h, m, s = self.time.day, self.time.month, self.time.year, self.time.hour, self.time.minute, self.time.second
             f.write('{:02d} {:02d} {:04d} {:02d} {:02d} {:02d}\n'.format(D, M, Y, h, m, s))
 
             # Write resolution and focal length
-            f.write('{:d} {:d} {:f}\n'.format(self.X_res, self.Y_res, self.focal_length))
+            f.write('{:d} {:d} {:f}\n'.format(int(self.X_res), int(self.Y_res), self.focal_length))
 
             # Write referent RA
             self.RA_H = int(self.RA_d/15)
@@ -217,7 +226,7 @@ class PlateparCMN(object):
             f.write("{:+7.3f} {:02d} {:02d} {:02d}\n".format(self.dec_d, self.dec_D, self.dec_M, self.dec_S))
 
             # Write rotation parameter
-            f.write('{:<7.3}\n'.format(self.rot_param))
+            f.write('{:<7.3}\n'.format(self.pos_angle_ref))
 
             # Write F scale
             f.write('{:<5.1f}\n'.format(3600/self.F_scale))

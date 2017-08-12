@@ -255,7 +255,7 @@ def altAz2RADec(lat, lon, UT_corr, time_data, azimuth_data, altitude_data, dt_ti
 
         x = -saz*calt
         y = -caz*sl*calt + salt*cl
-        HA = math.degrees(math.atan2(x,y))
+        HA = math.degrees(math.atan2(x, y))
 
         # Calculate the referent hour angle
         

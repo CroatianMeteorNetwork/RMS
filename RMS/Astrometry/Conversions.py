@@ -128,6 +128,41 @@ def datetime2JD(dt, UT_corr=0.0):
 
 
 
+def jd2Date(jd, UT_corr=0, dt_obj=False):
+    """ Converts the given Julian date to (year, month, day, hour, minute, second, millisecond) tuple. 
+
+    Arguments:
+        jd: [float] Julian date
+
+    Keyword arguments:
+        UT_corr: [float] UT correction in hours (difference from local time to UT)
+        dt_obj: [bool] returns a datetime object if True. False by default.
+
+    Return:
+        (year, month, day, hour, minute, second, millisecond)
+
+    """
+
+    
+    dt = timedelta(days=jd)
+
+    try:
+        date = dt + JULIAN_EPOCH - J2000_JD + timedelta(hours=UT_corr) 
+
+    # If the date is out of range (i.e. before year 1) use year 1. This is the limitation in the datetime
+    # library. Time handling should be switched to astropy.time
+    except OverflowError:
+        date = datetime(MINYEAR, 1, 1, 0, 0, 0)
+
+
+    # Return a datetime object if dt_obj == True
+    if dt_obj:
+        return date
+
+    return date.year, date.month, date.day, date.hour, date.minute, date.second, date.microsecond/1000.0
+
+
+
 def JD2LST(julian_date, lon):
     """ Convert Julian date to Local Sidreal Time and Greenwich Sidreal Time. 
 
