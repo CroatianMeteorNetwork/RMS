@@ -95,6 +95,16 @@ class PlateTool(object):
         self.config = config
         self.dir_path = dir_path
 
+        # Star picking mode
+        self.star_pick_mode = False
+        self.circle_aperature = None
+        self.circle_aperature_outer = None
+        self.star_aperature_radius = 5
+
+        # Positions of the mouse cursor
+        self.mouse_x = 0
+        self.mouse_y = 0
+
         # Kwy increment
         self.key_increment = 1.0
 
@@ -173,14 +183,69 @@ class PlateTool(object):
 
         
         # self.ax.figure.canvas.mpl_connect('button_press_event', self.onMousePress)
-        # self.ax.figure.canvas.mpl_connect('button_release_event', self.onMouseRelease)
-        # self.ax.figure.canvas.mpl_connect('motion_notify_event', self.onMouseMotion)
+        self.ax.figure.canvas.mpl_connect('button_release_event', self.onMouseRelease)
+        
+        self.ax.figure.canvas.mpl_connect('motion_notify_event', self.onMouseMotion)
 
         # Register which mouse/keyboard events will evoke which function
         self.ax.figure.canvas.mpl_connect('scroll_event', self.onScroll)
         self.scroll_counter = 0
 
         self.ax.figure.canvas.mpl_connect('key_press_event', self.onKeyPress)
+
+
+    def onMouseRelease(self, event):
+        """ Called when the mouse click is released. """
+
+        # Call the same function for mouse movements
+        self.onMouseMotion(event)
+
+        # Centroid the star around the pressed coordinates
+        self.centroidStar()
+
+
+
+    def onMouseMotion(self, event):
+        """ Called with the mouse is moved. """
+
+
+        # Read mouse position
+        self.mouse_x = event.xdata
+        self.mouse_y = event.ydata
+
+        # Change the position of the star aperature circle
+        if self.star_pick_mode:
+            self.addCursorCircle()
+
+        
+
+    def addCursorCircle(self):
+        """ Adds a circle around the mouse cursor. """
+
+        # Delete the old aperature circle
+        if self.circle_aperature is not None:
+            self.circle_aperature.remove()
+
+        if self.circle_aperature_outer is not None:
+            self.circle_aperature_outer.remove()
+
+        # Plot a circle of the given radius around the cursor
+        self.circle_aperature = matplotlib.patches.Circle((self.mouse_x, self.mouse_y),
+            self.star_aperature_radius, edgecolor='yellow', fc='none')
+
+        # Plot a circle of the given radius around the cursor, which is used to determine the region where the
+        # background will be taken from
+        self.circle_aperature_outer = matplotlib.patches.Circle((self.mouse_x, self.mouse_y),
+            self.star_aperature_radius*2, edgecolor='yellow', fc='none', linestyle='dotted')
+
+        plt.gca().add_patch(self.circle_aperature)
+        plt.gca().add_patch(self.circle_aperature_outer)
+
+        plt.gcf().canvas.draw()
+
+
+
+
         
 
 
@@ -270,6 +335,17 @@ class PlateTool(object):
             self.makeNewPlatepar()
 
 
+        # Change modes from astrometry parameter changing to star picking
+        elif event.key == 'ctrl+r':
+            if self.star_pick_mode:
+                self.disableStarPicking()
+                self.circle_aperature = None
+                self.circle_aperature_outer = None
+                self.updateImage()
+            else:
+                self.enableStarPicking()
+
+
         # Limit values of RA and Dec
         self.platepar.RA_d = self.platepar.RA_d%360
 
@@ -282,17 +358,31 @@ class PlateTool(object):
 
 
     def onScroll(self, event):
-        """ Switch images on scroll. """
+        """ Change star selector aperature on scroll. """
 
         self.scroll_counter += event.step
 
+
         if self.scroll_counter > 1:
-            self.nextFF()
+            self.star_aperature_radius += 1
             self.scroll_counter = 0
 
         elif self.scroll_counter < -1:
-            self.prevFF()
+            self.star_aperature_radius -= 1
             self.scroll_counter = 0
+
+
+        # Check that the star aperature is in the proper limits
+        if self.star_aperature_radius < 2:
+            self.star_aperature_radius = 2
+
+        if self.star_aperature_radius > 50:
+            self.star_aperature_radius = 50
+
+        # Change the size of the star aperature circle
+        if self.star_pick_mode:
+            self.addCursorCircle()
+
 
 
 
@@ -312,8 +402,11 @@ class PlateTool(object):
 
 
 
-    def updateImage(self):
+    def updateImage(self, clear_plot=True):
         """ Update the matplotlib plot to show the current image. 
+
+        Keyword arguments:
+            clear_plot: [bool] If True, the plot will be cleared before plotting again (default).
         """
 
         # Limit key increment so it can be lower than 0.1
@@ -321,7 +414,8 @@ class PlateTool(object):
             self.key_increment = 0.1
 
 
-        plt.clf()
+        if clear_plot:
+            plt.clf()
 
         # Load the FF from the current file
         self.current_ff = readFF(self.dir_path, self.current_ff_file)
@@ -597,6 +691,7 @@ class PlateTool(object):
         self.updateImage()
 
 
+
     def prevFF(self):
         """ Shows the previous FF file in the list. """
 
@@ -607,8 +702,100 @@ class PlateTool(object):
 
 
 
-        
+    def enableStarPicking(self):
+        """ Enable the star picking mode where the star are manually selected for the fit. """
 
+        self.star_pick_mode = True
+
+
+
+
+    def disableStarPicking(self):
+        """ Disable the star picking mode where the star are manually selected for the fit. """
+
+        self.star_pick_mode = False
+
+
+
+
+    def centroidStar(self):
+        """ Find the centroid of the star clicked on the image. """
+
+        ### Extract part of image around the mouse cursor ###
+        ######################################################################################################
+
+        # Outer circle radius
+        outer_radius = self.star_aperature_radius*2
+
+        x_min = int(round(self.mouse_x - outer_radius))
+        if x_min < 0: x_min = 0
+
+        x_max = int(round(self.mouse_x + outer_radius))
+        if x_max > self.current_ff.ncols - 1:
+            x_max > self.current_ff.ncols - 1
+
+        y_min = int(round(self.mouse_y - outer_radius))
+        if y_min < 0: y_min = 0
+
+        y_max = int(round(self.mouse_y + outer_radius))
+        if y_max > self.current_ff.nrows - 1:
+            y_max > self.current_ff.nrows - 1
+
+        img_crop = self.current_ff.maxpixel[y_min:y_max, x_min:x_max]
+
+        ######################################################################################################
+
+
+        ### Estimate the background ###
+        ######################################################################################################
+        bg_acc = 0
+        bg_counter = 0
+        for i in range(img_crop.shape[0]):
+            for j in range(img_crop.shape[1]):
+
+                # Calculate distance of pixel from centre of the cropped image
+                i_rel = i - img_crop.shape[0]/2
+                j_rel = j - img_crop.shape[1]/2
+                pix_dist = math.sqrt(i_rel**2 + j_rel**2)
+
+                # Take only those pixels between the inner and the outer circle
+                if (pix_dist <= outer_radius) and (pix_dist > self.star_aperature_radius):
+                    bg_acc += img_crop[i, j]
+                    bg_counter += 1
+
+        # Calculate mean background intensity
+        bg_intensity = bg_acc/bg_counter
+
+        ######################################################################################################
+
+
+        ### Calculate the centroid ###
+        ######################################################################################################
+        x_acc = 0
+        y_acc = 0
+        intens_acc = 0
+
+        for i in range(img_crop.shape[0]):
+            for j in range(img_crop.shape[1]):
+
+                # Calculate distance of pixel from centre of the cropped image
+                i_rel = i - img_crop.shape[0]/2
+                j_rel = j - img_crop.shape[1]/2
+                pix_dist = math.sqrt(i_rel**2 + j_rel**2)
+
+                # Take only those pixels between the inner and the outer circle
+                if pix_dist <= self.star_aperature_radius:
+                    x_acc += j*(img_crop[i, j] - bg_intensity)
+                    y_acc += i*(img_crop[i, j] - bg_intensity)
+                    intens_acc += img_crop[i, j] - bg_intensity
+
+
+        x_centroid = x_acc/intens_acc + x_min
+        y_centroid = y_acc/intens_acc + y_min
+
+        ######################################################################################################
+
+        return x_centroid, y_centroid
 
 
 
