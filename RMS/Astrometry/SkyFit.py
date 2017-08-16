@@ -211,53 +211,79 @@ class PlateTool(object):
         # Call the same function for mouse movements to update the variables in the background
         self.onMouseMotion(event)
 
+        # If the star picking mode is on
+        if self.star_pick_mode:
 
-        if self.star_selection_centroid:
+            # Left mouse button, select stars
+            if event.button == 1:
 
-            # Centroid the star around the pressed coordinates
-            self.x_centroid, self.y_centroid = self.centroidStar()
+                # If the centroid of the star has to be picked
+                if self.star_selection_centroid:
 
-            # Draw the centroid on the image
-            plt.scatter(self.x_centroid, self.y_centroid, marker='+', c='y', s=50)
+                    # Centroid the star around the pressed coordinates
+                    self.x_centroid, self.y_centroid, self.star_intensity = self.centroidStar()
 
-            
-            # Select the closest catalog star to the centroid as the first guess
-            self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.x_centroid, self.y_centroid)
+                    # Draw the centroid on the image
+                    plt.scatter(self.x_centroid, self.y_centroid, marker='+', c='y', s=50)
 
-            # Plot the closest star as a purple cross
-            self.selected_cat_star_scatter = plt.scatter(self.catalog_x[self.closest_cat_star_indx], 
-                self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=50)
+                    
+                    # Select the closest catalog star to the centroid as the first guess
+                    self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.x_centroid, self.y_centroid)
 
-            # Update canvas
-            plt.gcf().canvas.draw()
+                    # Plot the closest star as a purple cross
+                    self.selected_cat_star_scatter = plt.scatter(self.catalog_x[self.closest_cat_star_indx], 
+                        self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=50)
 
-            print(self.closest_cat_star_indx)
-            print(self.catalog_x[self.closest_cat_star_indx], 
-                self.catalog_y[self.closest_cat_star_indx], self.catalog_stars[self.closest_cat_star_indx])
+                    # Update canvas
+                    plt.gcf().canvas.draw()
+
+                    print(self.closest_cat_star_indx)
+                    print(self.catalog_x[self.closest_cat_star_indx], 
+                        self.catalog_y[self.closest_cat_star_indx], self.catalog_stars[self.closest_cat_star_indx])
 
 
-            # Switch to the mode where the catalog star is selected
-            self.star_selection_centroid = False
+                    # Switch to the mode where the catalog star is selected
+                    self.star_selection_centroid = False
+
+                    self.drawCursorCircle()
 
 
-        else:
+                # If the catalog star has to be picked
+                else:
 
-            # Select the closest catalog star
-            self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.mouse_x, self.mouse_y)
+                    # Select the closest catalog star
+                    self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.mouse_x, self.mouse_y)
 
-            if self.selected_cat_star_scatter is not None:
-                self.selected_cat_star_scatter.remove()
+                    if self.selected_cat_star_scatter is not None:
+                        self.selected_cat_star_scatter.remove()
 
-            # Plot the closest star as a purple cross
-            self.selected_cat_star_scatter = plt.scatter(self.catalog_x[self.closest_cat_star_indx], 
-                self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=50)
+                    # Plot the closest star as a purple cross
+                    self.selected_cat_star_scatter = plt.scatter(self.catalog_x[self.closest_cat_star_indx], 
+                        self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=50)
 
-            # Update canvas
-            plt.gcf().canvas.draw()
+                    # Update canvas
+                    plt.gcf().canvas.draw()
 
-            print(self.closest_cat_star_indx)
-            print(self.catalog_x[self.closest_cat_star_indx], 
-                self.catalog_y[self.closest_cat_star_indx], self.catalog_stars[self.closest_cat_star_indx])
+                    print(self.closest_cat_star_indx)
+                    print(self.catalog_x[self.closest_cat_star_indx], 
+                        self.catalog_y[self.closest_cat_star_indx], self.catalog_stars[self.closest_cat_star_indx])
+
+
+            # Right mouse button, deselect stars
+            elif event.button == 3:
+
+                if self.star_selection_centroid:
+
+                    # Find the closest picked star
+                    picked_indx = self.findClosestPickedStarIndex(self.mouse_x, self.mouse_y)
+
+                    if self.paired_stars:
+                        
+                        # Remove the picked star from the list
+                        self.paired_stars.pop(picked_indx)
+
+                    self.updateImage()
+
 
 
 
@@ -435,6 +461,18 @@ class PlateTool(object):
 
                     self.updateImage()
 
+                    self.drawCursorCircle()
+
+        elif event.key == 'escape':
+
+            if self.star_pick_mode:
+
+                # If the ESC is pressed when the star has been centroided, reset the centroid
+                if not self.star_selection_centroid:
+                    self.star_selection_centroid = True
+
+                    self.updateImage()
+
 
 
 
@@ -495,6 +533,22 @@ class PlateTool(object):
         return catalog_stars
 
 
+    def drawPairedStars(self):
+        """ Draws the stars that were picked for calibration. """
+
+        if self.star_pick_mode:
+
+            # Go through all paired stars
+            for paired_star in self.paired_stars:
+
+                img_star, catalog_star = paired_star
+
+                x, y = img_star
+
+                # Plot all paired stars
+                plt.scatter(x, y, marker='x', color='b')
+
+
 
     def updateImage(self, clear_plot=True):
         """ Update the matplotlib plot to show the current image. 
@@ -521,6 +575,8 @@ class PlateTool(object):
         # Show the loaded maxpixel
         plt.imshow(self.current_ff.maxpixel, cmap='gray')
 
+        # Draw stars that were paired in picking mode
+        self.drawPairedStars()
 
         # Draw stars detected on this image
         self.drawCalstars()
@@ -551,6 +607,13 @@ class PlateTool(object):
         plt.xlim([0, self.current_ff.ncols])
         plt.ylim([self.current_ff.nrows, 0])
 
+        # Show text on the top
+        if self.star_pick_mode:
+            text_str = 'STAR PICKING MODE'
+
+            plt.gca().text(self.current_ff.ncols/2, self.current_ff.nrows - 10, text_str, color='r', 
+                verticalalignment='top', horizontalalignment='center', fontsize=8)
+
         # Show text on image with platepar parameters
         text_str  = self.current_ff_file + '\n\n'
         text_str += 'RA  = {:.3f}\n'.format(self.platepar.RA_d)
@@ -571,6 +634,7 @@ class PlateTool(object):
         text_str += 'Lim mag - R/F\n'
         text_str += 'Increment - +/-\n'
         text_str += 'FOV centre - V\n'
+        text_str += 'Pick stars - CTRL + R\n'
         text_str += 'New platepar - CTRL + N\n'
         text_str += 'Save platepar - CTRL + S\n'
         plt.gca().text(10, self.current_ff.nrows - 10, text_str, color='w', verticalalignment='bottom', 
@@ -811,6 +875,8 @@ class PlateTool(object):
 
         self.star_pick_mode = True
 
+        self.updateImage()
+
 
 
 
@@ -818,6 +884,8 @@ class PlateTool(object):
         """ Disable the star picking mode where the star are manually selected for the fit. """
 
         self.star_pick_mode = False
+
+        self.updateImage()
 
 
 
@@ -899,7 +967,7 @@ class PlateTool(object):
 
         ######################################################################################################
 
-        return x_centroid, y_centroid
+        return x_centroid, y_centroid, intens_acc
 
 
 
@@ -911,6 +979,27 @@ class PlateTool(object):
 
         # Find the index of the closest catalog star to the given image coordinates
         for i, (x, y) in enumerate(zip(self.catalog_x, self.catalog_y)):
+            
+            dist = (pos_x - x)**2 + (pos_y - y)**2
+
+            if dist < min_dist:
+                min_dist = dist
+                min_index = i
+
+        return min_index
+
+
+    def findClosestPickedStarIndex(self, pos_x, pos_y):
+        """ Finds the index of the closest picked star on the image to the given image position. """
+
+        min_index = 0
+        min_dist = np.inf
+
+        picked_x = [star[0][0] for star in self.paired_stars]
+        picked_y = [star[0][1] for star in self.paired_stars]
+
+        # Find the index of the closest catalog star to the given image coordinates
+        for i, (x, y) in enumerate(zip(picked_x, picked_y)):
             
             dist = (pos_x - x)**2 + (pos_y - y)**2
 
