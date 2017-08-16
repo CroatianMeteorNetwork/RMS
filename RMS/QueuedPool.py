@@ -249,8 +249,6 @@ class QueuedPool(object):
 
 
 
-
-
     def getResults(self):
         """ Get the results from the output queue and store them in a list. The output list will be returned. 
         """

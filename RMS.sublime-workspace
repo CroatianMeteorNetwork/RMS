@@ -4,6 +4,154 @@
 		"selected_items":
 		[
 			[
+				"mess",
+				"messagebox"
+			],
+			[
+				"zer",
+				"zeros"
+			],
+			[
+				"op",
+				"optimize"
+			],
+			[
+				"catalo",
+				"catalog_x"
+			],
+			[
+				"pos_",
+				"pos_angle_ref"
+			],
+			[
+				"catalog",
+				"catalog_stars"
+			],
+			[
+				"ref",
+				"calcRefCentre"
+			],
+			[
+				"star",
+				"star_pick_mode"
+			],
+			[
+				"upda",
+				"updateImage"
+			],
+			[
+				"curren",
+				"current_ff\tstatement"
+			],
+			[
+				"star_",
+				"star_pick_mode\tstatement"
+			],
+			[
+				"paired",
+				"paired_stars"
+			],
+			[
+				"pair",
+				"paired_stars"
+			],
+			[
+				"find",
+				"findClosestPickedStarIndex"
+			],
+			[
+				"draw",
+				"drawPairedStars\tfunction"
+			],
+			[
+				"paire",
+				"paired_star\tstatement"
+			],
+			[
+				"pick",
+				"star_pick_mode\tstatement"
+			],
+			[
+				"sele",
+				"selected_cat_star_scatter"
+			],
+			[
+				"circe",
+				"circle_aperature\tstatement"
+			],
+			[
+				"pa",
+				"patches"
+			],
+			[
+				"cir",
+				"circle_aperature\tstatement"
+			],
+			[
+				"closes",
+				"closest_cat_star_indx"
+			],
+			[
+				"cata",
+				"catalog_x"
+			],
+			[
+				"clos",
+				"closest_cat_star_indx\tstatement"
+			],
+			[
+				"mous",
+				"mouse_y"
+			],
+			[
+				"mouse",
+				"mouse_x"
+			],
+			[
+				"catal",
+				"catalog_y"
+			],
+			[
+				"intens",
+				"intens_acc\tstatement"
+			],
+			[
+				"mouse_",
+				"mouse_y\tstatement"
+			],
+			[
+				"mou",
+				"mouse_x\tstatement"
+			],
+			[
+				"circ",
+				"circle_aperature_outer\tstatement"
+			],
+			[
+				"radiu",
+				"star_aperature_radius\tstatement"
+			],
+			[
+				"centr",
+				"centroidStar\tfunction"
+			],
+			[
+				"No",
+				"None\tinstance"
+			],
+			[
+				"ad",
+				"addCursorCircle"
+			],
+			[
+				"circle",
+				"circle_aperature\tstatement"
+			],
+			[
+				"clear",
+				"clear_plot\tparam"
+			],
+			[
 				"cu",
 				"current_ff_file"
 			],
@@ -112,10 +260,6 @@
 				"applyFieldCorrection"
 			],
 			[
-				"cata",
-				"catalog_stars"
-			],
-			[
 				"load",
 				"loadCatalogStars"
 			],
@@ -178,14 +322,6 @@
 			[
 				"ro",
 				"rot_param\tparam"
-			],
-			[
-				"star",
-				"star_data\tstatement"
-			],
-			[
-				"curren",
-				"current_ff_file\tstatement"
 			],
 			[
 				"cals",
@@ -292,10 +428,6 @@
 				"plateASTundo\tfunction"
 			],
 			[
-				"centr",
-				"centre_azim_rad\tstatement"
-			],
-			[
 				"cent",
 				"centre_azim_rad\tstatement"
 			],
@@ -318,10 +450,6 @@
 			[
 				"ang_se",
 				"ang_sep_min\tstatement"
-			],
-			[
-				"closes",
-				"closest_star_indx\tstatement"
 			],
 			[
 				"ang_",
@@ -364,10 +492,6 @@
 				"AstPlate\tclass"
 			],
 			[
-				"catal",
-				"catalog_stars\tstatement"
-			],
-			[
 				"win_c",
 				"win_pc_weave\tstatement"
 			],
@@ -390,130 +514,6 @@
 			[
 				"save",
 				"saveFieldIntensitiesText\tfunction"
-			],
-			[
-				"half",
-				"half_frames\tstatement"
-			],
-			[
-				"intens",
-				"intensity_array\tstatement"
-			],
-			[
-				"inten",
-				"intensity_array"
-			],
-			[
-				"gauss",
-				"gauss_values\tstatement"
-			],
-			[
-				"meteor",
-				"meteor_img\tstatement"
-			],
-			[
-				"mete",
-				"meteor_img\tstatement"
-			],
-			[
-				"img",
-				"img_w\tparam"
-			],
-			[
-				"frame",
-				"frame_num\tparam"
-			],
-			[
-				"fram",
-				"frame_num\tparam"
-			],
-			[
-				"met",
-				"meteorIntensity\tfunction"
-			],
-			[
-				"data",
-				"data_dir\tstatement"
-			],
-			[
-				"field",
-				"field_intensitites\tstatement"
-			],
-			[
-				"floa",
-				"float64"
-			],
-			[
-				"imr",
-				"imresize\tfunction"
-			],
-			[
-				"angle",
-				"angle_eps\tstatement"
-			],
-			[
-				"stri",
-				"stripe_width"
-			],
-			[
-				"strip",
-				"getStripeIndices"
-			],
-			[
-				"detectr",
-				"detector\tstatement"
-			],
-			[
-				"work",
-				"workpool\tstatement"
-			],
-			[
-				"WAR",
-				"WARNING\tstatement"
-			],
-			[
-				"WA",
-				"WARNING\tstatement"
-			],
-			[
-				"all",
-				"allDone\tfunction"
-			],
-			[
-				"out",
-				"output_queue\tstatement"
-			],
-			[
-				"ki",
-				"kill_workers\tstatement"
-			],
-			[
-				"kill",
-				"kill_workers"
-			],
-			[
-				"cl",
-				"clock\tfunction"
-			],
-			[
-				"rest",
-				"resetSIGINT\tfunction"
-			],
-			[
-				"sig",
-				"signal\tfunction"
-			],
-			[
-				"detec",
-				"detector\tstatement"
-			],
-			[
-				"dete",
-				"detector\tparam"
-			],
-			[
-				"detect",
-				"detectStarsAndMeteors\tfunction"
 			]
 		]
 	},
@@ -577,70 +577,7 @@
 			"file": "RMS/QueuedPool.py",
 			"settings":
 			{
-				"buffer_size": 8393,
-				"encoding": "UTF-8",
-				"line_ending": "Windows"
-			}
-		},
-		{
-			"file": "/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/Utils.vb",
-			"settings":
-			{
-				"buffer_size": 745,
-				"encoding": "UTF-8 with BOM",
-				"line_ending": "Windows"
-			}
-		},
-		{
-			"file": "/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/CalibrationStars.vb",
-			"settings":
-			{
-				"buffer_size": 1660,
-				"encoding": "UTF-8 with BOM",
-				"line_ending": "Windows"
-			}
-		},
-		{
-			"file": "/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/Math.vb",
-			"settings":
-			{
-				"buffer_size": 6904,
-				"encoding": "UTF-8 with BOM",
-				"line_ending": "Windows"
-			}
-		},
-		{
-			"file": "/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/Main.vb",
-			"settings":
-			{
-				"buffer_size": 23627,
-				"encoding": "UTF-8 with BOM",
-				"line_ending": "Windows"
-			}
-		},
-		{
-			"file": "/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/Image.vb",
-			"settings":
-			{
-				"buffer_size": 7235,
-				"encoding": "UTF-8 with BOM",
-				"line_ending": "Windows"
-			}
-		},
-		{
-			"file": "/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/MainForm.vb",
-			"settings":
-			{
-				"buffer_size": 13585,
-				"encoding": "UTF-8 with BOM",
-				"line_ending": "Windows"
-			}
-		},
-		{
-			"file": ".config",
-			"settings":
-			{
-				"buffer_size": 7981,
+				"buffer_size": 8391,
 				"encoding": "UTF-8",
 				"line_ending": "Windows"
 			}
@@ -649,8 +586,16 @@
 			"file": "RMS/Astrometry/SkyFit.py",
 			"settings":
 			{
-				"buffer_size": 20395,
+				"buffer_size": 41393,
 				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "/D/Dropbox/UWO Master's/Projects/OPTICS meteor clustering/PlotAnalysisSuite.py",
+			"settings":
+			{
+				"buffer_size": 8596,
 				"line_ending": "Windows"
 			}
 		},
@@ -660,38 +605,6 @@
 			{
 				"buffer_size": 13931,
 				"encoding": "UTF-8",
-				"line_ending": "Windows"
-			}
-		},
-		{
-			"file": "Utils/Grouping3DRunner.py",
-			"settings":
-			{
-				"buffer_size": 6064,
-				"line_ending": "Windows"
-			}
-		},
-		{
-			"file": "/D/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/20170730_012105_874590_detected/FTPdetectinfo_20170730_012105_874590.txt",
-			"settings":
-			{
-				"buffer_size": 155540,
-				"line_ending": "Unix"
-			}
-		},
-		{
-			"file": "/C/Users/delorayn1/Desktop/20170813_213506_620678/platepar_cmn2010.cal",
-			"settings":
-			{
-				"buffer_size": 464,
-				"line_ending": "Windows"
-			}
-		},
-		{
-			"file": "/D/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/20170730_012105_874590_detected/platepar_cmn2010.cal",
-			"settings":
-			{
-				"buffer_size": 465,
 				"line_ending": "Windows"
 			}
 		},
@@ -916,16 +829,24 @@
 	],
 	"file_history":
 	[
+		"/C/Users/delorayn1/Desktop/20170813_213506_620678/platepar_cmn2010.cal",
+		"/D/Dropbox/RPi Meteor Station/RMS/.config",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Astrometry/SkyFit.py",
+		"/D/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/20170730_012105_874590_detected/FTPdetectinfo_20170730_012105_874590.txt",
 		"/D/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/20170730_012105_874590_detected/platepar_cmn2010.cal",
+		"/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/Utils.vb",
+		"/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/CalibrationStars.vb",
+		"/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/Math.vb",
+		"/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/Main.vb",
+		"/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/Image.vb",
+		"/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/MainForm.vb",
 		"/C/Users/delorayn1/Desktop/2017071819-Processed/FTPdetectinfo_0459_2017_07_18.txt",
 		"/C/Users/delorayn1/Desktop/2017071819-Processed/platepar_cmn2010.cal",
-		"/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/Main.vb",
 		"/C/Users/delorayn1/Desktop/test.py",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats/FFbin.py",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats/CALSTARS.py",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats/BSC.py",
 		"/D/Dropbox/UWO Master's/Projects/OPTICS meteor clustering/PlotAnalysisSuite.py",
-		"/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/Math.vb",
 		"/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit.sln",
 		"/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit.suo",
 		"/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/My Project/Application.myapp",
@@ -938,7 +859,6 @@
 		"/D/Dropbox/RPi Meteor Station/samples/VID_2015270405/platepar_cmn2010.cal",
 		"/C/Users/delorayn1/Desktop/platepar_cmn2010.cal",
 		"/D/Dropbox/grouping3D/2015042021 fireball/APO/platepar_cmn2010.cal",
-		"/D/Dropbox/RPi Meteor Station/RMS/.config",
 		"/D/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/20170729_012218_387314_detected/CALSTARS049920170729_012218_387314.txt",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats/Platepar.py",
 		"/C/Users/delorayn1/Desktop/CMNcoordTransformations.py",
@@ -1036,14 +956,7 @@
 		"/home/dvida/Desktop/krizy (copy)/20110204_232040_report.txt",
 		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20161007_052749_mir/20161007_052749_report.txt",
 		"/home/dvida/Dropbox/UWO Master's/Projects/MetalPrepare/MetalPrepare.py",
-		"/home/dvida/Dropbox/UWO Master's/Projects/RPi station/RPi Video test scripts/video_test.py",
-		"/home/dvida/Dropbox/UWO Master's/Projects/RPi station/RPi Video test scripts/video_init.sh",
-		"/home/dvida/source/RMS/RMS/Compression.py",
-		"/home/dvida/source/RMS/RMS/StartCapture.py",
-		"/home/dvida/source/RMS/RMS/BufferedCapture.py",
-		"/home/dvida/source/cmn_binviewer/.gitignore",
-		"/home/dvida/Desktop/milig_inputs/20110204_232040_report.txt",
-		"/home/dvida/Desktop/PyLIG_in_2011100809DUI0066/20111008_032811_report.txt"
+		"/home/dvida/Dropbox/UWO Master's/Projects/RPi station/RPi Video test scripts/video_test.py"
 	],
 	"find":
 	{
@@ -1085,6 +998,56 @@
 		"case_sensitive": false,
 		"find_history":
 		[
+			"self.platepar.x_po",
+			"getcatalog",
+			"paired_stars = [",
+			"self.platepar.F_scale",
+			"self.platepar.alt_centre",
+			"self.platepar.az_centre",
+			"self.platepar.lat",
+			"calcref",
+			"calcrefce",
+			"self.platepar.dec_d",
+			"self.platepar.lat",
+			"messagebox.",
+			"messagebo",
+			"fitPickedStars",
+			"getCatalogStars",
+			"event.butt",
+			"\"3",
+			"'3",
+			"onmouserele",
+			"enablest",
+			"circle_ape",
+			"findclos",
+			"closest_catalog_star_index",
+			"closest_index",
+			"y_centroid",
+			"x_centroid",
+			"x_ce",
+			"findclose",
+			"getcatalo",
+			"catalog_y",
+			"catalog_x",
+			"y_array",
+			"x_array",
+			"drawcat",
+			"drawcatalogs",
+			"star_selection_catalog",
+			"addCursorCircle",
+			"radius",
+			"int",
+			"self.star_aperature_radius",
+			"circle_ape",
+			"centroidst",
+			"x",
+			"ncols",
+			"circle_ape",
+			"star_pick",
+			"star_aper",
+			"radius",
+			"self.star_pi",
+			"self.star_",
 			"getfo",
 			"try:",
 			"print",
@@ -1162,57 +1125,7 @@
 			"parse",
 			"getfov",
 			"lim_ma",
-			"384",
-			"24",
-			"384",
-			"240",
-			"340",
-			"applyfi",
-			"applyField",
-			"ra_d",
-			"applyfield",
-			"RA_d",
-			"UT_co",
-			"@param ",
-			"latitude",
-			"JD",
-			"math",
-			"self.",
-			"platepar",
-			"platepar.r",
-			"validff",
-			"MyDialog",
-			"top",
-			"alt",
-			"azim",
-			"azimuth",
-			"self.e",
-			"config",
-			"dec",
-			"ra",
-			"RA",
-			"radians",
-			"dec",
-			"ra",
-			"RA",
-			"cos",
-			"sin",
-			"dec2",
-			"ra2",
-			"dec1",
-			"ra1",
-			"deinterlace_array_odd",
-			"deinterlace_array_even",
-			"move_array_1up",
-			"deinterlace_blend",
-			"bsc",
-			"a",
-			"- th",
-			"destro",
-			"exact",
-			"rot",
-			"star_filtered",
-			"elev"
+			"384"
 		],
 		"highlight": true,
 		"in_selection": false,
@@ -1244,7 +1157,7 @@
 	"groups":
 	[
 		{
-			"selected": 16,
+			"selected": 7,
 			"sheets":
 			[
 				{
@@ -1290,7 +1203,7 @@
 						"translation.y": 0.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 25,
+					"stack_index": 15,
 					"type": "text"
 				},
 				{
@@ -1345,7 +1258,7 @@
 						"translation.y": 201.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 24,
+					"stack_index": 14,
 					"type": "text"
 				},
 				{
@@ -1391,7 +1304,7 @@
 						"translation.y": 1565.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 23,
+					"stack_index": 13,
 					"type": "text"
 				},
 				{
@@ -1437,7 +1350,7 @@
 						"translation.y": 8607.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 18,
+					"stack_index": 11,
 					"type": "text"
 				},
 				{
@@ -1483,7 +1396,7 @@
 						"translation.y": 1004.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 9,
+					"stack_index": 6,
 					"type": "text"
 				},
 				{
@@ -1525,7 +1438,7 @@
 						"translation.y": 0.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 22,
+					"stack_index": 12,
 					"type": "text"
 				},
 				{
@@ -1534,15 +1447,15 @@
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 8393,
+						"buffer_size": 8391,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								2444,
-								2444
+								7759,
+								7759
 							]
 						],
 						"settings":
@@ -1564,236 +1477,27 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 1180.0,
+						"translation.y": 3624.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 21,
+					"stack_index": 1,
 					"type": "text"
 				},
 				{
 					"buffer": 7,
-					"file": "/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/Utils.vb",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 745,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								0,
-								0
-							]
-						],
-						"settings":
-						{
-							"syntax": "Packages/Text/Plain text.tmLanguage",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 0.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 17,
-					"type": "text"
-				},
-				{
-					"buffer": 8,
-					"file": "/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/CalibrationStars.vb",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 1660,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								895,
-								896
-							]
-						],
-						"settings":
-						{
-							"syntax": "Packages/Text/Plain text.tmLanguage",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 0.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 16,
-					"type": "text"
-				},
-				{
-					"buffer": 9,
-					"file": "/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/Math.vb",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 6904,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								1252,
-								1252
-							]
-						],
-						"settings":
-						{
-							"syntax": "Packages/Text/Plain text.tmLanguage",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 2549.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 11,
-					"type": "text"
-				},
-				{
-					"buffer": 10,
-					"file": "/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/Main.vb",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 23627,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								3830,
-								3830
-							]
-						],
-						"settings":
-						{
-							"syntax": "Packages/Text/Plain text.tmLanguage",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 1246.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 13,
-					"type": "text"
-				},
-				{
-					"buffer": 11,
-					"file": "/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/Image.vb",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 7235,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								543,
-								546
-							]
-						],
-						"settings":
-						{
-							"syntax": "Packages/Text/Plain text.tmLanguage",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 0.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 20,
-					"type": "text"
-				},
-				{
-					"buffer": 12,
-					"file": "/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/MainForm.vb",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 13585,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								8609,
-								8612
-							]
-						],
-						"settings":
-						{
-							"syntax": "Packages/Text/Plain text.tmLanguage",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 3277.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 19,
-					"type": "text"
-				},
-				{
-					"buffer": 13,
-					"file": ".config",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 7981,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								248,
-								248
-							]
-						],
-						"settings":
-						{
-							"git_gutter_is_enabled": true,
-							"syntax": "Packages/Text/Plain text.tmLanguage"
-						},
-						"translation.x": 0.0,
-						"translation.y": 0.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 8,
-					"type": "text"
-				},
-				{
-					"buffer": 14,
 					"file": "RMS/Astrometry/SkyFit.py",
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 20395,
+						"buffer_size": 41393,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								17617,
-								17617
+								24037,
+								24037
 							]
 						],
 						"settings":
@@ -1807,35 +1511,52 @@
 								{
 									"characters": ".",
 									"selector": "source.python - string - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
 								}
 							],
 							"git_gutter_is_enabled": true,
-							"open_with_edit": true,
 							"syntax": "Packages/Python/Python.sublime-syntax",
 							"tab_size": 4,
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 9358.0,
+						"translation.y": 13055.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 0,
+					"type": "text"
+				},
+				{
+					"buffer": 8,
+					"file": "/D/Dropbox/UWO Master's/Projects/OPTICS meteor clustering/PlotAnalysisSuite.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 8596,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								7661,
+								7661
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 4303.0,
 						"zoom_level": 1.0
 					},
 					"stack_index": 2,
 					"type": "text"
 				},
 				{
-					"buffer": 15,
+					"buffer": 9,
 					"file": "RMS/Routines/Grouping3Dcy.pyx",
 					"semi_transient": false,
 					"settings":
@@ -1862,126 +1583,11 @@
 						"translation.y": 3611.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 1,
-					"type": "text"
-				},
-				{
-					"buffer": 16,
-					"file": "Utils/Grouping3DRunner.py",
-					"semi_transient": true,
-					"settings":
-					{
-						"buffer_size": 6064,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								3094,
-								3094
-							]
-						],
-						"settings":
-						{
-							"git_gutter_is_enabled": true,
-							"syntax": "Packages/Python/Python.sublime-syntax",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 1329.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 0,
-					"type": "text"
-				},
-				{
-					"buffer": 17,
-					"file": "/D/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/20170730_012105_874590_detected/FTPdetectinfo_20170730_012105_874590.txt",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 155540,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								0,
-								0
-							]
-						],
-						"settings":
-						{
-							"syntax": "Packages/Text/Plain text.tmLanguage"
-						},
-						"translation.x": 0.0,
-						"translation.y": 50564.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 4,
-					"type": "text"
-				},
-				{
-					"buffer": 18,
-					"file": "/C/Users/delorayn1/Desktop/20170813_213506_620678/platepar_cmn2010.cal",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 464,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								0,
-								0
-							]
-						],
-						"settings":
-						{
-							"syntax": "Packages/Text/Plain text.tmLanguage"
-						},
-						"translation.x": 0.0,
-						"translation.y": 0.0,
-						"zoom_level": 1.0
-					},
 					"stack_index": 3,
 					"type": "text"
 				},
 				{
-					"buffer": 19,
-					"file": "/D/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/20170730_012105_874590_detected/platepar_cmn2010.cal",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 465,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								47,
-								47
-							]
-						],
-						"settings":
-						{
-							"syntax": "Packages/Text/Plain text.tmLanguage"
-						},
-						"translation.x": 0.0,
-						"translation.y": 0.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 5,
-					"type": "text"
-				},
-				{
-					"buffer": 20,
+					"buffer": 10,
 					"file": "/C/Users/delorayn1/Desktop/2017071819-Processed/Meteor.hmm",
 					"semi_transient": false,
 					"settings":
@@ -2006,11 +1612,11 @@
 						"translation.y": 0.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 12,
+					"stack_index": 8,
 					"type": "text"
 				},
 				{
-					"buffer": 21,
+					"buffer": 11,
 					"file": "RMS/Formats/Platepar.py",
 					"semi_transient": false,
 					"settings":
@@ -2052,11 +1658,11 @@
 						"translation.y": 3457.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 6,
+					"stack_index": 4,
 					"type": "text"
 				},
 				{
-					"buffer": 22,
+					"buffer": 12,
 					"file": "RMS/Astrometry/Conversions.py",
 					"semi_transient": false,
 					"settings":
@@ -2083,11 +1689,11 @@
 						"translation.y": 2325.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 7,
+					"stack_index": 5,
 					"type": "text"
 				},
 				{
-					"buffer": 23,
+					"buffer": 13,
 					"file": "/C/Users/delorayn1/Desktop/2017071819-Processed/platepar_cmn2010.cal",
 					"semi_transient": false,
 					"settings":
@@ -2111,11 +1717,11 @@
 						"translation.y": 0.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 14,
+					"stack_index": 9,
 					"type": "text"
 				},
 				{
-					"buffer": 24,
+					"buffer": 14,
 					"file": "/C/Users/delorayn1/Desktop/CriticalCasesAstrometryCheckFit_CAMS2CMN_01.cpp",
 					"semi_transient": false,
 					"settings":
@@ -2139,11 +1745,11 @@
 						"translation.y": 57048.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 10,
+					"stack_index": 7,
 					"type": "text"
 				},
 				{
-					"buffer": 25,
+					"buffer": 15,
 					"file": "/D/Moji dokumenti/Denis/Programiranje/Python/Tortoise Checkout/HMM_MTP_3rdXY_Photometry_01.c",
 					"semi_transient": false,
 					"settings":
@@ -2169,7 +1775,7 @@
 						"translation.y": 30149.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 15,
+					"stack_index": 10,
 					"type": "text"
 				}
 			]
