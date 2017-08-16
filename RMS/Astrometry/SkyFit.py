@@ -97,9 +97,14 @@ class PlateTool(object):
 
         # Star picking mode
         self.star_pick_mode = False
+        self.star_selection_centroid = True
         self.circle_aperature = None
         self.circle_aperature_outer = None
         self.star_aperature_radius = 5
+        self.x_centroid = self.y_centroid = None
+
+        # List of paired image and catalog stars
+        self.paired_stars = []
 
         # Positions of the mouse cursor
         self.mouse_x = 0
@@ -123,6 +128,12 @@ class PlateTool(object):
             sys.exit()
         else:
             print('Star catalog loaded!')
+
+
+        # Image coordinates of catalog stars
+        self.catalog_x = self.catalog_y = None
+
+
 
         # Find the CALSTARS file in the given folder
         calstars_file = None
@@ -197,11 +208,56 @@ class PlateTool(object):
     def onMouseRelease(self, event):
         """ Called when the mouse click is released. """
 
-        # Call the same function for mouse movements
+        # Call the same function for mouse movements to update the variables in the background
         self.onMouseMotion(event)
 
-        # Centroid the star around the pressed coordinates
-        self.centroidStar()
+
+        if self.star_selection_centroid:
+
+            # Centroid the star around the pressed coordinates
+            self.x_centroid, self.y_centroid = self.centroidStar()
+
+            # Draw the centroid on the image
+            plt.scatter(self.x_centroid, self.y_centroid, marker='+', c='y', s=50)
+
+            
+            # Select the closest catalog star to the centroid as the first guess
+            self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.x_centroid, self.y_centroid)
+
+            # Plot the closest star as a purple cross
+            self.selected_cat_star_scatter = plt.scatter(self.catalog_x[self.closest_cat_star_indx], 
+                self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=50)
+
+            # Update canvas
+            plt.gcf().canvas.draw()
+
+            print(self.closest_cat_star_indx)
+            print(self.catalog_x[self.closest_cat_star_indx], 
+                self.catalog_y[self.closest_cat_star_indx], self.catalog_stars[self.closest_cat_star_indx])
+
+
+            # Switch to the mode where the catalog star is selected
+            self.star_selection_centroid = False
+
+
+        else:
+
+            # Select the closest catalog star
+            self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.mouse_x, self.mouse_y)
+
+            if self.selected_cat_star_scatter is not None:
+                self.selected_cat_star_scatter.remove()
+
+            # Plot the closest star as a purple cross
+            self.selected_cat_star_scatter = plt.scatter(self.catalog_x[self.closest_cat_star_indx], 
+                self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=50)
+
+            # Update canvas
+            plt.gcf().canvas.draw()
+
+            print(self.closest_cat_star_indx)
+            print(self.catalog_x[self.closest_cat_star_indx], 
+                self.catalog_y[self.closest_cat_star_indx], self.catalog_stars[self.closest_cat_star_indx])
 
 
 
@@ -215,38 +271,49 @@ class PlateTool(object):
 
         # Change the position of the star aperature circle
         if self.star_pick_mode:
-            self.addCursorCircle()
+            self.drawCursorCircle()
 
         
 
-    def addCursorCircle(self):
+    def drawCursorCircle(self):
         """ Adds a circle around the mouse cursor. """
 
         # Delete the old aperature circle
         if self.circle_aperature is not None:
             self.circle_aperature.remove()
+            self.circle_aperature = None
 
         if self.circle_aperature_outer is not None:
             self.circle_aperature_outer.remove()
+            self.circle_aperature_outer = None
 
-        # Plot a circle of the given radius around the cursor
-        self.circle_aperature = matplotlib.patches.Circle((self.mouse_x, self.mouse_y),
-            self.star_aperature_radius, edgecolor='yellow', fc='none')
+        # If centroid selection is on, show the annulus around the cursor
+        if self.star_selection_centroid:
 
-        # Plot a circle of the given radius around the cursor, which is used to determine the region where the
-        # background will be taken from
-        self.circle_aperature_outer = matplotlib.patches.Circle((self.mouse_x, self.mouse_y),
-            self.star_aperature_radius*2, edgecolor='yellow', fc='none', linestyle='dotted')
+            # Plot a circle of the given radius around the cursor
+            self.circle_aperature = matplotlib.patches.Circle((self.mouse_x, self.mouse_y),
+                self.star_aperature_radius, edgecolor='yellow', fc='none')
 
-        plt.gca().add_patch(self.circle_aperature)
-        plt.gca().add_patch(self.circle_aperature_outer)
+            # Plot a circle of the given radius around the cursor, which is used to determine the region where the
+            # background will be taken from
+            self.circle_aperature_outer = matplotlib.patches.Circle((self.mouse_x, self.mouse_y),
+                self.star_aperature_radius*2, edgecolor='yellow', fc='none', linestyle='dotted')
+
+            plt.gca().add_patch(self.circle_aperature)
+            plt.gca().add_patch(self.circle_aperature_outer)
+
+        # If the catalog star selection mode is on, show a purple circle
+        else:
+
+            # Plot a purple circle
+            self.circle_aperature = matplotlib.patches.Circle((self.mouse_x, self.mouse_y), 10, 
+                edgecolor='purple', fc='none')
+
+            plt.gca().add_patch(self.circle_aperature)
+
 
         plt.gcf().canvas.draw()
 
-
-
-
-        
 
 
     def onKeyPress(self, event):
@@ -337,13 +404,40 @@ class PlateTool(object):
 
         # Change modes from astrometry parameter changing to star picking
         elif event.key == 'ctrl+r':
+
             if self.star_pick_mode:
                 self.disableStarPicking()
                 self.circle_aperature = None
                 self.circle_aperature_outer = None
                 self.updateImage()
+
             else:
                 self.enableStarPicking()
+                self.paired_stars = []
+
+
+
+        elif event.key == 'enter':
+
+            if self.star_pick_mode:
+
+                # If the right catalog star has been selected, save the pair to the list
+                if not self.star_selection_centroid:
+
+                    # Add the image/catalog pair to the list
+                    self.paired_stars.append([[self.x_centroid, self.y_centroid], 
+                        self.catalog_stars[self.closest_cat_star_indx]])
+
+                    # Switch back to centroiding mode
+                    self.star_selection_centroid = True
+
+                    print(self.paired_stars)
+
+                    self.updateImage()
+
+
+
+
 
 
         # Limit values of RA and Dec
@@ -381,7 +475,7 @@ class PlateTool(object):
 
         # Change the size of the star aperature circle
         if self.star_pick_mode:
-            self.addCursorCircle()
+            self.drawCursorCircle()
 
 
 
@@ -409,6 +503,10 @@ class PlateTool(object):
             clear_plot: [bool] If True, the plot will be cleared before plotting again (default).
         """
 
+        # Reset circle patches
+        self.circle_aperature = None
+        self.circle_aperature_outer = None
+
         # Limit key increment so it can be lower than 0.1
         if self.key_increment < 0.1:
             self.key_increment = 0.1
@@ -430,8 +528,24 @@ class PlateTool(object):
         # Update centre of FOV in horizontal coordinates
         self.calcRefCentre()
 
-        # Draw catalog stars on the image using the current platepar
-        self.drawCatalogStars()
+        ### Draw catalog stars on the image using the current platepar ###
+        ######################################################################################################
+        self.catalog_x, self.catalog_y = self.getCatalogStars()
+
+        cat_stars = np.c_[self.catalog_x, self.catalog_y]
+
+        # Take only those stars inside the FOV
+        cat_stars = cat_stars[cat_stars[:, 0] > 0]
+        cat_stars = cat_stars[cat_stars[:, 0] < self.current_ff.ncols]
+        cat_stars = cat_stars[cat_stars[:, 1] > 0]
+        cat_stars = cat_stars[cat_stars[:, 1] < self.current_ff.nrows]
+
+        catalog_x_filtered, catalog_y_filtered = cat_stars.T
+
+        plt.scatter(catalog_x_filtered, catalog_y_filtered, c='r', marker='+')
+
+        ######################################################################################################
+
 
         # Set plot limits
         plt.xlim([0, self.current_ff.ncols])
@@ -505,7 +619,7 @@ class PlateTool(object):
 
 
 
-    def drawCatalogStars(self):
+    def getCatalogStars(self):
         """ Draw catalog stars using the current platepar values. """
 
         ra_catalog, dec_catalog, _ = self.catalog_stars.T
@@ -582,17 +696,7 @@ class PlateTool(object):
             y_array[i] = Y1
 
 
-        cat_stars = np.c_[x_array, y_array]
-
-        # Take only those stars inside the FOV
-        cat_stars = cat_stars[cat_stars[:, 0] > 0]
-        cat_stars = cat_stars[cat_stars[:, 0] < self.current_ff.ncols]
-        cat_stars = cat_stars[cat_stars[:, 1] > 0]
-        cat_stars = cat_stars[cat_stars[:, 1] < self.current_ff.nrows]
-
-        x_array, y_array = cat_stars.T
-
-        plt.scatter(x_array, y_array, c='r', marker='+')
+        return x_array, y_array
 
 
 
@@ -796,6 +900,34 @@ class PlateTool(object):
         ######################################################################################################
 
         return x_centroid, y_centroid
+
+
+
+    def findClosestCatalogStarIndex(self, pos_x, pos_y):
+        """ Finds the index of the closest catalog star on the image to the given image position. """
+
+        min_index = 0
+        min_dist = np.inf
+
+        # Find the index of the closest catalog star to the given image coordinates
+        for i, (x, y) in enumerate(zip(self.catalog_x, self.catalog_y)):
+            
+            dist = (pos_x - x)**2 + (pos_y - y)**2
+
+            if dist < min_dist:
+                min_dist = dist
+                min_index = i
+
+        return min_index
+
+
+
+
+
+
+
+
+
 
 
 
