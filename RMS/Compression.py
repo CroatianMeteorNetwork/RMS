@@ -338,7 +338,7 @@ class Compressor(multiprocessing.Process):
 
             # Run the extractor
             extractor = Extractor(self.config, self.data_dir)
-            # extractor.start(frames, compressed, filename)
+            extractor.start(frames, compressed, filename)
 
             # Fully format the filename (this could not have been done before as the extractor will add
             # the FR prefix)
