@@ -211,7 +211,12 @@ def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, dis
         max_array_size=max_line.counter)
 
     # Get the point could minus points in the max_line
-    point_list_rows = point_list.view([('', point_list.dtype)] * point_list.shape[1])
+    try:
+        point_list_rows = point_list.view([('', point_list.dtype)] * point_list.shape[1])
+
+    except:
+        return ([], [])
+
     max_line_points_rows = max_line_points.view([('', max_line_points.dtype)] * max_line_points.shape[1])
     point_list = np.setdiff1d(point_list_rows, max_line_points_rows).view(point_list.dtype).reshape(-1, 
         point_list.shape[1])

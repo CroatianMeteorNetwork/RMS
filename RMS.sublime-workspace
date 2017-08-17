@@ -4,6 +4,46 @@
 		"selected_items":
 		[
 			[
+				"dir",
+				"dir_path"
+			],
+			[
+				"pla",
+				"platepar_file"
+			],
+			[
+				"upda",
+				"update_image"
+			],
+			[
+				"updat",
+				"update_image"
+			],
+			[
+				"plate",
+				"platepar_file\tstatement"
+			],
+			[
+				"scale",
+				"scale_y\tstatement"
+			],
+			[
+				"scal",
+				"scale_x"
+			],
+			[
+				"fov",
+				"fov_w\tstatement"
+			],
+			[
+				"calstar",
+				"calstars_list\tparam"
+			],
+			[
+				"cals",
+				"calstars_list\tparam"
+			],
+			[
 				"catalog",
 				"catalog_stars_visible"
 			],
@@ -62,10 +102,6 @@
 			[
 				"star",
 				"star_pick_mode"
-			],
-			[
-				"upda",
-				"updateImage"
 			],
 			[
 				"curren",
@@ -178,10 +214,6 @@
 			[
 				"cu",
 				"current_ff_file"
-			],
-			[
-				"plate",
-				"platepar"
 			],
 			[
 				"s",
@@ -344,10 +376,6 @@
 				"rot_param\tparam"
 			],
 			[
-				"cals",
-				"calstars_list\tstatement"
-			],
-			[
 				"calsta",
 				"calstars_ff_files\tstatement"
 			],
@@ -486,34 +514,6 @@
 			[
 				"angu",
 				"angularSeparation\tfunction"
-			],
-			[
-				"th",
-				"th0\tstatement"
-			],
-			[
-				"time",
-				"timedelta\tclass"
-			],
-			[
-				"FF",
-				"FFbin\tmodule"
-			],
-			[
-				"AS",
-				"Astrometry\tmodule"
-			],
-			[
-				"lim",
-				"lim_mag"
-			],
-			[
-				"A",
-				"AstPlate\tclass"
-			],
-			[
-				"win_c",
-				"win_pc_weave\tstatement"
 			]
 		]
 	},
@@ -547,15 +547,6 @@
 			}
 		},
 		{
-			"file": "RMS/Astrometry/AstrometryCheckFit.py",
-			"settings":
-			{
-				"buffer_size": 23770,
-				"encoding": "UTF-8",
-				"line_ending": "Windows"
-			}
-		},
-		{
 			"file": "RMS/Astrometry/ApplyAstrometry.py",
 			"settings":
 			{
@@ -586,7 +577,25 @@
 			"file": "RMS/Astrometry/SkyFit.py",
 			"settings":
 			{
-				"buffer_size": 43595,
+				"buffer_size": 45547,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": ".config",
+			"settings":
+			{
+				"buffer_size": 7981,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "RMS/ExtractStars.py",
+			"settings":
+			{
+				"buffer_size": 13449,
 				"encoding": "UTF-8",
 				"line_ending": "Windows"
 			}
@@ -596,6 +605,15 @@
 			"settings":
 			{
 				"buffer_size": 6592,
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "RMS/Formats/Platepar.py",
+			"settings":
+			{
+				"buffer_size": 8055,
+				"encoding": "UTF-8",
 				"line_ending": "Windows"
 			}
 		},
@@ -780,13 +798,15 @@
 		"/D/Dropbox/RPi Meteor Station/RMS",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Astrometry",
-		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats",
-		"/D/Dropbox/RPi Meteor Station/RMS/Utils"
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats"
 	],
 	"file_history":
 	[
-		"/C/Users/delorayn1/Desktop/20170813_213506_620678/platepar_cmn2010.cal",
+		"/C/Users/delorayn1/Desktop/20170813_213506_620678/platepar.cal",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats/Platepar.py",
+		"/C/Users/delorayn1/Desktop/20170813_213506_620678/platepar_cmn2010.cal",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Astrometry/AstrometryCheckFit.py",
+		"/C/Users/delorayn1/Desktop/20170813_213506_620678/CALSTARS010020170813_213506_620678.txt",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Routines/Grouping3Dcy.pyx",
 		"/C/Users/delorayn1/Desktop/2017071819-Processed/Meteor.hmm",
 		"/C/Users/delorayn1/Desktop/VID.cal",
@@ -909,10 +929,7 @@
 		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/MirfitPrepare.py",
 		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/MetalPrepare.py",
 		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/.gitignore",
-		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/requirements.txt",
-		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/test.py",
-		"/home/dvida/Dropbox/UWO Master's/Projects/WesternMeteorPyLib/PyLIG report format.txt",
-		"/home/dvida/Dropbox/UWO Master's/Projects/RPi station/parts_list.txt"
+		"/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/requirements.txt"
 	],
 	"find":
 	{
@@ -954,6 +971,12 @@
 		"case_sensitive": false,
 		"find_history":
 		[
+			"makenewpl",
+			"getfovce",
+			"loadpla",
+			"loadplate",
+			"filedia",
+			"width",
 			"getcatalogst",
 			"getcata",
 			"filter_fov",
@@ -1075,13 +1098,7 @@
 			"Invalid",
 			"calculatere",
 			"calculateref",
-			"Cos",
-			"Sin",
-			"long",
-			"date2jd",
-			"invalid",
-			"alt_cen",
-			"Calculate"
+			"Cos"
 		],
 		"highlight": true,
 		"in_selection": false,
@@ -1113,7 +1130,7 @@
 	"groups":
 	[
 		{
-			"selected": 7,
+			"selected": 6,
 			"sheets":
 			[
 				{
@@ -1159,7 +1176,7 @@
 						"translation.y": 0.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 10,
+					"stack_index": 12,
 					"type": "text"
 				},
 				{
@@ -1214,7 +1231,7 @@
 						"translation.y": 201.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 9,
+					"stack_index": 11,
 					"type": "text"
 				},
 				{
@@ -1260,57 +1277,11 @@
 						"translation.y": 1565.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 8,
-					"type": "text"
-				},
-				{
-					"buffer": 3,
-					"file": "RMS/Astrometry/AstrometryCheckFit.py",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 23770,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								16896,
-								16896
-							]
-						],
-						"settings":
-						{
-							"auto_complete_triggers":
-							[
-								{
-									"characters": ".",
-									"selector": "source.python - string - comment - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								}
-							],
-							"git_gutter_is_enabled": true,
-							"syntax": "Packages/Python/Python.sublime-syntax",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 8607.0,
-						"zoom_level": 1.0
-					},
 					"stack_index": 6,
 					"type": "text"
 				},
 				{
-					"buffer": 4,
+					"buffer": 3,
 					"file": "RMS/Astrometry/ApplyAstrometry.py",
 					"semi_transient": false,
 					"settings":
@@ -1352,11 +1323,11 @@
 						"translation.y": 1004.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 5,
+					"stack_index": 9,
 					"type": "text"
 				},
 				{
-					"buffer": 5,
+					"buffer": 4,
 					"file": "RMS/DeleteOldObservations.py",
 					"semi_transient": false,
 					"settings":
@@ -1394,11 +1365,11 @@
 						"translation.y": 0.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 7,
+					"stack_index": 10,
 					"type": "text"
 				},
 				{
-					"buffer": 6,
+					"buffer": 5,
 					"file": "RMS/QueuedPool.py",
 					"semi_transient": false,
 					"settings":
@@ -1436,24 +1407,24 @@
 						"translation.y": 3624.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 4,
+					"stack_index": 8,
 					"type": "text"
 				},
 				{
-					"buffer": 7,
+					"buffer": 6,
 					"file": "RMS/Astrometry/SkyFit.py",
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 43595,
+						"buffer_size": 45547,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								14481,
-								14481
+								2445,
+								2445
 							]
 						],
 						"settings":
@@ -1475,6 +1446,10 @@
 								{
 									"characters": ".",
 									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
 								}
 							],
 							"git_gutter_is_enabled": true,
@@ -1483,14 +1458,74 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 7978.0,
+						"translation.y": 293.0,
 						"zoom_level": 1.0
 					},
 					"stack_index": 0,
 					"type": "text"
 				},
 				{
+					"buffer": 7,
+					"file": ".config",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 7981,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								5864,
+								5864
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Text/Plain text.tmLanguage"
+						},
+						"translation.x": 0.0,
+						"translation.y": 1568.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 4,
+					"type": "text"
+				},
+				{
 					"buffer": 8,
+					"file": "RMS/ExtractStars.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 13449,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								8292,
+								8292
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 4021.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 5,
+					"type": "text"
+				},
+				{
+					"buffer": 9,
 					"file": "RMS/Astrometry/CyFunctions.pyx",
 					"semi_transient": false,
 					"settings":
@@ -1517,11 +1552,42 @@
 						"translation.y": 294.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 3,
+					"stack_index": 2,
 					"type": "text"
 				},
 				{
-					"buffer": 9,
+					"buffer": 10,
+					"file": "RMS/Formats/Platepar.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 8055,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								1173,
+								69
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 1,
+					"type": "text"
+				},
+				{
+					"buffer": 11,
 					"file": "/D/Dropbox/UWO Master's/Projects/OPTICS meteor clustering/PlotAnalysisSuite.py",
 					"semi_transient": false,
 					"settings":
@@ -1539,6 +1605,7 @@
 						],
 						"settings":
 						{
+							"git_gutter_is_enabled": false,
 							"syntax": "Packages/Python/Python.sublime-syntax",
 							"tab_size": 4,
 							"translate_tabs_to_spaces": true
@@ -1547,11 +1614,11 @@
 						"translation.y": 4303.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 1,
+					"stack_index": 3,
 					"type": "text"
 				},
 				{
-					"buffer": 10,
+					"buffer": 12,
 					"file": "RMS/Astrometry/Conversions.py",
 					"semi_transient": false,
 					"settings":
@@ -1578,7 +1645,7 @@
 						"translation.y": 2325.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 2,
+					"stack_index": 7,
 					"type": "text"
 				}
 			]
