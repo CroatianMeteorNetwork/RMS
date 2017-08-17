@@ -90,27 +90,27 @@ class PlateparCMN(object):
         """
 
         # Station coordinates
-        self.lat = self.lon = self.elev = None
+        self.lat = self.lon = self.elev = 0
 
         # Referent time and date
         self.time = 0
         self.JD = 0
 
-        self.Ho = None
-        self.X_res = self.Y_res = self.focal_length = None
+        self.Ho = 0
+        self.X_res = self.Y_res = self.focal_length = 0
 
         # FOV centre
-        self.RA_d = self.RA_H = self.RA_M = self.RA_S = None
-        self.dec_d = self.dec_D = self.dec_M = self.dec_S = None
-        self.pos_angle_ref = None
+        self.RA_d = self.RA_H = self.RA_M = self.RA_S = 0
+        self.dec_d = self.dec_D = self.dec_M = self.dec_S = 0
+        self.pos_angle_ref = 0
 
-        self.az_centre = self.alt_centre = None
+        self.az_centre = self.alt_centre = 0
 
         # FOV scale
-        self.F_scale = None
-        self.w_pix = None
+        self.F_scale = 0
+        self.w_pix = 0
 
-        self.mag_0 = self.mag_lev = None
+        self.mag_0 = self.mag_lev = 0
 
         # Distortion fit
         self.x_poly = np.zeros(shape=(12,), dtype=np.float64)
@@ -226,7 +226,7 @@ class PlateparCMN(object):
             f.write("{:+7.3f} {:02d} {:02d} {:02d}\n".format(self.dec_d, self.dec_D, self.dec_M, self.dec_S))
 
             # Write rotation parameter
-            f.write('{:<7.3}\n'.format(self.pos_angle_ref))
+            f.write('{:<7.3f}\n'.format(self.pos_angle_ref))
 
             # Write F scale
             f.write('{:<5.1f}\n'.format(3600/self.F_scale))

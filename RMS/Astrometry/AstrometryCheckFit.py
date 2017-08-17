@@ -29,12 +29,18 @@ def sampleCALSTARS(calstars_list, N):
     """ Randomly sample N number of FF files containing stars, weighted by the number of stars on the image
     """
 
-    weights = np.array([len(star[1]) for star in calstars_list], dtype=np.float64)
-    weights = weights/np.sum(weights)
+    if len(calstars_list) > N:
 
-    indices = np.random.choice(len(calstars_list), N, replace=False, p=weights)
+        weights = np.array([len(star[1]) for star in calstars_list], dtype=np.float64)
+        weights = weights/np.sum(weights)
 
-    return [calstars_list[i] for i in indices]
+        indices = np.random.choice(len(calstars_list), N, replace=False, p=weights)
+
+        return [calstars_list[i] for i in indices]
+
+    else:
+        return calstars_list
+
 
 
 def getMiddleTimeFF(ff_name, fps, ret_milliseconds=True, ff_frames=256):
@@ -637,14 +643,16 @@ if __name__ == '__main__':
 
     #ff_directory = '/home/anonymus/CAMS/CapturedFiles/RVN2016_05_06_18_50_14'
     #ff_directory = '/home/anonymus/CAMS/CapturedFiles/OSE_2016_04_17_18_05_02/'
-    ff_directory = '/home/anonymus/CAMS/CapturedFiles/VIB_2016_04_19_18_27_08/'
+    #ff_directory = '/home/anonymus/CAMS/CapturedFiles/VIB_2016_04_19_18_27_08/'
     #ff_directory = '/home/anonymus/CAMS/CapturedFiles/OSE_2016_05_01_18_24_35/'
+    ff_directory = 'C:\\Users\\delorayn1\\Desktop\\20170813_213506_620678\\'
 
 
     #calstars_name = 'CALSTARS0497_2016_05_05_18_48_52.txt'
     #calstars_name = 'CALSTARS0494OSE_2016_04_17_18_05_02.txt'
-    calstars_name = 'CALSTARS0453VIB_2016_04_19_18_27_08.txt'
+    #calstars_name = 'CALSTARS0453VIB_2016_04_19_18_27_08.txt'
     #calstars_name = 'CALSTARS0494OSE_2016_05_01_18_24_35.txt'
+    calstars_name = 'CALSTARS010020170813_213506_620678.txt'
 
     UT_corr = 0.0
 

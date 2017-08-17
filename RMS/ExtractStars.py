@@ -230,7 +230,7 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
         # Fit a PSF to the star
         try:
             popt, pcov = opt.curve_fit(twoDGaussian, (y_ind, x_ind), star_seg.ravel(), p0=initial_guess, 
-                maxfev=150)
+                maxfev=200)
             # print popt
         except:
             # print 'Fitting failed!'

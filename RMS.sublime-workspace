@@ -4,6 +4,26 @@
 		"selected_items":
 		[
 			[
+				"catalog",
+				"catalog_stars_visible"
+			],
+			[
+				"catalog_sta",
+				"catalog_stars_visible"
+			],
+			[
+				"cata",
+				"catalog_stars"
+			],
+			[
+				"fil",
+				"filterCatalogStarsInsideFOV"
+			],
+			[
+				"app",
+				"append"
+			],
+			[
 				"catlog",
 				"catalog_stars\tparam"
 			],
@@ -34,10 +54,6 @@
 			[
 				"pos_",
 				"pos_angle_ref"
-			],
-			[
-				"catalog",
-				"catalog_stars"
 			],
 			[
 				"ref",
@@ -102,10 +118,6 @@
 			[
 				"closes",
 				"closest_cat_star_indx"
-			],
-			[
-				"cata",
-				"catalog_x"
 			],
 			[
 				"clos",
@@ -266,10 +278,6 @@
 			[
 				"x_",
 				"x_poly"
-			],
-			[
-				"app",
-				"applyFieldCorrection"
 			],
 			[
 				"load",
@@ -506,14 +514,6 @@
 			[
 				"win_c",
 				"win_pc_weave\tstatement"
-			],
-			[
-				"comm",
-				"commit_time\tstatement"
-			],
-			[
-				"commi",
-				"commit_unix_time\tstatement"
 			]
 		]
 	},
@@ -586,7 +586,7 @@
 			"file": "RMS/Astrometry/SkyFit.py",
 			"settings":
 			{
-				"buffer_size": 42945,
+				"buffer_size": 43595,
 				"encoding": "UTF-8",
 				"line_ending": "Windows"
 			}
@@ -785,8 +785,8 @@
 	],
 	"file_history":
 	[
-		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats/Platepar.py",
 		"/C/Users/delorayn1/Desktop/20170813_213506_620678/platepar_cmn2010.cal",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats/Platepar.py",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Routines/Grouping3Dcy.pyx",
 		"/C/Users/delorayn1/Desktop/2017071819-Processed/Meteor.hmm",
 		"/C/Users/delorayn1/Desktop/VID.cal",
@@ -954,6 +954,13 @@
 		"case_sensitive": false,
 		"find_history":
 		[
+			"getcatalogst",
+			"getcata",
+			"filter_fov",
+			"catalog_stars =",
+			"getcatalogs",
+			"getcatalog",
+			"getcatalogst",
 			"calcref",
 			"getcatalo",
 			"'purp",
@@ -1074,14 +1081,7 @@
 			"date2jd",
 			"invalid",
 			"alt_cen",
-			"Calculate",
-			"input_que",
-			"multiprocessing.Manager()",
-			"dec_d",
-			"lon",
-			"lat",
-			"lon",
-			"getmidd"
+			"Calculate"
 		],
 		"highlight": true,
 		"in_selection": false,
@@ -1445,15 +1445,15 @@
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 42945,
+						"buffer_size": 43595,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								40752,
-								40752
+								14481,
+								14481
 							]
 						],
 						"settings":
@@ -1471,6 +1471,10 @@
 								{
 									"characters": ".",
 									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
 								}
 							],
 							"git_gutter_is_enabled": true,
@@ -1479,7 +1483,7 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 21703.0,
+						"translation.y": 7978.0,
 						"zoom_level": 1.0
 					},
 					"stack_index": 0,

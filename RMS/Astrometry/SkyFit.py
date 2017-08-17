@@ -180,6 +180,11 @@ class PlateTool(object):
 
         # Load the platepar file
         self.platepar_file, self.platepar = self.loadPlatepar()
+        
+        # If the platepar file was not loaded, set initial values from config
+        if not self.platepar_file:
+            self.makeNewPlatepar(update_image=False)
+            self.platepar.RA_d, self.platepar.dec_d = self.getFOVcentre()
 
         plt.figure(facecolor='black')
 
@@ -423,6 +428,12 @@ class PlateTool(object):
 
         # Write out the new platepar
         elif event.key == 'ctrl+s':
+
+            # If the platepar is new, save it to the working directory
+            if not self.platepar_file:
+                self.platepar_file = os.path.join(self.dir_path, 'platepar.cal')
+
+            # Save the platepar file
             self.platepar.write(self.platepar_file)
             print('Platepar written to:', self.platepar_file)
 
@@ -886,15 +897,21 @@ class PlateTool(object):
         root = tkinter.Tk()
         root.withdraw()
 
+        platepar = PlateparCMN()
+
         # Load the platepar file
         platepar_file = filedialog.askopenfilename(initialdir=self.dir_path, \
             title='Select the platepar file')
+
+        root.destroy()
+
+        if not platepar_file:
+            return False, platepar
 
         print(platepar_file)
 
         # Parse the platepar file
         try:
-            platepar = PlateparCMN()
             platepar.read(platepar_file)
         except:
             platepar = False
@@ -905,13 +922,13 @@ class PlateTool(object):
             
             self.loadPlatepar()
 
-        root.destroy()
+        
 
         return platepar_file, platepar
 
 
 
-    def makeNewPlatepar(self):
+    def makeNewPlatepar(self, update_image=True):
         """ Make a new platepar from the loaded one, but set the parameters from the config file. """
 
         # Update the location from the config file
@@ -923,6 +940,11 @@ class PlateTool(object):
         self.platepar.X_res = self.config.width
         self.platepar.Y_res = self.config.height
 
+        # Estimate the scale
+        scale_x = self.config.fov_w/self.config.width*(self.config.width/384)
+        scale_y = self.config.fov_h/self.config.height*(self.config.height/288)
+        self.platepar.F_scale = 1/((scale_x + scale_y)/2)
+
         # Set distorsion polynomials to zero
         self.platepar.x_poly *= 0
         self.platepar.y_poly *= 0
@@ -930,7 +952,8 @@ class PlateTool(object):
         # Set station ID
         self.platepar.station_code = self.config.stationID
 
-        self.updateImage()
+        if update_image:
+            self.updateImage()
 
 
 
