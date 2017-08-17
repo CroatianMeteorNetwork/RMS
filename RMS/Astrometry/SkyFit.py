@@ -105,6 +105,8 @@ class PlateTool(object):
         self.star_aperature_radius = 5
         self.x_centroid = self.y_centroid = None
 
+        self.catalog_stars_visible = True
+
         # List of paired image and catalog stars
         self.paired_stars = []
 
@@ -430,6 +432,19 @@ class PlateTool(object):
             self.makeNewPlatepar()
 
 
+        # Show/hide catalog stars
+        if event.key == 'h':
+
+            if self.catalog_stars_visible:
+                self.catalog_stars_visible = False
+
+            else:
+                self.catalog_stars_visible = True
+
+            self.updateImage()
+
+
+
         # Change modes from astrometry parameter changing to star picking
         elif event.key == 'ctrl+r':
 
@@ -596,20 +611,21 @@ class PlateTool(object):
             self.platepar.lat, self.platepar.az_centre, self.platepar.alt_centre, self.platepar.pos_angle_ref, 
             self.platepar.F_scale, self.platepar.x_poly, self.platepar.y_poly)
 
-        cat_stars = np.c_[self.catalog_x, self.catalog_y]
+        if self.catalog_stars_visible:
+            cat_stars = np.c_[self.catalog_x, self.catalog_y]
 
-        # Take only those stars inside the FOV
-        filtered_indices, _ = self.filterCatalogStarsInsideFOV(self.catalog_stars)
-        cat_stars = cat_stars[filtered_indices]
-        cat_stars = cat_stars[cat_stars[:, 0] > 0]
-        cat_stars = cat_stars[cat_stars[:, 0] < self.current_ff.ncols]
-        cat_stars = cat_stars[cat_stars[:, 1] > 0]
-        cat_stars = cat_stars[cat_stars[:, 1] < self.current_ff.nrows]
+            # Take only those stars inside the FOV
+            filtered_indices, _ = self.filterCatalogStarsInsideFOV(self.catalog_stars)
+            cat_stars = cat_stars[filtered_indices]
+            cat_stars = cat_stars[cat_stars[:, 0] > 0]
+            cat_stars = cat_stars[cat_stars[:, 0] < self.current_ff.ncols]
+            cat_stars = cat_stars[cat_stars[:, 1] > 0]
+            cat_stars = cat_stars[cat_stars[:, 1] < self.current_ff.nrows]
 
-        catalog_x_filtered, catalog_y_filtered = cat_stars.T
+            catalog_x_filtered, catalog_y_filtered = cat_stars.T
 
-        # Plot catalog stars (mew - marker edge width)
-        plt.scatter(catalog_x_filtered, catalog_y_filtered, c='r', marker='+', lw=1.0, alpha=0.5)
+            # Plot catalog stars (mew - marker edge width)
+            plt.scatter(catalog_x_filtered, catalog_y_filtered, c='r', marker='+', lw=1.0, alpha=0.5)
 
         ######################################################################################################
 
@@ -644,6 +660,7 @@ class PlateTool(object):
         text_str += 'F_scale - Up/Down\n'
         text_str += 'Lim mag - R/F\n'
         text_str += 'Increment - +/-\n'
+        text_str += 'Hide/show catalog stars - H\n'
         text_str += 'FOV centre - V\n'
         text_str += 'Pick stars - CTRL + R\n'
         text_str += 'New platepar - CTRL + N\n'
@@ -1211,7 +1228,7 @@ class PlateTool(object):
 
         # Fit distorsion parameters in X direction
         res = scipy.optimize.minimize(_calcImageResidualsDistorsion, self.platepar.x_poly, args=(self, 
-            catalog_stars, img_stars, 'x'), method='Nelder-Mead')
+            catalog_stars, img_stars, 'x'), method='Nelder-Mead', options={'maxiter': 10000})
 
         # Exctact fitted X polynomial
         self.platepar.x_poly = res.x
@@ -1220,7 +1237,7 @@ class PlateTool(object):
 
         # Fit distorsion parameters in Y direction
         res = scipy.optimize.minimize(_calcImageResidualsDistorsion, self.platepar.y_poly, args=(self, 
-            catalog_stars, img_stars, 'y'), method='Nelder-Mead')
+            catalog_stars, img_stars, 'y'), method='Nelder-Mead', options={'maxiter': 10000})
 
         # Extract fitted Y polynomial
         self.platepar.y_poly = res.x
