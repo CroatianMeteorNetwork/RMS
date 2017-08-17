@@ -118,7 +118,7 @@ def readCALSTARS(file_path, file_name):
                 continue
 
             # Remove newline
-            line = line.replace('\n', '')
+            line = line.replace('\n', '').replace('\r', '')
 
             if 'FF' in line:
                 ff_name = line
