@@ -144,7 +144,7 @@ class PlateparCMN(object):
         with open(file_name) as f:
 
             # Parse latitude, longitude, elevation
-            self.lat, self.lon, self.elev = self.parseLine(f)
+            self.lon, self.lat, self.elev = self.parseLine(f)
 
             # Parse date and time as int
             D, M, Y, h, m, s = map(int, f.readline().split())

@@ -226,15 +226,14 @@ class PlateTool(object):
                     self.x_centroid, self.y_centroid, self.star_intensity = self.centroidStar()
 
                     # Draw the centroid on the image
-                    plt.scatter(self.x_centroid, self.y_centroid, marker='+', c='y', s=50)
+                    plt.scatter(self.x_centroid, self.y_centroid, marker='+', c='y', s=50, lw=2)
 
-                    
                     # Select the closest catalog star to the centroid as the first guess
                     self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.x_centroid, self.y_centroid)
 
                     # Plot the closest star as a purple cross
                     self.selected_cat_star_scatter = plt.scatter(self.catalog_x[self.closest_cat_star_indx], 
-                        self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=50)
+                        self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=50, lw=2)
 
                     # Update canvas
                     plt.gcf().canvas.draw()
@@ -261,7 +260,7 @@ class PlateTool(object):
 
                     # Plot the closest star as a purple cross
                     self.selected_cat_star_scatter = plt.scatter(self.catalog_x[self.closest_cat_star_indx], 
-                        self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=50)
+                        self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=50, lw=2)
 
                     # Update canvas
                     plt.gcf().canvas.draw()
@@ -600,6 +599,8 @@ class PlateTool(object):
         cat_stars = np.c_[self.catalog_x, self.catalog_y]
 
         # Take only those stars inside the FOV
+        filtered_indices, _ = self.filterCatalogStarsInsideFOV(self.catalog_stars)
+        cat_stars = cat_stars[filtered_indices]
         cat_stars = cat_stars[cat_stars[:, 0] > 0]
         cat_stars = cat_stars[cat_stars[:, 0] < self.current_ff.ncols]
         cat_stars = cat_stars[cat_stars[:, 1] > 0]
@@ -607,7 +608,8 @@ class PlateTool(object):
 
         catalog_x_filtered, catalog_y_filtered = cat_stars.T
 
-        plt.scatter(catalog_x_filtered, catalog_y_filtered, c='r', marker='+')
+        # Plot catalog stars (mew - marker edge width)
+        plt.scatter(catalog_x_filtered, catalog_y_filtered, c='r', marker='+', lw=1.0, alpha=0.5)
 
         ######################################################################################################
 
@@ -666,6 +668,40 @@ class PlateTool(object):
 
 
 
+    def filterCatalogStarsInsideFOV(self, catalog_stars):
+        """ Take only catalogs stars which are inside the FOV. 
+        
+        Arguments:
+            catalog_stars: [list] A list of (ra, dec, mag) tuples of catalog stars.
+        """
+
+        # Calculate the FOV radius in degrees
+        fov_x = (self.platepar.X_res/2)*(3600/self.platepar.F_scale)*(384/self.platepar.X_res)/3600
+        fov_y = (self.platepar.Y_res/2)*(3600/self.platepar.F_scale)*(288/self.platepar.Y_res)/3600
+
+        fov_radius = np.sqrt(fov_x**2 + fov_y**2)
+
+        filtered_catalog_stars = []
+        filtered_indices = []
+
+        # Take only those catalog stars which should be inside the FOV
+        for i, (ra, dec, _) in enumerate(catalog_stars):
+
+            # Calculate angular separation between the FOV centre and the catalog star
+            ang_sep = math.degrees(math.acos(math.sin(math.radians(dec))*math.sin(math.radians(self.platepar.dec_d)) \
+                + math.cos(math.radians(dec))*math.cos(math.radians(self.platepar.dec_d))*math.cos(math.radians(ra) - math.radians(self.platepar.RA_d))))
+
+            if ang_sep <= fov_radius:
+
+                # Add stars which are roughly inside the FOV to the OK list
+                filtered_catalog_stars.append(catalog_stars[i])
+                filtered_indices.append(i)
+
+
+        return filtered_indices, np.array(filtered_catalog_stars)
+
+
+
     def calcRefCentre(self, JD, lon, lat, ra_ref, dec_ref):
         """ Calculate the referent azimuth and altitude of the centre of the FOV from the given RA/Dec. 
 
@@ -714,27 +750,6 @@ class PlateTool(object):
             x_poly: [ndarray float] Distorsion polynomial in X direction.
             y_poly: [ndarray float] Distorsion polynomail in Y direction.
         """
-
-        # Calculate the FOV radius in degrees
-        fov_x = (self.platepar.X_res/2)*(3600/F_scale)*(384/self.platepar.X_res)/3600
-        fov_y = (self.platepar.Y_res/2)*(3600/F_scale)*(288/self.platepar.Y_res)/3600
-
-        fov_radius = np.sqrt(fov_x**2 + fov_y**2)
-
-        filtered_catalog_stars = []
-
-        # Take only those catalog stars which should be inside the FOV
-        for i, (ra, dec, _) in enumerate(catalog_stars):
-
-            # Calculate angular separation between the FOV centre and the catalog star
-            ang_sep = math.degrees(math.acos(math.sin(math.radians(dec))*math.sin(math.radians(self.platepar.dec_d)) \
-                + math.cos(math.radians(dec))*math.cos(math.radians(self.platepar.dec_d))*math.cos(math.radians(ra) - math.radians(self.platepar.RA_d))))
-
-            if ang_sep <= fov_radius:
-                filtered_catalog_stars.append(catalog_stars[i])
-
-        catalog_stars = np.array(filtered_catalog_stars)
-
 
         ra_catalog, dec_catalog, _ = catalog_stars.T
 
@@ -787,8 +802,8 @@ class PlateTool(object):
             delta_XY = 1
 
             # Apply distorsion polynomials
-            dX = x_poly[0] + x_poly[1]*X1 + x_poly[2]*Y1 + x_poly[3]*X1**2 + x_poly[4]*X1*Y1 + x_poly[5]*Y1**2 + x_poly[6]*X1**3 + x_poly[7]*X1*X1*Y1 + x_poly[8]*X1*Y1**2 + x_poly[9]*Y1**3 #+ x_poly[10]*X1*math.sqrt(X1*X1 + Y1*Y1) + x_poly[11]*Y1*math.sqrt(X1*X1 + Y1*Y1)
-            dY = y_poly[0] + y_poly[1]*X1 + y_poly[2]*Y1 + y_poly[3]*X1**2 + y_poly[4]*X1*Y1 + y_poly[5]*Y1**2 + y_poly[6]*X1**3 + y_poly[7]*X1*X1*Y1 + y_poly[8]*X1*Y1**2 + y_poly[9]*Y1**3 #+ y_poly[10]*X1*math.sqrt(X1*X1 + Y1*Y1) + y_poly[11]*Y1*math.sqrt(X1*X1 + Y1*Y1)
+            dX = x_poly[0] + x_poly[1]*X1 + x_poly[2]*Y1 + x_poly[3]*X1**2 + x_poly[4]*X1*Y1 + x_poly[5]*Y1**2 + x_poly[6]*X1**3 + x_poly[7]*X1*X1*Y1 + x_poly[8]*X1*Y1**2 + x_poly[9]*Y1**3 + x_poly[10]*X1*math.sqrt(X1*X1 + Y1*Y1) + x_poly[11]*Y1*math.sqrt(X1*X1 + Y1*Y1)
+            dY = y_poly[0] + y_poly[1]*X1 + y_poly[2]*Y1 + y_poly[3]*X1**2 + y_poly[4]*X1*Y1 + y_poly[5]*Y1**2 + y_poly[6]*X1**3 + y_poly[7]*X1*X1*Y1 + y_poly[8]*X1*Y1**2 + y_poly[9]*Y1**3 + y_poly[10]*X1*math.sqrt(X1*X1 + Y1*Y1) + y_poly[11]*Y1*math.sqrt(X1*X1 + Y1*Y1)
             
             X1 += dX
             Y1 += dY
@@ -1084,8 +1099,8 @@ class PlateTool(object):
         """
 
         # Fit the astrometry parameters, at least 8 stars are needed
-        if len(self.paired_stars) < 14:
-            messagebox.showwarning(title='Number of stars', message="At least 14 paired stars are needed to do the fit!")
+        if len(self.paired_stars) < 6:
+            messagebox.showwarning(title='Number of stars', message="At least 6 paired stars are needed to do the fit!")
 
             return False
 
@@ -1134,10 +1149,10 @@ class PlateTool(object):
 
             if dimension == 'x':
                 x_poly = params
-                y_poly = self.platepar.y_poly
+                y_poly = np.zeros(12)
 
             else:
-                x_poly = self.platepar.x_poly
+                x_poly = np.zeros(12)
                 y_poly = params
 
             # Calculate the centre of FOV
@@ -1167,8 +1182,13 @@ class PlateTool(object):
         catalog_stars = np.array([cat_coords for img_coords, cat_coords in self.paired_stars])
         img_stars = np.array([img_coords for img_coords, cat_coords in self.paired_stars])
 
-        print(_calcImageResidualsAstro([self.platepar.RA_d, self.platepar.dec_d, self.platepar.pos_angle_ref, 
-            self.platepar.F_scale], self, catalog_stars, img_stars))
+        print(catalog_stars)
+        print(img_stars)
+
+        print('ASTRO', _calcImageResidualsAstro([self.platepar.RA_d, self.platepar.dec_d, 
+            self.platepar.pos_angle_ref, self.platepar.F_scale], self, catalog_stars, img_stars))
+
+        print('DIS_X', _calcImageResidualsDistorsion(self.platepar.x_poly, self, catalog_stars, img_stars, 'x'))
 
 
 
@@ -1176,7 +1196,8 @@ class PlateTool(object):
         p0 = [self.platepar.RA_d, self.platepar.dec_d, self.platepar.pos_angle_ref, self.platepar.F_scale]
 
         # Fit the astrometric parameters
-        res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, args=(self, catalog_stars, img_stars), method='Nelder-Mead')
+        res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, args=(self, catalog_stars, img_stars),
+            method='Nelder-Mead')
 
         print(res)
 
