@@ -49,9 +49,9 @@ def applyFieldCorrection(x_poly, y_poly, X_res, Y_res, F_scale, X_data, Y_data, 
         level_data: 1D numpy array containing vignetting corrected levels
     """
 
-    # # Scale the resolution to CIF
-    # X_scale = X_res/384.0
-    # Y_scale = Y_res/288.0
+    # Scale the resolution to CIF
+    X_scale = X_res/384.0
+    Y_scale = Y_res/288.0
 
     # Initialize final values containers
     X_corrected = np.zeros_like(X_data, dtype=np.float64)
@@ -65,56 +65,49 @@ def applyFieldCorrection(x_poly, y_poly, X_res, Y_res, F_scale, X_data, Y_data, 
     # Go through all given data points
     for Xdet, Ydet, level in data_matrix:
 
-        # # Scale the point coordinates to CIF resolution
-        # Xdet = (Xdet - X_res/2)/X_scale
-        # Ydet = (Ydet - Y_res/2)/Y_scale
-
-        # Xdet = (Xdet - X_res/2)
-        # Ydet = (Ydet - Y_res/2)
+        # Scale the point coordinates to CIF resolution
+        Xdet = (Xdet - X_res/2)/X_scale
+        Ydet = (Ydet - Y_res/2)/Y_scale
 
         # # Apply vignetting correction
         # if (np.sqrt((Xdet - 192)**2 + (Ydet - 192)**2) > 120):
         #     level = level * (1 + 0.00245*(np.sqrt((Xdet - 192)**2 + (Ydet - 192)**2) - 120))
 
-        X_pix = (
-            Xdet 
-            + x_poly[0]
-            + x_poly[1] * Xdet
-            + x_poly[2] * Ydet
-            + x_poly[3] * Xdet**2
-            + x_poly[4] * Xdet * Ydet
-            + x_poly[5] * Ydet**2
-            + x_poly[6] * Xdet**3
-            + x_poly[7] * Xdet**2 * Ydet
-            + x_poly[8] * Xdet * Ydet**2
-            + x_poly[9] * Ydet**3
-            + x_poly[10] * Xdet * np.sqrt(Xdet**2 + Ydet**2)
-            + x_poly[11] * Ydet * np.sqrt(Xdet**2 + Ydet**2))
+        dX = (x_poly[0]
+            + x_poly[1]*Xdet
+            + x_poly[2]*Ydet
+            + x_poly[3]*Xdet**2
+            + x_poly[4]*Xdet*Ydet
+            + x_poly[5]*Ydet**2
+            + x_poly[6]*Xdet**3
+            + x_poly[7]*Xdet**2*Ydet
+            + x_poly[8]*Xdet*Ydet**2
+            + x_poly[9]*Ydet**3
+            + x_poly[10]*Xdet*np.sqrt(Xdet**2 + Ydet**2)
+            + x_poly[11]*Ydet*np.sqrt(Xdet**2 + Ydet**2))
 
-        Y_pix = (
-            Ydet
-            + y_poly[0]
-            + y_poly[1] * Xdet
-            + y_poly[2] * Ydet
-            + y_poly[3] * Xdet**2
-            + y_poly[4] * Xdet * Ydet
-            + y_poly[5] * Ydet**2
-            + y_poly[6] * Xdet**3
-            + y_poly[7] * Xdet**2 * Ydet
-            + y_poly[8] * Xdet * Ydet**2
-            + y_poly[9] * Ydet**3
-            + y_poly[10] * Ydet * np.sqrt(Xdet**2 + Ydet**2)
-            + y_poly[11] * Xdet * np.sqrt(Xdet**2 + Ydet**2))
+        # Add the distortion correction
+        X_pix = Xdet + dX
 
+        dY = (y_poly[0]
+            + y_poly[1]*Xdet
+            + y_poly[2]*Ydet
+            + y_poly[3]*Xdet**2
+            + y_poly[4]*Xdet*Ydet
+            + y_poly[5]*Ydet**2
+            + y_poly[6]*Xdet**3
+            + y_poly[7]*Xdet**2*Ydet
+            + y_poly[8]*Xdet*Ydet**2
+            + y_poly[9]*Ydet**3
+            + y_poly[10]*Ydet*np.sqrt(Xdet**2 + Ydet**2)
+            + y_poly[11]*Xdet*np.sqrt(Xdet**2 + Ydet**2))
 
-        # # # Scale back image coordinates
-        # # X_pix = X_pix/F_scale
-        # # Y_pix = Y_pix/F_scale
+        # Add the distortion correction
+        Y_pix = Ydet + dY
 
-        # ### TEST!!!!!!!!!!!!
-        # # Scale back image coordinates
-        # X_pix = X_pix*X_scale
-        # Y_pix = Y_pix*Y_scale
+        # Scale back image coordinates
+        X_pix = X_pix/F_scale
+        Y_pix = Y_pix/F_scale
 
         # Store values to final arrays
         X_corrected[i] = X_pix
@@ -391,8 +384,12 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, UT_corr, lat, lon, 
     X_corrected, Y_corrected, levels_corrected = applyFieldCorrection(x_poly, y_poly, X_res, Y_res, F_scale, 
         X_data, Y_data, level_data)
 
+    print(X_corrected, Y_corrected)
+
     # Convert XY image coordinates to azimuth and altitude
     az_data, alt_data = XY2altAz(lat, lon, RA_d, dec_d, Ho, rot_param, X_corrected, Y_corrected)
+
+    print(az_data, alt_data)
 
     # Convert azimuth and altitude data to right ascension and declination
     JD_data, RA_data, dec_data = altAz2RADec(lat, lon, UT_corr, time_data, az_data, alt_data)
@@ -409,7 +406,7 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, UT_corr, lat, lon, 
     return JD_data, RA_data, dec_data, magnitude_data
 
 
-
+# NOT TESTED!!!
 def raDecToXY(RA_data, dec_data, RA_d, dec_d, jd, ref_jd, rot_param, F_scale):
     """ Convert RA, Dec to image coordinates. 
 
@@ -474,4 +471,53 @@ def raDecToXY(RA_data, dec_data, RA_d, dec_d, jd, ref_jd, rot_param, F_scale):
 
 if __name__ == "__main__":
 
-    pass
+    from RMS.Formats.Platepar import PlateparCMN
+    from RMS.Astrometry.AstrometryCheckFit import getMiddleTimeFF
+
+    # # Load the platepar
+    # platepar = PlateparCMN()
+    # platepar.read("C:\\Users\\delorayn1\\Desktop\\20170813_213506_620678\\platepar_cmn2010.cal")
+
+    # # Deneb
+    # star_x = 281.14
+    # star_y = 57.97
+    # time = getMiddleTimeFF('FF100_20170813_213508_532_0000000.bin', 25)
+
+    # jd, ra, dec, mag = XY2CorrectedRADec([time], [star_x], [star_y], [0], 0, platepar.lat, platepar.lon, platepar.Ho, platepar.X_res, platepar.Y_res, platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale, platepar.w_pix, platepar.mag_0, platepar.mag_lev, platepar.x_poly, platepar.y_poly)
+
+    # ra_h = int(ra/15)
+    # ra_min = (ra/15 - ra_h)*60
+
+    # dec_d = int(dec)
+    # dec_min = (dec - dec_d)*60
+
+    # print(ra_h, ra_min)
+    # print(dec_d, dec_min)
+
+
+
+    # Load the platepar
+    platepar = PlateparCMN()
+    platepar.read("C:\\Users\\delorayn1\\Desktop\\2017071819-Processed\\platepar_cmn2010.cal")
+
+    # X_scale = platepar.X_res/384
+    # Y_scale = platepar.Y_res/288
+
+    # x = (617.71 - platepar.X_res/2)/X_scale/platepar.F_scale
+    # y = (139.99 - platepar.Y_res/2)/Y_scale/platepar.F_scale
+
+    x = 617.71
+    y = 139.99
+
+    secs = 28.788 + 164.0/25
+    time_data = [[2017, 7, 18, 20, 46, int(secs), int(1000*(secs - int(secs)))]]
+
+    X_corrected, Y_corrected, levels_corrected = applyFieldCorrection(platepar.x_poly, platepar.y_poly, platepar.X_res, platepar.Y_res, platepar.F_scale, [x], [y], [0])
+
+    az_data, alt_data = XY2altAz(platepar.lat, platepar.lon, platepar.RA_d, platepar.dec_d, platepar.Ho, platepar.pos_angle_ref, X_corrected, Y_corrected)
+
+    # Convert azimuth and altitude data to right ascension and declination
+    JD_data, RA_data, dec_data = altAz2RADec(platepar.lat, platepar.lon, 0, time_data, az_data, alt_data)
+
+    print(az_data, alt_data)
+    print(RA_data, dec_data)
