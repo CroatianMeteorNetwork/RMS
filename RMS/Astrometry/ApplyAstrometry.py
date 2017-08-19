@@ -23,6 +23,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+from __future__ import print_function, division, absolute_import
 
 import math
 import numpy as np
@@ -474,50 +475,50 @@ if __name__ == "__main__":
     from RMS.Formats.Platepar import PlateparCMN
     from RMS.Astrometry.AstrometryCheckFit import getMiddleTimeFF
 
-    # # Load the platepar
-    # platepar = PlateparCMN()
-    # platepar.read("C:\\Users\\delorayn1\\Desktop\\20170813_213506_620678\\platepar_cmn2010.cal")
-
-    # # Deneb
-    # star_x = 281.14
-    # star_y = 57.97
-    # time = getMiddleTimeFF('FF100_20170813_213508_532_0000000.bin', 25)
-
-    # jd, ra, dec, mag = XY2CorrectedRADec([time], [star_x], [star_y], [0], 0, platepar.lat, platepar.lon, platepar.Ho, platepar.X_res, platepar.Y_res, platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale, platepar.w_pix, platepar.mag_0, platepar.mag_lev, platepar.x_poly, platepar.y_poly)
-
-    # ra_h = int(ra/15)
-    # ra_min = (ra/15 - ra_h)*60
-
-    # dec_d = int(dec)
-    # dec_min = (dec - dec_d)*60
-
-    # print(ra_h, ra_min)
-    # print(dec_d, dec_min)
-
-
-
     # Load the platepar
     platepar = PlateparCMN()
-    platepar.read("C:\\Users\\delorayn1\\Desktop\\2017071819-Processed\\platepar_cmn2010.cal")
+    platepar.read("C:\\Users\\delorayn1\\Desktop\\20170813_213506_620678\\platepar_cmn2010.cal")
 
-    # X_scale = platepar.X_res/384
-    # Y_scale = platepar.Y_res/288
+    # Deneb
+    star_x = 281.14
+    star_y = 57.97
+    time = getMiddleTimeFF('FF100_20170813_213508_532_0000000.bin', 25)
 
-    # x = (617.71 - platepar.X_res/2)/X_scale/platepar.F_scale
-    # y = (139.99 - platepar.Y_res/2)/Y_scale/platepar.F_scale
+    jd, ra, dec, mag = XY2CorrectedRADec([time], [star_x], [star_y], [0], 0, platepar.lat, platepar.lon, platepar.Ho, platepar.X_res, platepar.Y_res, platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale, platepar.w_pix, platepar.mag_0, platepar.mag_lev, platepar.x_poly, platepar.y_poly)
 
-    x = 617.71
-    y = 139.99
+    ra_h = int(ra/15)
+    ra_min = (ra/15 - ra_h)*60
 
-    secs = 28.788 + 164.0/25
-    time_data = [[2017, 7, 18, 20, 46, int(secs), int(1000*(secs - int(secs)))]]
+    dec_d = int(dec)
+    dec_min = (dec - dec_d)*60
 
-    X_corrected, Y_corrected, levels_corrected = applyFieldCorrection(platepar.x_poly, platepar.y_poly, platepar.X_res, platepar.Y_res, platepar.F_scale, [x], [y], [0])
+    print(ra_h, ra_min)
+    print(dec_d, dec_min)
 
-    az_data, alt_data = XY2altAz(platepar.lat, platepar.lon, platepar.RA_d, platepar.dec_d, platepar.Ho, platepar.pos_angle_ref, X_corrected, Y_corrected)
 
-    # Convert azimuth and altitude data to right ascension and declination
-    JD_data, RA_data, dec_data = altAz2RADec(platepar.lat, platepar.lon, 0, time_data, az_data, alt_data)
 
-    print(az_data, alt_data)
-    print(RA_data, dec_data)
+    # # Load the platepar
+    # platepar = PlateparCMN()
+    # platepar.read("C:\\Users\\delorayn1\\Desktop\\2017071819-Processed\\platepar_cmn2010.cal")
+
+    # # X_scale = platepar.X_res/384
+    # # Y_scale = platepar.Y_res/288
+
+    # # x = (617.71 - platepar.X_res/2)/X_scale/platepar.F_scale
+    # # y = (139.99 - platepar.Y_res/2)/Y_scale/platepar.F_scale
+
+    # x = 617.71
+    # y = 139.99
+
+    # secs = 28.788 + 164.0/25
+    # time_data = [[2017, 7, 18, 20, 46, int(secs), int(1000*(secs - int(secs)))]]
+
+    # X_corrected, Y_corrected, levels_corrected = applyFieldCorrection(platepar.x_poly, platepar.y_poly, platepar.X_res, platepar.Y_res, platepar.F_scale, [x], [y], [0])
+
+    # az_data, alt_data = XY2altAz(platepar.lat, platepar.lon, platepar.RA_d, platepar.dec_d, platepar.Ho, platepar.pos_angle_ref, X_corrected, Y_corrected)
+
+    # # Convert azimuth and altitude data to right ascension and declination
+    # JD_data, RA_data, dec_data = altAz2RADec(platepar.lat, platepar.lon, 0, time_data, az_data, alt_data)
+
+    # print(az_data, alt_data)
+    # print(RA_data, dec_data)

@@ -50,7 +50,7 @@ from RMS.Formats.Platepar import PlateparCMN
 from RMS.Formats.FFbin import read as readFF
 from RMS.Formats.FFbin import validName as validFFName
 import RMS.ConfigReader as cr
-from RMS.Astrometry.ApplyAstrometry import raDecToXY, altAz2RADec, applyFieldCorrection
+from RMS.Astrometry.ApplyAstrometry import altAz2RADec
 from RMS.Astrometry.AstrometryCheckFit import getMiddleTimeFF
 from RMS.Astrometry.Conversions import date2JD
 
@@ -267,11 +267,6 @@ class PlateTool(object):
                     # Update canvas
                     plt.gcf().canvas.draw()
 
-                    print(self.closest_cat_star_indx)
-                    print(self.catalog_x[self.closest_cat_star_indx], 
-                        self.catalog_y[self.closest_cat_star_indx], self.catalog_stars[self.closest_cat_star_indx])
-
-
                     # Switch to the mode where the catalog star is selected
                     self.star_selection_centroid = False
 
@@ -293,10 +288,6 @@ class PlateTool(object):
 
                     # Update canvas
                     plt.gcf().canvas.draw()
-
-                    print(self.closest_cat_star_indx)
-                    print(self.catalog_x[self.closest_cat_star_indx], 
-                        self.catalog_y[self.closest_cat_star_indx], self.catalog_stars[self.closest_cat_star_indx])
 
 
             # Right mouse button, deselect stars
@@ -512,8 +503,6 @@ class PlateTool(object):
 
                     # Switch back to centroiding mode
                     self.star_selection_centroid = True
-
-                    print(self.paired_stars)
 
                     self.updateImage()
 
@@ -763,7 +752,7 @@ class PlateTool(object):
             dec_ref: [float] Referent declination at referent time in degrees.
         """
 
-        T = (JD - 2451545)/36525
+        T = (JD - 2451545)/36525.0
         Ho = (280.46061837 + 360.98564736629*(JD - 2451545) + 0.000387933*T**2 - (T**3)/38710000)%360
 
         h = Ho + lon - ra_ref
@@ -808,8 +797,8 @@ class PlateTool(object):
         # Get the date of the middle of the FF exposure
         jd = date2JD(*ff_middle_time, UT_corr=self.UT_corr)
 
-        T = (jd - 2451545)/36525
-        Ho = 280.46061837 + 360.98564736629*(jd - 2451545) + 0.000387933*T**2 - (T**3)/38710000
+        T = (jd - 2451545)/36525.0
+        Ho = 280.46061837 + 360.98564736629*(jd - 2451545) + 0.000387933*T**2 - (T**3)/38710000.0
 
         sl = math.sin(math.radians(lat))
         cl = math.cos(math.radians(lat))
@@ -841,40 +830,61 @@ class PlateTool(object):
             sinA = math.cos(dec2)*math.sin(ra2 - ra1)/math.sin(ad)
             cosA = (math.sin(dec2) - math.sin(dec1)*math.cos(ad))/(math.cos(dec1) * math.sin(ad))
             theta = -math.degrees(math.atan2(sinA, cosA))
-            theta = theta + pos_angle_ref - 90
+            theta = theta + pos_angle_ref - 90.0
 
             # Calculate the image coordinates (scale the F_scale from CIF resolution)
-            x = radius*math.cos(math.radians(theta))*F_scale*(self.platepar.X_res/384)
-            y = radius*math.sin(math.radians(theta))*F_scale*(self.platepar.Y_res/288)
+            X1 = radius*math.cos(math.radians(theta))*F_scale
+            Y1 = radius*math.sin(math.radians(theta))*F_scale
 
-            X1 = x
-            Y1 = y
-            delta_XY = 1
+            # Calculate distortion in X direction
+            dX = (x_poly[0]
+                + x_poly[1]*X1
+                + x_poly[2]*Y1
+                + x_poly[3]*X1**2
+                + x_poly[4]*X1*Y1
+                + x_poly[5]*Y1**2
+                + x_poly[6]*X1**3
+                + x_poly[7]*X1**2*Y1
+                + x_poly[8]*X1*Y1**2
+                + x_poly[9]*Y1**3
+                + x_poly[10]*X1*np.sqrt(X1**2 + Y1**2)
+                + x_poly[11]*Y1*np.sqrt(X1**2 + Y1**2))
 
-            # Apply distorsion polynomials
-            dX = x_poly[0] + x_poly[1]*X1 + x_poly[2]*Y1 + x_poly[3]*X1**2 + x_poly[4]*X1*Y1 + x_poly[5]*Y1**2 + x_poly[6]*X1**3 + x_poly[7]*X1*X1*Y1 + x_poly[8]*X1*Y1**2 + x_poly[9]*Y1**3 + x_poly[10]*X1*math.sqrt(X1*X1 + Y1*Y1) + x_poly[11]*Y1*math.sqrt(X1*X1 + Y1*Y1)
-            dY = y_poly[0] + y_poly[1]*X1 + y_poly[2]*Y1 + y_poly[3]*X1**2 + y_poly[4]*X1*Y1 + y_poly[5]*Y1**2 + y_poly[6]*X1**3 + y_poly[7]*X1*X1*Y1 + y_poly[8]*X1*Y1**2 + y_poly[9]*Y1**3 + y_poly[10]*X1*math.sqrt(X1*X1 + Y1*Y1) + y_poly[11]*Y1*math.sqrt(X1*X1 + Y1*Y1)
+            # Add the distortion correction
+            Xpix = X1 - dX
+
+            # Calculate distortion in Y direction
+            dY = (y_poly[0]
+                + y_poly[1]*X1
+                + y_poly[2]*Y1
+                + y_poly[3]*X1**2
+                + y_poly[4]*X1*Y1
+                + y_poly[5]*Y1**2
+                + y_poly[6]*X1**3
+                + y_poly[7]*X1**2*Y1
+                + y_poly[8]*X1*Y1**2
+                + y_poly[9]*Y1**3
+                + y_poly[10]*Y1*np.sqrt(X1**2 + Y1**2)
+                + y_poly[11]*X1*np.sqrt(X1**2 + Y1**2))
+
+            # Add the distortion correction
+            Ypix = Y1 - dY
+
+            # # Apply distorsion polynomials
+            # dX = x_poly[0] + x_poly[1]*X1 + x_poly[2]*Y1 + x_poly[3]*X1**2 + x_poly[4]*X1*Y1 + x_poly[5]*Y1**2 + x_poly[6]*X1**3 + x_poly[7]*X1*X1*Y1 + x_poly[8]*X1*Y1**2 + x_poly[9]*Y1**3 + x_poly[10]*X1*math.sqrt(X1*X1 + Y1*Y1) + x_poly[11]*Y1*math.sqrt(X1*X1 + Y1*Y1)
+            # dY = y_poly[0] + y_poly[1]*X1 + y_poly[2]*Y1 + y_poly[3]*X1**2 + y_poly[4]*X1*Y1 + y_poly[5]*Y1**2 + y_poly[6]*X1**3 + y_poly[7]*X1*X1*Y1 + y_poly[8]*X1*Y1**2 + y_poly[9]*Y1**3 + y_poly[10]*Y1*math.sqrt(X1*X1 + Y1*Y1) + y_poly[11]*X1*math.sqrt(X1*X1 + Y1*Y1)
             
-            X1 += dX
-            Y1 += dY
+            # Xpix = X1 + dX
+            # Ypix = Y1 + dY
 
-            # while (delta_XY > 0.1):
-            #     dX = (x_poly[0] + x_poly[1]*X1 + x_poly[2]*Y1 + x_poly[3]*X1**2 + x_poly[4]*X1*Y1 + x_poly[5]*Y1**2 + x_poly[6]*X1**3 + x_poly[7]*X1*X1*Y1 + x_poly[8]*X1*Y1**2 + x_poly[9]*Y1**3 + x_poly[10]*X1*math.sqrt(X1*X1 + Y1*Y1) + x_poly[11]*Y1*math.sqrt(X1*X1 + Y1*Y1))
-            #     dY = (y_poly[0] + y_poly[1]*X1 + y_poly[2]*Y1 + y_poly[3]*X1**2 + y_poly[4]*X1*Y1 + y_poly[5]*Y1**2 + y_poly[6]*X1**3 + y_poly[7]*X1*X1*Y1 + y_poly[8]*X1*Y1**2 + y_poly[9]*Y1**3 + y_poly[10]*X1*math.sqrt(X1*X1 + Y1*Y1) + y_poly[11]*Y1*math.sqrt(X1*X1 + Y1*Y1))
-            #     delta_xX = X1 - x + dX
-            #     delta_yY = Y1 - y + dY
-            #     delta_XY = math.sqrt(delta_xX*delta_xX + delta_yY*delta_yY)
-            #     X1 = x - dX
-            #     Y1 = y - dY
+            Xpix *= self.platepar.X_res/384.0
+            Ypix *= self.platepar.Y_res/288.0
 
-            # X1 = X1 + 192
-            # Y1 = Y1 + 144
+            Xpix = Xpix + self.platepar.X_res/2
+            Ypix = Ypix + self.platepar.Y_res/2
 
-            X1 = X1 + self.platepar.X_res/2
-            Y1 = Y1 + self.platepar.Y_res/2
-
-            x_array[i] = X1
-            y_array[i] = Y1
+            x_array[i] = Xpix
+            y_array[i] = Ypix
 
 
         return x_array, y_array
