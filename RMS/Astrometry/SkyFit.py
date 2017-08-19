@@ -850,8 +850,8 @@ class PlateTool(object):
                 + x_poly[10]*X1*np.sqrt(X1**2 + Y1**2)
                 + x_poly[11]*Y1*np.sqrt(X1**2 + Y1**2))
 
-            # Add the distortion correction
-            Xpix = X1 - dX
+            # Add the distortion correction and calculate X image coordinates
+            Xpix = (X1 - dX)*self.platepar.X_res/384.0 + self.platepar.X_res/2
 
             # Calculate distortion in Y direction
             dY = (y_poly[0]
@@ -867,21 +867,8 @@ class PlateTool(object):
                 + y_poly[10]*Y1*np.sqrt(X1**2 + Y1**2)
                 + y_poly[11]*X1*np.sqrt(X1**2 + Y1**2))
 
-            # Add the distortion correction
-            Ypix = Y1 - dY
-
-            # # Apply distorsion polynomials
-            # dX = x_poly[0] + x_poly[1]*X1 + x_poly[2]*Y1 + x_poly[3]*X1**2 + x_poly[4]*X1*Y1 + x_poly[5]*Y1**2 + x_poly[6]*X1**3 + x_poly[7]*X1*X1*Y1 + x_poly[8]*X1*Y1**2 + x_poly[9]*Y1**3 + x_poly[10]*X1*math.sqrt(X1*X1 + Y1*Y1) + x_poly[11]*Y1*math.sqrt(X1*X1 + Y1*Y1)
-            # dY = y_poly[0] + y_poly[1]*X1 + y_poly[2]*Y1 + y_poly[3]*X1**2 + y_poly[4]*X1*Y1 + y_poly[5]*Y1**2 + y_poly[6]*X1**3 + y_poly[7]*X1*X1*Y1 + y_poly[8]*X1*Y1**2 + y_poly[9]*Y1**3 + y_poly[10]*Y1*math.sqrt(X1*X1 + Y1*Y1) + y_poly[11]*X1*math.sqrt(X1*X1 + Y1*Y1)
-            
-            # Xpix = X1 + dX
-            # Ypix = Y1 + dY
-
-            Xpix *= self.platepar.X_res/384.0
-            Ypix *= self.platepar.Y_res/288.0
-
-            Xpix = Xpix + self.platepar.X_res/2
-            Ypix = Ypix + self.platepar.Y_res/2
+            # Add the distortion correction and calculate Y image coordinates
+            Ypix = (Y1 - dY)*self.platepar.Y_res/288.0 + self.platepar.Y_res/2
 
             x_array[i] = Xpix
             y_array[i] = Ypix

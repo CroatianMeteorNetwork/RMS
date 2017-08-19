@@ -479,21 +479,29 @@ if __name__ == "__main__":
     platepar = PlateparCMN()
     platepar.read("C:\\Users\\delorayn1\\Desktop\\20170813_213506_620678\\platepar_cmn2010.cal")
 
+    time = getMiddleTimeFF('FF100_20170813_213508_532_0000000.bin', 25)
+
     # Deneb
     star_x = 281.14
     star_y = 57.97
-    time = getMiddleTimeFF('FF100_20170813_213508_532_0000000.bin', 25)
+
+    # # Vega
+    # star_x = 546.27
+    # star_y = 54.74
 
     jd, ra, dec, mag = XY2CorrectedRADec([time], [star_x], [star_y], [0], 0, platepar.lat, platepar.lon, platepar.Ho, platepar.X_res, platepar.Y_res, platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale, platepar.w_pix, platepar.mag_0, platepar.mag_lev, platepar.x_poly, platepar.y_poly)
 
     ra_h = int(ra/15)
-    ra_min = (ra/15 - ra_h)*60
+    ra_min = int((ra/15 - ra_h)*60)
+    ra_sec = ((ra/15 - ra_h)*60 - ra_min)*60
 
     dec_d = int(dec)
-    dec_min = (dec - dec_d)*60
+    dec_min = int((dec - dec_d)*60)
+    dec_sec = ((dec - dec_d)*60 - dec_min)*60
 
-    print(ra_h, ra_min)
-    print(dec_d, dec_min)
+
+    print(ra_h, ra_min, ra_sec)
+    print(dec_d, dec_min, dec_sec)
 
 
 
