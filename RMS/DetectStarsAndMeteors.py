@@ -100,7 +100,8 @@ if __name__ == "__main__":
     
 
     # Get paths to every FF bin file in a directory 
-    ff_dir = os.path.abspath(sys.argv[1])
+    ff_dir = sys.argv[1].replace('"', '')
+    ff_dir = os.path.abspath(ff_dir)
     ff_list = [ff_name for ff_name in sorted(os.listdir(ff_dir)) if ff_name[0:2]=="FF" and ff_name[-3:]=="bin"]
 
 
