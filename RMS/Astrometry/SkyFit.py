@@ -49,9 +49,9 @@ import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import PlateparCMN
 from RMS.Formats.FFbin import read as readFF
 from RMS.Formats.FFbin import validName as validFFName
+from RMS.Formats.FFbin import getMiddleTimeFF
 import RMS.ConfigReader as cr
-from RMS.Astrometry.ApplyAstrometry import altAz2RADec
-from RMS.Astrometry.AstrometryCheckFit import getMiddleTimeFF
+from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADec
 from RMS.Astrometry.Conversions import date2JD
 
 
@@ -714,6 +714,16 @@ class PlateTool(object):
             catalog_stars: [list] A list of (ra, dec, mag) tuples of catalog stars.
         """
 
+        # The the time of the midle of the FF file
+        ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
+
+        # Convert the FOV centre to RA/Dec
+        _, ra_centre, dec_centre, _ = XY2CorrectedRADec([ff_middle_time], [self.platepar.X_res/2], 
+            [self.platepar.Y_res/2], [0], self.UT_corr, self.platepar.lat, self.platepar.lon, 
+            self.platepar.Ho, self.platepar.X_res, self.platepar.Y_res, self.platepar.RA_d, 
+            self.platepar.dec_d, self.platepar.pos_angle_ref, self.platepar.F_scale, self.platepar.w_pix, 
+            self.platepar.mag_0, self.platepar.mag_lev, self.platepar.x_poly, self.platepar.y_poly)
+
         # Calculate the FOV radius in degrees
         fov_x = (self.platepar.X_res/2)*(3600/self.platepar.F_scale)*(384/self.platepar.X_res)/3600
         fov_y = (self.platepar.Y_res/2)*(3600/self.platepar.F_scale)*(288/self.platepar.Y_res)/3600
@@ -727,8 +737,8 @@ class PlateTool(object):
         for i, (ra, dec, _) in enumerate(catalog_stars):
 
             # Calculate angular separation between the FOV centre and the catalog star
-            ang_sep = math.degrees(math.acos(math.sin(math.radians(dec))*math.sin(math.radians(self.platepar.dec_d)) \
-                + math.cos(math.radians(dec))*math.cos(math.radians(self.platepar.dec_d))*math.cos(math.radians(ra) - math.radians(self.platepar.RA_d))))
+            ang_sep = math.degrees(math.acos(math.sin(math.radians(dec))*math.sin(math.radians(dec_centre)) \
+                + math.cos(math.radians(dec))*math.cos(math.radians(dec_centre))*math.cos(math.radians(ra) - math.radians(ra_centre))))
 
             if ang_sep <= fov_radius:
 
@@ -1287,18 +1297,6 @@ class PlateTool(object):
         print(res)
 
         self.updateImage()
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

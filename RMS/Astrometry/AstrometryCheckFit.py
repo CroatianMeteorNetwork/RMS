@@ -16,6 +16,7 @@ from scipy.optimize import curve_fit
 # Import local modules
 import RMS.ConfigReader as cr
 import RMS.Formats.BSC as BSC
+import RMS.Formats.FFbin as FFbin
 import RMS.Formats.CALSTARS as CALSTARS
 import RMS.Formats.Platepar as Platepar
 import RMS.Astrometry.ApplyAstrometry as Astrometry
@@ -43,52 +44,12 @@ def sampleCALSTARS(calstars_list, N):
         return calstars_list
 
 
-
-def getMiddleTimeFF(ff_name, fps, ret_milliseconds=True, ff_frames=256):
-    """ Converts a CAMS format FF file name to datetime object of its recording time. 
-
-    @param ff_name: [str] name of the CAMS format FF file
-
-    @return [datetime obj] moment of the file recording start
-    """
-
-    # Extract date and time of the FF file from its name
-    ff_name = ff_name.split('_')
-
-    year = int(ff_name[1][0:4])
-    month = int(ff_name[1][4:6])
-    day = int(ff_name[1][6:8])
-
-    hour = int(ff_name[2][0:2])
-    minute = int(ff_name[2][2:4])
-    second = int(ff_name[2][4:6])
-    millisecond = int(ff_name[3])
-
-    # Convert to datetime
-    dt_obj = datetime.datetime(year, month, day, hour, minute, second, millisecond*1000)
-
-    # Time in seconds from the middle of the FF file
-    middle_diff = datetime.timedelta(seconds=ff_frames/2.0/fps)
-
-    # Add the difference in time
-    dt_obj = dt_obj + middle_diff
-
-    # Unpack datetime to individual values
-    year, month, day, hour, minute, second, microsecond = (dt_obj.year, dt_obj.month, dt_obj.day, dt_obj.hour, 
-        dt_obj.minute, dt_obj.second, dt_obj.microsecond)
-
-    if ret_milliseconds:
-        return (year, month, day, hour, minute, second, microsecond/1000)
-    else:
-        return (year, month, day, hour, minute, second, microsecond)
-
-
 def hourDifferenceFF(ff_name, platepar_datetime, fps):
     """ Calculate the difference in hours from the middle time of the FF file and the time in the platepar. 
     """
 
     # Get the FF file middle time of integration
-    ff_time_middle = datetime.datetime(*getMiddleTimeFF(ff_name, fps, ret_milliseconds=False))
+    ff_time_middle = datetime.datetime(*FFbin.getMiddleTimeFF(ff_name, fps, ret_milliseconds=False))
 
     # Get the difference in hours between the platepar and the FF middle time
     time_diff = ff_time_middle - platepar_datetime
@@ -104,7 +65,7 @@ def starsXY2RaDec(ff_name, star_list, platepar, fps, UT_corr):
         """
 
     # Get the middle time of the FF file
-    ff_time_middle = getMiddleTimeFF(ff_name, fps)
+    ff_time_middle = FFbin.getMiddleTimeFF(ff_name, fps)
 
     # Split the star list into columns
     y_data, x_data, bg_levels, level_data = np.hsplit(star_list, 4)

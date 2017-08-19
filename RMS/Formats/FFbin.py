@@ -170,6 +170,46 @@ def filenameToDatetime(file_name):
 
 
 
+def getMiddleTimeFF(ff_name, fps, ret_milliseconds=True, ff_frames=256):
+    """ Converts a CAMS format FF file name to datetime object of its recording time. 
+
+    @param ff_name: [str] name of the CAMS format FF file
+
+    @return [datetime obj] moment of the file recording start
+    """
+
+    # Extract date and time of the FF file from its name
+    ff_name = ff_name.split('_')
+
+    year = int(ff_name[1][0:4])
+    month = int(ff_name[1][4:6])
+    day = int(ff_name[1][6:8])
+
+    hour = int(ff_name[2][0:2])
+    minute = int(ff_name[2][2:4])
+    second = int(ff_name[2][4:6])
+    millisecond = int(ff_name[3])
+
+    # Convert to datetime
+    dt_obj = datetime.datetime(year, month, day, hour, minute, second, millisecond*1000)
+
+    # Time in seconds from the middle of the FF file
+    middle_diff = datetime.timedelta(seconds=ff_frames/2.0/fps)
+
+    # Add the difference in time
+    dt_obj = dt_obj + middle_diff
+
+    # Unpack datetime to individual values
+    year, month, day, hour, minute, second, microsecond = (dt_obj.year, dt_obj.month, dt_obj.day, dt_obj.hour, 
+        dt_obj.minute, dt_obj.second, dt_obj.microsecond)
+
+    if ret_milliseconds:
+        return (year, month, day, hour, minute, second, microsecond/1000)
+    else:
+        return (year, month, day, hour, minute, second, microsecond)
+
+
+
 def validName(ff_file):
     """ Checks if the given file is an FF bin file. """
 
