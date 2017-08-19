@@ -14,31 +14,41 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import print_function, division, absolute_import
 
-
+import os
 import datetime
 import git
 
 import numpy as np
 
 
-def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_code, fps):
+def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_code, fps, calibration=None,
+    celestial_coords_given=False):
     """ Writes a FTPdetectinfo file from the list of detected meteors. 
+    
+    Arguments:
+        meteor_list: [list] a list of meteor data, entries: 
+            ff_name, meteor_No, rho, theta, centroids
+        ff_directory: [str] path to the directory in which the file will be written
+        file_name: [str] file name of the file in which the data will be written
+        cal_directory: [str] path to the CAL directory (optional, used only in CAMS processing)
+        cam_code: [int] camera number
+        fps: [float] frames per second of the camera
 
-    @param meteor_list: [list] a list of meteor data, entries: 
-        ff_name, meteor_No, rho, theta, centroids
-    @param ff_directory: [str] path to the directory in which the file will be written
-    @param file_name: [str] file name of the file in which the data will be written
-    @param cal_directory: [str] path to the CAL directory (optional, used only in CAMS processing)
-    @param cam_code: [int] camera number
-    @param fps: [float] frames per second of the camera
+    Keyword arguments:
+        calibration: [str] String to write when the data is calibrated. None by default, which will write 
+            'Uncalibrated' in the file.
+        celestial_coords_given: [bool] If True, meteor picks in meteor_list should contain (frame, x, y, ra, 
+            dec, azim, elev, intens), if False it should contain (frame, x, y, intens).
 
-    @return None
+    Return:
+        None
     """
 
 
     # Open a file
-    with open(file_name, 'w') as ftpdetect_file:
+    with open(os.path.join(ff_directory, file_name), 'w') as ftpdetect_file:
 
         try:
             # Get latest version's commit hash and time of commit
@@ -74,15 +84,18 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
 
             ftpdetect_file.write("-------------------------------------------------------\n")
             ftpdetect_file.write(ff_name + "\n")
-            ftpdetect_file.write("Uncalibrated" + "\n")
+            if calibration is not None:
+                ftpdetect_file.write(calibration + "\n")
+            else:
+                ftpdetect_file.write("Uncalibrated" + "\n")
 
             # Calculate meteor's angular velocity
             first_centroid = centroids[0]
-            last_centroid = centroids[-1]
-            frame1, x1, y1, _ = first_centroid
-            frame2, x2, y2, _ = last_centroid
+            last_centroid  = centroids[-1]
+            frame1, x1, y1 = first_centroid[:3]
+            frame2, x2, y2 = last_centroid[:3]
 
-            ang_vel = np.sqrt((x2 - x1)**2 + (y2 - y1)**2) / float(frame2 - frame1)
+            ang_vel = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)/float(frame2 - frame1)
 
             # Write detection header
             ftpdetect_file.write(str(cam_code).zfill(4) + " " + str(meteor_No).zfill(4) + " " + 
@@ -92,29 +105,118 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
 
             # Write individual detection points
             for line in centroids:
-                frame, x, y, level = line
 
-                ftpdetect_file.write("{:06.1f} {:07.2f} {:07.2f}".format(frame, round(x, 2), round(y, 2)) + 
-                    " 000.00 000.00 000.00 000.00 " + "{:06d}".format(int(level)) + "\n")
+                if celestial_coords_given:
+                    frame, x, y, ra, dec, azim, elev, level = line
+
+                    ftpdetect_file.write("{:06.1f} {:07.2f} {:07.2f} {:08.4f} {:+08.4f} {:08.4f} {:+08.4f} {:06d}".format(frame, round(x, 2), \
+                        round(y, 2), round(ra, 4), round(dec, 4), round(azim, 4), round(elev, 4), \
+                        int(level)) + "\n")
+
+                else:
+                    frame, x, y, level = line
+
+                    ftpdetect_file.write("{:06.1f} {:07.2f} {:07.2f}".format(frame, round(x, 2), 
+                        round(y, 2)) + " 000.00 000.00 000.00 000.00 " + "{:06d}".format(int(level)) + "\n")
+
+
+
+def readFTPdetectinfo(ff_directory, file_name):
+    """ Read the CAMS format FTPdetectinfo file. 
+
+    Arguments:
+        ff_directory: [str] Directory where the FTPdetectinfo file is.
+        file_name: [str] Name of the FTPdetectinfo file.
+
+
+    """
+
+    ff_name = ''
+
+
+    # Open the FTPdetectinfo file
+    with open(os.path.join(ff_directory, file_name)) as f:
+
+        entry_counter = 0
+        meteor_list = []
+        meteor_meas = []
+        cam_code = meteor_No = n_segments = fps = hnr = mle = binn = px_fm = rho = phi = None
+
+        # Skip the header
+        for i in range(11):
+            next(f)
+
+
+        for line in f:
+            
+            line = line.replace('\n', '').replace('\r', '')
+
+
+            # The separator marks the beginning of a new meteor
+            if "-------------------------------------------------------" in line:
+
+                # Add the read meteor info to the final list
+                if meteor_meas:
+                    meteor_list.append([ff_name, cam_code, meteor_No, n_segments, fps, hnr, mle, binn, px_fm, 
+                        rho, phi, meteor_meas])
+
+                # Reset the line counter to 0
+                entry_counter = 0
+                meteor_meas = []
+
+
+            # Read the name of the FF file
+            if entry_counter == 1:
+                ff_name = line
+
+            # Read the meteor parameters
+            if entry_counter == 3:
+                cam_code, meteor_No, n_segments, fps, hnr, mle, binn, px_fm, rho, phi = line.split()
+                meteor_No, n_segments, fps, hnr, mle, binn, px_fm, rho, phi = list(map(float, [meteor_No, n_segments, fps, hnr, mle, binn, px_fm, rho, phi]))
+
+            # Read meteor measurements
+            if entry_counter > 3:
+                frame_n, x, y, ra, dec, azim, elev, inten = list(map(float, line.split()))
+                meteor_meas.append([frame_n, x, y, ra, dec, azim, elev, inten])
+
+            entry_counter += 1
+
+
+        # Add the last entry to the list
+        if meteor_meas:
+            meteor_list.append([ff_name, cam_code, meteor_No, n_segments, fps, hnr, mle, binn, px_fm, 
+                rho, phi, meteor_meas])
+
+
+        return meteor_list
+
 
 
 
 # Test
 if __name__ == '__main__':
-    meteor_list = [["FF453_20160419_184117_248_0020992.bin", 1, 271.953268044, 8.13010235416,
-    [[ 124.5      ,   665.44095949,  235.00000979,  101.        ],
-     [ 128.       ,   665.60121632,  235.9999914 ,  119.        ],
-     [ 137.5      ,   666.54497978,  237.00000934,  195.        ],
-     [ 151.5      ,   664.52378186,  238.99999005,  120.        ],
-     [ 152.5      ,   666.        ,  239.        ,  47.        ]]]]
+    # meteor_list = [["FF453_20160419_184117_248_0020992.bin", 1, 271.953268044, 8.13010235416,
+    # [[ 124.5      ,   665.44095949,  235.00000979,  101.        ],
+    #  [ 128.       ,   665.60121632,  235.9999914 ,  119.        ],
+    #  [ 137.5      ,   666.54497978,  237.00000934,  195.        ],
+    #  [ 151.5      ,   664.52378186,  238.99999005,  120.        ],
+    #  [ 152.5      ,   666.        ,  239.        ,  47.        ]]]]
 
-    file_name = 'FTPdetect_test.txt'
-    ff_directory = 'here'
-    cal_directory = 'there'
-    cam_code = 450
-    fps = 25
+    # file_name = 'FTPdetect_test.txt'
+    # ff_directory = 'here'
+    # cal_directory = 'there'
+    # cam_code = 450
+    # fps = 25
 
-    makeFTPdetectinfo(meteor_list, file_name, ff_directory, cal_directory, cam_code, fps)
+    # writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_code, fps)
+
+
+    dir_path = "C:\\Users\\delorayn1\\Desktop\\20170813_213506_620678"
+    file_name = "FTPdetectinfo_20170813_213506_620678.txt"
+
+    meteor_list = readFTPdetectinfo(dir_path, file_name)
+
+    print(meteor_list)
 
             
 

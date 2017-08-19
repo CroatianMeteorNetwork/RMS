@@ -1273,7 +1273,7 @@ if __name__ == "__main__":
     results_file.close()
 
 
-    ftpdetectinfo_name = os.path.join(results_path, 'FTPdetectinfo_' + results_name + '.txt')
+    ftpdetectinfo_name = 'FTPdetectinfo_' + results_name + '.txt'
 
     # Write FTPdetectinfo file
     FTPdetectinfo.writeFTPdetectinfo(results_list, results_path, ftpdetectinfo_name, results_path, 

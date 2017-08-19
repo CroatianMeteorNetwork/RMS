@@ -1,5 +1,6 @@
 
 
+from __future__ import print_function, absolute_import, division
 
 import time
 import datetime
@@ -243,16 +244,16 @@ def solutionEvaluation(transformation_parameters, rot_param, platepar, catalog_s
         # Calculate bearing
         mean_bearing = calcBearing(0, 0, np.mean(ra_mean_list), np.mean(dec_mean_list))
 
-        print 'Evaluation: ', evaluation_sum
-        print 'Separation and bearing: ', mean_separation, mean_bearing
-        print 'RA: ', np.mean(ra_mean_list), np.mean(ra_std_list)
-        print 'Dec: ', np.mean(dec_mean_list), np.mean(dec_std_list)
-        print 'Rotation:', rot_param
+        print('Evaluation: ', evaluation_sum)
+        print('Separation and bearing: ', mean_separation, mean_bearing)
+        print('RA: ', np.mean(ra_mean_list), np.mean(ra_std_list))
+        print('Dec: ', np.mean(dec_mean_list), np.mean(dec_std_list))
+        print('Rotation:', rot_param)
 
         return evaluation_sum, mean_separation, mean_bearing, rot_param
 
     else:
-        print 'NaN, skipping this iteration'
+        print('NaN, skipping this iteration')
         return 999, np.nan, np.nan, np.nan
 
 
@@ -295,9 +296,9 @@ def findCorrectionDirection(platepar, catalog_stars, calstars_list, fps, UT_corr
         return None, None, None, None
 
 
-    print 'Best values: '
-    print 'EVAL, SEP, ANGLE, ROT'
-    print best_evaluation[min_ind], best_separations[min_ind], best_angles[min_ind], best_rotations[min_ind]
+    print('Best values: ')
+    print('EVAL, SEP, ANGLE, ROT')
+    print(best_evaluation[min_ind], best_separations[min_ind], best_angles[min_ind], best_rotations[min_ind])
 
     return best_evaluation[min_ind], best_separations[min_ind], best_angles[min_ind], best_rotations[min_ind]
 
@@ -382,8 +383,8 @@ def photometryFit(matched_list):
 
     # TESTING ###########
     for i, ff_stars in enumerate(matched_list):
-        print '------------------'
-        print 'Image: ', i+1
+        print('------------------')
+        print('Image: ', i+1)
 
         ra_cat, dec_cat, mag_cat, ra_img, dec_img, level_img = ff_stars
 
@@ -399,7 +400,7 @@ def photometryFit(matched_list):
     # Fit the magnitude relation curve
     popt, pcov = curve_fit(_stellarMagnitude, levels_data, magnitude_data)
 
-    print popt
+    print(popt)
 
     x_level_test = np.linspace(50, 10000, 100)
 
@@ -451,11 +452,11 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
             if n_stars_on_image >= config.min_matched_stars:
                 n_stars += n_stars_on_image
 
-        print n_stars
+        print(n_stars)
 
         # Declare the procedure unsuccessfull if the minimum number of stars cannot be reached
         if n_stars == n_stars_prev:
-            print 'Not enough stars for calibration!'
+            print('Not enough stars for calibration!')
             sys.exit()
             # return False
 
@@ -507,7 +508,7 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
         # Check if no good solutions were found
         if evaluation == None:
             
-            print 'No good solutions were found, the astrometry procedure failed!'     
+            print('No good solutions were found, the astrometry procedure failed!')
             return False   
 
 
@@ -520,14 +521,14 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
             # Shrink the star search radius
             stars_NN_radius = stars_NN_radius/np.sqrt(2)
 
-            print 'NEW CENTER'
-            print platepar.RA_d, platepar.dec_d
-            print platepar.pos_angle_ref
-            print '--------'
+            print('NEW CENTER')
+            print(platepar.RA_d, platepar.dec_d)
+            print(platepar.pos_angle_ref)
+            print('--------')
 
         else:
             evaluation = previous_evaluation*1.2
-            print 'No solution is acceptable!'
+            print('No solution is acceptable!')
 
             # Widen the parameter search range
             stars_NN_radius *= 2
@@ -590,7 +591,7 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
     # Run SIMPLEX parameter refining
     res = minimize(refineSoluton, initial_parameters, method='Nelder-Mead', options={'xtol': 1e-4, 'disp': True})
 
-    print res.x
+    print(res.x)
 
     # Update platepar with simplex results for Ra and Dec
     platepar.x_poly = res.x
@@ -604,7 +605,7 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
     # Run SIMPLEX parameter refining
     res = minimize(refineSoluton, initial_parameters, method='Nelder-Mead', options={'xtol': 1e-4, 'disp': True})
 
-    print res.x
+    print(res.x)
 
     # Update platepar with simplex results for Ra and Dec
     platepar.y_poly = res.x
@@ -619,22 +620,22 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
     C2, m2 = photometryFit(matched_list)
 
 
-    print 'FINAL RESULTS:'
-    print platepar.RA_d, platepar.dec_d
-    print platepar.pos_angle_ref
-    print platepar.x_poly
-    print platepar.y_poly
+    print('FINAL RESULTS:')
+    print(platepar.RA_d, platepar.dec_d)
+    print(platepar.pos_angle_ref)
+    print(platepar.x_poly)
+    print(platepar.y_poly)
 
-    print 'Photometry parameters: ', C2, m2
+    print('Photometry parameters: ', C2, m2)
 
     # Calculate the number of used stars
     n_stars = 0
     for star_list in catalog_matched_stars.itervalues():
         n_stars += len(star_list)
 
-    print 'Number of stars used: ', n_stars
+    print('Number of stars used: ', n_stars)
 
-    print 'Total time for completion: ', time.clock() - total_time
+    print('Total time for completion: ', time.clock() - total_time)
 
     return platepar
 

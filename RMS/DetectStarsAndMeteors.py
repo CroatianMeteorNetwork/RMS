@@ -193,8 +193,7 @@ if __name__ == "__main__":
         config.width)
 
     # Generate FTPdetectinfo file name
-    ftpdetectinfo_name = os.path.join(ff_dir, 
-        'FTPdetectinfo_' + os.path.basename(ff_dir) + '.txt')
+    ftpdetectinfo_name = 'FTPdetectinfo_' + os.path.basename(ff_dir) + '.txt'
 
     # Write FTPdetectinfo file
     FTPdetectinfo.writeFTPdetectinfo(meteor_list, ff_dir, ftpdetectinfo_name, ff_dir, 

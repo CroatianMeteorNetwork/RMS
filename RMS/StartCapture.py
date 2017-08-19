@@ -309,8 +309,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False):
             config.width)
 
         # Generate FTPdetectinfo file name
-        ftpdetectinfo_name = os.path.join(night_data_dir, 
-            'FTPdetectinfo_' + os.path.basename(night_data_dir) + '.txt')
+        ftpdetectinfo_name = 'FTPdetectinfo_' + os.path.basename(night_data_dir) + '.txt'
 
         # Write FTPdetectinfo file
         FTPdetectinfo.writeFTPdetectinfo(meteor_list, night_data_dir, ftpdetectinfo_name, night_data_dir, 

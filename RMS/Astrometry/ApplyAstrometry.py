@@ -25,11 +25,18 @@
 
 from __future__ import print_function, division, absolute_import
 
+import os
+import sys
 import math
+import datetime
+import shutil
+
 import numpy as np
 
 from RMS.Astrometry.Conversions import date2JD, datetime2JD
-
+from RMS.Formats.Platepar import PlateparCMN
+from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
+from RMS.Formats.FFbin import filenameToDatetime as filenameToDatetimeFF
 
 
 def applyFieldCorrection(x_poly, y_poly, X_res, Y_res, F_scale, X_data, Y_data, level_data):
@@ -469,39 +476,143 @@ def raDecToXY(RA_data, dec_data, RA_d, dec_d, jd, ref_jd, rot_param, F_scale):
 
 
 
+def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, UT_corr=0):
+    """ Use the given platepar to calculate the celestial coordinates of detected meteors from a FTPdetectinfo
+        file and save the updates values.
 
-if __name__ == "__main__":
+    Arguments:
+        dir_path: [str] Path to the night.
+        ftp_detectinfo_file: [str] Name of the FTPdetectinfo file.
+        platepar_file: [str] Name of the platepar file.
 
-    from RMS.Formats.Platepar import PlateparCMN
-    from RMS.Astrometry.AstrometryCheckFit import getMiddleTimeFF
+    Keyword arguments:
+        UT_corr: [float] Difference of time from UTC in hours.
+
+    Return:
+        None
+    """
+
+    # Save a copy of the uncalibrated FTPdetectinfo
+    ftp_detectinfo_copy = "".join(ftp_detectinfo_file.split('.')[:-1]) + "_uncalibrated.txt"
+    shutil.copy2(os.path.join(dir_path, ftp_detectinfo_file), os.path.join(dir_path, ftp_detectinfo_copy))
 
     # Load the platepar
     platepar = PlateparCMN()
-    platepar.read("C:\\Users\\delorayn1\\Desktop\\20170813_213506_620678\\platepar_cmn2010.cal")
+    platepar.read(os.path.join(dir_path, platepar_file))
 
-    time = getMiddleTimeFF('FF100_20170813_213508_532_0000000.bin', 25)
+    # Load the FTPdetectinfo file
+    meteor_data = readFTPdetectinfo(dir_path, ftp_detectinfo_file)
 
-    # Deneb
-    star_x = 281.14
-    star_y = 57.97
+    # List for final meteor data
+    meteor_list = []
 
-    # # Vega
-    # star_x = 546.27
-    # star_y = 54.74
+    # Go through every meteor
+    for meteor in meteor_data:
 
-    jd, ra, dec, mag = XY2CorrectedRADec([time], [star_x], [star_y], [0], 0, platepar.lat, platepar.lon, platepar.Ho, platepar.X_res, platepar.Y_res, platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale, platepar.w_pix, platepar.mag_0, platepar.mag_lev, platepar.x_poly, platepar.y_poly)
+        ff_name, cam_code, meteor_No, n_segments, fps, hnr, mle, binn, px_fm, rho, phi, meteor_meas = meteor
 
-    ra_h = int(ra/15)
-    ra_min = int((ra/15 - ra_h)*60)
-    ra_sec = ((ra/15 - ra_h)*60 - ra_min)*60
+        meteor_meas = np.array(meteor_meas)
 
-    dec_d = int(dec)
-    dec_min = int((dec - dec_d)*60)
-    dec_sec = ((dec - dec_d)*60 - dec_min)*60
+        # Extract frame number, x, y, intensity
+        frames = meteor_meas[:, 0]
+        X_data = meteor_meas[:, 1]
+        Y_data = meteor_meas[:, 2]
+        level_data = meteor_meas[:, 7]
+
+        # Get the beginning time of the FF file
+        time_beg = filenameToDatetimeFF(ff_name)
+
+        # Calculate time data of every point
+        time_data = []
+        for frame_n in frames:
+            t = time_beg + datetime.timedelta(seconds=frame_n/fps)
+            time_data.append([t.year, t.month, t.day, t.hour, t.minute, t.second, int(t.microsecond/1000)])
+
+        # Apply field correction
+        X_corrected, Y_corrected, levels_corrected = applyFieldCorrection(platepar.x_poly, platepar.y_poly, \
+            platepar.X_res, platepar.Y_res, platepar.F_scale, X_data, Y_data, level_data)
+
+        # Convert XY image coordinates to azimuth and altitude
+        az_data, alt_data = XY2altAz(platepar.lat, platepar.lon, platepar.RA_d, platepar.dec_d, platepar.Ho, \
+            platepar.pos_angle_ref, X_corrected, Y_corrected)
+
+        # Convert azimuth and altitude data to right ascension and declination
+        JD_data, RA_data, dec_data = altAz2RADec(platepar.lat, platepar.lon, UT_corr, time_data, az_data, 
+            alt_data)
+
+        # Construct the meteor measurements array
+        meteor_picks = np.c_[frames, X_data, Y_data, RA_data, dec_data, az_data, alt_data, levels_corrected]
+
+        # Add the calculated values to the final list
+        meteor_list.append([ff_name, meteor_No, rho, phi, meteor_picks])
 
 
-    print(ra_h, ra_min, ra_sec)
-    print(dec_d, dec_min, dec_sec)
+    # Calibration string to be written to the FTPdetectinfo file
+    calib_str = 'Calibrated with RMS on: ' + str(datetime.datetime.now())
+
+    # Save the updated FTPdetectinfo
+    writeFTPdetectinfo(meteor_list, dir_path, ftp_detectinfo_file, dir_path, cam_code, fps, 
+        calibration=calib_str, celestial_coords_given=True)
+
+
+
+
+
+if __name__ == "__main__":
+
+    # Read the path to the FTPdetectinfo file
+    if not len(sys.argv) == 2:
+        print("Usage: python -m RMS.Astrometry.ApplyAstrometry /path/to/FTPdetectinfo.txt")
+        sys.exit()
+
+
+    # Extract the directory path
+    dir_path, ftp_detectinfo_file = os.path.split(os.path.abspath(sys.argv[1]))
+
+    # Find the platepar file
+    platepar_file = None
+    for file_name in os.listdir(dir_path):
+        if 'platepar' in file_name:
+            platepar_file = file_name
+            break
+
+    if platepar_file is None:
+        print('ERROR! Could not find the platepar file!')
+        sys.exit()
+
+
+    # Apply the astrometry to the given FTPdetectinfo file
+    applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file)
+
+
+    # # Load the platepar
+    # platepar = PlateparCMN()
+    # platepar.read("C:\\Users\\delorayn1\\Desktop\\20170813_213506_620678\\platepar_cmn2010.cal")
+
+    # from RMS.Astrometry.AstrometryCheckFit import getMiddleTimeFF
+    # time = getMiddleTimeFF('FF100_20170813_213508_532_0000000.bin', 25)
+
+    # # Deneb
+    # star_x = 281.14
+    # star_y = 57.97
+
+    # # # Vega
+    # # star_x = 546.27
+    # # star_y = 54.74
+
+    # jd, ra, dec, mag = XY2CorrectedRADec([time], [star_x], [star_y], [0], 0, platepar.lat, platepar.lon, platepar.Ho, platepar.X_res, platepar.Y_res, platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale, platepar.w_pix, platepar.mag_0, platepar.mag_lev, platepar.x_poly, platepar.y_poly)
+
+    # ra_h = int(ra/15)
+    # ra_min = int((ra/15 - ra_h)*60)
+    # ra_sec = ((ra/15 - ra_h)*60 - ra_min)*60
+
+    # dec_d = int(dec)
+    # dec_min = int((dec - dec_d)*60)
+    # dec_sec = ((dec - dec_d)*60 - dec_min)*60
+
+
+    # print(ra_h, ra_min, ra_sec)
+    # print(dec_d, dec_min, dec_sec)
 
 
 
