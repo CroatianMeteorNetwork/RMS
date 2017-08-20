@@ -1,3 +1,8 @@
+""" Reading the Bright Star Catalog. """
+
+
+from __future__ import print_function, division, absolute_import
+
 import os
 import numpy as np
 
