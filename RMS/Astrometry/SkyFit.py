@@ -44,6 +44,8 @@ import scipy.optimize
 import matplotlib
 import matplotlib.pyplot as plt
 
+import cv2
+
 import RMS.Formats.BSC as BSC
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import PlateparCMN
@@ -53,6 +55,7 @@ from RMS.Formats.FFbin import getMiddleTimeFF
 import RMS.ConfigReader as cr
 from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADec
 from RMS.Astrometry.Conversions import date2JD
+from RMS.Routines.Image import adjustLevels
 
 
 class FOVinputDialog(object):
@@ -129,6 +132,8 @@ class PlateTool(object):
 
         self.catalog_stars_visible = True
 
+        self.show_key_help = True
+
         # List of paired image and catalog stars
         self.paired_stars = []
 
@@ -138,6 +143,9 @@ class PlateTool(object):
 
         # Kwy increment
         self.key_increment = 1.0
+
+        # Image gamma
+        self.img_gamma = 1.0
 
         # Time difference from UT
         self.UT_corr = 0
@@ -412,6 +420,11 @@ class PlateTool(object):
             self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
             self.updateImage()
 
+        # Show/hide keyboard shortcut help
+        elif event.key == 'f1':
+            self.show_key_help = not self.show_key_help
+            self.updateImage()
+
         # Change image scale
         elif event.key == 'up':
 
@@ -457,7 +470,7 @@ class PlateTool(object):
 
 
         # Show/hide catalog stars
-        if event.key == 'h':
+        elif event.key == 'h':
 
             if self.catalog_stars_visible:
                 self.catalog_stars_visible = False
@@ -467,6 +480,17 @@ class PlateTool(object):
 
             self.updateImage()
 
+
+        # Increase image gamma
+        elif event.key == 'u':
+
+            # Increase image gamma by a factor of 1.1x
+            self.updateGamma(1.1)
+
+        elif event.key == 'j':
+
+            # Decrease image gamma by a factor of 0.9x
+            self.updateGamma(0.9)
 
 
         # Change modes from astrometry parameter changing to star picking
@@ -614,8 +638,13 @@ class PlateTool(object):
         # Load the FF from the current file
         self.current_ff = readFF(self.dir_path, self.current_ff_file)
 
+        img_data = self.current_ff.maxpixel
+
+        # Adjust image levels
+        img_data = adjustLevels(img_data, 0, self.img_gamma, (2**self.config.bit_depth -1), self.config.bit_depth)
+
         # Show the loaded maxpixel
-        plt.imshow(self.current_ff.maxpixel, cmap='gray')
+        plt.imshow(img_data, cmap='gray')
 
         # Draw stars that were paired in picking mode
         self.drawPairedStars()
@@ -663,32 +692,42 @@ class PlateTool(object):
             plt.gca().text(self.current_ff.ncols/2, self.current_ff.nrows - 10, text_str, color='r', 
                 verticalalignment='top', horizontalalignment='center', fontsize=8)
 
-        # Show text on image with platepar parameters
-        text_str  = self.current_ff_file + '\n\n'
-        text_str += 'RA  = {:.3f}\n'.format(self.platepar.RA_d)
-        text_str += 'Dec = {:.3f}\n'.format(self.platepar.dec_d)
-        text_str += 'PA  = {:.3f}\n'.format(self.platepar.pos_angle_ref)
-        text_str += 'F_scale = {:.3f}\n'.format(self.platepar.F_scale)
-        text_str += 'Lim mag = {:.1f}\n'.format(self.cat_lim_mag)
-        text_str += 'Increment = {:.3}\n'.format(self.key_increment)
-        plt.gca().text(10, 10, text_str, color='w', verticalalignment='top', horizontalalignment='left', 
-            fontsize=8)
+        if self.show_key_help:
+            # Show text on image with platepar parameters
+            text_str  = self.current_ff_file + '\n\n'
+            text_str += 'RA  = {:.3f}\n'.format(self.platepar.RA_d)
+            text_str += 'Dec = {:.3f}\n'.format(self.platepar.dec_d)
+            text_str += 'PA  = {:.3f}\n'.format(self.platepar.pos_angle_ref)
+            text_str += 'F_scale = {:.3f}\n'.format(self.platepar.F_scale)
+            text_str += 'Lim mag = {:.1f}\n'.format(self.cat_lim_mag)
+            text_str += 'Increment = {:.3}\n'.format(self.key_increment)
+            text_str += 'Img Gamma = {:.2}\n'.format(self.img_gamma)
+            plt.gca().text(10, 10, text_str, color='w', verticalalignment='top', horizontalalignment='left', 
+                fontsize=8)
 
-        # Show text on image with instructions
-        text_str  = 'Keys:\n'
-        text_str += 'RA  - A/D\n'
-        text_str += 'Dec - S/W\n'
-        text_str += 'PA  - Q/E\n'
-        text_str += 'F_scale - Up/Down\n'
-        text_str += 'Lim mag - R/F\n'
-        text_str += 'Increment - +/-\n'
-        text_str += 'Hide/show catalog stars - H\n'
-        text_str += 'FOV centre - V\n'
-        text_str += 'Pick stars - CTRL + R\n'
-        text_str += 'New platepar - CTRL + N\n'
-        text_str += 'Save platepar - CTRL + S\n'
-        plt.gca().text(10, self.current_ff.nrows - 10, text_str, color='w', verticalalignment='bottom', 
-            horizontalalignment='left', fontsize=8)
+            # Show text on image with instructions
+            text_str  = 'Keys:\n'
+            text_str += 'RA  - A/D\n'
+            text_str += 'Dec - S/W\n'
+            text_str += 'PA  - Q/E\n'
+            text_str += 'F_scale - Up/Down\n'
+            text_str += 'Lim mag - R/F\n'
+            text_str += 'Increment - +/-\n'
+            text_str += 'Img Gamma - U/J\n'
+            text_str += 'Hide/show catalog stars - H\n'
+            text_str += 'FOV centre - V\n'
+            text_str += 'Pick stars - CTRL + R\n'
+            text_str += 'New platepar - CTRL + N\n'
+            text_str += 'Save platepar - CTRL + S\n'
+            text_str += 'Hide keyboard shortcuts - F1\n'
+            plt.gca().text(10, self.current_ff.nrows - 5, text_str, color='w', verticalalignment='bottom', 
+                horizontalalignment='left', fontsize=8)
+
+        else:
+            text_str = 'Show keyboard shortcuts - F1'
+
+            plt.gca().text(10, self.current_ff.nrows, text_str, color='w', verticalalignment='bottom', 
+                horizontalalignment='left', fontsize=8)
 
         plt.gcf().canvas.draw()
 
@@ -704,6 +743,18 @@ class PlateTool(object):
         y, x, _, _ = np.array(star_data).T
 
         plt.scatter(x, y, edgecolors='g', marker='o', facecolors='none')
+
+
+    def updateGamma(self, gamma_adj_factor):
+        """ Change the image gamma by a given factor. """
+
+        self.img_gamma *= gamma_adj_factor
+
+        # Make sure gamma is in the proper range
+        if self.img_gamma < 0.1: self.img_gamma = 0.1
+        if self.img_gamma > 10: self.img_gamma = 10
+
+        self.updateImage()
 
 
 
