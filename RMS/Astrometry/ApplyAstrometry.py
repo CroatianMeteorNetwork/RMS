@@ -392,12 +392,8 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, UT_corr, lat, lon, 
     X_corrected, Y_corrected, levels_corrected = applyFieldCorrection(x_poly, y_poly, X_res, Y_res, F_scale, 
         X_data, Y_data, level_data)
 
-    print(X_corrected, Y_corrected)
-
     # Convert XY image coordinates to azimuth and altitude
     az_data, alt_data = XY2altAz(lat, lon, RA_d, dec_d, Ho, rot_param, X_corrected, Y_corrected)
-
-    print(az_data, alt_data)
 
     # Convert azimuth and altitude data to right ascension and declination
     JD_data, RA_data, dec_data = altAz2RADec(lat, lon, UT_corr, time_data, az_data, alt_data)
