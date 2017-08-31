@@ -16,7 +16,8 @@ You can see out Hackaday project web-page for more info: https://hackaday.io/pro
 This guide will assume basic knowledge of electronics, the Unix environment, and some minor experience with the Raspberry Pi platform itself.
 
 ### Hardware
-This code was designed to work with specific hardware, not because we wanted it so, but because only a unique combination of hardware will work at all. Thus, it is recommended that you follow the list as closely as possible. You can find a step-by-step guide how to assemble the hardware and install the software on Instructables: http://www.instructables.com/id/Raspberry-Pi-Meteor-Station/
+This code was designed to work with specific hardware, not because we wanted it so, but because only a unique combination of hardware will work at all. Thus, it is recommended that you follow the list as closely as possible. 
+You can find a **step-by-step guide how to assemble the hardware and install the software on Instructables**: http://www.instructables.com/id/Raspberry-Pi-Meteor-Station/
 
 1. **Raspberry Pi 2 or Raspberry Pi 3 single-board computer.**
 The first version of the system was developed on the Raspberry Pi 2, while the system is now being tested on the RPi3, which is what we recommend you use, as it provides much more computing power. The system will NOT work with Raspberry Pi 1.
