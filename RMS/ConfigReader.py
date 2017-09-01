@@ -464,14 +464,18 @@ def parseMeteorDetection(config, parser):
     
     # Read in the KHT library path for both the PC and the RPi, but decide which one to take based on the 
     # system this is running on
+    rpi_kht_lib_path = None
+    linux_pc_kht_lib_path = None
+    win_pc_kht_lib_path = None
+    
     if parser.has_option(section, "rpi_kht_lib_path"):
-         rpi_kht_lib_path = parser.get(section, "rpi_kht_lib_path")
+        rpi_kht_lib_path = parser.get(section, "rpi_kht_lib_path")
 
     if parser.has_option(section, "linux_pc_kht_lib_path"):
-         linux_pc_kht_lib_path = parser.get(section, "linux_pc_kht_lib_path")
+        linux_pc_kht_lib_path = parser.get(section, "linux_pc_kht_lib_path")
 
     if parser.has_option(section, "win_pc_kht_lib_path"):
-         win_pc_kht_lib_path = parser.get(section, "win_pc_kht_lib_path")
+        win_pc_kht_lib_path = parser.get(section, "win_pc_kht_lib_path")
 
     config.kht_lib_path = choosePlatform(win_pc_kht_lib_path, rpi_kht_lib_path, linux_pc_kht_lib_path)
 
