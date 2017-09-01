@@ -301,6 +301,8 @@ def parseBuildArgs(config, parser):
 
     if parser.has_option(section, "win_pc_weave"):
          win_pc_weave = parser.get(section, "win_pc_weave").split()
+    else:
+        win_pc_weave = None
 
     # Read in the KHT library path for both the PC and the RPi, but decide which one to take based on the 
     # system this is running on
