@@ -33,6 +33,9 @@ class ff_struct:
         self.nbits = 0
         self.first = 0
         self.camno = 0
+
+        self.nframes = 0
+        self.fps = 0
         
         self.maxpixel = None
         self.maxframe = None
@@ -40,17 +43,39 @@ class ff_struct:
         self.stdpixel = None
         
         self.array = None
+
+
+    def __repr__(self):
+
+        out  = ''
+        out += 'N rows: {:d}\n'.format(self.nrows)
+        out += 'N cols: {:d}\n'.format(self.ncols)
+        out += 'N bits: {:d}\n'.format(self.nbits)
+        out += 'First frame: {:d}\n'.format(self.first)
+        out += 'Camera ID: {:d}\n'.format(self.camno)
+
+        out += 'N frames: {:d}\n'.format(self.nframes)
+        out += 'FPS: {:d}\n'.format(self.fps)
+
+        return out
+
+
         
 
 
 def read(directory, filename, array=False):
-    """ Read FF*.bin file from specified directory.
+    """ Read FF*.bin file from the specified directory.
     
-    @param directory: [str] path to directory containing file
-    @param filename: [str] name of FF*.bin file (either with FF and extension or without)
-    @param array: [ndarray] True in order to populate structure's array element (default is False)
+    Arguments:
+        directory: [str] Path to directory containing file
+        filename: [str] Name of FF*.bin file (either with FF and extension or without)
 
-    @return [ff structure]
+    Keyword arguments:
+        array: [ndarray] True in order to populate structure's array element (default is False)
+    
+    Return:
+        [ff structure]
+
     """
     
     if filename[:2] == "FF":
@@ -60,37 +85,39 @@ def read(directory, filename, array=False):
 
     ff = ff_struct()
     
-    ff.nrows = int(np.fromfile(fid, dtype=np.uint32, count = 1))
-    ff.ncols = int(np.fromfile(fid, dtype=np.uint32, count = 1))
-    ff.nbits = int(np.fromfile(fid, dtype=np.uint32, count = 1))
-    ff.first = int(np.fromfile(fid, dtype=np.uint32, count = 1))
-    ff.camno = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+    ff.nrows = int(np.fromfile(fid, dtype=np.uint32, count=1))
+    ff.ncols = int(np.fromfile(fid, dtype=np.uint32, count=1))
+    ff.nbits = int(np.fromfile(fid, dtype=np.uint32, count=1))
+    ff.first = int(np.fromfile(fid, dtype=np.uint32, count=1))
+    ff.camno = int(np.fromfile(fid, dtype=np.uint32, count=1))
     
     if array:
-        N = 4 * ff.nrows * ff.ncols
+        N = 4*ff.nrows*ff.ncols
     
-        ff.array = np.reshape(np.fromfile(fid, dtype=np.uint8, count = N), (4, ff.nrows, ff.ncols))
+        ff.array = np.reshape(np.fromfile(fid, dtype=np.uint8, count=N), (4, ff.nrows, ff.ncols))
         
     else:
-        N = ff.nrows * ff.ncols
+        N = ff.nrows*ff.ncols
     
-        ff.maxpixel = np.reshape(np.fromfile(fid, dtype=np.uint8, count = N), (ff.nrows, ff.ncols))
-        ff.maxframe = np.reshape(np.fromfile(fid, dtype=np.uint8, count = N), (ff.nrows, ff.ncols))
-        ff.avepixel = np.reshape(np.fromfile(fid, dtype=np.uint8, count = N), (ff.nrows, ff.ncols))
-        ff.stdpixel = np.reshape(np.fromfile(fid, dtype=np.uint8, count = N), (ff.nrows, ff.ncols))
+        ff.maxpixel = np.reshape(np.fromfile(fid, dtype=np.uint8, count=N), (ff.nrows, ff.ncols))
+        ff.maxframe = np.reshape(np.fromfile(fid, dtype=np.uint8, count=N), (ff.nrows, ff.ncols))
+        ff.avepixel = np.reshape(np.fromfile(fid, dtype=np.uint8, count=N), (ff.nrows, ff.ncols))
+        ff.stdpixel = np.reshape(np.fromfile(fid, dtype=np.uint8, count=N), (ff.nrows, ff.ncols))
 
     return ff
 
 
 
 def write(ff, directory, filename):
-    """ Write FF*.bin structure to a file in specified directory.
-
-    @param ff: [ff bin struct] FF bin file loaded in the FF bin structure
-    @param directory: [str] path to the directory where the file will be written
-    @param filename: [str] name of the file which will be written
-
-    @return None
+    """ Write FF structure to a .bin file in the specified directory.
+    
+    Arguments:
+        ff: [ff bin struct] FF bin file loaded in the FF bin structure
+        directory: [str] path to the directory where the file will be written
+        filename: [str] name of the file which will be written
+    
+    Return:
+        None
     """
     
     if filename[:2] == "FF":
