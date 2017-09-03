@@ -55,6 +55,8 @@ class Config:
         self.fps = 25.0
 
         self.bit_depth = 8
+
+        self.ff_format = 'fits'
         
         self.fov_w = 64.0
         self.fov_h = 48.0
@@ -214,7 +216,7 @@ def parseSystem(config, parser):
         raise RuntimeError("Not configured!")
     
     try:
-        config.stationID = parser.getint(section, "stationID")
+        config.stationID = parser.get(section, "stationID")
     except NoOptionError:
         raise RuntimeError("Not configured!")
 
@@ -272,6 +274,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "fps"):
         config.fps = parser.getfloat(section, "fps")
+
+    if parser.has_option(section, "ff_format"):
+        config.ff_format = parser.get(section, "ff_format")
 
     if parser.has_option(section, "fov_w"):
         config.fov_w = parser.getfloat(section, "fov_w")

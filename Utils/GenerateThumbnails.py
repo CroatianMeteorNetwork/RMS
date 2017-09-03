@@ -28,7 +28,7 @@ import cv2
 
 
 import RMS.ConfigReader as cr
-import RMS.Formats.FFbin as FFbin
+import RMS.Formats.FFfile as FFfile
 
 
 def stackIfLighter(arr1, arr2):
@@ -69,11 +69,11 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None):
         file_list = sorted(os.listdir(dir_path))
 
 
-    # Make a list of all FF*.bin files in the night directory
+    # Make a list of all FF files in the night directory
     ff_list = []
 
     for file_name in file_list:
-        if ('FF' in file_name) and ('.bin' in file_name):
+        if FFfile.validFFName(file_name):
             ff_list.append(file_name)
 
 
@@ -98,7 +98,7 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None):
             if (i + j) < len(ff_list):
 
                 # Read maxpixel image
-                img = FFbin.read(dir_path, ff_list[i + j]).maxpixel
+                img = FFfile.read(dir_path, ff_list[i + j]).maxpixel
 
                 # Resize the image
                 img = cv2.resize(img, (bin_w, bin_h))
@@ -111,7 +111,7 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None):
 
 
         # Save the timestamp of the first image in the stack
-        timestamps.append(FFbin.filenameToDatetime(ff_list[i]))
+        timestamps.append(FFfile.filenameToDatetime(ff_list[i]))
 
         # Save the stacked image
         stacked_imgs.append(img_stack)
@@ -160,7 +160,7 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None):
 
                 # Add timestamp text
                 cv2.putText(mosaic_img, timestamps[indx].strftime('%H:%M:%S'), (text_x, text_y), \
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,255,255), 1)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
 
                 # Add the image to the mosaic
                 img_pos_x = col*bin_w

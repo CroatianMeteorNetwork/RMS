@@ -7,11 +7,11 @@ import os
 import numpy as np
 from astropy.io import fits
 
-from RMS.Formats.FFbin import ff_struct
+from RMS.Formats.FFStruct import FFStruct
 
 
 
-def read(directory, filename, _array=False):
+def read(directory, filename, array=False):
     """ Read a FF structure from a FITS file. 
     
     Arguments:
@@ -33,7 +33,7 @@ def read(directory, filename, _array=False):
         fid = open(os.path.join(directory, "FF" + filename + ".fits"), "rb")
 
     # Init an empty FF structure
-    ff = ff_struct()
+    ff = FFStruct()
 
     # Read in the FITS
     hdulist = fits.open(fid)
@@ -56,7 +56,7 @@ def read(directory, filename, _array=False):
     ff.avepixel = hdulist[3].data
     ff.stdpixel = hdulist[4].data
 
-    if _array:
+    if array:
         ff.array = np.dstack([ff.maxpixel, ff.maxframe, ff.avepixel, ff.stdpixel])
 
     # CLose the FITS file
@@ -122,7 +122,7 @@ if __name__ == "__main__":
     ht = 576
 
 
-    ff = ff_struct()
+    ff = FFStruct()
 
     ff.ncols = wid
     ff.nrows = ht

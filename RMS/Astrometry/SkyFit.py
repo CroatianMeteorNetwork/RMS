@@ -49,9 +49,9 @@ import cv2
 import RMS.Formats.BSC as BSC
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import PlateparCMN
-from RMS.Formats.FFbin import read as readFF
-from RMS.Formats.FFbin import validName as validFFName
-from RMS.Formats.FFbin import getMiddleTimeFF
+from RMS.Formats.FFfile import read as readFF
+from RMS.Formats.FFfile import validFFName
+from RMS.Formats.FFfile import getMiddleTimeFF
 import RMS.ConfigReader as cr
 from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADec
 from RMS.Astrometry.Conversions import date2JD

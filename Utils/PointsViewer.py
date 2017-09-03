@@ -2,7 +2,7 @@ import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 import sys
-from RMS.Formats import FFbin
+from RMS.Formats import FFfile
 from RMS import VideoExtraction
 import RMS.ConfigReader as cr
 
@@ -43,6 +43,6 @@ def plot(points, y_dim, x_dim):
 
 
 if __name__ == "__main__":
-    ff = FFbin.read(sys.argv[1], sys.argv[2], array=True)
+    ff = FFfile.read(sys.argv[1], sys.argv[2], array=True)
     
     view(ff)

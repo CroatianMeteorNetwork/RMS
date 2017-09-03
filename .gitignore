@@ -2,9 +2,13 @@
 *.sublime-project
 *.sublime-workspace
 
-# Recorded BIN files
+# Recorded BIN/FITS files
 FF*.bin
 FR*.bin
+FS*.bin
+FF*.fits
+FR*.fits
+FS*.fits
 
 # Eclipse
 .project

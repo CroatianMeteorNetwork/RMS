@@ -33,7 +33,7 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
         ff_directory: [str] path to the directory in which the file will be written
         file_name: [str] file name of the file in which the data will be written
         cal_directory: [str] path to the CAL directory (optional, used only in CAMS processing)
-        cam_code: [int] camera number
+        cam_code: [str] camera code
         fps: [float] frames per second of the camera
 
     Keyword arguments:

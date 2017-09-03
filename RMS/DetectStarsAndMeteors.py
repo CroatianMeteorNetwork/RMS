@@ -24,7 +24,6 @@ import logging
 
 # RMS imports
 import RMS.ConfigReader as cr
-from RMS.Formats import FFbin
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats import CALSTARS
 from RMS.ExtractStars import extractStars

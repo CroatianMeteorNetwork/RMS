@@ -27,7 +27,7 @@ import scipy.ndimage.filters as filters
 
 # RMS imports
 import RMS.ConfigReader as cr
-from RMS.Formats import FFbin
+from RMS.Formats import FFfile
 from RMS.Formats import CALSTARS
 from RMS.Routines import MaskImage
 
@@ -67,7 +67,7 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
         
 
     # Load the FF bin file
-    ff = FFbin.read(ff_dir, ff_name)
+    ff = FFfile.read(ff_dir, ff_name)
 
     # Load the mask file
     mask = MaskImage.loadMask(config.mask_file)
@@ -392,12 +392,12 @@ if __name__ == "__main__":
         #     continue
 
         # # Load the FF bin file
-        # ff = FFbin.read(ff_dir, ff_name)
+        # ff = FFfile.read(ff_dir, ff_name)
 
         # plotStars(ff, x2, y2)
 
     # Load data about the image
-    ff = FFbin.read(ff_dir, ff_name)
+    ff = FFfile.read(ff_dir, ff_name)
 
     # Generate the name for the CALSTARS file
     calstars_name = 'CALSTARS' + "{:04d}".format(int(ff.camno)) + ff_dir.split(os.sep)[-1] + '.txt'

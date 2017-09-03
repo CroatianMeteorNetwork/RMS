@@ -28,7 +28,7 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols):
 
     @param ff_directory: [str] path to the directory in which the file will be written
     @param file_name: [str] file name in which the data will be written
-    @param cam_code: [int] camera number
+    @param cam_code: [str] camera code
     @param nrows: [int] number of rows in the image
     @param ncols: [int] number of columns in the image
 

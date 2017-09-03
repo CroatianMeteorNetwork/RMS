@@ -31,7 +31,7 @@ import matplotlib.gridspec as gridspec
 from mpl_toolkits.mplot3d import Axes3D
 
 # RMS imports
-from RMS.Formats import FFbin
+from RMS.Formats import FFfile
 from RMS.Formats import FTPdetectinfo
 import RMS.ConfigReader as cr
 from RMS.Routines.Grouping3D import find3DLines, getAllPoints
@@ -914,7 +914,7 @@ def detectMeteors(ff_directory, ff_name, config):
     t_all = time()
 
     # Load the FF bin file
-    ff = FFbin.read(ff_directory, ff_name)
+    ff = FFfile.read(ff_directory, ff_name)
 
     # Load the mask file
     mask = MaskImage.loadMask(config.mask_file)

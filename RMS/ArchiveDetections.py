@@ -6,7 +6,7 @@ import os
 from RMS.Misc import archiveDir
 
 from Utils.GenerateThumbnails import generateThumbnails
-
+from RMS.Formats.FFfile import validFFName
 
 
 
@@ -62,7 +62,7 @@ def selectFiles(dir_path, ff_detected):
             # Locate the parent FF bin file
             for ff_file_name in os.listdir(dir_path):
 
-                if ('FF' in ff_file_name) and ('.bin' in ff_file_name) and (fr_id in ff_file_name):
+                if validFFName(ff_file_name) and (fr_id in ff_file_name):
                     
                     ff_match = ff_file_name
                     break

@@ -5,7 +5,7 @@ import numpy as np
 import time
 
 from RMS.Detection import thresholdImg, show
-from RMS.Formats import FFbin
+from RMS.Formats import FFfile
 
 # Import old morph
 from RMS.OLD import MorphologicalOperations as morph
@@ -24,7 +24,7 @@ head, ff_name = os.path.split(sys.argv[1])
 ff_path = os.path.abspath(head) + os.sep
 
 # Load the FF bin file
-ff = FFbin.read(ff_path, ff_name)
+ff = FFfile.read(ff_path, ff_name)
 
 img_thresh = thresholdImg(ff, 1.8, 9)
 

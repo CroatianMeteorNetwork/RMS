@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 
 import RMS.ConfigReader as cr
 from RMS.Formats.FieldIntensities import readFieldIntensitiesBin
-from RMS.Formats.FFbin import filenameToDatetime
+from RMS.Formats.FFfile import filenameToDatetime
 
 
 def plotFieldsums(dir_path, config):

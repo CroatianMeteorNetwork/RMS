@@ -16,10 +16,10 @@
 
 import cv2
 import sys, os
-from RMS.Formats import FFbin
+from RMS.Formats import FFfile
 
 if __name__ == "__main__":
-    ff = FFbin.read(sys.argv[1], sys.argv[2])
+    ff = FFfile.read(sys.argv[1], sys.argv[2])
     
     cv2.imwrite(sys.argv[2] + "_max.png", ff.maxpixel)
     cv2.imwrite(sys.argv[2] + "_frame.png", ff.maxframe) 

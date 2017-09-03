@@ -177,7 +177,7 @@ The data will be saved in /home/pi/RMS_data/YYYYMMDD_hhmmss_uuuuuu, where YYYYMM
 You can view the recorded data using the [CMN_binViewer](https://github.com/CroatianMeteorNetwork/cmn_binviewer) software.
 
 #### Viewing FR bin files (fireball detections)
-You may notice that there are some FR .bin files in the night directory (as opposed to FF .bin, which are storing the compressed video data). The FR .bin files are created by the fireball detector, which detects brighter meteors as well. To see the detection, run:
+You may notice that there are some FR files in the night directory (as opposed to FF, which are storing the compressed video data). The FR files are created by the fireball detector, which detects brighter meteors as well. To see the detection, run:
 
 ```
 python -m Utils.FRbinViewer ~/RMS_data/YYYMMDD_hhmmss_uuuuuu

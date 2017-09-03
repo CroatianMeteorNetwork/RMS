@@ -16,7 +16,7 @@ from scipy.optimize import curve_fit
 # Import local modules
 import RMS.ConfigReader as cr
 import RMS.Formats.BSC as BSC
-import RMS.Formats.FFbin as FFbin
+import RMS.Formats.FFfile as FFfile
 import RMS.Formats.CALSTARS as CALSTARS
 import RMS.Formats.Platepar as Platepar
 import RMS.Astrometry.ApplyAstrometry as Astrometry
@@ -49,7 +49,7 @@ def hourDifferenceFF(ff_name, platepar_datetime, fps):
     """
 
     # Get the FF file middle time of integration
-    ff_time_middle = datetime.datetime(*FFbin.getMiddleTimeFF(ff_name, fps, ret_milliseconds=False))
+    ff_time_middle = datetime.datetime(*FFfile.getMiddleTimeFF(ff_name, fps, ret_milliseconds=False))
 
     # Get the difference in hours between the platepar and the FF middle time
     time_diff = ff_time_middle - platepar_datetime
@@ -65,7 +65,7 @@ def starsXY2RaDec(ff_name, star_list, platepar, fps, UT_corr):
         """
 
     # Get the middle time of the FF file
-    ff_time_middle = FFbin.getMiddleTimeFF(ff_name, fps)
+    ff_time_middle = FFfile.getMiddleTimeFF(ff_name, fps)
 
     # Split the star list into columns
     y_data, x_data, bg_levels, level_data = np.hsplit(star_list, 4)

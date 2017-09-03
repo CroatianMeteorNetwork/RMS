@@ -1,7 +1,7 @@
 
 from RMS.VideoExtraction import Extractor
 import RMS.ConfigReader as cr
-import RMS.Formats.FFbin as FFbin
+import RMS.Formats.FFfile as FFfile
 from RMS.Routines.Grouping3D import find3DLines, getAllPoints
 
 
@@ -50,10 +50,10 @@ if __name__ == "__main__":
             config = cr.parse(".config")
 
             # Load compressed file
-            compressed = FFbin.read(bin_dir, bin_name, array=True).array
+            compressed = FFfile.read(bin_dir, bin_name, array=True).array
 
             # Show maxpixel
-            ff = FFbin.read(bin_dir, bin_name)
+            ff = FFfile.read(bin_dir, bin_name)
             plt.imshow(ff.maxpixel, cmap='gray')
             plt.show()
 

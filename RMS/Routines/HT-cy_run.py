@@ -11,7 +11,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Routines.PP_HT_cy import pixelPairHT, generateAtan2Lookup, generateTrigLookup
 
 from RMS.Detection import thresholdImg, show2
-from RMS.Formats import FFbin
+from RMS.Formats import FFfile
 from RMS.Routines import MorphologicalOperations as morph
 
 def pixelPairHT_wrapper(img_array, img_h, img_w, ht_sigma_factor, ht_sigma_abs, sub_factor, delta):
@@ -99,7 +99,7 @@ if __name__ == "__main__":
         print ff_name
 
         # Load FF bin
-        ff = FFbin.read(sys.argv[1], ff_name)
+        ff = FFfile.read(sys.argv[1], ff_name)
 
         thresh_img = thresholdImg(ff, 1.6, 9)
 

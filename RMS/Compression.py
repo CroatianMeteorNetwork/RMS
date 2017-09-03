@@ -32,7 +32,7 @@ import multiprocessing
 
 
 from RMS.VideoExtraction import Extractor
-from RMS.Formats import FFbin
+from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
 
 
@@ -209,7 +209,7 @@ class Compressor(multiprocessing.Process):
 
 
     def saveFF(self, arr, startTime, N):
-        """ Write metadata and data array to FF .bin file.
+        """ Write metadata and data array to FF file.
         
         Arguments:
             arr: [3D ndarray] 3D numpy array in format: (N, y, x) where N is [0, 4)
@@ -224,9 +224,10 @@ class Compressor(multiprocessing.Process):
         millis = int((startTime - floor(startTime))*1000)
         
 
-        filename = str(self.config.stationID).zfill(3) +  "_" + date_string + "_" + str(millis).zfill(3) + "_" + str(N).zfill(7)
+        filename = str(self.config.stationID).zfill(3) +  "_" + date_string + "_" + str(millis).zfill(3) \
+            + "_" + str(N).zfill(7)
 
-        ff = FFbin.ff_struct()
+        ff = FFStruct.FFStruct()
         ff.array = arr
         ff.nrows = arr.shape[1]
         ff.ncols = arr.shape[2]
@@ -234,8 +235,8 @@ class Compressor(multiprocessing.Process):
         ff.first = N + 256
         ff.camno = self.config.stationID
         
-        # Write the FFbin file
-        FFbin.write(ff, self.data_dir, filename)
+        # Write the FF file
+        FFfile.write(ff, self.data_dir, filename, fmt=self.config.ff_format)
         
         return filename
     
@@ -342,7 +343,7 @@ class Compressor(multiprocessing.Process):
 
             # Fully format the filename (this could not have been done before as the extractor will add
             # the FR prefix)
-            filename = "FF" + filename + ".bin"
+            filename = "FF" + filename + "." + self.config.ff_format
 
 
             # Run the detection on the file, if the detector handle was given

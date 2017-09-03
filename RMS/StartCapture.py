@@ -302,17 +302,18 @@ def runCapture(config, duration=None, video_file=None, nodetect=False):
 
 
         # Generate the name for the CALSTARS file
-        calstars_name = 'CALSTARS' + "{:04d}".format(config.stationID) + os.path.basename(night_data_dir) + '.txt'
+        calstars_name = 'CALSTARS' + "{:s}".format(str(config.stationID)) + os.path.basename(night_data_dir) \
+            + '.txt'
 
         # Write detected stars to the CALSTARS file
-        CALSTARS.writeCALSTARS(star_list, night_data_dir, calstars_name, config.stationID, config.height, 
+        CALSTARS.writeCALSTARS(star_list, night_data_dir, calstars_name, config.stationID, config.height, \
             config.width)
 
         # Generate FTPdetectinfo file name
         ftpdetectinfo_name = 'FTPdetectinfo_' + os.path.basename(night_data_dir) + '.txt'
 
         # Write FTPdetectinfo file
-        FTPdetectinfo.writeFTPdetectinfo(meteor_list, night_data_dir, ftpdetectinfo_name, night_data_dir, 
+        FTPdetectinfo.writeFTPdetectinfo(meteor_list, night_data_dir, ftpdetectinfo_name, night_data_dir, \
             config.stationID, config.fps)
 
 

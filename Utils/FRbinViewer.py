@@ -24,7 +24,7 @@ import os
 import sys
 
 import RMS.ConfigReader as cr
-from RMS.Formats import FFbin, FRbin
+from RMS.Formats import FFfile, FRbin
 
 
 def view(dir_path, ff, fr, config):
@@ -42,7 +42,7 @@ def view(dir_path, ff, fr, config):
         background = np.zeros((config.height, config.width), np.uint8)
 
     else:
-        background = FFbin.read(dir_path, ff).maxpixel
+        background = FFfile.read(dir_path, ff).maxpixel
     
     name = fr
     fr = FRbin.read(dir_path, fr)
@@ -123,14 +123,14 @@ if __name__ == "__main__":
     ff_list = sorted(ff_list)
 
     for fr in fr_list:
-        ffbin = None
+        ff_match = None
 
         # Find the matching FF bin to the given FR bin
         for ff in ff_list:
 
             if ff[2:] == fr[2:]:
-                ffbin = ff
+                ff_match = ff
                 break
         
         # View the fireball detection
-        view(dir_path, ffbin, fr, config)
+        view(dir_path, ff_match, fr, config)

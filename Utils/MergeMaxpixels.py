@@ -8,7 +8,8 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from RMS.Formats.FFbin import read as readFF
+from RMS.Formats.FFfile import read as readFF
+from RMS.Formats.FFfile import validFFName
 
 
 def truth_generator():
@@ -116,7 +117,7 @@ if __name__ == '__main__':
 
     # List all FF files in the current dir
     for ff_name in os.listdir(dir_path):
-        if ('FF' in ff_name) and ('.bin' in ff_name):
+        if validFFName(ff_name):
 
             print('Stacking: ', ff_name)
 

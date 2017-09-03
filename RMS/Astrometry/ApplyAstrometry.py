@@ -36,7 +36,7 @@ import numpy as np
 from RMS.Astrometry.Conversions import date2JD, datetime2JD
 from RMS.Formats.Platepar import PlateparCMN
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
-from RMS.Formats.FFbin import filenameToDatetime as filenameToDatetimeFF
+from RMS.Formats.FFfile import filenameToDatetime
 
 
 def applyFieldCorrection(x_poly, y_poly, X_res, Y_res, F_scale, X_data, Y_data, level_data):
@@ -516,7 +516,7 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
         level_data = meteor_meas[:, 7]
 
         # Get the beginning time of the FF file
-        time_beg = filenameToDatetimeFF(ff_name)
+        time_beg = filenameToDatetime(ff_name)
 
         # Calculate time data of every point
         time_data = []
@@ -585,8 +585,8 @@ if __name__ == "__main__":
     # platepar = PlateparCMN()
     # platepar.read("C:\\Users\\delorayn1\\Desktop\\20170813_213506_620678\\platepar_cmn2010.cal")
 
-    # from RMS.Astrometry.AstrometryCheckFit import getMiddleTimeFF
-    # time = getMiddleTimeFF('FF100_20170813_213508_532_0000000.bin', 25)
+    # from RMS.Formats.FFfile import getMiddleTime
+    # time = getMiddleTime('FF100_20170813_213508_532_0000000.bin', 25)
 
     # # Deneb
     # star_x = 281.14
