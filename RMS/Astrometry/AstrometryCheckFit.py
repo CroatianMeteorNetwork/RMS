@@ -442,7 +442,7 @@ def astrometryCheckFit(ff_directory, calstars_name, UT_corr, config):
 
     # Import platepar
     platepar_path = os.path.join(ff_directory, config.platepar_name)
-    platepar = Platepar.PlateparCMN()
+    platepar = Platepar.Platepar()
     platepar.read(platepar_path)
 
     # Check if the platepar exists

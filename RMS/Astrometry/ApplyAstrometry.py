@@ -34,7 +34,7 @@ import shutil
 import numpy as np
 
 from RMS.Astrometry.Conversions import date2JD, datetime2JD
-from RMS.Formats.Platepar import PlateparCMN
+from RMS.Formats.Platepar import Platepar
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.FFfile import filenameToDatetime
 
@@ -493,7 +493,7 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
     shutil.copy2(os.path.join(dir_path, ftp_detectinfo_file), os.path.join(dir_path, ftp_detectinfo_copy))
 
     # Load the platepar
-    platepar = PlateparCMN()
+    platepar = Platepar()
     platepar.read(os.path.join(dir_path, platepar_file))
 
     # Load the FTPdetectinfo file
@@ -582,7 +582,7 @@ if __name__ == "__main__":
 
 
     # # Load the platepar
-    # platepar = PlateparCMN()
+    # platepar = Platepar()
     # platepar.read("C:\\Users\\delorayn1\\Desktop\\20170813_213506_620678\\platepar_cmn2010.cal")
 
     # from RMS.Formats.FFfile import getMiddleTime
@@ -613,7 +613,7 @@ if __name__ == "__main__":
 
 
     # # Load the platepar
-    # platepar = PlateparCMN()
+    # platepar = Platepar()
     # platepar.read("C:\\Users\\delorayn1\\Desktop\\2017071819-Processed\\platepar_cmn2010.cal")
 
     # # X_scale = platepar.X_res/384

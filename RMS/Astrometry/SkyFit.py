@@ -48,7 +48,7 @@ import cv2
 
 import RMS.Formats.BSC as BSC
 import RMS.Formats.CALSTARS as CALSTARS
-from RMS.Formats.Platepar import PlateparCMN
+from RMS.Formats.Platepar import Platepar
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FFfile import getMiddleTimeFF
@@ -149,6 +149,9 @@ class PlateTool(object):
 
         # Time difference from UT
         self.UT_corr = 0
+
+        # Platepar format (json or txt)
+        self.platepar_fmt = None
 
         # Load catalog stars
         self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
@@ -460,7 +463,7 @@ class PlateTool(object):
                 self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
 
             # Save the platepar file
-            self.platepar.write(self.platepar_file)
+            self.platepar.write(self.platepar_file, fmt=self.platepar_fmt)
             print('Platepar written to:', self.platepar_file)
 
 
@@ -977,7 +980,7 @@ class PlateTool(object):
         root = tkinter.Tk()
         root.withdraw()
 
-        platepar = PlateparCMN()
+        platepar = Platepar()
 
         # Load the platepar file
         platepar_file = filedialog.askopenfilename(initialdir=self.dir_path, \
@@ -992,7 +995,7 @@ class PlateTool(object):
 
         # Parse the platepar file
         try:
-            platepar.read(platepar_file)
+            self.platepar_fmt = platepar.read(platepar_file)
         except:
             platepar = False
 
