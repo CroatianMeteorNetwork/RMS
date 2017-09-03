@@ -231,7 +231,7 @@ class Compressor(multiprocessing.Process):
         ff.array = arr
         ff.nrows = arr.shape[1]
         ff.ncols = arr.shape[2]
-        ff.nbits = 8
+        ff.nbits = self.config.bit_depth
         ff.first = N + 256
         ff.camno = self.config.stationID
         

@@ -79,7 +79,12 @@ def write(ff, directory, filename):
 
     """
 
-    file_path = os.path.join(directory, filename)
+    # Make sure the file starts with "FF"
+    if filename[:2] == "FF":
+        file_path = os.path.join(directory, filename)
+
+    else:
+        file_path = os.path.join(directory, "FF" + filename + ".fits")
 
     # Create a new FITS file
     
@@ -92,6 +97,14 @@ def write(ff, directory, filename):
     head['FIRST'] = ff.first
     head['CAMNO'] = ff.camno
     head['FPS'] = ff.fps
+
+    # Deconstruct the 3D array into individual images
+    if ff.array is not None:
+        ff.maxpixel, ff.maxframe, ff.avepixel, ff.stdpixel = np.split(ff.array, 4, axis=0)
+        ff.maxpixel = ff.maxpixel[0]
+        ff.maxframe = ff.maxframe[0]
+        ff.avepixel = ff.avepixel[0]
+        ff.stdpixel = ff.stdpixel[0]
 
     # Add the maxpixle to the list
     maxpixel_hdu = fits.ImageHDU(ff.maxpixel, name='MAXPIXEL')
@@ -106,7 +119,7 @@ def write(ff, directory, filename):
     hdulist = fits.HDUList([prim, maxpixel_hdu, maxframe_hdu, avepixel_hdu, stdpixel_hdu])
 
     # Save the FITS
-    hdulist.writeto(file_path, clobber=True)
+    hdulist.writeto(file_path, overwrite=True)
 
 
 
@@ -127,10 +140,17 @@ if __name__ == "__main__":
     ff.ncols = wid
     ff.nrows = ht
 
-    ff.maxpixel = np.zeros((ht, wid), dtype=np.uint8)
-    ff.avepixel = np.zeros((ht, wid), dtype=np.uint8) + 10
-    ff.stdpixel = np.zeros((ht, wid), dtype=np.uint8) + 20
-    ff.maxframe = np.zeros((ht, wid), dtype=np.uint8) + 30
+    # ff.maxpixel = np.zeros((ht, wid), dtype=np.uint8)
+    # ff.avepixel = np.zeros((ht, wid), dtype=np.uint8) + 10
+    # ff.stdpixel = np.zeros((ht, wid), dtype=np.uint8) + 20
+    # ff.maxframe = np.zeros((ht, wid), dtype=np.uint8) + 30
+
+    maxpixel = np.zeros((ht, wid), dtype=np.uint8)
+    avepixel = np.zeros((ht, wid), dtype=np.uint8) + 10
+    stdpixel = np.zeros((ht, wid), dtype=np.uint8) + 20
+    maxframe = np.zeros((ht, wid), dtype=np.uint8) + 30
+
+    ff.array = np.stack([maxpixel, maxframe, avepixel, stdpixel], axis=0)
 
     # Write the FF to FITS
     write(ff, dir_path, file_name)
@@ -139,3 +159,7 @@ if __name__ == "__main__":
     ff = read(dir_path, file_name)
 
     print(ff)
+    print(ff.maxpixel)
+    print(ff.maxframe)
+    print(ff.avepixel)
+    print(ff.stdpixel)

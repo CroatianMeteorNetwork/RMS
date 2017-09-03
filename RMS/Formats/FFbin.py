@@ -15,7 +15,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
-import datetime
+import re
 import struct
 
 import numpy as np
@@ -99,11 +99,14 @@ def write(ff, directory, filename):
             arr[2] = ff.avepixel
             arr[3] = ff.stdpixel
         
+        # Extract only the number from the camera code
+        camno_num = int(re.findall('\d+', ff.camno)[0])
+
         fid.write(struct.pack('I', ff.nrows))
         fid.write(struct.pack('I', ff.ncols))
         fid.write(struct.pack('I', ff.nbits))
         fid.write(struct.pack('I', ff.first))
-        fid.write(struct.pack('I', ff.camno))
+        fid.write(struct.pack('I', camno_num))
     
         arr.tofile(fid)
         

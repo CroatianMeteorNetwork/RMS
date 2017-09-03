@@ -11,7 +11,7 @@ class FFStruct:
         self.ncols = 0
         self.nbits = 0
         self.first = 0
-        self.camno = 0
+        self.camno = None
 
         self.nframes = -1
         self.fps = -1
@@ -31,7 +31,7 @@ class FFStruct:
         out += 'N cols: {:d}\n'.format(self.ncols)
         out += 'N bits: {:d}\n'.format(self.nbits)
         out += 'First frame: {:d}\n'.format(self.first)
-        out += 'Camera ID: {:d}\n'.format(self.camno)
+        out += 'Camera ID: {:s}\n'.format(str(self.camno))
 
         out += 'N frames: {:d}\n'.format(self.nframes)
         out += 'FPS: {:d}\n'.format(self.fps)
