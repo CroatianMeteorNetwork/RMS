@@ -1,7 +1,8 @@
-numpy
 gitpython
+numpy
+matplotlib
 pyephem
 cython
-matplotlib
 scipy
 Pillow
+astropy
