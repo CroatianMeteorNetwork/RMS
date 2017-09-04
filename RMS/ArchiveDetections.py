@@ -88,6 +88,38 @@ def selectFiles(dir_path, ff_detected):
 
 
 
+def archiveFieldsums(dir_path):
+    """ Put all FS fieldsum files in one archive. """
+
+    fieldsum_files = []
+
+    # Find all fieldsum FS files
+    for file_name in os.listdir(dir_path):
+
+        # Take all field sum files
+        if ('FS' in file_name) and ('fieldsum' in file_name):
+            fieldsum_files.append(file_name)
+
+
+    # Path to the fieldsum directory
+    fieldsum_archive_dir = os.path.abspath(os.path.join(dir_path, 'Fieldsums'))
+
+
+    # Name of the fieldsum archive
+    fieldsum_archive_name = os.path.join(os.path.abspath(os.path.join(fieldsum_archive_dir, os.pardir)), \
+        'FS_' + os.path.basename(dir_path) + '_fieldsums')
+
+    # Archive all FS files
+    archiveDir(dir_path, fieldsum_files, fieldsum_archive_dir, fieldsum_archive_name, delete_dest_dir=False)
+
+    # Delete FS files in the main directory
+    for fs_file in fieldsum_files:
+        os.remove(os.path.join(dir_path, fs_file))
+
+
+
+
+
 def archiveDetections(captured_path, archived_path, ff_detected, config):
 
 
@@ -121,11 +153,13 @@ if __name__ == "__main__":
 
     ### Test the archive function
 
-    captured_path = "/home/dvida/RMS_data/20170410_002933_521633"
+    captured_path = "/home/dvida/RMS_data/CapturedFiles/20170903_203323_142567"
+    archiveFieldsums(captured_path)
 
-    archived_path = "/home/dvida/RMS_data/ArchivedFiles/20170410_002933_521633"
+    # captured_path = "/home/dvida/RMS_data/20170410_002933_521633"
 
-    ff_detected = ['FF499_20170410_003723_921_0014080.bin', 'FF499_20170410_003732_463_0014336.bin']
+    # archived_path = "/home/dvida/RMS_data/ArchivedFiles/20170410_002933_521633"
 
+    # ff_detected = ['FF499_20170410_003723_921_0014080.bin', 'FF499_20170410_003732_463_0014336.bin']
 
-    archiveDetections(captured_path, archived_path, ff_detected)
+    # archiveDetections(captured_path, archived_path, ff_detected)

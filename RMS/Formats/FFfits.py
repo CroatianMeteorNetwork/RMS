@@ -26,11 +26,11 @@ def read(directory, filename, array=False):
 
     """
 
-    # Make sure the file starts with "FF"
-    if filename[:2] == "FF":
+    # Make sure the file starts with "FF_"
+    if filename[:3] == "FF_":
         fid = open(os.path.join(directory, filename), "rb")
     else:
-        fid = open(os.path.join(directory, "FF" + filename + ".fits"), "rb")
+        fid = open(os.path.join(directory, "FF_" + filename + ".fits"), "rb")
 
     # Init an empty FF structure
     ff = FFStruct()
@@ -80,11 +80,11 @@ def write(ff, directory, filename):
     """
 
     # Make sure the file starts with "FF"
-    if filename[:2] == "FF":
+    if filename[:3] == "FF_":
         file_path = os.path.join(directory, filename)
 
     else:
-        file_path = os.path.join(directory, "FF" + filename + ".fits")
+        file_path = os.path.join(directory, "FF_" + filename + ".fits")
 
     # Create a new FITS file
     
@@ -129,7 +129,7 @@ def write(ff, directory, filename):
 if __name__ == "__main__":
 
     dir_path = '.'
-    file_name = 'FFtest.fits'
+    file_name = 'FF_test.fits'
 
     wid = 720
     ht = 576

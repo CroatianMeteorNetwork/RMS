@@ -119,7 +119,7 @@ if __name__ == "__main__":
         sys.exit()
 
     # Get the list of FF bin files (compressed video frames)
-    ff_list = [ff for ff in os.listdir(dir_path) if ff[0:2]=="FF" and ff[-3:]=="bin"]
+    ff_list = [ff for ff in os.listdir(dir_path) if FFfile.validFFName(ff)]
     ff_list = sorted(ff_list)
 
     for fr in fr_list:

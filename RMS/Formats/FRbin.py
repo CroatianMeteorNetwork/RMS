@@ -46,7 +46,7 @@ def read(dir_path, filename):
     if filename[:2] == "FR":
         fid = open(os.path.join(dir_path, filename), "rb")
     else:
-        fid = open(os.path.join(dir_path, "FR" + filename + ".bin"), "rb")
+        fid = open(os.path.join(dir_path, "FR_" + filename + ".bin"), "rb")
     
     fr = fr_struct()
     
@@ -86,7 +86,7 @@ def write(fr, dir_path, filename):
     if filename[:2] == "FR":
         file = os.path.join(dir_path, filename)
     else:
-        file = os.path.join(dir_path, "FR" + filename + ".bin")
+        file = os.path.join(dir_path, "FR_" + filename + ".bin")
     
     file = os.path.join()
     with open(file, "wb") as fid:
@@ -111,7 +111,7 @@ def writeArray(arr, dir_path, filename):
     if filename[:2] == "FR":
         file = os.path.join(dir_path, filename)
     else:
-        file = os.path.join(dir_path, "FR" + filename + ".bin")
+        file = os.path.join(dir_path, "FR_" + filename + ".bin")
         
             
     with open(file, "wb") as f:

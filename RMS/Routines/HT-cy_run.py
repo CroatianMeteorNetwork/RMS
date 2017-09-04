@@ -86,7 +86,7 @@ if __name__ == "__main__":
         sys.exit()
     
     # Get paths to every FF bin file in a directory 
-    ff_list = [ff for ff in os.listdir(sys.argv[1]) if ff[0:2]=="FF" and ff[-3:]=="bin"]
+    ff_list = [ff for ff in os.listdir(sys.argv[1]) if FFfile.validFFName(ff)]
 
     # Check if there are any file in the directory
     if(len(ff_list) == None):

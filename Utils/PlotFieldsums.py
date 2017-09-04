@@ -93,8 +93,8 @@ def plotFieldsums(dir_path, config):
 
     plt.legend()
 
-
-    plt.savefig(os.path.join(dir_path, os.path.basename(dir_path) + '_fieldsums.png'), dpi=300)
+    plt.savefig(os.path.join(dir_path, str(config.stationID) + '_' + os.path.basename(dir_path) \
+        + '_fieldsums.png'), dpi=300)
 
     plt.clf()
     plt.close()
@@ -128,7 +128,8 @@ def plotFieldsums(dir_path, config):
     plt.tight_layout()
 
 
-    plt.savefig(os.path.join(dir_path, os.path.basename(dir_path) + '_fieldsums_noavg.png'), dpi=300)
+    plt.savefig(os.path.join(dir_path, str(config.stationID) + '_' + os.path.basename(dir_path) \
+        + '_fieldsums_noavg.png'), dpi=300)
 
     plt.clf()
     plt.close()

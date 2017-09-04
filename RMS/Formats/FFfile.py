@@ -165,21 +165,26 @@ def filenameToDatetime(file_name):
     """
 
     # e.g.  FF499_20170626_020520_353_0005120.bin
-    # or FFHR0001_20170626_020520_353_0005120.fits
+    # or FF_CA0001_20170626_020520_353_0005120.fits
 
     file_name = file_name.split('_')
 
-    date = file_name[1]
+    # Check the number of list elements, and the new fits format has one more underscore
+    i = 0
+    if len(file_name[0]) == 2:
+        i = 1
+
+    date = file_name[i + 1]
     year = int(date[:4])
     month = int(date[4:6])
     day = int(date[6:8])
 
-    time = file_name[2]
+    time = file_name[i + 2]
     hour = int(time[:2])
     minute = int(time[2:4])
     seconds = int(time[4:6])
 
-    ms = int(file_name[3])
+    ms = int(file_name[i + 3])
 
 
     return datetime.datetime(year, month, day, hour, minute, seconds, ms*1000)

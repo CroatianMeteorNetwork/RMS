@@ -343,7 +343,7 @@ class Compressor(multiprocessing.Process):
 
             # Fully format the filename (this could not have been done before as the extractor will add
             # the FR prefix)
-            filename = "FF" + filename + "." + self.config.ff_format
+            filename = "FF_" + filename + "." + self.config.ff_format
 
 
             # Run the detection on the file, if the detector handle was given

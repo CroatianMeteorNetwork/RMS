@@ -174,7 +174,8 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None):
 
     ##########################################################################################################
 
-    thumb_name = "{:s}_{:s}_thumbs.jpg".format(os.path.basename(dir_path), mosaic_type)
+    thumb_name = "{:s}_{:s}_{:s}_thumbs.jpg".format(str(config.stationID), os.path.basename(dir_path), \
+        mosaic_type)
 
     # Save the mosaic
     cv2.imwrite(os.path.join(dir_path, thumb_name), mosaic_img)

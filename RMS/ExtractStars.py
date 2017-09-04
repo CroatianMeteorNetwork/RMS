@@ -350,7 +350,7 @@ if __name__ == "__main__":
     
     # Get paths to every FF bin file in a directory 
     ff_dir = os.path.abspath(sys.argv[1])
-    ff_list = [ff_name for ff_name in os.listdir(ff_dir) if ff_name[0:2]=="FF" and ff_name[-3:]=="bin"]
+    ff_list = [ff_name for ff_name in os.listdir(ff_dir) if FFfile.validFFName(ff_name)]
 
     # Check if there are any file in the directory
     if(len(ff_list) == None):
@@ -400,7 +400,8 @@ if __name__ == "__main__":
     ff = FFfile.read(ff_dir, ff_name)
 
     # Generate the name for the CALSTARS file
-    calstars_name = 'CALSTARS' + "{:04d}".format(int(ff.camno)) + ff_dir.split(os.sep)[-1] + '.txt'
+    calstars_name = 'CALSTARS_' + "{:s}".format(str(config.stationID)) + '_' \
+        + os.path.basename(ff_dir) + '.txt'
 
 
     # Write detected stars to the CALSTARS file

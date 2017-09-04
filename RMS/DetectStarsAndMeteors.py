@@ -26,6 +26,7 @@ import logging
 import RMS.ConfigReader as cr
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats import CALSTARS
+from RMS.Formats.FFfile import validFFName
 from RMS.ExtractStars import extractStars
 from RMS.Detection import detectMeteors
 from RMS.QueuedPool import QueuedPool
@@ -101,7 +102,7 @@ if __name__ == "__main__":
     # Get paths to every FF bin file in a directory 
     ff_dir = sys.argv[1].replace('"', '')
     ff_dir = os.path.abspath(ff_dir)
-    ff_list = [ff_name for ff_name in sorted(os.listdir(ff_dir)) if ff_name[0:2]=="FF" and ff_name[-3:]=="bin"]
+    ff_list = [ff_name for ff_name in sorted(os.listdir(ff_dir)) if validFFName(ff_name)]
 
 
     # Check if there are any file in the directory
@@ -186,7 +187,7 @@ if __name__ == "__main__":
 
 
     # Generate the name for the CALSTARS file
-    calstars_name = 'CALSTARS' + "{:04d}".format(config.stationID) + os.path.basename(ff_dir) + '.txt'
+    calstars_name = 'CALSTARS_' + "{:s}".format(str(config.stationID)) + '_' + os.path.basename(ff_dir) + '.txt'
 
     # Write detected stars to the CALSTARS file
     CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, config.stationID, config.height, 

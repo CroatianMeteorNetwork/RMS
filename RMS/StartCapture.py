@@ -38,7 +38,7 @@ from RMS.BufferedCapture import BufferedCapture
 from RMS.Compression import Compressor
 from RMS.CaptureDuration import captureDuration
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
-from RMS.ArchiveDetections import archiveDetections
+from RMS.ArchiveDetections import archiveDetections, archiveFieldsums
 
 from RMS.LiveViewer import LiveViewer
 from RMS.QueuedPool import QueuedPool
@@ -302,8 +302,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False):
 
 
         # Generate the name for the CALSTARS file
-        calstars_name = 'CALSTARS' + "{:s}".format(str(config.stationID)) + os.path.basename(night_data_dir) \
-            + '.txt'
+        calstars_name = 'CALSTARS_' + "{:s}".format(str(config.stationID)) + '_' \
+            + os.path.basename(night_data_dir) + '.txt'
 
         # Write detected stars to the CALSTARS file
         CALSTARS.writeCALSTARS(star_list, night_data_dir, calstars_name, config.stationID, config.height, \
@@ -321,6 +321,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False):
 
     # Plot field sums to a graph
     plotFieldsums(night_data_dir, config)
+
+    # Archive all fieldsums to one archive
+    archiveFieldsums(night_data_dir)
 
 
     night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir, 

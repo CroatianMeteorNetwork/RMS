@@ -23,11 +23,11 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 if __name__ == "__main__":
 
     # Get bin path and name from the given argument
-    bin_name = sys.argv[1]
-    if os.sep in bin_name:
-        bin_name = bin_name.split(os.sep)
-        bin_dir = (os.sep).join(bin_name[:-1]) + os.sep
-        bin_name = bin_name[-1]
+    ff_name = sys.argv[1]
+    if os.sep in ff_name:
+        ff_name = ff_name.split(os.sep)
+        bin_dir = (os.sep).join(ff_name[:-1]) + os.sep
+        ff_name = ff_name[-1]
 
     # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/2015_06_20_19_33_11' + os.sep
     # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/2015_06_23_19_33_43' + os.sep
@@ -41,19 +41,19 @@ if __name__ == "__main__":
     # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/RIB2015062627 fireball' + os.sep
     # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/sample_bins' + os.sep
 
-    for bin_name in os.listdir(bin_dir):
-        if 'FF' in bin_name:
+    for ff_name in os.listdir(bin_dir):
+        if 'FF' in ff_name:
 
-            print bin_name
+            print ff_name
 
             # Load config file
             config = cr.parse(".config")
 
             # Load compressed file
-            compressed = FFfile.read(bin_dir, bin_name, array=True).array
+            compressed = FFfile.read(bin_dir, ff_name, array=True).array
 
             # Show maxpixel
-            ff = FFfile.read(bin_dir, bin_name)
+            ff = FFfile.read(bin_dir, ff_name)
             plt.imshow(ff.maxpixel, cmap='gray')
             plt.show()
 
