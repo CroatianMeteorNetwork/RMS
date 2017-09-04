@@ -514,7 +514,14 @@ class PlateTool(object):
 
             if self.star_pick_mode:
 
-                self.fitPickedStars()
+                # Do 3 fit iterations
+                for i in range(3):
+
+                    print('Fitting iteration {:d}/3'.format(i + 1))
+
+                    self.fitPickedStars()
+
+                print('Plate fitted!')
 
 
         elif event.key == 'enter':
@@ -1304,9 +1311,6 @@ class PlateTool(object):
         # Extract paired catalog stars and image coordinates separately
         catalog_stars = np.array([cat_coords for img_coords, cat_coords in self.paired_stars])
         img_stars = np.array([img_coords for img_coords, cat_coords in self.paired_stars])
-
-        print(catalog_stars)
-        print(img_stars)
 
         print('ASTRO', _calcImageResidualsAstro([self.platepar.RA_d, self.platepar.dec_d, 
             self.platepar.pos_angle_ref, self.platepar.F_scale], self, catalog_stars, img_stars))
