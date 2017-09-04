@@ -133,7 +133,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False):
 
 
     # Create a directory for captured files
-    night_data_dir_name = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+    night_data_dir_name = str(config.stationID) + '_' + datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
 
     # Full path to the data directory
     night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, night_data_dir_name)
