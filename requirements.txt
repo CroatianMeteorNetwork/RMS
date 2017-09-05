@@ -1,4 +1,5 @@
 gitpython
+paramiko
 numpy
 matplotlib
 pyephem

@@ -69,6 +69,7 @@ Furthermore, you will need the following software and libraries to run the code:
 	- cython (0.25.2 or later)
 	- pyephem (3.7.6.0 or later)
 	- weave
+	- paramiko
 	
 All python libraries will be installed when you run the setup.py script (instructions below).
 

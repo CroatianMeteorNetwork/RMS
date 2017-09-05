@@ -144,14 +144,13 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
 
 
 class UploadManager(multiprocessing.Process):
-    def __init__(self, data_path, config):
+    def __init__(self, config):
         """ Uploads all processed data which has not yet been uploaded to the server. The files will be tied 
             to uploaded every 15 minutes, until successfull. """
 
 
         super(UploadManager, self).__init__()
 
-        self.data_path = data_path
         self.config = config
 
         self.file_queue = Queue.Queue()
@@ -280,9 +279,12 @@ class UploadManager(multiprocessing.Process):
             # Get a file from the queue
             file_name = self.file_queue.get()
 
+            # Separate the path to the file and the file name
+            data_path, f_name = os.path.split(file_name)
+
             # Upload the file via SFTP
-            upload_status = uploadSFTP(self.config.hostname, self.config.stationID, self.data_path, '.', \
-                [file_name], rsa_private_key=self.config.rsa_private_key)
+            upload_status = uploadSFTP(self.config.hostname, self.config.stationID, data_path, '.', \
+                [f_name], rsa_private_key=self.config.rsa_private_key)
 
             # If the upload was successful, rewrite the holding file, which will remove the uploaded file
             if upload_status:
@@ -346,7 +348,7 @@ if __name__ == "__main__":
             self.hostname = 'minorid.localnet' 
             self.host_port = 22
             self.stationID = 'pi'
-            self.rsa_private_key = r"/home/dvida/.ssh/id_rsa"
+            self.rsa_private_key = os.path.expanduser("~/.ssh/id_rsa")
 
             self.upload_queue_file = 'FILES_TO_UPLOAD.inf'
 
@@ -359,17 +361,17 @@ if __name__ == "__main__":
 
     #uploadSFTP(config.hostname, config.stationID, dir_local, dir_remote, file_list, rsa_private_key=config.rsa_private_key)
 
-    up = UploadManager(dir_local, config)
+    up = UploadManager(config)
     up.start()
 
     time.sleep(2)
 
-    up.addFiles(['test.txt'])
+    up.addFiles([os.path.join(dir_local, 'test.txt')])
 
     time.sleep(1)
 
-    up.addFiles(['test2.txt'])    
-    up.addFiles(['test3.txt'])    
+    up.addFiles([os.path.join(dir_local, 'test2.txt')])
+    up.addFiles([os.path.join(dir_local, 'test3.txt')])
 
 
     up.stop()

@@ -67,7 +67,24 @@ class Config:
         self.captured_dir = "CapturedFiles"
         self.archived_dir = "ArchivedFiles"
 
-        
+
+        ##### Upload
+
+        # Address of the upload server
+        self.hostname = ''
+
+        # SSH port
+        self.host_port = 22
+
+        # Location of the SSH private key
+        self.rsa_private_key = os.path.expanduser("~/.ssh/id_rsa")
+
+        # Name of the file where the upload queue will be stored
+        self.upload_queue_file = "FILES_TO_UPLOAD.inf"
+
+
+
+        ##### Weave compilation arguments
         self.weaveArgs = ["-O3"]
         
         ##### FireballDetection
@@ -200,6 +217,7 @@ def parseAllSections(config, parser):
     parseSystem(config, parser)
     parseCapture(config, parser)
     parseBuildArgs(config, parser)
+    parseUpload(config, parser)
     parseCompression(config, parser)
     parseFireballDetection(config, parser)
     parseMeteorDetection(config, parser)
@@ -289,6 +307,30 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "mask"):
         config.mask_file = parser.get(section, "mask")
+
+
+
+def parseUpload(config, parser):
+    section = "Upload"
+    
+    if not parser.has_section(section):
+        return
+
+    # Address of the upload server
+    if parser.has_option(section, "hostname"):
+        config.hostname = parser.get(section, "hostname")
+
+    # SSH port
+    if parser.has_option(section, "host_port"):
+        config.host_port = parser.getint(section, "host_port")
+
+    # Location of the SSH private key
+    if parser.has_option(section, "rsa_private_key"):
+        config.rsa_private_key = os.path.expanduser(parser.get(section, "rsa_private_key"))
+
+    # Name of the file where the upload queue will be stored
+    if parser.has_option(section, "upload_queue_file"):
+        config.upload_queue_file = parser.get(section, "upload_queue_file")
         
 
 
@@ -323,6 +365,7 @@ def parseBuildArgs(config, parser):
 
 
 def parseCompression(config, parser):
+    section = "Compression"
     pass
 
 
