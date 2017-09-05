@@ -121,6 +121,18 @@ def archiveFieldsums(dir_path):
 
 
 def archiveDetections(captured_path, archived_path, ff_detected, config):
+    """ Create thumbnails and compress all files with detections and the accompanying files in one archive.
+
+    Arguments:
+        captured_path: [str] Path where the captured files are located.
+        archived_path: [str] Path where the detected files will be archived to.
+        ff_detected: [str] A list of FF files with detections.
+        config: [conf object] Configuration.
+
+    Return:
+        archive_name: [str] Name of the archive where the files were compressed to.
+
+    """
 
 
     # Generate captured thumbnails
@@ -145,21 +157,34 @@ def archiveDetections(captured_path, archived_path, ff_detected, config):
             os.path.basename(captured_path) + '_detected')
 
         # Archive the files
-        archiveDir(captured_path, file_list, archived_path, archive_name)
+        archive_name = archiveDir(captured_path, file_list, archived_path, archive_name)
+
+        return archive_name
+
+    return None
 
 
 
 if __name__ == "__main__":
 
+    import RMS.ConfigReader as cr
+
+    # Load the configuration file
+    config = cr.parse(".config")
+
+
+
     ### Test the archive function
 
-    captured_path = "/home/dvida/RMS_data/CapturedFiles/20170903_203323_142567"
-    archiveFieldsums(captured_path)
+    # captured_path = "/home/dvida/RMS_data/CapturedFiles/20170903_203323_142567"
+    # archiveFieldsums(captured_path)
 
-    # captured_path = "/home/dvida/RMS_data/20170410_002933_521633"
+    captured_path = "/home/dvida/RMS_data/CapturedFiles/CA0001_20170905_094706_920438"
 
-    # archived_path = "/home/dvida/RMS_data/ArchivedFiles/20170410_002933_521633"
+    archived_path = "/home/dvida/RMS_data/ArchivedFiles/CA0001_20170905_094706_920438"
 
-    # ff_detected = ['FF499_20170410_003723_921_0014080.bin', 'FF499_20170410_003732_463_0014336.bin']
+    ff_detected = ['FF_CA0001_20170905_094707_004_0000000.fits', 'FF_CA0001_20170905_094716_491_0000256.fits']
 
-    # archiveDetections(captured_path, archived_path, ff_detected)
+    archive_name = archiveDetections(captured_path, archived_path, ff_detected, config)
+
+    print(archive_name)

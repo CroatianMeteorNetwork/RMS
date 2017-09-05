@@ -8,6 +8,7 @@ import paramiko
 import multiprocessing
 import time
 import datetime
+import logging
 
 try:
     # Python 2
@@ -17,6 +18,10 @@ except:
     # Python 3
     import queue as Queue
 
+
+
+# Get the logger from the main module
+log = logging.getLogger("logger")
 
 
 def _agentAuth(transport, username, rsa_private_key):
@@ -86,7 +91,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
     # The whole thing is in a try block because if an error occurs, the connection will be closed at the end
     try:
 
-        print('Establishing SSH connection to:', hostname, port, '...')
+        log.info('Establishing SSH connection to: ' + hostname + ':' + str(port) + '...')
 
         # Connect to host
         t = paramiko.Transport((hostname, port))
@@ -124,7 +129,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                 pass
             
             # Upload the file to the server if it isn't already there
-            print('Copying', local_file, 'to ', remote_file)
+            log.info('Copying ' + local_file + ' to ' + remote_file)
             sftp.put(local_file, remote_file)
 
         t.close()
@@ -132,7 +137,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
         return True
 
     except Exception, e:
-        print('*** Caught exception: %s: %s' % (e.__class__, e))
+        log.error(e, exc_info=True)
         try:
             t.close()
         except:
@@ -146,7 +151,9 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
 class UploadManager(multiprocessing.Process):
     def __init__(self, config):
         """ Uploads all processed data which has not yet been uploaded to the server. The files will be tied 
-            to uploaded every 15 minutes, until successfull. """
+            to uploaded every 15 minutes, until successfull. 
+        
+        """
 
 
         super(UploadManager, self).__init__()
@@ -282,19 +289,20 @@ class UploadManager(multiprocessing.Process):
             # Separate the path to the file and the file name
             data_path, f_name = os.path.split(file_name)
 
-            # Upload the file via SFTP
-            upload_status = uploadSFTP(self.config.hostname, self.config.stationID, data_path, '.', \
-                [f_name], rsa_private_key=self.config.rsa_private_key)
+            # Upload the file via SFTP (use the lowercase version of the station ID as the username)
+            upload_status = uploadSFTP(self.config.hostname, self.config.stationID.lower(), data_path, \
+                self.config.remote_dir, [f_name], rsa_private_key=self.config.rsa_private_key)
 
             # If the upload was successful, rewrite the holding file, which will remove the uploaded file
             if upload_status:
+                log.info('Upload successful!')
                 self.saveQueue(overwrite=True)
                 tries = 0
 
             # If the upload failed, put the file back on the list and wait a bit
             else:
 
-                print('Uploading failed! Retry {:d} of {:d}'.format(tries + 1, retries))
+                log.warning('Uploading failed! Retry {:d} of {:d}'.format(tries + 1, retries))
 
                 tries += 1 
                 self.file_queue.put(file_name)
@@ -329,11 +337,6 @@ class UploadManager(multiprocessing.Process):
             time.sleep(0.1)
 
 
-            
-
-            
-
-
 
 
 if __name__ == "__main__":
@@ -347,6 +350,7 @@ if __name__ == "__main__":
             # remote hostname where SSH server is running
             self.hostname = 'minorid.localnet' 
             self.host_port = 22
+            self.remote_dir = '.'
             self.stationID = 'pi'
             self.rsa_private_key = os.path.expanduser("~/.ssh/id_rsa")
 
@@ -375,5 +379,3 @@ if __name__ == "__main__":
 
 
     up.stop()
-
-

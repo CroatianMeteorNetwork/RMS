@@ -41,6 +41,9 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
     Keyword arguments:
         delete_dest_dir: [bool] Delete the destination directory after compression. False by defualt.
 
+    Return:
+        archive_name: [str] Full name of the archive.
+
     """
 
     # Make the archive directory
@@ -51,8 +54,11 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
         shutil.copy2(os.path.join(source_dir, file_name), os.path.join(dest_dir, file_name))
 
     # Compress the archive directory
-    shutil.make_archive(os.path.join(dest_dir, compress_file), 'bztar', dest_dir, logger=log)
+    archive_name = shutil.make_archive(os.path.join(dest_dir, compress_file), 'bztar', dest_dir, logger=log)
 
     # Delete the archive directory after compression
     if delete_dest_dir:
         shutil.rmtree(dest_dir)
+
+
+    return archive_name

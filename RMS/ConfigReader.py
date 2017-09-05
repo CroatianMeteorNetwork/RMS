@@ -82,6 +82,8 @@ class Config:
         # Name of the file where the upload queue will be stored
         self.upload_queue_file = "FILES_TO_UPLOAD.inf"
 
+        # Directory on server where the files will be uploaded to
+        self.remote_dir = '.'
 
 
         ##### Weave compilation arguments
@@ -331,6 +333,10 @@ def parseUpload(config, parser):
     # Name of the file where the upload queue will be stored
     if parser.has_option(section, "upload_queue_file"):
         config.upload_queue_file = parser.get(section, "upload_queue_file")
+
+    # Directory on the server where the detected files will be uploaded to
+    if parser.has_option(section, "remote_dir"):
+        config.remote_dir = parser.get(section, "remote_dir")
         
 
 

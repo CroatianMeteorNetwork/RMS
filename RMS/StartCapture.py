@@ -39,6 +39,7 @@ from RMS.Compression import Compressor
 from RMS.CaptureDuration import captureDuration
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
 from RMS.ArchiveDetections import archiveDetections, archiveFieldsums
+from RMS.UploadManager import UploadManager
 
 from RMS.LiveViewer import LiveViewer
 from RMS.QueuedPool import QueuedPool
@@ -116,7 +117,7 @@ def wait(duration=None):
 
 
 
-def runCapture(config, duration=None, video_file=None, nodetect=False):
+def runCapture(config, duration=None, video_file=None, nodetect=False, upload_manager=None):
     """ Run capture and compression for the given time.given
 
     Arguments:
@@ -126,6 +127,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False):
         duration: [float] Time in seconds to capture. None by default.
         video_file: [str] Path to the video file, if it was given as the video source. None by default.
         nodetect: [bool] If True, detection will not be performed. False by defualt.
+        upload_manager: [UploadManager object] A handle to the UploadManager, which handles uploading files to
+            the central server. None by default.
 
     """
 
@@ -333,13 +336,25 @@ def runCapture(config, duration=None, video_file=None, nodetect=False):
     log.info('Archiving detections to ' + night_archive_dir)
     
     # Archive the detections
-    archiveDetections(night_data_dir, night_archive_dir, ff_detected, config)
+    archive_name = archiveDetections(night_data_dir, night_archive_dir, ff_detected, config)
+
+    # Put the archive up for upload
+    if upload_manager is not None:
+        log.info('Adding file on upload list: ' + archive_name)
+        upload_manager.addFiles([archive_name])
 
 
     # If capture was manually stopped, end program
     if STOP_CAPTURE:
 
         log.info('Ending program')
+
+        # Stop the upload manager
+        if upload_manager is not None:
+            if upload_manager.is_alive():
+                upload_manager.stop()
+                log.info('Closing upload manager...')
+
         sys.exit()
 
 
@@ -392,7 +407,7 @@ if __name__ == "__main__":
     mkdirP(os.path.abspath(config.data_dir))
 
 
-    # If the duration of capture was given, capture right away
+    # If the duration of capture was given, capture right away for a specified time
     if cml_args.duration:
 
         try:
@@ -414,11 +429,20 @@ if __name__ == "__main__":
             sys.exit()
 
 
+        # Init the upload manager
+        log.info('Starting the upload manager...')
+        upload_manager = UploadManager(config)
 
         log.info("Running for " + str(duration/60/60) + ' hours...')
 
         # Run the capture for the given number of hours
-        runCapture(config, duration=duration, nodetect=cml_args.nodetect)
+        runCapture(config, duration=duration, nodetect=cml_args.nodetect, upload_manager=upload_manager)
+
+        # Stop the upload manager
+        if upload_manager.is_alive():
+            log.info('Closing upload manager...')
+            upload_manager.stop()
+            
 
         sys.exit()
 
@@ -429,9 +453,24 @@ if __name__ == "__main__":
 
         log.info('Video source: ' + cml_args.input)
 
-        # Capture the video frames from the video file
-        runCapture(config, video_file=cml_args.input, nodetect=cml_args.nodetect)
 
+        # Init the upload manager
+        log.info('Starting the upload manager...')
+        upload_manager = UploadManager(config)  #### TESTTT!!!!!!!!!!!!!!!!!!!!!
+
+        # Capture the video frames from the video file
+        runCapture(config, video_file=cml_args.input, nodetect=cml_args.nodetect, upload_manager=upload_manager)
+
+        # Stop the upload manager    #### TESTTT!!!!!!!!!!!!!!!!!!!!!
+        if upload_manager.is_alive():
+            log.info('Closing upload manager...')
+            upload_manager.stop()
+
+
+
+    # Init the upload manager
+    log.info('Starting the upload manager...')
+    upload_manager = UploadManager(config)
 
 
     # Automatic running and stopping the capture at sunrise and sunset
@@ -492,14 +531,16 @@ if __name__ == "__main__":
             duration=duration):
 
             log.error('No more disk space can be freed up! Stopping capture...')
-            sys.exit()
+            break
 
 
         log.info('Starting capturing for ' + str(duration/60/60) + ' hours')
 
         # Run capture and compression
-        runCapture(config, duration=duration, nodetect=cml_args.nodetect)
+        runCapture(config, duration=duration, nodetect=cml_args.nodetect, upload_manager=upload_manager)
 
 
-
-    
+    # Stop the upload manager
+    if upload_manager.is_alive():
+        log.info('Closing upload manager...')
+        upload_manager.stop()
