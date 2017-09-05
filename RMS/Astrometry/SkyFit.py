@@ -44,8 +44,6 @@ import scipy.optimize
 import matplotlib
 import matplotlib.pyplot as plt
 
-import cv2
-
 import RMS.Formats.BSC as BSC
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar
