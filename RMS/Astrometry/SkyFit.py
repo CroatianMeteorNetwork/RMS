@@ -219,6 +219,10 @@ class PlateTool(object):
             self.makeNewPlatepar(update_image=False)
             self.platepar.RA_d, self.platepar.dec_d = self.getFOVcentre()
 
+            # Save the platepar to file
+            self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
+            self.platepar.write(self.platepar_file, fmt=self.platepar_fmt)
+
         plt.figure(facecolor='black')
 
         # Init the first image
@@ -993,7 +997,8 @@ class PlateTool(object):
         platepar_file = filedialog.askopenfilename(initialdir=self.dir_path, \
             title='Select the platepar file')
 
-        root.destroy()
+        root.quit()
+        #root.destroy()
 
         if not platepar_file:
             return False, platepar
