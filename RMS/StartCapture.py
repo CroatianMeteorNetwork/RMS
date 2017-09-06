@@ -454,17 +454,17 @@ if __name__ == "__main__":
         log.info('Video source: ' + cml_args.input)
 
 
-        # Init the upload manager
-        log.info('Starting the upload manager...')
-        upload_manager = UploadManager(config)  #### TESTTT!!!!!!!!!!!!!!!!!!!!!
+        # # Init the upload manager
+        # log.info('Starting the upload manager...')
+        # upload_manager = UploadManager(config)  #### TESTTT!!!!!!!!!!!!!!!!!!!!!
 
         # Capture the video frames from the video file
         runCapture(config, video_file=cml_args.input, nodetect=cml_args.nodetect, upload_manager=upload_manager)
 
-        # Stop the upload manager    #### TESTTT!!!!!!!!!!!!!!!!!!!!!
-        if upload_manager.is_alive():
-            log.info('Closing upload manager...')
-            upload_manager.stop()
+        # # Stop the upload manager    #### TESTTT!!!!!!!!!!!!!!!!!!!!!
+        # if upload_manager.is_alive():
+        #     log.info('Closing upload manager...')
+        #     upload_manager.stop()
 
 
 
