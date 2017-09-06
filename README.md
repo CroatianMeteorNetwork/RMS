@@ -58,6 +58,7 @@ Furthermore, you will need the following software and libraries to run the code:
 - python2.7
 - python2.7-dev
 - libblas-dev liblapack-dev
+- libffi-dev libssl-dev
 - Python libraries:
 	- gitpython
 	- astropy
