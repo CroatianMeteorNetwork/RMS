@@ -4,6 +4,62 @@
 		"selected_items":
 		[
 			[
+				"upl",
+				"upload_manager\tstatement"
+			],
+			[
+				"remote_",
+				"remote_dir"
+			],
+			[
+				"archive",
+				"archive_name\tstatement"
+			],
+			[
+				"up",
+				"upload_manager\tparam"
+			],
+			[
+				"uplo",
+				"upload_manager"
+			],
+			[
+				"uploa",
+				"upload_manager\tstatement"
+			],
+			[
+				"sto",
+				"stop"
+			],
+			[
+				"conf",
+				"config\tstatement"
+			],
+			[
+				"archi",
+				"archive_name\tstatement"
+			],
+			[
+				"ex",
+				"expanduser\tfunction"
+			],
+			[
+				"par",
+				"parser\tparam"
+			],
+			[
+				"e",
+				"expanduser\tfunction"
+			],
+			[
+				"s",
+				"split\tfunction"
+			],
+			[
+				"pa",
+				"path\tmodule"
+			],
+			[
 				"file",
 				"file_name\tstatement"
 			],
@@ -26,10 +82,6 @@
 			[
 				"cap",
 				"captured_path\tstatement"
-			],
-			[
-				"archi",
-				"archiveFieldsums\tfunction"
 			],
 			[
 				"night",
@@ -86,10 +138,6 @@
 			[
 				"text",
 				"text_str\tstatement"
-			],
-			[
-				"up",
-				"updateGamma\tfunction"
 			],
 			[
 				"gamma",
@@ -340,10 +388,6 @@
 				"circle_aperature\tstatement"
 			],
 			[
-				"pa",
-				"patches"
-			],
-			[
 				"cir",
 				"circle_aperature\tstatement"
 			],
@@ -412,10 +456,6 @@
 				"current_ff_file"
 			],
 			[
-				"s",
-				"self"
-			],
-			[
 				"zero",
 				"zeros_like"
 			],
@@ -474,46 +514,6 @@
 			[
 				"key",
 				"key_increment"
-			],
-			[
-				"x_",
-				"x_poly"
-			],
-			[
-				"load",
-				"loadCatalogStars"
-			],
-			[
-				"Dec",
-				"dec_d"
-			],
-			[
-				"tim",
-				"time_data"
-			],
-			[
-				"datet",
-				"datetime2JD\tfunction"
-			],
-			[
-				"lon",
-				"longitude\tstatement"
-			],
-			[
-				"curre",
-				"current_ff\tstatement"
-			],
-			[
-				"xl",
-				"xlim\tfunction"
-			],
-			[
-				"RA_",
-				"RA_data\tstatement"
-			],
-			[
-				"cur",
-				"current_ff\tstatement"
 			]
 		]
 	},
@@ -550,7 +550,7 @@
 			"file": "RMS/Astrometry/SkyFit.py",
 			"settings":
 			{
-				"buffer_size": 46976,
+				"buffer_size": 47321,
 				"encoding": "UTF-8",
 				"line_ending": "Unix"
 			}
@@ -560,15 +560,6 @@
 			"settings":
 			{
 				"buffer_size": 10992,
-				"encoding": "UTF-8",
-				"line_ending": "Unix"
-			}
-		},
-		{
-			"file": "/home/dvida/Desktop/test.py",
-			"settings":
-			{
-				"buffer_size": 174,
 				"encoding": "UTF-8",
 				"line_ending": "Unix"
 			}
@@ -613,53 +604,27 @@
 			"file": ".config",
 			"settings":
 			{
-				"buffer_size": 8082,
+				"buffer_size": 8429,
 				"encoding": "UTF-8",
 				"line_ending": "Unix"
 			}
 		},
 		{
-			"file": "RMS/Formats/FFfile.py",
+			"file": "RMS/UploadManager.py",
 			"settings":
 			{
-				"buffer_size": 7562,
+				"buffer_size": 11104,
 				"encoding": "UTF-8",
 				"line_ending": "Unix"
 			}
 		},
 		{
-			"file": "Utils/GenerateThumbnails.py",
+			"file": "RMS/StartCapture.py",
 			"settings":
 			{
-				"buffer_size": 6061,
+				"buffer_size": 16114,
 				"encoding": "UTF-8",
-				"line_ending": "Unix"
-			}
-		},
-		{
-			"file": "Utils/PlotFieldsums.py",
-			"settings":
-			{
-				"buffer_size": 4560,
-				"encoding": "UTF-8",
-				"line_ending": "Unix"
-			}
-		},
-		{
-			"file": "RMS/Formats/FTPdetectinfo.py",
-			"settings":
-			{
-				"buffer_size": 8541,
-				"line_ending": "Unix"
-			}
-		},
-		{
-			"file": "RMS/ExtractStars.py",
-			"settings":
-			{
-				"buffer_size": 13461,
-				"encoding": "UTF-8",
-				"line_ending": "Unix"
+				"line_ending": "Windows"
 			}
 		}
 	],
@@ -830,26 +795,30 @@
 	],
 	"file_history":
 	[
+		"/home/dvida/source/RMS/RMS/ConfigReader.py",
+		"/home/dvida/source/RMS/RMS/ExtractStars.py",
+		"/home/dvida/source/RMS/RMS/ArchiveDetections.py",
+		"/home/dvida/source/RMS/FILES_TO_UPLOAD.inf",
+		"/home/dvida/source/RMS/RMS/Misc.py",
+		"/home/dvida/source/RMS/RMS/FILES_TO_UPLOAD.inf",
+		"/home/dvida/source/RMS/README.md",
+		"/home/dvida/source/RMS/requirements.txt",
+		"/home/dvida/source/RMS/Utils/PlotFieldsums.py",
+		"/home/dvida/source/RMS/Utils/GenerateThumbnails.py",
+		"/home/dvida/Desktop/test.py",
 		"/home/dvida/RMS_data/CapturedFiles/20170903_212942_285606/FTPdetectinfo_20170903_212942_285606.txt",
 		"/home/dvida/RMS_data/CapturedFiles/20170903_212942_285606/CALSTARS_CA0001_20170903_212942_285606.txt",
 		"/home/dvida/source/RMS/RMS/DetectStarsAndMeteors.py",
 		"/home/dvida/source/RMS/RMS/StartCapture.py",
-		"/home/dvida/source/RMS/Utils/PlotFieldsums.py",
-		"/home/dvida/source/RMS/Utils/GenerateThumbnails.py",
 		"/home/dvida/source/RMS/Utils/Grouping3DRunner.py",
 		"/home/dvida/source/RMS/RMS/Formats/FFfits.py",
 		"/home/dvida/source/RMS/RMS/Formats/FieldIntensities.py",
-		"/home/dvida/source/RMS/RMS/ArchiveDetections.py",
 		"/home/dvida/source/RMS/RMS/Formats/FTPdetectinfo.py",
 		"/home/dvida/source/RMS/RMS/Formats/FRbin.py",
-		"/home/dvida/source/RMS/RMS/Misc.py",
 		"/home/dvida/source/RMS/RMS/Detection.py",
 		"/home/dvida/source/RMS/RMS/Routines/HT-cy_run.py",
-		"/home/dvida/source/RMS/RMS/ExtractStars.py",
 		"/home/dvida/source/RMS/Utils/FRbinViewer.py",
 		"/home/dvida/source/cmn_binviewer/FF_bin_suite.py",
-		"/home/dvida/source/RMS/requirements.txt",
-		"/home/dvida/source/RMS/README.md",
 		"/home/dvida/Desktop/platepar_cmn2010.cal",
 		"/home/dvida/Desktop/platepar_cmn2010.cal.json",
 		"/home/dvida/source/RMS/.gitignore",
@@ -953,11 +922,7 @@
 		"/C/Users/delorayn1/Desktop/meteor-uwo/perseid/plates/ast.c",
 		"/D/Dropbox/Apps/Elginfield RPi RMS data/ConfirmedFiles/20170729_012218_387314_detected/CALSTARS049920170729_012218_387314.txt",
 		"/D/Dropbox/RPi Meteor Station/RMS/setup.py",
-		"/D/Dropbox/RPi Meteor Station/RMS/requirements.txt",
-		"/D/github-codes/cmn_binviewer/requirements.txt",
-		"/D/Dropbox/RPi Meteor Station/RMS/test.py",
-		"/home/dvida/Desktop/UWO Master's/Projects/Preatmosphere VS initial velocitites/PlotResults.py",
-		"/home/dvida/Desktop/UWO Master's/Projects/Preatmosphere VS initial velocitites/AnalyzeCAMS.py"
+		"/D/Dropbox/RPi Meteor Station/RMS/requirements.txt"
 	],
 	"find":
 	{
@@ -1001,6 +966,29 @@
 		"case_sensitive": false,
 		"find_history":
 		[
+			"log.",
+			"upload_manager =",
+			"upload_manager.stop",
+			"upload_manager_",
+			"print",
+			"runCapture",
+			"archivedete",
+			"uploadsf",
+			"upload_queue_file",
+			"sys.exit",
+			"archivedete",
+			"archivede",
+			"sys.exit",
+			"archive",
+			"captured_dir",
+			"width",
+			"captured_dir",
+			"weavearg",
+			"data_pa",
+			"readff",
+			"cv2",
+			".quit",
+			"fovinp",
 			"'CALSTARS_",
 			"'CALSTARS",
 			"th",
@@ -1105,30 +1093,7 @@
 			"dec2",
 			"dec1",
 			"angularse",
-			"angularseparation",
-			"self.platepar.x_po",
-			"getcatalog",
-			"paired_stars = [",
-			"self.platepar.F_scale",
-			"self.platepar.alt_centre",
-			"self.platepar.az_centre",
-			"self.platepar.lat",
-			"calcref",
-			"calcrefce",
-			"self.platepar.dec_d",
-			"self.platepar.lat",
-			"messagebox.",
-			"messagebo",
-			"fitPickedStars",
-			"getCatalogStars",
-			"event.butt",
-			"\"3",
-			"'3",
-			"onmouserele",
-			"enablest",
-			"circle_ape",
-			"findclos",
-			"closest_catalog_star_index"
+			"angularseparation"
 		],
 		"highlight": true,
 		"in_selection": false,
@@ -1161,7 +1126,7 @@
 	"groups":
 	[
 		{
-			"selected": 10,
+			"selected": 9,
 			"sheets":
 			[
 				{
@@ -1215,7 +1180,7 @@
 						"translation.y": 6833.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 6,
+					"stack_index": 7,
 					"type": "text"
 				},
 				{
@@ -1257,7 +1222,7 @@
 						"translation.y": 8478.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 11,
+					"stack_index": 9,
 					"type": "text"
 				},
 				{
@@ -1308,15 +1273,15 @@
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 46976,
+						"buffer_size": 47321,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								34260,
-								34260
+								1562,
+								1562
 							]
 						],
 						"settings":
@@ -1362,6 +1327,10 @@
 								{
 									"characters": ".",
 									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
 								}
 							],
 							"git_gutter_is_enabled": true,
@@ -1370,10 +1339,10 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 14508.0,
+						"translation.y": 179.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 9,
+					"stack_index": 6,
 					"type": "text"
 				},
 				{
@@ -1415,51 +1384,11 @@
 						"translation.y": 3375.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 10,
+					"stack_index": 5,
 					"type": "text"
 				},
 				{
 					"buffer": 5,
-					"file": "/home/dvida/Desktop/test.py",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 174,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								162,
-								162
-							]
-						],
-						"settings":
-						{
-							"auto_complete_triggers":
-							[
-								{
-									"characters": ".",
-									"selector": "source.python - string - comment - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								}
-							],
-							"git_gutter_is_enabled": false,
-							"syntax": "Packages/Python/Python.sublime-syntax"
-						},
-						"translation.x": 0.0,
-						"translation.y": 0.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 12,
-					"type": "text"
-				},
-				{
-					"buffer": 6,
 					"file": "RMS/Formats/FFStruct.py",
 					"semi_transient": false,
 					"settings":
@@ -1486,11 +1415,11 @@
 						"translation.y": 0.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 13,
+					"stack_index": 10,
 					"type": "text"
 				},
 				{
-					"buffer": 7,
+					"buffer": 6,
 					"file": "RMS/Compression.py",
 					"semi_transient": false,
 					"settings":
@@ -1502,8 +1431,8 @@
 						"selection":
 						[
 							[
-								11115,
-								11115
+								8292,
+								8292
 							]
 						],
 						"settings":
@@ -1529,14 +1458,14 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 4711.0,
+						"translation.y": 3290.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 7,
+					"stack_index": 3,
 					"type": "text"
 				},
 				{
-					"buffer": 8,
+					"buffer": 7,
 					"file": "RMS/Routines/Image.py",
 					"semi_transient": false,
 					"settings":
@@ -1572,14 +1501,14 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 182.0,
+						"translation.y": 156.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 14,
+					"stack_index": 4,
 					"type": "text"
 				},
 				{
-					"buffer": 9,
+					"buffer": 8,
 					"file": "RMS/Formats/BSC.py",
 					"semi_transient": false,
 					"settings":
@@ -1617,24 +1546,24 @@
 						"translation.y": 892.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 15,
+					"stack_index": 11,
 					"type": "text"
 				},
 				{
-					"buffer": 10,
+					"buffer": 9,
 					"file": ".config",
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 8082,
+						"buffer_size": 8429,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								3623,
-								3623
+								1342,
+								1342
 							]
 						],
 						"settings":
@@ -1643,27 +1572,27 @@
 							"syntax": "Packages/Text/Plain text.tmLanguage"
 						},
 						"translation.x": 0.0,
-						"translation.y": 825.0,
+						"translation.y": 0.0,
 						"zoom_level": 1.0
 					},
 					"stack_index": 0,
 					"type": "text"
 				},
 				{
-					"buffer": 11,
-					"file": "RMS/Formats/FFfile.py",
+					"buffer": 10,
+					"file": "RMS/UploadManager.py",
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 7562,
+						"buffer_size": 11104,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								4669,
-								4669
+								2800,
+								2800
 							]
 						],
 						"settings":
@@ -1685,120 +1614,27 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 2295.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 5,
-					"type": "text"
-				},
-				{
-					"buffer": 12,
-					"file": "Utils/GenerateThumbnails.py",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 6061,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								5553,
-								5553
-							]
-						],
-						"settings":
-						{
-							"git_gutter_is_enabled": true,
-							"syntax": "Packages/Python/Python.sublime-syntax",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 2280.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 4,
-					"type": "text"
-				},
-				{
-					"buffer": 13,
-					"file": "Utils/PlotFieldsums.py",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 4560,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								3115,
-								3115
-							]
-						],
-						"settings":
-						{
-							"git_gutter_is_enabled": true,
-							"syntax": "Packages/Python/Python.sublime-syntax",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 1260.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 2,
-					"type": "text"
-				},
-				{
-					"buffer": 14,
-					"file": "RMS/Formats/FTPdetectinfo.py",
-					"semi_transient": true,
-					"settings":
-					{
-						"buffer_size": 8541,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								0,
-								0
-							]
-						],
-						"settings":
-						{
-							"git_gutter_is_enabled": true,
-							"syntax": "Packages/Python/Python.sublime-syntax",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 2250.0,
+						"translation.y": 980.0,
 						"zoom_level": 1.0
 					},
 					"stack_index": 1,
 					"type": "text"
 				},
 				{
-					"buffer": 15,
-					"file": "RMS/ExtractStars.py",
+					"buffer": 11,
+					"file": "RMS/StartCapture.py",
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 13461,
+						"buffer_size": 16114,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								13216,
-								13216
+								13786,
+								13786
 							]
 						],
 						"settings":
@@ -1820,10 +1656,10 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 5341.0,
+						"translation.y": 6395.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 3,
+					"stack_index": 2,
 					"type": "text"
 				}
 			]
