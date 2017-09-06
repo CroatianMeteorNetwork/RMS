@@ -38,11 +38,13 @@ def _agentAuth(transport, username, rsa_private_key):
     """
 
     # Try loading the private key
+    ki = None
     try:
         ki = paramiko.RSAKey.from_private_key_file(rsa_private_key)
 
     except Exception, e:
         print('Failed loading', rsa_private_key, e)
+        log.error('Failed loading ' + rsa_private_key + str(e))
 
     # Find all available keys
     agent = paramiko.Agent()
