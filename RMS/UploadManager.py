@@ -43,7 +43,6 @@ def _agentAuth(transport, username, rsa_private_key):
         ki = paramiko.RSAKey.from_private_key_file(rsa_private_key)
 
     except Exception, e:
-        print('Failed loading', rsa_private_key, e)
         log.error('Failed loading ' + rsa_private_key + str(e))
 
     # Find all available keys
@@ -55,16 +54,16 @@ def _agentAuth(transport, username, rsa_private_key):
 
     # Try a key until finding the one which works
     for key in agent_keys:
-        print('Trying ssh-agent key', key.get_fingerprint().encode('hex'))
+        log.info('Trying ssh-agent key ' + str(key.get_fingerprint().encode('hex')))
 
         # Try the key to authenticate
         try:
             transport.auth_publickey(username, key)
-            print('... success!')
+            log.info('... success!')
             return True
 
         except paramiko.SSHException, e:
-            print('... failed!', e)
+            log.warning('... failed!', e)
 
     return False
 
@@ -89,6 +88,11 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
         [bool] True if upload successful, false otherwise.
     """
 
+    # If the file list is empty, don't do anything
+    if not file_list:
+        log.info('No files to upload!')
+        return True
+
     # Connect and use paramiko Transport to negotiate SSH2 across the connection
     # The whole thing is in a try block because if an error occurs, the connection will be closed at the end
     try:
@@ -106,6 +110,14 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
 
         # Open new SFTP connection
         sftp = paramiko.SFTPClient.from_transport(t)
+
+        # Check that the remote directory exists
+        try:
+            sftp.stat(dir_remote)
+
+        except Exception as e:
+            log.error("Remote directory '" + dir_remote + "' does not exist!")
+            return False
 
         # Go through all files
         for fname in file_list:
@@ -128,7 +140,8 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                     continue
             
             except IOError, e:
-                pass
+                log.info('The file already exist on the server!')
+
             
             # Upload the file to the server if it isn't already there
             log.info('Copying ' + local_file + ' to ' + remote_file)
@@ -343,17 +356,19 @@ class UploadManager(multiprocessing.Process):
 
 if __name__ == "__main__":
 
+    from RMS.Logger import initLogging
+
     # Set up a fake config file
     class FakeConf(object):
         def __init__(self):
 
-            self.username = 'pi'
+            self.username = 'dvida'
 
             # remote hostname where SSH server is running
-            self.hostname = 'minorid.localnet' 
+            self.hostname = '129.100.40.167'
             self.host_port = 22
-            self.remote_dir = '.'
-            self.stationID = 'pi'
+            self.remote_dir = 'files'
+            self.stationID = 'dvida'
             self.rsa_private_key = os.path.expanduser("~/.ssh/id_rsa")
 
             self.upload_queue_file = 'FILES_TO_UPLOAD.inf'
@@ -362,22 +377,24 @@ if __name__ == "__main__":
     config = FakeConf()
 
     dir_local='/home/dvida/Desktop'
-    dir_remote = "."
 
 
     #uploadSFTP(config.hostname, config.stationID, dir_local, dir_remote, file_list, rsa_private_key=config.rsa_private_key)
+
+    # Init the logger
+    initLogging()
 
     up = UploadManager(config)
     up.start()
 
     time.sleep(2)
 
-    up.addFiles([os.path.join(dir_local, 'test.txt')])
+    #up.addFiles([os.path.join(dir_local, 'test.txt')])
 
     time.sleep(1)
 
-    up.addFiles([os.path.join(dir_local, 'test2.txt')])
-    up.addFiles([os.path.join(dir_local, 'test3.txt')])
+    #up.addFiles([os.path.join(dir_local, 'test2.txt')])
+    #up.addFiles([os.path.join(dir_local, 'test3.txt')])
 
 
     up.stop()

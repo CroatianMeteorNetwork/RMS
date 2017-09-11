@@ -432,6 +432,7 @@ if __name__ == "__main__":
         # Init the upload manager
         log.info('Starting the upload manager...')
         upload_manager = UploadManager(config)
+        upload_manager.start()
 
         log.info("Running for " + str(duration/60/60) + ' hours...')
 
@@ -448,29 +449,21 @@ if __name__ == "__main__":
 
 
 
-    # If a file with video input was give, use it as a video source
+    # If a file with video input was give, use it as a video source. These files fill not the uploaded to the
+    # server, because the video was recorded beforehand!
     if cml_args.input:
 
         log.info('Video source: ' + cml_args.input)
 
-
-        # # Init the upload manager
-        # log.info('Starting the upload manager...')
-        # upload_manager = UploadManager(config)  #### TESTTT!!!!!!!!!!!!!!!!!!!!!
-
         # Capture the video frames from the video file
         runCapture(config, video_file=cml_args.input, nodetect=cml_args.nodetect, upload_manager=upload_manager)
-
-        # # Stop the upload manager    #### TESTTT!!!!!!!!!!!!!!!!!!!!!
-        # if upload_manager.is_alive():
-        #     log.info('Closing upload manager...')
-        #     upload_manager.stop()
 
 
 
     # Init the upload manager
     log.info('Starting the upload manager...')
     upload_manager = UploadManager(config)
+    upload_manager.start()
 
 
     # Automatic running and stopping the capture at sunrise and sunset

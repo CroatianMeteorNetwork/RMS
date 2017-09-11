@@ -601,19 +601,10 @@
 			}
 		},
 		{
-			"file": ".config",
-			"settings":
-			{
-				"buffer_size": 8429,
-				"encoding": "UTF-8",
-				"line_ending": "Unix"
-			}
-		},
-		{
 			"file": "RMS/UploadManager.py",
 			"settings":
 			{
-				"buffer_size": 11104,
+				"buffer_size": 11182,
 				"encoding": "UTF-8",
 				"line_ending": "Unix"
 			}
@@ -622,9 +613,27 @@
 			"file": "RMS/StartCapture.py",
 			"settings":
 			{
-				"buffer_size": 16114,
+				"buffer_size": 16128,
 				"encoding": "UTF-8",
 				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "README.md",
+			"settings":
+			{
+				"buffer_size": 11944,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": ".config",
+			"settings":
+			{
+				"buffer_size": 8429,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
 			}
 		}
 	],
@@ -795,6 +804,7 @@
 	],
 	"file_history":
 	[
+		"/home/dvida/source/RMS/.config",
 		"/home/dvida/source/RMS/RMS/ConfigReader.py",
 		"/home/dvida/source/RMS/RMS/ExtractStars.py",
 		"/home/dvida/source/RMS/RMS/ArchiveDetections.py",
@@ -921,8 +931,7 @@
 		"/C/Users/delorayn1/Desktop/meteor-uwo/perseid/video/plate.c",
 		"/C/Users/delorayn1/Desktop/meteor-uwo/perseid/plates/ast.c",
 		"/D/Dropbox/Apps/Elginfield RPi RMS data/ConfirmedFiles/20170729_012218_387314_detected/CALSTARS049920170729_012218_387314.txt",
-		"/D/Dropbox/RPi Meteor Station/RMS/setup.py",
-		"/D/Dropbox/RPi Meteor Station/RMS/requirements.txt"
+		"/D/Dropbox/RPi Meteor Station/RMS/setup.py"
 	],
 	"find":
 	{
@@ -1180,7 +1189,7 @@
 						"translation.y": 6833.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 7,
+					"stack_index": 9,
 					"type": "text"
 				},
 				{
@@ -1222,7 +1231,7 @@
 						"translation.y": 8478.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 9,
+					"stack_index": 11,
 					"type": "text"
 				},
 				{
@@ -1264,7 +1273,7 @@
 						"translation.y": 856.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 8,
+					"stack_index": 10,
 					"type": "text"
 				},
 				{
@@ -1342,7 +1351,7 @@
 						"translation.y": 179.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 6,
+					"stack_index": 8,
 					"type": "text"
 				},
 				{
@@ -1384,7 +1393,7 @@
 						"translation.y": 3375.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 5,
+					"stack_index": 7,
 					"type": "text"
 				},
 				{
@@ -1415,7 +1424,7 @@
 						"translation.y": 0.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 10,
+					"stack_index": 12,
 					"type": "text"
 				},
 				{
@@ -1461,7 +1470,7 @@
 						"translation.y": 3290.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 3,
+					"stack_index": 5,
 					"type": "text"
 				},
 				{
@@ -1504,7 +1513,7 @@
 						"translation.y": 156.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 4,
+					"stack_index": 6,
 					"type": "text"
 				},
 				{
@@ -1520,8 +1529,8 @@
 						"selection":
 						[
 							[
-								2990,
-								2990
+								1414,
+								1414
 							]
 						],
 						"settings":
@@ -1543,36 +1552,53 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 892.0,
+						"translation.y": 381.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 11,
+					"stack_index": 4,
 					"type": "text"
 				},
 				{
 					"buffer": 9,
-					"file": ".config",
+					"file": "RMS/UploadManager.py",
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 8429,
+						"buffer_size": 11182,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								1342,
-								1342
+								650,
+								650
 							]
 						],
 						"settings":
 						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
 							"git_gutter_is_enabled": true,
-							"syntax": "Packages/Text/Plain text.tmLanguage"
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 0.0,
+						"translation.y": 125.0,
 						"zoom_level": 1.0
 					},
 					"stack_index": 0,
@@ -1580,61 +1606,19 @@
 				},
 				{
 					"buffer": 10,
-					"file": "RMS/UploadManager.py",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 11104,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								2800,
-								2800
-							]
-						],
-						"settings":
-						{
-							"auto_complete_triggers":
-							[
-								{
-									"characters": ".",
-									"selector": "source.python - string - comment - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								}
-							],
-							"git_gutter_is_enabled": true,
-							"syntax": "Packages/Python/Python.sublime-syntax",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 980.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 1,
-					"type": "text"
-				},
-				{
-					"buffer": 11,
 					"file": "RMS/StartCapture.py",
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 16114,
+						"buffer_size": 16128,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								13786,
-								13786
+								13720,
+								13720
 							]
 						],
 						"settings":
@@ -1659,7 +1643,66 @@
 						"translation.y": 6395.0,
 						"zoom_level": 1.0
 					},
+					"stack_index": 3,
+					"type": "text"
+				},
+				{
+					"buffer": 11,
+					"file": "README.md",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 11944,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								4700,
+								4700
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Markdown/Markdown.sublime-syntax",
+							"translate_tabs_to_spaces": false
+						},
+						"translation.x": 0.0,
+						"translation.y": 540.0,
+						"zoom_level": 1.0
+					},
 					"stack_index": 2,
+					"type": "text"
+				},
+				{
+					"buffer": 12,
+					"file": ".config",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 8429,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								4276,
+								4276
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Text/Plain text.tmLanguage"
+						},
+						"translation.x": 0.0,
+						"translation.y": 1035.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 1,
 					"type": "text"
 				}
 			]
