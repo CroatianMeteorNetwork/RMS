@@ -36,12 +36,14 @@ def availableSpace(dirname):
 
 
 
-def getNightDirs(dir_path):
+def getNightDirs(dir_path, stationID):
     """ Returns a sorted list of directories in the given directory which conform to the captured directories
         names. 
 
     Arguments:
         dir_path: [str] Path to the data directory.
+        stationID: [str] Name of the station. The directory will have to contain this string to be taken
+            as the night directory.
 
     Return:
         dir_list: [list] A list of night directories in the data directory.
@@ -52,19 +54,20 @@ def getNightDirs(dir_path):
     dir_list = [dir_name for dir_name in os.listdir(dir_path) if os.path.isdir(os.path.join(dir_path, dir_name))]
 
     # Get a list of directories which conform to the captured directories names
-    dir_list = [dir_name for dir_name in dir_list if (len(dir_name.split('_')) == 3) and len(dir_name) == 22]
+    dir_list = [dir_name for dir_name in dir_list if (len(dir_name.split('_')) == 3) and (stationID in dir_name)]
     dir_list = sorted(dir_list)
 
     return dir_list
 
 
 
-def deleteNightFolders(dir_path, delete_all=False):
+def deleteNightFolders(dir_path, config, delete_all=False):
     """ Deletes captured data directories to free up disk space. Either only one directory will be deleted
         (the oldest one), or all directories will be deleted (if delete_all = True).
 
     Arguments:
         dir_path: [str] Path to the data directory.
+        config: [COnfiguration object]
 
     Keyword arguments:
         delete_all: [bool] If True, all data folders will be deleted. False by default.
@@ -75,7 +78,7 @@ def deleteNightFolders(dir_path, delete_all=False):
     """
 
     # Get the list of night directories
-    dir_list = getNightDirs(dir_path)
+    dir_list = getNightDirs(dir_path, config.stationID)
 
     # Delete the night directories
     for dir_name in dir_list:
@@ -89,7 +92,7 @@ def deleteNightFolders(dir_path, delete_all=False):
 
 
     # Return the list of remaining night directories
-    return getNightDirs(dir_path)
+    return getNightDirs(dir_path, config.stationID)
 
 
 
@@ -152,14 +155,14 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     while True:
 
         # Delete one captured directory
-        captured_dirs_remaining = deleteNightFolders(captured_dir)
+        captured_dirs_remaining = deleteNightFolders(captured_dir, config)
 
         # Break the there's enough space
         if availableSpace(data_dir) > next_night_bytes:
             break
 
         # Delete one archived directory
-        archived_dirs_remaining = deleteNightFolders(archived_dir)
+        archived_dirs_remaining = deleteNightFolders(archived_dir, config)
 
 
         # Break the there's enough space
