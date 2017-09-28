@@ -54,7 +54,7 @@ def getNightDirs(dir_path, stationID):
     dir_list = [dir_name for dir_name in os.listdir(dir_path) if os.path.isdir(os.path.join(dir_path, dir_name))]
 
     # Get a list of directories which conform to the captured directories names
-    dir_list = [dir_name for dir_name in dir_list if (len(dir_name.split('_')) == 3) and (stationID in dir_name)]
+    dir_list = [dir_name for dir_name in dir_list if (len(dir_name.split('_')) > 3) and (stationID in dir_name)]
     dir_list = sorted(dir_list)
 
     return dir_list
