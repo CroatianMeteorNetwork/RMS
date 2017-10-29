@@ -51,7 +51,7 @@ class Compressor(multiprocessing.Process):
     running = False
     
     def __init__(self, data_dir, array1, startTime1, array2, startTime2, config, detector=None, 
-        live_view=None):
+        live_view=None, flat_struct=None):
         """
 
         Arguments:
@@ -62,10 +62,11 @@ class Compressor(multiprocessing.Process):
             config: configuration class
 
         Keyword arguments:
-            detector: [Detector object] handle to Detector object used for running star extraction and
-                meteor detection
-            live_view: [LiveViewer object] handle to the LiveViewer object which will show in real time 
-                the latest maxpixel on the screen
+            detector: [Detector object] Handle to Detector object used for running star extraction and
+                meteor detection.
+            live_view: [LiveViewer object] Handle to the LiveViewer object which will show in real time 
+                the latest maxpixel on the screen.
+            flat_struct: [Flat struct] Structure containing the flat field. None by default.
 
         """
         
@@ -80,6 +81,7 @@ class Compressor(multiprocessing.Process):
 
         self.detector = detector
         self.live_view = live_view
+        self.flat_struct = flat_struct
 
         self.exit = multiprocessing.Event()
 
@@ -350,7 +352,7 @@ class Compressor(multiprocessing.Process):
             if self.detector is not None:
 
                 # Add the file to the detector queue
-                self.detector.addJob([self.data_dir, filename, self.config])
+                self.detector.addJob([self.data_dir, filename, self.config, self.flat_struct])
 
 
             # Refresh the maxpixel currently shown on the screen

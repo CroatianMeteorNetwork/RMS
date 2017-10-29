@@ -112,7 +112,7 @@ class Platepar(object):
         self.F_scale = 0
         self.w_pix = 0
 
-        self.mag_0 = self.mag_lev = 0
+        self.mag_0 = self.mag_lev = 1.0
 
         # Distortion fit
         self.x_poly = np.zeros(shape=(12,), dtype=np.float64)

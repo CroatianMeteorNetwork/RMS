@@ -44,14 +44,14 @@ import scipy.optimize
 import matplotlib
 import matplotlib.pyplot as plt
 
+import RMS.ConfigReader as cr
 import RMS.Formats.BSC as BSC
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FFfile import getMiddleTimeFF
-import RMS.ConfigReader as cr
-from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADec
+from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADec, calcRefCentre, raDecToCorrectedXY
 from RMS.Astrometry.Conversions import date2JD
 from RMS.Routines.Image import adjustLevels
 
@@ -665,7 +665,7 @@ class PlateTool(object):
         self.drawCalstars()
 
         # Update centre of FOV in horizontal coordinates
-        self.platepar.az_centre, self.platepar.alt_centre = self.calcRefCentre(self.platepar.JD, self.platepar.lon, 
+        self.platepar.az_centre, self.platepar.alt_centre = calcRefCentre(self.platepar.JD, self.platepar.lon, 
             self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d)
 
         ### Draw catalog stars on the image using the current platepar ###
@@ -784,7 +784,7 @@ class PlateTool(object):
         _, ra_centre, dec_centre, _ = XY2CorrectedRADec([ff_middle_time], [self.platepar.X_res/2], 
             [self.platepar.Y_res/2], [0], self.UT_corr, self.platepar.lat, self.platepar.lon, 
             self.platepar.Ho, self.platepar.X_res, self.platepar.Y_res, self.platepar.RA_d, 
-            self.platepar.dec_d, self.platepar.pos_angle_ref, self.platepar.F_scale, self.platepar.w_pix, 
+            self.platepar.dec_d, self.platepar.pos_angle_ref, self.platepar.F_scale, 
             self.platepar.mag_0, self.platepar.mag_lev, self.platepar.x_poly, self.platepar.y_poly)
 
         # Calculate the FOV radius in degrees
@@ -814,42 +814,9 @@ class PlateTool(object):
 
 
 
-    def calcRefCentre(self, JD, lon, lat, ra_ref, dec_ref):
-        """ Calculate the referent azimuth and altitude of the centre of the FOV from the given RA/Dec. 
-
-        Arguments:
-            JD: [float] Referent Julian date.
-            lon: [float] Longitude +E in degrees.
-            lat: [float] Latitude +N in degrees.
-            ra_ref: [float] Referent RA at referent time in degrees.
-            dec_ref: [float] Referent declination at referent time in degrees.
-        """
-
-        T = (JD - 2451545)/36525.0
-        Ho = (280.46061837 + 360.98564736629*(JD - 2451545) + 0.000387933*T**2 - (T**3)/38710000)%360
-
-        h = Ho + lon - ra_ref
-        sh = math.sin(math.radians(h))
-        sd = math.sin(math.radians(dec_ref))
-        sl = math.sin(math.radians(lat))
-        ch = math.cos(math.radians(h))
-        cd = math.cos(math.radians(dec_ref))
-        cl = math.cos(math.radians(lat))
-        x = -ch*cd*sl + sd*cl
-        y = -sh*cd
-        z = ch*cd*cl + sd*sl
-        r = math.sqrt(x**2 + y**2)
-
-        az_centre = (math.degrees(math.atan2(y, x)))%360
-        alt_centre = math.degrees(math.atan2(z, r))
-
-        return az_centre, alt_centre
-
-
-
     def getCatalogStarPositions(self, catalog_stars, lon, lat, az_centre, alt_centre, pos_angle_ref, F_scale, 
         x_poly, y_poly):
-        """ Draw catalog stars using the current platepar values. 
+        """ Get image positions of catalog stars using the current platepar values. 
     
         Arguments:
             catalog_stars: [2D list] A list of (ra, dec, mag) pairs of catalog stars.
@@ -861,6 +828,9 @@ class PlateTool(object):
             F_scale: [float] Image scale in pix/arcsec for CIF resolution.
             x_poly: [ndarray float] Distorsion polynomial in X direction.
             y_poly: [ndarray float] Distorsion polynomail in Y direction.
+
+        Return:
+            (x_array, y_array): [tuple of floats] X and Y positons of stars on the image.
         """
 
         ra_catalog, dec_catalog, _ = catalog_stars.T
@@ -870,82 +840,10 @@ class PlateTool(object):
         # Get the date of the middle of the FF exposure
         jd = date2JD(*ff_middle_time, UT_corr=self.UT_corr)
 
-        T = (jd - 2451545)/36525.0
-        Ho = 280.46061837 + 360.98564736629*(jd - 2451545) + 0.000387933*T**2 - (T**3)/38710000.0
-
-        sl = math.sin(math.radians(lat))
-        cl = math.cos(math.radians(lat))
-
-        salt = math.sin(math.radians(alt_centre))
-        saz = math.sin(math.radians(az_centre))
-        calt = math.cos(math.radians(alt_centre))
-        caz = math.cos(math.radians(az_centre))
-        x = -saz*calt
-        y = -caz*sl*calt + salt*cl
-        HA = math.degrees(math.atan2(x, y))
-
-        # Centre of FOV
-        RA_centre = (Ho + lon - HA)%360
-        dec_centre = math.degrees(math.asin(sl*salt + cl*calt*caz))
-
-        x_array = np.zeros_like(ra_catalog)
-        y_array = np.zeros_like(ra_catalog)
-
-        for i, (ra_star, dec_star) in enumerate(zip(ra_catalog, dec_catalog)):
-
-            # Gnomonization of star coordinates to image coordinates
-            ra1 = math.radians(RA_centre)
-            dec1 = math.radians(dec_centre)
-            ra2 = math.radians(ra_star)
-            dec2 = math.radians(dec_star)
-            ad = math.acos(math.sin(dec1)*math.sin(dec2) + math.cos(dec1)*math.cos(dec2)*math.cos(ra2 - ra1))
-            radius = math.degrees(ad)
-            sinA = math.cos(dec2)*math.sin(ra2 - ra1)/math.sin(ad)
-            cosA = (math.sin(dec2) - math.sin(dec1)*math.cos(ad))/(math.cos(dec1) * math.sin(ad))
-            theta = -math.degrees(math.atan2(sinA, cosA))
-            theta = theta + pos_angle_ref - 90.0
-
-            # Calculate the image coordinates (scale the F_scale from CIF resolution)
-            X1 = radius*math.cos(math.radians(theta))*F_scale
-            Y1 = radius*math.sin(math.radians(theta))*F_scale
-
-            # Calculate distortion in X direction
-            dX = (x_poly[0]
-                + x_poly[1]*X1
-                + x_poly[2]*Y1
-                + x_poly[3]*X1**2
-                + x_poly[4]*X1*Y1
-                + x_poly[5]*Y1**2
-                + x_poly[6]*X1**3
-                + x_poly[7]*X1**2*Y1
-                + x_poly[8]*X1*Y1**2
-                + x_poly[9]*Y1**3
-                + x_poly[10]*X1*np.sqrt(X1**2 + Y1**2)
-                + x_poly[11]*Y1*np.sqrt(X1**2 + Y1**2))
-
-            # Add the distortion correction and calculate X image coordinates
-            Xpix = (X1 - dX)*self.platepar.X_res/384.0 + self.platepar.X_res/2
-
-            # Calculate distortion in Y direction
-            dY = (y_poly[0]
-                + y_poly[1]*X1
-                + y_poly[2]*Y1
-                + y_poly[3]*X1**2
-                + y_poly[4]*X1*Y1
-                + y_poly[5]*Y1**2
-                + y_poly[6]*X1**3
-                + y_poly[7]*X1**2*Y1
-                + y_poly[8]*X1*Y1**2
-                + y_poly[9]*Y1**3
-                + y_poly[10]*Y1*np.sqrt(X1**2 + Y1**2)
-                + y_poly[11]*X1*np.sqrt(X1**2 + Y1**2))
-
-            # Add the distortion correction and calculate Y image coordinates
-            Ypix = (Y1 - dY)*self.platepar.Y_res/288.0 + self.platepar.Y_res/2
-
-            x_array[i] = Xpix
-            y_array[i] = Ypix
-
+        # Convert star RA, Dec to image coordinates
+        x_array, y_array = raDecToCorrectedXY(ra_catalog, dec_catalog, jd, lat, lon, self.platepar.X_res, \
+            self.platepar.Y_res, self.platepar.RA_d, self.platepar.dec_d, self.platepar.JD, pos_angle_ref, \
+            F_scale, x_poly, y_poly)
 
         return x_array, y_array
 
@@ -1248,7 +1146,7 @@ class PlateTool(object):
             ra_ref, dec_ref, pos_angle_ref, F_scale = params
 
             # Calculate the centre of FOV
-            az_centre, alt_centre = self.calcRefCentre(self.platepar.JD, self.platepar.lon, self.platepar.lat, 
+            az_centre, alt_centre = calcRefCentre(self.platepar.JD, self.platepar.lon, self.platepar.lat, 
                 ra_ref, dec_ref)
 
             img_x, img_y = img_stars.T
@@ -1289,7 +1187,7 @@ class PlateTool(object):
                 y_poly = params
 
             # Calculate the centre of FOV
-            az_centre, alt_centre = self.calcRefCentre(self.platepar.JD, self.platepar.lon, self.platepar.lat, 
+            az_centre, alt_centre = calcRefCentre(self.platepar.JD, self.platepar.lon, self.platepar.lat, 
                 self.platepar.RA_d, self.platepar.dec_d)
 
             img_x, img_y = img_stars.T
@@ -1335,7 +1233,7 @@ class PlateTool(object):
         self.platepar.RA_d, self.platepar.dec_d, self.platepar.pos_angle_ref, self.platepar.F_scale = res.x
 
         # Recalculate centre
-        self.calcRefCentre(self.platepar.JD, self.platepar.lon, self.platepar.lat, self.platepar.RA_d, 
+        calcRefCentre(self.platepar.JD, self.platepar.lon, self.platepar.lat, self.platepar.RA_d, 
             self.platepar.dec_d)
 
 
@@ -1365,7 +1263,7 @@ if __name__ == '__main__':
 
 
     if len(sys.argv) < 2:
-        print('Usage: python -m RMS.Astrometry.PlateTool /path/to/FRbin/dir/')
+        print('Usage: python -m RMS.Astrometry.PlateTool /path/to/FFbin/dir/')
         sys.exit()
 
     dir_path = sys.argv[1].replace('"', '')

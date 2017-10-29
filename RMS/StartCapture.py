@@ -24,14 +24,17 @@ import datetime
 import signal
 import ctypes
 import logging
-import numpy as np
 import multiprocessing
+
+import numpy as np
+import scipy.misc
 
 import RMS.ConfigReader as cr
 from RMS.Logger import initLogging
 
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats import CALSTARS
+from RMS.Routines import Image
 
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.BufferedCapture import BufferedCapture
@@ -46,6 +49,8 @@ from RMS.QueuedPool import QueuedPool
 from RMS.Misc import mkdirP
 
 from Utils.PlotFieldsums import plotFieldsums
+from Utils.MakeFlat import makeFlat
+
 
 
 # Flag indicating that capturing should be stopped
@@ -148,6 +153,15 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
     log.info('Data directory: ' + night_data_dir)
 
 
+    # Load the default flat field image if it is available
+    flat_struct = None
+
+    if os.path.exists(config.flat_file):
+        flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
+
+        log.info('Loaded flat field image: ' + os.path.join(os.getcwd(), config.flat_file))
+
+
     # Init arrays for parallel compression on 2 cores
     sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, 256*config.width*config.height)
     sharedArray = np.ctypeslib.as_array(sharedArrayBase.get_obj())
@@ -178,7 +192,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
     
     # Initialize compression
     c = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config, 
-        detector=detector, live_view=live_view)
+        detector=detector, live_view=live_view, flat_struct=flat_struct)
 
     
     # Start buffered capture
@@ -329,6 +343,26 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
     archiveFieldsums(night_data_dir)
 
 
+    # List for any extra files which will be copied to the night archive directory. Full paths have to be 
+    #   given
+    extra_files = []
+
+    # Make a new flat field
+    flat_img = makeFlat(night_data_dir, config)
+
+    # If making flat was sucessfull, save it
+    if flat_img is not None:
+
+        # Save the flat in the root directory, to keep the operational flat updated
+        scipy.misc.imsave(config.flat_file, flat_img)
+        flat_path = os.path.join(os.getcwd(), config.flat_file)
+        log.info('Flat saved to: ' + flat_path)
+
+        # Copy the flat to the night's directory as well
+        extra_files.append(flat_path)
+
+
+
     night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir, 
         night_data_dir_name)
 
@@ -336,7 +370,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
     log.info('Archiving detections to ' + night_archive_dir)
     
     # Archive the detections
-    archive_name = archiveDetections(night_data_dir, night_archive_dir, ff_detected, config)
+    archive_name = archiveDetections(night_data_dir, night_archive_dir, ff_detected, config, \
+        extra_files=extra_files)
+
 
     # Put the archive up for upload
     if upload_manager is not None:
@@ -456,7 +492,7 @@ if __name__ == "__main__":
         log.info('Video source: ' + cml_args.input)
 
         # Capture the video frames from the video file
-        runCapture(config, video_file=cml_args.input, nodetect=cml_args.nodetect, upload_manager=upload_manager)
+        runCapture(config, video_file=cml_args.input, nodetect=cml_args.nodetect)
 
 
 

@@ -27,7 +27,7 @@ def mkdirP(path):
 
 
 
-def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=False):
+def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=False, extra_files=None):
     """ Move the given file list from the source directory to the destination directory, compress the 
         destination directory and save it as a .bz2 file. BZ2 compression is used as ZIP files have a limit
         of 2GB in size.
@@ -39,7 +39,9 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
         compress_file: [str] Name of the compressed file which will be created.
 
     Keyword arguments:
-        delete_dest_dir: [bool] Delete the destination directory after compression. False by defualt.
+        delete_dest_dir: [bool] Delete the destination directory after compression. False by default.
+        extra_files: [list] A list of extra files (with fill paths) which will be be saved to the night 
+            archive.
 
     Return:
         archive_name: [str] Full name of the archive.
@@ -52,6 +54,12 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
     # Copy the files from the source to the archive directory
     for file_name in file_list:
         shutil.copy2(os.path.join(source_dir, file_name), os.path.join(dest_dir, file_name))
+
+    # Copy the additional files to the archive directory
+    if extra_files is not None:
+        for file_name in extra_files:
+            shutil.copy2(file_name, os.path.join(dest_dir, os.path.basename(file_name)))
+
 
     # Compress the archive directory
     archive_name = shutil.make_archive(os.path.join(dest_dir, compress_file), 'bztar', dest_dir, logger=log)

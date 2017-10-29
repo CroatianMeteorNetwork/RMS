@@ -39,8 +39,8 @@ def selectFiles(dir_path, ff_detected):
             selected_list.append(file_name)
 
 
-        # Take all PNG and JPG images
-        if ('.png' in file_name) or ('.jpg' in file_name):
+        # Take all PNG, JPG, BMP images
+        if ('.png' in file_name) or ('.jpg' in file_name) or ('.bmp' in file_name):
             selected_list.append(file_name)
 
 
@@ -120,7 +120,7 @@ def archiveFieldsums(dir_path):
 
 
 
-def archiveDetections(captured_path, archived_path, ff_detected, config):
+def archiveDetections(captured_path, archived_path, ff_detected, config, extra_files=None):
     """ Create thumbnails and compress all files with detections and the accompanying files in one archive.
 
     Arguments:
@@ -128,6 +128,10 @@ def archiveDetections(captured_path, archived_path, ff_detected, config):
         archived_path: [str] Path where the detected files will be archived to.
         ff_detected: [str] A list of FF files with detections.
         config: [conf object] Configuration.
+
+    Keyword arguments:
+        extra_files: [list] A list of extra files (with fill paths) which will be be saved to the night 
+            archive.
 
     Return:
         archive_name: [str] Name of the archive where the files were compressed to.
@@ -157,7 +161,8 @@ def archiveDetections(captured_path, archived_path, ff_detected, config):
             os.path.basename(captured_path) + '_detected')
 
         # Archive the files
-        archive_name = archiveDir(captured_path, file_list, archived_path, archive_name)
+        archive_name = archiveDir(captured_path, file_list, archived_path, archive_name, \
+            extra_files=extra_files)
 
         return archive_name
 

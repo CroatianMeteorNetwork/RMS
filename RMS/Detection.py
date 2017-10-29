@@ -37,6 +37,7 @@ import RMS.ConfigReader as cr
 from RMS.Routines.Grouping3D import find3DLines, getAllPoints
 from RMS.Routines.CompareLines import compareLines
 from RMS.Routines import MaskImage
+from RMS.Routines import Image
 
 # Morphology - Cython init
 import pyximport
@@ -885,7 +886,7 @@ def show3DCloud(ff, stripe, detected_line=None, stripe_points=None, config=None)
 
 
 
-def detectMeteors(ff_directory, ff_name, config):
+def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
     """ Detect meteors on the given FF bin image. Here are the steps in the detection:
             - input image (FF bin format file) is thresholded (converted to black and white)
             - several morphological operations are applied to clean the image
@@ -901,6 +902,9 @@ def detectMeteors(ff_directory, ff_name, config):
         ff_directory: [string] an absolute path to the input FF bin file
         ff_name: [string] file name of the FF bin file on which to run the detection on
         config: [config object] configuration object (loaded from the .config file)
+
+    Keyword arguments:
+        flat_struct: [Flat struct] Structure containing the flat field. None by default.
     
     Return:
         meteor_detections: [list] a list of detected meteors, with these elements:
@@ -921,6 +925,12 @@ def detectMeteors(ff_directory, ff_name, config):
 
     # Mask the FF file
     ff = MaskImage.applyMask(ff, mask, ff_flag=True)
+
+    # Apply the flat to maxpixel and avepixel
+    if flat_struct is not None:
+
+        ff.maxpixel = Image.applyFlat(ff.maxpixel, flat_struct)
+        ff.avepixel = Image.applyFlat(ff.avepixel, flat_struct)
 
 
     # # Show the maxpixel image
@@ -1219,6 +1229,10 @@ def detectMeteors(ff_directory, ff_name, config):
 
 if __name__ == "__main__":
 
+    # Load config file
+    config = cr.parse(".config")
+
+
     # Measure the time of the whole operation
     time_whole = time()
 
@@ -1226,23 +1240,38 @@ if __name__ == "__main__":
     if len(sys.argv) == 1:
         print("Usage: python -m RMS.Detection /path/to/ff/files/")
         sys.exit()
+
+
+    dir_path = sys.argv[1]
+        
     
     # Get paths to every FF bin file in a directory 
-    ff_list = [ff for ff in os.listdir(sys.argv[1]) if FFfile.validFFName(ff)]
+    ff_list = [ff for ff in os.listdir(dir_path) if FFfile.validFFName(ff)]
 
     # Check if there are any file in the directory
     if(len(ff_list) == None):
         print("No files found!")
         sys.exit()
 
-    # Load config file
-    config = cr.parse(".config")
+
+    # Try loading a flat field image
+    flat_struct = None
+
+    # Check if there is flat in the data directory
+    if os.path.exists(os.path.join(dir_path, config.flat_file)):
+        flat_struct = Image.loadFlat(dir_path, config.flat_file)
+
+    # Try loading the default flat
+    elif os.path.exists(config.flat_file):
+        flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
+
+
 
     # Init results list
     results_list = []
 
     # Open a file for results
-    results_path = os.path.abspath(sys.argv[1]) + os.sep
+    results_path = os.path.abspath(dir_path) + os.sep
     results_name = results_path.split(os.sep)[-2]
     results_file = open(results_path + results_name+'_results.txt', 'w')
 
@@ -1253,7 +1282,7 @@ if __name__ == "__main__":
         print(ff_name)
 
         # Run the meteor detection algorithm
-        meteor_detections = detectMeteors(results_path, ff_name, config)
+        meteor_detections = detectMeteors(results_path, ff_name, config, flat_struct=flat_struct)
 
         meteor_No = 1
         for meteor in meteor_detections:

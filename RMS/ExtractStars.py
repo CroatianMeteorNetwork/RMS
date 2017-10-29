@@ -15,6 +15,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import print_function, division, absolute_import
+
 import time
 import sys
 import os
@@ -30,11 +32,12 @@ import RMS.ConfigReader as cr
 from RMS.Formats import FFfile
 from RMS.Formats import CALSTARS
 from RMS.Routines import MaskImage
+from RMS.Routines import Image
 
 
 
 def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=10, neighborhood_size=10, 
-        intensity_threshold=5):
+        intensity_threshold=5, flat_struct=None):
     """ Extracts stars on a given FF bin by searching for local maxima and applying PSF fit for star 
         confirmation.
 
@@ -49,6 +52,7 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
             border (in pixels)
         neighborhood_size: [int] size of the neighbourhood for the maximum search (in pixels)
         intensity_threshold: [float] a threshold for cutting the detections which are too faint (0-255)
+        flat_struct: [Flat struct] Structure containing the flat field. None by default.
 
     Return:
         x2, y2, background, intensity: [list of ndarrays]
@@ -74,6 +78,14 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
 
     # Mask the FF file
     ff = MaskImage.applyMask(ff, mask, ff_flag=True)
+
+
+    # Apply the flat to maxpixel and avepixel
+    if flat_struct is not None:
+
+        ff.maxpixel = Image.applyFlat(ff.maxpixel, flat_struct)
+        ff.avepixel = Image.applyFlat(ff.avepixel, flat_struct)
+
 
     # Calculate image mean and stddev
     global_mean = np.mean(ff.avepixel)
@@ -345,7 +357,7 @@ if __name__ == "__main__":
     config = cr.parse(".config")
 
     if not len(sys.argv) == 2:
-        print "Usage: python -m RMS.ExtractStars /path/to/bin/files/"
+        print("Usage: python -m RMS.ExtractStars /path/to/bin/files/")
         sys.exit()
     
     # Get paths to every FF bin file in a directory 
@@ -354,8 +366,21 @@ if __name__ == "__main__":
 
     # Check if there are any file in the directory
     if(len(ff_list) == None):
-        print "No files found!"
+        print("No files found!")
         sys.exit()
+
+
+
+    # Try loading a flat field image
+    flat_struct = None
+
+    # Check if there is flat in the data directory
+    if os.path.exists(os.path.join(ff_dir, config.flat_file)):
+        flat_struct = Image.loadFlat(ff_dir, config.flat_file)
+
+    # Try loading the default flat
+    elif os.path.exists(config.flat_file):
+        flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
 
 
     star_list = []
@@ -363,13 +388,13 @@ if __name__ == "__main__":
     # Go through all files in the directory
     for ff_name in sorted(ff_list):
 
-        print ff_name
+        print(ff_name)
 
         t1 = time.clock()
 
-        x2, y2, background, intensity = extractStars(ff_dir, ff_name, config)
+        x2, y2, background, intensity = extractStars(ff_dir, ff_name, config, flat_struct=flat_struct)
 
-        print 'Time for extraction: ', time.clock() - t1
+        print('Time for extraction: ', time.clock() - t1)
 
         # Skip if no stars were found
         if not x2:
@@ -382,9 +407,9 @@ if __name__ == "__main__":
         star_list.append([ff_name, star_data])
 
         # Print found stars
-        print '   ROW    COL   BGK  intensity'
+        print('   ROW    COL   BGK  intensity')
         for x, y, bg_level, level in star_data:
-            print ' {:06.2f} {:06.2f} {:6d} {:6d}'.format(round(y, 2), round(x, 2), int(bg_level), int(level))
+            print(' {:06.2f} {:06.2f} {:6d} {:6d}'.format(round(y, 2), round(x, 2), int(bg_level), int(level)))
 
 
         # # Show stars if there are only more then 10 of them
@@ -407,4 +432,4 @@ if __name__ == "__main__":
     # Write detected stars to the CALSTARS file
     CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, ff.camno, ff.nrows, ff.ncols)
 
-    print 'Total time taken: ', time.clock() - time_start
+    print('Total time taken: ', time.clock() - time_start)

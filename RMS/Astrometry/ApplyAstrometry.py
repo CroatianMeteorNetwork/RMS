@@ -39,22 +39,63 @@ from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.FFfile import filenameToDatetime
 
 
+
+
+def calcRefCentre(JD, lon, lat, ra_ref, dec_ref):
+    """ Calculate the referent azimuth and altitude of the centre of the FOV from the given RA/Dec. 
+
+    Arguments:
+        JD: [float] Referent Julian date.
+        lon: [float] Longitude +E in degrees.
+        lat: [float] Latitude +N in degrees.
+        ra_ref: [float] Referent RA at referent time in degrees.
+        dec_ref: [float] Referent declination at referent time in degrees.
+
+    Return:
+        (az_centre, alt_centre): [tuple of float]: Azimuth and altitude of the FOV centre (degrees).
+    """
+
+    T = (JD - 2451545)/36525.0
+    Ho = (280.46061837 + 360.98564736629*(JD - 2451545) + 0.000387933*T**2 - (T**3)/38710000)%360
+
+    h = Ho + lon - ra_ref
+    sh = math.sin(math.radians(h))
+    sd = math.sin(math.radians(dec_ref))
+    sl = math.sin(math.radians(lat))
+    ch = math.cos(math.radians(h))
+    cd = math.cos(math.radians(dec_ref))
+    cl = math.cos(math.radians(lat))
+    x = -ch*cd*sl + sd*cl
+    y = -sh*cd
+    z = ch*cd*cl + sd*sl
+    r = math.sqrt(x**2 + y**2)
+
+    az_centre = (math.degrees(math.atan2(y, x)))%360
+    alt_centre = math.degrees(math.atan2(z, r))
+
+    return az_centre, alt_centre
+
+
+
 def applyFieldCorrection(x_poly, y_poly, X_res, Y_res, F_scale, X_data, Y_data, level_data):
     """ Apply field correction and vignetting correction to all given image points. 
-
-    @param x_poly: [ndarray] 1D numpy array of 12 elements containing X axis polynomial parameters
-    @param y_poly: [ndarray] 1D numpy array of 12 elements containing Y axis polynomial parameters
-    @param X_res: [int] camera X axis resolution (longer)
-    @param Y_res: [int] camera Y axis resolution (shorter)
-    @param F_scale: [float] sum of image scales per each image axis (arcsec per px)
-    @param X_data: [ndarray] 1D float numpy array containing X component of the detection point
-    @param Y_data: [ndarray] 1D float numpy array containing Y component of the detection point
-    @param level_data: [ndarray] 1D int numpy array containing levels of detection points
-
-    @return (X_corrected, Y_corrected, levels_corrected): [tuple of ndarrays]
-        X_corrected: 1D numpy array containing distortion corrected X component
-        Y_corrected: 1D numpy array containing distortion corrected Y component
-        level_data: 1D numpy array containing vignetting corrected levels
+`
+    Arguments:
+        x_poly: [ndarray] 1D numpy array of 12 elements containing X axis polynomial parameters
+        y_poly: [ndarray] 1D numpy array of 12 elements containing Y axis polynomial parameters
+        X_res: [int] Camera X axis resolution.
+        Y_res: [int] Camera Y axis resolution.
+        F_scale: [float] Sum of image scales per each image axis (arcsec per px).
+        X_data: [ndarray] 1D float numpy array containing X component of the detection point.
+        Y_data: [ndarray] 1D float numpy array containing Y component of the detection point.
+        level_data: [ndarray] 1D int numpy array containing levels of detection points.
+    
+    Return:
+        (X_corrected, Y_corrected, levels_corrected): [tuple of ndarrays]
+            X_corrected: 1D numpy array containing distortion corrected X component.
+            Y_corrected: 1D numpy array containing distortion corrected Y component.
+            level_data: 1D numpy array containing vignetting corrected levels.
+            
     """
 
     # Scale the resolution to CIF
@@ -129,20 +170,22 @@ def applyFieldCorrection(x_poly, y_poly, X_res, Y_res, F_scale, X_data, Y_data, 
 
 
 def XY2altAz(lat, lon, RA_d, dec_d, Ho, rot_param, X_data, Y_data):
-    """ Convert image coordinates (X, Y) to sky altitude and azimuth. 
-
-    @param lat: [float] latitude of the observer in degrees
-    @param lon: [float] longitde of the observer in degress
-    @param RA_d: [float] right ascension of the image centre (degrees)
-    @param dec_d: [float] declination of the image centre (degrees)
-    @param Ho: [float] referent hour angle
-    @param rot_param: [float] field rotation parameter (degrees)
-    @param X_data: [ndarray] 1D numpy array containing distortion corrected X component
-    @param Y_data: [ndarray] 1D numpy array containing distortion corrected Y component
-
-    @return (azimuth_data, altitude_data): [tuple of ndarrays]
-        azimuth_data: [ndarray] 1D numpy array containing the azimuth of each data point (degrees)
-        altitude_data: [ndarray] 1D numyp array containing the altitude of each data point (degrees)
+    """ Convert image coordinates (X, Y) to celestial altitude and azimuth. 
+    
+    Arguments:
+        lat: [float] Latitude of the observer +N (degrees).
+        lon: [float] Longitde of the observer +E (degress).
+        RA_d: [float] Referent right ascension of the image centre (degrees).
+        dec_d: [float] Referent declination of the image centre (degrees).
+        Ho: [float] Referent hour angle.
+        rot_param: [float] Field rotation parameter (degrees).
+        X_data: [ndarray] 1D numpy array containing distortion corrected X component.
+        Y_data: [ndarray] 1D numpy array containing distortion corrected Y component.
+    
+    Return:
+        (azimuth_data, altitude_data): [tuple of ndarrays]
+            azimuth_data: [ndarray] 1D numpy array containing the azimuth of each data point (degrees).
+            altitude_data: [ndarray] 1D numyp array containing the altitude of each data point (degrees).
     """
 
     # Initialize final values containers
@@ -276,6 +319,7 @@ def altAz2RADec(lat, lon, UT_corr, time_data, azimuth_data, altitude_data, dt_ti
     return JD_data, RA_data, dec_data
 
 
+
 def calculateMagnitudes(level_data, C2, m2):
     """ Calculate the magnitude of the data points with given magnitude calibration parameters. 
 
@@ -322,12 +366,12 @@ def calculateMagnitudes_old(level_data, ra_beg, ra_end, dec_beg, dec_end, durati
     # Convert RA and Dec to radians
     ra_beg, ra_end, dec_beg, dec_end = map(np.radians, (ra_beg, ra_end, dec_beg, dec_end))
 
-    # Calculate the length of the meteor trail
-    length = np.degrees(np.arccos(np.sin(dec_beg)*np.sin(dec_end) + 
-        np.cos(dec_beg)*np.cos(dec_end)*np.cos(ra_beg - ra_end)))
+    # # Calculate the length of the meteor trail
+    # length = np.degrees(np.arccos(np.sin(dec_beg)*np.sin(dec_end) + 
+    #     np.cos(dec_beg)*np.cos(dec_end)*np.cos(ra_beg - ra_end)))
 
-    # Calculate the angular velocty
-    angular_v = length / float(duration)
+    # # Calculate the angular velocty
+    # angular_v = length / float(duration)
 
     # Go through all levels of a meteor
     for i, level in enumerate(level_data):
@@ -353,55 +397,62 @@ def calculateMagnitudes_old(level_data, ra_beg, ra_end, dec_beg, dec_end, durati
 
 
 def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, UT_corr, lat, lon, Ho, X_res, Y_res, RA_d, dec_d, 
-    rot_param, F_scale, w_pix, mag_0, mag_lev, x_poly, y_poly):
+    pos_angle_ref, F_scale, mag_0, mag_lev, x_poly, y_poly):
     """ A function that does the complete calibration and coordinate transformations of a meteor detection.
 
     First, it applies field distortion and vignetting correction on the data, then converts the XY coordinates
     to altitude and azimuth. Then it converts the altitude and azimuth data to right ascension and 
     declination. The resulting coordinates are in J2000.0 epoch.
+    
+    Arguments:
+        time_data: [2D ndarray] Numpy array containing time tuples of each data point (year, month, day, 
+            hour, minute, second, millisecond).
+        X_data: [ndarray] 1D numpy array containing the image X component.
+        Y_data: [ndarray] 1D numpy array containing the image Y component.
+        level_data: [ndarray] Levels of the meteor centroid.
+        UT_corr: [float] UT correction in hours (difference from local time to UT).
+        lat: [float] Latitude of the observer in degrees.
+        lon: [float] Longitde of the observer in degress.
+        Ho: [float] Referent hour angle (deg).
+        X_res: [int] Camera X axis resolution.
+        Y_res: [int] Camera Y axis resolution.
+        RA_d: [float] Referent right ascension of the image centre (degrees).
+        dec_d: [float] Referent declination of the image centre (degrees).
+        pos_angle_ref: [float] Field rotation parameter (degrees).
+        F_scale: [float] Sum of image scales per each image axis (arcsec per px).
+        mag_0: [float] Magnitude calibration equation parameter (slope).
+        mag_lev: [float] Magnitude calibration equation parameter (intercept).
+        x_poly: [ndarray] 1D numpy array of 12 elements containing X axis polynomial parameters.
+        y_poly: [ndarray] 1D numpy array of 12 elements containing Y axis polynomial parameters.
+    
+    Return:
+    (JD_data, RA_data, dec_data, magnitude_data): [tuple of ndarrays]
+        JD_data: [ndarray] Julian date of each data point.
+        RA_data: [ndarray] Right ascension of each point.
+        dec_data: [ndarray] Declination of each point.
+        magnitude_data: [ndarray] Array of meteor's lightcurve apparent magnitudes.
 
-    @param time_data: [2D ndarray] numpy array containing time tuples of each data point (year, month, day, 
-        hour, minute, second, millisecond)
-    @param X_data: [ndarray] 1D numpy array containing the image X component
-    @param Y_data: [ndarray] 1D numpy array containing the image Y component
-    @param level_data: [ndarray] levels of the meteor centroid (arbirtary units)
-    @param UT_corr: [float] UT correction in hours (difference from local time to UT)
-    @param lat: [float] latitude of the observer in degrees
-    @param lon: [float] longitde of the observer in degress
-    @param Ho: [float] referent hour angle
-    @param X_res: [int] camera X axis resolution (longer)
-    @param Y_res: [int] camera Y axis resolution (shorter)
-    @param RA_d: [float] right ascension of the image centre (degrees)
-    @param dec_d: [float] declination of the image centre (degrees)
-    @param rot_param: [float] field rotation parameter (degrees)
-    @param F_scale: [float] sum of image scales per each image axis (arcsec per px)
-    @param w_pix: [float] minimum angular velocity of which to apply magnitude correction (arcsec/sec)
-    @param mag_0: [float] magnitude calibration equation parameter (slope)
-    @param mag_lev: [float] magnitude calibration equation parameter (intercept)
-    @param x_poly: [ndarray] 1D numpy array of 12 elements containing X axis polynomial parameters
-    @param y_poly: [ndarray] 1D numpy array of 12 elements containing Y axis polynomial parameters
-
-    @return (JD_data, RA_data, dec_data, magnitude_data): [tuple of ndarrays]
-        JD_data: [ndarray] julian date of each data point
-        RA_data: [ndarray] right ascension of each point
-        dec_data: [ndarray] declination of each point
-        magnitude_data: [ndarray] array of meteor's lightcurve apparent magnitudes
     """
 
+    # # Apply field correction
+    # X_corrected, Y_corrected, levels_corrected = applyFieldCorrection(x_poly, y_poly, X_res, Y_res, F_scale, 
+    #     X_data, Y_data, level_data)
+
+    # # Convert XY image coordinates to azimuth and altitude
+    # az_data, alt_data = XY2altAz(lat, lon, RA_d, dec_d, Ho, rot_param, X_corrected, Y_corrected)
+
+    # # Convert azimuth and altitude data to right ascension and declination
+    # JD_data, RA_data, dec_data = altAz2RADec(lat, lon, UT_corr, time_data, az_data, alt_data)
+
     # Apply field correction
-    X_corrected, Y_corrected, levels_corrected = applyFieldCorrection(x_poly, y_poly, X_res, Y_res, F_scale, 
+    X_corrected, Y_corrected, levels_corrected = applyFieldCorrection(x_poly, y_poly, X_res, Y_res, F_scale, \
         X_data, Y_data, level_data)
 
     # Convert XY image coordinates to azimuth and altitude
-    az_data, alt_data = XY2altAz(lat, lon, RA_d, dec_d, Ho, rot_param, X_corrected, Y_corrected)
+    az_data, alt_data = XY2altAz(lat, lon, RA_d, dec_d, Ho, pos_angle_ref, X_corrected, Y_corrected)
 
     # Convert azimuth and altitude data to right ascension and declination
     JD_data, RA_data, dec_data = altAz2RADec(lat, lon, UT_corr, time_data, az_data, alt_data)
-
-    # Find the beginning and ending points of the meteor and its duration in seconds
-    ra_beg, ra_end = RA_data[0], RA_data[-1]
-    dec_beg, dec_end = dec_data[0], dec_data[-1]
-    duration = (JD_data[-1] - JD_data[0])*86400
 
     # Calculate magnitudes
     magnitude_data = calculateMagnitudes(levels_corrected, mag_0, mag_lev)
@@ -409,20 +460,27 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, UT_corr, lat, lon, 
 
     return JD_data, RA_data, dec_data, magnitude_data
 
+ 
 
-# NOT TESTED!!!
-def raDecToXY(RA_data, dec_data, RA_d, dec_d, jd, ref_jd, rot_param, F_scale):
-    """ Convert RA, Dec to image coordinates. 
+def raDecToCorrectedXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_d, ref_jd, pos_angle_ref, \
+    F_scale, x_poly, y_poly):
+    """ Convert RA, Dec to distorion corrected image coordinates. 
 
     Arguments:
-        RA: [ndarray] Right ascension (degrees).
-        dec: [ndarray] Declination (degrees).
+        RA: [ndarray] Array of right ascensions (degrees).
+        dec: [ndarray] Array of declinations (degrees).
+        jd: [float] Julian date.
+        lat: [float] Latitude of station in degrees.
+        lon: [float] Longitude of station in degrees.
+        x_res: [int] X resolution of the camera.
+        y_res: [int] Y resolution of the camera.
         RA_d: [float] Right ascension of the FOV centre (degrees).
         dec_d: [float] Declination of the FOV centre (degrees).
-        jd: [float] Julian date.
         ref_jd: [float] Referent Julian date from platepar.
-        rot_param: [float] Rotation from the celestial meridial (degrees).
+        pos_angle_ref: [float] Rotation from the celestial meridial (degrees).
         F_scale: [float] Sum of image scales per each image axis (arcsec per px).
+        x_poly: [ndarray float] Distorsion polynomial in X direction.
+        y_poly: [ndarray float] Distorsion polynomail in Y direction.
     
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
@@ -431,42 +489,87 @@ def raDecToXY(RA_data, dec_data, RA_d, dec_d, jd, ref_jd, rot_param, F_scale):
     RA_data = np.copy(RA_data)
     dec_data = np.copy(dec_data)
 
-    # Correct RA for the hour angle
-    delta_RA_H = 24.0657098244*15*(jd - ref_jd)
-    RA_data -= delta_RA_H
-    RA_data = RA_data%360
+    # Calculate the referent coordinates in azimuth and altitude
+    az_centre, alt_centre = calcRefCentre(ref_jd, lon, lat, RA_d, dec_d)
 
-    RA_data = np.radians(RA_data)
-    dec_data = np.radians(dec_data)
+    # Calculate the referent hour angle
+    T = (jd - 2451545)/36525.0
+    Ho = 280.46061837 + 360.98564736629*(jd - 2451545) + 0.000387933*T**2 - (T**3)/38710000.0
 
-    RA_d = np.radians(RA_d)
-    dec_d = np.radians(dec_d)
-    rot_param = np.radians(rot_param)
+    sl = math.sin(math.radians(lat))
+    cl = math.cos(math.radians(lat))
 
-    x_array = []
-    y_array = []
+    # Calculate the hour angle
+    salt = math.sin(math.radians(alt_centre))
+    saz = math.sin(math.radians(az_centre))
+    calt = math.cos(math.radians(alt_centre))
+    caz = math.cos(math.radians(az_centre))
+    x = -saz*calt
+    y = -caz*sl*calt + salt*cl
+    HA = math.degrees(math.atan2(x, y))
 
-    for RA, dec in zip(RA_data, dec_data):
-        ad = np.arccos(np.sin(dec_d)*np.sin(dec) + np.cos(dec_d)*np.cos(dec)*np.cos(RA - RA_d))
+    # Centre of FOV
+    RA_centre = (Ho + lon - HA)%360
+    dec_centre = math.degrees(math.asin(sl*salt + cl*calt*caz))
 
-        radius = np.degrees(ad)
+    x_array = np.zeros_like(RA_data)
+    y_array = np.zeros_like(RA_data)
 
-        sinA = np.cos(dec)*np.sin(RA - RA_d)/np.sin(ad)
+    for i, (ra_star, dec_star) in enumerate(zip(RA_data, dec_data)):
 
-        cosA = (np.sin(dec) - np.sin(dec_d)*np.cos(ad))/(np.cos(dec_d)*np.sin(ad))
+        # Gnomonization of star coordinates to image coordinates
+        ra1 = math.radians(RA_centre)
+        dec1 = math.radians(dec_centre)
+        ra2 = math.radians(ra_star)
+        dec2 = math.radians(dec_star)
+        ad = math.acos(math.sin(dec1)*math.sin(dec2) + math.cos(dec1)*math.cos(dec2)*math.cos(ra2 - ra1))
+        radius = math.degrees(ad)
+        sinA = math.cos(dec2)*math.sin(ra2 - ra1)/math.sin(ad)
+        cosA = (math.sin(dec2) - math.sin(dec1)*math.cos(ad))/(math.cos(dec1) * math.sin(ad))
+        theta = -math.degrees(math.atan2(sinA, cosA))
+        theta = theta + pos_angle_ref - 90.0
 
-        theta = -np.arctan2(sinA, cosA)
+        # Calculate the image coordinates (scale the F_scale from CIF resolution)
+        X1 = radius*math.cos(math.radians(theta))*F_scale
+        Y1 = radius*math.sin(math.radians(theta))*F_scale
 
-        theta = theta + rot_param - np.pi/2
+        # Calculate distortion in X direction
+        dX = (x_poly[0]
+            + x_poly[1]*X1
+            + x_poly[2]*Y1
+            + x_poly[3]*X1**2
+            + x_poly[4]*X1*Y1
+            + x_poly[5]*Y1**2
+            + x_poly[6]*X1**3
+            + x_poly[7]*X1**2*Y1
+            + x_poly[8]*X1*Y1**2
+            + x_poly[9]*Y1**3
+            + x_poly[10]*X1*np.sqrt(X1**2 + Y1**2)
+            + x_poly[11]*Y1*np.sqrt(X1**2 + Y1**2))
 
-        x = radius*np.cos(theta)*F_scale
-        y = radius*np.sin(theta)*F_scale
+        # Add the distortion correction and calculate X image coordinates
+        Xpix = (X1 - dX)*x_res/384.0 + x_res/2
 
-        x_array.append(x)
-        y_array.append(y)
+        # Calculate distortion in Y direction
+        dY = (y_poly[0]
+            + y_poly[1]*X1
+            + y_poly[2]*Y1
+            + y_poly[3]*X1**2
+            + y_poly[4]*X1*Y1
+            + y_poly[5]*Y1**2
+            + y_poly[6]*X1**3
+            + y_poly[7]*X1**2*Y1
+            + y_poly[8]*X1*Y1**2
+            + y_poly[9]*Y1**3
+            + y_poly[10]*Y1*np.sqrt(X1**2 + Y1**2)
+            + y_poly[11]*X1*np.sqrt(X1**2 + Y1**2))
 
-    x_array = np.array(x_array)
-    y_array = np.array(y_array)
+        # Add the distortion correction and calculate Y image coordinates
+        Ypix = (Y1 - dY)*y_res/288.0 + y_res/2
+
+        x_array[i] = Xpix
+        y_array[i] = Ypix
+
 
     return x_array, y_array
 
@@ -535,6 +638,10 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
         # Convert azimuth and altitude data to right ascension and declination
         JD_data, RA_data, dec_data = altAz2RADec(platepar.lat, platepar.lon, UT_corr, time_data, az_data, 
             alt_data)
+
+
+        ### CALCULATE MAGNITUDES
+        # UNFINISHED!!!
 
         # Construct the meteor measurements array
         meteor_picks = np.c_[frames, X_data, Y_data, RA_data, dec_data, az_data, alt_data, levels_corrected]

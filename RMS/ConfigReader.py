@@ -175,6 +175,9 @@ class Config:
 
 
         ##### Calibration
+
+        self.flat_file = 'flat.png'
+
         self.star_catalog_path = 'Catalogs'
         self.star_catalog_file = 'BSC5'
 
@@ -595,6 +598,9 @@ def parseCalibration(config, parser):
     
     if not parser.has_section(section):
         return
+
+    if parser.has_option(section, "flat_file"):
+        config.flat_file = parser.get(section, "flat_file")
 
     if parser.has_option(section, "star_catalog_path"):
         config.star_catalog_path = parser.get(section, "star_catalog_path")
