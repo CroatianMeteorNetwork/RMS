@@ -131,6 +131,7 @@ class LiveViewer(multiprocessing.Process):
 
 
 
+
 if __name__ == "__main__":
 
     ### Test the live viewer ###
@@ -172,5 +173,6 @@ if __name__ == "__main__":
 
     # Stop the viewer
     live_view.stop()
+    del live_view
 
     print 'stopped'

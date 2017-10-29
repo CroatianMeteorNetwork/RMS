@@ -223,6 +223,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
     # Stop the live viewer
     log.debug('Stopping live viewer...')
     live_view.stop()
+    del live_view
     log.debug('Live view stopped')
 
 
