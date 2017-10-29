@@ -173,6 +173,6 @@ if __name__ == "__main__":
 
     # Stop the viewer
     live_view.stop()
-    del live_view
+    del live_view # IMPORTANT! Otherwise the program does not exit
 
     print 'stopped'
