@@ -347,6 +347,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
     #   given
     extra_files = []
 
+    log.info('Making a flat...')
+
     # Make a new flat field
     flat_img = makeFlat(night_data_dir, config)
 
@@ -360,6 +362,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
 
         # Copy the flat to the night's directory as well
         extra_files.append(flat_path)
+
+    else:
+        log.info('Making flat image FAILED!')
 
 
 
