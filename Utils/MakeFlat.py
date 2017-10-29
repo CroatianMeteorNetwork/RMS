@@ -93,6 +93,11 @@ def makeFlat(dir_path, config):
                 ff_times.append(ff_time)
 
 
+    # Check that there are any FF files in the folder
+    if not ff_times:
+        print('No FF files have enough stars on them!')
+        return None
+        
     
     # Make sure the files cover at least 2 hours
     if not (max(ff_times) - min(ff_times))*24 > 2:
