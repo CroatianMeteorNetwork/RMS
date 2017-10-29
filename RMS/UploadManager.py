@@ -165,8 +165,8 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
 
 class UploadManager(multiprocessing.Process):
     def __init__(self, config):
-        """ Uploads all processed data which has not yet been uploaded to the server. The files will be tied 
-            to uploaded every 15 minutes, until successfull. 
+        """ Uploads all processed data which has not yet been uploaded to the server. The files will be tried 
+            to be uploaded every 15 minutes, until successfull. 
         
         """
 

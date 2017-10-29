@@ -4,6 +4,102 @@
 		"selected_items":
 		[
 			[
+				"live",
+				"live_view"
+			],
+			[
+				"flat",
+				"flat_struct\tstatement"
+			],
+			[
+				"cl",
+				"clock\tfunction"
+			],
+			[
+				"dtyp",
+				"dtype_info\tstatement"
+			],
+			[
+				"dir",
+				"dir_path"
+			],
+			[
+				"flat_",
+				"flat_struct"
+			],
+			[
+				"load",
+				"loadFlat\tfunction"
+			],
+			[
+				"app",
+				"applyFlat\tfunction"
+			],
+			[
+				"Flat",
+				"FlatStruct\tclass"
+			],
+			[
+				"as",
+				"astype"
+			],
+			[
+				"input",
+				"input_type\tstatement"
+			],
+			[
+				"exta",
+				"extra_files\tstatement"
+			],
+			[
+				"ext",
+				"extra_files\tstatement"
+			],
+			[
+				"file_",
+				"file_name\tstatement"
+			],
+			[
+				"extr",
+				"extra_file"
+			],
+			[
+				"extra",
+				"extra_files\tparam"
+			],
+			[
+				"Noe",
+				"None\tinstance"
+			],
+			[
+				"median",
+				"median_list\tstatement"
+			],
+			[
+				"read",
+				"readFF\tfunction"
+			],
+			[
+				"ff_lis",
+				"ff_list_good\tstatement"
+			],
+			[
+				"ge",
+				"getMiddleTimeFF\tfunction"
+			],
+			[
+				"ff_li",
+				"ff_list_good\tstatement"
+			],
+			[
+				"prin",
+				"print_function\tstatement"
+			],
+			[
+				"RA",
+				"RA_d"
+			],
+			[
 				"inf",
 				"info"
 			],
@@ -106,10 +202,6 @@
 			[
 				"field",
 				"fieldsum_archive_name\tstatement"
-			],
-			[
-				"dir",
-				"dir_path\tparam"
 			],
 			[
 				"pla",
@@ -244,10 +336,6 @@
 				"entry_counter\tstatement"
 			],
 			[
-				"read",
-				"readFTPdetectinfo\tfunction"
-			],
-			[
 				"ff_",
 				"ff_directory\tparam"
 			],
@@ -318,10 +406,6 @@
 			[
 				"fil",
 				"filterCatalogStarsInsideFOV"
-			],
-			[
-				"app",
-				"append"
 			],
 			[
 				"catlog",
@@ -430,90 +514,6 @@
 			[
 				"mouse_",
 				"mouse_y\tstatement"
-			],
-			[
-				"mou",
-				"mouse_x\tstatement"
-			],
-			[
-				"circ",
-				"circle_aperature_outer\tstatement"
-			],
-			[
-				"radiu",
-				"star_aperature_radius\tstatement"
-			],
-			[
-				"centr",
-				"centroidStar\tfunction"
-			],
-			[
-				"No",
-				"None\tinstance"
-			],
-			[
-				"ad",
-				"addCursorCircle"
-			],
-			[
-				"circle",
-				"circle_aperature\tstatement"
-			],
-			[
-				"clear",
-				"clear_plot\tparam"
-			],
-			[
-				"cu",
-				"current_ff_file"
-			],
-			[
-				"zero",
-				"zeros_like"
-			],
-			[
-				"ze",
-				"zeros_like"
-			],
-			[
-				"set",
-				"set_referent_time\tparam"
-			],
-			[
-				"first",
-				"first_image\tparam"
-			],
-			[
-				"RA",
-				"RA_d\tstatement"
-			],
-			[
-				"midd",
-				"getMiddleTimeFF"
-			],
-			[
-				"stat",
-				"station_code"
-			],
-			[
-				"dec_",
-				"dec_M"
-			],
-			[
-				"foc",
-				"focal_length"
-			],
-			[
-				"eve",
-				"elevation"
-			],
-			[
-				"for",
-				"format"
-			],
-			[
-				"get",
-				"getFOVcentre"
 			]
 		]
 	},
@@ -523,7 +523,16 @@
 			"file": "RMS/Astrometry/ApplyAstrometry.py",
 			"settings":
 			{
-				"buffer_size": 28285,
+				"buffer_size": 28193,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/Formats/FFfile.py",
+			"settings":
+			{
+				"buffer_size": 7562,
 				"encoding": "UTF-8",
 				"line_ending": "Unix"
 			}
@@ -532,7 +541,7 @@
 			"file": "RMS/Astrometry/SkyFit.py",
 			"settings":
 			{
-				"buffer_size": 46143,
+				"buffer_size": 43518,
 				"encoding": "UTF-8",
 				"line_ending": "Unix"
 			}
@@ -541,61 +550,7 @@
 			"file": "RMS/Formats/Platepar.py",
 			"settings":
 			{
-				"buffer_size": 10992,
-				"encoding": "UTF-8",
-				"line_ending": "Unix"
-			}
-		},
-		{
-			"file": "RMS/Formats/FFStruct.py",
-			"settings":
-			{
-				"buffer_size": 1031,
-				"encoding": "UTF-8",
-				"line_ending": "Unix"
-			}
-		},
-		{
-			"file": "RMS/Compression.py",
-			"settings":
-			{
-				"buffer_size": 11694,
-				"encoding": "UTF-8",
-				"line_ending": "Windows"
-			}
-		},
-		{
-			"file": "RMS/Routines/Image.py",
-			"settings":
-			{
-				"buffer_size": 1666,
-				"encoding": "UTF-8",
-				"line_ending": "Windows"
-			}
-		},
-		{
-			"file": "RMS/Formats/BSC.py",
-			"settings":
-			{
-				"buffer_size": 3375,
-				"encoding": "UTF-8",
-				"line_ending": "Windows"
-			}
-		},
-		{
-			"file": "RMS/UploadManager.py",
-			"settings":
-			{
-				"buffer_size": 11632,
-				"encoding": "UTF-8",
-				"line_ending": "Unix"
-			}
-		},
-		{
-			"file": "FILES_TO_UPLOAD.inf",
-			"settings":
-			{
-				"buffer_size": 0,
+				"buffer_size": 10994,
 				"encoding": "UTF-8",
 				"line_ending": "Unix"
 			}
@@ -604,9 +559,90 @@
 			"file": "RMS/StartCapture.py",
 			"settings":
 			{
-				"buffer_size": 15910,
+				"buffer_size": 17067,
 				"encoding": "UTF-8",
 				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "RMS/LiveViewer.py",
+			"settings":
+			{
+				"buffer_size": 3813,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/Compression.py",
+			"settings":
+			{
+				"buffer_size": 11864,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "RMS/Detection.py",
+			"settings":
+			{
+				"buffer_size": 42294,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/DetectStarsAndMeteors.py",
+			"settings":
+			{
+				"buffer_size": 6291,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/ExtractStars.py",
+			"settings":
+			{
+				"buffer_size": 14295,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/Routines/Image.py",
+			"settings":
+			{
+				"buffer_size": 4144,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "/home/dvida/source/cmn_binviewer/CMN_binViewer.py",
+			"settings":
+			{
+				"buffer_size": 142367,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/ArchiveDetections.py",
+			"settings":
+			{
+				"buffer_size": 5581,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/Misc.py",
+			"settings":
+			{
+				"buffer_size": 2208,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
 			}
 		},
 		{
@@ -622,7 +658,7 @@
 			"file": ".config",
 			"settings":
 			{
-				"buffer_size": 8430,
+				"buffer_size": 8481,
 				"encoding": "UTF-8",
 				"line_ending": "Unix"
 			}
@@ -792,25 +828,44 @@
 		"/home/dvida/source/RMS/RMS",
 		"/home/dvida/source/RMS/RMS/Astrometry",
 		"/home/dvida/source/RMS/RMS/Formats",
+		"/home/dvida/source/RMS/RMS/Routines",
 		"/home/dvida/source/RMS/Utils"
 	],
 	"file_history":
 	[
+		"/home/dvida/Desktop/RollingShutterSim.py",
+		"/home/dvida/source/RMS/Utils/PlotFieldsums.py",
+		"/home/dvida/source/RMS/Utils/MakeFlat.py",
+		"/home/dvida/source/RMS/RMS/UploadManager.py",
+		"/home/dvida/source/cmn_binviewer/FF_bin_suite.py",
+		"/home/dvida/source/RMS/RMS/BufferedCapture.py",
+		"/home/dvida/DATA/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/CA0001_20171018_230520_894458_detected/CALSTARS_CA0001_CA0001_20171018_230520_894458_detected.txt",
+		"/home/dvida/DATA/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/CA0001_20171018_230520_894458_detected/FTPdetectinfo_CA0001_20171018_230520_894458_detected.txt",
+		"/home/dvida/DATA/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/CA0001_20171018_230520_894458_detected/CALSTARS_CA0001_CA0001_20171018_230520_894458.txt",
+		"/home/dvida/source/RMS/RMS/QueuedPool.py",
+		"/home/dvida/DATA/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/CA0001_20171018_230520_894458_detected/FTPdetectinfo_CA0001_20171018_230520_894458.txt",
+		"/home/dvida/source/RMS/RMS/Routines/MaskImage.py",
+		"/home/dvida/source/RMS/RMS/Formats/FFStruct.py",
+		"/home/dvida/source/RMS/RMS/Compression.py",
+		"/home/dvida/source/RMS/RMS/Formats/BSC.py",
+		"/home/dvida/source/RMS/FILES_TO_UPLOAD.inf",
+		"/home/dvida/source/RMS/RMS/Routines/Image.py",
+		"/home/dvida/source/cmn_binviewer/CMN_binViewer.py",
+		"/home/dvida/source/cmn_binviewer/CMN_binViewer",
+		"/home/dvida/source/RMS/RMS/Misc.py",
+		"/home/dvida/source/RMS/RMS/ArchiveDetections.py",
+		"/home/dvida/source/RMS/RMS/ConfigReader.py",
+		"/home/dvida/source/RMS/.config",
+		"/home/dvida/WINDOWS/Users/delorayn1/Desktop/20170813_213506_620678/platepar_cmn2010.cal.json",
 		"/home/dvida/source/RMS/RMS/Formats/FFbin.py",
 		"/home/dvida/source/RMS/RMS/Astrometry/AstrometryCheckFit.py",
 		"/home/dvida/source/RMS/RMS/ExtractStars.py",
-		"/home/dvida/source/RMS/FILES_TO_UPLOAD.inf",
 		"/home/dvida/Desktop/test.txt",
 		"/home/dvida/source/RMS/RMS/Logger.py",
 		"/home/dvida/source/RMS/RMS/StartCapture.py",
-		"/home/dvida/source/RMS/.config",
-		"/home/dvida/source/RMS/RMS/ConfigReader.py",
-		"/home/dvida/source/RMS/RMS/ArchiveDetections.py",
-		"/home/dvida/source/RMS/RMS/Misc.py",
 		"/home/dvida/source/RMS/RMS/FILES_TO_UPLOAD.inf",
 		"/home/dvida/source/RMS/README.md",
 		"/home/dvida/source/RMS/requirements.txt",
-		"/home/dvida/source/RMS/Utils/PlotFieldsums.py",
 		"/home/dvida/source/RMS/Utils/GenerateThumbnails.py",
 		"/home/dvida/Desktop/test.py",
 		"/home/dvida/RMS_data/CapturedFiles/20170903_212942_285606/FTPdetectinfo_20170903_212942_285606.txt",
@@ -824,12 +879,10 @@
 		"/home/dvida/source/RMS/RMS/Detection.py",
 		"/home/dvida/source/RMS/RMS/Routines/HT-cy_run.py",
 		"/home/dvida/source/RMS/Utils/FRbinViewer.py",
-		"/home/dvida/source/cmn_binviewer/FF_bin_suite.py",
 		"/home/dvida/Desktop/platepar_cmn2010.cal",
 		"/home/dvida/Desktop/platepar_cmn2010.cal.json",
 		"/home/dvida/source/RMS/.gitignore",
 		"/home/dvida/source/saods9/BUILD.txt",
-		"/home/dvida/source/RMS/RMS/Formats/FFStruct.py",
 		"/C/Users/delorayn1/Desktop/20170813_213506_620678/platepar_cmn2010.cal",
 		"/D/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit/CameraTimeOffsets.txt",
 		"/D/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit/CameraSites.txt",
@@ -907,23 +960,7 @@
 		"/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/MainForm.Designer.vb",
 		"/C/Users/delorayn1/Desktop/2017080304-Processed/platepar_cmn2010.cal",
 		"/D/Dropbox/RPi Meteor Station/samples/VID_2015270405/platepar_cmn2010.cal",
-		"/D/Dropbox/grouping3D/2015042021 fireball/APO/platepar_cmn2010.cal",
-		"/D/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/20170729_012218_387314_detected/CALSTARS049920170729_012218_387314.txt",
-		"/C/Users/delorayn1/Desktop/CMNcoordTransformations.py",
-		"/D/Dropbox/RPi Meteor Station/RMS/RMS/LiveViewer.py",
-		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats/FTPdetectinfo.py",
-		"/D/Dropbox/RPi Meteor Station/RMS/RMS/VideoExtraction.py",
-		"/D/Dropbox/RPi Meteor Station/RMS/RMS/ConfigReader.py",
-		"/D/Dropbox/RPi Meteor Station/RMS/Tests/CompressSimulatedMeteor.py",
-		"/D/Dropbox/RPi Meteor Station/RMS/RMS/ArchiveDetections.py",
-		"/D/Dropbox/RPi Meteor Station/RMS/Utils/MergeMaxpixels.py",
-		"/C/Users/delorayn1/AppData/Local/Temp/allsky_galactic_proj.py",
-		"/D/Dropbox/Apps/Elginfield RPi RMS data/ConfirmedFiles/20170730_012105_874590_detected/mergeMaxpixels.py",
-		"/C/Users/delorayn1/Desktop/mergeMaxpixels.py",
-		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Astrometry/FitPlate.py",
-		"/D/Dropbox/HMM_backup/HMM_software/CMN-astrometry/astrometrijska_kalibracija.txt",
-		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Astrometry/PlateTool.py",
-		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats/AST.py"
+		"/D/Dropbox/grouping3D/2015042021 fireball/APO/platepar_cmn2010.cal"
 	],
 	"find":
 	{
@@ -967,6 +1004,62 @@
 		"case_sensitive": false,
 		"find_history":
 		[
+			"live_view.s",
+			"wait(",
+			"stop_cap",
+			"live_view",
+			"tkinter",
+			"live_view",
+			"liveview",
+			"mainloop",
+			"xy2cor",
+			"makefla",
+			"flat_stru",
+			"detector.add",
+			"runcap",
+			"dir_path",
+			"print",
+			"flat_str",
+			"dir_path",
+			"sys.argv[1]",
+			"max",
+			"flat_scalar",
+			"img_array",
+			"_scalar",
+			"ff.",
+			"_scalar",
+			"flat",
+			"== None",
+			"== No",
+			"is None",
+			"is not No",
+			"!= None",
+			"== None",
+			"= None",
+			"night_archive_di",
+			"flat",
+			"dir_pa",
+			"star_catalog_path",
+			"100",
+			"np.median",
+			"median",
+			"date2jd",
+			"getmidd",
+			"stars",
+			"self.",
+			"calstars",
+			"exit",
+			"@param",
+			"@param ",
+			"w_pix",
+			"@param",
+			"rot_param",
+			"xy2corre",
+			"raDecToCorrectedXY",
+			"radec",
+			"radec2co",
+			"ra_catalog",
+			"rot_param",
 			"calcRefCentre",
 			"calcrefce",
 			"xy2corr",
@@ -1038,63 +1131,7 @@
 			"   ",
 			"  ",
 			"platepar.",
-			"bsc",
-			"BSC",
-			"config.",
-			"self.platepar.dec_d",
-			"platepar",
-			"xy2co",
-			"xy2",
-			"getmidd",
-			"getMiddleTimeFF",
-			"getmiddletimeff",
-			"xy2",
-			"getcatalo",
-			"001044",
-			"writeFTPdetect",
-			"ftpdetectinfo_name",
-			"ftpdetectinfo_na",
-			"writeFTPdetectinfo",
-			"meteor_picks",
-			"UT_",
-			"UT",
-			"getmidd",
-			"prin",
-			"continue",
-			",",
-			"get_FTPdetect_coordinates",
-			"ftpdetec",
-			"@param ",
-			"x_pol",
-			"x_scal",
-			"print(",
-			"Y1",
-			"X1",
-			"Ydet",
-			"Xdet",
-			"X1",
-			" * ",
-			"*",
-			"Ho",
-			"xy2alt",
-			"Ho",
-			"Az0det",
-			"fi",
-			"radius*stu_rad",
-			"cos",
-			"sin",
-			"DecC_par",
-			"maken",
-			"xy2co",
-			"extractor",
-			"makenewpl",
-			"getfovce",
-			"loadpla",
-			"loadplate",
-			"filedia",
-			"width",
-			"getcatalogst",
-			"getcata"
+			"bsc"
 		],
 		"highlight": true,
 		"in_selection": false,
@@ -1102,6 +1139,9 @@
 		"regex": false,
 		"replace_history":
 		[
+			"is None",
+			"is not None",
+			"is None",
 			"Platepar",
 			".pos_angle_ref",
 			"PlateparCMN",
@@ -1127,7 +1167,7 @@
 	"groups":
 	[
 		{
-			"selected": 0,
+			"selected": 4,
 			"sheets":
 			[
 				{
@@ -1136,15 +1176,15 @@
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 28285,
+						"buffer_size": 28193,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								21473,
-								21473
+								14622,
+								14622
 							]
 						],
 						"settings":
@@ -1170,6 +1210,10 @@
 								{
 									"characters": ".",
 									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
 								}
 							],
 							"git_gutter_is_enabled": true,
@@ -1178,27 +1222,27 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 9262.0,
+						"translation.y": 5531.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 0,
+					"stack_index": 3,
 					"type": "text"
 				},
 				{
 					"buffer": 1,
-					"file": "RMS/Astrometry/SkyFit.py",
+					"file": "RMS/Formats/FFfile.py",
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 46143,
+						"buffer_size": 7562,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								27729,
-								27729
+								4588,
+								4588
 							]
 						],
 						"settings":
@@ -1212,46 +1256,6 @@
 								{
 									"characters": ".",
 									"selector": "source.python - string - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
 								}
 							],
 							"git_gutter_is_enabled": true,
@@ -1260,231 +1264,27 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 15219.0,
+						"translation.y": 2103.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 1,
+					"stack_index": 4,
 					"type": "text"
 				},
 				{
 					"buffer": 2,
-					"file": "RMS/Formats/Platepar.py",
+					"file": "RMS/Astrometry/SkyFit.py",
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 10992,
+						"buffer_size": 43518,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								8042,
-								8042
-							]
-						],
-						"settings":
-						{
-							"auto_complete_triggers":
-							[
-								{
-									"characters": ".",
-									"selector": "source.python - string - comment - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								}
-							],
-							"git_gutter_is_enabled": true,
-							"syntax": "Packages/Python/Python.sublime-syntax",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 4275.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 10,
-					"type": "text"
-				},
-				{
-					"buffer": 3,
-					"file": "RMS/Formats/FFStruct.py",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 1031,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								909,
-								909
-							]
-						],
-						"settings":
-						{
-							"git_gutter_is_enabled": true,
-							"syntax": "Packages/Python/Python.sublime-syntax",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 0.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 11,
-					"type": "text"
-				},
-				{
-					"buffer": 4,
-					"file": "RMS/Compression.py",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 11694,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								8518,
-								8518
-							]
-						],
-						"settings":
-						{
-							"auto_complete_triggers":
-							[
-								{
-									"characters": ".",
-									"selector": "source.python - string - comment - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								}
-							],
-							"git_gutter_is_enabled": true,
-							"syntax": "Packages/Python/Python.sublime-syntax",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 4261.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 7,
-					"type": "text"
-				},
-				{
-					"buffer": 5,
-					"file": "RMS/Routines/Image.py",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 1666,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								1296,
-								1296
-							]
-						],
-						"settings":
-						{
-							"auto_complete_triggers":
-							[
-								{
-									"characters": ".",
-									"selector": "source.python - string - comment - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								}
-							],
-							"git_gutter_is_enabled": true,
-							"open_with_edit": true,
-							"syntax": "Packages/Python/Python.sublime-syntax",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 196.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 9,
-					"type": "text"
-				},
-				{
-					"buffer": 6,
-					"file": "RMS/Formats/BSC.py",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 3375,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								1414,
-								1414
-							]
-						],
-						"settings":
-						{
-							"auto_complete_triggers":
-							[
-								{
-									"characters": ".",
-									"selector": "source.python - string - comment - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								}
-							],
-							"git_gutter_is_enabled": true,
-							"syntax": "Packages/Python/Python.sublime-syntax",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 481.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 8,
-					"type": "text"
-				},
-				{
-					"buffer": 7,
-					"file": "RMS/UploadManager.py",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 11632,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								8529,
-								8529
+								26507,
+								26507
 							]
 						],
 						"settings":
@@ -1506,73 +1306,38 @@
 								{
 									"characters": ".",
 									"selector": "source.python - string - constant.numeric"
-								}
-							],
-							"git_gutter_is_enabled": true,
-							"syntax": "Packages/Python/Python.sublime-syntax",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 4924.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 5,
-					"type": "text"
-				},
-				{
-					"buffer": 8,
-					"file": "FILES_TO_UPLOAD.inf",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 0,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								0,
-								0
-							]
-						],
-						"settings":
-						{
-							"git_gutter_is_enabled": true,
-							"syntax": "Packages/Text/Plain text.tmLanguage"
-						},
-						"translation.x": 0.0,
-						"translation.y": 0.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 6,
-					"type": "text"
-				},
-				{
-					"buffer": 9,
-					"file": "RMS/StartCapture.py",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 15910,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								5045,
-								5045
-							]
-						],
-						"settings":
-						{
-							"auto_complete_triggers":
-							[
+								},
 								{
 									"characters": ".",
-									"selector": "source.python - string - comment - constant.numeric"
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
 								},
 								{
 									"characters": ".",
@@ -1585,14 +1350,473 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 2608.0,
+						"translation.y": 11298.0,
 						"zoom_level": 1.0
 					},
 					"stack_index": 2,
 					"type": "text"
 				},
 				{
+					"buffer": 3,
+					"file": "RMS/Formats/Platepar.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 10994,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								3448,
+								3448
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 1170.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 14,
+					"type": "text"
+				},
+				{
+					"buffer": 4,
+					"file": "RMS/StartCapture.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 17067,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								11483,
+								11483
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 5343.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 0,
+					"type": "text"
+				},
+				{
+					"buffer": 5,
+					"file": "RMS/LiveViewer.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 3813,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								3215,
+								3215
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 1353.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 1,
+					"type": "text"
+				},
+				{
+					"buffer": 6,
+					"file": "RMS/Compression.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 11864,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								11538,
+								11538
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 4728.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 5,
+					"type": "text"
+				},
+				{
+					"buffer": 7,
+					"file": "RMS/Detection.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 42294,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								27827,
+								27827
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 12873.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 6,
+					"type": "text"
+				},
+				{
+					"buffer": 8,
+					"file": "RMS/DetectStarsAndMeteors.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 6291,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								3310,
+								3310
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 1379.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 7,
+					"type": "text"
+				},
+				{
+					"buffer": 9,
+					"file": "RMS/ExtractStars.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 14295,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								13053,
+								13053
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 5118.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 8,
+					"type": "text"
+				},
+				{
 					"buffer": 10,
+					"file": "RMS/Routines/Image.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 4144,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								3186,
+								3186
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 1997.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 9,
+					"type": "text"
+				},
+				{
+					"buffer": 11,
+					"file": "/home/dvida/source/cmn_binviewer/CMN_binViewer.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 142367,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								60558,
+								60558
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": -0.0,
+						"translation.y": 25121.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 11,
+					"type": "text"
+				},
+				{
+					"buffer": 12,
+					"file": "RMS/ArchiveDetections.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 5581,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								4744,
+								4744
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 1681.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 12,
+					"type": "text"
+				},
+				{
+					"buffer": 13,
+					"file": "RMS/Misc.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 2208,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								1924,
+								1924
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 360.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 13,
+					"type": "text"
+				},
+				{
+					"buffer": 14,
 					"file": "README.md",
 					"semi_transient": false,
 					"settings":
@@ -1618,24 +1842,24 @@
 						"translation.y": 255.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 3,
+					"stack_index": 15,
 					"type": "text"
 				},
 				{
-					"buffer": 11,
+					"buffer": 15,
 					"file": ".config",
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 8430,
+						"buffer_size": 8481,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								284,
-								284
+								7001,
+								7001
 							]
 						],
 						"settings":
@@ -1644,10 +1868,10 @@
 							"syntax": "Packages/Text/Plain text.tmLanguage"
 						},
 						"translation.x": 0.0,
-						"translation.y": 0.0,
+						"translation.y": 1845.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 4,
+					"stack_index": 10,
 					"type": "text"
 				}
 			]
@@ -1655,7 +1879,7 @@
 	],
 	"incremental_find":
 	{
-		"height": 26.0
+		"height": 23.0
 	},
 	"input":
 	{
@@ -1696,7 +1920,7 @@
 	"project": "RMS.sublime-project",
 	"replace":
 	{
-		"height": 48.0
+		"height": 62.0
 	},
 	"save_all_on_build": true,
 	"select_file":
