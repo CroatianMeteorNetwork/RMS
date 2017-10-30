@@ -118,6 +118,10 @@ def applyFlat(img, flat_struct):
 
     """
 
+    # Check that the input image and the flat have the same dimensions, otherwise do not apply it
+    if img.shape != flat_struct.flat_img.shape:
+        return img
+
     input_type = img.dtype
 
     # Apply the flat

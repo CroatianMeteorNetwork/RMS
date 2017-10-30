@@ -376,6 +376,21 @@ class PlateTool(object):
 
 
 
+    def checkParamRange(self):
+        """ Checks that the astrometry parameters are within the allowed range. """
+
+        # Right ascension should be within 0-360
+        self.platepar.RA_d = self.platepar.RA_d%360
+
+        # Keep the declination in the allowed range
+        if self.platepar.dec_d >= 90:
+            self.platepar.dec_d = 89.999
+
+        if self.platepar.dec_d <= -90:
+            self.platepar.dec_d = -89.999
+
+
+
     def onKeyPress(self, event):
         """ Traige what happes when an individual key is pressed. """
 
@@ -647,6 +662,11 @@ class PlateTool(object):
         if clear_plot:
             plt.clf()
 
+
+        # Check that the calibration parameters are within the nominal range
+        self.checkParamRange()
+
+
         # Load the FF from the current file
         self.current_ff = readFF(self.dir_path, self.current_ff_file)
 
@@ -890,11 +910,11 @@ class PlateTool(object):
         platepar = Platepar()
 
         # Load the platepar file
-        platepar_file = filedialog.askopenfilename(initialdir=self.dir_path, \
+        platepar_file = filedialog.askopenfilename(parent=root, initialdir=self.dir_path, \
             title='Select the platepar file')
 
         root.quit()
-        #root.destroy()
+        root.destroy()
 
         if not platepar_file:
             return False, platepar
@@ -1263,7 +1283,7 @@ if __name__ == '__main__':
 
 
     if len(sys.argv) < 2:
-        print('Usage: python -m RMS.Astrometry.PlateTool /path/to/FFbin/dir/')
+        print('Usage: python -m RMS.Astrometry.PlateTool /path/to/FF/dir/')
         sys.exit()
 
     dir_path = sys.argv[1].replace('"', '')
