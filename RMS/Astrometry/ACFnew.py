@@ -323,6 +323,11 @@ def autoCheckFit(config, platepar, calstars_list):
         star_dict = {key: star_dict[key] for key in rand_keys}
 
 
+    # Calculate the total number of calibration stars used
+    total_calstars = sum([len(star_dict[key]) for key in star_dict])
+    print('Total calstars:', total_calstars)
+
+
     # A list of matching radiuses to try
     radius_list = [5, 2]
 
