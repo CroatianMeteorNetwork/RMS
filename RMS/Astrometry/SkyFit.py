@@ -809,7 +809,7 @@ class PlateTool(object):
         fov_x = (self.platepar.X_res/2)*(3600/self.platepar.F_scale)*(384/self.platepar.X_res)/3600
         fov_y = (self.platepar.Y_res/2)*(3600/self.platepar.F_scale)*(288/self.platepar.Y_res)/3600
 
-        fov_radius = np.sqrt(fov_x**2 + fov_y**2)
+        fov_radius = np.sqrt(fov_x**2 + fov_y**2)*2
 
         filtered_catalog_stars = []
         filtered_indices = []

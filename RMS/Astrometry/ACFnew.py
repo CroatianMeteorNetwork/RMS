@@ -359,7 +359,7 @@ def autoCheckFit(config, platepar, calstars_list):
 
         # Fit the astrometric parameters
         res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, args=(platepar, catalog_stars, \
-            star_dict, max_radius, config.min_matched_stars), method='Nelder-Mead', options={'fatol': 1e-3})
+            star_dict, max_radius, config.min_matched_stars), method='Nelder-Mead', options={'fatol': 1e-2})
 
         print(res)
 
