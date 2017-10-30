@@ -93,9 +93,9 @@ def makeFlat(dir_path, config):
                 ff_times.append(ff_time)
 
 
-    # Check that there are any FF files in the folder
-    if not ff_times:
-        print('No FF files have enough stars on them!')
+    # Check that there are enough good FF files in the folder
+    if len(ff_times) < config.flat_min_imgs:
+        print('Not enough FF files have enough stars on them!')
         return None
         
     
