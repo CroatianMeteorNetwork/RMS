@@ -327,6 +327,10 @@ def autoCheckFit(config, platepar, calstars_list):
     total_calstars = sum([len(star_dict[key]) for key in star_dict])
     print('Total calstars:', total_calstars)
 
+    if total_calstars < config.calstars_min_stars:
+        print('Not enough calibration stars, need at least', config.calstars_min_stars)
+        return platepar, False
+
 
     # A list of matching radiuses to try
     radius_list = [5, 2]
@@ -334,13 +338,20 @@ def autoCheckFit(config, platepar, calstars_list):
     for max_radius in radius_list:
 
         # Match the stars and calculate the residuals
-        n_matched, avg_dist, cost = matchStarsResiduals(platepar, catalog_stars, star_dict, max_radius, config.min_matched_stars, ret_nmatch=True)
+        n_matched, avg_dist, cost = matchStarsResiduals(platepar, catalog_stars, star_dict, max_radius, \
+            config.min_matched_stars, ret_nmatch=True)
 
         print('Max radius:', max_radius)
         print('Initial values:')
         print(' Matched stars:', n_matched)
         print(' Average deviation:', avg_dist)
 
+
+        # The initial number of matched stars has to be at least the number of FF imaages, otherwise it means
+        #   that the initial platepar is no good
+        if n_matched < config.calstars_files_N:
+            print('The total number of initially matched stars is too small! Please manually redo the plate.')
+            return platepar, False
 
 
         # Initial parameters for the astrometric fit
