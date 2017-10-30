@@ -51,7 +51,7 @@ from RMS.Formats.Platepar import Platepar
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FFfile import getMiddleTimeFF
-from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADec, calcRefCentre, raDecToCorrectedXY
+from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADecPP, calcRefCentre, raDecToCorrectedXY
 from RMS.Astrometry.Conversions import date2JD
 from RMS.Routines.Image import adjustLevels
 
@@ -145,9 +145,6 @@ class PlateTool(object):
         # Image gamma
         self.img_gamma = 1.0
 
-        # Time difference from UT
-        self.UT_corr = 0
-
         # Platepar format (json or txt)
         self.platepar_fmt = None
 
@@ -205,6 +202,10 @@ class PlateTool(object):
 
             sys.exit()
 
+        # Sort the FF list
+        self.ff_list = sorted(self.ff_list)
+
+        # Init the first file
         self.current_ff_index = 0
         self.current_ff_file = self.ff_list[self.current_ff_index]
 
@@ -801,11 +802,8 @@ class PlateTool(object):
         ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
 
         # Convert the FOV centre to RA/Dec
-        _, ra_centre, dec_centre, _ = XY2CorrectedRADec([ff_middle_time], [self.platepar.X_res/2], 
-            [self.platepar.Y_res/2], [0], self.UT_corr, self.platepar.lat, self.platepar.lon, 
-            self.platepar.Ho, self.platepar.X_res, self.platepar.Y_res, self.platepar.RA_d, 
-            self.platepar.dec_d, self.platepar.pos_angle_ref, self.platepar.F_scale, 
-            self.platepar.mag_0, self.platepar.mag_lev, self.platepar.x_poly, self.platepar.y_poly)
+        _, ra_centre, dec_centre, _ = XY2CorrectedRADecPP([ff_middle_time], [self.platepar.X_res/2], 
+            [self.platepar.Y_res/2], [0], self.platepar)
 
         # Calculate the FOV radius in degrees
         fov_x = (self.platepar.X_res/2)*(3600/self.platepar.F_scale)*(384/self.platepar.X_res)/3600
@@ -858,7 +856,7 @@ class PlateTool(object):
         ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
 
         # Get the date of the middle of the FF exposure
-        jd = date2JD(*ff_middle_time, UT_corr=self.UT_corr)
+        jd = date2JD(*ff_middle_time, UT_corr=self.platepar.UT_corr)
 
         # Convert star RA, Dec to image coordinates
         x_array, y_array = raDecToCorrectedXY(ra_catalog, dec_catalog, jd, lat, lon, self.platepar.X_res, \
@@ -885,7 +883,7 @@ class PlateTool(object):
         ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
 
         # Set the referent platepar time to the time of the FF
-        self.platepar.JD = date2JD(*ff_middle_time, UT_corr=self.UT_corr)
+        self.platepar.JD = date2JD(*ff_middle_time, UT_corr=self.platepar.UT_corr)
 
         
         time_data = [ff_middle_time]
@@ -894,7 +892,7 @@ class PlateTool(object):
         print(time_data)
 
         # Convert FOV centre to RA, Dec
-        _, ra_data, dec_data = altAz2RADec(self.platepar.lat, self.platepar.lon, self.UT_corr, time_data, 
+        _, ra_data, dec_data = altAz2RADec(self.platepar.lat, self.platepar.lon, self.platepar.UT_corr, time_data, 
             [self.azim_centre], [self.alt_centre])
 
         return ra_data[0], dec_data[0]
@@ -914,7 +912,7 @@ class PlateTool(object):
             title='Select the platepar file')
 
         root.quit()
-        root.destroy()
+        #root.destroy()
 
         if not platepar_file:
             return False, platepar

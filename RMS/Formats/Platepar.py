@@ -79,16 +79,20 @@ def parseInf(file_name):
     return station_data_obj
 
 
+
 class Platepar(object):
     """ Load calibration parameters from a platepar file.
     """
 
     def __init__(self):
         """ Read platepar and return object to access the data externally. 
+    
+        Arguments:
+            file_name: [string] Path to the platepar file.
+    
+        Return:
+            self: [object] Instance of this class with loaded platepar parameters.
 
-        @param file_name: [string] path to the platepar file
-
-        @return self: [object] instance of this class with loaded platepar parameters
         """
 
         # Station coordinates
@@ -97,6 +101,9 @@ class Platepar(object):
         # Referent time and date
         self.time = 0
         self.JD = 0
+
+        # UT correction
+        self.UT_corr = 0
 
         self.Ho = 0
         self.X_res = self.Y_res = self.focal_length = 0
@@ -179,6 +186,10 @@ class Platepar(object):
 
             # Parse JSON into an object with attributes corresponding to dict keys
             self.__dict__ = json.loads(data)
+
+            # Add UT correction if it was not in the platepar
+            if not 'UT_corr' in self.__dict__:
+                self.UT_corr = 0
 
             # Convert lists to numpy arrays
             self.x_poly = np.array(self.x_poly)

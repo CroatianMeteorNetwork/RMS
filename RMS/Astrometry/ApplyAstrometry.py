@@ -396,6 +396,7 @@ def calculateMagnitudes_old(level_data, ra_beg, ra_end, dec_beg, dec_end, durati
 
 
 
+
 def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, UT_corr, lat, lon, Ho, X_res, Y_res, RA_d, dec_d, 
     pos_angle_ref, F_scale, mag_0, mag_lev, x_poly, y_poly):
     """ A function that does the complete calibration and coordinate transformations of a meteor detection.
@@ -426,11 +427,11 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, UT_corr, lat, lon, 
         y_poly: [ndarray] 1D numpy array of 12 elements containing Y axis polynomial parameters.
     
     Return:
-    (JD_data, RA_data, dec_data, magnitude_data): [tuple of ndarrays]
-        JD_data: [ndarray] Julian date of each data point.
-        RA_data: [ndarray] Right ascension of each point.
-        dec_data: [ndarray] Declination of each point.
-        magnitude_data: [ndarray] Array of meteor's lightcurve apparent magnitudes.
+        (JD_data, RA_data, dec_data, magnitude_data): [tuple of ndarrays]
+            JD_data: [ndarray] Julian date of each data point.
+            RA_data: [ndarray] Right ascension of each point.
+            dec_data: [ndarray] Declination of each point.
+            magnitude_data: [ndarray] Array of meteor's lightcurve apparent magnitudes.
 
     """
 
@@ -461,6 +462,36 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, UT_corr, lat, lon, 
     return JD_data, RA_data, dec_data, magnitude_data
 
  
+
+
+def XY2CorrectedRADecPP(time_data, X_data, Y_data, level_data, platepar):
+    """ Converts image XY to RA,Dec, but it takes a platepar instead of individual parameters. 
+    
+    Arguments:
+        time_data: [2D ndarray] Numpy array containing time tuples of each data point (year, month, day, 
+            hour, minute, second, millisecond).
+        X_data: [ndarray] 1D numpy array containing the image X component.
+        Y_data: [ndarray] 1D numpy array containing the image Y component.
+        level_data: [ndarray] Levels of the meteor centroid.
+        platepar: [Platepar structure] Astrometry parameters.
+
+
+    Return:
+        (JD_data, RA_data, dec_data, magnitude_data): [tuple of ndarrays]
+            JD_data: [ndarray] Julian date of each data point.
+            RA_data: [ndarray] Right ascension of each point.
+            dec_data: [ndarray] Declination of each point.
+            magnitude_data: [ndarray] Array of meteor's lightcurve apparent magnitudes.
+    """
+
+
+    return XY2CorrectedRADec(time_data, X_data, Y_data, level_data, platepar.UT_corr, platepar.lat, \
+        platepar.lon, platepar.Ho, platepar.X_res, platepar.Y_res, platepar.RA_d, platepar.dec_d, \
+        platepar.pos_angle_ref, platepar.F_scale, platepar.mag_0, platepar.mag_lev, platepar.x_poly, \
+        platepar.y_poly)
+
+
+
 
 def raDecToCorrectedXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_d, ref_jd, pos_angle_ref, \
     F_scale, x_poly, y_poly):
@@ -572,6 +603,27 @@ def raDecToCorrectedXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_
 
 
     return x_array, y_array
+
+
+
+def raDecToCorrectedXYPP(RA_data, dec_data, jd, platepar):
+    """ Converts RA, Dec to image coordinates, but the platepar is given instead of individual parameters.
+
+    Arguments:
+        RA: [ndarray] Array of right ascensions (degrees).
+        dec: [ndarray] Array of declinations (degrees).
+        jd: [float] Julian date.
+        platepar: [Platepar structure] Astrometry parameters.
+
+    Return:
+        (x, y): [tuple of ndarrays] Image X and Y coordinates.
+
+    """
+
+    return raDecToCorrectedXY(RA_data, dec_data, jd, platepar.lat, platepar.lon, platepar.X_res, \
+        platepar.Y_res, platepar.RA_d, platepar.dec_d, platepar.JD, platepar.pos_angle_ref, \
+        platepar.F_scale, platepar.x_poly, platepar.y_poly)
+
 
 
 
