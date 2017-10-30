@@ -110,6 +110,10 @@ def makeFlat(dir_path, config):
     if len(ff_list_good) > max_ff_flat:
         ff_list_good = [x[1] for x in sorted(random.sample(enumerate(ff_list_good), max_ff_flat))]
 
+
+    print('Using {:d} files for flat...'.format(len(ff_list_good)))
+
+
     c = 0
     ff_avg_list = []
     median_list = []
