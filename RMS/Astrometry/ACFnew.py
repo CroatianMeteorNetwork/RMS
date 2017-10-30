@@ -210,10 +210,10 @@ def matchStarsResiduals(platepar, catalog_stars, star_dict, max_radius, min_matc
     cost = (avg_dist**2)*(1.0/np.sqrt(n_matched + 1))
     #cost = 1.0/np.sqrt(n_matched + 1)
 
-    # print('Nmatched', n_matched)
+    print('Nmatched', n_matched)
     # # print('Avg dist', avg_dist)
-    # print('Cost:', cost)
-    # print('-----')
+    print('Cost:', cost)
+    print('-----')
 
 
     if ret_nmatch:
@@ -329,10 +329,13 @@ def autoCheckFit(config, platepar, calstars_list):
     for max_radius in radius_list:
 
         # Match the stars and calculate the residuals
-        cost = matchStarsResiduals(platepar, catalog_stars, star_dict, max_radius, config.min_matched_stars)
+        n_matched, avg_dist, cost = matchStarsResiduals(platepar, catalog_stars, star_dict, max_radius, config.min_matched_stars, ret_nmatch=True)
 
         print('Max radius:', max_radius)
-        print('Initial cost:', cost)
+        print('Initial values:')
+        print(' Matched stars:', n_matched)
+        print(' Average deviation:', avg_dist)
+
 
 
         # Initial parameters for the astrometric fit
@@ -451,9 +454,6 @@ if __name__ == "__main__":
         print('Cannot find the platepar file in the night directory: ', config.platepar_name)
         sys.exit()
 
-
-
-    print(platepar.UT_corr)
 
     # Find the CALSTARS file in the given folder
     calstars_file = None
