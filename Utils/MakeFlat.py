@@ -108,7 +108,7 @@ def makeFlat(dir_path, config):
     # Sample FF files if there are more than 200
     max_ff_flat = 200
     if len(ff_list_good) > max_ff_flat:
-        ff_list_good = [x[1] for x in sorted(random.sample(ff_list_good, max_ff_flat))]
+        ff_list_good = sorted(random.sample(ff_list_good, max_ff_flat))
 
 
     print('Using {:d} files for flat...'.format(len(ff_list_good)))
