@@ -176,7 +176,7 @@ class Config:
 
         ##### Calibration
 
-        self.flat_file = 'flat.png'
+        self.flat_file = 'flat.bmp'
         self.flat_min_imgs = 20
 
         self.star_catalog_path = 'Catalogs'
