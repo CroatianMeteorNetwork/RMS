@@ -74,6 +74,8 @@ def setSIGINT():
 
     signal.signal(signal.SIGINT, breakHandler)
 
+
+
 def resetSIGINT():
     """ Restore the original Ctrl+C action. """
 
@@ -243,27 +245,49 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
         resetSIGINT()
 
 
-        # If there are some more files to process, process them on more cores
-        if detector.input_queue.qsize() > 0:
+        try:
 
-            # Let the detector use all cores, but leave 1 free
-            available_cores = multiprocessing.cpu_count() - 1
+            # If there are some more files to process, process them on more cores
+            if detector.input_queue.qsize() > 0:
 
-
-            if available_cores > 1:
-
-                log.info('Running the detection on {:d} cores...'.format(available_cores))
-
-                # Start the detector
-                detector.updateCoreNumber(cores=available_cores)
+                # Let the detector use all cores, but leave 1 free
+                available_cores = multiprocessing.cpu_count() - 1
 
 
-        log.info('Waiting for the detection to finish...')
+                if available_cores > 1:
 
-        # Wait for the detector to finish and close it
-        detector.closePool()
+                    log.info('Running the detection on {:d} cores...'.format(available_cores))
 
-        log.info('Detection finished!')
+                    # Start the detector
+                    detector.updateCoreNumber(cores=available_cores)
+
+
+            log.info('Waiting for the detection to finish...')
+
+            # Wait for the detector to finish and close it
+            detector.closePool()
+
+            log.info('Detection finished!')
+
+
+        except KeyboardInterrupt:
+
+            log.info('Ctrl + C pressed, exiting...')
+                
+            if upload_manager is not None:
+
+                # Stop the upload manager
+                if upload_manager.is_alive():
+                    log.debug('Closing upload manager...')
+                    upload_manager.stop()
+                    del upload_manager
+
+            # Terminate the detector
+            if detector is not None:
+                del detector
+
+            sys.exit()
+
 
         # Set the Ctrl+C back to 'soft' program kill
         setSIGINT()
@@ -525,8 +549,21 @@ if __name__ == "__main__":
             # Reset the Ctrl+C to KeyboardInterrupt
             resetSIGINT()
 
-            # Wait for 30 mins before checking again
-            time.sleep(30*60)
+            try:
+                # Wait for 30 mins before checking again
+                time.sleep(30*60)
+
+            except KeyboardInterrupt:
+
+                log.info('Ctrl + C pressed, exiting...')
+                
+                # Stop the upload manager
+                if upload_manager.is_alive():
+                    log.debug('Closing upload manager...')
+                    upload_manager.stop()
+                    del upload_manager
+
+                sys.exit()
 
             # Change the Ctrl+C action to the special handle
             setSIGINT()
@@ -547,8 +584,21 @@ if __name__ == "__main__":
             # Reset the Ctrl+C to KeyboardInterrupt
             resetSIGINT()
 
-            # Wait until sunset
-            time.sleep(int(waiting_time.total_seconds()))
+            try:
+                # Wait until sunset
+                time.sleep(int(waiting_time.total_seconds()))
+
+            except KeyboardInterrupt:
+
+                log.info('Ctrl + C pressed, exiting...')
+                
+                # Stop the upload manager
+                if upload_manager.is_alive():
+                    log.debug('Closing upload manager...')
+                    upload_manager.stop()
+                    del upload_manager
+
+                sys.exit()
 
             # Change the Ctrl+C action to the special handle
             setSIGINT()
@@ -578,6 +628,6 @@ if __name__ == "__main__":
 
     # Stop the upload manager
     if upload_manager.is_alive():
-        log.info('Closing upload manager...')
+        log.debug('Closing upload manager...')
         upload_manager.stop()
         del upload_manager
