@@ -333,7 +333,7 @@ def autoCheckFit(config, platepar, calstars_list):
 
 
     # A list of matching radiuses to try
-    radius_list = [5, 2]
+    radius_list = [3, 1.5, 0.75]
 
     for max_radius in radius_list:
 
@@ -359,7 +359,7 @@ def autoCheckFit(config, platepar, calstars_list):
 
         # Fit the astrometric parameters
         res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, args=(platepar, catalog_stars, \
-            star_dict, max_radius, config.min_matched_stars), method='Nelder-Mead', options={'fatol': 1e-2})
+            star_dict, max_radius, config.min_matched_stars), method='Nelder-Mead', options={'fatol': 1e-1})
 
         print(res)
 
@@ -383,7 +383,7 @@ def autoCheckFit(config, platepar, calstars_list):
         # Fit the distortion parameters (X axis)
         res = scipy.optimize.minimize(_calcImageResidualsDistorsion, platepar.x_poly, args=(platepar, \
             catalog_stars, star_dict, max_radius, config.min_matched_stars, 'x'), method='Nelder-Mead', \
-            options={'xtol': 1e-1})
+            options={'fatol': 1e-1})
 
         print(res)
 
@@ -399,7 +399,7 @@ def autoCheckFit(config, platepar, calstars_list):
         # Fit the distortion parameters (Y axis)
         res = scipy.optimize.minimize(_calcImageResidualsDistorsion, platepar.y_poly, args=(platepar, \
             catalog_stars, star_dict, max_radius, config.min_matched_stars, 'y'), method='Nelder-Mead', \
-            options={'xtol': 1e-1})
+            options={'fatol': 1e-1})
 
         print(res)
 
