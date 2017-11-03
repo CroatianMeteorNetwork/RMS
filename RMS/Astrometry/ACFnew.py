@@ -350,7 +350,7 @@ def autoCheckFit(config, platepar, calstars_list):
         # The initial number of matched stars has to be at least the number of FF imaages, otherwise it means
         #   that the initial platepar is no good
         if n_matched < config.calstars_files_N:
-            print('The total number of initially matched stars is too small! Please manually redo the plate.')
+            print('The total number of initially matched stars is too small! Please manually redo the plate or make sure there are enough calibration stars.')
             return platepar, False
 
 
@@ -411,9 +411,6 @@ def autoCheckFit(config, platepar, calstars_list):
             platepar.y_poly = res.x
 
 
-
-
-
     # Match the stars and calculate the residuals
     n_matched, avg_dist, cost = matchStarsResiduals(platepar, catalog_stars, star_dict, max_radius, 
         config.min_matched_stars, ret_nmatch=True)
@@ -423,12 +420,6 @@ def autoCheckFit(config, platepar, calstars_list):
 
 
     return platepar, True
-
-
-
-
-        
-
     
 
 
