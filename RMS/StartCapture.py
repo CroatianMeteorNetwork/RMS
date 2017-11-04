@@ -193,7 +193,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
     live_view = LiveViewer(window_name='Maxpixel')
     
     # Initialize compression
-    c = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config, 
+    compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config, 
         detector=detector, live_view=live_view, flat_struct=flat_struct)
 
     
@@ -201,7 +201,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
     bc.startCapture()
 
     # Start the compression
-    c.start()
+    compressor.start()
 
     
     # Capture until Ctrl+C is pressed
@@ -219,7 +219,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
 
     # Stop the compressor
     log.debug('Stopping compression...')
-    detector, live_view = c.stop()
+    detector, live_view = compressor.stop()
     log.debug('Compression stopped')
 
     # Stop the live viewer

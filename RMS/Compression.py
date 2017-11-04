@@ -255,8 +255,19 @@ class Compressor(multiprocessing.Process):
             
         log.debug('Joining compression...')
 
+
+        t_beg = time.time()
+
+        # Wait until everything is done
         while not self.run_exited.is_set():
+            
             time.sleep(0.01)
+
+            # Do not wait more than a minute, just terminate the compression thread then
+            if (time.time() - t_beg) > 60:
+                log.debug('Waitied more than 60 seconds for compression to end, killing it...')
+                break
+
 
         log.debug('Compression joined!')
 
@@ -290,13 +301,16 @@ class Compressor(multiprocessing.Process):
 
                 # Exit function if process was stopped from the outside
                 if self.exit.is_set():
+
                     log.debug('Compression run exit')
                     self.run_exited.set()
-                    return
 
-                time.sleep(0.01)
+                    return None
+
+                time.sleep(0.1)
 
                 
+
             t = time.time()
 
             
@@ -346,6 +360,9 @@ class Compressor(multiprocessing.Process):
             # Fully format the filename (this could not have been done before as the extractor will add
             # the FR prefix)
             filename = "FF_" + filename + "." + self.config.ff_format
+
+
+            log.debug('Extractor started for: ' + filename)
 
 
             # Run the detection on the file, if the detector handle was given
