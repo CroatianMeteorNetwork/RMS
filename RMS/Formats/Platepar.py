@@ -259,11 +259,11 @@ class Platepar(object):
 
 
 
-    def write(self, file_name, fmt=None):
+    def write(self, file_path, fmt=None):
         """ Write platepar to file. 
         
         Arguments:
-            file_name: [str] Path and the name of the platepar to write.
+            file_path: [str] Path and the name of the platepar to write.
 
         Keyword arguments:
             fmt: [str] Format of the platepar file. 'json' for JSON format and 'txt' for the usual CMN textual
@@ -292,12 +292,12 @@ class Platepar(object):
 
             out_str = json.dumps(self2, default=lambda o: o.__dict__, indent=4, sort_keys=True)
 
-            with open(file_name, 'w') as f:
+            with open(file_path, 'w') as f:
                 f.write(out_str)
 
         else:
 
-            with open(file_name, 'w') as f:
+            with open(file_path, 'w') as f:
                 
                 # Write geo coords
                 f.write('{:9.6f} {:9.6f} {:04d}\n'.format(self.lon, self.lat, int(self.elev)))

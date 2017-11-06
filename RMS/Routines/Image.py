@@ -87,14 +87,14 @@ def loadFlat(dir_path, file_name):
     # Load the flat image
     flat_img = scipy.misc.imread(os.path.join(dir_path, file_name))
 
-    # Make sure there are not 0s, as images are divided by flats
-    flat_img[flat_img == 0] = 1
-
     # Convert the flat to float64
     flat_img = flat_img.astype(np.float64)
 
-    # Calculate the average of the flat
-    flat_avg = np.mean(flat_img)
+    # Calculate the median of the flat
+    flat_avg = np.median(flat_img)
+
+    # Make sure there are no values close to 0, as images are divided by flats
+    flat_img[flat_img < flat_avg/2] = flat_avg
 
     # Init a new Flat structure
     flat_struct = FlatStruct(flat_img, flat_avg)
@@ -171,8 +171,8 @@ if __name__ == "__main__":
     #### Apply the flat
 
     # Load an FF file
-    dir_path = "/home/dvida/DATA/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/CA0001_20171018_230520_894458_detected"
-    file_name = "FF_CA0001_20171019_013239_841_0264704.fits"
+    dir_path = "/home/dvida/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/CA0001_20171018_230520_894458_detected"
+    file_name = "FF_CA0001_20171019_092744_161_1118976.fits"
 
     ff = FFfile.read(dir_path, file_name)
 
