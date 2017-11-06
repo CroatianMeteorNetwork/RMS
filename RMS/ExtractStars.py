@@ -349,6 +349,7 @@ def plotStars(ff, x2, y2):
 
 
 
+
 if __name__ == "__main__":
 
     time_start = time.clock()
@@ -357,7 +358,7 @@ if __name__ == "__main__":
     config = cr.parse(".config")
 
     if not len(sys.argv) == 2:
-        print("Usage: python -m RMS.ExtractStars /path/to/bin/files/")
+        print("Usage: python -m RMS.ExtractStars /path/to/FF/files/")
         sys.exit()
     
     # Get paths to every FF bin file in a directory 
