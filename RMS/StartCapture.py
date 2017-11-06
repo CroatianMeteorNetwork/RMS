@@ -34,13 +34,17 @@ from RMS.Logger import initLogging
 
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats import CALSTARS
+from RMS.Formats.Platepar import Platepar
 from RMS.Routines import Image
+
 
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.BufferedCapture import BufferedCapture
 from RMS.Compression import Compressor
 from RMS.CaptureDuration import captureDuration
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
+from RMS.Astrometry.AstrometryCheckFit import autoCheckFit
+from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo
 from RMS.ArchiveDetections import archiveDetections, archiveFieldsums
 from RMS.UploadManager import UploadManager
 
@@ -155,13 +159,23 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
     log.info('Data directory: ' + night_data_dir)
 
 
+
     # Load the default flat field image if it is available
     flat_struct = None
 
-    if os.path.exists(config.flat_file):
+    if os.path.exists(os.path.join(os.getcwd(), config.flat_file)):
         flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
 
         log.info('Loaded flat field image: ' + os.path.join(os.getcwd(), config.flat_file))
+
+
+
+    # Load the default platepar if it is available
+    platepar = None
+    platepar_path = os.path.join(os.getcwd(), config.platepar_name)
+    if os.path.exists(platepar_path):
+        platepar = Platepar()
+        platepar_fmt = platepar.read(platepar_path)
 
 
     # Init arrays for parallel compression on 2 cores
@@ -357,6 +371,29 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
         # Write FTPdetectinfo file
         FTPdetectinfo.writeFTPdetectinfo(meteor_list, night_data_dir, ftpdetectinfo_name, night_data_dir, \
             config.stationID, config.fps)
+
+
+        # Run calibration check and auto astrometry refinement
+        if platepar is not None:
+
+            # Run astrometry check and refinement
+            platepar, fit_status = autoCheckFit(config, platepar, star_list)
+
+            # If the fit was sucessful, apply the astrometry to detected meteors
+            if fit_status:
+
+                log.info('Astrometric calibration SUCCESSFUL!')
+
+                # Save the refined platepar to the night directory and as default
+                platepar.write(os.path.join(night_data_dir, config.platepar_name), fmt=platepar_fmt)
+                platepar.write(platepar_path, fmt=platepar_fmt)
+
+                # Calculate astrometry for meteor detections
+                applyAstrometryFTPdetectinfo(night_data_dir, ftpdetectinfo_name, platepar_path)
+
+            else:
+                log.info('Astrometric calibration FAILED!')           
+
 
 
     log.info('Plotting field sums...')

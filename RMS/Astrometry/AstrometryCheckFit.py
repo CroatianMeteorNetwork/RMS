@@ -324,6 +324,10 @@ def autoCheckFit(config, platepar, calstars_list):
         calstars_list: [list] A list containing stars extracted from FF files. See RMS.Formats.CALSTARS for
             more details.
     
+    Return:
+        (platepar, fit_status):
+            platepar: [Platepar structure] Estimated/refined platepar.
+            fit_status: [bool] True if fit was successfuly, False if not.
     """
 
 

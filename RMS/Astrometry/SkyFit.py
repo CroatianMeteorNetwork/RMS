@@ -53,7 +53,8 @@ from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADecPP, calcRefCentre, raDecToCorrectedXY
 from RMS.Astrometry.Conversions import date2JD
-from RMS.Routines.Image import adjustLevels
+from RMS.Routines import Image
+
 
 
 class FOVinputDialog(object):
@@ -148,11 +149,18 @@ class PlateTool(object):
         # Platepar format (json or txt)
         self.platepar_fmt = None
 
+        # Image coordinates of catalog stars
+        self.catalog_x = self.catalog_y = None
+
+
+
+
+
         # Load catalog stars
         self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
         self.cat_lim_mag = self.config.catalog_mag_limit
 
-        # Check if the BSC exists
+        # Check if the BSC catalog exists
         if not self.catalog_stars.any():
             messagebox.showerror(title='Star catalog error', message='Star catalog from path ' \
                 + os.path.join(self.config.star_catalog_path, self.config.star_catalog_file) \
@@ -162,8 +170,6 @@ class PlateTool(object):
             print('Star catalog loaded!')
 
 
-        # Image coordinates of catalog stars
-        self.catalog_x = self.catalog_y = None
 
 
 
@@ -188,6 +194,9 @@ class PlateTool(object):
         # A list of FF files which have any stars on them
         calstars_ff_files = [line[0] for line in calstars_list]
 
+
+
+
         self.ff_list = []
 
         # Get a list of FF files in the folder
@@ -210,6 +219,8 @@ class PlateTool(object):
         self.current_ff_file = self.ff_list[self.current_ff_index]
 
 
+
+
         # Load the platepar file
         self.platepar_file, self.platepar = self.loadPlatepar()
 
@@ -220,9 +231,29 @@ class PlateTool(object):
             self.makeNewPlatepar(update_image=False)
             self.platepar.RA_d, self.platepar.dec_d = self.getFOVcentre()
 
-            # Save the platepar to file
+            # Create the name of the platepar file
             self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
-            self.platepar.write(self.platepar_file, fmt=self.platepar_fmt)
+
+            # # Save the platepar file
+            # self.platepar.write(self.platepar_file, fmt=self.platepar_fmt)
+
+
+
+
+        # Try loading a flat field image
+        self.flat_struct = None
+
+        # Check if there is flat in the data directory
+        if os.path.exists(os.path.join(dir_path, config.flat_file)):
+            self.flat_struct = Image.loadFlat(dir_path, config.flat_file)
+
+        # Try loading the default flat
+        elif os.path.exists(config.flat_file):
+            self.flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
+
+
+
+        ### INIT IMAGE ###
 
         plt.figure(facecolor='black')
 
@@ -250,6 +281,7 @@ class PlateTool(object):
         self.scroll_counter = 0
 
         self.ax.figure.canvas.mpl_connect('key_press_event', self.onKeyPress)
+
 
 
     def onMouseRelease(self, event):
@@ -487,6 +519,16 @@ class PlateTool(object):
             print('Platepar written to:', self.platepar_file)
 
 
+        # Save the platepar as default (SHIFT+CTRL+S)
+        elif event.key == 'ctrl+S':
+
+            platepar_default_path = os.path.join(os.getcwd(), self.config.platepar_name)
+
+            # Save the platepar file
+            self.platepar.write(platepar_default_path, fmt=self.platepar_fmt)
+            print('Default platepar written to:', platepar_default_path)
+
+
         # Create a new platepar
         elif event.key == 'ctrl+n':
             self.makeNewPlatepar()
@@ -675,8 +717,15 @@ class PlateTool(object):
 
         img_data = self.current_ff.maxpixel
 
+        # Apply flat
+        if self.flat_struct is not None:
+            img_data = Image.applyFlat(img_data, self.flat_struct)
+
+
         # Adjust image levels
-        img_data = adjustLevels(img_data, 0, self.img_gamma, (2**self.config.bit_depth -1), self.config.bit_depth)
+        img_data = Image.adjustLevels(img_data, 0, self.img_gamma, (2**self.config.bit_depth -1), 
+            self.config.bit_depth)
+
 
         # Show the loaded maxpixel
         plt.imshow(img_data, cmap='gray')
@@ -754,7 +803,13 @@ class PlateTool(object):
             text_str += 'Pick stars - CTRL + R\n'
             text_str += 'New platepar - CTRL + N\n'
             text_str += 'Save platepar - CTRL + S\n'
+            text_str += 'Save platepar as default - SHIFT + CTRL + S\n'
+
+            text_str += '\n'
+
             text_str += 'Hide keyboard shortcuts - F1\n'
+
+
             plt.gca().text(10, self.current_ff.nrows - 5, text_str, color='w', verticalalignment='bottom', 
                 horizontalalignment='left', fontsize=8)
 
@@ -763,6 +818,7 @@ class PlateTool(object):
 
             plt.gca().text(10, self.current_ff.nrows, text_str, color='w', verticalalignment='bottom', 
                 horizontalalignment='left', fontsize=8)
+
 
         plt.gcf().canvas.draw()
 
