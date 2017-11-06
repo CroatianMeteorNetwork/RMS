@@ -20,13 +20,13 @@ from RMS.Formats import CALSTARS
 from RMS.Formats import BSC
 from RMS.Formats import FFfile
 from RMS.Astrometry.Conversions import date2JD, jd2Date
-from RMS.Astrometry.ApplyAstrometry import raDecToCorrectedXYPP, XY2CorrectedRADecPP
+from RMS.Astrometry.ApplyAstrometry import calcRefCentre, raDecToCorrectedXYPP, XY2CorrectedRADecPP
 
 
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import matchStars,subsetCatalog
+from RMS.Astrometry.CyFunctions import matchStars, subsetCatalog, cyRaDecToCorrectedXY
 
 
 
@@ -91,7 +91,6 @@ def matchStarsResiduals(platepar, catalog_stars, star_dict, match_radius, min_ma
 
         # Convert all catalog stars to image coordinates
         cat_x_array, cat_y_array = raDecToCorrectedXYPP(ra_catalog, dec_catalog, jd, platepar)
-
 
         # Take only those stars which are within the FOV
         x_indices = np.argwhere((cat_x_array >= 0) & (cat_x_array < platepar.X_res))
@@ -179,16 +178,18 @@ def matchStarsResiduals(platepar, catalog_stars, star_dict, match_radius, min_ma
 
     # Extract all distances
     global_dist_list = []
-    level_list = []
-    mag_list = []
+    # level_list = []
+    # mag_list = []
     for jd in matched_stars:
-        matched_img_stars, matched_cat_stars, dist_list = matched_stars[jd]
+        # matched_img_stars, matched_cat_stars, dist_list = matched_stars[jd]
+
+        _, _, dist_list = matched_stars[jd]
         
         global_dist_list += dist_list.tolist()
 
-        # TEST
-        level_list += matched_img_stars[:, 3].tolist()
-        mag_list += matched_cat_stars[:, 2].tolist()
+        # # TEST
+        # level_list += matched_img_stars[:, 3].tolist()
+        # mag_list += matched_cat_stars[:, 2].tolist()
 
 
 
@@ -209,7 +210,6 @@ def matchStarsResiduals(platepar, catalog_stars, star_dict, match_radius, min_ma
     avg_dist = np.mean(global_dist_list)
 
     cost = (avg_dist**2)*(1.0/np.sqrt(n_matched + 1))
-    #cost = 1.0/np.sqrt(n_matched + 1)
 
     print('Nmatched', n_matched)
     print('Avg dist', avg_dist)
@@ -376,7 +376,11 @@ def autoCheckFit(config, platepar, calstars_list):
 
     # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
     # in the same reagrd as the cost function)
-    fatol = (config.dist_check_threshold**2)/np.sqrt(len(star_dict)*config.min_matched_stars)
+    fatol = (config.dist_check_threshold**2)/np.sqrt(len(star_dict)*config.min_matched_stars + 1)
+
+    # Parameter estimation tolerance for angular values
+    fov_w = 384.0/platepar.F_scale
+    xatol_ang = config.dist_check_threshold*fov_w/platepar.X_res
 
 
     for i, match_radius in enumerate(radius_list):
@@ -414,7 +418,7 @@ def autoCheckFit(config, platepar, calstars_list):
         # Fit the astrometric parameters
         res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, args=(platepar, catalog_stars, \
             star_dict, match_radius, config.min_matched_stars), method='Nelder-Mead', \
-            options={'fatol': fatol, 'xatol': 0.1})
+            options={'fatol': fatol, 'xatol': xatol_ang})
 
         print(res)
 

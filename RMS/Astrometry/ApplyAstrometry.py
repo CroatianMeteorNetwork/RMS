@@ -38,6 +38,10 @@ from RMS.Formats.Platepar import Platepar
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.FFfile import filenameToDatetime
 
+# Import Cython functions
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+from RMS.Astrometry.CyFunctions import cyRaDecToCorrectedXY
 
 
 
@@ -517,11 +521,22 @@ def raDecToCorrectedXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
     """
     
+    # Calculate the referent coordinates in azimuth and altitude
+    az_centre, alt_centre = calcRefCentre(ref_jd, lon, lat, RA_d, dec_d)
+
+    
+    # Use the cythonized funtion insted of the Python function
+    return cyRaDecToCorrectedXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, az_centre, alt_centre, 
+        pos_angle_ref, F_scale, x_poly, y_poly)
+
+
+    ### NOTE
+    ### THE CODE BELOW IS GIVEN FOR ARCHIVAL PURPOSES - it is equivalent to the cython code, but slower
+
     RA_data = np.copy(RA_data)
     dec_data = np.copy(dec_data)
 
-    # Calculate the referent coordinates in azimuth and altitude
-    az_centre, alt_centre = calcRefCentre(ref_jd, lon, lat, RA_d, dec_d)
+    
 
     # Calculate the referent hour angle
     T = (jd - 2451545)/36525.0

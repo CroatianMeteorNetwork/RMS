@@ -285,3 +285,123 @@ def matchStars(np.ndarray[FLOAT_TYPE_t, ndim=2] stars_list, np.ndarray[FLOAT_TYP
     matched_indices = matched_indices[:k]
 
     return matched_indices
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data, \
+    double jd, double lat, double lon, double x_res, double y_res, double az_centre, double alt_centre, \
+    double pos_angle_ref, double F_scale, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly):
+    """ Convert RA, Dec to distorion corrected image coordinates. 
+
+    Arguments:
+        RA: [ndarray] Array of right ascensions (degrees).
+        dec: [ndarray] Array of declinations (degrees).
+        jd: [float] Julian date.
+        lat: [float] Latitude of station in degrees.
+        lon: [float] Longitude of station in degrees.
+        x_res: [int] X resolution of the camera.
+        y_res: [int] Y resolution of the camera.
+        az_centre: [float] Azimuth of the FOV centre (degrees).
+        alt_centre: [float] Altitude of the FOV centre (degrees).
+        pos_angle_ref: [float] Rotation from the celestial meridial (degrees).
+        F_scale: [float] Sum of image scales per each image axis (arcsec per px).
+        x_poly: [ndarray float] Distorsion polynomial in X direction.
+        y_poly: [ndarray float] Distorsion polynomail in Y direction.
+    
+    Return:
+        (x, y): [tuple of ndarrays] Image X and Y coordinates.
+    """
+
+    cdef int i
+    cdef double ra_star, dec_star
+    cdef double ra1, dec1, ra2, dec2, ad, radius, sinA, cosA, theta, X1, Y1, dX, dY
+
+    # print('jd:', jd)
+
+    # Calculate the referent hour angle
+    cdef double T = (jd - 2451545.0)/36525.0
+    cdef double Ho = 280.46061837 + 360.98564736629*(jd - 2451545.0) + 0.000387933*T**2 - (T**3)/38710000.0
+
+    cdef double sl = sin(radians(lat))
+    cdef double cl = cos(radians(lat))
+
+    # Calculate the hour angle
+    cdef double salt = sin(radians(alt_centre))
+    cdef double saz = sin(radians(az_centre))
+    cdef double calt = cos(radians(alt_centre))
+    cdef double caz = cos(radians(az_centre))
+    cdef double x = -saz*calt
+    cdef double y = -caz*sl*calt + salt*cl
+    cdef double HA = degrees(atan2(x, y))
+
+    # Centre of FOV
+    cdef double RA_centre = (Ho + lon - HA)%360
+    cdef double dec_centre = degrees(asin(sl*salt + cl*calt*caz))
+
+    # print('RA centre:', RA_centre)
+    # print('Dec centre:', dec_centre)
+
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] x_array = np.zeros_like(RA_data)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] y_array = np.zeros_like(RA_data)
+
+    for i in range(RA_data.shape[0]):
+
+        ra_star = RA_data[i]
+        dec_star = dec_data[i]
+
+        # Gnomonization of star coordinates to image coordinates
+        ra1 = radians(RA_centre)
+        dec1 = radians(dec_centre)
+        ra2 = radians(ra_star)
+        dec2 = radians(dec_star)
+        ad = acos(sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra2 - ra1))
+        radius = degrees(ad)
+        sinA = cos(dec2)*sin(ra2 - ra1)/sin(ad)
+        cosA = (sin(dec2) - sin(dec1)*cos(ad))/(cos(dec1)*sin(ad))
+        theta = -degrees(atan2(sinA, cosA))
+        theta = theta + pos_angle_ref - 90.0
+
+        # Calculate the image coordinates (scale the F_scale from CIF resolution)
+        X1 = radius*cos(radians(theta))*F_scale
+        Y1 = radius*sin(radians(theta))*F_scale
+
+        # Calculate distortion in X direction
+        dX = (x_poly[0]
+            + x_poly[1]*X1
+            + x_poly[2]*Y1
+            + x_poly[3]*X1**2
+            + x_poly[4]*X1*Y1
+            + x_poly[5]*Y1**2
+            + x_poly[6]*X1**3
+            + x_poly[7]*X1**2*Y1
+            + x_poly[8]*X1*Y1**2
+            + x_poly[9]*Y1**3
+            + x_poly[10]*X1*sqrt(X1**2 + Y1**2)
+            + x_poly[11]*Y1*sqrt(X1**2 + Y1**2))
+
+        # Add the distortion correction and calculate X image coordinates
+        x_array[i] = (X1 - dX)*x_res/384.0 + x_res/2
+
+        # Calculate distortion in Y direction
+        dY = (y_poly[0]
+            + y_poly[1]*X1
+            + y_poly[2]*Y1
+            + y_poly[3]*X1**2
+            + y_poly[4]*X1*Y1
+            + y_poly[5]*Y1**2
+            + y_poly[6]*X1**3
+            + y_poly[7]*X1**2*Y1
+            + y_poly[8]*X1*Y1**2
+            + y_poly[9]*Y1**3
+            + y_poly[10]*Y1*sqrt(X1**2 + Y1**2)
+            + y_poly[11]*X1*sqrt(X1**2 + Y1**2))
+
+        # Add the distortion correction and calculate Y image coordinates
+        y_array[i] = (Y1 - dY)*y_res/288.0 + y_res/2
+
+
+    return x_array, y_array
