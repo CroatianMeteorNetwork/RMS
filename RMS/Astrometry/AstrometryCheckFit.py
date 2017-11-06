@@ -204,7 +204,12 @@ def matchStarsResiduals(platepar, catalog_stars, star_dict, match_radius, min_ma
     n_matched = len(global_dist_list)
 
     if n_matched == 0:
-        return 9999.0
+        
+        if ret_nmatch:
+            return 0, 9999.0, 9999.0
+
+        else:
+            return 9999.0
 
     # Calculate the average distance
     avg_dist = np.mean(global_dist_list)
