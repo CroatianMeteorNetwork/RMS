@@ -42,7 +42,6 @@ import numpy as np
 import scipy.optimize
 
 import matplotlib
-matplotlib.use('tkagg')
 import matplotlib.pyplot as plt
 
 import RMS.ConfigReader as cr
@@ -917,7 +916,7 @@ class PlateTool(object):
 
         root.update()
         root.quit()
-        root.destroy()
+        # root.destroy()
 
         if not platepar_file:
             return False, platepar
