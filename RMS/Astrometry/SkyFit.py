@@ -212,6 +212,8 @@ class PlateTool(object):
 
         # Load the platepar file
         self.platepar_file, self.platepar = self.loadPlatepar()
+
+        print('Platepar loaded:', self.platepar_file)
         
         # If the platepar file was not loaded, set initial values from config
         if not self.platepar_file:
