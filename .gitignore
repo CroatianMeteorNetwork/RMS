@@ -10,6 +10,12 @@ FF*.fits
 FR*.fits
 FS*.fits
 
+# Platepar
+platepar*.cal
+
+# Flat
+flat.*
+
 # Eclipse
 .project
 .pydevproject
