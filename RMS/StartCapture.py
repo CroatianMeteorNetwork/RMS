@@ -177,6 +177,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
         platepar = Platepar()
         platepar_fmt = platepar.read(platepar_path)
 
+        log.info('Loaded platepar: ' + platepar_path)
+
+    else:
+
+        log.info('No platepar file found!')
+
 
     # Init arrays for parallel compression on 2 cores
     sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, 256*config.width*config.height)
