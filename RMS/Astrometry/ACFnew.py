@@ -30,7 +30,8 @@ from RMS.Astrometry.CyFunctions import matchStars,subsetCatalog
 
 
 
-def matchStarsResiduals(platepar, catalog_stars, star_dict, max_radius, min_matched_stars, ret_nmatch=False):
+def matchStarsResiduals(platepar, catalog_stars, star_dict, match_radius, min_matched_stars, \
+    ret_nmatch=False):
     """ Match the image and catalog stars with the given astrometry solution and estimate the residuals 
         between them.
     
@@ -39,7 +40,7 @@ def matchStarsResiduals(platepar, catalog_stars, star_dict, max_radius, min_matc
         catalog_stars: [ndarray] An array of catalog stars (ra, dec, mag).
         star_dict: [ndarray] A dictionary where the keys are JDs when the stars were recorded and values are
             2D list of stars, each entry is (X, Y, bg_level, level).
-        max_radius: [float] Maximum radius for star matching (pixels).
+        match_radius: [float] Maximum radius for star matching (pixels).
         min_matched_stars: [int] Minimum number of matched stars on the image for the image to be accepted.
 
     Keyword arguments:
@@ -139,13 +140,13 @@ def matchStarsResiduals(platepar, catalog_stars, star_dict, max_radius, min_matc
 
 
         #     # Take the best matched star if the distance was within the maximum radius
-        #     if min_dist < max_radius:
+        #     if min_dist < match_radius:
         #         matched_indices.append([i, cat_match_indx, min_dist])
 
 
 
         # Match image and catalog stars
-        matched_indices = matchStars(stars_list, cat_x_array, cat_y_array, cat_good_indices, max_radius)
+        matched_indices = matchStars(stars_list, cat_x_array, cat_y_array, cat_good_indices, match_radius)
 
         # Skip this image is no stars were matched
         if len(matched_indices) < min_matched_stars:
@@ -211,7 +212,7 @@ def matchStarsResiduals(platepar, catalog_stars, star_dict, max_radius, min_matc
     #cost = 1.0/np.sqrt(n_matched + 1)
 
     print('Nmatched', n_matched)
-    # # print('Avg dist', avg_dist)
+    print('Avg dist', avg_dist)
     print('Cost:', cost)
     print('-----')
 
@@ -224,8 +225,45 @@ def matchStarsResiduals(platepar, catalog_stars, star_dict, max_radius, min_matc
 
 
 
+def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius):
+    """ Checks if the platepar is 'good enough', given the extracted star positions. Returns True if the
+        fit is deemed good, False otherwise. The goodness of fit is determined by 2 criteria: the average
+        star residual (in pixels) has to be below a certain threshold, and an average number of matched stars
+        per image has to be above a predefined threshold as well.
+    
+    Arguments:
+        config: [Config structure]
+        platepar: [Platepar structure] Initial astrometry parameters.
+        catalog_stars: [ndarray] An array of catalog stars (ra, dec, mag).
+        star_dict: [ndarray] A dictionary where the keys are JDs when the stars were recorded and values are
+            2D list of stars, each entry is (X, Y, bg_level, level).
+        match_radius: [float] Maximum radius for star matching (pixels).
 
-def _calcImageResidualsAstro(params, platepar, catalog_stars, star_dict, max_radius, min_matched_stars):
+    Return:
+        [bool] True if the platepar is good, False otherwise.
+    """
+
+    # Match the stars and calculate the residuals
+    n_matched, avg_dist, cost = matchStarsResiduals(platepar, catalog_stars, star_dict, match_radius, \
+        config.min_matched_stars, ret_nmatch=True)
+
+
+    # Check that the average distance is within the threshold
+    if avg_dist <= config.dist_check_threshold:
+
+        # Check that the minimum number of stars is matched per every image
+        if n_matched >= len(star_dict)*config.min_matched_stars:
+
+            return True
+
+
+    return False
+
+
+
+
+
+def _calcImageResidualsAstro(params, platepar, catalog_stars, star_dict, match_radius, min_matched_stars):
     """ Calculates the differences between the stars on the image and catalog stars in image coordinates with 
         the given astrometrical solution. 
     """
@@ -245,11 +283,11 @@ def _calcImageResidualsAstro(params, platepar, catalog_stars, star_dict, max_rad
 
 
     # Match stars and calculate image residuals
-    return matchStarsResiduals(pp, catalog_stars, star_dict, max_radius, min_matched_stars)
+    return matchStarsResiduals(pp, catalog_stars, star_dict, match_radius, min_matched_stars)
 
 
 
-def _calcImageResidualsDistorsion(params, platepar, catalog_stars, star_dict, max_radius, min_matched_stars, \
+def _calcImageResidualsDistorsion(params, platepar, catalog_stars, star_dict, match_radius, min_matched_stars, \
         dimension):
     """ Calculates the differences between the stars on the image and catalog stars in image coordinates with 
         the given astrometrical solution. 
@@ -266,7 +304,7 @@ def _calcImageResidualsDistorsion(params, platepar, catalog_stars, star_dict, ma
 
 
     # Match stars and calculate image residuals
-    return matchStarsResiduals(pp, catalog_stars, star_dict, max_radius, min_matched_stars)
+    return matchStarsResiduals(pp, catalog_stars, star_dict, match_radius, min_matched_stars)
 
 
 
@@ -333,15 +371,21 @@ def autoCheckFit(config, platepar, calstars_list):
 
 
     # A list of matching radiuses to try
-    radius_list = [3, 1.5, 0.75]
+    min_radius = 0.75
+    radius_list = [3, 1.5, min_radius]
 
-    for max_radius in radius_list:
+    # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
+    # in the same reagrd as the cost function)
+    fatol = (config.dist_check_threshold**2)/np.sqrt(len(star_dict)*config.min_matched_stars)
+
+
+    for i, match_radius in enumerate(radius_list):
 
         # Match the stars and calculate the residuals
-        n_matched, avg_dist, cost = matchStarsResiduals(platepar, catalog_stars, star_dict, max_radius, \
+        n_matched, avg_dist, cost = matchStarsResiduals(platepar, catalog_stars, star_dict, match_radius, \
             config.min_matched_stars, ret_nmatch=True)
 
-        print('Max radius:', max_radius)
+        print('Max radius:', match_radius)
         print('Initial values:')
         print(' Matched stars:', n_matched)
         print(' Average deviation:', avg_dist)
@@ -354,12 +398,23 @@ def autoCheckFit(config, platepar, calstars_list):
             return platepar, False
 
 
+        # Check if the platepar is good enough and do not estimate further parameters
+        if checkFitGoodness(config, platepar, catalog_stars, star_dict, min_radius):
+
+            # Print out notice only if the platepar is good right away
+            if i == 0:
+                print("Initial platepar is good enough!")
+
+            return platepar, True
+
+
         # Initial parameters for the astrometric fit
         p0 = [platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale]
 
         # Fit the astrometric parameters
         res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, args=(platepar, catalog_stars, \
-            star_dict, max_radius, config.min_matched_stars), method='Nelder-Mead', options={'fatol': 1e-1})
+            star_dict, match_radius, config.min_matched_stars), method='Nelder-Mead', \
+            options={'fatol': fatol, 'xatol': 0.1})
 
         print(res)
 
@@ -379,11 +434,15 @@ def autoCheckFit(config, platepar, calstars_list):
 
 
         
+        # Check if the platepar is good enough and do not estimate further parameters
+        if checkFitGoodness(config, platepar, catalog_stars, star_dict, min_radius):
+            return platepar, True
+
 
         # Fit the distortion parameters (X axis)
         res = scipy.optimize.minimize(_calcImageResidualsDistorsion, platepar.x_poly, args=(platepar, \
-            catalog_stars, star_dict, max_radius, config.min_matched_stars, 'x'), method='Nelder-Mead', \
-            options={'fatol': 1e-1})
+            catalog_stars, star_dict, match_radius, config.min_matched_stars, 'x'), method='Nelder-Mead', \
+            options={'fatol': fatol, 'xatol': 0.1})
 
         print(res)
 
@@ -395,11 +454,15 @@ def autoCheckFit(config, platepar, calstars_list):
             platepar.x_poly = res.x
 
 
+        # Check if the platepar is good enough and do not estimate further parameters
+        if checkFitGoodness(config, platepar, catalog_stars, star_dict, min_radius):
+            return platepar, True
+
 
         # Fit the distortion parameters (Y axis)
         res = scipy.optimize.minimize(_calcImageResidualsDistorsion, platepar.y_poly, args=(platepar, \
-            catalog_stars, star_dict, max_radius, config.min_matched_stars, 'y'), method='Nelder-Mead', \
-            options={'fatol': 1e-1})
+            catalog_stars, star_dict, match_radius, config.min_matched_stars, 'y'), method='Nelder-Mead', \
+            options={'fatol': fatol, 'xatol': 0.1})
 
         print(res)
 
@@ -411,8 +474,9 @@ def autoCheckFit(config, platepar, calstars_list):
             platepar.y_poly = res.x
 
 
+
     # Match the stars and calculate the residuals
-    n_matched, avg_dist, cost = matchStarsResiduals(platepar, catalog_stars, star_dict, max_radius, 
+    n_matched, avg_dist, cost = matchStarsResiduals(platepar, catalog_stars, star_dict, match_radius, 
         config.min_matched_stars, ret_nmatch=True)
 
     print('Matched stars:', n_matched)

@@ -904,15 +904,17 @@ class PlateTool(object):
 
         root = tkinter.Tk()
         root.withdraw()
+        root.update()
 
         platepar = Platepar()
 
         # Load the platepar file
-        platepar_file = filedialog.askopenfilename(parent=root, initialdir=self.dir_path, \
+        platepar_file = filedialog.askopenfilename(initialdir=self.dir_path, \
             title='Select the platepar file')
 
-        root.quit()
-        #root.destroy()
+        root.update()
+        #root.quit()
+        root.destroy()
 
         if not platepar_file:
             return False, platepar
