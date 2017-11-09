@@ -4,6 +4,10 @@
 		"selected_items":
 		[
 			[
+				"cals",
+				"calstars_list"
+			],
+			[
 				"platep",
 				"platepar_path\tstatement"
 			],
@@ -352,10 +356,6 @@
 				"calstars_list\tparam"
 			],
 			[
-				"cals",
-				"calstars_list\tparam"
-			],
-			[
 				"catalog",
 				"catalog_stars_visible"
 			],
@@ -577,7 +577,7 @@
 			"file": "RMS/StartCapture.py",
 			"settings":
 			{
-				"buffer_size": 19987,
+				"buffer_size": 20113,
 				"encoding": "UTF-8",
 				"line_ending": "Windows"
 			}
@@ -1108,7 +1108,7 @@
 	"groups":
 	[
 		{
-			"selected": 1,
+			"selected": 6,
 			"sheets":
 			[
 				{
@@ -1182,8 +1182,8 @@
 						"selection":
 						[
 							[
-								16106,
-								16106
+								17975,
+								17975
 							]
 						],
 						"settings":
@@ -1217,10 +1217,10 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 6735.0,
+						"translation.y": 7778.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 0,
+					"stack_index": 1,
 					"type": "text"
 				},
 				{
@@ -1445,15 +1445,15 @@
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 19987,
+						"buffer_size": 20113,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								8654,
-								8654
+								10893,
+								10893
 							]
 						],
 						"settings":
@@ -1471,6 +1471,10 @@
 								{
 									"characters": ".",
 									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
 								}
 							],
 							"git_gutter_is_enabled": true,
@@ -1479,10 +1483,10 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 3980.0,
+						"translation.y": 5285.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 2,
+					"stack_index": 0,
 					"type": "text"
 				},
 				{
@@ -1524,7 +1528,7 @@
 						"translation.y": 4455.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 1,
+					"stack_index": 2,
 					"type": "text"
 				},
 				{
