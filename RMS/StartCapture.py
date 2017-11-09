@@ -382,8 +382,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
         # Run calibration check and auto astrometry refinement
         if platepar is not None:
 
+            # Read in the CALSTARS file
+            calstars_list = CALSTARS.readCALSTARS(night_data_dir, calstars_name)
+
             # Run astrometry check and refinement
-            platepar, fit_status = autoCheckFit(config, platepar, star_list)
+            platepar, fit_status = autoCheckFit(config, platepar, calstars_list)
 
             # If the fit was sucessful, apply the astrometry to detected meteors
             if fit_status:
