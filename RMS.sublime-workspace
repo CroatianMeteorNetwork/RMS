@@ -592,15 +592,6 @@
 			}
 		},
 		{
-			"file": ".config",
-			"settings":
-			{
-				"buffer_size": 8716,
-				"encoding": "UTF-8",
-				"line_ending": "Windows"
-			}
-		},
-		{
 			"file": "RMS/ConfigReader.py",
 			"settings":
 			{
@@ -777,6 +768,7 @@
 	],
 	"file_history":
 	[
+		"/home/dvida/source/RMS/.config",
 		"/home/dvida/Dropbox/UWO Master's/Projects/SimulatedMeteors/CAMS/PER/2456151.69611/2456151.69611_sim_met_info.txt",
 		"/home/dvida/Dropbox/UWO Master's/Projects/SimulatedMeteors/CAMS/PER/2456151.68922/2456151.68922_sim_met_info.txt",
 		"/home/dvida/Dropbox/UWO Master's/Projects/SimulatedMeteors/CAMS/PER/2456151.68922/20120812_043229_report.txt",
@@ -903,8 +895,7 @@
 		"/C/Users/delorayn1/Desktop/ConfirmedFiles/2017071819-Processed/M_2017071819VID_HMM.hmm",
 		"/D/Dropbox/UWO Master's/Projects/OPTICS meteor clustering/PlotAnalysisSuite.py",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Astrometry/CyFunctions.pyx",
-		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Routines/Grouping3Dcy.pyx",
-		"/D/Dropbox/RPi Meteor Station/RMS/RMS/QueuedPool.py"
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Routines/Grouping3Dcy.pyx"
 	],
 	"find":
 	{
@@ -948,6 +939,7 @@
 		"case_sensitive": false,
 		"find_history":
 		[
+			"200",
 			"config",
 			"_calcImageResidualsAstro",
 			"matchstarsresid",
@@ -1074,8 +1066,7 @@
 			"x_pol",
 			"x_scal",
 			"print(",
-			"Y1",
-			"X1"
+			"Y1"
 		],
 		"highlight": true,
 		"in_selection": false,
@@ -1108,7 +1099,7 @@
 	"groups":
 	[
 		{
-			"selected": 6,
+			"selected": 8,
 			"sheets":
 			[
 				{
@@ -1220,7 +1211,7 @@
 						"translation.y": 7778.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 1,
+					"stack_index": 3,
 					"type": "text"
 				},
 				{
@@ -1486,7 +1477,7 @@
 						"translation.y": 5285.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 0,
+					"stack_index": 2,
 					"type": "text"
 				},
 				{
@@ -1528,40 +1519,11 @@
 						"translation.y": 4455.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 2,
+					"stack_index": 1,
 					"type": "text"
 				},
 				{
 					"buffer": 8,
-					"file": ".config",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 8716,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								7224,
-								7224
-							]
-						],
-						"settings":
-						{
-							"git_gutter_is_enabled": true,
-							"syntax": "Packages/Text/Plain text.tmLanguage"
-						},
-						"translation.x": 0.0,
-						"translation.y": 1183.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 3,
-					"type": "text"
-				},
-				{
-					"buffer": 9,
 					"file": "RMS/ConfigReader.py",
 					"semi_transient": false,
 					"settings":
@@ -1573,8 +1535,8 @@
 						"selection":
 						[
 							[
-								24098,
-								24098
+								8561,
+								8561
 							]
 						],
 						"settings":
@@ -1596,10 +1558,10 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 10035.0,
+						"translation.y": 2240.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 9,
+					"stack_index": 0,
 					"type": "text"
 				}
 			]

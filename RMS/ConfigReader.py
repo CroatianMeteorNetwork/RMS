@@ -187,7 +187,7 @@ class Config:
         self.catalog_extraction_radius = 40.0 #deg
         self.catalog_mag_limit = 4.5
 
-        self.calstars_files_N = 100 # How many calstars FF files to evaluate
+        self.calstars_files_N = 400 # How many calstars FF files to evaluate
 
         self.calstars_min_stars = 500 # Minimum number of stars to use
 
