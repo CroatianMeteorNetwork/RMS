@@ -296,7 +296,15 @@ def parseCapture(config, parser):
         config.bit_depth = parser.getint(section, "bit_depth")
     
     if parser.has_option(section, "device"):
-        config.deviceID = parser.getint(section, "device")
+        config.deviceID = parser.get(section, "device")
+
+    # Try converting the device ID to integer (meaning that it is a real device
+    try:
+        config.deviceID = int(config.deviceID)
+    except:
+
+        # If it fails, it's probably a RTSP stream
+        pass
 
     if parser.has_option(section, "fps"):
         config.fps = parser.getfloat(section, "fps")
