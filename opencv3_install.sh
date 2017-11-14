@@ -29,7 +29,7 @@ cmake -D CMAKE_BUILD_TYPE=RELEASE \
     -D INSTALL_C_EXAMPLES=OFF \
     -D OPENCV_EXTRA_MODULES_PATH=${HOME_DIR}/opencv_contrib-${VERSION}/modules \
     -D PYTHON_EXECUTABLE=/usr/bin/python \
-    -D BUILD_EXAMPLES=ON 
+    -D BUILD_EXAMPLES=ON \
     -D WITH_GSTREAMER=ON ..
 
 # Check output cmake, it should include python 2
