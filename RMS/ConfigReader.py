@@ -70,6 +70,9 @@ class Config:
 
         ##### Upload
 
+        # Flag determining if uploading is enabled or not
+        self.upload_enabled = True
+
         # Address of the upload server
         self.hostname = ''
 
@@ -331,6 +334,10 @@ def parseUpload(config, parser):
     
     if not parser.has_section(section):
         return
+
+    # Address of the upload server
+    if parser.has_option(section, "upload_enabled"):
+        config.upload_enabled = parser.get(section, "upload_enabled")    
 
     # Address of the upload server
     if parser.has_option(section, "hostname"):

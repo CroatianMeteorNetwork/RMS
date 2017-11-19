@@ -301,6 +301,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
                     log.debug('Closing upload manager...')
                     upload_manager.stop()
                     del upload_manager
+                    
 
             # Terminate the detector
             if detector is not None:
@@ -541,10 +542,14 @@ if __name__ == "__main__":
             sys.exit()
 
 
-        # Init the upload manager
-        log.info('Starting the upload manager...')
-        upload_manager = UploadManager(config)
-        upload_manager.start()
+        upload_manager = None
+        if config.upload_enabled:
+
+            # Init the upload manager
+            log.info('Starting the upload manager...')
+            upload_manager = UploadManager(config)
+            upload_manager.start()
+
 
         log.info("Running for " + str(duration/60/60) + ' hours...')
 
@@ -572,11 +577,13 @@ if __name__ == "__main__":
         runCapture(config, video_file=cml_args.input, nodetect=cml_args.nodetect)
 
 
+    upload_manager = None
+    if config.upload_enabled:
 
-    # Init the upload manager
-    log.info('Starting the upload manager...')
-    upload_manager = UploadManager(config)
-    upload_manager.start()
+        # Init the upload manager
+        log.info('Starting the upload manager...')
+        upload_manager = UploadManager(config)
+        upload_manager.start()
 
 
     # Automatic running and stopping the capture at sunrise and sunset
