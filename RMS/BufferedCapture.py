@@ -97,9 +97,18 @@ class BufferedCapture(Process):
             # Init the video device
             device = cv2.VideoCapture(self.config.deviceID)
 
-            # Set the resolution (does not work with gstreamer!)
-            #device.set(3, self.config.width)
-            #device.set(4, self.config.height)
+            # Try setting the resultion if using a video device, not gstreamer
+            try:
+
+                # This will fail if the video device is a gstreamer pipe
+                int(self.config.deviceID)
+                
+                # Set the resolution (crashes if using an IP camera and gstreamer!)
+                device.set(3, self.config.width)
+                device.set(4, self.config.height)
+
+            except:
+                pass
 
 
         # Throw away first 10 frame
