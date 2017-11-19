@@ -1341,7 +1341,7 @@ if __name__ == '__main__':
 
 
     if len(sys.argv) < 2:
-        print('Usage: python -m RMS.Astrometry.PlateTool /path/to/FF/dir/')
+        print('Usage: python -m RMS.Astrometry.SkyFit /path/to/FF/dir/')
         sys.exit()
 
     dir_path = sys.argv[1].replace('"', '')
