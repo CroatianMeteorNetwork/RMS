@@ -7,7 +7,7 @@ You will need:
 * [DS3231 RTC module](https://www.aliexpress.com/item/1pc-DS3231-Precision-RTC-Module-Memory-Module-for-Arduino-Raspberry-Pi/32676041749.html)
 
 Connect the RTC module to the GPIO according to this image:
-![Connecting the RTC](rtc.jpg)
+![Connecting the RTC](media/rtc.jpg)
 
 ## Software setup
 
