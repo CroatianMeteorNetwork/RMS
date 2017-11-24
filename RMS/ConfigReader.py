@@ -337,7 +337,7 @@ def parseUpload(config, parser):
 
     # Address of the upload server
     if parser.has_option(section, "upload_enabled"):
-        config.upload_enabled = parser.get(section, "upload_enabled")    
+        config.upload_enabled = parser.getboolean(section, "upload_enabled")
 
     # Address of the upload server
     if parser.has_option(section, "hostname"):
