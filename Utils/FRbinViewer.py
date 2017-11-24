@@ -110,7 +110,7 @@ if __name__ == "__main__":
     
 
     # Get the list of FR bin files (fireball detections) in the given directory
-    fr_list = [fr for fr in os.listdir(dir_path) if fr[0:2]=="FR" and fr[-3:]=="bin"]
+    fr_list = [fr for fr in os.listdir(dir_path) if fr[0:2]=="FR" and fr.endswith('bin')]
     fr_list = sorted(fr_list)
 
     if not fr_list:
@@ -125,10 +125,17 @@ if __name__ == "__main__":
     for fr in fr_list:
         ff_match = None
 
+        # Strip extensions
+        fr_name = ".".join(fr.split('.')[:-1])
+
         # Find the matching FF bin to the given FR bin
         for ff in ff_list:
 
-            if ff[2:] == fr[2:]:
+            # Strip extensions
+            ff_name = ".".join(ff.split('.')[:-1])
+
+
+            if ff_name[2:] == fr_name[2:]:
                 ff_match = ff
                 break
         
