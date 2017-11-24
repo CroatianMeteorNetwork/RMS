@@ -24,7 +24,12 @@ import time
 import sys
 
 config = cr.parse(".config")
-comp = Compressor(None, None, None, None, config)
+comp = Compressor(None, None, None, None, None, config)
+
+
+# IMAGE SIZE
+WIDTH = 1280
+HEIGHT = 720
 
 def timing(img):
     t = time.time()
@@ -32,22 +37,22 @@ def timing(img):
     return time.time() - t
    
 def create(f):
-    arr = np.empty((256, 576, 720), np.uint8)
+    arr = np.empty((256, HEIGHT, WIDTH), np.uint8)
     for i in range(256):
         arr[i] = f()
     return arr
 
 def black():
-    return np.zeros((576, 720), np.uint8)
+    return np.zeros((HEIGHT, WIDTH), np.uint8)
 
 def white():
-    return np.full((576, 720), 255, np.uint8)
+    return np.full((HEIGHT, WIDTH), 255, np.uint8)
 
 def uniform():
-    return np.random.uniform(0, 256, (576, 720))
+    return np.random.uniform(0, 256, (HEIGHT, WIDTH))
 
 def gauss():
-    return np.random.normal(128, 2, (576, 720))
+    return np.random.normal(128, 2, (HEIGHT, WIDTH))
 
 def test(filename):
     npzFile = np.load(filename)
