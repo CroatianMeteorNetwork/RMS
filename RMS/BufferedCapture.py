@@ -27,8 +27,6 @@ class BufferedCapture(Process):
     """ Capture from device to buffer in memory.
     """
     
-    TIME_FOR_DROP = 0.05
-    
     running = False
     
     def __init__(self, array1, startTime1, array2, startTime2, config, video_file=None):
@@ -57,6 +55,11 @@ class BufferedCapture(Process):
         self.config = config
 
         self.video_file = video_file
+
+        # A fraem will be considered dropped if it was late more then half a frame
+        self.time_for_drop = 1.5*(1.0/config.fps)
+
+        self.dropped_frames = 0
     
 
 
@@ -111,12 +114,31 @@ class BufferedCapture(Process):
                 pass
 
 
+        # Wait until the device is opened
+        device_opened = False
+        for i in range(20):
+            time.sleep(100)
+            if device.isOpened():
+                device_opened = True
+                break
+
+
+        # If the device could not be opened, stop capturing
+        if not device_opened:
+            log.info('The video source could not be opened!')
+
+            return False
+
+
+
         # Throw away first 10 frame
         for i in range(10):
             device.read()
 
+
         first = True
         
+        # Run until stopped from the outside
         while not self.exit.is_set():
             lastTime = 0
             
@@ -147,11 +169,16 @@ class BufferedCapture(Process):
                 if i == 0: 
                     startTime = t
 
-                # check if frame is dropped TODO: better frame dropping detection
-                elif lastTime - t > self.TIME_FOR_DROP: 
+                # check if frame is dropped
+                elif lastTime - t >= self.time_for_drop: 
                     
-                    #TODO: increase dropped frames counter
-                    log.warn("frame dropped!")
+                    # Calculate the number of dropped frames
+                    n_dropped = int((lastTime - t)*self.config.fps)
+                    
+                    log.info(str(n_dropped) + " frames dropped!")
+
+                    self.dropped_frames += n_dropped
+
                     
 
                 lastTime = t
@@ -177,7 +204,7 @@ class BufferedCapture(Process):
 
 
             if self.exit.is_set():
-                    break
+                break
 
 
             if first:

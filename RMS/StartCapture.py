@@ -237,6 +237,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
     bc.stopCapture()
     log.debug('Capture stopped')
 
+    dropped_frames = bc.dropped_frames
+    log.info('Total number of dropped frames: ' + str(dropped_frames))
+
+
     # Stop the compressor
     log.debug('Stopping compression...')
     detector, live_view = compressor.stop()
