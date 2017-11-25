@@ -117,16 +117,6 @@ def find3DLines(point_list, start_time, config, fireball_detection=True):
     # Call a fast cython function for finding lines in 3D
     return find3DLinesCy(point_list, start_time, grouping_config, get_single, line_list)
 
-def normalizeParameter(param, config):
-    """ Normalize detection parameter to be size independent.
-    
-    @param param: parameter to be normalized
-    
-    @return: normalized param
-    """
-
-    return param * config.width/config.f * config.height/config.f / (720*576)
-
 
 def findCoefficients(line_list):
     """ Extract coefficients from list of lines that can be consumed by RMS.VideoExtraction

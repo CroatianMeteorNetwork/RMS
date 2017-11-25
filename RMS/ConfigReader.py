@@ -17,7 +17,6 @@
 import os
 import sys
 from ConfigParser import RawConfigParser, NoOptionError
-from RMS.Routines import Grouping3D
 
 
 
@@ -90,7 +89,7 @@ class Config:
 
 
         ##### Weave compilation arguments
-        self.weaveArgs = ["-O3"]
+        self.extra_compile_args = ["-O3"]
         
         ##### FireballDetection
         self.f = 16                    # subsampling factor
@@ -210,6 +209,16 @@ class Config:
         self.thumb_stack   =  5
         self.thumb_n_width = 10
 
+
+def normalizeParameter(param, config):
+    """ Normalize detection parameter to be size independent.
+    
+    @param param: parameter to be normalized
+    
+    @return: normalized param
+    """
+
+    return param*config.width/config.f*config.height/config.f/(720*576)
 
 
 def parse(filename):
@@ -383,11 +392,7 @@ def parseBuildArgs(config, parser):
 
     # Read in the KHT library path for both the PC and the RPi, but decide which one to take based on the 
     # system this is running on
-    config.weaveArgs = choosePlatform(win_pc_weave, rpi_weave, linux_pc_weave)
-
-        
-    if parser.has_option(section, "extension"):
-        config.extension = parser.get(section, "extension").split()
+    config.extra_compile_args = choosePlatform(win_pc_weave, rpi_weave, linux_pc_weave)
 
 
 
@@ -454,12 +459,12 @@ def parseFireballDetection(config, parser):
     if parser.has_option(section, "distance_threshold"):
         config.distance_threshold = parser.getint(section, "distance_threshold")**2
     
-    config.distance_threshold = Grouping3D.normalizeParameter(config.distance_threshold, config)
+    config.distance_threshold = normalizeParameter(config.distance_threshold, config)
     
     if parser.has_option(section, "gap_threshold"):
         config.gap_threshold = parser.getint(section, "gap_threshold")**2
     
-    config.gap_threshold = Grouping3D.normalizeParameter(config.gap_threshold, config)
+    config.gap_threshold = normalizeParameter(config.gap_threshold, config)
 
     if parser.has_option(section, "line_minimum_frame_range"):
         config.line_minimum_frame_range = parser.getint(section, "line_minimum_frame_range")
@@ -511,12 +516,12 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "distance_threshold_det"):
         config.distance_threshold_det = parser.getint(section, "distance_threshold_det")**2
 
-    config.distance_threshold_det = Grouping3D.normalizeParameter(config.distance_threshold_det, config)
+    config.distance_threshold_det = normalizeParameter(config.distance_threshold_det, config)
 
     if parser.has_option(section, "gap_threshold_det"):
         config.gap_threshold_det = parser.getint(section, "gap_threshold_det")**2
 
-    config.gap_threshold_det = Grouping3D.normalizeParameter(config.gap_threshold_det, config)
+    config.gap_threshold_det = normalizeParameter(config.gap_threshold_det, config)
 
     if parser.has_option(section, "min_pixels_det"):
         config.min_pixels_det = parser.getint(section, "min_pixels_det")

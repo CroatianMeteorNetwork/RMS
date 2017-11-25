@@ -121,7 +121,7 @@ class Extractor(Process):
                       'min_points': self.config.min_pixels, 'k1': self.config.k1, 'f': self.config.f,
                       'count': count, 'pointsy': pointsy, 'pointsx': pointsx, 'pointsz': pointsz}
 
-        length = weave.inline(code, dictionary.keys(), dictionary, verbose=2, extra_compile_args=self.config.weaveArgs, extra_link_args=self.config.weaveArgs)
+        length = weave.inline(code, dictionary.keys(), dictionary, verbose=2, extra_compile_args=self.config.extra_compile_args, extra_link_args=self.config.extra_compile_args)
         
 
         # Return empty list if there is no points
@@ -225,7 +225,7 @@ class Extractor(Process):
         """
         
         dictionary = {'gap_threshold': sqrt(self.config.gap_threshold), 'y': y, 'x': x, 'z': z}
-        count = weave.inline(code, dictionary.keys(), dictionary, verbose=2, extra_compile_args=self.config.weaveArgs, extra_link_args=self.config.weaveArgs)
+        count = weave.inline(code, dictionary.keys(), dictionary, verbose=2, extra_compile_args=self.config.extra_compile_args, extra_link_args=self.config.extra_compile_args)
         
         return count >= self.config.min_points
     
@@ -402,7 +402,7 @@ class Extractor(Process):
                     'firstFrame': firstFrame, 'lastFrame': lastFrame, 'f': self.config.f, 'limitForSize': self.config.limitForSize,
                     'minSize': self.config.minSize, 'maxSize': self.config.maxSize, 'sizepos': sizepos, 'out': out}
 
-            length = weave.inline(code, dict.keys(), dict, verbose=2, extra_compile_args=self.config.weaveArgs, extra_link_args=self.config.weaveArgs)
+            length = weave.inline(code, dict.keys(), dict, verbose=2, extra_compile_args=self.config.extra_compile_args, extra_link_args=self.config.extra_compile_args)
             
             out = out[:length]
             sizepos = sizepos[:length]

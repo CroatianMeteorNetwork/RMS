@@ -204,7 +204,7 @@ class Compressor(multiprocessing.Process):
         
         # Run the weave code
         weave.inline(code, ['frames', 'out', 'fieldsum', 'deinterlace_order'], verbose=2, 
-            extra_compile_args=self.config.weaveArgs, extra_link_args=self.config.weaveArgs)
+            extra_compile_args=self.config.extra_compile_args, extra_link_args=self.config.extra_compile_args)
 
         return out, fieldsum
     
