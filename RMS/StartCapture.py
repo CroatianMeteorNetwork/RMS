@@ -556,11 +556,12 @@ if __name__ == "__main__":
         # Run the capture for the given number of hours
         runCapture(config, duration=duration, nodetect=cml_args.nodetect, upload_manager=upload_manager)
 
-        # Stop the upload manager
-        if upload_manager.is_alive():
-            log.info('Closing upload manager...')
-            upload_manager.stop()
-            del upload_manager
+        if upload_manager is not None:
+            # Stop the upload manager
+            if upload_manager.is_alive():
+                log.info('Closing upload manager...')
+                upload_manager.stop()
+                del upload_manager
             
 
         sys.exit()
@@ -610,11 +611,13 @@ if __name__ == "__main__":
 
                 log.info('Ctrl + C pressed, exiting...')
                 
-                # Stop the upload manager
-                if upload_manager.is_alive():
-                    log.debug('Closing upload manager...')
-                    upload_manager.stop()
-                    del upload_manager
+                if upload_manager is not None:
+
+                    # Stop the upload manager
+                    if upload_manager.is_alive():
+                        log.debug('Closing upload manager...')
+                        upload_manager.stop()
+                        del upload_manager
 
                 sys.exit()
 
@@ -645,11 +648,13 @@ if __name__ == "__main__":
 
                 log.info('Ctrl + C pressed, exiting...')
                 
-                # Stop the upload manager
-                if upload_manager.is_alive():
-                    log.debug('Closing upload manager...')
-                    upload_manager.stop()
-                    del upload_manager
+                if upload_manager is not None:
+
+                    # Stop the upload manager
+                    if upload_manager.is_alive():
+                        log.debug('Closing upload manager...')
+                        upload_manager.stop()
+                        del upload_manager
 
                 sys.exit()
 
@@ -679,8 +684,10 @@ if __name__ == "__main__":
         runCapture(config, duration=duration, nodetect=cml_args.nodetect, upload_manager=upload_manager)
 
 
-    # Stop the upload manager
-    if upload_manager.is_alive():
-        log.debug('Closing upload manager...')
-        upload_manager.stop()
-        del upload_manager
+    if upload_manager is not None:
+
+        # Stop the upload manager
+        if upload_manager.is_alive():
+            log.debug('Closing upload manager...')
+            upload_manager.stop()
+            del upload_manager
