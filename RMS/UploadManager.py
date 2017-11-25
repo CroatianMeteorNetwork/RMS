@@ -341,11 +341,11 @@ class UploadManager(multiprocessing.Process):
 
             # Check if the upload should be run
             if last_runtime is not None:
-                if (datetime.datetime.now() - last_runtime).total_seconds() < 15*60:
+                if (datetime.datetime.utcnow() - last_runtime).total_seconds() < 15*60:
                     time.sleep(5)
                     continue
 
-            last_runtime = datetime.datetime.now()
+            last_runtime = datetime.datetime.utcnow()
 
             # Run the upload procedure
             self.uploadData()

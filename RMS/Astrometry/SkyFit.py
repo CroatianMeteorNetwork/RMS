@@ -863,6 +863,8 @@ class PlateTool(object):
         _, ra_centre, dec_centre, _ = XY2CorrectedRADecPP([ff_middle_time], [self.platepar.X_res/2], 
             [self.platepar.Y_res/2], [0], self.platepar)
 
+        print('Center RA, Dec:', ra_centre, dec_centre)
+
         # Calculate the FOV radius in degrees
         fov_x = (self.platepar.X_res/2)*(3600/self.platepar.F_scale)*(384/self.platepar.X_res)/3600
         fov_y = (self.platepar.Y_res/2)*(3600/self.platepar.F_scale)*(288/self.platepar.Y_res)/3600
@@ -872,12 +874,30 @@ class PlateTool(object):
         filtered_catalog_stars = []
         filtered_indices = []
 
+        # Calculate minimum and maximum declination
+        dec_min = dec_centre - fov_radius
+        if dec_min < -90:
+            dec_min = -90
+
+        dec_max = dec_centre + fov_radius
+        if dec_max > 90:
+            dec_max = 90
+
         # Take only those catalog stars which should be inside the FOV
         for i, (ra, dec, _) in enumerate(catalog_stars):
 
+            # Skip if the declination is too large
+            if dec > dec_max:
+                continue
+
+            # End the loop if the declination is too small
+            if dec < dec_min:
+                break
+
             # Calculate angular separation between the FOV centre and the catalog star
             ang_sep = math.degrees(math.acos(math.sin(math.radians(dec))*math.sin(math.radians(dec_centre)) \
-                + math.cos(math.radians(dec))*math.cos(math.radians(dec_centre))*math.cos(math.radians(ra) - math.radians(ra_centre))))
+                + math.cos(math.radians(dec))*math.cos(math.radians(dec_centre))*math.cos(math.radians(ra) \
+                - math.radians(ra_centre))))
 
             if ang_sep <= fov_radius:
 
@@ -1261,7 +1281,7 @@ class PlateTool(object):
                 y_poly = np.zeros(12)
 
             else:
-                x_poly = np.zeros(12)
+                #x_poly = np.zeros(12)
                 y_poly = params
 
             # Calculate the centre of FOV

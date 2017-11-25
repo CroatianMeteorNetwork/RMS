@@ -66,7 +66,7 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
         ftpdetect_file.write("Meteor Count = "+str(total_meteors).zfill(6)+ "\n")
         ftpdetect_file.write("-----------------------------------------------------\n")
         ftpdetect_file.write("Processed with RMS " + commit_time + " " + str(sha) + " on " \
-            + str(datetime.datetime.now()) + "\n")
+            + str(datetime.datetime.utcnow()) + " UTC\n")
         ftpdetect_file.write("-----------------------------------------------------\n")
         ftpdetect_file.write("FF  folder = " + ff_directory + "\n")
         ftpdetect_file.write("CAL folder = " + cal_directory + "\n")

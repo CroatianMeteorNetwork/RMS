@@ -120,6 +120,7 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
 
     # Skip the image if there are too many maxima to process
     if num_objects > config.max_stars:
+        print('Too many candidate stars to process!')
         return [[], [], [], []]
 
     # Find centres of mass of each labeled objects
@@ -241,10 +242,12 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
 
         # Fit a PSF to the star
         try:
+            # Fit the 2D Gaussian with the limited number of iterations - this reduces the processing time
+            # and most of the bad star candidates take more iterations to fit
             popt, pcov = opt.curve_fit(twoDGaussian, (y_ind, x_ind), star_seg.ravel(), p0=initial_guess, 
                 maxfev=200)
             # print popt
-        except:
+        except RuntimeError:
             # print 'Fitting failed!'
             continue
 

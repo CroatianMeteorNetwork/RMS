@@ -82,7 +82,7 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None):
 
 if __name__ == "__main__":
 
-    time_start = datetime.datetime.now()
+    time_start = datetime.datetime.utcnow()
 
     # Load config file
     config = cr.parse(".config")
@@ -217,4 +217,4 @@ if __name__ == "__main__":
         config.stationID, config.fps)
 
 
-    print('Total time taken: ', datetime.datetime.now() - time_start)
+    print('Total time taken: ', datetime.datetime.utcnow() - time_start)

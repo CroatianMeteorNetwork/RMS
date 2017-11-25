@@ -718,7 +718,7 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
 
 
     # Calibration string to be written to the FTPdetectinfo file
-    calib_str = 'Calibrated with RMS on: ' + str(datetime.datetime.now())
+    calib_str = 'Calibrated with RMS on: ' + str(datetime.datetime.utcnow()) + ' UTC'
 
     # Save the updated FTPdetectinfo
     writeFTPdetectinfo(meteor_list, dir_path, ftp_detectinfo_file, dir_path, cam_code, fps, 

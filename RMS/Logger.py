@@ -31,7 +31,7 @@ def initLogging(log_file_prefix=""):
 
     """
 
-    log_file_name = log_file_prefix + "log_" + datetime.datetime.now().strftime('%Y%m%d_%H%M%S.%f') + ".log"
+    log_file_name = log_file_prefix + "log_" + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + ".log"
         
     # Init logging
     log = logging.getLogger('logger')

@@ -104,7 +104,7 @@ def wait(duration=None):
     log.info('Press Ctrl+C to stop capturing...')
 
     # Get the time of capture start
-    time_start = datetime.datetime.now()
+    time_start = datetime.datetime.utcnow()
 
     
     while True:
@@ -115,7 +115,7 @@ def wait(duration=None):
         # If some wait time was given, check if it passed
         if duration is not None:
 
-            time_elapsed = (datetime.datetime.now() - time_start).total_seconds()
+            time_elapsed = (datetime.datetime.utcnow() - time_start).total_seconds()
 
             # If the total time is elapsed, break the wait
             if time_elapsed >= duration:
@@ -147,7 +147,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
 
 
     # Create a directory for captured files
-    night_data_dir_name = str(config.stationID) + '_' + datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+    night_data_dir_name = str(config.stationID) + '_' + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
 
     # Full path to the data directory
     night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, night_data_dir_name)
@@ -593,7 +593,7 @@ if __name__ == "__main__":
         # Calculate when and how should the capture run
         start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
 
-        log.info('Next start time: ' + str(start_time))
+        log.info('Next start time: ' + str(start_time) + ' UTC')
 
         # Don't start the capture if there's less than 15 minutes left
         if duration < 15*60:
@@ -631,7 +631,7 @@ if __name__ == "__main__":
         if start_time != True:
             
             # Calculate how many seconds to wait until capture starts, and with for that time
-            time_now = datetime.datetime.now()
+            time_now = datetime.datetime.utcnow()
             waiting_time = start_time - time_now
 
             log.info('Waiting ' + str(waiting_time) + ' to start recording for ' + str(duration/60/60) \

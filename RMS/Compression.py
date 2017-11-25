@@ -220,7 +220,7 @@ class Compressor(multiprocessing.Process):
         """
         
         # Generate the name for the file
-        date_string = time.strftime("%Y%m%d_%H%M%S", time.localtime(startTime))
+        date_string = time.strftime("%Y%m%d_%H%M%S", time.gmtime(startTime))
 
         # Calculate miliseconds
         millis = int((startTime - floor(startTime))*1000)

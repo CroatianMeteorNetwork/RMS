@@ -8,6 +8,8 @@ import sys
 import shutil
 import datetime
 
+import ephem
+
 from RMS.CaptureDuration import captureDuration
 
 
@@ -123,12 +125,22 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     # If the duration of capture is not given
     if duration is None:
 
-        # Time of next noon
-        ct = datetime.datetime.now()
-        noon_time = datetime.datetime(ct.year, ct.month, ct.date, 12)
+        # Time of next local noon
+        #ct = datetime.datetime.utcnow()
+        #noon_time = datetime.datetime(ct.year, ct.month, ct.date, 12)
 
-        if ct.hour > 12:
-            noon_time += datetime.timedelta(days=1)
+        # Initialize the observer and find the time of next noon
+        o = ephem.Observer()  
+        o.lat = config.latitude
+        o.long = config.longitude
+        o.elevation = config.elevation
+        sun = ephem.Sun()
+
+        sunrise = o.previous_rising(sun, start=ephem.now())
+        noon_time = o.next_transit(sun, start=sunrise).datetime()
+
+        # if ct.hour > 12:
+        #     noon_time += datetime.timedelta(days=1)
 
 
         # Get the duration of the next night

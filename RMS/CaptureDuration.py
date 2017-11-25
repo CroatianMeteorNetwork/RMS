@@ -37,13 +37,13 @@ def captureDuration(lat, lon, elevation, current_time=None):
     s.compute()
 
     # Calculate the time of next sunrise and sunset
-    next_rise = ephem.localtime(o.next_rising(s))
-    next_set = ephem.localtime(o.next_setting(s))
+    next_rise = o.next_rising(s).datetime()
+    next_set = o.next_setting(s).datetime()
     
     if current_time is None:
-        current_time = datetime.datetime.now()
+        current_time = datetime.datetime.utcnow()
 
-    # If the nest sunset is later than the next sunrise, it means that it is night, and capturing should start immediately
+    # If the next sunset is later than the next sunrise, it means that it is night, and capturing should start immediately
     if next_set > next_rise:
 
         start_time = True
