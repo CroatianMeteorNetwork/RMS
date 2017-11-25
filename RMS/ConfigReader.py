@@ -419,7 +419,7 @@ def parseFireballDetection(config, parser):
         config.min_pixels = parser.getint(section, "minimum_pixels")
     
     if parser.has_option(section, "k1"):
-        config.k1 = parser.getint(section, "k1")
+        config.k1 = parser.getfloat(section, "k1")
     
     if parser.has_option(section, "max_points_per_frame"):
         config.max_points_per_frame = parser.getint(section, "max_points_per_frame")
