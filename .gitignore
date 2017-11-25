@@ -79,3 +79,6 @@ docs/_build/
 # PyBuilder
 target/
 *.npz
+
+# Cython compiled files
+*.pyxbldc
