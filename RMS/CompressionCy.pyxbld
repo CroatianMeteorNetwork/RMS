@@ -1,0 +1,22 @@
+from __future__ import absolute_import
+
+def make_ext(modname, pyxfilename):
+    
+    # Use extra compile arguments for this Cython
+    import RMS.ConfigReader as cr
+    from distutils.extension import Extension
+
+    # Load the configuration file
+    config = cr.parse(".config")
+
+    # Use additional compile arguments
+    ext = Extension(name = modname,
+        sources=[pyxfilename],
+        extra_compile_args=config.extra_compile_args,
+        extra_link_args=config.extra_compile_args)
+
+    return ext
+
+
+def make_setup_args():
+    return dict(script_args=["--verbose"])

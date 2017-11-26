@@ -99,8 +99,15 @@ def meteorSimulate(img_w, img_h, frame_num, psf_sigma, speed=1):
 
 if __name__ == "__main__":
 
+    import time
+
+    # Import Cython functions
+    import pyximport
+    pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+    from RMS.CompressionCy import compressFrames
+
     if len(sys.argv) < 2:
-        print('Usage: python -m Tests.CompressSimulatedMeteor /dir/with/FF/files')
+        print('Usage: python -m Tests.CompressSimulatedMeteor /output/dir')
 
         sys.exit()
 
@@ -112,7 +119,7 @@ if __name__ == "__main__":
     config = cr.parse(".config")
 
     # Simulate a meteor
-    frames = meteorSimulate(720, 480, 256, 2.0, speed=4)
+    frames = meteorSimulate(640, 480, 256, 2.0, speed=4)
 
 
     # # Show individual frames
@@ -123,11 +130,25 @@ if __name__ == "__main__":
     
     comp = Compressor(dir_path, None, None, None, None, config)
 
+    print('Running compression...')
+    t1 = time.time()
+
     # Run the compression
-    compressed, field_intensities = comp.compress(frames)
+    compressed, field_intensities = comp.compress(np.copy(frames))
+
+    print('Time for weave compression', time.time() - t1)
+
+    t1 = time.time()
+
+    # Run cythonized compression
+    compressed_cy, field_intensities = compressFrames(frames, -1)
+
+    print('Time for cython compression', time.time() - t1)
+
+    
 
     # Save FF file
-    comp.saveFF(compressed, 0, 0)
+    # comp.saveFF(compressed, 0, 0)
     
     # Save the extracted intensitites per every field
     filename = FieldIntensities.saveFieldIntensitiesBin(field_intensities, dir_path, 'TEST')
@@ -141,8 +162,34 @@ if __name__ == "__main__":
     half_frames, field_intensities = FieldIntensities.readFieldIntensitiesBin(dir_path, filename)
 
 
+    # Compare algorihtms
+    if np.array_equal(compressed[0], compressed_cy[0]):
+        print('Maxpixels equal')
+    else:
+        print('Maxpixels NOT equal')
+
+    if np.array_equal(compressed[1], compressed_cy[1]):
+        print('Maxframes equal')
+    else:
+        print('Maxframes NOT equal, which is possibly expected')
+
+    if np.array_equal(compressed[2], compressed_cy[2]):
+        print('Averages equal')
+    else:
+        print('Averages NOT equal')
+
+    if np.array_equal(compressed[3], compressed_cy[3]):
+        print('Stddev equal')
+    else:
+        print('Stddev NOT equal')
+
+    fig, (ax1, ax2) = plt.subplots(nrows=2)
+
     # Show compressed images
-    plt.imshow(compressed[0], vmin=0, vmax=255, cmap='gray')
+    ax1.imshow(compressed[0], vmin=0, vmax=255, cmap='gray')
+
+    ax2.imshow(compressed_cy[0], vmin=0, vmax=255, cmap='gray')
+
     plt.show()
 
     # Show field intensitites
