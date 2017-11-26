@@ -384,4 +384,3 @@ class Compressor(multiprocessing.Process):
         self.run_exited.set()
 
 
-    
