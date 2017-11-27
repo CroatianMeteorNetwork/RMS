@@ -108,13 +108,13 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
                     
                 
 
-                # Calculate the index for fieldsum, dependent on the deinterlace order (and if there's any
-                # detinerlacing at all)
-                fieldsum_indx = deinterlace_multiplier*n \
-                    + (deinterlace_multiplier - 1)*((y + deinterlace_order)%2)
+                # # Calculate the index for fieldsum, dependent on the deinterlace order (and if there's any
+                # # detinerlacing at all)
+                # fieldsum_indx = deinterlace_multiplier*n \
+                #     + (deinterlace_multiplier - 1)*((y + deinterlace_order)%2)
 
-                # Sum intensity per every field
-                fieldsum[fieldsum_indx] += <unsigned long> pixel
+                # # Sum intensity per every field
+                # fieldsum[fieldsum_indx] += <unsigned long> pixel
 
             
             
