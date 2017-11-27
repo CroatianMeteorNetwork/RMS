@@ -19,21 +19,18 @@ import logging
 
 from math import floor
 
-# New versions of scipy have weave as a separate module
-try:
-    from scipy import weave
-except ImportError:
-    import weave
-
-
 import numpy as np
 import multiprocessing
-
 
 
 from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
+
+# Import Cython functions
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+from RMS.CompressionCy import compressFrames
 
 
 # Get the logger from the main module
@@ -104,109 +101,10 @@ class Compressor(multiprocessing.Process):
 
         """
         
-        # Init the output FTP array
-        out = np.empty((4, frames.shape[1], frames.shape[2]), np.uint8)
+        # Run cythonized compression
+        ftp_array, fieldsum = compressFrames(frames, self.config.deinterlace_order)
 
-        # Init the field intensity sums array
-        fieldsum = np.zeros((2*frames.shape[0]), np.uint32)
-        
-        code = """
-        unsigned int x, y, n, acc, var, max, max_frame, pixel, num_equal, mean;
-        unsigned short rand_count = 0;
-        
-        unsigned int height = Nframes[1];
-        unsigned int width = Nframes[2];
-        unsigned int frames_num = Nframes[0];
-        unsigned int frames_num_minus_one = frames_num - 1;
-        unsigned int frames_num_minus_two = frames_num - 2;
-
-        unsigned int half_frame_n;
-        
-        // Populate the randomN array with 2**16 random numbers from 0 to 255
-        unsigned char randomN[65536] = {};
-        unsigned int arand = 1;
-        for(n=0; n<65536; n++) 
-        {
-            arand = (arand * 32719 + 3) % 32749;
-            randomN[n] = (unsigned char)(32767.0 / (double)(1 + arand % 32767));
-        }
-            
-        for(y=0; y<height; y++) 
-        {
-            for(x=0; x<width; x++) 
-            {
-                acc = 0;
-                var = 0;
-                max = 0;
-                
-                // Calculate mean, stddev, max, and max frame
-                for(n=0; n<frames_num; n++) 
-                {
-                    pixel = FRAMES3(n, y, x);
-                    acc += pixel;
-                    var += pixel*pixel;
-                    
-                    if(max < pixel)
-                    {
-                        max = pixel;
-                        max_frame = n;
-                        num_equal = 1;
-                    }
-                    // Randomize taken frame number for max pixel if there are several frames with the maximum
-                    // value
-                    else if(max == pixel)
-                    { 
-                        num_equal++;
-                        
-                        // rand_count is unsigned short, which means it will overflow back to 0 after 65535
-                        rand_count = (rand_count + 1)% 65536L;
-
-                        // Select the frame by random
-                        if(num_equal <= randomN[rand_count])
-                        {
-                            max_frame = n;
-                        }
-                    }
-
-                    // Calculate the current half frame index
-                    half_frame_n = 2*n + (y + deinterlace_order)%2;
-
-                    // Sum intensity per every field
-                    FIELDSUM1(half_frame_n) += (unsigned long) pixel;
-
-                }
-                
-                // Calculate mean
-                acc -= max;    // remove max pixel from average
-                mean = acc / frames_num_minus_one;
-                
-                // Calculate stddev
-                var -= max*max;     // remove max pixel
-                var -= acc*mean;    // subtract average squared sum of all values (acc*mean = acc*acc/frames_num_minus_one)
-                var = sqrt(var / frames_num_minus_two);
-
-                // Make sure that the stddev is not 0, to prevent divide by zero afterwards
-                if (var == 0)
-                {
-                    var = 1;
-                }
-                
-                // Output results
-                OUT3(0, y, x) = max;
-                OUT3(1, y, x) = max_frame;
-                OUT3(2, y, x) = mean;
-                OUT3(3, y, x) = var;
-            }
-        }
-        """
-
-        deinterlace_order = self.config.deinterlace_order
-        
-        # Run the weave code
-        weave.inline(code, ['frames', 'out', 'fieldsum', 'deinterlace_order'], verbose=2, 
-            extra_compile_args=self.config.extra_compile_args, extra_link_args=self.config.extra_compile_args)
-
-        return out, fieldsum
+        return ftp_array, fieldsum
     
 
 
