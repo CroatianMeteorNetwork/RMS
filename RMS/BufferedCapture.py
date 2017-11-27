@@ -117,7 +117,7 @@ class BufferedCapture(Process):
         # Wait until the device is opened
         device_opened = False
         for i in range(20):
-            time.sleep(100)
+            time.sleep(0.1)
             if device.isOpened():
                 device_opened = True
                 break
