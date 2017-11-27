@@ -129,6 +129,9 @@ class BufferedCapture(Process):
 
             return False
 
+        else:
+            log.info('Video device opened!')
+
 
 
         # Throw away first 10 frame
