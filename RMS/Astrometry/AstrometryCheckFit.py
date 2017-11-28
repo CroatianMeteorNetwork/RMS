@@ -380,7 +380,7 @@ def autoCheckFit(config, platepar, calstars_list):
 
 
     # A list of matching radiuses to try
-    min_radius = 0.75
+    min_radius = 0.5
     radius_list = [3, 1.5, min_radius]
 
     # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
