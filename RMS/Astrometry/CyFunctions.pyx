@@ -100,6 +100,9 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
     cdef np.ndarray[FLOAT_TYPE_t, ndim=2] filtered_list = np.zeros(shape=(catalog_list.shape[0], \
         catalog_list.shape[1]), dtype=FLOAT_TYPE)
 
+    cdef np.ndarray[INT_TYPE_t, ndim=1] filtered_indices = np.zeros(shape=(catalog_list.shape[0]), \
+        dtype=INT_TYPE)
+
     # Calculate minimum and maximum declination
     dec_min = dec_c - radius
     if dec_min < -90:
@@ -131,11 +134,15 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
             filtered_list[k,1] = dec
             filtered_list[k,2] = mag
 
+            # Add index to the list of indices which passed the filter
+            filtered_indices[k] = i;
+
             # Increment filtered list counter
             k += 1
 
 
-    return filtered_list[:k]
+    return filtered_indices[:k], filtered_list[:k]
+
 
 
 # @cython.boundscheck(False)
