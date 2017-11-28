@@ -233,7 +233,6 @@ class PlateTool(object):
         # If the platepar file was not loaded, set initial values from config
         if not self.platepar_file:
             self.makeNewPlatepar(update_image=False)
-            self.platepar.RA_d, self.platepar.dec_d = self.getFOVcentre()
 
             # Create the name of the platepar file
             self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
