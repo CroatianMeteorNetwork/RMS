@@ -742,12 +742,12 @@ class PlateTool(object):
 
         ### Draw catalog stars on the image using the current platepar ###
         ######################################################################################################
-        self.catalog_x, self.catalog_y = self.getCatalogStarPositions(self.catalog_stars, self.platepar.lon, 
+        self.catalog_x, self.catalog_y, catalog_mag = self.getCatalogStarPositions(self.catalog_stars, self.platepar.lon, 
             self.platepar.lat, self.platepar.az_centre, self.platepar.alt_centre, self.platepar.pos_angle_ref, 
             self.platepar.F_scale, self.platepar.x_poly, self.platepar.y_poly)
 
         if self.catalog_stars_visible:
-            cat_stars = np.c_[self.catalog_x, self.catalog_y]
+            cat_stars = np.c_[self.catalog_x, self.catalog_y, catalog_mag]
 
             # Take only those stars inside the FOV
             filtered_indices, _ = self.filterCatalogStarsInsideFOV(self.catalog_stars)
@@ -757,10 +757,13 @@ class PlateTool(object):
             cat_stars = cat_stars[cat_stars[:, 1] > 0]
             cat_stars = cat_stars[cat_stars[:, 1] < self.current_ff.nrows]
 
-            catalog_x_filtered, catalog_y_filtered = cat_stars.T
+            catalog_x_filtered, catalog_y_filtered, catalog_mag_filtered = cat_stars.T
 
-            # Plot catalog stars (mew - marker edge width)
-            plt.scatter(catalog_x_filtered, catalog_y_filtered, c='r', marker='+', lw=1.0, alpha=0.5)
+            cat_mag_faintest = np.max(catalog_mag_filtered)
+
+            # Plot catalog stars
+            plt.scatter(catalog_x_filtered, catalog_y_filtered, c='r', marker='+', lw=1.0, alpha=0.5, \
+                s=((4.0 + (cat_mag_faintest - catalog_mag_filtered))/2.0)**(2*2.512))
 
         ######################################################################################################
 
@@ -779,9 +782,9 @@ class PlateTool(object):
         if self.show_key_help:
             # Show text on image with platepar parameters
             text_str  = self.current_ff_file + '\n\n'
-            text_str += 'RA  = {:.3f}\n'.format(self.platepar.RA_d)
-            text_str += 'Dec = {:.3f}\n'.format(self.platepar.dec_d)
-            text_str += 'PA  = {:.3f}\n'.format(self.platepar.pos_angle_ref)
+            text_str += 'Ref RA  = {:.3f}\n'.format(self.platepar.RA_d)
+            text_str += 'Ref Dec = {:.3f}\n'.format(self.platepar.dec_d)
+            text_str += 'PA      = {:.3f}\n'.format(self.platepar.pos_angle_ref)
             text_str += 'F_scale = {:.3f}\n'.format(self.platepar.F_scale)
             text_str += 'Lim mag = {:.1f}\n'.format(self.cat_lim_mag)
             text_str += 'Increment = {:.3}\n'.format(self.key_increment)
@@ -862,6 +865,9 @@ class PlateTool(object):
         # Convert the FOV centre to RA/Dec
         _, ra_centre, dec_centre, _ = XY2CorrectedRADecPP([ff_middle_time], [self.platepar.X_res/2], 
             [self.platepar.Y_res/2], [0], self.platepar)
+        
+        ra_centre = ra_centre[0]
+        dec_centre = dec_centre[0]
 
         print('Center RA, Dec:', ra_centre, dec_centre)
 
@@ -929,7 +935,7 @@ class PlateTool(object):
             (x_array, y_array): [tuple of floats] X and Y positons of stars on the image.
         """
 
-        ra_catalog, dec_catalog, _ = catalog_stars.T
+        ra_catalog, dec_catalog, mag_catalog = catalog_stars.T
 
         ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
 
@@ -941,7 +947,7 @@ class PlateTool(object):
             self.platepar.Y_res, self.platepar.RA_d, self.platepar.dec_d, self.platepar.JD, pos_angle_ref, \
             F_scale, x_poly, y_poly)
 
-        return x_array, y_array
+        return x_array, y_array, mag_catalog
 
 
 
@@ -961,7 +967,14 @@ class PlateTool(object):
         ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
 
         # Set the referent platepar time to the time of the FF
-        self.platepar.JD = date2JD(*ff_middle_time, UT_corr=self.platepar.UT_corr)
+        self.platepar.JD = date2JD(*ff_middle_time, UT_corr=float(self.platepar.UT_corr))
+
+        # Set the referent hour angle
+        T = (self.platepar.JD - 2451545)/36525.0
+        Ho = 280.46061837 + 360.98564736629*(self.platepar.JD - 2451545) + 0.000387933*T**2 \
+            - (T**3)/38710000.0
+
+        self.platepar.Ho = Ho
 
         
         time_data = [ff_middle_time]
@@ -1040,6 +1053,11 @@ class PlateTool(object):
 
         # Set station ID
         self.platepar.station_code = self.config.stationID
+
+
+        # Get referent RA, Dec of the image centre
+        self.platepar.RA_d, self.platepar.dec_d = self.getFOVcentre()
+
 
         if update_image:
             self.updateImage()
@@ -1250,7 +1268,7 @@ class PlateTool(object):
             img_x, img_y = img_stars.T
 
             # Get image coordinates of catalog stars
-            catalog_x, catalog_y = self.getCatalogStarPositions(catalog_stars, self.platepar.lon, 
+            catalog_x, catalog_y, catalog_mag = self.getCatalogStarPositions(catalog_stars, self.platepar.lon, 
                 self.platepar.lat, az_centre, alt_centre, pos_angle_ref, F_scale, self.platepar.x_poly, 
                 self.platepar.y_poly)
 
@@ -1281,7 +1299,7 @@ class PlateTool(object):
                 y_poly = np.zeros(12)
 
             else:
-                #x_poly = np.zeros(12)
+                x_poly = np.zeros(12)
                 y_poly = params
 
             # Calculate the centre of FOV
@@ -1291,7 +1309,7 @@ class PlateTool(object):
             img_x, img_y = img_stars.T
 
             # Get image coordinates of catalog stars
-            catalog_x, catalog_y = self.getCatalogStarPositions(catalog_stars, self.platepar.lon, 
+            catalog_x, catalog_y, catalog_mag = self.getCatalogStarPositions(catalog_stars, self.platepar.lon, 
                 self.platepar.lat, az_centre, alt_centre, self.platepar.pos_angle_ref, self.platepar.F_scale, 
                 x_poly, y_poly)
 
