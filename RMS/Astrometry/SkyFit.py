@@ -55,6 +55,10 @@ from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADecPP, cal
 from RMS.Astrometry.Conversions import date2JD
 from RMS.Routines import Image
 
+# Import Cython functions
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+from RMS.Astrometry.CyFunctions import subsetCatalog
 
 
 class FOVinputDialog(object):
@@ -869,47 +873,48 @@ class PlateTool(object):
         ra_centre = ra_centre[0]
         dec_centre = dec_centre[0]
 
-        print('Center RA, Dec:', ra_centre, dec_centre)
-
         # Calculate the FOV radius in degrees
         fov_x = (self.platepar.X_res/2)*(3600/self.platepar.F_scale)*(384/self.platepar.X_res)/3600
         fov_y = (self.platepar.Y_res/2)*(3600/self.platepar.F_scale)*(288/self.platepar.Y_res)/3600
 
         fov_radius = np.sqrt(fov_x**2 + fov_y**2)*2
 
-        filtered_catalog_stars = []
-        filtered_indices = []
+        # filtered_catalog_stars = []
+        # filtered_indices = []
 
-        # Calculate minimum and maximum declination
-        dec_min = dec_centre - fov_radius
-        if dec_min < -90:
-            dec_min = -90
+        # # Calculate minimum and maximum declination
+        # dec_min = dec_centre - fov_radius
+        # if dec_min < -90:
+        #     dec_min = -90
 
-        dec_max = dec_centre + fov_radius
-        if dec_max > 90:
-            dec_max = 90
+        # dec_max = dec_centre + fov_radius
+        # if dec_max > 90:
+        #     dec_max = 90
 
-        # Take only those catalog stars which should be inside the FOV
-        for i, (ra, dec, _) in enumerate(catalog_stars):
+        # # Take only those catalog stars which should be inside the FOV
+        # for i, (ra, dec, _) in enumerate(catalog_stars):
 
-            # Skip if the declination is too large
-            if dec > dec_max:
-                continue
+        #     # Skip if the declination is too large
+        #     if dec > dec_max:
+        #         continue
 
-            # End the loop if the declination is too small
-            if dec < dec_min:
-                break
+        #     # End the loop if the declination is too small
+        #     if dec < dec_min:
+        #         break
 
-            # Calculate angular separation between the FOV centre and the catalog star
-            ang_sep = math.degrees(math.acos(math.sin(math.radians(dec))*math.sin(math.radians(dec_centre)) \
-                + math.cos(math.radians(dec))*math.cos(math.radians(dec_centre))*math.cos(math.radians(ra) \
-                - math.radians(ra_centre))))
+        #     # Calculate angular separation between the FOV centre and the catalog star
+        #     ang_sep = math.degrees(math.acos(math.sin(math.radians(dec))*math.sin(math.radians(dec_centre)) \
+        #         + math.cos(math.radians(dec))*math.cos(math.radians(dec_centre))*math.cos(math.radians(ra) \
+        #         - math.radians(ra_centre))))
 
-            if ang_sep <= fov_radius:
+        #     if ang_sep <= fov_radius:
 
-                # Add stars which are roughly inside the FOV to the OK list
-                filtered_catalog_stars.append(catalog_stars[i])
-                filtered_indices.append(i)
+        #         # Add stars which are roughly inside the FOV to the OK list
+        #         filtered_catalog_stars.append(catalog_stars[i])
+        #         filtered_indices.append(i)
+
+        filtered_indices, filtered_catalog_stars = subsetCatalog(catalog_stars, ra_centre, dec_centre, \
+            fov_radius, self.config.catalog_mag_limit)
 
 
         return filtered_indices, np.array(filtered_catalog_stars)
