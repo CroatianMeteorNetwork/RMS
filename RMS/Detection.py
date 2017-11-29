@@ -1360,3 +1360,4 @@ if __name__ == "__main__":
 
 
     print('Time for the whole directory:', time() - time_whole)
+    print('Detected meteors:', meteor_No)
