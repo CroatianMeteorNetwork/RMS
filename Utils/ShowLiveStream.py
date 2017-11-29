@@ -1,5 +1,7 @@
 """ Shows the live stream from the camera. """
 
+from __future__ import print_function, division, absolute_import
+
 import cv2
 import time
 
@@ -19,25 +21,35 @@ if __name__ == "__main__":
     t_prev = time.time()
     counter = 0
 
+    first_image = True
+
     if vcap.isOpened():
         print('Open')
 
         while(1):
-
             
-            if (time.time() - t_prev) >= 1:
+            if (time.time() - t_prev) >= 1.0:
                 t_prev = time.time()
 
                 # Print the number of frames received in the last second
-                print(counter)
-                counter = 0
+                print("FPS:", counter)
+                counter = -1
 
             ret, frame = vcap.read()
 
             counter += 1
 
-            cv2.imshow('VIDEO', frame)
+            window_name = 'Live stream'
+            cv2.imshow(window_name, frame)
+
+            # If this is the first image, move it to the upper left corner
+            if first_image:
+                
+                cv2.moveWindow(window_name, 0, 0)
+
+                first_image = False
+
             cv2.waitKey(1)
 
     else:
-        print('Cant open')
+        print('Cant open video stream:', config.deviceID)
