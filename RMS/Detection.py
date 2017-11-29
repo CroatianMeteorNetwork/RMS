@@ -933,6 +933,12 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
         ff.avepixel = Image.applyFlat(ff.avepixel, flat_struct)
 
 
+    # At the end, a check that the detection has a surface brightness above the background will be performed.
+    # The assumption here is that the peak of the meteor should have the intensity which is at least
+    # that of a patch of 4x4 pixels that are of the mean background brightness
+    min_patch_intensity = 4*4*(np.mean(ff.maxpixel - ff.avepixel) + config.k1_det*np.mean(ff.stdpixel) + config.j1)
+
+
     # # Show the maxpixel image
     # show2(ff_name+' maxpixel', ff.maxpixel)
 
@@ -1150,20 +1156,36 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
                 # Calculate centroids by half-frame
                 for half_frame in range(2):
 
-                    # Deinterlace by fields (line lixels)
-                    half_frame_pixels = frame_pixels[frame_pixels[:,1] % 2 == (config.deinterlace_order 
-                        + half_frame) % 2]
+                    # Apply deinterlacing if it is present in the video
+                    if config.deinterlace_order > 0:
 
-                    # Deinterlace by fields (stripe pixels)
-                    half_frame_pixels_stripe = frame_pixels_stripe[frame_pixels_stripe[:,1] % 2 == (config.deinterlace_order 
-                        + half_frame) % 2]
+                        # Deinterlace by fields (line lixels)
+                        half_frame_pixels = frame_pixels[frame_pixels[:,1] % 2 == (config.deinterlace_order 
+                            + half_frame) % 2]
 
-                    # Skip if there are no pixels in the half-frame
-                    if not len(half_frame_pixels):
-                        continue
+                        # Deinterlace by fields (stripe pixels)
+                        half_frame_pixels_stripe = frame_pixels_stripe[frame_pixels_stripe[:,1] % 2 == (config.deinterlace_order 
+                            + half_frame) % 2]
 
-                    # Calculate half-frame value
-                    frame_no = i+half_frame*0.5
+
+                        # Skip if there are no pixels in the half-frame
+                        if not len(half_frame_pixels):
+                            continue
+
+                        # Calculate half-frame value
+                        frame_no = i+half_frame*0.5
+
+
+                    # No deinterlacing
+                    else:
+
+                        # Skip the second half frame
+                        if half_frame == 1:
+                            continue
+
+                        half_frame_pixels = frame_pixels
+                        half_frame_pixels_stripe = frame_pixels_stripe
+                        frame_no = i
 
                     # Get maxpixel-avepixel values of given pixel indices (this will be used as weights)
                     max_weights = flattened_weights[half_frame_pixels[:,1], half_frame_pixels[:,0]]
@@ -1175,7 +1197,7 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
                     y_weighted = half_frame_pixels[:,1]*np.transpose(max_weights)
                     y_centroid = np.sum(y_weighted)/float(np.sum(max_weights))
 
-                    # Calculate intensity as the sum of white pixels on the stripe
+                    # Calculate intensity as the sum of threshold passer pixels on the stripe
                     #intensity_values = max_avg_corrected[half_frame_pixels[:,1], half_frame_pixels[:,0]]
                     intensity_values = max_avg_corrected[half_frame_pixels_stripe[:,1], 
                         half_frame_pixels_stripe[:,0]]
@@ -1197,6 +1219,14 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
             if len(centroids) < config.line_minimum_frame_range_det:
                 continue
 
+
+            # Check that the detection has a surface brightness above the background
+            # The assumption here is that the peak of the meteor should have the intensity which is at least
+            # that of a patch of 4x4 pixels that are of the mean background brightness
+            if np.max(centroids[:, 3]) < min_patch_intensity:
+                continue
+
+
             # Check the detection if it has the proper angular velocity
             if not checkAngularVelocity(centroids, config):
                 continue
@@ -1209,19 +1239,38 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
             logDebug('time for processing:', time() - t_all)
 
 
-            # #COMMENTED
-            # gs = gridspec.GridSpec(2, 1, width_ratios=[2,2], height_ratios=[2,1])
+            
             # # Plot centroids to image
-            # plt.subplot(gs[0])
-            # plt.imshow(img_thres, cmap='gray')
-            # plt.scatter(centroids[:,1], centroids[:,2], s=5, c='r', edgecolors='none')
+            # fig, (ax1, ax2) = plt.subplots(nrows=2)
+            
+            # ax1.imshow(ff.maxpixel - ff.avepixel, cmap='gray')
+            # ax1.scatter(centroids[:,1], centroids[:,2], s=5, c='r', edgecolors='none')
 
             # # Plot lightcurve
-            # plt.subplot(gs[1])
-            # plt.plot(centroids[:,0], centroids[:,3])
+            # ax2.plot(centroids[:,0], centroids[:,3])
+
+            # # # Plot relative angular velocity
+            # # ang_vels = []
+            # # fr_prev, x_prev, y_prev, _ = centroids[0]
+            # # for fr, x, y, _ in centroids[1:]:
+            # #     dx = x - x_prev
+            # #     dy = y - y_prev
+            # #     dfr = fr - fr_prev
+
+            # #     ddist = np.sqrt(dx**2 + dy**2)
+            # #     dt = dfr/config.fps
+
+            # #     ang_vels.append(ddist/dt)
+
+            # #     x_prev = x
+            # #     y_prev = y
+            # #     fr_prev = fr
+
+            # # ax2.plot(ang_vels)
+
             # plt.show()
-            # plt.clf() 
-            # plt.close()
+
+
     
     return meteor_detections
 
