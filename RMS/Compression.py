@@ -14,6 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import os
+import sys
 import time
 import logging
 
@@ -83,6 +85,23 @@ class Compressor(multiprocessing.Process):
         self.exit = multiprocessing.Event()
 
         self.run_exited = multiprocessing.Event()
+
+
+        self.platform_rpi = True
+
+        # Determine if the code is running on a Raspberry Pi
+        if 'win' in sys.platform:
+            self.platform_rpi = False
+
+        else:
+
+            if 'arm' in os.uname()[4]:
+                self.platform_rpi = True
+
+            else:
+                self.platform_rpi = False
+
+
     
 
 
@@ -100,9 +119,40 @@ class Compressor(multiprocessing.Process):
             [3D ndarray]: in format: (N, y, x) where N is a member of [0, 1, 2, 3]
 
         """
+
+        ### For some reason, the RPi 3 does not like memory chuncks which size is the multipier of its L2
+        ### cache size (512 kB). When such a memory chunk is provided, the compression becomes 10x slower
+        ### then usual. We are applying a dirty fix here where we just add an extra image row and column
+        ### if such a memory chunck will be created. The compression is performed, and the image is cropped
+        ### back to its original dimensions.
+
+        depth, height, width = frames.shape
+
+        # Check if the image dimensions are divisible by RPi3 L2 cache size
+        l2_divisible = (depth*height*width)%(512*1024) == 0
+
+        if self.platform_rpi and l2_divisible:
+
+            # Add a column
+            column = np.zeros(shape=(depth, height, 1))
+
+            frames = np.concatenate((frames, column), axis=2)
+
+            # Add a row
+            row = np.zeros(shape=(depth, 1, width+1))
+
+            frames = np.concatenate((frames, row), axis=1)
+
+
         
         # Run cythonized compression
         ftp_array, fieldsum = compressFrames(frames, self.config.deinterlace_order)
+
+
+        # Cut out the frames back to the original dimension if the code was runnin on RPi
+        if self.platform_rpi and l2_divisible:
+            frames = frames[:, :height, :width]
+
 
         return ftp_array, fieldsum
     
