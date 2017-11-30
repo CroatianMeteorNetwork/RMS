@@ -79,7 +79,6 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     # Mask the FF file
     ff = MaskImage.applyMask(ff, mask, ff_flag=True)
 
-
     # Apply the flat to maxpixel and avepixel
     if flat_struct is not None:
 
@@ -100,7 +99,7 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     # Apply a mean filter to the image to reduce noise
     data = ndimage.filters.convolve(data, weights=np.full((2, 2), 1.0/4))
 
-    # Locate local maximums on the image
+    # Locate local maxima on the image
     data_max = filters.maximum_filter(data, neighborhood_size)
     maxima = (data == data_max)
     data_min = filters.minimum_filter(data, neighborhood_size)
@@ -114,6 +113,7 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     border_mask[:,:border] = 0
     border_mask[:,-border:] = 0
     maxima = MaskImage.applyMask(maxima, (True, border_mask))
+
 
     # Find and label the maxima
     labeled, num_objects = ndimage.label(maxima)
@@ -378,13 +378,15 @@ if __name__ == "__main__":
     # Try loading a flat field image
     flat_struct = None
 
-    # Check if there is flat in the data directory
-    if os.path.exists(os.path.join(ff_dir, config.flat_file)):
-        flat_struct = Image.loadFlat(ff_dir, config.flat_file)
+    if config.use_flat:
+        
+        # Check if there is flat in the data directory
+        if os.path.exists(os.path.join(ff_dir, config.flat_file)):
+            flat_struct = Image.loadFlat(ff_dir, config.flat_file)
 
-    # Try loading the default flat
-    elif os.path.exists(config.flat_file):
-        flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
+        # Try loading the default flat
+        elif os.path.exists(config.flat_file):
+            flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
 
 
     star_list = []

@@ -1306,13 +1306,15 @@ if __name__ == "__main__":
     # Try loading a flat field image
     flat_struct = None
 
-    # Check if there is flat in the data directory
-    if os.path.exists(os.path.join(dir_path, config.flat_file)):
-        flat_struct = Image.loadFlat(dir_path, config.flat_file)
+    if config.use_flat:
+        
+        # Check if there is flat in the data directory
+        if os.path.exists(os.path.join(dir_path, config.flat_file)):
+            flat_struct = Image.loadFlat(dir_path, config.flat_file)
 
-    # Try loading the default flat
-    elif os.path.exists(config.flat_file):
-        flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
+        # Try loading the default flat
+        elif os.path.exists(config.flat_file):
+            flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
 
 
 
