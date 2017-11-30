@@ -246,13 +246,16 @@ class PlateTool(object):
         # Try loading a flat field image
         self.flat_struct = None
 
-        # Check if there is flat in the data directory
-        if os.path.exists(os.path.join(dir_path, config.flat_file)):
-            self.flat_struct = Image.loadFlat(dir_path, config.flat_file)
+        # If using a flat is enabled
+        if self.config.use_flat:
 
-        # Try loading the default flat
-        elif os.path.exists(config.flat_file):
-            self.flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
+            # Check if there is flat in the data directory
+            if os.path.exists(os.path.join(dir_path, config.flat_file)):
+                self.flat_struct = Image.loadFlat(dir_path, config.flat_file)
+
+            # Try loading the default flat
+            elif os.path.exists(config.flat_file):
+                self.flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
 
 
 

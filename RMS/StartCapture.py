@@ -163,10 +163,13 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
     # Load the default flat field image if it is available
     flat_struct = None
 
-    if os.path.exists(os.path.join(os.getcwd(), config.flat_file)):
-        flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
+    if config.use_flat:
 
-        log.info('Loaded flat field image: ' + os.path.join(os.getcwd(), config.flat_file))
+        # Check if the flat exists
+        if os.path.exists(os.path.join(os.getcwd(), config.flat_file)):
+            flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
+
+            log.info('Loaded flat field image: ' + os.path.join(os.getcwd(), config.flat_file))
 
 
 

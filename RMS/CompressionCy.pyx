@@ -119,7 +119,7 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
             
             
             # Calculate mean
-            acc -= max_val;    # remove max_val pixel from average
+            acc -= max_val    # remove max_val pixel from average
             mean = acc/frames_num_minus_one
             
             # Calculate stddev

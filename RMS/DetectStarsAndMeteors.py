@@ -118,13 +118,15 @@ if __name__ == "__main__":
     # Try loading a flat field image
     flat_struct = None
 
-    # Check if there is flat in the data directory
-    if os.path.exists(os.path.join(ff_dir, config.flat_file)):
-        flat_struct = Image.loadFlat(ff_dir, config.flat_file)
+    if config.use_flat:
+        
+        # Check if there is flat in the data directory
+        if os.path.exists(os.path.join(ff_dir, config.flat_file)):
+            flat_struct = Image.loadFlat(ff_dir, config.flat_file)
 
-    # Try loading the default flat
-    elif os.path.exists(config.flat_file):
-        flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
+        # Try loading the default flat
+        elif os.path.exists(config.flat_file):
+            flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
 
 
     # Initialize the detector

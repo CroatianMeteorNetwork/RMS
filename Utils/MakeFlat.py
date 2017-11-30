@@ -153,6 +153,12 @@ def makeFlat(dir_path, config):
         ff_median = median_list[0]
 
 
+    # Stretch flat to 0-255
+    ff_median = ff_median/np.max(ff_median)*255
+
+    # Convert the flat to 8 bits
+    ff_median = ff_median.astype(np.uint8)
+
     return ff_median
 
 

@@ -177,7 +177,7 @@ class Config:
 
 
         ##### Calibration
-
+        self.use_flat = True
         self.flat_file = 'flat.bmp'
         self.flat_min_imgs = 20
 
@@ -621,6 +621,9 @@ def parseCalibration(config, parser):
     
     if not parser.has_section(section):
         return
+
+    if parser.has_option(section, "use_flat"):
+        config.use_flat = parser.getboolean(section, "use_flat")
 
     if parser.has_option(section, "flat_file"):
         config.flat_file = parser.get(section, "flat_file")
