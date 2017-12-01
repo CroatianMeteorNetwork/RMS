@@ -2,11 +2,7 @@
 High priority:
 --------------
 
-- Add check if camera is open before capture
-
 - Photometry
-
-- Option for non-interlaced video (deinterlace_flag=-1)
 
 - Solve logger picking so the code can run on Windows
 
@@ -20,8 +16,11 @@ High priority:
 - Document server uploading
 
 
+
 Low priority:
 ----------------
+
+- Rolling shutter correction
 
 - Manual reduction tool
 	- load a list of FF files
@@ -44,3 +43,12 @@ Things to resolve before 1.0 release:
 - .deb installer & storing everything on usual locations (/var/log, /usr/local/bin, /opt...)
 
 - Windows installer & storing everything in usual Win dirs (C:/Program Files/...)
+
+
+
+DONE:
+-----
+
+- Add check if camera is open before capture
+
+- Option for non-interlaced video (deinterlace_flag=-1)
