@@ -381,7 +381,7 @@ def autoCheckFit(config, platepar, calstars_list):
 
     # A list of matching radiuses to try
     min_radius = 0.5
-    radius_list = [3, 1.5, min_radius]
+    radius_list = [10, 3, 1.5, min_radius]
 
     # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
     # in the same reagrd as the cost function)
