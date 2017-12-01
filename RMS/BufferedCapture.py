@@ -190,9 +190,9 @@ class BufferedCapture(Process):
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
                 if first:
-                    self.array1[i] = gray
+                    self.array1[i, :gray.shape[0], :gray.shape[1]] = gray
                 else:
-                    self.array2[i] = gray
+                    self.array2[i, :gray.shape[0], :gray.shape[1]] = gray
 
 
                 # If video is loaded from a file, simulate real FPS

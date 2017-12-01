@@ -187,15 +187,28 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
         log.info('No platepar file found!')
 
 
+
+    ### For some reason, the RPi 3 does not like memory chunks which size is the multipier of its L2
+    ### cache size (512 kB). When such a memory chunk is provided, the compression becomes 10x slower
+    ### then usual. We are applying a dirty fix here where we just add an extra image row and column
+    ### if such a memory chunk will be created. The compression is performed, and the image is cropped
+    ### back to its original dimensions.
+    array_pad = 0
+
+    # Check if the image dimensions are divisible by RPi3 L2 cache size and add padding
+    if (256*config.width*config.height)%(512*1024) == 0:
+        array_pad = 1
+
+
     # Init arrays for parallel compression on 2 cores
-    sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, 256*config.width*config.height)
+    sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, 256*(config.width + array_pad)*(config.height + array_pad))
     sharedArray = np.ctypeslib.as_array(sharedArrayBase.get_obj())
-    sharedArray = sharedArray.reshape(256, config.height, config.width)
+    sharedArray = sharedArray.reshape(256, (config.height + array_pad), (config.width + array_pad))
     startTime = multiprocessing.Value('d', 0.0)
     
-    sharedArrayBase2 = multiprocessing.Array(ctypes.c_uint8, 256*config.width*config.height)
+    sharedArrayBase2 = multiprocessing.Array(ctypes.c_uint8, 256*(config.width + array_pad)*(config.height + array_pad))
     sharedArray2 = np.ctypeslib.as_array(sharedArrayBase2.get_obj())
-    sharedArray2 = sharedArray2.reshape(256, config.height, config.width)
+    sharedArray2 = sharedArray2.reshape(256, (config.height + array_pad), (config.width + array_pad))
     startTime2 = multiprocessing.Value('d', 0.0)
 
 

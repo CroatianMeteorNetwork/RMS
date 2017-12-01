@@ -236,6 +236,9 @@ class Compressor(multiprocessing.Process):
             
             # Run the compression
             compressed, field_intensities = self.compress(frames)
+
+            # Cut out the compressed frames to the proper size
+            compressed = compressed[:, :self.config.height, :self.config.width]
             
             log.debug("compression: " + str(time.time() - t) + "s")
             t = time.time()
