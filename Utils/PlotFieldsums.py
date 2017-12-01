@@ -85,6 +85,9 @@ def plotFieldsums(dir_path, config):
     plt.xlabel('Time')
     plt.ylabel('ADU')
 
+    # Rotate x ticks so they do not overlap
+    plt.xticks(rotation=30)
+
     plt.grid(color='0.9', which='both')
 
     plt.title('Peak field sums for ' + os.path.basename(dir_path))
@@ -121,9 +124,13 @@ def plotFieldsums(dir_path, config):
     plt.xlabel('Time')
     plt.ylabel('Peak ADU - average')
 
+    # Rotate x ticks so they do not overlap
+    plt.xticks(rotation=30)
+
     plt.grid(color='0.9', which='both')
 
     plt.title('Deaveraged field sums for ' + os.path.basename(dir_path))
+
 
     plt.tight_layout()
 
