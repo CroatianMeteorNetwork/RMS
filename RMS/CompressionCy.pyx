@@ -48,7 +48,7 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
         deinterlace_multiplier = 2
 
     
-    cdef unsigned short rand_count = 0
+    cdef unsigned short rand_count = 1
 
     cdef unsigned int var, max_val, max_frame, mean, pixel, n, num_equal
     
@@ -64,7 +64,7 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
     # Populate the randomN array with 2**16 random numbers from 0 to 255
     #cdef np.ndarray[INT8_TYPE_t, ndim=1] randomN = np.empty(shape=[65536], dtype=INT8_TYPE)
     cdef np.ndarray[INT8_TYPE_t, ndim=1] randomN = np.random.randint(0, 256, size=65536, dtype=INT8_TYPE)
-    cdef unsigned int arand = 1
+    cdef unsigned int arand = randomN[0]
 
     # for n in range(65536):
     #     arand = (arand*32719 + 3)%32749
