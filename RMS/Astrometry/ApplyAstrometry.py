@@ -734,6 +734,11 @@ if __name__ == "__main__":
     # Extract the directory path
     dir_path, ftp_detectinfo_file = os.path.split(os.path.abspath(sys.argv[1]))
 
+    if not '.txt' in ftp_detectinfo_file:
+        print("Usage: python -m RMS.Astrometry.ApplyAstrometry /path/to/FTPdetectinfo.txt")
+        print("Please provide the FTPdetectinfo file!")
+        sys.exit()
+
     # Find the platepar file
     platepar_file = None
     for file_name in os.listdir(dir_path):
@@ -748,6 +753,8 @@ if __name__ == "__main__":
 
     # Apply the astrometry to the given FTPdetectinfo file
     applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file)
+
+    print('Done!')
 
 
     # # Load the platepar
