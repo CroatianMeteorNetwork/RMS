@@ -1285,6 +1285,16 @@ if __name__ == "__main__":
     # Measure the time of the whole operation
     time_whole = time()
 
+
+    ### Init the logger
+
+    from RMS.Logger import initLogging
+    initLogging('detection_')
+
+    log = logging.getLogger("logger")
+
+    ######
+
     
     if len(sys.argv) == 1:
         print("Usage: python -m RMS.Detection /path/to/ff/files/")
