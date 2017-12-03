@@ -1336,6 +1336,8 @@ if __name__ == "__main__":
     results_name = results_path.split(os.sep)[-2]
     results_file = open(results_path + results_name+'_results.txt', 'w')
 
+    total_meteors = 0
+
     # Run meteor search on every file
     for ff_name in sorted(ff_list):
 
@@ -1360,6 +1362,9 @@ if __name__ == "__main__":
             results_list.append([ff_name, meteor_No, rho, theta, centroids])
             meteor_No += 1
 
+            total_meteors += 1
+
+
     results_file.close()
 
 
@@ -1372,4 +1377,4 @@ if __name__ == "__main__":
 
 
     print('Time for the whole directory:', time() - time_whole)
-    print('Detected meteors:', meteor_No)
+    print('Detected meteors:', total_meteors)
