@@ -536,8 +536,11 @@ if __name__ == "__main__":
     setSIGINT()
 
 
-    # Make the data directory
-    mkdirP(os.path.abspath(config.data_dir))
+    # Make the data directories
+    root_dir = os.path.abspath(config.data_dir)
+    mkdirP(root_dir)
+    mkdirP(os.path.join(root_dir, config.captured_dir))
+    mkdirP(os.path.join(root_dir, config.archived_dir))
 
 
     # If the duration of capture was given, capture right away for a specified time
