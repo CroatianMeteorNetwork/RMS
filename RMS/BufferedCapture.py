@@ -140,6 +140,8 @@ class BufferedCapture(Process):
 
 
         first = True
+
+        wait_for_reconnect = False
         
         # Run until stopped from the outside
         while not self.exit.is_set():
@@ -150,10 +152,33 @@ class BufferedCapture(Process):
             else:
                 self.startTime2.value = 0
             
+
+            # If the video device was disconnected, wait 10s for reconnection
+            if wait_for_reconnect:
+
+                log.info('Waiting for the video device to be reconnected...')
+
+                time.sleep(10)
+
+                wait_for_reconnect = False
+
+
+
             for i in range(256):
 
                 # Read the frame
                 ret, frame = device.read()
+
+
+                # If the video device was disconnected, wait for reconnection
+                if not ret:
+
+                    log.info('Frame grabbing failed, video device is probably disconnected!')
+
+                    wait_for_reconnect = True
+                    break
+
+
 
                 # If the end of the file was reached, stop the capture
                 if (self.video_file is not None) and (frame is None):
