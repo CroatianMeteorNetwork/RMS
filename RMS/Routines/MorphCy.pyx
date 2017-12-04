@@ -10,6 +10,8 @@ cimport cython
 INT_TYPE = np.uint8
 ctypedef np.uint8_t INT_TYPE_t
 
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False) 
 def morphApply(np.ndarray[INT_TYPE_t, ndim=2] img, operations):
@@ -41,6 +43,8 @@ def morphApply(np.ndarray[INT_TYPE_t, ndim=2] img, operations):
 
     return img
 
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False) 
 def clean(np.ndarray[INT_TYPE_t, ndim=2] img):
@@ -63,8 +67,8 @@ def clean(np.ndarray[INT_TYPE_t, ndim=2] img):
     cdef int ym = y_size - 1
     cdef int xm = x_size - 1
 
-    for y in range(img.shape[0]):
-        for x in range(img.shape[1]):
+    for y in range(1, img.shape[0]):
+        for x in range(1, img.shape[1]):
 
             # Skip if it is not a bright pixel
             if not img[y, x]:
@@ -84,6 +88,7 @@ def clean(np.ndarray[INT_TYPE_t, ndim=2] img):
                 img[y, x] = 0
 
     return img
+
 
 
 @cython.boundscheck(False)
@@ -108,10 +113,9 @@ def bridge(np.ndarray[INT_TYPE_t, ndim=2] img):
     # Init mask array
     cdef np.ndarray[INT_TYPE_t, ndim=2] mask = np.zeros(shape=(y_size, x_size), dtype=INT_TYPE)
 
-    y = 1
-    x = 1
-    for y in range(img.shape[0]-1):
-        for x in range(img.shape[1]-1):
+    
+    for y in range(1, img.shape[0]-1):
+        for x in range(1, img.shape[1]-1):
 
             # Continue if both the image and the mask pixels are bright
             if (img[y, x] and mask[y, x]):
@@ -139,6 +143,8 @@ def bridge(np.ndarray[INT_TYPE_t, ndim=2] img):
 
     return img
 
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False) 
 def close_cy(np.ndarray[INT_TYPE_t, ndim=2] img):
@@ -162,10 +168,8 @@ def close_cy(np.ndarray[INT_TYPE_t, ndim=2] img):
     cdef np.ndarray[INT_TYPE_t, ndim=2] mask = np.zeros(shape=(y_size, x_size), dtype=INT_TYPE)
 
     # Apply morphological dilation
-    y = 1
-    x = 1
-    for y in range(img.shape[0]-1):
-        for x in range(img.shape[1]-1):
+    for y in range(1, img.shape[0]-1):
+        for x in range(1, img.shape[1]-1):
 
             # Continue if the pixel is bright
             if img[y, x]:
@@ -192,10 +196,8 @@ def close_cy(np.ndarray[INT_TYPE_t, ndim=2] img):
     mask.fill(1)
 
     # Apply morphological erosion
-    y = 1
-    x = 1
-    for y in range(img.shape[0]-1):
-        for x in range(img.shape[1]-1):
+    for y in range(1, img.shape[0]-1):
+        for x in range(1, img.shape[1]-1):
 
             # Continue if the pixel is not bright
             if not img[y, x]:
@@ -221,6 +223,7 @@ def close_cy(np.ndarray[INT_TYPE_t, ndim=2] img):
     return img
 
 
+
 @cython.boundscheck(False)
 @cython.wraparound(False) 
 def close(np.ndarray[INT_TYPE_t, ndim=2] img):
@@ -236,6 +239,7 @@ def close(np.ndarray[INT_TYPE_t, ndim=2] img):
     img = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
     
     return img
+
 
 
 @cython.boundscheck(False)
@@ -262,10 +266,8 @@ def thin(np.ndarray[INT_TYPE_t, ndim=2] img):
 
         for iteration in range(2):
 
-            y = 1
-            x = 1
-            for y in range(img.shape[0]-1):
-                for x in range(img.shape[1]-1):
+            for y in range(1, img.shape[0]-1):
+                for x in range(1, img.shape[1]-1):
 
                     # Get neighbouring pixels
                     p2 = img[y-1, x]
