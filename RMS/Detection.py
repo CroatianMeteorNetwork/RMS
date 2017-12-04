@@ -559,23 +559,8 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
 
         ###
 
-
         # Get image shape
         w, h = img.shape[1], img.shape[0]
-
-        ### For some reason, the RPi 3 does not like memory chunks which size is the multipier of 2048.
-        ### The KHT function just segfaults. A similar behaviour was noticed with the compression as well.
-        ### A dirty fix here is just to add one row and column to the image.
-
-        # Check if the image dimensions are divisible by 2048
-        if (w*h)%(2048) == 0:
-
-            # Add one empty row and column to the image (all zeroes)
-            img = np.pad(img, ((0, 0), (0, 1), (0, 1)), 'constant')
-
-            # Get image shape
-            w, h = img.shape[1], img.shape[0]
-
 
         # Convert the image to feed it into the KHT
         img_flatten = (img.flatten().astype(np.byte)*255).astype(np.byte)
