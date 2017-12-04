@@ -132,8 +132,10 @@ class Compressor(multiprocessing.Process):
         ff.nrows = arr.shape[1]
         ff.ncols = arr.shape[2]
         ff.nbits = self.config.bit_depth
+        ff.nframes = 256
         ff.first = N + 256
         ff.camno = self.config.stationID
+        ff.fps = self.config.fps
         
         # Write the FF file
         FFfile.write(ff, self.data_dir, filename, fmt=self.config.ff_format)
