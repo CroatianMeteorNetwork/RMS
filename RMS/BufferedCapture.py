@@ -235,12 +235,18 @@ class BufferedCapture(Process):
                 break
 
 
-            if first:
-                self.startTime1.value = startTime
+            if not wait_for_reconnect:
 
-            else:
-                self.startTime2.value = startTime
+                # Set the starting value of the frame block, which indicates to the compression that the
+                # block is ready for processing
+                if first:
+                    self.startTime1.value = startTime
 
+                else:
+                    self.startTime2.value = startTime
+
+            
+            # Switch the frame block buffer flags
             first = not first
         
 
