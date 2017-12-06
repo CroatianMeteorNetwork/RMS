@@ -85,11 +85,9 @@ class BufferedCapture(Process):
         self.join()
 
 
+    def initVideoDevice(self):
+        """ Initialize the video device. """
 
-    def run(self):
-        """ Capture frames.
-        """
-        
         # use a file as the video source
         if self.video_file is not None:
             device = cv2.VideoCapture(self.video_file)
@@ -112,6 +110,17 @@ class BufferedCapture(Process):
 
             except:
                 pass
+
+
+        return device
+
+
+    def run(self):
+        """ Capture frames.
+        """
+        
+        # Init the video device
+        device = self.initVideoDevice()
 
 
         # Wait until the device is opened
@@ -153,12 +162,18 @@ class BufferedCapture(Process):
                 self.startTime2.value = 0
             
 
-            # If the video device was disconnected, wait 10s for reconnection
+            # If the video device was disconnected, wait 5s for reconnection
             if wait_for_reconnect:
 
-                log.info('Waiting for the video device to be reconnected...')
+                while (not self.exit.is_set()) or (not device.isOpened()):
 
-                time.sleep(10)
+                    # Reinit the video device
+                    device = self.initVideoDevice()
+
+                    log.info('Waiting for the video device to be reconnected...')
+
+                    time.sleep(5)
+
 
                 wait_for_reconnect = False
 
