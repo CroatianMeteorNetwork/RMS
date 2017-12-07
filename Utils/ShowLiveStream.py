@@ -35,7 +35,22 @@ if __name__ == "__main__":
                 print("FPS:", counter)
                 counter = -1
 
+
+            # Get the video frame
             ret, frame = vcap.read()
+
+            # If the connection has been lost, try reconnecting the device
+            if not ret:
+
+                print('Connection lost! Reconnecting...')
+
+                while not vcap.isOpened():
+                    
+                    time.sleep(5)
+
+                    print('Trying to reconnect...')
+                    vcap = cv2.VideoCapture(config.deviceID)
+                    
 
             counter += 1
 
