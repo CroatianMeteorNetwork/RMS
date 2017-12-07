@@ -50,6 +50,9 @@ if __name__ == "__main__":
 
                     print('Trying to reconnect...')
                     vcap = cv2.VideoCapture(config.deviceID)
+
+
+                continue
                     
 
             counter += 1
