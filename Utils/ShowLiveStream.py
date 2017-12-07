@@ -44,15 +44,19 @@ if __name__ == "__main__":
 
                 print('Connection lost! Reconnecting...')
 
-                while not vcap.isOpened():
-                    
+                while 1:
+                    print('Trying to reconnect...')
                     time.sleep(5)
 
-                    print('Trying to reconnect...')
+                    # Try reconnecting the device and getting a frame
                     vcap = cv2.VideoCapture(config.deviceID)
+                    ret, frame = vcap.read()
 
+                    if ret:
+                        break
 
                 continue
+
                     
 
             counter += 1
