@@ -165,14 +165,21 @@ class BufferedCapture(Process):
             # If the video device was disconnected, wait 5s for reconnection
             if wait_for_reconnect:
 
-                while (not self.exit.is_set()) or (not device.isOpened()):
-
-                    # Reinit the video device
-                    device = self.initVideoDevice()
+                while not self.exit.is_set():
 
                     log.info('Waiting for the video device to be reconnected...')
 
                     time.sleep(5)
+
+                    # Reinit the video device
+                    device = self.initVideoDevice()
+
+                    # Read the frame
+                    ret, frame = device.read()
+
+                    # If the connection was made and the frame was retrieved, continue with the capture
+                    if ret:
+                        break
 
 
                 wait_for_reconnect = False
