@@ -600,7 +600,7 @@ class PlateTool(object):
                 if not self.star_selection_centroid:
 
                     # Add the image/catalog pair to the list
-                    self.paired_stars.append([[self.x_centroid, self.y_centroid], 
+                    self.paired_stars.append([[self.x_centroid, self.y_centroid, self.star_intensity], 
                         self.catalog_stars[self.closest_cat_star_indx]])
 
                     # Switch back to centroiding mode
@@ -619,6 +619,50 @@ class PlateTool(object):
                     self.star_selection_centroid = True
 
                     self.updateImage()
+
+
+        elif event.key == 'p':
+
+            if self.star_pick_mode:
+
+                ### Make a photometry plot
+
+                # Make sure there are more than 2 stars picked
+                if len(self.paired_stars) > 2:
+                    
+
+                    # Extract star intensities and star magnitudes
+                    logsum_px = []
+                    catalog_mags = []
+                    for paired_star in self.paired_stars:
+
+                        img_star, catalog_star = paired_star
+
+                        _, _, px_intens = img_star
+                        _, _, star_mag = catalog_star
+
+                        logsum_px.append(np.log10(px_intens))
+                        catalog_mags.append(star_mag)
+
+
+                    # Init plot
+                    fig_p = plt.figure()
+                    ax_p = fig_p.add_subplot(1, 1, 1)
+
+                    # Plot catalog magnitude vs. logsum of pixel intensities
+                    ax_p.semilogy(catalog_mags, logsum_px)
+
+                    fig_p.show()
+                    plt.show()
+                    fig_p.clf()
+
+
+                else:
+
+                    print('Need more than 2 stars for photometry plot!')
+
+
+
                     
 
 
@@ -687,7 +731,7 @@ class PlateTool(object):
 
                 img_star, catalog_star = paired_star
 
-                x, y = img_star
+                x, y, _ = img_star
 
                 # Plot all paired stars
                 plt.scatter(x, y, marker='x', color='b')
@@ -1272,7 +1316,7 @@ class PlateTool(object):
             az_centre, alt_centre = calcRefCentre(self.platepar.JD, self.platepar.lon, self.platepar.lat, 
                 ra_ref, dec_ref)
 
-            img_x, img_y = img_stars.T
+            img_x, img_y, _ = img_stars.T
 
             # Get image coordinates of catalog stars
             catalog_x, catalog_y, catalog_mag = self.getCatalogStarPositions(catalog_stars, self.platepar.lon, 
@@ -1313,7 +1357,7 @@ class PlateTool(object):
             az_centre, alt_centre = calcRefCentre(self.platepar.JD, self.platepar.lon, self.platepar.lat, 
                 self.platepar.RA_d, self.platepar.dec_d)
 
-            img_x, img_y = img_stars.T
+            img_x, img_y, _ = img_stars.T
 
             # Get image coordinates of catalog stars
             catalog_x, catalog_y, catalog_mag = self.getCatalogStarPositions(catalog_stars, self.platepar.lon, 
