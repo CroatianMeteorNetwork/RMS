@@ -324,12 +324,12 @@ def altAz2RADec(lat, lon, UT_corr, time_data, azimuth_data, altitude_data, dt_ti
 
 
 
-def calculateMagnitudes(level_data, C2, m2):
+def calculateMagnitudes(level_data, mag_0, mag_lev):
     """ Calculate the magnitude of the data points with given magnitude calibration parameters. 
 
     @param level_data: [ndarray] levels of the meteor centroid (arbirtary units)
-    @param C2: [float] magnitude calibration equation parameter (fitted intensity)
-    @param m2: [float] magnitude calibration equation parameter (intercept)
+    @param mag_0: [float] magnitude slope
+    @param mag_lev: [float] magnitude intercept
 
     @return magnitude_data: [ndarray] array of meteor's lightcurve apparent magnitudes
     """
@@ -340,7 +340,7 @@ def calculateMagnitudes(level_data, C2, m2):
     for i, level in enumerate(level_data):
 
         # Save magnitude data to the output array
-        magnitude_data[i] = -2.5*np.log10(level) + 2.5*np.log10(C2) + m2
+        magnitude_data[i] = mag_lev*np.log10(float(level)) + mag_lev
 
 
     return magnitude_data
@@ -698,10 +698,10 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
 
 
         ### CALCULATE MAGNITUDES
-        # UNFINISHED!!!
+        magnitudes = calculateMagnitudes(levels_corrected, platepar.mag_0, platepar.mag_lev)
 
         # Construct the meteor measurements array
-        meteor_picks = np.c_[frames, X_data, Y_data, RA_data, dec_data, az_data, alt_data, levels_corrected]
+        meteor_picks = np.c_[frames, X_data, Y_data, RA_data, dec_data, az_data, alt_data, magnitudes]
 
         # Add the calculated values to the final list
         meteor_list.append([ff_name, meteor_No, rho, phi, meteor_picks])

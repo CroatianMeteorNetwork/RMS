@@ -156,7 +156,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
 
         # Extract data from matched stars
         matched_img_stars = stars_list[matched_img_inds.astype(np.int)]
-        matched_cat_stars = catalog_stars[matched_cat_inds.astype(np.int)]
+        matched_cat_stars = extracted_catalog[matched_cat_inds.astype(np.int)]
 
         # Put the matched stars to a dictionary
         matched_stars[jd] = [matched_img_stars, matched_cat_stars, dist_list]
@@ -206,7 +206,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
     if n_matched == 0:
         
         if ret_nmatch:
-            return 0, 9999.0, 9999.0
+            return 0, 9999.0, 9999.0, {}
 
         else:
             return 9999.0
@@ -223,7 +223,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
 
 
     if ret_nmatch:
-        return n_matched, avg_dist, cost
+        return n_matched, avg_dist, cost, matched_stars
 
     else:
         return cost
@@ -249,7 +249,7 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius):
     """
 
     # Match the stars and calculate the residuals
-    n_matched, avg_dist, cost = matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius,\
+    n_matched, avg_dist, cost, _ = matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius,\
         ret_nmatch=True)
 
 
@@ -311,6 +311,89 @@ def _calcImageResidualsDistorsion(params, config, platepar, catalog_stars, star_
     # Match stars and calculate image residuals
     return matchStarsResiduals(config, pp, catalog_stars, star_dict, match_radius)
 
+
+
+
+def photometryFit(config, matched_stars):
+    """ Perform the photometry fit on matched stars. To avoid saturation effects, all stars which have their
+        peak intensity close to saturation are rejected.
+
+    Arguments:
+        config: [Config structure]
+        matched_stars: [dict] Dictonary where key are FF file JDs, while values are lists of image stars, 
+            catalog stars, and their distances in pixels.
+
+    Return:
+        (photom_slope, photom_intercept): [tuple of floats] Photometric fit on magnitudes and log of sum of 
+            pixel intensities for each star.
+
+    """
+
+    # If the amplitde (the peak of the star) is higher than this threshold, it will be rejected due to 
+    # concerns about saturation and CMOS non-linearity
+    photom_amplitude_thresh = 200
+
+    # Take only stars which are within the radius of the half the size of the image, to avoid vignetitng 
+    # effects
+    hf_r = np.sqrt((config.width/2)**2 + (config.height/2)**2)
+
+
+    matched_mags = []
+    matched_logsum = []
+
+    # Go through all images
+    for jd_entry in matched_stars:
+
+        matched_img_stars, matched_cat_stars, dist_list = matched_stars[jd_entry]
+
+        # Go through all stars
+        for i in range(len(matched_img_stars)):
+
+            # Unpack image star data
+            x, y, intens_sum, ampl = matched_img_stars[i]
+
+            # Check if the coordinates are close to the centre of the image
+            if np.sqrt((x - config.width/2)**2 + (y - config.height/2)**2) <= hf_r:
+
+                # Check that the peak intensity is within the saturation threshold
+                if (ampl <= photom_amplitude_thresh) and (ampl > 10) and (intens_sum > 0):
+
+                    # Unpack catalog star data
+                    ra, dec, mag = matched_cat_stars[i]
+
+                    # Add the star for fitting
+                    matched_logsum.append(np.log10(intens_sum))
+                    matched_mags.append(mag)
+
+
+    
+
+    def _line(x, k):
+        # Slope is fixed to -2.5, as per magnitude definition
+        return -2.5*x + k
+
+    # Fit a line to the star data, where only the intercept has to be estimated
+    photom_params, _ = scipy.optimize.curve_fit(_line, matched_logsum, matched_mags, method='trf', \
+        loss='soft_l1')
+
+    mag_lev = photom_params[0]
+
+    # Plot catalog magnitude vs. logsum of pixel intensities
+    plt.scatter(matched_logsum, matched_mags)
+
+    # Plot the line fit
+    logsum_arr = np.linspace(np.max(matched_logsum), np.min(matched_logsum), 10)
+    plt.plot(logsum_arr, _line(logsum_arr, *photom_params))
+
+    plt.xlabel("Logsum pixel")
+    plt.ylabel("Catalog magnitude (V)")
+
+    plt.gca().invert_yaxis()
+
+    plt.show()
+
+
+    return mag_lev
 
 
 
@@ -395,7 +478,7 @@ def autoCheckFit(config, platepar, calstars_list):
     for i, match_radius in enumerate(radius_list):
 
         # Match the stars and calculate the residuals
-        n_matched, avg_dist, cost = matchStarsResiduals(config, platepar, catalog_stars, star_dict, \
+        n_matched, avg_dist, cost, _ = matchStarsResiduals(config, platepar, catalog_stars, star_dict, \
             match_radius, ret_nmatch=True)
 
         print('Max radius:', match_radius)
@@ -489,8 +572,8 @@ def autoCheckFit(config, platepar, calstars_list):
 
 
     # Match the stars and calculate the residuals
-    n_matched, avg_dist, cost = matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius,\
-        ret_nmatch=True)
+    n_matched, avg_dist, cost, matched_stars = matchStarsResiduals(config, platepar, catalog_stars, \
+        star_dict, min_radius, ret_nmatch=True)
 
     print('Matched stars:', n_matched)
     print('Average deviation:', avg_dist)

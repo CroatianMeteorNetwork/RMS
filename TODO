@@ -2,7 +2,7 @@
 High priority:
 --------------
 
-- Photometry
+- Photometry - estimate vignetting from star movements across the FOV
 
 - Solve logger picking so the code can run on Windows
 

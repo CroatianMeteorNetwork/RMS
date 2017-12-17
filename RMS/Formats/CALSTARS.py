@@ -41,7 +41,7 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols):
         star_file.write("==========================================================================\n")
         star_file.write("RMS star extractor" + "\n")
         star_file.write("Cal time = FF header time plus 255/(2*framerate_Hz) seconds" + "\n")
-        star_file.write("Row  Column  Intensity-Backgnd  Intensity  (integrated values)" + "\n")
+        star_file.write("Row  Column  Intensity-Backgnd  Amplitude  (integrated values)" + "\n")
         star_file.write("==========================================================================\n")
         star_file.write("FF folder = " + ff_directory + "\n")
         star_file.write("Cam #  = " + str(cam_code) + "\n")
@@ -62,10 +62,9 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols):
             star_file.write("Integ pixels  = -1" + "\n")
 
             # Write every star to file
-            #for x, y, bg_level, level in zip(x2, y2, background, intensity):
-            for x, y, bg_level, level in star_data:
+            for x, y, amplitude, level in star_data:
                 star_file.write("{:7.2f} {:7.2f} {:6d} {:6d}".format(round(y, 2), round(x, 2), 
-                    int(bg_level), int(level)) + "\n")
+                    int(level), int(amplitude)) + "\n")
 
         # Write the end separator
         star_file.write("##########################################################################\n")

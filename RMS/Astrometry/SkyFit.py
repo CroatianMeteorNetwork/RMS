@@ -645,12 +645,46 @@ class PlateTool(object):
                         catalog_mags.append(star_mag)
 
 
+                    def _line(x, k):
+                        # The slope is fixed to -2.5, coming from the definition of magnitude
+                        return -2.5*x + k
+
+
+                    # Fit a line to the star data, where only the intercept has to be estimated
+                    photom_params, _ = scipy.optimize.curve_fit(_line, logsum_px, catalog_mags, \
+                        method='trf', loss='soft_l1')
+
+                    # Set photometry parameters
+                    self.platepar.mag_0 = -2.5
+                    self.platepar.mag_lev = photom_params[0]
+
+                    # Calculate the standard deviation
+                    fit_stddev = np.std(np.array(catalog_mags) - _line(np.array(logsum_px), *photom_params))
+
+
                     # Init plot
                     fig_p = plt.figure()
                     ax_p = fig_p.add_subplot(1, 1, 1)
 
                     # Plot catalog magnitude vs. logsum of pixel intensities
-                    ax_p.semilogy(catalog_mags, logsum_px)
+                    ax_p.scatter(logsum_px, catalog_mags)
+
+                    # Plot the line fit
+                    logsum_arr = np.linspace(np.min(logsum_px), np.max(logsum_px), 10)
+                    ax_p.plot(logsum_arr, _line(logsum_arr, *photom_params))
+
+                    x_min, _ = ax_p.get_xlim()
+                    y_min, _ = ax_p.get_ylim()
+                    
+                    # Plot fit info
+                    fit_info = 'Fit: {:+.2f}M {:+.2f} +/- {:.2f}'.format(self.platepar.mag_0, self.platepar.mag_lev, fit_stddev)
+                    print(fit_info)
+                    ax_p.text(x_min, y_min, fit_info, color='r', verticalalignment='top', horizontalalignment='left', fontsize=10)
+
+                    ax_p.set_ylabel("Catalog magnitude (V)")
+                    ax_p.set_xlabel("Logsum pixel")
+
+                    ax_p.invert_yaxis()
 
                     fig_p.show()
                     plt.show()
@@ -824,7 +858,9 @@ class PlateTool(object):
 
         # Show text on the top
         if self.star_pick_mode:
-            text_str = 'STAR PICKING MODE, PRESS CTRL + Z FOR FITTING'
+            text_str  = "STAR PICKING MODE\n"
+            text_str += "PRESS 'CTRL + Z' FOR STAR FITTING\n"
+            text_str += "PRESS 'P' FOR PHOTOMETRY FIT"
 
             plt.gca().text(self.current_ff.ncols/2, self.current_ff.nrows - 10, text_str, color='r', 
                 verticalalignment='top', horizontalalignment='center', fontsize=8)
@@ -887,6 +923,7 @@ class PlateTool(object):
         y, x, _, _ = np.array(star_data).T
 
         plt.scatter(x, y, edgecolors='g', marker='o', facecolors='none')
+
 
 
     def updateGamma(self, gamma_adj_factor):
