@@ -136,13 +136,13 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     # plotStars(ff, x, y)
 
     # Fit a PSF to each star
-    x2, y2, background, intensity = fitPSF(ff, global_mean, x, y, config=config)
-    # x2, y2, background, intensity = list(x), list(y), [], [] # Skip PSF fit
+    x2, y2, amplitude, intensity = fitPSF(ff, global_mean, x, y, config=config)
+    # x2, y2, amplitude, intensity = list(x), list(y), [], [] # Skip PSF fit
 
     # # Plot stars after PSF fit filtering
     # plotStars(ff, x2, y2)
 
-    return x2, y2, background, intensity
+    return x2, y2, amplitude, intensity
 
 
 
@@ -204,7 +204,7 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
 
     x_fitted = []
     y_fitted = []
-    background_fitted = []
+    amplitude_fitted = []
     intensity_fitted = []
 
     # Set the initial guess
@@ -273,7 +273,7 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
         # Add stars to the final list
         x_fitted.append(x_min + xo)
         y_fitted.append(y_min + yo)
-        background_fitted.append(offset)
+        amplitude_fitted.append(amplitude)
         intensity_fitted.append(intensity)
 
         # # Plot fitted stars
@@ -291,7 +291,7 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
         # plt.clf()
         # plt.close()
 
-    return x_fitted, y_fitted, background_fitted, intensity_fitted
+    return x_fitted, y_fitted, amplitude_fitted, intensity_fitted
 
 
 
@@ -398,7 +398,7 @@ if __name__ == "__main__":
 
         t1 = time.clock()
 
-        x2, y2, background, intensity = extractStars(ff_dir, ff_name, config, flat_struct=flat_struct)
+        x2, y2, amplitude, intensity = extractStars(ff_dir, ff_name, config, flat_struct=flat_struct)
 
         print('Time for extraction: ', time.clock() - t1)
 
@@ -407,15 +407,15 @@ if __name__ == "__main__":
             continue
 
         # Construct the table of the star parameters
-        star_data = zip(x2, y2, background, intensity)
+        star_data = zip(x2, y2, amplitude, intensity)
 
         # Add star info to the star list
         star_list.append([ff_name, star_data])
 
         # Print found stars
-        print('   ROW    COL   BGK  intensity')
-        for x, y, bg_level, level in star_data:
-            print(' {:06.2f} {:06.2f} {:6d} {:6d}'.format(round(y, 2), round(x, 2), int(bg_level), int(level)))
+        print('   ROW    COL   amplitude  intensity')
+        for x, y, max_ampl, level in star_data:
+            print(' {:06.2f} {:06.2f} {:6d} {:6d}'.format(round(y, 2), round(x, 2), int(max_ampl), int(level)))
 
 
         # # Show stars if there are only more then 10 of them

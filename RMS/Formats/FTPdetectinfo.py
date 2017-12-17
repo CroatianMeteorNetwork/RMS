@@ -74,7 +74,11 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
         ftpdetect_file.write("FF  file processed\n")
         ftpdetect_file.write("CAL file processed\n")
         ftpdetect_file.write("Cam# Meteor# #Segments fps hnr mle bin Pix/fm Rho Phi\n")
-        ftpdetect_file.write("Per segment:  Frame# Col Row RA Dec Azim Elev Inten\n")
+        
+        if calibration is None:
+            ftpdetect_file.write("Per segment:  Frame# Col Row RA Dec Azim Elev Inten\n")
+        else:
+            ftpdetect_file.write("Per segment:  Frame# Col Row RA Dec Azim Elev Mag\n")
 
         # Write info for all meteors
         for meteor in meteor_list:
@@ -109,9 +113,19 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
                 if celestial_coords_given:
                     frame, x, y, ra, dec, azim, elev, level = line
 
-                    ftpdetect_file.write("{:06.1f} {:07.2f} {:07.2f} {:08.4f} {:+08.4f} {:08.4f} {:+08.4f} {:06d}".format(frame, round(x, 2), \
-                        round(y, 2), round(ra, 4), round(dec, 4), round(azim, 4), round(elev, 4), \
-                        int(level)) + "\n")
+                    # If the magnitude is given, write it instead of the level
+                    if calibration is None:
+                        lvl_mag_format = "{:06d}"
+                        level = int(level)
+                    else:
+                        lvl_mag_format = "{:.2f}"
+
+
+                    detection_line_str = "{:06.1f} {:07.2f} {:07.2f} {:08.4f} {:+08.4f} {:08.4f} {:+08.4f} " \
+                        + lvl_mag_format
+
+                    ftpdetect_file.write(detection_line_str.format(frame, round(x, 2), round(y, 2), \
+                        round(ra, 4), round(dec, 4), round(azim, 4), round(elev, 4), level) + "\n")
 
                 else:
                     frame, x, y, level = line
@@ -172,7 +186,8 @@ def readFTPdetectinfo(ff_directory, file_name):
             # Read the meteor parameters
             if entry_counter == 3:
                 cam_code, meteor_No, n_segments, fps, hnr, mle, binn, px_fm, rho, phi = line.split()
-                meteor_No, n_segments, fps, hnr, mle, binn, px_fm, rho, phi = list(map(float, [meteor_No, n_segments, fps, hnr, mle, binn, px_fm, rho, phi]))
+                meteor_No, n_segments, fps, hnr, mle, binn, px_fm, rho, phi = list(map(float, [meteor_No, \
+                    n_segments, fps, hnr, mle, binn, px_fm, rho, phi]))
 
             # Read meteor measurements
             if entry_counter > 3:
