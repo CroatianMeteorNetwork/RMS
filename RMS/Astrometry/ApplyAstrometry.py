@@ -650,7 +650,10 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
 
     # Save a copy of the uncalibrated FTPdetectinfo
     ftp_detectinfo_copy = "".join(ftp_detectinfo_file.split('.')[:-1]) + "_uncalibrated.txt"
-    shutil.copy2(os.path.join(dir_path, ftp_detectinfo_file), os.path.join(dir_path, ftp_detectinfo_copy))
+
+    # Back up the original FTPdetectinfo, only if a backup does not exist already
+    if not os.path.isfile(os.path.join(dir_path, ftp_detectinfo_copy)):
+        shutil.copy2(os.path.join(dir_path, ftp_detectinfo_file), os.path.join(dir_path, ftp_detectinfo_copy))
 
     # Load the platepar
     platepar = Platepar()
@@ -670,10 +673,10 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
         meteor_meas = np.array(meteor_meas)
 
         # Extract frame number, x, y, intensity
-        frames = meteor_meas[:, 0]
-        X_data = meteor_meas[:, 1]
-        Y_data = meteor_meas[:, 2]
-        level_data = meteor_meas[:, 7]
+        frames = meteor_meas[:, 1]
+        X_data = meteor_meas[:, 2]
+        Y_data = meteor_meas[:, 3]
+        level_data = meteor_meas[:, 8]
 
         # Get the beginning time of the FF file
         time_beg = filenameToDatetime(ff_name)
@@ -701,7 +704,8 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
         magnitudes = calculateMagnitudes(levels_corrected, platepar.mag_0, platepar.mag_lev)
 
         # Construct the meteor measurements array
-        meteor_picks = np.c_[frames, X_data, Y_data, RA_data, dec_data, az_data, alt_data, magnitudes]
+        meteor_picks = np.c_[frames, X_data, Y_data, RA_data, dec_data, az_data, alt_data, level_data, \
+            magnitudes]
 
         # Add the calculated values to the final list
         meteor_list.append([ff_name, meteor_No, rho, phi, meteor_picks])
