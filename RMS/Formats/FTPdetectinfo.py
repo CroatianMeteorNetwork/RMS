@@ -75,10 +75,7 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
         ftpdetect_file.write("CAL file processed\n")
         ftpdetect_file.write("Cam# Meteor# #Segments fps hnr mle bin Pix/fm Rho Phi\n")
         
-        if calibration is None:
-            ftpdetect_file.write("Per segment:  Frame# Col Row RA Dec Azim Elev Inten\n")
-        else:
-            ftpdetect_file.write("Per segment:  Frame# Col Row RA Dec Azim Elev Mag\n")
+        ftpdetect_file.write("Per segment:  Frame# Col Row RA Dec Azim Elev Inten Mag\n")
 
         # Write info for all meteors
         for meteor in meteor_list:
@@ -111,27 +108,21 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
             for line in centroids:
 
                 if celestial_coords_given:
-                    frame, x, y, ra, dec, azim, elev, level = line
 
-                    # If the magnitude is given, write it instead of the level
-                    if calibration is None:
-                        lvl_mag_format = "{:06d}"
-                        level = int(level)
-                    else:
-                        lvl_mag_format = "{:.2f}"
+                    frame, x, y, ra, dec, azim, elev, level, mag = line
 
-
-                    detection_line_str = "{:06.1f} {:07.2f} {:07.2f} {:08.4f} {:+08.4f} {:08.4f} {:+08.4f} " \
-                        + lvl_mag_format
+                    detection_line_str = "{:06.1f} {:07.2f} {:07.2f} {:08.4f} {:+08.4f} {:08.4f} {:+08.4f} {:06d} {:.2f}"
 
                     ftpdetect_file.write(detection_line_str.format(frame, round(x, 2), round(y, 2), \
-                        round(ra, 4), round(dec, 4), round(azim, 4), round(elev, 4), level) + "\n")
+                        round(ra, 4), round(dec, 4), round(azim, 4), round(elev, 4), int(level), \
+                        round(mag, 2)) + "\n")
 
                 else:
                     frame, x, y, level = line
 
-                    ftpdetect_file.write("{:06.1f} {:07.2f} {:07.2f}".format(frame, round(x, 2), 
-                        round(y, 2)) + " 000.00 000.00 000.00 000.00 " + "{:06d}".format(int(level)) + "\n")
+                    ftpdetect_file.write("{:06.1f} {:07.2f} {:07.2f}".format(frame, round(x, 2), \
+                        round(y, 2)) + " 000.00 000.00 000.00 000.00 " + "{:06d}".format(int(level)) \
+                        + " 0.00\n")
 
 
 
@@ -155,6 +146,7 @@ def readFTPdetectinfo(ff_directory, file_name):
         meteor_list = []
         meteor_meas = []
         cam_code = meteor_No = n_segments = fps = hnr = mle = binn = px_fm = rho = phi = None
+        calib_status = 0
 
         # Skip the header
         for i in range(11):
@@ -179,6 +171,16 @@ def readFTPdetectinfo(ff_directory, file_name):
                 meteor_meas = []
 
 
+            # Read the calibration status
+            if entry_counter == 0:
+
+                if 'Uncalibrated' in line:
+                    calib_status = 0
+
+                else:
+                    calib_status = 1
+
+
             # Read the name of the FF file
             if entry_counter == 1:
                 ff_name = line
@@ -191,8 +193,22 @@ def readFTPdetectinfo(ff_directory, file_name):
 
             # Read meteor measurements
             if entry_counter > 3:
-                frame_n, x, y, ra, dec, azim, elev, inten = list(map(float, line.split()))
-                meteor_meas.append([frame_n, x, y, ra, dec, azim, elev, inten])
+                
+                mag = np.nan
+
+                # Read magnitude if it is in the file
+                if len(line.split()) > 8:
+
+                    line_sp = line.split()
+
+                    mag = float(line_sp[8])
+
+
+                # Read meteor frame-by-frame measurements
+                frame_n, x, y, ra, dec, azim, elev, inten = list(map(float, line.split()[:8]))
+
+                meteor_meas.append([calib_status, frame_n, x, y, ra, dec, azim, elev, inten, mag])
+
 
             entry_counter += 1
 
