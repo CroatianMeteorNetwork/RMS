@@ -128,7 +128,7 @@ def wait(duration=None):
 
 
 
-def runCapture(config, duration=None, video_file=None, nodetect=False, upload_manager=None):
+def runCapture(config, duration=None, video_file=None, nodetect=False, detect_end=False, upload_manager=None):
     """ Run capture and compression for the given time.given
 
     Arguments:
@@ -138,6 +138,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
         duration: [float] Time in seconds to capture. None by default.
         video_file: [str] Path to the video file, if it was given as the video source. None by default.
         nodetect: [bool] If True, detection will not be performed. False by defualt.
+        detect_end: [bool] If True, detection will be performed at the end of the night, when capture 
+            finishes. False by default.
         upload_manager: [UploadManager object] A handle to the UploadManager, which handles uploading files to
             the central server. None by default.
 
@@ -217,8 +219,18 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
         detector = None
 
     else:
-        # Initialize the detector, wait 60s from initialization and then start the detection
-        detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log, delay_start=60)
+
+        if detect_end:
+
+            # Delay detection until the end of the night
+            delay_detection = duration
+
+        else:
+            # Delay the detection for 2 minutes after capture start
+            delay_detection = 120
+
+        # Initialize the detector
+        detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log, delay_start=delay_detection)
         detector.startPool()
 
     
@@ -517,6 +529,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-n', '--nodetect', action="store_true", help="""Do not perform star extraction 
         nor meteor detection. """)
 
+    arg_parser.add_argument('-e', '--detectend', action="store_true", help="""Detect stars and meteors at the
+        end of the night, after capture finishes. """)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -577,7 +592,8 @@ if __name__ == "__main__":
         log.info("Running for " + str(duration/60/60) + ' hours...')
 
         # Run the capture for the given number of hours
-        runCapture(config, duration=duration, nodetect=cml_args.nodetect, upload_manager=upload_manager)
+        runCapture(config, duration=duration, nodetect=cml_args.nodetect, upload_manager=upload_manager, \
+            detect_end=cml_args.detectend)
 
         if upload_manager is not None:
             # Stop the upload manager
@@ -704,7 +720,8 @@ if __name__ == "__main__":
         log.info('Starting capturing for ' + str(duration/60/60) + ' hours')
 
         # Run capture and compression
-        runCapture(config, duration=duration, nodetect=cml_args.nodetect, upload_manager=upload_manager)
+        runCapture(config, duration=duration, nodetect=cml_args.nodetect, upload_manager=upload_manager, 
+            detect_end=cml_args.detectend)
 
 
     if upload_manager is not None:
