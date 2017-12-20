@@ -56,10 +56,11 @@ class QueuedPool(object):
         cores: [int] Number of CPU cores to use. None by default. If negative, then the number of cores to be 
             used will be the total number available, minus the given number.
         log: [logging handle] A logger object which will be used for logging.
+        delay_start: [float] Number of seconds to wait after init before the workers start workings.
 
     """
 
-    def __init__(self, func, cores=None, log=None):
+    def __init__(self, func, cores=None, log=None, delay_start=0):
 
 
         # If the cores are not given, use all available cores
@@ -82,6 +83,9 @@ class QueuedPool(object):
         self.cores = SafeValue(cores)
         self.log = log
 
+        self.start_time = time.time()
+        self.delay_start = delay_start
+
         # Initialize queues (for some reason queues from Manager need to be created, otherwise they are 
         # blocking when using get_nowait)
         manager = multiprocessing.Manager()
@@ -99,7 +103,12 @@ class QueuedPool(object):
 
     def _workerFunc(self, func):
         """ A wrapper function for the given worker function. Handles the queue operations. """
-            
+        
+
+        # Wait until delay has passed
+        while (self.start_time + self.delay_start) < time.time():
+            time.sleep(0.1)
+
         self.active_workers.increment()
 
         while True:
