@@ -20,6 +20,7 @@ if __name__ == "__main__":
 
     t_prev = time.time()
     counter = 0
+    fps = config.fps
 
     first_image = True
 
@@ -31,13 +32,24 @@ if __name__ == "__main__":
             if (time.time() - t_prev) >= 1.0:
                 t_prev = time.time()
 
+                fps = counter
+
                 # Print the number of frames received in the last second
                 print("FPS:", counter)
-                counter = -1
+                counter = 0
 
+
+                # If the FPS is lower than the onfigured value, this means that the video buffer is full and needs
+                # to be emptied
+                if fps < config.fps:
+                    for i in range(int(config.fps - fps) + 1):
+                        ret = vcap.grab()
+                        counter += 1
+                    
 
             # Get the video frame
             ret, frame = vcap.read()
+            
 
             # If the connection has been lost, try reconnecting the device
             if not ret:
