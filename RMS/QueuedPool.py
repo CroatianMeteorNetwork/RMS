@@ -106,7 +106,7 @@ class QueuedPool(object):
         
 
         # Wait until delay has passed
-        while (self.start_time + self.delay_start) < time.time():
+        while (self.start_time + self.delay_start) > time.time():
             time.sleep(0.1)
 
         self.active_workers.increment()
