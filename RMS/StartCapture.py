@@ -217,8 +217,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, upload_ma
         detector = None
 
     else:
-        # Initialize the detector
-        detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log)
+        # Initialize the detector, wait 60s from initialization and then start the detection
+        detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log, delayed_start=60)
         detector.startPool()
 
     
