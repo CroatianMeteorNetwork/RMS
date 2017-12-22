@@ -51,7 +51,7 @@ def plotFieldsums(dir_path, config):
         if ('FS' in file_name) and ('_fieldsum.bin' in file_name):
 
             # Read the field sums
-            half_frames, intensity_array = readFieldIntensitiesBin(dir_path, file_name)
+            _, intensity_array = readFieldIntensitiesBin(dir_path, file_name)
 
             # Extract the date and time from the FF file
             dt = filenameToDatetime(file_name)
@@ -66,6 +66,9 @@ def plotFieldsums(dir_path, config):
             time_data.append(dt)
 
 
+    # If there are no fieldsums, do nothing
+    if not time_data:
+        return False
 
 
     ### Plot the raw intensity over time ###
