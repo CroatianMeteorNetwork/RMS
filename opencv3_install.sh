@@ -1,3 +1,11 @@
+#!/bin/sh
+if [ "$#" -ne 1 ] || ! [ -d "$1" ]; then
+  echo "Usage: $0 VIRTUALENV_PATH" >&2
+  exit 1
+fi
+
+# The script takes the path to the virtual environment directory as the argument
+
 # Configuration
 HOME_DIR=$HOME
 VERSION=3.2.0
@@ -25,11 +33,11 @@ cd ${HOME_DIR}/opencv-${VERSION}/
 mkdir build
 cd build
 cmake -D CMAKE_BUILD_TYPE=RELEASE \
-    -D CMAKE_INSTALL_PREFIX=/usr/local \
+    -D CMAKE_INSTALL_PREFIX=${1}/local \
     -D INSTALL_PYTHON_EXAMPLES=ON \
     -D INSTALL_C_EXAMPLES=OFF \
     -D OPENCV_EXTRA_MODULES_PATH=${HOME_DIR}/opencv_contrib-${VERSION}/modules \
-    -D PYTHON_EXECUTABLE=/usr/bin/python \
+    -D PYTHON_EXECUTABLE=${1}/bin/python \
     -D BUILD_EXAMPLES=ON \
     -D WITH_GSTREAMER=ON ..
 
