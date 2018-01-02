@@ -118,9 +118,15 @@ class FOVinputDialog(object):
 
 
 
-
 class PlateTool(object):
     def __init__(self, dir_path, config):
+        """ SkyFit interactive window.
+
+        Arguments:
+            dir_path: [str] Absolute path to the directory containing image files.
+            config: [COnfig struct]
+
+        """
 
         self.config = config
         self.dir_path = dir_path
@@ -132,6 +138,7 @@ class PlateTool(object):
         self.circle_aperature_outer = None
         self.star_aperature_radius = 5
         self.x_centroid = self.y_centroid = None
+        self.photom_deviatons_scat = []
 
         self.catalog_stars_visible = True
 
@@ -155,8 +162,6 @@ class PlateTool(object):
 
         # Image coordinates of catalog stars
         self.catalog_x = self.catalog_y = None
-
-
 
 
 
@@ -269,7 +274,7 @@ class PlateTool(object):
         self.ax = plt.gca()
 
         # Set the bacground color to black
-        matplotlib.rcParams['axes.facecolor'] = 'k'
+        #matplotlib.rcParams['axes.facecolor'] = 'k'
 
         # Disable standard matplotlib keyboard shortcuts
         plt.rcParams['keymap.save'] = ''
@@ -627,31 +632,37 @@ class PlateTool(object):
 
                 ### Make a photometry plot
 
+                # Extract star intensities and star magnitudes
+                star_coords = []
+                logsum_px = []
+                catalog_mags = []
+                for paired_star in self.paired_stars:
+
+                    img_star, catalog_star = paired_star
+
+                    star_x, star_y, px_intens = img_star
+                    _, _, star_mag = catalog_star
+
+                    # Skip intensities which were not properly calculated
+                    if np.isnan(px_intens) or np.isinf(px_intens):
+                        continue
+
+                    star_coords.append([star_x, star_y])
+                    logsum_px.append(np.log10(px_intens))
+                    catalog_mags.append(star_mag)
+
+
+
                 # Make sure there are more than 2 stars picked
-                if len(self.paired_stars) > 2:
-                    
+                if len(logsum_px) > 2:
 
-                    # Extract star intensities and star magnitudes
-                    logsum_px = []
-                    catalog_mags = []
-                    for paired_star in self.paired_stars:
-
-                        img_star, catalog_star = paired_star
-
-                        _, _, px_intens = img_star
-                        _, _, star_mag = catalog_star
-
-                        logsum_px.append(np.log10(px_intens))
-                        catalog_mags.append(star_mag)
-
-
-                    def _line(x, k):
+                    def _photomLine(x, k):
                         # The slope is fixed to -2.5, coming from the definition of magnitude
                         return -2.5*x + k
 
 
                     # Fit a line to the star data, where only the intercept has to be estimated
-                    photom_params, _ = scipy.optimize.curve_fit(_line, logsum_px, catalog_mags, \
+                    photom_params, _ = scipy.optimize.curve_fit(_photomLine, logsum_px, catalog_mags, \
                         method='trf', loss='soft_l1')
 
                     # Set photometry parameters
@@ -659,42 +670,88 @@ class PlateTool(object):
                     self.platepar.mag_lev = photom_params[0]
 
                     # Calculate the standard deviation
-                    fit_stddev = np.std(np.array(catalog_mags) - _line(np.array(logsum_px), *photom_params))
+                    fit_resids = np.array(catalog_mags) - _photomLine(np.array(logsum_px), *photom_params)
+                    fit_stddev = np.std(fit_resids)
 
+
+                    # Remove previous photometry deviation labels 
+                    if len(self.photom_deviatons_scat) > 0:
+                        for entry in self.photom_deviatons_scat:
+                            resid_lbl, mag_lbl = entry
+                            try:
+                                resid_lbl.remove()
+                                mag_lbl.remove()
+                            except:
+                                pass
+
+                    self.photom_deviatons_scat = []
+
+                    # Plot photometry deviations on the main plot as colour coded rings
+                    star_coords = np.array(star_coords)
+                    star_coords_x, star_coords_y = star_coords.T
+
+                    for star_x, star_y, fit_diff, star_mag in zip (star_coords_x, star_coords_y, fit_resids, \
+                        catalog_mags):
+
+                        photom_resid_txt = "{:.2f}".format(fit_diff)
+
+                        # Determine the size of the residual text, larger the residual, larger the text
+                        photom_resid_size = 8 + np.abs(fit_diff)/(np.max(np.abs(fit_resids))/5.0)
+
+                        # Plot the residual as text under the star
+                        photom_resid_lbl = plt.text(star_x, star_y + 10, photom_resid_txt, \
+                            verticalalignment='top', horizontalalignment='center', \
+                            fontsize=photom_resid_size, color='w')
+
+                        # Plot the star magnitude
+                        star_mag_lbl = plt.text(star_x, star_y - 10, "{:+.2}".format(star_mag), \
+                            verticalalignment='bottom', horizontalalignment='center', \
+                            fontsize=10, color='r')
+
+
+                        self.photom_deviatons_scat.append([photom_resid_lbl, star_mag_lbl])
+
+
+                    plt.draw()
 
                     # Init plot
-                    fig_p = plt.figure()
+                    fig_p = plt.figure(facecolor=None)
                     ax_p = fig_p.add_subplot(1, 1, 1)
 
                     # Plot catalog magnitude vs. logsum of pixel intensities
-                    ax_p.scatter(logsum_px, catalog_mags)
-
-                    # Plot the line fit
-                    logsum_arr = np.linspace(np.min(logsum_px), np.max(logsum_px), 10)
-                    ax_p.plot(logsum_arr, _line(logsum_arr, *photom_params))
+                    self.photom_points = ax_p.scatter(logsum_px, catalog_mags)
 
                     x_min, _ = ax_p.get_xlim()
                     y_min, _ = ax_p.get_ylim()
                     
                     # Plot fit info
-                    fit_info = 'Fit: {:+.2f}M {:+.2f} +/- {:.2f}'.format(self.platepar.mag_0, self.platepar.mag_lev, fit_stddev)
+                    fit_info = 'Fit: {:+.2f}M {:+.2f} +/- {:.2f}'.format(self.platepar.mag_0, \
+                        self.platepar.mag_lev, fit_stddev)
+
                     print(fit_info)
-                    ax_p.text(x_min, y_min, fit_info, color='r', verticalalignment='top', horizontalalignment='left', fontsize=10)
+                    #ax_p.text(x_min, y_min, fit_info, color='r', verticalalignment='top', horizontalalignment='left', fontsize=10)
+
+                    # Plot the line fit
+                    logsum_arr = np.linspace(np.min(logsum_px), np.max(logsum_px), 10)
+                    ax_p.plot(logsum_arr, _photomLine(logsum_arr, *photom_params), label=fit_info)
+
+                    ax_p.legend()
 
                     ax_p.set_ylabel("Catalog magnitude (V)")
                     ax_p.set_xlabel("Logsum pixel")
 
                     ax_p.invert_yaxis()
 
+                    ax_p.grid()
+
+                    
                     fig_p.show()
                     plt.show()
                     fig_p.clf()
 
 
                 else:
-
                     print('Need more than 2 stars for photometry plot!')
-
 
 
                     
@@ -1087,9 +1144,16 @@ class PlateTool(object):
 
         platepar = Platepar()
 
+
+        # Check if platepar exists in the folder, and set it as the defualt file name if it does
+        if self.config.platepar_name in os.listdir(self.dir_path):
+            initialfile = self.config.platepar_name
+        else:
+            initialfile = ''
+
         # Load the platepar file
         platepar_file = filedialog.askopenfilename(initialdir=self.dir_path, \
-            title='Select the platepar file')
+            initialfile=initialfile, title='Select the platepar file')
 
         root.update()
         root.quit()
