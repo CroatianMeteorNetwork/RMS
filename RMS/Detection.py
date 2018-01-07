@@ -1100,7 +1100,7 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
             stripe = np.zeros((ff.nrows, ff.ncols), np.uint8)
             stripe[stripe_indices] = img[stripe_indices]
 
-            #COMMENTED
+            # Show detected line
             # show('detected line: '+str(frame_min)+'-'+str(frame_max), stripe)
 
             # Get stripe positions
@@ -1157,7 +1157,7 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
                 for half_frame in range(2):
 
                     # Apply deinterlacing if it is present in the video
-                    if config.deinterlace_order > 0:
+                    if config.deinterlace_order >= 0:
 
                         # Deinterlace by fields (line lixels)
                         half_frame_pixels = frame_pixels[frame_pixels[:,1] % 2 == (config.deinterlace_order 
