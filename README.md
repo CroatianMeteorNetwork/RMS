@@ -195,3 +195,22 @@ python -m RMS.DetectStarsAndMeteors ~/RMS_data/YYYMMDD_hhmmss_uuuuuu
 ```
 
 where YYYMMDD_hhmmss_uuuuuu is the name of the night directory. This will take a while to run, and when it is done, it will generate a file called CALSTARS (which will hold information about detected stars on images), and FTPdetectinfo file which will hold information about detected meteors.
+
+
+## Donate!
+
+This project is run by volounteers in their free time. Show you appreciation for the project by donating!
+
+**Crypo wallets:**
+
+- ***Bitcoin:*** 3M3toMCSxzEvxtLHmR63LBfGeYbruAWvF1
+- ***Bitcoin Cash:*** 1D7NbwZ7p61sgXA5kqUNAUHHyvGkfJiP9s
+- ***Bitcoin Gold:*** GbfbNuAn58DKYNvEWMf9m2Fbcupc8xoPJj
+- ***Ethereum:*** 0x2731cbd765514c6a2675be46bfff05bd4b8a5945
+- ***Litecoin:*** LiBZkdgzEooJNfrmcYw4MQtUK8ZBGYmuix
+
+
+## Citations
+
+For academic use, please cite the paper:
+>Vida, D., Zubović, D., Šegon, D., Gural, P., & Cupec, R. (2016). *Open-source meteor detection software for low-cost single-board computers*. **Proceedings of the IMC2016, Egmond, The Netherlands**, pp. 307-318
