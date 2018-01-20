@@ -1,0 +1,1816 @@
+{
+	"auto_complete":
+	{
+		"selected_items":
+		[
+			[
+				"Dev",
+				"deviceID"
+			],
+			[
+				"device",
+				"deviceID\tstatement"
+			],
+			[
+				"dev",
+				"deviceID\tstatement"
+			],
+			[
+				"Get",
+				"GetProfiles"
+			],
+			[
+				"H",
+				"H264"
+			],
+			[
+				"op",
+				"options\tstatement"
+			],
+			[
+				"img_se",
+				"img_settings\tstatement"
+			],
+			[
+				"img_s",
+				"img_settings\tstatement"
+			],
+			[
+				"img_",
+				"img_settings\tstatement"
+			],
+			[
+				"ut",
+				"utcnow\tfunction"
+			],
+			[
+				"min",
+				"minute\tinstance"
+			],
+			[
+				"da",
+				"day\tinstance"
+			],
+			[
+				"datet",
+				"datetime\tmodule"
+			],
+			[
+				"matched_ca",
+				"matched_cat_stars\tstatement"
+			],
+			[
+				"to",
+				"tolist"
+			],
+			[
+				"leve",
+				"level_list\tstatement"
+			],
+			[
+				"matched",
+				"matched_cat_inds\tstatement"
+			],
+			[
+				"global",
+				"global_dist_list\tstatement"
+			],
+			[
+				"dist",
+				"dist_list\tstatement"
+			],
+			[
+				"sca",
+				"scatter\tfunction"
+			],
+			[
+				"matched_img",
+				"matched_img_stars\tstatement"
+			],
+			[
+				"cat_",
+				"cat_y\tstatement"
+			],
+			[
+				"math",
+				"matched"
+			],
+			[
+				"matche",
+				"matched_stars\tstatement"
+			],
+			[
+				"match",
+				"matched_stars\tstatement"
+			],
+			[
+				"max",
+				"max_radius\tparam"
+			],
+			[
+				"im_s",
+				"im_star_y\tstatement"
+			],
+			[
+				"x",
+				"X_res\tstatement"
+			],
+			[
+				"star",
+				"star_gnom\tstatement"
+			],
+			[
+				"star_",
+				"star_gnom\tstatement"
+			],
+			[
+				"catalog",
+				"catalog_stars\tparam"
+			],
+			[
+				"cata",
+				"catalog_stars\tstatement"
+			],
+			[
+				"dat",
+				"date2JD\tfunction"
+			],
+			[
+				"stars",
+				"stars_list\tstatement"
+			],
+			[
+				"cals",
+				"calstars\tstatement"
+			],
+			[
+				"pla",
+				"plate_tool\tstatement"
+			],
+			[
+				"dec",
+				"dec_d"
+			],
+			[
+				"plae",
+				"platepar\tstatement"
+			],
+			[
+				"plate",
+				"platepar_name"
+			],
+			[
+				"file",
+				"file_list\tstatement"
+			],
+			[
+				"li",
+				"listdir\tfunction"
+			],
+			[
+				"live",
+				"live_view"
+			],
+			[
+				"flat",
+				"flat_struct\tstatement"
+			],
+			[
+				"cl",
+				"clock\tfunction"
+			],
+			[
+				"dtyp",
+				"dtype_info\tstatement"
+			],
+			[
+				"dir",
+				"dir_path"
+			],
+			[
+				"flat_",
+				"flat_struct"
+			],
+			[
+				"load",
+				"loadFlat\tfunction"
+			],
+			[
+				"app",
+				"applyFlat\tfunction"
+			],
+			[
+				"Flat",
+				"FlatStruct\tclass"
+			],
+			[
+				"as",
+				"astype"
+			],
+			[
+				"input",
+				"input_type\tstatement"
+			],
+			[
+				"exta",
+				"extra_files\tstatement"
+			],
+			[
+				"ext",
+				"extra_files\tstatement"
+			],
+			[
+				"file_",
+				"file_name\tstatement"
+			],
+			[
+				"extr",
+				"extra_file"
+			],
+			[
+				"extra",
+				"extra_files\tparam"
+			],
+			[
+				"Noe",
+				"None\tinstance"
+			],
+			[
+				"median",
+				"median_list\tstatement"
+			],
+			[
+				"read",
+				"readFF\tfunction"
+			],
+			[
+				"ff_lis",
+				"ff_list_good\tstatement"
+			],
+			[
+				"ge",
+				"getMiddleTimeFF\tfunction"
+			],
+			[
+				"ff_li",
+				"ff_list_good\tstatement"
+			],
+			[
+				"prin",
+				"print_function\tstatement"
+			],
+			[
+				"RA",
+				"RA_d"
+			],
+			[
+				"inf",
+				"info"
+			],
+			[
+				"local_fi",
+				"local_file_size\tstatement"
+			],
+			[
+				"local_fiel",
+				"local_file_size\tstatement"
+			],
+			[
+				"upl",
+				"upload_manager\tstatement"
+			],
+			[
+				"remote_",
+				"remote_dir"
+			],
+			[
+				"archive",
+				"archive_name\tstatement"
+			],
+			[
+				"up",
+				"upload_manager\tparam"
+			],
+			[
+				"uplo",
+				"upload_manager"
+			],
+			[
+				"uploa",
+				"upload_manager\tstatement"
+			],
+			[
+				"sto",
+				"stop"
+			],
+			[
+				"conf",
+				"config\tstatement"
+			],
+			[
+				"archi",
+				"archive_name\tstatement"
+			],
+			[
+				"ex",
+				"expanduser\tfunction"
+			],
+			[
+				"par",
+				"parser\tparam"
+			],
+			[
+				"e",
+				"expanduser\tfunction"
+			],
+			[
+				"s",
+				"split\tfunction"
+			],
+			[
+				"pa",
+				"path\tmodule"
+			],
+			[
+				"vali",
+				"validFFName\tfunction"
+			],
+			[
+				"FF",
+				"FFfile\tmodule"
+			],
+			[
+				"fielsum",
+				"fieldsum_files\tstatement"
+			],
+			[
+				"fieldsu",
+				"fieldsum_files\tstatement"
+			],
+			[
+				"cap",
+				"captured_path\tstatement"
+			],
+			[
+				"night",
+				"night_archive_dir"
+			],
+			[
+				"archiv",
+				"archiveFieldsums"
+			],
+			[
+				"field",
+				"fieldsum_archive_name\tstatement"
+			],
+			[
+				"sta",
+				"station_code\tstatement"
+			],
+			[
+				"dt",
+				"dt_obj\tparam"
+			],
+			[
+				"sort",
+				"sort_keys\tparam"
+			],
+			[
+				"pp",
+				"pp_file\tstatement"
+			],
+			[
+				"cam",
+				"camno"
+			],
+			[
+				"upda",
+				"update"
+			],
+			[
+				"text",
+				"text_str\tstatement"
+			],
+			[
+				"gamma",
+				"gamma_adj_factor\tparam"
+			],
+			[
+				"gamm",
+				"img_gamma"
+			],
+			[
+				"ma",
+				"maxpixel\tstatement"
+			],
+			[
+				"UT",
+				"UT_corr\tstatement"
+			],
+			[
+				"cop",
+				"copy2\tfunction"
+			],
+			[
+				"calib",
+				"calib_string\tstatement"
+			],
+			[
+				"date",
+				"datetime\tclass"
+			],
+			[
+				"mete",
+				"meteor_list"
+			],
+			[
+				"time_da",
+				"time_data\tstatement"
+			],
+			[
+				"time_d",
+				"time_data"
+			],
+			[
+				"second",
+				"seconds"
+			],
+			[
+				"tiem",
+				"timedelta\tclass"
+			],
+			[
+				"time",
+				"time_beg\tstatement"
+			],
+			[
+				"pos",
+				"pos_angle_ref\tstatement"
+			],
+			[
+				"meteor_",
+				"meteor_picks\tstatement"
+			],
+			[
+				"meteo",
+				"meteor_data\tstatement"
+			],
+			[
+				"pri",
+				"print_function\tstatement"
+			],
+			[
+				"meter",
+				"meteor_list"
+			],
+			[
+				"entr",
+				"entry_counter\tstatement"
+			],
+			[
+				"ent",
+				"entry_counter\tstatement"
+			],
+			[
+				"ff_",
+				"ff_directory\tparam"
+			],
+			[
+				"sec",
+				"secs\tstatement"
+			],
+			[
+				"ra_",
+				"ra_h\tstatement"
+			],
+			[
+				"mag",
+				"mag_0\tstatement"
+			],
+			[
+				"rot",
+				"rot_param\tparam"
+			],
+			[
+				"xy",
+				"XY2CorrectedRADec\tfunction"
+			],
+			[
+				"Pla",
+				"PlateparCMN\tclass"
+			],
+			[
+				"updat",
+				"update_image"
+			],
+			[
+				"scale",
+				"scale_y\tstatement"
+			],
+			[
+				"scal",
+				"scale_x"
+			],
+			[
+				"fov",
+				"fov_w\tstatement"
+			]
+		]
+	},
+	"buffers":
+	[
+		{
+			"file": "RMS/Astrometry/ApplyAstrometry.py",
+			"settings":
+			{
+				"buffer_size": 30785,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/Formats/FFfile.py",
+			"settings":
+			{
+				"buffer_size": 7562,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/Astrometry/SkyFit.py",
+			"settings":
+			{
+				"buffer_size": 45076,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/StartCapture.py",
+			"settings":
+			{
+				"buffer_size": 20288,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "RMS/UploadManager.py",
+			"settings":
+			{
+				"buffer_size": 11670,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/Compression.py",
+			"settings":
+			{
+				"buffer_size": 12268,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "RMS/BufferedCapture.py",
+			"settings":
+			{
+				"buffer_size": 5367,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": ".config",
+			"settings":
+			{
+				"buffer_size": 8770,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/VideoExtraction.py",
+			"settings":
+			{
+				"buffer_size": 18208,
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/Detection.py",
+			"settings":
+			{
+				"buffer_size": 42294,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "README.md",
+			"settings":
+			{
+				"buffer_size": 11944,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "FILES_TO_UPLOAD.inf",
+			"settings":
+			{
+				"buffer_size": 0,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/ConfigReader.py",
+			"settings":
+			{
+				"buffer_size": 26063,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		}
+	],
+	"build_system": "Anaconda Python Builder",
+	"build_system_choices":
+	[
+		[
+			[
+				[
+					"Anaconda Python Builder",
+					""
+				],
+				[
+					"Packages/Python/Python.sublime-build",
+					""
+				],
+				[
+					"Packages/Python/Python.sublime-build",
+					"Syntax Check"
+				]
+			],
+			[
+				"Anaconda Python Builder",
+				""
+			]
+		],
+		[
+			[
+				[
+					"Packages/C++/C++ Single File.sublime-build",
+					""
+				],
+				[
+					"Packages/C++/C++ Single File.sublime-build",
+					"Run"
+				]
+			],
+			[
+				"Packages/C++/C++ Single File.sublime-build",
+				""
+			]
+		],
+		[
+			[
+				[
+					"Packages/C++/C++ Single File.sublime-build",
+					""
+				],
+				[
+					"Packages/C++/C++ Single File.sublime-build",
+					"Run"
+				],
+				[
+					"Packages/User/cpp.sublime-build",
+					""
+				]
+			],
+			[
+				"Packages/C++/C++ Single File.sublime-build",
+				""
+			]
+		],
+		[
+			[
+				[
+					"Packages/C++/C++ Single File.sublime-build",
+					""
+				],
+				[
+					"Packages/C++/C++ Single File.sublime-build",
+					"Run"
+				],
+				[
+					"Packages/User/gcc.sublime-build",
+					""
+				]
+			],
+			[
+				"Packages/C++/C++ Single File.sublime-build",
+				""
+			]
+		],
+		[
+			[
+				[
+					"Packages/Python/Python.sublime-build",
+					""
+				],
+				[
+					"Packages/Python/Python.sublime-build",
+					"Syntax Check"
+				]
+			],
+			[
+				"Packages/Python/Python.sublime-build",
+				""
+			]
+		],
+		[
+			[
+				[
+					"Packages/Python/Python.sublime-build",
+					""
+				],
+				[
+					"Packages/Python/Python.sublime-build",
+					"Syntax Check"
+				],
+				[
+					"Packages/User/cpp.sublime-build",
+					""
+				]
+			],
+			[
+				"Packages/Python/Python.sublime-build",
+				""
+			]
+		]
+	],
+	"build_varint": "",
+	"command_palette":
+	{
+		"height": 92.0,
+		"last_filter": "install pa",
+		"selected_items":
+		[
+			[
+				"install pa",
+				"Package Control: Install Package"
+			],
+			[
+				"package control in",
+				"Package Control: Install Package"
+			],
+			[
+				"package co",
+				"Package Control: List Packages"
+			],
+			[
+				"package",
+				"Install Package Control"
+			]
+		],
+		"width": 449.0
+	},
+	"console":
+	{
+		"height": 0.0,
+		"history":
+		[
+		]
+	},
+	"distraction_free":
+	{
+		"menu_visible": true,
+		"show_minimap": false,
+		"show_open_files": false,
+		"show_tabs": false,
+		"side_bar_visible": false,
+		"status_bar_visible": false
+	},
+	"expanded_folders":
+	[
+		"/home/dvida/source/RMS",
+		"/home/dvida/source/RMS/RMS",
+		"/home/dvida/source/RMS/RMS/Astrometry",
+		"/home/dvida/source/RMS/RMS/Formats",
+		"/home/dvida/source/RMS/RMS/Routines",
+		"/home/dvida/source/RMS/Utils"
+	],
+	"file_history":
+	[
+		"/home/dvida/Desktop/onvif_test.py",
+		"/home/dvida/source/RMS/.config",
+		"/home/dvida/Desktop/opencv3_install.sh",
+		"/home/dvida/source/RMS/TODO",
+		"/home/dvida/source/RMS/opencv3_install.sh",
+		"/home/dvida/Desktop/rtsp_test.py",
+		"/home/dvida/source/RollingShutterSim/RollingShutterSim.py",
+		"/home/dvida/Desktop/vlc_test.py",
+		"/home/dvida/Desktop/vlc.py",
+		"/home/dvida/Desktop/opencv-python-ipcam.py",
+		"/home/dvida/source/RMS/RMS/Astrometry/ACFnew.py",
+		"/home/dvida/DATA/Movies/films to watch.txt",
+		"/home/dvida/source/RMS/RMS/Routines/Image.py",
+		"/home/dvida/DATA/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/CA0001_20171018_230520_894458_detected/CALSTARS_CA0001_CA0001_20171018_230520_894458_detected.txt",
+		"/home/dvida/DATA/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/CA0001_20171018_230520_894458_detected/platepar_cmn2010.cal",
+		"/home/dvida/source/RMS/RMS/Formats/Platepar.py",
+		"/home/dvida/source/RMS/RMS/Misc.py",
+		"/home/dvida/source/RMS/RMS/ArchiveDetections.py",
+		"/home/dvida/source/cmn_binviewer/CMN_binViewer.py",
+		"/home/dvida/source/RMS/RMS/DetectStarsAndMeteors.py",
+		"/home/dvida/source/RMS/RMS/ExtractStars.py",
+		"/home/dvida/source/RMS/RMS/LiveViewer.py",
+		"/home/dvida/Desktop/RollingShutterSim.py",
+		"/home/dvida/source/RMS/Utils/PlotFieldsums.py",
+		"/home/dvida/source/RMS/Utils/MakeFlat.py",
+		"/home/dvida/source/RMS/RMS/UploadManager.py",
+		"/home/dvida/source/cmn_binviewer/FF_bin_suite.py",
+		"/home/dvida/source/RMS/RMS/BufferedCapture.py",
+		"/home/dvida/DATA/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/CA0001_20171018_230520_894458_detected/FTPdetectinfo_CA0001_20171018_230520_894458_detected.txt",
+		"/home/dvida/DATA/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/CA0001_20171018_230520_894458_detected/CALSTARS_CA0001_CA0001_20171018_230520_894458.txt",
+		"/home/dvida/source/RMS/RMS/QueuedPool.py",
+		"/home/dvida/DATA/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/CA0001_20171018_230520_894458_detected/FTPdetectinfo_CA0001_20171018_230520_894458.txt",
+		"/home/dvida/source/RMS/RMS/Routines/MaskImage.py",
+		"/home/dvida/source/RMS/RMS/Formats/FFStruct.py",
+		"/home/dvida/source/RMS/RMS/Compression.py",
+		"/home/dvida/source/RMS/RMS/Formats/BSC.py",
+		"/home/dvida/source/RMS/FILES_TO_UPLOAD.inf",
+		"/home/dvida/source/cmn_binviewer/CMN_binViewer",
+		"/home/dvida/source/RMS/RMS/ConfigReader.py",
+		"/home/dvida/WINDOWS/Users/delorayn1/Desktop/20170813_213506_620678/platepar_cmn2010.cal.json",
+		"/home/dvida/source/RMS/RMS/Formats/FFbin.py",
+		"/home/dvida/source/RMS/RMS/Astrometry/AstrometryCheckFit.py",
+		"/home/dvida/Desktop/test.txt",
+		"/home/dvida/source/RMS/RMS/Logger.py",
+		"/home/dvida/source/RMS/RMS/StartCapture.py",
+		"/home/dvida/source/RMS/RMS/FILES_TO_UPLOAD.inf",
+		"/home/dvida/source/RMS/README.md",
+		"/home/dvida/source/RMS/requirements.txt",
+		"/home/dvida/source/RMS/Utils/GenerateThumbnails.py",
+		"/home/dvida/Desktop/test.py",
+		"/home/dvida/RMS_data/CapturedFiles/20170903_212942_285606/FTPdetectinfo_20170903_212942_285606.txt",
+		"/home/dvida/RMS_data/CapturedFiles/20170903_212942_285606/CALSTARS_CA0001_20170903_212942_285606.txt",
+		"/home/dvida/source/RMS/Utils/Grouping3DRunner.py",
+		"/home/dvida/source/RMS/RMS/Formats/FFfits.py",
+		"/home/dvida/source/RMS/RMS/Formats/FieldIntensities.py",
+		"/home/dvida/source/RMS/RMS/Formats/FTPdetectinfo.py",
+		"/home/dvida/source/RMS/RMS/Formats/FRbin.py",
+		"/home/dvida/source/RMS/RMS/Detection.py",
+		"/home/dvida/source/RMS/RMS/Routines/HT-cy_run.py",
+		"/home/dvida/source/RMS/Utils/FRbinViewer.py",
+		"/home/dvida/Desktop/platepar_cmn2010.cal",
+		"/home/dvida/Desktop/platepar_cmn2010.cal.json",
+		"/home/dvida/source/RMS/.gitignore",
+		"/home/dvida/source/saods9/BUILD.txt",
+		"/C/Users/delorayn1/Desktop/20170813_213506_620678/platepar_cmn2010.cal",
+		"/D/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit/CameraTimeOffsets.txt",
+		"/D/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit/CameraSites.txt",
+		"/D/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit/FTPdetectinfo_first_rpi.txt",
+		"/D/Dropbox/Apps/VSA2017 RMS data/PUB/20170817_183817_894457_chosen/platepar_cmn2010.cal",
+		"/D/Dropbox/HMM_backup/HMM_ADAPT/CAMS/RunFolder/STARS8TH_VBVRI.txt",
+		"/D/Dropbox/RPi Meteor Station/RMS/Catalogs/BSC5",
+		"/D/Dropbox/RPi Meteor Station/sky2kv4ra.dat",
+		"/D/Dropbox/RPi Meteor Station/RMS/Catalogs/BSC5_source.txt",
+		"/C/Users/delorayn1/Desktop/first_rpi_orbit/FTPdetectinfo_20170818_194846_698891_met.txt",
+		"/D/Dropbox/Apps/VSA2017 RMS data/104/20170818_194846_698891_detected/platepar_cmn2010.cal",
+		"/D/Dropbox/Apps/VSA2017 RMS data/PUB/20170818_183633_813117_detected/FTPdetectinfo_20170818_183633_813117_met.txt",
+		"/D/Dropbox/Apps/VSA2017 RMS data/PUB/20170818_183633_813117_detected/FTPdetectinfo.txt",
+		"/D/Dropbox/Apps/VSA2017 RMS data/104/20170818_194846_698891_detected/FTPdetectinfo_20170818_194846_698891_met.txt",
+		"/D/Dropbox/Apps/VSA2017 RMS data/PUB/20170818_183633_813117_detected/platepar_cmn2010.cal",
+		"/D/Dropbox/Apps/VSA2017 RMS data/PUB/20170818_183633_813117_detected/CALSTARS.txt",
+		"/D/Dropbox/Apps/VSA2017 RMS data/104/20170818_194846_698891_detected/FTPdetectinfo_20170818_194846_698891.txt",
+		"/C/Users/delorayn1/Desktop/20170813_213506_620678/FTPdetectinfo_20170813_213506_620678.txt",
+		"/C/Users/delorayn1/Desktop/20170813_213506_620678/FTPdetectinfo_20170813_213506_620678_uncalibrated.txt",
+		"/C/Users/delorayn1/Desktop/20170813_213506_620678/TEST.TXT",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/DetectStarsAndMeteors.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/StartCapture.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Detection.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Compression.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/Utils/FRbinViewer.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Astrometry/Conversions.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/ExtractStars.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/.config",
+		"/D/github-codes/cmn_binviewer/FF_bin_suite.py",
+		"/D/github-codes/cmn_binviewer/CMN_binViewer.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats/Platepar.py",
+		"/D/github-codes/cmn_binviewer/module_MTP2logsort.py",
+		"/D/github-codes/cmn_binviewer/module_exportLogsort.py",
+		"/D/github-codes/cmn_binviewer/module_confirmationClass.py",
+		"/D/github-codes/cmn_binviewer/module_CAMS2CMN.py",
+		"/C/Users/delorayn1/Desktop/20170813_213506_620678/CALSTARS010020170813_213506_620678.txt",
+		"/C/Users/delorayn1/Desktop/2017071819-Processed/M_2017071819VID_HMM.hmm",
+		"/C/Users/delorayn1/Desktop/2017071819-Processed/FTPdetectinfo_0459_2017_07_18.txt",
+		"/C/Users/delorayn1/Desktop/HMM_MTP_2010_05.cpp",
+		"/C/Users/delorayn1/Desktop/CriticalCasesAstrometryCheckFit_CAMS2CMN_01.cpp",
+		"/D/Dropbox/HMM_backup/HMM_ppconv/temp/2009/Tican/08_Processed/2007081213-Processed/2007081213-Detected_01/M_2007081213TIA_HMM.hmm",
+		"/C/Users/delorayn1/Desktop/ConfirmedFiles/2017071819-Processed/M_2017071819VID_HMM.hmm",
+		"/D/Dropbox/UWO Master's/Projects/OPTICS meteor clustering/PlotAnalysisSuite.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Astrometry/CyFunctions.pyx",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Routines/Grouping3Dcy.pyx",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/QueuedPool.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/DeleteOldObservations.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Astrometry/AstrometryCheckFit.py",
+		"/C/Users/delorayn1/Desktop/20170813_213506_620678/platepar.cal",
+		"/C/Users/delorayn1/Desktop/2017071819-Processed/Meteor.hmm",
+		"/C/Users/delorayn1/Desktop/VID.cal",
+		"/C/Users/delorayn1/Desktop/platepar_cmn2010.cal",
+		"/D/Moji dokumenti/Denis/Programiranje/Python/Tortoise Checkout/HMM_MTP_3rdXY_Photometry_01.c",
+		"/C/Users/delorayn1/Desktop/2017071819-Processed/platepar_cmn2010.cal",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Astrometry/CyFunctions.c",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Astrometry/SkyFit.py",
+		"/D/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/20170730_012105_874590_detected/FTPdetectinfo_20170730_012105_874590.txt",
+		"/D/Dropbox/Apps/Elginfield RPi RMS data/ArchivedFiles/20170730_012105_874590_detected/platepar_cmn2010.cal",
+		"/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/Utils.vb",
+		"/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/CalibrationStars.vb",
+		"/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/Math.vb",
+		"/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/Main.vb",
+		"/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/Image.vb",
+		"/C/Users/delorayn1/Desktop/CMN_SkyFit/CMN_SkyFit/MainForm.vb"
+	],
+	"find":
+	{
+		"height": 34.0
+	},
+	"find_in_files":
+	{
+		"height": 90.0,
+		"where_history":
+		[
+			"/home/dvida/source/RMS/",
+			"D:\\Dropbox\\RPi Meteor Station\\RMS",
+			"D:\\Dropbox\\RPi Meteor Station\\RMS,C:\\Users\\delorayn1\\Desktop\\CMN_SkyFit",
+			"D:\\Dropbox\\RPi Meteor Station\\RMS",
+			"/home/dvida/source/RMS/",
+			"/home/dvida/source/RMS/RMS",
+			"/home/dvida/source/meteor-uwo/",
+			"/home/dvida/source/meteor-uwo/perseid",
+			"/home/dvida/Dropbox/HMM_backup",
+			"/home/dvida/source/meteor-uwo/",
+			"/home/dvida/source/meteor-uwo/morb",
+			"/home/dvida/source/meteor-weryk-mirfit/",
+			"/home/dvida/source/meteor-weryk-mirfit/mirfit",
+			"/home/dvida/source/meteor-weryk-mirfit/",
+			"/home/dvida/source/meteor-weryk-mirfit/mirfit",
+			"/home/dvida/source/main/meteor-uwo",
+			"/home/dvida/source/meteor-mirfit-new/",
+			"/home/dvida/source/meteor-mirfit-new/mirfit",
+			"/home/dvida/source/meteor-uwo/starmap/",
+			"/home/dvida/source/meteor-uwo/",
+			"/home/dvida/source/meteor-uwo/starmap",
+			"/home/dvida/source/meteor-mirfit-new",
+			"/home/dvida/source/meteor-uwo/",
+			"/home/dvida/source/meteor-mirfit-new/",
+			"/home/dvida/source/meteor-mirfit-new/mirfit",
+			"/home/dvida/source/meteor-mirfit-new"
+		]
+	},
+	"find_state":
+	{
+		"case_sensitive": false,
+		"find_history":
+		[
+			"upload_ma",
+			"hostname",
+			"configpa",
+			"true",
+			"z",
+			"y",
+			"x",
+			"libvlc_new",
+			"cv.",
+			"deviceID",
+			"dt",
+			"dT",
+			"dt",
+			"self.run_ex",
+			".startTime1",
+			".stop",
+			"c.",
+			"bc.stopCapture",
+			"c.",
+			"self.run_exited",
+			"y",
+			"matched_stars",
+			"self.",
+			"filed",
+			"platepar_fmt",
+			"json",
+			"live_view.s",
+			"wait(",
+			"stop_cap",
+			"live_view",
+			"tkinter",
+			"live_view",
+			"liveview",
+			"mainloop",
+			"xy2cor",
+			"makefla",
+			"flat_stru",
+			"detector.add",
+			"runcap",
+			"dir_path",
+			"print",
+			"flat_str",
+			"dir_path",
+			"sys.argv[1]",
+			"max",
+			"flat_scalar",
+			"img_array",
+			"_scalar",
+			"ff.",
+			"_scalar",
+			"flat",
+			"== None",
+			"== No",
+			"is None",
+			"is not No",
+			"!= None",
+			"== None",
+			"= None",
+			"night_archive_di",
+			"flat",
+			"dir_pa",
+			"star_catalog_path",
+			"100",
+			"np.median",
+			"median",
+			"date2jd",
+			"getmidd",
+			"stars",
+			"self.",
+			"calstars",
+			"exit",
+			"@param",
+			"@param ",
+			"w_pix",
+			"@param",
+			"rot_param",
+			"xy2corre",
+			"raDecToCorrectedXY",
+			"radec",
+			"radec2co",
+			"ra_catalog",
+			"rot_param",
+			"calcRefCentre",
+			"calcrefce",
+			"xy2corr",
+			"altaz2ra",
+			"log",
+			"queuedpool",
+			"log.",
+			"logdebug",
+			"log.",
+			"print",
+			"upload_manager",
+			"uploadmana",
+			"logger",
+			"compressor",
+			"compression",
+			"run",
+			"log.",
+			"upload_manager =",
+			"upload_manager.stop",
+			"upload_manager_",
+			"print",
+			"runCapture",
+			"archivedete",
+			"uploadsf",
+			"upload_queue_file",
+			"sys.exit",
+			"archivedete",
+			"archivede",
+			"sys.exit",
+			"archive",
+			"captured_dir",
+			"width",
+			"captured_dir",
+			"weavearg",
+			"data_pa",
+			"readff",
+			"cv2",
+			".quit",
+			"fovinp",
+			"'CALSTARS_",
+			"'CALSTARS",
+			"th",
+			"'CALSTARS'",
+			"'CALSTARS_'",
+			"\"CALSTARS_\"",
+			"\"CALSTARS\""
+		],
+		"highlight": true,
+		"in_selection": false,
+		"preserve_case": false,
+		"regex": false,
+		"replace_history":
+		[
+			"is None",
+			"is not None",
+			"is None",
+			"Platepar",
+			".pos_angle_ref",
+			"PlateparCMN",
+			"threshold",
+			"]",
+			"[",
+			"hv -",
+			"hu -",
+			"",
+			" ",
+			"",
+			"self.ax",
+			"cos",
+			"sin",
+			"cartesianDistance"
+		],
+		"reverse": false,
+		"show_context": true,
+		"use_buffer2": true,
+		"whole_word": false,
+		"wrap": true
+	},
+	"groups":
+	[
+		{
+			"selected": 7,
+			"sheets":
+			[
+				{
+					"buffer": 0,
+					"file": "RMS/Astrometry/ApplyAstrometry.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 30785,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								0,
+								0
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 9242.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 11,
+					"type": "text"
+				},
+				{
+					"buffer": 1,
+					"file": "RMS/Formats/FFfile.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 7562,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								2184,
+								2184
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 813.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 10,
+					"type": "text"
+				},
+				{
+					"buffer": 2,
+					"file": "RMS/Astrometry/SkyFit.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 45076,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								0,
+								0
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 12498.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 9,
+					"type": "text"
+				},
+				{
+					"buffer": 3,
+					"file": "RMS/StartCapture.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 20288,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								13931,
+								13931
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 6543.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 1,
+					"type": "text"
+				},
+				{
+					"buffer": 4,
+					"file": "RMS/UploadManager.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 11670,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								4806,
+								4806
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 2011.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 2,
+					"type": "text"
+				},
+				{
+					"buffer": 5,
+					"file": "RMS/Compression.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 12268,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								8842,
+								8842
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 3588.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 7,
+					"type": "text"
+				},
+				{
+					"buffer": 6,
+					"file": "RMS/BufferedCapture.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 5367,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								2682,
+								2682
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 1215.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 4,
+					"type": "text"
+				},
+				{
+					"buffer": 7,
+					"file": ".config",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 8770,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								1342,
+								1342
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Text/Plain text.tmLanguage"
+						},
+						"translation.x": 0.0,
+						"translation.y": 180.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 0,
+					"type": "text"
+				},
+				{
+					"buffer": 8,
+					"file": "RMS/VideoExtraction.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 18208,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								16079,
+								16079
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 198.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 8,
+					"type": "text"
+				},
+				{
+					"buffer": 9,
+					"file": "RMS/Detection.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 42294,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								27827,
+								27827
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 12873.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 12,
+					"type": "text"
+				},
+				{
+					"buffer": 10,
+					"file": "README.md",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 11944,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								4700,
+								4700
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Markdown/Markdown.sublime-syntax",
+							"translate_tabs_to_spaces": false
+						},
+						"translation.x": 0.0,
+						"translation.y": 255.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 5,
+					"type": "text"
+				},
+				{
+					"buffer": 11,
+					"file": "FILES_TO_UPLOAD.inf",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 0,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								0,
+								0
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Text/Plain text.tmLanguage"
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 6,
+					"type": "text"
+				},
+				{
+					"buffer": 12,
+					"file": "RMS/ConfigReader.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 26063,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								1914,
+								1914
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 892.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 3,
+					"type": "text"
+				}
+			]
+		}
+	],
+	"incremental_find":
+	{
+		"height": 23.0
+	},
+	"input":
+	{
+		"height": 31.0
+	},
+	"layout":
+	{
+		"cells":
+		[
+			[
+				0,
+				0,
+				1,
+				1
+			]
+		],
+		"cols":
+		[
+			0.0,
+			1.0
+		],
+		"rows":
+		[
+			0.0,
+			1.0
+		]
+	},
+	"menu_visible": true,
+	"output.exec":
+	{
+		"height": 201.0
+	},
+	"output.find_results":
+	{
+		"height": 0.0
+	},
+	"pinned_build_system": "",
+	"project": "RMS.sublime-project",
+	"replace":
+	{
+		"height": 62.0
+	},
+	"save_all_on_build": true,
+	"select_file":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_project":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_symbol":
+	{
+		"height": 392.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 392.0
+	},
+	"selected_group": 0,
+	"settings":
+	{
+	},
+	"show_minimap": true,
+	"show_open_files": false,
+	"show_tabs": true,
+	"side_bar_visible": true,
+	"side_bar_width": 184.0,
+	"status_bar_visible": true,
+	"template_settings":
+	{
+	}
+}

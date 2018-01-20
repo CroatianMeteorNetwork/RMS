@@ -1,0 +1,54 @@
+
+High priority:
+--------------
+
+- Photometry - estimate vignetting from star movements across the FOV
+
+- Solve logger picking so the code can run on Windows
+
+- Calculate fireball centroids and put them to a separate FTPdetectinfo file
+
+- Python 3 compatibility
+	- convert all weave code to cython
+
+- Document SkyFit and astrometry
+
+- Document server uploading
+
+
+
+Low priority:
+----------------
+
+- Rolling shutter correction
+
+- Manual reduction tool
+	- load a list of FF files
+	- load a platepar
+	- X/Y, alt/az, ra/dec on mouse position
+	- centroid with aperature
+	- frame by frame
+	- write out results in FTPdetectinfo
+
+
+- Generate doc page
+
+
+
+Things to resolve before 1.0 release:
+-------------------------------------
+
+- Cleaning code for multiplatform use (ie. os.sep, abstracting away hardware interface layer)
+
+- .deb installer & storing everything on usual locations (/var/log, /usr/local/bin, /opt...)
+
+- Windows installer & storing everything in usual Win dirs (C:/Program Files/...)
+
+
+
+DONE:
+-----
+
+- Add check if camera is open before capture
+
+- Option for non-interlaced video (deinterlace_flag=-1)

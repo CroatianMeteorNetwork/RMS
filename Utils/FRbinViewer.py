@@ -1,137 +1,143 @@
+""" Showing fireball detections from FR bin files. """
+
+# RPi Meteor Station
+# Copyright (C) 2017  Dario Zubovic, Denis Vida
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+from __future__ import print_function, absolute_import, division
+
 import cv2
 import numpy as np
-import sys, os
+import os
+import sys
 
-# FFbin handling stolen from FF_bin_suite.py in CMN_binViewer
+import RMS.ConfigReader as cr
+from RMS.Formats import FFfile, FRbin
 
-class ff_struct:
-    """ Default structure for a FF*.bin file.
-    """
-    def __init__(self):
-        self.nrows = 0
-        self.ncols = 0
-        self.nbits = 0
-        self.first = 0
-        self.camno = 0
-        self.maxpixel = 0
-        self.maxframe = 0
-        self.avepixel = 0
-        self.stdpixel = 0
-        
-def readFF(filename):
-    """Function for reading FF bin files.
-    Returns a structure that allows access to individual parameters of the image
-    e.g. print readFF("FF300_20140802_205545_600_0090624.bin").nrows to print out the number of rows
-    e.g. print readFF("FF300_20140802_205545_600_0090624.bin").maxpixel to print out the array of nrows*ncols numbers which represent the image
-    INPUTS:
-        filename: file name from the file to be read
-    """
 
-    fid = open(filename, 'rb')
-    ff = ff_struct()
-    ff.nrows = np.fromfile(fid, dtype=np.uint32, count = 1)
-    ff.ncols = np.fromfile(fid, dtype=np.uint32, count = 1)
-    ff.nbits = np.fromfile(fid, dtype=np.uint32, count = 1)
-    ff.first = np.fromfile(fid, dtype=np.uint32, count = 1)
-    ff.camno = np.fromfile(fid, dtype=np.uint32, count = 1)
-
-    N = ff.nrows * ff.ncols
-
-    ff.maxpixel = np.reshape (np.fromfile(fid, dtype=np.uint8, count = N), (ff.nrows, ff.ncols))
-    ff.maxframe = np.reshape (np.fromfile(fid, dtype=np.uint8, count = N), (ff.nrows, ff.ncols))
-    ff.avepixel = np.reshape (np.fromfile(fid, dtype=np.uint8, count = N), (ff.nrows, ff.ncols))
-    ff.stdpixel = np.reshape (np.fromfile(fid, dtype=np.uint8, count = N), (ff.nrows, ff.ncols))
-
-    return ff
-
-class fr_struct:
-    """ Default structure for a FF*.bin file.
-    """
-    def __init__(self):
-        self.lines = 0
-        self.frameNum = []
-        self.yc = []
-        self.xc = []
-        self.t = []
-        self.size = []
-        self.frames = []
-        
-def readFR(filename):
-    fid = open(filename, 'rb')
-    fr = fr_struct()
-    fr.lines = np.fromfile(fid, dtype=np.uint32, count = 1)
+def view(dir_path, ff, fr, config):
+    """ Shows the detected fireball stored in the FR file. 
     
-    for i in range(fr.lines):
-        frameNum = np.fromfile(fid, dtype=np.uint32, count = 1)
-        yc = []
-        xc = []
-        t = []
-        size = []
-        frames = []
-        
-        for z in range(frameNum):
-            yc.append(np.fromfile(fid, dtype=np.uint32, count = 1))
-            xc.append(np.fromfile(fid, dtype=np.uint32, count = 1))
-            t.append(np.fromfile(fid, dtype=np.uint32, count = 1))
-            size.append(np.fromfile(fid, dtype=np.uint32, count = 1))
-            frames.append(np.reshape(np.fromfile(fid, dtype=np.uint8, count = size[-1]**2), (size[-1], size[-1])))
-        
-        fr.frameNum.append(frameNum)
-        fr.yc.append(yc)
-        fr.xc.append(xc)
-        fr.t.append(t)
-        fr.size.append(size)
-        fr.frames.append(frames)
+    Arguments:
+        dir_path: [str] Current directory.
+        ff: [str] path to the FF bin file
+        fr: [str] path to the FR bin file
+        config: [conf object] configuration structure
 
-    return fr
+    """
 
-def view(ff, fr):
-    if ff == None:
-        background = np.zeros((576, 720), np.uint8)
+    if ff is None:
+        background = np.zeros((config.height, config.width), np.uint8)
+
     else:
-        background = readFF(ff).maxpixel
+        background = FFfile.read(dir_path, ff).maxpixel
     
     name = fr
-    fr = readFR(fr)
+    fr = FRbin.read(dir_path, fr)
     
-    print "Number of lines:", fr.lines
+    print("Number of lines:", fr.lines[0])
     
+    first_image = True
+
     for i in range(fr.lines):
+
+        print('Frame,  Y ,  X , size')
+
         for z in range(fr.frameNum[i]):
+
+            # Get the center position of the detection on the current frame
             yc = fr.yc[i][z]
             xc = fr.xc[i][z]
+
+            # Get the frame number
             t = fr.t[i][z]
+
+            # Get the size of the window
             size = fr.size[i][z]
             
-            print "Center coords:", yc, xc, t, "size:", size
+            print("  {:3d}, {:3d}, {:3d}, {:d}".format(t, yc, xc, size))
+            
             
             y2 = 0
-            for y in range(yc - size/2, yc + size/2):
+
+            # Assign the detection pixels to the background image
+            for y in range(yc - size//2, yc + size//2):
+
                 x2 = 0
-                for x in range(xc - size/2,  xc + size/2):
+
+                for x in range(xc - size//2,  xc + size//2):
+
                     background[y, x] = fr.frames[i][z][y2, x2]
                     x2 += 1
+
                 y2 += 1
             
             cv2.imshow(name, background)
-            cv2.waitKey(200)
+
+            # If this is the first image, move it to the upper left corner
+            if first_image:
+                cv2.moveWindow(name, 0, 0)
+                first_image = False
+
+            cv2.waitKey(2*int(1000.0/config.fps))
     
     cv2.destroyWindow(name)
             
 
 if __name__ == "__main__":
-    fr_list = [fr for fr in os.listdir(".") if fr[0:2]=="FR"]
-    if(len(fr_list) == None):
-        print "No files found!"
+
+    if len(sys.argv) < 2:
+        print('Usage: python -m Utils.FRbinViewer /path/to/FRbin/dir/')
         sys.exit()
+
+    dir_path = sys.argv[1].replace('"', '')
+
+    # Load the configuration file
+    config = cr.parse(".config")
+
     
-    ff_list = [ff for ff in os.listdir(".") if ff[0:2]=="FF"]
-    
+
+    # Get the list of FR bin files (fireball detections) in the given directory
+    fr_list = [fr for fr in os.listdir(dir_path) if fr[0:2]=="FR" and fr.endswith('bin')]
+    fr_list = sorted(fr_list)
+
+    if not fr_list:
+
+        print("No files found!")
+        sys.exit()
+
+    # Get the list of FF bin files (compressed video frames)
+    ff_list = [ff for ff in os.listdir(dir_path) if FFfile.validFFName(ff)]
+    ff_list = sorted(ff_list)
+
     for fr in fr_list:
-        ffbin = None
+        ff_match = None
+
+        # Strip extensions
+        fr_name = ".".join(fr.split('.')[:-1])
+
+        # Find the matching FF bin to the given FR bin
         for ff in ff_list:
-            if ff[2:] == fr[2:]:
-                ffbin = ff
+
+            # Strip extensions
+            ff_name = ".".join(ff.split('.')[:-1])
+
+
+            if ff_name[2:] == fr_name[2:]:
+                ff_match = ff
                 break
         
-        view(ffbin, fr)
+        # View the fireball detection
+        view(dir_path, ff_match, fr, config)

@@ -1,3 +1,21 @@
+# Sublime files
+*.sublime-project
+*.sublime-workspace
+
+# Recorded BIN/FITS files
+FF*.bin
+FR*.bin
+FS*.bin
+FF*.fits
+FR*.fits
+FS*.fits
+
+# Platepar
+platepar*.cal
+
+# Flat
+flat.*
+
 # Eclipse
 .project
 .pydevproject
@@ -52,8 +70,8 @@ coverage.xml
 *.mo
 *.pot
 
-# Django stuff:
-*.log
+# Log files
+*.log*
 
 # Sphinx documentation
 docs/_build/
@@ -61,3 +79,6 @@ docs/_build/
 # PyBuilder
 target/
 *.npz
+
+# Cython compiled files
+*.pyxbldc

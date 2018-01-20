@@ -14,192 +14,276 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from multiprocessing import Process, Event
-from math import floor
-from scipy import weave
-import numpy as np
 import time
-import struct
 import logging
-from os import uname
-from RMS.VideoExtractor import Extractor
 
-class Compression(Process):
+from math import floor
+
+import numpy as np
+import multiprocessing
+
+
+from RMS.VideoExtraction import Extractor
+from RMS.Formats import FFfile, FFStruct
+from RMS.Formats import FieldIntensities
+
+# Import Cython functions
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+from RMS.CompressionCy import compressFrames
+
+
+# Get the logger from the main module
+log = logging.getLogger("logger")
+
+
+class Compressor(multiprocessing.Process):
     """Compress list of numpy arrays (video frames).
-    Output is in Flat-field Temporal Pixel (FTP) format like the one used by CAMS project (P. Jenniskens et al., 2011).
+
+        Output is in Four-frame Temporal Pixel (FTP) format. See the Jenniskens et al., 2011 paper about the
+        CAMS project for more info.
+
     """
 
     running = False
     
-    def __init__(self, array1, startTime1, array2, startTime2, camNum):
+    def __init__(self, data_dir, array1, startTime1, array2, startTime2, config, detector=None, 
+        live_view=None, flat_struct=None):
+        """
+
+        Arguments:
+            array1: first numpy array in shared memory of grayscale video frames
+            startTime1: float in shared memory that holds time of first frame in array1
+            array2: second numpy array in shared memory
+            startTime1: float in shared memory that holds time of first frame in array2
+            config: configuration class
+
+        Keyword arguments:
+            detector: [Detector object] Handle to Detector object used for running star extraction and
+                meteor detection.
+            live_view: [LiveViewer object] Handle to the LiveViewer object which will show in real time 
+                the latest maxpixel on the screen.
+            flat_struct: [Flat struct] Structure containing the flat field. None by default.
+
         """
         
-        @param array1: first numpy array in shared memory of grayscale video frames
-        @param startTime1: float in shared memory that holds time of first frame in array1
-        @param array2: second numpy array in shared memory
-        @param startTime1: float in shared memory that holds time of first frame in array2
-        @param camNum: camera ID (ie. 459)
-        """
+        super(Compressor, self).__init__()
         
-        super(Compression, self).__init__()
+        self.data_dir = data_dir
         self.array1 = array1
         self.startTime1 = startTime1
         self.array2 = array2
         self.startTime2 = startTime2
-        self.camNum = camNum
+        self.config = config
+
+        self.detector = detector
+        self.live_view = live_view
+        self.flat_struct = flat_struct
+
+        self.exit = multiprocessing.Event()
+
+        self.run_exited = multiprocessing.Event()
     
+
+
     def compress(self, frames):
-        """Compress frames to the FTP-compatible array.
+        """ Compress frames to the FTP-compatible array and extract sums of intensities per every field.
+
+        NOTE: The standard deviation calculation is performed in a non-standard way due to performance 
+            concerns. The end result is the same as a proper calculation due to the usage of low-precision
+            8-bit unsigned integers, so the difference does not matter.
         
-        @param frames: grayscale frames stored as 3d numpy array
-        @return: 3d numpy array in format: (N, y, x) where N is [0, 4)
+        Arguments:
+            frames: [3D ndarray] grayscale frames stored as 3d numpy array
+        
+        Return:
+            [3D ndarray]: in format: (N, y, x) where N is a member of [0, 1, 2, 3]
+
         """
         
-        out = np.empty((4, frames.shape[1], frames.shape[2]), np.uint8)
-        
-        code = """
-        unsigned int x, y, n, acc, var, max, max_frame, pixel, num_equal, mean;
-        unsigned short rand_count = 0;
-        
-        unsigned int height = Nframes[1];
-        unsigned int width = Nframes[2];
-        unsigned int frames_num = Nframes[0];
-        unsigned int frames_num_minus_one = frames_num - 1;
-        unsigned int frames_num_minus_two = frames_num - 2;
-        
-        unsigned char randomN[65536] = {};
-        unsigned int arand = 1;
-        for(n=0; n<65536; n++) {
-            arand = (arand * 32719 + 3) % 32749;
-            randomN[n] = (unsigned char)(32767.0 / (double)(1 + arand % 32767));
-        }
-            
-        for(y=0; y<height; y++) {
-            for(x=0; x<width; x++) {
-                acc = 0;
-                var = 0;
-                max = 0;
-                
-                // calculate mean, stddev, max, and max frame
-                for(n=0; n<frames_num; n++) {
-                    pixel = FRAMES3(n, y, x);
-                    acc += pixel;
-                    var += pixel*pixel;
-                    
-                    if(pixel > max) {
-                        max = pixel;
-                        max_frame = n;
-                        num_equal = 1;
-                    } else if(pixel == max) { // randomize taken frame number for max pixel
-                        num_equal++;
-                        
-                        rand_count++; //rand_count is unsigned short, which means it will overflow back to 0 after 65,535
-                        if(num_equal <= randomN[rand_count]) {
-                            max_frame = n;
-                        }
-                    }
-                }
-                
-                //mean
-                acc -= max;    // remove max pixel from average
-                mean = acc / frames_num_minus_one;
-                
-                //stddev
-                var -= max*max;     // remove max pixel
-                var -= acc*mean;    // subtract average squared sum of all values (acc*mean = acc*acc/frames_num_minus_one)
-                var = sqrt(var / frames_num_minus_two);
-                
-                // output results
-                OUT3(0, y, x) = max;
-                OUT3(1, y, x) = max_frame;
-                OUT3(2, y, x) = mean;
-                OUT3(3, y, x) = var;
-            }
-        }
-        """
-        
-        args = []
-        if uname()[4] == "armv7l":
-            args = ["-O3", "-mfpu=neon", "-mfloat-abi=hard", "-fdump-tree-vect-details", "-funsafe-loop-optimizations", "-ftree-loop-if-convert-stores"]
-        weave.inline(code, ['frames', 'out'], verbose=2, extra_compile_args=args, extra_link_args=args)
-        return out
+        # Run cythonized compression
+        ftp_array, fieldsum = compressFrames(frames, self.config.deinterlace_order)
+
+        return ftp_array, fieldsum
     
-    def save(self, arr, startTime, N, camNum):
-        """Write metadata and data array to FTP .bin file.
+
+
+    def saveFF(self, arr, startTime, N):
+        """ Write metadata and data array to FF file.
         
-        @param arr: 3d numpy array in format: (N, y, x) where N is [0, 4)
-        @param startTime: seconds and fractions of a second from epoch to first frame
-        @param N: frame counter (ie. 0000512)
-        @param camNum: camera ID (ie. 459)
+        Arguments:
+            arr: [3D ndarray] 3D numpy array in format: (N, y, x) where N is [0, 4)
+            startTime: [float] seconds and fractions of a second from epoch to first frame
+            N: [int] frame counter (ie. 0000512)
         """
         
-        dateTime = time.strftime("%Y%m%d_%H%M%S", time.localtime(startTime))
+        # Generate the name for the file
+        date_string = time.strftime("%Y%m%d_%H%M%S", time.gmtime(startTime))
+
+        # Calculate miliseconds
         millis = int((startTime - floor(startTime))*1000)
         
-        filename = str(camNum).zfill(3) +  "_" + dateTime + "_" + str(millis).zfill(3) + "_" + str(N).zfill(7)
+
+        filename = str(self.config.stationID).zfill(3) +  "_" + date_string + "_" + str(millis).zfill(3) \
+            + "_" + str(N).zfill(7)
+
+        ff = FFStruct.FFStruct()
+        ff.array = arr
+        ff.nrows = arr.shape[1]
+        ff.ncols = arr.shape[2]
+        ff.nbits = self.config.bit_depth
+        ff.nframes = 256
+        ff.first = N + 256
+        ff.camno = self.config.stationID
+        ff.fps = self.config.fps
         
-        image = "FF" + filename + ".bin"
-        
-        with open(image, "wb") as f:
-            f.write(struct.pack('I', arr.shape[1]))  # nrows
-            f.write(struct.pack('I', arr.shape[2]))  # ncols
-            f.write(struct.pack('I', 8))             # nbits
-            f.write(struct.pack('I', N+256))         # first
-            f.write(struct.pack('I', camNum))        # camera number
-        
-            arr.tofile(f)                            # image array
+        # Write the FF file
+        FFfile.write(ff, self.data_dir, filename, fmt=self.config.ff_format)
         
         return filename
     
+
+
     def stop(self):
-        """Stop the process.
+        """ Stop compression.
         """
         
+
         self.exit.set()
+        log.debug('Compression exit flag set')
+
+            
+        log.debug('Joining compression...')
+
+
+        t_beg = time.time()
+
+        # Wait until everything is done
+        while not self.run_exited.is_set():
+            
+            time.sleep(0.01)
+
+            # Do not wait more than a minute, just terminate the compression thread then
+            if (time.time() - t_beg) > 60:
+                log.debug('Waitied more than 60 seconds for compression to end, killing it...')
+                break
+
+
+        log.debug('Compression joined!')
+
+        self.terminate()
         self.join()
-        
+
+        # Return the detector and live viewer objects because they were updated in this namespace
+        return self.detector, self.live_view
+    
+
+
     def start(self):
-        """Start the process.
+        """ Start compression.
         """
         
-        self.exit = Event()
-        super(Compression, self).start()
-        
+        super(Compressor, self).start()
+    
+
+
     def run(self):
-        """Retrieve frames from list, convert, compress and save them.
+        """ Retrieve frames from list, convert, compress and save them.
         """
         
         n = 0
         
+        # Repeat until the compressor is killed from the outside
         while not self.exit.is_set():
-            while self.startTime1.value==0 and self.startTime2.value==0: #block until frames are available
-                if self.exit.is_set():    #exit function if process was stopped
-                    return
+
+            # Block until frames are available
+            while self.startTime1.value == 0 and self.startTime2.value == 0: 
+
+                # Exit function if process was stopped from the outside
+                if self.exit.is_set():
+
+                    log.debug('Compression run exit')
+                    self.run_exited.set()
+
+                    return None
+
+                time.sleep(0.1)
+
                 
+
             t = time.time()
+
             
             if self.startTime1.value != 0:
-                startTime = self.startTime1.value #retrieve time of first frame
-                frames = self.array1 #copy frames
+
+                # Retrieve time of first frame
+                startTime = self.startTime1.value 
+
+                # Copy frames
+                frames = self.array1 
                 self.startTime1.value = 0
+
             else:
-                startTime = self.startTime2.value #retrieve time of first frame
-                frames = self.array2 #copy frames
+
+                # Retrieve time of first frame
+                startTime = self.startTime2.value 
+
+                # Copy frames
+                frames = self.array2 
                 self.startTime2.value = 0
+
             
-            logging.debug("memory copy: " + str(time.time() - t) + "s")
+            log.debug("memory copy: " + str(time.time() - t) + "s")
             t = time.time()
             
-            compressed = self.compress(frames)
+            # Run the compression
+            compressed, field_intensities = self.compress(frames)
+
+            # Cut out the compressed frames to the proper size
+            compressed = compressed[:, :self.config.height, :self.config.width]
             
-            logging.debug("compression: " + str(time.time() - t) + "s")
+            log.debug("compression: " + str(time.time() - t) + "s")
             t = time.time()
             
-            filename = self.save(compressed, startTime, n*256, self.camNum)
+            # Save the compressed image
+            filename = self.saveFF(compressed, startTime, n*256)
             n += 1
             
-            logging.debug("saving: " + str(time.time() - t) + "s")
-            
-            ve = Extractor()
-            ve.start(frames, compressed, filename)
-    
+            log.debug("saving: " + str(time.time() - t) + "s")
+
+
+            # Save the extracted intensitites per every field
+            FieldIntensities.saveFieldIntensitiesBin(field_intensities, self.data_dir, filename)
+
+
+            # Run the extractor
+            extractor = Extractor(self.config, self.data_dir)
+            extractor.start(frames, compressed, filename)
+
+            # Fully format the filename (this could not have been done before as the extractor will add
+            # the FR prefix)
+            filename = "FF_" + filename + "." + self.config.ff_format
+
+
+            log.debug('Extractor started for: ' + filename)
+
+
+            # Run the detection on the file, if the detector handle was given
+            if self.detector is not None:
+
+                # Add the file to the detector queue
+                self.detector.addJob([self.data_dir, filename, self.config, self.flat_struct])
+
+
+            # Refresh the maxpixel currently shown on the screen
+            if self.live_view is not None:
+
+                # Add the image to the image queue
+                self.live_view.updateImage(compressed[0], filename + " maxpixel")
+
+
+
+        log.debug('Compression run exit')
+        self.run_exited.set()
+
+

@@ -17,12 +17,19 @@
 """ Timings of compression algorithm with various cases.
 """
 
-from RMS.Compression import Compression
+from RMS.Compression import Compressor
+import RMS.ConfigReader as cr
 import numpy as np
 import time
 import sys
 
-comp = Compression(None, None, None, None, 000)
+config = cr.parse(".config")
+comp = Compressor(None, None, None, None, None, config)
+
+
+# IMAGE SIZE
+WIDTH = 1280
+HEIGHT = 720
 
 def timing(img):
     t = time.time()
@@ -30,52 +37,49 @@ def timing(img):
     return time.time() - t
    
 def create(f):
-    arr = np.empty((256, 576, 720), np.uint8)
+
+    arr = np.empty((256, HEIGHT, WIDTH), np.uint8)
+
     for i in range(256):
         arr[i] = f()
+
     return arr
 
+
 def black():
-    return np.zeros((576, 720), np.uint8)
+    return np.zeros((HEIGHT, WIDTH), np.uint8)
 
 def white():
-    return np.full((576, 720), 255, np.uint8)
+    return np.full((HEIGHT, WIDTH), 255, np.uint8)
 
 def uniform():
-    return np.random.uniform(0, 256, (576, 720))
+    return np.random.uniform(0, 256, (HEIGHT, WIDTH))
 
 def gauss():
-    return np.random.normal(128, 2, (576, 720))
+    return np.random.normal(128, 2, (HEIGHT, WIDTH))
 
-def test(filename):
-    npzFile = np.load(filename)
+
+def test():
+
+    func_list = [black, white, uniform, gauss]
     
     t = [0, 0, 0, 0]
     
     for i in range(4):
-        arr = npzFile["arr_"+str(i)]
+
+        arr = create(func_list[i])
         timing(arr) # warmup
+
         for n in range(2):
             t[i] += timing(arr)
+
     
     print "Black:", t[0]/2
     print "White:", t[1]/2
     print "Uniform noise:", t[2]/2
-    print "Gaussian noise:", t[3]/2
-       
-def generate(filename):    
-    blackArr = create(black)
-    whiteArr = create(white)
-    uniformArr = create(uniform)
-    gaussArr = create(gauss)
+    print "Gaussian noise:", t[3]/2  
     
-    np.savez(filename, blackArr, whiteArr, uniformArr, gaussArr)
 
 if __name__ == "__main__":
-    if len(sys.argv) == 2:
-        test(sys.argv[1])
-    elif len(sys.argv) == 3:
-        generate(sys.argv[1])
-    else:
-        print "Usage: python -m Tests.CompressionTimings filename.npz"
-        print "or:    python -m Tests.CompressionTimings filename.npz --generate"
+    
+    test()

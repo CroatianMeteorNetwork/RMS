@@ -1,0 +1,9 @@
+gitpython
+paramiko
+numpy
+matplotlib
+pyephem
+cython
+scipy
+Pillow
+astropy
