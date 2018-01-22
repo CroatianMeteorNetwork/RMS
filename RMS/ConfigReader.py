@@ -183,6 +183,7 @@ class Config:
 
         self.star_catalog_path = 'Catalogs'
         self.star_catalog_file = 'BSC5'
+        self.star_catalog_band_ratios = [0.0, 1.0, 0.0, 0.0]
 
         self.platepar_name = 'platepar_cmn2010.cal'
 
@@ -636,6 +637,14 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "star_catalog_file"):
         config.star_catalog_file = parser.get(section, "star_catalog_file")
+
+    if parser.has_option(section, "star_catalog_band_ratios"):
+        
+        ratios_str = parser.get(section, "star_catalog_band_ratios")
+
+        # Parse the ratios as a list of floats
+        config.star_catalog_band_ratios = list(map(float, ratios_str.split(',')))
+
 
     if parser.has_option(section, "platepar_name"):
         config.platepar_name = parser.get(section, "platepar_name")

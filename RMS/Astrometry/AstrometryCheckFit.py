@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import RMS.ConfigReader as cr
 from RMS.Formats import Platepar
 from RMS.Formats import CALSTARS
-from RMS.Formats import BSC
+from RMS.Formats import StarCatalog
 from RMS.Formats import FFfile
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Astrometry.ApplyAstrometry import calcRefCentre, raDecToCorrectedXYPP, XY2CorrectedRADecPP
@@ -418,8 +418,8 @@ def autoCheckFit(config, platepar, calstars_list):
     calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
     # Load catalog stars
-    catalog_stars = BSC.readBSC(config.star_catalog_path, config.star_catalog_file, \
-        lim_mag=config.catalog_mag_limit)
+    catalog_stars = StarCatalog.readStarCatalog(config.star_catalog_path, config.star_catalog_file, \
+        lim_mag=config.catalog_mag_limit, mag_band_ratios=config.star_catalog_band_ratios)
 
 
     # Dictionary which will contain the JD, and a list of (X, Y, bg_intens, intens) of the stars

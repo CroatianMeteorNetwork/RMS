@@ -45,12 +45,12 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 import RMS.ConfigReader as cr
-import RMS.Formats.BSC as BSC
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FFfile import getMiddleTimeFF
+from RMS.Formats import StarCatalog
 from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADecPP, calcRefCentre, raDecToCorrectedXY
 from RMS.Astrometry.Conversions import date2JD
 from RMS.Routines import Image
@@ -806,8 +806,9 @@ class PlateTool(object):
         """
 
         # Load catalog stars
-        catalog_stars = BSC.readBSC(self.config.star_catalog_path, self.config.star_catalog_file, 
-            lim_mag=lim_mag)
+        catalog_stars = StarCatalog.readStarCatalog(self.config.star_catalog_path, \
+            self.config.star_catalog_file, lim_mag=lim_mag, \
+            mag_band_ratios=self.config.star_catalog_band_ratios)
 
         return catalog_stars
 

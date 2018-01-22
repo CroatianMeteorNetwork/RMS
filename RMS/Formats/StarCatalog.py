@@ -1,10 +1,10 @@
-""" Reading the Bright Star Catalog. """
-
+""" Reading the cusom star catalog. """
 
 from __future__ import print_function, division, absolute_import
 
 import os
 import numpy as np
+
 
 def readBSC(file_path, file_name, years_from_J2000=0, lim_mag=None):
     """ Import the Bright Star Catalog in a numpy array. 
@@ -87,5 +87,106 @@ def readBSC(file_path, file_name, years_from_J2000=0, lim_mag=None):
 
 
 
-# Test open the file
-# print readBSC('../../Catalogs', 'BSC5', 16.5)
+
+def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
+    """ Import the star catalog into a numpy array. 
+    
+    Arguments:
+        dir_path: [str] Path to the directory where the catalog file is located.
+        file_name: [str] Name of the catalog file.
+
+    Keyword arguments:
+        lim_mag: [float] Limiting magnitude. Stars fainter than this magnitude will be filtered out. None by
+            default.
+        mag_band_ratios: [list] A list of relative contributions of every photometric band (BVRI) to the 
+            final camera-bandpass magnitude. The list should contain 4 numbers, one for every band: 
+                [B, V, R, I].
+    
+    Return:
+        star_data: [ndarray] Array of (RA, dec, mag) parameters for each star, coordinates are in degrees.
+    """
+
+    # Use the BSC star catalog if BSC is given
+    if 'BSC' in file_name:
+        return BSC.readBSC(dir_path, file_name, lim_mag=lim_mag)
+
+
+
+    file_path = os.path.join(dir_path, file_name)
+
+    # Check if the star catalog exits
+    if not os.path.isfile(file_path):
+        return False
+
+
+    with open(file_path) as f:
+
+        star_data = []
+
+        for line in f:
+
+            line = line.replace('\n', '')
+
+            if not line:
+                continue
+
+
+            # Unpack star parameters
+            ra, dec, mag_v, mag_bv, mag_r, mag_i = list(map(float, line.split()))
+
+            # Skip the star if it fainter then the given limiting magnitude
+            if lim_mag is not None:
+                if mag_v > lim_mag:
+                    continue
+
+
+
+            # Use visual magnitude by defualt
+            mag_spectrum = mag_v
+
+            # Calculate the camera-bandpass magnitude if given
+            if mag_band_ratios is not None:
+
+                if len(mag_band_ratios) == 4:
+                    
+                    # Calculate the B band magnitude
+                    mag_b = mag_v + mag_bv
+
+                    rb, rv, rr, ri = mag_band_ratios
+
+                    ratio_sum = sum(mag_band_ratios)
+
+                    # Make sure the ratios are normalized to 1.0
+                    rb /= ratio_sum
+                    rv /= ratio_sum
+                    rr /= ratio_sum
+                    ri /= ratio_sum
+
+                    # Calcualte the camera-band magnitude
+                    mag_spectrum = rb*mag_b + rv*mag_v + rr*mag_r + ri*mag_i
+
+
+            star_data.append([ra, dec, mag_spectrum])
+
+
+    # Convert the data to a numpy array
+    star_data = np.array(star_data).astype(np.float64)
+
+    # Sort stars by descending declination
+    star_data = star_data[star_data[:,1].argsort()[::-1]]
+
+
+    return star_data
+
+
+
+if __name__ == "__main__":
+
+    import RMS.ConfigReader as cr
+
+    # Load the configuration file
+    config = cr.parse(".config")
+
+    # Test open the file
+    print(readStarCatalog(config.star_catalog_path, config.star_catalog_file, \
+        mag_band_ratios=config.star_catalog_band_ratios))
