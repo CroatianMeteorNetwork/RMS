@@ -737,7 +737,8 @@ class PlateTool(object):
 
                     ax_p.legend()
 
-                    ax_p.set_ylabel("Catalog magnitude (V)")
+                    mag_str = "{:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*self.config.star_catalog_band_ratios)
+                    ax_p.set_ylabel("Catalog magnitude ({:s})".format(mag_str))
                     ax_p.set_xlabel("Logsum pixel")
 
                     ax_p.invert_yaxis()
