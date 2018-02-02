@@ -178,7 +178,7 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None):
         mosaic_type)
 
     # Save the mosaic
-    cv2.imwrite(os.path.join(dir_path, thumb_name), mosaic_img)
+    cv2.imwrite(os.path.join(dir_path, thumb_name), mosaic_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
 
 
     return thumb_name
