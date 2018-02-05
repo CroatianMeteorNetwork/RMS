@@ -108,7 +108,7 @@ def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
 
     # Use the BSC star catalog if BSC is given
     if 'BSC' in file_name:
-        return BSC.readBSC(dir_path, file_name, lim_mag=lim_mag)
+        return readBSC(dir_path, file_name, lim_mag=lim_mag)
 
 
 
