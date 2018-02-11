@@ -66,7 +66,7 @@ sudo apt-get install -y ntpdate
 The NTP daemon tended to corrupt the time on the RTC, so we have to remove it.
 After the NTP daemon has been removed, you can still sync the system clock using `ntpdate-debian` which you might add to /etc/rc.local as well (after the hwclock command though) – just in case there is an Internet connection available during boot.
 
-#### 7. Edit /etc/rc.local and add the hwclock command above the line that says `exit 0`:
+#### 7. Edit `/etc/rc.local` and add the hwclock command above the line that says `exit 0`:
 ```
 sleep 1
 hwclock -s
@@ -74,7 +74,8 @@ ntpdate-debian
 ```
 This will read in the time from the RTC upon boot, and sync the time via Internet (if it is available).
 
-#### 8. The `/etc/init.d/hwclock.sh` shell scripts tends to corrupt this RTC clock module. In my case, the RTC clock was set to 2066/01/01 after every reboot. To prevent this from happening, edit `/etc/default/hwclock` and set `HWCLOCKACCESS` to no:
+#### 8. The /etc/init.d/hwclock.sh shell scripts tends to corrupt this RTC clock module. In my case, the RTC clock was set to 2066/01/01 after every reboot. 
+To prevent this from happening, edit `/etc/default/hwclock` and set `HWCLOCKACCESS` to `no`:
 ```
 HWCLOCKACCESS=no
 ```
