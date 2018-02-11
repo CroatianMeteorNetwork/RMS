@@ -31,7 +31,7 @@ sudo reboot
 
 #### 2. We don’t need fake-hwclock module anymore, so we are going to remove it:
 ```
-sudo apt-get remove fake-hwclock
+sudo apt-get remove -y fake-hwclock
 sudo update-rc.d hwclock.sh enable
 sudo update-rc.d fake-hwclock remove
 ```
@@ -60,8 +60,8 @@ sudo dpkg-reconfigure tzdata
 
 #### 6. Get rid of the NTP daemon as well using:
 ```
-sudo apt-get remove ntp
-sudo apt-get install ntpdate
+sudo apt-get remove -y ntp
+sudo apt-get install -y ntpdate
 ```
 The NTP daemon tended to corrupt the time on the RTC, so we have to remove it.
 After the NTP daemon has been removed, you can still sync the system clock using `ntpdate-debian` which you might add to /etc/rc.local as well (after the hwclock command though) – just in case there is an Internet connection available during boot.
