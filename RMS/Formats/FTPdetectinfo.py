@@ -113,9 +113,9 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
 
                     detection_line_str = "{:06.4f} {:07.2f} {:07.2f} {:08.4f} {:+08.4f} {:08.4f} {:+08.4f} {:06d} {:.2f}"
 
-                    ftpdetect_file.write(detection_line_str.format(frame, round(x, 2), round(y, 2), \
-                        round(ra, 4), round(dec, 4), round(azim, 4), round(elev, 4), int(level), \
-                        round(mag, 2)) + "\n")
+                    ftpdetect_file.write(detection_line_str.format(round(frame, 4), round(x, 2), \
+                        round(y, 2), round(ra, 4), round(dec, 4), round(azim, 4), round(elev, 4), \
+                        int(level), round(mag, 2)) + "\n")
 
                 else:
                     frame, x, y, level = line
