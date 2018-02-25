@@ -340,7 +340,7 @@ def calculateMagnitudes(level_data, mag_0, mag_lev):
     for i, level in enumerate(level_data):
 
         # Save magnitude data to the output array
-        magnitude_data[i] = mag_lev*np.log10(float(level)) + mag_lev
+        magnitude_data[i] = mag_0*np.log10(float(level)) + mag_lev
 
 
     return magnitude_data
