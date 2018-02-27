@@ -165,14 +165,17 @@ def jd2Date(jd, UT_corr=0, dt_obj=False):
 
 def JD2LST(julian_date, lon):
     """ Convert Julian date to Local Sidreal Time and Greenwich Sidreal Time. 
-
-    @param julian_date: [float] decimal julian date, epoch J2000.0
-    @param lon: [float] longitude of the observer in degrees
-
-    @return (LST, GST): [tuple of floats] a tuple of Local Sidreal Time and Greenwich Sidreal Time
+    
+    Arguments;
+        julian_date: [float] decimal julian date, epoch J2000.0
+        lon: [float] longitude of the observer in degrees
+    
+    Return:
+        [tuple]: (LST, GST): [tuple of floats] a tuple of Local Sidreal Time and Greenwich Sidreal Time 
+            (degrees)
     """
 
-    t = (julian_date - J2000_JD.days)/36525
+    t = (julian_date - J2000_JD.days)/36525.0
 
     # Greenwich Sidreal Time
     GST = 280.46061837 + 360.98564736629 * (julian_date - 2451545) + 0.000387933 *t**2 - ((t**3) / 38710000)

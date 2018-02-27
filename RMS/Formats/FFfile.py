@@ -202,9 +202,10 @@ def getMiddleTimeFF(ff_name, fps, ret_milliseconds=True, ff_frames=256):
         ret_milliseconds: [bool] If True, the last number returned will be in milliseconds. Otverwise, it will
             be in microseconds.
         ff_frames: [int] Number of frames that were compressed in the FF file.
+        UT_corr: [float] UT correction (hours).
     
     Return:
-        [datetime obj] Moment of the middle of the FF file.
+        [tuple] (year, month, day, hour, minute, second, microsecond/millisecond)
 
     """
 

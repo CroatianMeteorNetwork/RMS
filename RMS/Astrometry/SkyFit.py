@@ -449,6 +449,30 @@ class PlateTool(object):
             self.nextFF()
 
 
+        elif event.key == ',':
+
+            # Decrement UT correction
+            self.platepar.UT_corr -= 0.5
+
+            # Update platepar JD
+            self.platepar.JD += 0.5/24
+
+            print(self.platepar.JD)
+
+            self.updateImage()
+
+        elif event.key == '.':
+
+            # Decrement UT correction
+            self.platepar.UT_corr += 0.5
+
+            # Update platepar JD
+            self.platepar.JD -= 0.5/24
+
+            print(self.platepar.JD)
+
+            self.updateImage()            
+
         # Move RA/Dec
         elif event.key == 'a':
             self.platepar.RA_d -= self.key_increment
@@ -499,6 +523,32 @@ class PlateTool(object):
 
         elif event.key == 'down':
             self.platepar.F_scale *= 1.0 - self.key_increment/100.0
+            self.updateImage()
+
+
+        elif event.key == '1':
+
+            # Decrement X 1st order distortion
+            self.platepar.x_poly[1] -= 0.01
+            self.updateImage()
+
+        elif event.key == '2':
+
+            # Increment X 1st order distortion
+            self.platepar.x_poly[1] += 0.01
+            self.updateImage()
+
+
+        elif event.key == '3':
+
+            # Decrement Y 1st order distortion
+            self.platepar.y_poly[2] -= 0.01
+            self.updateImage()
+
+        elif event.key == '4':
+
+            # Increment Y 1st order distortion
+            self.platepar.y_poly[2] += 0.01
             self.updateImage()
 
 
@@ -585,16 +635,19 @@ class PlateTool(object):
         # Do a fit on the selected stars while in the star picking mode
         elif event.key == 'ctrl+z':
 
-            if self.star_pick_mode:
+            # if self.star_pick_mode:
 
-                # Do 3 fit iterations
-                for i in range(3):
+            #     # Do 3 fit iterations
+            #     for i in range(3):
 
-                    print('Fitting iteration {:d}/3'.format(i + 1))
+            #         print('Fitting iteration {:d}/3'.format(i + 1))
 
-                    self.fitPickedStars()
+            #         self.fitPickedStars()
 
-                print('Plate fitted!')
+            #     print('Plate fitted!')
+
+            self.fitPickedStars()
+            print('Plate fitted!')
 
 
         elif event.key == 'enter':
@@ -885,9 +938,9 @@ class PlateTool(object):
 
         ### Draw catalog stars on the image using the current platepar ###
         ######################################################################################################
-        self.catalog_x, self.catalog_y, catalog_mag = self.getCatalogStarPositions(self.catalog_stars, self.platepar.lon, 
-            self.platepar.lat, self.platepar.az_centre, self.platepar.alt_centre, self.platepar.pos_angle_ref, 
-            self.platepar.F_scale, self.platepar.x_poly, self.platepar.y_poly)
+        self.catalog_x, self.catalog_y, catalog_mag = self.getCatalogStarPositions(self.catalog_stars, \
+            self.platepar.lon, self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d, 
+            self.platepar.pos_angle_ref, self.platepar.F_scale, self.platepar.x_poly, self.platepar.y_poly)
 
         if self.catalog_stars_visible:
             cat_stars = np.c_[self.catalog_x, self.catalog_y, catalog_mag]
@@ -927,6 +980,7 @@ class PlateTool(object):
         if self.show_key_help:
             # Show text on image with platepar parameters
             text_str  = self.current_ff_file + '\n\n'
+            text_str += 'UT corr = {:.1f}\n'.format(self.platepar.UT_corr)
             text_str += 'Ref RA  = {:.3f}\n'.format(self.platepar.RA_d)
             text_str += 'Ref Dec = {:.3f}\n'.format(self.platepar.dec_d)
             text_str += 'PA      = {:.3f}\n'.format(self.platepar.pos_angle_ref)
@@ -943,6 +997,9 @@ class PlateTool(object):
             text_str += 'Dec - S/W\n'
             text_str += 'PA  - Q/E\n'
             text_str += 'F_scale - Up/Down\n'
+            text_str += 'X 1st dist coeff - 1/2\n'
+            text_str += 'Y 1st dist coeff - 3/4\n'
+            text_str += 'UT correction - ,/.\n'
             text_str += 'Lim mag - R/F\n'
             text_str += 'Increment - +/-\n'
             text_str += 'Img Gamma - U/J\n'
@@ -1016,8 +1073,11 @@ class PlateTool(object):
         dec_centre = dec_centre[0]
 
         # Calculate the FOV radius in degrees
-        fov_x = (self.platepar.X_res/2)*(3600/self.platepar.F_scale)*(384/self.platepar.X_res)/3600
-        fov_y = (self.platepar.Y_res/2)*(3600/self.platepar.F_scale)*(288/self.platepar.Y_res)/3600
+        # fov_x = (self.platepar.X_res/2)*(3600/self.platepar.F_scale)*(384/self.platepar.X_res)/3600
+        # fov_y = (self.platepar.Y_res/2)*(3600/self.platepar.F_scale)*(288/self.platepar.Y_res)/3600
+
+        fov_x = (self.platepar.X_res/2)*(3600/self.platepar.F_scale)/3600
+        fov_y = (self.platepar.Y_res/2)*(3600/self.platepar.F_scale)/3600
 
         fov_radius = np.sqrt(fov_x**2 + fov_y**2)*2
 
@@ -1063,7 +1123,7 @@ class PlateTool(object):
 
 
 
-    def getCatalogStarPositions(self, catalog_stars, lon, lat, az_centre, alt_centre, pos_angle_ref, F_scale, 
+    def getCatalogStarPositions(self, catalog_stars, lon, lat, ra_ref, dec_ref, pos_angle_ref, F_scale, \
         x_poly, y_poly):
         """ Get image positions of catalog stars using the current platepar values. 
     
@@ -1071,8 +1131,8 @@ class PlateTool(object):
             catalog_stars: [2D list] A list of (ra, dec, mag) pairs of catalog stars.
             lon: [float] Longitude in degrees.
             lat: [float] Latitude in degrees.
-            az_centre: [float] Azimuth of the FOV centre at referent time in degrees.
-            alt_centre: [float] Altitude of the FOV centre at referent time in degrees.
+            ra_ref: [float] Referent RA of the FOV centre (degrees).
+            dec_ref: [float] Referent Dec of the FOV centre (degrees).
             pos_angle_ref: [float] Referent position angle in degrees.
             F_scale: [float] Image scale in pix/arcsec for CIF resolution.
             x_poly: [ndarray float] Distorsion polynomial in X direction.
@@ -1087,12 +1147,12 @@ class PlateTool(object):
         ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
 
         # Get the date of the middle of the FF exposure
-        jd = date2JD(*ff_middle_time, UT_corr=self.platepar.UT_corr)
+        jd = date2JD(*ff_middle_time)
 
         # Convert star RA, Dec to image coordinates
         x_array, y_array = raDecToCorrectedXY(ra_catalog, dec_catalog, jd, lat, lon, self.platepar.X_res, \
-            self.platepar.Y_res, self.platepar.RA_d, self.platepar.dec_d, self.platepar.JD, pos_angle_ref, \
-            F_scale, x_poly, y_poly)
+            self.platepar.Y_res, ra_ref, dec_ref, self.platepar.JD, pos_angle_ref, F_scale, x_poly, y_poly, 
+            UT_corr=self.platepar.UT_corr)
 
         return x_array, y_array, mag_catalog
 
@@ -1118,7 +1178,7 @@ class PlateTool(object):
 
         # Set the referent hour angle
         T = (self.platepar.JD - 2451545)/36525.0
-        Ho = 280.46061837 + 360.98564736629*(self.platepar.JD - 2451545) + 0.000387933*T**2 \
+        Ho = 280.46061837 + 360.98564736629*(self.platepar.JD - 2451545.0) + 0.000387933*T**2 \
             - (T**3)/38710000.0
 
         self.platepar.Ho = Ho
@@ -1130,8 +1190,8 @@ class PlateTool(object):
         print(time_data)
 
         # Convert FOV centre to RA, Dec
-        _, ra_data, dec_data = altAz2RADec(self.platepar.lat, self.platepar.lon, self.platepar.UT_corr, time_data, 
-            [self.azim_centre], [self.alt_centre])
+        _, ra_data, dec_data = altAz2RADec(self.platepar.lat, self.platepar.lon, self.platepar.UT_corr, 
+            time_data, [self.azim_centre], [self.alt_centre])
 
         return ra_data[0], dec_data[0]
 
@@ -1197,8 +1257,10 @@ class PlateTool(object):
         self.platepar.Y_res = self.config.height
 
         # Estimate the scale
-        scale_x = self.config.fov_w/self.config.width*(self.config.width/384)
-        scale_y = self.config.fov_h/self.config.height*(self.config.height/288)
+        # scale_x = self.config.fov_w/self.config.width*(self.config.width/384)
+        # scale_y = self.config.fov_h/self.config.height*(self.config.height/288)
+        scale_x = self.config.fov_w/self.config.width
+        scale_y = self.config.fov_h/self.config.height
         self.platepar.F_scale = 1/((scale_x + scale_y)/2)
 
         # Set distorsion polynomials to zero
@@ -1415,23 +1477,17 @@ class PlateTool(object):
             # Extract fitting parameters
             ra_ref, dec_ref, pos_angle_ref, F_scale = params
 
-            # Calculate the centre of FOV
-            az_centre, alt_centre = calcRefCentre(self.platepar.JD, self.platepar.lon, self.platepar.lat, 
-                ra_ref, dec_ref)
-
             img_x, img_y, _ = img_stars.T
 
             # Get image coordinates of catalog stars
             catalog_x, catalog_y, catalog_mag = self.getCatalogStarPositions(catalog_stars, self.platepar.lon, 
-                self.platepar.lat, az_centre, alt_centre, pos_angle_ref, F_scale, self.platepar.x_poly, 
+                self.platepar.lat, ra_ref, dec_ref, pos_angle_ref, F_scale, self.platepar.x_poly, 
                 self.platepar.y_poly)
 
 
-            dist_sum = 0
-
+            
             # Calculate the sum of squared distances between image stars and catalog stars
-            for i in range(len(catalog_x)):
-                dist_sum += (catalog_x[i] - img_x[i])**2 + (catalog_y[i] - img_y[i])**2
+            dist_sum = np.sum((catalog_x - img_x)**2 + (catalog_y - img_y)**2)
 
 
             return dist_sum
@@ -1451,28 +1507,29 @@ class PlateTool(object):
             if dimension == 'x':
                 x_poly = params
                 y_poly = np.zeros(12)
+                #y_poly = self.platepar.y_poly
 
             else:
                 x_poly = np.zeros(12)
+                #x_poly = self.platepar.x_poly
                 y_poly = params
 
-            # Calculate the centre of FOV
-            az_centre, alt_centre = calcRefCentre(self.platepar.JD, self.platepar.lon, self.platepar.lat, 
-                self.platepar.RA_d, self.platepar.dec_d)
 
             img_x, img_y, _ = img_stars.T
 
             # Get image coordinates of catalog stars
             catalog_x, catalog_y, catalog_mag = self.getCatalogStarPositions(catalog_stars, self.platepar.lon, 
-                self.platepar.lat, az_centre, alt_centre, self.platepar.pos_angle_ref, self.platepar.F_scale, 
-                x_poly, y_poly)
+                self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d, self.platepar.pos_angle_ref, 
+                self.platepar.F_scale, x_poly, y_poly)
 
 
-            dist_sum = 0
+            # Calculate the sum of squared distances between image stars and catalog stars, per every
+            #   dimension
+            if dimension == 'x':
+                dist_sum = np.sum((catalog_x - img_x)**2)
 
-            # Calculate the sum of squared distances between image stars and catalog stars
-            for i in range(len(catalog_x)):
-                dist_sum += (catalog_x[i] - img_x[i])**2 + (catalog_y[i] - img_y[i])**2
+            else:
+                dist_sum = np.sum((catalog_y - img_y)**2)
 
 
             return dist_sum
@@ -1488,6 +1545,7 @@ class PlateTool(object):
 
         print('DIS_X', _calcImageResidualsDistorsion(self.platepar.x_poly, self, catalog_stars, img_stars, 'x'))
 
+        print('DIS_Y', _calcImageResidualsDistorsion(self.platepar.x_poly, self, catalog_stars, img_stars, 'y'))
 
 
         # Initial parameters for the astrometric fit
@@ -1503,8 +1561,8 @@ class PlateTool(object):
         self.platepar.RA_d, self.platepar.dec_d, self.platepar.pos_angle_ref, self.platepar.F_scale = res.x
 
         # Recalculate centre
-        calcRefCentre(self.platepar.JD, self.platepar.lon, self.platepar.lat, self.platepar.RA_d, 
-            self.platepar.dec_d)
+        self.platepar.az_centre, self.platepar.alt_centre = calcRefCentre(self.platepar.JD, self.platepar.lon, 
+            self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d)
 
 
         # Fit distorsion parameters in X direction

@@ -106,20 +106,24 @@ class Platepar(object):
         self.UT_corr = 0
 
         self.Ho = 0
-        self.X_res = self.Y_res = self.focal_length = 0
+        self.X_res = 0
+        self.Y_res = 0
+        self.focal_length = 0
 
         # FOV centre
         self.RA_d = self.RA_H = self.RA_M = self.RA_S = 0
         self.dec_d = self.dec_D = self.dec_M = self.dec_S = 0
         self.pos_angle_ref = 0
 
-        self.az_centre = self.alt_centre = 0
+        self.az_centre = 0
+        self.alt_centre = 0
 
         # FOV scale
         self.F_scale = 0
         self.w_pix = 0
 
-        self.mag_0 = self.mag_lev = 1.0
+        self.mag_0 = 1.0
+        self.mag_lev = 1.0
 
         # Distortion fit
         self.x_poly = np.zeros(shape=(12,), dtype=np.float64)

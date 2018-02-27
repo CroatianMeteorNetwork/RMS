@@ -54,15 +54,14 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
 
 
     # Estimate the FOV radius
-    x_scale = 384.0/platepar.X_res/platepar.F_scale
-    y_scale = 288.0/platepar.Y_res/platepar.F_scale
-    fov_w = x_scale*platepar.X_res
-    fov_h = y_scale*platepar.Y_res
+    fov_w = platepar.X_res/platepar.F_scale
+    fov_h = platepar.Y_res/platepar.F_scale
 
     fov_radius = np.sqrt((fov_w/2)**2 + (fov_h/2)**2)
 
     # print('fscale', platepar.F_scale)
-    # print('FOVw:', platepar.X_res/platepar.F_scale)
+    # print('FOV w:', fov_w)
+    # print('FOV h:', fov_h)
     # print('FOV radius:', fov_radius)
 
 
@@ -103,45 +102,12 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
 
         # # Plot image stars
         # im_y, im_x, _, _ = stars_list.T
-        # plt.scatter(im_y, im_x, c='r', s=5)
+        # plt.scatter(im_y, im_x, facecolors='none', edgecolor='g')
 
         # # Plot catalog stars
-        # plt.scatter(cat_y_array[cat_good_indices], cat_x_array[cat_good_indices], facecolors='none', edgecolor='g')
+        # plt.scatter(cat_y_array[cat_good_indices], cat_x_array[cat_good_indices], c='r', s=20, marker='+')
 
         # plt.show()
-        
-        
-        #matched_indices = []
-
-        # # Match image and catalog stars
-        # # Go through all image stars
-        # for i, entry in enumerate(stars_list):
-
-        #     # Extract image star data
-        #     im_star_y, im_star_x, _, _ = entry
-
-        #     min_dist = np.inf
-        #     cat_match_indx = None
-
-        #     # Check for the best match among catalog stars
-        #     for k in cat_good_indices:
-
-        #         cat_x = cat_x_array[k]
-        #         cat_y = cat_y_array[k]
-
-
-        #         # Calculate the distance between stars
-        #         dist = np.sqrt((im_star_x - cat_x)**2 + (im_star_y - cat_y)**2)
-
-        #         if (dist < min_dist):
-        #             min_dist = dist
-        #             cat_match_indx = k
-
-
-        #     # Take the best matched star if the distance was within the maximum radius
-        #     if min_dist < match_radius:
-        #         matched_indices.append([i, cat_match_indx, min_dist])
-
 
 
         # Match image and catalog stars
@@ -471,7 +437,7 @@ def autoCheckFit(config, platepar, calstars_list):
     fatol = (config.dist_check_threshold**2)/np.sqrt(len(star_dict)*config.min_matched_stars + 1)
 
     # Parameter estimation tolerance for angular values
-    fov_w = 384.0/platepar.F_scale
+    fov_w = platepar.X_res/platepar.F_scale
     xatol_ang = config.dist_check_threshold*fov_w/platepar.X_res
 
 
