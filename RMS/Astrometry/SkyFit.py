@@ -564,7 +564,13 @@ class PlateTool(object):
 
         # Enter FOV centre
         elif event.key == 'v':
+
             self.platepar.RA_d, self.platepar.dec_d = self.getFOVcentre()
+            
+            # Recalculate reference alt/az
+            self.platepar.az_centre, self.platepar.alt_centre = calcRefCentre(self.platepar.JD, \
+                self.platepar.lon, self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d)
+            
             self.updateImage()
 
 
@@ -1186,12 +1192,10 @@ class PlateTool(object):
         
         time_data = [ff_middle_time]
 
-        print(self.azim_centre, self.alt_centre)
-        print(time_data)
-
         # Convert FOV centre to RA, Dec
         _, ra_data, dec_data = altAz2RADec(self.platepar.lat, self.platepar.lon, self.platepar.UT_corr, 
             time_data, [self.azim_centre], [self.alt_centre])
+
 
         return ra_data[0], dec_data[0]
 
@@ -1273,6 +1277,10 @@ class PlateTool(object):
 
         # Get referent RA, Dec of the image centre
         self.platepar.RA_d, self.platepar.dec_d = self.getFOVcentre()
+
+        # Recalculate reference alt/az
+        self.platepar.az_centre, self.platepar.alt_centre = calcRefCentre(self.platepar.JD, \
+            self.platepar.lon, self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d)
 
 
         if update_image:
