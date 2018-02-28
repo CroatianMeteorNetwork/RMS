@@ -2,6 +2,8 @@
 High priority:
 --------------
 
+- SkyFit - fix skyfit FOV centre - alt/az to RA/Dec is not working well for UT times. Maybe use different alt/az to Ra/Dec functions?
+
 - Photometry - estimate vignetting from star movements across the FOV
 
 - Solve logger picking so the code can run on Windows
