@@ -1075,16 +1075,15 @@ class PlateTool(object):
         # Convert the FOV centre to RA/Dec
         _, ra_centre, dec_centre, _ = XY2CorrectedRADecPP([ff_middle_time], [self.platepar.X_res/2], 
             [self.platepar.Y_res/2], [0], self.platepar)
+
+        print('RA/Dec centre:', ra_centre, dec_centre)
         
         ra_centre = ra_centre[0]
         dec_centre = dec_centre[0]
 
         # Calculate the FOV radius in degrees
-        # fov_x = (self.platepar.X_res/2)*(3600/self.platepar.F_scale)*(384/self.platepar.X_res)/3600
-        # fov_y = (self.platepar.Y_res/2)*(3600/self.platepar.F_scale)*(288/self.platepar.Y_res)/3600
-
-        fov_x = (self.platepar.X_res/2)*(3600/self.platepar.F_scale)/3600
-        fov_y = (self.platepar.Y_res/2)*(3600/self.platepar.F_scale)/3600
+        fov_x = (self.platepar.X_res/2)*self.platepar.F_scale
+        fov_y = (self.platepar.Y_res/2)*self.platepar.F_scale
 
         fov_radius = np.sqrt(fov_x**2 + fov_y**2)*2
 
@@ -1547,6 +1546,14 @@ class PlateTool(object):
 
             return dist_sum
 
+
+        # Update reference time
+        ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
+        self.platepar.JD = date2JD(*ff_middle_time)
+
+        # Recalculate centre
+        self.platepar.az_centre, self.platepar.alt_centre = calcRefCentre(self.platepar.JD, self.platepar.lon, 
+            self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d)
 
 
         # Extract paired catalog stars and image coordinates separately
