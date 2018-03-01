@@ -184,8 +184,9 @@ class PlateTool(object):
 
         # Find the CALSTARS file in the given folder
         calstars_file = None
-        for calstars_file in os.listdir(dir_path):
-            if ('CALSTARS' in calstars_file) and ('.txt' in calstars_file):
+        for cal_file in os.listdir(dir_path):
+            if ('CALSTARS' in cal_file) and ('.txt' in cal_file):
+                calstars_file = cal_file
                 break
 
         if calstars_file is None:
