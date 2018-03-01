@@ -1252,6 +1252,10 @@ class PlateTool(object):
     def makeNewPlatepar(self, update_image=True):
         """ Make a new platepar from the loaded one, but set the parameters from the config file. """
 
+        # Update the reference time
+        ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
+        self.platepar.JD = date2JD(*ff_middle_time)
+
         # Update the location from the config file
         self.platepar.lat = self.config.latitude
         self.platepar.lon = self.config.longitude
