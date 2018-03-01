@@ -458,9 +458,9 @@ class PlateTool(object):
             # Update platepar JD
             self.platepar.JD += 0.5/24
 
-            print(self.platepar.JD)
 
             self.updateImage()
+
 
         elif event.key == '.':
 
@@ -470,9 +470,9 @@ class PlateTool(object):
             # Update platepar JD
             self.platepar.JD -= 0.5/24
 
-            print(self.platepar.JD)
 
             self.updateImage()            
+
 
         # Move RA/Dec
         elif event.key == 'a':
@@ -1082,10 +1082,11 @@ class PlateTool(object):
         dec_centre = dec_centre[0]
 
         # Calculate the FOV radius in degrees
-        fov_x = (self.platepar.X_res/2)*self.platepar.F_scale
-        fov_y = (self.platepar.Y_res/2)*self.platepar.F_scale
+        fov_x = (self.platepar.X_res/2)/self.platepar.F_scale
+        fov_y = (self.platepar.Y_res/2)/self.platepar.F_scale
 
         fov_radius = np.sqrt(fov_x**2 + fov_y**2)*2
+
 
         # filtered_catalog_stars = []
         # filtered_indices = []

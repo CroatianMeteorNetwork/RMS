@@ -119,7 +119,7 @@ class Platepar(object):
         self.alt_centre = 0
 
         # FOV scale
-        self.F_scale = 0
+        self.F_scale = 1.0
         self.w_pix = 0
 
         self.mag_0 = 1.0
