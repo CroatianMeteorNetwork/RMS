@@ -182,7 +182,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
 
     cost = (avg_dist**2)*(1.0/np.sqrt(n_matched + 1))
 
-    print('Nmatched', n_matched)
+    print('Nmatched {:.2f} px: {:d}'.format(match_radius, n_matched))
     print('Avg dist', avg_dist)
     print('Cost:', cost)
     print('-----')
@@ -213,6 +213,9 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius):
     Return:
         [bool] True if the platepar is good, False otherwise.
     """
+
+    print()
+    print('CHECK FIT GOODNESS:')
 
     # Match the stars and calculate the residuals
     n_matched, avg_dist, cost, _ = matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius,\
@@ -252,7 +255,6 @@ def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict,
     pp.pos_angle_ref = pos_angle_ref
     pp.F_scale = F_scale
 
-
     # Match stars and calculate image residuals
     return matchStarsResiduals(config, pp, catalog_stars, star_dict, match_radius)
 
@@ -273,6 +275,7 @@ def _calcImageResidualsDistorsion(params, config, platepar, catalog_stars, star_
     else:
         pp.y_poly = params
 
+    print('{:s} distortion params:'.format(dimension))
 
     # Match stars and calculate image residuals
     return matchStarsResiduals(config, pp, catalog_stars, star_dict, match_radius)
@@ -430,7 +433,7 @@ def autoCheckFit(config, platepar, calstars_list):
 
     # A list of matching radiuses to try
     min_radius = 0.5
-    radius_list = [10, 3, 1.5, min_radius]
+    radius_list = [5, 3, 1.5, min_radius]
 
     # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
     # in the same reagrd as the cost function)
@@ -441,6 +444,7 @@ def autoCheckFit(config, platepar, calstars_list):
     xatol_ang = config.dist_check_threshold*fov_w/platepar.X_res
 
 
+    # Match increasingly smaller search radiia around image stars
     for i, match_radius in enumerate(radius_list):
 
         # Match the stars and calculate the residuals
@@ -541,6 +545,7 @@ def autoCheckFit(config, platepar, calstars_list):
     n_matched, avg_dist, cost, matched_stars = matchStarsResiduals(config, platepar, catalog_stars, \
         star_dict, min_radius, ret_nmatch=True)
 
+    print('FINAL SOLUTION with {:f} px:'.format(min_radius))
     print('Matched stars:', n_matched)
     print('Average deviation:', avg_dist)
 
