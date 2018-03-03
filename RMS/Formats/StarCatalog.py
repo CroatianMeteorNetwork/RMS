@@ -130,15 +130,16 @@ def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
             if not line:
                 continue
 
+            # Skip lines which do not begin with a number
+            try:
+                float(line[0])
+
+            except:
+                continue
+
 
             # Unpack star parameters
             ra, dec, mag_v, mag_bv, mag_r, mag_i = list(map(float, line.split()))
-
-            # Skip the star if it fainter then the given limiting magnitude
-            if lim_mag is not None:
-                if mag_v > lim_mag:
-                    continue
-
 
 
             # Use visual magnitude by defualt
@@ -165,6 +166,11 @@ def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
                     # Calcualte the camera-band magnitude
                     mag_spectrum = rb*mag_b + rv*mag_v + rr*mag_r + ri*mag_i
 
+
+            # Skip the star if it fainter then the given limiting magnitude
+            if lim_mag is not None:
+                if mag_spectrum > lim_mag:
+                    continue
 
             star_data.append([ra, dec, mag_spectrum])
 
