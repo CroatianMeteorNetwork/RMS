@@ -315,14 +315,14 @@ class PlateTool(object):
                     self.x_centroid, self.y_centroid, self.star_intensity = self.centroidStar()
 
                     # Draw the centroid on the image
-                    plt.scatter(self.x_centroid, self.y_centroid, marker='+', c='y', s=50, lw=2)
+                    plt.scatter(self.x_centroid, self.y_centroid, marker='+', c='y', s=100, lw=3)
 
                     # Select the closest catalog star to the centroid as the first guess
                     self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.x_centroid, self.y_centroid)
 
                     # Plot the closest star as a purple cross
                     self.selected_cat_star_scatter = plt.scatter(self.catalog_x[self.closest_cat_star_indx], 
-                        self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=50, lw=2)
+                        self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=100, lw=3)
 
                     # Update canvas
                     plt.gcf().canvas.draw()
@@ -887,7 +887,7 @@ class PlateTool(object):
                 x, y, _ = img_star
 
                 # Plot all paired stars
-                plt.scatter(x, y, marker='x', color='b')
+                plt.scatter(x, y, marker='x', c='b', s=100, lw=3)
 
 
 
