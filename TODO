@@ -2,8 +2,6 @@
 High priority:
 --------------
 
-- SkyFit - fix skyfit FOV centre - alt/az to RA/Dec is not working well for UT times. Maybe use different alt/az to Ra/Dec functions?
-
 - Astrometry - add calculating alt/az in the epoch of date and write to FTPdetectinfo
 
 - Photometry - estimate vignetting from star movements across the FOV
@@ -14,8 +12,6 @@ High priority:
 
 - Python 3 compatibility
 	- convert all weave code to cython
-
-- Document SkyFit and astrometry
 
 - Document server uploading
 
