@@ -1287,6 +1287,9 @@ class PlateTool(object):
         self.platepar.az_centre, self.platepar.alt_centre = calcRefCentre(self.platepar.JD, \
             self.platepar.lon, self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d)
 
+        # Check that the calibration parameters are within the nominal range
+        self.checkParamRange()
+
 
         if update_image:
             self.updateImage()
