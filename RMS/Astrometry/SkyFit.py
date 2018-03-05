@@ -1551,13 +1551,13 @@ class PlateTool(object):
             return dist_sum
 
 
-        # Update reference time
-        ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
-        self.platepar.JD = date2JD(*ff_middle_time)
+        # # Update reference time
+        # ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
+        # self.platepar.JD = date2JD(*ff_middle_time)
 
-        # Recalculate centre
-        self.platepar.az_centre, self.platepar.alt_centre = calcRefCentre(self.platepar.JD, self.platepar.lon, 
-            self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d)
+        # # Recalculate centre
+        # self.platepar.az_centre, self.platepar.alt_centre = calcRefCentre(self.platepar.JD, self.platepar.lon, 
+        #     self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d)
 
 
         # Extract paired catalog stars and image coordinates separately
@@ -1607,7 +1607,53 @@ class PlateTool(object):
 
         print(res)
 
+
+
+        ### Calculate the fit residuals for every fitted star ###
+        
+        # Get image coordinates of catalog stars
+        catalog_x, catalog_y, catalog_mag = self.getCatalogStarPositions(catalog_stars, self.platepar.lon, 
+            self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d, self.platepar.pos_angle_ref, 
+            self.platepar.F_scale, self.platepar.x_poly, self.platepar.y_poly)
+
+
+        residuals = []
+
+        # Calculate the distance and the angle between each pair of image positions and catalog predictions
+        for cat_x, cat_y, img_c in zip(catalog_x, catalog_y, img_stars):
+            
+            img_x, img_y, _ = img_c
+
+
+            delta_x = cat_x - img_x
+            delta_y = cat_y - img_y
+
+            angle = np.arctan2(delta_y, delta_x)
+            distance = np.sqrt(delta_x**2 + delta_y**2)
+
+
+            residuals.append([img_x, img_y, angle, distance])
+
+        ####################
+
+
         self.updateImage()
+
+
+        # Plot the residuals
+        res_scale = 100
+        for entry in residuals:
+
+            img_x, img_y, angle, distance = entry
+
+            # Calculate coordinates of the end of the residual line
+            res_x = img_x + res_scale*np.cos(angle)*distance
+            res_y = img_y + res_scale*np.sin(angle)*distance
+
+            plt.plot([img_x, res_x], [img_y, res_y], color='orange')
+
+
+        plt.draw()
 
 
 
