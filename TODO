@@ -4,6 +4,8 @@ High priority:
 
 - Astrometry - add calculating alt/az in the epoch of date and write to FTPdetectinfo
 
+- Astrometry - automatic recalibration if the camera is moved and the offset is larger than the search radius
+
 - Photometry - estimate vignetting from star movements across the FOV
 
 - Solve logger picking so the code can run on Windows
