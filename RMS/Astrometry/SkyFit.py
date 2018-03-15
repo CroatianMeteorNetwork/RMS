@@ -993,8 +993,8 @@ class PlateTool(object):
             text_str += 'PA      = {:.3f}\n'.format(self.platepar.pos_angle_ref)
             text_str += 'F_scale = {:.3f}\n'.format(self.platepar.F_scale)
             text_str += 'Lim mag = {:.1f}\n'.format(self.cat_lim_mag)
-            text_str += 'Increment = {:.3}\n'.format(self.key_increment)
-            text_str += 'Img Gamma = {:.2}\n'.format(self.img_gamma)
+            text_str += 'Increment = {:.3f}\n'.format(self.key_increment)
+            text_str += 'Img Gamma = {:.2f}\n'.format(self.img_gamma)
             plt.gca().text(10, 10, text_str, color='w', verticalalignment='top', horizontalalignment='left', 
                 fontsize=8)
 
