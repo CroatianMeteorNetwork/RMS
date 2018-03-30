@@ -1,3 +1,6 @@
+""" Script for running the fireball extractor on FF files in the given directory. """
+
+from __future__ import print_function, division, absolute_import
 
 from RMS.VideoExtraction import Extractor
 import RMS.ConfigReader as cr
@@ -22,29 +25,16 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 
 if __name__ == "__main__":
 
-    # Get bin path and name from the given argument
-    ff_name = sys.argv[1]
-    if os.sep in ff_name:
-        ff_name = ff_name.split(os.sep)
-        bin_dir = (os.sep).join(ff_name[:-1]) + os.sep
-        ff_name = ff_name[-1]
+    # Extract the directory name from the given argument
+    bin_dir = sys.argv[1]
 
-    # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/2015_06_20_19_33_11' + os.sep
-    # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/2015_06_23_19_33_43' + os.sep
-    # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/bins' + os.sep
-    # bin_dir = '/home/anonymus/Dropbox/grouping3D/perzeidi2015/11 12 Aug' + os.sep
-    # bin_dir = "/home/anonymus/Dropbox/grouping3D/perzeidi2015/12 13 Aug" + os.sep
-    # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples' + os.sep
-    # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/2015110304 bolid' + os.sep
-    # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/2015110506 bolid' + os.sep
-    # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/20151111213 visnjan' + os.sep
-    # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/RIB2015062627 fireball' + os.sep
-    # bin_dir = '/home/anonymus/Dropbox/grouping3D/samples/sample_bins' + os.sep
+
+    print('Directory:', bin_dir)
 
     for ff_name in os.listdir(bin_dir):
         if 'FF' in ff_name:
 
-            print ff_name
+            print(ff_name)
 
             # Load config file
             config = cr.parse(".config")
@@ -82,7 +72,7 @@ if __name__ == "__main__":
             #     j = 256 - i - 50
             #     event_points.append([int(j/8),int(30-j/8), i+200])
 
-            print event_points
+            print(event_points)
 
             if event_points:
 
@@ -104,7 +94,7 @@ if __name__ == "__main__":
                 ys = points[:,0]
                 zs = points[:,2]
 
-                print len(xs)
+                print(len(xs))
 
                 # Plot points in 3D
                 ax.scatter(xs, ys, zs)
@@ -129,7 +119,7 @@ if __name__ == "__main__":
 
                 if line_list:
 
-                    print line_list
+                    print(line_list)
 
                     # Define line colors to use
                     ln_colors = ['r', 'g', 'y', 'k', 'm', 'c']
@@ -166,7 +156,7 @@ if __name__ == "__main__":
                         ax.scatter(xs, ys, zs, c = ln_colors[i%6], s = 40)
 
 
-                print 'Elapsed time: ', elapsed_time
+                print('Elapsed time: ', elapsed_time)
                 plt.show()
 
                 plt.clf()
