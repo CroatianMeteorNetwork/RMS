@@ -8,6 +8,8 @@ High priority:
 
 - Photometry - estimate vignetting from star movements across the FOV
 
+- Pull a new platepar from the server if available
+
 - Solve logger picking so the code can run on Windows
 
 - Calculate fireball centroids and put them to a separate FTPdetectinfo file
