@@ -415,8 +415,8 @@ static CYTHON_INLINE float __PYX_NAN() {
   #define __Pyx_PyNumber_Divide(x,y)         PyNumber_TrueDivide(x,y)
   #define __Pyx_PyNumber_InPlaceDivide(x,y)  PyNumber_InPlaceTrueDivide(x,y)
 #else
-  #define __Pyx_PyNumber_Divide(x,y)         PyNumber_Divide(x,y)
-  #define __Pyx_PyNumber_InPlaceDivide(x,y)  PyNumber_InPlaceDivide(x,y)
+  #define __Pyx_PyNumber_Divide(x,y)         PyNumber_TrueDivide(x,y)
+  #define __Pyx_PyNumber_InPlaceDivide(x,y)  PyNumber_InPlaceTrueDivide(x,y)
 #endif
 
 #ifndef __PYX_EXTERN_C
@@ -434,6 +434,7 @@ static CYTHON_INLINE float __PYX_NAN() {
 #include <stdlib.h>
 #include "numpy/arrayobject.h"
 #include "numpy/ufuncobject.h"
+#include "math.h"
 #ifdef _OPENMP
 #include <omp.h>
 #endif /* _OPENMP */
@@ -881,14 +882,23 @@ typedef npy_double __pyx_t_5numpy_double_t;
  */
 typedef npy_longdouble __pyx_t_5numpy_longdouble_t;
 
-/* "RMS/Routines/Grouping3Dcy.pyx":9
+/* "RMS/Routines/Grouping3Dcy.pyx":14
+ * # Define numpy types
+ * UINT16_TYPE = np.uint16
+ * ctypedef np.uint16_t UINT16_TYPE_t             # <<<<<<<<<<<<<<
  * 
- * INT_TYPE = np.uint16
- * ctypedef np.uint16_t INT_TYPE_t             # <<<<<<<<<<<<<<
- * 
- * @cython.cdivision(True) # Don't check for zero division
+ * UINT8_TYPE = np.uint8
  */
-typedef __pyx_t_5numpy_uint16_t __pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t;
+typedef __pyx_t_5numpy_uint16_t __pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t;
+
+/* "RMS/Routines/Grouping3Dcy.pyx":17
+ * 
+ * UINT8_TYPE = np.uint8
+ * ctypedef np.uint8_t UINT8_TYPE_t             # <<<<<<<<<<<<<<
+ * 
+ * 
+ */
+typedef __pyx_t_5numpy_uint8_t __pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT8_TYPE_t;
 /* Declarations.proto */
 #if CYTHON_CCOMPLEX
   #ifdef __cplusplus
@@ -954,8 +964,8 @@ typedef npy_clongdouble __pyx_t_5numpy_clongdouble_t;
  */
 typedef npy_cdouble __pyx_t_5numpy_complex_t;
 
-/* "RMS/Routines/Grouping3Dcy.pyx":66
- *     return (x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2
+/* "RMS/Routines/Grouping3Dcy.pyx":87
+ * 
  * 
  * cdef class Line:             # <<<<<<<<<<<<<<
  *     """ Structure that defines a line.
@@ -974,10 +984,10 @@ struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy_Line {
 };
 
 
-/* "RMS/Routines/Grouping3Dcy.pyx":100
+/* "RMS/Routines/Grouping3Dcy.pyx":124
  * 
  * @cython.boundscheck(False)
- * def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):             # <<<<<<<<<<<<<<
+ * def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):             # <<<<<<<<<<<<<<
  *     """ Returns all points describing a particular line.
  * 
  */
@@ -1346,6 +1356,15 @@ static PyObject* __Pyx_PyObject_CallMethod1(PyObject* obj, PyObject* method_name
 /* append.proto */
 static CYTHON_INLINE int __Pyx_PyObject_Append(PyObject* L, PyObject* x);
 
+/* PyIntFromDouble.proto */
+#if PY_MAJOR_VERSION < 3
+static CYTHON_INLINE PyObject* __Pyx_PyInt_FromDouble(double value);
+#else
+#define __Pyx_PyInt_FromDouble(value) PyLong_FromDouble(value)
+#endif
+
+#define __Pyx_BufPtrStrided3d(type, buf, i0, s0, i1, s1, i2, s2) (type)((char*)buf + i0 * s0 + i1 * s1 + i2 * s2)
+#define __Pyx_BufPtrStrided1d(type, buf, i0, s0) (type)((char*)buf + i0 * s0)
 /* RaiseException.proto */
 static void __Pyx_Raise(PyObject *type, PyObject *value, PyObject *tb, PyObject *cause);
 
@@ -1470,6 +1489,12 @@ static CYTHON_INLINE PyObject* __Pyx_PyInt_From_long(long value);
 /* CIntToPy.proto */
 static CYTHON_INLINE PyObject* __Pyx_PyInt_From_npy_uint16(npy_uint16 value);
 
+/* CIntToPy.proto */
+static CYTHON_INLINE PyObject* __Pyx_PyInt_From_unsigned_int(unsigned int value);
+
+/* CIntToPy.proto */
+static CYTHON_INLINE PyObject* __Pyx_PyInt_From_npy_uint8(npy_uint8 value);
+
 /* RealImag.proto */
 #if CYTHON_CCOMPLEX
   #ifdef __cplusplus
@@ -1575,6 +1600,9 @@ static CYTHON_INLINE PyObject* __Pyx_PyInt_From_enum__NPY_TYPES(enum NPY_TYPES v
 static CYTHON_INLINE int __Pyx_PyInt_As_int(PyObject *);
 
 /* CIntFromPy.proto */
+static CYTHON_INLINE unsigned int __Pyx_PyInt_As_unsigned_int(PyObject *);
+
+/* CIntFromPy.proto */
 static CYTHON_INLINE long __Pyx_PyInt_As_long(PyObject *);
 
 /* CheckBinaryVersion.proto */
@@ -1635,7 +1663,9 @@ static PyTypeObject *__pyx_ptype_3RMS_8Routines_12Grouping3Dcy_Line = 0;
 static PyTypeObject *__pyx_ptype_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__getAllPoints = 0;
 static float __pyx_f_3RMS_8Routines_12Grouping3Dcy_line3DDistance_simple(int, int, int, int, int, int, int, int, int); /*proto*/
 static int __pyx_f_3RMS_8Routines_12Grouping3Dcy_point3DDistance(int, int, int, int, int, int); /*proto*/
-static __Pyx_TypeInfo __Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t = { "INT_TYPE_t", NULL, sizeof(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t), { 0 }, 0, IS_UNSIGNED(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t) ? 'U' : 'I', IS_UNSIGNED(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t), 0 };
+static __Pyx_TypeInfo __Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t = { "UINT16_TYPE_t", NULL, sizeof(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t), { 0 }, 0, IS_UNSIGNED(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t) ? 'U' : 'I', IS_UNSIGNED(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t), 0 };
+static __Pyx_TypeInfo __Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT8_TYPE_t = { "UINT8_TYPE_t", NULL, sizeof(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT8_TYPE_t), { 0 }, 0, IS_UNSIGNED(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT8_TYPE_t) ? 'U' : 'I', IS_UNSIGNED(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT8_TYPE_t), 0 };
+static __Pyx_TypeInfo __Pyx_TypeInfo_nn___pyx_t_5numpy_int32_t = { "int32_t", NULL, sizeof(__pyx_t_5numpy_int32_t), { 0 }, 0, IS_UNSIGNED(__pyx_t_5numpy_int32_t) ? 'U' : 'I', IS_UNSIGNED(__pyx_t_5numpy_int32_t), 0 };
 #define __Pyx_MODULE_NAME "RMS.Routines.Grouping3Dcy"
 int __pyx_module_is_main_RMS__Routines__Grouping3Dcy = 0;
 
@@ -1646,10 +1676,15 @@ static PyObject *__pyx_builtin_ValueError;
 static PyObject *__pyx_builtin_RuntimeError;
 static PyObject *__pyx_builtin_ImportError;
 static const char __pyx_k_[] = " ";
+static const char __pyx_k_f[] = "f";
 static const char __pyx_k_i[] = "i";
 static const char __pyx_k_j[] = "j";
+static const char __pyx_k_n[] = "n";
+static const char __pyx_k_x[] = "x";
+static const char __pyx_k_y[] = "y";
 static const char __pyx_k_z[] = "z";
 static const char __pyx_k__5[] = "";
+static const char __pyx_k_k1[] = "k1";
 static const char __pyx_k_np[] = "np";
 static const char __pyx_k_x1[] = "x1";
 static const char __pyx_k_x2[] = "x2";
@@ -1663,6 +1698,7 @@ static const char __pyx_k_z3[] = "z3";
 static const char __pyx_k_all[] = "all";
 static const char __pyx_k_inf[] = "inf";
 static const char __pyx_k_map[] = "map";
+static const char __pyx_k_num[] = "num";
 static const char __pyx_k_axis[] = "axis";
 static const char __pyx_k_copy[] = "copy";
 static const char __pyx_k_join[] = "join";
@@ -1673,34 +1709,55 @@ static const char __pyx_k_test[] = "__test__";
 static const char __pyx_k_time[] = "time";
 static const char __pyx_k_view[] = "view";
 static const char __pyx_k_array[] = "array";
+static const char __pyx_k_count[] = "count";
 static const char __pyx_k_dtype[] = "dtype";
+static const char __pyx_k_int32[] = "int32";
 static const char __pyx_k_numpy[] = "numpy";
 static const char __pyx_k_range[] = "range";
 static const char __pyx_k_shape[] = "shape";
+static const char __pyx_k_uint8[] = "uint8";
 static const char __pyx_k_where[] = "where";
 static const char __pyx_k_zeros[] = "zeros";
 static const char __pyx_k_append[] = "append";
 static const char __pyx_k_config[] = "config";
+static const char __pyx_k_frames[] = "frames";
 static const char __pyx_k_import[] = "__import__";
 static const char __pyx_k_uint16[] = "uint16";
+static const char __pyx_k_x_dist[] = "x_dist";
 static const char __pyx_k_x_prev[] = "x_prev";
+static const char __pyx_k_x_size[] = "x_size";
 static const char __pyx_k_x_temp[] = "x_temp";
+static const char __pyx_k_y_dist[] = "y_dist";
 static const char __pyx_k_y_prev[] = "y_prev";
+static const char __pyx_k_y_size[] = "y_size";
 static const char __pyx_k_y_temp[] = "y_temp";
+static const char __pyx_k_z_dist[] = "z_dist";
 static const char __pyx_k_z_prev[] = "z_prev";
 static const char __pyx_k_z_temp[] = "z_temp";
 static const char __pyx_k_argsort[] = "argsort";
+static const char __pyx_k_avg_std[] = "avg_std";
 static const char __pyx_k_counter[] = "counter";
+static const char __pyx_k_max_val[] = "max_val";
+static const char __pyx_k_nframes[] = "nframes";
+static const char __pyx_k_pointsx[] = "pointsx";
+static const char __pyx_k_pointsy[] = "pointsy";
+static const char __pyx_k_pointsz[] = "pointsz";
 static const char __pyx_k_reshape[] = "reshape";
-static const char __pyx_k_INT_TYPE[] = "INT_TYPE";
+static const char __pyx_k_shape_x[] = "shape_x";
+static const char __pyx_k_shape_y[] = "shape_y";
+static const char __pyx_k_shape_z[] = "shape_z";
+static const char __pyx_k_distance[] = "distance";
 static const char __pyx_k_max_line[] = "max_line";
 static const char __pyx_k_max_time[] = "max_time";
 static const char __pyx_k_line_dist[] = "line_dist";
 static const char __pyx_k_line_list[] = "line_list";
 static const char __pyx_k_max_lines[] = "max_lines";
+static const char __pyx_k_min_level[] = "min_level";
 static const char __pyx_k_setdiff1d[] = "setdiff1d";
 static const char __pyx_k_temp_dist[] = "temp_dist";
+static const char __pyx_k_UINT8_TYPE[] = "UINT8_TYPE";
 static const char __pyx_k_ValueError[] = "ValueError";
+static const char __pyx_k_compressed[] = "compressed";
 static const char __pyx_k_formatLine[] = "_formatLine";
 static const char __pyx_k_get_points[] = "get_points";
 static const char __pyx_k_get_single[] = "get_single";
@@ -1710,7 +1767,9 @@ static const char __pyx_k_min_frames[] = "min_frames";
 static const char __pyx_k_min_points[] = "min_points";
 static const char __pyx_k_point_list[] = "point_list";
 static const char __pyx_k_start_time[] = "start_time";
+static const char __pyx_k_testPoints[] = "testPoints";
 static const char __pyx_k_ImportError[] = "ImportError";
+static const char __pyx_k_UINT16_TYPE[] = "UINT16_TYPE";
 static const char __pyx_k_find3DLines[] = "find3DLines";
 static const char __pyx_k_first_frame[] = "first_frame";
 static const char __pyx_k_RuntimeError[] = "RuntimeError";
@@ -1735,9 +1794,11 @@ static const char __pyx_k_distance_threshold[] = "distance_threshold";
 static const char __pyx_k_line_distance_const[] = "line_distance_const";
 static const char __pyx_k_max_line_points_rows[] = "max_line_points_rows";
 static const char __pyx_k_point_ratio_threshold[] = "point_ratio_threshold";
+static const char __pyx_k_thresholdAndSubsample[] = "thresholdAndSubsample";
 static const char __pyx_k_line_minimum_frame_range[] = "line_minimum_frame_range";
 static const char __pyx_k_RMS_Routines_Grouping3Dcy[] = "RMS.Routines.Grouping3Dcy";
 static const char __pyx_k_ndarray_is_not_C_contiguous[] = "ndarray is not C contiguous";
+static const char __pyx_k_Cython_functions_for_3D_line_de[] = " Cython functions for 3D line detection. ";
 static const char __pyx_k_home_dvida_source_RMS_RMS_Routi[] = "/home/dvida/source/RMS/RMS/Routines/Grouping3Dcy.pyx";
 static const char __pyx_k_numpy_core_multiarray_failed_to[] = "numpy.core.multiarray failed to import";
 static const char __pyx_k_unknown_dtype_code_in_numpy_pxd[] = "unknown dtype code in numpy.pxd (%d)";
@@ -1750,27 +1811,34 @@ static const char __pyx_k_Format_string_allocated_too_shor_2[] = "Format string 
 static PyObject *__pyx_kp_s_;
 static PyObject *__pyx_kp_u_Format_string_allocated_too_shor;
 static PyObject *__pyx_kp_u_Format_string_allocated_too_shor_2;
-static PyObject *__pyx_n_s_INT_TYPE;
 static PyObject *__pyx_n_s_ImportError;
 static PyObject *__pyx_kp_u_Non_native_byte_order_not_suppor;
 static PyObject *__pyx_n_s_RMS_Routines_Grouping3Dcy;
 static PyObject *__pyx_n_s_RuntimeError;
+static PyObject *__pyx_n_s_UINT16_TYPE;
+static PyObject *__pyx_n_s_UINT8_TYPE;
 static PyObject *__pyx_n_s_ValueError;
 static PyObject *__pyx_kp_s__5;
 static PyObject *__pyx_n_s_all;
 static PyObject *__pyx_n_s_append;
 static PyObject *__pyx_n_s_argsort;
 static PyObject *__pyx_n_s_array;
+static PyObject *__pyx_n_s_avg_std;
 static PyObject *__pyx_n_s_axis;
 static PyObject *__pyx_n_s_best_distance;
+static PyObject *__pyx_n_s_compressed;
 static PyObject *__pyx_n_s_config;
 static PyObject *__pyx_n_s_copy;
+static PyObject *__pyx_n_s_count;
 static PyObject *__pyx_n_s_counter;
+static PyObject *__pyx_n_s_distance;
 static PyObject *__pyx_n_s_distance_threshold;
 static PyObject *__pyx_n_s_dtype;
+static PyObject *__pyx_n_s_f;
 static PyObject *__pyx_n_s_find3DLines;
 static PyObject *__pyx_n_s_first_frame;
 static PyObject *__pyx_n_s_formatLine;
+static PyObject *__pyx_n_s_frames;
 static PyObject *__pyx_n_s_gap_threshold;
 static PyObject *__pyx_n_s_getAllPoints;
 static PyObject *__pyx_n_s_getAllPoints_locals_propagateLin;
@@ -1780,8 +1848,10 @@ static PyObject *__pyx_kp_s_home_dvida_source_RMS_RMS_Routi;
 static PyObject *__pyx_n_s_i;
 static PyObject *__pyx_n_s_import;
 static PyObject *__pyx_n_s_inf;
+static PyObject *__pyx_n_s_int32;
 static PyObject *__pyx_n_s_j;
 static PyObject *__pyx_n_s_join;
+static PyObject *__pyx_n_s_k1;
 static PyObject *__pyx_n_s_last_frame;
 static PyObject *__pyx_n_s_line;
 static PyObject *__pyx_n_s_line_dist;
@@ -1800,11 +1870,16 @@ static PyObject *__pyx_n_s_max_line_points;
 static PyObject *__pyx_n_s_max_line_points_rows;
 static PyObject *__pyx_n_s_max_lines;
 static PyObject *__pyx_n_s_max_time;
+static PyObject *__pyx_n_s_max_val;
 static PyObject *__pyx_n_s_min_frames;
+static PyObject *__pyx_n_s_min_level;
 static PyObject *__pyx_n_s_min_points;
+static PyObject *__pyx_n_s_n;
 static PyObject *__pyx_kp_u_ndarray_is_not_C_contiguous;
 static PyObject *__pyx_kp_u_ndarray_is_not_Fortran_contiguou;
+static PyObject *__pyx_n_s_nframes;
 static PyObject *__pyx_n_s_np;
+static PyObject *__pyx_n_s_num;
 static PyObject *__pyx_n_s_numpy;
 static PyObject *__pyx_kp_s_numpy_core_multiarray_failed_to;
 static PyObject *__pyx_kp_s_numpy_core_umath_failed_to_impor;
@@ -1814,6 +1889,9 @@ static PyObject *__pyx_n_s_point_list_copy;
 static PyObject *__pyx_n_s_point_list_rows;
 static PyObject *__pyx_n_s_point_list_size;
 static PyObject *__pyx_n_s_point_ratio_threshold;
+static PyObject *__pyx_n_s_pointsx;
+static PyObject *__pyx_n_s_pointsy;
+static PyObject *__pyx_n_s_pointsz;
 static PyObject *__pyx_n_s_propagateLine;
 static PyObject *__pyx_n_s_propagation_list;
 static PyObject *__pyx_n_s_range;
@@ -1823,29 +1901,42 @@ static PyObject *__pyx_n_s_results_counter;
 static PyObject *__pyx_n_s_results_list;
 static PyObject *__pyx_n_s_setdiff1d;
 static PyObject *__pyx_n_s_shape;
+static PyObject *__pyx_n_s_shape_x;
+static PyObject *__pyx_n_s_shape_y;
+static PyObject *__pyx_n_s_shape_z;
 static PyObject *__pyx_n_s_size;
 static PyObject *__pyx_n_s_start_time;
 static PyObject *__pyx_n_s_temp_dist;
 static PyObject *__pyx_n_s_test;
+static PyObject *__pyx_n_s_testPoints;
+static PyObject *__pyx_n_s_thresholdAndSubsample;
 static PyObject *__pyx_n_s_time;
 static PyObject *__pyx_n_s_uint16;
+static PyObject *__pyx_n_s_uint8;
 static PyObject *__pyx_kp_u_unknown_dtype_code_in_numpy_pxd;
 static PyObject *__pyx_n_s_view;
 static PyObject *__pyx_n_s_where;
+static PyObject *__pyx_n_s_x;
 static PyObject *__pyx_n_s_x1;
 static PyObject *__pyx_n_s_x2;
 static PyObject *__pyx_n_s_x3;
+static PyObject *__pyx_n_s_x_dist;
 static PyObject *__pyx_n_s_x_prev;
+static PyObject *__pyx_n_s_x_size;
 static PyObject *__pyx_n_s_x_temp;
+static PyObject *__pyx_n_s_y;
 static PyObject *__pyx_n_s_y1;
 static PyObject *__pyx_n_s_y2;
 static PyObject *__pyx_n_s_y3;
+static PyObject *__pyx_n_s_y_dist;
 static PyObject *__pyx_n_s_y_prev;
+static PyObject *__pyx_n_s_y_size;
 static PyObject *__pyx_n_s_y_temp;
 static PyObject *__pyx_n_s_z;
 static PyObject *__pyx_n_s_z1;
 static PyObject *__pyx_n_s_z2;
 static PyObject *__pyx_n_s_z3;
+static PyObject *__pyx_n_s_z_dist;
 static PyObject *__pyx_n_s_z_prev;
 static PyObject *__pyx_n_s_z_temp;
 static PyObject *__pyx_n_s_zeros;
@@ -1861,6 +1952,8 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
 static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_point_list, struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy_Line *__pyx_v_max_line, PyObject *__pyx_v_distance_threshold, PyObject *__pyx_v_gap_threshold); /* proto */
 static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4_formatLine(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_line, PyObject *__pyx_v_first_frame, PyObject *__pyx_v_last_frame); /* proto */
 static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_point_list, PyObject *__pyx_v_start_time, PyObject *__pyx_v_config, PyObject *__pyx_v_get_single, PyObject *__pyx_v_line_list); /* proto */
+static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_8thresholdAndSubsample(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_frames, PyArrayObject *__pyx_v_compressed, int __pyx_v_min_level, int __pyx_v_min_points, float __pyx_v_k1, int __pyx_v_f); /* proto */
+static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_10testPoints(CYTHON_UNUSED PyObject *__pyx_self, int __pyx_v_gap_threshold, PyArrayObject *__pyx_v_pointsy, PyArrayObject *__pyx_v_pointsx, PyArrayObject *__pyx_v_pointsz); /* proto */
 static int __pyx_pf_5numpy_7ndarray___getbuffer__(PyArrayObject *__pyx_v_self, Py_buffer *__pyx_v_info, int __pyx_v_flags); /* proto */
 static void __pyx_pf_5numpy_7ndarray_2__releasebuffer__(PyArrayObject *__pyx_v_self, Py_buffer *__pyx_v_info); /* proto */
 static PyObject *__pyx_tp_new_3RMS_8Routines_12Grouping3Dcy_Line(PyTypeObject *t, PyObject *a, PyObject *k); /*proto*/
@@ -1891,13 +1984,17 @@ static PyObject *__pyx_tuple__21;
 static PyObject *__pyx_tuple__23;
 static PyObject *__pyx_tuple__25;
 static PyObject *__pyx_tuple__27;
+static PyObject *__pyx_tuple__29;
+static PyObject *__pyx_tuple__31;
 static PyObject *__pyx_codeobj__3;
 static PyObject *__pyx_codeobj__22;
 static PyObject *__pyx_codeobj__24;
 static PyObject *__pyx_codeobj__26;
 static PyObject *__pyx_codeobj__28;
+static PyObject *__pyx_codeobj__30;
+static PyObject *__pyx_codeobj__32;
 
-/* "RMS/Routines/Grouping3Dcy.pyx":12
+/* "RMS/Routines/Grouping3Dcy.pyx":27
  * 
  * @cython.cdivision(True) # Don't check for zero division
  * cdef float line3DDistance_simple(int x1, int y1, int z1, int x2, int y2, int z2, int x0, int y0, int z0):             # <<<<<<<<<<<<<<
@@ -1919,7 +2016,7 @@ static float __pyx_f_3RMS_8Routines_12Grouping3Dcy_line3DDistance_simple(int __p
   __Pyx_RefNannyDeclarations
   __Pyx_RefNannySetupContext("line3DDistance_simple", 0);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":32
+  /* "RMS/Routines/Grouping3Dcy.pyx":47
  * 
  *     # Length of vector in the numerator
  *     cdef int dx1 = x0 - x1             # <<<<<<<<<<<<<<
@@ -1928,7 +2025,7 @@ static float __pyx_f_3RMS_8Routines_12Grouping3Dcy_line3DDistance_simple(int __p
  */
   __pyx_v_dx1 = (__pyx_v_x0 - __pyx_v_x1);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":33
+  /* "RMS/Routines/Grouping3Dcy.pyx":48
  *     # Length of vector in the numerator
  *     cdef int dx1 = x0 - x1
  *     cdef int dy1 = y0 - y1             # <<<<<<<<<<<<<<
@@ -1937,7 +2034,7 @@ static float __pyx_f_3RMS_8Routines_12Grouping3Dcy_line3DDistance_simple(int __p
  */
   __pyx_v_dy1 = (__pyx_v_y0 - __pyx_v_y1);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":34
+  /* "RMS/Routines/Grouping3Dcy.pyx":49
  *     cdef int dx1 = x0 - x1
  *     cdef int dy1 = y0 - y1
  *     cdef int dz1 = z0 - z1             # <<<<<<<<<<<<<<
@@ -1946,7 +2043,7 @@ static float __pyx_f_3RMS_8Routines_12Grouping3Dcy_line3DDistance_simple(int __p
  */
   __pyx_v_dz1 = (__pyx_v_z0 - __pyx_v_z1);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":36
+  /* "RMS/Routines/Grouping3Dcy.pyx":51
  *     cdef int dz1 = z0 - z1
  * 
  *     cdef int dx2 = x0 - x2             # <<<<<<<<<<<<<<
@@ -1955,7 +2052,7 @@ static float __pyx_f_3RMS_8Routines_12Grouping3Dcy_line3DDistance_simple(int __p
  */
   __pyx_v_dx2 = (__pyx_v_x0 - __pyx_v_x2);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":37
+  /* "RMS/Routines/Grouping3Dcy.pyx":52
  * 
  *     cdef int dx2 = x0 - x2
  *     cdef int dy2 = y0 - y2             # <<<<<<<<<<<<<<
@@ -1964,7 +2061,7 @@ static float __pyx_f_3RMS_8Routines_12Grouping3Dcy_line3DDistance_simple(int __p
  */
   __pyx_v_dy2 = (__pyx_v_y0 - __pyx_v_y2);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":38
+  /* "RMS/Routines/Grouping3Dcy.pyx":53
  *     cdef int dx2 = x0 - x2
  *     cdef int dy2 = y0 - y2
  *     cdef int dz2 = z0 - z2             # <<<<<<<<<<<<<<
@@ -1973,7 +2070,7 @@ static float __pyx_f_3RMS_8Routines_12Grouping3Dcy_line3DDistance_simple(int __p
  */
   __pyx_v_dz2 = (__pyx_v_z0 - __pyx_v_z2);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":42
+  /* "RMS/Routines/Grouping3Dcy.pyx":57
  * 
  * 
  *     cdef int n_len = (dx1*dy2 - dx2*dy1)**2+(dx2*dz1 - dx1*dz2)**2 + (dy1*dz2 - dy2*dz1)**2             # <<<<<<<<<<<<<<
@@ -1982,7 +2079,7 @@ static float __pyx_f_3RMS_8Routines_12Grouping3Dcy_line3DDistance_simple(int __p
  */
   __pyx_v_n_len = ((__Pyx_pow_long(((long)((__pyx_v_dx1 * __pyx_v_dy2) - (__pyx_v_dx2 * __pyx_v_dy1))), 2) + __Pyx_pow_long(((long)((__pyx_v_dx2 * __pyx_v_dz1) - (__pyx_v_dx1 * __pyx_v_dz2))), 2)) + __Pyx_pow_long(((long)((__pyx_v_dy1 * __pyx_v_dz2) - (__pyx_v_dy2 * __pyx_v_dz1))), 2));
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":45
+  /* "RMS/Routines/Grouping3Dcy.pyx":60
  * 
  *     # Length of denominator vector
  *     cdef int d_len = (x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2             # <<<<<<<<<<<<<<
@@ -1991,7 +2088,7 @@ static float __pyx_f_3RMS_8Routines_12Grouping3Dcy_line3DDistance_simple(int __p
  */
   __pyx_v_d_len = ((__Pyx_pow_long(((long)(__pyx_v_x2 - __pyx_v_x1)), 2) + __Pyx_pow_long(((long)(__pyx_v_y2 - __pyx_v_y1)), 2)) + __Pyx_pow_long(((long)(__pyx_v_z2 - __pyx_v_z1)), 2));
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":47
+  /* "RMS/Routines/Grouping3Dcy.pyx":62
  *     cdef int d_len = (x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2
  * 
  *     cdef float result = (<float> n_len) / (<float> d_len)             # <<<<<<<<<<<<<<
@@ -2000,17 +2097,17 @@ static float __pyx_f_3RMS_8Routines_12Grouping3Dcy_line3DDistance_simple(int __p
  */
   __pyx_v_result = (((float)__pyx_v_n_len) / ((float)__pyx_v_d_len));
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":49
+  /* "RMS/Routines/Grouping3Dcy.pyx":64
  *     cdef float result = (<float> n_len) / (<float> d_len)
  * 
  *     return result             # <<<<<<<<<<<<<<
  * 
- * cdef int point3DDistance(int x1, int y1, int z1, int x2, int y2, int z2):
+ * 
  */
   __pyx_r = __pyx_v_result;
   goto __pyx_L0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":12
+  /* "RMS/Routines/Grouping3Dcy.pyx":27
  * 
  * @cython.cdivision(True) # Don't check for zero division
  * cdef float line3DDistance_simple(int x1, int y1, int z1, int x2, int y2, int z2, int x0, int y0, int z0):             # <<<<<<<<<<<<<<
@@ -2024,8 +2121,8 @@ static float __pyx_f_3RMS_8Routines_12Grouping3Dcy_line3DDistance_simple(int __p
   return __pyx_r;
 }
 
-/* "RMS/Routines/Grouping3Dcy.pyx":51
- *     return result
+/* "RMS/Routines/Grouping3Dcy.pyx":69
+ * 
  * 
  * cdef int point3DDistance(int x1, int y1, int z1, int x2, int y2, int z2):             # <<<<<<<<<<<<<<
  *     """ Calculate distance between two points in 3D space.
@@ -2037,18 +2134,18 @@ static int __pyx_f_3RMS_8Routines_12Grouping3Dcy_point3DDistance(int __pyx_v_x1,
   __Pyx_RefNannyDeclarations
   __Pyx_RefNannySetupContext("point3DDistance", 0);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":64
+  /* "RMS/Routines/Grouping3Dcy.pyx":82
  *     """
  * 
  *     return (x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2             # <<<<<<<<<<<<<<
  * 
- * cdef class Line:
+ * 
  */
   __pyx_r = ((__Pyx_pow_long(((long)(__pyx_v_x2 - __pyx_v_x1)), 2) + __Pyx_pow_long(((long)(__pyx_v_y2 - __pyx_v_y1)), 2)) + __Pyx_pow_long(((long)(__pyx_v_z2 - __pyx_v_z1)), 2));
   goto __pyx_L0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":51
- *     return result
+  /* "RMS/Routines/Grouping3Dcy.pyx":69
+ * 
  * 
  * cdef int point3DDistance(int x1, int y1, int z1, int x2, int y2, int z2):             # <<<<<<<<<<<<<<
  *     """ Calculate distance between two points in 3D space.
@@ -2061,7 +2158,7 @@ static int __pyx_f_3RMS_8Routines_12Grouping3Dcy_point3DDistance(int __pyx_v_x1,
   return __pyx_r;
 }
 
-/* "RMS/Routines/Grouping3Dcy.pyx":74
+/* "RMS/Routines/Grouping3Dcy.pyx":95
  *     cdef public float line_quality
  * 
  *     def __cinit__(self, x1=0, y1=0, z1=0, x2=0, y2=0, z2=0, counter=0, line_quality=0):             # <<<<<<<<<<<<<<
@@ -2153,7 +2250,7 @@ static int __pyx_pw_3RMS_8Routines_12Grouping3Dcy_4Line_1__cinit__(PyObject *__p
         }
       }
       if (unlikely(kw_args > 0)) {
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "__cinit__") < 0)) __PYX_ERR(0, 74, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "__cinit__") < 0)) __PYX_ERR(0, 95, __pyx_L3_error)
       }
     } else {
       switch (PyTuple_GET_SIZE(__pyx_args)) {
@@ -2180,7 +2277,7 @@ static int __pyx_pw_3RMS_8Routines_12Grouping3Dcy_4Line_1__cinit__(PyObject *__p
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("__cinit__", 0, 0, 8, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 74, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("__cinit__", 0, 0, 8, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 95, __pyx_L3_error)
   __pyx_L3_error:;
   __Pyx_AddTraceback("RMS.Routines.Grouping3Dcy.Line.__cinit__", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
@@ -2200,87 +2297,87 @@ static int __pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line___cinit__(struct __pyx_o
   float __pyx_t_2;
   __Pyx_RefNannySetupContext("__cinit__", 0);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":75
+  /* "RMS/Routines/Grouping3Dcy.pyx":96
  * 
  *     def __cinit__(self, x1=0, y1=0, z1=0, x2=0, y2=0, z2=0, counter=0, line_quality=0):
  *         self.x1 = x1             # <<<<<<<<<<<<<<
  *         self.y1 = y1
  *         self.z1 = z1
  */
-  __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_v_x1); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 75, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_v_x1); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 96, __pyx_L1_error)
   __pyx_v_self->x1 = __pyx_t_1;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":76
+  /* "RMS/Routines/Grouping3Dcy.pyx":97
  *     def __cinit__(self, x1=0, y1=0, z1=0, x2=0, y2=0, z2=0, counter=0, line_quality=0):
  *         self.x1 = x1
  *         self.y1 = y1             # <<<<<<<<<<<<<<
  *         self.z1 = z1
  * 
  */
-  __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_v_y1); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 76, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_v_y1); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 97, __pyx_L1_error)
   __pyx_v_self->y1 = __pyx_t_1;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":77
+  /* "RMS/Routines/Grouping3Dcy.pyx":98
  *         self.x1 = x1
  *         self.y1 = y1
  *         self.z1 = z1             # <<<<<<<<<<<<<<
  * 
  *         self.x2 = x2
  */
-  __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_v_z1); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 77, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_v_z1); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 98, __pyx_L1_error)
   __pyx_v_self->z1 = __pyx_t_1;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":79
+  /* "RMS/Routines/Grouping3Dcy.pyx":100
  *         self.z1 = z1
  * 
  *         self.x2 = x2             # <<<<<<<<<<<<<<
  *         self.y2 = y2
  *         self.z2 = z2
  */
-  __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_v_x2); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 79, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_v_x2); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 100, __pyx_L1_error)
   __pyx_v_self->x2 = __pyx_t_1;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":80
+  /* "RMS/Routines/Grouping3Dcy.pyx":101
  * 
  *         self.x2 = x2
  *         self.y2 = y2             # <<<<<<<<<<<<<<
  *         self.z2 = z2
  * 
  */
-  __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_v_y2); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 80, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_v_y2); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 101, __pyx_L1_error)
   __pyx_v_self->y2 = __pyx_t_1;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":81
+  /* "RMS/Routines/Grouping3Dcy.pyx":102
  *         self.x2 = x2
  *         self.y2 = y2
  *         self.z2 = z2             # <<<<<<<<<<<<<<
  * 
  *         self.counter = counter
  */
-  __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_v_z2); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 81, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_v_z2); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 102, __pyx_L1_error)
   __pyx_v_self->z2 = __pyx_t_1;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":83
+  /* "RMS/Routines/Grouping3Dcy.pyx":104
  *         self.z2 = z2
  * 
  *         self.counter = counter             # <<<<<<<<<<<<<<
  *         self.line_quality = line_quality
  * 
  */
-  __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_v_counter); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 83, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_v_counter); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 104, __pyx_L1_error)
   __pyx_v_self->counter = __pyx_t_1;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":84
+  /* "RMS/Routines/Grouping3Dcy.pyx":105
  * 
  *         self.counter = counter
  *         self.line_quality = line_quality             # <<<<<<<<<<<<<<
  * 
  *     def __str__(self):
  */
-  __pyx_t_2 = __pyx_PyFloat_AsFloat(__pyx_v_line_quality); if (unlikely((__pyx_t_2 == (float)-1) && PyErr_Occurred())) __PYX_ERR(0, 84, __pyx_L1_error)
+  __pyx_t_2 = __pyx_PyFloat_AsFloat(__pyx_v_line_quality); if (unlikely((__pyx_t_2 == (float)-1) && PyErr_Occurred())) __PYX_ERR(0, 105, __pyx_L1_error)
   __pyx_v_self->line_quality = __pyx_t_2;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":74
+  /* "RMS/Routines/Grouping3Dcy.pyx":95
  *     cdef public float line_quality
  * 
  *     def __cinit__(self, x1=0, y1=0, z1=0, x2=0, y2=0, z2=0, counter=0, line_quality=0):             # <<<<<<<<<<<<<<
@@ -2299,7 +2396,7 @@ static int __pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line___cinit__(struct __pyx_o
   return __pyx_r;
 }
 
-/* "RMS/Routines/Grouping3Dcy.pyx":86
+/* "RMS/Routines/Grouping3Dcy.pyx":107
  *         self.line_quality = line_quality
  * 
  *     def __str__(self):             # <<<<<<<<<<<<<<
@@ -2338,7 +2435,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line_2__str__(struct __
   PyObject *__pyx_t_9 = NULL;
   __Pyx_RefNannySetupContext("__str__", 0);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":90
+  /* "RMS/Routines/Grouping3Dcy.pyx":111
  *         """
  * 
  *         return " ".join(map(str, (self.x1, self.y1, self.z1, self.x2, self.y2, self.z2, self.counter,             # <<<<<<<<<<<<<<
@@ -2346,39 +2443,39 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line_2__str__(struct __
  * 
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = __Pyx_PyInt_From_int(__pyx_v_self->x1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 90, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyInt_From_int(__pyx_v_self->x1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 111, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = __Pyx_PyInt_From_int(__pyx_v_self->y1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 90, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyInt_From_int(__pyx_v_self->y1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 111, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyInt_From_int(__pyx_v_self->z1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 90, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyInt_From_int(__pyx_v_self->z1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 111, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_4 = __Pyx_PyInt_From_int(__pyx_v_self->x2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 90, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyInt_From_int(__pyx_v_self->x2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 111, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_5 = __Pyx_PyInt_From_int(__pyx_v_self->y2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 90, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyInt_From_int(__pyx_v_self->y2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 111, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = __Pyx_PyInt_From_int(__pyx_v_self->z2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 90, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyInt_From_int(__pyx_v_self->z2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 111, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_7 = __Pyx_PyInt_From_int(__pyx_v_self->counter); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 90, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyInt_From_int(__pyx_v_self->counter); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 111, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":91
+  /* "RMS/Routines/Grouping3Dcy.pyx":112
  * 
  *         return " ".join(map(str, (self.x1, self.y1, self.z1, self.x2, self.y2, self.z2, self.counter,
  *             self.line_quality)))             # <<<<<<<<<<<<<<
  * 
  *     def get_points(self):
  */
-  __pyx_t_8 = PyFloat_FromDouble(__pyx_v_self->line_quality); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 91, __pyx_L1_error)
+  __pyx_t_8 = PyFloat_FromDouble(__pyx_v_self->line_quality); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 112, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":90
+  /* "RMS/Routines/Grouping3Dcy.pyx":111
  *         """
  * 
  *         return " ".join(map(str, (self.x1, self.y1, self.z1, self.x2, self.y2, self.z2, self.counter,             # <<<<<<<<<<<<<<
  *             self.line_quality)))
  * 
  */
-  __pyx_t_9 = PyTuple_New(8); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 90, __pyx_L1_error)
+  __pyx_t_9 = PyTuple_New(8); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 111, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_9);
   __Pyx_GIVEREF(__pyx_t_1);
   PyTuple_SET_ITEM(__pyx_t_9, 0, __pyx_t_1);
@@ -2404,7 +2501,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line_2__str__(struct __
   __pyx_t_6 = 0;
   __pyx_t_7 = 0;
   __pyx_t_8 = 0;
-  __pyx_t_8 = PyTuple_New(2); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 90, __pyx_L1_error)
+  __pyx_t_8 = PyTuple_New(2); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 111, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_INCREF(((PyObject *)(&PyString_Type)));
   __Pyx_GIVEREF(((PyObject *)(&PyString_Type)));
@@ -2412,17 +2509,17 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line_2__str__(struct __
   __Pyx_GIVEREF(__pyx_t_9);
   PyTuple_SET_ITEM(__pyx_t_8, 1, __pyx_t_9);
   __pyx_t_9 = 0;
-  __pyx_t_9 = __Pyx_PyObject_Call(__pyx_builtin_map, __pyx_t_8, NULL); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 90, __pyx_L1_error)
+  __pyx_t_9 = __Pyx_PyObject_Call(__pyx_builtin_map, __pyx_t_8, NULL); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 111, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_9);
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __pyx_t_8 = __Pyx_PyString_Join(__pyx_kp_s_, __pyx_t_9); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 90, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyString_Join(__pyx_kp_s_, __pyx_t_9); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 111, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
   __pyx_r = __pyx_t_8;
   __pyx_t_8 = 0;
   goto __pyx_L0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":86
+  /* "RMS/Routines/Grouping3Dcy.pyx":107
  *         self.line_quality = line_quality
  * 
  *     def __str__(self):             # <<<<<<<<<<<<<<
@@ -2449,7 +2546,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line_2__str__(struct __
   return __pyx_r;
 }
 
-/* "RMS/Routines/Grouping3Dcy.pyx":93
+/* "RMS/Routines/Grouping3Dcy.pyx":114
  *             self.line_quality)))
  * 
  *     def get_points(self):             # <<<<<<<<<<<<<<
@@ -2483,27 +2580,27 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line_4get_points(struct
   PyObject *__pyx_t_7 = NULL;
   __Pyx_RefNannySetupContext("get_points", 0);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":97
+  /* "RMS/Routines/Grouping3Dcy.pyx":118
  *         """
  * 
  *         return self.x1, self.y1, self.z1, self.x2, self.y2, self.z2             # <<<<<<<<<<<<<<
  * 
- * @cython.boundscheck(False)
+ * 
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = __Pyx_PyInt_From_int(__pyx_v_self->x1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 97, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyInt_From_int(__pyx_v_self->x1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 118, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = __Pyx_PyInt_From_int(__pyx_v_self->y1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 97, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyInt_From_int(__pyx_v_self->y1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 118, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyInt_From_int(__pyx_v_self->z1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 97, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyInt_From_int(__pyx_v_self->z1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 118, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_4 = __Pyx_PyInt_From_int(__pyx_v_self->x2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 97, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyInt_From_int(__pyx_v_self->x2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 118, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_5 = __Pyx_PyInt_From_int(__pyx_v_self->y2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 97, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyInt_From_int(__pyx_v_self->y2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 118, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = __Pyx_PyInt_From_int(__pyx_v_self->z2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 97, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyInt_From_int(__pyx_v_self->z2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 118, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_7 = PyTuple_New(6); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 97, __pyx_L1_error)
+  __pyx_t_7 = PyTuple_New(6); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 118, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_GIVEREF(__pyx_t_1);
   PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_1);
@@ -2527,7 +2624,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line_4get_points(struct
   __pyx_t_7 = 0;
   goto __pyx_L0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":93
+  /* "RMS/Routines/Grouping3Dcy.pyx":114
  *             self.line_quality)))
  * 
  *     def get_points(self):             # <<<<<<<<<<<<<<
@@ -2552,7 +2649,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line_4get_points(struct
   return __pyx_r;
 }
 
-/* "RMS/Routines/Grouping3Dcy.pyx":71
+/* "RMS/Routines/Grouping3Dcy.pyx":92
  * 
  *     cdef int x1, y1, z1, x2, y2, z2
  *     cdef public int counter             # <<<<<<<<<<<<<<
@@ -2579,7 +2676,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line_7counter___get__(s
   PyObject *__pyx_t_1 = NULL;
   __Pyx_RefNannySetupContext("__get__", 0);
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = __Pyx_PyInt_From_int(__pyx_v_self->counter); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 71, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyInt_From_int(__pyx_v_self->counter); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 92, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_r = __pyx_t_1;
   __pyx_t_1 = 0;
@@ -2614,7 +2711,7 @@ static int __pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line_7counter_2__set__(struct
   __Pyx_RefNannyDeclarations
   int __pyx_t_1;
   __Pyx_RefNannySetupContext("__set__", 0);
-  __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_v_value); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 71, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_v_value); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 92, __pyx_L1_error)
   __pyx_v_self->counter = __pyx_t_1;
 
   /* function exit code */
@@ -2628,7 +2725,7 @@ static int __pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line_7counter_2__set__(struct
   return __pyx_r;
 }
 
-/* "RMS/Routines/Grouping3Dcy.pyx":72
+/* "RMS/Routines/Grouping3Dcy.pyx":93
  *     cdef int x1, y1, z1, x2, y2, z2
  *     cdef public int counter
  *     cdef public float line_quality             # <<<<<<<<<<<<<<
@@ -2655,7 +2752,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line_12line_quality___g
   PyObject *__pyx_t_1 = NULL;
   __Pyx_RefNannySetupContext("__get__", 0);
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = PyFloat_FromDouble(__pyx_v_self->line_quality); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 72, __pyx_L1_error)
+  __pyx_t_1 = PyFloat_FromDouble(__pyx_v_self->line_quality); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 93, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_r = __pyx_t_1;
   __pyx_t_1 = 0;
@@ -2690,7 +2787,7 @@ static int __pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line_12line_quality_2__set__(
   __Pyx_RefNannyDeclarations
   float __pyx_t_1;
   __Pyx_RefNannySetupContext("__set__", 0);
-  __pyx_t_1 = __pyx_PyFloat_AsFloat(__pyx_v_value); if (unlikely((__pyx_t_1 == (float)-1) && PyErr_Occurred())) __PYX_ERR(0, 72, __pyx_L1_error)
+  __pyx_t_1 = __pyx_PyFloat_AsFloat(__pyx_v_value); if (unlikely((__pyx_t_1 == (float)-1) && PyErr_Occurred())) __PYX_ERR(0, 93, __pyx_L1_error)
   __pyx_v_self->line_quality = __pyx_t_1;
 
   /* function exit code */
@@ -2704,10 +2801,10 @@ static int __pyx_pf_3RMS_8Routines_12Grouping3Dcy_4Line_12line_quality_2__set__(
   return __pyx_r;
 }
 
-/* "RMS/Routines/Grouping3Dcy.pyx":100
+/* "RMS/Routines/Grouping3Dcy.pyx":124
  * 
  * @cython.boundscheck(False)
- * def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):             # <<<<<<<<<<<<<<
+ * def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):             # <<<<<<<<<<<<<<
  *     """ Returns all points describing a particular line.
  * 
  */
@@ -2759,42 +2856,42 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_1getAllPoints(PyObject *
         case  1:
         if (likely((values[1] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_x1)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, 1); __PYX_ERR(0, 100, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, 1); __PYX_ERR(0, 124, __pyx_L3_error)
         }
         case  2:
         if (likely((values[2] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_y1)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, 2); __PYX_ERR(0, 100, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, 2); __PYX_ERR(0, 124, __pyx_L3_error)
         }
         case  3:
         if (likely((values[3] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_z1)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, 3); __PYX_ERR(0, 100, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, 3); __PYX_ERR(0, 124, __pyx_L3_error)
         }
         case  4:
         if (likely((values[4] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_x2)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, 4); __PYX_ERR(0, 100, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, 4); __PYX_ERR(0, 124, __pyx_L3_error)
         }
         case  5:
         if (likely((values[5] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_y2)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, 5); __PYX_ERR(0, 100, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, 5); __PYX_ERR(0, 124, __pyx_L3_error)
         }
         case  6:
         if (likely((values[6] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_z2)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, 6); __PYX_ERR(0, 100, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, 6); __PYX_ERR(0, 124, __pyx_L3_error)
         }
         case  7:
         if (likely((values[7] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_distance_threshold)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, 7); __PYX_ERR(0, 100, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, 7); __PYX_ERR(0, 124, __pyx_L3_error)
         }
         case  8:
         if (likely((values[8] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_gap_threshold)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, 8); __PYX_ERR(0, 100, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, 8); __PYX_ERR(0, 124, __pyx_L3_error)
         }
         case  9:
         if (kw_args > 0) {
@@ -2803,7 +2900,7 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_1getAllPoints(PyObject *
         }
       }
       if (unlikely(kw_args > 0)) {
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "getAllPoints") < 0)) __PYX_ERR(0, 100, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "getAllPoints") < 0)) __PYX_ERR(0, 124, __pyx_L3_error)
       }
     } else {
       switch (PyTuple_GET_SIZE(__pyx_args)) {
@@ -2834,13 +2931,13 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_1getAllPoints(PyObject *
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 100, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("getAllPoints", 0, 9, 10, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 124, __pyx_L3_error)
   __pyx_L3_error:;
   __Pyx_AddTraceback("RMS.Routines.Grouping3Dcy.getAllPoints", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_point_list), __pyx_ptype_5numpy_ndarray, 1, "point_list", 0))) __PYX_ERR(0, 100, __pyx_L1_error)
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_point_list), __pyx_ptype_5numpy_ndarray, 1, "point_list", 0))) __PYX_ERR(0, 124, __pyx_L1_error)
   __pyx_r = __pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(__pyx_self, __pyx_v_point_list, __pyx_v_x1, __pyx_v_y1, __pyx_v_z1, __pyx_v_x2, __pyx_v_y2, __pyx_v_z2, __pyx_v_distance_threshold, __pyx_v_gap_threshold, __pyx_v_max_array_size);
 
   /* function exit code */
@@ -2852,10 +2949,10 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_1getAllPoints(PyObject *
   return __pyx_r;
 }
 
-/* "RMS/Routines/Grouping3Dcy.pyx":121
+/* "RMS/Routines/Grouping3Dcy.pyx":145
  *         return np.array([[]])
  * 
- *     def propagateLine(np.ndarray[INT_TYPE_t, ndim=2] max_line_points, np.ndarray[INT_TYPE_t, ndim=2] propagation_list, int i):             # <<<<<<<<<<<<<<
+ *     def propagateLine(np.ndarray[UINT16_TYPE_t, ndim=2] max_line_points, np.ndarray[UINT16_TYPE_t, ndim=2] propagation_list, int i):             # <<<<<<<<<<<<<<
  *         """ Finds all points present on a line starting from a point on that line.
  *         """
  */
@@ -2892,16 +2989,16 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_1propagat
         case  1:
         if (likely((values[1] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_propagation_list)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("propagateLine", 1, 3, 3, 1); __PYX_ERR(0, 121, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("propagateLine", 1, 3, 3, 1); __PYX_ERR(0, 145, __pyx_L3_error)
         }
         case  2:
         if (likely((values[2] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_i)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("propagateLine", 1, 3, 3, 2); __PYX_ERR(0, 121, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("propagateLine", 1, 3, 3, 2); __PYX_ERR(0, 145, __pyx_L3_error)
         }
       }
       if (unlikely(kw_args > 0)) {
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "propagateLine") < 0)) __PYX_ERR(0, 121, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "propagateLine") < 0)) __PYX_ERR(0, 145, __pyx_L3_error)
       }
     } else if (PyTuple_GET_SIZE(__pyx_args) != 3) {
       goto __pyx_L5_argtuple_error;
@@ -2912,18 +3009,18 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_1propagat
     }
     __pyx_v_max_line_points = ((PyArrayObject *)values[0]);
     __pyx_v_propagation_list = ((PyArrayObject *)values[1]);
-    __pyx_v_i = __Pyx_PyInt_As_int(values[2]); if (unlikely((__pyx_v_i == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 121, __pyx_L3_error)
+    __pyx_v_i = __Pyx_PyInt_As_int(values[2]); if (unlikely((__pyx_v_i == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 145, __pyx_L3_error)
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("propagateLine", 1, 3, 3, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 121, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("propagateLine", 1, 3, 3, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 145, __pyx_L3_error)
   __pyx_L3_error:;
   __Pyx_AddTraceback("RMS.Routines.Grouping3Dcy.getAllPoints.propagateLine", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_max_line_points), __pyx_ptype_5numpy_ndarray, 1, "max_line_points", 0))) __PYX_ERR(0, 121, __pyx_L1_error)
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_propagation_list), __pyx_ptype_5numpy_ndarray, 1, "propagation_list", 0))) __PYX_ERR(0, 121, __pyx_L1_error)
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_max_line_points), __pyx_ptype_5numpy_ndarray, 1, "max_line_points", 0))) __PYX_ERR(0, 145, __pyx_L1_error)
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_propagation_list), __pyx_ptype_5numpy_ndarray, 1, "propagation_list", 0))) __PYX_ERR(0, 145, __pyx_L1_error)
   __pyx_r = __pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagateLine(__pyx_self, __pyx_v_max_line_points, __pyx_v_propagation_list, __pyx_v_i);
 
   /* function exit code */
@@ -2988,44 +3085,44 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
   __pyx_pybuffernd_propagation_list.rcbuffer = &__pyx_pybuffer_propagation_list;
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_max_line_points.rcbuffer->pybuffer, (PyObject*)__pyx_v_max_line_points, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES| PyBUF_WRITABLE, 2, 0, __pyx_stack) == -1)) __PYX_ERR(0, 121, __pyx_L1_error)
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_max_line_points.rcbuffer->pybuffer, (PyObject*)__pyx_v_max_line_points, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES| PyBUF_WRITABLE, 2, 0, __pyx_stack) == -1)) __PYX_ERR(0, 145, __pyx_L1_error)
   }
   __pyx_pybuffernd_max_line_points.diminfo[0].strides = __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_max_line_points.diminfo[0].shape = __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_max_line_points.diminfo[1].strides = __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_max_line_points.diminfo[1].shape = __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.shape[1];
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_propagation_list.rcbuffer->pybuffer, (PyObject*)__pyx_v_propagation_list, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) __PYX_ERR(0, 121, __pyx_L1_error)
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_propagation_list.rcbuffer->pybuffer, (PyObject*)__pyx_v_propagation_list, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) __PYX_ERR(0, 145, __pyx_L1_error)
   }
   __pyx_pybuffernd_propagation_list.diminfo[0].strides = __pyx_pybuffernd_propagation_list.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_propagation_list.diminfo[0].shape = __pyx_pybuffernd_propagation_list.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_propagation_list.diminfo[1].strides = __pyx_pybuffernd_propagation_list.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_propagation_list.diminfo[1].shape = __pyx_pybuffernd_propagation_list.rcbuffer->pybuffer.shape[1];
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":127
+  /* "RMS/Routines/Grouping3Dcy.pyx":151
  *         cdef int x3, y3, z3, x_prev, y_prev, z_prev, z
  * 
  *         x_prev, y_prev, z_prev = x1, y1, z1             # <<<<<<<<<<<<<<
  * 
  *         for z in range(len(propagation_list)):
  */
-  if (unlikely(!__pyx_cur_scope->__pyx_v_x1)) { __Pyx_RaiseClosureNameError("x1"); __PYX_ERR(0, 127, __pyx_L1_error) }
-  __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_x1); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 127, __pyx_L1_error)
-  if (unlikely(!__pyx_cur_scope->__pyx_v_y1)) { __Pyx_RaiseClosureNameError("y1"); __PYX_ERR(0, 127, __pyx_L1_error) }
-  __pyx_t_2 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_y1); if (unlikely((__pyx_t_2 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 127, __pyx_L1_error)
-  if (unlikely(!__pyx_cur_scope->__pyx_v_z1)) { __Pyx_RaiseClosureNameError("z1"); __PYX_ERR(0, 127, __pyx_L1_error) }
-  __pyx_t_3 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_z1); if (unlikely((__pyx_t_3 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 127, __pyx_L1_error)
+  if (unlikely(!__pyx_cur_scope->__pyx_v_x1)) { __Pyx_RaiseClosureNameError("x1"); __PYX_ERR(0, 151, __pyx_L1_error) }
+  __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_x1); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 151, __pyx_L1_error)
+  if (unlikely(!__pyx_cur_scope->__pyx_v_y1)) { __Pyx_RaiseClosureNameError("y1"); __PYX_ERR(0, 151, __pyx_L1_error) }
+  __pyx_t_2 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_y1); if (unlikely((__pyx_t_2 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 151, __pyx_L1_error)
+  if (unlikely(!__pyx_cur_scope->__pyx_v_z1)) { __Pyx_RaiseClosureNameError("z1"); __PYX_ERR(0, 151, __pyx_L1_error) }
+  __pyx_t_3 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_z1); if (unlikely((__pyx_t_3 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 151, __pyx_L1_error)
   __pyx_v_x_prev = __pyx_t_1;
   __pyx_v_y_prev = __pyx_t_2;
   __pyx_v_z_prev = __pyx_t_3;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":129
+  /* "RMS/Routines/Grouping3Dcy.pyx":153
  *         x_prev, y_prev, z_prev = x1, y1, z1
  * 
  *         for z in range(len(propagation_list)):             # <<<<<<<<<<<<<<
  * 
  *             # This point defines a single point from a point cloud
  */
-  __pyx_t_4 = PyObject_Length(((PyObject *)__pyx_v_propagation_list)); if (unlikely(__pyx_t_4 == -1)) __PYX_ERR(0, 129, __pyx_L1_error)
+  __pyx_t_4 = PyObject_Length(((PyObject *)__pyx_v_propagation_list)); if (unlikely(__pyx_t_4 == -1)) __PYX_ERR(0, 153, __pyx_L1_error)
   for (__pyx_t_3 = 0; __pyx_t_3 < __pyx_t_4; __pyx_t_3+=1) {
     __pyx_v_z = __pyx_t_3;
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":132
+    /* "RMS/Routines/Grouping3Dcy.pyx":156
  * 
  *             # This point defines a single point from a point cloud
  *             x3 = propagation_list[z, 0]             # <<<<<<<<<<<<<<
@@ -3036,9 +3133,9 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
     __pyx_t_6 = 0;
     if (__pyx_t_5 < 0) __pyx_t_5 += __pyx_pybuffernd_propagation_list.diminfo[0].shape;
     if (__pyx_t_6 < 0) __pyx_t_6 += __pyx_pybuffernd_propagation_list.diminfo[1].shape;
-    __pyx_v_x3 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t *, __pyx_pybuffernd_propagation_list.rcbuffer->pybuffer.buf, __pyx_t_5, __pyx_pybuffernd_propagation_list.diminfo[0].strides, __pyx_t_6, __pyx_pybuffernd_propagation_list.diminfo[1].strides));
+    __pyx_v_x3 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_propagation_list.rcbuffer->pybuffer.buf, __pyx_t_5, __pyx_pybuffernd_propagation_list.diminfo[0].strides, __pyx_t_6, __pyx_pybuffernd_propagation_list.diminfo[1].strides));
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":133
+    /* "RMS/Routines/Grouping3Dcy.pyx":157
  *             # This point defines a single point from a point cloud
  *             x3 = propagation_list[z, 0]
  *             y3 = propagation_list[z, 1]             # <<<<<<<<<<<<<<
@@ -3049,9 +3146,9 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
     __pyx_t_8 = 1;
     if (__pyx_t_7 < 0) __pyx_t_7 += __pyx_pybuffernd_propagation_list.diminfo[0].shape;
     if (__pyx_t_8 < 0) __pyx_t_8 += __pyx_pybuffernd_propagation_list.diminfo[1].shape;
-    __pyx_v_y3 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t *, __pyx_pybuffernd_propagation_list.rcbuffer->pybuffer.buf, __pyx_t_7, __pyx_pybuffernd_propagation_list.diminfo[0].strides, __pyx_t_8, __pyx_pybuffernd_propagation_list.diminfo[1].strides));
+    __pyx_v_y3 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_propagation_list.rcbuffer->pybuffer.buf, __pyx_t_7, __pyx_pybuffernd_propagation_list.diminfo[0].strides, __pyx_t_8, __pyx_pybuffernd_propagation_list.diminfo[1].strides));
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":134
+    /* "RMS/Routines/Grouping3Dcy.pyx":158
  *             x3 = propagation_list[z, 0]
  *             y3 = propagation_list[z, 1]
  *             z3 = propagation_list[z, 2]             # <<<<<<<<<<<<<<
@@ -3062,62 +3159,62 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
     __pyx_t_10 = 2;
     if (__pyx_t_9 < 0) __pyx_t_9 += __pyx_pybuffernd_propagation_list.diminfo[0].shape;
     if (__pyx_t_10 < 0) __pyx_t_10 += __pyx_pybuffernd_propagation_list.diminfo[1].shape;
-    __pyx_v_z3 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t *, __pyx_pybuffernd_propagation_list.rcbuffer->pybuffer.buf, __pyx_t_9, __pyx_pybuffernd_propagation_list.diminfo[0].strides, __pyx_t_10, __pyx_pybuffernd_propagation_list.diminfo[1].strides));
+    __pyx_v_z3 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_propagation_list.rcbuffer->pybuffer.buf, __pyx_t_9, __pyx_pybuffernd_propagation_list.diminfo[0].strides, __pyx_t_10, __pyx_pybuffernd_propagation_list.diminfo[1].strides));
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":137
+    /* "RMS/Routines/Grouping3Dcy.pyx":161
  * 
  *             # Check if the distance between the line and the point is close enough
  *             line_dist = line3DDistance_simple(x1, y1, z1, x2, y2, z2, x3, y3, z3)             # <<<<<<<<<<<<<<
  * 
  *             if line_dist < distance_threshold:
  */
-    if (unlikely(!__pyx_cur_scope->__pyx_v_x1)) { __Pyx_RaiseClosureNameError("x1"); __PYX_ERR(0, 137, __pyx_L1_error) }
-    __pyx_t_2 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_x1); if (unlikely((__pyx_t_2 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 137, __pyx_L1_error)
-    if (unlikely(!__pyx_cur_scope->__pyx_v_y1)) { __Pyx_RaiseClosureNameError("y1"); __PYX_ERR(0, 137, __pyx_L1_error) }
-    __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_y1); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 137, __pyx_L1_error)
-    if (unlikely(!__pyx_cur_scope->__pyx_v_z1)) { __Pyx_RaiseClosureNameError("z1"); __PYX_ERR(0, 137, __pyx_L1_error) }
-    __pyx_t_11 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_z1); if (unlikely((__pyx_t_11 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 137, __pyx_L1_error)
-    if (unlikely(!__pyx_cur_scope->__pyx_v_x2)) { __Pyx_RaiseClosureNameError("x2"); __PYX_ERR(0, 137, __pyx_L1_error) }
-    __pyx_t_12 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_x2); if (unlikely((__pyx_t_12 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 137, __pyx_L1_error)
-    if (unlikely(!__pyx_cur_scope->__pyx_v_y2)) { __Pyx_RaiseClosureNameError("y2"); __PYX_ERR(0, 137, __pyx_L1_error) }
-    __pyx_t_13 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_y2); if (unlikely((__pyx_t_13 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 137, __pyx_L1_error)
-    if (unlikely(!__pyx_cur_scope->__pyx_v_z2)) { __Pyx_RaiseClosureNameError("z2"); __PYX_ERR(0, 137, __pyx_L1_error) }
-    __pyx_t_14 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_z2); if (unlikely((__pyx_t_14 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 137, __pyx_L1_error)
-    __pyx_t_15 = PyFloat_FromDouble(__pyx_f_3RMS_8Routines_12Grouping3Dcy_line3DDistance_simple(__pyx_t_2, __pyx_t_1, __pyx_t_11, __pyx_t_12, __pyx_t_13, __pyx_t_14, __pyx_v_x3, __pyx_v_y3, __pyx_v_z3)); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 137, __pyx_L1_error)
+    if (unlikely(!__pyx_cur_scope->__pyx_v_x1)) { __Pyx_RaiseClosureNameError("x1"); __PYX_ERR(0, 161, __pyx_L1_error) }
+    __pyx_t_2 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_x1); if (unlikely((__pyx_t_2 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 161, __pyx_L1_error)
+    if (unlikely(!__pyx_cur_scope->__pyx_v_y1)) { __Pyx_RaiseClosureNameError("y1"); __PYX_ERR(0, 161, __pyx_L1_error) }
+    __pyx_t_1 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_y1); if (unlikely((__pyx_t_1 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 161, __pyx_L1_error)
+    if (unlikely(!__pyx_cur_scope->__pyx_v_z1)) { __Pyx_RaiseClosureNameError("z1"); __PYX_ERR(0, 161, __pyx_L1_error) }
+    __pyx_t_11 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_z1); if (unlikely((__pyx_t_11 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 161, __pyx_L1_error)
+    if (unlikely(!__pyx_cur_scope->__pyx_v_x2)) { __Pyx_RaiseClosureNameError("x2"); __PYX_ERR(0, 161, __pyx_L1_error) }
+    __pyx_t_12 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_x2); if (unlikely((__pyx_t_12 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 161, __pyx_L1_error)
+    if (unlikely(!__pyx_cur_scope->__pyx_v_y2)) { __Pyx_RaiseClosureNameError("y2"); __PYX_ERR(0, 161, __pyx_L1_error) }
+    __pyx_t_13 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_y2); if (unlikely((__pyx_t_13 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 161, __pyx_L1_error)
+    if (unlikely(!__pyx_cur_scope->__pyx_v_z2)) { __Pyx_RaiseClosureNameError("z2"); __PYX_ERR(0, 161, __pyx_L1_error) }
+    __pyx_t_14 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_z2); if (unlikely((__pyx_t_14 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 161, __pyx_L1_error)
+    __pyx_t_15 = PyFloat_FromDouble(__pyx_f_3RMS_8Routines_12Grouping3Dcy_line3DDistance_simple(__pyx_t_2, __pyx_t_1, __pyx_t_11, __pyx_t_12, __pyx_t_13, __pyx_t_14, __pyx_v_x3, __pyx_v_y3, __pyx_v_z3)); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 161, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_15);
     __Pyx_XDECREF_SET(__pyx_v_line_dist, __pyx_t_15);
     __pyx_t_15 = 0;
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":139
+    /* "RMS/Routines/Grouping3Dcy.pyx":163
  *             line_dist = line3DDistance_simple(x1, y1, z1, x2, y2, z2, x3, y3, z3)
  * 
  *             if line_dist < distance_threshold:             # <<<<<<<<<<<<<<
  * 
  *                 # Calculate the gap from the previous point and reject the solution if the point is too far
  */
-    if (unlikely(!__pyx_cur_scope->__pyx_v_distance_threshold)) { __Pyx_RaiseClosureNameError("distance_threshold"); __PYX_ERR(0, 139, __pyx_L1_error) }
-    __pyx_t_15 = PyObject_RichCompare(__pyx_v_line_dist, __pyx_cur_scope->__pyx_v_distance_threshold, Py_LT); __Pyx_XGOTREF(__pyx_t_15); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 139, __pyx_L1_error)
-    __pyx_t_16 = __Pyx_PyObject_IsTrue(__pyx_t_15); if (unlikely(__pyx_t_16 < 0)) __PYX_ERR(0, 139, __pyx_L1_error)
+    if (unlikely(!__pyx_cur_scope->__pyx_v_distance_threshold)) { __Pyx_RaiseClosureNameError("distance_threshold"); __PYX_ERR(0, 163, __pyx_L1_error) }
+    __pyx_t_15 = PyObject_RichCompare(__pyx_v_line_dist, __pyx_cur_scope->__pyx_v_distance_threshold, Py_LT); __Pyx_XGOTREF(__pyx_t_15); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 163, __pyx_L1_error)
+    __pyx_t_16 = __Pyx_PyObject_IsTrue(__pyx_t_15); if (unlikely(__pyx_t_16 < 0)) __PYX_ERR(0, 163, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_15); __pyx_t_15 = 0;
     if (__pyx_t_16) {
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":142
+      /* "RMS/Routines/Grouping3Dcy.pyx":166
  * 
  *                 # Calculate the gap from the previous point and reject the solution if the point is too far
  *                 if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_threshold:             # <<<<<<<<<<<<<<
  *                     break
  * 
  */
-      __pyx_t_15 = __Pyx_PyInt_From_int(__pyx_f_3RMS_8Routines_12Grouping3Dcy_point3DDistance(__pyx_v_x_prev, __pyx_v_y_prev, __pyx_v_z_prev, __pyx_v_x3, __pyx_v_y3, __pyx_v_z3)); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 142, __pyx_L1_error)
+      __pyx_t_15 = __Pyx_PyInt_From_int(__pyx_f_3RMS_8Routines_12Grouping3Dcy_point3DDistance(__pyx_v_x_prev, __pyx_v_y_prev, __pyx_v_z_prev, __pyx_v_x3, __pyx_v_y3, __pyx_v_z3)); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 166, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_15);
-      if (unlikely(!__pyx_cur_scope->__pyx_v_gap_threshold)) { __Pyx_RaiseClosureNameError("gap_threshold"); __PYX_ERR(0, 142, __pyx_L1_error) }
-      __pyx_t_17 = PyObject_RichCompare(__pyx_t_15, __pyx_cur_scope->__pyx_v_gap_threshold, Py_GT); __Pyx_XGOTREF(__pyx_t_17); if (unlikely(!__pyx_t_17)) __PYX_ERR(0, 142, __pyx_L1_error)
+      if (unlikely(!__pyx_cur_scope->__pyx_v_gap_threshold)) { __Pyx_RaiseClosureNameError("gap_threshold"); __PYX_ERR(0, 166, __pyx_L1_error) }
+      __pyx_t_17 = PyObject_RichCompare(__pyx_t_15, __pyx_cur_scope->__pyx_v_gap_threshold, Py_GT); __Pyx_XGOTREF(__pyx_t_17); if (unlikely(!__pyx_t_17)) __PYX_ERR(0, 166, __pyx_L1_error)
       __Pyx_DECREF(__pyx_t_15); __pyx_t_15 = 0;
-      __pyx_t_16 = __Pyx_PyObject_IsTrue(__pyx_t_17); if (unlikely(__pyx_t_16 < 0)) __PYX_ERR(0, 142, __pyx_L1_error)
+      __pyx_t_16 = __Pyx_PyObject_IsTrue(__pyx_t_17); if (unlikely(__pyx_t_16 < 0)) __PYX_ERR(0, 166, __pyx_L1_error)
       __Pyx_DECREF(__pyx_t_17); __pyx_t_17 = 0;
       if (__pyx_t_16) {
 
-        /* "RMS/Routines/Grouping3Dcy.pyx":143
+        /* "RMS/Routines/Grouping3Dcy.pyx":167
  *                 # Calculate the gap from the previous point and reject the solution if the point is too far
  *                 if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_threshold:
  *                     break             # <<<<<<<<<<<<<<
@@ -3126,7 +3223,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
  */
         goto __pyx_L4_break;
 
-        /* "RMS/Routines/Grouping3Dcy.pyx":142
+        /* "RMS/Routines/Grouping3Dcy.pyx":166
  * 
  *                 # Calculate the gap from the previous point and reject the solution if the point is too far
  *                 if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_threshold:             # <<<<<<<<<<<<<<
@@ -3135,7 +3232,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
  */
       }
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":145
+      /* "RMS/Routines/Grouping3Dcy.pyx":169
  *                     break
  * 
  *                 max_line_points[i,0] = x3             # <<<<<<<<<<<<<<
@@ -3146,9 +3243,9 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
       __pyx_t_19 = 0;
       if (__pyx_t_18 < 0) __pyx_t_18 += __pyx_pybuffernd_max_line_points.diminfo[0].shape;
       if (__pyx_t_19 < 0) __pyx_t_19 += __pyx_pybuffernd_max_line_points.diminfo[1].shape;
-      *__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t *, __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.buf, __pyx_t_18, __pyx_pybuffernd_max_line_points.diminfo[0].strides, __pyx_t_19, __pyx_pybuffernd_max_line_points.diminfo[1].strides) = __pyx_v_x3;
+      *__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.buf, __pyx_t_18, __pyx_pybuffernd_max_line_points.diminfo[0].strides, __pyx_t_19, __pyx_pybuffernd_max_line_points.diminfo[1].strides) = __pyx_v_x3;
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":146
+      /* "RMS/Routines/Grouping3Dcy.pyx":170
  * 
  *                 max_line_points[i,0] = x3
  *                 max_line_points[i,1] = y3             # <<<<<<<<<<<<<<
@@ -3159,9 +3256,9 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
       __pyx_t_21 = 1;
       if (__pyx_t_20 < 0) __pyx_t_20 += __pyx_pybuffernd_max_line_points.diminfo[0].shape;
       if (__pyx_t_21 < 0) __pyx_t_21 += __pyx_pybuffernd_max_line_points.diminfo[1].shape;
-      *__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t *, __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.buf, __pyx_t_20, __pyx_pybuffernd_max_line_points.diminfo[0].strides, __pyx_t_21, __pyx_pybuffernd_max_line_points.diminfo[1].strides) = __pyx_v_y3;
+      *__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.buf, __pyx_t_20, __pyx_pybuffernd_max_line_points.diminfo[0].strides, __pyx_t_21, __pyx_pybuffernd_max_line_points.diminfo[1].strides) = __pyx_v_y3;
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":147
+      /* "RMS/Routines/Grouping3Dcy.pyx":171
  *                 max_line_points[i,0] = x3
  *                 max_line_points[i,1] = y3
  *                 max_line_points[i,2] = z3             # <<<<<<<<<<<<<<
@@ -3172,9 +3269,9 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
       __pyx_t_23 = 2;
       if (__pyx_t_22 < 0) __pyx_t_22 += __pyx_pybuffernd_max_line_points.diminfo[0].shape;
       if (__pyx_t_23 < 0) __pyx_t_23 += __pyx_pybuffernd_max_line_points.diminfo[1].shape;
-      *__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t *, __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.buf, __pyx_t_22, __pyx_pybuffernd_max_line_points.diminfo[0].strides, __pyx_t_23, __pyx_pybuffernd_max_line_points.diminfo[1].strides) = __pyx_v_z3;
+      *__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.buf, __pyx_t_22, __pyx_pybuffernd_max_line_points.diminfo[0].strides, __pyx_t_23, __pyx_pybuffernd_max_line_points.diminfo[1].strides) = __pyx_v_z3;
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":148
+      /* "RMS/Routines/Grouping3Dcy.pyx":172
  *                 max_line_points[i,1] = y3
  *                 max_line_points[i,2] = z3
  *                 i += 1             # <<<<<<<<<<<<<<
@@ -3183,7 +3280,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
  */
       __pyx_v_i = (__pyx_v_i + 1);
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":150
+      /* "RMS/Routines/Grouping3Dcy.pyx":174
  *                 i += 1
  * 
  *                 x_prev, y_prev, z_prev = x3, y3, z3             # <<<<<<<<<<<<<<
@@ -3197,7 +3294,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
       __pyx_v_y_prev = __pyx_t_13;
       __pyx_v_z_prev = __pyx_t_12;
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":139
+      /* "RMS/Routines/Grouping3Dcy.pyx":163
  *             line_dist = line3DDistance_simple(x1, y1, z1, x2, y2, z2, x3, y3, z3)
  * 
  *             if line_dist < distance_threshold:             # <<<<<<<<<<<<<<
@@ -3208,7 +3305,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
   }
   __pyx_L4_break:;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":152
+  /* "RMS/Routines/Grouping3Dcy.pyx":176
  *                 x_prev, y_prev, z_prev = x3, y3, z3
  * 
  *         return max_line_points, i             # <<<<<<<<<<<<<<
@@ -3216,9 +3313,9 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
  * 
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_17 = __Pyx_PyInt_From_int(__pyx_v_i); if (unlikely(!__pyx_t_17)) __PYX_ERR(0, 152, __pyx_L1_error)
+  __pyx_t_17 = __Pyx_PyInt_From_int(__pyx_v_i); if (unlikely(!__pyx_t_17)) __PYX_ERR(0, 176, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_17);
-  __pyx_t_15 = PyTuple_New(2); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 152, __pyx_L1_error)
+  __pyx_t_15 = PyTuple_New(2); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 176, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_15);
   __Pyx_INCREF(((PyObject *)__pyx_v_max_line_points));
   __Pyx_GIVEREF(((PyObject *)__pyx_v_max_line_points));
@@ -3230,10 +3327,10 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
   __pyx_t_15 = 0;
   goto __pyx_L0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":121
+  /* "RMS/Routines/Grouping3Dcy.pyx":145
  *         return np.array([[]])
  * 
- *     def propagateLine(np.ndarray[INT_TYPE_t, ndim=2] max_line_points, np.ndarray[INT_TYPE_t, ndim=2] propagation_list, int i):             # <<<<<<<<<<<<<<
+ *     def propagateLine(np.ndarray[UINT16_TYPE_t, ndim=2] max_line_points, np.ndarray[UINT16_TYPE_t, ndim=2] propagation_list, int i):             # <<<<<<<<<<<<<<
  *         """ Finds all points present on a line starting from a point on that line.
  *         """
  */
@@ -3262,10 +3359,10 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagate
   return __pyx_r;
 }
 
-/* "RMS/Routines/Grouping3Dcy.pyx":100
+/* "RMS/Routines/Grouping3Dcy.pyx":124
  * 
  * @cython.boundscheck(False)
- * def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):             # <<<<<<<<<<<<<<
+ * def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):             # <<<<<<<<<<<<<<
  *     """ Returns all points describing a particular line.
  * 
  */
@@ -3323,7 +3420,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
   if (unlikely(!__pyx_cur_scope)) {
     __pyx_cur_scope = ((struct __pyx_obj_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__getAllPoints *)Py_None);
     __Pyx_INCREF(Py_None);
-    __PYX_ERR(0, 100, __pyx_L1_error)
+    __PYX_ERR(0, 124, __pyx_L1_error)
   } else {
     __Pyx_GOTREF(__pyx_cur_scope);
   }
@@ -3362,11 +3459,11 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
   __pyx_pybuffernd_point_list.rcbuffer = &__pyx_pybuffer_point_list;
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer, (PyObject*)__pyx_v_point_list, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) __PYX_ERR(0, 100, __pyx_L1_error)
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer, (PyObject*)__pyx_v_point_list, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) __PYX_ERR(0, 124, __pyx_L1_error)
   }
   __pyx_pybuffernd_point_list.diminfo[0].strides = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_point_list.diminfo[0].shape = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_point_list.diminfo[1].strides = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_point_list.diminfo[1].shape = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.shape[1];
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":112
+  /* "RMS/Routines/Grouping3Dcy.pyx":136
  *     """
  * 
  *     cdef int i = 0             # <<<<<<<<<<<<<<
@@ -3375,7 +3472,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
  */
   __pyx_v_i = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":115
+  /* "RMS/Routines/Grouping3Dcy.pyx":139
  * 
  *     # Number of points in the point list
  *     point_list_size = point_list.shape[0]             # <<<<<<<<<<<<<<
@@ -3384,7 +3481,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
  */
   __pyx_v_point_list_size = (__pyx_v_point_list->dimensions[0]);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":118
+  /* "RMS/Routines/Grouping3Dcy.pyx":142
  * 
  *     # Check if the point list is empty
  *     if point_list_size == 0:             # <<<<<<<<<<<<<<
@@ -3394,22 +3491,22 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
   __pyx_t_1 = ((__pyx_v_point_list_size == 0) != 0);
   if (__pyx_t_1) {
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":119
+    /* "RMS/Routines/Grouping3Dcy.pyx":143
  *     # Check if the point list is empty
  *     if point_list_size == 0:
  *         return np.array([[]])             # <<<<<<<<<<<<<<
  * 
- *     def propagateLine(np.ndarray[INT_TYPE_t, ndim=2] max_line_points, np.ndarray[INT_TYPE_t, ndim=2] propagation_list, int i):
+ *     def propagateLine(np.ndarray[UINT16_TYPE_t, ndim=2] max_line_points, np.ndarray[UINT16_TYPE_t, ndim=2] propagation_list, int i):
  */
     __Pyx_XDECREF(__pyx_r);
-    __pyx_t_3 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 119, __pyx_L1_error)
+    __pyx_t_3 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 143, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_3);
-    __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_array); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 119, __pyx_L1_error)
+    __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_array); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 143, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_4);
     __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-    __pyx_t_3 = PyList_New(0); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 119, __pyx_L1_error)
+    __pyx_t_3 = PyList_New(0); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 143, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_3);
-    __pyx_t_5 = PyList_New(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 119, __pyx_L1_error)
+    __pyx_t_5 = PyList_New(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 143, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_5);
     __Pyx_GIVEREF(__pyx_t_3);
     PyList_SET_ITEM(__pyx_t_5, 0, __pyx_t_3);
@@ -3425,14 +3522,14 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
       }
     }
     if (!__pyx_t_3) {
-      __pyx_t_2 = __Pyx_PyObject_CallOneArg(__pyx_t_4, __pyx_t_5); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 119, __pyx_L1_error)
+      __pyx_t_2 = __Pyx_PyObject_CallOneArg(__pyx_t_4, __pyx_t_5); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 143, __pyx_L1_error)
       __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
       __Pyx_GOTREF(__pyx_t_2);
     } else {
       #if CYTHON_FAST_PYCALL
       if (PyFunction_Check(__pyx_t_4)) {
         PyObject *__pyx_temp[2] = {__pyx_t_3, __pyx_t_5};
-        __pyx_t_2 = __Pyx_PyFunction_FastCall(__pyx_t_4, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 119, __pyx_L1_error)
+        __pyx_t_2 = __Pyx_PyFunction_FastCall(__pyx_t_4, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 143, __pyx_L1_error)
         __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
         __Pyx_GOTREF(__pyx_t_2);
         __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
@@ -3441,20 +3538,20 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
       #if CYTHON_FAST_PYCCALL
       if (__Pyx_PyFastCFunction_Check(__pyx_t_4)) {
         PyObject *__pyx_temp[2] = {__pyx_t_3, __pyx_t_5};
-        __pyx_t_2 = __Pyx_PyCFunction_FastCall(__pyx_t_4, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 119, __pyx_L1_error)
+        __pyx_t_2 = __Pyx_PyCFunction_FastCall(__pyx_t_4, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 143, __pyx_L1_error)
         __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
         __Pyx_GOTREF(__pyx_t_2);
         __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
       } else
       #endif
       {
-        __pyx_t_6 = PyTuple_New(1+1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 119, __pyx_L1_error)
+        __pyx_t_6 = PyTuple_New(1+1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 143, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_6);
         __Pyx_GIVEREF(__pyx_t_3); PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_3); __pyx_t_3 = NULL;
         __Pyx_GIVEREF(__pyx_t_5);
         PyTuple_SET_ITEM(__pyx_t_6, 0+1, __pyx_t_5);
         __pyx_t_5 = 0;
-        __pyx_t_2 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_6, NULL); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 119, __pyx_L1_error)
+        __pyx_t_2 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_6, NULL); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 143, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_2);
         __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
       }
@@ -3464,7 +3561,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
     __pyx_t_2 = 0;
     goto __pyx_L0;
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":118
+    /* "RMS/Routines/Grouping3Dcy.pyx":142
  * 
  *     # Check if the point list is empty
  *     if point_list_size == 0:             # <<<<<<<<<<<<<<
@@ -3473,44 +3570,44 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
  */
   }
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":121
+  /* "RMS/Routines/Grouping3Dcy.pyx":145
  *         return np.array([[]])
  * 
- *     def propagateLine(np.ndarray[INT_TYPE_t, ndim=2] max_line_points, np.ndarray[INT_TYPE_t, ndim=2] propagation_list, int i):             # <<<<<<<<<<<<<<
+ *     def propagateLine(np.ndarray[UINT16_TYPE_t, ndim=2] max_line_points, np.ndarray[UINT16_TYPE_t, ndim=2] propagation_list, int i):             # <<<<<<<<<<<<<<
  *         """ Finds all points present on a line starting from a point on that line.
  *         """
  */
-  __pyx_t_2 = __Pyx_CyFunction_NewEx(&__pyx_mdef_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_1propagateLine, 0, __pyx_n_s_getAllPoints_locals_propagateLin, ((PyObject*)__pyx_cur_scope), __pyx_n_s_RMS_Routines_Grouping3Dcy, __pyx_d, ((PyObject *)__pyx_codeobj__3)); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 121, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_CyFunction_NewEx(&__pyx_mdef_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_1propagateLine, 0, __pyx_n_s_getAllPoints_locals_propagateLin, ((PyObject*)__pyx_cur_scope), __pyx_n_s_RMS_Routines_Grouping3Dcy, __pyx_d, ((PyObject *)__pyx_codeobj__3)); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 145, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_v_propagateLine = __pyx_t_2;
   __pyx_t_2 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":155
+  /* "RMS/Routines/Grouping3Dcy.pyx":179
  * 
  * 
  *     if max_array_size == 0:             # <<<<<<<<<<<<<<
  *         max_array_size = point_list_size
  * 
  */
-  __pyx_t_2 = __Pyx_PyInt_EqObjC(__pyx_v_max_array_size, __pyx_int_0, 0, 0); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 155, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyInt_EqObjC(__pyx_v_max_array_size, __pyx_int_0, 0, 0); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 179, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_1 = __Pyx_PyObject_IsTrue(__pyx_t_2); if (unlikely(__pyx_t_1 < 0)) __PYX_ERR(0, 155, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_IsTrue(__pyx_t_2); if (unlikely(__pyx_t_1 < 0)) __PYX_ERR(0, 179, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   if (__pyx_t_1) {
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":156
+    /* "RMS/Routines/Grouping3Dcy.pyx":180
  * 
  *     if max_array_size == 0:
  *         max_array_size = point_list_size             # <<<<<<<<<<<<<<
  * 
  *     # Get all points belonging to the best line
  */
-    __pyx_t_2 = __Pyx_PyInt_From_Py_intptr_t(__pyx_v_point_list_size); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 156, __pyx_L1_error)
+    __pyx_t_2 = __Pyx_PyInt_From_Py_intptr_t(__pyx_v_point_list_size); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 180, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_2);
     __Pyx_DECREF_SET(__pyx_v_max_array_size, __pyx_t_2);
     __pyx_t_2 = 0;
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":155
+    /* "RMS/Routines/Grouping3Dcy.pyx":179
  * 
  * 
  *     if max_array_size == 0:             # <<<<<<<<<<<<<<
@@ -3519,21 +3616,21 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
  */
   }
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":159
+  /* "RMS/Routines/Grouping3Dcy.pyx":183
  * 
  *     # Get all points belonging to the best line
- *     cdef np.ndarray[INT_TYPE_t, ndim=2] max_line_points = np.zeros(shape=(max_array_size, 3), dtype = INT_TYPE)             # <<<<<<<<<<<<<<
+ *     cdef np.ndarray[UINT16_TYPE_t, ndim=2] max_line_points = np.zeros(shape=(max_array_size, 3), dtype = UINT16_TYPE)             # <<<<<<<<<<<<<<
  * 
  *     # Get the index of the first point
  */
-  __pyx_t_2 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 159, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 183, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_zeros); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 159, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_zeros); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 183, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = PyDict_New(); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 159, __pyx_L1_error)
+  __pyx_t_2 = PyDict_New(); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 183, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_6 = PyTuple_New(2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 159, __pyx_L1_error)
+  __pyx_t_6 = PyTuple_New(2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 183, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_INCREF(__pyx_v_max_array_size);
   __Pyx_GIVEREF(__pyx_v_max_array_size);
@@ -3541,23 +3638,23 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
   __Pyx_INCREF(__pyx_int_3);
   __Pyx_GIVEREF(__pyx_int_3);
   PyTuple_SET_ITEM(__pyx_t_6, 1, __pyx_int_3);
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_shape, __pyx_t_6) < 0) __PYX_ERR(0, 159, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_shape, __pyx_t_6) < 0) __PYX_ERR(0, 183, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_GetModuleGlobalName(__pyx_n_s_INT_TYPE); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 159, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_GetModuleGlobalName(__pyx_n_s_UINT16_TYPE); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 183, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 159, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 183, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_empty_tuple, __pyx_t_2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 159, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_empty_tuple, __pyx_t_2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 183, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  if (!(likely(((__pyx_t_6) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_6, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 159, __pyx_L1_error)
+  if (!(likely(((__pyx_t_6) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_6, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 183, __pyx_L1_error)
   __pyx_t_7 = ((PyArrayObject *)__pyx_t_6);
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_max_line_points.rcbuffer->pybuffer, (PyObject*)__pyx_t_7, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_max_line_points.rcbuffer->pybuffer, (PyObject*)__pyx_t_7, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
       __pyx_v_max_line_points = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.buf = NULL;
-      __PYX_ERR(0, 159, __pyx_L1_error)
+      __PYX_ERR(0, 183, __pyx_L1_error)
     } else {__pyx_pybuffernd_max_line_points.diminfo[0].strides = __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_max_line_points.diminfo[0].shape = __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_max_line_points.diminfo[1].strides = __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_max_line_points.diminfo[1].shape = __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.shape[1];
     }
   }
@@ -3565,29 +3662,29 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
   __pyx_v_max_line_points = ((PyArrayObject *)__pyx_t_6);
   __pyx_t_6 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":162
+  /* "RMS/Routines/Grouping3Dcy.pyx":186
  * 
  *     # Get the index of the first point
  *     point1_index = np.where(np.all(point_list==np.array((x1, y1, z1)),axis=1))[0]             # <<<<<<<<<<<<<<
  * 
  *     # Check if the first point exists, if not start from the point closes to the given point
  */
-  __pyx_t_2 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 162, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 186, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_where); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 162, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_where); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 186, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 162, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 186, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_all); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 162, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_all); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 186, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_3 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 162, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 186, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_array); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 162, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_array); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 186, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_t_3 = PyTuple_New(3); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 162, __pyx_L1_error)
+  __pyx_t_3 = PyTuple_New(3); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 186, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_INCREF(__pyx_cur_scope->__pyx_v_x1);
   __Pyx_GIVEREF(__pyx_cur_scope->__pyx_v_x1);
@@ -3609,14 +3706,14 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
     }
   }
   if (!__pyx_t_9) {
-    __pyx_t_2 = __Pyx_PyObject_CallOneArg(__pyx_t_8, __pyx_t_3); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 162, __pyx_L1_error)
+    __pyx_t_2 = __Pyx_PyObject_CallOneArg(__pyx_t_8, __pyx_t_3); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 186, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
     __Pyx_GOTREF(__pyx_t_2);
   } else {
     #if CYTHON_FAST_PYCALL
     if (PyFunction_Check(__pyx_t_8)) {
       PyObject *__pyx_temp[2] = {__pyx_t_9, __pyx_t_3};
-      __pyx_t_2 = __Pyx_PyFunction_FastCall(__pyx_t_8, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 162, __pyx_L1_error)
+      __pyx_t_2 = __Pyx_PyFunction_FastCall(__pyx_t_8, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 186, __pyx_L1_error)
       __Pyx_XDECREF(__pyx_t_9); __pyx_t_9 = 0;
       __Pyx_GOTREF(__pyx_t_2);
       __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
@@ -3625,36 +3722,36 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
     #if CYTHON_FAST_PYCCALL
     if (__Pyx_PyFastCFunction_Check(__pyx_t_8)) {
       PyObject *__pyx_temp[2] = {__pyx_t_9, __pyx_t_3};
-      __pyx_t_2 = __Pyx_PyCFunction_FastCall(__pyx_t_8, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 162, __pyx_L1_error)
+      __pyx_t_2 = __Pyx_PyCFunction_FastCall(__pyx_t_8, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 186, __pyx_L1_error)
       __Pyx_XDECREF(__pyx_t_9); __pyx_t_9 = 0;
       __Pyx_GOTREF(__pyx_t_2);
       __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
     } else
     #endif
     {
-      __pyx_t_10 = PyTuple_New(1+1); if (unlikely(!__pyx_t_10)) __PYX_ERR(0, 162, __pyx_L1_error)
+      __pyx_t_10 = PyTuple_New(1+1); if (unlikely(!__pyx_t_10)) __PYX_ERR(0, 186, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_10);
       __Pyx_GIVEREF(__pyx_t_9); PyTuple_SET_ITEM(__pyx_t_10, 0, __pyx_t_9); __pyx_t_9 = NULL;
       __Pyx_GIVEREF(__pyx_t_3);
       PyTuple_SET_ITEM(__pyx_t_10, 0+1, __pyx_t_3);
       __pyx_t_3 = 0;
-      __pyx_t_2 = __Pyx_PyObject_Call(__pyx_t_8, __pyx_t_10, NULL); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 162, __pyx_L1_error)
+      __pyx_t_2 = __Pyx_PyObject_Call(__pyx_t_8, __pyx_t_10, NULL); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 186, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_2);
       __Pyx_DECREF(__pyx_t_10); __pyx_t_10 = 0;
     }
   }
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __pyx_t_8 = PyObject_RichCompare(((PyObject *)__pyx_v_point_list), __pyx_t_2, Py_EQ); __Pyx_XGOTREF(__pyx_t_8); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 162, __pyx_L1_error)
+  __pyx_t_8 = PyObject_RichCompare(((PyObject *)__pyx_v_point_list), __pyx_t_2, Py_EQ); __Pyx_XGOTREF(__pyx_t_8); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 186, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = PyTuple_New(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 162, __pyx_L1_error)
+  __pyx_t_2 = PyTuple_New(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 186, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_GIVEREF(__pyx_t_8);
   PyTuple_SET_ITEM(__pyx_t_2, 0, __pyx_t_8);
   __pyx_t_8 = 0;
-  __pyx_t_8 = PyDict_New(); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 162, __pyx_L1_error)
+  __pyx_t_8 = PyDict_New(); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 186, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
-  if (PyDict_SetItem(__pyx_t_8, __pyx_n_s_axis, __pyx_int_1) < 0) __PYX_ERR(0, 162, __pyx_L1_error)
-  __pyx_t_10 = __Pyx_PyObject_Call(__pyx_t_5, __pyx_t_2, __pyx_t_8); if (unlikely(!__pyx_t_10)) __PYX_ERR(0, 162, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_8, __pyx_n_s_axis, __pyx_int_1) < 0) __PYX_ERR(0, 186, __pyx_L1_error)
+  __pyx_t_10 = __Pyx_PyObject_Call(__pyx_t_5, __pyx_t_2, __pyx_t_8); if (unlikely(!__pyx_t_10)) __PYX_ERR(0, 186, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_10);
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
@@ -3670,14 +3767,14 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
     }
   }
   if (!__pyx_t_8) {
-    __pyx_t_6 = __Pyx_PyObject_CallOneArg(__pyx_t_4, __pyx_t_10); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 162, __pyx_L1_error)
+    __pyx_t_6 = __Pyx_PyObject_CallOneArg(__pyx_t_4, __pyx_t_10); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 186, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_10); __pyx_t_10 = 0;
     __Pyx_GOTREF(__pyx_t_6);
   } else {
     #if CYTHON_FAST_PYCALL
     if (PyFunction_Check(__pyx_t_4)) {
       PyObject *__pyx_temp[2] = {__pyx_t_8, __pyx_t_10};
-      __pyx_t_6 = __Pyx_PyFunction_FastCall(__pyx_t_4, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 162, __pyx_L1_error)
+      __pyx_t_6 = __Pyx_PyFunction_FastCall(__pyx_t_4, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 186, __pyx_L1_error)
       __Pyx_XDECREF(__pyx_t_8); __pyx_t_8 = 0;
       __Pyx_GOTREF(__pyx_t_6);
       __Pyx_DECREF(__pyx_t_10); __pyx_t_10 = 0;
@@ -3686,69 +3783,69 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
     #if CYTHON_FAST_PYCCALL
     if (__Pyx_PyFastCFunction_Check(__pyx_t_4)) {
       PyObject *__pyx_temp[2] = {__pyx_t_8, __pyx_t_10};
-      __pyx_t_6 = __Pyx_PyCFunction_FastCall(__pyx_t_4, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 162, __pyx_L1_error)
+      __pyx_t_6 = __Pyx_PyCFunction_FastCall(__pyx_t_4, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 186, __pyx_L1_error)
       __Pyx_XDECREF(__pyx_t_8); __pyx_t_8 = 0;
       __Pyx_GOTREF(__pyx_t_6);
       __Pyx_DECREF(__pyx_t_10); __pyx_t_10 = 0;
     } else
     #endif
     {
-      __pyx_t_2 = PyTuple_New(1+1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 162, __pyx_L1_error)
+      __pyx_t_2 = PyTuple_New(1+1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 186, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_2);
       __Pyx_GIVEREF(__pyx_t_8); PyTuple_SET_ITEM(__pyx_t_2, 0, __pyx_t_8); __pyx_t_8 = NULL;
       __Pyx_GIVEREF(__pyx_t_10);
       PyTuple_SET_ITEM(__pyx_t_2, 0+1, __pyx_t_10);
       __pyx_t_10 = 0;
-      __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_2, NULL); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 162, __pyx_L1_error)
+      __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_2, NULL); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 186, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_6);
       __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
     }
   }
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __pyx_t_4 = __Pyx_GetItemInt(__pyx_t_6, 0, long, 1, __Pyx_PyInt_From_long, 0, 0, 0); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 162, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_GetItemInt(__pyx_t_6, 0, long, 1, __Pyx_PyInt_From_long, 0, 0, 0); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 186, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
   __pyx_v_point1_index = __pyx_t_4;
   __pyx_t_4 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":165
+  /* "RMS/Routines/Grouping3Dcy.pyx":189
  * 
  *     # Check if the first point exists, if not start from the point closes to the given point
  *     if not point1_index:             # <<<<<<<<<<<<<<
  * 
  *         best_distance = np.inf
  */
-  __pyx_t_1 = __Pyx_PyObject_IsTrue(__pyx_v_point1_index); if (unlikely(__pyx_t_1 < 0)) __PYX_ERR(0, 165, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_IsTrue(__pyx_v_point1_index); if (unlikely(__pyx_t_1 < 0)) __PYX_ERR(0, 189, __pyx_L1_error)
   __pyx_t_11 = ((!__pyx_t_1) != 0);
   if (__pyx_t_11) {
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":167
+    /* "RMS/Routines/Grouping3Dcy.pyx":191
  *     if not point1_index:
  * 
  *         best_distance = np.inf             # <<<<<<<<<<<<<<
  * 
  *         for j in range(len(point_list)):
  */
-    __pyx_t_4 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 167, __pyx_L1_error)
+    __pyx_t_4 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 191, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_4);
-    __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_inf); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 167, __pyx_L1_error)
+    __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_inf); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 191, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_6);
     __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
     __pyx_v_best_distance = __pyx_t_6;
     __pyx_t_6 = 0;
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":169
+    /* "RMS/Routines/Grouping3Dcy.pyx":193
  *         best_distance = np.inf
  * 
  *         for j in range(len(point_list)):             # <<<<<<<<<<<<<<
  *             x_temp = point_list[j, 0]
  *             y_temp = point_list[j, 1]
  */
-    __pyx_t_12 = PyObject_Length(((PyObject *)__pyx_v_point_list)); if (unlikely(__pyx_t_12 == -1)) __PYX_ERR(0, 169, __pyx_L1_error)
+    __pyx_t_12 = PyObject_Length(((PyObject *)__pyx_v_point_list)); if (unlikely(__pyx_t_12 == -1)) __PYX_ERR(0, 193, __pyx_L1_error)
     for (__pyx_t_13 = 0; __pyx_t_13 < __pyx_t_12; __pyx_t_13+=1) {
       __pyx_v_j = __pyx_t_13;
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":170
+      /* "RMS/Routines/Grouping3Dcy.pyx":194
  * 
  *         for j in range(len(point_list)):
  *             x_temp = point_list[j, 0]             # <<<<<<<<<<<<<<
@@ -3759,12 +3856,12 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
       __pyx_t_15 = 0;
       if (__pyx_t_14 < 0) __pyx_t_14 += __pyx_pybuffernd_point_list.diminfo[0].shape;
       if (__pyx_t_15 < 0) __pyx_t_15 += __pyx_pybuffernd_point_list.diminfo[1].shape;
-      __pyx_t_6 = __Pyx_PyInt_From_npy_uint16((*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_14, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_15, __pyx_pybuffernd_point_list.diminfo[1].strides))); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 170, __pyx_L1_error)
+      __pyx_t_6 = __Pyx_PyInt_From_npy_uint16((*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_14, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_15, __pyx_pybuffernd_point_list.diminfo[1].strides))); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 194, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_6);
       __Pyx_XDECREF_SET(__pyx_v_x_temp, __pyx_t_6);
       __pyx_t_6 = 0;
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":171
+      /* "RMS/Routines/Grouping3Dcy.pyx":195
  *         for j in range(len(point_list)):
  *             x_temp = point_list[j, 0]
  *             y_temp = point_list[j, 1]             # <<<<<<<<<<<<<<
@@ -3775,12 +3872,12 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
       __pyx_t_17 = 1;
       if (__pyx_t_16 < 0) __pyx_t_16 += __pyx_pybuffernd_point_list.diminfo[0].shape;
       if (__pyx_t_17 < 0) __pyx_t_17 += __pyx_pybuffernd_point_list.diminfo[1].shape;
-      __pyx_t_6 = __Pyx_PyInt_From_npy_uint16((*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_16, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_17, __pyx_pybuffernd_point_list.diminfo[1].strides))); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 171, __pyx_L1_error)
+      __pyx_t_6 = __Pyx_PyInt_From_npy_uint16((*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_16, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_17, __pyx_pybuffernd_point_list.diminfo[1].strides))); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 195, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_6);
       __Pyx_XDECREF_SET(__pyx_v_y_temp, __pyx_t_6);
       __pyx_t_6 = 0;
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":172
+      /* "RMS/Routines/Grouping3Dcy.pyx":196
  *             x_temp = point_list[j, 0]
  *             y_temp = point_list[j, 1]
  *             z_temp = point_list[j, 2]             # <<<<<<<<<<<<<<
@@ -3791,63 +3888,63 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
       __pyx_t_19 = 2;
       if (__pyx_t_18 < 0) __pyx_t_18 += __pyx_pybuffernd_point_list.diminfo[0].shape;
       if (__pyx_t_19 < 0) __pyx_t_19 += __pyx_pybuffernd_point_list.diminfo[1].shape;
-      __pyx_t_6 = __Pyx_PyInt_From_npy_uint16((*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_18, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_19, __pyx_pybuffernd_point_list.diminfo[1].strides))); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 172, __pyx_L1_error)
+      __pyx_t_6 = __Pyx_PyInt_From_npy_uint16((*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_18, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_19, __pyx_pybuffernd_point_list.diminfo[1].strides))); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 196, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_6);
       __Pyx_XDECREF_SET(__pyx_v_z_temp, __pyx_t_6);
       __pyx_t_6 = 0;
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":174
+      /* "RMS/Routines/Grouping3Dcy.pyx":198
  *             z_temp = point_list[j, 2]
  * 
  *             temp_dist = point3DDistance(x1, y1, z1, x_temp, y_temp, z_temp)             # <<<<<<<<<<<<<<
  * 
  *             if temp_dist < best_distance:
  */
-      __pyx_t_20 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_x1); if (unlikely((__pyx_t_20 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 174, __pyx_L1_error)
-      __pyx_t_21 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_y1); if (unlikely((__pyx_t_21 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 174, __pyx_L1_error)
-      __pyx_t_22 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_z1); if (unlikely((__pyx_t_22 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 174, __pyx_L1_error)
-      __pyx_t_23 = __Pyx_PyInt_As_int(__pyx_v_x_temp); if (unlikely((__pyx_t_23 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 174, __pyx_L1_error)
-      __pyx_t_24 = __Pyx_PyInt_As_int(__pyx_v_y_temp); if (unlikely((__pyx_t_24 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 174, __pyx_L1_error)
-      __pyx_t_25 = __Pyx_PyInt_As_int(__pyx_v_z_temp); if (unlikely((__pyx_t_25 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 174, __pyx_L1_error)
+      __pyx_t_20 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_x1); if (unlikely((__pyx_t_20 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 198, __pyx_L1_error)
+      __pyx_t_21 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_y1); if (unlikely((__pyx_t_21 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 198, __pyx_L1_error)
+      __pyx_t_22 = __Pyx_PyInt_As_int(__pyx_cur_scope->__pyx_v_z1); if (unlikely((__pyx_t_22 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 198, __pyx_L1_error)
+      __pyx_t_23 = __Pyx_PyInt_As_int(__pyx_v_x_temp); if (unlikely((__pyx_t_23 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 198, __pyx_L1_error)
+      __pyx_t_24 = __Pyx_PyInt_As_int(__pyx_v_y_temp); if (unlikely((__pyx_t_24 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 198, __pyx_L1_error)
+      __pyx_t_25 = __Pyx_PyInt_As_int(__pyx_v_z_temp); if (unlikely((__pyx_t_25 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 198, __pyx_L1_error)
       __pyx_v_temp_dist = __pyx_f_3RMS_8Routines_12Grouping3Dcy_point3DDistance(__pyx_t_20, __pyx_t_21, __pyx_t_22, __pyx_t_23, __pyx_t_24, __pyx_t_25);
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":176
+      /* "RMS/Routines/Grouping3Dcy.pyx":200
  *             temp_dist = point3DDistance(x1, y1, z1, x_temp, y_temp, z_temp)
  * 
  *             if temp_dist < best_distance:             # <<<<<<<<<<<<<<
  *                 best_distance = temp_dist
  *                 point1_index = [j]
  */
-      __pyx_t_6 = __Pyx_PyInt_From_int(__pyx_v_temp_dist); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 176, __pyx_L1_error)
+      __pyx_t_6 = __Pyx_PyInt_From_int(__pyx_v_temp_dist); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 200, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_6);
-      __pyx_t_4 = PyObject_RichCompare(__pyx_t_6, __pyx_v_best_distance, Py_LT); __Pyx_XGOTREF(__pyx_t_4); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 176, __pyx_L1_error)
+      __pyx_t_4 = PyObject_RichCompare(__pyx_t_6, __pyx_v_best_distance, Py_LT); __Pyx_XGOTREF(__pyx_t_4); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 200, __pyx_L1_error)
       __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-      __pyx_t_11 = __Pyx_PyObject_IsTrue(__pyx_t_4); if (unlikely(__pyx_t_11 < 0)) __PYX_ERR(0, 176, __pyx_L1_error)
+      __pyx_t_11 = __Pyx_PyObject_IsTrue(__pyx_t_4); if (unlikely(__pyx_t_11 < 0)) __PYX_ERR(0, 200, __pyx_L1_error)
       __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
       if (__pyx_t_11) {
 
-        /* "RMS/Routines/Grouping3Dcy.pyx":177
+        /* "RMS/Routines/Grouping3Dcy.pyx":201
  * 
  *             if temp_dist < best_distance:
  *                 best_distance = temp_dist             # <<<<<<<<<<<<<<
  *                 point1_index = [j]
  * 
  */
-        __pyx_t_4 = __Pyx_PyInt_From_int(__pyx_v_temp_dist); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 177, __pyx_L1_error)
+        __pyx_t_4 = __Pyx_PyInt_From_int(__pyx_v_temp_dist); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 201, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_4);
         __Pyx_DECREF_SET(__pyx_v_best_distance, __pyx_t_4);
         __pyx_t_4 = 0;
 
-        /* "RMS/Routines/Grouping3Dcy.pyx":178
+        /* "RMS/Routines/Grouping3Dcy.pyx":202
  *             if temp_dist < best_distance:
  *                 best_distance = temp_dist
  *                 point1_index = [j]             # <<<<<<<<<<<<<<
  * 
  *     # Extract the first point
  */
-        __pyx_t_4 = PyInt_FromSsize_t(__pyx_v_j); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 178, __pyx_L1_error)
+        __pyx_t_4 = PyInt_FromSsize_t(__pyx_v_j); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 202, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_4);
-        __pyx_t_6 = PyList_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 178, __pyx_L1_error)
+        __pyx_t_6 = PyList_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 202, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_6);
         __Pyx_GIVEREF(__pyx_t_4);
         PyList_SET_ITEM(__pyx_t_6, 0, __pyx_t_4);
@@ -3855,7 +3952,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
         __Pyx_DECREF_SET(__pyx_v_point1_index, __pyx_t_6);
         __pyx_t_6 = 0;
 
-        /* "RMS/Routines/Grouping3Dcy.pyx":176
+        /* "RMS/Routines/Grouping3Dcy.pyx":200
  *             temp_dist = point3DDistance(x1, y1, z1, x_temp, y_temp, z_temp)
  * 
  *             if temp_dist < best_distance:             # <<<<<<<<<<<<<<
@@ -3865,7 +3962,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
       }
     }
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":165
+    /* "RMS/Routines/Grouping3Dcy.pyx":189
  * 
  *     # Check if the first point exists, if not start from the point closes to the given point
  *     if not point1_index:             # <<<<<<<<<<<<<<
@@ -3874,29 +3971,29 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
  */
   }
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":181
+  /* "RMS/Routines/Grouping3Dcy.pyx":205
  * 
  *     # Extract the first point
  *     point1_index = point1_index[0]             # <<<<<<<<<<<<<<
  * 
  *     # Spread point cloud forward
  */
-  __pyx_t_6 = __Pyx_GetItemInt(__pyx_v_point1_index, 0, long, 1, __Pyx_PyInt_From_long, 0, 0, 0); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 181, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_GetItemInt(__pyx_v_point1_index, 0, long, 1, __Pyx_PyInt_From_long, 0, 0, 0); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 205, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_DECREF_SET(__pyx_v_point1_index, __pyx_t_6);
   __pyx_t_6 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":184
+  /* "RMS/Routines/Grouping3Dcy.pyx":208
  * 
  *     # Spread point cloud forward
  *     max_line_points, i = propagateLine(max_line_points, point_list[point1_index:], i)             # <<<<<<<<<<<<<<
  * 
  *     # Spread point cloud backwards
  */
-  __pyx_t_6 = __Pyx_PyObject_GetSlice(((PyObject *)__pyx_v_point_list), 0, 0, &__pyx_v_point1_index, NULL, NULL, 0, 0, 1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 184, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyObject_GetSlice(((PyObject *)__pyx_v_point_list), 0, 0, &__pyx_v_point1_index, NULL, NULL, 0, 0, 1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 208, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  if (!(likely(((__pyx_t_6) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_6, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 184, __pyx_L1_error)
-  __pyx_t_4 = __pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagateLine(__pyx_v_propagateLine, ((PyArrayObject *)__pyx_v_max_line_points), ((PyArrayObject *)__pyx_t_6), __pyx_v_i); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 184, __pyx_L1_error)
+  if (!(likely(((__pyx_t_6) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_6, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 208, __pyx_L1_error)
+  __pyx_t_4 = __pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagateLine(__pyx_v_propagateLine, ((PyArrayObject *)__pyx_v_max_line_points), ((PyArrayObject *)__pyx_t_6), __pyx_v_i); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 208, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
   if ((likely(PyTuple_CheckExact(__pyx_t_4))) || (PyList_CheckExact(__pyx_t_4))) {
@@ -3909,7 +4006,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
     if (unlikely(size != 2)) {
       if (size > 2) __Pyx_RaiseTooManyValuesError(2);
       else if (size >= 0) __Pyx_RaiseNeedMoreValuesError(size);
-      __PYX_ERR(0, 184, __pyx_L1_error)
+      __PYX_ERR(0, 208, __pyx_L1_error)
     }
     #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
     if (likely(PyTuple_CheckExact(sequence))) {
@@ -3922,15 +4019,15 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
     __Pyx_INCREF(__pyx_t_6);
     __Pyx_INCREF(__pyx_t_2);
     #else
-    __pyx_t_6 = PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 184, __pyx_L1_error)
+    __pyx_t_6 = PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 208, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_6);
-    __pyx_t_2 = PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 184, __pyx_L1_error)
+    __pyx_t_2 = PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 208, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_2);
     #endif
     __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
   } else {
     Py_ssize_t index = -1;
-    __pyx_t_10 = PyObject_GetIter(__pyx_t_4); if (unlikely(!__pyx_t_10)) __PYX_ERR(0, 184, __pyx_L1_error)
+    __pyx_t_10 = PyObject_GetIter(__pyx_t_4); if (unlikely(!__pyx_t_10)) __PYX_ERR(0, 208, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_10);
     __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
     __pyx_t_26 = Py_TYPE(__pyx_t_10)->tp_iternext;
@@ -3938,7 +4035,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
     __Pyx_GOTREF(__pyx_t_6);
     index = 1; __pyx_t_2 = __pyx_t_26(__pyx_t_10); if (unlikely(!__pyx_t_2)) goto __pyx_L9_unpacking_failed;
     __Pyx_GOTREF(__pyx_t_2);
-    if (__Pyx_IternextUnpackEndCheck(__pyx_t_26(__pyx_t_10), 2) < 0) __PYX_ERR(0, 184, __pyx_L1_error)
+    if (__Pyx_IternextUnpackEndCheck(__pyx_t_26(__pyx_t_10), 2) < 0) __PYX_ERR(0, 208, __pyx_L1_error)
     __pyx_t_26 = NULL;
     __Pyx_DECREF(__pyx_t_10); __pyx_t_10 = 0;
     goto __pyx_L10_unpacking_done;
@@ -3946,20 +4043,20 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
     __Pyx_DECREF(__pyx_t_10); __pyx_t_10 = 0;
     __pyx_t_26 = NULL;
     if (__Pyx_IterFinish() == 0) __Pyx_RaiseNeedMoreValuesError(index);
-    __PYX_ERR(0, 184, __pyx_L1_error)
+    __PYX_ERR(0, 208, __pyx_L1_error)
     __pyx_L10_unpacking_done:;
   }
-  if (!(likely(((__pyx_t_6) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_6, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 184, __pyx_L1_error)
-  __pyx_t_25 = __Pyx_PyInt_As_int(__pyx_t_2); if (unlikely((__pyx_t_25 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 184, __pyx_L1_error)
+  if (!(likely(((__pyx_t_6) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_6, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 208, __pyx_L1_error)
+  __pyx_t_25 = __Pyx_PyInt_As_int(__pyx_t_2); if (unlikely((__pyx_t_25 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 208, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   __pyx_t_7 = ((PyArrayObject *)__pyx_t_6);
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
     __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_max_line_points.rcbuffer->pybuffer);
-    __pyx_t_24 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_max_line_points.rcbuffer->pybuffer, (PyObject*)__pyx_t_7, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack);
+    __pyx_t_24 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_max_line_points.rcbuffer->pybuffer, (PyObject*)__pyx_t_7, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack);
     if (unlikely(__pyx_t_24 < 0)) {
       PyErr_Fetch(&__pyx_t_27, &__pyx_t_28, &__pyx_t_29);
-      if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_max_line_points.rcbuffer->pybuffer, (PyObject*)__pyx_v_max_line_points, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
+      if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_max_line_points.rcbuffer->pybuffer, (PyObject*)__pyx_v_max_line_points, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
         Py_XDECREF(__pyx_t_27); Py_XDECREF(__pyx_t_28); Py_XDECREF(__pyx_t_29);
         __Pyx_RaiseBufferFallbackError();
       } else {
@@ -3967,27 +4064,27 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
       }
     }
     __pyx_pybuffernd_max_line_points.diminfo[0].strides = __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_max_line_points.diminfo[0].shape = __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_max_line_points.diminfo[1].strides = __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_max_line_points.diminfo[1].shape = __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.shape[1];
-    if (unlikely(__pyx_t_24 < 0)) __PYX_ERR(0, 184, __pyx_L1_error)
+    if (unlikely(__pyx_t_24 < 0)) __PYX_ERR(0, 208, __pyx_L1_error)
   }
   __pyx_t_7 = 0;
   __Pyx_DECREF_SET(__pyx_v_max_line_points, ((PyArrayObject *)__pyx_t_6));
   __pyx_t_6 = 0;
   __pyx_v_i = __pyx_t_25;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":187
+  /* "RMS/Routines/Grouping3Dcy.pyx":211
  * 
  *     # Spread point cloud backwards
  *     max_line_points, i = propagateLine(max_line_points, (point_list[:point1_index])[::-1], i)             # <<<<<<<<<<<<<<
  * 
  *     return max_line_points[:i]
  */
-  __pyx_t_4 = __Pyx_PyObject_GetSlice(((PyObject *)__pyx_v_point_list), 0, 0, NULL, &__pyx_v_point1_index, NULL, 0, 0, 1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 187, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyObject_GetSlice(((PyObject *)__pyx_v_point_list), 0, 0, NULL, &__pyx_v_point1_index, NULL, 0, 0, 1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 211, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_2 = PyObject_GetItem(__pyx_t_4, __pyx_slice__4); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 187, __pyx_L1_error)
+  __pyx_t_2 = PyObject_GetItem(__pyx_t_4, __pyx_slice__4); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 211, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  if (!(likely(((__pyx_t_2) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_2, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 187, __pyx_L1_error)
-  __pyx_t_4 = __pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagateLine(__pyx_v_propagateLine, ((PyArrayObject *)__pyx_v_max_line_points), ((PyArrayObject *)__pyx_t_2), __pyx_v_i); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 187, __pyx_L1_error)
+  if (!(likely(((__pyx_t_2) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_2, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 211, __pyx_L1_error)
+  __pyx_t_4 = __pyx_pf_3RMS_8Routines_12Grouping3Dcy_12getAllPoints_propagateLine(__pyx_v_propagateLine, ((PyArrayObject *)__pyx_v_max_line_points), ((PyArrayObject *)__pyx_t_2), __pyx_v_i); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 211, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   if ((likely(PyTuple_CheckExact(__pyx_t_4))) || (PyList_CheckExact(__pyx_t_4))) {
@@ -4000,7 +4097,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
     if (unlikely(size != 2)) {
       if (size > 2) __Pyx_RaiseTooManyValuesError(2);
       else if (size >= 0) __Pyx_RaiseNeedMoreValuesError(size);
-      __PYX_ERR(0, 187, __pyx_L1_error)
+      __PYX_ERR(0, 211, __pyx_L1_error)
     }
     #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
     if (likely(PyTuple_CheckExact(sequence))) {
@@ -4013,15 +4110,15 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
     __Pyx_INCREF(__pyx_t_2);
     __Pyx_INCREF(__pyx_t_6);
     #else
-    __pyx_t_2 = PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 187, __pyx_L1_error)
+    __pyx_t_2 = PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 211, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_2);
-    __pyx_t_6 = PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 187, __pyx_L1_error)
+    __pyx_t_6 = PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 211, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_6);
     #endif
     __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
   } else {
     Py_ssize_t index = -1;
-    __pyx_t_10 = PyObject_GetIter(__pyx_t_4); if (unlikely(!__pyx_t_10)) __PYX_ERR(0, 187, __pyx_L1_error)
+    __pyx_t_10 = PyObject_GetIter(__pyx_t_4); if (unlikely(!__pyx_t_10)) __PYX_ERR(0, 211, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_10);
     __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
     __pyx_t_26 = Py_TYPE(__pyx_t_10)->tp_iternext;
@@ -4029,7 +4126,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
     __Pyx_GOTREF(__pyx_t_2);
     index = 1; __pyx_t_6 = __pyx_t_26(__pyx_t_10); if (unlikely(!__pyx_t_6)) goto __pyx_L11_unpacking_failed;
     __Pyx_GOTREF(__pyx_t_6);
-    if (__Pyx_IternextUnpackEndCheck(__pyx_t_26(__pyx_t_10), 2) < 0) __PYX_ERR(0, 187, __pyx_L1_error)
+    if (__Pyx_IternextUnpackEndCheck(__pyx_t_26(__pyx_t_10), 2) < 0) __PYX_ERR(0, 211, __pyx_L1_error)
     __pyx_t_26 = NULL;
     __Pyx_DECREF(__pyx_t_10); __pyx_t_10 = 0;
     goto __pyx_L12_unpacking_done;
@@ -4037,20 +4134,20 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
     __Pyx_DECREF(__pyx_t_10); __pyx_t_10 = 0;
     __pyx_t_26 = NULL;
     if (__Pyx_IterFinish() == 0) __Pyx_RaiseNeedMoreValuesError(index);
-    __PYX_ERR(0, 187, __pyx_L1_error)
+    __PYX_ERR(0, 211, __pyx_L1_error)
     __pyx_L12_unpacking_done:;
   }
-  if (!(likely(((__pyx_t_2) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_2, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 187, __pyx_L1_error)
-  __pyx_t_25 = __Pyx_PyInt_As_int(__pyx_t_6); if (unlikely((__pyx_t_25 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 187, __pyx_L1_error)
+  if (!(likely(((__pyx_t_2) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_2, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 211, __pyx_L1_error)
+  __pyx_t_25 = __Pyx_PyInt_As_int(__pyx_t_6); if (unlikely((__pyx_t_25 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 211, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
   __pyx_t_7 = ((PyArrayObject *)__pyx_t_2);
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
     __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_max_line_points.rcbuffer->pybuffer);
-    __pyx_t_24 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_max_line_points.rcbuffer->pybuffer, (PyObject*)__pyx_t_7, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack);
+    __pyx_t_24 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_max_line_points.rcbuffer->pybuffer, (PyObject*)__pyx_t_7, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack);
     if (unlikely(__pyx_t_24 < 0)) {
       PyErr_Fetch(&__pyx_t_29, &__pyx_t_28, &__pyx_t_27);
-      if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_max_line_points.rcbuffer->pybuffer, (PyObject*)__pyx_v_max_line_points, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
+      if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_max_line_points.rcbuffer->pybuffer, (PyObject*)__pyx_v_max_line_points, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
         Py_XDECREF(__pyx_t_29); Py_XDECREF(__pyx_t_28); Py_XDECREF(__pyx_t_27);
         __Pyx_RaiseBufferFallbackError();
       } else {
@@ -4058,14 +4155,14 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
       }
     }
     __pyx_pybuffernd_max_line_points.diminfo[0].strides = __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_max_line_points.diminfo[0].shape = __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_max_line_points.diminfo[1].strides = __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_max_line_points.diminfo[1].shape = __pyx_pybuffernd_max_line_points.rcbuffer->pybuffer.shape[1];
-    if (unlikely(__pyx_t_24 < 0)) __PYX_ERR(0, 187, __pyx_L1_error)
+    if (unlikely(__pyx_t_24 < 0)) __PYX_ERR(0, 211, __pyx_L1_error)
   }
   __pyx_t_7 = 0;
   __Pyx_DECREF_SET(__pyx_v_max_line_points, ((PyArrayObject *)__pyx_t_2));
   __pyx_t_2 = 0;
   __pyx_v_i = __pyx_t_25;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":189
+  /* "RMS/Routines/Grouping3Dcy.pyx":213
  *     max_line_points, i = propagateLine(max_line_points, (point_list[:point1_index])[::-1], i)
  * 
  *     return max_line_points[:i]             # <<<<<<<<<<<<<<
@@ -4073,16 +4170,16 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
  * 
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_4 = __Pyx_PyObject_GetSlice(((PyObject *)__pyx_v_max_line_points), 0, __pyx_v_i, NULL, NULL, NULL, 0, 1, 1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 189, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyObject_GetSlice(((PyObject *)__pyx_v_max_line_points), 0, __pyx_v_i, NULL, NULL, NULL, 0, 1, 1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 213, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __pyx_r = __pyx_t_4;
   __pyx_t_4 = 0;
   goto __pyx_L0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":100
+  /* "RMS/Routines/Grouping3Dcy.pyx":124
  * 
  * @cython.boundscheck(False)
- * def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):             # <<<<<<<<<<<<<<
+ * def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):             # <<<<<<<<<<<<<<
  *     """ Returns all points describing a particular line.
  * 
  */
@@ -4125,10 +4222,10 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_getAllPoints(CYTHON_UNUS
   return __pyx_r;
 }
 
-/* "RMS/Routines/Grouping3Dcy.pyx":193
+/* "RMS/Routines/Grouping3Dcy.pyx":217
  * 
  * 
- * def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, distance_threshold, gap_threshold):             # <<<<<<<<<<<<<<
+ * def remove3DPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, Line max_line, distance_threshold, gap_threshold):             # <<<<<<<<<<<<<<
  *     """ Remove points from a point list that belong to the given line.
  * 
  */
@@ -4167,21 +4264,21 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_3remove3DPoints(PyObject
         case  1:
         if (likely((values[1] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_max_line)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("remove3DPoints", 1, 4, 4, 1); __PYX_ERR(0, 193, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("remove3DPoints", 1, 4, 4, 1); __PYX_ERR(0, 217, __pyx_L3_error)
         }
         case  2:
         if (likely((values[2] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_distance_threshold)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("remove3DPoints", 1, 4, 4, 2); __PYX_ERR(0, 193, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("remove3DPoints", 1, 4, 4, 2); __PYX_ERR(0, 217, __pyx_L3_error)
         }
         case  3:
         if (likely((values[3] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_gap_threshold)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("remove3DPoints", 1, 4, 4, 3); __PYX_ERR(0, 193, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("remove3DPoints", 1, 4, 4, 3); __PYX_ERR(0, 217, __pyx_L3_error)
         }
       }
       if (unlikely(kw_args > 0)) {
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "remove3DPoints") < 0)) __PYX_ERR(0, 193, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "remove3DPoints") < 0)) __PYX_ERR(0, 217, __pyx_L3_error)
       }
     } else if (PyTuple_GET_SIZE(__pyx_args) != 4) {
       goto __pyx_L5_argtuple_error;
@@ -4198,14 +4295,14 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_3remove3DPoints(PyObject
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("remove3DPoints", 1, 4, 4, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 193, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("remove3DPoints", 1, 4, 4, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 217, __pyx_L3_error)
   __pyx_L3_error:;
   __Pyx_AddTraceback("RMS.Routines.Grouping3Dcy.remove3DPoints", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_point_list), __pyx_ptype_5numpy_ndarray, 1, "point_list", 0))) __PYX_ERR(0, 193, __pyx_L1_error)
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_max_line), __pyx_ptype_3RMS_8Routines_12Grouping3Dcy_Line, 1, "max_line", 0))) __PYX_ERR(0, 193, __pyx_L1_error)
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_point_list), __pyx_ptype_5numpy_ndarray, 1, "point_list", 0))) __PYX_ERR(0, 217, __pyx_L1_error)
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_max_line), __pyx_ptype_3RMS_8Routines_12Grouping3Dcy_Line, 1, "max_line", 0))) __PYX_ERR(0, 217, __pyx_L1_error)
   __pyx_r = __pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(__pyx_self, __pyx_v_point_list, __pyx_v_max_line, __pyx_v_distance_threshold, __pyx_v_gap_threshold);
 
   /* function exit code */
@@ -4260,18 +4357,18 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
   __pyx_pybuffernd_point_list.rcbuffer = &__pyx_pybuffer_point_list;
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer, (PyObject*)__pyx_v_point_list, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) __PYX_ERR(0, 193, __pyx_L1_error)
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer, (PyObject*)__pyx_v_point_list, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) __PYX_ERR(0, 217, __pyx_L1_error)
   }
   __pyx_pybuffernd_point_list.diminfo[0].strides = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_point_list.diminfo[0].shape = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_point_list.diminfo[1].strides = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_point_list.diminfo[1].shape = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.shape[1];
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":207
+  /* "RMS/Routines/Grouping3Dcy.pyx":231
  * 
  *     # Get max_line ending points
  *     x1, y1, z1, x2, y2, z2 = max_line.get_points()             # <<<<<<<<<<<<<<
  * 
  *     # Get all points belonging to the max_line
  */
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_max_line), __pyx_n_s_get_points); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 207, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_max_line), __pyx_n_s_get_points); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 231, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_t_3 = NULL;
   if (CYTHON_UNPACK_METHODS && likely(PyMethod_Check(__pyx_t_2))) {
@@ -4284,10 +4381,10 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
     }
   }
   if (__pyx_t_3) {
-    __pyx_t_1 = __Pyx_PyObject_CallOneArg(__pyx_t_2, __pyx_t_3); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 207, __pyx_L1_error)
+    __pyx_t_1 = __Pyx_PyObject_CallOneArg(__pyx_t_2, __pyx_t_3); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 231, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
   } else {
-    __pyx_t_1 = __Pyx_PyObject_CallNoArg(__pyx_t_2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 207, __pyx_L1_error)
+    __pyx_t_1 = __Pyx_PyObject_CallNoArg(__pyx_t_2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 231, __pyx_L1_error)
   }
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
@@ -4301,7 +4398,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
     if (unlikely(size != 6)) {
       if (size > 6) __Pyx_RaiseTooManyValuesError(6);
       else if (size >= 0) __Pyx_RaiseNeedMoreValuesError(size);
-      __PYX_ERR(0, 207, __pyx_L1_error)
+      __PYX_ERR(0, 231, __pyx_L1_error)
     }
     #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
     if (likely(PyTuple_CheckExact(sequence))) {
@@ -4330,7 +4427,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
       Py_ssize_t i;
       PyObject** temps[6] = {&__pyx_t_2,&__pyx_t_3,&__pyx_t_4,&__pyx_t_5,&__pyx_t_6,&__pyx_t_7};
       for (i=0; i < 6; i++) {
-        PyObject* item = PySequence_ITEM(sequence, i); if (unlikely(!item)) __PYX_ERR(0, 207, __pyx_L1_error)
+        PyObject* item = PySequence_ITEM(sequence, i); if (unlikely(!item)) __PYX_ERR(0, 231, __pyx_L1_error)
         __Pyx_GOTREF(item);
         *(temps[i]) = item;
       }
@@ -4340,7 +4437,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
   } else {
     Py_ssize_t index = -1;
     PyObject** temps[6] = {&__pyx_t_2,&__pyx_t_3,&__pyx_t_4,&__pyx_t_5,&__pyx_t_6,&__pyx_t_7};
-    __pyx_t_8 = PyObject_GetIter(__pyx_t_1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 207, __pyx_L1_error)
+    __pyx_t_8 = PyObject_GetIter(__pyx_t_1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 231, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_8);
     __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
     __pyx_t_9 = Py_TYPE(__pyx_t_8)->tp_iternext;
@@ -4349,7 +4446,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
       __Pyx_GOTREF(item);
       *(temps[index]) = item;
     }
-    if (__Pyx_IternextUnpackEndCheck(__pyx_t_9(__pyx_t_8), 6) < 0) __PYX_ERR(0, 207, __pyx_L1_error)
+    if (__Pyx_IternextUnpackEndCheck(__pyx_t_9(__pyx_t_8), 6) < 0) __PYX_ERR(0, 231, __pyx_L1_error)
     __pyx_t_9 = NULL;
     __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
     goto __pyx_L4_unpacking_done;
@@ -4357,20 +4454,20 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
     __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
     __pyx_t_9 = NULL;
     if (__Pyx_IterFinish() == 0) __Pyx_RaiseNeedMoreValuesError(index);
-    __PYX_ERR(0, 207, __pyx_L1_error)
+    __PYX_ERR(0, 231, __pyx_L1_error)
     __pyx_L4_unpacking_done:;
   }
-  __pyx_t_10 = __Pyx_PyInt_As_int(__pyx_t_2); if (unlikely((__pyx_t_10 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 207, __pyx_L1_error)
+  __pyx_t_10 = __Pyx_PyInt_As_int(__pyx_t_2); if (unlikely((__pyx_t_10 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 231, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_11 = __Pyx_PyInt_As_int(__pyx_t_3); if (unlikely((__pyx_t_11 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 207, __pyx_L1_error)
+  __pyx_t_11 = __Pyx_PyInt_As_int(__pyx_t_3); if (unlikely((__pyx_t_11 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 231, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_t_12 = __Pyx_PyInt_As_int(__pyx_t_4); if (unlikely((__pyx_t_12 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 207, __pyx_L1_error)
+  __pyx_t_12 = __Pyx_PyInt_As_int(__pyx_t_4); if (unlikely((__pyx_t_12 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 231, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __pyx_t_13 = __Pyx_PyInt_As_int(__pyx_t_5); if (unlikely((__pyx_t_13 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 207, __pyx_L1_error)
+  __pyx_t_13 = __Pyx_PyInt_As_int(__pyx_t_5); if (unlikely((__pyx_t_13 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 231, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_14 = __Pyx_PyInt_As_int(__pyx_t_6); if (unlikely((__pyx_t_14 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 207, __pyx_L1_error)
+  __pyx_t_14 = __Pyx_PyInt_As_int(__pyx_t_6); if (unlikely((__pyx_t_14 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 231, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_15 = __Pyx_PyInt_As_int(__pyx_t_7); if (unlikely((__pyx_t_15 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 207, __pyx_L1_error)
+  __pyx_t_15 = __Pyx_PyInt_As_int(__pyx_t_7); if (unlikely((__pyx_t_15 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 231, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   __pyx_v_x1 = __pyx_t_10;
   __pyx_v_y1 = __pyx_t_11;
@@ -4379,28 +4476,28 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
   __pyx_v_y2 = __pyx_t_14;
   __pyx_v_z2 = __pyx_t_15;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":210
+  /* "RMS/Routines/Grouping3Dcy.pyx":234
  * 
  *     # Get all points belonging to the max_line
  *     max_line_points = getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold,             # <<<<<<<<<<<<<<
  *         max_array_size=max_line.counter)
  * 
  */
-  __pyx_t_1 = __Pyx_GetModuleGlobalName(__pyx_n_s_getAllPoints); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 210, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_GetModuleGlobalName(__pyx_n_s_getAllPoints); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 234, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_7 = __Pyx_PyInt_From_int(__pyx_v_x1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 210, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyInt_From_int(__pyx_v_x1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 234, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  __pyx_t_6 = __Pyx_PyInt_From_int(__pyx_v_y1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 210, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyInt_From_int(__pyx_v_y1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 234, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_5 = __Pyx_PyInt_From_int(__pyx_v_z1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 210, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyInt_From_int(__pyx_v_z1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 234, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_4 = __Pyx_PyInt_From_int(__pyx_v_x2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 210, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyInt_From_int(__pyx_v_x2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 234, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_3 = __Pyx_PyInt_From_int(__pyx_v_y2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 210, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyInt_From_int(__pyx_v_y2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 234, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_2 = __Pyx_PyInt_From_int(__pyx_v_z2); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 210, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyInt_From_int(__pyx_v_z2); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 234, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_8 = PyTuple_New(9); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 210, __pyx_L1_error)
+  __pyx_t_8 = PyTuple_New(9); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 234, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_INCREF(((PyObject *)__pyx_v_point_list));
   __Pyx_GIVEREF(((PyObject *)__pyx_v_point_list));
@@ -4430,28 +4527,28 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
   __pyx_t_3 = 0;
   __pyx_t_2 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":211
+  /* "RMS/Routines/Grouping3Dcy.pyx":235
  *     # Get all points belonging to the max_line
  *     max_line_points = getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold,
  *         max_array_size=max_line.counter)             # <<<<<<<<<<<<<<
  * 
  *     # Get the point could minus points in the max_line
  */
-  __pyx_t_2 = PyDict_New(); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 211, __pyx_L1_error)
+  __pyx_t_2 = PyDict_New(); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 235, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyInt_From_int(__pyx_v_max_line->counter); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 211, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyInt_From_int(__pyx_v_max_line->counter); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 235, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_max_array_size, __pyx_t_3) < 0) __PYX_ERR(0, 211, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_max_array_size, __pyx_t_3) < 0) __PYX_ERR(0, 235, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":210
+  /* "RMS/Routines/Grouping3Dcy.pyx":234
  * 
  *     # Get all points belonging to the max_line
  *     max_line_points = getAllPoints(point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold,             # <<<<<<<<<<<<<<
  *         max_array_size=max_line.counter)
  * 
  */
-  __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_8, __pyx_t_2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 210, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_8, __pyx_t_2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 234, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
@@ -4459,14 +4556,14 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
   __pyx_v_max_line_points = __pyx_t_3;
   __pyx_t_3 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":214
+  /* "RMS/Routines/Grouping3Dcy.pyx":238
  * 
  *     # Get the point could minus points in the max_line
  *     point_list_copy = point_list.copy()             # <<<<<<<<<<<<<<
  *     point_list_rows = point_list_copy.view([('', point_list_copy.dtype)] * point_list_copy.shape[1])
  *     max_line_points_rows = max_line_points.view([('', max_line_points.dtype)] * max_line_points.shape[1])
  */
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_point_list), __pyx_n_s_copy); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 214, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_point_list), __pyx_n_s_copy); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 238, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_t_8 = NULL;
   if (CYTHON_UNPACK_METHODS && likely(PyMethod_Check(__pyx_t_2))) {
@@ -4479,28 +4576,28 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
     }
   }
   if (__pyx_t_8) {
-    __pyx_t_3 = __Pyx_PyObject_CallOneArg(__pyx_t_2, __pyx_t_8); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 214, __pyx_L1_error)
+    __pyx_t_3 = __Pyx_PyObject_CallOneArg(__pyx_t_2, __pyx_t_8); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 238, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
   } else {
-    __pyx_t_3 = __Pyx_PyObject_CallNoArg(__pyx_t_2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 214, __pyx_L1_error)
+    __pyx_t_3 = __Pyx_PyObject_CallNoArg(__pyx_t_2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 238, __pyx_L1_error)
   }
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   __pyx_v_point_list_copy = __pyx_t_3;
   __pyx_t_3 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":215
+  /* "RMS/Routines/Grouping3Dcy.pyx":239
  *     # Get the point could minus points in the max_line
  *     point_list_copy = point_list.copy()
  *     point_list_rows = point_list_copy.view([('', point_list_copy.dtype)] * point_list_copy.shape[1])             # <<<<<<<<<<<<<<
  *     max_line_points_rows = max_line_points.view([('', max_line_points.dtype)] * max_line_points.shape[1])
  *     point_list = np.setdiff1d(point_list_rows, max_line_points_rows).view(point_list_copy.dtype).reshape(-1,
  */
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_v_point_list_copy, __pyx_n_s_view); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 215, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_v_point_list_copy, __pyx_n_s_view); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 239, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_v_point_list_copy, __pyx_n_s_dtype); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 215, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_v_point_list_copy, __pyx_n_s_dtype); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 239, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
-  __pyx_t_1 = PyTuple_New(2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 215, __pyx_L1_error)
+  __pyx_t_1 = PyTuple_New(2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 239, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_INCREF(__pyx_kp_s__5);
   __Pyx_GIVEREF(__pyx_kp_s__5);
@@ -4508,16 +4605,16 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
   __Pyx_GIVEREF(__pyx_t_8);
   PyTuple_SET_ITEM(__pyx_t_1, 1, __pyx_t_8);
   __pyx_t_8 = 0;
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_v_point_list_copy, __pyx_n_s_shape); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 215, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_v_point_list_copy, __pyx_n_s_shape); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 239, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
-  __pyx_t_4 = __Pyx_GetItemInt(__pyx_t_8, 1, long, 1, __Pyx_PyInt_From_long, 0, 0, 1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 215, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_GetItemInt(__pyx_t_8, 1, long, 1, __Pyx_PyInt_From_long, 0, 0, 1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 239, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __pyx_t_8 = PyList_New(1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 215, __pyx_L1_error)
+  __pyx_t_8 = PyList_New(1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 239, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_GIVEREF(__pyx_t_1);
   PyList_SET_ITEM(__pyx_t_8, 0, __pyx_t_1);
-  { PyObject* __pyx_temp = PyNumber_InPlaceMultiply(__pyx_t_8, __pyx_t_4); if (unlikely(!__pyx_temp)) __PYX_ERR(0, 215, __pyx_L1_error)
+  { PyObject* __pyx_temp = PyNumber_InPlaceMultiply(__pyx_t_8, __pyx_t_4); if (unlikely(!__pyx_temp)) __PYX_ERR(0, 239, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_temp);
     __Pyx_DECREF(__pyx_t_8);
     __pyx_t_8 = __pyx_temp;
@@ -4535,14 +4632,14 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
     }
   }
   if (!__pyx_t_4) {
-    __pyx_t_3 = __Pyx_PyObject_CallOneArg(__pyx_t_2, __pyx_t_8); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 215, __pyx_L1_error)
+    __pyx_t_3 = __Pyx_PyObject_CallOneArg(__pyx_t_2, __pyx_t_8); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 239, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
     __Pyx_GOTREF(__pyx_t_3);
   } else {
     #if CYTHON_FAST_PYCALL
     if (PyFunction_Check(__pyx_t_2)) {
       PyObject *__pyx_temp[2] = {__pyx_t_4, __pyx_t_8};
-      __pyx_t_3 = __Pyx_PyFunction_FastCall(__pyx_t_2, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 215, __pyx_L1_error)
+      __pyx_t_3 = __Pyx_PyFunction_FastCall(__pyx_t_2, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 239, __pyx_L1_error)
       __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
       __Pyx_GOTREF(__pyx_t_3);
       __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
@@ -4551,20 +4648,20 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
     #if CYTHON_FAST_PYCCALL
     if (__Pyx_PyFastCFunction_Check(__pyx_t_2)) {
       PyObject *__pyx_temp[2] = {__pyx_t_4, __pyx_t_8};
-      __pyx_t_3 = __Pyx_PyCFunction_FastCall(__pyx_t_2, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 215, __pyx_L1_error)
+      __pyx_t_3 = __Pyx_PyCFunction_FastCall(__pyx_t_2, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 239, __pyx_L1_error)
       __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
       __Pyx_GOTREF(__pyx_t_3);
       __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
     } else
     #endif
     {
-      __pyx_t_1 = PyTuple_New(1+1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 215, __pyx_L1_error)
+      __pyx_t_1 = PyTuple_New(1+1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 239, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       __Pyx_GIVEREF(__pyx_t_4); PyTuple_SET_ITEM(__pyx_t_1, 0, __pyx_t_4); __pyx_t_4 = NULL;
       __Pyx_GIVEREF(__pyx_t_8);
       PyTuple_SET_ITEM(__pyx_t_1, 0+1, __pyx_t_8);
       __pyx_t_8 = 0;
-      __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_1, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 215, __pyx_L1_error)
+      __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_1, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 239, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_3);
       __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
     }
@@ -4573,18 +4670,18 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
   __pyx_v_point_list_rows = __pyx_t_3;
   __pyx_t_3 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":216
+  /* "RMS/Routines/Grouping3Dcy.pyx":240
  *     point_list_copy = point_list.copy()
  *     point_list_rows = point_list_copy.view([('', point_list_copy.dtype)] * point_list_copy.shape[1])
  *     max_line_points_rows = max_line_points.view([('', max_line_points.dtype)] * max_line_points.shape[1])             # <<<<<<<<<<<<<<
  *     point_list = np.setdiff1d(point_list_rows, max_line_points_rows).view(point_list_copy.dtype).reshape(-1,
  *         point_list_copy.shape[1])
  */
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_v_max_line_points, __pyx_n_s_view); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 216, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_v_max_line_points, __pyx_n_s_view); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 240, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_max_line_points, __pyx_n_s_dtype); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 216, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_max_line_points, __pyx_n_s_dtype); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 240, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_8 = PyTuple_New(2); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 216, __pyx_L1_error)
+  __pyx_t_8 = PyTuple_New(2); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 240, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_INCREF(__pyx_kp_s__5);
   __Pyx_GIVEREF(__pyx_kp_s__5);
@@ -4592,16 +4689,16 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
   __Pyx_GIVEREF(__pyx_t_1);
   PyTuple_SET_ITEM(__pyx_t_8, 1, __pyx_t_1);
   __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_max_line_points, __pyx_n_s_shape); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 216, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_max_line_points, __pyx_n_s_shape); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 240, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_4 = __Pyx_GetItemInt(__pyx_t_1, 1, long, 1, __Pyx_PyInt_From_long, 0, 0, 1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 216, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_GetItemInt(__pyx_t_1, 1, long, 1, __Pyx_PyInt_From_long, 0, 0, 1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 240, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = PyList_New(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 216, __pyx_L1_error)
+  __pyx_t_1 = PyList_New(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 240, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_GIVEREF(__pyx_t_8);
   PyList_SET_ITEM(__pyx_t_1, 0, __pyx_t_8);
-  { PyObject* __pyx_temp = PyNumber_InPlaceMultiply(__pyx_t_1, __pyx_t_4); if (unlikely(!__pyx_temp)) __PYX_ERR(0, 216, __pyx_L1_error)
+  { PyObject* __pyx_temp = PyNumber_InPlaceMultiply(__pyx_t_1, __pyx_t_4); if (unlikely(!__pyx_temp)) __PYX_ERR(0, 240, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_temp);
     __Pyx_DECREF(__pyx_t_1);
     __pyx_t_1 = __pyx_temp;
@@ -4619,14 +4716,14 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
     }
   }
   if (!__pyx_t_4) {
-    __pyx_t_3 = __Pyx_PyObject_CallOneArg(__pyx_t_2, __pyx_t_1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 216, __pyx_L1_error)
+    __pyx_t_3 = __Pyx_PyObject_CallOneArg(__pyx_t_2, __pyx_t_1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 240, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
     __Pyx_GOTREF(__pyx_t_3);
   } else {
     #if CYTHON_FAST_PYCALL
     if (PyFunction_Check(__pyx_t_2)) {
       PyObject *__pyx_temp[2] = {__pyx_t_4, __pyx_t_1};
-      __pyx_t_3 = __Pyx_PyFunction_FastCall(__pyx_t_2, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 216, __pyx_L1_error)
+      __pyx_t_3 = __Pyx_PyFunction_FastCall(__pyx_t_2, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 240, __pyx_L1_error)
       __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
       __Pyx_GOTREF(__pyx_t_3);
       __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -4635,20 +4732,20 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
     #if CYTHON_FAST_PYCCALL
     if (__Pyx_PyFastCFunction_Check(__pyx_t_2)) {
       PyObject *__pyx_temp[2] = {__pyx_t_4, __pyx_t_1};
-      __pyx_t_3 = __Pyx_PyCFunction_FastCall(__pyx_t_2, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 216, __pyx_L1_error)
+      __pyx_t_3 = __Pyx_PyCFunction_FastCall(__pyx_t_2, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 240, __pyx_L1_error)
       __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
       __Pyx_GOTREF(__pyx_t_3);
       __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
     } else
     #endif
     {
-      __pyx_t_8 = PyTuple_New(1+1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 216, __pyx_L1_error)
+      __pyx_t_8 = PyTuple_New(1+1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 240, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_8);
       __Pyx_GIVEREF(__pyx_t_4); PyTuple_SET_ITEM(__pyx_t_8, 0, __pyx_t_4); __pyx_t_4 = NULL;
       __Pyx_GIVEREF(__pyx_t_1);
       PyTuple_SET_ITEM(__pyx_t_8, 0+1, __pyx_t_1);
       __pyx_t_1 = 0;
-      __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_8, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 216, __pyx_L1_error)
+      __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_8, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 240, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_3);
       __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
     }
@@ -4657,16 +4754,16 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
   __pyx_v_max_line_points_rows = __pyx_t_3;
   __pyx_t_3 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":217
+  /* "RMS/Routines/Grouping3Dcy.pyx":241
  *     point_list_rows = point_list_copy.view([('', point_list_copy.dtype)] * point_list_copy.shape[1])
  *     max_line_points_rows = max_line_points.view([('', max_line_points.dtype)] * max_line_points.shape[1])
  *     point_list = np.setdiff1d(point_list_rows, max_line_points_rows).view(point_list_copy.dtype).reshape(-1,             # <<<<<<<<<<<<<<
  *         point_list_copy.shape[1])
  * 
  */
-  __pyx_t_1 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 217, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 241, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_setdiff1d); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 217, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_setdiff1d); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 241, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __pyx_t_1 = NULL;
@@ -4684,7 +4781,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
   #if CYTHON_FAST_PYCALL
   if (PyFunction_Check(__pyx_t_4)) {
     PyObject *__pyx_temp[3] = {__pyx_t_1, __pyx_v_point_list_rows, __pyx_v_max_line_points_rows};
-    __pyx_t_8 = __Pyx_PyFunction_FastCall(__pyx_t_4, __pyx_temp+1-__pyx_t_15, 2+__pyx_t_15); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 217, __pyx_L1_error)
+    __pyx_t_8 = __Pyx_PyFunction_FastCall(__pyx_t_4, __pyx_temp+1-__pyx_t_15, 2+__pyx_t_15); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 241, __pyx_L1_error)
     __Pyx_XDECREF(__pyx_t_1); __pyx_t_1 = 0;
     __Pyx_GOTREF(__pyx_t_8);
   } else
@@ -4692,13 +4789,13 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
   #if CYTHON_FAST_PYCCALL
   if (__Pyx_PyFastCFunction_Check(__pyx_t_4)) {
     PyObject *__pyx_temp[3] = {__pyx_t_1, __pyx_v_point_list_rows, __pyx_v_max_line_points_rows};
-    __pyx_t_8 = __Pyx_PyCFunction_FastCall(__pyx_t_4, __pyx_temp+1-__pyx_t_15, 2+__pyx_t_15); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 217, __pyx_L1_error)
+    __pyx_t_8 = __Pyx_PyCFunction_FastCall(__pyx_t_4, __pyx_temp+1-__pyx_t_15, 2+__pyx_t_15); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 241, __pyx_L1_error)
     __Pyx_XDECREF(__pyx_t_1); __pyx_t_1 = 0;
     __Pyx_GOTREF(__pyx_t_8);
   } else
   #endif
   {
-    __pyx_t_5 = PyTuple_New(2+__pyx_t_15); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 217, __pyx_L1_error)
+    __pyx_t_5 = PyTuple_New(2+__pyx_t_15); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 241, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_5);
     if (__pyx_t_1) {
       __Pyx_GIVEREF(__pyx_t_1); PyTuple_SET_ITEM(__pyx_t_5, 0, __pyx_t_1); __pyx_t_1 = NULL;
@@ -4709,15 +4806,15 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
     __Pyx_INCREF(__pyx_v_max_line_points_rows);
     __Pyx_GIVEREF(__pyx_v_max_line_points_rows);
     PyTuple_SET_ITEM(__pyx_t_5, 1+__pyx_t_15, __pyx_v_max_line_points_rows);
-    __pyx_t_8 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_5, NULL); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 217, __pyx_L1_error)
+    __pyx_t_8 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_5, NULL); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 241, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_8);
     __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
   }
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_8, __pyx_n_s_view); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 217, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_8, __pyx_n_s_view); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 241, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_v_point_list_copy, __pyx_n_s_dtype); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 217, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_v_point_list_copy, __pyx_n_s_dtype); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 241, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __pyx_t_5 = NULL;
   if (CYTHON_UNPACK_METHODS && likely(PyMethod_Check(__pyx_t_4))) {
@@ -4730,14 +4827,14 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
     }
   }
   if (!__pyx_t_5) {
-    __pyx_t_2 = __Pyx_PyObject_CallOneArg(__pyx_t_4, __pyx_t_8); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 217, __pyx_L1_error)
+    __pyx_t_2 = __Pyx_PyObject_CallOneArg(__pyx_t_4, __pyx_t_8); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 241, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
     __Pyx_GOTREF(__pyx_t_2);
   } else {
     #if CYTHON_FAST_PYCALL
     if (PyFunction_Check(__pyx_t_4)) {
       PyObject *__pyx_temp[2] = {__pyx_t_5, __pyx_t_8};
-      __pyx_t_2 = __Pyx_PyFunction_FastCall(__pyx_t_4, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 217, __pyx_L1_error)
+      __pyx_t_2 = __Pyx_PyFunction_FastCall(__pyx_t_4, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 241, __pyx_L1_error)
       __Pyx_XDECREF(__pyx_t_5); __pyx_t_5 = 0;
       __Pyx_GOTREF(__pyx_t_2);
       __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
@@ -4746,39 +4843,39 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
     #if CYTHON_FAST_PYCCALL
     if (__Pyx_PyFastCFunction_Check(__pyx_t_4)) {
       PyObject *__pyx_temp[2] = {__pyx_t_5, __pyx_t_8};
-      __pyx_t_2 = __Pyx_PyCFunction_FastCall(__pyx_t_4, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 217, __pyx_L1_error)
+      __pyx_t_2 = __Pyx_PyCFunction_FastCall(__pyx_t_4, __pyx_temp+1-1, 1+1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 241, __pyx_L1_error)
       __Pyx_XDECREF(__pyx_t_5); __pyx_t_5 = 0;
       __Pyx_GOTREF(__pyx_t_2);
       __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
     } else
     #endif
     {
-      __pyx_t_1 = PyTuple_New(1+1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 217, __pyx_L1_error)
+      __pyx_t_1 = PyTuple_New(1+1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 241, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       __Pyx_GIVEREF(__pyx_t_5); PyTuple_SET_ITEM(__pyx_t_1, 0, __pyx_t_5); __pyx_t_5 = NULL;
       __Pyx_GIVEREF(__pyx_t_8);
       PyTuple_SET_ITEM(__pyx_t_1, 0+1, __pyx_t_8);
       __pyx_t_8 = 0;
-      __pyx_t_2 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_1, NULL); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 217, __pyx_L1_error)
+      __pyx_t_2 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_1, NULL); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 241, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_2);
       __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
     }
   }
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_reshape); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 217, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_reshape); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 241, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":218
+  /* "RMS/Routines/Grouping3Dcy.pyx":242
  *     max_line_points_rows = max_line_points.view([('', max_line_points.dtype)] * max_line_points.shape[1])
  *     point_list = np.setdiff1d(point_list_rows, max_line_points_rows).view(point_list_copy.dtype).reshape(-1,
  *         point_list_copy.shape[1])             # <<<<<<<<<<<<<<
  * 
  *     # Sort max point only if there are any
  */
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_v_point_list_copy, __pyx_n_s_shape); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 218, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_v_point_list_copy, __pyx_n_s_shape); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 242, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_1 = __Pyx_GetItemInt(__pyx_t_2, 1, long, 1, __Pyx_PyInt_From_long, 0, 0, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 218, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_GetItemInt(__pyx_t_2, 1, long, 1, __Pyx_PyInt_From_long, 0, 0, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 242, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   __pyx_t_2 = NULL;
@@ -4796,7 +4893,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
   #if CYTHON_FAST_PYCALL
   if (PyFunction_Check(__pyx_t_4)) {
     PyObject *__pyx_temp[3] = {__pyx_t_2, __pyx_int_neg_1, __pyx_t_1};
-    __pyx_t_3 = __Pyx_PyFunction_FastCall(__pyx_t_4, __pyx_temp+1-__pyx_t_15, 2+__pyx_t_15); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 217, __pyx_L1_error)
+    __pyx_t_3 = __Pyx_PyFunction_FastCall(__pyx_t_4, __pyx_temp+1-__pyx_t_15, 2+__pyx_t_15); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 241, __pyx_L1_error)
     __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
     __Pyx_GOTREF(__pyx_t_3);
     __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -4805,14 +4902,14 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
   #if CYTHON_FAST_PYCCALL
   if (__Pyx_PyFastCFunction_Check(__pyx_t_4)) {
     PyObject *__pyx_temp[3] = {__pyx_t_2, __pyx_int_neg_1, __pyx_t_1};
-    __pyx_t_3 = __Pyx_PyCFunction_FastCall(__pyx_t_4, __pyx_temp+1-__pyx_t_15, 2+__pyx_t_15); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 217, __pyx_L1_error)
+    __pyx_t_3 = __Pyx_PyCFunction_FastCall(__pyx_t_4, __pyx_temp+1-__pyx_t_15, 2+__pyx_t_15); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 241, __pyx_L1_error)
     __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
     __Pyx_GOTREF(__pyx_t_3);
     __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   } else
   #endif
   {
-    __pyx_t_8 = PyTuple_New(2+__pyx_t_15); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 217, __pyx_L1_error)
+    __pyx_t_8 = PyTuple_New(2+__pyx_t_15); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 241, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_8);
     if (__pyx_t_2) {
       __Pyx_GIVEREF(__pyx_t_2); PyTuple_SET_ITEM(__pyx_t_8, 0, __pyx_t_2); __pyx_t_2 = NULL;
@@ -4823,28 +4920,28 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
     __Pyx_GIVEREF(__pyx_t_1);
     PyTuple_SET_ITEM(__pyx_t_8, 1+__pyx_t_15, __pyx_t_1);
     __pyx_t_1 = 0;
-    __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_8, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 217, __pyx_L1_error)
+    __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_8, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 241, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_3);
     __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
   }
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":217
+  /* "RMS/Routines/Grouping3Dcy.pyx":241
  *     point_list_rows = point_list_copy.view([('', point_list_copy.dtype)] * point_list_copy.shape[1])
  *     max_line_points_rows = max_line_points.view([('', max_line_points.dtype)] * max_line_points.shape[1])
  *     point_list = np.setdiff1d(point_list_rows, max_line_points_rows).view(point_list_copy.dtype).reshape(-1,             # <<<<<<<<<<<<<<
  *         point_list_copy.shape[1])
  * 
  */
-  if (!(likely(((__pyx_t_3) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_3, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 217, __pyx_L1_error)
+  if (!(likely(((__pyx_t_3) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_3, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 241, __pyx_L1_error)
   __pyx_t_16 = ((PyArrayObject *)__pyx_t_3);
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
     __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer);
-    __pyx_t_15 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer, (PyObject*)__pyx_t_16, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack);
+    __pyx_t_15 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer, (PyObject*)__pyx_t_16, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack);
     if (unlikely(__pyx_t_15 < 0)) {
       PyErr_Fetch(&__pyx_t_17, &__pyx_t_18, &__pyx_t_19);
-      if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer, (PyObject*)__pyx_v_point_list, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
+      if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer, (PyObject*)__pyx_v_point_list, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
         Py_XDECREF(__pyx_t_17); Py_XDECREF(__pyx_t_18); Py_XDECREF(__pyx_t_19);
         __Pyx_RaiseBufferFallbackError();
       } else {
@@ -4852,35 +4949,35 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
       }
     }
     __pyx_pybuffernd_point_list.diminfo[0].strides = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_point_list.diminfo[0].shape = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_point_list.diminfo[1].strides = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_point_list.diminfo[1].shape = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.shape[1];
-    if (unlikely(__pyx_t_15 < 0)) __PYX_ERR(0, 217, __pyx_L1_error)
+    if (unlikely(__pyx_t_15 < 0)) __PYX_ERR(0, 241, __pyx_L1_error)
   }
   __pyx_t_16 = 0;
   __Pyx_DECREF_SET(__pyx_v_point_list, ((PyArrayObject *)__pyx_t_3));
   __pyx_t_3 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":221
+  /* "RMS/Routines/Grouping3Dcy.pyx":245
  * 
  *     # Sort max point only if there are any
  *     if max_line_points.size:             # <<<<<<<<<<<<<<
  *         max_line_points = max_line_points[max_line_points[:,2].argsort()]
  * 
  */
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_v_max_line_points, __pyx_n_s_size); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 221, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_v_max_line_points, __pyx_n_s_size); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 245, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_20 = __Pyx_PyObject_IsTrue(__pyx_t_3); if (unlikely(__pyx_t_20 < 0)) __PYX_ERR(0, 221, __pyx_L1_error)
+  __pyx_t_20 = __Pyx_PyObject_IsTrue(__pyx_t_3); if (unlikely(__pyx_t_20 < 0)) __PYX_ERR(0, 245, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
   if (__pyx_t_20) {
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":222
+    /* "RMS/Routines/Grouping3Dcy.pyx":246
  *     # Sort max point only if there are any
  *     if max_line_points.size:
  *         max_line_points = max_line_points[max_line_points[:,2].argsort()]             # <<<<<<<<<<<<<<
  * 
  *     # Sort_points by frame
  */
-    __pyx_t_4 = PyObject_GetItem(__pyx_v_max_line_points, __pyx_tuple__7); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 222, __pyx_L1_error)
+    __pyx_t_4 = PyObject_GetItem(__pyx_v_max_line_points, __pyx_tuple__7); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 246, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_4);
-    __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_argsort); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 222, __pyx_L1_error)
+    __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_argsort); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 246, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_8);
     __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
     __pyx_t_4 = NULL;
@@ -4894,20 +4991,20 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
       }
     }
     if (__pyx_t_4) {
-      __pyx_t_3 = __Pyx_PyObject_CallOneArg(__pyx_t_8, __pyx_t_4); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 222, __pyx_L1_error)
+      __pyx_t_3 = __Pyx_PyObject_CallOneArg(__pyx_t_8, __pyx_t_4); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 246, __pyx_L1_error)
       __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
     } else {
-      __pyx_t_3 = __Pyx_PyObject_CallNoArg(__pyx_t_8); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 222, __pyx_L1_error)
+      __pyx_t_3 = __Pyx_PyObject_CallNoArg(__pyx_t_8); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 246, __pyx_L1_error)
     }
     __Pyx_GOTREF(__pyx_t_3);
     __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-    __pyx_t_8 = PyObject_GetItem(__pyx_v_max_line_points, __pyx_t_3); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 222, __pyx_L1_error)
+    __pyx_t_8 = PyObject_GetItem(__pyx_v_max_line_points, __pyx_t_3); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 246, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_8);
     __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
     __Pyx_DECREF_SET(__pyx_v_max_line_points, __pyx_t_8);
     __pyx_t_8 = 0;
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":221
+    /* "RMS/Routines/Grouping3Dcy.pyx":245
  * 
  *     # Sort max point only if there are any
  *     if max_line_points.size:             # <<<<<<<<<<<<<<
@@ -4916,16 +5013,16 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
  */
   }
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":225
+  /* "RMS/Routines/Grouping3Dcy.pyx":249
  * 
  *     # Sort_points by frame
  *     point_list = point_list[point_list[:,2].argsort()]             # <<<<<<<<<<<<<<
  * 
  *     return (point_list, max_line_points)
  */
-  __pyx_t_3 = PyObject_GetItem(((PyObject *)__pyx_v_point_list), __pyx_tuple__9); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 225, __pyx_L1_error)
+  __pyx_t_3 = PyObject_GetItem(((PyObject *)__pyx_v_point_list), __pyx_tuple__9); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 249, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_argsort); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 225, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_argsort); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 249, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
   __pyx_t_3 = NULL;
@@ -4939,25 +5036,25 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
     }
   }
   if (__pyx_t_3) {
-    __pyx_t_8 = __Pyx_PyObject_CallOneArg(__pyx_t_4, __pyx_t_3); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 225, __pyx_L1_error)
+    __pyx_t_8 = __Pyx_PyObject_CallOneArg(__pyx_t_4, __pyx_t_3); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 249, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
   } else {
-    __pyx_t_8 = __Pyx_PyObject_CallNoArg(__pyx_t_4); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 225, __pyx_L1_error)
+    __pyx_t_8 = __Pyx_PyObject_CallNoArg(__pyx_t_4); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 249, __pyx_L1_error)
   }
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __pyx_t_4 = PyObject_GetItem(((PyObject *)__pyx_v_point_list), __pyx_t_8); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 225, __pyx_L1_error)
+  __pyx_t_4 = PyObject_GetItem(((PyObject *)__pyx_v_point_list), __pyx_t_8); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 249, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  if (!(likely(((__pyx_t_4) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_4, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 225, __pyx_L1_error)
+  if (!(likely(((__pyx_t_4) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_4, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 249, __pyx_L1_error)
   __pyx_t_16 = ((PyArrayObject *)__pyx_t_4);
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
     __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer);
-    __pyx_t_15 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer, (PyObject*)__pyx_t_16, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack);
+    __pyx_t_15 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer, (PyObject*)__pyx_t_16, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack);
     if (unlikely(__pyx_t_15 < 0)) {
       PyErr_Fetch(&__pyx_t_19, &__pyx_t_18, &__pyx_t_17);
-      if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer, (PyObject*)__pyx_v_point_list, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
+      if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer, (PyObject*)__pyx_v_point_list, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
         Py_XDECREF(__pyx_t_19); Py_XDECREF(__pyx_t_18); Py_XDECREF(__pyx_t_17);
         __Pyx_RaiseBufferFallbackError();
       } else {
@@ -4965,21 +5062,21 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
       }
     }
     __pyx_pybuffernd_point_list.diminfo[0].strides = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_point_list.diminfo[0].shape = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_point_list.diminfo[1].strides = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_point_list.diminfo[1].shape = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.shape[1];
-    if (unlikely(__pyx_t_15 < 0)) __PYX_ERR(0, 225, __pyx_L1_error)
+    if (unlikely(__pyx_t_15 < 0)) __PYX_ERR(0, 249, __pyx_L1_error)
   }
   __pyx_t_16 = 0;
   __Pyx_DECREF_SET(__pyx_v_point_list, ((PyArrayObject *)__pyx_t_4));
   __pyx_t_4 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":227
+  /* "RMS/Routines/Grouping3Dcy.pyx":251
  *     point_list = point_list[point_list[:,2].argsort()]
  * 
  *     return (point_list, max_line_points)             # <<<<<<<<<<<<<<
  * 
- * def _formatLine(line, first_frame, last_frame):
+ * 
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 227, __pyx_L1_error)
+  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 251, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_INCREF(((PyObject *)__pyx_v_point_list));
   __Pyx_GIVEREF(((PyObject *)__pyx_v_point_list));
@@ -4991,10 +5088,10 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
   __pyx_t_4 = 0;
   goto __pyx_L0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":193
+  /* "RMS/Routines/Grouping3Dcy.pyx":217
  * 
  * 
- * def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, distance_threshold, gap_threshold):             # <<<<<<<<<<<<<<
+ * def remove3DPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, Line max_line, distance_threshold, gap_threshold):             # <<<<<<<<<<<<<<
  *     """ Remove points from a point list that belong to the given line.
  * 
  */
@@ -5031,8 +5128,8 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_2remove3DPoints(CYTHON_U
   return __pyx_r;
 }
 
-/* "RMS/Routines/Grouping3Dcy.pyx":229
- *     return (point_list, max_line_points)
+/* "RMS/Routines/Grouping3Dcy.pyx":256
+ * 
  * 
  * def _formatLine(line, first_frame, last_frame):             # <<<<<<<<<<<<<<
  *     """ Converts Line object to a list of format:
@@ -5071,16 +5168,16 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_5_formatLine(PyObject *_
         case  1:
         if (likely((values[1] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_first_frame)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("_formatLine", 1, 3, 3, 1); __PYX_ERR(0, 229, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("_formatLine", 1, 3, 3, 1); __PYX_ERR(0, 256, __pyx_L3_error)
         }
         case  2:
         if (likely((values[2] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_last_frame)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("_formatLine", 1, 3, 3, 2); __PYX_ERR(0, 229, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("_formatLine", 1, 3, 3, 2); __PYX_ERR(0, 256, __pyx_L3_error)
         }
       }
       if (unlikely(kw_args > 0)) {
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "_formatLine") < 0)) __PYX_ERR(0, 229, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "_formatLine") < 0)) __PYX_ERR(0, 256, __pyx_L3_error)
       }
     } else if (PyTuple_GET_SIZE(__pyx_args) != 3) {
       goto __pyx_L5_argtuple_error;
@@ -5095,7 +5192,7 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_5_formatLine(PyObject *_
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("_formatLine", 1, 3, 3, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 229, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("_formatLine", 1, 3, 3, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 256, __pyx_L3_error)
   __pyx_L3_error:;
   __Pyx_AddTraceback("RMS.Routines.Grouping3Dcy._formatLine", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
@@ -5128,14 +5225,14 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4_formatLine(CYTHON_UNUS
   PyObject *(*__pyx_t_9)(PyObject *);
   __Pyx_RefNannySetupContext("_formatLine", 0);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":234
+  /* "RMS/Routines/Grouping3Dcy.pyx":261
  *     """
  * 
  *     x1, y1, z1, x2, y2, z2 = line.get_points()             # <<<<<<<<<<<<<<
  * 
  *     return [(x1, y1, z1), (x2, y2, z2), line.counter, line.line_quality, first_frame, last_frame]
  */
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_v_line, __pyx_n_s_get_points); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 234, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_v_line, __pyx_n_s_get_points); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 261, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_t_3 = NULL;
   if (CYTHON_UNPACK_METHODS && likely(PyMethod_Check(__pyx_t_2))) {
@@ -5148,10 +5245,10 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4_formatLine(CYTHON_UNUS
     }
   }
   if (__pyx_t_3) {
-    __pyx_t_1 = __Pyx_PyObject_CallOneArg(__pyx_t_2, __pyx_t_3); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 234, __pyx_L1_error)
+    __pyx_t_1 = __Pyx_PyObject_CallOneArg(__pyx_t_2, __pyx_t_3); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 261, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
   } else {
-    __pyx_t_1 = __Pyx_PyObject_CallNoArg(__pyx_t_2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 234, __pyx_L1_error)
+    __pyx_t_1 = __Pyx_PyObject_CallNoArg(__pyx_t_2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 261, __pyx_L1_error)
   }
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
@@ -5165,7 +5262,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4_formatLine(CYTHON_UNUS
     if (unlikely(size != 6)) {
       if (size > 6) __Pyx_RaiseTooManyValuesError(6);
       else if (size >= 0) __Pyx_RaiseNeedMoreValuesError(size);
-      __PYX_ERR(0, 234, __pyx_L1_error)
+      __PYX_ERR(0, 261, __pyx_L1_error)
     }
     #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
     if (likely(PyTuple_CheckExact(sequence))) {
@@ -5194,7 +5291,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4_formatLine(CYTHON_UNUS
       Py_ssize_t i;
       PyObject** temps[6] = {&__pyx_t_2,&__pyx_t_3,&__pyx_t_4,&__pyx_t_5,&__pyx_t_6,&__pyx_t_7};
       for (i=0; i < 6; i++) {
-        PyObject* item = PySequence_ITEM(sequence, i); if (unlikely(!item)) __PYX_ERR(0, 234, __pyx_L1_error)
+        PyObject* item = PySequence_ITEM(sequence, i); if (unlikely(!item)) __PYX_ERR(0, 261, __pyx_L1_error)
         __Pyx_GOTREF(item);
         *(temps[i]) = item;
       }
@@ -5204,7 +5301,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4_formatLine(CYTHON_UNUS
   } else {
     Py_ssize_t index = -1;
     PyObject** temps[6] = {&__pyx_t_2,&__pyx_t_3,&__pyx_t_4,&__pyx_t_5,&__pyx_t_6,&__pyx_t_7};
-    __pyx_t_8 = PyObject_GetIter(__pyx_t_1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 234, __pyx_L1_error)
+    __pyx_t_8 = PyObject_GetIter(__pyx_t_1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 261, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_8);
     __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
     __pyx_t_9 = Py_TYPE(__pyx_t_8)->tp_iternext;
@@ -5213,7 +5310,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4_formatLine(CYTHON_UNUS
       __Pyx_GOTREF(item);
       *(temps[index]) = item;
     }
-    if (__Pyx_IternextUnpackEndCheck(__pyx_t_9(__pyx_t_8), 6) < 0) __PYX_ERR(0, 234, __pyx_L1_error)
+    if (__Pyx_IternextUnpackEndCheck(__pyx_t_9(__pyx_t_8), 6) < 0) __PYX_ERR(0, 261, __pyx_L1_error)
     __pyx_t_9 = NULL;
     __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
     goto __pyx_L4_unpacking_done;
@@ -5221,7 +5318,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4_formatLine(CYTHON_UNUS
     __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
     __pyx_t_9 = NULL;
     if (__Pyx_IterFinish() == 0) __Pyx_RaiseNeedMoreValuesError(index);
-    __PYX_ERR(0, 234, __pyx_L1_error)
+    __PYX_ERR(0, 261, __pyx_L1_error)
     __pyx_L4_unpacking_done:;
   }
   __pyx_v_x1 = __pyx_t_2;
@@ -5237,15 +5334,15 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4_formatLine(CYTHON_UNUS
   __pyx_v_z2 = __pyx_t_7;
   __pyx_t_7 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":236
+  /* "RMS/Routines/Grouping3Dcy.pyx":263
  *     x1, y1, z1, x2, y2, z2 = line.get_points()
  * 
  *     return [(x1, y1, z1), (x2, y2, z2), line.counter, line.line_quality, first_frame, last_frame]             # <<<<<<<<<<<<<<
  * 
- * @cython.boundscheck(False)
+ * 
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = PyTuple_New(3); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 236, __pyx_L1_error)
+  __pyx_t_1 = PyTuple_New(3); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 263, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_INCREF(__pyx_v_x1);
   __Pyx_GIVEREF(__pyx_v_x1);
@@ -5256,7 +5353,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4_formatLine(CYTHON_UNUS
   __Pyx_INCREF(__pyx_v_z1);
   __Pyx_GIVEREF(__pyx_v_z1);
   PyTuple_SET_ITEM(__pyx_t_1, 2, __pyx_v_z1);
-  __pyx_t_7 = PyTuple_New(3); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 236, __pyx_L1_error)
+  __pyx_t_7 = PyTuple_New(3); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 263, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_INCREF(__pyx_v_x2);
   __Pyx_GIVEREF(__pyx_v_x2);
@@ -5267,11 +5364,11 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4_formatLine(CYTHON_UNUS
   __Pyx_INCREF(__pyx_v_z2);
   __Pyx_GIVEREF(__pyx_v_z2);
   PyTuple_SET_ITEM(__pyx_t_7, 2, __pyx_v_z2);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_v_line, __pyx_n_s_counter); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 236, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_v_line, __pyx_n_s_counter); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 263, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_v_line, __pyx_n_s_line_quality); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 236, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_v_line, __pyx_n_s_line_quality); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 263, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_4 = PyList_New(6); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 236, __pyx_L1_error)
+  __pyx_t_4 = PyList_New(6); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 263, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_GIVEREF(__pyx_t_1);
   PyList_SET_ITEM(__pyx_t_4, 0, __pyx_t_1);
@@ -5295,8 +5392,8 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4_formatLine(CYTHON_UNUS
   __pyx_t_4 = 0;
   goto __pyx_L0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":229
- *     return (point_list, max_line_points)
+  /* "RMS/Routines/Grouping3Dcy.pyx":256
+ * 
  * 
  * def _formatLine(line, first_frame, last_frame):             # <<<<<<<<<<<<<<
  *     """ Converts Line object to a list of format:
@@ -5327,10 +5424,10 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_4_formatLine(CYTHON_UNUS
   return __pyx_r;
 }
 
-/* "RMS/Routines/Grouping3Dcy.pyx":240
+/* "RMS/Routines/Grouping3Dcy.pyx":270
  * @cython.boundscheck(False)
  * @cython.wraparound(False)
- * def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, get_single=False, line_list=[]):             # <<<<<<<<<<<<<<
+ * def find3DLines(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, start_time, config, get_single=False, line_list=[]):             # <<<<<<<<<<<<<<
  *     """ Iteratively find N straight lines in 3D space.
  * 
  */
@@ -5373,12 +5470,12 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_7find3DLines(PyObject *_
         case  1:
         if (likely((values[1] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_start_time)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("find3DLines", 0, 3, 5, 1); __PYX_ERR(0, 240, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("find3DLines", 0, 3, 5, 1); __PYX_ERR(0, 270, __pyx_L3_error)
         }
         case  2:
         if (likely((values[2] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_config)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("find3DLines", 0, 3, 5, 2); __PYX_ERR(0, 240, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("find3DLines", 0, 3, 5, 2); __PYX_ERR(0, 270, __pyx_L3_error)
         }
         case  3:
         if (kw_args > 0) {
@@ -5392,7 +5489,7 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_7find3DLines(PyObject *_
         }
       }
       if (unlikely(kw_args > 0)) {
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "find3DLines") < 0)) __PYX_ERR(0, 240, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "find3DLines") < 0)) __PYX_ERR(0, 270, __pyx_L3_error)
       }
     } else {
       switch (PyTuple_GET_SIZE(__pyx_args)) {
@@ -5413,13 +5510,13 @@ static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_7find3DLines(PyObject *_
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("find3DLines", 0, 3, 5, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 240, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("find3DLines", 0, 3, 5, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 270, __pyx_L3_error)
   __pyx_L3_error:;
   __Pyx_AddTraceback("RMS.Routines.Grouping3Dcy.find3DLines", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_point_list), __pyx_ptype_5numpy_ndarray, 1, "point_list", 0))) __PYX_ERR(0, 240, __pyx_L1_error)
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_point_list), __pyx_ptype_5numpy_ndarray, 1, "point_list", 0))) __PYX_ERR(0, 270, __pyx_L1_error)
   __pyx_r = __pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(__pyx_self, __pyx_v_point_list, __pyx_v_start_time, __pyx_v_config, __pyx_v_get_single, __pyx_v_line_list);
 
   /* function exit code */
@@ -5524,89 +5621,89 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
   __pyx_pybuffernd_point_list.rcbuffer = &__pyx_pybuffer_point_list;
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer, (PyObject*)__pyx_v_point_list, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) __PYX_ERR(0, 240, __pyx_L1_error)
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer, (PyObject*)__pyx_v_point_list, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) __PYX_ERR(0, 270, __pyx_L1_error)
   }
   __pyx_pybuffernd_point_list.diminfo[0].strides = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_point_list.diminfo[0].shape = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_point_list.diminfo[1].strides = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_point_list.diminfo[1].shape = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.shape[1];
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":253
+  /* "RMS/Routines/Grouping3Dcy.pyx":283
  * 
  *     # Load config parameters
  *     cdef float distance_threshold = config.distance_threshold             # <<<<<<<<<<<<<<
  *     cdef float gap_threshold = config.gap_threshold
  *     cdef int min_points = config.min_points
  */
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_distance_threshold); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 253, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_distance_threshold); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 283, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = __pyx_PyFloat_AsFloat(__pyx_t_1); if (unlikely((__pyx_t_2 == (float)-1) && PyErr_Occurred())) __PYX_ERR(0, 253, __pyx_L1_error)
+  __pyx_t_2 = __pyx_PyFloat_AsFloat(__pyx_t_1); if (unlikely((__pyx_t_2 == (float)-1) && PyErr_Occurred())) __PYX_ERR(0, 283, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __pyx_v_distance_threshold = __pyx_t_2;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":254
+  /* "RMS/Routines/Grouping3Dcy.pyx":284
  *     # Load config parameters
  *     cdef float distance_threshold = config.distance_threshold
  *     cdef float gap_threshold = config.gap_threshold             # <<<<<<<<<<<<<<
  *     cdef int min_points = config.min_points
  *     cdef int min_frames = config.min_frames
  */
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_gap_threshold); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 254, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_gap_threshold); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 284, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = __pyx_PyFloat_AsFloat(__pyx_t_1); if (unlikely((__pyx_t_2 == (float)-1) && PyErr_Occurred())) __PYX_ERR(0, 254, __pyx_L1_error)
+  __pyx_t_2 = __pyx_PyFloat_AsFloat(__pyx_t_1); if (unlikely((__pyx_t_2 == (float)-1) && PyErr_Occurred())) __PYX_ERR(0, 284, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __pyx_v_gap_threshold = __pyx_t_2;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":255
+  /* "RMS/Routines/Grouping3Dcy.pyx":285
  *     cdef float distance_threshold = config.distance_threshold
  *     cdef float gap_threshold = config.gap_threshold
  *     cdef int min_points = config.min_points             # <<<<<<<<<<<<<<
  *     cdef int min_frames = config.min_frames
  *     cdef int line_minimum_frame_range = config.line_minimum_frame_range
  */
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_min_points); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 255, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_min_points); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 285, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_3 = __Pyx_PyInt_As_int(__pyx_t_1); if (unlikely((__pyx_t_3 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 255, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyInt_As_int(__pyx_t_1); if (unlikely((__pyx_t_3 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 285, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __pyx_v_min_points = __pyx_t_3;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":256
+  /* "RMS/Routines/Grouping3Dcy.pyx":286
  *     cdef float gap_threshold = config.gap_threshold
  *     cdef int min_points = config.min_points
  *     cdef int min_frames = config.min_frames             # <<<<<<<<<<<<<<
  *     cdef int line_minimum_frame_range = config.line_minimum_frame_range
  *     cdef float line_distance_const = config.line_distance_const
  */
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_min_frames); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 256, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_min_frames); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 286, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_3 = __Pyx_PyInt_As_int(__pyx_t_1); if (unlikely((__pyx_t_3 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 256, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyInt_As_int(__pyx_t_1); if (unlikely((__pyx_t_3 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 286, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __pyx_v_min_frames = __pyx_t_3;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":257
+  /* "RMS/Routines/Grouping3Dcy.pyx":287
  *     cdef int min_points = config.min_points
  *     cdef int min_frames = config.min_frames
  *     cdef int line_minimum_frame_range = config.line_minimum_frame_range             # <<<<<<<<<<<<<<
  *     cdef float line_distance_const = config.line_distance_const
  * 
  */
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_line_minimum_frame_range); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 257, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_line_minimum_frame_range); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 287, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_3 = __Pyx_PyInt_As_int(__pyx_t_1); if (unlikely((__pyx_t_3 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 257, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyInt_As_int(__pyx_t_1); if (unlikely((__pyx_t_3 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 287, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __pyx_v_line_minimum_frame_range = __pyx_t_3;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":258
+  /* "RMS/Routines/Grouping3Dcy.pyx":288
  *     cdef int min_frames = config.min_frames
  *     cdef int line_minimum_frame_range = config.line_minimum_frame_range
  *     cdef float line_distance_const = config.line_distance_const             # <<<<<<<<<<<<<<
  * 
  *     cdef int i, j, z
  */
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_line_distance_const); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 258, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_line_distance_const); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 288, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = __pyx_PyFloat_AsFloat(__pyx_t_1); if (unlikely((__pyx_t_2 == (float)-1) && PyErr_Occurred())) __PYX_ERR(0, 258, __pyx_L1_error)
+  __pyx_t_2 = __pyx_PyFloat_AsFloat(__pyx_t_1); if (unlikely((__pyx_t_2 == (float)-1) && PyErr_Occurred())) __PYX_ERR(0, 288, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __pyx_v_line_distance_const = __pyx_t_2;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":264
+  /* "RMS/Routines/Grouping3Dcy.pyx":294
  *     cdef int x1, y1, z1, x2, y2, z2, x3, y3, z3, x_prev, y_prev, z_prev
  * 
  *     cdef int counter = 0             # <<<<<<<<<<<<<<
@@ -5615,7 +5712,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
   __pyx_v_counter = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":265
+  /* "RMS/Routines/Grouping3Dcy.pyx":295
  * 
  *     cdef int counter = 0
  *     cdef int results_counter = 0             # <<<<<<<<<<<<<<
@@ -5624,7 +5721,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
   __pyx_v_results_counter = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":266
+  /* "RMS/Routines/Grouping3Dcy.pyx":296
  *     cdef int counter = 0
  *     cdef int results_counter = 0
  *     cdef float line_dist_sum = 0             # <<<<<<<<<<<<<<
@@ -5633,26 +5730,26 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
   __pyx_v_line_dist_sum = 0.0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":271
+  /* "RMS/Routines/Grouping3Dcy.pyx":301
  * 
  *     # stop iterating if too many lines
  *     if len(line_list) >= config.max_lines:             # <<<<<<<<<<<<<<
  *         return line_list
  * 
  */
-  __pyx_t_4 = PyObject_Length(__pyx_v_line_list); if (unlikely(__pyx_t_4 == -1)) __PYX_ERR(0, 271, __pyx_L1_error)
-  __pyx_t_1 = PyInt_FromSsize_t(__pyx_t_4); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 271, __pyx_L1_error)
+  __pyx_t_4 = PyObject_Length(__pyx_v_line_list); if (unlikely(__pyx_t_4 == -1)) __PYX_ERR(0, 301, __pyx_L1_error)
+  __pyx_t_1 = PyInt_FromSsize_t(__pyx_t_4); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 301, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_max_lines); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 271, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_max_lines); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 301, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = PyObject_RichCompare(__pyx_t_1, __pyx_t_5, Py_GE); __Pyx_XGOTREF(__pyx_t_6); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 271, __pyx_L1_error)
+  __pyx_t_6 = PyObject_RichCompare(__pyx_t_1, __pyx_t_5, Py_GE); __Pyx_XGOTREF(__pyx_t_6); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 301, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_7 = __Pyx_PyObject_IsTrue(__pyx_t_6); if (unlikely(__pyx_t_7 < 0)) __PYX_ERR(0, 271, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_IsTrue(__pyx_t_6); if (unlikely(__pyx_t_7 < 0)) __PYX_ERR(0, 301, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
   if (__pyx_t_7) {
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":272
+    /* "RMS/Routines/Grouping3Dcy.pyx":302
  *     # stop iterating if too many lines
  *     if len(line_list) >= config.max_lines:
  *         return line_list             # <<<<<<<<<<<<<<
@@ -5664,7 +5761,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
     __pyx_r = __pyx_v_line_list;
     goto __pyx_L0;
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":271
+    /* "RMS/Routines/Grouping3Dcy.pyx":301
  * 
  *     # stop iterating if too many lines
  *     if len(line_list) >= config.max_lines:             # <<<<<<<<<<<<<<
@@ -5673,14 +5770,14 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
   }
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":275
+  /* "RMS/Routines/Grouping3Dcy.pyx":305
  * 
  *     # stop iterating if running for too long
  *     if time() - start_time > config.max_time:             # <<<<<<<<<<<<<<
  *         if len(line_list) > 0:
  *             return line_list
  */
-  __pyx_t_5 = __Pyx_GetModuleGlobalName(__pyx_n_s_time); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 275, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_GetModuleGlobalName(__pyx_n_s_time); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 305, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __pyx_t_1 = NULL;
   if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_5))) {
@@ -5693,37 +5790,37 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
     }
   }
   if (__pyx_t_1) {
-    __pyx_t_6 = __Pyx_PyObject_CallOneArg(__pyx_t_5, __pyx_t_1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 275, __pyx_L1_error)
+    __pyx_t_6 = __Pyx_PyObject_CallOneArg(__pyx_t_5, __pyx_t_1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 305, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   } else {
-    __pyx_t_6 = __Pyx_PyObject_CallNoArg(__pyx_t_5); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 275, __pyx_L1_error)
+    __pyx_t_6 = __Pyx_PyObject_CallNoArg(__pyx_t_5); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 305, __pyx_L1_error)
   }
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = PyNumber_Subtract(__pyx_t_6, __pyx_v_start_time); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 275, __pyx_L1_error)
+  __pyx_t_5 = PyNumber_Subtract(__pyx_t_6, __pyx_v_start_time); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 305, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_max_time); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 275, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_max_time); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 305, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_1 = PyObject_RichCompare(__pyx_t_5, __pyx_t_6, Py_GT); __Pyx_XGOTREF(__pyx_t_1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 275, __pyx_L1_error)
+  __pyx_t_1 = PyObject_RichCompare(__pyx_t_5, __pyx_t_6, Py_GT); __Pyx_XGOTREF(__pyx_t_1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 305, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_7 = __Pyx_PyObject_IsTrue(__pyx_t_1); if (unlikely(__pyx_t_7 < 0)) __PYX_ERR(0, 275, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_IsTrue(__pyx_t_1); if (unlikely(__pyx_t_7 < 0)) __PYX_ERR(0, 305, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   if (__pyx_t_7) {
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":276
+    /* "RMS/Routines/Grouping3Dcy.pyx":306
  *     # stop iterating if running for too long
  *     if time() - start_time > config.max_time:
  *         if len(line_list) > 0:             # <<<<<<<<<<<<<<
  *             return line_list
  *         else:
  */
-    __pyx_t_4 = PyObject_Length(__pyx_v_line_list); if (unlikely(__pyx_t_4 == -1)) __PYX_ERR(0, 276, __pyx_L1_error)
+    __pyx_t_4 = PyObject_Length(__pyx_v_line_list); if (unlikely(__pyx_t_4 == -1)) __PYX_ERR(0, 306, __pyx_L1_error)
     __pyx_t_7 = ((__pyx_t_4 > 0) != 0);
     if (__pyx_t_7) {
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":277
+      /* "RMS/Routines/Grouping3Dcy.pyx":307
  *     if time() - start_time > config.max_time:
  *         if len(line_list) > 0:
  *             return line_list             # <<<<<<<<<<<<<<
@@ -5735,7 +5832,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
       __pyx_r = __pyx_v_line_list;
       goto __pyx_L0;
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":276
+      /* "RMS/Routines/Grouping3Dcy.pyx":306
  *     # stop iterating if running for too long
  *     if time() - start_time > config.max_time:
  *         if len(line_list) > 0:             # <<<<<<<<<<<<<<
@@ -5744,7 +5841,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
     }
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":279
+    /* "RMS/Routines/Grouping3Dcy.pyx":309
  *             return line_list
  *         else:
  *             return None             # <<<<<<<<<<<<<<
@@ -5758,7 +5855,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
       goto __pyx_L0;
     }
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":275
+    /* "RMS/Routines/Grouping3Dcy.pyx":305
  * 
  *     # stop iterating if running for too long
  *     if time() - start_time > config.max_time:             # <<<<<<<<<<<<<<
@@ -5767,7 +5864,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
   }
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":281
+  /* "RMS/Routines/Grouping3Dcy.pyx":311
  *             return None
  * 
  *     cdef int point_list_size = point_list.shape[0]             # <<<<<<<<<<<<<<
@@ -5776,34 +5873,34 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
   __pyx_v_point_list_size = (__pyx_v_point_list->dimensions[0]);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":284
+  /* "RMS/Routines/Grouping3Dcy.pyx":314
  * 
  *     # Define a list for results
- *     results_list = np.zeros(shape=((point_list_size*(point_list_size-1))/2), dtype=Line)             # <<<<<<<<<<<<<<
+ *     results_list = np.zeros(shape=((point_list_size*(point_list_size-1))//2), dtype=Line)             # <<<<<<<<<<<<<<
  * 
  *     for i in range(point_list_size):
  */
-  __pyx_t_1 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 284, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 314, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_zeros); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 284, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_zeros); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 314, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = PyDict_New(); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 284, __pyx_L1_error)
+  __pyx_t_1 = PyDict_New(); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 314, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_5 = __Pyx_PyInt_From_long(__Pyx_div_long((__pyx_v_point_list_size * (__pyx_v_point_list_size - 1)), 2)); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 284, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyInt_From_long(__Pyx_div_long((__pyx_v_point_list_size * (__pyx_v_point_list_size - 1)), 2)); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 314, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_shape, __pyx_t_5) < 0) __PYX_ERR(0, 284, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_shape, __pyx_t_5) < 0) __PYX_ERR(0, 314, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, ((PyObject *)__pyx_ptype_3RMS_8Routines_12Grouping3Dcy_Line)) < 0) __PYX_ERR(0, 284, __pyx_L1_error)
-  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_empty_tuple, __pyx_t_1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 284, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, ((PyObject *)__pyx_ptype_3RMS_8Routines_12Grouping3Dcy_Line)) < 0) __PYX_ERR(0, 314, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_empty_tuple, __pyx_t_1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 314, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __pyx_v_results_list = __pyx_t_5;
   __pyx_t_5 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":286
- *     results_list = np.zeros(shape=((point_list_size*(point_list_size-1))/2), dtype=Line)
+  /* "RMS/Routines/Grouping3Dcy.pyx":316
+ *     results_list = np.zeros(shape=((point_list_size*(point_list_size-1))//2), dtype=Line)
  * 
  *     for i in range(point_list_size):             # <<<<<<<<<<<<<<
  *         for j in range(point_list_size - i - 1):
@@ -5813,7 +5910,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
   for (__pyx_t_8 = 0; __pyx_t_8 < __pyx_t_3; __pyx_t_8+=1) {
     __pyx_v_i = __pyx_t_8;
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":287
+    /* "RMS/Routines/Grouping3Dcy.pyx":317
  * 
  *     for i in range(point_list_size):
  *         for j in range(point_list_size - i - 1):             # <<<<<<<<<<<<<<
@@ -5824,7 +5921,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
     for (__pyx_t_10 = 0; __pyx_t_10 < __pyx_t_9; __pyx_t_10+=1) {
       __pyx_v_j = __pyx_t_10;
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":290
+      /* "RMS/Routines/Grouping3Dcy.pyx":320
  * 
  *             # These 2 points define the line
  *             x1 = point_list[i, 0]             # <<<<<<<<<<<<<<
@@ -5833,9 +5930,9 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
       __pyx_t_11 = __pyx_v_i;
       __pyx_t_12 = 0;
-      __pyx_v_x1 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_11, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_12, __pyx_pybuffernd_point_list.diminfo[1].strides));
+      __pyx_v_x1 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_11, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_12, __pyx_pybuffernd_point_list.diminfo[1].strides));
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":291
+      /* "RMS/Routines/Grouping3Dcy.pyx":321
  *             # These 2 points define the line
  *             x1 = point_list[i, 0]
  *             y1 = point_list[i, 1]             # <<<<<<<<<<<<<<
@@ -5844,9 +5941,9 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
       __pyx_t_13 = __pyx_v_i;
       __pyx_t_14 = 1;
-      __pyx_v_y1 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_13, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_14, __pyx_pybuffernd_point_list.diminfo[1].strides));
+      __pyx_v_y1 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_13, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_14, __pyx_pybuffernd_point_list.diminfo[1].strides));
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":292
+      /* "RMS/Routines/Grouping3Dcy.pyx":322
  *             x1 = point_list[i, 0]
  *             y1 = point_list[i, 1]
  *             z1 = point_list[i, 2]             # <<<<<<<<<<<<<<
@@ -5855,9 +5952,9 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
       __pyx_t_15 = __pyx_v_i;
       __pyx_t_16 = 2;
-      __pyx_v_z1 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_15, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_16, __pyx_pybuffernd_point_list.diminfo[1].strides));
+      __pyx_v_z1 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_15, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_16, __pyx_pybuffernd_point_list.diminfo[1].strides));
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":295
+      /* "RMS/Routines/Grouping3Dcy.pyx":325
  *             # x1, y1, z1 = point_list[i]
  * 
  *             x2 = point_list[i + j + 1, 0]             # <<<<<<<<<<<<<<
@@ -5866,9 +5963,9 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
       __pyx_t_17 = ((__pyx_v_i + __pyx_v_j) + 1);
       __pyx_t_18 = 0;
-      __pyx_v_x2 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_17, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_18, __pyx_pybuffernd_point_list.diminfo[1].strides));
+      __pyx_v_x2 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_17, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_18, __pyx_pybuffernd_point_list.diminfo[1].strides));
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":296
+      /* "RMS/Routines/Grouping3Dcy.pyx":326
  * 
  *             x2 = point_list[i + j + 1, 0]
  *             y2 = point_list[i + j + 1, 1]             # <<<<<<<<<<<<<<
@@ -5877,9 +5974,9 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
       __pyx_t_19 = ((__pyx_v_i + __pyx_v_j) + 1);
       __pyx_t_20 = 1;
-      __pyx_v_y2 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_19, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_20, __pyx_pybuffernd_point_list.diminfo[1].strides));
+      __pyx_v_y2 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_19, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_20, __pyx_pybuffernd_point_list.diminfo[1].strides));
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":297
+      /* "RMS/Routines/Grouping3Dcy.pyx":327
  *             x2 = point_list[i + j + 1, 0]
  *             y2 = point_list[i + j + 1, 1]
  *             z2 = point_list[i + j + 1, 2]             # <<<<<<<<<<<<<<
@@ -5888,9 +5985,9 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
       __pyx_t_21 = ((__pyx_v_i + __pyx_v_j) + 1);
       __pyx_t_22 = 2;
-      __pyx_v_z2 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_21, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_22, __pyx_pybuffernd_point_list.diminfo[1].strides));
+      __pyx_v_z2 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_21, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_22, __pyx_pybuffernd_point_list.diminfo[1].strides));
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":300
+      /* "RMS/Routines/Grouping3Dcy.pyx":330
  * 
  *             # Include 2 points that make the line in the count
  *             counter = 0             # <<<<<<<<<<<<<<
@@ -5899,7 +5996,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
       __pyx_v_counter = 0;
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":303
+      /* "RMS/Routines/Grouping3Dcy.pyx":333
  * 
  *             # Track average distance from the line
  *             line_dist_sum = 0             # <<<<<<<<<<<<<<
@@ -5908,7 +6005,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
       __pyx_v_line_dist_sum = 0.0;
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":305
+      /* "RMS/Routines/Grouping3Dcy.pyx":335
  *             line_dist_sum = 0
  * 
  *             x_prev, y_prev, z_prev = x1, y1, z1             # <<<<<<<<<<<<<<
@@ -5922,7 +6019,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
       __pyx_v_y_prev = __pyx_t_24;
       __pyx_v_z_prev = __pyx_t_25;
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":307
+      /* "RMS/Routines/Grouping3Dcy.pyx":337
  *             x_prev, y_prev, z_prev = x1, y1, z1
  * 
  *             for z in range(point_list_size):             # <<<<<<<<<<<<<<
@@ -5933,7 +6030,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
       for (__pyx_t_24 = 0; __pyx_t_24 < __pyx_t_25; __pyx_t_24+=1) {
         __pyx_v_z = __pyx_t_24;
 
-        /* "RMS/Routines/Grouping3Dcy.pyx":314
+        /* "RMS/Routines/Grouping3Dcy.pyx":344
  * 
  *                 # This point defines a single point from a point cloud
  *                 x3 = point_list[z, 0]             # <<<<<<<<<<<<<<
@@ -5942,9 +6039,9 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
         __pyx_t_26 = __pyx_v_z;
         __pyx_t_27 = 0;
-        __pyx_v_x3 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_26, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_27, __pyx_pybuffernd_point_list.diminfo[1].strides));
+        __pyx_v_x3 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_26, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_27, __pyx_pybuffernd_point_list.diminfo[1].strides));
 
-        /* "RMS/Routines/Grouping3Dcy.pyx":315
+        /* "RMS/Routines/Grouping3Dcy.pyx":345
  *                 # This point defines a single point from a point cloud
  *                 x3 = point_list[z, 0]
  *                 y3 = point_list[z, 1]             # <<<<<<<<<<<<<<
@@ -5953,9 +6050,9 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
         __pyx_t_28 = __pyx_v_z;
         __pyx_t_29 = 1;
-        __pyx_v_y3 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_28, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_29, __pyx_pybuffernd_point_list.diminfo[1].strides));
+        __pyx_v_y3 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_28, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_29, __pyx_pybuffernd_point_list.diminfo[1].strides));
 
-        /* "RMS/Routines/Grouping3Dcy.pyx":316
+        /* "RMS/Routines/Grouping3Dcy.pyx":346
  *                 x3 = point_list[z, 0]
  *                 y3 = point_list[z, 1]
  *                 z3 = point_list[z, 2]             # <<<<<<<<<<<<<<
@@ -5964,9 +6061,9 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
         __pyx_t_30 = __pyx_v_z;
         __pyx_t_31 = 2;
-        __pyx_v_z3 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_30, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_31, __pyx_pybuffernd_point_list.diminfo[1].strides));
+        __pyx_v_z3 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_point_list.rcbuffer->pybuffer.buf, __pyx_t_30, __pyx_pybuffernd_point_list.diminfo[0].strides, __pyx_t_31, __pyx_pybuffernd_point_list.diminfo[1].strides));
 
-        /* "RMS/Routines/Grouping3Dcy.pyx":319
+        /* "RMS/Routines/Grouping3Dcy.pyx":349
  * 
  *                 # Check if the distance between the line and the point is close enough
  *                 line_dist = line3DDistance_simple(x1, y1, z1, x2, y2, z2, x3, y3, z3)             # <<<<<<<<<<<<<<
@@ -5975,7 +6072,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
         __pyx_v_line_dist = __pyx_f_3RMS_8Routines_12Grouping3Dcy_line3DDistance_simple(__pyx_v_x1, __pyx_v_y1, __pyx_v_z1, __pyx_v_x2, __pyx_v_y2, __pyx_v_z2, __pyx_v_x3, __pyx_v_y3, __pyx_v_z3);
 
-        /* "RMS/Routines/Grouping3Dcy.pyx":321
+        /* "RMS/Routines/Grouping3Dcy.pyx":351
  *                 line_dist = line3DDistance_simple(x1, y1, z1, x2, y2, z2, x3, y3, z3)
  * 
  *                 if line_dist < distance_threshold:             # <<<<<<<<<<<<<<
@@ -5985,7 +6082,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
         __pyx_t_7 = ((__pyx_v_line_dist < __pyx_v_distance_threshold) != 0);
         if (__pyx_t_7) {
 
-          /* "RMS/Routines/Grouping3Dcy.pyx":324
+          /* "RMS/Routines/Grouping3Dcy.pyx":354
  * 
  *                     # Calculate the gap from the previous point and reject the solution if the point is too far
  *                     if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_threshold:             # <<<<<<<<<<<<<<
@@ -5995,7 +6092,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
           __pyx_t_7 = ((__pyx_f_3RMS_8Routines_12Grouping3Dcy_point3DDistance(__pyx_v_x_prev, __pyx_v_y_prev, __pyx_v_z_prev, __pyx_v_x3, __pyx_v_y3, __pyx_v_z3) > __pyx_v_gap_threshold) != 0);
           if (__pyx_t_7) {
 
-            /* "RMS/Routines/Grouping3Dcy.pyx":327
+            /* "RMS/Routines/Grouping3Dcy.pyx":357
  * 
  *                         # Reject solution (reset counter) if the last point is too far
  *                         if point3DDistance(x2, y2, z2, x_prev, y_prev, z_prev) > gap_threshold:             # <<<<<<<<<<<<<<
@@ -6005,7 +6102,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
             __pyx_t_7 = ((__pyx_f_3RMS_8Routines_12Grouping3Dcy_point3DDistance(__pyx_v_x2, __pyx_v_y2, __pyx_v_z2, __pyx_v_x_prev, __pyx_v_y_prev, __pyx_v_z_prev) > __pyx_v_gap_threshold) != 0);
             if (__pyx_t_7) {
 
-              /* "RMS/Routines/Grouping3Dcy.pyx":328
+              /* "RMS/Routines/Grouping3Dcy.pyx":358
  *                         # Reject solution (reset counter) if the last point is too far
  *                         if point3DDistance(x2, y2, z2, x_prev, y_prev, z_prev) > gap_threshold:
  *                             counter = 0             # <<<<<<<<<<<<<<
@@ -6014,7 +6111,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
               __pyx_v_counter = 0;
 
-              /* "RMS/Routines/Grouping3Dcy.pyx":327
+              /* "RMS/Routines/Grouping3Dcy.pyx":357
  * 
  *                         # Reject solution (reset counter) if the last point is too far
  *                         if point3DDistance(x2, y2, z2, x_prev, y_prev, z_prev) > gap_threshold:             # <<<<<<<<<<<<<<
@@ -6023,7 +6120,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
             }
 
-            /* "RMS/Routines/Grouping3Dcy.pyx":330
+            /* "RMS/Routines/Grouping3Dcy.pyx":360
  *                             counter = 0
  * 
  *                         break             # <<<<<<<<<<<<<<
@@ -6032,7 +6129,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
             goto __pyx_L11_break;
 
-            /* "RMS/Routines/Grouping3Dcy.pyx":324
+            /* "RMS/Routines/Grouping3Dcy.pyx":354
  * 
  *                     # Calculate the gap from the previous point and reject the solution if the point is too far
  *                     if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_threshold:             # <<<<<<<<<<<<<<
@@ -6041,7 +6138,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
           }
 
-          /* "RMS/Routines/Grouping3Dcy.pyx":332
+          /* "RMS/Routines/Grouping3Dcy.pyx":362
  *                         break
  * 
  *                     counter += 1             # <<<<<<<<<<<<<<
@@ -6050,7 +6147,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
           __pyx_v_counter = (__pyx_v_counter + 1);
 
-          /* "RMS/Routines/Grouping3Dcy.pyx":333
+          /* "RMS/Routines/Grouping3Dcy.pyx":363
  * 
  *                     counter += 1
  *                     line_dist_sum += line_dist             # <<<<<<<<<<<<<<
@@ -6059,7 +6156,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
           __pyx_v_line_dist_sum = (__pyx_v_line_dist_sum + __pyx_v_line_dist);
 
-          /* "RMS/Routines/Grouping3Dcy.pyx":335
+          /* "RMS/Routines/Grouping3Dcy.pyx":365
  *                     line_dist_sum += line_dist
  * 
  *                     x_prev, y_prev, z_prev = x3, y3, z3             # <<<<<<<<<<<<<<
@@ -6073,7 +6170,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
           __pyx_v_y_prev = __pyx_t_32;
           __pyx_v_z_prev = __pyx_t_33;
 
-          /* "RMS/Routines/Grouping3Dcy.pyx":321
+          /* "RMS/Routines/Grouping3Dcy.pyx":351
  *                 line_dist = line3DDistance_simple(x1, y1, z1, x2, y2, z2, x3, y3, z3)
  * 
  *                 if line_dist < distance_threshold:             # <<<<<<<<<<<<<<
@@ -6084,7 +6181,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
       }
       __pyx_L11_break:;
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":338
+      /* "RMS/Routines/Grouping3Dcy.pyx":368
  * 
  *             # Skip if too little points were found
  *             if counter < min_points:             # <<<<<<<<<<<<<<
@@ -6094,7 +6191,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
       __pyx_t_7 = ((__pyx_v_counter < __pyx_v_min_points) != 0);
       if (__pyx_t_7) {
 
-        /* "RMS/Routines/Grouping3Dcy.pyx":339
+        /* "RMS/Routines/Grouping3Dcy.pyx":369
  *             # Skip if too little points were found
  *             if counter < min_points:
  *                 continue             # <<<<<<<<<<<<<<
@@ -6103,7 +6200,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
         goto __pyx_L8_continue;
 
-        /* "RMS/Routines/Grouping3Dcy.pyx":338
+        /* "RMS/Routines/Grouping3Dcy.pyx":368
  * 
  *             # Skip if too little points were found
  *             if counter < min_points:             # <<<<<<<<<<<<<<
@@ -6112,7 +6209,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
       }
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":342
+      /* "RMS/Routines/Grouping3Dcy.pyx":372
  * 
  *             # Average distance between points and the line
  *             line_dist_avg = line_dist_sum / <float> (counter)             # <<<<<<<<<<<<<<
@@ -6121,44 +6218,44 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
       if (unlikely(((float)__pyx_v_counter) == 0)) {
         PyErr_SetString(PyExc_ZeroDivisionError, "float division");
-        __PYX_ERR(0, 342, __pyx_L1_error)
+        __PYX_ERR(0, 372, __pyx_L1_error)
       }
       __pyx_v_line_dist_avg = (__pyx_v_line_dist_sum / ((float)__pyx_v_counter));
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":346
+      /* "RMS/Routines/Grouping3Dcy.pyx":376
  *             # calculate a parameter for line quality
  *             # larger average distance = less quality
  *             line_quality = <float> counter - line_distance_const * line_dist_avg             # <<<<<<<<<<<<<<
  *             results_list[results_counter] = Line(x1, y1, z1, x2, y2, z2, counter, line_quality)
  *             results_counter += 1
  */
-      __pyx_t_5 = PyFloat_FromDouble((((float)__pyx_v_counter) - (__pyx_v_line_distance_const * __pyx_v_line_dist_avg))); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 346, __pyx_L1_error)
+      __pyx_t_5 = PyFloat_FromDouble((((float)__pyx_v_counter) - (__pyx_v_line_distance_const * __pyx_v_line_dist_avg))); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 376, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_5);
       __Pyx_XDECREF_SET(__pyx_v_line_quality, __pyx_t_5);
       __pyx_t_5 = 0;
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":347
+      /* "RMS/Routines/Grouping3Dcy.pyx":377
  *             # larger average distance = less quality
  *             line_quality = <float> counter - line_distance_const * line_dist_avg
  *             results_list[results_counter] = Line(x1, y1, z1, x2, y2, z2, counter, line_quality)             # <<<<<<<<<<<<<<
  *             results_counter += 1
  * 
  */
-      __pyx_t_5 = __Pyx_PyInt_From_int(__pyx_v_x1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 347, __pyx_L1_error)
+      __pyx_t_5 = __Pyx_PyInt_From_int(__pyx_v_x1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 377, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_5);
-      __pyx_t_1 = __Pyx_PyInt_From_int(__pyx_v_y1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 347, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyInt_From_int(__pyx_v_y1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 377, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
-      __pyx_t_6 = __Pyx_PyInt_From_int(__pyx_v_z1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 347, __pyx_L1_error)
+      __pyx_t_6 = __Pyx_PyInt_From_int(__pyx_v_z1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 377, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_6);
-      __pyx_t_34 = __Pyx_PyInt_From_int(__pyx_v_x2); if (unlikely(!__pyx_t_34)) __PYX_ERR(0, 347, __pyx_L1_error)
+      __pyx_t_34 = __Pyx_PyInt_From_int(__pyx_v_x2); if (unlikely(!__pyx_t_34)) __PYX_ERR(0, 377, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_34);
-      __pyx_t_35 = __Pyx_PyInt_From_int(__pyx_v_y2); if (unlikely(!__pyx_t_35)) __PYX_ERR(0, 347, __pyx_L1_error)
+      __pyx_t_35 = __Pyx_PyInt_From_int(__pyx_v_y2); if (unlikely(!__pyx_t_35)) __PYX_ERR(0, 377, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_35);
-      __pyx_t_36 = __Pyx_PyInt_From_int(__pyx_v_z2); if (unlikely(!__pyx_t_36)) __PYX_ERR(0, 347, __pyx_L1_error)
+      __pyx_t_36 = __Pyx_PyInt_From_int(__pyx_v_z2); if (unlikely(!__pyx_t_36)) __PYX_ERR(0, 377, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_36);
-      __pyx_t_37 = __Pyx_PyInt_From_int(__pyx_v_counter); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 347, __pyx_L1_error)
+      __pyx_t_37 = __Pyx_PyInt_From_int(__pyx_v_counter); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 377, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_37);
-      __pyx_t_38 = PyTuple_New(8); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 347, __pyx_L1_error)
+      __pyx_t_38 = PyTuple_New(8); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 377, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_38);
       __Pyx_GIVEREF(__pyx_t_5);
       PyTuple_SET_ITEM(__pyx_t_38, 0, __pyx_t_5);
@@ -6184,13 +6281,13 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
       __pyx_t_35 = 0;
       __pyx_t_36 = 0;
       __pyx_t_37 = 0;
-      __pyx_t_37 = __Pyx_PyObject_Call(((PyObject *)__pyx_ptype_3RMS_8Routines_12Grouping3Dcy_Line), __pyx_t_38, NULL); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 347, __pyx_L1_error)
+      __pyx_t_37 = __Pyx_PyObject_Call(((PyObject *)__pyx_ptype_3RMS_8Routines_12Grouping3Dcy_Line), __pyx_t_38, NULL); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 377, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_37);
       __Pyx_DECREF(__pyx_t_38); __pyx_t_38 = 0;
-      if (unlikely(__Pyx_SetItemInt(__pyx_v_results_list, __pyx_v_results_counter, __pyx_t_37, int, 1, __Pyx_PyInt_From_int, 0, 0, 0) < 0)) __PYX_ERR(0, 347, __pyx_L1_error)
+      if (unlikely(__Pyx_SetItemInt(__pyx_v_results_list, __pyx_v_results_counter, __pyx_t_37, int, 1, __Pyx_PyInt_From_int, 0, 0, 0) < 0)) __PYX_ERR(0, 377, __pyx_L1_error)
       __Pyx_DECREF(__pyx_t_37); __pyx_t_37 = 0;
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":348
+      /* "RMS/Routines/Grouping3Dcy.pyx":378
  *             line_quality = <float> counter - line_distance_const * line_dist_avg
  *             results_list[results_counter] = Line(x1, y1, z1, x2, y2, z2, counter, line_quality)
  *             results_counter += 1             # <<<<<<<<<<<<<<
@@ -6202,7 +6299,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
     }
   }
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":351
+  /* "RMS/Routines/Grouping3Dcy.pyx":381
  * 
  *     # Return empty if no good match was found
  *     if not results_counter:             # <<<<<<<<<<<<<<
@@ -6212,7 +6309,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
   __pyx_t_7 = ((!(__pyx_v_results_counter != 0)) != 0);
   if (__pyx_t_7) {
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":352
+    /* "RMS/Routines/Grouping3Dcy.pyx":382
  *     # Return empty if no good match was found
  *     if not results_counter:
  *         return None             # <<<<<<<<<<<<<<
@@ -6224,7 +6321,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
     __pyx_r = Py_None;
     goto __pyx_L0;
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":351
+    /* "RMS/Routines/Grouping3Dcy.pyx":381
  * 
  *     # Return empty if no good match was found
  *     if not results_counter:             # <<<<<<<<<<<<<<
@@ -6233,19 +6330,19 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
   }
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":355
+  /* "RMS/Routines/Grouping3Dcy.pyx":385
  * 
  *     # Get Line with the best quality
  *     max_line = results_list[0]             # <<<<<<<<<<<<<<
  *     for i in range(results_counter):
  *         if results_list[i].line_quality > max_line.line_quality:
  */
-  __pyx_t_37 = __Pyx_GetItemInt(__pyx_v_results_list, 0, long, 1, __Pyx_PyInt_From_long, 0, 0, 0); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 355, __pyx_L1_error)
+  __pyx_t_37 = __Pyx_GetItemInt(__pyx_v_results_list, 0, long, 1, __Pyx_PyInt_From_long, 0, 0, 0); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 385, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_37);
   __pyx_v_max_line = __pyx_t_37;
   __pyx_t_37 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":356
+  /* "RMS/Routines/Grouping3Dcy.pyx":386
  *     # Get Line with the best quality
  *     max_line = results_list[0]
  *     for i in range(results_counter):             # <<<<<<<<<<<<<<
@@ -6256,40 +6353,40 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
   for (__pyx_t_8 = 0; __pyx_t_8 < __pyx_t_3; __pyx_t_8+=1) {
     __pyx_v_i = __pyx_t_8;
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":357
+    /* "RMS/Routines/Grouping3Dcy.pyx":387
  *     max_line = results_list[0]
  *     for i in range(results_counter):
  *         if results_list[i].line_quality > max_line.line_quality:             # <<<<<<<<<<<<<<
  *             max_line = results_list[i]
  * 
  */
-    __pyx_t_37 = __Pyx_GetItemInt(__pyx_v_results_list, __pyx_v_i, int, 1, __Pyx_PyInt_From_int, 0, 0, 0); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 357, __pyx_L1_error)
+    __pyx_t_37 = __Pyx_GetItemInt(__pyx_v_results_list, __pyx_v_i, int, 1, __Pyx_PyInt_From_int, 0, 0, 0); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 387, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_37);
-    __pyx_t_38 = __Pyx_PyObject_GetAttrStr(__pyx_t_37, __pyx_n_s_line_quality); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 357, __pyx_L1_error)
+    __pyx_t_38 = __Pyx_PyObject_GetAttrStr(__pyx_t_37, __pyx_n_s_line_quality); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 387, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_38);
     __Pyx_DECREF(__pyx_t_37); __pyx_t_37 = 0;
-    __pyx_t_37 = __Pyx_PyObject_GetAttrStr(__pyx_v_max_line, __pyx_n_s_line_quality); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 357, __pyx_L1_error)
+    __pyx_t_37 = __Pyx_PyObject_GetAttrStr(__pyx_v_max_line, __pyx_n_s_line_quality); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 387, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_37);
-    __pyx_t_36 = PyObject_RichCompare(__pyx_t_38, __pyx_t_37, Py_GT); __Pyx_XGOTREF(__pyx_t_36); if (unlikely(!__pyx_t_36)) __PYX_ERR(0, 357, __pyx_L1_error)
+    __pyx_t_36 = PyObject_RichCompare(__pyx_t_38, __pyx_t_37, Py_GT); __Pyx_XGOTREF(__pyx_t_36); if (unlikely(!__pyx_t_36)) __PYX_ERR(0, 387, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_38); __pyx_t_38 = 0;
     __Pyx_DECREF(__pyx_t_37); __pyx_t_37 = 0;
-    __pyx_t_7 = __Pyx_PyObject_IsTrue(__pyx_t_36); if (unlikely(__pyx_t_7 < 0)) __PYX_ERR(0, 357, __pyx_L1_error)
+    __pyx_t_7 = __Pyx_PyObject_IsTrue(__pyx_t_36); if (unlikely(__pyx_t_7 < 0)) __PYX_ERR(0, 387, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_36); __pyx_t_36 = 0;
     if (__pyx_t_7) {
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":358
+      /* "RMS/Routines/Grouping3Dcy.pyx":388
  *     for i in range(results_counter):
  *         if results_list[i].line_quality > max_line.line_quality:
  *             max_line = results_list[i]             # <<<<<<<<<<<<<<
  * 
  *     # Ratio of points inside and and all points
  */
-      __pyx_t_36 = __Pyx_GetItemInt(__pyx_v_results_list, __pyx_v_i, int, 1, __Pyx_PyInt_From_int, 0, 0, 0); if (unlikely(!__pyx_t_36)) __PYX_ERR(0, 358, __pyx_L1_error)
+      __pyx_t_36 = __Pyx_GetItemInt(__pyx_v_results_list, __pyx_v_i, int, 1, __Pyx_PyInt_From_int, 0, 0, 0); if (unlikely(!__pyx_t_36)) __PYX_ERR(0, 388, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_36);
       __Pyx_DECREF_SET(__pyx_v_max_line, __pyx_t_36);
       __pyx_t_36 = 0;
 
-      /* "RMS/Routines/Grouping3Dcy.pyx":357
+      /* "RMS/Routines/Grouping3Dcy.pyx":387
  *     max_line = results_list[0]
  *     for i in range(results_counter):
  *         if results_list[i].line_quality > max_line.line_quality:             # <<<<<<<<<<<<<<
@@ -6299,37 +6396,37 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
     }
   }
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":361
+  /* "RMS/Routines/Grouping3Dcy.pyx":391
  * 
  *     # Ratio of points inside and and all points
  *     cdef float line_ratio = max_line.counter / results_counter             # <<<<<<<<<<<<<<
  * 
  *     # Remove points from the point cloud that belong to line with the best quality
  */
-  __pyx_t_36 = __Pyx_PyObject_GetAttrStr(__pyx_v_max_line, __pyx_n_s_counter); if (unlikely(!__pyx_t_36)) __PYX_ERR(0, 361, __pyx_L1_error)
+  __pyx_t_36 = __Pyx_PyObject_GetAttrStr(__pyx_v_max_line, __pyx_n_s_counter); if (unlikely(!__pyx_t_36)) __PYX_ERR(0, 391, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_36);
-  __pyx_t_37 = __Pyx_PyInt_From_int(__pyx_v_results_counter); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 361, __pyx_L1_error)
+  __pyx_t_37 = __Pyx_PyInt_From_int(__pyx_v_results_counter); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 391, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_37);
-  __pyx_t_38 = __Pyx_PyNumber_Divide(__pyx_t_36, __pyx_t_37); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 361, __pyx_L1_error)
+  __pyx_t_38 = __Pyx_PyNumber_Divide(__pyx_t_36, __pyx_t_37); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 391, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_38);
   __Pyx_DECREF(__pyx_t_36); __pyx_t_36 = 0;
   __Pyx_DECREF(__pyx_t_37); __pyx_t_37 = 0;
-  __pyx_t_2 = __pyx_PyFloat_AsFloat(__pyx_t_38); if (unlikely((__pyx_t_2 == (float)-1) && PyErr_Occurred())) __PYX_ERR(0, 361, __pyx_L1_error)
+  __pyx_t_2 = __pyx_PyFloat_AsFloat(__pyx_t_38); if (unlikely((__pyx_t_2 == (float)-1) && PyErr_Occurred())) __PYX_ERR(0, 391, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_38); __pyx_t_38 = 0;
   __pyx_v_line_ratio = __pyx_t_2;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":364
+  /* "RMS/Routines/Grouping3Dcy.pyx":394
  * 
  *     # Remove points from the point cloud that belong to line with the best quality
  *     point_list, max_line_points = remove3DPoints(point_list, max_line, distance_threshold, gap_threshold)             # <<<<<<<<<<<<<<
  * 
  *     # Return nothing if no points were found
  */
-  __pyx_t_37 = __Pyx_GetModuleGlobalName(__pyx_n_s_remove3DPoints); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 364, __pyx_L1_error)
+  __pyx_t_37 = __Pyx_GetModuleGlobalName(__pyx_n_s_remove3DPoints); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 394, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_37);
-  __pyx_t_36 = PyFloat_FromDouble(__pyx_v_distance_threshold); if (unlikely(!__pyx_t_36)) __PYX_ERR(0, 364, __pyx_L1_error)
+  __pyx_t_36 = PyFloat_FromDouble(__pyx_v_distance_threshold); if (unlikely(!__pyx_t_36)) __PYX_ERR(0, 394, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_36);
-  __pyx_t_35 = PyFloat_FromDouble(__pyx_v_gap_threshold); if (unlikely(!__pyx_t_35)) __PYX_ERR(0, 364, __pyx_L1_error)
+  __pyx_t_35 = PyFloat_FromDouble(__pyx_v_gap_threshold); if (unlikely(!__pyx_t_35)) __PYX_ERR(0, 394, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_35);
   __pyx_t_34 = NULL;
   __pyx_t_3 = 0;
@@ -6346,7 +6443,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
   #if CYTHON_FAST_PYCALL
   if (PyFunction_Check(__pyx_t_37)) {
     PyObject *__pyx_temp[5] = {__pyx_t_34, ((PyObject *)__pyx_v_point_list), __pyx_v_max_line, __pyx_t_36, __pyx_t_35};
-    __pyx_t_38 = __Pyx_PyFunction_FastCall(__pyx_t_37, __pyx_temp+1-__pyx_t_3, 4+__pyx_t_3); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 364, __pyx_L1_error)
+    __pyx_t_38 = __Pyx_PyFunction_FastCall(__pyx_t_37, __pyx_temp+1-__pyx_t_3, 4+__pyx_t_3); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 394, __pyx_L1_error)
     __Pyx_XDECREF(__pyx_t_34); __pyx_t_34 = 0;
     __Pyx_GOTREF(__pyx_t_38);
     __Pyx_DECREF(__pyx_t_36); __pyx_t_36 = 0;
@@ -6356,7 +6453,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
   #if CYTHON_FAST_PYCCALL
   if (__Pyx_PyFastCFunction_Check(__pyx_t_37)) {
     PyObject *__pyx_temp[5] = {__pyx_t_34, ((PyObject *)__pyx_v_point_list), __pyx_v_max_line, __pyx_t_36, __pyx_t_35};
-    __pyx_t_38 = __Pyx_PyCFunction_FastCall(__pyx_t_37, __pyx_temp+1-__pyx_t_3, 4+__pyx_t_3); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 364, __pyx_L1_error)
+    __pyx_t_38 = __Pyx_PyCFunction_FastCall(__pyx_t_37, __pyx_temp+1-__pyx_t_3, 4+__pyx_t_3); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 394, __pyx_L1_error)
     __Pyx_XDECREF(__pyx_t_34); __pyx_t_34 = 0;
     __Pyx_GOTREF(__pyx_t_38);
     __Pyx_DECREF(__pyx_t_36); __pyx_t_36 = 0;
@@ -6364,7 +6461,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
   } else
   #endif
   {
-    __pyx_t_6 = PyTuple_New(4+__pyx_t_3); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 364, __pyx_L1_error)
+    __pyx_t_6 = PyTuple_New(4+__pyx_t_3); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 394, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_6);
     if (__pyx_t_34) {
       __Pyx_GIVEREF(__pyx_t_34); PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_34); __pyx_t_34 = NULL;
@@ -6381,7 +6478,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
     PyTuple_SET_ITEM(__pyx_t_6, 3+__pyx_t_3, __pyx_t_35);
     __pyx_t_36 = 0;
     __pyx_t_35 = 0;
-    __pyx_t_38 = __Pyx_PyObject_Call(__pyx_t_37, __pyx_t_6, NULL); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 364, __pyx_L1_error)
+    __pyx_t_38 = __Pyx_PyObject_Call(__pyx_t_37, __pyx_t_6, NULL); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 394, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_38);
     __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
   }
@@ -6396,7 +6493,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
     if (unlikely(size != 2)) {
       if (size > 2) __Pyx_RaiseTooManyValuesError(2);
       else if (size >= 0) __Pyx_RaiseNeedMoreValuesError(size);
-      __PYX_ERR(0, 364, __pyx_L1_error)
+      __PYX_ERR(0, 394, __pyx_L1_error)
     }
     #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
     if (likely(PyTuple_CheckExact(sequence))) {
@@ -6409,15 +6506,15 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
     __Pyx_INCREF(__pyx_t_37);
     __Pyx_INCREF(__pyx_t_6);
     #else
-    __pyx_t_37 = PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 364, __pyx_L1_error)
+    __pyx_t_37 = PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 394, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_37);
-    __pyx_t_6 = PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 364, __pyx_L1_error)
+    __pyx_t_6 = PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 394, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_6);
     #endif
     __Pyx_DECREF(__pyx_t_38); __pyx_t_38 = 0;
   } else {
     Py_ssize_t index = -1;
-    __pyx_t_35 = PyObject_GetIter(__pyx_t_38); if (unlikely(!__pyx_t_35)) __PYX_ERR(0, 364, __pyx_L1_error)
+    __pyx_t_35 = PyObject_GetIter(__pyx_t_38); if (unlikely(!__pyx_t_35)) __PYX_ERR(0, 394, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_35);
     __Pyx_DECREF(__pyx_t_38); __pyx_t_38 = 0;
     __pyx_t_39 = Py_TYPE(__pyx_t_35)->tp_iternext;
@@ -6425,7 +6522,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
     __Pyx_GOTREF(__pyx_t_37);
     index = 1; __pyx_t_6 = __pyx_t_39(__pyx_t_35); if (unlikely(!__pyx_t_6)) goto __pyx_L20_unpacking_failed;
     __Pyx_GOTREF(__pyx_t_6);
-    if (__Pyx_IternextUnpackEndCheck(__pyx_t_39(__pyx_t_35), 2) < 0) __PYX_ERR(0, 364, __pyx_L1_error)
+    if (__Pyx_IternextUnpackEndCheck(__pyx_t_39(__pyx_t_35), 2) < 0) __PYX_ERR(0, 394, __pyx_L1_error)
     __pyx_t_39 = NULL;
     __Pyx_DECREF(__pyx_t_35); __pyx_t_35 = 0;
     goto __pyx_L21_unpacking_done;
@@ -6433,18 +6530,18 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
     __Pyx_DECREF(__pyx_t_35); __pyx_t_35 = 0;
     __pyx_t_39 = NULL;
     if (__Pyx_IterFinish() == 0) __Pyx_RaiseNeedMoreValuesError(index);
-    __PYX_ERR(0, 364, __pyx_L1_error)
+    __PYX_ERR(0, 394, __pyx_L1_error)
     __pyx_L21_unpacking_done:;
   }
-  if (!(likely(((__pyx_t_37) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_37, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 364, __pyx_L1_error)
+  if (!(likely(((__pyx_t_37) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_37, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 394, __pyx_L1_error)
   __pyx_t_40 = ((PyArrayObject *)__pyx_t_37);
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
     __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer);
-    __pyx_t_3 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer, (PyObject*)__pyx_t_40, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack);
+    __pyx_t_3 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer, (PyObject*)__pyx_t_40, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack);
     if (unlikely(__pyx_t_3 < 0)) {
       PyErr_Fetch(&__pyx_t_41, &__pyx_t_42, &__pyx_t_43);
-      if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer, (PyObject*)__pyx_v_point_list, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
+      if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_point_list.rcbuffer->pybuffer, (PyObject*)__pyx_v_point_list, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
         Py_XDECREF(__pyx_t_41); Py_XDECREF(__pyx_t_42); Py_XDECREF(__pyx_t_43);
         __Pyx_RaiseBufferFallbackError();
       } else {
@@ -6452,7 +6549,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
       }
     }
     __pyx_pybuffernd_point_list.diminfo[0].strides = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_point_list.diminfo[0].shape = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_point_list.diminfo[1].strides = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_point_list.diminfo[1].shape = __pyx_pybuffernd_point_list.rcbuffer->pybuffer.shape[1];
-    if (unlikely(__pyx_t_3 < 0)) __PYX_ERR(0, 364, __pyx_L1_error)
+    if (unlikely(__pyx_t_3 < 0)) __PYX_ERR(0, 394, __pyx_L1_error)
   }
   __pyx_t_40 = 0;
   __Pyx_DECREF_SET(__pyx_v_point_list, ((PyArrayObject *)__pyx_t_37));
@@ -6460,21 +6557,21 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
   __pyx_v_max_line_points = __pyx_t_6;
   __pyx_t_6 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":367
+  /* "RMS/Routines/Grouping3Dcy.pyx":397
  * 
  *     # Return nothing if no points were found
  *     if not max_line_points.size:             # <<<<<<<<<<<<<<
  *         return None
  * 
  */
-  __pyx_t_38 = __Pyx_PyObject_GetAttrStr(__pyx_v_max_line_points, __pyx_n_s_size); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 367, __pyx_L1_error)
+  __pyx_t_38 = __Pyx_PyObject_GetAttrStr(__pyx_v_max_line_points, __pyx_n_s_size); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 397, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_38);
-  __pyx_t_7 = __Pyx_PyObject_IsTrue(__pyx_t_38); if (unlikely(__pyx_t_7 < 0)) __PYX_ERR(0, 367, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_IsTrue(__pyx_t_38); if (unlikely(__pyx_t_7 < 0)) __PYX_ERR(0, 397, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_38); __pyx_t_38 = 0;
   __pyx_t_44 = ((!__pyx_t_7) != 0);
   if (__pyx_t_44) {
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":368
+    /* "RMS/Routines/Grouping3Dcy.pyx":398
  *     # Return nothing if no points were found
  *     if not max_line_points.size:
  *         return None             # <<<<<<<<<<<<<<
@@ -6486,7 +6583,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
     __pyx_r = Py_None;
     goto __pyx_L0;
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":367
+    /* "RMS/Routines/Grouping3Dcy.pyx":397
  * 
  *     # Return nothing if no points were found
  *     if not max_line_points.size:             # <<<<<<<<<<<<<<
@@ -6495,29 +6592,29 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
   }
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":371
+  /* "RMS/Routines/Grouping3Dcy.pyx":401
  * 
  *     # Get the first and the last frame from the max_line point could
  *     first_frame = max_line_points[0,2]             # <<<<<<<<<<<<<<
  *     last_frame = max_line_points[len(max_line_points) - 1,2]
  * 
  */
-  __pyx_t_38 = PyObject_GetItem(__pyx_v_max_line_points, __pyx_tuple__11); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 371, __pyx_L1_error)
+  __pyx_t_38 = PyObject_GetItem(__pyx_v_max_line_points, __pyx_tuple__11); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 401, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_38);
   __pyx_v_first_frame = __pyx_t_38;
   __pyx_t_38 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":372
+  /* "RMS/Routines/Grouping3Dcy.pyx":402
  *     # Get the first and the last frame from the max_line point could
  *     first_frame = max_line_points[0,2]
  *     last_frame = max_line_points[len(max_line_points) - 1,2]             # <<<<<<<<<<<<<<
  * 
  * 
  */
-  __pyx_t_4 = PyObject_Length(__pyx_v_max_line_points); if (unlikely(__pyx_t_4 == -1)) __PYX_ERR(0, 372, __pyx_L1_error)
-  __pyx_t_38 = PyInt_FromSsize_t((__pyx_t_4 - 1)); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 372, __pyx_L1_error)
+  __pyx_t_4 = PyObject_Length(__pyx_v_max_line_points); if (unlikely(__pyx_t_4 == -1)) __PYX_ERR(0, 402, __pyx_L1_error)
+  __pyx_t_38 = PyInt_FromSsize_t((__pyx_t_4 - 1)); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 402, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_38);
-  __pyx_t_6 = PyTuple_New(2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 372, __pyx_L1_error)
+  __pyx_t_6 = PyTuple_New(2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 402, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_GIVEREF(__pyx_t_38);
   PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_38);
@@ -6525,44 +6622,44 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
   __Pyx_GIVEREF(__pyx_int_2);
   PyTuple_SET_ITEM(__pyx_t_6, 1, __pyx_int_2);
   __pyx_t_38 = 0;
-  __pyx_t_38 = PyObject_GetItem(__pyx_v_max_line_points, __pyx_t_6); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 372, __pyx_L1_error)
+  __pyx_t_38 = PyObject_GetItem(__pyx_v_max_line_points, __pyx_t_6); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 402, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_38);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
   __pyx_v_last_frame = __pyx_t_38;
   __pyx_t_38 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":376
+  /* "RMS/Routines/Grouping3Dcy.pyx":406
  * 
  *     # Reject the line if all points are only in very close frames (eliminate flashes):
  *     if abs(last_frame - first_frame) + 1 >= line_minimum_frame_range:             # <<<<<<<<<<<<<<
  * 
  *         # Add max_line to results, as well as the first and the last frame of a meteor
  */
-  __pyx_t_38 = PyNumber_Subtract(__pyx_v_last_frame, __pyx_v_first_frame); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 376, __pyx_L1_error)
+  __pyx_t_38 = PyNumber_Subtract(__pyx_v_last_frame, __pyx_v_first_frame); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 406, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_38);
-  __pyx_t_6 = PyNumber_Absolute(__pyx_t_38); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 376, __pyx_L1_error)
+  __pyx_t_6 = PyNumber_Absolute(__pyx_t_38); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 406, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_DECREF(__pyx_t_38); __pyx_t_38 = 0;
-  __pyx_t_38 = __Pyx_PyInt_AddObjC(__pyx_t_6, __pyx_int_1, 1, 0); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 376, __pyx_L1_error)
+  __pyx_t_38 = __Pyx_PyInt_AddObjC(__pyx_t_6, __pyx_int_1, 1, 0); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 406, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_38);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyInt_From_int(__pyx_v_line_minimum_frame_range); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 376, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyInt_From_int(__pyx_v_line_minimum_frame_range); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 406, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_37 = PyObject_RichCompare(__pyx_t_38, __pyx_t_6, Py_GE); __Pyx_XGOTREF(__pyx_t_37); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 376, __pyx_L1_error)
+  __pyx_t_37 = PyObject_RichCompare(__pyx_t_38, __pyx_t_6, Py_GE); __Pyx_XGOTREF(__pyx_t_37); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 406, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_38); __pyx_t_38 = 0;
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_44 = __Pyx_PyObject_IsTrue(__pyx_t_37); if (unlikely(__pyx_t_44 < 0)) __PYX_ERR(0, 376, __pyx_L1_error)
+  __pyx_t_44 = __Pyx_PyObject_IsTrue(__pyx_t_37); if (unlikely(__pyx_t_44 < 0)) __PYX_ERR(0, 406, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_37); __pyx_t_37 = 0;
   if (__pyx_t_44) {
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":379
+    /* "RMS/Routines/Grouping3Dcy.pyx":409
  * 
  *         # Add max_line to results, as well as the first and the last frame of a meteor
  *         line_list.append(_formatLine(max_line, first_frame, last_frame))             # <<<<<<<<<<<<<<
  * 
  *     # If only one line was desired, return it
  */
-    __pyx_t_6 = __Pyx_GetModuleGlobalName(__pyx_n_s_formatLine); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 379, __pyx_L1_error)
+    __pyx_t_6 = __Pyx_GetModuleGlobalName(__pyx_n_s_formatLine); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 409, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_6);
     __pyx_t_38 = NULL;
     __pyx_t_3 = 0;
@@ -6579,7 +6676,7 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
     #if CYTHON_FAST_PYCALL
     if (PyFunction_Check(__pyx_t_6)) {
       PyObject *__pyx_temp[4] = {__pyx_t_38, __pyx_v_max_line, __pyx_v_first_frame, __pyx_v_last_frame};
-      __pyx_t_37 = __Pyx_PyFunction_FastCall(__pyx_t_6, __pyx_temp+1-__pyx_t_3, 3+__pyx_t_3); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 379, __pyx_L1_error)
+      __pyx_t_37 = __Pyx_PyFunction_FastCall(__pyx_t_6, __pyx_temp+1-__pyx_t_3, 3+__pyx_t_3); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 409, __pyx_L1_error)
       __Pyx_XDECREF(__pyx_t_38); __pyx_t_38 = 0;
       __Pyx_GOTREF(__pyx_t_37);
     } else
@@ -6587,13 +6684,13 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
     #if CYTHON_FAST_PYCCALL
     if (__Pyx_PyFastCFunction_Check(__pyx_t_6)) {
       PyObject *__pyx_temp[4] = {__pyx_t_38, __pyx_v_max_line, __pyx_v_first_frame, __pyx_v_last_frame};
-      __pyx_t_37 = __Pyx_PyCFunction_FastCall(__pyx_t_6, __pyx_temp+1-__pyx_t_3, 3+__pyx_t_3); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 379, __pyx_L1_error)
+      __pyx_t_37 = __Pyx_PyCFunction_FastCall(__pyx_t_6, __pyx_temp+1-__pyx_t_3, 3+__pyx_t_3); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 409, __pyx_L1_error)
       __Pyx_XDECREF(__pyx_t_38); __pyx_t_38 = 0;
       __Pyx_GOTREF(__pyx_t_37);
     } else
     #endif
     {
-      __pyx_t_35 = PyTuple_New(3+__pyx_t_3); if (unlikely(!__pyx_t_35)) __PYX_ERR(0, 379, __pyx_L1_error)
+      __pyx_t_35 = PyTuple_New(3+__pyx_t_3); if (unlikely(!__pyx_t_35)) __PYX_ERR(0, 409, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_35);
       if (__pyx_t_38) {
         __Pyx_GIVEREF(__pyx_t_38); PyTuple_SET_ITEM(__pyx_t_35, 0, __pyx_t_38); __pyx_t_38 = NULL;
@@ -6607,15 +6704,15 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
       __Pyx_INCREF(__pyx_v_last_frame);
       __Pyx_GIVEREF(__pyx_v_last_frame);
       PyTuple_SET_ITEM(__pyx_t_35, 2+__pyx_t_3, __pyx_v_last_frame);
-      __pyx_t_37 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_t_35, NULL); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 379, __pyx_L1_error)
+      __pyx_t_37 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_t_35, NULL); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 409, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_37);
       __Pyx_DECREF(__pyx_t_35); __pyx_t_35 = 0;
     }
     __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-    __pyx_t_45 = __Pyx_PyObject_Append(__pyx_v_line_list, __pyx_t_37); if (unlikely(__pyx_t_45 == -1)) __PYX_ERR(0, 379, __pyx_L1_error)
+    __pyx_t_45 = __Pyx_PyObject_Append(__pyx_v_line_list, __pyx_t_37); if (unlikely(__pyx_t_45 == -1)) __PYX_ERR(0, 409, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_37); __pyx_t_37 = 0;
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":376
+    /* "RMS/Routines/Grouping3Dcy.pyx":406
  * 
  *     # Reject the line if all points are only in very close frames (eliminate flashes):
  *     if abs(last_frame - first_frame) + 1 >= line_minimum_frame_range:             # <<<<<<<<<<<<<<
@@ -6624,21 +6721,21 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
   }
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":383
+  /* "RMS/Routines/Grouping3Dcy.pyx":413
  *     # If only one line was desired, return it
  *     # if there are more lines on the image, recursively find lines
  *     if (line_ratio < config.point_ratio_threshold) and (results_counter > 10) and (not get_single):             # <<<<<<<<<<<<<<
  *         # Recursively find lines until there are no more points or no lines is found to be good
  *         find3DLines(point_list, start_time, config, get_single=get_single, line_list = line_list)
  */
-  __pyx_t_37 = PyFloat_FromDouble(__pyx_v_line_ratio); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 383, __pyx_L1_error)
+  __pyx_t_37 = PyFloat_FromDouble(__pyx_v_line_ratio); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 413, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_37);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_point_ratio_threshold); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 383, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_v_config, __pyx_n_s_point_ratio_threshold); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 413, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_35 = PyObject_RichCompare(__pyx_t_37, __pyx_t_6, Py_LT); __Pyx_XGOTREF(__pyx_t_35); if (unlikely(!__pyx_t_35)) __PYX_ERR(0, 383, __pyx_L1_error)
+  __pyx_t_35 = PyObject_RichCompare(__pyx_t_37, __pyx_t_6, Py_LT); __Pyx_XGOTREF(__pyx_t_35); if (unlikely(!__pyx_t_35)) __PYX_ERR(0, 413, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_37); __pyx_t_37 = 0;
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_7 = __Pyx_PyObject_IsTrue(__pyx_t_35); if (unlikely(__pyx_t_7 < 0)) __PYX_ERR(0, 383, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_IsTrue(__pyx_t_35); if (unlikely(__pyx_t_7 < 0)) __PYX_ERR(0, 413, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_35); __pyx_t_35 = 0;
   if (__pyx_t_7) {
   } else {
@@ -6651,22 +6748,22 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
     __pyx_t_44 = __pyx_t_7;
     goto __pyx_L25_bool_binop_done;
   }
-  __pyx_t_7 = __Pyx_PyObject_IsTrue(__pyx_v_get_single); if (unlikely(__pyx_t_7 < 0)) __PYX_ERR(0, 383, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_IsTrue(__pyx_v_get_single); if (unlikely(__pyx_t_7 < 0)) __PYX_ERR(0, 413, __pyx_L1_error)
   __pyx_t_46 = ((!__pyx_t_7) != 0);
   __pyx_t_44 = __pyx_t_46;
   __pyx_L25_bool_binop_done:;
   if (__pyx_t_44) {
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":385
+    /* "RMS/Routines/Grouping3Dcy.pyx":415
  *     if (line_ratio < config.point_ratio_threshold) and (results_counter > 10) and (not get_single):
  *         # Recursively find lines until there are no more points or no lines is found to be good
  *         find3DLines(point_list, start_time, config, get_single=get_single, line_list = line_list)             # <<<<<<<<<<<<<<
  * 
  *     return line_list
  */
-    __pyx_t_35 = __Pyx_GetModuleGlobalName(__pyx_n_s_find3DLines); if (unlikely(!__pyx_t_35)) __PYX_ERR(0, 385, __pyx_L1_error)
+    __pyx_t_35 = __Pyx_GetModuleGlobalName(__pyx_n_s_find3DLines); if (unlikely(!__pyx_t_35)) __PYX_ERR(0, 415, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_35);
-    __pyx_t_6 = PyTuple_New(3); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 385, __pyx_L1_error)
+    __pyx_t_6 = PyTuple_New(3); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 415, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_6);
     __Pyx_INCREF(((PyObject *)__pyx_v_point_list));
     __Pyx_GIVEREF(((PyObject *)__pyx_v_point_list));
@@ -6677,18 +6774,18 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
     __Pyx_INCREF(__pyx_v_config);
     __Pyx_GIVEREF(__pyx_v_config);
     PyTuple_SET_ITEM(__pyx_t_6, 2, __pyx_v_config);
-    __pyx_t_37 = PyDict_New(); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 385, __pyx_L1_error)
+    __pyx_t_37 = PyDict_New(); if (unlikely(!__pyx_t_37)) __PYX_ERR(0, 415, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_37);
-    if (PyDict_SetItem(__pyx_t_37, __pyx_n_s_get_single, __pyx_v_get_single) < 0) __PYX_ERR(0, 385, __pyx_L1_error)
-    if (PyDict_SetItem(__pyx_t_37, __pyx_n_s_line_list, __pyx_v_line_list) < 0) __PYX_ERR(0, 385, __pyx_L1_error)
-    __pyx_t_38 = __Pyx_PyObject_Call(__pyx_t_35, __pyx_t_6, __pyx_t_37); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 385, __pyx_L1_error)
+    if (PyDict_SetItem(__pyx_t_37, __pyx_n_s_get_single, __pyx_v_get_single) < 0) __PYX_ERR(0, 415, __pyx_L1_error)
+    if (PyDict_SetItem(__pyx_t_37, __pyx_n_s_line_list, __pyx_v_line_list) < 0) __PYX_ERR(0, 415, __pyx_L1_error)
+    __pyx_t_38 = __Pyx_PyObject_Call(__pyx_t_35, __pyx_t_6, __pyx_t_37); if (unlikely(!__pyx_t_38)) __PYX_ERR(0, 415, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_38);
     __Pyx_DECREF(__pyx_t_35); __pyx_t_35 = 0;
     __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
     __Pyx_DECREF(__pyx_t_37); __pyx_t_37 = 0;
     __Pyx_DECREF(__pyx_t_38); __pyx_t_38 = 0;
 
-    /* "RMS/Routines/Grouping3Dcy.pyx":383
+    /* "RMS/Routines/Grouping3Dcy.pyx":413
  *     # If only one line was desired, return it
  *     # if there are more lines on the image, recursively find lines
  *     if (line_ratio < config.point_ratio_threshold) and (results_counter > 10) and (not get_single):             # <<<<<<<<<<<<<<
@@ -6697,20 +6794,22 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
  */
   }
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":387
+  /* "RMS/Routines/Grouping3Dcy.pyx":417
  *         find3DLines(point_list, start_time, config, get_single=get_single, line_list = line_list)
  * 
  *     return line_list             # <<<<<<<<<<<<<<
+ * 
+ * 
  */
   __Pyx_XDECREF(__pyx_r);
   __Pyx_INCREF(__pyx_v_line_list);
   __pyx_r = __pyx_v_line_list;
   goto __pyx_L0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":240
+  /* "RMS/Routines/Grouping3Dcy.pyx":270
  * @cython.boundscheck(False)
  * @cython.wraparound(False)
- * def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, get_single=False, line_list=[]):             # <<<<<<<<<<<<<<
+ * def find3DLines(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, start_time, config, get_single=False, line_list=[]):             # <<<<<<<<<<<<<<
  *     """ Iteratively find N straight lines in 3D space.
  * 
  */
@@ -6744,6 +6843,1354 @@ static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_6find3DLines(CYTHON_UNUS
   __Pyx_XDECREF(__pyx_v_first_frame);
   __Pyx_XDECREF(__pyx_v_last_frame);
   __Pyx_XDECREF((PyObject *)__pyx_v_point_list);
+  __Pyx_XGIVEREF(__pyx_r);
+  __Pyx_RefNannyFinishContext();
+  return __pyx_r;
+}
+
+/* "RMS/Routines/Grouping3Dcy.pyx":426
+ * @cython.wraparound(False)
+ * @cython.cdivision(True)
+ * def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \             # <<<<<<<<<<<<<<
+ *     np.ndarray[UINT8_TYPE_t, ndim=3] compressed, int min_level, int min_points, float k1, int f):
+ *     """ Given the list of frames, threshold them, subsample the time and check if there are enough threshold
+ */
+
+/* Python wrapper */
+static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_9thresholdAndSubsample(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
+static char __pyx_doc_3RMS_8Routines_12Grouping3Dcy_8thresholdAndSubsample[] = " Given the list of frames, threshold them, subsample the time and check if there are enough threshold\n        passers on the given frame. \n\n    Arguments:\n        frames: [3D ndarray] Numpy array containing video frames. Structure: (nframe, y, x).\n        compressed: [3D ndarray] Numpy array containing compressed video frames. Structure: (frame, y, x), \n            where frames are: maxpixel, maxframe, avepixel, stdpixel\n        min_level: [int] The point will be subsampled if it has this minimum pixel level (i.e. brightness).\n        min_points: [int] Minimum number of points in the subsampled block that is required to pass the \n            threshold.\n        k1: [float] Threhsold max > avg + k1*stddev\n        f: [int] Decimation scale\n\n    Return:\n        num: [int] Number threshold passers.\n        pointsx: [ndarray] X coordinate of the subsampled point.\n        pointsy: [ndarray] Y coordinate of the subsampled point. \n        pointsz: [ndarray] frame of the subsampled point.\n    ";
+static PyMethodDef __pyx_mdef_3RMS_8Routines_12Grouping3Dcy_9thresholdAndSubsample = {"thresholdAndSubsample", (PyCFunction)__pyx_pw_3RMS_8Routines_12Grouping3Dcy_9thresholdAndSubsample, METH_VARARGS|METH_KEYWORDS, __pyx_doc_3RMS_8Routines_12Grouping3Dcy_8thresholdAndSubsample};
+static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_9thresholdAndSubsample(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
+  PyArrayObject *__pyx_v_frames = 0;
+  PyArrayObject *__pyx_v_compressed = 0;
+  int __pyx_v_min_level;
+  int __pyx_v_min_points;
+  float __pyx_v_k1;
+  int __pyx_v_f;
+  PyObject *__pyx_r = 0;
+  __Pyx_RefNannyDeclarations
+  __Pyx_RefNannySetupContext("thresholdAndSubsample (wrapper)", 0);
+  {
+    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_frames,&__pyx_n_s_compressed,&__pyx_n_s_min_level,&__pyx_n_s_min_points,&__pyx_n_s_k1,&__pyx_n_s_f,0};
+    PyObject* values[6] = {0,0,0,0,0,0};
+    if (unlikely(__pyx_kwds)) {
+      Py_ssize_t kw_args;
+      const Py_ssize_t pos_args = PyTuple_GET_SIZE(__pyx_args);
+      switch (pos_args) {
+        case  6: values[5] = PyTuple_GET_ITEM(__pyx_args, 5);
+        case  5: values[4] = PyTuple_GET_ITEM(__pyx_args, 4);
+        case  4: values[3] = PyTuple_GET_ITEM(__pyx_args, 3);
+        case  3: values[2] = PyTuple_GET_ITEM(__pyx_args, 2);
+        case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+        case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
+        case  0: break;
+        default: goto __pyx_L5_argtuple_error;
+      }
+      kw_args = PyDict_Size(__pyx_kwds);
+      switch (pos_args) {
+        case  0:
+        if (likely((values[0] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_frames)) != 0)) kw_args--;
+        else goto __pyx_L5_argtuple_error;
+        case  1:
+        if (likely((values[1] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_compressed)) != 0)) kw_args--;
+        else {
+          __Pyx_RaiseArgtupleInvalid("thresholdAndSubsample", 1, 6, 6, 1); __PYX_ERR(0, 426, __pyx_L3_error)
+        }
+        case  2:
+        if (likely((values[2] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_min_level)) != 0)) kw_args--;
+        else {
+          __Pyx_RaiseArgtupleInvalid("thresholdAndSubsample", 1, 6, 6, 2); __PYX_ERR(0, 426, __pyx_L3_error)
+        }
+        case  3:
+        if (likely((values[3] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_min_points)) != 0)) kw_args--;
+        else {
+          __Pyx_RaiseArgtupleInvalid("thresholdAndSubsample", 1, 6, 6, 3); __PYX_ERR(0, 426, __pyx_L3_error)
+        }
+        case  4:
+        if (likely((values[4] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_k1)) != 0)) kw_args--;
+        else {
+          __Pyx_RaiseArgtupleInvalid("thresholdAndSubsample", 1, 6, 6, 4); __PYX_ERR(0, 426, __pyx_L3_error)
+        }
+        case  5:
+        if (likely((values[5] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_f)) != 0)) kw_args--;
+        else {
+          __Pyx_RaiseArgtupleInvalid("thresholdAndSubsample", 1, 6, 6, 5); __PYX_ERR(0, 426, __pyx_L3_error)
+        }
+      }
+      if (unlikely(kw_args > 0)) {
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "thresholdAndSubsample") < 0)) __PYX_ERR(0, 426, __pyx_L3_error)
+      }
+    } else if (PyTuple_GET_SIZE(__pyx_args) != 6) {
+      goto __pyx_L5_argtuple_error;
+    } else {
+      values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
+      values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+      values[2] = PyTuple_GET_ITEM(__pyx_args, 2);
+      values[3] = PyTuple_GET_ITEM(__pyx_args, 3);
+      values[4] = PyTuple_GET_ITEM(__pyx_args, 4);
+      values[5] = PyTuple_GET_ITEM(__pyx_args, 5);
+    }
+    __pyx_v_frames = ((PyArrayObject *)values[0]);
+    __pyx_v_compressed = ((PyArrayObject *)values[1]);
+    __pyx_v_min_level = __Pyx_PyInt_As_int(values[2]); if (unlikely((__pyx_v_min_level == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 427, __pyx_L3_error)
+    __pyx_v_min_points = __Pyx_PyInt_As_int(values[3]); if (unlikely((__pyx_v_min_points == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 427, __pyx_L3_error)
+    __pyx_v_k1 = __pyx_PyFloat_AsFloat(values[4]); if (unlikely((__pyx_v_k1 == (float)-1) && PyErr_Occurred())) __PYX_ERR(0, 427, __pyx_L3_error)
+    __pyx_v_f = __Pyx_PyInt_As_int(values[5]); if (unlikely((__pyx_v_f == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 427, __pyx_L3_error)
+  }
+  goto __pyx_L4_argument_unpacking_done;
+  __pyx_L5_argtuple_error:;
+  __Pyx_RaiseArgtupleInvalid("thresholdAndSubsample", 1, 6, 6, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 426, __pyx_L3_error)
+  __pyx_L3_error:;
+  __Pyx_AddTraceback("RMS.Routines.Grouping3Dcy.thresholdAndSubsample", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_RefNannyFinishContext();
+  return NULL;
+  __pyx_L4_argument_unpacking_done:;
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_frames), __pyx_ptype_5numpy_ndarray, 1, "frames", 0))) __PYX_ERR(0, 426, __pyx_L1_error)
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_compressed), __pyx_ptype_5numpy_ndarray, 1, "compressed", 0))) __PYX_ERR(0, 427, __pyx_L1_error)
+  __pyx_r = __pyx_pf_3RMS_8Routines_12Grouping3Dcy_8thresholdAndSubsample(__pyx_self, __pyx_v_frames, __pyx_v_compressed, __pyx_v_min_level, __pyx_v_min_points, __pyx_v_k1, __pyx_v_f);
+
+  /* function exit code */
+  goto __pyx_L0;
+  __pyx_L1_error:;
+  __pyx_r = NULL;
+  __pyx_L0:;
+  __Pyx_RefNannyFinishContext();
+  return __pyx_r;
+}
+
+static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_8thresholdAndSubsample(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_frames, PyArrayObject *__pyx_v_compressed, int __pyx_v_min_level, int __pyx_v_min_points, float __pyx_v_k1, int __pyx_v_f) {
+  unsigned int __pyx_v_x;
+  unsigned int __pyx_v_y;
+  unsigned int __pyx_v_x2;
+  unsigned int __pyx_v_y2;
+  unsigned int __pyx_v_n;
+  unsigned int __pyx_v_max_val;
+  CYTHON_UNUSED unsigned int __pyx_v_nframes;
+  unsigned int __pyx_v_x_size;
+  unsigned int __pyx_v_y_size;
+  unsigned int __pyx_v_num;
+  unsigned int __pyx_v_avg_std;
+  PyObject *__pyx_v_shape_z = 0;
+  PyObject *__pyx_v_shape_y = 0;
+  PyObject *__pyx_v_shape_x = 0;
+  PyArrayObject *__pyx_v_count = 0;
+  PyArrayObject *__pyx_v_pointsy = 0;
+  PyArrayObject *__pyx_v_pointsx = 0;
+  PyArrayObject *__pyx_v_pointsz = 0;
+  __Pyx_LocalBuf_ND __pyx_pybuffernd_compressed;
+  __Pyx_Buffer __pyx_pybuffer_compressed;
+  __Pyx_LocalBuf_ND __pyx_pybuffernd_count;
+  __Pyx_Buffer __pyx_pybuffer_count;
+  __Pyx_LocalBuf_ND __pyx_pybuffernd_frames;
+  __Pyx_Buffer __pyx_pybuffer_frames;
+  __Pyx_LocalBuf_ND __pyx_pybuffernd_pointsx;
+  __Pyx_Buffer __pyx_pybuffer_pointsx;
+  __Pyx_LocalBuf_ND __pyx_pybuffernd_pointsy;
+  __Pyx_Buffer __pyx_pybuffer_pointsy;
+  __Pyx_LocalBuf_ND __pyx_pybuffernd_pointsz;
+  __Pyx_Buffer __pyx_pybuffer_pointsz;
+  PyObject *__pyx_r = NULL;
+  __Pyx_RefNannyDeclarations
+  PyObject *__pyx_t_1 = NULL;
+  PyObject *__pyx_t_2 = NULL;
+  PyObject *__pyx_t_3 = NULL;
+  PyObject *__pyx_t_4 = NULL;
+  PyObject *__pyx_t_5 = NULL;
+  int __pyx_t_6;
+  PyObject *__pyx_t_7 = NULL;
+  PyArrayObject *__pyx_t_8 = NULL;
+  PyArrayObject *__pyx_t_9 = NULL;
+  PyArrayObject *__pyx_t_10 = NULL;
+  PyArrayObject *__pyx_t_11 = NULL;
+  unsigned int __pyx_t_12;
+  unsigned int __pyx_t_13;
+  unsigned int __pyx_t_14;
+  unsigned int __pyx_t_15;
+  Py_ssize_t __pyx_t_16;
+  size_t __pyx_t_17;
+  size_t __pyx_t_18;
+  Py_ssize_t __pyx_t_19;
+  size_t __pyx_t_20;
+  size_t __pyx_t_21;
+  Py_ssize_t __pyx_t_22;
+  size_t __pyx_t_23;
+  size_t __pyx_t_24;
+  int __pyx_t_25;
+  int __pyx_t_26;
+  Py_ssize_t __pyx_t_27;
+  size_t __pyx_t_28;
+  size_t __pyx_t_29;
+  size_t __pyx_t_30;
+  size_t __pyx_t_31;
+  size_t __pyx_t_32;
+  size_t __pyx_t_33;
+  size_t __pyx_t_34;
+  size_t __pyx_t_35;
+  size_t __pyx_t_36;
+  size_t __pyx_t_37;
+  size_t __pyx_t_38;
+  size_t __pyx_t_39;
+  size_t __pyx_t_40;
+  size_t __pyx_t_41;
+  size_t __pyx_t_42;
+  size_t __pyx_t_43;
+  size_t __pyx_t_44;
+  PyObject *__pyx_t_45 = NULL;
+  PyObject *__pyx_t_46 = NULL;
+  PyObject *__pyx_t_47 = NULL;
+  __Pyx_RefNannySetupContext("thresholdAndSubsample", 0);
+  __pyx_pybuffer_count.pybuffer.buf = NULL;
+  __pyx_pybuffer_count.refcount = 0;
+  __pyx_pybuffernd_count.data = NULL;
+  __pyx_pybuffernd_count.rcbuffer = &__pyx_pybuffer_count;
+  __pyx_pybuffer_pointsy.pybuffer.buf = NULL;
+  __pyx_pybuffer_pointsy.refcount = 0;
+  __pyx_pybuffernd_pointsy.data = NULL;
+  __pyx_pybuffernd_pointsy.rcbuffer = &__pyx_pybuffer_pointsy;
+  __pyx_pybuffer_pointsx.pybuffer.buf = NULL;
+  __pyx_pybuffer_pointsx.refcount = 0;
+  __pyx_pybuffernd_pointsx.data = NULL;
+  __pyx_pybuffernd_pointsx.rcbuffer = &__pyx_pybuffer_pointsx;
+  __pyx_pybuffer_pointsz.pybuffer.buf = NULL;
+  __pyx_pybuffer_pointsz.refcount = 0;
+  __pyx_pybuffernd_pointsz.data = NULL;
+  __pyx_pybuffernd_pointsz.rcbuffer = &__pyx_pybuffer_pointsz;
+  __pyx_pybuffer_frames.pybuffer.buf = NULL;
+  __pyx_pybuffer_frames.refcount = 0;
+  __pyx_pybuffernd_frames.data = NULL;
+  __pyx_pybuffernd_frames.rcbuffer = &__pyx_pybuffer_frames;
+  __pyx_pybuffer_compressed.pybuffer.buf = NULL;
+  __pyx_pybuffer_compressed.refcount = 0;
+  __pyx_pybuffernd_compressed.data = NULL;
+  __pyx_pybuffernd_compressed.rcbuffer = &__pyx_pybuffer_compressed;
+  {
+    __Pyx_BufFmt_StackElem __pyx_stack[1];
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_frames.rcbuffer->pybuffer, (PyObject*)__pyx_v_frames, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT8_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 3, 0, __pyx_stack) == -1)) __PYX_ERR(0, 426, __pyx_L1_error)
+  }
+  __pyx_pybuffernd_frames.diminfo[0].strides = __pyx_pybuffernd_frames.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_frames.diminfo[0].shape = __pyx_pybuffernd_frames.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_frames.diminfo[1].strides = __pyx_pybuffernd_frames.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_frames.diminfo[1].shape = __pyx_pybuffernd_frames.rcbuffer->pybuffer.shape[1]; __pyx_pybuffernd_frames.diminfo[2].strides = __pyx_pybuffernd_frames.rcbuffer->pybuffer.strides[2]; __pyx_pybuffernd_frames.diminfo[2].shape = __pyx_pybuffernd_frames.rcbuffer->pybuffer.shape[2];
+  {
+    __Pyx_BufFmt_StackElem __pyx_stack[1];
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_compressed.rcbuffer->pybuffer, (PyObject*)__pyx_v_compressed, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT8_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 3, 0, __pyx_stack) == -1)) __PYX_ERR(0, 426, __pyx_L1_error)
+  }
+  __pyx_pybuffernd_compressed.diminfo[0].strides = __pyx_pybuffernd_compressed.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_compressed.diminfo[0].shape = __pyx_pybuffernd_compressed.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_compressed.diminfo[1].strides = __pyx_pybuffernd_compressed.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_compressed.diminfo[1].shape = __pyx_pybuffernd_compressed.rcbuffer->pybuffer.shape[1]; __pyx_pybuffernd_compressed.diminfo[2].strides = __pyx_pybuffernd_compressed.rcbuffer->pybuffer.strides[2]; __pyx_pybuffernd_compressed.diminfo[2].shape = __pyx_pybuffernd_compressed.rcbuffer->pybuffer.shape[2];
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":449
+ * 
+ *     cdef unsigned int x, y, x2, y2, n, max_val, nframes, x_size, y_size
+ *     cdef unsigned int num = 0             # <<<<<<<<<<<<<<
+ *     cdef unsigned int avg_std
+ * 
+ */
+  __pyx_v_num = 0;
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":453
+ * 
+ *     # Calculate the shapes of the subsamples image
+ *     cdef shape_z = frames.shape[0]             # <<<<<<<<<<<<<<
+ *     cdef shape_y = int(floor(frames.shape[1]//f))
+ *     cdef shape_x = int(floor(frames.shape[2]//f))
+ */
+  __pyx_t_1 = __Pyx_PyInt_From_Py_intptr_t((__pyx_v_frames->dimensions[0])); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 453, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_1);
+  __pyx_v_shape_z = __pyx_t_1;
+  __pyx_t_1 = 0;
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":454
+ *     # Calculate the shapes of the subsamples image
+ *     cdef shape_z = frames.shape[0]
+ *     cdef shape_y = int(floor(frames.shape[1]//f))             # <<<<<<<<<<<<<<
+ *     cdef shape_x = int(floor(frames.shape[2]//f))
+ * 
+ */
+  __pyx_t_1 = __Pyx_PyInt_FromDouble(floor(((__pyx_v_frames->dimensions[1]) / __pyx_v_f))); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 454, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_1);
+  __pyx_v_shape_y = __pyx_t_1;
+  __pyx_t_1 = 0;
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":455
+ *     cdef shape_z = frames.shape[0]
+ *     cdef shape_y = int(floor(frames.shape[1]//f))
+ *     cdef shape_x = int(floor(frames.shape[2]//f))             # <<<<<<<<<<<<<<
+ * 
+ *     # Init subsampled image arrays
+ */
+  __pyx_t_1 = __Pyx_PyInt_FromDouble(floor(((__pyx_v_frames->dimensions[2]) / __pyx_v_f))); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 455, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_1);
+  __pyx_v_shape_x = __pyx_t_1;
+  __pyx_t_1 = 0;
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":458
+ * 
+ *     # Init subsampled image arrays
+ *     cdef np.ndarray[np.int32_t, ndim=3] count = np.zeros((shape_z, shape_y, shape_x), np.int32)             # <<<<<<<<<<<<<<
+ *     cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsy = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)
+ *     cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsx = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)
+ */
+  __pyx_t_2 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 458, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_zeros); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 458, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+  __pyx_t_2 = PyTuple_New(3); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 458, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __Pyx_INCREF(__pyx_v_shape_z);
+  __Pyx_GIVEREF(__pyx_v_shape_z);
+  PyTuple_SET_ITEM(__pyx_t_2, 0, __pyx_v_shape_z);
+  __Pyx_INCREF(__pyx_v_shape_y);
+  __Pyx_GIVEREF(__pyx_v_shape_y);
+  PyTuple_SET_ITEM(__pyx_t_2, 1, __pyx_v_shape_y);
+  __Pyx_INCREF(__pyx_v_shape_x);
+  __Pyx_GIVEREF(__pyx_v_shape_x);
+  PyTuple_SET_ITEM(__pyx_t_2, 2, __pyx_v_shape_x);
+  __pyx_t_4 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 458, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_int32); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 458, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  __pyx_t_4 = NULL;
+  __pyx_t_6 = 0;
+  if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_3))) {
+    __pyx_t_4 = PyMethod_GET_SELF(__pyx_t_3);
+    if (likely(__pyx_t_4)) {
+      PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_3);
+      __Pyx_INCREF(__pyx_t_4);
+      __Pyx_INCREF(function);
+      __Pyx_DECREF_SET(__pyx_t_3, function);
+      __pyx_t_6 = 1;
+    }
+  }
+  #if CYTHON_FAST_PYCALL
+  if (PyFunction_Check(__pyx_t_3)) {
+    PyObject *__pyx_temp[3] = {__pyx_t_4, __pyx_t_2, __pyx_t_5};
+    __pyx_t_1 = __Pyx_PyFunction_FastCall(__pyx_t_3, __pyx_temp+1-__pyx_t_6, 2+__pyx_t_6); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 458, __pyx_L1_error)
+    __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
+    __Pyx_GOTREF(__pyx_t_1);
+    __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+    __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+  } else
+  #endif
+  #if CYTHON_FAST_PYCCALL
+  if (__Pyx_PyFastCFunction_Check(__pyx_t_3)) {
+    PyObject *__pyx_temp[3] = {__pyx_t_4, __pyx_t_2, __pyx_t_5};
+    __pyx_t_1 = __Pyx_PyCFunction_FastCall(__pyx_t_3, __pyx_temp+1-__pyx_t_6, 2+__pyx_t_6); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 458, __pyx_L1_error)
+    __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
+    __Pyx_GOTREF(__pyx_t_1);
+    __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+    __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+  } else
+  #endif
+  {
+    __pyx_t_7 = PyTuple_New(2+__pyx_t_6); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 458, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_7);
+    if (__pyx_t_4) {
+      __Pyx_GIVEREF(__pyx_t_4); PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_4); __pyx_t_4 = NULL;
+    }
+    __Pyx_GIVEREF(__pyx_t_2);
+    PyTuple_SET_ITEM(__pyx_t_7, 0+__pyx_t_6, __pyx_t_2);
+    __Pyx_GIVEREF(__pyx_t_5);
+    PyTuple_SET_ITEM(__pyx_t_7, 1+__pyx_t_6, __pyx_t_5);
+    __pyx_t_2 = 0;
+    __pyx_t_5 = 0;
+    __pyx_t_1 = __Pyx_PyObject_Call(__pyx_t_3, __pyx_t_7, NULL); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 458, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_1);
+    __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+  }
+  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+  if (!(likely(((__pyx_t_1) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_1, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 458, __pyx_L1_error)
+  __pyx_t_8 = ((PyArrayObject *)__pyx_t_1);
+  {
+    __Pyx_BufFmt_StackElem __pyx_stack[1];
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_count.rcbuffer->pybuffer, (PyObject*)__pyx_t_8, &__Pyx_TypeInfo_nn___pyx_t_5numpy_int32_t, PyBUF_FORMAT| PyBUF_STRIDES| PyBUF_WRITABLE, 3, 0, __pyx_stack) == -1)) {
+      __pyx_v_count = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_count.rcbuffer->pybuffer.buf = NULL;
+      __PYX_ERR(0, 458, __pyx_L1_error)
+    } else {__pyx_pybuffernd_count.diminfo[0].strides = __pyx_pybuffernd_count.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_count.diminfo[0].shape = __pyx_pybuffernd_count.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_count.diminfo[1].strides = __pyx_pybuffernd_count.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_count.diminfo[1].shape = __pyx_pybuffernd_count.rcbuffer->pybuffer.shape[1]; __pyx_pybuffernd_count.diminfo[2].strides = __pyx_pybuffernd_count.rcbuffer->pybuffer.strides[2]; __pyx_pybuffernd_count.diminfo[2].shape = __pyx_pybuffernd_count.rcbuffer->pybuffer.shape[2];
+    }
+  }
+  __pyx_t_8 = 0;
+  __pyx_v_count = ((PyArrayObject *)__pyx_t_1);
+  __pyx_t_1 = 0;
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":459
+ *     # Init subsampled image arrays
+ *     cdef np.ndarray[np.int32_t, ndim=3] count = np.zeros((shape_z, shape_y, shape_x), np.int32)
+ *     cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsy = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)             # <<<<<<<<<<<<<<
+ *     cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsx = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)
+ *     cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsz = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)
+ */
+  __pyx_t_3 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 459, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_zeros); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 459, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+  __pyx_t_3 = PyNumber_Multiply(__pyx_v_shape_z, __pyx_v_shape_y); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 459, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __pyx_t_5 = PyNumber_Multiply(__pyx_t_3, __pyx_v_shape_x); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 459, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+  __pyx_t_3 = __Pyx_GetModuleGlobalName(__pyx_n_s_UINT16_TYPE); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 459, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __pyx_t_2 = NULL;
+  __pyx_t_6 = 0;
+  if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_7))) {
+    __pyx_t_2 = PyMethod_GET_SELF(__pyx_t_7);
+    if (likely(__pyx_t_2)) {
+      PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_7);
+      __Pyx_INCREF(__pyx_t_2);
+      __Pyx_INCREF(function);
+      __Pyx_DECREF_SET(__pyx_t_7, function);
+      __pyx_t_6 = 1;
+    }
+  }
+  #if CYTHON_FAST_PYCALL
+  if (PyFunction_Check(__pyx_t_7)) {
+    PyObject *__pyx_temp[3] = {__pyx_t_2, __pyx_t_5, __pyx_t_3};
+    __pyx_t_1 = __Pyx_PyFunction_FastCall(__pyx_t_7, __pyx_temp+1-__pyx_t_6, 2+__pyx_t_6); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 459, __pyx_L1_error)
+    __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
+    __Pyx_GOTREF(__pyx_t_1);
+    __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+    __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+  } else
+  #endif
+  #if CYTHON_FAST_PYCCALL
+  if (__Pyx_PyFastCFunction_Check(__pyx_t_7)) {
+    PyObject *__pyx_temp[3] = {__pyx_t_2, __pyx_t_5, __pyx_t_3};
+    __pyx_t_1 = __Pyx_PyCFunction_FastCall(__pyx_t_7, __pyx_temp+1-__pyx_t_6, 2+__pyx_t_6); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 459, __pyx_L1_error)
+    __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
+    __Pyx_GOTREF(__pyx_t_1);
+    __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+    __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+  } else
+  #endif
+  {
+    __pyx_t_4 = PyTuple_New(2+__pyx_t_6); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 459, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_4);
+    if (__pyx_t_2) {
+      __Pyx_GIVEREF(__pyx_t_2); PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2); __pyx_t_2 = NULL;
+    }
+    __Pyx_GIVEREF(__pyx_t_5);
+    PyTuple_SET_ITEM(__pyx_t_4, 0+__pyx_t_6, __pyx_t_5);
+    __Pyx_GIVEREF(__pyx_t_3);
+    PyTuple_SET_ITEM(__pyx_t_4, 1+__pyx_t_6, __pyx_t_3);
+    __pyx_t_5 = 0;
+    __pyx_t_3 = 0;
+    __pyx_t_1 = __Pyx_PyObject_Call(__pyx_t_7, __pyx_t_4, NULL); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 459, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_1);
+    __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  }
+  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+  if (!(likely(((__pyx_t_1) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_1, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 459, __pyx_L1_error)
+  __pyx_t_9 = ((PyArrayObject *)__pyx_t_1);
+  {
+    __Pyx_BufFmt_StackElem __pyx_stack[1];
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_pointsy.rcbuffer->pybuffer, (PyObject*)__pyx_t_9, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES| PyBUF_WRITABLE, 1, 0, __pyx_stack) == -1)) {
+      __pyx_v_pointsy = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_pointsy.rcbuffer->pybuffer.buf = NULL;
+      __PYX_ERR(0, 459, __pyx_L1_error)
+    } else {__pyx_pybuffernd_pointsy.diminfo[0].strides = __pyx_pybuffernd_pointsy.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_pointsy.diminfo[0].shape = __pyx_pybuffernd_pointsy.rcbuffer->pybuffer.shape[0];
+    }
+  }
+  __pyx_t_9 = 0;
+  __pyx_v_pointsy = ((PyArrayObject *)__pyx_t_1);
+  __pyx_t_1 = 0;
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":460
+ *     cdef np.ndarray[np.int32_t, ndim=3] count = np.zeros((shape_z, shape_y, shape_x), np.int32)
+ *     cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsy = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)
+ *     cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsx = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)             # <<<<<<<<<<<<<<
+ *     cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsz = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)
+ * 
+ */
+  __pyx_t_7 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 460, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_7, __pyx_n_s_zeros); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 460, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+  __pyx_t_7 = PyNumber_Multiply(__pyx_v_shape_z, __pyx_v_shape_y); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 460, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __pyx_t_3 = PyNumber_Multiply(__pyx_t_7, __pyx_v_shape_x); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 460, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+  __pyx_t_7 = __Pyx_GetModuleGlobalName(__pyx_n_s_UINT16_TYPE); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 460, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __pyx_t_5 = NULL;
+  __pyx_t_6 = 0;
+  if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_4))) {
+    __pyx_t_5 = PyMethod_GET_SELF(__pyx_t_4);
+    if (likely(__pyx_t_5)) {
+      PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_4);
+      __Pyx_INCREF(__pyx_t_5);
+      __Pyx_INCREF(function);
+      __Pyx_DECREF_SET(__pyx_t_4, function);
+      __pyx_t_6 = 1;
+    }
+  }
+  #if CYTHON_FAST_PYCALL
+  if (PyFunction_Check(__pyx_t_4)) {
+    PyObject *__pyx_temp[3] = {__pyx_t_5, __pyx_t_3, __pyx_t_7};
+    __pyx_t_1 = __Pyx_PyFunction_FastCall(__pyx_t_4, __pyx_temp+1-__pyx_t_6, 2+__pyx_t_6); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 460, __pyx_L1_error)
+    __Pyx_XDECREF(__pyx_t_5); __pyx_t_5 = 0;
+    __Pyx_GOTREF(__pyx_t_1);
+    __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+    __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+  } else
+  #endif
+  #if CYTHON_FAST_PYCCALL
+  if (__Pyx_PyFastCFunction_Check(__pyx_t_4)) {
+    PyObject *__pyx_temp[3] = {__pyx_t_5, __pyx_t_3, __pyx_t_7};
+    __pyx_t_1 = __Pyx_PyCFunction_FastCall(__pyx_t_4, __pyx_temp+1-__pyx_t_6, 2+__pyx_t_6); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 460, __pyx_L1_error)
+    __Pyx_XDECREF(__pyx_t_5); __pyx_t_5 = 0;
+    __Pyx_GOTREF(__pyx_t_1);
+    __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+    __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+  } else
+  #endif
+  {
+    __pyx_t_2 = PyTuple_New(2+__pyx_t_6); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 460, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_2);
+    if (__pyx_t_5) {
+      __Pyx_GIVEREF(__pyx_t_5); PyTuple_SET_ITEM(__pyx_t_2, 0, __pyx_t_5); __pyx_t_5 = NULL;
+    }
+    __Pyx_GIVEREF(__pyx_t_3);
+    PyTuple_SET_ITEM(__pyx_t_2, 0+__pyx_t_6, __pyx_t_3);
+    __Pyx_GIVEREF(__pyx_t_7);
+    PyTuple_SET_ITEM(__pyx_t_2, 1+__pyx_t_6, __pyx_t_7);
+    __pyx_t_3 = 0;
+    __pyx_t_7 = 0;
+    __pyx_t_1 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_2, NULL); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 460, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_1);
+    __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+  }
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  if (!(likely(((__pyx_t_1) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_1, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 460, __pyx_L1_error)
+  __pyx_t_10 = ((PyArrayObject *)__pyx_t_1);
+  {
+    __Pyx_BufFmt_StackElem __pyx_stack[1];
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_pointsx.rcbuffer->pybuffer, (PyObject*)__pyx_t_10, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES| PyBUF_WRITABLE, 1, 0, __pyx_stack) == -1)) {
+      __pyx_v_pointsx = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_pointsx.rcbuffer->pybuffer.buf = NULL;
+      __PYX_ERR(0, 460, __pyx_L1_error)
+    } else {__pyx_pybuffernd_pointsx.diminfo[0].strides = __pyx_pybuffernd_pointsx.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_pointsx.diminfo[0].shape = __pyx_pybuffernd_pointsx.rcbuffer->pybuffer.shape[0];
+    }
+  }
+  __pyx_t_10 = 0;
+  __pyx_v_pointsx = ((PyArrayObject *)__pyx_t_1);
+  __pyx_t_1 = 0;
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":461
+ *     cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsy = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)
+ *     cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsx = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)
+ *     cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsz = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)             # <<<<<<<<<<<<<<
+ * 
+ *     # Extract frames dimensions
+ */
+  __pyx_t_4 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 461, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_zeros); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 461, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  __pyx_t_4 = PyNumber_Multiply(__pyx_v_shape_z, __pyx_v_shape_y); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 461, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  __pyx_t_7 = PyNumber_Multiply(__pyx_t_4, __pyx_v_shape_x); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 461, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  __pyx_t_4 = __Pyx_GetModuleGlobalName(__pyx_n_s_UINT16_TYPE); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 461, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  __pyx_t_3 = NULL;
+  __pyx_t_6 = 0;
+  if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_2))) {
+    __pyx_t_3 = PyMethod_GET_SELF(__pyx_t_2);
+    if (likely(__pyx_t_3)) {
+      PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_2);
+      __Pyx_INCREF(__pyx_t_3);
+      __Pyx_INCREF(function);
+      __Pyx_DECREF_SET(__pyx_t_2, function);
+      __pyx_t_6 = 1;
+    }
+  }
+  #if CYTHON_FAST_PYCALL
+  if (PyFunction_Check(__pyx_t_2)) {
+    PyObject *__pyx_temp[3] = {__pyx_t_3, __pyx_t_7, __pyx_t_4};
+    __pyx_t_1 = __Pyx_PyFunction_FastCall(__pyx_t_2, __pyx_temp+1-__pyx_t_6, 2+__pyx_t_6); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 461, __pyx_L1_error)
+    __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
+    __Pyx_GOTREF(__pyx_t_1);
+    __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+    __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  } else
+  #endif
+  #if CYTHON_FAST_PYCCALL
+  if (__Pyx_PyFastCFunction_Check(__pyx_t_2)) {
+    PyObject *__pyx_temp[3] = {__pyx_t_3, __pyx_t_7, __pyx_t_4};
+    __pyx_t_1 = __Pyx_PyCFunction_FastCall(__pyx_t_2, __pyx_temp+1-__pyx_t_6, 2+__pyx_t_6); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 461, __pyx_L1_error)
+    __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
+    __Pyx_GOTREF(__pyx_t_1);
+    __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+    __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  } else
+  #endif
+  {
+    __pyx_t_5 = PyTuple_New(2+__pyx_t_6); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 461, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_5);
+    if (__pyx_t_3) {
+      __Pyx_GIVEREF(__pyx_t_3); PyTuple_SET_ITEM(__pyx_t_5, 0, __pyx_t_3); __pyx_t_3 = NULL;
+    }
+    __Pyx_GIVEREF(__pyx_t_7);
+    PyTuple_SET_ITEM(__pyx_t_5, 0+__pyx_t_6, __pyx_t_7);
+    __Pyx_GIVEREF(__pyx_t_4);
+    PyTuple_SET_ITEM(__pyx_t_5, 1+__pyx_t_6, __pyx_t_4);
+    __pyx_t_7 = 0;
+    __pyx_t_4 = 0;
+    __pyx_t_1 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_5, NULL); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 461, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_1);
+    __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+  }
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+  if (!(likely(((__pyx_t_1) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_1, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 461, __pyx_L1_error)
+  __pyx_t_11 = ((PyArrayObject *)__pyx_t_1);
+  {
+    __Pyx_BufFmt_StackElem __pyx_stack[1];
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_pointsz.rcbuffer->pybuffer, (PyObject*)__pyx_t_11, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES| PyBUF_WRITABLE, 1, 0, __pyx_stack) == -1)) {
+      __pyx_v_pointsz = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_pointsz.rcbuffer->pybuffer.buf = NULL;
+      __PYX_ERR(0, 461, __pyx_L1_error)
+    } else {__pyx_pybuffernd_pointsz.diminfo[0].strides = __pyx_pybuffernd_pointsz.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_pointsz.diminfo[0].shape = __pyx_pybuffernd_pointsz.rcbuffer->pybuffer.shape[0];
+    }
+  }
+  __pyx_t_11 = 0;
+  __pyx_v_pointsz = ((PyArrayObject *)__pyx_t_1);
+  __pyx_t_1 = 0;
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":464
+ * 
+ *     # Extract frames dimensions
+ *     nframes = frames.shape[0]             # <<<<<<<<<<<<<<
+ *     y_size = frames.shape[1]
+ *     x_size = frames.shape[2]
+ */
+  __pyx_v_nframes = (__pyx_v_frames->dimensions[0]);
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":465
+ *     # Extract frames dimensions
+ *     nframes = frames.shape[0]
+ *     y_size = frames.shape[1]             # <<<<<<<<<<<<<<
+ *     x_size = frames.shape[2]
+ * 
+ */
+  __pyx_v_y_size = (__pyx_v_frames->dimensions[1]);
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":466
+ *     nframes = frames.shape[0]
+ *     y_size = frames.shape[1]
+ *     x_size = frames.shape[2]             # <<<<<<<<<<<<<<
+ * 
+ *     for y in range(y_size):
+ */
+  __pyx_v_x_size = (__pyx_v_frames->dimensions[2]);
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":468
+ *     x_size = frames.shape[2]
+ * 
+ *     for y in range(y_size):             # <<<<<<<<<<<<<<
+ *         for x in range(x_size):
+ * 
+ */
+  __pyx_t_12 = __pyx_v_y_size;
+  for (__pyx_t_13 = 0; __pyx_t_13 < __pyx_t_12; __pyx_t_13+=1) {
+    __pyx_v_y = __pyx_t_13;
+
+    /* "RMS/Routines/Grouping3Dcy.pyx":469
+ * 
+ *     for y in range(y_size):
+ *         for x in range(x_size):             # <<<<<<<<<<<<<<
+ * 
+ *             max_val = compressed[0, y, x]
+ */
+    __pyx_t_14 = __pyx_v_x_size;
+    for (__pyx_t_15 = 0; __pyx_t_15 < __pyx_t_14; __pyx_t_15+=1) {
+      __pyx_v_x = __pyx_t_15;
+
+      /* "RMS/Routines/Grouping3Dcy.pyx":471
+ *         for x in range(x_size):
+ * 
+ *             max_val = compressed[0, y, x]             # <<<<<<<<<<<<<<
+ * 
+ *             avg_std = int(float(compressed[2, y, x]) + k1*float(compressed[3, y, x]))
+ */
+      __pyx_t_16 = 0;
+      __pyx_t_17 = __pyx_v_y;
+      __pyx_t_18 = __pyx_v_x;
+      __pyx_v_max_val = (*__Pyx_BufPtrStrided3d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT8_TYPE_t *, __pyx_pybuffernd_compressed.rcbuffer->pybuffer.buf, __pyx_t_16, __pyx_pybuffernd_compressed.diminfo[0].strides, __pyx_t_17, __pyx_pybuffernd_compressed.diminfo[1].strides, __pyx_t_18, __pyx_pybuffernd_compressed.diminfo[2].strides));
+
+      /* "RMS/Routines/Grouping3Dcy.pyx":473
+ *             max_val = compressed[0, y, x]
+ * 
+ *             avg_std = int(float(compressed[2, y, x]) + k1*float(compressed[3, y, x]))             # <<<<<<<<<<<<<<
+ * 
+ * 
+ */
+      __pyx_t_19 = 2;
+      __pyx_t_20 = __pyx_v_y;
+      __pyx_t_21 = __pyx_v_x;
+      __pyx_t_22 = 3;
+      __pyx_t_23 = __pyx_v_y;
+      __pyx_t_24 = __pyx_v_x;
+      __pyx_v_avg_std = ((unsigned int)(((double)(*__Pyx_BufPtrStrided3d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT8_TYPE_t *, __pyx_pybuffernd_compressed.rcbuffer->pybuffer.buf, __pyx_t_19, __pyx_pybuffernd_compressed.diminfo[0].strides, __pyx_t_20, __pyx_pybuffernd_compressed.diminfo[1].strides, __pyx_t_21, __pyx_pybuffernd_compressed.diminfo[2].strides))) + (__pyx_v_k1 * ((double)(*__Pyx_BufPtrStrided3d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT8_TYPE_t *, __pyx_pybuffernd_compressed.rcbuffer->pybuffer.buf, __pyx_t_22, __pyx_pybuffernd_compressed.diminfo[0].strides, __pyx_t_23, __pyx_pybuffernd_compressed.diminfo[1].strides, __pyx_t_24, __pyx_pybuffernd_compressed.diminfo[2].strides))))));
+
+      /* "RMS/Routines/Grouping3Dcy.pyx":476
+ * 
+ * 
+ *             if((max_val > min_level) and (max_val >= avg_std)):             # <<<<<<<<<<<<<<
+ * 
+ *                 # Extract frame of maximum intensity
+ */
+      __pyx_t_26 = ((__pyx_v_max_val > __pyx_v_min_level) != 0);
+      if (__pyx_t_26) {
+      } else {
+        __pyx_t_25 = __pyx_t_26;
+        goto __pyx_L8_bool_binop_done;
+      }
+      __pyx_t_26 = ((__pyx_v_max_val >= __pyx_v_avg_std) != 0);
+      __pyx_t_25 = __pyx_t_26;
+      __pyx_L8_bool_binop_done:;
+      if (__pyx_t_25) {
+
+        /* "RMS/Routines/Grouping3Dcy.pyx":479
+ * 
+ *                 # Extract frame of maximum intensity
+ *                 n = compressed[1, y, x]             # <<<<<<<<<<<<<<
+ * 
+ *                 # Subsample frame in f*f squares
+ */
+        __pyx_t_27 = 1;
+        __pyx_t_28 = __pyx_v_y;
+        __pyx_t_29 = __pyx_v_x;
+        __pyx_v_n = (*__Pyx_BufPtrStrided3d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT8_TYPE_t *, __pyx_pybuffernd_compressed.rcbuffer->pybuffer.buf, __pyx_t_27, __pyx_pybuffernd_compressed.diminfo[0].strides, __pyx_t_28, __pyx_pybuffernd_compressed.diminfo[1].strides, __pyx_t_29, __pyx_pybuffernd_compressed.diminfo[2].strides));
+
+        /* "RMS/Routines/Grouping3Dcy.pyx":482
+ * 
+ *                 # Subsample frame in f*f squares
+ *                 y2 = y//f             # <<<<<<<<<<<<<<
+ *                 x2 = x//f
+ * 
+ */
+        __pyx_v_y2 = (__pyx_v_y / __pyx_v_f);
+
+        /* "RMS/Routines/Grouping3Dcy.pyx":483
+ *                 # Subsample frame in f*f squares
+ *                 y2 = y//f
+ *                 x2 = x//f             # <<<<<<<<<<<<<<
+ * 
+ *                 # Check if there are enough of threshold passers inside of this square
+ */
+        __pyx_v_x2 = (__pyx_v_x / __pyx_v_f);
+
+        /* "RMS/Routines/Grouping3Dcy.pyx":486
+ * 
+ *                 # Check if there are enough of threshold passers inside of this square
+ *                 if count[n, y2, x2] >= min_points:             # <<<<<<<<<<<<<<
+ * 
+ *                     # Put this point to the final list
+ */
+        __pyx_t_30 = __pyx_v_n;
+        __pyx_t_31 = __pyx_v_y2;
+        __pyx_t_32 = __pyx_v_x2;
+        __pyx_t_25 = (((*__Pyx_BufPtrStrided3d(__pyx_t_5numpy_int32_t *, __pyx_pybuffernd_count.rcbuffer->pybuffer.buf, __pyx_t_30, __pyx_pybuffernd_count.diminfo[0].strides, __pyx_t_31, __pyx_pybuffernd_count.diminfo[1].strides, __pyx_t_32, __pyx_pybuffernd_count.diminfo[2].strides)) >= __pyx_v_min_points) != 0);
+        if (__pyx_t_25) {
+
+          /* "RMS/Routines/Grouping3Dcy.pyx":489
+ * 
+ *                     # Put this point to the final list
+ *                     pointsy[num] = y2             # <<<<<<<<<<<<<<
+ *                     pointsx[num] = x2
+ *                     pointsz[num] = n
+ */
+          __pyx_t_33 = __pyx_v_num;
+          *__Pyx_BufPtrStrided1d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_pointsy.rcbuffer->pybuffer.buf, __pyx_t_33, __pyx_pybuffernd_pointsy.diminfo[0].strides) = __pyx_v_y2;
+
+          /* "RMS/Routines/Grouping3Dcy.pyx":490
+ *                     # Put this point to the final list
+ *                     pointsy[num] = y2
+ *                     pointsx[num] = x2             # <<<<<<<<<<<<<<
+ *                     pointsz[num] = n
+ *                     num += 1
+ */
+          __pyx_t_34 = __pyx_v_num;
+          *__Pyx_BufPtrStrided1d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_pointsx.rcbuffer->pybuffer.buf, __pyx_t_34, __pyx_pybuffernd_pointsx.diminfo[0].strides) = __pyx_v_x2;
+
+          /* "RMS/Routines/Grouping3Dcy.pyx":491
+ *                     pointsy[num] = y2
+ *                     pointsx[num] = x2
+ *                     pointsz[num] = n             # <<<<<<<<<<<<<<
+ *                     num += 1
+ * 
+ */
+          __pyx_t_35 = __pyx_v_num;
+          *__Pyx_BufPtrStrided1d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_pointsz.rcbuffer->pybuffer.buf, __pyx_t_35, __pyx_pybuffernd_pointsz.diminfo[0].strides) = __pyx_v_n;
+
+          /* "RMS/Routines/Grouping3Dcy.pyx":492
+ *                     pointsx[num] = x2
+ *                     pointsz[num] = n
+ *                     num += 1             # <<<<<<<<<<<<<<
+ * 
+ *                     # Don't repeat this number
+ */
+          __pyx_v_num = (__pyx_v_num + 1);
+
+          /* "RMS/Routines/Grouping3Dcy.pyx":495
+ * 
+ *                     # Don't repeat this number
+ *                     count[n, y2, x2] = -1             # <<<<<<<<<<<<<<
+ * 
+ *                 # Increase counter if not enough threshold passers and this number isn't written already
+ */
+          __pyx_t_36 = __pyx_v_n;
+          __pyx_t_37 = __pyx_v_y2;
+          __pyx_t_38 = __pyx_v_x2;
+          *__Pyx_BufPtrStrided3d(__pyx_t_5numpy_int32_t *, __pyx_pybuffernd_count.rcbuffer->pybuffer.buf, __pyx_t_36, __pyx_pybuffernd_count.diminfo[0].strides, __pyx_t_37, __pyx_pybuffernd_count.diminfo[1].strides, __pyx_t_38, __pyx_pybuffernd_count.diminfo[2].strides) = -1;
+
+          /* "RMS/Routines/Grouping3Dcy.pyx":486
+ * 
+ *                 # Check if there are enough of threshold passers inside of this square
+ *                 if count[n, y2, x2] >= min_points:             # <<<<<<<<<<<<<<
+ * 
+ *                     # Put this point to the final list
+ */
+          goto __pyx_L10;
+        }
+
+        /* "RMS/Routines/Grouping3Dcy.pyx":498
+ * 
+ *                 # Increase counter if not enough threshold passers and this number isn't written already
+ *                 elif count[n, y2, x2] != -1:             # <<<<<<<<<<<<<<
+ *                     count[n, y2, x2] += 1
+ * 
+ */
+        __pyx_t_39 = __pyx_v_n;
+        __pyx_t_40 = __pyx_v_y2;
+        __pyx_t_41 = __pyx_v_x2;
+        __pyx_t_25 = (((*__Pyx_BufPtrStrided3d(__pyx_t_5numpy_int32_t *, __pyx_pybuffernd_count.rcbuffer->pybuffer.buf, __pyx_t_39, __pyx_pybuffernd_count.diminfo[0].strides, __pyx_t_40, __pyx_pybuffernd_count.diminfo[1].strides, __pyx_t_41, __pyx_pybuffernd_count.diminfo[2].strides)) != -1L) != 0);
+        if (__pyx_t_25) {
+
+          /* "RMS/Routines/Grouping3Dcy.pyx":499
+ *                 # Increase counter if not enough threshold passers and this number isn't written already
+ *                 elif count[n, y2, x2] != -1:
+ *                     count[n, y2, x2] += 1             # <<<<<<<<<<<<<<
+ * 
+ * 
+ */
+          __pyx_t_42 = __pyx_v_n;
+          __pyx_t_43 = __pyx_v_y2;
+          __pyx_t_44 = __pyx_v_x2;
+          *__Pyx_BufPtrStrided3d(__pyx_t_5numpy_int32_t *, __pyx_pybuffernd_count.rcbuffer->pybuffer.buf, __pyx_t_42, __pyx_pybuffernd_count.diminfo[0].strides, __pyx_t_43, __pyx_pybuffernd_count.diminfo[1].strides, __pyx_t_44, __pyx_pybuffernd_count.diminfo[2].strides) += 1;
+
+          /* "RMS/Routines/Grouping3Dcy.pyx":498
+ * 
+ *                 # Increase counter if not enough threshold passers and this number isn't written already
+ *                 elif count[n, y2, x2] != -1:             # <<<<<<<<<<<<<<
+ *                     count[n, y2, x2] += 1
+ * 
+ */
+        }
+        __pyx_L10:;
+
+        /* "RMS/Routines/Grouping3Dcy.pyx":476
+ * 
+ * 
+ *             if((max_val > min_level) and (max_val >= avg_std)):             # <<<<<<<<<<<<<<
+ * 
+ *                 # Extract frame of maximum intensity
+ */
+      }
+    }
+  }
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":503
+ * 
+ *     # Cut point arrays to their maximum size
+ *     pointsy = pointsy[:num]             # <<<<<<<<<<<<<<
+ *     pointsx = pointsx[:num]
+ *     pointsz = pointsz[:num]
+ */
+  __pyx_t_1 = __Pyx_PyObject_GetSlice(((PyObject *)__pyx_v_pointsy), 0, __pyx_v_num, NULL, NULL, NULL, 0, 1, 0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 503, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_1);
+  if (!(likely(((__pyx_t_1) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_1, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 503, __pyx_L1_error)
+  __pyx_t_9 = ((PyArrayObject *)__pyx_t_1);
+  {
+    __Pyx_BufFmt_StackElem __pyx_stack[1];
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_pointsy.rcbuffer->pybuffer);
+    __pyx_t_6 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_pointsy.rcbuffer->pybuffer, (PyObject*)__pyx_t_9, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES| PyBUF_WRITABLE, 1, 0, __pyx_stack);
+    if (unlikely(__pyx_t_6 < 0)) {
+      PyErr_Fetch(&__pyx_t_45, &__pyx_t_46, &__pyx_t_47);
+      if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_pointsy.rcbuffer->pybuffer, (PyObject*)__pyx_v_pointsy, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES| PyBUF_WRITABLE, 1, 0, __pyx_stack) == -1)) {
+        Py_XDECREF(__pyx_t_45); Py_XDECREF(__pyx_t_46); Py_XDECREF(__pyx_t_47);
+        __Pyx_RaiseBufferFallbackError();
+      } else {
+        PyErr_Restore(__pyx_t_45, __pyx_t_46, __pyx_t_47);
+      }
+    }
+    __pyx_pybuffernd_pointsy.diminfo[0].strides = __pyx_pybuffernd_pointsy.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_pointsy.diminfo[0].shape = __pyx_pybuffernd_pointsy.rcbuffer->pybuffer.shape[0];
+    if (unlikely(__pyx_t_6 < 0)) __PYX_ERR(0, 503, __pyx_L1_error)
+  }
+  __pyx_t_9 = 0;
+  __Pyx_DECREF_SET(__pyx_v_pointsy, ((PyArrayObject *)__pyx_t_1));
+  __pyx_t_1 = 0;
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":504
+ *     # Cut point arrays to their maximum size
+ *     pointsy = pointsy[:num]
+ *     pointsx = pointsx[:num]             # <<<<<<<<<<<<<<
+ *     pointsz = pointsz[:num]
+ * 
+ */
+  __pyx_t_1 = __Pyx_PyObject_GetSlice(((PyObject *)__pyx_v_pointsx), 0, __pyx_v_num, NULL, NULL, NULL, 0, 1, 0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 504, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_1);
+  if (!(likely(((__pyx_t_1) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_1, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 504, __pyx_L1_error)
+  __pyx_t_10 = ((PyArrayObject *)__pyx_t_1);
+  {
+    __Pyx_BufFmt_StackElem __pyx_stack[1];
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_pointsx.rcbuffer->pybuffer);
+    __pyx_t_6 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_pointsx.rcbuffer->pybuffer, (PyObject*)__pyx_t_10, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES| PyBUF_WRITABLE, 1, 0, __pyx_stack);
+    if (unlikely(__pyx_t_6 < 0)) {
+      PyErr_Fetch(&__pyx_t_47, &__pyx_t_46, &__pyx_t_45);
+      if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_pointsx.rcbuffer->pybuffer, (PyObject*)__pyx_v_pointsx, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES| PyBUF_WRITABLE, 1, 0, __pyx_stack) == -1)) {
+        Py_XDECREF(__pyx_t_47); Py_XDECREF(__pyx_t_46); Py_XDECREF(__pyx_t_45);
+        __Pyx_RaiseBufferFallbackError();
+      } else {
+        PyErr_Restore(__pyx_t_47, __pyx_t_46, __pyx_t_45);
+      }
+    }
+    __pyx_pybuffernd_pointsx.diminfo[0].strides = __pyx_pybuffernd_pointsx.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_pointsx.diminfo[0].shape = __pyx_pybuffernd_pointsx.rcbuffer->pybuffer.shape[0];
+    if (unlikely(__pyx_t_6 < 0)) __PYX_ERR(0, 504, __pyx_L1_error)
+  }
+  __pyx_t_10 = 0;
+  __Pyx_DECREF_SET(__pyx_v_pointsx, ((PyArrayObject *)__pyx_t_1));
+  __pyx_t_1 = 0;
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":505
+ *     pointsy = pointsy[:num]
+ *     pointsx = pointsx[:num]
+ *     pointsz = pointsz[:num]             # <<<<<<<<<<<<<<
+ * 
+ *     return num, pointsx, pointsy, pointsz
+ */
+  __pyx_t_1 = __Pyx_PyObject_GetSlice(((PyObject *)__pyx_v_pointsz), 0, __pyx_v_num, NULL, NULL, NULL, 0, 1, 0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 505, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_1);
+  if (!(likely(((__pyx_t_1) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_1, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 505, __pyx_L1_error)
+  __pyx_t_11 = ((PyArrayObject *)__pyx_t_1);
+  {
+    __Pyx_BufFmt_StackElem __pyx_stack[1];
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_pointsz.rcbuffer->pybuffer);
+    __pyx_t_6 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_pointsz.rcbuffer->pybuffer, (PyObject*)__pyx_t_11, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES| PyBUF_WRITABLE, 1, 0, __pyx_stack);
+    if (unlikely(__pyx_t_6 < 0)) {
+      PyErr_Fetch(&__pyx_t_45, &__pyx_t_46, &__pyx_t_47);
+      if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_pointsz.rcbuffer->pybuffer, (PyObject*)__pyx_v_pointsz, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES| PyBUF_WRITABLE, 1, 0, __pyx_stack) == -1)) {
+        Py_XDECREF(__pyx_t_45); Py_XDECREF(__pyx_t_46); Py_XDECREF(__pyx_t_47);
+        __Pyx_RaiseBufferFallbackError();
+      } else {
+        PyErr_Restore(__pyx_t_45, __pyx_t_46, __pyx_t_47);
+      }
+    }
+    __pyx_pybuffernd_pointsz.diminfo[0].strides = __pyx_pybuffernd_pointsz.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_pointsz.diminfo[0].shape = __pyx_pybuffernd_pointsz.rcbuffer->pybuffer.shape[0];
+    if (unlikely(__pyx_t_6 < 0)) __PYX_ERR(0, 505, __pyx_L1_error)
+  }
+  __pyx_t_11 = 0;
+  __Pyx_DECREF_SET(__pyx_v_pointsz, ((PyArrayObject *)__pyx_t_1));
+  __pyx_t_1 = 0;
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":507
+ *     pointsz = pointsz[:num]
+ * 
+ *     return num, pointsx, pointsy, pointsz             # <<<<<<<<<<<<<<
+ * 
+ * 
+ */
+  __Pyx_XDECREF(__pyx_r);
+  __pyx_t_1 = __Pyx_PyInt_From_unsigned_int(__pyx_v_num); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 507, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_1);
+  __pyx_t_2 = PyTuple_New(4); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 507, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __Pyx_GIVEREF(__pyx_t_1);
+  PyTuple_SET_ITEM(__pyx_t_2, 0, __pyx_t_1);
+  __Pyx_INCREF(((PyObject *)__pyx_v_pointsx));
+  __Pyx_GIVEREF(((PyObject *)__pyx_v_pointsx));
+  PyTuple_SET_ITEM(__pyx_t_2, 1, ((PyObject *)__pyx_v_pointsx));
+  __Pyx_INCREF(((PyObject *)__pyx_v_pointsy));
+  __Pyx_GIVEREF(((PyObject *)__pyx_v_pointsy));
+  PyTuple_SET_ITEM(__pyx_t_2, 2, ((PyObject *)__pyx_v_pointsy));
+  __Pyx_INCREF(((PyObject *)__pyx_v_pointsz));
+  __Pyx_GIVEREF(((PyObject *)__pyx_v_pointsz));
+  PyTuple_SET_ITEM(__pyx_t_2, 3, ((PyObject *)__pyx_v_pointsz));
+  __pyx_t_1 = 0;
+  __pyx_r = __pyx_t_2;
+  __pyx_t_2 = 0;
+  goto __pyx_L0;
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":426
+ * @cython.wraparound(False)
+ * @cython.cdivision(True)
+ * def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \             # <<<<<<<<<<<<<<
+ *     np.ndarray[UINT8_TYPE_t, ndim=3] compressed, int min_level, int min_points, float k1, int f):
+ *     """ Given the list of frames, threshold them, subsample the time and check if there are enough threshold
+ */
+
+  /* function exit code */
+  __pyx_L1_error:;
+  __Pyx_XDECREF(__pyx_t_1);
+  __Pyx_XDECREF(__pyx_t_2);
+  __Pyx_XDECREF(__pyx_t_3);
+  __Pyx_XDECREF(__pyx_t_4);
+  __Pyx_XDECREF(__pyx_t_5);
+  __Pyx_XDECREF(__pyx_t_7);
+  { PyObject *__pyx_type, *__pyx_value, *__pyx_tb;
+    __Pyx_PyThreadState_declare
+    __Pyx_PyThreadState_assign
+    __Pyx_ErrFetch(&__pyx_type, &__pyx_value, &__pyx_tb);
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_compressed.rcbuffer->pybuffer);
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_count.rcbuffer->pybuffer);
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_frames.rcbuffer->pybuffer);
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_pointsx.rcbuffer->pybuffer);
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_pointsy.rcbuffer->pybuffer);
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_pointsz.rcbuffer->pybuffer);
+  __Pyx_ErrRestore(__pyx_type, __pyx_value, __pyx_tb);}
+  __Pyx_AddTraceback("RMS.Routines.Grouping3Dcy.thresholdAndSubsample", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __pyx_r = NULL;
+  goto __pyx_L2;
+  __pyx_L0:;
+  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_compressed.rcbuffer->pybuffer);
+  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_count.rcbuffer->pybuffer);
+  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_frames.rcbuffer->pybuffer);
+  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_pointsx.rcbuffer->pybuffer);
+  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_pointsy.rcbuffer->pybuffer);
+  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_pointsz.rcbuffer->pybuffer);
+  __pyx_L2:;
+  __Pyx_XDECREF(__pyx_v_shape_z);
+  __Pyx_XDECREF(__pyx_v_shape_y);
+  __Pyx_XDECREF(__pyx_v_shape_x);
+  __Pyx_XDECREF((PyObject *)__pyx_v_count);
+  __Pyx_XDECREF((PyObject *)__pyx_v_pointsy);
+  __Pyx_XDECREF((PyObject *)__pyx_v_pointsx);
+  __Pyx_XDECREF((PyObject *)__pyx_v_pointsz);
+  __Pyx_XGIVEREF(__pyx_r);
+  __Pyx_RefNannyFinishContext();
+  return __pyx_r;
+}
+
+/* "RMS/Routines/Grouping3Dcy.pyx":513
+ * @cython.boundscheck(False)
+ * @cython.wraparound(False)
+ * def testPoints(int gap_threshold, np.ndarray[UINT16_TYPE_t, ndim=1] pointsy, \             # <<<<<<<<<<<<<<
+ *     np.ndarray[UINT16_TYPE_t, ndim=1] pointsx, np.ndarray[UINT16_TYPE_t, ndim=1] pointsz):
+ *     """ Test if the given 3D point cloud contains a line by testing if there is a large gap between the points
+ */
+
+/* Python wrapper */
+static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_11testPoints(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
+static char __pyx_doc_3RMS_8Routines_12Grouping3Dcy_10testPoints[] = " Test if the given 3D point cloud contains a line by testing if there is a large gap between the points\n        in time or not.\n\n    Arguments:\n        gap_threshold: [int] Maximum gap between points in 3D space.\n        pointsy: [ndarray] X coordinates of points.\n        pointsx: [ndarray] Y coordinates of points.\n        pointsz: [ndarray] Z coordinates of points.\n\n    Return:\n        count: [int] Number of points within the gap threshold. \n\n    ";
+static PyMethodDef __pyx_mdef_3RMS_8Routines_12Grouping3Dcy_11testPoints = {"testPoints", (PyCFunction)__pyx_pw_3RMS_8Routines_12Grouping3Dcy_11testPoints, METH_VARARGS|METH_KEYWORDS, __pyx_doc_3RMS_8Routines_12Grouping3Dcy_10testPoints};
+static PyObject *__pyx_pw_3RMS_8Routines_12Grouping3Dcy_11testPoints(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
+  int __pyx_v_gap_threshold;
+  PyArrayObject *__pyx_v_pointsy = 0;
+  PyArrayObject *__pyx_v_pointsx = 0;
+  PyArrayObject *__pyx_v_pointsz = 0;
+  PyObject *__pyx_r = 0;
+  __Pyx_RefNannyDeclarations
+  __Pyx_RefNannySetupContext("testPoints (wrapper)", 0);
+  {
+    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_gap_threshold,&__pyx_n_s_pointsy,&__pyx_n_s_pointsx,&__pyx_n_s_pointsz,0};
+    PyObject* values[4] = {0,0,0,0};
+    if (unlikely(__pyx_kwds)) {
+      Py_ssize_t kw_args;
+      const Py_ssize_t pos_args = PyTuple_GET_SIZE(__pyx_args);
+      switch (pos_args) {
+        case  4: values[3] = PyTuple_GET_ITEM(__pyx_args, 3);
+        case  3: values[2] = PyTuple_GET_ITEM(__pyx_args, 2);
+        case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+        case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
+        case  0: break;
+        default: goto __pyx_L5_argtuple_error;
+      }
+      kw_args = PyDict_Size(__pyx_kwds);
+      switch (pos_args) {
+        case  0:
+        if (likely((values[0] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_gap_threshold)) != 0)) kw_args--;
+        else goto __pyx_L5_argtuple_error;
+        case  1:
+        if (likely((values[1] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_pointsy)) != 0)) kw_args--;
+        else {
+          __Pyx_RaiseArgtupleInvalid("testPoints", 1, 4, 4, 1); __PYX_ERR(0, 513, __pyx_L3_error)
+        }
+        case  2:
+        if (likely((values[2] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_pointsx)) != 0)) kw_args--;
+        else {
+          __Pyx_RaiseArgtupleInvalid("testPoints", 1, 4, 4, 2); __PYX_ERR(0, 513, __pyx_L3_error)
+        }
+        case  3:
+        if (likely((values[3] = PyDict_GetItem(__pyx_kwds, __pyx_n_s_pointsz)) != 0)) kw_args--;
+        else {
+          __Pyx_RaiseArgtupleInvalid("testPoints", 1, 4, 4, 3); __PYX_ERR(0, 513, __pyx_L3_error)
+        }
+      }
+      if (unlikely(kw_args > 0)) {
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "testPoints") < 0)) __PYX_ERR(0, 513, __pyx_L3_error)
+      }
+    } else if (PyTuple_GET_SIZE(__pyx_args) != 4) {
+      goto __pyx_L5_argtuple_error;
+    } else {
+      values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
+      values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+      values[2] = PyTuple_GET_ITEM(__pyx_args, 2);
+      values[3] = PyTuple_GET_ITEM(__pyx_args, 3);
+    }
+    __pyx_v_gap_threshold = __Pyx_PyInt_As_int(values[0]); if (unlikely((__pyx_v_gap_threshold == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 513, __pyx_L3_error)
+    __pyx_v_pointsy = ((PyArrayObject *)values[1]);
+    __pyx_v_pointsx = ((PyArrayObject *)values[2]);
+    __pyx_v_pointsz = ((PyArrayObject *)values[3]);
+  }
+  goto __pyx_L4_argument_unpacking_done;
+  __pyx_L5_argtuple_error:;
+  __Pyx_RaiseArgtupleInvalid("testPoints", 1, 4, 4, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 513, __pyx_L3_error)
+  __pyx_L3_error:;
+  __Pyx_AddTraceback("RMS.Routines.Grouping3Dcy.testPoints", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_RefNannyFinishContext();
+  return NULL;
+  __pyx_L4_argument_unpacking_done:;
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_pointsy), __pyx_ptype_5numpy_ndarray, 1, "pointsy", 0))) __PYX_ERR(0, 513, __pyx_L1_error)
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_pointsx), __pyx_ptype_5numpy_ndarray, 1, "pointsx", 0))) __PYX_ERR(0, 514, __pyx_L1_error)
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_pointsz), __pyx_ptype_5numpy_ndarray, 1, "pointsz", 0))) __PYX_ERR(0, 514, __pyx_L1_error)
+  __pyx_r = __pyx_pf_3RMS_8Routines_12Grouping3Dcy_10testPoints(__pyx_self, __pyx_v_gap_threshold, __pyx_v_pointsy, __pyx_v_pointsx, __pyx_v_pointsz);
+
+  /* function exit code */
+  goto __pyx_L0;
+  __pyx_L1_error:;
+  __pyx_r = NULL;
+  __pyx_L0:;
+  __Pyx_RefNannyFinishContext();
+  return __pyx_r;
+}
+
+static PyObject *__pyx_pf_3RMS_8Routines_12Grouping3Dcy_10testPoints(CYTHON_UNUSED PyObject *__pyx_self, int __pyx_v_gap_threshold, PyArrayObject *__pyx_v_pointsy, PyArrayObject *__pyx_v_pointsx, PyArrayObject *__pyx_v_pointsz) {
+  unsigned int __pyx_v_size;
+  unsigned int __pyx_v_distance;
+  unsigned int __pyx_v_i;
+  unsigned int __pyx_v_count;
+  unsigned int __pyx_v_y_dist;
+  CYTHON_UNUSED unsigned int __pyx_v_x_dist;
+  unsigned int __pyx_v_z_dist;
+  unsigned int __pyx_v_y_prev;
+  unsigned int __pyx_v_x_prev;
+  unsigned int __pyx_v_z_prev;
+  __Pyx_LocalBuf_ND __pyx_pybuffernd_pointsx;
+  __Pyx_Buffer __pyx_pybuffer_pointsx;
+  __Pyx_LocalBuf_ND __pyx_pybuffernd_pointsy;
+  __Pyx_Buffer __pyx_pybuffer_pointsy;
+  __Pyx_LocalBuf_ND __pyx_pybuffernd_pointsz;
+  __Pyx_Buffer __pyx_pybuffer_pointsz;
+  PyObject *__pyx_r = NULL;
+  __Pyx_RefNannyDeclarations
+  unsigned int __pyx_t_1;
+  unsigned int __pyx_t_2;
+  size_t __pyx_t_3;
+  size_t __pyx_t_4;
+  size_t __pyx_t_5;
+  int __pyx_t_6;
+  size_t __pyx_t_7;
+  size_t __pyx_t_8;
+  size_t __pyx_t_9;
+  PyObject *__pyx_t_10 = NULL;
+  __Pyx_RefNannySetupContext("testPoints", 0);
+  __pyx_pybuffer_pointsy.pybuffer.buf = NULL;
+  __pyx_pybuffer_pointsy.refcount = 0;
+  __pyx_pybuffernd_pointsy.data = NULL;
+  __pyx_pybuffernd_pointsy.rcbuffer = &__pyx_pybuffer_pointsy;
+  __pyx_pybuffer_pointsx.pybuffer.buf = NULL;
+  __pyx_pybuffer_pointsx.refcount = 0;
+  __pyx_pybuffernd_pointsx.data = NULL;
+  __pyx_pybuffernd_pointsx.rcbuffer = &__pyx_pybuffer_pointsx;
+  __pyx_pybuffer_pointsz.pybuffer.buf = NULL;
+  __pyx_pybuffer_pointsz.refcount = 0;
+  __pyx_pybuffernd_pointsz.data = NULL;
+  __pyx_pybuffernd_pointsz.rcbuffer = &__pyx_pybuffer_pointsz;
+  {
+    __Pyx_BufFmt_StackElem __pyx_stack[1];
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_pointsy.rcbuffer->pybuffer, (PyObject*)__pyx_v_pointsy, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 1, 0, __pyx_stack) == -1)) __PYX_ERR(0, 513, __pyx_L1_error)
+  }
+  __pyx_pybuffernd_pointsy.diminfo[0].strides = __pyx_pybuffernd_pointsy.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_pointsy.diminfo[0].shape = __pyx_pybuffernd_pointsy.rcbuffer->pybuffer.shape[0];
+  {
+    __Pyx_BufFmt_StackElem __pyx_stack[1];
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_pointsx.rcbuffer->pybuffer, (PyObject*)__pyx_v_pointsx, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 1, 0, __pyx_stack) == -1)) __PYX_ERR(0, 513, __pyx_L1_error)
+  }
+  __pyx_pybuffernd_pointsx.diminfo[0].strides = __pyx_pybuffernd_pointsx.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_pointsx.diminfo[0].shape = __pyx_pybuffernd_pointsx.rcbuffer->pybuffer.shape[0];
+  {
+    __Pyx_BufFmt_StackElem __pyx_stack[1];
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_pointsz.rcbuffer->pybuffer, (PyObject*)__pyx_v_pointsz, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 1, 0, __pyx_stack) == -1)) __PYX_ERR(0, 513, __pyx_L1_error)
+  }
+  __pyx_pybuffernd_pointsz.diminfo[0].strides = __pyx_pybuffernd_pointsz.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_pointsz.diminfo[0].shape = __pyx_pybuffernd_pointsz.rcbuffer->pybuffer.shape[0];
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":529
+ *     """
+ * 
+ *     cdef unsigned int size, distance, i, count = 0, y_dist, x_dist, z_dist, y_prev = 0, x_prev = 0, z_prev = 0             # <<<<<<<<<<<<<<
+ * 
+ *     # Extract the size of arrays
+ */
+  __pyx_v_count = 0;
+  __pyx_v_y_prev = 0;
+  __pyx_v_x_prev = 0;
+  __pyx_v_z_prev = 0;
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":532
+ * 
+ *     # Extract the size of arrays
+ *     size = pointsx.shape[0]             # <<<<<<<<<<<<<<
+ * 
+ *     for i in range(size):
+ */
+  __pyx_v_size = (__pyx_v_pointsx->dimensions[0]);
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":534
+ *     size = pointsx.shape[0]
+ * 
+ *     for i in range(size):             # <<<<<<<<<<<<<<
+ * 
+ *         # Compute the distance from the previous point
+ */
+  __pyx_t_1 = __pyx_v_size;
+  for (__pyx_t_2 = 0; __pyx_t_2 < __pyx_t_1; __pyx_t_2+=1) {
+    __pyx_v_i = __pyx_t_2;
+
+    /* "RMS/Routines/Grouping3Dcy.pyx":537
+ * 
+ *         # Compute the distance from the previous point
+ *         x_dist = pointsx[i] - x_prev             # <<<<<<<<<<<<<<
+ *         z_dist = pointsz[i] - z_prev
+ *         y_dist = pointsy[i] - y_prev
+ */
+    __pyx_t_3 = __pyx_v_i;
+    __pyx_v_x_dist = ((*__Pyx_BufPtrStrided1d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_pointsx.rcbuffer->pybuffer.buf, __pyx_t_3, __pyx_pybuffernd_pointsx.diminfo[0].strides)) - __pyx_v_x_prev);
+
+    /* "RMS/Routines/Grouping3Dcy.pyx":538
+ *         # Compute the distance from the previous point
+ *         x_dist = pointsx[i] - x_prev
+ *         z_dist = pointsz[i] - z_prev             # <<<<<<<<<<<<<<
+ *         y_dist = pointsy[i] - y_prev
+ * 
+ */
+    __pyx_t_4 = __pyx_v_i;
+    __pyx_v_z_dist = ((*__Pyx_BufPtrStrided1d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_pointsz.rcbuffer->pybuffer.buf, __pyx_t_4, __pyx_pybuffernd_pointsz.diminfo[0].strides)) - __pyx_v_z_prev);
+
+    /* "RMS/Routines/Grouping3Dcy.pyx":539
+ *         x_dist = pointsx[i] - x_prev
+ *         z_dist = pointsz[i] - z_prev
+ *         y_dist = pointsy[i] - y_prev             # <<<<<<<<<<<<<<
+ * 
+ *         distance = y_dist**2 + z_dist**2 + z_dist**2
+ */
+    __pyx_t_5 = __pyx_v_i;
+    __pyx_v_y_dist = ((*__Pyx_BufPtrStrided1d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_pointsy.rcbuffer->pybuffer.buf, __pyx_t_5, __pyx_pybuffernd_pointsy.diminfo[0].strides)) - __pyx_v_y_prev);
+
+    /* "RMS/Routines/Grouping3Dcy.pyx":541
+ *         y_dist = pointsy[i] - y_prev
+ * 
+ *         distance = y_dist**2 + z_dist**2 + z_dist**2             # <<<<<<<<<<<<<<
+ * 
+ *         # Count the point if there is no gap from the previous point
+ */
+    __pyx_v_distance = ((__Pyx_pow_long(((long)__pyx_v_y_dist), 2) + __Pyx_pow_long(((long)__pyx_v_z_dist), 2)) + __Pyx_pow_long(((long)__pyx_v_z_dist), 2));
+
+    /* "RMS/Routines/Grouping3Dcy.pyx":544
+ * 
+ *         # Count the point if there is no gap from the previous point
+ *         if(distance < gap_threshold):             # <<<<<<<<<<<<<<
+ *             count += 1
+ * 
+ */
+    __pyx_t_6 = ((__pyx_v_distance < __pyx_v_gap_threshold) != 0);
+    if (__pyx_t_6) {
+
+      /* "RMS/Routines/Grouping3Dcy.pyx":545
+ *         # Count the point if there is no gap from the previous point
+ *         if(distance < gap_threshold):
+ *             count += 1             # <<<<<<<<<<<<<<
+ * 
+ *         y_prev = pointsy[i]
+ */
+      __pyx_v_count = (__pyx_v_count + 1);
+
+      /* "RMS/Routines/Grouping3Dcy.pyx":544
+ * 
+ *         # Count the point if there is no gap from the previous point
+ *         if(distance < gap_threshold):             # <<<<<<<<<<<<<<
+ *             count += 1
+ * 
+ */
+    }
+
+    /* "RMS/Routines/Grouping3Dcy.pyx":547
+ *             count += 1
+ * 
+ *         y_prev = pointsy[i]             # <<<<<<<<<<<<<<
+ *         x_prev = pointsx[i]
+ *         z_prev = pointsz[i]
+ */
+    __pyx_t_7 = __pyx_v_i;
+    __pyx_v_y_prev = (*__Pyx_BufPtrStrided1d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_pointsy.rcbuffer->pybuffer.buf, __pyx_t_7, __pyx_pybuffernd_pointsy.diminfo[0].strides));
+
+    /* "RMS/Routines/Grouping3Dcy.pyx":548
+ * 
+ *         y_prev = pointsy[i]
+ *         x_prev = pointsx[i]             # <<<<<<<<<<<<<<
+ *         z_prev = pointsz[i]
+ * 
+ */
+    __pyx_t_8 = __pyx_v_i;
+    __pyx_v_x_prev = (*__Pyx_BufPtrStrided1d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_pointsx.rcbuffer->pybuffer.buf, __pyx_t_8, __pyx_pybuffernd_pointsx.diminfo[0].strides));
+
+    /* "RMS/Routines/Grouping3Dcy.pyx":549
+ *         y_prev = pointsy[i]
+ *         x_prev = pointsx[i]
+ *         z_prev = pointsz[i]             # <<<<<<<<<<<<<<
+ * 
+ * 
+ */
+    __pyx_t_9 = __pyx_v_i;
+    __pyx_v_z_prev = (*__Pyx_BufPtrStrided1d(__pyx_t_3RMS_8Routines_12Grouping3Dcy_UINT16_TYPE_t *, __pyx_pybuffernd_pointsz.rcbuffer->pybuffer.buf, __pyx_t_9, __pyx_pybuffernd_pointsz.diminfo[0].strides));
+  }
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":552
+ * 
+ * 
+ *     return count             # <<<<<<<<<<<<<<
+ */
+  __Pyx_XDECREF(__pyx_r);
+  __pyx_t_10 = __Pyx_PyInt_From_unsigned_int(__pyx_v_count); if (unlikely(!__pyx_t_10)) __PYX_ERR(0, 552, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_10);
+  __pyx_r = __pyx_t_10;
+  __pyx_t_10 = 0;
+  goto __pyx_L0;
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":513
+ * @cython.boundscheck(False)
+ * @cython.wraparound(False)
+ * def testPoints(int gap_threshold, np.ndarray[UINT16_TYPE_t, ndim=1] pointsy, \             # <<<<<<<<<<<<<<
+ *     np.ndarray[UINT16_TYPE_t, ndim=1] pointsx, np.ndarray[UINT16_TYPE_t, ndim=1] pointsz):
+ *     """ Test if the given 3D point cloud contains a line by testing if there is a large gap between the points
+ */
+
+  /* function exit code */
+  __pyx_L1_error:;
+  __Pyx_XDECREF(__pyx_t_10);
+  { PyObject *__pyx_type, *__pyx_value, *__pyx_tb;
+    __Pyx_PyThreadState_declare
+    __Pyx_PyThreadState_assign
+    __Pyx_ErrFetch(&__pyx_type, &__pyx_value, &__pyx_tb);
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_pointsx.rcbuffer->pybuffer);
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_pointsy.rcbuffer->pybuffer);
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_pointsz.rcbuffer->pybuffer);
+  __Pyx_ErrRestore(__pyx_type, __pyx_value, __pyx_tb);}
+  __Pyx_AddTraceback("RMS.Routines.Grouping3Dcy.testPoints", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __pyx_r = NULL;
+  goto __pyx_L2;
+  __pyx_L0:;
+  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_pointsx.rcbuffer->pybuffer);
+  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_pointsy.rcbuffer->pybuffer);
+  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_pointsz.rcbuffer->pybuffer);
+  __pyx_L2:;
   __Pyx_XGIVEREF(__pyx_r);
   __Pyx_RefNannyFinishContext();
   return __pyx_r;
@@ -9549,7 +10996,7 @@ static struct PyModuleDef __pyx_moduledef = {
     PyModuleDef_HEAD_INIT,
   #endif
     "Grouping3Dcy",
-    0, /* m_doc */
+    __pyx_k_Cython_functions_for_3D_line_de, /* m_doc */
     -1, /* m_size */
     __pyx_methods /* m_methods */,
     NULL, /* m_reload */
@@ -9563,27 +11010,34 @@ static __Pyx_StringTabEntry __pyx_string_tab[] = {
   {&__pyx_kp_s_, __pyx_k_, sizeof(__pyx_k_), 0, 0, 1, 0},
   {&__pyx_kp_u_Format_string_allocated_too_shor, __pyx_k_Format_string_allocated_too_shor, sizeof(__pyx_k_Format_string_allocated_too_shor), 0, 1, 0, 0},
   {&__pyx_kp_u_Format_string_allocated_too_shor_2, __pyx_k_Format_string_allocated_too_shor_2, sizeof(__pyx_k_Format_string_allocated_too_shor_2), 0, 1, 0, 0},
-  {&__pyx_n_s_INT_TYPE, __pyx_k_INT_TYPE, sizeof(__pyx_k_INT_TYPE), 0, 0, 1, 1},
   {&__pyx_n_s_ImportError, __pyx_k_ImportError, sizeof(__pyx_k_ImportError), 0, 0, 1, 1},
   {&__pyx_kp_u_Non_native_byte_order_not_suppor, __pyx_k_Non_native_byte_order_not_suppor, sizeof(__pyx_k_Non_native_byte_order_not_suppor), 0, 1, 0, 0},
   {&__pyx_n_s_RMS_Routines_Grouping3Dcy, __pyx_k_RMS_Routines_Grouping3Dcy, sizeof(__pyx_k_RMS_Routines_Grouping3Dcy), 0, 0, 1, 1},
   {&__pyx_n_s_RuntimeError, __pyx_k_RuntimeError, sizeof(__pyx_k_RuntimeError), 0, 0, 1, 1},
+  {&__pyx_n_s_UINT16_TYPE, __pyx_k_UINT16_TYPE, sizeof(__pyx_k_UINT16_TYPE), 0, 0, 1, 1},
+  {&__pyx_n_s_UINT8_TYPE, __pyx_k_UINT8_TYPE, sizeof(__pyx_k_UINT8_TYPE), 0, 0, 1, 1},
   {&__pyx_n_s_ValueError, __pyx_k_ValueError, sizeof(__pyx_k_ValueError), 0, 0, 1, 1},
   {&__pyx_kp_s__5, __pyx_k__5, sizeof(__pyx_k__5), 0, 0, 1, 0},
   {&__pyx_n_s_all, __pyx_k_all, sizeof(__pyx_k_all), 0, 0, 1, 1},
   {&__pyx_n_s_append, __pyx_k_append, sizeof(__pyx_k_append), 0, 0, 1, 1},
   {&__pyx_n_s_argsort, __pyx_k_argsort, sizeof(__pyx_k_argsort), 0, 0, 1, 1},
   {&__pyx_n_s_array, __pyx_k_array, sizeof(__pyx_k_array), 0, 0, 1, 1},
+  {&__pyx_n_s_avg_std, __pyx_k_avg_std, sizeof(__pyx_k_avg_std), 0, 0, 1, 1},
   {&__pyx_n_s_axis, __pyx_k_axis, sizeof(__pyx_k_axis), 0, 0, 1, 1},
   {&__pyx_n_s_best_distance, __pyx_k_best_distance, sizeof(__pyx_k_best_distance), 0, 0, 1, 1},
+  {&__pyx_n_s_compressed, __pyx_k_compressed, sizeof(__pyx_k_compressed), 0, 0, 1, 1},
   {&__pyx_n_s_config, __pyx_k_config, sizeof(__pyx_k_config), 0, 0, 1, 1},
   {&__pyx_n_s_copy, __pyx_k_copy, sizeof(__pyx_k_copy), 0, 0, 1, 1},
+  {&__pyx_n_s_count, __pyx_k_count, sizeof(__pyx_k_count), 0, 0, 1, 1},
   {&__pyx_n_s_counter, __pyx_k_counter, sizeof(__pyx_k_counter), 0, 0, 1, 1},
+  {&__pyx_n_s_distance, __pyx_k_distance, sizeof(__pyx_k_distance), 0, 0, 1, 1},
   {&__pyx_n_s_distance_threshold, __pyx_k_distance_threshold, sizeof(__pyx_k_distance_threshold), 0, 0, 1, 1},
   {&__pyx_n_s_dtype, __pyx_k_dtype, sizeof(__pyx_k_dtype), 0, 0, 1, 1},
+  {&__pyx_n_s_f, __pyx_k_f, sizeof(__pyx_k_f), 0, 0, 1, 1},
   {&__pyx_n_s_find3DLines, __pyx_k_find3DLines, sizeof(__pyx_k_find3DLines), 0, 0, 1, 1},
   {&__pyx_n_s_first_frame, __pyx_k_first_frame, sizeof(__pyx_k_first_frame), 0, 0, 1, 1},
   {&__pyx_n_s_formatLine, __pyx_k_formatLine, sizeof(__pyx_k_formatLine), 0, 0, 1, 1},
+  {&__pyx_n_s_frames, __pyx_k_frames, sizeof(__pyx_k_frames), 0, 0, 1, 1},
   {&__pyx_n_s_gap_threshold, __pyx_k_gap_threshold, sizeof(__pyx_k_gap_threshold), 0, 0, 1, 1},
   {&__pyx_n_s_getAllPoints, __pyx_k_getAllPoints, sizeof(__pyx_k_getAllPoints), 0, 0, 1, 1},
   {&__pyx_n_s_getAllPoints_locals_propagateLin, __pyx_k_getAllPoints_locals_propagateLin, sizeof(__pyx_k_getAllPoints_locals_propagateLin), 0, 0, 1, 1},
@@ -9593,8 +11047,10 @@ static __Pyx_StringTabEntry __pyx_string_tab[] = {
   {&__pyx_n_s_i, __pyx_k_i, sizeof(__pyx_k_i), 0, 0, 1, 1},
   {&__pyx_n_s_import, __pyx_k_import, sizeof(__pyx_k_import), 0, 0, 1, 1},
   {&__pyx_n_s_inf, __pyx_k_inf, sizeof(__pyx_k_inf), 0, 0, 1, 1},
+  {&__pyx_n_s_int32, __pyx_k_int32, sizeof(__pyx_k_int32), 0, 0, 1, 1},
   {&__pyx_n_s_j, __pyx_k_j, sizeof(__pyx_k_j), 0, 0, 1, 1},
   {&__pyx_n_s_join, __pyx_k_join, sizeof(__pyx_k_join), 0, 0, 1, 1},
+  {&__pyx_n_s_k1, __pyx_k_k1, sizeof(__pyx_k_k1), 0, 0, 1, 1},
   {&__pyx_n_s_last_frame, __pyx_k_last_frame, sizeof(__pyx_k_last_frame), 0, 0, 1, 1},
   {&__pyx_n_s_line, __pyx_k_line, sizeof(__pyx_k_line), 0, 0, 1, 1},
   {&__pyx_n_s_line_dist, __pyx_k_line_dist, sizeof(__pyx_k_line_dist), 0, 0, 1, 1},
@@ -9613,11 +11069,16 @@ static __Pyx_StringTabEntry __pyx_string_tab[] = {
   {&__pyx_n_s_max_line_points_rows, __pyx_k_max_line_points_rows, sizeof(__pyx_k_max_line_points_rows), 0, 0, 1, 1},
   {&__pyx_n_s_max_lines, __pyx_k_max_lines, sizeof(__pyx_k_max_lines), 0, 0, 1, 1},
   {&__pyx_n_s_max_time, __pyx_k_max_time, sizeof(__pyx_k_max_time), 0, 0, 1, 1},
+  {&__pyx_n_s_max_val, __pyx_k_max_val, sizeof(__pyx_k_max_val), 0, 0, 1, 1},
   {&__pyx_n_s_min_frames, __pyx_k_min_frames, sizeof(__pyx_k_min_frames), 0, 0, 1, 1},
+  {&__pyx_n_s_min_level, __pyx_k_min_level, sizeof(__pyx_k_min_level), 0, 0, 1, 1},
   {&__pyx_n_s_min_points, __pyx_k_min_points, sizeof(__pyx_k_min_points), 0, 0, 1, 1},
+  {&__pyx_n_s_n, __pyx_k_n, sizeof(__pyx_k_n), 0, 0, 1, 1},
   {&__pyx_kp_u_ndarray_is_not_C_contiguous, __pyx_k_ndarray_is_not_C_contiguous, sizeof(__pyx_k_ndarray_is_not_C_contiguous), 0, 1, 0, 0},
   {&__pyx_kp_u_ndarray_is_not_Fortran_contiguou, __pyx_k_ndarray_is_not_Fortran_contiguou, sizeof(__pyx_k_ndarray_is_not_Fortran_contiguou), 0, 1, 0, 0},
+  {&__pyx_n_s_nframes, __pyx_k_nframes, sizeof(__pyx_k_nframes), 0, 0, 1, 1},
   {&__pyx_n_s_np, __pyx_k_np, sizeof(__pyx_k_np), 0, 0, 1, 1},
+  {&__pyx_n_s_num, __pyx_k_num, sizeof(__pyx_k_num), 0, 0, 1, 1},
   {&__pyx_n_s_numpy, __pyx_k_numpy, sizeof(__pyx_k_numpy), 0, 0, 1, 1},
   {&__pyx_kp_s_numpy_core_multiarray_failed_to, __pyx_k_numpy_core_multiarray_failed_to, sizeof(__pyx_k_numpy_core_multiarray_failed_to), 0, 0, 1, 0},
   {&__pyx_kp_s_numpy_core_umath_failed_to_impor, __pyx_k_numpy_core_umath_failed_to_impor, sizeof(__pyx_k_numpy_core_umath_failed_to_impor), 0, 0, 1, 0},
@@ -9627,6 +11088,9 @@ static __Pyx_StringTabEntry __pyx_string_tab[] = {
   {&__pyx_n_s_point_list_rows, __pyx_k_point_list_rows, sizeof(__pyx_k_point_list_rows), 0, 0, 1, 1},
   {&__pyx_n_s_point_list_size, __pyx_k_point_list_size, sizeof(__pyx_k_point_list_size), 0, 0, 1, 1},
   {&__pyx_n_s_point_ratio_threshold, __pyx_k_point_ratio_threshold, sizeof(__pyx_k_point_ratio_threshold), 0, 0, 1, 1},
+  {&__pyx_n_s_pointsx, __pyx_k_pointsx, sizeof(__pyx_k_pointsx), 0, 0, 1, 1},
+  {&__pyx_n_s_pointsy, __pyx_k_pointsy, sizeof(__pyx_k_pointsy), 0, 0, 1, 1},
+  {&__pyx_n_s_pointsz, __pyx_k_pointsz, sizeof(__pyx_k_pointsz), 0, 0, 1, 1},
   {&__pyx_n_s_propagateLine, __pyx_k_propagateLine, sizeof(__pyx_k_propagateLine), 0, 0, 1, 1},
   {&__pyx_n_s_propagation_list, __pyx_k_propagation_list, sizeof(__pyx_k_propagation_list), 0, 0, 1, 1},
   {&__pyx_n_s_range, __pyx_k_range, sizeof(__pyx_k_range), 0, 0, 1, 1},
@@ -9636,37 +11100,50 @@ static __Pyx_StringTabEntry __pyx_string_tab[] = {
   {&__pyx_n_s_results_list, __pyx_k_results_list, sizeof(__pyx_k_results_list), 0, 0, 1, 1},
   {&__pyx_n_s_setdiff1d, __pyx_k_setdiff1d, sizeof(__pyx_k_setdiff1d), 0, 0, 1, 1},
   {&__pyx_n_s_shape, __pyx_k_shape, sizeof(__pyx_k_shape), 0, 0, 1, 1},
+  {&__pyx_n_s_shape_x, __pyx_k_shape_x, sizeof(__pyx_k_shape_x), 0, 0, 1, 1},
+  {&__pyx_n_s_shape_y, __pyx_k_shape_y, sizeof(__pyx_k_shape_y), 0, 0, 1, 1},
+  {&__pyx_n_s_shape_z, __pyx_k_shape_z, sizeof(__pyx_k_shape_z), 0, 0, 1, 1},
   {&__pyx_n_s_size, __pyx_k_size, sizeof(__pyx_k_size), 0, 0, 1, 1},
   {&__pyx_n_s_start_time, __pyx_k_start_time, sizeof(__pyx_k_start_time), 0, 0, 1, 1},
   {&__pyx_n_s_temp_dist, __pyx_k_temp_dist, sizeof(__pyx_k_temp_dist), 0, 0, 1, 1},
   {&__pyx_n_s_test, __pyx_k_test, sizeof(__pyx_k_test), 0, 0, 1, 1},
+  {&__pyx_n_s_testPoints, __pyx_k_testPoints, sizeof(__pyx_k_testPoints), 0, 0, 1, 1},
+  {&__pyx_n_s_thresholdAndSubsample, __pyx_k_thresholdAndSubsample, sizeof(__pyx_k_thresholdAndSubsample), 0, 0, 1, 1},
   {&__pyx_n_s_time, __pyx_k_time, sizeof(__pyx_k_time), 0, 0, 1, 1},
   {&__pyx_n_s_uint16, __pyx_k_uint16, sizeof(__pyx_k_uint16), 0, 0, 1, 1},
+  {&__pyx_n_s_uint8, __pyx_k_uint8, sizeof(__pyx_k_uint8), 0, 0, 1, 1},
   {&__pyx_kp_u_unknown_dtype_code_in_numpy_pxd, __pyx_k_unknown_dtype_code_in_numpy_pxd, sizeof(__pyx_k_unknown_dtype_code_in_numpy_pxd), 0, 1, 0, 0},
   {&__pyx_n_s_view, __pyx_k_view, sizeof(__pyx_k_view), 0, 0, 1, 1},
   {&__pyx_n_s_where, __pyx_k_where, sizeof(__pyx_k_where), 0, 0, 1, 1},
+  {&__pyx_n_s_x, __pyx_k_x, sizeof(__pyx_k_x), 0, 0, 1, 1},
   {&__pyx_n_s_x1, __pyx_k_x1, sizeof(__pyx_k_x1), 0, 0, 1, 1},
   {&__pyx_n_s_x2, __pyx_k_x2, sizeof(__pyx_k_x2), 0, 0, 1, 1},
   {&__pyx_n_s_x3, __pyx_k_x3, sizeof(__pyx_k_x3), 0, 0, 1, 1},
+  {&__pyx_n_s_x_dist, __pyx_k_x_dist, sizeof(__pyx_k_x_dist), 0, 0, 1, 1},
   {&__pyx_n_s_x_prev, __pyx_k_x_prev, sizeof(__pyx_k_x_prev), 0, 0, 1, 1},
+  {&__pyx_n_s_x_size, __pyx_k_x_size, sizeof(__pyx_k_x_size), 0, 0, 1, 1},
   {&__pyx_n_s_x_temp, __pyx_k_x_temp, sizeof(__pyx_k_x_temp), 0, 0, 1, 1},
+  {&__pyx_n_s_y, __pyx_k_y, sizeof(__pyx_k_y), 0, 0, 1, 1},
   {&__pyx_n_s_y1, __pyx_k_y1, sizeof(__pyx_k_y1), 0, 0, 1, 1},
   {&__pyx_n_s_y2, __pyx_k_y2, sizeof(__pyx_k_y2), 0, 0, 1, 1},
   {&__pyx_n_s_y3, __pyx_k_y3, sizeof(__pyx_k_y3), 0, 0, 1, 1},
+  {&__pyx_n_s_y_dist, __pyx_k_y_dist, sizeof(__pyx_k_y_dist), 0, 0, 1, 1},
   {&__pyx_n_s_y_prev, __pyx_k_y_prev, sizeof(__pyx_k_y_prev), 0, 0, 1, 1},
+  {&__pyx_n_s_y_size, __pyx_k_y_size, sizeof(__pyx_k_y_size), 0, 0, 1, 1},
   {&__pyx_n_s_y_temp, __pyx_k_y_temp, sizeof(__pyx_k_y_temp), 0, 0, 1, 1},
   {&__pyx_n_s_z, __pyx_k_z, sizeof(__pyx_k_z), 0, 0, 1, 1},
   {&__pyx_n_s_z1, __pyx_k_z1, sizeof(__pyx_k_z1), 0, 0, 1, 1},
   {&__pyx_n_s_z2, __pyx_k_z2, sizeof(__pyx_k_z2), 0, 0, 1, 1},
   {&__pyx_n_s_z3, __pyx_k_z3, sizeof(__pyx_k_z3), 0, 0, 1, 1},
+  {&__pyx_n_s_z_dist, __pyx_k_z_dist, sizeof(__pyx_k_z_dist), 0, 0, 1, 1},
   {&__pyx_n_s_z_prev, __pyx_k_z_prev, sizeof(__pyx_k_z_prev), 0, 0, 1, 1},
   {&__pyx_n_s_z_temp, __pyx_k_z_temp, sizeof(__pyx_k_z_temp), 0, 0, 1, 1},
   {&__pyx_n_s_zeros, __pyx_k_zeros, sizeof(__pyx_k_zeros), 0, 0, 1, 1},
   {0, 0, 0, 0, 0, 0, 0}
 };
 static int __Pyx_InitCachedBuiltins(void) {
-  __pyx_builtin_map = __Pyx_GetBuiltinName(__pyx_n_s_map); if (!__pyx_builtin_map) __PYX_ERR(0, 90, __pyx_L1_error)
-  __pyx_builtin_range = __Pyx_GetBuiltinName(__pyx_n_s_range); if (!__pyx_builtin_range) __PYX_ERR(0, 169, __pyx_L1_error)
+  __pyx_builtin_map = __Pyx_GetBuiltinName(__pyx_n_s_map); if (!__pyx_builtin_map) __PYX_ERR(0, 111, __pyx_L1_error)
+  __pyx_builtin_range = __Pyx_GetBuiltinName(__pyx_n_s_range); if (!__pyx_builtin_range) __PYX_ERR(0, 193, __pyx_L1_error)
   __pyx_builtin_ValueError = __Pyx_GetBuiltinName(__pyx_n_s_ValueError); if (!__pyx_builtin_ValueError) __PYX_ERR(1, 218, __pyx_L1_error)
   __pyx_builtin_RuntimeError = __Pyx_GetBuiltinName(__pyx_n_s_RuntimeError); if (!__pyx_builtin_RuntimeError) __PYX_ERR(1, 799, __pyx_L1_error)
   __pyx_builtin_ImportError = __Pyx_GetBuiltinName(__pyx_n_s_ImportError); if (!__pyx_builtin_ImportError) __PYX_ERR(1, 989, __pyx_L1_error)
@@ -9679,65 +11156,65 @@ static int __Pyx_InitCachedConstants(void) {
   __Pyx_RefNannyDeclarations
   __Pyx_RefNannySetupContext("__Pyx_InitCachedConstants", 0);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":121
+  /* "RMS/Routines/Grouping3Dcy.pyx":145
  *         return np.array([[]])
  * 
- *     def propagateLine(np.ndarray[INT_TYPE_t, ndim=2] max_line_points, np.ndarray[INT_TYPE_t, ndim=2] propagation_list, int i):             # <<<<<<<<<<<<<<
+ *     def propagateLine(np.ndarray[UINT16_TYPE_t, ndim=2] max_line_points, np.ndarray[UINT16_TYPE_t, ndim=2] propagation_list, int i):             # <<<<<<<<<<<<<<
  *         """ Finds all points present on a line starting from a point on that line.
  *         """
  */
-  __pyx_tuple__2 = PyTuple_Pack(11, __pyx_n_s_max_line_points, __pyx_n_s_propagation_list, __pyx_n_s_i, __pyx_n_s_x3, __pyx_n_s_y3, __pyx_n_s_z3, __pyx_n_s_x_prev, __pyx_n_s_y_prev, __pyx_n_s_z_prev, __pyx_n_s_z, __pyx_n_s_line_dist); if (unlikely(!__pyx_tuple__2)) __PYX_ERR(0, 121, __pyx_L1_error)
+  __pyx_tuple__2 = PyTuple_Pack(11, __pyx_n_s_max_line_points, __pyx_n_s_propagation_list, __pyx_n_s_i, __pyx_n_s_x3, __pyx_n_s_y3, __pyx_n_s_z3, __pyx_n_s_x_prev, __pyx_n_s_y_prev, __pyx_n_s_z_prev, __pyx_n_s_z, __pyx_n_s_line_dist); if (unlikely(!__pyx_tuple__2)) __PYX_ERR(0, 145, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__2);
   __Pyx_GIVEREF(__pyx_tuple__2);
-  __pyx_codeobj__3 = (PyObject*)__Pyx_PyCode_New(3, 0, 11, 0, 0, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__2, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_home_dvida_source_RMS_RMS_Routi, __pyx_n_s_propagateLine, 121, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__3)) __PYX_ERR(0, 121, __pyx_L1_error)
+  __pyx_codeobj__3 = (PyObject*)__Pyx_PyCode_New(3, 0, 11, 0, 0, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__2, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_home_dvida_source_RMS_RMS_Routi, __pyx_n_s_propagateLine, 145, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__3)) __PYX_ERR(0, 145, __pyx_L1_error)
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":187
+  /* "RMS/Routines/Grouping3Dcy.pyx":211
  * 
  *     # Spread point cloud backwards
  *     max_line_points, i = propagateLine(max_line_points, (point_list[:point1_index])[::-1], i)             # <<<<<<<<<<<<<<
  * 
  *     return max_line_points[:i]
  */
-  __pyx_slice__4 = PySlice_New(Py_None, Py_None, __pyx_int_neg_1); if (unlikely(!__pyx_slice__4)) __PYX_ERR(0, 187, __pyx_L1_error)
+  __pyx_slice__4 = PySlice_New(Py_None, Py_None, __pyx_int_neg_1); if (unlikely(!__pyx_slice__4)) __PYX_ERR(0, 211, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_slice__4);
   __Pyx_GIVEREF(__pyx_slice__4);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":222
+  /* "RMS/Routines/Grouping3Dcy.pyx":246
  *     # Sort max point only if there are any
  *     if max_line_points.size:
  *         max_line_points = max_line_points[max_line_points[:,2].argsort()]             # <<<<<<<<<<<<<<
  * 
  *     # Sort_points by frame
  */
-  __pyx_slice__6 = PySlice_New(Py_None, Py_None, Py_None); if (unlikely(!__pyx_slice__6)) __PYX_ERR(0, 222, __pyx_L1_error)
+  __pyx_slice__6 = PySlice_New(Py_None, Py_None, Py_None); if (unlikely(!__pyx_slice__6)) __PYX_ERR(0, 246, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_slice__6);
   __Pyx_GIVEREF(__pyx_slice__6);
-  __pyx_tuple__7 = PyTuple_Pack(2, __pyx_slice__6, __pyx_int_2); if (unlikely(!__pyx_tuple__7)) __PYX_ERR(0, 222, __pyx_L1_error)
+  __pyx_tuple__7 = PyTuple_Pack(2, __pyx_slice__6, __pyx_int_2); if (unlikely(!__pyx_tuple__7)) __PYX_ERR(0, 246, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__7);
   __Pyx_GIVEREF(__pyx_tuple__7);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":225
+  /* "RMS/Routines/Grouping3Dcy.pyx":249
  * 
  *     # Sort_points by frame
  *     point_list = point_list[point_list[:,2].argsort()]             # <<<<<<<<<<<<<<
  * 
  *     return (point_list, max_line_points)
  */
-  __pyx_slice__8 = PySlice_New(Py_None, Py_None, Py_None); if (unlikely(!__pyx_slice__8)) __PYX_ERR(0, 225, __pyx_L1_error)
+  __pyx_slice__8 = PySlice_New(Py_None, Py_None, Py_None); if (unlikely(!__pyx_slice__8)) __PYX_ERR(0, 249, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_slice__8);
   __Pyx_GIVEREF(__pyx_slice__8);
-  __pyx_tuple__9 = PyTuple_Pack(2, __pyx_slice__8, __pyx_int_2); if (unlikely(!__pyx_tuple__9)) __PYX_ERR(0, 225, __pyx_L1_error)
+  __pyx_tuple__9 = PyTuple_Pack(2, __pyx_slice__8, __pyx_int_2); if (unlikely(!__pyx_tuple__9)) __PYX_ERR(0, 249, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__9);
   __Pyx_GIVEREF(__pyx_tuple__9);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":371
+  /* "RMS/Routines/Grouping3Dcy.pyx":401
  * 
  *     # Get the first and the last frame from the max_line point could
  *     first_frame = max_line_points[0,2]             # <<<<<<<<<<<<<<
  *     last_frame = max_line_points[len(max_line_points) - 1,2]
  * 
  */
-  __pyx_tuple__11 = PyTuple_Pack(2, __pyx_int_0, __pyx_int_2); if (unlikely(!__pyx_tuple__11)) __PYX_ERR(0, 371, __pyx_L1_error)
+  __pyx_tuple__11 = PyTuple_Pack(2, __pyx_int_0, __pyx_int_2); if (unlikely(!__pyx_tuple__11)) __PYX_ERR(0, 401, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__11);
   __Pyx_GIVEREF(__pyx_tuple__11);
 
@@ -9838,53 +11315,77 @@ static int __Pyx_InitCachedConstants(void) {
   __Pyx_GOTREF(__pyx_tuple__20);
   __Pyx_GIVEREF(__pyx_tuple__20);
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":100
+  /* "RMS/Routines/Grouping3Dcy.pyx":124
  * 
  * @cython.boundscheck(False)
- * def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):             # <<<<<<<<<<<<<<
+ * def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):             # <<<<<<<<<<<<<<
  *     """ Returns all points describing a particular line.
  * 
  */
-  __pyx_tuple__21 = PyTuple_Pack(22, __pyx_n_s_point_list, __pyx_n_s_x1, __pyx_n_s_y1, __pyx_n_s_z1, __pyx_n_s_x2, __pyx_n_s_y2, __pyx_n_s_z2, __pyx_n_s_distance_threshold, __pyx_n_s_gap_threshold, __pyx_n_s_max_array_size, __pyx_n_s_i, __pyx_n_s_point_list_size, __pyx_n_s_propagateLine, __pyx_n_s_propagateLine, __pyx_n_s_max_line_points, __pyx_n_s_point1_index, __pyx_n_s_best_distance, __pyx_n_s_j, __pyx_n_s_x_temp, __pyx_n_s_y_temp, __pyx_n_s_z_temp, __pyx_n_s_temp_dist); if (unlikely(!__pyx_tuple__21)) __PYX_ERR(0, 100, __pyx_L1_error)
+  __pyx_tuple__21 = PyTuple_Pack(22, __pyx_n_s_point_list, __pyx_n_s_x1, __pyx_n_s_y1, __pyx_n_s_z1, __pyx_n_s_x2, __pyx_n_s_y2, __pyx_n_s_z2, __pyx_n_s_distance_threshold, __pyx_n_s_gap_threshold, __pyx_n_s_max_array_size, __pyx_n_s_i, __pyx_n_s_point_list_size, __pyx_n_s_propagateLine, __pyx_n_s_propagateLine, __pyx_n_s_max_line_points, __pyx_n_s_point1_index, __pyx_n_s_best_distance, __pyx_n_s_j, __pyx_n_s_x_temp, __pyx_n_s_y_temp, __pyx_n_s_z_temp, __pyx_n_s_temp_dist); if (unlikely(!__pyx_tuple__21)) __PYX_ERR(0, 124, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__21);
   __Pyx_GIVEREF(__pyx_tuple__21);
-  __pyx_codeobj__22 = (PyObject*)__Pyx_PyCode_New(10, 0, 22, 0, 0, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__21, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_home_dvida_source_RMS_RMS_Routi, __pyx_n_s_getAllPoints, 100, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__22)) __PYX_ERR(0, 100, __pyx_L1_error)
+  __pyx_codeobj__22 = (PyObject*)__Pyx_PyCode_New(10, 0, 22, 0, 0, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__21, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_home_dvida_source_RMS_RMS_Routi, __pyx_n_s_getAllPoints, 124, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__22)) __PYX_ERR(0, 124, __pyx_L1_error)
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":193
+  /* "RMS/Routines/Grouping3Dcy.pyx":217
  * 
  * 
- * def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, distance_threshold, gap_threshold):             # <<<<<<<<<<<<<<
+ * def remove3DPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, Line max_line, distance_threshold, gap_threshold):             # <<<<<<<<<<<<<<
  *     """ Remove points from a point list that belong to the given line.
  * 
  */
-  __pyx_tuple__23 = PyTuple_Pack(14, __pyx_n_s_point_list, __pyx_n_s_max_line, __pyx_n_s_distance_threshold, __pyx_n_s_gap_threshold, __pyx_n_s_x1, __pyx_n_s_y1, __pyx_n_s_z1, __pyx_n_s_x2, __pyx_n_s_y2, __pyx_n_s_z2, __pyx_n_s_max_line_points, __pyx_n_s_point_list_copy, __pyx_n_s_point_list_rows, __pyx_n_s_max_line_points_rows); if (unlikely(!__pyx_tuple__23)) __PYX_ERR(0, 193, __pyx_L1_error)
+  __pyx_tuple__23 = PyTuple_Pack(14, __pyx_n_s_point_list, __pyx_n_s_max_line, __pyx_n_s_distance_threshold, __pyx_n_s_gap_threshold, __pyx_n_s_x1, __pyx_n_s_y1, __pyx_n_s_z1, __pyx_n_s_x2, __pyx_n_s_y2, __pyx_n_s_z2, __pyx_n_s_max_line_points, __pyx_n_s_point_list_copy, __pyx_n_s_point_list_rows, __pyx_n_s_max_line_points_rows); if (unlikely(!__pyx_tuple__23)) __PYX_ERR(0, 217, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__23);
   __Pyx_GIVEREF(__pyx_tuple__23);
-  __pyx_codeobj__24 = (PyObject*)__Pyx_PyCode_New(4, 0, 14, 0, 0, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__23, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_home_dvida_source_RMS_RMS_Routi, __pyx_n_s_remove3DPoints, 193, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__24)) __PYX_ERR(0, 193, __pyx_L1_error)
+  __pyx_codeobj__24 = (PyObject*)__Pyx_PyCode_New(4, 0, 14, 0, 0, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__23, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_home_dvida_source_RMS_RMS_Routi, __pyx_n_s_remove3DPoints, 217, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__24)) __PYX_ERR(0, 217, __pyx_L1_error)
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":229
- *     return (point_list, max_line_points)
+  /* "RMS/Routines/Grouping3Dcy.pyx":256
+ * 
  * 
  * def _formatLine(line, first_frame, last_frame):             # <<<<<<<<<<<<<<
  *     """ Converts Line object to a list of format:
  *     (point1, point2, counter, line_quality), first_frame, last_frame
  */
-  __pyx_tuple__25 = PyTuple_Pack(9, __pyx_n_s_line, __pyx_n_s_first_frame, __pyx_n_s_last_frame, __pyx_n_s_x1, __pyx_n_s_y1, __pyx_n_s_z1, __pyx_n_s_x2, __pyx_n_s_y2, __pyx_n_s_z2); if (unlikely(!__pyx_tuple__25)) __PYX_ERR(0, 229, __pyx_L1_error)
+  __pyx_tuple__25 = PyTuple_Pack(9, __pyx_n_s_line, __pyx_n_s_first_frame, __pyx_n_s_last_frame, __pyx_n_s_x1, __pyx_n_s_y1, __pyx_n_s_z1, __pyx_n_s_x2, __pyx_n_s_y2, __pyx_n_s_z2); if (unlikely(!__pyx_tuple__25)) __PYX_ERR(0, 256, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__25);
   __Pyx_GIVEREF(__pyx_tuple__25);
-  __pyx_codeobj__26 = (PyObject*)__Pyx_PyCode_New(3, 0, 9, 0, 0, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__25, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_home_dvida_source_RMS_RMS_Routi, __pyx_n_s_formatLine, 229, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__26)) __PYX_ERR(0, 229, __pyx_L1_error)
+  __pyx_codeobj__26 = (PyObject*)__Pyx_PyCode_New(3, 0, 9, 0, 0, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__25, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_home_dvida_source_RMS_RMS_Routi, __pyx_n_s_formatLine, 256, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__26)) __PYX_ERR(0, 256, __pyx_L1_error)
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":240
+  /* "RMS/Routines/Grouping3Dcy.pyx":270
  * @cython.boundscheck(False)
  * @cython.wraparound(False)
- * def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, get_single=False, line_list=[]):             # <<<<<<<<<<<<<<
+ * def find3DLines(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, start_time, config, get_single=False, line_list=[]):             # <<<<<<<<<<<<<<
  *     """ Iteratively find N straight lines in 3D space.
  * 
  */
-  __pyx_tuple__27 = PyTuple_Pack(39, __pyx_n_s_point_list, __pyx_n_s_start_time, __pyx_n_s_config, __pyx_n_s_get_single, __pyx_n_s_line_list, __pyx_n_s_distance_threshold, __pyx_n_s_gap_threshold, __pyx_n_s_min_points, __pyx_n_s_min_frames, __pyx_n_s_line_minimum_frame_range, __pyx_n_s_line_distance_const, __pyx_n_s_i, __pyx_n_s_j, __pyx_n_s_z, __pyx_n_s_x1, __pyx_n_s_y1, __pyx_n_s_z1, __pyx_n_s_x2, __pyx_n_s_y2, __pyx_n_s_z2, __pyx_n_s_x3, __pyx_n_s_y3, __pyx_n_s_z3, __pyx_n_s_x_prev, __pyx_n_s_y_prev, __pyx_n_s_z_prev, __pyx_n_s_counter, __pyx_n_s_results_counter, __pyx_n_s_line_dist_sum, __pyx_n_s_line_dist, __pyx_n_s_line_dist_avg, __pyx_n_s_point_list_size, __pyx_n_s_results_list, __pyx_n_s_line_quality, __pyx_n_s_max_line, __pyx_n_s_line_ratio, __pyx_n_s_max_line_points, __pyx_n_s_first_frame, __pyx_n_s_last_frame); if (unlikely(!__pyx_tuple__27)) __PYX_ERR(0, 240, __pyx_L1_error)
+  __pyx_tuple__27 = PyTuple_Pack(39, __pyx_n_s_point_list, __pyx_n_s_start_time, __pyx_n_s_config, __pyx_n_s_get_single, __pyx_n_s_line_list, __pyx_n_s_distance_threshold, __pyx_n_s_gap_threshold, __pyx_n_s_min_points, __pyx_n_s_min_frames, __pyx_n_s_line_minimum_frame_range, __pyx_n_s_line_distance_const, __pyx_n_s_i, __pyx_n_s_j, __pyx_n_s_z, __pyx_n_s_x1, __pyx_n_s_y1, __pyx_n_s_z1, __pyx_n_s_x2, __pyx_n_s_y2, __pyx_n_s_z2, __pyx_n_s_x3, __pyx_n_s_y3, __pyx_n_s_z3, __pyx_n_s_x_prev, __pyx_n_s_y_prev, __pyx_n_s_z_prev, __pyx_n_s_counter, __pyx_n_s_results_counter, __pyx_n_s_line_dist_sum, __pyx_n_s_line_dist, __pyx_n_s_line_dist_avg, __pyx_n_s_point_list_size, __pyx_n_s_results_list, __pyx_n_s_line_quality, __pyx_n_s_max_line, __pyx_n_s_line_ratio, __pyx_n_s_max_line_points, __pyx_n_s_first_frame, __pyx_n_s_last_frame); if (unlikely(!__pyx_tuple__27)) __PYX_ERR(0, 270, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__27);
   __Pyx_GIVEREF(__pyx_tuple__27);
-  __pyx_codeobj__28 = (PyObject*)__Pyx_PyCode_New(5, 0, 39, 0, 0, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__27, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_home_dvida_source_RMS_RMS_Routi, __pyx_n_s_find3DLines, 240, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__28)) __PYX_ERR(0, 240, __pyx_L1_error)
+  __pyx_codeobj__28 = (PyObject*)__Pyx_PyCode_New(5, 0, 39, 0, 0, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__27, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_home_dvida_source_RMS_RMS_Routi, __pyx_n_s_find3DLines, 270, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__28)) __PYX_ERR(0, 270, __pyx_L1_error)
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":426
+ * @cython.wraparound(False)
+ * @cython.cdivision(True)
+ * def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \             # <<<<<<<<<<<<<<
+ *     np.ndarray[UINT8_TYPE_t, ndim=3] compressed, int min_level, int min_points, float k1, int f):
+ *     """ Given the list of frames, threshold them, subsample the time and check if there are enough threshold
+ */
+  __pyx_tuple__29 = PyTuple_Pack(24, __pyx_n_s_frames, __pyx_n_s_compressed, __pyx_n_s_min_level, __pyx_n_s_min_points, __pyx_n_s_k1, __pyx_n_s_f, __pyx_n_s_x, __pyx_n_s_y, __pyx_n_s_x2, __pyx_n_s_y2, __pyx_n_s_n, __pyx_n_s_max_val, __pyx_n_s_nframes, __pyx_n_s_x_size, __pyx_n_s_y_size, __pyx_n_s_num, __pyx_n_s_avg_std, __pyx_n_s_shape_z, __pyx_n_s_shape_y, __pyx_n_s_shape_x, __pyx_n_s_count, __pyx_n_s_pointsy, __pyx_n_s_pointsx, __pyx_n_s_pointsz); if (unlikely(!__pyx_tuple__29)) __PYX_ERR(0, 426, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__29);
+  __Pyx_GIVEREF(__pyx_tuple__29);
+  __pyx_codeobj__30 = (PyObject*)__Pyx_PyCode_New(6, 0, 24, 0, 0, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__29, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_home_dvida_source_RMS_RMS_Routi, __pyx_n_s_thresholdAndSubsample, 426, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__30)) __PYX_ERR(0, 426, __pyx_L1_error)
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":513
+ * @cython.boundscheck(False)
+ * @cython.wraparound(False)
+ * def testPoints(int gap_threshold, np.ndarray[UINT16_TYPE_t, ndim=1] pointsy, \             # <<<<<<<<<<<<<<
+ *     np.ndarray[UINT16_TYPE_t, ndim=1] pointsx, np.ndarray[UINT16_TYPE_t, ndim=1] pointsz):
+ *     """ Test if the given 3D point cloud contains a line by testing if there is a large gap between the points
+ */
+  __pyx_tuple__31 = PyTuple_Pack(14, __pyx_n_s_gap_threshold, __pyx_n_s_pointsy, __pyx_n_s_pointsx, __pyx_n_s_pointsz, __pyx_n_s_size, __pyx_n_s_distance, __pyx_n_s_i, __pyx_n_s_count, __pyx_n_s_y_dist, __pyx_n_s_x_dist, __pyx_n_s_z_dist, __pyx_n_s_y_prev, __pyx_n_s_x_prev, __pyx_n_s_z_prev); if (unlikely(!__pyx_tuple__31)) __PYX_ERR(0, 513, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__31);
+  __Pyx_GIVEREF(__pyx_tuple__31);
+  __pyx_codeobj__32 = (PyObject*)__Pyx_PyCode_New(4, 0, 14, 0, 0, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__31, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_home_dvida_source_RMS_RMS_Routi, __pyx_n_s_testPoints, 513, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__32)) __PYX_ERR(0, 513, __pyx_L1_error)
   __Pyx_RefNannyFinishContext();
   return 0;
   __pyx_L1_error:;
@@ -9893,12 +11394,12 @@ static int __Pyx_InitCachedConstants(void) {
 }
 
 static int __Pyx_InitGlobals(void) {
-  if (__Pyx_InitStrings(__pyx_string_tab) < 0) __PYX_ERR(0, 2, __pyx_L1_error);
-  __pyx_int_0 = PyInt_FromLong(0); if (unlikely(!__pyx_int_0)) __PYX_ERR(0, 2, __pyx_L1_error)
-  __pyx_int_1 = PyInt_FromLong(1); if (unlikely(!__pyx_int_1)) __PYX_ERR(0, 2, __pyx_L1_error)
-  __pyx_int_2 = PyInt_FromLong(2); if (unlikely(!__pyx_int_2)) __PYX_ERR(0, 2, __pyx_L1_error)
-  __pyx_int_3 = PyInt_FromLong(3); if (unlikely(!__pyx_int_3)) __PYX_ERR(0, 2, __pyx_L1_error)
-  __pyx_int_neg_1 = PyInt_FromLong(-1); if (unlikely(!__pyx_int_neg_1)) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__Pyx_InitStrings(__pyx_string_tab) < 0) __PYX_ERR(0, 1, __pyx_L1_error);
+  __pyx_int_0 = PyInt_FromLong(0); if (unlikely(!__pyx_int_0)) __PYX_ERR(0, 1, __pyx_L1_error)
+  __pyx_int_1 = PyInt_FromLong(1); if (unlikely(!__pyx_int_1)) __PYX_ERR(0, 1, __pyx_L1_error)
+  __pyx_int_2 = PyInt_FromLong(2); if (unlikely(!__pyx_int_2)) __PYX_ERR(0, 1, __pyx_L1_error)
+  __pyx_int_3 = PyInt_FromLong(3); if (unlikely(!__pyx_int_3)) __PYX_ERR(0, 1, __pyx_L1_error)
+  __pyx_int_neg_1 = PyInt_FromLong(-1); if (unlikely(!__pyx_int_neg_1)) __PYX_ERR(0, 1, __pyx_L1_error)
   return 0;
   __pyx_L1_error:;
   return -1;
@@ -9925,24 +11426,24 @@ PyMODINIT_FUNC PyInit_Grouping3Dcy(void)
   }
   #endif
   __Pyx_RefNannySetupContext("PyMODINIT_FUNC PyInit_Grouping3Dcy(void)", 0);
-  if (__Pyx_check_binary_version() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
-  __pyx_empty_tuple = PyTuple_New(0); if (unlikely(!__pyx_empty_tuple)) __PYX_ERR(0, 2, __pyx_L1_error)
-  __pyx_empty_bytes = PyBytes_FromStringAndSize("", 0); if (unlikely(!__pyx_empty_bytes)) __PYX_ERR(0, 2, __pyx_L1_error)
-  __pyx_empty_unicode = PyUnicode_FromStringAndSize("", 0); if (unlikely(!__pyx_empty_unicode)) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__Pyx_check_binary_version() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
+  __pyx_empty_tuple = PyTuple_New(0); if (unlikely(!__pyx_empty_tuple)) __PYX_ERR(0, 1, __pyx_L1_error)
+  __pyx_empty_bytes = PyBytes_FromStringAndSize("", 0); if (unlikely(!__pyx_empty_bytes)) __PYX_ERR(0, 1, __pyx_L1_error)
+  __pyx_empty_unicode = PyUnicode_FromStringAndSize("", 0); if (unlikely(!__pyx_empty_unicode)) __PYX_ERR(0, 1, __pyx_L1_error)
   #ifdef __Pyx_CyFunction_USED
-  if (__pyx_CyFunction_init() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__pyx_CyFunction_init() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #endif
   #ifdef __Pyx_FusedFunction_USED
-  if (__pyx_FusedFunction_init() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__pyx_FusedFunction_init() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #endif
   #ifdef __Pyx_Coroutine_USED
-  if (__pyx_Coroutine_init() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__pyx_Coroutine_init() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #endif
   #ifdef __Pyx_Generator_USED
-  if (__pyx_Generator_init() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__pyx_Generator_init() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #endif
   #ifdef __Pyx_StopAsyncIteration_USED
-  if (__pyx_StopAsyncIteration_init() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__pyx_StopAsyncIteration_init() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #endif
   /*--- Library function declarations ---*/
   /*--- Threads initialization code ---*/
@@ -9953,47 +11454,47 @@ PyMODINIT_FUNC PyInit_Grouping3Dcy(void)
   #endif
   /*--- Module creation code ---*/
   #if PY_MAJOR_VERSION < 3
-  __pyx_m = Py_InitModule4("Grouping3Dcy", __pyx_methods, 0, 0, PYTHON_API_VERSION); Py_XINCREF(__pyx_m);
+  __pyx_m = Py_InitModule4("Grouping3Dcy", __pyx_methods, __pyx_k_Cython_functions_for_3D_line_de, 0, PYTHON_API_VERSION); Py_XINCREF(__pyx_m);
   #else
   __pyx_m = PyModule_Create(&__pyx_moduledef);
   #endif
-  if (unlikely(!__pyx_m)) __PYX_ERR(0, 2, __pyx_L1_error)
-  __pyx_d = PyModule_GetDict(__pyx_m); if (unlikely(!__pyx_d)) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (unlikely(!__pyx_m)) __PYX_ERR(0, 1, __pyx_L1_error)
+  __pyx_d = PyModule_GetDict(__pyx_m); if (unlikely(!__pyx_d)) __PYX_ERR(0, 1, __pyx_L1_error)
   Py_INCREF(__pyx_d);
-  __pyx_b = PyImport_AddModule(__Pyx_BUILTIN_MODULE_NAME); if (unlikely(!__pyx_b)) __PYX_ERR(0, 2, __pyx_L1_error)
+  __pyx_b = PyImport_AddModule(__Pyx_BUILTIN_MODULE_NAME); if (unlikely(!__pyx_b)) __PYX_ERR(0, 1, __pyx_L1_error)
   #if CYTHON_COMPILING_IN_PYPY
   Py_INCREF(__pyx_b);
   #endif
-  if (PyObject_SetAttrString(__pyx_m, "__builtins__", __pyx_b) < 0) __PYX_ERR(0, 2, __pyx_L1_error);
+  if (PyObject_SetAttrString(__pyx_m, "__builtins__", __pyx_b) < 0) __PYX_ERR(0, 1, __pyx_L1_error);
   /*--- Initialize various global constants etc. ---*/
-  if (__Pyx_InitGlobals() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__Pyx_InitGlobals() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #if PY_MAJOR_VERSION < 3 && (__PYX_DEFAULT_STRING_ENCODING_IS_ASCII || __PYX_DEFAULT_STRING_ENCODING_IS_DEFAULT)
-  if (__Pyx_init_sys_getdefaultencoding_params() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__Pyx_init_sys_getdefaultencoding_params() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #endif
   if (__pyx_module_is_main_RMS__Routines__Grouping3Dcy) {
-    if (PyObject_SetAttrString(__pyx_m, "__name__", __pyx_n_s_main) < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+    if (PyObject_SetAttrString(__pyx_m, "__name__", __pyx_n_s_main) < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   }
   #if PY_MAJOR_VERSION >= 3
   {
-    PyObject *modules = PyImport_GetModuleDict(); if (unlikely(!modules)) __PYX_ERR(0, 2, __pyx_L1_error)
+    PyObject *modules = PyImport_GetModuleDict(); if (unlikely(!modules)) __PYX_ERR(0, 1, __pyx_L1_error)
     if (!PyDict_GetItemString(modules, "RMS.Routines.Grouping3Dcy")) {
-      if (unlikely(PyDict_SetItemString(modules, "RMS.Routines.Grouping3Dcy", __pyx_m) < 0)) __PYX_ERR(0, 2, __pyx_L1_error)
+      if (unlikely(PyDict_SetItemString(modules, "RMS.Routines.Grouping3Dcy", __pyx_m) < 0)) __PYX_ERR(0, 1, __pyx_L1_error)
     }
   }
   #endif
   /*--- Builtin init code ---*/
-  if (__Pyx_InitCachedBuiltins() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__Pyx_InitCachedBuiltins() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   /*--- Constants init code ---*/
-  if (__Pyx_InitCachedConstants() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__Pyx_InitCachedConstants() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   /*--- Global init code ---*/
   /*--- Variable export code ---*/
   /*--- Function export code ---*/
   /*--- Type init code ---*/
-  if (PyType_Ready(&__pyx_type_3RMS_8Routines_12Grouping3Dcy_Line) < 0) __PYX_ERR(0, 66, __pyx_L1_error)
+  if (PyType_Ready(&__pyx_type_3RMS_8Routines_12Grouping3Dcy_Line) < 0) __PYX_ERR(0, 87, __pyx_L1_error)
   __pyx_type_3RMS_8Routines_12Grouping3Dcy_Line.tp_print = 0;
   #if CYTHON_COMPILING_IN_CPYTHON
   {
-    PyObject *wrapper = PyObject_GetAttrString((PyObject *)&__pyx_type_3RMS_8Routines_12Grouping3Dcy_Line, "__str__"); if (unlikely(!wrapper)) __PYX_ERR(0, 66, __pyx_L1_error)
+    PyObject *wrapper = PyObject_GetAttrString((PyObject *)&__pyx_type_3RMS_8Routines_12Grouping3Dcy_Line, "__str__"); if (unlikely(!wrapper)) __PYX_ERR(0, 87, __pyx_L1_error)
     if (Py_TYPE(wrapper) == &PyWrapperDescr_Type) {
       __pyx_wrapperbase_3RMS_8Routines_12Grouping3Dcy_4Line_2__str__ = *((PyWrapperDescrObject *)wrapper)->d_base;
       __pyx_wrapperbase_3RMS_8Routines_12Grouping3Dcy_4Line_2__str__.doc = __pyx_doc_3RMS_8Routines_12Grouping3Dcy_4Line_2__str__;
@@ -10001,9 +11502,9 @@ PyMODINIT_FUNC PyInit_Grouping3Dcy(void)
     }
   }
   #endif
-  if (PyObject_SetAttrString(__pyx_m, "Line", (PyObject *)&__pyx_type_3RMS_8Routines_12Grouping3Dcy_Line) < 0) __PYX_ERR(0, 66, __pyx_L1_error)
+  if (PyObject_SetAttrString(__pyx_m, "Line", (PyObject *)&__pyx_type_3RMS_8Routines_12Grouping3Dcy_Line) < 0) __PYX_ERR(0, 87, __pyx_L1_error)
   __pyx_ptype_3RMS_8Routines_12Grouping3Dcy_Line = &__pyx_type_3RMS_8Routines_12Grouping3Dcy_Line;
-  if (PyType_Ready(&__pyx_type_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__getAllPoints) < 0) __PYX_ERR(0, 100, __pyx_L1_error)
+  if (PyType_Ready(&__pyx_type_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__getAllPoints) < 0) __PYX_ERR(0, 124, __pyx_L1_error)
   __pyx_type_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__getAllPoints.tp_print = 0;
   __pyx_ptype_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__getAllPoints = &__pyx_type_3RMS_8Routines_12Grouping3Dcy___pyx_scope_struct__getAllPoints;
   /*--- Type import code ---*/
@@ -10023,119 +11524,158 @@ PyMODINIT_FUNC PyInit_Grouping3Dcy(void)
   /*--- Function import code ---*/
   /*--- Execution code ---*/
   #if defined(__Pyx_Generator_USED) || defined(__Pyx_Coroutine_USED)
-  if (__Pyx_patch_abc() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__Pyx_patch_abc() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #endif
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":2
+  /* "RMS/Routines/Grouping3Dcy.pyx":5
+ * from __future__ import division, print_function
  * 
  * from time import time             # <<<<<<<<<<<<<<
  * 
  * import numpy as np
  */
-  __pyx_t_1 = PyList_New(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 2, __pyx_L1_error)
+  __pyx_t_1 = PyList_New(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 5, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_INCREF(__pyx_n_s_time);
   __Pyx_GIVEREF(__pyx_n_s_time);
   PyList_SET_ITEM(__pyx_t_1, 0, __pyx_n_s_time);
-  __pyx_t_2 = __Pyx_Import(__pyx_n_s_time, __pyx_t_1, -1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 2, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_Import(__pyx_n_s_time, __pyx_t_1, -1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 5, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_ImportFrom(__pyx_t_2, __pyx_n_s_time); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 2, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_ImportFrom(__pyx_t_2, __pyx_n_s_time); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 5, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_time, __pyx_t_1) < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_time, __pyx_t_1) < 0) __PYX_ERR(0, 5, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":4
+  /* "RMS/Routines/Grouping3Dcy.pyx":7
  * from time import time
  * 
  * import numpy as np             # <<<<<<<<<<<<<<
  * cimport numpy as np
  * cimport cython
  */
-  __pyx_t_2 = __Pyx_Import(__pyx_n_s_numpy, 0, -1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 4, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_Import(__pyx_n_s_numpy, 0, -1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 7, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_np, __pyx_t_2) < 0) __PYX_ERR(0, 4, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_np, __pyx_t_2) < 0) __PYX_ERR(0, 7, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":8
- * cimport cython
+  /* "RMS/Routines/Grouping3Dcy.pyx":13
  * 
- * INT_TYPE = np.uint16             # <<<<<<<<<<<<<<
- * ctypedef np.uint16_t INT_TYPE_t
+ * # Define numpy types
+ * UINT16_TYPE = np.uint16             # <<<<<<<<<<<<<<
+ * ctypedef np.uint16_t UINT16_TYPE_t
  * 
  */
-  __pyx_t_2 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 8, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 13, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_uint16); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 8, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_uint16); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 13, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_INT_TYPE, __pyx_t_1) < 0) __PYX_ERR(0, 8, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_UINT16_TYPE, __pyx_t_1) < 0) __PYX_ERR(0, 13, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":100
+  /* "RMS/Routines/Grouping3Dcy.pyx":16
+ * ctypedef np.uint16_t UINT16_TYPE_t
+ * 
+ * UINT8_TYPE = np.uint8             # <<<<<<<<<<<<<<
+ * ctypedef np.uint8_t UINT8_TYPE_t
+ * 
+ */
+  __pyx_t_1 = __Pyx_GetModuleGlobalName(__pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 16, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_1);
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_uint8); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 16, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_UINT8_TYPE, __pyx_t_2) < 0) __PYX_ERR(0, 16, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":124
  * 
  * @cython.boundscheck(False)
- * def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):             # <<<<<<<<<<<<<<
+ * def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):             # <<<<<<<<<<<<<<
  *     """ Returns all points describing a particular line.
  * 
  */
-  __pyx_t_1 = PyCFunction_NewEx(&__pyx_mdef_3RMS_8Routines_12Grouping3Dcy_1getAllPoints, NULL, __pyx_n_s_RMS_Routines_Grouping3Dcy); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 100, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_getAllPoints, __pyx_t_1) < 0) __PYX_ERR(0, 100, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+  __pyx_t_2 = PyCFunction_NewEx(&__pyx_mdef_3RMS_8Routines_12Grouping3Dcy_1getAllPoints, NULL, __pyx_n_s_RMS_Routines_Grouping3Dcy); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 124, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_getAllPoints, __pyx_t_2) < 0) __PYX_ERR(0, 124, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":193
+  /* "RMS/Routines/Grouping3Dcy.pyx":217
  * 
  * 
- * def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, distance_threshold, gap_threshold):             # <<<<<<<<<<<<<<
+ * def remove3DPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, Line max_line, distance_threshold, gap_threshold):             # <<<<<<<<<<<<<<
  *     """ Remove points from a point list that belong to the given line.
  * 
  */
-  __pyx_t_1 = PyCFunction_NewEx(&__pyx_mdef_3RMS_8Routines_12Grouping3Dcy_3remove3DPoints, NULL, __pyx_n_s_RMS_Routines_Grouping3Dcy); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 193, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_remove3DPoints, __pyx_t_1) < 0) __PYX_ERR(0, 193, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+  __pyx_t_2 = PyCFunction_NewEx(&__pyx_mdef_3RMS_8Routines_12Grouping3Dcy_3remove3DPoints, NULL, __pyx_n_s_RMS_Routines_Grouping3Dcy); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 217, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_remove3DPoints, __pyx_t_2) < 0) __PYX_ERR(0, 217, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":229
- *     return (point_list, max_line_points)
+  /* "RMS/Routines/Grouping3Dcy.pyx":256
+ * 
  * 
  * def _formatLine(line, first_frame, last_frame):             # <<<<<<<<<<<<<<
  *     """ Converts Line object to a list of format:
  *     (point1, point2, counter, line_quality), first_frame, last_frame
  */
-  __pyx_t_1 = PyCFunction_NewEx(&__pyx_mdef_3RMS_8Routines_12Grouping3Dcy_5_formatLine, NULL, __pyx_n_s_RMS_Routines_Grouping3Dcy); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 229, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_formatLine, __pyx_t_1) < 0) __PYX_ERR(0, 229, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+  __pyx_t_2 = PyCFunction_NewEx(&__pyx_mdef_3RMS_8Routines_12Grouping3Dcy_5_formatLine, NULL, __pyx_n_s_RMS_Routines_Grouping3Dcy); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 256, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_formatLine, __pyx_t_2) < 0) __PYX_ERR(0, 256, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":240
+  /* "RMS/Routines/Grouping3Dcy.pyx":270
  * @cython.boundscheck(False)
  * @cython.wraparound(False)
- * def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, get_single=False, line_list=[]):             # <<<<<<<<<<<<<<
+ * def find3DLines(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, start_time, config, get_single=False, line_list=[]):             # <<<<<<<<<<<<<<
  *     """ Iteratively find N straight lines in 3D space.
  * 
  */
-  __pyx_t_1 = PyList_New(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 240, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_k__10 = __pyx_t_1;
-  __Pyx_GIVEREF(__pyx_t_1);
-  __pyx_t_1 = 0;
-  __pyx_t_1 = PyCFunction_NewEx(&__pyx_mdef_3RMS_8Routines_12Grouping3Dcy_7find3DLines, NULL, __pyx_n_s_RMS_Routines_Grouping3Dcy); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 240, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_find3DLines, __pyx_t_1) < 0) __PYX_ERR(0, 240, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+  __pyx_t_2 = PyList_New(0); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 270, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __pyx_k__10 = __pyx_t_2;
+  __Pyx_GIVEREF(__pyx_t_2);
+  __pyx_t_2 = 0;
+  __pyx_t_2 = PyCFunction_NewEx(&__pyx_mdef_3RMS_8Routines_12Grouping3Dcy_7find3DLines, NULL, __pyx_n_s_RMS_Routines_Grouping3Dcy); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 270, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_find3DLines, __pyx_t_2) < 0) __PYX_ERR(0, 270, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
 
-  /* "RMS/Routines/Grouping3Dcy.pyx":2
- * 
- * from time import time             # <<<<<<<<<<<<<<
- * 
- * import numpy as np
+  /* "RMS/Routines/Grouping3Dcy.pyx":426
+ * @cython.wraparound(False)
+ * @cython.cdivision(True)
+ * def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \             # <<<<<<<<<<<<<<
+ *     np.ndarray[UINT8_TYPE_t, ndim=3] compressed, int min_level, int min_points, float k1, int f):
+ *     """ Given the list of frames, threshold them, subsample the time and check if there are enough threshold
  */
-  __pyx_t_1 = PyDict_New(); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 2, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_test, __pyx_t_1) < 0) __PYX_ERR(0, 2, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+  __pyx_t_2 = PyCFunction_NewEx(&__pyx_mdef_3RMS_8Routines_12Grouping3Dcy_9thresholdAndSubsample, NULL, __pyx_n_s_RMS_Routines_Grouping3Dcy); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 426, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_thresholdAndSubsample, __pyx_t_2) < 0) __PYX_ERR(0, 426, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":513
+ * @cython.boundscheck(False)
+ * @cython.wraparound(False)
+ * def testPoints(int gap_threshold, np.ndarray[UINT16_TYPE_t, ndim=1] pointsy, \             # <<<<<<<<<<<<<<
+ *     np.ndarray[UINT16_TYPE_t, ndim=1] pointsx, np.ndarray[UINT16_TYPE_t, ndim=1] pointsz):
+ *     """ Test if the given 3D point cloud contains a line by testing if there is a large gap between the points
+ */
+  __pyx_t_2 = PyCFunction_NewEx(&__pyx_mdef_3RMS_8Routines_12Grouping3Dcy_11testPoints, NULL, __pyx_n_s_RMS_Routines_Grouping3Dcy); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 513, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_testPoints, __pyx_t_2) < 0) __PYX_ERR(0, 513, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+
+  /* "RMS/Routines/Grouping3Dcy.pyx":1
+ * """ Cython functions for 3D line detection. """             # <<<<<<<<<<<<<<
+ * 
+ * from __future__ import division, print_function
+ */
+  __pyx_t_2 = PyDict_New(); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_test, __pyx_t_2) < 0) __PYX_ERR(0, 1, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
 
   /* "../../../../usr/local/lib/python2.7/dist-packages/Cython/Includes/numpy/__init__.pxd":997
  *         raise ImportError("numpy.core.umath failed to import")
@@ -12411,6 +13951,16 @@ done:
     return 0;
 }
 
+/* PyIntFromDouble */
+              #if PY_MAJOR_VERSION < 3
+static CYTHON_INLINE PyObject* __Pyx_PyInt_FromDouble(double value) {
+    if (value >= (double)LONG_MIN && value <= (double)LONG_MAX) {
+        return PyInt_FromLong((long)value);
+    }
+    return PyLong_FromDouble(value);
+}
+#endif
+
 /* RaiseException */
               #if PY_MAJOR_VERSION < 3
 static void __Pyx_Raise(PyObject *type, PyObject *value, PyObject *tb,
@@ -12944,7 +14494,29 @@ static void __Pyx_ReleaseBuffer(Py_buffer *view) {
 #endif
 
 
-                  /* None */
+                  /* CIntFromPyVerify */
+                  #define __PYX_VERIFY_RETURN_INT(target_type, func_type, func_value)\
+    __PYX__VERIFY_RETURN_INT(target_type, func_type, func_value, 0)
+#define __PYX_VERIFY_RETURN_INT_EXC(target_type, func_type, func_value)\
+    __PYX__VERIFY_RETURN_INT(target_type, func_type, func_value, 1)
+#define __PYX__VERIFY_RETURN_INT(target_type, func_type, func_value, exc)\
+    {\
+        func_type value = func_value;\
+        if (sizeof(target_type) < sizeof(func_type)) {\
+            if (unlikely(value != (func_type) (target_type) value)) {\
+                func_type zero = 0;\
+                if (exc && unlikely(value == (func_type)-1 && PyErr_Occurred()))\
+                    return (target_type) -1;\
+                if (is_unsigned && unlikely(value < zero))\
+                    goto raise_neg_overflow;\
+                else\
+                    goto raise_overflow;\
+            }\
+        }\
+        return (target_type) value;\
+    }
+
+/* None */
                   static CYTHON_INLINE long __Pyx_pow_long(long b, long e) {
     long t = b;
     switch (e) {
@@ -12968,28 +14540,6 @@ static void __Pyx_ReleaseBuffer(Py_buffer *view) {
     }
     return t;
 }
-
-/* CIntFromPyVerify */
-                  #define __PYX_VERIFY_RETURN_INT(target_type, func_type, func_value)\
-    __PYX__VERIFY_RETURN_INT(target_type, func_type, func_value, 0)
-#define __PYX_VERIFY_RETURN_INT_EXC(target_type, func_type, func_value)\
-    __PYX__VERIFY_RETURN_INT(target_type, func_type, func_value, 1)
-#define __PYX__VERIFY_RETURN_INT(target_type, func_type, func_value, exc)\
-    {\
-        func_type value = func_value;\
-        if (sizeof(target_type) < sizeof(func_type)) {\
-            if (unlikely(value != (func_type) (target_type) value)) {\
-                func_type zero = 0;\
-                if (exc && unlikely(value == (func_type)-1 && PyErr_Occurred()))\
-                    return (target_type) -1;\
-                if (is_unsigned && unlikely(value < zero))\
-                    goto raise_neg_overflow;\
-                else\
-                    goto raise_overflow;\
-            }\
-        }\
-        return (target_type) value;\
-    }
 
 /* CIntToPy */
                   static CYTHON_INLINE PyObject* __Pyx_PyInt_From_int(int value) {
@@ -13111,6 +14661,68 @@ static void __Pyx_ReleaseBuffer(Py_buffer *view) {
         int one = 1; int little = (int)*(unsigned char *)&one;
         unsigned char *bytes = (unsigned char *)&value;
         return _PyLong_FromByteArray(bytes, sizeof(npy_uint16),
+                                     little, !is_unsigned);
+    }
+}
+
+/* CIntToPy */
+                  static CYTHON_INLINE PyObject* __Pyx_PyInt_From_unsigned_int(unsigned int value) {
+    const unsigned int neg_one = (unsigned int) -1, const_zero = (unsigned int) 0;
+    const int is_unsigned = neg_one > const_zero;
+    if (is_unsigned) {
+        if (sizeof(unsigned int) < sizeof(long)) {
+            return PyInt_FromLong((long) value);
+        } else if (sizeof(unsigned int) <= sizeof(unsigned long)) {
+            return PyLong_FromUnsignedLong((unsigned long) value);
+#ifdef HAVE_LONG_LONG
+        } else if (sizeof(unsigned int) <= sizeof(unsigned PY_LONG_LONG)) {
+            return PyLong_FromUnsignedLongLong((unsigned PY_LONG_LONG) value);
+#endif
+        }
+    } else {
+        if (sizeof(unsigned int) <= sizeof(long)) {
+            return PyInt_FromLong((long) value);
+#ifdef HAVE_LONG_LONG
+        } else if (sizeof(unsigned int) <= sizeof(PY_LONG_LONG)) {
+            return PyLong_FromLongLong((PY_LONG_LONG) value);
+#endif
+        }
+    }
+    {
+        int one = 1; int little = (int)*(unsigned char *)&one;
+        unsigned char *bytes = (unsigned char *)&value;
+        return _PyLong_FromByteArray(bytes, sizeof(unsigned int),
+                                     little, !is_unsigned);
+    }
+}
+
+/* CIntToPy */
+                  static CYTHON_INLINE PyObject* __Pyx_PyInt_From_npy_uint8(npy_uint8 value) {
+    const npy_uint8 neg_one = (npy_uint8) -1, const_zero = (npy_uint8) 0;
+    const int is_unsigned = neg_one > const_zero;
+    if (is_unsigned) {
+        if (sizeof(npy_uint8) < sizeof(long)) {
+            return PyInt_FromLong((long) value);
+        } else if (sizeof(npy_uint8) <= sizeof(unsigned long)) {
+            return PyLong_FromUnsignedLong((unsigned long) value);
+#ifdef HAVE_LONG_LONG
+        } else if (sizeof(npy_uint8) <= sizeof(unsigned PY_LONG_LONG)) {
+            return PyLong_FromUnsignedLongLong((unsigned PY_LONG_LONG) value);
+#endif
+        }
+    } else {
+        if (sizeof(npy_uint8) <= sizeof(long)) {
+            return PyInt_FromLong((long) value);
+#ifdef HAVE_LONG_LONG
+        } else if (sizeof(npy_uint8) <= sizeof(PY_LONG_LONG)) {
+            return PyLong_FromLongLong((PY_LONG_LONG) value);
+#endif
+        }
+    }
+    {
+        int one = 1; int little = (int)*(unsigned char *)&one;
+        unsigned char *bytes = (unsigned char *)&value;
+        return _PyLong_FromByteArray(bytes, sizeof(npy_uint8),
                                      little, !is_unsigned);
     }
 }
@@ -13643,6 +15255,195 @@ raise_neg_overflow:
     PyErr_SetString(PyExc_OverflowError,
         "can't convert negative value to int");
     return (int) -1;
+}
+
+/* CIntFromPy */
+                  static CYTHON_INLINE unsigned int __Pyx_PyInt_As_unsigned_int(PyObject *x) {
+    const unsigned int neg_one = (unsigned int) -1, const_zero = (unsigned int) 0;
+    const int is_unsigned = neg_one > const_zero;
+#if PY_MAJOR_VERSION < 3
+    if (likely(PyInt_Check(x))) {
+        if (sizeof(unsigned int) < sizeof(long)) {
+            __PYX_VERIFY_RETURN_INT(unsigned int, long, PyInt_AS_LONG(x))
+        } else {
+            long val = PyInt_AS_LONG(x);
+            if (is_unsigned && unlikely(val < 0)) {
+                goto raise_neg_overflow;
+            }
+            return (unsigned int) val;
+        }
+    } else
+#endif
+    if (likely(PyLong_Check(x))) {
+        if (is_unsigned) {
+#if CYTHON_USE_PYLONG_INTERNALS
+            const digit* digits = ((PyLongObject*)x)->ob_digit;
+            switch (Py_SIZE(x)) {
+                case  0: return (unsigned int) 0;
+                case  1: __PYX_VERIFY_RETURN_INT(unsigned int, digit, digits[0])
+                case 2:
+                    if (8 * sizeof(unsigned int) > 1 * PyLong_SHIFT) {
+                        if (8 * sizeof(unsigned long) > 2 * PyLong_SHIFT) {
+                            __PYX_VERIFY_RETURN_INT(unsigned int, unsigned long, (((((unsigned long)digits[1]) << PyLong_SHIFT) | (unsigned long)digits[0])))
+                        } else if (8 * sizeof(unsigned int) >= 2 * PyLong_SHIFT) {
+                            return (unsigned int) (((((unsigned int)digits[1]) << PyLong_SHIFT) | (unsigned int)digits[0]));
+                        }
+                    }
+                    break;
+                case 3:
+                    if (8 * sizeof(unsigned int) > 2 * PyLong_SHIFT) {
+                        if (8 * sizeof(unsigned long) > 3 * PyLong_SHIFT) {
+                            __PYX_VERIFY_RETURN_INT(unsigned int, unsigned long, (((((((unsigned long)digits[2]) << PyLong_SHIFT) | (unsigned long)digits[1]) << PyLong_SHIFT) | (unsigned long)digits[0])))
+                        } else if (8 * sizeof(unsigned int) >= 3 * PyLong_SHIFT) {
+                            return (unsigned int) (((((((unsigned int)digits[2]) << PyLong_SHIFT) | (unsigned int)digits[1]) << PyLong_SHIFT) | (unsigned int)digits[0]));
+                        }
+                    }
+                    break;
+                case 4:
+                    if (8 * sizeof(unsigned int) > 3 * PyLong_SHIFT) {
+                        if (8 * sizeof(unsigned long) > 4 * PyLong_SHIFT) {
+                            __PYX_VERIFY_RETURN_INT(unsigned int, unsigned long, (((((((((unsigned long)digits[3]) << PyLong_SHIFT) | (unsigned long)digits[2]) << PyLong_SHIFT) | (unsigned long)digits[1]) << PyLong_SHIFT) | (unsigned long)digits[0])))
+                        } else if (8 * sizeof(unsigned int) >= 4 * PyLong_SHIFT) {
+                            return (unsigned int) (((((((((unsigned int)digits[3]) << PyLong_SHIFT) | (unsigned int)digits[2]) << PyLong_SHIFT) | (unsigned int)digits[1]) << PyLong_SHIFT) | (unsigned int)digits[0]));
+                        }
+                    }
+                    break;
+            }
+#endif
+#if CYTHON_COMPILING_IN_CPYTHON
+            if (unlikely(Py_SIZE(x) < 0)) {
+                goto raise_neg_overflow;
+            }
+#else
+            {
+                int result = PyObject_RichCompareBool(x, Py_False, Py_LT);
+                if (unlikely(result < 0))
+                    return (unsigned int) -1;
+                if (unlikely(result == 1))
+                    goto raise_neg_overflow;
+            }
+#endif
+            if (sizeof(unsigned int) <= sizeof(unsigned long)) {
+                __PYX_VERIFY_RETURN_INT_EXC(unsigned int, unsigned long, PyLong_AsUnsignedLong(x))
+#ifdef HAVE_LONG_LONG
+            } else if (sizeof(unsigned int) <= sizeof(unsigned PY_LONG_LONG)) {
+                __PYX_VERIFY_RETURN_INT_EXC(unsigned int, unsigned PY_LONG_LONG, PyLong_AsUnsignedLongLong(x))
+#endif
+            }
+        } else {
+#if CYTHON_USE_PYLONG_INTERNALS
+            const digit* digits = ((PyLongObject*)x)->ob_digit;
+            switch (Py_SIZE(x)) {
+                case  0: return (unsigned int) 0;
+                case -1: __PYX_VERIFY_RETURN_INT(unsigned int, sdigit, (sdigit) (-(sdigit)digits[0]))
+                case  1: __PYX_VERIFY_RETURN_INT(unsigned int,  digit, +digits[0])
+                case -2:
+                    if (8 * sizeof(unsigned int) - 1 > 1 * PyLong_SHIFT) {
+                        if (8 * sizeof(unsigned long) > 2 * PyLong_SHIFT) {
+                            __PYX_VERIFY_RETURN_INT(unsigned int, long, -(long) (((((unsigned long)digits[1]) << PyLong_SHIFT) | (unsigned long)digits[0])))
+                        } else if (8 * sizeof(unsigned int) - 1 > 2 * PyLong_SHIFT) {
+                            return (unsigned int) (((unsigned int)-1)*(((((unsigned int)digits[1]) << PyLong_SHIFT) | (unsigned int)digits[0])));
+                        }
+                    }
+                    break;
+                case 2:
+                    if (8 * sizeof(unsigned int) > 1 * PyLong_SHIFT) {
+                        if (8 * sizeof(unsigned long) > 2 * PyLong_SHIFT) {
+                            __PYX_VERIFY_RETURN_INT(unsigned int, unsigned long, (((((unsigned long)digits[1]) << PyLong_SHIFT) | (unsigned long)digits[0])))
+                        } else if (8 * sizeof(unsigned int) - 1 > 2 * PyLong_SHIFT) {
+                            return (unsigned int) ((((((unsigned int)digits[1]) << PyLong_SHIFT) | (unsigned int)digits[0])));
+                        }
+                    }
+                    break;
+                case -3:
+                    if (8 * sizeof(unsigned int) - 1 > 2 * PyLong_SHIFT) {
+                        if (8 * sizeof(unsigned long) > 3 * PyLong_SHIFT) {
+                            __PYX_VERIFY_RETURN_INT(unsigned int, long, -(long) (((((((unsigned long)digits[2]) << PyLong_SHIFT) | (unsigned long)digits[1]) << PyLong_SHIFT) | (unsigned long)digits[0])))
+                        } else if (8 * sizeof(unsigned int) - 1 > 3 * PyLong_SHIFT) {
+                            return (unsigned int) (((unsigned int)-1)*(((((((unsigned int)digits[2]) << PyLong_SHIFT) | (unsigned int)digits[1]) << PyLong_SHIFT) | (unsigned int)digits[0])));
+                        }
+                    }
+                    break;
+                case 3:
+                    if (8 * sizeof(unsigned int) > 2 * PyLong_SHIFT) {
+                        if (8 * sizeof(unsigned long) > 3 * PyLong_SHIFT) {
+                            __PYX_VERIFY_RETURN_INT(unsigned int, unsigned long, (((((((unsigned long)digits[2]) << PyLong_SHIFT) | (unsigned long)digits[1]) << PyLong_SHIFT) | (unsigned long)digits[0])))
+                        } else if (8 * sizeof(unsigned int) - 1 > 3 * PyLong_SHIFT) {
+                            return (unsigned int) ((((((((unsigned int)digits[2]) << PyLong_SHIFT) | (unsigned int)digits[1]) << PyLong_SHIFT) | (unsigned int)digits[0])));
+                        }
+                    }
+                    break;
+                case -4:
+                    if (8 * sizeof(unsigned int) - 1 > 3 * PyLong_SHIFT) {
+                        if (8 * sizeof(unsigned long) > 4 * PyLong_SHIFT) {
+                            __PYX_VERIFY_RETURN_INT(unsigned int, long, -(long) (((((((((unsigned long)digits[3]) << PyLong_SHIFT) | (unsigned long)digits[2]) << PyLong_SHIFT) | (unsigned long)digits[1]) << PyLong_SHIFT) | (unsigned long)digits[0])))
+                        } else if (8 * sizeof(unsigned int) - 1 > 4 * PyLong_SHIFT) {
+                            return (unsigned int) (((unsigned int)-1)*(((((((((unsigned int)digits[3]) << PyLong_SHIFT) | (unsigned int)digits[2]) << PyLong_SHIFT) | (unsigned int)digits[1]) << PyLong_SHIFT) | (unsigned int)digits[0])));
+                        }
+                    }
+                    break;
+                case 4:
+                    if (8 * sizeof(unsigned int) > 3 * PyLong_SHIFT) {
+                        if (8 * sizeof(unsigned long) > 4 * PyLong_SHIFT) {
+                            __PYX_VERIFY_RETURN_INT(unsigned int, unsigned long, (((((((((unsigned long)digits[3]) << PyLong_SHIFT) | (unsigned long)digits[2]) << PyLong_SHIFT) | (unsigned long)digits[1]) << PyLong_SHIFT) | (unsigned long)digits[0])))
+                        } else if (8 * sizeof(unsigned int) - 1 > 4 * PyLong_SHIFT) {
+                            return (unsigned int) ((((((((((unsigned int)digits[3]) << PyLong_SHIFT) | (unsigned int)digits[2]) << PyLong_SHIFT) | (unsigned int)digits[1]) << PyLong_SHIFT) | (unsigned int)digits[0])));
+                        }
+                    }
+                    break;
+            }
+#endif
+            if (sizeof(unsigned int) <= sizeof(long)) {
+                __PYX_VERIFY_RETURN_INT_EXC(unsigned int, long, PyLong_AsLong(x))
+#ifdef HAVE_LONG_LONG
+            } else if (sizeof(unsigned int) <= sizeof(PY_LONG_LONG)) {
+                __PYX_VERIFY_RETURN_INT_EXC(unsigned int, PY_LONG_LONG, PyLong_AsLongLong(x))
+#endif
+            }
+        }
+        {
+#if CYTHON_COMPILING_IN_PYPY && !defined(_PyLong_AsByteArray)
+            PyErr_SetString(PyExc_RuntimeError,
+                            "_PyLong_AsByteArray() not available in PyPy, cannot convert large numbers");
+#else
+            unsigned int val;
+            PyObject *v = __Pyx_PyNumber_IntOrLong(x);
+ #if PY_MAJOR_VERSION < 3
+            if (likely(v) && !PyLong_Check(v)) {
+                PyObject *tmp = v;
+                v = PyNumber_Long(tmp);
+                Py_DECREF(tmp);
+            }
+ #endif
+            if (likely(v)) {
+                int one = 1; int is_little = (int)*(unsigned char *)&one;
+                unsigned char *bytes = (unsigned char *)&val;
+                int ret = _PyLong_AsByteArray((PyLongObject *)v,
+                                              bytes, sizeof(val),
+                                              is_little, !is_unsigned);
+                Py_DECREF(v);
+                if (likely(!ret))
+                    return val;
+            }
+#endif
+            return (unsigned int) -1;
+        }
+    } else {
+        unsigned int val;
+        PyObject *tmp = __Pyx_PyNumber_IntOrLong(x);
+        if (!tmp) return (unsigned int) -1;
+        val = __Pyx_PyInt_As_unsigned_int(tmp);
+        Py_DECREF(tmp);
+        return val;
+    }
+raise_overflow:
+    PyErr_SetString(PyExc_OverflowError,
+        "value too large to convert to unsigned int");
+    return (unsigned int) -1;
+raise_neg_overflow:
+    PyErr_SetString(PyExc_OverflowError,
+        "can't convert negative value to unsigned int");
+    return (unsigned int) -1;
 }
 
 /* CIntFromPy */

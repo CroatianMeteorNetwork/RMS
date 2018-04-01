@@ -15,7 +15,6 @@ High priority:
 - Calculate fireball centroids and put them to a separate FTPdetectinfo file
 
 - Python 3 compatibility
-	- convert all weave code to cython
 
 - Document server uploading
 

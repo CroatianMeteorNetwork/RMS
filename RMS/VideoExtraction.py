@@ -16,16 +16,10 @@
 
 
 
-from math import floor, sqrt, ceil
+import math
 import time
 import logging
 from multiprocessing import Process, Event
-
-# New versions of scipy have weave as a separate module
-try:
-    from scipy import weave
-except ImportError:
-    import weave
 
 import numpy as np
 from scipy import stats
@@ -66,73 +60,15 @@ class Extractor(Process):
             (y, x, z): [tuple] Coordinates of points that form the fireball, where Z is the frame number.
         """
 
-        # Calculate the shapes of the subsamples image
-        shape_z = self.frames.shape[0]
-        shape_y = int(floor(self.frames.shape[1]//self.config.f))
-        shape_x = int(floor(self.frames.shape[2]//self.config.f))
-        
-        # Init subssampled image arrays
-        count = np.zeros((shape_z, shape_y, shape_x), np.int)
-        pointsy = np.empty((shape_z*shape_y*shape_x), np.uint16)
-        pointsx = np.empty((shape_z*shape_y*shape_x), np.uint16)
-        pointsz = np.empty((shape_z*shape_y*shape_x), np.uint16)
-        
-        code = """
-        unsigned int x, y, x2, y2, n, i, max;
-        unsigned int num = 0, acc = 0;
-        unsigned int avg_std;
-        
-        for(y=0; y<Nframes[1]; y++) {
-            for(x=0; x<Nframes[2]; x++) {
-                max = COMPRESSED3(0, y, x);
-                avg_std = COMPRESSED3(2, y, x) + k1*COMPRESSED3(3, y, x);
-                
-                //if((max > min_level) && (avg_std > 255 || max >= avg_std)) {
-                if((max > min_level) && (max >= avg_std)) {
-                    n = COMPRESSED3(1, y, x);
-                    
-                    // Subsample frame in f*f squares
-                    y2 = y/f; 
-                    x2 = x/f;
-                    
-                    // Check if there are enough of threshold passers inside of this square
-                    if(COUNT3(n, y2, x2) >= min_points) { 
-                        POINTSY1(num) = y2;
-                        POINTSX1(num) = x2;
-                        POINTSZ1(num) = n;
-                        num++;
+        # Threshold and subsample frames
+        length, x, y, z = Grouping3D.thresholdAndSubsample(self.frames, self.compressed, \
+            self.config.min_level, self.config.min_pixels, self.config.k1, self.config.f)
 
-                        // Don't repeat this number
-                        COUNT3(n, y2, x2) = -1;
-
-                    // Increase counter if not enough threshold passers and this number isn't written already
-                    } else if(COUNT3(n, y2, x2) != -1) { 
-                        COUNT3(n, y2, x2) += 1;
-                    }
-                }
-            }     
-        }
-        
-        // Output the length of POINTS arrays
-        return_val = num; 
-        """
-        
-        dictionary = {'frames': self.frames, 'compressed': self.compressed, 'min_level': self.config.min_level,
-                      'min_points': self.config.min_pixels, 'k1': self.config.k1, 'f': self.config.f,
-                      'count': count, 'pointsy': pointsy, 'pointsx': pointsx, 'pointsz': pointsz}
-
-        length = weave.inline(code, dictionary.keys(), dictionary, verbose=2, extra_compile_args=self.config.extra_compile_args, extra_link_args=self.config.extra_compile_args)
-        
 
         # Return empty list if there is no points
         if length == 0:
             return []
-        
 
-        # Cut away extra long array
-        y = pointsy[0 : length]
-        x = pointsx[0 : length]
-        z = pointsz[0 : length]
         
         # Return list with the number of occurence of each frame number (Z axis)
         freq = stats.itemfreq(z) 
@@ -166,11 +102,11 @@ class Extractor(Process):
             z = z[indices]
         
 
-        # Sort by frame number and convert to float
+        # Sort by frame number
         indices = np.argsort(z)
-        y = y[indices].astype(np.float)
-        x = x[indices].astype(np.float)
-        z = z[indices].astype(np.float)
+        y = y[indices]
+        x = x[indices]
+        z = z[indices]
         
         # Do a quick test to check if the points form a viable solution
         if not self.testPoints(y, x, z):
@@ -183,49 +119,24 @@ class Extractor(Process):
     
 
 
-    def testPoints(self, y, x, z):
+    def testPoints(self, pointsy, pointsx, pointsz):
         """ Quick test if points are interesting (ie. something is detected).
 
         Arguments:
-            y: 1D numpy array with Y coords of points
-            x: 1D numpy array with X coords of points
-            z: 1D numpy array with Z coords of points (aka. frame number)
+            pointsy: 1D numpy array with Y coords of points
+            pointsx: 1D numpy array with X coords of points
+            pointsz: 1D numpy array with Z coords of points (aka. frame number)
         
         Return:
             [bool] True if video should be further checked for fireballs, False otherwise
         """
         
         # Check if there are enough points
-        if(len(y) < self.config.min_points):
+        if(len(pointsy) < self.config.min_points):
             return False
-        
+
         # Check how many points are close to each other (along the time line)
-        code = """
-        unsigned int distance, i, count = 0,
-        y_dist, x_dist, z_dist,
-        y_prev = 0, x_prev = 0, z_prev = 0;
-        
-        for(i=1; i<Ny[0]; i++) {
-            y_dist = Y1(i) - y_prev;
-            x_dist = X1(i) - x_prev;
-            z_dist = Z1(i) - z_prev;
-            
-            distance = sqrt(y_dist*y_dist + z_dist*z_dist + z_dist*z_dist);
-            
-            if(distance < gap_threshold) {
-                count++;
-            }
-            
-            y_prev = Y1(i);
-            x_prev = X1(i);
-            z_prev = Z1(i);
-        }
-        
-        return_val = count;
-        """
-        
-        dictionary = {'gap_threshold': sqrt(self.config.gap_threshold), 'y': y, 'x': x, 'z': z}
-        count = weave.inline(code, dictionary.keys(), dictionary, verbose=2, extra_compile_args=self.config.extra_compile_args, extra_link_args=self.config.extra_compile_args)
+        count = Grouping3D.testPoints(self.config.gap_threshold, pointsy, pointsx, pointsz)
         
         return count >= self.config.min_points
     
@@ -244,170 +155,37 @@ class Extractor(Process):
         clips = []
         
         # [first point, slope of XZ, slope of YZ, first frame, last frame]
-        
         for point, slopeXZ, slopeYZ, firstFrame, lastFrame in coefficients:
+
             slopeXZ = float(slopeXZ)
             slopeYZ = float(slopeYZ)
+
             firstFrame = int(firstFrame)
             lastFrame = int(lastFrame)
             
             diff = lastFrame - firstFrame
 
             # Extrapolate before first detected point
-            firstFrame = firstFrame - ceil(diff*self.config.before) 
+            firstFrame = firstFrame - math.ceil(diff*self.config.before) 
             if firstFrame < 0:
                 firstFrame = 0
 
             # Extrapolate after last detected point
-            lastFrame = lastFrame + ceil(diff*self.config.after) 
+            lastFrame = lastFrame + math.ceil(diff*self.config.after) 
             if lastFrame >= self.frames.shape[0]:
                 lastFrame = self.frames.shape[0] - 1
-            
-            out = np.zeros((self.frames.shape[0], self.config.maxSize, self.config.maxSize), np.uint8)
 
-            # y, x, size
-            sizepos = np.empty((self.frames.shape[0], 4), np.uint16)
+            # Cut of the fireball from raw video frames
+            length, cropouts, sizepos = Grouping3D.detectionCutOut(self.frames, self.compressed, 
+                point.astype(np.uint16), slopeXZ, slopeYZ, firstFrame, lastFrame, self.config.f, \
+                self.config.limitForSize, self.config.minSize, self.config.maxSize)
             
-            code = """
-                int x_m, x_p, x_t, y_m, y_p, y_t, k,
-                half_max_size = maxSize / 2,
-                half_f = f / 2;
-                unsigned int x, y, i, x2, y2, num = 0,
-                max, pixel, limit, max_width, max_height, size, half_size, num_equal;
-                
-                for(i = firstFrame; i < lastFrame; i++) {
-                    // calculate point at current time
-                    k = i - POINT1(2);
-                    y_t = (POINT1(0) + slopeYZ * k) * f + half_f;
-                    x_t = (POINT1(1) + slopeXZ * k) * f + half_f;
-                    
-                    if(y_t < 0 || x_t < 0 || y_t >= Nframes[1] || x_t >= Nframes[2]) {
-                        // skip if out of bounds
-                        continue;
-                    }
-                    
-                    // calculate boundaries for finding max value
-                    y_m = y_t - half_f, y_p = y_t + half_f, 
-                    x_m = x_t - half_f, x_p = x_t + half_f;
-                    if(y_m < 0) {
-                        y_m = 0;
-                    }
-                    if(x_m < 0) {
-                        x_m = 0;
-                    }
-                    if(y_p >= Nframes[1]) {
-                        y_p = Nframes[1] - 1;
-                    }
-                    if(x_p >= Nframes[2]) {
-                        x_p = Nframes[2] - 1;
-                    }
-                    
-                    // find max value
-                    max = 0;
-                    for(y=y_m; y<y_p; y++) {
-                        for(x=x_m; x<x_p; x++) {
-                            pixel = FRAMES3(i, y, x);
-                            if(pixel > max) {
-                                max = pixel;
-                            }
-                        }
-                    }
-                    
-                    // calculate boundaries for finding size
-                    y_m = y_t - half_max_size, y_p = y_t + half_max_size, 
-                    x_m = x_t - half_max_size, x_p = x_t + half_max_size;
-                    if(y_m < 0) {
-                        y_m = 0;
-                    }
-                    if(x_m < 0) {
-                        x_m = 0;
-                    }
-                    if(y_p >= Nframes[1]) {
-                        y_p = Nframes[1] - 1;
-                    }
-                    if(x_p >= Nframes[2]) {
-                        x_p = Nframes[2] - 1;
-                    }
-                    
-                    // calculate mean distance from center
-                    max_width = 0, max_height = 0, num_equal = 0,
-                    limit = limitForSize * max;
-                    for(y=y_m; y<y_p; y++) {
-                        for(x=x_m; x<x_p; x++) {
-                            if(FRAMES3(i, y, x) - COMPRESSED3(2, y, x) >= limit) {
-                                max_height += abs(y_t - y);
-                                max_width += abs(x_t - x);
-                                num_equal++;
-                            }
-                        }
-                    }
-                    
-                    // calculate size
-                    if(max_height > max_width) {
-                        size = max_height / num_equal;
-                    } else {
-                        size = max_width / num_equal;
-                    }
-                    if(size < minSize) {
-                        size = minSize;
-                    } else if(size > half_max_size) {
-                        size = half_max_size;
-                    }
-                    
-                    // save size
-                    SIZEPOS2(num, 3) = size;
-                    half_size = size / 2;
-                    
-                    // adjust position for frame extraction if out of borders
-                    if(y_t < half_size) {
-                        y_t = half_size;
-                    }
-                    if(x_t < half_size) {
-                        x_t = half_size;
-                    }
-                    if(y_t >= Nframes[1] - half_size) {
-                        y_t = Nframes[1] - 1 - half_size;
-                    }
-                    if(x_t >= Nframes[2] - half_size) {
-                        x_t = Nframes[2] - 1 - half_size;
-                    }
-                    
-                    // save location
-                    SIZEPOS2(num, 0) = y_t; 
-                    SIZEPOS2(num, 1) = x_t; 
-                    SIZEPOS2(num, 2) = i;
-                    
-                    // calculate bounds for frame extraction
-                    y_m = y_t - half_size, y_p = y_t + half_size, 
-                    x_m = x_t - half_size, x_p = x_t + half_size;
-                    
-                    // crop part of frame
-                    y2 = 0, x2 = 0;
-                    for(y=y_m; y<y_p; y++) {
-                        x2 = 0;
-                        for(x=x_m; x<x_p; x++) {
-                            OUT3(num, y2, x2) = FRAMES3(i, y, x);
-                            x2++;
-                        }
-                        y2++;
-                    }
-                    
-                    num++;
-                }
-                
-                return_val = num;                
-            """
-            
-            dict = {'frames': self.frames, 'compressed': self.compressed, 'point': point, 'slopeXZ': slopeXZ, 'slopeYZ': slopeYZ,
-                    'firstFrame': firstFrame, 'lastFrame': lastFrame, 'f': self.config.f, 'limitForSize': self.config.limitForSize,
-                    'minSize': self.config.minSize, 'maxSize': self.config.maxSize, 'sizepos': sizepos, 'out': out}
-
-            length = weave.inline(code, dict.keys(), dict, verbose=2, extra_compile_args=self.config.extra_compile_args, extra_link_args=self.config.extra_compile_args)
-            
-            out = out[:length]
+            # Shorten the output arrays to their maximum sizes
+            cropouts = cropouts[:length]
             sizepos = sizepos[:length]
             
-            clips.append([out, sizepos])
+            clips.append([cropouts, sizepos])
+
         
         return clips
     

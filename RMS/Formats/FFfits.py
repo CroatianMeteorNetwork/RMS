@@ -11,7 +11,7 @@ from RMS.Formats.FFStruct import FFStruct
 
 
 
-def read(directory, filename, array=False):
+def read(directory, filename, array=False, full_filename=False):
     """ Read a FF structure from a FITS file. 
     
     Arguments:
@@ -19,7 +19,9 @@ def read(directory, filename, array=False):
         filename: [str] Name of FF*.fits file (either with FF and extension or without)
 
     Keyword arguments:
-        _array: [ndarray] True in order to populate structure's array element (default is False)
+        array: [ndarray] True in order to populate structure's array element (default is False)
+        full_filename: [bool] True if full file name is given explicitly, a name which may differ from the
+            usual FF*.fits format. False by default.
     
     Return:
         [ff structure]
@@ -27,7 +29,7 @@ def read(directory, filename, array=False):
     """
 
     # Make sure the file starts with "FF_"
-    if filename[:3] == "FF_":
+    if (filename.startswith('FF') and ('.fits' in filename)) or full_filename:
         fid = open(os.path.join(directory, filename), "rb")
     else:
         fid = open(os.path.join(directory, "FF_" + filename + ".fits"), "rb")

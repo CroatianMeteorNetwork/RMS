@@ -26,7 +26,7 @@ from RMS.Formats.FFStruct import FFStruct
 # FFbin handling stolen from FF_bin_suite.py from CMN_binViewer written by Denis Vida
 
 
-def read(directory, filename, array=False):
+def read(directory, filename, array=False, full_filename=False):
     """ Read FF*.bin file from the specified directory.
     
     Arguments:
@@ -35,13 +35,15 @@ def read(directory, filename, array=False):
 
     Keyword arguments:
         array: [ndarray] True in order to populate structure's array element (default is False)
+        full_filename: [bool] True if full file name is given explicitly, a name which may differ from the
+            usual FF*.fits format. False by default.
     
     Return:
         [ff structure]
 
     """
     
-    if filename[:2] == "FF":
+    if (filename.startswith("FF") and ('.bin' in filename)) or full_filename:
         fid = open(os.path.join(directory, filename), "rb")
     else:
         fid = open(os.path.join(directory, "FF" + filename + ".bin"), "rb")

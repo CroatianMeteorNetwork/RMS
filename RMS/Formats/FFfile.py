@@ -15,7 +15,7 @@ from RMS.Formats.FFfits import write as writeFFfits
 
 
 
-def read(directory, filename, fmt=None, array=False):
+def read(directory, filename, fmt=None, array=False, full_filename=False):
     """ Read FF file from the specified directory and choose the proper format for reading.
     
     Arguments:
@@ -26,6 +26,8 @@ def read(directory, filename, fmt=None, array=False):
         fmt: [str] Format for reading the file. It should either be 'bin' or 'fits'. If it is not given,
             the format will be guessed.
         array: [ndarray] True in order to populate structure's array element (default is False)
+        full_filename: [bool] True if full file name is given explicitly, a name which may differ from the
+            usual FF*.fits format. False by default.
     
     Return:
         [ff structure]
@@ -64,13 +66,13 @@ def read(directory, filename, fmt=None, array=False):
     if fmt == 'bin':
 
         # Read the file as bin
-        ff = readFFbin(directory, filename, array=array)
+        ff = readFFbin(directory, filename, array=array, full_filename=full_filename)
 
 
     elif fmt == 'fits':
 
         # Read the file as FITS
-        ff = readFFfits(directory, filename, array=array)
+        ff = readFFfits(directory, filename, array=array, full_filename=full_filename)
 
     else:
         ff = None

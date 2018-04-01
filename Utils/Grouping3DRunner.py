@@ -40,10 +40,10 @@ if __name__ == "__main__":
             config = cr.parse(".config")
 
             # Load compressed file
-            compressed = FFfile.read(bin_dir, ff_name, array=True).array
+            compressed = FFfile.read(bin_dir, ff_name, array=True, full_filename=True).array
 
             # Show maxpixel
-            ff = FFfile.read(bin_dir, ff_name)
+            ff = FFfile.read(bin_dir, ff_name, full_filename=True)
             plt.imshow(ff.maxpixel, cmap='gray')
             plt.show()
 
@@ -51,13 +51,19 @@ if __name__ == "__main__":
             plt.close()
 
             # Dummy frames (empty)
-            frames = np.zeros(shape=(256, compressed.shape[1], compressed.shape[2]), dtype=np.uint8)
+            frames = np.zeros(shape=(256, compressed.shape[1], compressed.shape[2]), dtype=np.uint8) + 255
 
             extract_obj = Extractor(config, bin_dir)
             extract_obj.compressed = compressed
             extract_obj.frames = frames
+            truncated_filename = ff_name.replace('FF', '').strip('_')
+            truncated_filename = "".join(truncated_filename.split('.')[:-1])
+            extract_obj.filename = truncated_filename
 
             event_points = extract_obj.findPoints()
+
+            # Execute all
+            extract_obj.executeAll()
 
             # # Produce fake event points
             # event_points = []
@@ -81,8 +87,8 @@ if __name__ == "__main__":
                 ax = fig.add_subplot(111, projection='3d')
 
                 # Plot the image as a surface at frame 0
-                img_y_size = ff.maxpixel.shape[0]/config.f
-                img_x_size = ff.maxpixel.shape[1]/config.f
+                img_y_size = int(np.floor(ff.maxpixel.shape[0]//config.f))
+                img_x_size = int(np.floor(ff.maxpixel.shape[1]//config.f))
                 y, x = np.mgrid[0:img_y_size, :img_x_size]
                 img_resize = scipy.misc.imresize(ff.maxpixel, (img_y_size, img_x_size), interp='lanczos').astype(np.float64)
                 ax.plot_surface(x, y, np.zeros_like(x), rstride=1, cstride=1, 

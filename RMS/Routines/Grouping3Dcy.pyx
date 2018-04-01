@@ -1,3 +1,6 @@
+""" Cython functions for 3D line detection. """
+
+from __future__ import division, print_function
 
 from time import time
 
@@ -5,8 +8,21 @@ import numpy as np
 cimport numpy as np
 cimport cython
 
-INT_TYPE = np.uint16
-ctypedef np.uint16_t INT_TYPE_t
+
+# Define numpy types
+UINT16_TYPE = np.uint16
+ctypedef np.uint16_t UINT16_TYPE_t
+
+UINT8_TYPE = np.uint8
+ctypedef np.uint8_t UINT8_TYPE_t
+
+
+# Declare math functions
+cdef extern from "math.h":
+    double floor(double)
+    double abs(double)
+
+
 
 @cython.cdivision(True) # Don't check for zero division
 cdef float line3DDistance_simple(int x1, int y1, int z1, int x2, int y2, int z2, int x0, int y0, int z0):
@@ -48,6 +64,9 @@ cdef float line3DDistance_simple(int x1, int y1, int z1, int x2, int y2, int z2,
 
     return result
 
+
+
+
 cdef int point3DDistance(int x1, int y1, int z1, int x2, int y2, int z2):
     """ Calculate distance between two points in 3D space.
     
@@ -62,6 +81,9 @@ cdef int point3DDistance(int x1, int y1, int z1, int x2, int y2, int z2):
     """
 
     return (x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2
+
+
+
 
 cdef class Line:
     """ Structure that defines a line.
@@ -96,8 +118,11 @@ cdef class Line:
 
         return self.x1, self.y1, self.z1, self.x2, self.y2, self.z2
 
+
+
+
 @cython.boundscheck(False)
-def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):
+def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):
     """ Returns all points describing a particular line. 
     
     @param point_list: [ndarray] list of all points
@@ -118,7 +143,7 @@ def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, 
     if point_list_size == 0:
         return np.array([[]])
 
-    def propagateLine(np.ndarray[INT_TYPE_t, ndim=2] max_line_points, np.ndarray[INT_TYPE_t, ndim=2] propagation_list, int i):
+    def propagateLine(np.ndarray[UINT16_TYPE_t, ndim=2] max_line_points, np.ndarray[UINT16_TYPE_t, ndim=2] propagation_list, int i):
         """ Finds all points present on a line starting from a point on that line.
         """
 
@@ -156,7 +181,7 @@ def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, 
         max_array_size = point_list_size
 
     # Get all points belonging to the best line
-    cdef np.ndarray[INT_TYPE_t, ndim=2] max_line_points = np.zeros(shape=(max_array_size, 3), dtype = INT_TYPE)
+    cdef np.ndarray[UINT16_TYPE_t, ndim=2] max_line_points = np.zeros(shape=(max_array_size, 3), dtype = UINT16_TYPE)
 
     # Get the index of the first point
     point1_index = np.where(np.all(point_list==np.array((x1, y1, z1)),axis=1))[0]
@@ -190,7 +215,7 @@ def getAllPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, 
 
 
 
-def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, distance_threshold, gap_threshold):
+def remove3DPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, Line max_line, distance_threshold, gap_threshold):
     """ Remove points from a point list that belong to the given line.
     
     @param point_list: [ndarray] list of all points
@@ -226,6 +251,9 @@ def remove3DPoints(np.ndarray[INT_TYPE_t, ndim=2] point_list, Line max_line, dis
 
     return (point_list, max_line_points)
 
+
+
+
 def _formatLine(line, first_frame, last_frame):
     """ Converts Line object to a list of format:
     (point1, point2, counter, line_quality), first_frame, last_frame
@@ -235,9 +263,12 @@ def _formatLine(line, first_frame, last_frame):
 
     return [(x1, y1, z1), (x2, y2, z2), line.counter, line.line_quality, first_frame, last_frame]
 
+
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False) 
-def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, get_single=False, line_list=[]):
+def find3DLines(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, start_time, config, get_single=False, line_list=[]):
     """ Iteratively find N straight lines in 3D space.
     
     @param point_list: [ndarray] list of all points
@@ -281,7 +312,7 @@ def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, g
     cdef int point_list_size = point_list.shape[0]
 
     # Define a list for results
-    results_list = np.zeros(shape=((point_list_size*(point_list_size-1))/2), dtype=Line)
+    results_list = np.zeros(shape=((point_list_size*(point_list_size-1))//2), dtype=Line)
 
     for i in range(point_list_size):
         for j in range(point_list_size - i - 1):
@@ -385,3 +416,334 @@ def find3DLines(np.ndarray[INT_TYPE_t, ndim=2] point_list, start_time, config, g
         find3DLines(point_list, start_time, config, get_single=get_single, line_list = line_list)
 
     return line_list
+
+
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False) 
+@cython.cdivision(True)
+def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
+    np.ndarray[UINT8_TYPE_t, ndim=3] compressed, int min_level, int min_points, float k1, int f):
+    """ Given the list of frames, threshold them, subsample the time and check if there are enough threshold
+        passers on the given frame. 
+
+    Arguments:
+        frames: [3D ndarray] Numpy array containing video frames. Structure: (nframe, y, x).
+        compressed: [3D ndarray] Numpy array containing compressed video frames. Structure: (frame, y, x), 
+            where frames are: maxpixel, maxframe, avepixel, stdpixel
+        min_level: [int] The point will be subsampled if it has this minimum pixel level (i.e. brightness).
+        min_points: [int] Minimum number of points in the subsampled block that is required to pass the 
+            threshold.
+        k1: [float] Threhsold max > avg + k1*stddev
+        f: [int] Decimation scale
+
+    Return:
+        num: [int] Number threshold passers.
+        pointsx: [ndarray] X coordinate of the subsampled point.
+        pointsy: [ndarray] Y coordinate of the subsampled point. 
+        pointsz: [ndarray] frame of the subsampled point.
+    """
+
+    cdef unsigned int x, y, x2, y2, n, max_val, nframes, x_size, y_size
+    cdef unsigned int num = 0
+    cdef unsigned int avg_std
+
+    # Calculate the shapes of the subsamples image
+    cdef shape_z = frames.shape[0]
+    cdef shape_y = int(floor(frames.shape[1]//f))
+    cdef shape_x = int(floor(frames.shape[2]//f))
+    
+    # Init subsampled image arrays
+    cdef np.ndarray[np.int32_t, ndim=3] count = np.zeros((shape_z, shape_y, shape_x), np.int32)
+    cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsy = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)
+    cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsx = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)
+    cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsz = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)
+
+    # Extract frames dimensions 
+    nframes = frames.shape[0]
+    y_size = frames.shape[1]
+    x_size = frames.shape[2]
+    
+    for y in range(y_size):
+        for x in range(x_size):
+
+            max_val = compressed[0, y, x]
+
+            avg_std = int(float(compressed[2, y, x]) + k1*float(compressed[3, y, x]))
+            
+            
+            if((max_val > min_level) and (max_val >= avg_std)):
+
+                # Extract frame of maximum intensity
+                n = compressed[1, y, x]
+                
+                # Subsample frame in f*f squares
+                y2 = y//f
+                x2 = x//f
+                
+                # Check if there are enough of threshold passers inside of this square
+                if count[n, y2, x2] >= min_points:
+
+                    # Put this point to the final list
+                    pointsy[num] = y2
+                    pointsx[num] = x2
+                    pointsz[num] = n
+                    num += 1
+
+                    # Don't repeat this number
+                    count[n, y2, x2] = -1
+
+                # Increase counter if not enough threshold passers and this number isn't written already
+                elif count[n, y2, x2] != -1:
+                    count[n, y2, x2] += 1
+                
+    
+    # Cut point arrays to their maximum size
+    pointsy = pointsy[:num]
+    pointsx = pointsx[:num]
+    pointsz = pointsz[:num]
+
+    return num, pointsx, pointsy, pointsz
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False) 
+def testPoints(int gap_threshold, np.ndarray[UINT16_TYPE_t, ndim=1] pointsy, \
+    np.ndarray[UINT16_TYPE_t, ndim=1] pointsx, np.ndarray[UINT16_TYPE_t, ndim=1] pointsz):
+    """ Test if the given 3D point cloud contains a line by testing if there is a large gap between the points
+        in time or not.
+
+    Arguments:
+        gap_threshold: [int] Maximum gap between points in 3D space.
+        pointsy: [ndarray] X coordinates of points.
+        pointsx: [ndarray] Y coordinates of points.
+        pointsz: [ndarray] Z coordinates of points.
+
+    Return:
+        count: [int] Number of points within the gap threshold. 
+
+    """
+
+    cdef unsigned int size, distance, i, count = 0, y_dist, x_dist, z_dist, y_prev = 0, x_prev = 0, z_prev = 0
+    
+    # Extract the size of arrays
+    size = pointsx.shape[0]
+
+    for i in range(size):
+
+        # Compute the distance from the previous point
+        x_dist = pointsx[i] - x_prev
+        z_dist = pointsz[i] - z_prev
+        y_dist = pointsy[i] - y_prev
+        
+        distance = y_dist**2 + z_dist**2 + z_dist**2
+        
+        # Count the point if there is no gap from the previous point
+        if(distance < gap_threshold):
+            count += 1
+        
+        y_prev = pointsy[i]
+        x_prev = pointsx[i]
+        z_prev = pointsz[i]
+
+    
+    return count
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+def detectionCutOut(np.ndarray[UINT8_TYPE_t, ndim=3] frames, np.ndarray[UINT8_TYPE_t, ndim=3] compressed, \
+    np.ndarray[UINT16_TYPE_t, ndim=1] point, float slopeXZ, float slopeYZ, int first_frame, int last_frame, \
+    int f, float intensity_size_threshold, int size_min, int size_max):
+    """ Compute the locations and the size of fireball frame crops. The computed values will be used to
+        crop out raw video frames.
+
+    Arguments:
+        frames: [3D ndarray]: Raw video frames.
+        compressed: [3D array]: FTP compressed 256 frame block.
+        point: [ndarray] Coordinates of the first point of the event.
+        slopeXZ: [float] Speed of the fireball in X direction in px/frame.
+        slopeYZ: [float] Speed of the fireball in Y direction in px/frame.
+        first_frame: [int] No. of the first frame.
+        last_frame: [int] No. of the last frame.
+        f: [int] Decimation factor.
+        intensity_size_threshold: [float] Threshold for dynamically estimating the window size based on the
+            pixel intensity.
+        size_min: [int] Minimum size of the window.
+        size_max: [int] Maximum size of the window.
+
+    Return:
+        num: [int] Number of extracted windows.
+        cropouts: [3D ndarray] Cropped out windows.
+        sizepos: [3D ndarray] Array of positions and size of cropouts within the context of the whole frame.
+
+    """
+
+
+    cdef float k
+    cdef int x_m, x_p, x_t, y_m, y_p, y_t, half_max_size = size_max//2, half_f = f//2
+    cdef int x, y, i, x2, y2, num = 0, max_val, pixel, limit, max_width, max_height, size, half_size, \
+        num_equal, frames_ysize, frames_xsize
+
+
+    # Init the output crops array
+    cdef np.ndarray[UINT8_TYPE_t, ndim=3] cropouts = np.zeros((frames.shape[0], size_max, size_max), \
+        UINT8_TYPE)
+
+    # Init the array holding X and Y sizes
+    cdef np.ndarray[UINT16_TYPE_t, ndim=2] sizepos = np.zeros((frames.shape[0], 4), UINT16_TYPE)
+    
+
+    # Extract frame size
+    frames_ysize = frames.shape[1]
+    frames_xsize = frames.shape[2]
+
+    # Go though all frames
+    for i in range(first_frame, last_frame):
+        
+        # Calculate position of the detection at current time
+        k = <float> (i - point[2])
+        y_t = <int> ((<float> point[0] + slopeYZ*k)*f + half_f)
+        x_t = <int> ((<float> point[1] + slopeXZ*k)*f + half_f)
+
+        print(i, k, y_t, x_t)
+            
+        # Skip if out of bounds
+        if (y_t < 0) or (x_t < 0) or (y_t >= frames_ysize) or (x_t >= frames_xsize):
+            continue
+
+        
+        # Calculate boundaries for finding max value
+        y_m = y_t - half_f
+        y_p = y_t + half_f
+        x_m = x_t - half_f
+        x_p = x_t + half_f
+
+        if y_m < 0:
+            y_m = 0
+        
+        if x_m < 0:
+            x_m = 0
+        
+        if y_p >= frames_ysize:
+            y_p = frames_ysize - 1
+        
+
+        if x_p >= frames_xsize:
+            x_p = frames_xsize - 1
+        
+        
+        # Find max value
+        max_val = 0
+
+        for y in range(y_m, y_p):
+            for x in range(x_m, x_p):
+
+                pixel = frames[i, y, x]
+
+                if pixel > max_val:
+                    max_val = pixel
+
+        
+        # Calculate boundaries for finding size
+        y_m = y_t - half_max_size
+        y_p = y_t + half_max_size
+        x_m = x_t - half_max_size
+        x_p = x_t + half_max_size
+
+        if y_m < 0:
+            y_m = 0
+        
+        if x_m < 0:
+            x_m = 0
+        
+        if y_p >= frames_ysize:
+            y_p = frames_ysize - 1
+        
+        if x_p >= frames_xsize:
+            x_p = frames_xsize - 1
+        
+        
+        # Calculate mean distance from center
+        max_width = 0 
+        max_height = 0
+        num_equal = 1
+        limit = <int> intensity_size_threshold*max_val
+
+        for y in range(y_m, y_p):
+            for x in range(x_m, x_p):
+    
+                if (frames[i, y, x] - compressed[2, y, x]) >= limit:
+
+                    max_height += <int> abs(y_t - y)
+                    max_width += <int> abs(x_t - x)
+                    num_equal += 1
+        
+        # Compute size
+        if max_height > max_width:
+            size = max_height//num_equal
+        else:
+            size = max_width//num_equal
+
+        
+        if size < size_min:
+            size = size_min
+
+        elif size > half_max_size:
+            size = half_max_size
+        
+        # Save size
+        sizepos[num, 3] = size
+        half_size = size//2
+        
+        # Adjust position for frame extraction if out of borders
+        if y_t < half_size:
+            y_t = half_size
+        
+        if x_t < half_size:
+            x_t = half_size
+        
+        if y_t >= frames_ysize - half_size:
+            y_t = frames_ysize - 1 - half_size
+        
+        if x_t >= frames_xsize - half_size:
+            x_t = frames_xsize - 1 - half_size
+        
+        
+        # Save location
+        sizepos[num, 0] = y_t
+        sizepos[num, 1] = x_t
+        sizepos[num, 2] = i
+        
+        # Calculate bounds for frame extraction
+        y_m = y_t - half_size
+        y_p = y_t + half_size
+        x_m = x_t - half_size
+        x_p = x_t + half_size
+        
+        # Crop part of frame
+        y2 = 0
+        x2 = 0
+
+        for y in range(y_m, y_p):
+
+            x2 = 0
+
+            for x in range(x_m, x_p):
+
+                cropouts[num, y2, x2] = frames[i, y, x]
+                x2 += 1
+            
+            y2 +=1 
+        
+        
+        num += 1
+    
+
+
+    return num, cropouts, sizepos

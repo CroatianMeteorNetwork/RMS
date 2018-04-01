@@ -126,13 +126,13 @@ if __name__ == "__main__":
         ff_match = None
 
         # Strip extensions
-        fr_name = ".".join(fr.split('.')[:-1])
+        fr_name = ".".join(fr.split('.')[:-1]).replace('FR', '').strip("_")
 
         # Find the matching FF bin to the given FR bin
         for ff in ff_list:
 
             # Strip extensions
-            ff_name = ".".join(ff.split('.')[:-1])
+            ff_name = ".".join(ff.split('.')[:-1]).replace('FF', "").strip("_")
 
 
             if ff_name[2:] == fr_name[2:]:
