@@ -120,7 +120,7 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
 
     # Skip the image if there are too many maxima to process
     if num_objects > config.max_stars:
-        print('Too many candidate stars to process!')
+        print('Too many candidate stars to process! {:d}/{:d}'.format(num_objects, config.max_stars))
         return [[], [], [], []]
 
     # Find centres of mass of each labeled objects
@@ -146,11 +146,11 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
 
 
 
-def twoDGaussian((x, y), amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
+def twoDGaussian(mesh, amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
     """ Defines a 2D Gaussian distribution. 
     
     Arguments:
-        (x, y): [tuple of floats] independant variables
+        mesh: [tuple of floats] (x, y) independant variables
         amplitude: [float] amplitude of the PSF
         xo: [float] PSF center, X component
         yo: [float] PSF center, Y component
@@ -163,6 +163,8 @@ def twoDGaussian((x, y), amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
         g: [ndarray] values of the given Gaussian at (x, y) coordinates
 
     """
+
+    x, y = mesh
     
     xo = float(xo)
     yo = float(yo)
@@ -246,9 +248,9 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
             # and most of the bad star candidates take more iterations to fit
             popt, pcov = opt.curve_fit(twoDGaussian, (y_ind, x_ind), star_seg.ravel(), p0=initial_guess, 
                 maxfev=200)
-            # print popt
+            # print(popt)
         except RuntimeError:
-            # print 'Fitting failed!'
+            # print('Fitting failed!')
             continue
 
         # Unpack fitted gaussian parameters

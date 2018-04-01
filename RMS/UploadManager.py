@@ -42,7 +42,7 @@ def _agentAuth(transport, username, rsa_private_key):
     try:
         ki = paramiko.RSAKey.from_private_key_file(rsa_private_key)
 
-    except Exception, e:
+    except Exception as e:
         log.error('Failed loading ' + rsa_private_key + str(e))
 
     # Find all available keys
@@ -62,7 +62,7 @@ def _agentAuth(transport, username, rsa_private_key):
             log.info('... success!')
             return True
 
-        except paramiko.SSHException, e:
+        except paramiko.SSHException as e:
             log.warning('... failed!', e)
 
     return False
@@ -139,7 +139,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                 if local_file_size == remote_info.st_size:
                     continue
             
-            except IOError, e:
+            except IOError as e:
                 log.info('The file already exist on the server!')
 
             
@@ -151,7 +151,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
 
         return True
 
-    except Exception, e:
+    except Exception as e:
         log.error(e, exc_info=True)
         try:
             t.close()

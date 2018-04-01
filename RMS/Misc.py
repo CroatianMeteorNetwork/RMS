@@ -17,13 +17,13 @@ def mkdirP(path):
         os.makedirs(path)
 
     # If it already exist, do nothing
-    except OSError, exc:
+    except OSError as exc:
         if exc.errno == errno.EEXIST:
             pass
 
     # Raise all other errors
-	else: 
-		raise
+    else: 
+        raise
 
 
 

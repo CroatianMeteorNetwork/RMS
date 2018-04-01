@@ -47,7 +47,7 @@ def view(dir_path, ff, fr, config):
     name = fr
     fr = FRbin.read(dir_path, fr)
     
-    print("Number of lines:", fr.lines[0])
+    print("Number of lines:", fr.lines)
     
     first_image = True
 

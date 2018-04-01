@@ -17,6 +17,8 @@
 """ Timings of compression algorithm with various cases.
 """
 
+from __future__ import print_function, division, absolute_import
+
 from RMS.Compression import Compressor
 import RMS.ConfigReader as cr
 import numpy as np
@@ -74,10 +76,10 @@ def test():
             t[i] += timing(arr)
 
     
-    print "Black:", t[0]/2
-    print "White:", t[1]/2
-    print "Uniform noise:", t[2]/2
-    print "Gaussian noise:", t[3]/2  
+    print("Black:", t[0]/2)
+    print("White:", t[1]/2)
+    print("Uniform noise:", t[2]/2)
+    print("Gaussian noise:", t[3]/2  )
     
 
 if __name__ == "__main__":

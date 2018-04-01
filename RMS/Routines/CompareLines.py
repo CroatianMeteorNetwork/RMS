@@ -2,6 +2,8 @@
 See the compareLines function for more details about the usage.
 """
 
+from __future__ import division, absolute_import, print_function
+
 import numpy as np
 import math
 
@@ -60,8 +62,8 @@ def samplePolarLine(rho, theta, img_h, img_w, nsamples=10):
     theta = np.deg2rad(theta)
 
     # Image half widths and heights
-    hh = img_h / 2.0
-    hw = img_w / 2.0
+    hh = img_h/2.0
+    hw = img_w/2.0
 
     # Convert line to Cartesian coordinates
     a = np.cos(theta)
@@ -129,4 +131,4 @@ if __name__ == '__main__':
     rho2, theta2 = line_list[5][0:2]
 
     # test line comparison
-    print compareLines(rho1, theta1, rho2, theta2, img_h, img_w)
+    print(compareLines(rho1, theta1, rho2, theta2, img_h, img_w))

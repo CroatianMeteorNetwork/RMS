@@ -2,6 +2,8 @@
     from the other thread.
 """
 
+from __future__ import print_function, division, absolute_import
+
 import cv2
 import numpy as np
 import time
@@ -155,7 +157,7 @@ if __name__ == "__main__":
     # # Update the image in the Viewer
     # live_view.updateImage(img.astype(np.uint8), 'test 1')
 
-    # print 'updated'
+    # print('updated')
 
     # time.sleep(5)
 
@@ -167,7 +169,7 @@ if __name__ == "__main__":
 
     # time.sleep(2)
 
-    # print 'close'
+    # print('close')
 
 
 
@@ -175,4 +177,4 @@ if __name__ == "__main__":
     live_view.stop()
     del live_view # IMPORTANT! Otherwise the program does not exit
 
-    print 'stopped'
+    print('stopped')

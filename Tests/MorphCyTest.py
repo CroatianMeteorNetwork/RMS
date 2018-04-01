@@ -1,4 +1,6 @@
 
+from __future__ import print_function, division, absolute_import
+
 import sys
 import os
 import numpy as np
@@ -42,7 +44,7 @@ img_old = morph.bridge(img_old)
 img_old = morph.close(img_old)
 img_old = morph.thin2(img_old)
 
-print 'time for old:', time.clock() - t1
+print('time for old:', time.clock() - t1)
 
 show('old', img_old)
 
@@ -50,9 +52,9 @@ show('old', img_old)
 t1 = time.clock()
 img = morphApply(img, [1, 2, 3, 4])
 
-print 'time for new:', time.clock() - t1
+print('time for new:', time.clock() - t1)
 show('new', img)
 
 show('diff', np.abs(img_old - img))
 
-print 'diff', np.sum(img_old - img)
+print('diff', np.sum(img_old - img))

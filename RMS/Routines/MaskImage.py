@@ -14,6 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import division, absolute_import, print_function
+
 import os
 import logging
 
@@ -90,4 +92,4 @@ if __name__ == '__main__':
 
 	mask_file = '../../mask.bmp'
 
-	print loadMask(mask_file)
+	print(loadMask(mask_file))

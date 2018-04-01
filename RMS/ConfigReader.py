@@ -16,7 +16,14 @@
 
 import os
 import sys
-from ConfigParser import RawConfigParser, NoOptionError
+
+try:
+    # Python 3
+    from ConfigParser import RawConfigParser, NoOptionError
+
+except:
+    # Python 3
+    from configparser import RawConfigParser, NoOptionError 
 
 
 
@@ -223,7 +230,15 @@ def normalizeParameter(param, config):
 
 
 def parse(filename):
-    parser = RawConfigParser()
+
+    try:
+        # Python 3
+        parser = RawConfigParser(inline_comment_prefixes=(";"))
+
+    except:
+        # Python 2
+        parser = RawConfigParser()
+
     parser.read(filename)
     
     config = Config()

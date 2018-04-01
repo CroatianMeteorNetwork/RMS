@@ -121,7 +121,7 @@ if __name__ == "__main__":
                 line_list = find3DLines(event_points, time.time(), config)
 
                 elapsed_time = time.clock() - t1
-                # print 'Elapsed time: ', time.clock() - t1
+                # print('Elapsed time: ', time.clock() - t1)
 
                 if line_list:
 

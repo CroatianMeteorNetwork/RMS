@@ -182,7 +182,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
         a = -np.tan(theta)
         b = rho/np.cos(theta)
          
-        for y in xrange(int(-hh), int(hh)):
+        for y in range(int(-hh), int(hh)):
 
             x0 = a*y + b
              
@@ -195,7 +195,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
             if x2 < 0 or x1 >= img_w:
                 continue
             
-            for x in xrange(x1, x2):
+            for x in range(x1, x2):
                 if x < 0 or x >= img_w:
                     continue
                  
@@ -210,7 +210,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
         a = -1/np.tan(theta)
         b = rho/np.sin(theta)
          
-        for x in xrange(int(-hw), int(hw)):
+        for x in range(int(-hw), int(hw)):
             y0 = a*x + b
              
             y1 = int(y0 - half_limit + hh)
@@ -222,7 +222,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
             if y2 < 0 or y1 >= img_h:
                 continue
                 
-            for y in xrange(y1, y2):
+            for y in range(y1, y2):
                 if y < 0 or y >= img_h:
                     continue
                  

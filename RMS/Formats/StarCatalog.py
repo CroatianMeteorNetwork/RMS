@@ -68,7 +68,7 @@ def readBSC(file_path, file_name, years_from_J2000=0, lim_mag=None):
             RA_proper = np.fromfile(fid, dtype=float_32d, count=1)[0]
             dec_proper = np.fromfile(fid, dtype=float_32d, count=1)[0]
 
-            # print catalog_No, RA, dec, spectral, mag, RA_proper, dec_proper
+            # print(catalog_No, RA, dec, spectral, mag, RA_proper, dec_proper)
 
             # Assign data to array and apply the proper motion correction
             BSC_data[i][0] = np.degrees(RA + RA_proper*years_from_J2000)
