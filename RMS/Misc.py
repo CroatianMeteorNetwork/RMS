@@ -22,8 +22,8 @@ def mkdirP(path):
             pass
 
     # Raise all other errors
-    else: 
-        raise
+    except:
+        raise 
 
 
 
