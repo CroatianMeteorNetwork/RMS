@@ -610,8 +610,6 @@ def detectionCutOut(np.ndarray[UINT8_TYPE_t, ndim=3] frames, np.ndarray[UINT8_TY
         k = <float> (i - point[2])
         y_t = <int> ((<float> point[0] + slopeYZ*k)*f + half_f)
         x_t = <int> ((<float> point[1] + slopeXZ*k)*f + half_f)
-
-        print(i, k, y_t, x_t)
             
         # Skip if out of bounds
         if (y_t < 0) or (x_t < 0) or (y_t >= frames_ysize) or (x_t >= frames_xsize):
