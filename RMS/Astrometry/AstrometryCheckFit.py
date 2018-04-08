@@ -182,7 +182,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
 
     cost = (avg_dist**2)*(1.0/np.sqrt(n_matched + 1))
 
-    print('Matched {:d} stars with radius of {:.2f} px:'.format(n_matched, match_radius))
+    print('Matched {:d} stars with radius of {:.2f} px'.format(n_matched, match_radius))
     print('Avg dist', avg_dist)
     print('Cost:', cost)
     print('-----')
