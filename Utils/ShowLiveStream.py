@@ -6,6 +6,7 @@ import cv2
 import time
 
 import RMS.ConfigReader as cr
+from RMS.Routines.Image import applyBrightnessAndContrast
 
 
 
@@ -49,6 +50,11 @@ if __name__ == "__main__":
 
             # Get the video frame
             ret, frame = vcap.read()
+
+
+            # Apply brightness and contrast corrections if given
+            if (config.brightness != 0) or (config.contrast != 0):
+                frame = applyBrightnessAndContrast(frame, config.brightness, config.contrast)
             
 
             # If the connection has been lost, try reconnecting the device

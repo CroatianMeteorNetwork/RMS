@@ -60,6 +60,9 @@ class Config:
         self.height = 576
         self.fps = 25.0
 
+        self.brightness = 0
+        self.contrast = 0
+
         self.bit_depth = 8
 
         self.ff_format = 'fits'
@@ -319,6 +322,12 @@ def parseCapture(config, parser):
        
     if parser.has_option(section, "height"):
         config.height = parser.getint(section, "height")
+
+    if parser.has_option(section, "brightness"):
+        config.brightness = parser.getint(section, "brightness")
+
+    if parser.has_option(section, "contrast"):
+        config.contrast = parser.getint(section, "contrast")
 
     if parser.has_option(section, "bit_depth"):
         config.bit_depth = parser.getint(section, "bit_depth")

@@ -8,6 +8,45 @@ import numpy as np
 import scipy.misc
 
 
+
+def applyBrightnessAndContrast(img, brightness, contrast):
+    """ Applies brightness and contrast corrections to the image. 
+    
+    Arguments:
+        img: [2D ndarray] Image array.
+        brightness: [int] A number in the range -255 to 255.
+        contrast: [float] A number in the range -255 to 255.
+
+    Return:
+        img: [2D ndarray] Image array with the brightness applied.
+    """
+
+    contrast = float(contrast)
+
+    # Compute the contrast factor
+    f = (259.0*(contrast + 255.0))/(255*(259 - contrast))
+
+    img_type = img.dtype
+
+    # Convert image to float
+    img = img.astype(np.float)
+
+    # Apply contrast
+    img = f*(img - 128.0) + 128.0
+
+    # Apply brightness
+    img = img + brightness
+
+    # Clip the values to 0-255 range
+    img = np.clip(img, 0, 255)
+
+    # Preserve image type
+    img = img.astype(img_type)
+
+    return img 
+
+
+
 def adjustLevels(img_array, minv, gamma, maxv, nbits=8):
     """ Adjusts levels on image with given parameters.
 
