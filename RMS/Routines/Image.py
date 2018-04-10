@@ -31,11 +31,11 @@ def applyBrightnessAndContrast(img, brightness, contrast):
     # Convert image to float
     img = img.astype(np.float)
 
-    # Apply contrast
-    img = f*(img - 128.0) + 128.0
-
     # Apply brightness
     img = img + brightness
+
+    # Apply contrast
+    img = f*(img - 128.0) + 128.0
 
     # Clip the values to 0-255 range
     img = np.clip(img, 0, 255)
