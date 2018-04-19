@@ -8,7 +8,7 @@ fi
 
 # Configuration
 HOME_DIR=$HOME
-VERSION=3.2.0
+VERSION=3.4.1
 
 # Installation
 sudo apt-get update
