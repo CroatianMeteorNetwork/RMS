@@ -21,7 +21,6 @@ sudo apt-get install -y gstreamer1.0-tools
 sudo apt-get install -y libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 sudo apt-get install -y libgtk-3-dev
 sudo apt-get install -y libatlas-base-dev gfortran
-sudo apt-get install -y python2.7-dev
 
 cd ${HOME_DIR}
 wget -O opencv.zip https://github.com/Itseez/opencv/archive/${VERSION}.zip
