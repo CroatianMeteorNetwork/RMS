@@ -418,7 +418,7 @@ def autoCheckFit(config, platepar, calstars_list):
     else:
 
         # Randomly choose calstars_files_N image files from the whole list
-        rand_keys = random.sample(star_dict, config.calstars_files_N)
+        rand_keys = random.sample(list(star_dict), config.calstars_files_N)
         star_dict = {key: star_dict[key] for key in rand_keys}
 
 
