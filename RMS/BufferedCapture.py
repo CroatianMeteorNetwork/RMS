@@ -186,13 +186,16 @@ class BufferedCapture(Process):
                 wait_for_reconnect = False
 
 
+            t_frame = 0
             t_assignment = 0
             t_convert = 0
 
             for i in range(256):
 
                 # Read the frame
+                t1_frame = time.time()
                 ret, frame = device.read()
+                t_frame = time.time() - t1_frame
 
 
                 # If the video device was disconnected, wait for reconnection
@@ -228,7 +231,7 @@ class BufferedCapture(Process):
                     # Calculate the number of dropped frames
                     n_dropped = int((t - lastTime)*self.config.fps)
                     
-                    log.info(str(n_dropped) + " frames dropped! Time for convert: {:.3f}, assignment: {:.3f}".format(t_convert, t_assignment))
+                    log.info(str(n_dropped) + " frames dropped! Time for frame: {:.3f}, convert: {:.3f}, assignment: {:.3f}".format(t_frame, t_convert, t_assignment))
 
                     self.dropped_frames += n_dropped
 
