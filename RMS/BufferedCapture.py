@@ -186,6 +186,8 @@ class BufferedCapture(Process):
                 wait_for_reconnect = False
 
 
+            t_assignment = 0
+            t_convert = 0
 
             for i in range(256):
 
@@ -226,14 +228,15 @@ class BufferedCapture(Process):
                     # Calculate the number of dropped frames
                     n_dropped = int((t - lastTime)*self.config.fps)
                     
-                    log.info(str(n_dropped) + " frames dropped!")
+                    log.info(str(n_dropped) + " frames dropped! Time for convert: {:.3f}, assignment: {:.3f}".format(t_convert, t_assignment))
 
                     self.dropped_frames += n_dropped
 
                     
 
                 lastTime = t
-                
+                    
+                t1_convert = time.time()
                 # Convert the frame to grayscale
                 #gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -252,11 +255,17 @@ class BufferedCapture(Process):
                     gray = frame
 
 
+                t_convert = time.time() - t1_convert
+
+
                 # Assign the frame to shared memory
+                t1_assign = time.time()
                 if first:
                     self.array1[i, :gray.shape[0], :gray.shape[1]] = gray
                 else:
                     self.array2[i, :gray.shape[0], :gray.shape[1]] = gray
+
+                t_assignment = time.time() - t1_assign
 
 
                 # If video is loaded from a file, simulate real FPS
