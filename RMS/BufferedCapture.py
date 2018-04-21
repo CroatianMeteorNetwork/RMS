@@ -221,7 +221,7 @@ class BufferedCapture(Process):
                     startTime = t
 
                 # check if frame is dropped
-                elif (lastTime - t) >= self.time_for_drop:
+                elif (t - lastTime) >= self.time_for_drop:
                     
                     # Calculate the number of dropped frames
                     n_dropped = int((lastTime - t)*self.config.fps)
