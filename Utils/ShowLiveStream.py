@@ -4,6 +4,7 @@ from __future__ import print_function, division, absolute_import
 
 import cv2
 import time
+import argparse
 
 import RMS.ConfigReader as cr
 from RMS.Routines.Image import applyBrightnessAndContrast
@@ -11,6 +12,20 @@ from RMS.Routines.Image import applyBrightnessAndContrast
 
 
 if __name__ == "__main__":
+
+
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description=""" Show live stream from the camera.
+        """)
+
+    arg_parser.add_argument('-n', '--novideo', action="store_true", help="""Get the frames in the background,
+        but don't show them on the screen. """)
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+
 
     # Load the configuration file
     config = cr.parse(".config")
@@ -79,17 +94,20 @@ if __name__ == "__main__":
 
             counter += 1
 
-            window_name = 'Live stream'
-            cv2.imshow(window_name, frame)
 
-            # If this is the first image, move it to the upper left corner
-            if first_image:
-                
-                cv2.moveWindow(window_name, 0, 0)
+            if not cml_args.novideo:
 
-                first_image = False
+                window_name = 'Live stream'
+                cv2.imshow(window_name, frame)
 
-            cv2.waitKey(1)
+                # If this is the first image, move it to the upper left corner
+                if first_image:
+                    
+                    cv2.moveWindow(window_name, 0, 0)
+
+                    first_image = False
+
+                cv2.waitKey(1)
 
     else:
         print('Cant open video stream:', config.deviceID)
