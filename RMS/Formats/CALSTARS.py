@@ -127,6 +127,9 @@ def readCALSTARS(file_path, file_name):
             # Split the line
             line = line.split()
 
+            if len(line) < 4:
+                continue
+
             # Save star data
             star_data.append([float(line[0]), float(line[1]), int(line[2]), int(line[3])])
 
