@@ -132,6 +132,9 @@ def readCALSTARS(file_path, file_name):
 
             try:
                 float(line[0])
+                float(line[1])
+                int(line[2])
+                int(line[3])
 
             except:
                 continue
