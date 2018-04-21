@@ -235,8 +235,24 @@ class BufferedCapture(Process):
                 lastTime = t
                 
                 # Convert the frame to grayscale
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                #gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
+                # Convert the frame to grayscale
+                if len(frame.shape) == 3:
+
+                    # If a color image is given, take the green channel
+                    if frame.shape[2] == 3:
+
+                        gray = frame[:, :, 1]
+
+                    else:
+                        gray = frame[:, :, 0]
+
+                else:
+                    gray = frame
+
+
+                # Assign the frame to shared memory
                 if first:
                     self.array1[i, :gray.shape[0], :gray.shape[1]] = gray
                 else:

@@ -190,6 +190,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
 
+    log.info('Initializing frame buffers...')
     ### For some reason, the RPi 3 does not like memory chunks which size is the multipier of its L2
     ### cache size (512 kB). When such a memory chunk is provided, the compression becomes 10x slower
     ### then usual. We are applying a dirty fix here where we just add an extra image row and column
@@ -212,6 +213,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     sharedArray2 = np.ctypeslib.as_array(sharedArrayBase2.get_obj())
     sharedArray2 = sharedArray2.reshape(256, (config.height + array_pad), (config.width + array_pad))
     startTime2 = multiprocessing.Value('d', 0.0)
+
+    log.info('Initializing frame buffers done!')
 
 
     # Check if the detection should be performed or not
