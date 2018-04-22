@@ -233,7 +233,7 @@ class Compressor(multiprocessing.Process):
                 self.startTime2.value = 0
 
             
-            log.debug("memory copy: " + str(time.time() - t) + "s")
+            #log.debug("memory copy: " + str(time.time() - t) + "s")
             t = time.time()
             
             # Run the compression
