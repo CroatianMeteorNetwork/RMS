@@ -6,7 +6,7 @@ import numpy as np
 
 class AllskyPlate(object):
     def __init__(self):
-        """ Borovicka et al. (1995) all-sky calibration. """
+        """ Borovicka et al. (1995) all-sky calibration, implementation based on code by Rob Weryk. """
 
         ### Plate constants
 

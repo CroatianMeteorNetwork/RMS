@@ -1,4 +1,4 @@
-""" This module contains functions for parsing CMN format data.
+""" CMN-style astrometric calibration.
 """
 
 # The MIT License
