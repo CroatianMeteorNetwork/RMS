@@ -165,8 +165,8 @@ class PlateTool(object):
 
 
 
-        # Load catalog stars
-        self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
+        # Load catalog stars (1.5 magnitude deeper than the config)
+        self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit + 1.5)
         self.cat_lim_mag = self.config.catalog_mag_limit
 
         # Check if the BSC catalog exists
