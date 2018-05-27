@@ -165,8 +165,8 @@ class PlateTool(object):
 
 
 
-        # Load catalog stars (1.5 magnitude deeper than the config)
-        self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit + 1.5)
+        # Load catalog stars
+        self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
         self.cat_lim_mag = self.config.catalog_mag_limit
 
         # Check if the BSC catalog exists
@@ -1123,7 +1123,7 @@ class PlateTool(object):
         #         filtered_indices.append(i)
 
         filtered_indices, filtered_catalog_stars = subsetCatalog(catalog_stars, ra_centre, dec_centre, \
-            fov_radius, self.config.catalog_mag_limit)
+            fov_radius, self.cat_lim_mag)
 
 
         return filtered_indices, np.array(filtered_catalog_stars)
