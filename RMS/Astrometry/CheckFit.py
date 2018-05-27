@@ -225,9 +225,12 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius):
     # Check that the average distance is within the threshold
     if avg_dist <= config.dist_check_threshold:
 
+        print('The minimum residual is satisfied!')
+
         # Check that the minimum number of stars is matched per every image
         if n_matched >= len(star_dict)*config.min_matched_stars:
 
+            print('But there are not enough stars on every image, recalibrating...')
             return True
 
 
