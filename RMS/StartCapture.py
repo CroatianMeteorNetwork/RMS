@@ -43,7 +43,7 @@ from RMS.BufferedCapture import BufferedCapture
 from RMS.Compression import Compressor
 from RMS.CaptureDuration import captureDuration
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
-from RMS.Astrometry.AstrometryCheckFit import autoCheckFit
+from RMS.Astrometry.CheckFit import autoCheckFit
 from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo
 from RMS.ArchiveDetections import archiveDetections, archiveFieldsums
 from RMS.UploadManager import UploadManager

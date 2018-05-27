@@ -444,6 +444,23 @@ def autoCheckFit(config, platepar, calstars_list):
     xatol_ang = config.dist_check_threshold*fov_w/platepar.X_res
 
 
+    ### If the initial match is good enough, do only quick recalibratoin ###
+     
+    # Match the stars and calculate the residuals
+    n_matched, avg_dist, cost, _ = matchStarsResiduals(config, platepar, catalog_stars, star_dict, \
+        min_radius, ret_nmatch=True)
+
+    if n_matched >= config.calstars_files_N:
+
+        # Check if the average distance with the tightest radius is close
+        if avg_dist < config.dist_check_quick_threshold:
+
+            # Use a reduced set of initial radius values
+            radius_list = [1.5, min_radius]
+
+    ##########
+
+
     # Match increasingly smaller search radiia around image stars
     for i, match_radius in enumerate(radius_list):
 
@@ -559,7 +576,7 @@ if __name__ == "__main__":
 
 
     if len(sys.argv) < 2:
-        print('Usage: python -m RMS.Astrometry.AstrometryCheckFit /path/to/FF/dir/')
+        print('Usage: python -m RMS.Astrometry.CheckFit /path/to/FF/dir/')
         sys.exit()
 
     # Night directory

@@ -204,7 +204,8 @@ class Config:
 
         self.calstars_min_stars = 500 # Minimum number of stars to use
 
-        self.dist_check_threshold = 0.25
+        self.dist_check_threshold = 0.33 # Minimum acceptable calibration residual (px)
+        self.dist_check_quick_threshold = 0.4 # Threshold for quick recalibration
 
         self.stars_NN_radius = 10.0 # deg
         self.refinement_star_NN_radius = 0.125 #deg
@@ -684,6 +685,9 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "dist_check_threshold"):
         config.dist_check_threshold = parser.getfloat(section, "dist_check_threshold")
+
+    if parser.has_option(section, "dist_check_quick_threshold"):
+        config.dist_check_quick_threshold = parser.getfloat(section, "dist_check_quick_threshold")
 
     if parser.has_option(section, "calstars_min_stars"):
         config.calstars_min_stars = parser.getint(section, "calstars_min_stars")

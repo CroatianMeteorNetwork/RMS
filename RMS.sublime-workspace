@@ -4,12 +4,136 @@
 		"selected_items":
 		[
 			[
-				"star_",
-				"star_catalog_band_ratios\tstatement"
+				"plt",
+				"plot"
+			],
+			[
+				"guess",
+				"guess_amp\tstatement"
+			],
+			[
+				"sine",
+				"sine_fit\tstatement"
+			],
+			[
+				"high",
+				"highpass\tparam"
+			],
+			[
+				"filt",
+				"filter_order\tparam"
+			],
+			[
+				"pot",
+				"plot\tfunction"
+			],
+			[
+				"filter",
+				"filtered_data\tstatement"
+			],
+			[
+				"filtere",
+				"filtered_data\tstatement"
+			],
+			[
+				"filte",
+				"filtered_data"
+			],
+			[
+				"spec",
+				"specgram"
+			],
+			[
+				"int",
+				"intensity\tstatement"
+			],
+			[
+				"fil",
+				"filterLP\tfunction"
+			],
+			[
+				"filters",
+				"filters_params\tstatement"
+			],
+			[
+				"cba",
+				"cbar_ax"
+			],
+			[
+				"cmp",
+				"cmap\tparam"
+			],
+			[
+				"std",
+				"stdpixel\tstatement"
+			],
+			[
+				"ave",
+				"avepixel\tstatement"
+			],
+			[
+				"max",
+				"maxpixel\tstatement"
 			],
 			[
 				"read",
-				"readStarCatalog\tfunction"
+				"readFF\tfunction"
+			],
+			[
+				"Fro",
+				"Formats\tmodule"
+			],
+			[
+				"ex",
+				"exists\tfunction"
+			],
+			[
+				"arr",
+				"array_pad\tstatement"
+			],
+			[
+				"sh",
+				"shape\tparam"
+			],
+			[
+				"sha",
+				"shape"
+			],
+			[
+				"array1",
+				"array1_ctypes\tparam"
+			],
+			[
+				"shared",
+				"sharedctypes"
+			],
+			[
+				"w",
+				"width\tstatement"
+			],
+			[
+				"arra",
+				"array1_proto\tstatement"
+			],
+			[
+				"share",
+				"sharedArrayBase\tstatement"
+			],
+			[
+				"no",
+				"novideo"
+			],
+			[
+				"app",
+				"applyBrightnessAndContrast\tfunction"
+			],
+			[
+				"brig",
+				"brightness"
+			],
+			[
+				"star_",
+				"star_catalog_band_ratios\tstatement"
 			],
 			[
 				"Star",
@@ -168,10 +292,6 @@
 				"matched_stars\tstatement"
 			],
 			[
-				"max",
-				"max_radius\tparam"
-			],
-			[
 				"im_s",
 				"im_star_y\tstatement"
 			],
@@ -250,10 +370,6 @@
 			[
 				"load",
 				"loadFlat\tfunction"
-			],
-			[
-				"app",
-				"applyFlat\tfunction"
 			],
 			[
 				"Flat",
@@ -364,10 +480,6 @@
 				"archive_name\tstatement"
 			],
 			[
-				"ex",
-				"expanduser\tfunction"
-			],
-			[
 				"par",
 				"parser\tparam"
 			],
@@ -402,118 +514,6 @@
 			[
 				"cap",
 				"captured_path\tstatement"
-			],
-			[
-				"night",
-				"night_archive_dir"
-			],
-			[
-				"archiv",
-				"archiveFieldsums"
-			],
-			[
-				"field",
-				"fieldsum_archive_name\tstatement"
-			],
-			[
-				"sta",
-				"station_code\tstatement"
-			],
-			[
-				"dt",
-				"dt_obj\tparam"
-			],
-			[
-				"sort",
-				"sort_keys\tparam"
-			],
-			[
-				"pp",
-				"pp_file\tstatement"
-			],
-			[
-				"cam",
-				"camno"
-			],
-			[
-				"upda",
-				"update"
-			],
-			[
-				"text",
-				"text_str\tstatement"
-			],
-			[
-				"gamma",
-				"gamma_adj_factor\tparam"
-			],
-			[
-				"gamm",
-				"img_gamma"
-			],
-			[
-				"ma",
-				"maxpixel\tstatement"
-			],
-			[
-				"UT",
-				"UT_corr\tstatement"
-			],
-			[
-				"cop",
-				"copy2\tfunction"
-			],
-			[
-				"calib",
-				"calib_string\tstatement"
-			],
-			[
-				"date",
-				"datetime\tclass"
-			],
-			[
-				"mete",
-				"meteor_list"
-			],
-			[
-				"time_da",
-				"time_data\tstatement"
-			],
-			[
-				"time_d",
-				"time_data"
-			],
-			[
-				"second",
-				"seconds"
-			],
-			[
-				"tiem",
-				"timedelta\tclass"
-			],
-			[
-				"time",
-				"time_beg\tstatement"
-			],
-			[
-				"pos",
-				"pos_angle_ref\tstatement"
-			],
-			[
-				"meteor_",
-				"meteor_picks\tstatement"
-			],
-			[
-				"meteo",
-				"meteor_data\tstatement"
-			],
-			[
-				"pri",
-				"print_function\tstatement"
-			],
-			[
-				"meter",
-				"meteor_list"
 			]
 		]
 	},
@@ -523,7 +523,76 @@
 			"file": "RMS/StartCapture.py",
 			"settings":
 			{
-				"buffer_size": 22315,
+				"buffer_size": 22543,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "RMS/Formats/Platepar.py",
+			"settings":
+			{
+				"buffer_size": 11246,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "RMS/Compression.py",
+			"settings":
+			{
+				"buffer_size": 8847,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "RMS/Formats/CALSTARS.py",
+			"settings":
+			{
+				"buffer_size": 4943,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "/D/Dropbox/RPi Meteor Station/configs/.config_hr0002",
+			"settings":
+			{
+				"buffer_size": 9212,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "/D/Dropbox/RPi Meteor Station/configs/.config_home",
+			"settings":
+			{
+				"buffer_size": 8916,
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "RMS/DeleteOldObservations.py",
+			"settings":
+			{
+				"buffer_size": 5622,
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "/D/Dropbox/RPi Meteor Station/data/CA0004_20180516_040459_588816_detected/platepar_cmn2010.cal",
+			"settings":
+			{
+				"buffer_size": 1450,
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "RMS/BufferedCapture.py",
+			"settings":
+			{
+				"buffer_size": 8614,
 				"encoding": "UTF-8",
 				"line_ending": "Windows"
 			}
@@ -532,80 +601,24 @@
 			"file": "/D/Dropbox/RPi Meteor Station/RMS_NEW_installation+steps.txt",
 			"settings":
 			{
-				"buffer_size": 4515,
+				"buffer_size": 6540,
 				"encoding": "UTF-8",
 				"line_ending": "Windows"
 			}
 		},
 		{
-			"file": "/D/Dropbox/RPi Meteor Station/IMX225 - approx photometry band ratios",
+			"file": "RMS/Detection.py",
 			"settings":
 			{
-				"buffer_size": 308,
-				"encoding": "UTF-8",
-				"line_ending": "Windows",
-				"name": "IMX225 - approx photometry band ratios"
-			}
-		},
-		{
-			"file": "/D/Dropbox/RPi Meteor Station/sky2000 convert/Sky2000.py",
-			"settings":
-			{
-				"buffer_size": 5242,
-				"encoding": "UTF-8",
+				"buffer_size": 44379,
 				"line_ending": "Windows"
 			}
 		},
 		{
-			"file": "RMS/Formats/StarCatalog.py",
+			"file": "RMS/Astrometry/AstrometryCheckFit.py",
 			"settings":
 			{
-				"buffer_size": 6260,
-				"encoding": "UTF-8",
-				"line_ending": "Windows"
-			}
-		},
-		{
-			"file": "Catalogs/STARS9TH_VBVRI.txt",
-			"settings":
-			{
-				"buffer_size": 1281408,
-				"line_ending": "Windows"
-			}
-		},
-		{
-			"contents": "Searching 128 files for \"readStarCa\"\n\nD:\\Dropbox\\RPi Meteor Station\\RMS\\RMS\\Astrometry\\AstrometryCheckFit.py:\n  419  \n  420      # Load catalog stars\n  421:     catalog_stars = StarCatalog.readStarCatalog(config.star_catalog_path, config.star_catalog_file, \\\n  422          lim_mag=config.catalog_mag_limit)\n  423  \n\nD:\\Dropbox\\RPi Meteor Station\\RMS\\RMS\\Astrometry\\SkyFit.py:\n  807  \n  808          # Load catalog stars\n  809:         catalog_stars = StarCatalog.readStarCatalog(self.config.star_catalog_path, \n  810              self.config.star_catalog_file, lim_mag=lim_mag)\n  811  \n\nD:\\Dropbox\\RPi Meteor Station\\RMS\\RMS\\Formats\\StarCatalog.py:\n   89  \n   90  \n   91: def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):\n   92      \"\"\" Import the star catalog into a numpy array. \n   93      \n   ..\n  189  \n  190      # Test open the file\n  191:     print(readStarCatalog(config.star_catalog_path, config.star_catalog_file))\n\n4 matches across 3 files\n",
-			"settings":
-			{
-				"buffer_size": 981,
-				"line_ending": "Windows",
-				"name": "Find Results",
-				"scratch": true
-			}
-		},
-		{
-			"file": "RMS/Astrometry/SkyFit.py",
-			"settings":
-			{
-				"buffer_size": 52421,
-				"encoding": "UTF-8",
-				"line_ending": "Windows"
-			}
-		},
-		{
-			"file": ".config",
-			"settings":
-			{
-				"buffer_size": 8845,
-				"encoding": "UTF-8",
-				"line_ending": "Windows"
-			}
-		},
-		{
-			"file": "RMS/ConfigReader.py",
-			"settings":
-			{
-				"buffer_size": 26623,
+				"buffer_size": 20573,
 				"encoding": "UTF-8",
 				"line_ending": "Windows"
 			}
@@ -777,14 +790,54 @@
 	[
 		"/D/Dropbox/RPi Meteor Station/RMS",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS",
-		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats"
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Astrometry",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Routines",
+		"/D/Dropbox/RPi Meteor Station/RMS/Tests",
+		"/D/Dropbox/RPi Meteor Station/RMS/Utils"
 	],
 	"file_history":
 	[
-		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Astrometry/AstrometryCheckFit.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/Utils/ShowThresholdLevels.py",
+		"/D/Dropbox/RPi Meteor Station/2018 WGN papers/radiometer/WGN_RadioimeterFiltering_V04.py",
+		"/D/Dropbox/UWO/Radiometer/UWOMeteorRadiometer/AnalyzeData.py",
+		"/C/Users/delorayn1/Desktop/visa_application_id.txt",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats/AllskyPlate.py",
+		"/C/Users/delorayn1/Desktop/test.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats/AST.py",
+		"/C/Users/delorayn1/Desktop/home_20180420/platepar_cmn2010.cal",
+		"/D/Dropbox/RPi Meteor Station/configs/.config_home",
+		"/D/Dropbox/RPi Meteor Station/configs/.config_ca0001",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/QueuedPool.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Compression.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/Utils/ShowLiveStream.py",
+		"/D/Dropbox/UWO/TA/2018W - A2232/final project/pair_students_and_grades.py",
+		"/C/Users/delorayn1/AppData/Local/Temp/a2232_groups-1.txt",
+		"/D/Dropbox/UWO/TA/2018W - A2232/final project/A2232G_final_project_ALL_MARKS.csv",
+		"/D/Dropbox/RPi Meteor Station/RMS/Utils/PlotFieldsums.py",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Astrometry/SkyFit.py",
-		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats/BSC.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/ConfigReader.py",
+		"/D/Dropbox/RPi Meteor Station/IMX225 - approx photometry band ratios",
+		"/D/Dropbox/RPi Meteor Station/sky2000 convert/Sky2000.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats/StarCatalog.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/VideoExtraction.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/Utils/Grouping3DRunner.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Routines/Image.py",
+		"/D/Dropbox/RPi Meteor Station/RMS/Catalogs/STARS9TH_VBVRI.txt",
+		"/D/Dropbox/RPi Meteor Station/RMS/opencv3_install.sh",
+		"/D/Dropbox/RPi Meteor Station/scripts/TunnelIPcamera.sh",
+		"/D/Dropbox/RPi Meteor Station/imx225_usage_URL.txt",
+		"/D/Dropbox/RPi Meteor Station/imx225_settings/onvif_manager.txt",
+		"/D/Dropbox/RPi Meteor Station/configs/.config_hr0002",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Astrometry/AstrometryCheckFit.py",
+		"/D/Dropbox/RPi Meteor Station/samples/VID_2015270506/CALSTARS0459_2015_07_05_19_31_58.txt",
+		"/C/Users/delorayn1/Desktop/hum meteors/HR0002_20180124_002440_123660_detected/CALSTARS_HR0002_HR0002_20180124_002440_123660.txt",
+		"/C/Users/delorayn1/Desktop/20170813_213506_620678/CALSTARS010020170813_213506_620678.txt",
+		"/D/Dropbox/UWO Master's/Projects/compressive_strengths_NEW_paper.txt",
+		"/D/Dropbox/RPi Meteor Station/RMS/TODO",
 		"/D/Dropbox/RPi Meteor Station/RMS/.config",
+		"/D/Dropbox/RPi Meteor Station/RMS_NEW_installation+steps.txt",
+		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats/BSC.py",
 		"/D/Dropbox/RPi Meteor Station/sky2000 convert/STARS9TH_VBVRI.txt",
 		"/C/Users/delorayn1/Desktop/sky2000 reader/sky2kv5.dat",
 		"/C/Users/delorayn1/Desktop/sky2000 reader/Sky2000.py",
@@ -796,18 +849,13 @@
 		"/C/Users/delorayn1/Desktop/sky2000 reader/sky2000_source.txt",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats/FFfile.py",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Astrometry/ApplyAstrometry.py",
-		"/D/Dropbox/RPi Meteor Station/RMS/RMS/QueuedPool.py",
 		"/D/Dropbox/UWO Master's/Projects/SimulatedMeteors/traj_solvers_paper.txt",
-		"/D/Dropbox/RPi Meteor Station/RMS/RMS/ConfigReader.py",
 		"/D/Dropbox/RPi Meteor Station/RMS/FILES_TO_UPLOAD.inf",
 		"/D/Dropbox/RPi Meteor Station/2018 WGN paper/radiometer/WGN_RadioimeterFiltering_V04.py",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Detection.py",
-		"/D/Dropbox/RPi Meteor Station/RMS/RMS/VideoExtraction.py",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS/BufferedCapture.py",
-		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Compression.py",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS/UploadManager.py",
 		"/D/Dropbox/UWO Master's/Projects/MILIG files/20171127_meteorite_dropping/input.txt",
-		"/D/Dropbox/RPi Meteor Station/configs/.config_home",
 		"/D/Dropbox/UWO Master's/Projects/Preatmosphere VS initial velocitites/deltaVfit.py",
 		"/D/Dropbox/UWO Master's/Projects/Preatmosphere VS initial velocitites/PlotResults.py",
 		"/C/Users/delorayn1/Desktop/meteor-uwo/automate/automate.c",
@@ -831,12 +879,9 @@
 		"/D/Moji dokumenti/Denis/Razno/ReadMe.txt",
 		"/C/Users/delorayn1/Desktop/3D7Do0u3.html",
 		"/C/Users/delorayn1/Desktop/ograniceno.php",
-		"/D/Dropbox/RPi Meteor Station/RMS/opencv3_install.sh",
 		"/C/Users/delorayn1/Desktop/RMS_step9_NEW.txt",
-		"/D/Dropbox/RPi Meteor Station/RMS/Utils/PlotFieldsums.py",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS/Formats/FieldIntensities.py",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS/CaptureDuration.py",
-		"/D/Dropbox/RPi Meteor Station/RMS/Utils/ShowLiveStream.py",
 		"/D/Dropbox/RPi Meteor Station/RMS/RMS/LiveViewer.py",
 		"/home/dvida/Desktop/onvif_test.py",
 		"/home/dvida/source/RMS/.config",
@@ -880,39 +925,11 @@
 		"/home/dvida/WINDOWS/Users/delorayn1/Desktop/20170813_213506_620678/platepar_cmn2010.cal.json",
 		"/home/dvida/source/RMS/RMS/Formats/FFbin.py",
 		"/home/dvida/source/RMS/RMS/Astrometry/AstrometryCheckFit.py",
-		"/home/dvida/Desktop/test.txt",
-		"/home/dvida/source/RMS/RMS/Logger.py",
-		"/home/dvida/source/RMS/RMS/StartCapture.py",
-		"/home/dvida/source/RMS/RMS/FILES_TO_UPLOAD.inf",
-		"/home/dvida/source/RMS/README.md",
-		"/home/dvida/source/RMS/requirements.txt",
-		"/home/dvida/source/RMS/Utils/GenerateThumbnails.py",
-		"/home/dvida/Desktop/test.py",
-		"/home/dvida/RMS_data/CapturedFiles/20170903_212942_285606/FTPdetectinfo_20170903_212942_285606.txt",
-		"/home/dvida/RMS_data/CapturedFiles/20170903_212942_285606/CALSTARS_CA0001_20170903_212942_285606.txt",
-		"/home/dvida/source/RMS/Utils/Grouping3DRunner.py",
-		"/home/dvida/source/RMS/RMS/Formats/FFfits.py",
-		"/home/dvida/source/RMS/RMS/Formats/FieldIntensities.py",
-		"/home/dvida/source/RMS/RMS/Formats/FTPdetectinfo.py",
-		"/home/dvida/source/RMS/RMS/Formats/FRbin.py",
-		"/home/dvida/source/RMS/RMS/Detection.py",
-		"/home/dvida/source/RMS/RMS/Routines/HT-cy_run.py",
-		"/home/dvida/source/RMS/Utils/FRbinViewer.py",
-		"/home/dvida/Desktop/platepar_cmn2010.cal",
-		"/home/dvida/Desktop/platepar_cmn2010.cal.json",
-		"/home/dvida/source/RMS/.gitignore",
-		"/home/dvida/source/saods9/BUILD.txt",
-		"/C/Users/delorayn1/Desktop/20170813_213506_620678/platepar_cmn2010.cal",
-		"/D/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit/CameraTimeOffsets.txt",
-		"/D/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit/CameraSites.txt",
-		"/D/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit/FTPdetectinfo_first_rpi.txt",
-		"/D/Dropbox/Apps/VSA2017 RMS data/PUB/20170817_183817_894457_chosen/platepar_cmn2010.cal",
-		"/D/Dropbox/RPi Meteor Station/RMS/Catalogs/BSC5",
-		"/D/Dropbox/RPi Meteor Station/sky2kv4ra.dat"
+		"/home/dvida/Desktop/test.txt"
 	],
 	"find":
 	{
-		"height": 41.0
+		"height": 28.0
 	},
 	"find_in_files":
 	{
@@ -954,6 +971,30 @@
 		"case_sensitive": false,
 		"find_history":
 		[
+			"yy",
+			"tt",
+			"numpy",
+			"readBinary",
+			"wrap",
+			"python",
+			"dropped_frames",
+			"memory co",
+			",",
+			"bc.",
+			"config.",
+			"y1",
+			"nolan",
+			"mehr",
+			"guthe",
+			"sample",
+			"libjpe",
+			"python",
+			"pate",
+			"patel",
+			";",
+			"width",
+			".misc",
+			"weave",
 			" 37.95452",
 			"readStarCa",
 			"star_catalog_file",
@@ -1057,31 +1098,7 @@
 			"calstars",
 			"exit",
 			"@param",
-			"@param ",
-			"w_pix",
-			"@param",
-			"rot_param",
-			"xy2corre",
-			"raDecToCorrectedXY",
-			"radec",
-			"radec2co",
-			"ra_catalog",
-			"rot_param",
-			"calcRefCentre",
-			"calcrefce",
-			"xy2corr",
-			"altaz2ra",
-			"log",
-			"queuedpool",
-			"log.",
-			"logdebug",
-			"log.",
-			"print",
-			"upload_manager",
-			"uploadmana",
-			"logger",
-			"compressor",
-			"compression"
+			"@param "
 		],
 		"highlight": true,
 		"in_selection": false,
@@ -1117,7 +1134,7 @@
 	"groups":
 	[
 		{
-			"selected": 5,
+			"selected": 6,
 			"sheets":
 			[
 				{
@@ -1126,15 +1143,15 @@
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 22315,
+						"buffer_size": 22543,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								963,
-								934
+								16322,
+								16341
 							]
 						],
 						"settings":
@@ -1168,145 +1185,6 @@
 								{
 									"characters": ".",
 									"selector": "source.python - string - constant.numeric"
-								}
-							],
-							"git_gutter_is_enabled": true,
-							"syntax": "Packages/Python/Python.sublime-syntax",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 0.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 8,
-					"type": "text"
-				},
-				{
-					"buffer": 1,
-					"file": "/D/Dropbox/RPi Meteor Station/RMS_NEW_installation+steps.txt",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 4515,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								3789,
-								3789
-							]
-						],
-						"settings":
-						{
-							"git_gutter_is_enabled": false,
-							"syntax": "Packages/Text/Plain text.tmLanguage"
-						},
-						"translation.x": 0.0,
-						"translation.y": 343.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 9,
-					"type": "text"
-				},
-				{
-					"buffer": 2,
-					"file": "/D/Dropbox/RPi Meteor Station/IMX225 - approx photometry band ratios",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 308,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								308,
-								273
-							]
-						],
-						"settings":
-						{
-							"auto_name": "IMX225 - approx photometry band ratios",
-							"git_gutter_is_enabled": false,
-							"syntax": "Packages/Text/Plain text.tmLanguage"
-						},
-						"translation.x": 0.0,
-						"translation.y": 2.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 5,
-					"type": "text"
-				},
-				{
-					"buffer": 3,
-					"file": "/D/Dropbox/RPi Meteor Station/sky2000 convert/Sky2000.py",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 5242,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								5241,
-								5241
-							]
-						],
-						"settings":
-						{
-							"auto_complete_triggers":
-							[
-								{
-									"characters": ".",
-									"selector": "source.python - string - comment - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								}
-							],
-							"git_gutter_is_enabled": false,
-							"syntax": "Packages/Python/Python.sublime-syntax",
-							"tab_size": 4,
-							"translate_tabs_to_spaces": true
-						},
-						"translation.x": 0.0,
-						"translation.y": 2845.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 6,
-					"type": "text"
-				},
-				{
-					"buffer": 4,
-					"file": "RMS/Formats/StarCatalog.py",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 6260,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								5549,
-								5549
-							]
-						],
-						"settings":
-						{
-							"auto_complete_triggers":
-							[
-								{
-									"characters": ".",
-									"selector": "source.python - string - comment - constant.numeric"
 								},
 								{
 									"characters": ".",
@@ -1314,193 +1192,94 @@
 								}
 							],
 							"git_gutter_is_enabled": true,
-							"open_with_edit": true,
 							"syntax": "Packages/Python/Python.sublime-syntax",
 							"tab_size": 4,
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 2219.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 1,
-					"type": "text"
-				},
-				{
-					"buffer": 5,
-					"file": "Catalogs/STARS9TH_VBVRI.txt",
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 1281408,
-						"regions":
-						{
-						},
-						"selection":
-						[
-							[
-								113567,
-								113567
-							]
-						],
-						"settings":
-						{
-							"git_gutter_is_enabled": true,
-							"syntax": "Packages/Text/Plain text.tmLanguage"
-						},
-						"translation.x": 0.0,
-						"translation.y": 41854.0,
-						"zoom_level": 1.0
-					},
-					"stack_index": 0,
-					"type": "text"
-				},
-				{
-					"buffer": 6,
-					"semi_transient": false,
-					"settings":
-					{
-						"buffer_size": 981,
-						"regions":
-						{
-							"match":
-							{
-								"flags": 112,
-								"regions":
-								[
-									[
-										189,
-										199
-									],
-									[
-										464,
-										474
-									],
-									[
-										677,
-										687
-									],
-									[
-										886,
-										896
-									]
-								],
-								"scope": ""
-							}
-						},
-						"selection":
-						[
-							[
-								950,
-								950
-							]
-						],
-						"settings":
-						{
-							"default_dir": "D:\\Dropbox\\RPi Meteor Station\\RMS",
-							"detect_indentation": false,
-							"git_gutter_is_enabled": false,
-							"line_numbers": false,
-							"output_tag": 1,
-							"result_base_dir": "",
-							"result_file_regex": "^([^ \t].*):$",
-							"result_line_regex": "^ +([0-9]+):",
-							"scroll_past_end": true,
-							"syntax": "Packages/Default/Find Results.hidden-tmLanguage"
-						},
-						"translation.x": 0.0,
-						"translation.y": 0.0,
+						"translation.y": 9781.0,
 						"zoom_level": 1.0
 					},
 					"stack_index": 2,
 					"type": "text"
 				},
 				{
-					"buffer": 7,
-					"file": "RMS/Astrometry/SkyFit.py",
+					"buffer": 1,
+					"file": "RMS/Formats/Platepar.py",
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 52421,
+						"buffer_size": 11246,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								26478,
-								26478
+								540,
+								540
 							]
 						],
 						"settings":
 						{
-							"auto_complete_triggers":
-							[
-								{
-									"characters": ".",
-									"selector": "source.python - string - comment - constant.numeric"
-								},
-								{
-									"characters": ".",
-									"selector": "source.python - string - constant.numeric"
-								}
-							],
 							"git_gutter_is_enabled": true,
 							"syntax": "Packages/Python/Python.sublime-syntax",
 							"tab_size": 4,
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 14078.0,
+						"translation.y": 0.0,
 						"zoom_level": 1.0
 					},
 					"stack_index": 4,
 					"type": "text"
 				},
 				{
-					"buffer": 8,
-					"file": ".config",
+					"buffer": 2,
+					"file": "RMS/Compression.py",
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 8845,
+						"buffer_size": 8847,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								7210,
-								7186
+								7066,
+								7066
 							]
 						],
 						"settings":
 						{
 							"git_gutter_is_enabled": true,
-							"syntax": "Packages/Text/Plain text.tmLanguage"
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 2119.0,
+						"translation.y": 3784.0,
 						"zoom_level": 1.0
 					},
-					"stack_index": 3,
+					"stack_index": 8,
 					"type": "text"
 				},
 				{
-					"buffer": 9,
-					"file": "RMS/ConfigReader.py",
+					"buffer": 3,
+					"file": "RMS/Formats/CALSTARS.py",
 					"semi_transient": false,
 					"settings":
 					{
-						"buffer_size": 26623,
+						"buffer_size": 4943,
 						"regions":
 						{
 						},
 						"selection":
 						[
 							[
-								24342,
-								24342
+								4737,
+								4737
 							]
 						],
 						"settings":
@@ -1522,10 +1301,265 @@
 							"translate_tabs_to_spaces": true
 						},
 						"translation.x": 0.0,
-						"translation.y": 10966.0,
+						"translation.y": 1918.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 9,
+					"type": "text"
+				},
+				{
+					"buffer": 4,
+					"file": "/D/Dropbox/RPi Meteor Station/configs/.config_hr0002",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 9212,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								428,
+								428
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": false,
+							"syntax": "Packages/Text/Plain text.tmLanguage"
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 6,
+					"type": "text"
+				},
+				{
+					"buffer": 5,
+					"file": "/D/Dropbox/RPi Meteor Station/configs/.config_home",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 8916,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								271,
+								456
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": false,
+							"syntax": "Packages/Text/Plain text.tmLanguage"
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 1,
+					"type": "text"
+				},
+				{
+					"buffer": 6,
+					"file": "RMS/DeleteOldObservations.py",
+					"semi_transient": true,
+					"settings":
+					{
+						"buffer_size": 5622,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								0,
+								0
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 731.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 0,
+					"type": "text"
+				},
+				{
+					"buffer": 7,
+					"file": "/D/Dropbox/RPi Meteor Station/data/CA0004_20180516_040459_588816_detected/platepar_cmn2010.cal",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 1450,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								0,
+								0
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": false,
+							"syntax": "Packages/Text/Plain text.tmLanguage",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 5,
+					"type": "text"
+				},
+				{
+					"buffer": 8,
+					"file": "RMS/BufferedCapture.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 8614,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								1982,
+								1982
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": ".",
+									"selector": "source.python - string - comment - constant.numeric"
+								},
+								{
+									"characters": ".",
+									"selector": "source.python - string - constant.numeric"
+								}
+							],
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 652.0,
 						"zoom_level": 1.0
 					},
 					"stack_index": 7,
+					"type": "text"
+				},
+				{
+					"buffer": 9,
+					"file": "/D/Dropbox/RPi Meteor Station/RMS_NEW_installation+steps.txt",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 6540,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								3479,
+								3479
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": false,
+							"syntax": "Packages/Text/Plain text.tmLanguage",
+							"tab_size": 2,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 1215.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 11,
+					"type": "text"
+				},
+				{
+					"buffer": 10,
+					"file": "RMS/Detection.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 44379,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								26571,
+								26638
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 17023.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 3,
+					"type": "text"
+				},
+				{
+					"buffer": 11,
+					"file": "RMS/Astrometry/AstrometryCheckFit.py",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 20573,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								13536,
+								13536
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": true,
+							"syntax": "Packages/Python/Python.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 7038.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 10,
 					"type": "text"
 				}
 			]
@@ -1533,11 +1567,11 @@
 	],
 	"incremental_find":
 	{
-		"height": 26.0
+		"height": 28.0
 	},
 	"input":
 	{
-		"height": 39.0
+		"height": 41.0
 	},
 	"layout":
 	{
@@ -1570,11 +1604,15 @@
 	{
 		"height": 0.0
 	},
+	"output.mdpopups":
+	{
+		"height": 0.0
+	},
 	"pinned_build_system": "",
 	"project": "RMS.sublime-project",
 	"replace":
 	{
-		"height": 48.0
+		"height": 52.0
 	},
 	"save_all_on_build": true,
 	"select_file":
