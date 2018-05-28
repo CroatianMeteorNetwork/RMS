@@ -17,7 +17,9 @@ This guide will assume basic knowledge of electronics, the Unix environment, and
 
 ### Hardware
 This code was designed to work with specific hardware, not because we wanted it so, but because only a unique combination of hardware will work at all. Thus, it is recommended that you follow the list as closely as possible. 
-You can find a **step-by-step guide how to assemble the hardware and install the software on Instructables**: http://www.instructables.com/id/Raspberry-Pi-Meteor-Station/
+You can find a **step-by-step guide how to assemble the hardware and install the software on Instructables** (NOTE: we have an SD card image available too, see below for more details): http://www.instructables.com/id/Raspberry-Pi-Meteor-Station/
+
+#### RPi
 
 1. **Raspberry Pi 2 or Raspberry Pi 3 single-board computer.**
 The first version of the system was developed on the Raspberry Pi 2, while the system is now being tested on the RPi3, which is what we recommend you use, as it provides much more computing power. The system will NOT work with Raspberry Pi 1.
@@ -35,6 +37,8 @@ If you end up using the RPi3, it is very probable that you will need to use a ca
 The RPi itself does not have a battery, so every time you turn it off, it loses the current time. The time then needs to be updates via the Internet. If for some reason you do not have access to the Internet, or you network connection is down, it is a good idea to have the correct time nevertheless, as it is essential for meteor trajectory estimation.
 We recommend buying the DS3231 RTC module. See under [Guides/rpi3_rtc_setup.md](Guides/rpi3_rtc_setup.md) for information on installing this RTC module.
 
+#### Cameras
+
 1. **EasyCap UTV007 video digitizer.** 
 This device is used to digitize the video signal from the analogue camera, so it can be digitally processed and stored. We have tried numerous EasyCap devices, but **only the one the UTV007 chipset** works without any issues on the RPi.
 
@@ -42,11 +46,22 @@ This device is used to digitize the video signal from the analogue camera, so it
 Upon thorough testing, it was found that this camera has the best price–performance ratio, especially when it is paired with a wide-field lens. A 4mm wide field lens will give a field-of-view of about 64x48 degrees. This camera needs a 12V power supply. One important thing to note is that the camera needs to have the IR-cut filter removed (this filter will filter out all infrared light, but as meteors are radiating in that part of the spectrum, we want to record that light as well). Alternatives to the proposed camera are possible, see [Samuels et al. (2014) "Performance of 
 new low-cost 1/3" security cameras for meteor surveillance"](http://www.imo.net/imcs/imc2014/2014-29-wray-final.pdf) for more information.
 
+---------
+
+OR:
+
+1. **IP camera**
+Preferebly an IMX225 or IMX291 based camera. This part is still in the testing phase, but contact us for more details!
+
+---------
+
 1. **Security camera housing.**
 The best place to mount a meteor camera is on the outside wall of your house. As this means that the camera will be exposed to the elements, you need a good camera housing. We recommend that you get a housing with a heater and a fan, which will keep it warm in the winter and cool in the summer. Also, be sure to buy a housing large enough to accomodate your camera. There is one **important thing to note** - security camera housings are **not** designed to look up at the sky. Most of them are designed to be under a roof and looking down. As your camera will be looking up, and most likely be without the protection of a roof, you will have to properly isolate it. Buy some silirubber groutcone sealant and (after you fully assemble your camera and properly test everything), apply the sealant along all openings and joints, and most importantly, along the edges of the glass at the front. You want to keep the camera dry are prevent the humidity from getting inside. If you have some humidity inside the camera, when the temperature hits the dew point, everything inside the housing will be wet. People have also found that putting alumininum foil on the glass, from the inside of the housing, prevents the humidity from forming (just be careful not to obstruct the view of your camera).
 
 1. **Wiring**
 You will probably need some cables and connectors to connect your camera to the digitizer, and to bring power to you camera. We recommend using a shielded coaxial cable for the video signal, and a simple copper pair wire for the power (although you might want to get a shielded cable for power if there's a lot of interference in the video signal).
+
+
 
 ### Software
 
