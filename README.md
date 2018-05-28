@@ -22,7 +22,7 @@ You can find a **step-by-step guide how to assemble the hardware and install the
 1. **Raspberry Pi 2 or Raspberry Pi 3 single-board computer.**
 The first version of the system was developed on the Raspberry Pi 2, while the system is now being tested on the RPi3, which is what we recommend you use, as it provides much more computing power. The system will NOT work with Raspberry Pi 1.
 
-1. **Class 10 microSD card, 32GB or higher.** 
+1. **Class 10 microSD card, 64GB or higher.** 
 The recorded data takes up a lot of space, as much as several gigabytes per night. To be able to store at least one week of data on the system, a 64GB SD card is recommended.
 
 1. **5V power supply for the RPi with the maximum current of at least 2A.** 
@@ -49,7 +49,13 @@ The best place to mount a meteor camera is on the outside wall of your house. As
 You will probably need some cables and connectors to connect your camera to the digitizer, and to bring power to you camera. We recommend using a shielded coaxial cable for the video signal, and a simple copper pair wire for the power (although you might want to get a shielded cable for power if there's a lot of interference in the video signal).
 
 ### Software
-Set up your Raspberry Pi with the latest version of the Raspbian operating system. Here's the guide which explaing how to do just that: [Installing Raspbian](https://www.raspberrypi.org/documentation/installation/installing-images/)
+
+**NOTE:** We have an SD card image with everything installed on it. We don't want to distribute it publically just yet as it
+s not 100% tested, but contact us if you want a copy and more details. Then you'll just have to flash it to an SD card and that's it!
+
+---------
+
+Set up your Raspberry Pi with Raspbian Jessie operating system (gstreamer does not really work on Stretch, and it's necessary if you want to run an IP camera). Here's the guide which explaing how to do just that: [Installing Raspbian](https://www.raspberrypi.org/documentation/installation/installing-images/)
 
 Furthermore, you will need the following software and libraries to run the code:
 
