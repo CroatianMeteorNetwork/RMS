@@ -1,8 +1,10 @@
 
+import platform
 import os
 import shutil
 import errno
 import logging
+import subprocess
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -70,3 +72,27 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
 
 
     return archive_name
+
+
+
+def ping(host):
+    """ Ping the host and return True if reachable. 
+        Remember that a host may not respond to a ping (ICMP) request even if the host name is valid.
+
+    Source: https://stackoverflow.com/a/32684938/6002120
+
+    Arguments:
+        host: [str] Host name or IP address.
+
+    Return:
+        [bool] True if host (str) responds to a ping request.
+    """
+
+    # Ping command count option as function of OS
+    param = '-n 1' if platform.system().lower()=='windows' else '-c 1'
+
+    # Building the command. Ex: "ping -c 1 google.com"
+    command = ['ping', param, host]
+
+    # Pinging
+    return subprocess.call(command) == 0

@@ -14,10 +14,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from multiprocessing import Process, Event
-import cv2
+import re
 import time
 import logging
+from multiprocessing import Process, Event
+
+import cv2
+
+from Misc import ping
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -88,12 +92,36 @@ class BufferedCapture(Process):
     def initVideoDevice(self):
         """ Initialize the video device. """
 
+        device = None
+
         # use a file as the video source
         if self.video_file is not None:
             device = cv2.VideoCapture(self.video_file)
 
         # Use a device as the video source
         else:
+
+            ### If the IP camera is used, check first if it can be pinged
+
+            # Extract the IP address
+            ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", self.config.deviceID)
+
+            # Check if the IP address was found
+            if ip:
+                ip = ip[0]
+
+                # Try pinging the IP address
+                if ping(ip):
+                    log.info("Camera IP ping successful!")
+
+                else:
+                    log.error("Can't ping the camera IP!")
+                    return None
+
+            else:
+                return None
+
+
 
             # Init the video device
             device = cv2.VideoCapture(self.config.deviceID)
@@ -121,6 +149,12 @@ class BufferedCapture(Process):
         
         # Init the video device
         device = self.initVideoDevice()
+
+
+        if device is None:
+
+            log.info('The video source could not be opened!')
+            return False
 
 
         # Wait until the device is opened
