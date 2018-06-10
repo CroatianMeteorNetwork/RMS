@@ -281,6 +281,8 @@ class PlateTool(object):
         plt.rcParams['keymap.save'] = ''
         plt.rcParams['keymap.fullscreen'] = ''
         plt.rcParams['keymap.all_axes'] = ''
+        plt.rcParams['keymap.quit'] = ''
+
 
         
         # self.ax.figure.canvas.mpl_connect('button_press_event', self.onMousePress)
