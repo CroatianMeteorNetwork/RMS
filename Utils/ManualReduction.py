@@ -176,9 +176,19 @@ class FireballPickTool(object):
             frame_mask = np.where(self.ff.maxframe == self.current_frame)
             img[frame_mask] = self.ff.maxpixel[frame_mask]
 
-        # Otherwise, create a blank background
+        # Otherwise, create a blank background with the size enough to fit the FR bin
         else:
-            img = np.zeros((self.config.height, self.config.width), np.uint8)
+
+            # Get the maximum extent of the meteor frames
+            y_size = max(max(np.array(self.fr.yc[i]) + np.array(self.fr.size[i])//2) for i in \
+                range(self.fr.lines))
+            x_size = max(max(np.array(self.fr.xc[i]) + np.array(self.fr.size[i])//2) for i in \
+                range(self.fr.lines))
+
+            # Make the image square
+            img_size = max(y_size, x_size)
+
+            img = np.zeros((img_size, img_size), np.uint8)
 
 
         # If FR is given, paste the raw frame onto the image
@@ -234,7 +244,7 @@ class FireballPickTool(object):
 
 
         # Adjust image levels
-        img = Image.adjustLevels(img, 0, self.img_gamma, (2**self.config.bit_depth -1), 
+        img = Image.adjustLevels(img, 0, self.img_gamma, (2**self.config.bit_depth - 1), 
             self.config.bit_depth)
 
         plt.imshow(img, cmap='gray', vmin=0, vmax=255)
