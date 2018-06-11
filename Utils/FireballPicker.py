@@ -60,7 +60,9 @@ class FireballPickTool(object):
 
         self.photometry_coloring_mode = False
         self.photometry_coloring_color = False
+        self.photometry_aperture_radius = 3
         self.photometry_add = True
+        self.photometry_coloring_handle = None
 
         self.pick_list = []
 
@@ -127,12 +129,15 @@ class FireballPickTool(object):
         # Reset centroid patch
         self.centroid_handle = None
 
+        # Reset photometry coloring
+        self.photometry_coloring_handle = None
 
         # Save the previous zoom
         if self.current_image is not None:
             
             self.prev_xlim = plt.gca().get_xlim()
             self.prev_ylim = plt.gca().get_ylim()
+
 
         plt.clf()
             
@@ -207,14 +212,20 @@ class FireballPickTool(object):
 
         if (self.prev_xlim is not None) and (self.prev_ylim is not None):
 
-            print('setting plot zoom to:', self.prev_xlim, self.prev_ylim)
             # Restore previous zoom
             plt.xlim(self.prev_xlim)
             plt.ylim(self.prev_ylim)
 
 
-        # Plot image pick
-        self.drawPick(update_plot=False)
+        # Don't draw the picks in the photometry coloring more
+        if not self.photometry_coloring_mode:
+            
+            # Plot image pick
+            self.drawPicks(update_plot=False)
+
+
+        # Plot the photometry coloring
+        self.drawPhotometryColoring(update_plot=False)
 
         plt.gcf().canvas.draw()
 
@@ -238,9 +249,10 @@ class FireballPickTool(object):
             text_str += '-----------\n'
             text_str += 'Previous/next frame - Arrow keys left/right\n'
             text_str += 'Img Gamma - U/J\n'
+            text_str += 'Zoom in/out - +/-\n'
             text_str += 'Reset view - R\n'
             text_str += '\n'
-            text_str  = 'Mouse:\n'
+            text_str += 'Mouse:\n'
             text_str += '-----------\n'
             text_str += 'Centroid - Left click\n'
             text_str += 'Manual pick - CTRL + Left click\n'
@@ -271,6 +283,21 @@ class FireballPickTool(object):
         elif event.key == 'right':
             self.nextFrame()
 
+
+        # Zoom in/out
+        elif event.key == '+':
+
+            self.zoomImage(zoom_in=True)
+
+            self.updateImage()
+
+        elif event.key == '-':
+            
+            self.zoomImage(zoom_in=False)            
+
+            self.updateImage()
+
+
         # Show/hide keyboard shortcut help
         elif event.key == 'f1':
             self.show_key_help = not self.show_key_help
@@ -299,7 +326,12 @@ class FireballPickTool(object):
 
 
         elif event.key == 'shift':
-            self.photometry_coloring_mode = True
+
+            # Toggle the photometry coloring mode
+            if not self.photometry_coloring_mode:
+                
+                self.photometry_coloring_mode = True
+                self.updateImage()
 
 
 
@@ -307,23 +339,34 @@ class FireballPickTool(object):
         """ Handles key releases. """
 
         if event.key == 'shift':
-            self.photometry_coloring_mode = False
+
+            # Toggle the photometry coloring mode
+            if self.photometry_coloring_mode:
+                
+                self.photometry_coloring_mode = False
+
+                # Redraw the centroids
+                self.drawPicks()
 
 
 
     def onMouseMotion(self, event):
         """ Called with the mouse is moved. """
 
+        # Check if the mouse is within bounds
+        if (event.xdata is not None) and (event.ydata is not None):
+            
+            # Read mouse position
+            self.mouse_x = event.xdata
+            self.mouse_y = event.ydata
 
-        # Read mouse position
-        self.mouse_x = event.xdata
-        self.mouse_y = event.ydata
+            # Change the position of the star aperture circle
+            self.drawCursorCircle()
 
-        # Change the position of the star aperture circle
-        self.drawCursorCircle()
+            if self.photometry_coloring_mode and self.photometry_coloring_color:
+                self.changePhotometry(self.current_frame, self.photometryColoring(), add_photometry=self.photometry_add)
 
-        if self.photometry_coloring_mode:
-            self.photometryColoring()
+                self.drawPhotometryColoring(update_plot=True)
 
 
     def onScroll(self, event):
@@ -333,23 +376,41 @@ class FireballPickTool(object):
 
 
         if self.scroll_counter > 1:
-            self.aperture_radius += 1
+            
+            if self.photometry_coloring_mode:
+                self.photometry_aperture_radius += 1
+            else:
+                self.aperture_radius += 1
+
             self.scroll_counter = 0
 
         elif self.scroll_counter < -1:
-            self.aperture_radius -= 1
+
+            if self.photometry_coloring_mode:
+                self.photometry_aperture_radius -= 1
+            else:
+                self.aperture_radius -= 1
+
             self.scroll_counter = 0
 
 
-        # Check that the star aperture is in the proper limits
+        # Check that the centroid aperture is in the proper limits
         if self.aperture_radius < 2:
             self.aperture_radius = 2
 
         if self.aperture_radius > 50:
             self.aperture_radius = 50
 
-        # Change the size of the star aperture circle
+        # Check that the photometry aperture is in the proper limits
+        if self.photometry_aperture_radius < 2:
+            self.photometry_aperture_radius = 2
+
+        if self.photometry_aperture_radius > 50:
+            self.photometry_aperture_radius = 50
+
+        
         self.drawCursorCircle()
+
 
 
     def onMouseRelease(self, event):
@@ -378,7 +439,7 @@ class FireballPickTool(object):
             # Add the centroid to the list
             self.addCentroid(self.current_frame, self.x_centroid, self.y_centroid)
 
-            self.drawPick()
+            self.updateImage()
 
 
         # Remove centroid on right click
@@ -410,6 +471,74 @@ class FireballPickTool(object):
                 self.photometry_add = False
 
 
+    def zoomImage(self, zoom_in):
+        """ Change the zoom if the image. """
+
+        zoom_factor = 2.0/3
+
+        # Get the current limits of the plot
+        xmin, xmax = plt.gca().get_xlim()
+        ymin, ymax = plt.gca().get_ylim()
+
+        x_img = self.current_image.shape[1]
+        y_img = self.current_image.shape[0]
+
+
+        # Compute maximum length of side differences
+        max_size = max(abs(xmax - xmin), abs(ymin - ymax))
+
+        # Zoom in
+        if zoom_in:
+
+            # Compute the new size
+            xsize = zoom_factor*max_size
+            ysize = zoom_factor*max_size
+
+
+        else:
+
+            # Compute the new size
+            xsize = (1.0/zoom_factor)*max_size
+            ysize = (1.0/zoom_factor)*max_size
+
+
+        # Compute the new limits
+        xmin = self.mouse_x - xsize/2
+        xmax = self.mouse_x + xsize/2
+        ymin = self.mouse_y + ysize/2
+        ymax = self.mouse_y - ysize/2
+
+
+        # Check if the new bounds are within the limits
+        if xmin < 0:
+            xmin = 0
+        elif xmin > x_img:
+            xmin = x_img
+
+        if xmax < 0:
+            xmax = 0
+        elif xmax > x_img:
+            xmax = x_img
+
+
+        if ymin < 0:
+            ymin = 0
+        elif ymin > y_img:
+            ymin = y_img
+
+        if ymax < 0:
+            ymax = 0
+        elif ymax > y_img:
+            ymax = y_img
+
+        # Set the new limits
+        plt.xlim(xmin, xmax)
+        plt.ylim(ymin, ymax)
+
+
+
+
+
     def photometryColoring(self):
         """ Color pixels for photometry. """
 
@@ -417,30 +546,30 @@ class FireballPickTool(object):
 
         mouse_x = int(self.mouse_x)
         mouse_y = int(self.mouse_y)
-
-        if self.photometry_coloring_color:
             
-            ### Add all pixels within the aperture to the list for photometry ###
+        ### Add all pixels within the aperture to the list for photometry ###
 
-            x_list = range(mouse_x - self.aperture_radius, mouse_x + self.aperture_radius + 1)
-            y_list = range(mouse_y - self.aperture_radius, mouse_y + self.aperture_radius + 1)
+        x_list = range(mouse_x - self.photometry_aperture_radius, mouse_x \
+            + self.photometry_aperture_radius + 1)
+        y_list = range(mouse_y - self.photometry_aperture_radius, mouse_y \
+            + self.photometry_aperture_radius + 1)
 
-            for x in x_list:
-                for y in y_list:
+        for x in x_list:
+            for y in y_list:
 
-                    # Skip pixels ourside the image
-                    if (x < 0) or (x > self.current_image.shape[1]):
-                        continue
+                # Skip pixels ourside the image
+                if (x < 0) or (x > self.current_image.shape[1]):
+                    continue
 
-                    if (y < 0) or (y > self.current_image.shape[0]):
-                        continue
+                if (y < 0) or (y > self.current_image.shape[0]):
+                    continue
 
-                    # Check if the given pixels are within the aperture radius
-                    if math.sqrt((x - mouse_x)**2 + (y - mouse_y)**2) <= self.aperture_radius:
-                        pixel_list.append((x, y))
+                # Check if the given pixels are within the aperture radius
+                if math.sqrt((x - mouse_x)**2 + (y - mouse_y)**2) <= self.photometry_aperture_radius:
+                    pixel_list.append((x, y))
 
 
-            ##########
+        ##########
 
         return pixel_list
 
@@ -470,7 +599,7 @@ class FireballPickTool(object):
 
             # Plot a circle of the given radius around the cursor
             self.circle_aperture = mpatches.Circle((self.mouse_x, self.mouse_y),
-                self.aperture_radius, edgecolor='red', fc='red', alpha=0.5)
+                self.photometry_aperture_radius, edgecolor='red', fc='red', alpha=0.5)
 
             plt.gca().add_patch(self.circle_aperture)
 
@@ -493,10 +622,8 @@ class FireballPickTool(object):
 
 
 
-    def drawPick(self, update_plot=True):
-        """ Plot the pick done on the current frame. """
-
-
+    def drawPicks(self, update_plot=True):
+        """ Plot the picks. """
 
         # Plot all picks
         for pick in self.pick_list:
@@ -504,26 +631,61 @@ class FireballPickTool(object):
             plt.scatter(pick.x_centroid, pick.y_centroid, marker='+', c='y', s=20, lw=1)
 
 
-        # Find the pick done on this frame
-        pick_found = [(i, pick) for i, pick in enumerate(self.pick_list) if pick.frame == self.current_frame]
+        # Find the pick done on the current frame
+        pick_found = [pick for pick in self.pick_list if pick.frame == self.current_frame]
 
         # Plot the pick done on this image a bit larger
         if pick_found:
 
-            i, pick = pick_found[0]
+            pick = pick_found[0]
 
             # Draw the centroid on the image
             self.centroid_handle = plt.scatter(pick.x_centroid, pick.y_centroid, marker='+', c='y', s=100, 
-                lw=1)
-
-
-            # Draw colored pixels
-            #if pick.photometry_pixels:
+                lw=2)
 
 
             # Update canvas
             if update_plot:
                 plt.gcf().canvas.draw()
+
+
+    def drawPhotometryColoring(self, update_plot=True):
+        """ Color pixels which will be used for photometry. """
+
+        # Remove old photometry coloring
+        if self.photometry_coloring_handle is not None:
+            try:
+                self.photometry_coloring_handle.remove()
+            except:
+                pass
+
+        # Find the pick done on the current frame
+        pick_found = [pick for pick in self.pick_list if pick.frame == self.current_frame]
+
+        if pick_found:
+
+            pick = pick_found[0]
+
+            if pick.photometry_pixels is not None:
+
+                # Create a coloring mask
+                x_mask, y_mask = np.array(pick.photometry_pixels).T
+
+                mask_img = np.zeros_like(self.current_image)
+                mask_img[y_mask, x_mask] = 1
+
+                # Create a RGB overlay
+                mask_overlay = np.zeros((self.current_image.shape[0], self.current_image.shape[1], 4))
+                mask_overlay[..., 1] = 1 # Green channel
+                mask_overlay[..., 3] = 0.3*mask_img # Alpha channel
+
+                self.photometry_coloring_handle = plt.imshow(mask_overlay)
+
+                # Update canvas
+                if update_plot:
+                    plt.gcf().canvas.draw()
+
+
 
 
 
@@ -543,8 +705,6 @@ class FireballPickTool(object):
             self.pick_list[i].x_centroid = x_centroid
             self.pick_list[i].y_centroid = y_centroid
 
-            print('Pick modified!')
-
         # Create a new pick
         else:
 
@@ -556,7 +716,45 @@ class FireballPickTool(object):
 
             self.pick_list.append(pick)
 
-            print('Pick added!')
+
+    def changePhotometry(self, frame, photometry_pixels, add_photometry):
+        """ Add/remove photometry pixels of the pick. """
+
+        # Check if there are previous picks on this frame
+        prev_pick = [i for i, pick in enumerate(self.pick_list) if pick.frame == frame]
+            
+        # Update centroids of previous pick if it exists
+        if prev_pick:
+
+            i = prev_pick[0]
+
+            # If there's no previous photometry, add an empty list
+            if self.pick_list[i].photometry_pixels is None:
+                self.pick_list[i].photometry_pixels = []
+
+            if add_photometry:
+                
+                # Add the photometry pixels to the pick
+                self.pick_list[i].photometry_pixels = list(set(self.pick_list[i].photometry_pixels \
+                    + photometry_pixels))
+
+            else:
+
+                # Remove the photometry pixels to the pick
+                self.pick_list[i].photometry_pixels = [px for px in self.pick_list[i].photometry_pixels if px not in photometry_pixels]
+
+
+        # Add a new pick
+        elif add_photometry:
+
+            pick = Pick()
+
+            pick.frame = frame
+            pick.photometry_pixels = photometry_pixels
+
+            self.pick_list.append(pick)
+
+
 
 
     def removeCentroid(self, frame):
