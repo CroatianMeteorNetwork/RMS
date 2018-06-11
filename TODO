@@ -22,20 +22,14 @@ High priority:
 
 - Manual reduction
 	- loading any video or static image for reduction
+	- load a platepar
+	    - X/Y, alt/az, ra/dec on mouse position
 
 
 Low priority:
 ----------------
 
 - Rolling shutter correction
-
-- Manual reduction tool
-	- load a list of FF files
-	- load a platepar
-	- X/Y, alt/az, ra/dec on mouse position
-	- centroid with aperature
-	- frame by frame
-	- write out results in FTPdetectinfo
 
 
 - Generate doc page
