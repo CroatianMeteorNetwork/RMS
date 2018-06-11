@@ -1,3 +1,5 @@
+"""Tool for manual astrometry and photometry of FF and FR files. """
+
 from __future__ import print_function, division, absolute_import
 
 import os
@@ -13,6 +15,7 @@ import RMS.ConfigReader as cr
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FRbin import read as readFR
+from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Routines import Image
 
 
@@ -26,18 +29,32 @@ class Pick(object):
         self.y_centroid = None
 
         self.photometry_pixels = None
+        self.intensity_sum = None
 
 
 
 class FireballPickTool(object):
-    def __init__(self, config, ff, fr, first_frame=None):
-        """ Tool for manually picking fireball centroids and doing photometry. """
+    def __init__(self, config, ff_file, fr_file, first_frame=None):
+        """ Tool for manually picking fireball centroids and photometry. """
 
 
         self.config = config
 
-        self.ff = ff
-        self.fr = fr
+        self.ff_file = ff_file
+        self.fr_file = fr_file
+
+        # Load the FF file if given
+        if self.ff_file is not None:
+            self.ff = readFF(*os.path.split(self.ff_file))
+        else:
+            self.ff = None
+
+
+        # Load the FR file is given
+        if self.fr_file is not None:
+            self.fr = readFR(*os.path.split(self.fr_file))
+        else:
+            self.fr = None
 
 
         ###########
@@ -46,6 +63,11 @@ class FireballPickTool(object):
         self.show_key_help = True
 
         self.current_image = None
+
+        self.fr_xmin = None
+        self.fr_xmax = None
+        self.fr_ymin = None
+        self.fr_ymax = None
 
         # Previous zoom
         self.prev_xlim = None
@@ -78,15 +100,11 @@ class FireballPickTool(object):
         else:
 
             # Set the first frame to the first frame in FR, if given
-            if fr is not None:
+            if self.fr is not None:
                 self.current_frame = self.fr.t[self.current_line][0]
 
             else:
                 self.current_frame = 0
-
-
-        print(self.current_frame)
-
 
 
 
@@ -118,6 +136,13 @@ class FireballPickTool(object):
         self.ax.figure.canvas.mpl_connect('scroll_event', self.onScroll)
 
 
+    def printStatus(self):
+        """ Print the status message. """
+
+        print('----------------------------')
+        print('Frame:', self.current_frame)
+        print('Line:', self.current_line)
+
 
     def updateImage(self):
         """ Updates the current plot. """
@@ -143,7 +168,7 @@ class FireballPickTool(object):
             
 
         # If FF is given, reconstruct frames
-        if ff is not None:
+        if self.ff is not None:
 
             # Take the current frame from FF file
             img = np.copy(self.ff.avepixel)
@@ -156,23 +181,23 @@ class FireballPickTool(object):
 
 
         # If FR is given, paste the raw frame onto the image
-        if fr is not None:
+        if self.fr is not None:
 
             # Compute the index of the frame in the FR bin structure
-            frame_indx = self.current_frame - fr.t[self.current_line][0]
+            frame_indx = self.current_frame - self.fr.t[self.current_line][0]
 
             # Reconstruct the frame if it is within the bounds
-            if frame_indx < fr.frameNum[self.current_line]:
+            if frame_indx < self.fr.frameNum[self.current_line]:
 
                 # Get the center position of the detection on the current frame
-                yc = fr.yc[self.current_line][frame_indx]
-                xc = fr.xc[self.current_line][frame_indx]
+                yc = self.fr.yc[self.current_line][frame_indx]
+                xc = self.fr.xc[self.current_line][frame_indx]
 
                 # # Get the frame number
-                # t = fr.t[self.current_line][frame_indx]
+                # t = self.fr.t[self.current_line][frame_indx]
 
                 # Get the size of the window
-                size = fr.size[self.current_line][frame_indx]
+                size = self.fr.size[self.current_line][frame_indx]
 
 
                 # Paste the frames onto the big image
@@ -188,6 +213,11 @@ class FireballPickTool(object):
 
                 img[Y_img, X_img] = self.fr.frames[self.current_line][frame_indx][Y_frame, X_frame]
 
+                # Save the limits of the FR
+                self.fr_xmin = np.min(x_img)
+                self.fr_xmax = np.max(x_img)
+                self.fr_ymin = np.max(y_img)
+                self.fr_ymax = np.min(y_img)
 
                 # Draw a red rectangle around the pasted frame
                 rect_x = np.min(x_img)
@@ -248,6 +278,7 @@ class FireballPickTool(object):
             text_str  = 'Keys:\n'
             text_str += '-----------\n'
             text_str += 'Previous/next frame - Arrow keys left/right\n'
+            text_str += 'Previous/next FR line - ,/.\n'
             text_str += 'Img Gamma - U/J\n'
             text_str += 'Zoom in/out - +/-\n'
             text_str += 'Reset view - R\n'
@@ -256,7 +287,8 @@ class FireballPickTool(object):
             text_str += '-----------\n'
             text_str += 'Centroid - Left click\n'
             text_str += 'Manual pick - CTRL + Left click\n'
-            text_str += 'Photometry coloring - Shift + Left click'
+            text_str += 'Photometry coloring add - Shift + Left click'
+            text_str += 'Photometry coloring remove - Shift + Right click'
             text_str += '\n'
             text_str += 'Hide/show text - F1\n'
 
@@ -298,6 +330,34 @@ class FireballPickTool(object):
             self.updateImage()
 
 
+        # Previous line
+        elif event.key == ',':
+
+            if self.fr is not None:
+                
+                self.current_line -= 0
+
+                if self.current_line < 0:
+                    self.current_line = 0
+
+                self.printStatus()
+
+
+        elif event.key == '.':
+
+            if self.fr is not None:
+
+                self.current_line += 0
+
+                if self.current_line >= self.fr.lines:
+                    self.current_line = self.fr.lines - 1
+
+                self.printStatus()
+
+
+
+
+
         # Show/hide keyboard shortcut help
         elif event.key == 'f1':
             self.show_key_help = not self.show_key_help
@@ -323,6 +383,12 @@ class FireballPickTool(object):
             plt.ylim(self.current_image.shape[0], 0)
 
             self.updateImage()
+
+
+        elif event.key == 'ctrl+s':
+
+            # Save the FTPdetectinfo file
+            self.saveFTPdetectinfo()
 
 
         elif event.key == 'shift':
@@ -367,6 +433,7 @@ class FireballPickTool(object):
                 self.changePhotometry(self.current_frame, self.photometryColoring(), add_photometry=self.photometry_add)
 
                 self.drawPhotometryColoring(update_plot=True)
+
 
 
     def onScroll(self, event):
@@ -536,9 +603,6 @@ class FireballPickTool(object):
         plt.ylim(ymin, ymax)
 
 
-
-
-
     def photometryColoring(self):
         """ Color pixels for photometry. """
 
@@ -572,6 +636,79 @@ class FireballPickTool(object):
         ##########
 
         return pixel_list
+
+
+    def computeIntensitySum(self):
+        """ Compute the background subtracted sum of intensity of colored pixels. The background is estimated
+            as the median of near pixels that are not colored. 
+        """
+
+        # Find the pick done on the current frame
+        pick_found = [pick for pick in self.pick_list if pick.frame == self.current_frame]
+
+        if pick_found:
+
+            pick = pick_found[0]
+
+            # If there are no photometry pixels, set the intensity to 0
+            if not pick.photometry_pixels:
+                
+                pick.intensity_sum = 0
+
+                return None
+
+
+            x_arr, y_arr = np.array(pick.photometry_pixels).T
+
+            # Compute the centre of the colored pixels
+            x_centre = np.mean(x_arr)
+            y_centre = np.mean(y_arr)
+
+            # Take a window twice the size of the colored pixels
+            x_color_size = np.max(x_arr) - np.min(x_arr)
+            y_color_size = np.max(y_arr) - np.min(y_arr)
+
+            x_min = int(x_centre - x_color_size)
+            x_max = int(x_centre + x_color_size)
+            y_min = int(y_centre + y_color_size)
+            y_max = int(y_centre - y_color_size)
+
+            # If only the FR file is given, make sure the background is only estimated within the FR window
+            if (self.fr is not None) and (self.ff is None):
+                x_min = max(x_min, self.fr_xmin)
+                x_max = min(x_max, self.fr_xmax)
+                y_min = min(y_min, self.fr_ymin)
+                y_max = max(y_max, self.fr_ymax)
+
+            # Limit the size to be within the bounds
+            if x_min < 0: x_min = 0
+            if x_max > self.current_image.shape[1]: x_max = self.current_image.shape[1]
+            if y_min > self.current_image.shape[0]: y_min = self.current_image.shape[0]
+            if y_max < 0: y_max = 0
+            
+
+            # Take only the colored part
+            mask_img = np.ones_like(self.current_image)
+            mask_img[y_arr, x_arr] = 0
+            masked_img = np.ma.masked_array(self.current_image, mask_img)
+            crop_img = masked_img[y_max:y_min, x_min:x_max]
+
+
+
+            # Mask out the colored in pixels
+            mask_img_bg = np.zeros_like(self.current_image)
+            mask_img_bg[y_arr, x_arr] = 1
+
+            # Take the image where the colored part is masked out and crop the surroundings
+            masked_img_bg = np.ma.masked_array(self.current_image, mask_img_bg)
+            crop_bg = masked_img_bg[y_max:y_min, x_min:x_max]
+
+
+            # Compute the median background
+            background_lvl = np.ma.median(crop_bg)
+
+            # Compute the background subtracted intensity sum
+            pick.intensity_sum = np.ma.sum(crop_img - background_lvl)
 
 
 
@@ -687,12 +824,10 @@ class FireballPickTool(object):
 
 
 
-
-
-
-
     def addCentroid(self, frame, x_centroid, y_centroid):
         """ Add the centroid to the list of centroids. """
+
+        print('Added centroid at ({:.2f}, {:.2f}) on frame {:d}'.format(x_centroid, y_centroid, frame))
 
         # Check if there are previous picks on this frame
         prev_pick = [i for i, pick in enumerate(self.pick_list) if pick.frame == frame]
@@ -715,6 +850,25 @@ class FireballPickTool(object):
             pick.y_centroid = y_centroid
 
             self.pick_list.append(pick)
+
+
+    def removeCentroid(self, frame):
+        """ Remove the centroid from the list of centroids. """
+
+        # Check if there are previous picks on this frame
+        prev_pick = [i for i, pick in enumerate(self.pick_list) if pick.frame == frame]
+
+        if prev_pick:
+
+            i = prev_pick[0]
+
+            pick = self.pick_list[i]
+
+            print('Removed centroid at ({:.2f}, {:.2f}) on frame {:d}'.format(pick.x_centroid, \
+                pick.y_centroid, frame))
+
+            # Remove the centroid
+            self.pick_list.pop(i)
 
 
     def changePhotometry(self, frame, photometry_pixels, add_photometry):
@@ -753,22 +907,6 @@ class FireballPickTool(object):
             pick.photometry_pixels = photometry_pixels
 
             self.pick_list.append(pick)
-
-
-
-
-    def removeCentroid(self, frame):
-        """ Remove the centroid from the list of centroids. """
-
-        # Check if there are previous picks on this frame
-        prev_pick = [i for i, pick in enumerate(self.pick_list) if pick.frame == frame]
-
-        if prev_pick:
-
-            i = prev_pick[0]
-
-            # Remove the centroid
-            self.pick_list.pop(i)
 
 
 
@@ -866,17 +1004,76 @@ class FireballPickTool(object):
 
 
     def prevFrame(self):
+        """ Cycle to the previous frame. """
+
+        # Compute the intensity sum done on the previous frame
+        self.computeIntensitySum()
 
         self.current_frame = (self.current_frame - 1)%256
 
+        self.printStatus()
+
         self.updateImage()
+
 
 
     def nextFrame(self):
+        """ Cycle to the next frame. """
+
+        # Compute the intensity sum done on the previous frame
+        self.computeIntensitySum()
 
         self.current_frame = (self.current_frame + 1)%256
 
+        self.printStatus()
+
         self.updateImage()
+
+
+
+    def saveFTPdetectinfo(self):
+        """ Saves the picks to a FTPdetectinfo file in the same folder where the first given file is. """
+
+        # Compute the intensity sum done on the previous frame
+        self.computeIntensitySum()
+
+        # Extract the save directory
+        if self.ff_file is not None:
+            dir_path, ff_name_ftp = os.path.split(self.ff_file)
+
+        elif self.fr_file is not None:
+            dir_path, ff_name_ftp = os.path.split(self.fr_file)
+
+
+        # Create the list of picks for saving
+        centroids = []
+        for pick in self.pick_list:
+            centroids.append([pick.frame, pick.x_centroid, pick.y_centroid, pick.intensity_sum])
+
+        meteor_list = [[ff_name_ftp, 1, 0, 0, centroids]]
+
+        # Create a name for the FTPdetectinfo
+        ftpdetectinfo_name = "FTPdetectinfo_" + "_".join(ff_name_ftp.split('_')[1:]) + '_manual.txt'
+
+        # Read the station code for the file name
+        station_id = ff_name_ftp.split('_')[1]
+
+        # Take the FPS from the FF file, if available
+        fps = None
+        if self.ff is not None:
+            if hasattr(self.ff, 'fps'):
+                fps = self.ff.fps
+
+        if fps is None:
+            fps = self.config.fps
+
+        # Write the FTPdetect info
+        writeFTPdetectinfo(meteor_list, dir_path, ftpdetectinfo_name, '', station_id, fps)
+
+        print('FTPdetecinfo written to:', os.path.join(dir_path, ftpdetectinfo_name))
+
+
+
 
 
 
@@ -954,22 +1151,8 @@ if __name__ == "__main__":
         sys.exit()
 
 
-    # Load the FF file if given
-    if ff_name is not None:
-        ff = readFF(*os.path.split(ff_name))
-    else:
-        ff = None
-
-
-    # Load the FR file is given
-    if fr_name is not None:
-        fr = readFR(*os.path.split(fr_name))
-    else:
-        fr = None
-
-
     # Init the fireball picker
-    fireball_picker = FireballPickTool(config, ff, fr, first_frame=cml_args.firstframe)
+    fireball_picker = FireballPickTool(config, ff_name, fr_name, first_frame=cml_args.firstframe)
 
 
     plt.tight_layout()
