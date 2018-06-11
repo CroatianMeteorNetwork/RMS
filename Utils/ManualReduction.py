@@ -34,15 +34,17 @@ class Pick(object):
 
 
 
-class FireballPickTool(object):
-    def __init__(self, config, ff_file, fr_file, first_frame=None):
-        """ Tool for manually picking fireball centroids and photometry. """
+class ManualReductionTool(object):
+    def __init__(self, config, ff_file, fr_file, first_frame=None, fps=None):
+        """ Tool for manually picking meteor centroids and photometry. """
 
 
         self.config = config
 
         self.ff_file = ff_file
         self.fr_file = fr_file
+
+        self.fps = fps
 
         # Load the FF file if given
         if self.ff_file is not None:
@@ -1086,16 +1088,15 @@ class FireballPickTool(object):
         station_id = ff_name_ftp.split('_')[1]
 
         # Take the FPS from the FF file, if available
-        fps = None
         if self.ff is not None:
             if hasattr(self.ff, 'fps'):
-                fps = self.ff.fps
+                self.fps = self.ff.fps
 
-        if fps is None:
-            fps = self.config.fps
+        if self.fps is None:
+            self.fps = self.config.fps
 
         # Write the FTPdetect info
-        writeFTPdetectinfo(meteor_list, dir_path, ftpdetectinfo_name, '', station_id, fps)
+        writeFTPdetectinfo(meteor_list, dir_path, ftpdetectinfo_name, '', station_id, self.fps)
 
         print('FTPdetecinfo written to:', os.path.join(dir_path, ftpdetectinfo_name))
 
@@ -1133,7 +1134,7 @@ if __name__ == "__main__":
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Tool for manually picking positions of fireballs on video frames.")
+    arg_parser = argparse.ArgumentParser(description="Tool for manually picking positions of meteors on video frames and performing manual photometry.")
 
     arg_parser.add_argument('file1', metavar='FILE1', type=str, nargs=1,
                     help='Path to an FF file, or an FR file if an FF file is not available.')
@@ -1141,7 +1142,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('file2', metavar='FILE2', type=str, nargs='*',
                     help='If an FF file was given, an FR file can be given in addition.')
 
-    arg_parser.add_argument('-f', '--firstframe', metavar='FIRST FRAME', type=int, help="First frame to show. Has to be between 0-255.")
+    arg_parser.add_argument('-b', '--begframe', metavar='FIRST FRAME', type=int, help="First frame to show. Has to be between 0-255.")
+
+    arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float, help="Frames per second of the video. If not given, it will be read from a) the FF file if available, b) from the config file.")
 
 
     #########################
@@ -1199,8 +1202,9 @@ if __name__ == "__main__":
         sys.exit()
 
 
-    # Init the fireball picker
-    fireball_picker = FireballPickTool(config, ff_name, fr_name, first_frame=cml_args.firstframe)
+    # Init the tool
+    manual_tool = ManualReductionTool(config, ff_name, fr_name, first_frame=cml_args.begframe, \
+        fps=cml_args.fps)
 
 
     plt.tight_layout()
