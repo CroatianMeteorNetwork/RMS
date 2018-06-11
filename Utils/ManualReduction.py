@@ -8,6 +8,7 @@ import argparse
 import math
 
 import numpy as np
+import scipy.misc
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
@@ -282,6 +283,8 @@ class FireballPickTool(object):
             text_str += 'Img Gamma - U/J\n'
             text_str += 'Zoom in/out - +/-\n'
             text_str += 'Reset view - R\n'
+            text_str += 'Save current frame - CTRL + W\n'
+            text_str += 'Save FTPdetectinfo - CTRL + S\n'
             text_str += '\n'
             text_str += 'Mouse:\n'
             text_str += '-----------\n'
@@ -290,7 +293,7 @@ class FireballPickTool(object):
             text_str += 'Photometry coloring add - Shift + Left click'
             text_str += 'Photometry coloring remove - Shift + Right click'
             text_str += '\n'
-            text_str += 'Hide/show text - F1\n'
+            text_str += 'Hide/show text - F1'
 
 
             plt.gca().text(10, self.current_image.shape[0] - 5, text_str, color='w', 
@@ -383,6 +386,12 @@ class FireballPickTool(object):
             plt.ylim(self.current_image.shape[0], 0)
 
             self.updateImage()
+
+
+        elif event.key == 'ctrl+w':
+
+            # Save current frame to disk as image
+            self.saveCurrentFrame()
 
 
         elif event.key == 'ctrl+s':
@@ -1045,6 +1054,9 @@ class FireballPickTool(object):
             dir_path, ff_name_ftp = os.path.split(self.fr_file)
 
 
+        # Remove the file extension of the image file
+        ff_name_ftp = ff_name_ftp.replace('.bin', '').replace('.fits', '')
+
         # Create the list of picks for saving
         centroids = []
         for pick in self.pick_list:
@@ -1074,7 +1086,28 @@ class FireballPickTool(object):
 
 
 
+    def saveCurrentFrame(self):
+        """ Saves the current frame to disk. """
 
+        # Extract the save directory
+        if self.ff_file is not None:
+            dir_path, ff_name_ftp = os.path.split(self.ff_file)
+
+        elif self.fr_file is not None:
+            dir_path, ff_name_ftp = os.path.split(self.fr_file)
+
+
+        # Remove the file extension of the image file
+        ff_name_ftp = ff_name_ftp.replace('.bin', '').replace('.fits', '')
+
+        # Construct the file name
+        frame_file_name = ff_name_ftp + "_frame_{:03d}".format(self.current_frame) + '.png'
+        frame_file_path = os.path.join(dir_path, frame_file_name)
+
+        # Save the frame to disk
+        scipy.misc.imsave(frame_file_path, self.current_image)
+
+        print('Frame {:d} saved to: {:s}'.format(self.current_frame, frame_file_path))
 
 
 

@@ -20,14 +20,6 @@ High priority:
 
 - Brightness and contrast
 
-- Fireball centroiding tool
-	- loading FF and/or FR files
-	- cycling through frames
-	- saving individual frames
-	- manual picks/centroiding - adding/removing
-		- adjustable size circle to help with centroiding
-	- saving picks to a FTPdetectinfo
-
 
 Low priority:
 ----------------
