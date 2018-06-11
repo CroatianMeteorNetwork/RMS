@@ -27,6 +27,7 @@ from __future__ import print_function, division, absolute_import
 import os
 import sys
 import math
+import argparse
     
 # tkinter import that works on both Python 2 and 3
 try:
@@ -927,9 +928,14 @@ class PlateTool(object):
             img_data = Image.applyFlat(img_data, self.flat_struct)
 
 
-        # Adjust image levels
-        img_data = Image.adjustLevels(img_data, 0, self.img_gamma, (2**self.config.bit_depth -1), 
-            self.config.bit_depth)
+        ### Adjust image levels
+
+        # Guess the bit depth from the array type
+        bit_depth = 8*img_data.itemsize
+
+        img_data = Image.adjustLevels(img_data, 0, self.img_gamma, (2**bit_depth -1), bit_depth)
+
+        ###
 
 
         # Show the loaded maxpixel
@@ -1662,17 +1668,33 @@ class PlateTool(object):
 if __name__ == '__main__':
 
 
-    if len(sys.argv) < 2:
-        print('Usage: python -m RMS.Astrometry.SkyFit /path/to/FF/dir/')
-        sys.exit()
+    ### COMMAND LINE ARGUMENTS
 
-    dir_path = sys.argv[1].replace('"', '')
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Tool for fitting astrometry plates and photometric calibration.")
+
+    arg_parser.add_argument('dir_path', metavar='DIR PATH', type=str, nargs=1, \
+        help='Path to the folder with FF files.')
+
+    arg_parser.add_argument('-c', '--config', metavar='CONFIG PATH', type=str, help="Path to a config file which will be used instead of the default one.")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+    if cml_args.config is not None:
+
+        # Load the given config file
+        config = cr.parse(cml_args.config)
+
+    else:
+        # Load the default configuration file
+        config = cr.parse(".config")
 
 
-    # Load the configuration file
-    config = cr.parse(".config")
-
-    plate_tool = PlateTool(dir_path, config)
+    # Init the plate tool instance
+    plate_tool = PlateTool(cml_args.dir_path[0], config)
 
     plt.tight_layout()
     plt.show()
