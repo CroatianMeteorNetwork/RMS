@@ -1146,11 +1146,12 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float, help="Frames per second of the video. If not given, it will be read from a) the FF file if available, b) from the config file.")
 
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
 
     #########################
 
-    # Parse the command line arguments
-    cml_args = arg_parser.parse_args()
+    
 
 
     # Load the configuration file
