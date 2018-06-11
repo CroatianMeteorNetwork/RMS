@@ -243,9 +243,14 @@ class FireballPickTool(object):
         self.current_image = np.copy(img)
 
 
-        # Adjust image levels
-        img = Image.adjustLevels(img, 0, self.img_gamma, (2**self.config.bit_depth - 1), 
-            self.config.bit_depth)
+        ### Adjust image levels
+
+        # Guess the bit depth from the array type
+        bit_depth = 8*img.itemsize
+
+        img = Image.adjustLevels(img, 0, self.img_gamma, (2**bit_depth - 1), bit_depth)
+
+        ###
 
         plt.imshow(img, cmap='gray', vmin=0, vmax=255)
 
