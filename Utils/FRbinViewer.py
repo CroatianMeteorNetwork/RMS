@@ -27,7 +27,7 @@ import RMS.ConfigReader as cr
 from RMS.Formats import FFfile, FRbin
 
 
-def view(dir_path, ff, fr, config):
+def view(dir_path, ff_path, fr_path, config):
     """ Shows the detected fireball stored in the FR file. 
     
     Arguments:
@@ -37,15 +37,25 @@ def view(dir_path, ff, fr, config):
         config: [conf object] configuration structure
 
     """
+    
+    name = fr_path
+    fr = FRbin.read(dir_path, fr_path)
 
-    if ff is None:
-        background = np.zeros((config.height, config.width), np.uint8)
+
+    if ff_path is None:
+        #background = np.zeros((config.height, config.width), np.uint8)
+
+        # Get the maximum extent of the meteor frames
+        y_size = max(max(np.array(fr.yc[i]) + np.array(fr.size[i])//2) for i in range(fr.lines))
+        x_size = max(max(np.array(fr.xc[i]) + np.array(fr.size[i])//2) for i in range(fr.lines))
+
+        # Make the image square
+        img_size = max(y_size, x_size)
+
+        background = np.zeros((img_size, img_size), np.uint8)
 
     else:
-        background = FFfile.read(dir_path, ff).maxpixel
-    
-    name = fr
-    fr = FRbin.read(dir_path, fr)
+        background = FFfile.read(dir_path, ff_path).maxpixel
     
     print("Number of lines:", fr.lines)
     
