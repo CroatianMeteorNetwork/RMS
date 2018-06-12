@@ -1,13 +1,17 @@
 # RPi Meteor Station
 
-Open source powered meteor station. We are currently using the Raspberry Pi 3 as the main development platform.
-The software is still deep in the development phase, but here are its current features:
+Open source powered meteor station. We are currently using the Raspberry Pi 3 as the main development platform. **The code also works on Linux PCs.**
+The software is still in the development phase, but here are the current features:
 
-1. Video capturing from a sensitive B/W video camera
-2. Compressing 256-frame blocks into the Four-frame Temporal Pixel (FTP) format
-3. Detecting bright fireballs in real time
-4. Detecting meteors on FTP compressed files
-5. Extracting stars from FTP compressed files
+1. Automated video capture - start at dusk, stop at dawn. Analog cameras supported through EasyCap, **IP cameras up to 720p resolution - CONTACT US FOR MORE DETAILS.**
+1. Compressing 256-frame blocks into the Four-frame Temporal Pixel (FTP) format (see [Jenniskens et al., 2011 CAMS](http://cams.seti.org/CAMSoverviewpaper.pdf) paper for more info).
+1. Detecting bright fireballs in real time
+1. Detecting meteors on FTP compressed files
+1. Extracting stars from FTP compressed files
+1. Astrometry and photometry calibration
+1. Automatic recalibration of astrometry every night
+1. Automatic upload of calibrated detections to central server
+1. Manual reduction of fireballs/meteors
 
 You can see out Hackaday project web-page for more info: https://hackaday.io/project/6811-asteria-network
 
@@ -21,23 +25,25 @@ You can find a **step-by-step guide how to assemble the hardware and install the
 
 #### RPi
 
-1. **Raspberry Pi 2 or Raspberry Pi 3 single-board computer.**
-The first version of the system was developed on the Raspberry Pi 2, while the system is now being tested on the RPi3, which is what we recommend you use, as it provides much more computing power. The system will NOT work with Raspberry Pi 1.
+1. **Raspberry Pi 3 single-board computer.**
+The first version of the system was developed on the Raspberry Pi 2, while the system is now being tested on the RPi3, which is what we recommend you use, as it provides much more computing power. The code will NOT work on Raspberry Pi 1.
 
 1. **Class 10 microSD card, 64GB or higher.** 
-The recorded data takes up a lot of space, as much as several gigabytes per night. To be able to store at least one week of data on the system, a 64GB SD card is recommended.
+The recorded data takes up a lot of space, as much as several gigabytes per night. To be able to store at least one week of data on the system, a 64GB SD card is the minimum.
 
-1. **5V power supply for the RPi with the maximum current of at least 2A.** 
+1. **5V power supply for the RPi with the maximum current of at least 2.5A.** 
 The RPi will have to power the video digitizer, and sometimes run at almost 100% CPU utilization, which draws a lot of power. We recommend using the official RPi 5V/2.5A power supply. Remember, most of the issues people have with RPis are caused by a power supply which is not powerful enough.
 
 1. **RPi case with a fan + heatsinks.** 
-If you end up using the RPi3, it is very probable that you will need to use a case with a fan, as the software will likely utilize the CPU close to 100% at some time. Be careful to buy a case with a fan which will not interfiere with the Real Time Clock module. We recommend buying a case which allows the fan to be mounted on the outside of the case.
+You will need to use a RPi case with a fan, as the software will likely utilize the CPU close to 100% at some time. Be careful to buy a case with a fan which will not interfere with the Real Time Clock module. We recommend buying a case which allows the fan to be mounted on the outside of the case.
 
 1. **Real Time Clock module**
-The RPi itself does not have a battery, so every time you turn it off, it loses the current time. The time then needs to be updates via the Internet. If for some reason you do not have access to the Internet, or you network connection is down, it is a good idea to have the correct time nevertheless, as it is essential for meteor trajectory estimation.
+The RPi itself does not have a battery, so every time you turn it off, it loses the current time. The time then needs to be fetched from the Internet. If for some reason you do not have access to the Internet, or you network connection is down, it is a good idea to have the correct time nevertheless, as it is essential for meteor trajectory estimation.
 We recommend buying the DS3231 RTC module. See under [Guides/rpi3_rtc_setup.md](Guides/rpi3_rtc_setup.md) for information on installing this RTC module.
 
 #### Cameras
+
+##### Analog
 
 1. **EasyCap UTV007 video digitizer.** 
 This device is used to digitize the video signal from the analogue camera, so it can be digitally processed and stored. We have tried numerous EasyCap devices, but **only the one the UTV007 chipset** works without any issues on the RPi.
@@ -50,8 +56,11 @@ new low-cost 1/3" security cameras for meteor surveillance"](http://www.imo.net/
 
 OR:
 
+##### Digital IP
+
+
 1. **IP camera**
-Preferebly an IMX225 or IMX291 based camera. This part is still in the testing phase, but contact us for more details!
+Preferably an IMX225 or IMX291 based camera. This part is still in the testing phase, but contact us for more details!
 
 ---------
 
@@ -92,7 +101,7 @@ Furthermore, you will need the following software and libraries to run the code:
 	- pyephem (3.7.6.0 or later)
 	- paramiko
 	
-All python libraries will be installed when you run the setup.py script (instructions below).
+All python libraries will be installed when you run the setup.py script (instructions below). If you want use IP cameras, you need to install a specail compilation of OpenCV that supports gstreamer. Run the opencv3_install.sh scripts that is provided with the code.
 
 ## Setting up
 
@@ -130,7 +139,7 @@ This will also install all Python libraries that you might need, except OpenCV. 
 sudo apt-get install libopencv-dev python-opencv
 ```
 
-### Checking video device and initializing proper settings
+### Checking video device and initializing proper settings - ANALOG CAMERAS ONLY!
 Once you connect the EasyCap digitizer and the camera, you need to check if the video signal is being properly received.
 
 #### NTSC

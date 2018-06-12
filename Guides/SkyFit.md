@@ -72,7 +72,7 @@ Next, a dialog asking you to input an approximate azimuth and altitude of the ca
 
 **Alt**itude is the angle between the horizon and the centre of the field of view of the camera. If you have pointed your camera straight up, towards the zenith, the altitude will then be around 90°, but the azimuth then loses meaning and can be any angle between 0 and 360.
 
-![Platepar file dialog](media/skyfit_altaz_fig.png)
+![Platepar file dialog](media/skyfit_altaz_fig.jpg)
 
 
 
