@@ -509,6 +509,10 @@ class ManualReductionTool(object):
     def onMouseRelease(self, event):
         """ Called when the mouse click is released. """
 
+        # Photometry coloring - off
+        if ((event.button == 1) or (event.button == 3)) and (event.key == 'shift'):
+            self.photometry_coloring_color = False
+
         # Call the same function for mouse movements to update the variables in the background
         self.onMouseMotion(event)
 
@@ -540,11 +544,6 @@ class ManualReductionTool(object):
             self.removeCentroid(self.current_frame)
 
             self.updateImage()
-
-
-        # Photometry coloring - off
-        if ((event.button == 1) or (event.button == 3)) and (event.key == 'shift'):
-            self.photometry_coloring_color = False
 
 
 
