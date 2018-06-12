@@ -188,6 +188,8 @@ class BufferedCapture(Process):
         
         # Run until stopped from the outside
         while not self.exit.is_set():
+
+
             lastTime = 0
             
             if first:
@@ -318,6 +320,7 @@ class BufferedCapture(Process):
 
 
             if self.exit.is_set():
+                wait_for_reconnect = False
                 break
 
 
@@ -336,5 +339,7 @@ class BufferedCapture(Process):
             first = not first
         
 
+        log.info('Releasing video device...')
         device.release()
+        log.info('Video device released!')
     
