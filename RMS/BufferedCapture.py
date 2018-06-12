@@ -101,25 +101,36 @@ class BufferedCapture(Process):
         # Use a device as the video source
         else:
 
-            ### If the IP camera is used, check first if it can be pinged
+            # If an analog camera is used, skip the ping
+            ip_cam = True
+            try:
+                int(self.config.deviceID)
+                ip_cam = False
+            except:
+                pass
 
-            # Extract the IP address
-            ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", self.config.deviceID)
 
-            # Check if the IP address was found
-            if ip:
-                ip = ip[0]
+            if ip_cam:
 
-                # Try pinging the IP address
-                if ping(ip):
-                    log.info("Camera IP ping successful!")
+                ### If the IP camera is used, check first if it can be pinged
+
+                # Extract the IP address
+                ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", self.config.deviceID)
+
+                # Check if the IP address was found
+                if ip:
+                    ip = ip[0]
+
+                    # Try pinging the IP address
+                    if ping(ip):
+                        log.info("Camera IP ping successful!")
+
+                    else:
+                        log.error("Can't ping the camera IP!")
+                        return None
 
                 else:
-                    log.error("Can't ping the camera IP!")
                     return None
-
-            else:
-                return None
 
 
 
