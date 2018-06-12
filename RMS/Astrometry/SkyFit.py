@@ -1673,10 +1673,11 @@ if __name__ == '__main__':
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Tool for fitting astrometry plates and photometric calibration.")
 
-    arg_parser.add_argument('dir_path', metavar='DIR PATH', type=str, nargs=1, \
+    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR PATH', type=str, \
         help='Path to the folder with FF files.')
 
-    arg_parser.add_argument('-c', '--config', metavar='CONFIG PATH', type=str, help="Path to a config file which will be used instead of the default one.")
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -1686,7 +1687,7 @@ if __name__ == '__main__':
     if cml_args.config is not None:
 
         # Load the given config file
-        config = cr.parse(cml_args.config)
+        config = cr.parse(cml_args.config[0].replace('"', ''))
 
     else:
         # Load the default configuration file
@@ -1694,7 +1695,7 @@ if __name__ == '__main__':
 
 
     # Init the plate tool instance
-    plate_tool = PlateTool(cml_args.dir_path[0], config)
+    plate_tool = PlateTool(cml_args.dir_path[0].replace('"', ''), config)
 
     plt.tight_layout()
     plt.show()
