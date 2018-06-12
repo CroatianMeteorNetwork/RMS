@@ -214,6 +214,7 @@ class BufferedCapture(Process):
                     # If the connection was made and the frame was retrieved, continue with the capture
                     if ret:
                         log.info('Video device reconnected successfully!')
+                        wait_for_reconnect = False
                         break
 
 
