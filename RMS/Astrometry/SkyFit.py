@@ -728,13 +728,16 @@ class PlateTool(object):
                     photom_params, _ = scipy.optimize.curve_fit(_photomLine, logsum_px, catalog_mags, \
                         method='trf', loss='soft_l1')
 
-                    # Set photometry parameters
-                    self.platepar.mag_0 = -2.5
-                    self.platepar.mag_lev = photom_params[0]
 
                     # Calculate the standard deviation
                     fit_resids = np.array(catalog_mags) - _photomLine(np.array(logsum_px), *photom_params)
                     fit_stddev = np.std(fit_resids)
+
+
+                    # Set photometry parameters
+                    self.platepar.mag_0 = -2.5
+                    self.platepar.mag_lev = photom_params[0]
+                    self.platepar.mag_lev_stddev = fit_stddev
 
 
                     # Remove previous photometry deviation labels 

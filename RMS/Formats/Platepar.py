@@ -122,8 +122,10 @@ class Platepar(object):
         self.F_scale = 1.0
         self.w_pix = 0
 
-        self.mag_0 = 1.0
+        # Photometry calibration
+        self.mag_0 = -2.5
         self.mag_lev = 1.0
+        self.mag_lev_stddev = 0.0
 
         # Distortion fit
         self.x_poly = np.zeros(shape=(12,), dtype=np.float64)
