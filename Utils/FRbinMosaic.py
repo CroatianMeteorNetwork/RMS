@@ -28,8 +28,8 @@ def makeFRmosaic(dir_path, border=5):
         print('Frame number:', fr.frameNum[i])
 
         # Determine the width and the height in frame segments
-        width = int(np.sqrt(fr.frameNum[i]))
-        height = np.ceil(fr.frameNum[i]/width)
+        height = int(np.sqrt(fr.frameNum[i])) + 1
+        width = np.ceil(fr.frameNum[i]/height)
 
         # Compute the image width and height
         w_img = int(np.ceil(width*(border + max_size)))
