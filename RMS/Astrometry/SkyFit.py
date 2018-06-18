@@ -1689,8 +1689,12 @@ if __name__ == '__main__':
 
     if cml_args.config is not None:
 
+        config_file = os.path.abspath(cml_args.config[0].replace('"', ''))
+
+        print('Loading config file:', config_file)
+
         # Load the given config file
-        config = cr.parse(cml_args.config[0].replace('"', ''))
+        config = cr.parse(config_file)
 
     else:
         # Load the default configuration file
