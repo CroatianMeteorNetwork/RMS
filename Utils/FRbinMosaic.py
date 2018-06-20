@@ -6,6 +6,7 @@ import argparse
 
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy.misc
 
 from RMS.Formats.FRbin import read as readFR
 
@@ -25,11 +26,9 @@ def makeFRmosaic(dir_path, border=5):
         # Determine the maximum size of the window
         max_size = max([fr.size[i][z] for z in range(fr.frameNum[i])])
 
-        print('Frame number:', fr.frameNum[i])
-
         # Determine the width and the height in frame segments
-        height = int(np.sqrt(fr.frameNum[i])) + 1
-        width = np.ceil(fr.frameNum[i]/height)
+        height = int(np.ceil(np.sqrt(fr.frameNum[i])))
+        width = int(np.ceil(fr.frameNum[i]/height))
 
         # Compute the image width and height
         w_img = int(np.ceil(width*(border + max_size)))
@@ -37,6 +36,12 @@ def makeFRmosaic(dir_path, border=5):
 
         # Create an empty mosaic image
         mosaic_img = np.zeros((h_img, w_img), dtype=np.uint8)
+
+        
+        x_min = w_img
+        x_max = 0
+        y_min = h_img
+        y_max = 0
 
         # Go through all frames
         for z in range(fr.frameNum[i]):
@@ -55,15 +60,9 @@ def makeFRmosaic(dir_path, border=5):
             h_ind = int(z%height)
             v_ind = int(z/height)
 
-            print()
-            print(v_ind, h_ind)
-
             # Compute the position of the frame on the image in image coordinates
-            frame_x = h_ind*max_size + border + (max_size - size)
-            frame_y = v_ind*max_size + border + (max_size - size)
-
-            #for i, y in enumerate(range(frame_y, frame_y + size)):
-                #for x in range(frame_x, frame_x + size):
+            frame_x = h_ind*max_size + border + (max_size - size)//2 + 1
+            frame_y = v_ind*max_size + border + (max_size - size)//2 + 1
 
             # Get the frame size
             fr_y, fr_x = fr.frames[i][z].shape
@@ -71,7 +70,34 @@ def makeFRmosaic(dir_path, border=5):
             # Assign the frame to the mosaic
             mosaic_img[frame_y:(frame_y + fr_y), frame_x:(frame_x + fr_x)] = fr.frames[i][z]
 
+            # Keep track of the min and max value of the extent of the frames
+            x_min = min(x_min, frame_x)
+            x_max = max(x_max, frame_x + fr_x)
+            y_min = min(y_min, frame_y)
+            y_max = max(y_max, frame_y + fr_y)
 
+
+        # Draw a grid
+        for h_ind in range(height+1):
+        	
+        	# Draw horizontal lines
+        	mosaic_img[h_ind*max_size + border, :] = 255
+
+        for v_ind in range(width+1):
+            
+            # Draw horizontal lines
+            mosaic_img[:, v_ind*max_size + border] = 255
+
+
+        # Cut the image to the size of the frames
+        mosaic_img = mosaic_img[y_min:y_max, x_min:x_max]
+
+
+        # Save the image to disk
+        img_file_name = ".".join(file_name.split('.')[:-1]) + '_mosaic.png'
+        scipy.misc.imsave(os.path.join(dir_path, img_file_name), mosaic_img)
+
+        # Plot the image
         plt.imshow(mosaic_img, cmap='gray', vmin=0, vmax=255)
         plt.show()
 
