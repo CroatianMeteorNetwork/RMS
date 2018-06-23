@@ -165,13 +165,14 @@ class BufferedCapture(Process):
         if device is None:
 
             log.info('The video source could not be opened!')
+            self.exit.set()
             return False
 
 
         # Wait until the device is opened
         device_opened = False
         for i in range(20):
-            time.sleep(0.1)
+            time.sleep(1)
             if device.isOpened():
                 device_opened = True
                 break
@@ -180,7 +181,7 @@ class BufferedCapture(Process):
         # If the device could not be opened, stop capturing
         if not device_opened:
             log.info('The video source could not be opened!')
-
+            self.exit.set()
             return False
 
         else:
@@ -220,6 +221,12 @@ class BufferedCapture(Process):
 
                     # Reinit the video device
                     device = self.initVideoDevice()
+
+
+                    if device is None:
+                        print("The video device couldn't be connected! Retrying...")
+                        continue
+
 
                     # Read the frame
                     ret, frame = device.read()

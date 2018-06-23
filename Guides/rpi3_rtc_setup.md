@@ -58,6 +58,39 @@ sudo hwclock -w
 sudo dpkg-reconfigure tzdata
 ```
 
+#### 6. Install the NTP deamon:
+```
+sudo apt-get install -y ntp
+```
+
+#### 7. Edit `/etc/rc.local` and add the hwclock command above the line that says `exit 0`:
+```
+sleep 1
+
+# Read time from hardware clock
+hwclock -s
+
+# Pull the time from the internet
+ntpd -gq
+
+# Write time to hardware clock
+hwclock -w
+```
+This will read in the time from the RTC upon boot, and sync the time via Internet (if it is available).
+
+
+#### 8. Reboot.
+Done! Raspbian will now set the time from the RTC clock during boot even if there is no Internet connectivity available.
+
+
+
+-------------
+
+### Legacy instructions
+
+These instructions were vaild for old versions of the system, but the problems have been fixed and the NTP deamon is running fine now. Use these instructions **only** if you have issues with your RTC!
+
+
 #### 6. Get rid of the NTP daemon as well using:
 ```
 sudo apt-get remove -y ntp
