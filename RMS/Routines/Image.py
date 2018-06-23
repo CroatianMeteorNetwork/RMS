@@ -176,6 +176,65 @@ def applyFlat(img, flat_struct):
     return img
 
 
+def deinterlaceOdd(img):
+    """ Deinterlaces the numpy array image by duplicating the odd frame. 
+    """
+    
+    # Deepcopy img to new array
+    deinterlaced_image = np.copy(img) 
+
+    deinterlaced_image[1::2, :] = deinterlaced_image[:-1:2, :]
+
+    # Move the image one row up
+    deinterlaced_image[:-1, :] = deinterlaced_image[1:, :]
+    deinterlaced_image[-1, :] = 0
+
+    return deinterlaced_image
+
+
+
+def deinterlaceEven(img):
+    """ Deinterlaces the numpy array image by duplicating the even frame. 
+    """
+    
+    # Deepcopy img to new array
+    deinterlaced_image = np.copy(img)
+
+    deinterlaced_image[:-1:2, :] = deinterlaced_image[1::2, :]
+
+    return deinterlaced_image
+
+
+
+def blendLighten(arr1, arr2):
+    """ Blends two image array with lighen method (only takes the lighter pixel on each spot).
+    """
+    arr1 = arr1.astype(np.int16)
+
+    temp = arr1 - arr2
+    temp[temp > 0] = 0
+
+    new_arr = arr1 - temp
+    new_arr = new_arr.astype(np.uint8)
+
+    return  new_arr
+
+
+
+
+def deinterlaceBlend(img):
+    """ Deinterlaces the image by making an odd and even frame, then blends them by lighten method.
+    """
+
+    img_odd_d = deinterlaceOdd(img)
+    img_even = deinterlaceEven(img)
+
+    proc_img = blendLighten(img_odd_d, img_even)
+
+    return proc_img
+
+
+
 
 if __name__ == "__main__":
 
