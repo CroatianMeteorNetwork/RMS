@@ -307,8 +307,9 @@ class ManualReductionTool(object):
             text_str += '-----------\n'
             text_str += 'Centroid - Left click\n'
             text_str += 'Manual pick - CTRL + Left click\n'
-            text_str += 'Photometry coloring add - Shift + Left click'
-            text_str += 'Photometry coloring remove - Shift + Right click'
+            text_str += 'Photometry coloring add - Shift + Left click\n'
+            text_str += 'Photometry coloring remove - Shift + Right click\n'
+            text_str += 'Annulus size - Mouse scroll\n'
             text_str += '\n'
             text_str += 'Hide/show text - F1'
 
@@ -491,15 +492,15 @@ class ManualReductionTool(object):
         if self.aperture_radius < 2:
             self.aperture_radius = 2
 
-        if self.aperture_radius > 50:
-            self.aperture_radius = 50
+        if self.aperture_radius > 250:
+            self.aperture_radius = 250
 
         # Check that the photometry aperture is in the proper limits
         if self.photometry_aperture_radius < 2:
             self.photometry_aperture_radius = 2
 
-        if self.photometry_aperture_radius > 50:
-            self.photometry_aperture_radius = 50
+        if self.photometry_aperture_radius > 250:
+            self.photometry_aperture_radius = 250
 
         
         self.drawCursorCircle()
