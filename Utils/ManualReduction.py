@@ -35,8 +35,22 @@ class Pick(object):
 
 
 class ManualReductionTool(object):
-    def __init__(self, config, ff_file, fr_file, first_frame=None, fps=None):
-        """ Tool for manually picking meteor centroids and photometry. """
+    def __init__(self, config, ff_file, fr_file, first_frame=None, fps=None, deinterlace_mode=-1):
+        """ Tool for manually picking meteor centroids and photometry. 
+        
+        Arguments:
+            config: [config] Configuration structure.
+            ff_file: [str] Path to the FF or FR file.
+            fr_file: [str] Path to the FR file, if given (can be None).
+
+        Keyword Arguments:
+            first_frame: [int] First frame to start with. None by default, which will start with the first one.
+            fps: [float] Frames per second. None by default, which will read the fps from the config file.
+            deinterlace_mode: [int]
+                -1 - no deinterlace
+                 0 - odd first
+                 1 - even first
+        """
 
 
         self.config = config
@@ -45,6 +59,14 @@ class ManualReductionTool(object):
         self.fr_file = fr_file
 
         self.fps = fps
+
+        self.deinterlace_mode = deinterlace_mode
+
+        # Compute the frame step
+        if self.deinterlace_mode > -1:
+            self.frame_step = 0.5
+        else:
+            self.frame_step = 1
 
         # Load the FF file if given
         if self.ff_file is not None:
@@ -175,7 +197,7 @@ class ManualReductionTool(object):
 
             # Take the current frame from FF file
             img = np.copy(self.ff.avepixel)
-            frame_mask = np.where(self.ff.maxframe == self.current_frame)
+            frame_mask = np.where(self.ff.maxframe == int(self.current_frame))
             img[frame_mask] = self.ff.maxpixel[frame_mask]
 
         # Otherwise, create a blank background with the size enough to fit the FR bin
@@ -197,7 +219,7 @@ class ManualReductionTool(object):
         if self.fr is not None:
 
             # Compute the index of the frame in the FR bin structure
-            frame_indx = self.current_frame - self.fr.t[self.current_line][0]
+            frame_indx = int(self.current_frame) - self.fr.t[self.current_line][0]
 
             # Reconstruct the frame if it is within the bounds
             if frame_indx < self.fr.frameNum[self.current_line]:
@@ -240,6 +262,23 @@ class ManualReductionTool(object):
                 plt.gca().add_patch(mpatches.Rectangle((rect_x, rect_y), rect_w, rect_h, fill=None, edgecolor='red', alpha=0.5))
 
 
+        # Apply the deinterlace
+        if self.deinterlace_mode > -1:
+
+            # Set the deinterlace index to handle proper deinterlacing order
+            if self.deinterlace_mode == 0:
+                deinter_indx = 0
+
+            else:
+                deinter_indx = 1
+
+
+            # Deinterlace the image using the appropriate method
+            if (self.current_frame + deinter_indx*0.5)%1 == 0:
+                img = Image.deinterlaceOdd(img)
+
+            else:
+                img = Image.deinterlaceEven(img)
 
         # Current image without adjustments
         self.current_image = np.copy(img)
@@ -256,14 +295,14 @@ class ManualReductionTool(object):
 
         plt.imshow(img, cmap='gray', vmin=0, vmax=255)
 
-        self.drawText()
-
         if (self.prev_xlim is not None) and (self.prev_ylim is not None):
 
             # Restore previous zoom
             plt.xlim(self.prev_xlim)
             plt.ylim(self.prev_ylim)
 
+
+        self.drawText()
 
         # Don't draw the picks in the photometry coloring more
         if not self.photometry_coloring_mode:
@@ -286,11 +325,16 @@ class ManualReductionTool(object):
 
             # Draw info text
 
-            text_str  = "Frame: {:d}\n".format(self.current_frame)
+            text_str  = "Frame: {:.1f}\n".format(self.current_frame)
             text_str += "Gamma: {:.2f}\n".format(self.img_gamma)
 
-            plt.gca().text(10, 10, text_str, color='w', verticalalignment='top', horizontalalignment='left', \
+            # Get the current plot limit
+            x_min, x_max = plt.gca().get_xlim()
+            y_max, y_min = plt.gca().get_ylim()
+
+            plt.gca().text(x_min + 10, y_min + 10, text_str, color='w', verticalalignment='top', horizontalalignment='left', \
                 fontsize=8)
+            
 
             # Show text on image with instructions
             text_str  = 'Keys:\n'
@@ -853,7 +897,7 @@ class ManualReductionTool(object):
     def addCentroid(self, frame, x_centroid, y_centroid):
         """ Add the centroid to the list of centroids. """
 
-        print('Added centroid at ({:.2f}, {:.2f}) on frame {:d}'.format(x_centroid, y_centroid, frame))
+        print('Added centroid at ({:.2f}, {:.2f}) on frame {:.1f}'.format(x_centroid, y_centroid, frame))
 
         # Check if there are previous picks on this frame
         prev_pick = [i for i, pick in enumerate(self.pick_list) if pick.frame == frame]
@@ -890,7 +934,7 @@ class ManualReductionTool(object):
 
             pick = self.pick_list[i]
 
-            print('Removed centroid at ({:.2f}, {:.2f}) on frame {:d}'.format(pick.x_centroid, \
+            print('Removed centroid at ({:.2f}, {:.2f}) on frame {:.1f}'.format(pick.x_centroid, \
                 pick.y_centroid, frame))
 
             # Remove the centroid
@@ -1035,7 +1079,7 @@ class ManualReductionTool(object):
         # Compute the intensity sum done on the previous frame
         self.computeIntensitySum()
 
-        self.current_frame = (self.current_frame - 1)%256
+        self.current_frame = (self.current_frame - self.frame_step)%256
 
         self.printStatus()
 
@@ -1049,7 +1093,7 @@ class ManualReductionTool(object):
         # Compute the intensity sum done on the previous frame
         self.computeIntensitySum()
 
-        self.current_frame = (self.current_frame + 1)%256
+        self.current_frame = (self.current_frame + self.frame_step)%256
 
         self.printStatus()
 
@@ -1123,7 +1167,7 @@ class ManualReductionTool(object):
         # Save the frame to disk
         scipy.misc.imsave(frame_file_path, self.current_image)
 
-        print('Frame {:d} saved to: {:s}'.format(self.current_frame, frame_file_path))
+        print('Frame {:.1f} saved to: {:s}'.format(self.current_frame, frame_file_path))
 
 
 
@@ -1146,12 +1190,12 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float, help="Frames per second of the video. If not given, it will be read from a) the FF file if available, b) from the config file.")
 
+    arg_parser.add_argument('-d', '--deinterlace', nargs='?', type=int, default=-1, help="Perform manual reduction on deinterlaced frames, even first by default. If odd first is desired, -d 1 should be used.")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
     #########################
-
-    
 
 
     # Load the configuration file
@@ -1203,9 +1247,17 @@ if __name__ == "__main__":
         sys.exit()
 
 
+    # Read the deinterlace
+    #   -1 - no deinterlace
+    #    0 - odd first
+    #    1 - even first
+    deinterlace_mode = cml_args.deinterlace
+    if cml_args.deinterlace is None:
+        deinterlace_mode = 0
+
     # Init the tool
     manual_tool = ManualReductionTool(config, ff_name, fr_name, first_frame=cml_args.begframe, \
-        fps=cml_args.fps)
+        fps=cml_args.fps, deinterlace_mode=deinterlace_mode)
 
 
     plt.tight_layout()
