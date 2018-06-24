@@ -1,3 +1,6 @@
+# Config file
+.config
+
 # Sublime files
 *.sublime-project
 *.sublime-workspace
