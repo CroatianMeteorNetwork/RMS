@@ -59,13 +59,13 @@ if __name__ == "__main__":
 
             # Use the fireball thresholding
             if cml_args.fireball:
-                j1 = 0
                 k1 = config.k1
+                j1 = config.j1
 
             # Meteor detection
             else:
-                j1 = config.j1
                 k1 = config.k1_det
+                j1 = config.j1_det
 
             # Compute the threshold value
             k1_vals = (ff.maxpixel.astype(np.float64) - ff.avepixel.astype(np.float64) \
