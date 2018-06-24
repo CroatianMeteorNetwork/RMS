@@ -28,6 +28,8 @@ if __name__ == "__main__":
     # Extract the directory name from the given argument
     bin_dir = sys.argv[1]
 
+    # Load config file
+    config = cr.parse(".config")
 
     print('Directory:', bin_dir)
 
@@ -35,9 +37,6 @@ if __name__ == "__main__":
         if 'FF' in ff_name:
 
             print(ff_name)
-
-            # Load config file
-            config = cr.parse(".config")
 
             # Load compressed file
             compressed = FFfile.read(bin_dir, ff_name, array=True, full_filename=True).array
@@ -61,6 +60,8 @@ if __name__ == "__main__":
             extract_obj.filename = truncated_filename
 
             event_points = extract_obj.findPoints()
+
+            print('Points:', event_points)
 
             # Execute all
             extract_obj.executeAll()

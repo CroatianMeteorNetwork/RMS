@@ -61,6 +61,9 @@ def read(directory, filename, array=False, full_filename=False):
     if array:
         ff.array = np.dstack([ff.maxpixel, ff.maxframe, ff.avepixel, ff.stdpixel])
 
+        ff.array = np.swapaxes(ff.array, 0, 1)
+        ff.array = np.swapaxes(ff.array, 0, 2)
+
     # CLose the FITS file
     hdulist.close()
 

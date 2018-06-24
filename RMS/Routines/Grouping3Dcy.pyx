@@ -480,8 +480,8 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
                 n = compressed[1, y, x]
                 
                 # Subsample frame in f*f squares
-                y2 = y//f
-                x2 = x//f
+                y2 = int(floor(y//f))
+                x2 = int(floor(x//f))
                 
                 # Check if there are enough of threshold passers inside of this square
                 if count[n, y2, x2] >= min_points:
