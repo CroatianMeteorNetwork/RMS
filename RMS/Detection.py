@@ -943,7 +943,7 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
     # show2(ff_name+' maxpixel', ff.maxpixel)
 
     # Get lines on the image
-    line_list = getLines(ff, config.k1_det, config.j1, config.time_slide, config.time_window_size, 
+    line_list = getLines(ff, config.k1_det, config.j1_det, config.time_slide, config.time_window_size, 
         config.max_lines_det, config.max_white_ratio, config.kht_lib_path)
 
     logDebug('List of lines:', line_list)
@@ -967,7 +967,7 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
         # plotLines(ff, line_list)
 
         # Threshold the image
-        img_thres = thresholdImg(ff, config.k1_det, config.j1)
+        img_thres = thresholdImg(ff, config.k1_det, config.j1_det)
 
         filtered_lines = []
 

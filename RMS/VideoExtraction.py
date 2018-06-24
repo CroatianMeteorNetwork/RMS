@@ -62,7 +62,7 @@ class Extractor(Process):
 
         # Threshold and subsample frames
         length, x, y, z = Grouping3D.thresholdAndSubsample(self.frames, self.compressed, \
-            self.config.min_level, self.config.min_pixels, self.config.k1, self.config.f)
+            self.config.min_level, self.config.min_pixels, self.config.k1, self.config.j1, self.config.f)
 
 
         # Return empty list if there is no points

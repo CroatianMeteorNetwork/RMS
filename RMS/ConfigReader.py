@@ -110,6 +110,7 @@ class Config:
         self.min_level = 40            # ignore pixel if below this level
         self.min_pixels = 8            # minimum number of pixels required to add event point
         self.k1 = 4                    # k1 factor for thresholding
+        self.j1 = 5                    # absolute levels above average in thresholding
         self.max_points_per_frame = 30 # ignore frame if there are too many points in it (ie. flare)
         self.max_per_frame_factor = 10 # multiplied with median number of points for flare detection
         self.max_points = 190          # if there are too many points in total after flare removal, randomize them
@@ -139,7 +140,7 @@ class Config:
         self.ff_min_stars = 5
         
         self.k1_det = 1.5 # weight for stddev in thresholding for faint meteor detection
-        self.j1 = 9 # absolute levels above average in thresholding for faint meteor detection
+        self.j1_det = 9 # absolute levels above average in thresholding for faint meteor detection
         self.max_white_ratio = 0.07 # maximum ratio of white to all pixels on a thresholded image (used to avoid searching on very messed up images)
         self.time_window_size = 64 # size of the time window which will be slided over the time axis
         self.time_slide = 32 # subdivision size of the time axis (256 will be divided into 256/time_slide parts)
@@ -451,6 +452,9 @@ def parseFireballDetection(config, parser):
     
     if parser.has_option(section, "k1"):
         config.k1 = parser.getfloat(section, "k1")
+
+    if parser.has_option(section, "j1"):
+        config.j1 = parser.getint(section, "j1")
     
     if parser.has_option(section, "max_points_per_frame"):
         config.max_points_per_frame = parser.getint(section, "max_points_per_frame")
@@ -522,7 +526,7 @@ def parseMeteorDetection(config, parser):
         config.k1_det = parser.getfloat(section, "k1")
 
     if parser.has_option(section, "j1"):
-        config.j1 = parser.getint(section, "j1")
+        config.j1_det = parser.getint(section, "j1")
 
     if parser.has_option(section, "max_white_ratio"):
         config.max_white_ratio = parser.getfloat(section, "max_white_ratio")

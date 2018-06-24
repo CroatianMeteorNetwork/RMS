@@ -183,7 +183,7 @@ def findCoefficients(line_list):
 
 
 
-def thresholdAndSubsample(frames, compressed, min_level, min_points, k1, f):
+def thresholdAndSubsample(frames, compressed, min_level, min_points, k1, j1, f):
     """ This is only a Cython wrapper function!
         Given the list of frames, threshold them, subsample the time and check if there are enough threshold
         passers on the given frame. 
@@ -196,6 +196,7 @@ def thresholdAndSubsample(frames, compressed, min_level, min_points, k1, f):
         min_points: [int] Minimum number of points in the subsampled block that is required to pass the 
             threshold.
         k1: [float] Threhsold max > avg + k1*stddev
+        j1: [float] Constant offset in the threshold levels.
         f: [int] Decimation scale
 
     Return:
@@ -205,7 +206,7 @@ def thresholdAndSubsample(frames, compressed, min_level, min_points, k1, f):
         pointsz: [ndarray] frame of the subsampled point.
     """
 
-    return thresholdAndSubsampleCy(frames, compressed, min_level, min_points, k1, f)
+    return thresholdAndSubsampleCy(frames, compressed, min_level, min_points, k1, j1, f)
 
 
 

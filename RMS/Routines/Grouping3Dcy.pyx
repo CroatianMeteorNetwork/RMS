@@ -425,7 +425,7 @@ def find3DLines(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, start_time, config
 @cython.wraparound(False) 
 @cython.cdivision(True)
 def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
-    np.ndarray[UINT8_TYPE_t, ndim=3] compressed, int min_level, int min_points, float k1, int f):
+    np.ndarray[UINT8_TYPE_t, ndim=3] compressed, int min_level, int min_points, float k1, float j1, int f):
     """ Given the list of frames, threshold them, subsample the time and check if there are enough threshold
         passers on the given frame. 
 
@@ -437,6 +437,7 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
         min_points: [int] Minimum number of points in the subsampled block that is required to pass the 
             threshold.
         k1: [float] Threhsold max > avg + k1*stddev
+        j1: [float] Constant level offset in the threshold
         f: [int] Decimation scale
 
     Return:
@@ -471,8 +472,8 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
 
             max_val = compressed[0, y, x]
 
-            avg_std = int(float(compressed[2, y, x]) + k1*float(compressed[3, y, x]))
-            
+            # Compute the threshold limit
+            avg_std = int(float(compressed[2, y, x]) + k1*float(compressed[3, y, x])) + j1
             
             if((max_val > min_level) and (max_val >= avg_std)):
 
