@@ -78,6 +78,8 @@ class ManualReductionTool(object):
         # Load the FR file is given
         if self.fr_file is not None:
             self.fr = readFR(*os.path.split(self.fr_file))
+
+            print('Total lines:', self.fr.lines)
         else:
             self.fr = None
 
@@ -168,6 +170,14 @@ class ManualReductionTool(object):
         print('Frame:', self.current_frame)
         print('Line:', self.current_line)
 
+        if self.fr is not None:
+
+            # Get all frames in the line
+            frames = self.fr.t[self.current_line]
+
+            # Print line frame range
+            print('Line frame range:', min(frames), max(frames))
+
 
     def updateImage(self):
         """ Updates the current plot. """
@@ -222,7 +232,7 @@ class ManualReductionTool(object):
             frame_indx = int(self.current_frame) - self.fr.t[self.current_line][0]
 
             # Reconstruct the frame if it is within the bounds
-            if frame_indx < self.fr.frameNum[self.current_line]:
+            if (frame_indx < self.fr.frameNum[self.current_line]) and (frame_indx >= 0):
 
                 # Get the center position of the detection on the current frame
                 yc = self.fr.yc[self.current_line][frame_indx]
@@ -400,10 +410,9 @@ class ManualReductionTool(object):
 
             if self.fr is not None:
                 
-                self.current_line -= 0
+                self.current_line -= 1
 
-                if self.current_line < 0:
-                    self.current_line = 0
+                self.current_line = self.current_line%self.fr.lines
 
                 self.printStatus()
 
@@ -412,10 +421,9 @@ class ManualReductionTool(object):
 
             if self.fr is not None:
 
-                self.current_line += 0
+                self.current_line += 1
 
-                if self.current_line >= self.fr.lines:
-                    self.current_line = self.fr.lines - 1
+                self.current_line = self.current_line%self.fr.lines
 
                 self.printStatus()
 
