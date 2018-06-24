@@ -61,14 +61,14 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
 
     cdef unsigned int fieldsum_indx
     
-    # Populate the randomN array with 2**16 random numbers from 0 to 255
-    #cdef np.ndarray[INT8_TYPE_t, ndim=1] randomN = np.empty(shape=[65536], dtype=INT8_TYPE)
-    cdef np.ndarray[INT8_TYPE_t, ndim=1] randomN = np.random.randint(0, 256, size=65536, dtype=INT8_TYPE)
+    # Populate the randomN array with 2**16 random numbers
+    cdef np.ndarray[INT8_TYPE_t, ndim=1] randomN = np.empty(shape=[65536], dtype=INT8_TYPE)
     cdef unsigned int arand = randomN[0]
 
-    # for n in range(65536):
-    #     arand = (arand*32719 + 3)%32749
-    #     randomN[n] = <unsigned char>(32767.0/<double>(1 + arand%32767))
+
+    for n in range(65536):
+        arand = (arand*32719 + 3)%32749
+        randomN[n] = <unsigned char>(32767.0/<double>(1 + arand%32767))
 
 
     for y in range(height):
@@ -77,6 +77,7 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
             acc = 0
             var = 0
             max_val = 0
+            num_equal = 0
             
             # Calculate mean, stddev, max_val, and max_val frame
             for n in range(frames_num):
@@ -86,7 +87,7 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
                 var += pixel*pixel
                 
                 # Assign the maximum value
-                if max_val < pixel:
+                if pixel > max_val:
                 
                     max_val = pixel
                     max_frame = n

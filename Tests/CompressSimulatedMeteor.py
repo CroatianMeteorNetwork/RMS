@@ -1,6 +1,9 @@
 """ Runs the compression on a simulated meteor. """
 
+from __future__ import print_function, division, absolute_import
+
 import sys
+import os
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -44,6 +47,8 @@ def meteorSimulate(img_w, img_h, frame_num, psf_sigma, speed=1):
 
     # Simulate even-first interlaced video
     for i in range(frame_num):
+
+        print('Frame', i)
 
         if i < int(frame_num/speed):
             for field in range(2):
@@ -100,6 +105,7 @@ def meteorSimulate(img_w, img_h, frame_num, psf_sigma, speed=1):
 if __name__ == "__main__":
 
     import time
+    import pickle
 
     if len(sys.argv) < 2:
         print('Usage: python -m Tests.CompressSimulatedMeteor /output/dir')
@@ -113,8 +119,30 @@ if __name__ == "__main__":
     # Load config file
     config = cr.parse(".config")
 
+    print('Simulating a meteor...')
+
     # Simulate a meteor
-    frames = meteorSimulate(720, 576, 256, 2.0, speed=4)
+
+    # # Faster low-light fireball
+    # frames = meteorSimulate(720, 576, 256, 2.0, speed=4)
+
+    # Slow bright fireball
+    frames = meteorSimulate(720, 576, 256, 5.0, speed=1)
+
+
+
+    pickle_file = 'compress_test_frames.pickle'
+
+    ## SAVE the frames to disk
+    with open(os.path.join(dir_path, pickle_file), 'w') as f:
+        pickle.dump(frames, f)
+    ###
+
+    # ## Load the frames from disk
+    # with open(os.path.join(dir_path, pickle_file), 'r') as f:
+    #     frames = pickle.load(f)
+    # ###
+
 
     # # Show individual frames
     # for i in range(120, 128):
