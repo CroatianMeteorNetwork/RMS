@@ -26,6 +26,9 @@ High priority:
 	    - X/Y, alt/az, ra/dec on mouse position
 
 
+- Downloading platepar from server if the current one is failing or missing
+
+
 Low priority:
 ----------------
 
