@@ -14,6 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import print_function, division, absolute_import
+
 import re
 import time
 import logging
@@ -21,7 +23,7 @@ from multiprocessing import Process, Event
 
 import cv2
 
-from Misc import ping
+from RMS.Misc import ping
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
