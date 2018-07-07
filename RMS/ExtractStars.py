@@ -396,6 +396,11 @@ if __name__ == "__main__":
     # Go through all files in the directory
     for ff_name in sorted(ff_list):
 
+        # Check if the given file is a valid FF file
+        if not FFfile.validFFName(ff_name):
+            continue
+
+
         print(ff_name)
 
         t1 = time.clock()
