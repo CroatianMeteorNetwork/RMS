@@ -436,9 +436,13 @@ def autoCheckFit(config, platepar, calstars_list):
         return platepar, False
 
 
-    # A list of matching radiuses to try
+    # A list of matching radiuses to try, pairs of [radius, fit_distorsion_flag]
     min_radius = 0.5
-    radius_list = [5, 3, 1.5, min_radius]
+    radius_list = [[10, False], 
+                    [5, False], 
+                    [3, False], 
+                    [1.5, True], 
+                    [min_radius, True]]
 
     # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
     # in the same reagrd as the cost function)
@@ -461,13 +465,13 @@ def autoCheckFit(config, platepar, calstars_list):
         if avg_dist < config.dist_check_quick_threshold:
 
             # Use a reduced set of initial radius values
-            radius_list = [1.5, min_radius]
+            radius_list = [[1.5, True], [min_radius, True]]
 
     ##########
 
 
     # Match increasingly smaller search radiia around image stars
-    for i, match_radius in enumerate(radius_list):
+    for i, (match_radius, fit_distorsion) in enumerate(radius_list):
 
         # Match the stars and calculate the residuals
         n_matched, avg_dist, cost, _ = matchStarsResiduals(config, platepar, catalog_stars, star_dict, \
@@ -527,39 +531,42 @@ def autoCheckFit(config, platepar, calstars_list):
             return platepar, True
 
 
-        # Fit the distortion parameters (X axis)
-        res = scipy.optimize.minimize(_calcImageResidualsDistorsion, platepar.x_poly, args=(config, platepar,\
-            catalog_stars, star_dict, match_radius, 'x'), method='Nelder-Mead', \
-            options={'fatol': fatol, 'xatol': 0.1})
+        # Fit the lens distorsion parameters
+        if fit_distorsion:
 
-        print(res)
+            # Fit the distortion parameters (X axis)
+            res = scipy.optimize.minimize(_calcImageResidualsDistorsion, platepar.x_poly, args=(config, platepar,\
+                catalog_stars, star_dict, match_radius, 'x'), method='Nelder-Mead', \
+                options={'fatol': fatol, 'xatol': 0.1})
 
-        # If the fit was not successfull, stop further fitting
-        if not res.success:
-            return platepar, False
+            print(res)
 
-        else:
-            platepar.x_poly = res.x
+            # If the fit was not successfull, stop further fitting
+            if not res.success:
+                return platepar, False
 
-
-        # Check if the platepar is good enough and do not estimate further parameters
-        if checkFitGoodness(config, platepar, catalog_stars, star_dict, min_radius):
-            return platepar, True
+            else:
+                platepar.x_poly = res.x
 
 
-        # Fit the distortion parameters (Y axis)
-        res = scipy.optimize.minimize(_calcImageResidualsDistorsion, platepar.y_poly, args=(config, platepar,\
-            catalog_stars, star_dict, match_radius, 'y'), method='Nelder-Mead', \
-            options={'fatol': fatol, 'xatol': 0.1})
+            # Check if the platepar is good enough and do not estimate further parameters
+            if checkFitGoodness(config, platepar, catalog_stars, star_dict, min_radius):
+                return platepar, True
 
-        print(res)
 
-        # If the fit was not successfull, stop further fitting
-        if not res.success:
-            return platepar, False
+            # Fit the distortion parameters (Y axis)
+            res = scipy.optimize.minimize(_calcImageResidualsDistorsion, platepar.y_poly, args=(config, platepar,\
+                catalog_stars, star_dict, match_radius, 'y'), method='Nelder-Mead', \
+                options={'fatol': fatol, 'xatol': 0.1})
 
-        else:
-            platepar.y_poly = res.x
+            print(res)
+
+            # If the fit was not successfull, stop further fitting
+            if not res.success:
+                return platepar, False
+
+            else:
+                platepar.y_poly = res.x
 
 
 
