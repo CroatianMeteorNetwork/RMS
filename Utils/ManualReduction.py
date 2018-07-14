@@ -4,8 +4,10 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import sys
-import argparse
 import math
+import argparse
+import datetime
+import pytz
 
 import numpy as np
 import scipy.misc
@@ -35,13 +37,15 @@ class Pick(object):
 
 
 class ManualReductionTool(object):
-    def __init__(self, config, ff_file, fr_file, first_frame=None, fps=None, deinterlace_mode=-1):
+    def __init__(self, config, input1, input2, first_frame=None, fps=None, deinterlace_mode=-1, 
+        png_mode=False):
         """ Tool for manually picking meteor centroids and photometry. 
         
         Arguments:
             config: [config] Configuration structure.
-            ff_file: [str] Path to the FF or FR file.
-            fr_file: [str] Path to the FR file, if given (can be None).
+            input1: [str] Path to the FF or FR file. Or, path to the directory with PNGs.
+            inptu2: [str] Path to the FR file, if given (can be None). In PNG mode this must be the datetime 
+                of the first frame.
 
         Keyword Arguments:
             first_frame: [int] First frame to start with. None by default, which will start with the first one.
@@ -50,17 +54,18 @@ class ManualReductionTool(object):
                 -1 - no deinterlace
                  0 - odd first
                  1 - even first
+            png_mode: [bool] If True, the frames are taken from a directory which contains a list of PNG 
+                images. False by default, in which case FF and/or FR files are used.
         """
 
 
         self.config = config
 
-        self.ff_file = ff_file
-        self.fr_file = fr_file
-
         self.fps = fps
 
         self.deinterlace_mode = deinterlace_mode
+
+        self.png_mode = png_mode
 
         # Compute the frame step
         if self.deinterlace_mode > -1:
@@ -68,20 +73,55 @@ class ManualReductionTool(object):
         else:
             self.frame_step = 1
 
-        # Load the FF file if given
-        if self.ff_file is not None:
-            self.ff = readFF(*os.path.split(self.ff_file))
-        else:
+
+
+        # Load the PNG files if in PNG mode
+        if self.png_mode:
+
+            self.png_dir = input1
+            self.frame0_time = input2
+
+            print('PNG dir:', self.png_dir)
+
+            self.png_list = sorted([fname for fname in os.listdir(self.png_dir) \
+                if fname.lower().endswith('.png')])
+
+            self.nframes = len(self.png_list)
+
+            self.png_img_path = ''
+
+            # Variables for FF mode that are not used
             self.ff = None
-
-
-        # Load the FR file is given
-        if self.fr_file is not None:
-            self.fr = readFR(*os.path.split(self.fr_file))
-
-            print('Total lines:', self.fr.lines)
-        else:
             self.fr = None
+
+
+        # FF mode
+        else:
+
+            # Variables for PNG mode that are not used
+            self.png_list = None
+            self.frame0_time = None
+
+            self.ff_file = input1
+            self.fr_file = input2
+
+            # Load the FF file if given
+            if self.ff_file is not None:
+                self.ff = readFF(*os.path.split(self.ff_file))
+            else:
+                self.ff = None
+
+
+            # Load the FR file is given
+            if self.fr_file is not None:
+                self.fr = readFR(*os.path.split(self.fr_file))
+
+                print('Total lines:', self.fr.lines)
+            else:
+                self.fr = None
+
+
+            self.nframes = 256
 
 
         ###########
@@ -122,7 +162,7 @@ class ManualReductionTool(object):
         self.current_line = 0
 
         if first_frame is not None:
-            self.current_frame = first_frame%256
+            self.current_frame = first_frame%self.nframes
 
         else:
 
@@ -141,6 +181,7 @@ class ManualReductionTool(object):
 
         # Init the first image
         self.updateImage()
+        self.printStatus()
 
         self.ax = plt.gca()
 
@@ -168,15 +209,22 @@ class ManualReductionTool(object):
 
         print('----------------------------')
         print('Frame:', self.current_frame)
-        print('Line:', self.current_line)
 
-        if self.fr is not None:
+        # PNG mode
+        if self.png_mode:
+            print('File:', self.png_img_path)
 
-            # Get all frames in the line
-            frames = self.fr.t[self.current_line]
+        # FF mode
+        else:
+            print('Line:', self.current_line)
 
-            # Print line frame range
-            print('Line frame range:', min(frames), max(frames))
+            if self.fr is not None:
+
+                # Get all frames in the line
+                frames = self.fr.t[self.current_line]
+
+                # Print line frame range
+                print('Line frame range:', min(frames), max(frames))
 
 
     def updateImage(self):
@@ -200,76 +248,88 @@ class ManualReductionTool(object):
 
 
         plt.clf()
-            
+        
+        # PNG mode
+        if self.png_mode:
 
-        # If FF is given, reconstruct frames
-        if self.ff is not None:
+            # Get path to current PNG image
+            self.png_img_path = os.path.join(self.png_dir, self.png_list[int(self.current_frame)])
 
-            # Take the current frame from FF file
-            img = np.copy(self.ff.avepixel)
-            frame_mask = np.where(self.ff.maxframe == int(self.current_frame))
-            img[frame_mask] = self.ff.maxpixel[frame_mask]
+            # Read the image
+            img = scipy.misc.imread(self.png_img_path)
 
-        # Otherwise, create a blank background with the size enough to fit the FR bin
+
+        # FF mode
         else:
+            # If FF is given, reconstruct frames
+            if self.ff is not None:
 
-            # Get the maximum extent of the meteor frames
-            y_size = max(max(np.array(self.fr.yc[i]) + np.array(self.fr.size[i])//2) for i in \
-                range(self.fr.lines))
-            x_size = max(max(np.array(self.fr.xc[i]) + np.array(self.fr.size[i])//2) for i in \
-                range(self.fr.lines))
+                # Take the current frame from FF file
+                img = np.copy(self.ff.avepixel)
+                frame_mask = np.where(self.ff.maxframe == int(self.current_frame))
+                img[frame_mask] = self.ff.maxpixel[frame_mask]
 
-            # Make the image square
-            img_size = max(y_size, x_size)
+            # Otherwise, create a blank background with the size enough to fit the FR bin
+            else:
 
-            img = np.zeros((img_size, img_size), np.uint8)
+                # Get the maximum extent of the meteor frames
+                y_size = max(max(np.array(self.fr.yc[i]) + np.array(self.fr.size[i])//2) for i in \
+                    range(self.fr.lines))
+                x_size = max(max(np.array(self.fr.xc[i]) + np.array(self.fr.size[i])//2) for i in \
+                    range(self.fr.lines))
 
+                # Make the image square
+                img_size = max(y_size, x_size)
 
-        # If FR is given, paste the raw frame onto the image
-        if self.fr is not None:
-
-            # Compute the index of the frame in the FR bin structure
-            frame_indx = int(self.current_frame) - self.fr.t[self.current_line][0]
-
-            # Reconstruct the frame if it is within the bounds
-            if (frame_indx < self.fr.frameNum[self.current_line]) and (frame_indx >= 0):
-
-                # Get the center position of the detection on the current frame
-                yc = self.fr.yc[self.current_line][frame_indx]
-                xc = self.fr.xc[self.current_line][frame_indx]
-
-                # # Get the frame number
-                # t = self.fr.t[self.current_line][frame_indx]
-
-                # Get the size of the window
-                size = self.fr.size[self.current_line][frame_indx]
+                img = np.zeros((img_size, img_size), np.uint8)
 
 
-                # Paste the frames onto the big image
-                y_img = np.arange(yc - size//2, yc + size//2)
-                x_img = np.arange(xc - size//2,  xc + size//2)
+            # If FR is given, paste the raw frame onto the image
+            if self.fr is not None:
 
-                Y_img, X_img = np.meshgrid(y_img, x_img)
+                # Compute the index of the frame in the FR bin structure
+                frame_indx = int(self.current_frame) - self.fr.t[self.current_line][0]
 
-                y_frame = np.arange(len(y_img))
-                x_frame = np.arange(len(x_img))
+                # Reconstruct the frame if it is within the bounds
+                if (frame_indx < self.fr.frameNum[self.current_line]) and (frame_indx >= 0):
 
-                Y_frame, X_frame = np.meshgrid(y_frame, x_frame)                
+                    # Get the center position of the detection on the current frame
+                    yc = self.fr.yc[self.current_line][frame_indx]
+                    xc = self.fr.xc[self.current_line][frame_indx]
 
-                img[Y_img, X_img] = self.fr.frames[self.current_line][frame_indx][Y_frame, X_frame]
+                    # # Get the frame number
+                    # t = self.fr.t[self.current_line][frame_indx]
 
-                # Save the limits of the FR
-                self.fr_xmin = np.min(x_img)
-                self.fr_xmax = np.max(x_img)
-                self.fr_ymin = np.max(y_img)
-                self.fr_ymax = np.min(y_img)
+                    # Get the size of the window
+                    size = self.fr.size[self.current_line][frame_indx]
 
-                # Draw a red rectangle around the pasted frame
-                rect_x = np.min(x_img)
-                rect_y = np.max(y_img)
-                rect_w = np.max(x_img) - rect_x
-                rect_h = np.min(y_img) - rect_y
-                plt.gca().add_patch(mpatches.Rectangle((rect_x, rect_y), rect_w, rect_h, fill=None, edgecolor='red', alpha=0.5))
+
+                    # Paste the frames onto the big image
+                    y_img = np.arange(yc - size//2, yc + size//2)
+                    x_img = np.arange(xc - size//2,  xc + size//2)
+
+                    Y_img, X_img = np.meshgrid(y_img, x_img)
+
+                    y_frame = np.arange(len(y_img))
+                    x_frame = np.arange(len(x_img))
+
+                    Y_frame, X_frame = np.meshgrid(y_frame, x_frame)                
+
+                    img[Y_img, X_img] = self.fr.frames[self.current_line][frame_indx][Y_frame, X_frame]
+
+                    # Save the limits of the FR
+                    self.fr_xmin = np.min(x_img)
+                    self.fr_xmax = np.max(x_img)
+                    self.fr_ymin = np.max(y_img)
+                    self.fr_ymax = np.min(y_img)
+
+                    # Draw a red rectangle around the pasted frame
+                    rect_x = np.min(x_img)
+                    rect_y = np.max(y_img)
+                    rect_w = np.max(x_img) - rect_x
+                    rect_h = np.min(y_img) - rect_y
+                    plt.gca().add_patch(mpatches.Rectangle((rect_x, rect_y), rect_w, rect_h, fill=None, \
+                        edgecolor='red', alpha=0.5))
 
 
         # Apply the deinterlace
@@ -1087,11 +1147,11 @@ class ManualReductionTool(object):
         # Compute the intensity sum done on the previous frame
         self.computeIntensitySum()
 
-        self.current_frame = (self.current_frame - self.frame_step)%256
-
-        self.printStatus()
+        self.current_frame = (self.current_frame - self.frame_step)%self.nframes
 
         self.updateImage()
+
+        self.printStatus()
 
 
 
@@ -1101,11 +1161,11 @@ class ManualReductionTool(object):
         # Compute the intensity sum done on the previous frame
         self.computeIntensitySum()
 
-        self.current_frame = (self.current_frame + self.frame_step)%256
-
-        self.printStatus()
+        self.current_frame = (self.current_frame + self.frame_step)%self.nframes
 
         self.updateImage()
+
+        self.printStatus()
 
 
 
@@ -1115,12 +1175,20 @@ class ManualReductionTool(object):
         # Compute the intensity sum done on the previous frame
         self.computeIntensitySum()
 
-        # Extract the save directory
-        if self.ff_file is not None:
-            dir_path, ff_name_ftp = os.path.split(self.ff_file)
 
-        elif self.fr_file is not None:
-            dir_path, ff_name_ftp = os.path.split(self.fr_file)
+        # PNG mode
+        if self.png_mode:
+            dir_path = self.png_dir
+            ff_name_ftp = "FF_" + self.frame0_time.strftime("%Y%m%d_%H%M%S.%f") + '.bin'
+
+        # FF mode
+        else:
+            # Extract the save directory
+            if self.ff_file is not None:
+                dir_path, ff_name_ftp = os.path.split(self.ff_file)
+
+            elif self.fr_file is not None:
+                dir_path, ff_name_ftp = os.path.split(self.fr_file)
 
 
         # Remove the file extension of the image file
@@ -1157,12 +1225,19 @@ class ManualReductionTool(object):
     def saveCurrentFrame(self):
         """ Saves the current frame to disk. """
 
-        # Extract the save directory
-        if self.ff_file is not None:
-            dir_path, ff_name_ftp = os.path.split(self.ff_file)
+        # PNG mode
+        if self.png_mode:
+            dir_path = self.png_img_path
+            ff_name_ftp = "FF_" + self.frame0_time.strftime("%Y%m%d_%H%M%S.%f") + '.bin'
 
-        elif self.fr_file is not None:
-            dir_path, ff_name_ftp = os.path.split(self.fr_file)
+        # FF mode
+        else:
+            # Extract the save directory
+            if self.ff_file is not None:
+                dir_path, ff_name_ftp = os.path.split(self.ff_file)
+
+            elif self.fr_file is not None:
+                dir_path, ff_name_ftp = os.path.split(self.fr_file)
 
 
         # Remove the file extension of the image file
@@ -1189,16 +1264,18 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="Tool for manually picking positions of meteors on video frames and performing manual photometry.")
 
     arg_parser.add_argument('file1', metavar='FILE1', type=str, nargs=1,
-                    help='Path to an FF file, or an FR file if an FF file is not available.')
+                    help='Path to an FF file, or an FR file if an FF file is not available. Or, a path to a directory with PNG files can be given.')
 
-    arg_parser.add_argument('file2', metavar='FILE2', type=str, nargs='*',
-                    help='If an FF file was given, an FR file can be given in addition.')
+    arg_parser.add_argument('input2', metavar='INPUT2', type=str, nargs='*',
+                    help='If an FF file was given, an FR file can be given in addition. If PNGs are used, this second argument must be the UTC time of frame 0 in the following format: YYYYMMDD-HHMMSS.uuu')
 
     arg_parser.add_argument('-b', '--begframe', metavar='FIRST FRAME', type=int, help="First frame to show. Has to be between 0-255.")
 
     arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float, help="Frames per second of the video. If not given, it will be read from a) the FF file if available, b) from the config file.")
 
     arg_parser.add_argument('-d', '--deinterlace', nargs='?', type=int, default=-1, help="Perform manual reduction on deinterlaced frames, even first by default. If odd first is desired, -d 1 should be used.")
+
+    arg_parser.add_argument('-p', '--png', help="Work with PNGs, and not FF files.", action="store_true")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -1213,48 +1290,6 @@ if __name__ == "__main__":
     ff_name = None
     fr_name = None
 
-
-    file1_name = os.path.split(cml_args.file1[0])[-1]
-
-    # Check if the first file is an FF file
-    if validFFName(file1_name):
-
-        # This is an FF file
-        ff_name = cml_args.file1[0]
-
-    # This is possibly a FR file then
-    else:
-
-        if 'FR' in file1_name:
-            fr_name = cml_args.file1[0]
-
-
-    if cml_args.file2 and (ff_name is None):
-        print('The given FF file is not a proper FF file!')
-        sys.exit()
-
-
-    # Check if the second file is a good FR file
-    if cml_args.file2:
-
-        file2_name = os.path.split(cml_args.file2[0])[-1]
-
-        if 'FR' in file2_name:
-
-            fr_name = cml_args.file2[0]
-
-        else:
-            print('The given FR file is not valid!')
-            sys.exit()
-
-
-
-    # Make sure there is at least one good file given
-    if (ff_name is None) and (fr_name is None):
-        print('No valid FF or FR files given!')
-        sys.exit()
-
-
     # Read the deinterlace
     #   -1 - no deinterlace
     #    0 - odd first
@@ -1263,9 +1298,89 @@ if __name__ == "__main__":
     if cml_args.deinterlace is None:
         deinterlace_mode = 0
 
-    # Init the tool
-    manual_tool = ManualReductionTool(config, ff_name, fr_name, first_frame=cml_args.begframe, \
-        fps=cml_args.fps, deinterlace_mode=deinterlace_mode)
+
+
+    # If a directory with PNGs is given
+    if cml_args.png:
+
+        # Parse the directory with PNGs and check if there are any PNGs inside
+        png_dir = os.path.abspath(cml_args.file1[0])
+
+        if not os.path.exists(png_dir):
+            print('Directory does not exist:', png_dir)
+            sys.exit()
+
+        png_list = [fname for fname in os.listdir(png_dir) if fname.lower().endswith('.png')]
+
+        if len(png_list) == 0:
+            print('No PNG files in directory:', png_dir)
+            sys.exit()
+
+
+        # Check if the time was given and can be parsed
+        if not cml_args.input2:
+            print('The time of frame 0 must be given when doing a manual reduction on PNGs!')
+            sys.exit()
+
+        
+        # Parse the time
+        frame0_time = datetime.datetime.strptime(cml_args.input2[0], "%Y%m%d-%H%M%S.%f")
+        frame0_time = frame0_time.replace(tzinfo=pytz.UTC)
+
+        # Init the tool
+        manual_tool = ManualReductionTool(config, png_dir, frame0_time, first_frame=cml_args.begframe, \
+            fps=cml_args.fps, deinterlace_mode=deinterlace_mode, png_mode=True)
+
+
+
+
+    # If an FF file was given
+    else:
+
+        file1_name = os.path.split(cml_args.file1[0])[-1]
+
+        # Check if the first file is an FF file
+        if validFFName(file1_name):
+
+            # This is an FF file
+            ff_name = cml_args.file1[0]
+
+        # This is possibly a FR file then
+        else:
+
+            if 'FR' in file1_name:
+                fr_name = cml_args.file1[0]
+
+
+        if cml_args.file2 and (ff_name is None):
+            print('The given FF file is not a proper FF file!')
+            sys.exit()
+
+
+        # Check if the second file is a good FR file
+        if cml_args.input2:
+
+            file2_name = os.path.split(cml_args.input2[0])[-1]
+
+            if 'FR' in file2_name:
+
+                fr_name = cml_args.input2[0]
+
+            else:
+                print('The given FR file is not valid!')
+                sys.exit()
+
+
+
+        # Make sure there is at least one good file given
+        if (ff_name is None) and (fr_name is None):
+            print('No valid FF or FR files given!')
+            sys.exit()
+
+
+        # Init the tool
+        manual_tool = ManualReductionTool(config, ff_name, fr_name, first_frame=cml_args.begframe, \
+            fps=cml_args.fps, deinterlace_mode=deinterlace_mode, png_mode=False)
 
 
     plt.tight_layout()
