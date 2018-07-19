@@ -170,31 +170,47 @@ class QueuedPool(object):
 
         if self.pool is not None:
 
+            c = 0
+
             # Wait until the input queue is empty, then close the pool
             while True:
+
+                c += 1
+
+                if c%1000 == 0:
+                    print('-----')
+                    print('Queue size:', self.output_queue.qsize())
+                    print('Total jobs:', self.total_jobs.value())
                 
                 # If all jobs are done, close the pool
                 if self.output_queue.qsize() >= self.total_jobs.value():
 
+                    print('Inserting poison pills...')
+
                     # Insert the 'poison pill' to the queue, to kill all workers
                     for i in range(self.cores.value()):
+                        print('Inserting pill', i + 1)
                         self.input_queue.put(None)
 
 
                     # Wait until the pills are 'swallowed'
                     while self.input_queue.qsize():
+                        print('Swallowing pills...', self.input_queue.qsize())
                         time.sleep(0.1)
 
 
                     # Close the pool and wait for all threads to terminate
+                    print('Closing pool...')
                     self.pool.close()
+                    print('Terminating pool...')
                     self.pool.terminate()
+                    print('Joining pool...')
                     self.pool.join()
 
                     break
 
                 else:
-                    time.sleep(0.01)
+                    time.sleep(0.1)
 
 
 
