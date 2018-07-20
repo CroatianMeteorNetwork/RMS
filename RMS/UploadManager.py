@@ -206,6 +206,8 @@ class UploadManager(multiprocessing.Process):
         for file_name in file_list:
             self.file_queue.put(file_name)
 
+        time.sleep(0.1)
+
         # Write the queue to disk
         self.saveQueue()
 

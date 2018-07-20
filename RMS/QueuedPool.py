@@ -141,6 +141,8 @@ class QueuedPool(object):
             # Save the results to an output queue
             self.output_queue.put(result)
 
+            time.sleep(0.1)
+
             # Exit if exit is requested
             if self.kill_workers.is_set():
                 break
@@ -191,6 +193,9 @@ class QueuedPool(object):
                     for i in range(self.cores.value()):
                         print('Inserting pill', i + 1)
                         self.input_queue.put(None)
+
+
+                    time.sleep(0.1)
 
 
                     # Wait until the pills are 'swallowed'
@@ -260,6 +265,8 @@ class QueuedPool(object):
             job = [job]
 
         self.input_queue.put(job)
+
+        time.sleep(0.1)
 
 
     def allDone(self):

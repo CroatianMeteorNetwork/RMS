@@ -82,6 +82,8 @@ class LiveViewer(multiprocessing.Process):
 
         self.img_queue.put([img, img_text])
 
+        time.sleep(0.1)
+
 
 
     def run(self):
