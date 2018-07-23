@@ -433,11 +433,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 platepar.write(os.path.join(night_data_dir, config.platepar_name), fmt=platepar_fmt)
                 platepar.write(platepar_path, fmt=platepar_fmt)
 
-                # Calculate astrometry for meteor detections
-                applyAstrometryFTPdetectinfo(night_data_dir, ftpdetectinfo_name, platepar_path)
-
             else:
-                log.info('Astrometric calibration FAILED!')           
+                log.info('Astrometric calibration FAILED!, Using old platepar for calibration...')    
+
+
+            # Calculate astrometry for meteor detections
+            applyAstrometryFTPdetectinfo(night_data_dir, ftpdetectinfo_name, platepar_path)
 
 
 
