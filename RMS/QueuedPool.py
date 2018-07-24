@@ -145,6 +145,7 @@ class QueuedPool(object):
 
             # Exit if exit is requested
             if self.kill_workers.is_set():
+                print('Worker killed!')
                 break
 
         self.active_workers.decrement()
@@ -231,12 +232,21 @@ class QueuedPool(object):
         self.kill_workers.set()
 
         # Wait until all workers have exited
+        loop_start = time.time()
         while self.active_workers.value() > 0:
+            print('Active workers:', self.active_workers.value())
             time.sleep(0.1)
 
+            # Break the loop if waiting for more than 100 s
+            if abs(time.time() - loop_start) > 100:
+                break
+
         # Join the previous pool
+        print('Closing pool...')
         self.pool.close()
+        print('Terminating pool...')
         self.pool.terminate()
+        print('Joining pool...')
         self.pool.join()
 
         self.kill_workers.clear()
@@ -245,9 +255,11 @@ class QueuedPool(object):
         if cores is None:
             cores = multiprocessing.cpu_count()
 
+        print('Setting new number of cores to:', cores)
         self.cores.set(cores)
 
         # Init a new pool
+        print('Starting new pool...')
         self.startPool()
 
 
