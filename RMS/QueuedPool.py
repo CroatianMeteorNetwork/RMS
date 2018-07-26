@@ -2,8 +2,10 @@ from __future__ import print_function
 
 import logging
 import traceback
-import multiprocessing
 import time
+import functools
+import multiprocessing
+import multiprocessing.dummy
 
 
 class SafeValue(object):
@@ -43,24 +45,27 @@ class SafeValue(object):
 
 
 class QueuedPool(object):
-    """ Provides capability of creating a pool of workers which will process jobs in a given queue, and the 
-        input queue can be updated in another thread. 
+    def __init__(self, func, cores=None, log=None, delay_start=0, worker_timeout=1000):
+        """ Provides capability of creating a pool of workers which will process jobs in a given queue, and 
+        the input queue can be updated in another thread. 
 
         The workers will process the queue until the pool is deliberately closed. All results are stored in an 
         output queue. It is also possible to change the number of workers in a pool during runtime.
 
-    Arguments:
-        func: [function] Worker function to which the arguments from the queue will be passed
+        The default worker timeout time is 1000 seconds.
 
-    Keyword arguments:
-        cores: [int] Number of CPU cores to use. None by default. If negative, then the number of cores to be 
-            used will be the total number available, minus the given number.
-        log: [logging handle] A logger object which will be used for logging.
-        delay_start: [float] Number of seconds to wait after init before the workers start workings.
+        Arguments:
+            func: [function] Worker function to which the arguments from the queue will be passed
 
-    """
+        Keyword arguments:
+            cores: [int] Number of CPU cores to use. None by default. If negative, then the number of cores 
+                to be used will be the total number available, minus the given number.
+            log: [logging handle] A logger object which will be used for logging.
+            delay_start: [float] Number of seconds to wait after init before the workers start workings.
+            worker_timeout: [int] Number of seconds to wait before the queue is killed due to a worker getting 
+                stuck.
 
-    def __init__(self, func, cores=None, log=None, delay_start=0):
+        """
 
 
         # If the cores are not given, use all available cores
@@ -85,6 +90,7 @@ class QueuedPool(object):
 
         self.start_time = time.time()
         self.delay_start = delay_start
+        self.worker_timeout = worker_timeout
 
         # Initialize queues (for some reason queues from Manager need to be created, otherwise they are 
         # blocking when using get_nowait)
@@ -122,9 +128,8 @@ class QueuedPool(object):
 
 
             # Catch errors in workers and handle them softly
-
             try:
-                
+
                 # Call the original worker function and collect results
                 result = func(*args)
 
@@ -175,6 +180,9 @@ class QueuedPool(object):
 
             c = 0
 
+            prev_output_qsize = 0
+            output_qsize_last_change = time.time()
+
             # Wait until the input queue is empty, then close the pool
             while True:
 
@@ -184,6 +192,28 @@ class QueuedPool(object):
                     print('-----')
                     print('Queue size:', self.output_queue.qsize())
                     print('Total jobs:', self.total_jobs.value())
+
+
+                # Keep track of the changes of the output queue size
+                if self.output_queue.qsize() != prev_output_qsize:
+                    prev_output_qsize = self.output_queue.qsize()
+                    output_qsize_last_change = time.time()
+
+
+                # If the queue has been idle for too long, kill it
+                if (time.time() - output_qsize_last_change) > self.worker_timeout:
+                    print('One of the workers got stuck longer then {:d} seconds, killing multiprocessing...'.format(self.worker_timeout))
+
+                    print('Terminating pool...')
+                    self.pool.terminate()
+
+                    print('Joining pool...')
+                    self.pool.join()
+
+                    self.active_workers.set(0)
+
+                    break
+
                 
                 # If all jobs are done, close the pool
                 if self.output_queue.qsize() >= self.total_jobs.value():
@@ -208,8 +238,10 @@ class QueuedPool(object):
                     # Close the pool and wait for all threads to terminate
                     print('Closing pool...')
                     self.pool.close()
+
                     print('Terminating pool...')
                     self.pool.terminate()
+
                     print('Joining pool...')
                     self.pool.join()
 
@@ -317,13 +349,15 @@ def exampleWorker(in_str, in_num):
 
     print('Got:', in_str, in_num)
 
+
+    # Wait for in_num seconds
     t1 = time.time()
     while True:
-        if time.time() - t1 > 2:
+        if time.time() - t1 > in_num:
             break
 
 
-    # Cause an error in the worker
+    # Cause an error in the worker when input is 0
     5/in_num
 
 
@@ -334,14 +368,16 @@ def exampleWorker(in_str, in_num):
 
 if __name__ == "__main__":
 
-    # Init logging
-    logging.basicConfig()
-    log = logging.getLogger('logger')
-    log.setLevel(logging.INFO)
-    log.setLevel(logging.DEBUG)
+    # # Init logging
+    # logging.basicConfig()
+    # log = logging.getLogger('logger')
+    # log.setLevel(logging.INFO)
+    # log.setLevel(logging.DEBUG)
 
-    # Initialize the pool with only one core
-    workpool = QueuedPool(exampleWorker, cores=1, log=log)
+    log = None
+
+    # Initialize the pool with only one core, timeout of only 10 seconds
+    workpool = QueuedPool(exampleWorker, cores=1, log=log, worker_timeout=10)
 
     # Give the pool something to do
     for i in range(1, 3):
@@ -349,8 +385,6 @@ if __name__ == "__main__":
         workpool.addJob(["hello", i])
 
         time.sleep(0.1)
-
-        workpool.addJob(["world", i])
 
 
     # Start the pool
@@ -366,11 +400,12 @@ if __name__ == "__main__":
     print('Adding more jobs...')
 
     # Give the pool some more work to do
-    for i in range(0, 4):
+    for i in range(1, 4):
         workpool.addJob(["test1", i])
         time.sleep(0.05)
-        workpool.addJob(["test2", i])
 
+
+    workpool.addJob(["long time", 99])
 
     print('Closing the pool...')
 
