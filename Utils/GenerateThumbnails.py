@@ -18,10 +18,10 @@
 from __future__ import print_function, division, absolute_import
 
 
-""" Generates a thumbnail image of all FF*.bin files in the given directory. """
+""" Generates a thumbnail image of all FF files in the given directory. """
 
 import os
-import sys
+import argparse
 
 import numpy as np
 import cv2
@@ -196,13 +196,21 @@ if __name__ == "__main__":
     config = cr.parse(".config")
 
 
-    if len(sys.argv) < 2:
-        print('Usage: python -m Utils.GenerateThumbnails /dir/with/FF/files')
+    ### COMMAND LINE ARGUMENTS
 
-        sys.exit()
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Generates a thumbnail image of all FF files in the given directory.")
+
+    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
+        help='Path to directory with FF files.')
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
 
 
     # Read the argument as a path to the night directory
-    dir_path = " ".join(sys.argv[1:])
+    dir_path = cml_args.dir_path[0]
 
     generateThumbnails(dir_path, config, 'mosaic')

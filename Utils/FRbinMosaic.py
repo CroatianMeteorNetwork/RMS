@@ -117,7 +117,7 @@ if __name__ == "__main__":
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Make a mosaic image out of a FR bin file.")
 
-    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR PATH', type=str, \
+    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
         help='Path to the FR bin file.')
 
     # Parse the command line arguments

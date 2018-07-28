@@ -2,11 +2,12 @@
 
 from __future__ import print_function, division, absolute_import
 
-import sys
 import os
+import argparse
 
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy.misc
 
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
@@ -105,13 +106,28 @@ def deinterlaceBlend(image_array):
 
 if __name__ == '__main__':
 
+    ### COMMAND LINE ARGUMENTS
 
-    if len(sys.argv) < 2:
-        print('Usage: python -m Utils.MergeMaxpixels /dir/with/FF/files')
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Stacks all maxpixles in the given folder to one image.")
 
-        sys.exit()
+    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
+        help='Path to directory with FF files.')
 
-    dir_path = sys.argv[1].replace('"', '')
+    arg_parser.add_argument('file_format', nargs=1, metavar='FILE_FORMAT', type=str, \
+        help='File format of the image, e.g. jpg or png.')
+
+    arg_parser.add_argument('-d', '--deinterlace', action="store_true", help="""Deinterlace the image before stacking. """)
+
+    arg_parser.add_argument('-s', '--subavg', action="store_true", help="""Subtract the average image from maxpixel before stacking. """)
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+
+    dir_path = cml_args.dir_path[0]
 
     first_img = True
 
@@ -124,8 +140,21 @@ if __name__ == '__main__':
             # Load FF file
             ff = readFF(dir_path, ff_name)
 
-            # Take only the detection (max - avg pixel image)
-            img = deinterlaceBlend(ff.maxpixel) - deinterlaceBlend(ff.avepixel)
+            maxpixel = ff.maxpixel
+            avepixel = ff.avepixel
+
+            # Dinterlace the images
+            if cml_args.deinterlace:
+                maxpixel = deinterlaceBlend(maxpixel)
+                avepixel = deinterlaceBlend(avepixel)
+
+            # Subtract the average from maxpixel
+            if cml_args.subavg:
+                img = maxpixel - avepixel
+
+            else:
+                img = maxpixel
+
 
             if first_img:
                 merge_img = np.copy(img)
@@ -136,11 +165,17 @@ if __name__ == '__main__':
             merge_img = blend_lighten(merge_img, img)
 
 
+    stack_path = os.path.join(dir_path, 'stacked.' + cml_args.file_format[0])
+
+    print("Saving to:", stack_path)
+    
+    # Save the blended image
+    scipy.misc.imsave(stack_path, merge_img)
 
     # Plot the blended image
     plt.imshow(merge_img, cmap='gray')
 
-    plt.imsave(os.path.join(dir_path, 'stacked.png'), merge_img, cmap='gray')
+    #plt.imsave(os.path.join(dir_path, 'stacked.png'), merge_img, cmap='gray')
     plt.show()
 
 
