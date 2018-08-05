@@ -88,6 +88,10 @@ class BufferedCapture(Process):
         """
         
         self.exit.set()
+
+        time.sleep(1)
+
+        log.info("Joining capture...")
         self.join()
 
 
@@ -137,6 +141,7 @@ class BufferedCapture(Process):
 
 
             # Init the video device
+            log.info("Initializing the video device...")
             device = cv2.VideoCapture(self.config.deviceID)
 
             # Try setting the resultion if using a video device, not gstreamer
@@ -230,8 +235,13 @@ class BufferedCapture(Process):
                         continue
 
 
+                    if self.exit.is_set():
+                        break
+
                     # Read the frame
+                    log.info("Reading frame...")
                     ret, frame = device.read()
+                    log.info("Frame read!")
 
                     # If the connection was made and the frame was retrieved, continue with the capture
                     if ret:
