@@ -1633,13 +1633,14 @@ class PlateTool(object):
         print()
         print('Residuals')
         print('----------')
-        print(' No,   Img X,   Img Y,   Cat X,   Cat Y,    Dist,  Angle')
+        print(' No,   Img X,   Img Y, RA (deg), Dec (deg),    Mag,   Cat X,   Cat Y,    Dist,  Angle')
 
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
-        for star_no, (cat_x, cat_y, img_c) in enumerate(zip(catalog_x, catalog_y, img_stars)):
+        for star_no, (cat_x, cat_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y, catalog_stars, \
+            img_stars)):
             
             img_x, img_y, _ = img_c
-
+            ra, dec, mag = cat_coords
 
             delta_x = cat_x - img_x
             delta_y = cat_y - img_y
@@ -1651,8 +1652,8 @@ class PlateTool(object):
             residuals.append([img_x, img_y, angle, distance])
 
             # Print out the residuals
-            print('{:3d}, {:7.2f}, {:7.2f}, {:7.2f}, {:7.2f}, {:7.2f}, {:+5.1f}'.format(star_no + 1, img_x, img_y, \
-                cat_x, cat_y, distance, np.degrees(angle)))
+            print('{:3d}, {:7.2f}, {:7.2f}, {:>8.3f}, {:>+9.3f}, {:+6.2}, {:7.2f}, {:7.2f}, {:7.2f}, {:+5.1f}'.format(star_no + 1, img_x, img_y, \
+                ra, dec, mag, cat_x, cat_y, distance, np.degrees(angle)))
 
         print('Average distance: {:.2f} px'.format(np.mean([entry[3] for entry in residuals])))
 
