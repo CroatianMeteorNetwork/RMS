@@ -67,7 +67,7 @@ def deinterlaceEven(ff_image):
 
 
 
-def blend_lighten(arr1, arr2):
+def blendLighten(arr1, arr2):
     """ Blends two image array with lighen method (only takes the lighter pixel on each spot).
     """
 
@@ -99,7 +99,7 @@ def deinterlaceBlend(image_array):
 
     image_odd_d = deinterlaceOdd(image_array)
     image_even = deinterlaceEven(image_array)
-    full_proc_image = blend_lighten(image_odd_d, image_even)
+    full_proc_image = blendLighten(image_odd_d, image_even)
 
     return full_proc_image
 
@@ -162,7 +162,7 @@ if __name__ == '__main__':
                 continue
 
             # Blend images 'if lighter'
-            merge_img = blend_lighten(merge_img, img)
+            merge_img = blendLighten(merge_img, img)
 
 
     stack_path = os.path.join(dir_path, 'stacked.' + cml_args.file_format[0])
@@ -175,7 +175,6 @@ if __name__ == '__main__':
     # Plot the blended image
     plt.imshow(merge_img, cmap='gray')
 
-    #plt.imsave(os.path.join(dir_path, 'stacked.png'), merge_img, cmap='gray')
     plt.show()
 
 
