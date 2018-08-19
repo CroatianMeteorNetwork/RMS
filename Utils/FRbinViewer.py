@@ -99,7 +99,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False):
 
             # Save frame to disk
             if save_frames:
-                frame_file_name = fr_path.replace('.bin') + "_frame_{:03d}.png".format(t)
+                frame_file_name = fr_path.replace('.bin', '') + "_frame_{:03d}.png".format(t)
                 cv2.imwrite(os.path.join(dir_path, frame_file_name), img)
 
 
@@ -126,8 +126,8 @@ if __name__ == "__main__":
     arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
         help='Path to the directory which contains FR bin files.')
 
-    arg_parser.add_argument('-e', '--extract', metavar='EXTRACT_FR_FILE', type=str, \
-        help="Save frames from a given FR file to disk.")
+    arg_parser.add_argument('-e', '--extract', action="store_true", \
+        help="Save frames from FR files to disk.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -172,4 +172,4 @@ if __name__ == "__main__":
                 break
         
         # View the fireball detection
-        view(dir_path, ff_match, fr, config)
+        view(dir_path, ff_match, fr, config, save_frames=cml_args.extract)
