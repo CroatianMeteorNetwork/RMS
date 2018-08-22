@@ -127,11 +127,17 @@ class BufferedCapture(Process):
                 if ip:
                     ip = ip[0]
 
-                    # Try pinging the IP address
-                    if ping(ip):
-                        log.info("Camera IP ping successful!")
+                    # Try pinging 5 times
+                    ping_success = False
 
-                    else:
+                    for i in range(5):
+                        ping_success = ping(ip)
+
+                        if ping_success:
+                            log.info("Camera IP ping successful!")
+                            break
+
+                    if not ping_success:
                         log.error("Can't ping the camera IP!")
                         return None
 
