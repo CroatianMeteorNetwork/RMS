@@ -340,7 +340,7 @@ class BufferedCapture(Process):
                 print(' done!')
 
 
-                print('Assigning frame to memory...')
+                print('Assigning frame to memory...', end='')
                 # Assign the frame to shared memory
                 t1_assign = time.time()
                 if first:
