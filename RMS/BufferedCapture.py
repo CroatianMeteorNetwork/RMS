@@ -228,6 +228,8 @@ class BufferedCapture(Process):
             # If the video device was disconnected, wait 5s for reconnection
             if wait_for_reconnect:
 
+                print('Reconnecting...')
+
                 while not self.exit.is_set():
 
                     log.info('Waiting for the video device to be reconnected...')
@@ -364,6 +366,7 @@ class BufferedCapture(Process):
 
             if self.exit.is_set():
                 wait_for_reconnect = False
+                print('!!! Capture exited!')
                 break
 
 
