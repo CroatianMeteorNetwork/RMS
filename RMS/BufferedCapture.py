@@ -92,7 +92,16 @@ class BufferedCapture(Process):
         time.sleep(1)
 
         log.info("Joining capture...")
-        self.join()
+
+        # Wait for the capture to join for 60 seconds, then terminate
+        for i in range(60):
+            if self.is_alive():
+                time.sleep(1)
+            else:
+                break
+
+        if self.is_alive:
+            self.terminate()
 
 
     def initVideoDevice(self):
