@@ -505,7 +505,7 @@ def raDecToCorrectedXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
     """
     
-    # Calculate the referent coordinates in azimuth and altitude
+    # Calculate the azimuth and altitude of the FOV centre
     az_centre, alt_centre = calcRefCentre(ref_jd, lon, lat, RA_d, dec_d)
 
     # Apply the UT correction
@@ -540,7 +540,7 @@ def raDecToCorrectedXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_
     y = -caz*sl*calt + salt*cl
     HA = math.degrees(math.atan2(x, y))
 
-    # Centre of FOV
+    # Centre of FOV at the given time
     RA_centre = (Ho + lon - HA)%360
     dec_centre = math.degrees(math.asin(sl*salt + cl*calt*caz))
 
@@ -550,18 +550,21 @@ def raDecToCorrectedXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_
     for i, (ra_star, dec_star) in enumerate(zip(RA_data, dec_data)):
 
         # Gnomonization of star coordinates to image coordinates
-        ra1 = math.radians(RA_centre)
-        dec1 = math.radians(dec_centre)
-        ra2 = math.radians(ra_star)
-        dec2 = math.radians(dec_star)
-        ad = math.acos(math.sin(dec1)*math.sin(dec2) + math.cos(dec1)*math.cos(dec2)*math.cos(ra2 - ra1))
+        ra_c = math.radians(RA_centre)
+        dec_c = math.radians(dec_centre)
+        ra_s = math.radians(ra_star)
+        dec_s = math.radians(dec_star)
+
+        ad = math.acos(math.sin(dec_c)*math.sin(dec_s) + math.cos(dec_c)*math.cos(dec_s)*math.cos(ra_s - ra_c))
         radius = math.degrees(ad)
-        sinA = math.cos(dec2)*math.sin(ra2 - ra1)/math.sin(ad)
-        cosA = (math.sin(dec2) - math.sin(dec1)*math.cos(ad))/(math.cos(dec1) * math.sin(ad))
+
+        sinA = math.cos(dec_s)*math.sin(ra_s - ra_c)/math.sin(ad)
+        cosA = (math.sin(dec_s) - math.sin(dec_c)*math.cos(ad))/(math.cos(dec_c) * math.sin(ad))
+
         theta = -math.degrees(math.atan2(sinA, cosA))
         theta = theta + pos_angle_ref - 90.0
 
-        # Calculate the image coordinates (scale the F_scale from CIF resolution)
+        # Calculate standard coordinates
         X1 = radius*math.cos(math.radians(theta))*F_scale
         Y1 = radius*math.sin(math.radians(theta))*F_scale
 
@@ -580,7 +583,6 @@ def raDecToCorrectedXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_
             + x_poly[11]*Y1*np.sqrt(X1**2 + Y1**2))
 
         # Add the distortion correction and calculate X image coordinates
-        #Xpix = (X1 - dX)*x_res/384.0 + x_res/2
         Xpix = X1 - dX + x_res/2.0
 
         # Calculate distortion in Y direction
@@ -598,7 +600,6 @@ def raDecToCorrectedXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_
             + y_poly[11]*X1*np.sqrt(X1**2 + Y1**2))
 
         # Add the distortion correction and calculate Y image coordinates
-        #Ypix = (Y1 - dY)*y_res/288.0 + y_res/2
         Ypix = Y1 - dY + y_res/2.0
 
         x_array[i] = Xpix
