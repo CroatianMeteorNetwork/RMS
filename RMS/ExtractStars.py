@@ -309,6 +309,7 @@ def adjustLevels(img_array, minv, gamma, maxv):
     Return:
         [2D numpy array] image with corrected levels and gamma
     """
+
     if (minv == None) and (gamma == None) and (maxv == None):
         return img_array #Return the same array if parameters are None
 
@@ -332,6 +333,7 @@ def adjustLevels(img_array, minv, gamma, maxv):
     img_array = img_array.astype(np.uint8)
 
     return img_array
+
 
 
 def plotStars(ff, x2, y2):

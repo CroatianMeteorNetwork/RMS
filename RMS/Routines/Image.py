@@ -76,17 +76,18 @@ def adjustLevels(img_array, minv, gamma, maxv, nbits=8):
     interval = maxv - minv
     invgamma = 1.0/gamma
 
-    img_array = img_array.astype(np.float)
+    img_array = img_array.astype(np.float64)
 
-    #Reduce array to 0-1 values
-    img_array = img_array/max_lvl
+    # Reduce array to 0-1 values
+    img_array = np.divide(img_array, max_lvl)
 
-    #Calculate new levels
-    img_array = ((img_array - minv)/interval)**invgamma 
+    # Calculate new levels
+    img_array = np.divide((img_array - minv), interval)
+    img_array = np.power(img_array, invgamma)
 
-    img_array = img_array*max_lvl
+    img_array = np.multiply(img_array, max_lvl)
 
-    #Convert back to 0-255 values
+    # Convert back to 0-255 values
     img_array = np.clip(img_array, 0, max_lvl)
 
     # WARNING: This limits the number of image levels to 256!

@@ -940,7 +940,6 @@ class PlateTool(object):
 
         ###
 
-
         # Show the loaded maxpixel
         plt.imshow(img_data, cmap='gray')
 
