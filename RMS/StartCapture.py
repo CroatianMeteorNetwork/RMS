@@ -151,7 +151,7 @@ def getPlatepar(config):
         log.info('No platepar file found!')
 
 
-    return platepar
+    return platepar, platepar_path, platepar_fmt
 
 
 
@@ -204,7 +204,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # Get the platepar file
-    platepar = getPlatepar(config)
+    platepar, platepar_path, platepar_fmt = getPlatepar(config)
 
 
     log.info('Initializing frame buffers...')
@@ -435,7 +435,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
         # Get the platepar file
-        platepar = getPlatepar(config)
+        platepar, platepar_path, platepar_fmt = getPlatepar(config)
 
 
         # Run calibration check and auto astrometry refinement
