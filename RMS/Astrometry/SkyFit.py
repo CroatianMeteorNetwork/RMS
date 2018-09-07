@@ -52,7 +52,7 @@ from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Formats import StarCatalog
-from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADecPP, calcRefCentre, raDecToCorrectedXY
+from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADecPP, raDec2AltAz, raDecToCorrectedXY
 from RMS.Astrometry.Conversions import date2JD
 from RMS.Routines import Image
 
@@ -572,7 +572,7 @@ class PlateTool(object):
             self.platepar.RA_d, self.platepar.dec_d = self.getFOVcentre()
             
             # Recalculate reference alt/az
-            self.platepar.az_centre, self.platepar.alt_centre = calcRefCentre(self.platepar.JD, \
+            self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.JD, \
                 self.platepar.lon, self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d)
             
             self.updateImage()
@@ -950,7 +950,7 @@ class PlateTool(object):
         self.drawCalstars()
 
         # Update centre of FOV in horizontal coordinates
-        self.platepar.az_centre, self.platepar.alt_centre = calcRefCentre(self.platepar.JD, self.platepar.lon, 
+        self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.JD, self.platepar.lon, 
             self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d)
 
         ### Draw catalog stars on the image using the current platepar ###
@@ -1294,7 +1294,7 @@ class PlateTool(object):
         self.platepar.RA_d, self.platepar.dec_d = self.getFOVcentre()
 
         # Recalculate reference alt/az
-        self.platepar.az_centre, self.platepar.alt_centre = calcRefCentre(self.platepar.JD, \
+        self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.JD, \
             self.platepar.lon, self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d)
 
         # Check that the calibration parameters are within the nominal range
@@ -1561,14 +1561,6 @@ class PlateTool(object):
             return dist_sum
 
 
-        # # Update reference time
-        # ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
-        # self.platepar.JD = date2JD(*ff_middle_time)
-
-        # # Recalculate centre
-        # self.platepar.az_centre, self.platepar.alt_centre = calcRefCentre(self.platepar.JD, self.platepar.lon, 
-        #     self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d)
-
 
         # Extract paired catalog stars and image coordinates separately
         catalog_stars = np.array([cat_coords for img_coords, cat_coords in self.paired_stars])
@@ -1595,7 +1587,7 @@ class PlateTool(object):
         self.platepar.RA_d, self.platepar.dec_d, self.platepar.pos_angle_ref, self.platepar.F_scale = res.x
 
         # Recalculate centre
-        self.platepar.az_centre, self.platepar.alt_centre = calcRefCentre(self.platepar.JD, self.platepar.lon, 
+        self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.JD, self.platepar.lon, 
             self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d)
 
 

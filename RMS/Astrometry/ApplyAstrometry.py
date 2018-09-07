@@ -45,39 +45,54 @@ from RMS.Astrometry.CyFunctions import cyRaDecToCorrectedXY
 
 
 
-def calcRefCentre(JD, lon, lat, ra_ref, dec_ref):
-    """ Calculate the referent azimuth and altitude of the centre of the FOV from the given RA/Dec. 
+def raDec2AltAz(JD, lon, lat, ra, dec):
+    """ Calculate the reference azimuth and altitude of the centre of the FOV from the given RA/Dec. 
 
     Arguments:
         JD: [float] Referent Julian date.
         lon: [float] Longitude +E in degrees.
         lat: [float] Latitude +N in degrees.
-        ra_ref: [float] Referent RA at referent time in degrees.
-        dec_ref: [float] Referent declination at referent time in degrees.
+        ra_: [float] Right ascension in degrees.
+        dec: [float] Declination in degrees.
 
     Return:
-        (az_centre, alt_centre): [tuple of float]: Azimuth and altitude of the FOV centre (degrees).
+        (azim, elev): [tuple of float]: Azimuth and elevation (degrees).
     """
 
+    # Compute the LST (local sidereal time)
     T = (JD - 2451545)/36525.0
-    Ho = (280.46061837 + 360.98564736629*(JD - 2451545) + 0.000387933*T**2 - (T**3)/38710000)%360
+    lst = (280.46061837 + 360.98564736629*(JD - 2451545.0) + 0.000387933*T**2 - (T**3)/38710000)%360
+    lst = lst + lon
 
-    h = Ho + lon - ra_ref
-    sh = math.sin(math.radians(h))
-    sd = math.sin(math.radians(dec_ref))
-    sl = math.sin(math.radians(lat))
-    ch = math.cos(math.radians(h))
-    cd = math.cos(math.radians(dec_ref))
-    cl = math.cos(math.radians(lat))
-    x = -ch*cd*sl + sd*cl
-    y = -sh*cd
-    z = ch*cd*cl + sd*sl
-    r = math.sqrt(x**2 + y**2)
+    # Convert all values to radians
+    lst = np.radians(lst)
+    lat = np.radians(lat)    
+    ra = np.radians(ra)
+    dec = np.radians(dec)
 
-    az_centre = (math.degrees(math.atan2(y, x)))%360
-    alt_centre = math.degrees(math.atan2(z, r))
+    # Calculate the hour angle
+    ha = lst - ra
 
-    return az_centre, alt_centre
+    # Constrain the hour angle to [-pi, pi] range
+    ha = (ha + np.pi)%(2*np.pi) - np.pi
+
+    # Calculate the azimuth
+    azim = np.pi + np.arctan2(np.sin(ha), np.cos(ha)*np.sin(lat) - np.tan(dec)*np.cos(lat))
+
+    # Calculate the sine of elevation
+    sin_elev = np.sin(lat)*np.sin(dec) + np.cos(lat)*np.cos(dec)*np.cos(ha)
+
+    # Wrap the sine of elevation in the [-1, +1] range
+    sin_elev = (sin_elev + 1)%2 - 1
+
+    elev = np.arcsin(sin_elev)
+    
+
+    # Convert alt/az to degrees
+    azim = np.degrees(azim)
+    elev = np.degrees(elev)
+
+    return azim, elev
 
 
 
@@ -506,7 +521,7 @@ def raDecToCorrectedXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_
     """
     
     # Calculate the azimuth and altitude of the FOV centre
-    az_centre, alt_centre = calcRefCentre(ref_jd, lon, lat, RA_d, dec_d)
+    az_centre, alt_centre = raDec2AltAz(ref_jd, lon, lat, RA_d, dec_d)
 
     # Apply the UT correction
     jd -= UT_corr/24.0
@@ -692,9 +707,21 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
         JD_data, RA_data, dec_data, magnitudes = XY2CorrectedRADecPP(np.array(time_data), X_data, Y_data, \
             level_data, platepar)
 
-        # Do not calculate azimuth and altitude
+
+        # Compute azimuth and altitude of centroids
         az_data = np.zeros_like(RA_data)
         alt_data = np.zeros_like(RA_data)
+
+        for i in range(len(az_data)):
+
+            jd = JD_data[i]
+            ra_tmp = RA_data[i]
+            dec_tmp = dec_data[i]
+
+            az_tmp, alt_tmp = raDec2AltAz(jd, platepar.lon, platepar.lat, ra_tmp, dec_tmp)
+
+            az_data[i] = az_tmp
+            alt_data[i] = alt_tmp
 
 
         # print(ff_name, cam_code, meteor_No, fps)

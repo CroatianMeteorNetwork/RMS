@@ -20,7 +20,7 @@ from RMS.Formats import CALSTARS
 from RMS.Formats import StarCatalog
 from RMS.Formats import FFfile
 from RMS.Astrometry.Conversions import date2JD, jd2Date
-from RMS.Astrometry.ApplyAstrometry import calcRefCentre, raDecToCorrectedXYPP, XY2CorrectedRADecPP
+from RMS.Astrometry.ApplyAstrometry import raDec2AltAz, raDecToCorrectedXYPP, XY2CorrectedRADecPP
 
 
 # Import Cython functions
