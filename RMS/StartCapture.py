@@ -47,6 +47,7 @@ from RMS.Astrometry.CheckFit import autoCheckFit
 from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo
 from RMS.ArchiveDetections import archiveDetections, archiveFieldsums
 from RMS.UploadManager import UploadManager
+from RMS.DownloadPlatepar import downloadNewPlatepar
 
 from RMS.LiveViewer import LiveViewer
 from RMS.QueuedPool import QueuedPool
@@ -128,6 +129,33 @@ def wait(duration=None):
 
 
 
+def getPlatepar(config):
+    """ Downloads a new platepar from the server of uses an existing one. """
+
+
+    # Download a new platepar from the server, if present
+    downloadNewPlatepar(config)
+
+
+    # Load the default platepar if it is available
+    platepar = None
+    platepar_path = os.path.join(os.getcwd(), config.platepar_name)
+    if os.path.exists(platepar_path):
+        platepar = Platepar()
+        platepar_fmt = platepar.read(platepar_path)
+
+        log.info('Loaded platepar: ' + platepar_path)
+
+    else:
+
+        log.info('No platepar file found!')
+
+
+    return platepar
+
+
+
+
 def runCapture(config, duration=None, video_file=None, nodetect=False, detect_end=False, upload_manager=None):
     """ Run capture and compression for the given time.given
 
@@ -175,19 +203,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
 
-    # Load the default platepar if it is available
-    platepar = None
-    platepar_path = os.path.join(os.getcwd(), config.platepar_name)
-    if os.path.exists(platepar_path):
-        platepar = Platepar()
-        platepar_fmt = platepar.read(platepar_path)
-
-        log.info('Loaded platepar: ' + platepar_path)
-
-    else:
-
-        log.info('No platepar file found!')
-
+    # Get the platepar file
+    platepar = getPlatepar(config)
 
 
     log.info('Initializing frame buffers...')
@@ -413,6 +430,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         # Write FTPdetectinfo file
         FTPdetectinfo.writeFTPdetectinfo(meteor_list, night_data_dir, ftpdetectinfo_name, night_data_dir, \
             config.stationID, config.fps)
+
+
+
+
+        # Get the platepar file
+        platepar = getPlatepar(config)
 
 
         # Run calibration check and auto astrometry refinement

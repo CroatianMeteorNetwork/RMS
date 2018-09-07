@@ -95,7 +95,7 @@ class Config:
         self.upload_queue_file = "FILES_TO_UPLOAD.inf"
 
         # Directory on server where the files will be uploaded to
-        self.remote_dir = '.'
+        self.remote_dir = 'files'
 
 
         ##### Weave compilation arguments
@@ -197,6 +197,10 @@ class Config:
         self.star_catalog_band_ratios = [0.0, 1.0, 0.0, 0.0]
 
         self.platepar_name = 'platepar_cmn2010.cal'
+
+        # Name of the platepar file on the server
+        self.platepar_remote_name = 'platepar_latest.cal'
+        self.remote_platepar_dir = 'platepars'
 
         self.catalog_extraction_radius = 40.0 #deg
         self.catalog_mag_limit = 4.5
@@ -677,6 +681,12 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "platepar_name"):
         config.platepar_name = parser.get(section, "platepar_name")
+
+    if parser.has_option(section, "platepar_remote_name"):
+        config.platepar_remote_name = parser.get(section, "platepar_remote_name")
+
+    if parser.has_option(section, "remote_platepar_dir"):
+        config.remote_platepar_dir = parser.get(section, "remote_platepar_dir")
 
     if parser.has_option(section, "catalog_extraction_radius"):
         config.catalog_extraction_radius = parser.getfloat(section, "catalog_extraction_radius")

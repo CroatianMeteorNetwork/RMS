@@ -4,11 +4,13 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import ctypes
-import paramiko
 import multiprocessing
 import time
 import datetime
 import logging
+
+import binascii
+import paramiko
 
 try:
     # Python 2
@@ -54,7 +56,7 @@ def _agentAuth(transport, username, rsa_private_key):
 
     # Try a key until finding the one which works
     for key in agent_keys:
-        log.info('Trying ssh-agent key ' + str(key.get_fingerprint().encode('hex')))
+        log.info('Trying ssh-agent key ' + str(binascii.hexlify(key.get_fingerprint())))
 
         # Try the key to authenticate
         try:
@@ -137,10 +139,12 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                 
                 # If the remote and the local file are of the same size, skip it
                 if local_file_size == remote_info.st_size:
+                    log.info('The file already exist on the server!')
                     continue
             
             except IOError as e:
-                log.info('The file already exist on the server!')
+                pass
+                
 
             
             # Upload the file to the server if it isn't already there
