@@ -48,7 +48,7 @@ class Config:
     def __init__(self):
 
         ##### System
-        self.stationID = 499
+        self.stationID = "XX0001"
         self.latitude = 0
         self.longitude = 0
         self.elevation = 0
@@ -56,8 +56,8 @@ class Config:
         ##### Capture
         self.deviceID = 0
 
-        self.width = 720
-        self.height = 576
+        self.width = 1280
+        self.height = 720
         self.fps = 25.0
 
         self.brightness = 0
@@ -68,8 +68,8 @@ class Config:
         self.ff_format = 'fits'
         
         self.fov_w = 64.0
-        self.fov_h = 48.0
-        self.deinterlace_order = 1
+        self.fov_h = 35.0
+        self.deinterlace_order = -2
         self.mask_file = "mask.bmp"
 
         self.data_dir = "~/RMS_data"

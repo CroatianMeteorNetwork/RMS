@@ -38,6 +38,7 @@ from RMS.Routines.Grouping3D import find3DLines, getAllPoints
 from RMS.Routines.CompareLines import compareLines
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
+from RMS.Routines import RollingShutterCorrection
 
 # Morphology - Cython init
 import pyximport
@@ -1187,6 +1188,7 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
                         half_frame_pixels_stripe = frame_pixels_stripe
                         frame_no = i
 
+
                     # Get maxpixel-avepixel values of given pixel indices (this will be used as weights)
                     max_weights = flattened_weights[half_frame_pixels[:,1], half_frame_pixels[:,0]]
 
@@ -1196,6 +1198,15 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
 
                     y_weighted = half_frame_pixels[:,1]*np.transpose(max_weights)
                     y_centroid = np.sum(y_weighted)/float(np.sum(max_weights))
+
+
+                    # Correct the rolling shutter effect
+                    if config.deinterlace_order == -1:
+
+                        # Compute the corrected frame time
+                        frame_no = RollingShutterCorrection.correctRollingShutterTemporal(frame_no, \
+                            y_centroid, ff.maxpixel.shape[0])
+
 
                     # Calculate intensity as the sum of threshold passer pixels on the stripe
                     #intensity_values = max_avg_corrected[half_frame_pixels[:,1], half_frame_pixels[:,0]]
