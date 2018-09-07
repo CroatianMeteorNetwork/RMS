@@ -498,9 +498,19 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         log.info('Making flat image FAILED!')
 
 
+
+    ### Add extra files to archive
+
     # Add the platepar to the archive if it exists
     if os.path.exists(platepar_path):
         extra_files.append(platepar_path)
+
+
+    # Add the config file to the archive too
+    extra_files.append(os.path.join(os.getcwd(), '.config'))
+
+
+    ### ###
 
 
     night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir, 

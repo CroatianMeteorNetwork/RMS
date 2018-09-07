@@ -20,17 +20,25 @@ log = logging.getLogger("logger")
 def downloadNewPlatepar(config, port=22):
     """ Connect to the central server and download a new platepar calibration file, if available. """
 
-    # Connect to host
-    t = paramiko.Transport((config.hostname, port))
-    t.start_client()
 
-    # Authenticate the connection
-    auth_status = _agentAuth(t, config.stationID.lower(), config.rsa_private_key)
-    if not auth_status:
+    log.info('Establishing SSH connection to: ' + config.hostname + ':' + str(port) + '...')
+
+    try:
+        # Connect to host
+        t = paramiko.Transport((config.hostname, port))
+        t.start_client()
+
+        # Authenticate the connection
+        auth_status = _agentAuth(t, config.stationID.lower(), config.rsa_private_key)
+        if not auth_status:
+            return False
+
+        # Open new SFTP connection
+        sftp = paramiko.SFTPClient.from_transport(t)
+
+    except:
+        log.error('Connecting to server failed!')
         return False
-
-    # Open new SFTP connection
-    sftp = paramiko.SFTPClient.from_transport(t)
 
 
     # Check that the remote directory exists
