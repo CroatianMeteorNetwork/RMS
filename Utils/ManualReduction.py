@@ -1352,7 +1352,7 @@ if __name__ == "__main__":
                 fr_name = cml_args.file1[0]
 
 
-        if cml_args.file2 and (ff_name is None):
+        if cml_args.input2 and (ff_name is None):
             print('The given FF file is not a proper FF file!')
             sys.exit()
 

@@ -279,11 +279,9 @@ class BufferedCapture(Process):
             for i in range(256):
 
                 # Read the frame
-                print('Reading frame...', end='')
                 t1_frame = time.time()
                 ret, frame = device.read()
                 t_frame = time.time() - t1_frame
-                print(' done!')
 
 
                 # If the video device was disconnected, wait for reconnection
@@ -327,7 +325,6 @@ class BufferedCapture(Process):
 
                 lastTime = t
                 
-                print('Converting frame...', end='')
                 t1_convert = time.time()
                 # Convert the frame to grayscale
                 #gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -348,10 +345,8 @@ class BufferedCapture(Process):
 
 
                 t_convert = time.time() - t1_convert
-                print(' done!')
 
 
-                print('Assigning frame to memory...', end='')
                 # Assign the frame to shared memory
                 t1_assign = time.time()
                 if first:
@@ -360,7 +355,6 @@ class BufferedCapture(Process):
                     self.array2[i, :gray.shape[0], :gray.shape[1]] = gray
 
                 t_assignment = time.time() - t1_assign
-                print(' done!')
 
                 # If video is loaded from a file, simulate real FPS
                 if self.video_file is not None:
@@ -375,7 +369,7 @@ class BufferedCapture(Process):
 
             if self.exit.is_set():
                 wait_for_reconnect = False
-                print('!!! Capture exited!')
+                log.info('Capture exited!')
                 break
 
 
