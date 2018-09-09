@@ -139,6 +139,7 @@ def getPlatepar(config):
 
     # Load the default platepar if it is available
     platepar = None
+    platepar_fmt = None
     platepar_path = os.path.join(os.getcwd(), config.platepar_name)
     if os.path.exists(platepar_path):
         platepar = Platepar()
