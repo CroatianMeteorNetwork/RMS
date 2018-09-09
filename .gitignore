@@ -85,3 +85,6 @@ target/
 
 # Cython compiled files
 *.pyxbldc
+
+#VS Code files
+.vscode
