@@ -65,7 +65,7 @@ def _agentAuth(transport, username, rsa_private_key):
             return True
 
         except paramiko.SSHException as e:
-            log.warning('... failed!', e)
+            log.warning('... failed! - %s', e)
 
     return False
 
