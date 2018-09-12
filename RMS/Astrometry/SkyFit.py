@@ -132,8 +132,8 @@ class PlateTool(object):
         self.config = config
         self.dir_path = dir_path
 
-        # Flag which regulates wheter the maxpixel or the avepixel image is shown
-        self.img_type_flag = 'maxpixel'
+        # Flag which regulates wheter the maxpixel or the avepixel image is shown (avepixel by default)
+        self.img_type_flag = 'avepixel'
 
         # Star picking mode
         self.star_pick_mode = False
