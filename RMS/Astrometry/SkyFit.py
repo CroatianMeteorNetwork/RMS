@@ -132,6 +132,9 @@ class PlateTool(object):
         self.config = config
         self.dir_path = dir_path
 
+        # Flag which regulates wheter the maxpixel or the avepixel image is shown
+        self.img_type_flag = 'maxpixel'
+
         # Star picking mode
         self.star_pick_mode = False
         self.star_selection_centroid = True
@@ -178,9 +181,6 @@ class PlateTool(object):
             sys.exit()
         else:
             print('Star catalog loaded!')
-
-
-
 
 
         # Find the CALSTARS file in the given folder
@@ -452,6 +452,9 @@ class PlateTool(object):
         elif event.key == 'right':
             self.nextFF()
 
+
+        elif event.key == 'm':
+            self.toggleImageType()
 
         elif event.key == ',':
 
@@ -863,6 +866,17 @@ class PlateTool(object):
 
 
 
+    def toggleImageType(self):
+        """ Toggle between the maxpixel and avepixel. """
+
+        if self.img_type_flag == 'maxpixel':
+            self.img_type_flag = 'avepixel'
+
+        else:
+            self.img_type_flag = 'maxpixel'
+
+        self.updateImage()
+            
 
     def loadCatalogStars(self, lim_mag):
         """ Loads stars from the BSC star catalog. 
@@ -924,7 +938,14 @@ class PlateTool(object):
         # Load the FF from the current file
         self.current_ff = readFF(self.dir_path, self.current_ff_file)
 
-        img_data = self.current_ff.maxpixel
+
+        # Choose appropriate iamge data
+        if self.img_type_flag == 'maxpixel':
+            img_data = self.current_ff.maxpixel
+
+        else:
+            img_data = self.current_ff.avepixel
+
 
         # Apply flat
         if self.flat_struct is not None:
@@ -940,7 +961,7 @@ class PlateTool(object):
 
         ###
 
-        # Show the loaded maxpixel
+        # Show the loaded image
         plt.imshow(img_data, cmap='gray')
 
         # Draw stars that were paired in picking mode
@@ -995,8 +1016,9 @@ class PlateTool(object):
                 verticalalignment='top', horizontalalignment='center', fontsize=8)
 
         if self.show_key_help:
+
             # Show text on image with platepar parameters
-            text_str  = self.current_ff_file + '\n\n'
+            text_str  = self.current_ff_file + ' ' + self.img_type_flag + '\n\n'
             text_str += 'UT corr = {:.1f}\n'.format(self.platepar.UT_corr)
             text_str += 'Ref RA  = {:.3f}\n'.format(self.platepar.RA_d)
             text_str += 'Ref Dec = {:.3f}\n'.format(self.platepar.dec_d)
@@ -1010,22 +1032,25 @@ class PlateTool(object):
 
             # Show text on image with instructions
             text_str  = 'Keys:\n'
-            text_str += 'RA  - A/D\n'
-            text_str += 'Dec - S/W\n'
-            text_str += 'PA  - Q/E\n'
-            text_str += 'F_scale - Up/Down\n'
-            text_str += 'X 1st dist coeff - 1/2\n'
-            text_str += 'Y 1st dist coeff - 3/4\n'
-            text_str += 'UT correction - ,/.\n'
-            text_str += 'Lim mag - R/F\n'
-            text_str += 'Increment - +/-\n'
-            text_str += 'Img Gamma - U/J\n'
-            text_str += 'Hide/show catalog stars - H\n'
-            text_str += 'FOV centre - V\n'
-            text_str += 'Pick stars - CTRL + R\n'
-            text_str += 'New platepar - CTRL + N\n'
-            text_str += 'Save platepar - CTRL + S\n'
-            text_str += 'Save platepar as default - SHIFT + CTRL + S\n'
+            text_str += '-----\n'
+            text_str += 'A/D - RA\n'
+            text_str += 'S/W - Dec\n'
+            text_str += 'Q/E - Position angle\n'
+            text_str += 'Up/Down - Scale\n'
+            text_str += '1/2 - X 1st dist. coeff.\n'
+            text_str += '3/4 - Y 1st dist. coeff.\n'
+            text_str += ',/. - UT correction\n'
+            text_str += 'R/F - Lim mag\n'
+            text_str += '+/- - Increment\n'
+            text_str += 'M - Toggle maxpixel/avepixel\n'
+            text_str += 'H - Hide/show catalog stars\n'
+            text_str += 'U/J - Img Gamma\n'
+            text_str += 'V - FOV centre\n'
+            text_str += '\n'
+            text_str += 'CTRL + R - Pick stars\n'
+            text_str += 'CTRL + N - New platepar\n'
+            text_str += 'CTRL + S - Save platepar\n'
+            text_str += 'SHIFT + CTRL + S - Save platepar as default\n'
 
             text_str += '\n'
 
@@ -1383,7 +1408,16 @@ class PlateTool(object):
         if y_max > self.current_ff.nrows - 1:
             y_max > self.current_ff.nrows - 1
 
-        img_crop = self.current_ff.maxpixel[y_min:y_max, x_min:x_max]
+
+        if self.img_type_flag == 'maxpixel':
+            img_data = self.current_ff.maxpixel
+
+        else:
+            img_data = self.current_ff.avepixel
+
+
+        # Crop the image
+        img_crop = img_data[y_min:y_max, x_min:x_max]
 
         ######################################################################################################
 
