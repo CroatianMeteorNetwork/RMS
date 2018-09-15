@@ -51,8 +51,8 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False):
         #background = np.zeros((config.height, config.width), np.uint8)
 
         # Get the maximum extent of meteor frames
-        y_size = max(max(np.max(np.array(fr.yc)) + np.max(np.array(fr.size))//2) for i in range(fr.lines))
-        x_size = max(max(np.max(np.array(fr.xc)) + np.max(np.array(fr.size))//2) for i in range(fr.lines))
+        y_size = max([max(np.array(fr.yc[i]) + np.array(fr.size[i])//2) for i in range(fr.lines)])
+        x_size = max([max(np.array(fr.xc[i]) + np.array(fr.size[i])//2) for i in range(fr.lines)])
 
         # Make the image square
         img_size = max(y_size, x_size)
