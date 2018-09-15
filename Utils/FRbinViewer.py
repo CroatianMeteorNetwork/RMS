@@ -43,13 +43,16 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False):
     name = fr_path
     fr = FRbin.read(dir_path, fr_path)
 
+    print('------------------------')
+    print('Showing file:', fr_path)
+
 
     if ff_path is None:
         #background = np.zeros((config.height, config.width), np.uint8)
 
-        # Get the maximum extent of the meteor frames
-        y_size = max(max(np.array(fr.yc[0]) + np.array(fr.size[0])//2) for i in range(fr.lines))
-        x_size = max(max(np.array(fr.xc[0]) + np.array(fr.size[0])//2) for i in range(fr.lines))
+        # Get the maximum extent of meteor frames
+        y_size = max(max(np.array(fr.yc[0]) + np.array(fr.size[0])//2) for i in range(fr.lines)) + 1
+        x_size = max(max(np.array(fr.xc[0]) + np.array(fr.size[0])//2) for i in range(fr.lines)) + 1
 
         # Make the image square
         img_size = max(y_size, x_size)
