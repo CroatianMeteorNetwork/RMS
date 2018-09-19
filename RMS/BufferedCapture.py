@@ -100,7 +100,8 @@ class BufferedCapture(Process):
             else:
                 break
 
-        if self.is_alive:
+        if self.is_alive():
+            log.info('Terminating capture...')
             self.terminate()
 
 
