@@ -58,7 +58,15 @@ class Config:
 
         self.width = 1280
         self.height = 720
+        self.width_device = self.width
+        self.height_device = self.height
         self.fps = 25.0
+
+        # Region of interest, -1 disables the range
+        self.roi_left = -1
+        self.roi_right = -1
+        self.roi_up = -1
+        self.roi_down = -1
 
         self.brightness = 0
         self.contrast = 0
@@ -325,9 +333,57 @@ def parseCapture(config, parser):
     
     if parser.has_option(section, "width"):
         config.width = parser.getint(section, "width")
+
+        # Save original input image size
+        config.width_device = config.width
+
        
     if parser.has_option(section, "height"):
         config.height = parser.getint(section, "height")
+
+        # Save original input image size
+        config.height_device = config.height
+
+
+    # Parse the region of interest boundaries
+    if parser.has_option(section, "roi_left"):
+        config.roi_left = parser.getint(section, "roi_left")
+
+    if parser.has_option(section, "roi_right"):
+        config.roi_right = parser.getint(section, "roi_right")
+
+    if parser.has_option(section, "roi_up"):
+        config.roi_up = parser.getint(section, "roi_up")
+
+    if parser.has_option(section, "roi_down"):
+        config.roi_down = parser.getint(section, "roi_down")
+
+
+    # Compute the width and the height from the region of interest, if given
+    if config.roi_left > config.roi_right:
+        config.roi_left, config.roi_right = config.roi_right, config.roi_left
+
+    if (config.roi_left < 0) or (config.roi_left > config.width):
+        config.roi_left = 0
+
+    if (config.roi_right < 0) or (config.roi_right > config.width):
+        config.roi_right = config.width
+
+    # Choose the correct ROI for up/down
+    if config.roi_up > config.roi_down:
+        config.roi_up, config.roi_down = config.roi_down, config.roi_up
+
+    if (config.roi_up < 0) or (config.roi_up > config.height):
+        config.roi_up = 0
+
+    if (config.roi_down < 0) or (config.roi_down > config.height):
+        config.roi_down = config.height
+
+
+    # Recompute the width and height from ROI
+    config.width = config.roi_right - config.roi_left
+    config.height = config.roi_down - config.roi_up
+
 
     if parser.has_option(section, "brightness"):
         config.brightness = parser.getint(section, "brightness")

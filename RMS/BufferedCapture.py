@@ -169,8 +169,8 @@ class BufferedCapture(Process):
                 int(self.config.deviceID)
                 
                 # Set the resolution (crashes if using an IP camera and gstreamer!)
-                device.set(3, self.config.width)
-                device.set(4, self.config.height)
+                device.set(3, self.config.width_device)
+                device.set(4, self.config.height_device)
 
             except:
                 pass
@@ -327,6 +327,7 @@ class BufferedCapture(Process):
                 lastTime = t
                 
                 t1_convert = time.time()
+
                 # Convert the frame to grayscale
                 #gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -343,6 +344,11 @@ class BufferedCapture(Process):
 
                 else:
                     gray = frame
+
+
+                # Cut the frame to the region of interest (ROI)
+                gray = gray[self.config.roi_up:self.config.roi_down, \
+                    self.config.roi_left:self.config.roi_right]
 
 
                 t_convert = time.time() - t1_convert
