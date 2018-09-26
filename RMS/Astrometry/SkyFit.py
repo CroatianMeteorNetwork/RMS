@@ -53,8 +53,9 @@ from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Formats import StarCatalog
 from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADecPP, raDec2AltAz, raDecToCorrectedXY
-from RMS.Astrometry.Conversions import date2JD
+from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Routines import Image
+from RMS.Math import angularSeparation
 
 # Import Cython functions
 import pyximport
@@ -237,6 +238,9 @@ class PlateTool(object):
         self.platepar_file, self.platepar = self.loadPlatepar()
 
         print('Platepar loaded:', self.platepar_file)
+
+        # Print the field of view size
+        print("FOV: {:.2f} x {:.2f} deg".format(*self.computeFOVSize()))
         
         # If the platepar file was not loaded, set initial values from config
         if not self.platepar_file:
@@ -590,7 +594,7 @@ class PlateTool(object):
                 self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
 
             # Save the platepar file
-            self.platepar.write(self.platepar_file, fmt=self.platepar_fmt)
+            self.platepar.write(self.platepar_file, fmt=self.platepar_fmt, fov=self.computeFOVSize())
             print('Platepar written to:', self.platepar_file)
 
 
@@ -1331,6 +1335,38 @@ class PlateTool(object):
             self.updateImage()
 
 
+    def computeFOVSize(self):
+        """ Computes the size of the FOV in deg from the given platepar. 
+        
+        Return:
+            fov_h: [float] Horizontal FOV in degrees.
+            fov_v: [float] Vertical FOV in degrees.
+        """
+
+        # Construct poinits on the middle of every side of the image
+        time_data = np.array(4*[jd2Date(self.platepar.JD)])
+        x_data = np.array([0, self.platepar.X_res, self.platepar.X_res/2, self.platepar.X_res/2])
+        y_data = np.array([self.platepar.Y_res/2, self.platepar.Y_res/2, 0, self.platepar.Y_res])
+        level_data = np.ones(4)
+
+        # Compute RA/Dec of the points
+        _, ra_data, dec_data, _ = XY2CorrectedRADecPP(time_data, x_data, y_data, level_data, self.platepar)
+
+        ra1, ra2, ra3, ra4 = ra_data
+        dec1, dec2, dec3, dec4 = dec_data
+
+        # Compute horizontal FOV
+        fov_h = np.degrees(angularSeparation(np.radians(ra1), np.radians(dec1), np.radians(ra2), \
+            np.radians(dec2)))
+
+        # Compute vertical FOV
+        fov_v = np.degrees(angularSeparation(np.radians(ra3), np.radians(dec3), np.radians(ra4), \
+            np.radians(dec4)))
+
+
+        return fov_h, fov_v
+
+
 
     def nextFF(self):
         """ Shows the next FF file in the list. """
@@ -1626,6 +1662,10 @@ class PlateTool(object):
             self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d)
 
 
+        # Save the size of the image
+        self.platepar.Y_res, self.platepar.X_res = self.current_ff.maxpixel.shape
+
+
         # Fit distorsion parameters in X direction
         res = scipy.optimize.minimize(_calcImageResidualsDistorsion, self.platepar.x_poly, args=(self, 
             catalog_stars, img_stars, 'x'), method='Nelder-Mead', options={'maxiter': 10000})
@@ -1682,6 +1722,9 @@ class PlateTool(object):
                 ra, dec, mag, cat_x, cat_y, distance, np.degrees(angle)))
 
         print('Average distance: {:.2f} px'.format(np.mean([entry[3] for entry in residuals])))
+
+        # Print the field of view size
+        print("FOV: {:.2f} x {:.2f} deg".format(*self.computeFOVSize()))
 
 
         ####################

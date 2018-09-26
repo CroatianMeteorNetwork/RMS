@@ -110,6 +110,9 @@ class Platepar(object):
         self.Y_res = 0
         self.focal_length = 0
 
+        self.fov_h = 0
+        self.fov_v = 0
+
         # FOV centre
         self.RA_d = self.RA_H = self.RA_M = self.RA_S = 0
         self.dec_d = self.dec_D = self.dec_M = self.dec_S = 0
@@ -265,7 +268,7 @@ class Platepar(object):
 
 
 
-    def write(self, file_path, fmt=None):
+    def write(self, file_path, fmt=None, fov=None):
         """ Write platepar to file. 
         
         Arguments:
@@ -274,11 +277,17 @@ class Platepar(object):
         Keyword arguments:
             fmt: [str] Format of the platepar file. 'json' for JSON format and 'txt' for the usual CMN textual
                 format. The format is JSON by default.
+            fov: [tuple] Tuple of horizontal and vertical FOV size in degree. None by default.
 
         Return:
             fmt: [str]
 
         """
+
+        # If the FOV size was given, store it
+        if fov is not None:
+            self.fov_h, self.fov_v = fov
+
 
         # Set JSON to be the defualt format
         if fmt is None:

@@ -439,8 +439,8 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, lat, lon, Ho, X_res
     Return:
         (JD_data, RA_data, dec_data, magnitude_data): [tuple of ndarrays]
             JD_data: [ndarray] Julian date of each data point.
-            RA_data: [ndarray] Right ascension of each point.
-            dec_data: [ndarray] Declination of each point.
+            RA_data: [ndarray] Right ascension of each point (deg).
+            dec_data: [ndarray] Declination of each point (deg).
             magnitude_data: [ndarray] Array of meteor's lightcurve apparent magnitudes.
 
     """
@@ -479,8 +479,8 @@ def XY2CorrectedRADecPP(time_data, X_data, Y_data, level_data, platepar):
     Return:
         (JD_data, RA_data, dec_data, magnitude_data): [tuple of ndarrays]
             JD_data: [ndarray] Julian date of each data point.
-            RA_data: [ndarray] Right ascension of each point.
-            dec_data: [ndarray] Declination of each point.
+            RA_data: [ndarray] Right ascension of each point (deg).
+            dec_data: [ndarray] Declination of each point (deg).
             magnitude_data: [ndarray] Array of meteor's lightcurve apparent magnitudes.
     """
 
