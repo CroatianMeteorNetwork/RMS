@@ -4,7 +4,9 @@ High priority:
 
 - Astrometry - automatic recalibration if the camera is moved and the offset is larger than the search radius
 
-- Photometry - estimate vignetting from star movements across the FOV
+- Photometry 
+  - estimate vignetting from star movements across the FOV
+  - add extinction for magnitude computation
 
 - Solve logger picking so the code can run on Windows
 

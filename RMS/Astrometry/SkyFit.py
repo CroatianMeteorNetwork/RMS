@@ -132,6 +132,8 @@ class PlateTool(object):
         self.config = config
         self.dir_path = dir_path
 
+        print('Using FF files from:', self.dir_path)
+
         # Flag which regulates wheter the maxpixel or the avepixel image is shown (avepixel by default)
         self.img_type_flag = 'avepixel'
 
@@ -206,8 +208,6 @@ class PlateTool(object):
         calstars_ff_files = [line[0] for line in calstars_list]
 
 
-
-
         self.ff_list = []
 
         # Get a list of FF files in the folder
@@ -218,9 +218,10 @@ class PlateTool(object):
 
         # Check that there are any FF files in the folder
         if not self.ff_list:
-            messagebox.showinfo(title='File list warning', message='No FF files in the selected folder!')
+            messagebox.showinfo(title='File list warning', message='No FF files in the selected folder, or in the CALSTARS file!')
 
             sys.exit()
+
 
         # Sort the FF list
         self.ff_list = sorted(self.ff_list)

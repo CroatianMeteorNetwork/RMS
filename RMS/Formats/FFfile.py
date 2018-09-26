@@ -251,12 +251,23 @@ def validFFName(ff_file, fmt=None):
     # Make sure the file starts with FF
     if ('FF' in ff_file[:2]):
 
+        candidate = False
+
         # Check that the format coresponds to the given file
         if (fmt == 'bin') and ('.bin' in ff_file):
-            return True
+            candidate = True
 
         elif (fmt == 'fits') and ('.fits' in ff_file):
+            candidate = True
+
+
+        # Make sure it's not an image file
+        if candidate and (('.jpg' in ff_file) or ('.bmp' in ff_file) or ('.png' in ff_file)):
+            return False
+            
+        else:
             return True
+
         
     return False
 

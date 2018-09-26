@@ -21,6 +21,7 @@ import os
 import time
 import datetime
 import logging
+import argparse
 
 # RMS imports
 import RMS.ConfigReader as cr
@@ -84,9 +85,6 @@ if __name__ == "__main__":
 
     time_start = datetime.datetime.utcnow()
 
-    # Load config file
-    config = cr.parse(".config")
-
 
     ### Init the logger
 
@@ -98,13 +96,40 @@ if __name__ == "__main__":
     ######
 
 
-    if not len(sys.argv) == 2:
-        print("Usage: python -m RMS.ExtractStars /path/to/bin/files/")
-        sys.exit()
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Detect stars and meteors in the given folder.")
+
+    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
+        help='Path to the folder with FF files.')
+
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+    if cml_args.config is not None:
+
+        config_file = os.path.abspath(cml_args.config[0].replace('"', ''))
+
+        print('Loading config file:', config_file)
+
+        # Load the given config file
+        config = cr.parse(config_file)
+
+    else:
+        # Load the default configuration file
+        config = cr.parse(".config")
+
+
     
 
     # Get paths to every FF bin file in a directory 
-    ff_dir = sys.argv[1].replace('"', '')
+    ff_dir = cml_args.dir_path[0]
     ff_dir = os.path.abspath(ff_dir)
     ff_list = [ff_name for ff_name in sorted(os.listdir(ff_dir)) if validFFName(ff_name)]
 
