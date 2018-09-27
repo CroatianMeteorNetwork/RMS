@@ -4,9 +4,11 @@ High priority:
 
 - Astrometry - automatic recalibration if the camera is moved and the offset is larger than the search radius
 
+- SkyFit
+	- Make cursor movements faster, see here: https://matplotlib.org/users/event_handling.html, the 'extra credit' solution
+
 - Photometry 
   - estimate vignetting from star movements across the FOV
-  - add extinction for magnitude computation
 
 - Solve logger picking so the code can run on Windows
 
