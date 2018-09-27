@@ -158,6 +158,10 @@ class PlateTool(object):
         self.mouse_x = 0
         self.mouse_y = 0
 
+        # Position of mouse cursor when it was last pressed
+        self.mouse_x_press = 0
+        self.mouse_y_press = 0
+
         # Kwy increment
         self.key_increment = 1.0
 
@@ -291,7 +295,7 @@ class PlateTool(object):
 
 
         
-        # self.ax.figure.canvas.mpl_connect('button_press_event', self.onMousePress)
+        self.ax.figure.canvas.mpl_connect('button_press_event', self.onMousePress)
         self.ax.figure.canvas.mpl_connect('button_release_event', self.onMouseRelease)
         
         self.ax.figure.canvas.mpl_connect('motion_notify_event', self.onMouseMotion)
@@ -302,6 +306,14 @@ class PlateTool(object):
 
         self.ax.figure.canvas.mpl_connect('key_press_event', self.onKeyPress)
 
+
+
+    def onMousePress(self, event):
+        """ Called when the mouse click is pressed. """
+
+        # Record the mouse cursor positions
+        self.mouse_x_press = event.xdata
+        self.mouse_y_press = event.ydata
 
 
     def onMouseRelease(self, event):
@@ -345,7 +357,8 @@ class PlateTool(object):
                 else:
 
                     # Select the closest catalog star
-                    self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.mouse_x, self.mouse_y)
+                    self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.mouse_x_press, \
+                        self.mouse_y_press)
 
                     if self.selected_cat_star_scatter is not None:
                         self.selected_cat_star_scatter.remove()
@@ -364,7 +377,7 @@ class PlateTool(object):
                 if self.star_selection_centroid:
 
                     # Find the closest picked star
-                    picked_indx = self.findClosestPickedStarIndex(self.mouse_x, self.mouse_y)
+                    picked_indx = self.findClosestPickedStarIndex(self.mouse_x_press, self.mouse_y_press)
 
                     if self.paired_stars:
                         
@@ -821,8 +834,8 @@ class PlateTool(object):
 
                     
                     fig_p.show()
-                    plt.show()
-                    fig_p.clf()
+                    #plt.show()
+                    #fig_p.clf()
 
 
                 else:
@@ -1431,17 +1444,17 @@ class PlateTool(object):
         # Outer circle radius
         outer_radius = self.star_aperature_radius*2
 
-        x_min = int(round(self.mouse_x - outer_radius))
+        x_min = int(round(self.mouse_x_press - outer_radius))
         if x_min < 0: x_min = 0
 
-        x_max = int(round(self.mouse_x + outer_radius))
+        x_max = int(round(self.mouse_x_press + outer_radius))
         if x_max > self.current_ff.ncols - 1:
             x_max > self.current_ff.ncols - 1
 
-        y_min = int(round(self.mouse_y - outer_radius))
+        y_min = int(round(self.mouse_y_press - outer_radius))
         if y_min < 0: y_min = 0
 
-        y_max = int(round(self.mouse_y + outer_radius))
+        y_max = int(round(self.mouse_y_press + outer_radius))
         if y_max > self.current_ff.nrows - 1:
             y_max > self.current_ff.nrows - 1
 
@@ -1455,6 +1468,7 @@ class PlateTool(object):
 
         # Crop the image
         img_crop = img_data[y_min:y_max, x_min:x_max]
+
 
         ######################################################################################################
 

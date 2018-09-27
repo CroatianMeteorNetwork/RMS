@@ -34,6 +34,7 @@ import shutil
 import numpy as np
 
 from RMS.Astrometry.Conversions import date2JD, datetime2JD
+from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.FFfile import filenameToDatetime
@@ -409,7 +410,7 @@ def calculateMagnitudes_old(level_data, ra_beg, ra_end, dec_beg, dec_end, durati
 
 
 def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, lat, lon, Ho, X_res, Y_res, RA_d, dec_d, 
-    pos_angle_ref, F_scale, mag_0, mag_lev, x_poly, y_poly):
+    pos_angle_ref, F_scale, mag_0, mag_lev, x_poly, y_poly, station_ht):
     """ A function that does the complete calibration and coordinate transformations of a meteor detection.
 
     First, it applies field distortion and vignetting correction on the data, then converts the XY coordinates
@@ -435,6 +436,7 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, lat, lon, Ho, X_res
         mag_lev: [float] Magnitude calibration equation parameter (intercept).
         x_poly: [ndarray] 1D numpy array of 12 elements containing X axis polynomial parameters.
         y_poly: [ndarray] 1D numpy array of 12 elements containing Y axis polynomial parameters.
+        station_ht: [float] Height above sea level of the station (m).
     
     Return:
         (JD_data, RA_data, dec_data, magnitude_data): [tuple of ndarrays]
@@ -457,6 +459,9 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, lat, lon, Ho, X_res
 
     # Calculate magnitudes
     magnitude_data = calculateMagnitudes(level_data, mag_0, mag_lev)
+
+    # Compute the apparent magnitudes corrected to atmospheric extinction
+    magnitude_data += atmosphericExtinctionCorrection(alt_data, station_ht)
 
 
     return JD_data, RA_data, dec_data, magnitude_data
@@ -488,7 +493,7 @@ def XY2CorrectedRADecPP(time_data, X_data, Y_data, level_data, platepar):
     return XY2CorrectedRADec(time_data, X_data, Y_data, level_data, platepar.lat, \
         platepar.lon, platepar.Ho, platepar.X_res, platepar.Y_res, platepar.RA_d, platepar.dec_d, \
         platepar.pos_angle_ref, platepar.F_scale, platepar.mag_0, platepar.mag_lev, platepar.x_poly, \
-        platepar.y_poly)
+        platepar.y_poly, platepar.elev)
 
 
 
