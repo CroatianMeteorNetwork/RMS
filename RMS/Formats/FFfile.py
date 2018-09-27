@@ -122,10 +122,36 @@ def write(ff, directory, filename, fmt=None):
         writeFFfits(ff, directory, filename)
 
 
+def reconstructFrame(ff, frame_no, avepixel=False):
+    """ Reconstruct just a given frame from an FF file.
+    
+    Arguments:
+        ff: [ff bin struct] FF file loaded in the FF structure.
+        frame_no: [int] Frame index, from 0 to 255 (inclusive).
+
+    Keyword arguments:
+        avepixel: [bool] If True, the average pixel image will be the background. False by default, which
+            will use a black background.
+    
+    Return:
+        frame: [ndarray] Reconstructed frame.
+    """
+
+    # Init the empty frame
+    if avepixel:
+        frame = np.copy(ff.avepixel)
+    else:
+        frame = np.zeros_like(ff.maxpixel)
+
+    # Find where the max values occured for this frame
+    indices = np.where(ff.maxframe == frame_no)
+    frame[indices] = ff.maxpixel[indices]
+
+    return frame
 
 
 def reconstruct(ff):
-    """ Reconstruct video frames from the FF bin file. 
+    """ Reconstruct video frames from the FF file. 
     
     Arguments:
         ff: [ff bin struct] FF file loaded in the FF structure.
