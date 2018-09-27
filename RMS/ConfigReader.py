@@ -72,6 +72,7 @@ class Config:
         self.contrast = 0
 
         self.bit_depth = 8
+        self.gamma = 0.45
 
         self.ff_format = 'fits'
         
@@ -393,6 +394,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "bit_depth"):
         config.bit_depth = parser.getint(section, "bit_depth")
+
+    if parser.has_option(section, "gamma"):
+        config.gamma = parser.getfloat(section, "gamma")
     
     if parser.has_option(section, "device"):
         config.deviceID = parser.get(section, "device")

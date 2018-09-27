@@ -831,6 +831,8 @@ class ManualReductionTool(object):
             masked_img = np.ma.masked_array(self.current_image, mask_img)
             crop_img = masked_img[y_max:y_min, x_min:x_max]
 
+            # Perform gamma correction on the colored part
+            crop_img = Image.gammaCorrection(crop_img, self.config.gamma)
 
 
             # Mask out the colored in pixels
@@ -840,6 +842,9 @@ class ManualReductionTool(object):
             # Take the image where the colored part is masked out and crop the surroundings
             masked_img_bg = np.ma.masked_array(self.current_image, mask_img_bg)
             crop_bg = masked_img_bg[y_max:y_min, x_min:x_max]
+
+            # Perform gamma correction on the background
+            crop_bg = Image.gammaCorrection(crop_bg, self.config.gamma)
 
 
             # Compute the median background
@@ -1071,7 +1076,12 @@ class ManualReductionTool(object):
         if y_max > self.current_image.shape[0] - 1:
             y_max > self.current_image.shape[0] - 1
 
+
+        # Crop the segment containing the centroid
         img_crop = self.current_image[y_min:y_max, x_min:x_max]
+
+        # Apply camera gamma correction
+        img_crop = Image.gammaCorrection(img_crop, self.config.gamma)
 
         ######################################################################################################
 
@@ -1198,6 +1208,10 @@ class ManualReductionTool(object):
         centroids = []
         for pick in self.pick_list:
             centroids.append([pick.frame, pick.x_centroid, pick.y_centroid, pick.intensity_sum])
+
+        # Sort by frame number
+        centroids = sorted(centroids, key=lambda x: x[0])
+
 
         meteor_list = [[ff_name_ftp, 1, 0, 0, centroids]]
 

@@ -9,6 +9,37 @@ import scipy.misc
 
 
 
+@np.vectorize
+def gammaCorrection(intensity, gamma, bp=0, wp=255):
+    """ Correct the given intensity for gamma. 
+        
+    Arguments:
+        intensity: [int] Pixel intensity
+        gamma: [float] Gamma.
+
+    Keyword arguments:
+        bp: [int] Black point.
+        wp: [int] White point.
+
+    Return:
+        [float] Gamma corrected image intensity.
+    """
+
+    if intensity < 0:
+        intensity = 0
+
+    x = (intensity - bp)/(wp - bp)
+
+    if x > 0:
+
+        # Compute the corrected intensity
+        return bp + (wp - bp)*(x**(1.0/gamma))
+
+    else:
+        return bp
+
+
+
 def applyBrightnessAndContrast(img, brightness, contrast):
     """ Applies brightness and contrast corrections to the image. 
     

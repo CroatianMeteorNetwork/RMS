@@ -179,7 +179,7 @@ def twoDGaussian(mesh, amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
 
 
 def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_threshold=0.5, 
-    max_feature_ratio=0.8, bit_depth=8):
+    max_feature_ratio=0.8, bit_depth=8, gamma=0.45):
     """ Fit 2D Gaussian distribution as the PSF on the star image. 
     
     Arguments:
@@ -194,14 +194,16 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
             (hot pixels are narrow, while stars are round)
         max_feature_ratio: [float] maximum ratio between 2 sigma of the star and the image segment area
         bit_depth: [float] bit depth of the camera
+        gamma: [float] Camera gamma.
     """
 
     # Load parameters form config if present
-    if config:
+    if config is not None:
         segment_radius = config.segment_radius
         roundness_threshold = config.roundness_threshold
         max_feature_ratio = config.max_feature_ratio
         bit_depth = config.bit_depth
+        gamma = config.gamma
 
 
     x_fitted = []
@@ -238,6 +240,9 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
 
         # Extract an image segment around each star
         star_seg = ff.avepixel[y_min:y_max, x_min:x_max]
+
+        # Apply the gamma correction to the extracted segment
+        star_seg = Image.gammaCorrection(star_seg, gamma)
 
         # Create x and y indices
         y_ind, x_ind = np.indices(star_seg.shape)

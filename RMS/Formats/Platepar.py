@@ -129,6 +129,7 @@ class Platepar(object):
         self.mag_0 = -2.5
         self.mag_lev = 1.0
         self.mag_lev_stddev = 0.0
+        self.gamma = 0.45
 
         # Distortion fit
         self.x_poly = np.zeros(shape=(12,), dtype=np.float64)
@@ -196,9 +197,15 @@ class Platepar(object):
             # Parse JSON into an object with attributes corresponding to dict keys
             self.__dict__ = json.loads(data)
 
+
             # Add UT correction if it was not in the platepar
             if not 'UT_corr' in self.__dict__:
                 self.UT_corr = 0
+
+            # Add the gamma if it was not in the platepar
+            if not 'gamma' in self.__dict__:
+                self.gamma = 0.45
+
 
             # Convert lists to numpy arrays
             self.x_poly = np.array(self.x_poly)

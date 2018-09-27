@@ -812,8 +812,8 @@ class PlateTool(object):
                     y_min, _ = ax_p.get_ylim()
                     
                     # Plot fit info
-                    fit_info = 'Fit: {:+.2f}M {:+.2f} +/- {:.2f}'.format(self.platepar.mag_0, \
-                        self.platepar.mag_lev, fit_stddev)
+                    fit_info = 'Fit: {:+.2f}M {:+.2f} +/- {:.2f} \nGamma = {:.2f}'.format(self.platepar.mag_0, \
+                        self.platepar.mag_lev, fit_stddev, self.platepar.gamma)
 
                     print(fit_info)
                     #ax_p.text(x_min, y_min, fit_info, color='r', verticalalignment='top', horizontalalignment='left', fontsize=10)
@@ -1318,9 +1318,10 @@ class PlateTool(object):
         self.platepar.X_res = self.config.width
         self.platepar.Y_res = self.config.height
 
+        # Set the camera gamma from the config file
+        self.platepar.gamma = self.config.gamma
+
         # Estimate the scale
-        # scale_x = self.config.fov_w/self.config.width*(self.config.width/384)
-        # scale_y = self.config.fov_h/self.config.height*(self.config.height/288)
         scale_x = self.config.fov_w/self.config.width
         scale_y = self.config.fov_h/self.config.height
         self.platepar.F_scale = 1/((scale_x + scale_y)/2)
@@ -1346,6 +1347,7 @@ class PlateTool(object):
 
         if update_image:
             self.updateImage()
+
 
 
     def computeFOVSize(self):
@@ -1468,6 +1470,9 @@ class PlateTool(object):
 
         # Crop the image
         img_crop = img_data[y_min:y_max, x_min:x_max]
+
+        # perform gamma correction
+        img_crop = Image.gammaCorrection(img_crop, self.config.gamma)
 
 
         ######################################################################################################

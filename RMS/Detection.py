@@ -1150,9 +1150,11 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
                 if not len(frame_pixels):
                     continue
 
-                # Calculate weights for centroiding
-                max_avg_corrected = ff.maxpixel - ff.avepixel
-                flattened_weights = (max_avg_corrected).astype(np.float32)/ff.stdpixel
+                # Calculate weights for centroiding (apply gamma correction on both images)
+                max_avg_corrected = Image.gammaCorrection(ff.maxpixel, config.gamma) \
+                    - Image.gammaCorrection(ff.avepixel, config.gamma)
+                flattened_weights = (max_avg_corrected).astype(np.float32)/Image.gammaCorrection(ff.stdpixel, \
+                    config.gamma)
 
                 # Calculate centroids by half-frame
                 for half_frame in range(2):
