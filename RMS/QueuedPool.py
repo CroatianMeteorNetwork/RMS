@@ -296,7 +296,7 @@ class QueuedPool(object):
 
 
 
-    def addJob(self, job):
+    def addJob(self, job, wait_time=0.05):
         """ Add a job to the input queue. Job can be a list of arguments for the worker function. If a list is
             not given, the arguments will be wrapped in the list.
 
@@ -310,7 +310,7 @@ class QueuedPool(object):
 
         self.input_queue.put(job)
 
-        time.sleep(0.01)
+        time.sleep(wait_time)
 
 
     def allDone(self):
