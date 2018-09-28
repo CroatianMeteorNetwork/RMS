@@ -154,6 +154,8 @@ if __name__ == "__main__":
             flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
 
 
+    print('Starting detection...')
+
     # Initialize the detector
     detector = QueuedPool(detectStarsAndMeteors, cores=-1, log=log)
 
