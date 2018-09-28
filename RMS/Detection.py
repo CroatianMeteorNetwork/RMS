@@ -972,6 +972,15 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
 
         filtered_lines = []
 
+
+        # Calculate weights for centroiding (apply gamma correction on both images)
+        max_avg_corrected = Image.gammaCorrection(ff.maxpixel, config.gamma) \
+            - Image.gammaCorrection(ff.avepixel, config.gamma)
+        flattened_weights = (max_avg_corrected).astype(np.float32)/Image.gammaCorrection(ff.stdpixel, \
+            config.gamma)
+
+
+
         # Analyze stripes of each line
         for line in line_list:
             rho, theta, frame_min, frame_max = line
@@ -1135,6 +1144,7 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
             # Calculate centroids
             centroids = []
 
+
             for i in range(frame_min, frame_max+1):
                 
                 # Select pixel indicies belonging to a given frame
@@ -1149,12 +1159,6 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
                 # Skip if there are no pixels in the frame
                 if not len(frame_pixels):
                     continue
-
-                # Calculate weights for centroiding (apply gamma correction on both images)
-                max_avg_corrected = Image.gammaCorrection(ff.maxpixel, config.gamma) \
-                    - Image.gammaCorrection(ff.avepixel, config.gamma)
-                flattened_weights = (max_avg_corrected).astype(np.float32)/Image.gammaCorrection(ff.stdpixel, \
-                    config.gamma)
 
                 # Calculate centroids by half-frame
                 for half_frame in range(2):
@@ -1249,7 +1253,7 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
             meteor_detections.append([rho_cams, theta_cams, centroids])
 
 
-            logDebug('time for processing:', time() - t_all)
+            logDebug('Time for processing:', time() - t_all)
 
 
             

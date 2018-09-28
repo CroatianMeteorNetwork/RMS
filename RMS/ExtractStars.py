@@ -92,11 +92,11 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
         return [[], [], [], []]
         
 
-    # Apply gamma correction
-    ff.avepixel = Image.gammaCorrection(ff.avepixel, config.gamma)
+    # Apply gamma correction (DISABLED BECAUSE IT MESESSED WITH DETECTION!)
+    # ff.avepixel = Image.gammaCorrection(ff.avepixel, config.gamma)
 
     data = ff.avepixel.astype(np.float32)
-    
+
 
     # Apply a mean filter to the image to reduce noise
     data = ndimage.filters.convolve(data, weights=np.full((2, 2), 1.0/4))
@@ -138,7 +138,7 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     # plotStars(ff, x, y)
 
     # Fit a PSF to each star
-    x2, y2, amplitude, intensity = fitPSF(ff, global_mean, x, y, config=config)
+    x2, y2, amplitude, intensity = fitPSF(ff, global_mean, x, y, config)
     # x2, y2, amplitude, intensity = list(x), list(y), [], [] # Skip PSF fit
 
     # # Plot stars after PSF fit filtering
@@ -180,8 +180,7 @@ def twoDGaussian(mesh, amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
 
 
 
-def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_threshold=0.5, 
-    max_feature_ratio=0.8):
+def fitPSF(ff, avepixel_mean, x2, y2, config):
     """ Fit 2D Gaussian distribution as the PSF on the star image. 
     
     Arguments:
@@ -190,16 +189,15 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
         x2: [list] a list of estimated star position (X axis)
         xy: [list] a list of estimated star position (Y axis)
         config: [config object] configuration object (loaded from the .config file)
-        segment_radius: [int] radius (in pixels) of image segment around the detected star on which to 
-            perform the fit
-        roundness_threshold: [float] minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars
-            (hot pixels are narrow, while stars are round)
-        max_feature_ratio: [float] maximum ratio between 2 sigma of the star and the image segment area
-        gamma: [float] Camera gamma.
     """
 
     # Load parameters form config if present
     if config is not None:
+        # segment_radius: [int] radius (in pixels) of image segment around the detected star on which to 
+        #     perform the fit
+        # roundness_threshold: [float] minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars
+        #     (hot pixels are narrow, while stars are round)
+        # max_feature_ratio: [float] maximum ratio between 2 sigma of the star and the image segment area
         segment_radius = config.segment_radius
         roundness_threshold = config.roundness_threshold
         max_feature_ratio = config.max_feature_ratio
@@ -266,8 +264,45 @@ def fitPSF(ff, avepixel_mean, x2, y2, config=None, segment_radius=4, roundness_t
         if (4*sigma_x*sigma_y / segment_radius**2 > max_feature_ratio):
             continue
 
-        # Calculate the intensity (as a volume under the 2D Gaussian)
-        intensity = 2*np.pi*amplitude*sigma_x*sigma_y
+
+        ### If the fitting was successfull, compute the star intensity
+
+        # Crop the star segment to take 3 sigma portion around the star
+        crop_y_min = int(yo - 3*sigma_y) + 1
+        if crop_y_min < 0: crop_y_min = 0
+        
+        crop_y_max = int(yo + 3*sigma_y) + 1
+        if crop_y_max >= star_seg.shape[0]: crop_y_max = star_seg.shape[0] - 1
+
+        crop_x_min = int(xo - 3*sigma_x) + 1
+        if crop_x_min < 0: crop_x_min = 0
+
+        crop_x_max = int(xo + 3*sigma_x) + 1
+        if crop_x_max >= star_seg.shape[1]: crop_x_max = star_seg.shape[1] - 1
+
+
+        star_seg_crop = star_seg[crop_y_min:crop_y_max, crop_x_min:crop_x_max]
+
+        # Gamma correct the star segment
+        star_seg_crop = Image.gammaCorrection(star_seg_crop.astype(np.float32), config.gamma)
+
+        # Correct the background for gamma
+        bg_corrected = Image.gammaCorrection(offset, config.gamma)
+
+        # Subtract the background from the star segment and compute the total intensity
+        intensity = np.sum(star_seg_crop - bg_corrected)
+
+        # print(intensity)
+        # plt.imshow(star_seg_crop - bg_corrected, cmap='gray', vmin=0, vmax=255)
+        # plt.show()
+
+
+        ###
+
+        # Calculate the intensity (as a volume under the 2D Gaussian) (OLD, before gamma correction)
+        # intensity = 2*np.pi*amplitude*sigma_x*sigma_y
+
+
 
         # # Skip if the star intensity is below background level
         # if intensity < offset:
