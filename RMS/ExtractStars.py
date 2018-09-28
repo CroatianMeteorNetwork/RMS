@@ -289,9 +289,10 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
             crop_x_min = int(xo - 3)
             crop_x_max = int(xo + 3)
 
-        print('Star seg crop shape:', star_seg_crop.shape)
 
         star_seg_crop = star_seg[crop_y_min:crop_y_max, crop_x_min:crop_x_max]
+
+        print('Star seg crop shape:', star_seg_crop.shape)
 
         # Gamma correct the star segment
         star_seg_crop = Image.gammaCorrection(star_seg_crop.astype(np.float32), config.gamma)
