@@ -161,6 +161,7 @@ if __name__ == "__main__":
 
     # Give detector jobs
     for ff_name in ff_list:
+        print('Adding for detection:', ff_name)
         detector.addJob([ff_dir, ff_name, config, flat_struct])
 
 
