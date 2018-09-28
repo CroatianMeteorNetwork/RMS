@@ -310,7 +310,7 @@ class QueuedPool(object):
 
         self.input_queue.put(job)
 
-        time.sleep(0.1)
+        time.sleep(0.01)
 
 
     def allDone(self):
