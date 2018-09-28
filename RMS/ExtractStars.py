@@ -282,17 +282,19 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
 
         # If the segment is too small, set a fixed size
         if (y_max - y_min) < 3:
-            crop_y_min = int(yo - 3)
-            crop_y_max = int(yo + 3)
+            crop_y_min = int(yo - 2)
+            crop_y_max = int(yo + 2)
 
         if (x_max - x_min) < 3:
-            crop_x_min = int(xo - 3)
-            crop_x_max = int(xo + 3)
+            crop_x_min = int(xo - 2)
+            crop_x_max = int(xo + 2)
 
 
         star_seg_crop = star_seg[crop_y_min:crop_y_max, crop_x_min:crop_x_max]
 
-        print('Star seg crop shape:', star_seg_crop.shape)
+        # Skip the star if the shape is too small
+        if (star_seg.shape[0] == 0) or (star_seg.shape[1] == 0):
+            continue
 
         # Gamma correct the star segment
         star_seg_crop = Image.gammaCorrection(star_seg_crop.astype(np.float32), config.gamma)
