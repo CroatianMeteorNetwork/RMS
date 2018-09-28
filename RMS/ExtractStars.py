@@ -280,6 +280,15 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
         crop_x_max = int(xo + 3*sigma_x) + 1
         if crop_x_max >= star_seg.shape[1]: crop_x_max = star_seg.shape[1] - 1
 
+        # If the segment is too small, set a fixed size
+        if (y_max - y_min) < 3:
+            crop_y_min = int(yo - 3)
+            crop_y_max = int(yo + 3)
+
+        if (x_max - x_min) < 3:
+            crop_x_min = int(xo - 3)
+            crop_x_max = int(xo + 3)
+
 
         star_seg_crop = star_seg[crop_y_min:crop_y_max, crop_x_min:crop_x_max]
 
