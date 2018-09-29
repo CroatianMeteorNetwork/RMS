@@ -90,10 +90,6 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     # Check if the image is too bright and skip the image
     if global_mean > max_global_intensity:
         return [[], [], [], []]
-        
-
-    # Apply gamma correction (DISABLED BECAUSE IT MESESSED WITH DETECTION!)
-    # ff.avepixel = Image.gammaCorrection(ff.avepixel, config.gamma)
 
     data = ff.avepixel.astype(np.float32)
 
@@ -181,7 +177,7 @@ def twoDGaussian(mesh, amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
 
 
 def fitPSF(ff, avepixel_mean, x2, y2, config):
-    """ Fit 2D Gaussian distribution as the PSF on the star image. 
+    """ Fit a 2D Gaussian to the star candidate cutout to check if it's a star.
     
     Arguments:
         ff: [ff bin struct] FF bin file loaded in the FF bin structure
@@ -211,6 +207,7 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
     # Set the initial guess
     initial_guess = (30.0, segment_radius, segment_radius, 1.0, 1.0, 0.0, avepixel_mean)
     
+    # Go through all stars
     for star in zip(list(y2), list(x2)):
 
         y, x = star
@@ -250,6 +247,8 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
             # print(popt)
         except RuntimeError:
             # print('Fitting failed!')
+
+            # Skip stars that can't be fitted in 200 iterations
             continue
 
         # Unpack fitted gaussian parameters
@@ -346,51 +345,13 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
 
 
 
-def adjustLevels(img_array, minv, gamma, maxv):
-    """Adjusts levels on image with given parameters.
-
-    Arguments:
-        img_array: [2D numpy array] input image array
-        minv: [int] minimum level value (levels below will be black)
-        gamma: [float] gamma value
-        maxv: [int] maximum level value (levels above will be white)
-    
-    Return:
-        [2D numpy array] image with corrected levels and gamma
-    """
-
-    if (minv == None) and (gamma == None) and (maxv == None):
-        return img_array #Return the same array if parameters are None
-
-
-    minv = minv/255.0
-    maxv = maxv/255.0
-    _interval = maxv - minv
-    _invgamma = 1.0/gamma
-
-    img_array = img_array.astype(np.float)
-    
-    # Reduce array to 0-1 values
-    img_array = img_array/255.0 
-
-    # Calculate new levels
-    img_array = ((img_array - minv)/_interval)**_invgamma 
-
-    # Convert back to 0-255 values
-    img_array = img_array * 255.0
-    img_array = np.clip(img_array, 0, 255) 
-    img_array = img_array.astype(np.uint8)
-
-    return img_array
-
-
 
 def plotStars(ff, x2, y2):
     """ Plots detected stars on the input image.
     """
 
     # Plot image with adjusted levels to better see stars
-    plt.imshow(adjustLevels(ff.avepixel, 0, 1.3, 255), cmap='gray')
+    plt.imshow(Image.adjustLevels(ff.avepixel, 0, 1.3, 255), cmap='gray')
 
     # Plot stars
     for star in zip(list(y2), list(x2)):

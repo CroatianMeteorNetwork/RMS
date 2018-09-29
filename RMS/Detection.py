@@ -250,12 +250,17 @@ def mergeLines(line_list, min_distance, img_w, img_h, last_count=0):
     """ Merge similar lines defined by rho and theta.
     
     Arguments:
-        line_list: [list] a list of (rho, phi, min_frame, max_frame) tuples which define a KHT line
-        min_distance: [float] minimum distance between two vectors described by line parameters for the lines to be joined
-        last_count: [int] used for recursion, default is 0 and it should be left as is
+        line_list: [list] A list of (rho, phi, min_frame, max_frame) tuples which define a KHT line.
+        min_distance: [float] Minimum distance between two vectors described by line parameters for the lines 
+            to be joined.
+        img_w: [int] Image width.
+        img_h: [int] Image height.
+
+    Keyword arguments:
+        last_count: [int] Used for recursion, default is 0 and it should be left as is!
 
     Return:
-        final_list: [list] a list of (rho, phi, min_frame, max_frame) tuples after line merging
+        final_list: [list] List of (rho, phi, min_frame, max_frame) tuples after line merging.
 
     """
 
@@ -344,12 +349,14 @@ def merge3DLines(line_list, vect_angle_thresh, last_count=0):
         close enough, merge the line. Frame ranges also have to overlap to merge the line.
     
     Arguments:
-        line_list: [list] a list of lines found by grouping3D algorithm
-        vect_angle_thresh: [float] minimum angle between vectors to merge the lines
-        last_count: [int] used for recursion, default is 0 and it should be left as is
+        line_list: [list] A list of lines found by grouping3D algorithm.
+        vect_angle_thresh: [float] Minimum angle between vectors to merge the lines.
+
+    Keyword arguments:
+        last_count: [int] Used for recursion, default is 0 and it should be left as is!
     
     Return:
-        final_list: [list] a list of merged lines
+        final_list: [list] A list of merged lines.
 
     """
 
@@ -937,7 +944,8 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
     # At the end, a check that the detection has a surface brightness above the background will be performed.
     # The assumption here is that the peak of the meteor should have the intensity which is at least
     # that of a patch of 4x4 pixels that are of the mean background brightness
-    min_patch_intensity = 4*4*(np.mean(ff.maxpixel - ff.avepixel) + config.k1_det*np.mean(ff.stdpixel) + config.j1)
+    min_patch_intensity = 4*4*(np.mean(ff.maxpixel - ff.avepixel) + config.k1_det*np.mean(ff.stdpixel) \
+        + config.j1)
 
 
     # # Show the maxpixel image
@@ -1002,7 +1010,6 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
             stripe[stripe_indices] = img[stripe_indices]
 
             # Show stripe
-            #COMMENTED
             # show2("stripe", stripe*255)
 
             # Show 3D could
