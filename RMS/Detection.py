@@ -941,13 +941,6 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
         ff.avepixel = Image.applyFlat(ff.avepixel, flat_struct)
 
 
-    # At the end, a check that the detection has a surface brightness above the background will be performed.
-    # The assumption here is that the peak of the meteor should have the intensity which is at least
-    # that of a patch of 4x4 pixels that are of the mean background brightness
-    min_patch_intensity = 4*4*(np.mean(ff.maxpixel - ff.avepixel) + config.k1_det*np.mean(ff.stdpixel) \
-        + config.j1)
-
-
     # # Show the maxpixel image
     # show2(ff_name+' maxpixel', ff.maxpixel)
 
@@ -981,12 +974,21 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
         filtered_lines = []
 
 
-        # Calculate weights for centroiding (apply gamma correction on both images)
-        max_avg_corrected = Image.gammaCorrection(ff.maxpixel, config.gamma) \
-            - Image.gammaCorrection(ff.avepixel, config.gamma)
-        flattened_weights = (max_avg_corrected).astype(np.float32)/Image.gammaCorrection(ff.stdpixel, \
-            config.gamma)
+        # Gamma correct image files
+        maxpixel_gamma_corr = Image.gammaCorrection(ff.maxpixel, config.gamma)
+        avepixel_gamma_corr = Image.gammaCorrection(ff.avepixel, config.gamma)
+        stdpixel_gamma_corr = Image.gammaCorrection(ff.stdpixel, config.gamma)
 
+        # Calculate weights for centroiding (apply gamma correction on both images)
+        max_avg_corrected = maxpixel_gamma_corr - avepixel_gamma_corr
+        flattened_weights = (max_avg_corrected).astype(np.float32)/stdpixel_gamma_corr
+
+
+        # At the end, a check that the detection has a surface brightness above the background will be performed.
+        # The assumption here is that the peak of the meteor should have the intensity which is at least
+        # that of a patch of 4x4 pixels that are of the mean background brightness
+        min_patch_intensity = 4*4*(np.mean(maxpixel_gamma_corr - avepixel_gamma_corr) \
+            + config.k1_det*np.mean(stdpixel_gamma_corr) + config.j1)
 
 
         # Analyze stripes of each line
