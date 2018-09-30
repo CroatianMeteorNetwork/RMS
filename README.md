@@ -87,7 +87,7 @@ Here we provide installation instructions for the RPi, but the procedure should 
 
 Set up your Raspberry Pi with Raspbian Jessie operating system (gstreamer does not really work on Stretch, and it's necessary if you want to run an IP camera). Here's the guide which explains how to do just that: [Installing Raspbian](https://www.raspberrypi.org/documentation/installation/installing-images/)
 
-**We are currently stuck on Python 2 because for some reason memory assignment to numpy arrays is slow when running the code under multiprocessing. When a frame is feched from the camera and is stored to a numpy array, this takes a lot of time and naturally leads to frame drops. We could not solve the issue and we invite others to take a stab at it!**
+**We are currently stuck on Python 2 because for some reason memory assignment to numpy arrays is slow when running the code under multiprocessing. When a frame is feched from the camera and is stored to a numpy array, this takes a lot of time and naturally leads to frame drops. The issue was apparently solved in Python 3.7, but we have not yet extensively tested it. You will need to run Raspbian Stretch to get Python 3.7 running.**
 
 Furthermore, you will need the following software and libraries to run the code:
 
