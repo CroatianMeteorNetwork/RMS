@@ -1,11 +1,14 @@
 from __future__ import print_function
 
+import os
 import logging
 import traceback
 import time
 import functools
 import multiprocessing
 import multiprocessing.dummy
+
+from RMS.Pickling import savePickle, loadPickle
 
 
 class SafeValue(object):
@@ -19,11 +22,9 @@ class SafeValue(object):
         self.lock = multiprocessing.Lock()
 
 
-
     def increment(self):
         with self.lock:
             self.val.value += 1
-
 
 
     def decrement(self):
@@ -31,11 +32,9 @@ class SafeValue(object):
             self.val.value -= 1
 
 
-
     def set(self, n):
         with self.lock:
             self.val.value = n
-
 
 
     def value(self):
@@ -44,8 +43,21 @@ class SafeValue(object):
 
 
 
+class BackupContainer(object):
+    def __init__(self, inputs, outputs):
+        """ Container for storing the inputs and outputs of a certain worker function. This container is 
+            saved to disk when the worker function finishes, and can be later restored. 
+        """
+
+        # Take the input list a tuple, as it has to be imutable to be a dictionary key
+        self.inputs = tuple(inputs)
+
+        self.outputs = outputs
+
+
+
 class QueuedPool(object):
-    def __init__(self, func, cores=None, log=None, delay_start=0, worker_timeout=5000):
+    def __init__(self, func, cores=None, log=None, delay_start=0, worker_timeout=5000, backup_dir='.'):
         """ Provides capability of creating a pool of workers which will process jobs in a given queue, and 
         the input queue can be updated in another thread. 
 
@@ -64,6 +76,7 @@ class QueuedPool(object):
             delay_start: [float] Number of seconds to wait after init before the workers start workings.
             worker_timeout: [int] Number of seconds to wait before the queue is killed due to a worker getting 
                 stuck.
+            backup_dir: [str] Path to the directory where result backups will be held.
 
         """
 
@@ -102,8 +115,93 @@ class QueuedPool(object):
         self.pool = None
 
         self.total_jobs = SafeValue()
+        self.results_counter = SafeValue()
         self.active_workers = SafeValue()
         self.kill_workers = multiprocessing.Event()
+
+
+        ### Backing up results
+
+        self.bkup_dir = backup_dir
+        self.bkup_file_prefix = 'rms_queue_bkup_'
+        self.bkup_file_extension = '.pickle'
+        self.bkup_dict = {}
+
+        # Load all previous backup files in the given directory, if any
+        self.loadBackupFiles()
+
+        ### ###
+
+
+    def printAndLog(self, message):
+        """ Print and log the given message. """
+
+        print(message)
+
+        if self.log is not None:
+            self.log.info(message)
+
+
+    def saveBackupFile(self, inputs, outputs):
+        """ Save the pair of inputs and outputs to disk, so if the script breaks, previous results can be
+            loaded in and processing can continue from that point.
+        """
+
+        # Create a backup object
+        bkup_obj = BackupContainer(inputs, outputs)
+
+        # Create a name for the backup file
+        bkup_file_name = self.bkup_file_prefix + str(self.results_counter.value()) + self.bkup_file_extension
+
+        # Save the backup to disk
+        savePickle(bkup_obj, self.bkup_dir, bkup_file_name)
+
+
+
+    def _listBackupFiles(self):
+        """ Returns a list of all backup files in the backup folder. """
+
+        bkup_file_list = []
+
+        for file_name in os.listdir(self.bkup_dir):
+
+            # Check if this is the backup file
+            if file_name.startswith(self.bkup_file_prefix) and file_name.endswith(self.bkup_file_extension):
+
+                bkup_file_list.append(file_name)
+
+        return bkup_file_list
+
+
+    def loadBackupFiles(self):
+        """ Load previous backup files. """
+
+        # Load all backup files in a dictionary
+        for file_name in self._listBackupFiles():
+
+            # Load the backup file
+            bkup_obj = loadPickle(self.bkup_dir, file_name)
+
+            # Make sure the value-key pair does not exist
+            if tuple(bkup_obj.inputs) not in self.bkup_dict:
+
+                # Add the pair of inputs vs. outputs to the lookup dictionary
+                self.bkup_dict[bkup_obj.inputs] = bkup_obj.outputs
+
+
+        # Print and log how many previous files have been loaded
+        print_str = "Loaded {:d} backed up results...".format(len(self.bkup_dict))
+        self.printAndLog(print_str)
+
+
+    def deleteBackupFiles(self):
+        """ Delete all backup files in the backup folder. """
+
+        # Go though all backup files
+        for file_name in self._listBackupFiles():
+
+            # Remove the backup file
+            os.remove(os.path.join(self.bkup_dir, file_name))
 
 
 
@@ -127,30 +225,42 @@ class QueuedPool(object):
                 break
 
 
-            # Catch errors in workers and handle them softly
-            try:
+            # First do a lookup in the dictionary if this set of inputs have already been processed
+            if tuple(args) in self.bkup_dict:
 
-                # Call the original worker function and collect results
-                result = func(*args)
+                # Load the results from backup
+                result = self.bkup_dict[tuple(args)]
 
-            except:
-                tb = traceback.format_exc()
 
-                print(tb)
-                
-                if self.log is not None:
-                    self.log.error(tb)
+            # Process the inputs if they haven't been processed already
+            else:
 
-                result = None
+                # Catch errors in workers and handle them softly
+                try:
+
+                    # Call the original worker function and collect results
+                    result = func(*args)
+
+                except:
+                    tb = traceback.format_exc()
+
+                    self.printAndLog(tb)
+
+                    result = None
+
 
             # Save the results to an output queue
             self.output_queue.put(result)
+            self.results_counter.increment()
 
             time.sleep(0.1)
 
+            # Back up the result to disk
+            self.saveBackupFile(args, result)
+
             # Exit if exit is requested
             if self.kill_workers.is_set():
-                print('Worker killed!')
+                self.printAndLog('Worker killed!')
                 break
 
         self.active_workers.decrement()
@@ -164,8 +274,8 @@ class QueuedPool(object):
             self.cores.set(cores)
 
 
-        if self.log is not None:
-            self.log.info('Using {:d} cores'.format(self.cores.value()))
+        
+        self.printAndLog('Using {:d} cores'.format(self.cores.value()))
 
         # Initialize the pool of workers with the given number of worker cores
         # Comma in the argument list is a must!
@@ -189,9 +299,9 @@ class QueuedPool(object):
                 c += 1
 
                 if c%1000 == 0:
-                    print('-----')
-                    print('Queue size:', self.output_queue.qsize())
-                    print('Total jobs:', self.total_jobs.value())
+                    self.printAndLog('-----')
+                    self.printAndLog('Queue size:', self.output_queue.qsize())
+                    self.printAndLog('Total jobs:', self.total_jobs.value())
 
 
                 # Keep track of the changes of the output queue size
@@ -202,12 +312,12 @@ class QueuedPool(object):
 
                 # If the queue has been idle for too long, kill it
                 if (time.time() - output_qsize_last_change) > self.worker_timeout:
-                    print('One of the workers got stuck longer then {:d} seconds, killing multiprocessing...'.format(self.worker_timeout))
+                    self.printAndLog('One of the workers got stuck longer then {:d} seconds, killing multiprocessing...'.format(self.worker_timeout))
 
-                    print('Terminating pool...')
+                    self.printAndLog('Terminating pool...')
                     self.pool.terminate()
 
-                    print('Joining pool...')
+                    self.printAndLog('Joining pool...')
                     self.pool.join()
 
                     self.active_workers.set(0)
@@ -218,11 +328,11 @@ class QueuedPool(object):
                 # If all jobs are done, close the pool
                 if self.output_queue.qsize() >= self.total_jobs.value():
 
-                    print('Inserting poison pills...')
+                    self.printAndLog('Inserting poison pills...')
 
                     # Insert the 'poison pill' to the queue, to kill all workers
-                    for i in range(self.cores.value()):
-                        print('Inserting pill', i + 1)
+                    for i in range(self.active_workers.value()):
+                        self.printAndLog('Inserting pill', i + 1)
                         self.input_queue.put(None)
 
 
@@ -231,18 +341,18 @@ class QueuedPool(object):
 
                     # Wait until the pills are 'swallowed'
                     while self.input_queue.qsize():
-                        print('Swallowing pills...', self.input_queue.qsize())
+                        self.printAndLog('Swallowing pills...', self.input_queue.qsize())
                         time.sleep(0.1)
 
 
                     # Close the pool and wait for all threads to terminate
-                    print('Closing pool...')
+                    self.printAndLog('Closing pool...')
                     self.pool.close()
 
-                    print('Terminating pool...')
+                    self.printAndLog('Terminating pool...')
                     self.pool.terminate()
 
-                    print('Joining pool...')
+                    self.printAndLog('Joining pool...')
                     self.pool.join()
 
                     break
@@ -266,7 +376,7 @@ class QueuedPool(object):
         # Wait until all workers have exited
         loop_start = time.time()
         while self.active_workers.value() > 0:
-            print('Active workers:', self.active_workers.value())
+            self.printAndLog('Active workers:', self.active_workers.value())
             time.sleep(0.1)
 
             # Break the loop if waiting for more than 100 s
@@ -274,11 +384,11 @@ class QueuedPool(object):
                 break
 
         # Join the previous pool
-        print('Closing pool...')
+        self.printAndLog('Closing pool...')
         self.pool.close()
-        print('Terminating pool...')
+        self.printAndLog('Terminating pool...')
         self.pool.terminate()
-        print('Joining pool...')
+        self.printAndLog('Joining pool...')
         self.pool.join()
 
         self.kill_workers.clear()
@@ -287,11 +397,11 @@ class QueuedPool(object):
         if cores is None:
             cores = multiprocessing.cpu_count()
 
-        print('Setting new number of cores to:', cores)
+        self.printAndLog('Setting new number of cores to:', cores)
         self.cores.set(cores)
 
         # Init a new pool
-        print('Starting new pool...')
+        self.printAndLog('Starting new pool...')
         self.startPool()
 
 
@@ -395,7 +505,7 @@ if __name__ == "__main__":
     print('Updating cores...')
 
     # Use all available cores
-    workpool.updateCoreNumber(3)
+    #workpool.updateCoreNumber(3)
 
     print('Adding more jobs...')
 
@@ -417,3 +527,6 @@ if __name__ == "__main__":
     results = workpool.getResults()
 
     print(results)
+
+    # Delete all backed up files
+    workpool.deleteBackupFiles()
