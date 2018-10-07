@@ -11,97 +11,9 @@ import scipy.misc
 
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
+from RMS.Routines.Image import deinterlaceBlend, blendLighten, loadFlat, applyFlat
 
 
-def truth_generator():
-    """ Generates True/False intermittently by calling:
-
-    gen = truth_generator() 
-    gen.next() #True
-    gen.next() #False
-    gen.next() #True
-    ...
-
-    """
-
-    while 1:
-        yield True
-        yield False
-
-
-def deinterlaceOdd(ff_image):
-    """ Deinterlaces the numpy array image by duplicating the odd frame. 
-    """
-
-    truth_gen = truth_generator()
-    deinterlaced_image = np.copy(ff_image) #deepcopy ff_image to new array
-    old_row = ff_image[0]
-    for row_num in range(len(ff_image)):
-        if truth_gen.next() == True:
-            deinterlaced_image[row_num] = np.copy(ff_image[row_num])
-            old_row = ff_image[row_num]
-        else:
-            deinterlaced_image[row_num] = np.copy(old_row)
-
-    deinterlaced_image = moveArrayOneUp(deinterlaced_image)
-
-    return deinterlaced_image
-
-
-
-def deinterlaceEven(ff_image):
-    """ Deinterlaces the numpy array image by duplicating the even frame. 
-    """
-
-    truth_gen = truth_generator()
-    deinterlaced_image = np.copy(ff_image) #deepcopy ff_image to new array
-    old_row = ff_image[-1]
-    for row_num in reversed(range(len(ff_image))):
-        if truth_gen.next() == True:
-            deinterlaced_image[row_num] = np.copy(ff_image[row_num])
-            old_row = ff_image[row_num]
-        else:
-            deinterlaced_image[row_num] = np.copy(old_row)
-
-    return deinterlaced_image
-
-
-
-def blendLighten(arr1, arr2):
-    """ Blends two image array with lighen method (only takes the lighter pixel on each spot).
-    """
-
-    arr1 = arr1.astype(np.int16)
-
-    temp = arr1 - arr2 
-    temp[temp > 0] = 0
-    new_arr = arr1 - temp
-    new_arr = new_arr.astype(np.uint8)
-
-    #Return "greater than" values
-    return new_arr
-
-
-def moveArrayOneUp(array):
-    """ Moves image array 1 pixel up, and fills the bottom with zeroes.
-    """
-
-    array = np.delete(array, (0), axis=0)
-    array = np.vstack([array, np.zeros(len(array[0]), dtype = np.uint8)])
-
-    return array
-
-
-
-def deinterlaceBlend(image_array):
-    """ Deinterlaces the image by making an odd and even frame, then blends them by lighten method.
-    """
-
-    image_odd_d = deinterlaceOdd(image_array)
-    image_even = deinterlaceEven(image_array)
-    full_proc_image = blendLighten(image_odd_d, image_even)
-
-    return full_proc_image
 
 
 if __name__ == '__main__':
@@ -117,9 +29,14 @@ if __name__ == '__main__':
     arg_parser.add_argument('file_format', nargs=1, metavar='FILE_FORMAT', type=str, \
         help='File format of the image, e.g. jpg or png.')
 
-    arg_parser.add_argument('-d', '--deinterlace', action="store_true", help="""Deinterlace the image before stacking. """)
+    arg_parser.add_argument('-d', '--deinterlace', action="store_true", \
+        help="""Deinterlace the image before stacking. """)
 
-    arg_parser.add_argument('-s', '--subavg', action="store_true", help="""Subtract the average image from maxpixel before stacking. """)
+    arg_parser.add_argument('-s', '--subavg', action="store_true", \
+        help="""Subtract the average image from maxpixel before stacking. """)
+
+    arg_parser.add_argument('-f', '--flat', nargs='?', metavar='FLAT_PATH', type=str, default='', 
+        help="Apply a given flat frame. If no path to the flat is given, flat.bmp from the folder will be taken.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -130,6 +47,33 @@ if __name__ == '__main__':
     dir_path = cml_args.dir_path[0]
 
     first_img = True
+
+
+    # Check if a flat was given
+    flat_path = cml_args.flat
+
+    print(flat_path)
+
+    # Load the flat if it was given
+    flat = None
+    if flat_path != '':
+
+        # Try finding the default flat
+        if flat_path is None:
+            flat_path = dir_path
+            flat_file = 'flat.bmp'
+
+        else:
+            flat_path, flat_file = os.path.split(flat_path)
+
+        flat_full_path = os.path.join(flat_path, flat_file)
+        if os.path.isfile(flat_full_path):
+
+            # Load the flat
+            flat = loadFlat(flat_path, flat_file)
+
+            print('Loaded flat:', flat_full_path)
+
 
     # List all FF files in the current dir
     for ff_name in os.listdir(dir_path):
@@ -147,6 +91,11 @@ if __name__ == '__main__':
             if cml_args.deinterlace:
                 maxpixel = deinterlaceBlend(maxpixel)
                 avepixel = deinterlaceBlend(avepixel)
+
+            # If the flat was given, apply it to the image, only if no subtraction is done
+            if (flat is not None) and not cml_args.subavg:
+                maxpixel = applyFlat(maxpixel, flat)
+                avepixel = applyFlat(avepixel, flat)
 
             # Subtract the average from maxpixel
             if cml_args.subavg:
@@ -173,7 +122,7 @@ if __name__ == '__main__':
     scipy.misc.imsave(stack_path, merge_img)
 
     # Plot the blended image
-    plt.imshow(merge_img, cmap='gray')
+    plt.imshow(merge_img, cmap='gray', vmin=0, vmax=255)
 
     plt.show()
 
