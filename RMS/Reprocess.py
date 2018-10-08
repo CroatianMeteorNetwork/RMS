@@ -73,6 +73,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetection=Fal
         archive_name: [str] Path to the archive.
     """
 
+    # Remove final slash in the night dir
+    if night_data_dir.endswith(os.sep):
+        night_data_dir = night_data_dir[:-1]
+
     # Extract the name of the night
     night_data_dir_name = os.path.basename(night_data_dir)
     
