@@ -7,7 +7,7 @@ import sys
 import pickle
 
 
-from wmpl.Utils.OSTools import mkdirP
+from RMS.Misc import mkdirP
 
 
 
