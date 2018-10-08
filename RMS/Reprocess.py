@@ -57,7 +57,7 @@ def getPlatepar(config):
 
 
 
-def processNight(night_data_dir, config, detection_results=None, nodetection=False):
+def processNight(night_data_dir, config, detection_results=None, nodetect=False):
     """ Given the directory with FF files, run detection and archiving. 
     
     Arguments:
@@ -67,7 +67,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetection=Fal
     Keyword arguments:
         detection_results: [list] An optional list of detection. If None (default), detection will be done
             on the the files in the folder.
-        nodetection: [bool] True if detection should be skipped. False by default.
+        nodetect: [bool] True if detection should be skipped. False by default.
 
     Return:
         archive_name: [str] Path to the archive.
@@ -81,7 +81,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetection=Fal
     night_data_dir_name = os.path.basename(night_data_dir)
     
     # If the detection should be run
-    if (not nodetection):
+    if (not nodetect):
 
         # If no detection was performed, run it
         if detection_results is None:
