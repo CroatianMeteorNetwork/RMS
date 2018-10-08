@@ -228,11 +228,15 @@ class QueuedPool(object):
                 break
 
 
+            read_from_backup = False
             # First do a lookup in the dictionary if this set of inputs have already been processed
+            read_from_backup = False
             if tuple(args) in self.bkup_dict:
 
                 # Load the results from backup
                 result = self.bkup_dict[tuple(args)]
+
+                read_from_backup = True
 
 
             # Process the inputs if they haven't been processed already
@@ -258,8 +262,9 @@ class QueuedPool(object):
 
             time.sleep(0.1)
 
-            # Back up the result to disk
-            self.saveBackupFile(args, result)
+            # Back up the result to disk, if it was not already in the backup
+            if not read_from_backup:
+                self.saveBackupFile(args, result)
 
             # Exit if exit is requested
             if self.kill_workers.is_set():
