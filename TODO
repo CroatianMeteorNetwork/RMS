@@ -2,6 +2,8 @@
 High priority:
 --------------
 
+- Explore why when running setup.py install on Windows the following error occurs: "Cannot export PyInit_kht_module: symbol not defined"
+
 - Astrometry - automatic recalibration if the camera is moved and the offset is larger than the search radius
 
 - SkyFit

@@ -68,8 +68,8 @@ kht_wrapper(double (*lines_array)[2], unsigned char *binary_image, const size_t 
 {
 	static lines_list_t lines;
 
-    struct timespec before;
-    clock_gettime(CLOCK_MONOTONIC, &before);
+    /*struct timespec before;
+    clock_gettime(CLOCK_MONOTONIC, &before);*/
 
 	kht( lines, binary_image, image_width, image_height, cluster_min_size, cluster_min_deviation, delta,
 		 kernel_min_height, n_sigmas );
