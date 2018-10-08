@@ -221,6 +221,16 @@ if __name__ == "__main__":
         config = cr.parse(".config")
 
 
+    
+    ### Init the logger
+
+    from RMS.Logger import initLogging
+    initLogging('reprocess_')
+
+    log = logging.getLogger("logger")
+
+    ######
+
 
     # Process the night
     archive_name = processNight(cml_args.dir_path[0], config)
