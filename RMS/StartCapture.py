@@ -27,35 +27,22 @@ import logging
 import multiprocessing
 
 import numpy as np
-import scipy.misc
 
 import RMS.ConfigReader as cr
 from RMS.Logger import initLogging
 
-from RMS.Formats import FTPdetectinfo
-from RMS.Formats import CALSTARS
-from RMS.Formats.Platepar import Platepar
-from RMS.Routines import Image
 
-
-from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.BufferedCapture import BufferedCapture
-from RMS.Compression import Compressor
 from RMS.CaptureDuration import captureDuration
+from RMS.Compression import Compressor
+from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
-from RMS.Astrometry.CheckFit import autoCheckFit
-from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo
-from RMS.ArchiveDetections import archiveDetections, archiveFieldsums
-from RMS.UploadManager import UploadManager
-from RMS.DownloadPlatepar import downloadNewPlatepar
-
 from RMS.LiveViewer import LiveViewer
-from RMS.QueuedPool import QueuedPool
 from RMS.Misc import mkdirP
-
-from Utils.PlotFieldsums import plotFieldsums
-from Utils.MakeFlat import makeFlat
-
+from RMS.QueuedPool import QueuedPool
+from RMS.Reprocess import getPlatepar, processNight
+from RMS.Routines import Image
+from RMS.UploadManager import UploadManager
 
 
 # Flag indicating that capturing should be stopped
@@ -125,34 +112,6 @@ def wait(duration=None):
 
         if STOP_CAPTURE:
             break
-
-
-
-
-def getPlatepar(config):
-    """ Downloads a new platepar from the server of uses an existing one. """
-
-
-    # Download a new platepar from the server, if present
-    downloadNewPlatepar(config)
-
-
-    # Load the default platepar if it is available
-    platepar = None
-    platepar_fmt = None
-    platepar_path = os.path.join(os.getcwd(), config.platepar_name)
-    if os.path.exists(platepar_path):
-        platepar = Platepar()
-        platepar_fmt = platepar.read(platepar_path)
-
-        log.info('Loaded platepar: ' + platepar_path)
-
-    else:
-
-        log.info('No platepar file found!')
-
-
-    return platepar, platepar_path, platepar_fmt
 
 
 
@@ -303,11 +262,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     log.debug('Live view stopped')
 
 
-    # Init data lists
-    star_list = []
-    meteor_list = []
-    ff_detected = []
-
 
     # If detection should be performed
     if not nodetect:
@@ -375,162 +329,17 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         # Get the detection results from the queue
         detection_results = detector.getResults()
 
-        # Remove all 'None' results, which were errors
-        detection_results = [res for res in detection_results if res is not None]
-
-        # Count the number of detected meteors
-        meteors_num = 0
-        for _, _, meteor_data in detection_results:
-            for meteor in meteor_data:
-                meteors_num += 1
-
-        log.info('TOTAL: ' + str(meteors_num) + ' detected meteors.')
-
-
-        # Save the detections to a file
-        for ff_name, star_data, meteor_data in detection_results:
-
-            x2, y2, background, intensity = star_data
-
-            # Skip if no stars were found
-            if not x2:
-                continue
-
-            # Construct the table of the star parameters
-            star_data = zip(x2, y2, background, intensity)
-
-            # Add star info to the star list
-            star_list.append([ff_name, star_data])
-
-            # Handle the detected meteors
-            meteor_No = 1
-            for meteor in meteor_data:
-
-                rho, theta, centroids = meteor
-
-                # Append to the results list
-                meteor_list.append([ff_name, meteor_No, rho, theta, centroids])
-                meteor_No += 1
-
-
-            # Add the FF file to the archive list if a meteor was detected on it
-            if meteor_data:
-                ff_detected.append(ff_name)
-
-
-        # Generate the name for the CALSTARS file
-        calstars_name = 'CALSTARS_' + "{:s}".format(str(config.stationID)) + '_' \
-            + os.path.basename(night_data_dir) + '.txt'
-
-        # Write detected stars to the CALSTARS file
-        CALSTARS.writeCALSTARS(star_list, night_data_dir, calstars_name, config.stationID, config.height, \
-            config.width)
-
-        # Generate FTPdetectinfo file name
-        ftpdetectinfo_name = 'FTPdetectinfo_' + os.path.basename(night_data_dir) + '.txt'
-
-        # Write FTPdetectinfo file
-        FTPdetectinfo.writeFTPdetectinfo(meteor_list, night_data_dir, ftpdetectinfo_name, night_data_dir, \
-            config.stationID, config.fps)
 
 
 
-
-        # Get the platepar file
-        platepar, platepar_path, platepar_fmt = getPlatepar(config)
-
-
-        # Run calibration check and auto astrometry refinement
-        if platepar is not None:
-
-            # Read in the CALSTARS file
-            calstars_list = CALSTARS.readCALSTARS(night_data_dir, calstars_name)
-
-            # Run astrometry check and refinement
-            platepar, fit_status = autoCheckFit(config, platepar, calstars_list)
-
-            # If the fit was sucessful, apply the astrometry to detected meteors
-            if fit_status:
-
-                log.info('Astrometric calibration SUCCESSFUL!')
-
-                # Save the refined platepar to the night directory and as default
-                platepar.write(os.path.join(night_data_dir, config.platepar_name), fmt=platepar_fmt)
-                platepar.write(platepar_path, fmt=platepar_fmt)
-
-            else:
-                log.info('Astrometric calibration FAILED!, Using old platepar for calibration...')    
-
-
-            # Calculate astrometry for meteor detections
-            applyAstrometryFTPdetectinfo(night_data_dir, ftpdetectinfo_name, platepar_path)
-
-
-
-    log.info('Plotting field sums...')
-
-    # Plot field sums to a graph
-    plotFieldsums(night_data_dir, config)
-
-    # Archive all fieldsums to one archive
-    archiveFieldsums(night_data_dir)
-
-
-    # List for any extra files which will be copied to the night archive directory. Full paths have to be 
-    #   given
-    extra_files = []
-
-    log.info('Making a flat...')
-
-    # Make a new flat field
-    flat_img = makeFlat(night_data_dir, config)
-
-    # If making flat was sucessfull, save it
-    if flat_img is not None:
-
-        # Save the flat in the root directory, to keep the operational flat updated
-        scipy.misc.imsave(config.flat_file, flat_img)
-        flat_path = os.path.join(os.getcwd(), config.flat_file)
-        log.info('Flat saved to: ' + flat_path)
-
-        # Copy the flat to the night's directory as well
-        extra_files.append(flat_path)
-
-    else:
-        log.info('Making flat image FAILED!')
-
-
-
-    ### Add extra files to archive
-
-    # Add the platepar to the archive if it exists
-    if os.path.exists(platepar_path):
-        extra_files.append(platepar_path)
-
-
-    # Add the config file to the archive too
-    extra_files.append(os.path.join(os.getcwd(), '.config'))
-
-
-    ### ###
-
-
-    night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir, 
-        night_data_dir_name)
-
-
-    log.info('Archiving detections to ' + night_archive_dir)
-    
-    # Archive the detections
-    archive_name = archiveDetections(night_data_dir, night_archive_dir, ff_detected, config, \
-        extra_files=extra_files)
+    # Save detection to disk and archive detection    
+    archive_name = processNight(night_data_dir, config, detection_results=detection_results, nodetect=nodetect)
 
 
     # Put the archive up for upload
     if upload_manager is not None:
         log.info('Adding file on upload list: ' + archive_name)
         upload_manager.addFiles([archive_name])
-
 
 
     # Delete detector backup files

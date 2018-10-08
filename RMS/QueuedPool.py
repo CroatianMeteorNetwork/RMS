@@ -176,6 +176,7 @@ class QueuedPool(object):
         return bkup_file_list
 
 
+
     def loadBackupFiles(self):
         """ Load previous backup files. """
 
@@ -195,6 +196,7 @@ class QueuedPool(object):
         # Print and log how many previous files have been loaded
         print_str = "Loaded {:d} backed up results...".format(len(self.bkup_dict))
         self.printAndLog(print_str)
+
 
 
     def deleteBackupFiles(self):
@@ -282,7 +284,6 @@ class QueuedPool(object):
             self.cores.set(cores)
 
 
-        
         self.printAndLog('Using {:d} cores'.format(self.cores.value()))
 
         # Initialize the pool of workers with the given number of worker cores
