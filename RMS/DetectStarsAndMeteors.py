@@ -157,7 +157,7 @@ if __name__ == "__main__":
     print('Starting detection...')
 
     # Initialize the detector
-    detector = QueuedPool(detectStarsAndMeteors, cores=-1, log=log)
+    detector = QueuedPool(detectStarsAndMeteors, cores=-1, log=log, backup_dir=ff_dir)
 
     # Give detector jobs
     for ff_name in ff_list:
@@ -245,6 +245,10 @@ if __name__ == "__main__":
     # Write FTPdetectinfo file
     FTPdetectinfo.writeFTPdetectinfo(meteor_list, ff_dir, ftpdetectinfo_name, ff_dir, 
         config.stationID, config.fps)
+
+
+    # Delete QueuedPool backup files
+    detector.deleteBackupFiles()
 
 
     print('Total time taken: ', datetime.datetime.utcnow() - time_start)

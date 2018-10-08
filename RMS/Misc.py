@@ -5,6 +5,8 @@ import shutil
 import errno
 import logging
 import subprocess
+import random
+import string
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -96,3 +98,14 @@ def ping(host):
 
     # Pinging
     return subprocess.call(command) == 0
+
+
+
+
+
+def randomCharacters(length):
+    """ Returns a random string of alphanumeric characters. """
+
+    letters = string.ascii_lowercase + string.digits
+
+    return ''.join(random.choice(letters) for i in range(length))

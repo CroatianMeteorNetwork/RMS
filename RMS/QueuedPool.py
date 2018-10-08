@@ -9,6 +9,7 @@ import multiprocessing
 import multiprocessing.dummy
 
 from RMS.Pickling import savePickle, loadPickle
+from RMS.Misc import randomCharacters
 
 
 class SafeValue(object):
@@ -133,9 +134,10 @@ class QueuedPool(object):
         ### ###
 
 
-    def printAndLog(self, message):
+    def printAndLog(self, *args):
         """ Print and log the given message. """
 
+        message = " ".join(list(map(str, args)))
         print(message)
 
         if self.log is not None:
@@ -151,7 +153,8 @@ class QueuedPool(object):
         bkup_obj = BackupContainer(inputs, outputs)
 
         # Create a name for the backup file
-        bkup_file_name = self.bkup_file_prefix + str(self.results_counter.value()) + self.bkup_file_extension
+        bkup_file_name = self.bkup_file_prefix + str(self.results_counter.value()) + "_" + randomCharacters(5) \
+            + self.bkup_file_extension
 
         # Save the backup to disk
         savePickle(bkup_obj, self.bkup_dir, bkup_file_name)
@@ -450,7 +453,6 @@ class QueuedPool(object):
                     break
             
         return results
-
 
 
 

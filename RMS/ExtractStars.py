@@ -20,10 +20,11 @@ from __future__ import print_function, division, absolute_import
 import time
 import sys
 import os
+import argparse
+
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize as opt
-
 import scipy.ndimage as ndimage
 import scipy.ndimage.filters as filters
 
@@ -33,6 +34,7 @@ from RMS.Formats import FFfile
 from RMS.Formats import CALSTARS
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
+from RMS.QueuedPool import QueuedPool
 
 
 
@@ -371,15 +373,38 @@ if __name__ == "__main__":
 
     time_start = time.clock()
 
-    # Load config file
-    config = cr.parse(".config")
+    ### COMMAND LINE ARGUMENTS
 
-    if not len(sys.argv) == 2:
-        print("Usage: python -m RMS.ExtractStars /path/to/FF/files/")
-        sys.exit()
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Extract stars on FF files in the given folder.")
+
+    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
+        help='Path to the folder with FF files.')
+
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+    if cml_args.config is not None:
+
+        config_file = os.path.abspath(cml_args.config[0].replace('"', ''))
+
+        print('Loading config file:', config_file)
+
+        # Load the given config file
+        config = cr.parse(config_file)
+
+    else:
+        # Load the default configuration file
+        config = cr.parse(".config")
+
     
     # Get paths to every FF bin file in a directory 
-    ff_dir = os.path.abspath(sys.argv[1])
+    ff_dir = os.path.abspath(cml_args.dir_path[0])
     ff_list = [ff_name for ff_name in os.listdir(ff_dir) if FFfile.validFFName(ff_name)]
 
     # Check if there are any file in the directory
@@ -403,30 +428,56 @@ if __name__ == "__main__":
             flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
 
 
-    star_list = []
+    
 
-    # Go through all files in the directory
+    extraction_list = []
+
+    # Go through all files in the directory and add them to the detection list
     for ff_name in sorted(ff_list):
 
         # Check if the given file is a valid FF file
         if not FFfile.validFFName(ff_name):
             continue
 
+        #print(ff_name)
+        extraction_list.append(ff_name)
 
-        print(ff_name)
 
-        t1 = time.clock()
+    star_list = []
 
-        x2, y2, amplitude, intensity = extractStars(ff_dir, ff_name, config, flat_struct=flat_struct)
+    # Run the QueuedPool for detection
+    workpool = QueuedPool(extractStars, cores=-1, backup_dir=ff_dir)
 
-        print('Time for extraction: ', time.clock() - t1)
+
+    # Add jobs for the pool
+    for ff_name in extraction_list:
+        print('Adding for extraction:', ff_name)
+        workpool.addJob([ff_dir, ff_name, config, flat_struct])
+
+
+    print('Starting pool...')
+
+    # Start the detection
+    workpool.startPool()
+
+
+    print('Waiting for the detection to finish...')
+
+    # Wait for the detector to finish and close it
+    workpool.closePool()
+
+
+    # Get extraction results
+    for result in workpool.getResults():
+
+        x2, y2, amplitude, intensity = result
 
         # Skip if no stars were found
         if not x2:
             continue
 
         # Construct the table of the star parameters
-        star_data = zip(x2, y2, amplitude, intensity)
+        star_data = list(zip(x2, y2, amplitude, intensity))
 
         # Add star info to the star list
         star_list.append([ff_name, star_data])
@@ -456,5 +507,8 @@ if __name__ == "__main__":
 
     # Write detected stars to the CALSTARS file
     CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, ff.camno, ff.nrows, ff.ncols)
+
+    # Delete QueudPool backed up files
+    workpool.deleteBackupFiles()
 
     print('Total time taken: ', time.clock() - time_start)

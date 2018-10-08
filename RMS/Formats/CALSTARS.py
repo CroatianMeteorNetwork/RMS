@@ -62,7 +62,7 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols):
             star_file.write("Integ pixels  = -1" + "\n")
 
             # Write every star to file
-            for x, y, amplitude, level in star_data:
+            for x, y, amplitude, level in list(star_data):
                 star_file.write("{:7.2f} {:7.2f} {:6d} {:6d}".format(round(y, 2), round(x, 2), 
                     int(level), int(amplitude)) + "\n")
 

@@ -251,7 +251,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             delay_detection = 120
 
         # Initialize the detector
-        detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log, delay_start=delay_detection)
+        detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log, delay_start=delay_detection, \
+            backup_dir=night_data_dir)
         detector.startPool()
 
     
@@ -529,6 +530,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     if upload_manager is not None:
         log.info('Adding file on upload list: ' + archive_name)
         upload_manager.addFiles([archive_name])
+
+
+
+    # Delete detector backup files
+    detector.deleteBackupFiles()
 
 
     # If capture was manually stopped, end program
