@@ -50,8 +50,13 @@ def plotFieldsums(dir_path, config):
         # Check if it is the fieldsum file
         if ('FS' in file_name) and ('_fieldsum.bin' in file_name):
 
-            # Read the field sums
-            _, intensity_array = readFieldIntensitiesBin(dir_path, file_name)
+            # Try reading the intensities sum, because the file might be corrupted
+            try:
+                # Read the field sums
+                _, intensity_array = readFieldIntensitiesBin(dir_path, file_name)
+
+            except TypeError:
+                print('File {:s} is corrupted!'.format(file_name))
 
             # Extract the date and time from the FF file
             dt = filenameToDatetime(file_name)
