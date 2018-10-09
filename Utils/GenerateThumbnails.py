@@ -97,8 +97,15 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None):
 
             if (i + j) < len(ff_list):
 
-                # Read maxpixel image
-                img = FFfile.read(dir_path, ff_list[i + j]).maxpixel
+                tmp_file_name = ff_list[i + j]
+
+                try:
+                    
+                    # Read maxpixel image
+                    img = FFfile.read(dir_path, tmp_file_name).maxpixel
+
+                except IOError:
+                    print('File {:s} is corrupted!'.format(tmp_file_name))
 
                 # Resize the image
                 img = cv2.resize(img, (bin_w, bin_h))
