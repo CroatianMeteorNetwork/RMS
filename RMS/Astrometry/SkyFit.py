@@ -806,10 +806,16 @@ class PlateTool(object):
                     ax_p = fig_p.add_subplot(1, 1, 1)
 
                     # Plot catalog magnitude vs. logsum of pixel intensities
-                    self.photom_points = ax_p.scatter(logsum_px, catalog_mags)
+                    self.photom_points = ax_p.scatter(logsum_px, catalog_mags, s=5, c='r')
 
-                    x_min, _ = ax_p.get_xlim()
-                    y_min, _ = ax_p.get_ylim()
+                    x_min, x_max = ax_p.get_xlim()
+                    y_min, y_max = ax_p.get_ylim()
+
+                    x_min_w = x_min - 3
+                    x_max_w = x_max + 3
+                    y_min_w = y_min - 3
+                    y_max_w = y_max + 3
+
                     
                     # Plot fit info
                     fit_info = 'Fit: {:+.2f}M {:+.2f} +/- {:.2f} \nGamma = {:.2f}'.format(self.platepar.mag_0, \
@@ -819,14 +825,18 @@ class PlateTool(object):
                     #ax_p.text(x_min, y_min, fit_info, color='r', verticalalignment='top', horizontalalignment='left', fontsize=10)
 
                     # Plot the line fit
-                    logsum_arr = np.linspace(np.min(logsum_px), np.max(logsum_px), 10)
-                    ax_p.plot(logsum_arr, _photomLine(logsum_arr, *photom_params), label=fit_info)
+                    logsum_arr = np.linspace(x_min_w, x_max_w, 10)
+                    ax_p.plot(logsum_arr, _photomLine(logsum_arr, *photom_params), label=fit_info, linestyle='--', color='k', alpha=0.5)
 
                     ax_p.legend()
 
                     mag_str = "{:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*self.config.star_catalog_band_ratios)
                     ax_p.set_ylabel("Catalog magnitude ({:s})".format(mag_str))
                     ax_p.set_xlabel("Logsum pixel")
+
+                    # Set wider axis limits
+                    ax_p.set_xlim(x_min_w, x_max_w)
+                    ax_p.set_ylim(y_min_w, y_max_w)
 
                     ax_p.invert_yaxis()
 
@@ -1011,11 +1021,16 @@ class PlateTool(object):
 
             catalog_x_filtered, catalog_y_filtered, catalog_mag_filtered = cat_stars.T
 
-            cat_mag_faintest = np.max(catalog_mag_filtered)
+            if len(catalog_mag_filtered):
 
-            # Plot catalog stars
-            plt.scatter(catalog_x_filtered, catalog_y_filtered, c='r', marker='+', lw=1.0, alpha=0.5, \
-                s=((4.0 + (cat_mag_faintest - catalog_mag_filtered))/2.0)**(2*2.512))
+                cat_mag_faintest = np.max(catalog_mag_filtered)
+
+                # Plot catalog stars
+                plt.scatter(catalog_x_filtered, catalog_y_filtered, c='r', marker='+', lw=1.0, alpha=0.5, \
+                    s=((4.0 + (cat_mag_faintest - catalog_mag_filtered))/2.0)**(2*2.512))
+
+            else:
+                print('No catalog stars visible!')
 
         ######################################################################################################
 
