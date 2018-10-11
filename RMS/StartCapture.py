@@ -333,7 +333,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # Save detection to disk and archive detection    
-    archive_name = processNight(night_data_dir, config, detection_results=detection_results, nodetect=nodetect)
+    archive_name, _ = processNight(night_data_dir, config, detection_results=detection_results, nodetect=nodetect)
 
 
     # Put the archive up for upload

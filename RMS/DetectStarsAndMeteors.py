@@ -235,10 +235,7 @@ def detectStarsAndMeteorsDirectory(dir_path, config):
     calstars_name, ftpdetectinfo_name, ff_detected = saveDetections(detection_results, ff_dir, config)
 
 
-    # Delete QueuedPool backup files
-    detector.deleteBackupFiles()
-
-    return calstars_name, ftpdetectinfo_name, ff_detected
+    return calstars_name, ftpdetectinfo_name, ff_detected, detector
 
 
 

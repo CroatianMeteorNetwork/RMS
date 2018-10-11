@@ -87,7 +87,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         if detection_results is None:
 
             # Run detection on the given directory
-            calstars_name, ftpdetectinfo_name, ff_detected = detectStarsAndMeteorsDirectory(night_data_dir, \
+            calstars_name, ftpdetectinfo_name, ff_detected, detector = detectStarsAndMeteorsDirectory(night_data_dir, \
                 config)
 
         # Otherwise, save detection results
@@ -96,6 +96,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             # Save CALSTARS and FTPdetectinfo to disk
             calstars_name, ftpdetectinfo_name, ff_detected = saveDetections(detection_results, \
                 night_data_dir, config)
+
+            # If the files were previously detected, there is no detector
+            detector = None
 
 
         # Get the platepar file
@@ -188,7 +191,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         extra_files=extra_files)
 
 
-    return archive_name
+    return archive_name, detector
 
 
 
@@ -237,7 +240,7 @@ if __name__ == "__main__":
 
 
     # Process the night
-    archive_name = processNight(cml_args.dir_path[0], config)
+    archive_name, detector = processNight(cml_args.dir_path[0], config)
 
 
     # Upload the archive, if upload is enabled
@@ -257,3 +260,8 @@ if __name__ == "__main__":
         if upload_manager.is_alive():
             upload_manager.stop()
             print('Closing upload manager...')
+
+
+        # Delete detection backup files
+        if detector is not None:
+            detector.deleteBackupFiles()
