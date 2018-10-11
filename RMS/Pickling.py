@@ -41,10 +41,18 @@ def loadPickle(dir_path, file_name):
 
     with open(os.path.join(dir_path, file_name), 'rb') as f:
 
-        # Python 2
-        if sys.version_info[0] < 3:
-            return pickle.load(f)
+        # Try loading the Pickle file
 
-        # Python 3
-        else:
-            return pickle.load(f, encoding='latin1')
+        try:
+            # Python 2
+            if sys.version_info[0] < 3:
+                return pickle.load(f)
+
+            # Python 3
+            else:
+                return pickle.load(f, encoding='latin1')
+
+        except IOError:
+            
+            print('The pickle file was corruped and could not be loaded:', os.path.join(dir_path, file_name))
+            return None

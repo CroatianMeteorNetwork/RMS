@@ -186,6 +186,9 @@ class QueuedPool(object):
             # Load the backup file
             bkup_obj = loadPickle(self.bkup_dir, file_name)
 
+            if bkup_obj is None:
+                continue
+
             # Get the inputs
             bkup_inputs = tuple(bkup_obj.inputs)
 
