@@ -176,9 +176,9 @@ def checkListEquality(t1, t2):
 
 
 
-def isListInDict(lst, dct):
-    """ Given the list or a tuple, check if it is a dictionary. Difference instances of same classes are
-        handled as well.
+def isListKeyInDict(lst, dct):
+    """ Given the list or a tuple, check if it is a key in the dictionary. Difference instances of same 
+        classes are handled as well.
 
     Arguments:
         lst: [list or tuple] Input list.
@@ -192,9 +192,25 @@ def isListInDict(lst, dct):
     for key in dct:
 
         # If the list was found, return True
-        if checkListEquality(lst, dct[key]):
+        if checkListEquality(lst, key):
             return True
 
 
     # If list was not found in the dictionary, return False
     return False
+
+
+
+def listToTupleRecursive(lst):
+    """ Given the list, convert it to tuples, and convert all sublists to tuples. """
+
+    out = []
+
+    for elem in lst:
+
+        if (type(elem) is list) or (type(elem) is tuple):
+            elem = listToTupleRecursive(elem)
+
+        out.append(elem)
+
+    return tuple(out)

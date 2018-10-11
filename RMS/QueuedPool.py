@@ -9,7 +9,7 @@ import multiprocessing
 import multiprocessing.dummy
 
 from RMS.Pickling import savePickle, loadPickle
-from RMS.Misc import randomCharacters, isListInDict
+from RMS.Misc import randomCharacters, isListKeyInDict, listToTupleRecursive
 
 
 class SafeValue(object):
@@ -51,7 +51,7 @@ class BackupContainer(object):
         """
 
         # Take the input list a tuple, as it has to be imutable to be a dictionary key
-        self.inputs = tuple(inputs)
+        self.inputs = listToTupleRecursive(inputs)
 
         self.outputs = outputs
 
@@ -190,10 +190,10 @@ class QueuedPool(object):
                 continue
 
             # Get the inputs
-            bkup_inputs = tuple(bkup_obj.inputs)
+            bkup_inputs = listToTupleRecursive(bkup_obj.inputs)
 
             # Make sure the value-key pair does not exist
-            if not isListInDict(bkup_inputs, self.bkup_dict):
+            if not isListKeyInDict(bkup_inputs, self.bkup_dict):
 
                 # Add the pair of inputs vs. outputs to the lookup dictionary
                 self.bkup_dict[bkup_inputs] = bkup_obj.outputs
@@ -235,13 +235,14 @@ class QueuedPool(object):
             if args is None:
                 break
 
-
             # First do a lookup in the dictionary if this set of inputs have already been processed
             read_from_backup = False
-            if isListInDict(tuple(args), self.bkup_dict):
+            args_tpl = listToTupleRecursive(args)
+            
+            if isListKeyInDict(args_tpl, self.bkup_dict):
 
                 # Load the results from backup
-                result = self.bkup_dict[tuple(args)]
+                result = self.bkup_dict[args_tpl]
 
                 read_from_backup = True
 
