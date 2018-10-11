@@ -197,6 +197,8 @@ class QueuedPool(object):
         print_str = "Loaded {:d} backed up results...".format(len(self.bkup_dict))
         self.printAndLog(print_str)
 
+        print(self.bkup_dict)
+
 
 
     def deleteBackupFiles(self):
@@ -224,6 +226,8 @@ class QueuedPool(object):
 
             # Get the function arguments (block until available)
             args = self.input_queue.get(True)
+
+            print('Args:', args)
 
             # The 'poison pill' for killing the worker when closing is requested
             if args is None:
