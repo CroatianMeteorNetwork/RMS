@@ -185,7 +185,8 @@ def isListKeyInDict(lst, dct):
         dct: [dict] Dictionary to be checked.
 
     Return:
-        [bool] True if list/tuple in dictionary, False otherwise.
+        (status, key): [bool, obj] True if list/tuple in dictionary, False otherwise. The key for value
+            retrieval will be returned as well.
     """
 
     # Go though the sict
@@ -193,11 +194,11 @@ def isListKeyInDict(lst, dct):
 
         # If the list was found, return True
         if checkListEquality(lst, key):
-            return True
+            return True, key
 
 
     # If list was not found in the dictionary, return False
-    return False
+    return False, None
 
 
 

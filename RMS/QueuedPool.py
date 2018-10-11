@@ -238,11 +238,14 @@ class QueuedPool(object):
             # First do a lookup in the dictionary if this set of inputs have already been processed
             read_from_backup = False
             args_tpl = listToTupleRecursive(args)
-            
-            if isListKeyInDict(args_tpl, self.bkup_dict):
+
+            # Check if the key exists. Return the found key as object instances might differ
+            key_status, key = isListKeyInDict(args_tpl, self.bkup_dict)
+
+            if key_status:
 
                 # Load the results from backup
-                result = self.bkup_dict[args_tpl]
+                result = self.bkup_dict[key]
 
                 read_from_backup = True
 
