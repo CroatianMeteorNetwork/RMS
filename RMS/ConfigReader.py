@@ -72,7 +72,7 @@ class Config:
         self.contrast = 0
 
         self.bit_depth = 8
-        self.gamma = 0.45
+        self.gamma = 1.0
 
         self.ff_format = 'fits'
         

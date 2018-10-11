@@ -331,8 +331,14 @@ class PlateTool(object):
                 # If the centroid of the star has to be picked
                 if self.star_selection_centroid:
 
+                    # Perform centroiding with 2 iterations
+
+                    x_cent_tmp, y_cent_tmp, _ = self.centroidStar()
+
                     # Centroid the star around the pressed coordinates
-                    self.x_centroid, self.y_centroid, self.star_intensity = self.centroidStar()
+                    self.x_centroid, self.y_centroid, \
+                        self.star_intensity = self.centroidStar(prev_x_cent=x_cent_tmp, \
+                            prev_y_cent=y_cent_tmp)
 
                     # Draw the centroid on the image
                     plt.scatter(self.x_centroid, self.y_centroid, marker='+', c='y', s=100, lw=3)
@@ -456,6 +462,160 @@ class PlateTool(object):
 
         if self.platepar.dec_d <= -90:
             self.platepar.dec_d = -89.999
+
+
+
+    def photometry(self, show_plot=False):
+        """ Perform the photometry on selectes stars. """
+
+        if self.star_pick_mode:
+
+            ### Make a photometry plot
+
+            # Extract star intensities and star magnitudes
+            star_coords = []
+            logsum_px = []
+            catalog_mags = []
+            for paired_star in self.paired_stars:
+
+                img_star, catalog_star = paired_star
+
+                star_x, star_y, px_intens = img_star
+                _, _, star_mag = catalog_star
+
+                # Skip intensities which were not properly calculated
+                if np.isnan(px_intens) or np.isinf(px_intens):
+                    continue
+
+                star_coords.append([star_x, star_y])
+                logsum_px.append(np.log10(px_intens))
+                catalog_mags.append(star_mag)
+
+
+
+            # Make sure there are more than 2 stars picked
+            if len(logsum_px) > 2:
+
+                def _photomLine(x, k):
+                    # The slope is fixed to -2.5, coming from the definition of magnitude
+                    return -2.5*x + k
+
+
+                # Fit a line to the star data, where only the intercept has to be estimated
+                photom_params, _ = scipy.optimize.curve_fit(_photomLine, logsum_px, catalog_mags, \
+                    method='trf', loss='soft_l1')
+
+
+                # Calculate the standard deviation
+                fit_resids = np.array(catalog_mags) - _photomLine(np.array(logsum_px), *photom_params)
+                fit_stddev = np.std(fit_resids)
+
+
+                # Set photometry parameters
+                self.platepar.mag_0 = -2.5
+                self.platepar.mag_lev = photom_params[0]
+                self.platepar.mag_lev_stddev = fit_stddev
+
+
+                # Remove previous photometry deviation labels 
+                if len(self.photom_deviatons_scat) > 0:
+                    for entry in self.photom_deviatons_scat:
+                        resid_lbl, mag_lbl = entry
+                        try:
+                            resid_lbl.remove()
+                            mag_lbl.remove()
+                        except:
+                            pass
+
+                self.photom_deviatons_scat = []
+
+
+
+                if self.catalog_stars_visible:
+
+                    # Plot photometry deviations on the main plot as colour coded rings
+                    star_coords = np.array(star_coords)
+                    star_coords_x, star_coords_y = star_coords.T
+
+                    for star_x, star_y, fit_diff, star_mag in zip (star_coords_x, star_coords_y, fit_resids, \
+                        catalog_mags):
+
+                        photom_resid_txt = "{:.2f}".format(fit_diff)
+
+                        # Determine the size of the residual text, larger the residual, larger the text
+                        photom_resid_size = 8 + np.abs(fit_diff)/(np.max(np.abs(fit_resids))/5.0)
+
+                        # Plot the residual as text under the star
+                        photom_resid_lbl = plt.text(star_x, star_y + 10, photom_resid_txt, \
+                            verticalalignment='top', horizontalalignment='center', \
+                            fontsize=photom_resid_size, color='w')
+
+                        # Plot the star magnitude
+                        star_mag_lbl = plt.text(star_x, star_y - 10, "{:+.2}".format(star_mag), \
+                            verticalalignment='bottom', horizontalalignment='center', \
+                            fontsize=10, color='r')
+
+
+                        self.photom_deviatons_scat.append([photom_resid_lbl, star_mag_lbl])
+
+
+                    plt.draw()
+
+
+                # Show the photometry fit plot
+                if show_plot:
+
+                    # Init plot
+                    fig_p = plt.figure(facecolor=None)
+                    ax_p = fig_p.add_subplot(1, 1, 1)
+
+                    # Plot catalog magnitude vs. logsum of pixel intensities
+                    self.photom_points = ax_p.scatter(logsum_px, catalog_mags, s=5, c='r')
+
+                    x_min, x_max = ax_p.get_xlim()
+                    y_min, y_max = ax_p.get_ylim()
+
+                    x_min_w = x_min - 3
+                    x_max_w = x_max + 3
+                    y_min_w = y_min - 3
+                    y_max_w = y_max + 3
+
+                    
+                    # Plot fit info
+                    fit_info = 'Fit: {:+.2f}LSP {:+.2f} +/- {:.2f} \nGamma = {:.2f}'.format(self.platepar.mag_0, \
+                        self.platepar.mag_lev, fit_stddev, self.platepar.gamma)
+
+                    print(fit_info)
+                    #ax_p.text(x_min, y_min, fit_info, color='r', verticalalignment='top', horizontalalignment='left', fontsize=10)
+
+                    # Plot the line fit
+                    logsum_arr = np.linspace(x_min_w, x_max_w, 10)
+                    ax_p.plot(logsum_arr, _photomLine(logsum_arr, *photom_params), label=fit_info, linestyle='--', color='k', alpha=0.5)
+
+                    ax_p.legend()
+
+                    mag_str = "{:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*self.config.star_catalog_band_ratios)
+                    ax_p.set_ylabel("Catalog magnitude ({:s})".format(mag_str))
+                    ax_p.set_xlabel("Logsum pixel")
+
+                    # Set wider axis limits
+                    ax_p.set_xlim(x_min_w, x_max_w)
+                    ax_p.set_ylim(y_min_w, y_max_w)
+
+                    ax_p.invert_yaxis()
+
+                    ax_p.grid()
+
+                    
+                    fig_p.show()
+                    #plt.show()
+                    #fig_p.clf()
+
+
+            else:
+                print('Need more than 2 stars for photometry plot!')
+
+
 
 
 
@@ -712,147 +872,8 @@ class PlateTool(object):
 
         elif event.key == 'p':
 
-            if self.star_pick_mode:
-
-                ### Make a photometry plot
-
-                # Extract star intensities and star magnitudes
-                star_coords = []
-                logsum_px = []
-                catalog_mags = []
-                for paired_star in self.paired_stars:
-
-                    img_star, catalog_star = paired_star
-
-                    star_x, star_y, px_intens = img_star
-                    _, _, star_mag = catalog_star
-
-                    # Skip intensities which were not properly calculated
-                    if np.isnan(px_intens) or np.isinf(px_intens):
-                        continue
-
-                    star_coords.append([star_x, star_y])
-                    logsum_px.append(np.log10(px_intens))
-                    catalog_mags.append(star_mag)
-
-
-
-                # Make sure there are more than 2 stars picked
-                if len(logsum_px) > 2:
-
-                    def _photomLine(x, k):
-                        # The slope is fixed to -2.5, coming from the definition of magnitude
-                        return -2.5*x + k
-
-
-                    # Fit a line to the star data, where only the intercept has to be estimated
-                    photom_params, _ = scipy.optimize.curve_fit(_photomLine, logsum_px, catalog_mags, \
-                        method='trf', loss='soft_l1')
-
-
-                    # Calculate the standard deviation
-                    fit_resids = np.array(catalog_mags) - _photomLine(np.array(logsum_px), *photom_params)
-                    fit_stddev = np.std(fit_resids)
-
-
-                    # Set photometry parameters
-                    self.platepar.mag_0 = -2.5
-                    self.platepar.mag_lev = photom_params[0]
-                    self.platepar.mag_lev_stddev = fit_stddev
-
-
-                    # Remove previous photometry deviation labels 
-                    if len(self.photom_deviatons_scat) > 0:
-                        for entry in self.photom_deviatons_scat:
-                            resid_lbl, mag_lbl = entry
-                            try:
-                                resid_lbl.remove()
-                                mag_lbl.remove()
-                            except:
-                                pass
-
-                    self.photom_deviatons_scat = []
-
-                    # Plot photometry deviations on the main plot as colour coded rings
-                    star_coords = np.array(star_coords)
-                    star_coords_x, star_coords_y = star_coords.T
-
-                    for star_x, star_y, fit_diff, star_mag in zip (star_coords_x, star_coords_y, fit_resids, \
-                        catalog_mags):
-
-                        photom_resid_txt = "{:.2f}".format(fit_diff)
-
-                        # Determine the size of the residual text, larger the residual, larger the text
-                        photom_resid_size = 8 + np.abs(fit_diff)/(np.max(np.abs(fit_resids))/5.0)
-
-                        # Plot the residual as text under the star
-                        photom_resid_lbl = plt.text(star_x, star_y + 10, photom_resid_txt, \
-                            verticalalignment='top', horizontalalignment='center', \
-                            fontsize=photom_resid_size, color='w')
-
-                        # Plot the star magnitude
-                        star_mag_lbl = plt.text(star_x, star_y - 10, "{:+.2}".format(star_mag), \
-                            verticalalignment='bottom', horizontalalignment='center', \
-                            fontsize=10, color='r')
-
-
-                        self.photom_deviatons_scat.append([photom_resid_lbl, star_mag_lbl])
-
-
-                    plt.draw()
-
-                    # Init plot
-                    fig_p = plt.figure(facecolor=None)
-                    ax_p = fig_p.add_subplot(1, 1, 1)
-
-                    # Plot catalog magnitude vs. logsum of pixel intensities
-                    self.photom_points = ax_p.scatter(logsum_px, catalog_mags, s=5, c='r')
-
-                    x_min, x_max = ax_p.get_xlim()
-                    y_min, y_max = ax_p.get_ylim()
-
-                    x_min_w = x_min - 3
-                    x_max_w = x_max + 3
-                    y_min_w = y_min - 3
-                    y_max_w = y_max + 3
-
-                    
-                    # Plot fit info
-                    fit_info = 'Fit: {:+.2f}M {:+.2f} +/- {:.2f} \nGamma = {:.2f}'.format(self.platepar.mag_0, \
-                        self.platepar.mag_lev, fit_stddev, self.platepar.gamma)
-
-                    print(fit_info)
-                    #ax_p.text(x_min, y_min, fit_info, color='r', verticalalignment='top', horizontalalignment='left', fontsize=10)
-
-                    # Plot the line fit
-                    logsum_arr = np.linspace(x_min_w, x_max_w, 10)
-                    ax_p.plot(logsum_arr, _photomLine(logsum_arr, *photom_params), label=fit_info, linestyle='--', color='k', alpha=0.5)
-
-                    ax_p.legend()
-
-                    mag_str = "{:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*self.config.star_catalog_band_ratios)
-                    ax_p.set_ylabel("Catalog magnitude ({:s})".format(mag_str))
-                    ax_p.set_xlabel("Logsum pixel")
-
-                    # Set wider axis limits
-                    ax_p.set_xlim(x_min_w, x_max_w)
-                    ax_p.set_ylim(y_min_w, y_max_w)
-
-                    ax_p.invert_yaxis()
-
-                    ax_p.grid()
-
-                    
-                    fig_p.show()
-                    #plt.show()
-                    #fig_p.clf()
-
-
-                else:
-                    print('Need more than 2 stars for photometry plot!')
-
-
-                    
+            # Show the photometry plot
+            self.photometry(show_plot=True)
 
 
         # Limit values of RA and Dec
@@ -1042,6 +1063,11 @@ class PlateTool(object):
                 print('No catalog stars visible!')
 
         ######################################################################################################
+
+
+        # Draw photometry
+        if len(self.paired_stars) > 2:
+            self.photometry()
 
 
         # Set plot limits
@@ -1461,8 +1487,18 @@ class PlateTool(object):
 
 
 
-    def centroidStar(self):
+    def centroidStar(self, prev_x_cent=None, prev_y_cent=None):
         """ Find the centroid of the star clicked on the image. """
+
+
+        # If the centroid from the previous iteration is given, use that as the centre
+        if (prev_x_cent is not None) and (prev_y_cent is not None):
+            mouse_x = prev_x_cent
+            mouse_y = prev_y_cent
+
+        else:
+            mouse_x = self.mouse_x_press
+            mouse_y = self.mouse_y_press
 
         ### Extract part of image around the mouse cursor ###
         ######################################################################################################
@@ -1470,17 +1506,17 @@ class PlateTool(object):
         # Outer circle radius
         outer_radius = self.star_aperature_radius*2
 
-        x_min = int(round(self.mouse_x_press - outer_radius))
+        x_min = int(round(mouse_x - outer_radius))
         if x_min < 0: x_min = 0
 
-        x_max = int(round(self.mouse_x_press + outer_radius))
+        x_max = int(round(mouse_x + outer_radius))
         if x_max > self.current_ff.ncols - 1:
             x_max > self.current_ff.ncols - 1
 
-        y_min = int(round(self.mouse_y_press - outer_radius))
+        y_min = int(round(mouse_y - outer_radius))
         if y_min < 0: y_min = 0
 
-        y_max = int(round(self.mouse_y_press + outer_radius))
+        y_max = int(round(mouse_y + outer_radius))
         if y_max > self.current_ff.nrows - 1:
             y_max > self.current_ff.nrows - 1
 
