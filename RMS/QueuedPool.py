@@ -186,18 +186,19 @@ class QueuedPool(object):
             # Load the backup file
             bkup_obj = loadPickle(self.bkup_dir, file_name)
 
+            # Get the inputs
+            bkup_inputs = tuple(bkup_obj.inputs)
+
             # Make sure the value-key pair does not exist
-            if not isListInDict(tuple(bkup_obj.inputs), self.bkup_dict):
+            if not isListInDict(bkup_inputs, self.bkup_dict):
 
                 # Add the pair of inputs vs. outputs to the lookup dictionary
-                self.bkup_dict[bkup_obj.inputs] = bkup_obj.outputs
+                self.bkup_dict[bkup_inputs] = bkup_obj.outputs
 
 
         # Print and log how many previous files have been loaded
         print_str = "Loaded {:d} backed up results...".format(len(self.bkup_dict))
         self.printAndLog(print_str)
-
-        print(self.bkup_dict)
 
 
 
@@ -226,8 +227,6 @@ class QueuedPool(object):
 
             # Get the function arguments (block until available)
             args = self.input_queue.get(True)
-
-            print('Args:', args)
 
             # The 'poison pill' for killing the worker when closing is requested
             if args is None:
