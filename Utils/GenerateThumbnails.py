@@ -101,7 +101,7 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None):
 
                     
                 # Read the FF file
-                ff = FFfile.read(dir_path, tmp_file_name).maxpixel
+                ff = FFfile.read(dir_path, tmp_file_name)
 
                 # Skip the FF if it is corruped
                 if ff is None:
