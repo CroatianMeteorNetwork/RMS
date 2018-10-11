@@ -64,6 +64,9 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
             - intensity: intensity of the star
     """
 
+    # This will be returned if there was an error
+    error_return = [[], [], [], []]
+
     # Load parameters from config if given
     if config:
         max_global_intensity = config.max_global_intensity
@@ -81,6 +84,11 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     # Mask the FF file
     ff = MaskImage.applyMask(ff, mask, ff_flag=True)
 
+    # If the FF file could not be read, skip star extraction
+    if ff is None:
+        return error_return
+
+
     # Apply the flat
     if flat_struct is not None:
         ff.avepixel = Image.applyFlat(ff.avepixel, flat_struct)
@@ -91,7 +99,7 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
 
     # Check if the image is too bright and skip the image
     if global_mean > max_global_intensity:
-        return [[], [], [], []]
+        return error_return
 
     data = ff.avepixel.astype(np.float32)
 
@@ -121,7 +129,7 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     # Skip the image if there are too many maxima to process
     if num_objects > config.max_stars:
         print('Too many candidate stars to process! {:d}/{:d}'.format(num_objects, config.max_stars))
-        return [[], [], [], []]
+        return error_return
 
     # Find centres of mass of each labeled objects
     xy = np.array(ndimage.center_of_mass(data, labeled, range(1, num_objects+1)))
@@ -497,8 +505,16 @@ if __name__ == "__main__":
 
         # plotStars(ff, x2, y2)
 
-    # Load data about the image
-    ff = FFfile.read(ff_dir, ff_name)
+
+    for ff_name in extraction_list:
+        
+        # Load data about the image
+        ff = FFfile.read(ff_dir, ff_name)
+
+        # Break when an FF file was successfully loaded
+        if ff is not None:
+            break
+
 
     # Generate the name for the CALSTARS file
     calstars_name = 'CALSTARS_' + "{:s}".format(str(config.stationID)) + '_' \

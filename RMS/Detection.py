@@ -928,6 +928,10 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
     # Load the FF bin file
     ff = FFfile.read(ff_directory, ff_name)
 
+    # If the file could not be read, skip detection
+    if ff is None:
+        return []
+
     # Load the mask file
     mask = MaskImage.loadMask(config.mask_file)
 

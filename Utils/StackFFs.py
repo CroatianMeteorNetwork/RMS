@@ -84,6 +84,10 @@ if __name__ == '__main__':
             # Load FF file
             ff = readFF(dir_path, ff_name)
 
+            # Skip the file if it is corruped
+            if ff is None:
+                continue
+
             maxpixel = ff.maxpixel
             avepixel = ff.avepixel
 

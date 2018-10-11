@@ -41,6 +41,10 @@ if __name__ == "__main__":
             # Read the FF file
             ff = readFF(dir_path, file_name)
 
+            # Skip the file if it could not be read
+            if ff is None:
+                continue
+
             # Make a filename for the image
             img_file_name = file_name.replace('fits', '') + cml_args.file_format[0]
 

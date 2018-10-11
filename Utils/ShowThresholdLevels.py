@@ -57,6 +57,10 @@ if __name__ == "__main__":
             # Read the FF file
             ff = readFF(cml_args.dir_path, file_name)
 
+            # Skip the file if it is corruped
+            if ff is None:
+                continue
+
             # Use the fireball thresholding
             if cml_args.fireball:
                 k1 = config.k1

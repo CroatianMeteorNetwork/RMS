@@ -125,6 +125,11 @@ def makeFlat(dir_path, config):
         if c < 10:
 
             ff = readFF(dir_path, ff_list_good[i])
+
+            # Skip the file if it is corruped
+            if ff is None:
+                continue
+
             ff_avg_list.append(ff.avepixel)
 
             c += 1 
