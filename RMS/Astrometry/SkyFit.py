@@ -966,11 +966,14 @@ class PlateTool(object):
         # Load the FF from the current file
         self.current_ff = readFF(self.dir_path, self.current_ff_file)
 
-        # If the current FF couldn't be opened, go to the next
-        messagebox.showerror(title='Read error', message='The current FF file is corrupted!')
-        self.nextFF()
 
-        return None
+        if self.current_ff is None:
+            
+            # If the current FF couldn't be opened, go to the next
+            messagebox.showerror(title='Read error', message='The current FF file is corrupted!')
+            self.nextFF()
+
+            return None
 
 
         # Choose appropriate iamge data
