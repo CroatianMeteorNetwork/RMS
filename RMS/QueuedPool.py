@@ -193,7 +193,8 @@ class QueuedPool(object):
             bkup_inputs = listToTupleRecursive(bkup_obj.inputs)
 
             # Make sure the value-key pair does not exist
-            if not isListKeyInDict(bkup_inputs, self.bkup_dict):
+            key_status, _ = isListKeyInDict(bkup_inputs, self.bkup_dict)
+            if not key_status:
 
                 # Add the pair of inputs vs. outputs to the lookup dictionary
                 self.bkup_dict[bkup_inputs] = bkup_obj.outputs
