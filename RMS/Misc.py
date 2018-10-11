@@ -7,6 +7,7 @@ import logging
 import subprocess
 import random
 import string
+import inspect
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -109,3 +110,91 @@ def randomCharacters(length):
     letters = string.ascii_lowercase + string.digits
 
     return ''.join(random.choice(letters) for i in range(length))
+
+
+
+
+def checkListEquality(t1, t2):
+    """ Given two lists or tuples, compare every element and make sure they are the same. This function takes care
+        of comparing two objects attribute-wise.
+    
+    Arguments:
+        t1: [tuple] First list or tuple.
+        t2: [tuple] Second list or tuple.
+
+    Return:
+        [bool] True if equal, False otherwise.
+    """
+
+    # Check if they are tuples or lists
+    if not (type(t1) is list) and not(type(t1) is tuple):
+        return False
+
+    if not (type(t2) is list) and not(type(t2) is tuple):
+        return False
+
+
+    # Check if they have the same length
+    if len(t1) != len(t2):
+        return False
+
+
+    # Check them element-wise
+    for e1, e2 in zip(t1, t2):
+
+        # If they are tuples or lists, recursively check equality
+        if (type(e1) is list) or (type(e1) is tuple):
+            if not checkListEquality(e1, e2):
+                return False
+
+
+        # If the elements are instances of objects, compare their attributes
+        elif hasattr(e1, '__dict__') and hasattr(e2, '__dict__'):
+
+            # Check if they are functions or classes, compare them directly
+            if (inspect.isroutine(e1) and inspect.isroutine(e2)) or \
+                (inspect.isclass(e1) and inspect.isclass(e2)):
+
+                if e1 == e2: 
+                    return True
+                else: 
+                    return False
+
+            # If they are instances of objects, compare their attributes
+            elif e1.__dict__ != e2.__dict__:
+                return False
+
+        else:
+
+            # If the elements are someting else, compare them directly
+            if e1 != e2:
+                return False
+
+
+    # If all checks have passes, return True
+    return True
+
+
+
+def isListInDict(lst, dct):
+    """ Given the list or a tuple, check if it is a dictionary. Difference instances of same classes are
+        handled as well.
+
+    Arguments:
+        lst: [list or tuple] Input list.
+        dct: [dict] Dictionary to be checked.
+
+    Return:
+        [bool] True if list/tuple in dictionary, False otherwise.
+    """
+
+    # Go though the sict
+    for key in dct:
+
+        # If the list was found, return True
+        if checkListEquality(lst, dct[key]):
+            return True
+
+
+    # If list was not found in the dictionary, return False
+    return False

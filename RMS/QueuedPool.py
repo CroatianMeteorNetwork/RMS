@@ -9,7 +9,7 @@ import multiprocessing
 import multiprocessing.dummy
 
 from RMS.Pickling import savePickle, loadPickle
-from RMS.Misc import randomCharacters
+from RMS.Misc import randomCharacters, isListInDict
 
 
 class SafeValue(object):
@@ -153,7 +153,7 @@ class QueuedPool(object):
         bkup_obj = BackupContainer(inputs, outputs)
 
         # Create a name for the backup file
-        bkup_file_name = self.bkup_file_prefix + str(self.results_counter.value()) + "_" + randomCharacters(5) \
+        bkup_file_name = self.bkup_file_prefix + str(self.results_counter.value()) + "_" + randomCharacters(9) \
             + self.bkup_file_extension
 
         # Save the backup to disk
@@ -187,7 +187,7 @@ class QueuedPool(object):
             bkup_obj = loadPickle(self.bkup_dir, file_name)
 
             # Make sure the value-key pair does not exist
-            if tuple(bkup_obj.inputs) not in self.bkup_dict:
+            if not isListInDict(tuple(bkup_obj.inputs), self.bkup_dict):
 
                 # Add the pair of inputs vs. outputs to the lookup dictionary
                 self.bkup_dict[bkup_obj.inputs] = bkup_obj.outputs
@@ -236,7 +236,7 @@ class QueuedPool(object):
 
             # First do a lookup in the dictionary if this set of inputs have already been processed
             read_from_backup = False
-            if tuple(args) in self.bkup_dict:
+            if isListInDict(tuple(args), self.bkup_dict):
 
                 # Load the results from backup
                 result = self.bkup_dict[tuple(args)]
