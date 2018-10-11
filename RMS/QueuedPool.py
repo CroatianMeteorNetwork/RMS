@@ -230,7 +230,6 @@ class QueuedPool(object):
                 break
 
 
-            read_from_backup = False
             # First do a lookup in the dictionary if this set of inputs have already been processed
             read_from_backup = False
             if tuple(args) in self.bkup_dict:
@@ -239,6 +238,8 @@ class QueuedPool(object):
                 result = self.bkup_dict[tuple(args)]
 
                 read_from_backup = True
+
+                self.printAndLog('Result loaded from backup for input: {:s}'.format(str(args)))
 
 
             # Process the inputs if they haven't been processed already
