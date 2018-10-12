@@ -287,6 +287,9 @@ if __name__ == "__main__":
 
 
     # Run detection on the folder
-    detectStarsAndMeteorsDirectory(cml_args.dir_path[0], config)
+    _, _, _, detector = detectStarsAndMeteorsDirectory(cml_args.dir_path[0], config)
+
+    # Delete backup files
+    detector.deleteBackupFiles()
 
     print('Total time taken: ', datetime.datetime.utcnow() - time_start)
