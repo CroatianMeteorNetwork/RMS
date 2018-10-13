@@ -1148,7 +1148,7 @@ class PlateTool(object):
             img_data = Image.applyFlat(img_data, self.flat_struct)
 
 
-        # Store image before modifications
+        # Store image before levels modifications
         self.img_data_raw = np.copy(img_data)
 
 
@@ -1720,15 +1720,8 @@ class PlateTool(object):
             y_max > self.current_ff.nrows - 1
 
 
-        if self.img_type_flag == 'maxpixel':
-            img_data = self.current_ff.maxpixel
-
-        else:
-            img_data = self.current_ff.avepixel
-
-
         # Crop the image
-        img_crop = img_data[y_min:y_max, x_min:x_max]
+        img_crop = self.img_data_raw[y_min:y_max, x_min:x_max]
 
         # perform gamma correction
         img_crop = Image.gammaCorrection(img_crop, self.config.gamma)
