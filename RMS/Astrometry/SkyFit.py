@@ -165,8 +165,14 @@ class PlateTool(object):
         # Kwy increment
         self.key_increment = 1.0
 
-        # Image gamma
+        # Image gamma and levels
+        self.bit_depth = self.config.bit_depth
         self.img_gamma = 1.0
+        self.img_level_min = 0
+        self.img_level_max = 2**self.bit_depth - 1
+        self.img_data_raw = None
+
+        self.adjust_levels_mode = False
 
         # Platepar format (json or txt)
         self.platepar_fmt = None
@@ -304,8 +310,36 @@ class PlateTool(object):
         # Call the same function for mouse movements to update the variables in the background
         self.onMouseMotion(event)
 
+
+        # If the histogram is on, adjust the levels
+        if self.adjust_levels_mode:
+
+            # Left mouse button sets the minimum level
+            if event.button == 1:
+
+                # Compute the new image level from clicked position
+                img_level_min_new = event.xdata/self.img_data_raw.shape[1]*(2**self.bit_depth)
+
+                # Make sure the minimum level is smaller than the maximum level
+                if (img_level_min_new < self.img_level_max) and (img_level_min_new > 0):
+                    self.img_level_min = img_level_min_new
+
+
+            # Right mouse button sets the maximum level
+            if event.button == 3:
+
+                # Compute the new image level from clicked position
+                img_level_max_new = event.xdata/self.img_data_raw.shape[1]*(2**self.bit_depth)
+
+                # Make sure the minimum level is smaller than the maximum level
+                if (img_level_max_new > self.img_level_min) and (img_level_max_new < (2**self.bit_depth - 1)):
+                    self.img_level_max = img_level_max_new
+
+            self.updateImage()
+
+
         # If the star picking mode is on
-        if self.star_pick_mode:
+        elif self.star_pick_mode:
 
             # Left mouse button, select stars
             if event.button == 1:
@@ -695,24 +729,49 @@ class PlateTool(object):
 
         elif event.key == '1':
 
+            # Increment X offset
+            self.platepar.x_poly[0] += 0.5
+            self.updateImage()
+
+        elif event.key == '2':
+
+            # Decrement X offset
+            self.platepar.x_poly[0] -= 0.5
+            self.updateImage()
+
+
+        elif event.key == '3':
+
+            # Increment Y offset            
+            self.platepar.y_poly[0] += 0.5
+            self.updateImage()
+
+        elif event.key == '4':
+
+            # Decrement Y offset
+            self.platepar.y_poly[0] -= 0.5
+            self.updateImage()
+
+        elif event.key == '5':
+
             # Decrement X 1st order distortion
             self.platepar.x_poly[1] -= 0.01
             self.updateImage()
 
-        elif event.key == '2':
+        elif event.key == '6':
 
             # Increment X 1st order distortion
             self.platepar.x_poly[1] += 0.01
             self.updateImage()
 
 
-        elif event.key == '3':
+        elif event.key == '7':
 
             # Decrement Y 1st order distortion
             self.platepar.y_poly[2] -= 0.01
             self.updateImage()
 
-        elif event.key == '4':
+        elif event.key == '8':
 
             # Increment Y 1st order distortion
             self.platepar.y_poly[2] += 0.01
@@ -797,6 +856,14 @@ class PlateTool(object):
 
             # Decrease image gamma by a factor of 0.9x
             self.updateGamma(0.9)
+
+
+        elif event.key == 'ctrl+h':
+
+            # Toggle levels adustment mode
+            self.adjust_levels_mode = not self.adjust_levels_mode
+
+            self.updateImage()
 
 
         # Change modes from astrometry parameter changing to star picking
@@ -949,6 +1016,49 @@ class PlateTool(object):
 
 
 
+    def drawLevelsAdjustmentHistogram(self, img):
+
+        nbins = int((2**self.config.bit_depth)/2)
+
+        # Compute the intensity histogram
+        hist, bin_edges = np.histogram(img.flatten(), normed=True, range=(0, 2**self.bit_depth), \
+            bins=nbins)
+
+        # Scale the maximum histogram peak to half the image height
+        hist *= img.shape[0]/np.max(hist)/2
+
+        # Scale the edges to image width
+        image_to_level_scale = img.shape[1]/np.max(bin_edges)
+        bin_edges *= image_to_level_scale
+
+        ax1 = plt.gca()
+        ax2 = ax1.twinx().twiny()
+
+        # Plot the histogram
+        ax2.bar(bin_edges[:-1], hist, color='white', alpha=0.5, width=img.shape[1]/nbins, edgecolor='k')
+
+        # Plot levels limits
+        y_range = np.linspace(0, img.shape[0], 3)
+        x_arr = np.zeros_like(y_range)
+
+        ax2.plot(x_arr + self.img_level_min*image_to_level_scale, y_range, color='w')
+        ax2.plot(x_arr + self.img_level_max*image_to_level_scale, y_range, color='w')
+
+        ax2.invert_yaxis()
+
+        ax2.set_ylim([0, img.shape[0]])
+        ax2.set_xlim([0, img.shape[1]])
+
+        # Set background color to black
+        ax1.set_facecolor('black')
+        ax2.set_facecolor('black')
+
+        plt.sca(ax1)
+
+
+
+
+
     def updateImage(self, clear_plot=True):
         """ Update the matplotlib plot to show the current image. 
 
@@ -994,19 +1104,29 @@ class PlateTool(object):
             img_data = self.current_ff.avepixel
 
 
+        # Guess the bit depth from the array type
+        self.bit_depth = 8*img_data.itemsize
+
+
         # Apply flat
         if self.flat_struct is not None:
             img_data = Image.applyFlat(img_data, self.flat_struct)
 
 
+        # Store image before modifications
+        self.img_data_raw = np.copy(img_data)
+
+
         ### Adjust image levels
 
-        # Guess the bit depth from the array type
-        bit_depth = 8*img_data.itemsize
-
-        img_data = Image.adjustLevels(img_data, 0, self.img_gamma, (2**bit_depth -1), bit_depth)
+        img_data = Image.adjustLevels(img_data, self.img_level_min, self.img_gamma, self.img_level_max, \
+            self.bit_depth)
 
         ###
+
+        # Draw levels adjustment histogram
+        if self.adjust_levels_mode:
+            self.drawLevelsAdjustmentHistogram(self.img_data_raw)
 
         # Show the loaded image
         plt.imshow(img_data, cmap='gray')
@@ -1063,6 +1183,7 @@ class PlateTool(object):
         plt.xlim([0, self.current_ff.ncols])
         plt.ylim([self.current_ff.nrows, 0])
 
+
         # Show text on the top
         if self.star_pick_mode:
             text_str  = "STAR PICKING MODE\n"
@@ -1094,14 +1215,19 @@ class PlateTool(object):
             text_str += 'S/W - Dec\n'
             text_str += 'Q/E - Position angle\n'
             text_str += 'Up/Down - Scale\n'
-            text_str += '1/2 - X 1st dist. coeff.\n'
-            text_str += '3/4 - Y 1st dist. coeff.\n'
+            text_str += '1/2 - X offset\n'
+            text_str += '3/4 - Y offset\n'
+            text_str += '5/6 - X 1st dist. coeff.\n'
+            text_str += '7/8 - Y 1st dist. coeff.\n'
+            text_str += '\n'
             text_str += ',/. - UT correction\n'
             text_str += 'R/F - Lim mag\n'
             text_str += '+/- - Increment\n'
+            text_str += '\n'
             text_str += 'M - Toggle maxpixel/avepixel\n'
             text_str += 'H - Hide/show catalog stars\n'
             text_str += 'U/J - Img Gamma\n'
+            text_str += 'CTRL + H - Adjust levels\n'
             text_str += 'V - FOV centre\n'
             text_str += '\n'
             text_str += 'CTRL + F - Load flat\n'

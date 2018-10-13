@@ -98,6 +98,10 @@ def adjustLevels(img_array, minv, gamma, maxv, nbits=8):
     # Calculate maximum image level
     max_lvl = 2**nbits - 1.0
 
+    # Limit the maximum level
+    if maxv > max_lvl:
+        maxv = max_lvl
+
     # Check that the image adjustment values are in fact given
     if (minv == None) and (gamma == None) and (maxv == None):
         return img_array
