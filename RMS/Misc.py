@@ -215,3 +215,26 @@ def listToTupleRecursive(lst):
         out.append(elem)
 
     return tuple(out)
+
+
+
+def decimalDegreesToSexHours(val):
+    """ Convert a value in decimal degrees DDD.ddd into the sexadecimal format in hours, HH, MM, SS.ss.
+    
+    Arguments:
+        val: [float] Value in decimal degrees
+
+    Return:
+        (hh, mm, ss):
+            - hh [int] Hours
+            - mm [int] Minutes
+            - ss [float] Seconds
+    """
+
+    val = val/15.0
+
+    hh = int(val)
+    mm = int((val - hh)*60)
+    ss = ((val - hh)*60 - mm)*60
+
+    return hh, mm, ss

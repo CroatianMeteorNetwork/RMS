@@ -44,6 +44,7 @@ import scipy.optimize
 
 import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib.font_manager import FontProperties
 
 import RMS.ConfigReader as cr
 import RMS.Formats.CALSTARS as CALSTARS
@@ -56,6 +57,7 @@ from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADecPP, raD
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Routines import Image
 from RMS.Math import angularSeparation
+from RMS.Misc import decimalDegreesToSexHours
 
 # Import Cython functions
 import pyximport
@@ -149,7 +151,7 @@ class PlateTool(object):
 
         self.catalog_stars_visible = True
 
-        self.show_key_help = False
+        self.show_key_help = 1
 
         # List of paired image and catalog stars
         self.paired_stars = []
@@ -633,6 +635,20 @@ class PlateTool(object):
 
 
 
+    def updateRefRADec(self):
+        """ Update the reference RA and Dec from Alt/Az. """
+
+        # Compute the datetime object of the reference Julian date
+        time_data = [jd2Date(self.platepar.JD, dt_obj=True)]
+
+        # Convert the reference alt/az to reference RA/Dec
+        _, ra_data, dec_data = altAz2RADec(self.platepar.lat, self.platepar.lon, self.platepar.UT_corr, 
+            time_data, [self.platepar.az_centre], [self.platepar.alt_centre], dt_time=True)
+
+        # Assign the computed RA/Dec to platepar
+        self.platepar.RA_d = ra_data[0]
+        self.platepar.dec_d = dec_data[0]
+
 
 
     def onKeyPress(self, event):
@@ -676,19 +692,31 @@ class PlateTool(object):
 
         # Move RA/Dec
         elif event.key == 'a':
-            self.platepar.RA_d -= self.key_increment
+            
+            self.platepar.az_centre += self.key_increment
+            self.updateRefRADec()
+
             self.updateImage()
 
         elif event.key == 'd':
-            self.platepar.RA_d += self.key_increment
+
+            self.platepar.az_centre -= self.key_increment
+            self.updateRefRADec()
+
             self.updateImage()
 
         elif event.key == 'w':
-            self.platepar.dec_d += self.key_increment
+
+            self.platepar.alt_centre -= self.key_increment
+            self.updateRefRADec()
+
             self.updateImage()
 
         elif event.key == 's':
-            self.platepar.dec_d -= self.key_increment
+
+            self.platepar.alt_centre += self.key_increment
+            self.updateRefRADec()
+
             self.updateImage()
 
         # Move rotation parameter
@@ -713,7 +741,14 @@ class PlateTool(object):
 
         # Show/hide keyboard shortcut help
         elif event.key == 'f1':
-            self.show_key_help = not self.show_key_help
+
+            # Go through states of text visibility
+            self.show_key_help += 1
+
+            if self.show_key_help >= 3:
+                self.show_key_help = 0
+
+
             self.updateImage()
 
         # Change image scale
@@ -1184,29 +1219,54 @@ class PlateTool(object):
         plt.ylim([self.current_ff.nrows, 0])
 
 
-        # Show text on the top
-        if self.star_pick_mode:
-            text_str  = "STAR PICKING MODE\n"
-            text_str += "PRESS 'CTRL + Z' FOR STAR FITTING\n"
-            text_str += "PRESS 'P' FOR PHOTOMETRY FIT"
+        # Compute RA/Dec of the FOV centre
+        ra_centre, dec_centre = self.computeCentreRADec()
 
-            plt.gca().text(self.current_ff.ncols/2, self.current_ff.nrows - 10, text_str, color='r', 
-                verticalalignment='top', horizontalalignment='center', fontsize=8)
 
-        # Show text on image with platepar parameters
-        text_str  = self.current_ff_file + '\n' + self.img_type_flag + '\n\n'
-        text_str += 'UT corr = {:.1f}\n'.format(self.platepar.UT_corr)
-        text_str += 'Ref RA  = {:.3f}\n'.format(self.platepar.RA_d)
-        text_str += 'Ref Dec = {:.3f}\n'.format(self.platepar.dec_d)
-        text_str += 'PA      = {:.3f}\n'.format(self.platepar.pos_angle_ref)
-        text_str += 'F_scale = {:.3f}\n'.format(self.platepar.F_scale)
-        text_str += 'Lim mag = {:.1f}\n'.format(self.cat_lim_mag)
-        text_str += 'Increment = {:.3f}\n'.format(self.key_increment)
-        text_str += 'Img Gamma = {:.2f}\n'.format(self.img_gamma)
-        plt.gca().text(10, 10, text_str, color='w', verticalalignment='top', horizontalalignment='left', 
-            fontsize=8)
+        # Setup a monospace font
+        font = FontProperties()
+        font.set_family('monospace')
+        font.set_size(8)
 
-        if self.show_key_help:
+        
+        if self.show_key_help == 0:
+            text_str = 'Show fit parameters - F1'
+
+            plt.gca().text(10, self.current_ff.nrows, text_str, color='w', verticalalignment='bottom', 
+                horizontalalignment='left', fontproperties=font)
+
+
+        # Show plate info
+        if self.show_key_help > 0:
+
+            # Show text on image with platepar parameters
+            text_str  = self.current_ff_file + '\n' + self.img_type_flag + '\n\n'
+            text_str += 'UT corr  = {:.1f}h\n'.format(self.platepar.UT_corr)
+            text_str += 'Ref Az   = {:.3f}$\\degree$\n'.format(self.platepar.az_centre)
+            text_str += 'Ref Alt  = {:.3f}$\\degree$\n'.format(self.platepar.alt_centre)
+            text_str += 'Rotation = {:.3f}$\\degree$\n'.format(self.platepar.pos_angle_ref)
+            #text_str += 'Ref RA  = {:.3f}\n'.format(self.platepar.RA_d)
+            #text_str += 'Ref Dec = {:.3f}\n'.format(self.platepar.dec_d)
+            text_str += "F_scale  = {:.3f}'/px\n".format(60/self.platepar.F_scale)
+            text_str += 'Lim mag  = {:.1f}\n'.format(self.cat_lim_mag)
+            text_str += 'Increment = {:.2f}\n'.format(self.key_increment)
+            text_str += 'Img Gamma = {:.2f}\n'.format(self.img_gamma)
+            text_str += '\n'
+            text_str += 'RA centre  = {:2d}h {:2d}m {:5.2f}s\n'.format(*decimalDegreesToSexHours(ra_centre))
+            text_str += 'Dec centre = {:.3f}$\\degree$\n'.format(dec_centre)
+            plt.gca().text(10, 10, text_str, color='w', verticalalignment='top', horizontalalignment='left', \
+                fontproperties=font)
+
+
+            if self.show_key_help == 1:
+                text_str = 'Show keyboard shortcuts - F1'
+
+                plt.gca().text(10, self.current_ff.nrows, text_str, color='w', verticalalignment='bottom', 
+                    horizontalalignment='left', fontproperties=font)
+
+
+        # Show keyboard shortcurs
+        if self.show_key_help > 1:
 
             # Show text on image with instructions
             text_str  = 'Keys:\n'
@@ -1238,17 +1298,21 @@ class PlateTool(object):
 
             text_str += '\n'
 
-            text_str += 'Hide keyboard shortcuts - F1\n'
+            text_str += 'Hide on-screen text - F1\n'
 
 
             plt.gca().text(10, self.current_ff.nrows - 5, text_str, color='w', verticalalignment='bottom', 
-                horizontalalignment='left', fontsize=8)
+                horizontalalignment='left', fontproperties=font)
 
-        else:
-            text_str = 'Show keyboard shortcuts - F1'
 
-            plt.gca().text(10, self.current_ff.nrows, text_str, color='w', verticalalignment='bottom', 
-                horizontalalignment='left', fontsize=8)
+        # Show fitting instructions
+        if self.star_pick_mode:
+            text_str  = "STAR PICKING MODE\n"
+            text_str += "PRESS 'CTRL + Z' FOR STAR FITTING\n"
+            text_str += "PRESS 'P' FOR PHOTOMETRY FIT"
+
+            plt.gca().text(self.current_ff.ncols/2, self.current_ff.nrows - 10, text_str, color='r', 
+                verticalalignment='top', horizontalalignment='center', fontproperties=font)
 
 
         plt.gcf().canvas.draw()
@@ -1280,6 +1344,21 @@ class PlateTool(object):
         self.updateImage()
 
 
+    def computeCentreRADec(self):
+        """ Compute RA and Dec of the FOV centre in degrees. """
+
+        # The the time of the midle of the FF file
+        ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
+
+        # Convert the FOV centre to RA/Dec
+        _, ra_centre, dec_centre, _ = XY2CorrectedRADecPP([ff_middle_time], [self.platepar.X_res/2], 
+            [self.platepar.Y_res/2], [0], self.platepar)
+        
+        ra_centre = ra_centre[0]
+        dec_centre = dec_centre[0]
+
+        return ra_centre, dec_centre
+
 
     def filterCatalogStarsInsideFOV(self, catalog_stars):
         """ Take only catalogs stars which are inside the FOV. 
@@ -1288,17 +1367,8 @@ class PlateTool(object):
             catalog_stars: [list] A list of (ra, dec, mag) tuples of catalog stars.
         """
 
-        # The the time of the midle of the FF file
-        ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
-
-        # Convert the FOV centre to RA/Dec
-        _, ra_centre, dec_centre, _ = XY2CorrectedRADecPP([ff_middle_time], [self.platepar.X_res/2], 
-            [self.platepar.Y_res/2], [0], self.platepar)
-
-        print('RA/Dec centre:', ra_centre, dec_centre)
-        
-        ra_centre = ra_centre[0]
-        dec_centre = dec_centre[0]
+        # Get RA/Dec of the FOV centre
+        ra_centre, dec_centre = self.computeCentreRADec()
 
         # Calculate the FOV radius in degrees
         fov_x = (self.platepar.X_res/2)/self.platepar.F_scale
@@ -1307,40 +1377,7 @@ class PlateTool(object):
         fov_radius = np.sqrt(fov_x**2 + fov_y**2)
 
 
-        # filtered_catalog_stars = []
-        # filtered_indices = []
-
-        # # Calculate minimum and maximum declination
-        # dec_min = dec_centre - fov_radius
-        # if dec_min < -90:
-        #     dec_min = -90
-
-        # dec_max = dec_centre + fov_radius
-        # if dec_max > 90:
-        #     dec_max = 90
-
-        # # Take only those catalog stars which should be inside the FOV
-        # for i, (ra, dec, _) in enumerate(catalog_stars):
-
-        #     # Skip if the declination is too large
-        #     if dec > dec_max:
-        #         continue
-
-        #     # End the loop if the declination is too small
-        #     if dec < dec_min:
-        #         break
-
-        #     # Calculate angular separation between the FOV centre and the catalog star
-        #     ang_sep = math.degrees(math.acos(math.sin(math.radians(dec))*math.sin(math.radians(dec_centre)) \
-        #         + math.cos(math.radians(dec))*math.cos(math.radians(dec_centre))*math.cos(math.radians(ra) \
-        #         - math.radians(ra_centre))))
-
-        #     if ang_sep <= fov_radius:
-
-        #         # Add stars which are roughly inside the FOV to the OK list
-        #         filtered_catalog_stars.append(catalog_stars[i])
-        #         filtered_indices.append(i)
-
+        # Take only those stars which are inside the FOV
         filtered_indices, filtered_catalog_stars = subsetCatalog(catalog_stars, ra_centre, dec_centre, \
             fov_radius, self.cat_lim_mag)
 
