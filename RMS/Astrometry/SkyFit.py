@@ -149,7 +149,7 @@ class PlateTool(object):
 
         self.catalog_stars_visible = True
 
-        self.show_key_help = True
+        self.show_key_help = False
 
         # List of paired image and catalog stars
         self.paired_stars = []
@@ -170,6 +170,9 @@ class PlateTool(object):
 
         # Platepar format (json or txt)
         self.platepar_fmt = None
+
+        # Flat field
+        self.flat_struct = None
 
         # Image coordinates of catalog stars
         self.catalog_x = self.catalog_y = None
@@ -253,27 +256,6 @@ class PlateTool(object):
             # Create the name of the platepar file
             self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
 
-            # # Save the platepar file
-            # self.platepar.write(self.platepar_file, fmt=self.platepar_fmt)
-
-
-
-
-        # Try loading a flat field image
-        self.flat_struct = None
-
-        # If using a flat is enabled
-        if self.config.use_flat:
-
-            # Check if there is flat in the data directory
-            if os.path.exists(os.path.join(dir_path, config.flat_file)):
-                self.flat_struct = Image.loadFlat(dir_path, config.flat_file)
-
-            # Try loading the default flat
-            elif os.path.exists(config.flat_file):
-                self.flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
-
-
 
         ### INIT IMAGE ###
 
@@ -341,7 +323,7 @@ class PlateTool(object):
                             prev_y_cent=y_cent_tmp)
 
                     # Draw the centroid on the image
-                    plt.scatter(self.x_centroid, self.y_centroid, marker='+', c='y', s=100, lw=3)
+                    plt.scatter(self.x_centroid, self.y_centroid, marker='+', c='y', s=100, lw=3, alpha=0.5)
 
                     # Select the closest catalog star to the centroid as the first guess
                     self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.x_centroid, self.y_centroid)
@@ -686,12 +668,12 @@ class PlateTool(object):
 
         # Change catalog limiting magnitude
         elif event.key == 'r':
-            self.cat_lim_mag -= 0.1
+            self.cat_lim_mag += 0.1
             self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
             self.updateImage()
 
         elif event.key == 'f':
-            self.cat_lim_mag += 0.1
+            self.cat_lim_mag -= 0.1
             self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
             self.updateImage()
 
@@ -784,6 +766,13 @@ class PlateTool(object):
         # Create a new platepar
         elif event.key == 'ctrl+n':
             self.makeNewPlatepar()
+
+
+        # Load the flat
+        elif event.key == 'ctrl+f':
+            _, self.flat_struct = self.loadFlat()
+
+            self.updateImage()
 
 
         # Show/hide catalog stars
@@ -997,7 +986,7 @@ class PlateTool(object):
             return None
 
 
-        # Choose appropriate iamge data
+        # Choose appropriate image data
         if self.img_type_flag == 'maxpixel':
             img_data = self.current_ff.maxpixel
 
@@ -1083,20 +1072,20 @@ class PlateTool(object):
             plt.gca().text(self.current_ff.ncols/2, self.current_ff.nrows - 10, text_str, color='r', 
                 verticalalignment='top', horizontalalignment='center', fontsize=8)
 
-        if self.show_key_help:
+        # Show text on image with platepar parameters
+        text_str  = self.current_ff_file + '\n' + self.img_type_flag + '\n\n'
+        text_str += 'UT corr = {:.1f}\n'.format(self.platepar.UT_corr)
+        text_str += 'Ref RA  = {:.3f}\n'.format(self.platepar.RA_d)
+        text_str += 'Ref Dec = {:.3f}\n'.format(self.platepar.dec_d)
+        text_str += 'PA      = {:.3f}\n'.format(self.platepar.pos_angle_ref)
+        text_str += 'F_scale = {:.3f}\n'.format(self.platepar.F_scale)
+        text_str += 'Lim mag = {:.1f}\n'.format(self.cat_lim_mag)
+        text_str += 'Increment = {:.3f}\n'.format(self.key_increment)
+        text_str += 'Img Gamma = {:.2f}\n'.format(self.img_gamma)
+        plt.gca().text(10, 10, text_str, color='w', verticalalignment='top', horizontalalignment='left', 
+            fontsize=8)
 
-            # Show text on image with platepar parameters
-            text_str  = self.current_ff_file + ' ' + self.img_type_flag + '\n\n'
-            text_str += 'UT corr = {:.1f}\n'.format(self.platepar.UT_corr)
-            text_str += 'Ref RA  = {:.3f}\n'.format(self.platepar.RA_d)
-            text_str += 'Ref Dec = {:.3f}\n'.format(self.platepar.dec_d)
-            text_str += 'PA      = {:.3f}\n'.format(self.platepar.pos_angle_ref)
-            text_str += 'F_scale = {:.3f}\n'.format(self.platepar.F_scale)
-            text_str += 'Lim mag = {:.1f}\n'.format(self.cat_lim_mag)
-            text_str += 'Increment = {:.3f}\n'.format(self.key_increment)
-            text_str += 'Img Gamma = {:.2f}\n'.format(self.img_gamma)
-            plt.gca().text(10, 10, text_str, color='w', verticalalignment='top', horizontalalignment='left', 
-                fontsize=8)
+        if self.show_key_help:
 
             # Show text on image with instructions
             text_str  = 'Keys:\n'
@@ -1148,7 +1137,7 @@ class PlateTool(object):
         # Get star coordinates
         y, x, _, _ = np.array(star_data).T
 
-        plt.scatter(x, y, edgecolors='g', marker='o', facecolors='none')
+        plt.scatter(x, y, edgecolors='g', marker='o', facecolors='none', alpha=0.8, linestyle='dotted')
 
 
 
@@ -1431,6 +1420,52 @@ class PlateTool(object):
 
         return fov_h, fov_v
 
+
+    def loadFlat(self):
+        """ Open a file dialog and ask user to load a flat field. """
+
+        root = tkinter.Tk()
+        root.withdraw()
+        root.update()
+
+
+        # Check if flat exists in the folder, and set it as the defualt file name if it does
+        if self.config.flat_file in os.listdir(self.dir_path):
+            initialfile = self.config.flat_file
+        else:
+            initialfile = ''
+
+        # Load the platepar file
+        flat_file = filedialog.askopenfilename(initialdir=self.dir_path, \
+            initialfile=initialfile, title='Select the flat field file')
+
+        root.update()
+        root.quit()
+
+        if not flat_file:
+            return False, None
+
+        print(flat_file)
+
+        # Parse the platepar file
+        try:
+            flat = Image.loadFlat(*os.path.split(flat_file))
+        except:
+            flat = None
+
+
+        # Check if the size of the file matches
+        if self.current_ff.maxpixel.shape != flat.flat_img.shape:
+            messagebox.showerror(title='Flat field file error', message='The size of the flat field does not match the size of the image!')
+            flat = None
+
+        # Check if the platepar was successfuly loaded
+        if flat is None:
+            messagebox.showerror(title='Flat field file error', message='The file you selected could not be loaded as a flat field!')
+
+        
+
+        return flat_file, flat
 
 
     def nextFF(self):
