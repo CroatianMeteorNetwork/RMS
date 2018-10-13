@@ -1104,6 +1104,7 @@ class PlateTool(object):
             text_str += 'U/J - Img Gamma\n'
             text_str += 'V - FOV centre\n'
             text_str += '\n'
+            text_str += 'CTRL + F - Load flat\n'
             text_str += 'CTRL + R - Pick stars\n'
             text_str += 'CTRL + N - New platepar\n'
             text_str += 'CTRL + S - Save platepar\n'
