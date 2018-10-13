@@ -102,7 +102,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False):
 
             # Save frame to disk
             if save_frames:
-                frame_file_name = fr_path.replace('.bin', '') + "_frame_{:03d}.png".format(t)
+                frame_file_name = fr_path.replace('.bin', '') + "_line_{:02d}_frame_{:03d}.png".format(current_line, t)
                 cv2.imwrite(os.path.join(dir_path, frame_file_name), img)
 
 
