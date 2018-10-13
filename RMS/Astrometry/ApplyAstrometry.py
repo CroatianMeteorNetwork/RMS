@@ -300,6 +300,10 @@ def altAz2RADec(lat, lon, UT_corr, time_data, azimuth_data, altitude_data, dt_ti
             Y, M, D, h, m, s, ms = time_data[i]
             JD = date2JD(Y, M, D, h, m, s, ms, UT_corr=-UT_corr)
 
+        # Never allow the altitude to be exactly 90 deg due to numerical issues
+        if altitude == 90:
+            altitude = 89.9999
+
         # Convert altitude and azimuth to radians
         az_rad = math.radians(azimuth)
         alt_rad = math.radians(altitude)
