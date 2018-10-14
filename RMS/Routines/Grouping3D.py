@@ -1,5 +1,5 @@
 # RPi Meteor Station
-# Copyright (C) 2015  Dario Zubovic
+# Copyright (C) 2018  Dario Zubovic, Denis Vida
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,6 +13,8 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+from __future__ import print_function, division, absolute_import
 
 import numpy as np
 from math import sqrt
@@ -171,6 +173,8 @@ def findCoefficients(line_list):
         # length of velocity vector
         total = sqrt(slopeXZ**2 + slopeYZ**2)
         
+        print('Fireball slope:', total)
+
         # ignore line if too fast
         # TODO: this limit should be read from config file and calculated for FOV
         # 1.6 is better estimate on upper speed limit, set to 2 for safety

@@ -49,8 +49,8 @@ if __name__ == "__main__":
             plt.clf()
             plt.close()
 
-            # Dummy frames (empty)
-            frames = np.zeros(shape=(256, compressed.shape[1], compressed.shape[2]), dtype=np.uint8) + 255
+            # Dummy frames from FF file
+            frames = FFfile.reconstruct(ff)
 
             extract_obj = Extractor(config, bin_dir)
             extract_obj.compressed = compressed

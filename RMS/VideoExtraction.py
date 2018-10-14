@@ -165,15 +165,32 @@ class Extractor(Process):
             
             diff = lastFrame - firstFrame
 
+            
             # Extrapolate before first detected point
-            firstFrame = firstFrame - math.ceil(diff*self.config.before) 
+            before_frames = math.ceil(diff*self.config.before)
+
+            # Make sure at least 4 frames before are taken
+            if before_frames < 4:
+                before_frames = 4
+
+            firstFrame = firstFrame - before_frames
+
             if firstFrame < 0:
                 firstFrame = 0
 
+
             # Extrapolate after last detected point
-            lastFrame = lastFrame + math.ceil(diff*self.config.after) 
+            after_frames = math.ceil(diff*self.config.after) 
+
+            # Make sure at least 4 frames after are taken
+            if after_frames < 4:
+                after_frames = 4
+
+            lastFrame = lastFrame + after_frames
+
             if lastFrame >= self.frames.shape[0]:
                 lastFrame = self.frames.shape[0] - 1
+                
 
             # Cut of the fireball from raw video frames
             length, cropouts, sizepos = Grouping3D.detectionCutOut(self.frames, self.compressed, 
