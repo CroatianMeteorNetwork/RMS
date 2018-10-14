@@ -62,7 +62,7 @@ class BufferedCapture(Process):
 
         self.video_file = video_file
 
-        # A fraem will be considered dropped if it was late more then half a frame
+        # A frame will be considered dropped if it was late more then half a frame
         self.time_for_drop = 1.5*(1.0/config.fps)
 
         self.dropped_frames = 0
@@ -314,13 +314,14 @@ class BufferedCapture(Process):
                 if i == 0: 
                     startTime = t
 
-                # check if frame is dropped
+                # Check if frame is dropped if it has been more than 1.5 frames than the last frame
                 elif (t - lastTime) >= self.time_for_drop:
                     
                     # Calculate the number of dropped frames
                     n_dropped = int((t - lastTime)*self.config.fps)
                     
-                    log.info(str(n_dropped) + " frames dropped! Time for frame: {:.3f}, convert: {:.3f}, assignment: {:.3f}".format(t_frame, t_convert, t_assignment))
+                    if self.config.report_dropped_frames:
+                        log.info(str(n_dropped) + " frames dropped! Time for frame: {:.3f}, convert: {:.3f}, assignment: {:.3f}".format(t_frame, t_convert, t_assignment))
 
                     self.dropped_frames += n_dropped
 

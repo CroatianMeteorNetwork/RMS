@@ -62,6 +62,8 @@ class Config:
         self.height_device = self.height
         self.fps = 25.0
 
+        self.report_dropped_frames = False
+
         # Region of interest, -1 disables the range
         self.roi_left = -1
         self.roi_right = -1
@@ -346,6 +348,10 @@ def parseCapture(config, parser):
         config.height_device = config.height
 
 
+    if parser.has_option(section, "report_dropped_frames"):
+        config.report_dropped_frames = parser.getboolean(section, "report_dropped_frames")
+
+
     # Parse the region of interest boundaries
     if parser.has_option(section, "roi_left"):
         config.roi_left = parser.getint(section, "roi_left")
@@ -435,7 +441,7 @@ def parseUpload(config, parser):
     if not parser.has_section(section):
         return
 
-    # Address of the upload server
+    # Enable/disable upload
     if parser.has_option(section, "upload_enabled"):
         config.upload_enabled = parser.getboolean(section, "upload_enabled")
 
