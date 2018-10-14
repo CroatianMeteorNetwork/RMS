@@ -218,8 +218,40 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius):
     print('CHECK FIT GOODNESS:')
 
     # Match the stars and calculate the residuals
-    n_matched, avg_dist, cost, _ = matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius,\
+    n_matched, avg_dist, cost, matched_stars = matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius,\
         ret_nmatch=True)
+
+
+
+    # ### Plot zenith distance vs. residual
+    
+    # # Go through all images
+    # for jd in matched_stars:
+    #     _, cat_stars, dists = matched_stars[jd]
+
+    #     # Extract RA/Dec
+    #     ra, dec, _ = cat_stars.T
+
+    #     zangle_list = []
+    #     for ra_t, dec_t in zip(ra, dec):
+            
+    #         # Compute zenith distance
+    #         azim, elev = raDec2AltAz(jd, platepar.lon, platepar.lat, ra_t, dec_t)
+
+    #         zangle = 90 - elev
+
+    #         zangle_list.append(zangle)
+
+
+    #     # Plot zangle vs. distance
+    #     plt.scatter(zangle_list, dists, c='k', s=0.1)
+
+
+    # plt.xlabel('Zenith angle')
+    # plt.ylabel('Residual (px)')
+    # plt.show()
+
+    # ###
 
 
     # Check that the average distance is within the threshold
