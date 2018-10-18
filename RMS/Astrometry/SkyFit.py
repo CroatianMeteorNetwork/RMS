@@ -588,7 +588,7 @@ class PlateTool(object):
                     ax_p = fig_p.add_subplot(1, 1, 1)
 
                     # Plot catalog magnitude vs. logsum of pixel intensities
-                    self.photom_points = ax_p.scatter(logsum_px, catalog_mags, s=5, c='r')
+                    self.photom_points = ax_p.scatter(-2.5*np.array(logsum_px), catalog_mags, s=5, c='r')
 
                     x_min, x_max = ax_p.get_xlim()
                     y_min, y_max = ax_p.get_ylim()
@@ -608,19 +608,20 @@ class PlateTool(object):
 
                     # Plot the line fit
                     logsum_arr = np.linspace(x_min_w, x_max_w, 10)
-                    ax_p.plot(logsum_arr, _photomLine(logsum_arr, *photom_params), label=fit_info, linestyle='--', color='k', alpha=0.5)
+                    ax_p.plot(logsum_arr, _photomLine(logsum_arr/(-2.5), *photom_params), label=fit_info, linestyle='--', color='k', alpha=0.5)
 
                     ax_p.legend()
 
                     mag_str = "{:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*self.config.star_catalog_band_ratios)
                     ax_p.set_ylabel("Catalog magnitude ({:s})".format(mag_str))
-                    ax_p.set_xlabel("Logsum pixel")
+                    ax_p.set_xlabel("Uncalibrated magnitude")
 
                     # Set wider axis limits
                     ax_p.set_xlim(x_min_w, x_max_w)
                     ax_p.set_ylim(y_min_w, y_max_w)
 
                     ax_p.invert_yaxis()
+                    ax_p.invert_xaxis()
 
                     ax_p.grid()
 
