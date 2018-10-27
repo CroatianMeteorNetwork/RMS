@@ -1154,6 +1154,10 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
             if abs(np.max(line_points[:,2]) - np.min(line_points[:,2])) + 1 < config.line_minimum_frame_range_det:
                 continue
 
+
+            # Compute the average angular velocity in px per frame
+            ang_vel_avg = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)/(z2 - z1)
+
             # Calculate centroids
             centroids = []
 

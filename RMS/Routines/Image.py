@@ -3,6 +3,7 @@
 from __future__ import print_function, division, absolute_import
 
 import os
+import math
 
 import numpy as np
 import scipy.misc
@@ -272,6 +273,102 @@ def deinterlaceBlend(img):
 
 
 
+def fillCircle(photom_mask, x_cent, y_cent, radius):
+
+    y_min = math.floor(y_cent - 1.41*radius)
+    y_max = math.ceil(y_cent + 1.41*radius)
+
+    if y_min < 0: y_min = 0
+    if y_max > photom_mask.shape[0]: y_max = photom_mask.shape[0]
+
+    x_min = math.floor(x_cent - 1.41*radius)
+    x_max = math.ceil(x_cent + 1.41*radius)
+
+    if x_min < 0: x_min = 0
+    if x_max > photom_mask.shape[1]: x_max = photom_mask.shape[1]
+
+    for y in range(y_min, y_max):
+        for x in range(x_min, x_max):
+
+            if ((x - x_cent)**2 + (y - y_cent)**2) <= radius**2:
+                photom_mask[y, x] = 1
+
+    return photom_mask
+
+
+
+def thickLine(img_h, img_w, x_cent, y_cent, length, rotation, radius):
+    """ Given the image size, return the mask where indices which are inside a thick rounded line are 1s, and
+    the rest are 0s. The Bresenham algorithm is used to compute line indices.
+
+    Arguments:
+        img_h: [int] Image height (px).
+        img_w: [int] Image width (px).
+        x_cent: [float] X centroid.
+        y_cent: [float] Y centroid.
+        length: [float] Length of the line segment (px).
+        rotation: [float] Rotation of the line (deg).
+        radius: [float] Aperture radius (px).
+
+    Return:
+        photom_mask: [ndarray] Photometric mask.
+    """
+
+    # Init the photom_mask array
+    photom_mask = np.zeros((img_h, img_w), dtype=np.uint8)
+
+    rotation = np.radians(rotation)
+
+    # Compute the bounding box
+    x0 = math.floor(x_cent - np.cos(rotation)*length/2.0)
+    y0 = math.floor(y_cent - np.sin(rotation)*length/2.0)
+
+    y1 = math.ceil(y_cent + np.sin(rotation)*length/2.0)
+    x1 = math.ceil(x_cent + np.cos(rotation)*length/2.0)
+
+    # Init the photom_mask array
+    photom_mask = np.zeros((img_h, img_w))
+
+
+    dx = abs(x1 - x0)
+    dy = abs(y1 - y0)
+    x, y = x0, y0
+    sx = -1 if x0 > x1 else 1
+    sy = -1 if y0 > y1 else 1
+
+    if dx > dy:
+        err = dx / 2.0
+        while x != x1:
+
+            photom_mask = fillCircle(photom_mask, int(x), int(y), radius)
+
+            err -= dy
+            if err < 0:
+                y += sy
+                err += dx
+            x += sx
+    else:
+        err = dy / 2.0
+
+        while y != y1:
+
+            photom_mask = fillCircle(photom_mask, int(x), int(y), radius)
+
+            err -= dx
+            if err < 0:
+                x += sx
+                err += dy
+            y += sy        
+
+    photom_mask = fillCircle(photom_mask, int(x), int(y), radius)
+
+    return photom_mask
+
+
+
+
+
+
 if __name__ == "__main__":
 
     import time
@@ -322,4 +419,22 @@ if __name__ == "__main__":
     print('Flat time:', time.clock() - t1)
 
     plt.imshow(img, cmap='gray', vmin=0, vmax=255)
+    plt.show()
+
+
+
+    ### TEST THICK LINE
+
+    x_cent = 20.1
+    y_cent = 20
+
+    rotation = 90
+    length = 0
+    radius = 2
+
+
+    indices = thickLine(200, 200, x_cent, y_cent, length, rotation, radius)
+
+
+    plt.imshow(indices)
     plt.show()
