@@ -65,6 +65,9 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False):
     print("Number of lines:", fr.lines)
     
     first_image = True
+    wait_time = 2*int(1000.0/config.fps)
+
+    pause_flag = False
 
     for current_line in range(fr.lines):
 
@@ -114,7 +117,34 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False):
                 cv2.moveWindow(name, 0, 0)
                 first_image = False
 
-            cv2.waitKey(2*int(1000.0/config.fps))
+
+            if pause_flag:
+                wait_time = 0
+            else:
+                wait_time = 2*int(1000.0/config.fps)
+
+            # Space key: pause display. 
+            # 1: previous file. 
+            # 2: next line. 
+            # q: Quit.
+            key = cv2.waitKey(wait_time) & 0xFF
+
+            if key == ord("1"): 
+                cv2.destroyWindow(name)
+                return -1
+
+            elif key == ord("2"): 
+                break
+
+            elif key == ord(" "): 
+                
+                # Pause/unpause video
+                pause_flag = not pause_flag
+
+            elif key == ord("q") : 
+                os._exit(0)
+                
+
     
     cv2.destroyWindow(name)
             
@@ -124,7 +154,13 @@ if __name__ == "__main__":
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Show reconstructed fireball detections from FR files.")
+    arg_parser = argparse.ArgumentParser(description="""Show reconstructed fireball detections from FR files.
+        Key mapping:
+            Space: pause display.
+            1: previous file.
+            2: next line.
+            q: Quit.
+            """, formatter_class=argparse.RawTextHelpFormatter)
 
     arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
         help='Path to the directory which contains FR bin files.')
@@ -157,7 +193,17 @@ if __name__ == "__main__":
     ff_list = [ff for ff in os.listdir(dir_path) if FFfile.validFFName(ff)]
     ff_list = sorted(ff_list)
 
-    for fr in fr_list:
+
+    i = 0
+
+    while True:
+
+        # Break the loop if at the end
+        if i >= len(fr_list):
+            break
+
+        fr = fr_list[i]
+
         ff_match = None
 
         # Strip extensions
@@ -175,4 +221,13 @@ if __name__ == "__main__":
                 break
         
         # View the fireball detection
-        view(dir_path, ff_match, fr, config, save_frames=cml_args.extract)
+        retval = view(dir_path, ff_match, fr, config, save_frames=cml_args.extract)
+
+        # Return to previous file
+        if retval == -1:
+            i -= 2
+
+        if i < 0:
+            i = 0
+
+        i += 1
