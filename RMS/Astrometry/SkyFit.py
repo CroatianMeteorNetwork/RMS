@@ -612,7 +612,15 @@ class PlateTool(object):
 
                     ax_p.legend()
 
-                    mag_str = "{:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*self.config.star_catalog_band_ratios)
+                    if 'BSC' in self.config.star_catalog_file:
+                        mag_str = "V"
+
+                    elif 'gaia' in self.config.star_catalog_file.lower():
+                        mag_str = 'GAIA G band'
+
+                    else:
+                        mag_str = "{:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*self.config.star_catalog_band_ratios)
+                        
                     ax_p.set_ylabel("Catalog magnitude ({:s})".format(mag_str))
                     ax_p.set_xlabel("Uncalibrated magnitude")
 

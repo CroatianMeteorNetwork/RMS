@@ -87,9 +87,42 @@ def readBSC(file_path, file_name, years_from_J2000=0, lim_mag=None):
 
 
 
+def loadGaiaCatalog(dir_path, file_name, lim_mag=None):
+    """ Read star data from the GAIA catalog in the .npy format. 
+    
+    Arguments:
+        dir_path: [str] Path to the directory where the catalog file is located.
+        file_name: [str] Name of the catalog file.
+
+    Keyword arguments:
+        lim_mag: [float] Faintest magnitude to return. None by default, which will return all stars.
+
+    Return:
+        results: [2d ndarray] Rows of (ra, dec, mag), angular values are in degrees.
+    """
+
+    file_path = os.path.join(dir_path, file_name)
+
+    # Read the catalog
+    results = np.load(file_path, allow_pickle=False)
+
+
+    # Filter by limiting magnitude
+    if lim_mag is not None:
+
+        results = results[results[:, 2] < lim_mag]
+
+
+    # Sort stars by descending declination
+    results = results[results[:,1].argsort()[::-1]]
+
+
+    return results
+
+
 
 def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
-    """ Import the star catalog into a numpy array. 
+    """ Import the star catalog into a numpy array.
     
     Arguments:
         dir_path: [str] Path to the directory where the catalog file is located.
@@ -111,6 +144,13 @@ def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
         return readBSC(dir_path, file_name, lim_mag=lim_mag)
 
 
+    # Use the GAIA star catalog
+    if 'gaia' in file_name.lower():
+        return loadGaiaCatalog(dir_path, file_name, lim_mag=lim_mag)
+
+
+
+    ### Load the SKY2000 catalog ###
 
     file_path = os.path.join(dir_path, file_name)
 
@@ -183,6 +223,7 @@ def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
 
 
     return star_data
+
 
 
 
