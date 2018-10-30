@@ -1,0 +1,1 @@
+The Gaia DR2 was downloaded from http://jvo.nao.ac.jp/portal/gaia/dr2.do on October 29, 2018. Only stars brighter than G magntiude 11.5 were selected.

@@ -27,6 +27,8 @@ from __future__ import print_function, division, absolute_import
 import os
 import sys
 import math
+import copy
+import datetime
 import argparse
     
 # tkinter import that works on both Python 2 and 3
@@ -38,10 +40,10 @@ except:
     import tkFileDialog as filedialog
     import tkMessageBox as messagebox
 
+
+import cv2
 import numpy as np
-
 import scipy.optimize
-
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.font_manager import FontProperties
@@ -53,8 +55,10 @@ from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Formats import StarCatalog
+from RMS.Formats.Vid import readFrame as readVidFrame
+from RMS.Formats.Vid import VidStruct
 from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADecPP, raDec2AltAz, raDecToCorrectedXY
-from RMS.Astrometry.Conversions import date2JD, jd2Date
+from RMS.Astrometry.Conversions import date2JD, jd2Date, unixTime2Date
 from RMS.Routines import Image
 from RMS.Math import angularSeparation
 from RMS.Misc import decimalDegreesToSexHours
@@ -63,6 +67,409 @@ from RMS.Misc import decimalDegreesToSexHours
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog
+
+
+### CLASSES WHICH DEFINE A COMMON INFERFACE FOR DIFFERENT INPUT DATA TYPES (FF files, videos, images) ###
+##############################################################################################################
+
+
+class InputTypeFF(object):
+    def __init__(self, dir_path, config):
+        """ Input file type handle for FF files.
+        
+        Arguments:
+            dir_path: [str] Path to directory with FF files. 
+            config: [ConfigStruct object]
+
+        """
+
+
+        self.dir_path = dir_path
+        self.config = config
+
+        # This type of input should have the calstars file
+        self.require_calstars = True
+
+        print('Using FF files from:', self.dir_path)
+
+
+        self.ff_list = []
+
+        # Get a list of FF files in the folder
+        for file_name in os.listdir(dir_path):
+            if validFFName(file_name):
+                self.ff_list.append(file_name)
+
+
+        # Check that there are any FF files in the folder
+        if not self.ff_list:
+            messagebox.showinfo(title='File list warning', message='No FF files in the selected folder!')
+
+            sys.exit()
+
+
+        # Sort the FF list
+        self.ff_list = sorted(self.ff_list)
+
+        # Init the first file
+        self.current_ff_index = 0
+        self.current_ff_file = self.ff_list[self.current_ff_index]
+
+
+        self.cache = {}
+
+
+
+    def next(self):
+        """ Go to the next FF file. """
+
+        self.current_ff_index = (self.current_ff_index + 1)%len(self.ff_list)
+        self.current_ff_file = self.ff_list[self.current_ff_index]
+
+
+
+    def prev(self):
+        """ Go to the previous FF file. """
+
+        self.current_ff_index = (self.current_ff_index - 1)%len(self.ff_list)
+        self.current_ff_file = self.ff_list[self.current_ff_index]
+
+
+
+    def load(self):
+        """ Load the FF file. """
+
+        # Load from cache to avoid recomputing
+        if self.current_ff_file in self.cache:
+            return self.cache[self.current_ff_file]
+
+        # Load the FF file from disk
+        ff = readFF(self.dir_path, self.current_ff_file)
+                
+        # Store the loaded file to cache for faster loading
+        self.cache = {}
+        self.cache[self.current_ff_file] = ff
+
+        return ff
+
+
+    def name(self):
+        """ Return the name of the FF file. """
+
+        return self.current_ff_file
+
+
+    def currentTime(self):
+        """ Return the time of the current image. """
+
+        return getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
+
+
+
+class FFMimickInterface(object):
+    def __init__(self, maxpixel, avepixel, nrows, ncols):
+        """ Object which mimicks the interface of an FF structure. """
+
+        self.maxpixel = maxpixel
+        self.avepixel = avepixel
+        self.nrows = nrows
+        self.ncols = ncols
+
+
+
+class InputTypeVideo(object):
+    def __init__(self, dir_path, config):
+        """ Input file type handle for video files.
+        
+        Arguments:
+            dir_path: [str] Path to the video file.
+            config: [ConfigStruct object]
+
+        """
+
+        self.dir_path = dir_path
+        self.config = config
+
+        # This type of input probably won't have any calstars files
+        self.require_calstars = False
+
+
+        _, file_name = os.path.split(self.dir_path)
+
+        # Remove the file extension
+        file_name = ".".join(file_name.split('.')[:-1])
+
+        # Try reading the beginning time of the video from the name
+        self.beginning_datetime = datetime.datetime.strptime(file_name, "%Y%m%d_%H%M%S.%f")
+
+
+
+        print('Using video file:', self.dir_path)
+
+        # Open the video file
+        self.cap = cv2.VideoCapture(self.dir_path)
+
+        self.current_frame_chunk = 0
+
+        # Prop values: https://stackoverflow.com/questions/11420748/setting-camera-parameters-in-opencv-python
+
+        # Get the FPS
+        self.fps = self.cap.get(5)
+
+        # Get the total time number of video frames in the file
+        self.total_frames = self.cap.get(7)
+
+        # Get the image size
+        self.nrows = int(self.cap.get(4))
+        self.ncols = int(self.cap.get(3))
+
+
+        # Set the number of frames to be used for averaging and maxpixels
+        self.fr_chunk_no = 256
+
+        # Compute the number of frame chunks
+        self.total_fr_chunks = self.total_frames//self.fr_chunk_no
+        if self.total_fr_chunks == 0:
+            self.total_fr_chunks = 1
+
+        self.current_fr_chunk_size = self.fr_chunk_no
+
+
+        self.cache = {}
+
+
+    def next(self):
+        """ Go to the next frame chunk. """
+
+        self.current_frame_chunk += 1
+        self.current_frame_chunk = self.current_frame_chunk%self.total_fr_chunks
+
+
+    def prev(self):
+        """ Go to the previous frame chunk. """
+
+        self.current_frame_chunk -= 1
+        self.current_frame_chunk = self.current_frame_chunk%self.total_fr_chunks
+
+
+    def load(self):
+        """ Load the frame chunk file. """
+
+        # First try to load the frame form cache, if available
+        if self.current_frame_chunk in self.cache:
+            return self.cache[self.current_frame_chunk]
+
+        frames = np.empty(shape=(self.fr_chunk_no, self.nrows, self.ncols), dtype=np.uint8)
+
+        # Set the first frame location
+        self.cap.set(1, self.current_frame_chunk*self.fr_chunk_no)
+
+        # Load the chunk of frames
+        for i in range(self.fr_chunk_no):
+
+            ret, frame = self.cap.read()
+
+            # If the end of the video files was reached, stop the loop
+            if frame is None:
+                break
+
+            # Convert frame to grayscale
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+            frames[i] = frame.astype(np.uint8)
+
+        # Crop the frame number to total size
+        frames = frames[:i]
+
+        self.current_fr_chunk_size = i + 1
+
+
+        # Compute the maxpixel and avepixel
+        maxpixel = np.max(frames, axis=0).astype(np.uint8)
+        avepixel = np.mean(frames, axis=0).astype(np.uint8)
+
+
+        # Init the structure that mimicks the FF file structure
+        ff_struct_fake = FFMimickInterface(maxpixel, avepixel, self.nrows, self.ncols)
+
+        # Store the FF struct to cache to avoid recomputing
+        self.cache = {}
+        self.cache[self.current_frame_chunk] = ff_struct_fake
+
+        return ff_struct_fake
+        
+
+
+    def name(self):
+        """ Return the name of the chunk, which is just the time range. """
+
+        year, month, day, hours, minutes, seconds, milliseconds = self.currentTime()
+        microseconds = int(1000*milliseconds)
+
+        return str(datetime.datetime(year, month, day, hours, minutes, seconds, microseconds))
+
+
+    def currentTime(self):
+        """ Return the mean time of the current image. """
+
+        # Compute number of seconds since the beginning of the video file to the mean time of the frame chunk
+        seconds_since_beginning = (self.current_frame_chunk*self.fr_chunk_no \
+            + self.current_fr_chunk_size/2)/self.fps
+
+        # Compute the absolute time
+        dt = self.beginning_datetime + datetime.timedelta(seconds=seconds_since_beginning)
+
+        return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
+
+
+
+
+class InputTypeUWOVid(object):
+    def __init__(self, dir_path, config):
+        """ Input file type handle for UWO .vid files.
+        
+        Arguments:
+            dir_path: [str] Path to the vid file.
+            config: [ConfigStruct object]
+
+        """
+
+        self.dir_path = dir_path
+        self.config = config
+
+        # This type of input probably won't have any calstars files
+        self.require_calstars = False
+
+
+        print('Using vid file:', self.dir_path)
+
+        # Open the vid file
+        self.vid = VidStruct()
+        self.vid_file = open(self.dir_path, 'rb')
+
+        # Read one video frame and rewind to beginning
+        readVidFrame(self.vid, self.vid_file)
+        self.vidinfo = copy.deepcopy(self.vid)
+        self.vid_file.seek(0)
+        
+        # Try reading the beginning time of the video from the name
+        self.beginning_datetime = unixTime2Date(self.vidinfo.ts, self.vidinfo.tu, dt_obj=True)
+
+
+        self.current_frame_chunk = 0
+
+        # Get the total time number of video frames in the file
+        self.total_frames = os.path.getsize(self.dir_path)//self.vidinfo.seqlen
+
+        # Get the image size
+        self.nrows = self.vidinfo.ht
+        self.ncols = self.vidinfo.wid
+
+
+        # Set the number of frames to be used for averaging and maxpixels
+        self.fr_chunk_no = 64
+
+        # Compute the number of frame chunks
+        self.total_fr_chunks = self.total_frames//self.fr_chunk_no
+        if self.total_fr_chunks == 0:
+            self.total_fr_chunks = 1
+
+        self.frame_chunk_unix_times = []
+
+
+        self.cache = {}
+
+        # Do the initial load
+        self.load()
+
+
+    def next(self):
+        """ Go to the next frame chunk. """
+
+        self.current_frame_chunk += 1
+        self.current_frame_chunk = self.current_frame_chunk%self.total_fr_chunks
+
+
+    def prev(self):
+        """ Go to the previous frame chunk. """
+
+        self.current_frame_chunk -= 1
+        self.current_frame_chunk = self.current_frame_chunk%self.total_fr_chunks
+
+
+    def load(self):
+        """ Load the frame chunk file. """
+
+        # First try to load the frame from cache, if available
+        if self.current_frame_chunk in self.cache:
+            frame, self.frame_chunk_unix_times = self.cache[self.current_frame_chunk]
+            return frame
+
+
+        # Set the vid file pointer to the right byte
+        self.vid_file.seek(self.current_frame_chunk*self.fr_chunk_no*self.vidinfo.seqlen)
+
+        # Init frame container
+        frames = np.empty(shape=(self.fr_chunk_no, self.nrows, self.ncols), dtype=np.uint16)
+
+        self.frame_chunk_unix_times = []
+
+        # Load the chunk of frames
+        for i in range(self.fr_chunk_no):
+
+            frame = readVidFrame(self.vid, self.vid_file)
+
+            # If the end of the vid file was reached, stop the loop
+            if frame is None:
+                break
+
+            frames[i] = frame.astype(np.uint16)
+
+            # Add the unix time to list
+            self.frame_chunk_unix_times.append(self.vid.ts + self.vid.tu/1000000.0)
+
+
+        # Crop the frame number to total size
+        frames = frames[:i]
+
+        # Compute the maxpixel and avepixel
+        maxpixel = np.max(frames, axis=0).astype(np.uint16)
+        avepixel = np.mean(frames, axis=0).astype(np.uint16)
+
+
+        # Init the structure that mimicks the FF file structure
+        ff_struct_fake = FFMimickInterface(maxpixel, avepixel, self.nrows, self.ncols)
+
+        # Store the FF struct to cache to avoid recomputing
+        self.cache = {}
+        self.cache[self.current_frame_chunk] = [ff_struct_fake, self.frame_chunk_unix_times]
+
+        return ff_struct_fake
+        
+
+
+    def name(self):
+        """ Return the name of the chunk, which is just the time range. """
+
+        year, month, day, hours, minutes, seconds, milliseconds = self.currentTime()
+        microseconds = int(1000*milliseconds)
+
+        return str(datetime.datetime(year, month, day, hours, minutes, seconds, microseconds))
+
+
+    def currentTime(self):
+        """ Return the mean time of the current image. """
+
+        # Compute the mean UNIX time
+        mean_utime = np.mean(self.frame_chunk_unix_times)
+
+        mean_ts = int(mean_utime)
+        mean_tu = int((mean_utime - mean_ts)*1000000)
+
+        return unixTime2Date(mean_ts, mean_tu)
+
+
+##############################################################################################################
 
 
 class FOVinputDialog(object):
@@ -128,14 +535,12 @@ class PlateTool(object):
 
         Arguments:
             dir_path: [str] Absolute path to the directory containing image files.
-            config: [COnfig struct]
+            config: [Config struct]
 
         """
 
         self.config = config
         self.dir_path = dir_path
-
-        print('Using FF files from:', self.dir_path)
 
         # Flag which regulates wheter the maxpixel or the avepixel image is shown (avepixel by default)
         self.img_type_flag = 'avepixel'
@@ -150,6 +555,7 @@ class PlateTool(object):
         self.photom_deviatons_scat = []
 
         self.catalog_stars_visible = True
+        self.draw_calstars = True
 
         self.show_key_help = 1
 
@@ -187,11 +593,60 @@ class PlateTool(object):
 
 
 
+        ### Detect input file type and load appropriate input plugin ###
+
+        # If the given dir path is a directory
+        if os.path.isdir(self.dir_path):
+
+            # Check if there are valid FF names in the directory
+            if any([validFFName(ff_file) for ff_file in os.listdir(self.dir_path)]):
+
+                # Init the image handle for FF files
+                self.img_handle = InputTypeFF(self.dir_path, self.config)
+
+            # If not, check if there any image files in the folder
+            else:
+                ### PLACEHOLDER !!!
+                sys.exit()
+
+
+        # Use the given video file
+        else:
+
+            # Check if the given file is a video file
+            if self.dir_path.endswith('.mp4') or self.dir_path.endswith('.avi') or self.dir_path.endswith('.mkv'):
+
+                # Init the image hadle for video files
+                self.img_handle = InputTypeVideo(self.dir_path, self.config)
+
+
+            # Check if the given files is the UWO .vid format
+            elif self.dir_path.endswith('.vid'):
+                
+                # Init the image handle for UWO-type .vid files
+                self.img_handle = InputTypeUWOVid(self.dir_path, self.config)
+
+
+            else:
+                messagebox.showerror(title='Input format error', message='Only these video formats are supported: .mp4, .avi, .mkv, .vid!')
+                sys.exit()
+
+
+            # Extract the directory path
+            self.dir_path, _ = os.path.split(self.dir_path)
+
+
+
+        ################################################################
+
+
+
+
         # Load catalog stars
         self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
         self.cat_lim_mag = self.config.catalog_mag_limit
 
-        # Check if the BSC catalog exists
+        # Check if the catalog exists
         if not self.catalog_stars.any():
             messagebox.showerror(title='Star catalog error', message='Star catalog from path ' \
                 + os.path.join(self.config.star_catalog_path, self.config.star_catalog_file) \
@@ -203,49 +658,30 @@ class PlateTool(object):
 
         # Find the CALSTARS file in the given folder
         calstars_file = None
-        for cal_file in os.listdir(dir_path):
+        for cal_file in os.listdir(self.dir_path):
             if ('CALSTARS' in cal_file) and ('.txt' in cal_file):
                 calstars_file = cal_file
                 break
 
         if calstars_file is None:
-            messagebox.showerror(title='CALSTARS error', message='CALSTARS file could not be found in the given directory!')
-            sys.exit()
 
-        # Load the calstars file
-        calstars_list = CALSTARS.readCALSTARS(dir_path, calstars_file)
+            # Check if the calstars file is required
+            if self.img_handle.require_calstars:
+                
+                messagebox.showinfo(title='CALSTARS error', \
+                    message='CALSTARS file could not be found in the given directory!')
 
-        # Convert the list to a dictionary
-        self.calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
+            self.calstars = {}
 
-        print('CALSTARS file: ' + calstars_file + ' loaded!')
+        else:
 
-        # A list of FF files which have any stars on them
-        calstars_ff_files = [line[0] for line in calstars_list]
+            # Load the calstars file
+            calstars_list = CALSTARS.readCALSTARS(self.dir_path, calstars_file)
 
+            # Convert the list to a dictionary
+            self.calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
-        self.ff_list = []
-
-        # Get a list of FF files in the folder
-        for file_name in os.listdir(dir_path):
-            if validFFName(file_name) and (file_name in calstars_ff_files):
-                self.ff_list.append(file_name)
-
-
-        # Check that there are any FF files in the folder
-        if not self.ff_list:
-            messagebox.showinfo(title='File list warning', message='No FF files in the selected folder, or in the CALSTARS file!')
-
-            sys.exit()
-
-
-        # Sort the FF list
-        self.ff_list = sorted(self.ff_list)
-
-        # Init the first file
-        self.current_ff_index = 0
-        self.current_ff_file = self.ff_list[self.current_ff_index]
-
+            print('CALSTARS file: ' + calstars_file + ' loaded!')
 
 
 
@@ -268,9 +704,10 @@ class PlateTool(object):
         ### INIT IMAGE ###
 
         plt.figure(facecolor='black')
+        plt.gcf().canvas.set_window_title('SkyFit')
 
         # Init the first image
-        self.updateImage()
+        self.updateImage(first_update=True)
 
         self.ax = plt.gca()
 
@@ -612,7 +1049,15 @@ class PlateTool(object):
 
                     ax_p.legend()
 
-                    mag_str = "{:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*self.config.star_catalog_band_ratios)
+                    if 'BSC' in self.config.star_catalog_file:
+                        mag_str = "V"
+
+                    elif 'gaia' in self.config.star_catalog_file.lower():
+                        mag_str = 'GAIA G band'
+
+                    else:
+                        mag_str = "{:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*self.config.star_catalog_band_ratios)
+                        
                     ax_p.set_ylabel("Catalog magnitude ({:s})".format(mag_str))
                     ax_p.set_xlabel("Uncalibrated magnitude")
 
@@ -658,10 +1103,10 @@ class PlateTool(object):
 
         # Switch images
         if event.key == 'left':
-            self.prevFF()
+            self.prevImg()
 
         elif event.key == 'right':
-            self.nextFF()
+            self.nextImg()
 
 
         elif event.key == 'm':
@@ -816,11 +1261,21 @@ class PlateTool(object):
 
         # Key increment
         elif event.key == '+':
-            self.key_increment += 0.1
+
+            if self.key_increment <= 0.091:
+                self.key_increment += 0.01
+            else:
+                self.key_increment += 0.1
+
             self.updateImage()
 
         elif event.key == '-':
-            self.key_increment -= 0.1
+            
+            if self.key_increment <= 0.11:
+                self.key_increment -= 0.01
+            else:
+                self.key_increment -= 0.1
+            
             self.updateImage()
 
 
@@ -873,11 +1328,15 @@ class PlateTool(object):
         # Show/hide catalog stars
         elif event.key == 'h':
 
-            if self.catalog_stars_visible:
-                self.catalog_stars_visible = False
+            self.catalog_stars_visible = not self.catalog_stars_visible
 
-            else:
-                self.catalog_stars_visible = True
+            self.updateImage()
+
+
+        # Show/hide detected stars
+        elif event.key == 'c':
+
+            self.draw_calstars = not self.draw_calstars
 
             self.updateImage()
 
@@ -1089,26 +1548,33 @@ class PlateTool(object):
         ax1.set_facecolor('black')
         ax2.set_facecolor('black')
 
+        # Plot the image level range
+        for i in range(8):
+            rel_i = i/8
+            ax2.text(rel_i*img.shape[1], 0, str(int(rel_i*2**self.bit_depth)), color='red')
+
         plt.sca(ax1)
 
 
 
 
 
-    def updateImage(self, clear_plot=True):
+    def updateImage(self, clear_plot=True, first_update=False):
         """ Update the matplotlib plot to show the current image. 
 
         Keyword arguments:
             clear_plot: [bool] If True, the plot will be cleared before plotting again (default).
+            first_update: [bool] Special lines will be executed if this is True, e.g. the max level will be 
+                computed. False by default.
         """
 
         # Reset circle patches
         self.circle_aperature = None
         self.circle_aperature_outer = None
 
-        # Limit key increment so it can be lower than 0.1
-        if self.key_increment < 0.1:
-            self.key_increment = 0.1
+        # Limit key increment so it can be lower than 0.01
+        if self.key_increment < 0.01:
+            self.key_increment = 0.01
 
 
         if clear_plot:
@@ -1119,15 +1585,15 @@ class PlateTool(object):
         self.checkParamRange()
 
 
-        # Load the FF from the current file
-        self.current_ff = readFF(self.dir_path, self.current_ff_file)
+        # Load the current image
+        self.current_ff = self.img_handle.load()
 
 
         if self.current_ff is None:
             
             # If the current FF couldn't be opened, go to the next
-            messagebox.showerror(title='Read error', message='The current FF file is corrupted!')
-            self.nextFF()
+            messagebox.showerror(title='Read error', message='The current image is corrupted!')
+            self.nextImg()
 
             return None
 
@@ -1144,6 +1610,12 @@ class PlateTool(object):
         self.bit_depth = 8*img_data.itemsize
 
 
+        if first_update:
+            
+            # Set the maximum image level after reading the bit depth
+            self.img_level_max = 2**self.bit_depth - 1
+
+
         # Apply flat
         if self.flat_struct is not None:
             img_data = Image.applyFlat(img_data, self.flat_struct)
@@ -1155,8 +1627,7 @@ class PlateTool(object):
 
         ### Adjust image levels
 
-        img_data = Image.adjustLevels(img_data, self.img_level_min, self.img_gamma, self.img_level_max, \
-            self.bit_depth)
+        img_data = Image.adjustLevels(img_data, self.img_level_min, self.img_gamma, self.img_level_max)
 
         ###
 
@@ -1171,7 +1642,8 @@ class PlateTool(object):
         self.drawPairedStars()
 
         # Draw stars detected on this image
-        self.drawCalstars()
+        if self.draw_calstars:
+            self.drawCalstars()
 
         # Update centre of FOV in horizontal coordinates
         self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.JD, self.platepar.lon, 
@@ -1241,7 +1713,7 @@ class PlateTool(object):
         if self.show_key_help > 0:
 
             # Show text on image with platepar parameters
-            text_str  = self.current_ff_file + '\n' + self.img_type_flag + '\n\n'
+            text_str  = self.img_handle.name() + '\n' + self.img_type_flag + '\n\n'
             text_str += 'UT corr  = {:.1f}h\n'.format(self.platepar.UT_corr)
             text_str += 'Ref Az   = {:.3f}$\\degree$\n'.format(self.platepar.az_centre)
             text_str += 'Ref Alt  = {:.3f}$\\degree$\n'.format(self.platepar.alt_centre)
@@ -1287,6 +1759,7 @@ class PlateTool(object):
             text_str += '\n'
             text_str += 'M - Toggle maxpixel/avepixel\n'
             text_str += 'H - Hide/show catalog stars\n'
+            text_str += 'C - Hide/show detected stars\n'
             text_str += 'U/J - Img Gamma\n'
             text_str += 'CTRL + H - Adjust levels\n'
             text_str += 'V - FOV centre\n'
@@ -1323,13 +1796,16 @@ class PlateTool(object):
     def drawCalstars(self):
         """ Draw extracted stars on the current image. """
 
-        # Get the stars detected on this FF file
-        star_data = self.calstars[self.current_ff_file]
+        # Check if the given FF files is in the calstars list
+        if self.img_handle.name() in self.calstars:
 
-        # Get star coordinates
-        y, x, _, _ = np.array(star_data).T
+            # Get the stars detected on this FF file
+            star_data = self.calstars[self.img_handle.name()]
 
-        plt.scatter(x, y, edgecolors='g', marker='o', facecolors='none', alpha=0.8, linestyle='dotted')
+            # Get star coordinates
+            y, x, _, _ = np.array(star_data).T
+
+            plt.scatter(x, y, edgecolors='g', marker='o', facecolors='none', alpha=0.8, linestyle='dotted')
 
 
 
@@ -1348,11 +1824,11 @@ class PlateTool(object):
     def computeCentreRADec(self):
         """ Compute RA and Dec of the FOV centre in degrees. """
 
-        # The the time of the midle of the FF file
-        ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
+        # The the time of the image
+        img_time = self.img_handle.currentTime()
 
         # Convert the FOV centre to RA/Dec
-        _, ra_centre, dec_centre, _ = XY2CorrectedRADecPP([ff_middle_time], [self.platepar.X_res/2], 
+        _, ra_centre, dec_centre, _ = XY2CorrectedRADecPP([img_time], [self.platepar.X_res/2], 
             [self.platepar.Y_res/2], [0], self.platepar)
         
         ra_centre = ra_centre[0]
@@ -1408,10 +1884,10 @@ class PlateTool(object):
 
         ra_catalog, dec_catalog, mag_catalog = catalog_stars.T
 
-        ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
+        img_time = self.img_handle.currentTime()
 
         # Get the date of the middle of the FF exposure
-        jd = date2JD(*ff_middle_time)
+        jd = date2JD(*img_time)
 
         # Convert star RA, Dec to image coordinates
         x_array, y_array = raDecToCorrectedXY(ra_catalog, dec_catalog, jd, lat, lon, self.platepar.X_res, \
@@ -1435,10 +1911,10 @@ class PlateTool(object):
         root.destroy()
 
         # Get the middle time of the first FF
-        ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
+        img_time = self.img_handle.currentTime()
 
         # Set the referent platepar time to the time of the FF
-        self.platepar.JD = date2JD(*ff_middle_time, UT_corr=float(self.platepar.UT_corr))
+        self.platepar.JD = date2JD(*img_time, UT_corr=float(self.platepar.UT_corr))
 
         # Set the referent hour angle
         T = (self.platepar.JD - 2451545)/36525.0
@@ -1448,7 +1924,7 @@ class PlateTool(object):
         self.platepar.Ho = Ho
 
         
-        time_data = [ff_middle_time]
+        time_data = [img_time]
 
         # Convert FOV centre to RA, Dec
         _, ra_data, dec_data = altAz2RADec(self.platepar.lat, self.platepar.lon, self.platepar.UT_corr, 
@@ -1510,8 +1986,8 @@ class PlateTool(object):
         """ Make a new platepar from the loaded one, but set the parameters from the config file. """
 
         # Update the reference time
-        ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
-        self.platepar.JD = date2JD(*ff_middle_time)
+        img_time = self.img_handle.currentTime()
+        self.platepar.JD = date2JD(*img_time)
 
         # Update the location from the config file
         self.platepar.lat = self.config.latitude
@@ -1633,7 +2109,7 @@ class PlateTool(object):
         return flat_file, flat
 
 
-    def nextFF(self):
+    def nextImg(self):
         """ Shows the next FF file in the list. """
 
         # Don't allow image change while in star picking mode
@@ -1641,8 +2117,9 @@ class PlateTool(object):
             messagebox.showwarning(title='Star picking mode', message='You cannot cycle through images while in star picking mode!')
             return
 
-        self.current_ff_index = (self.current_ff_index + 1)%len(self.ff_list)
-        self.current_ff_file = self.ff_list[self.current_ff_index]
+            
+        self.img_handle.next()
+
 
         self.paired_stars = []
 
@@ -1650,7 +2127,7 @@ class PlateTool(object):
 
 
 
-    def prevFF(self):
+    def prevImg(self):
         """ Shows the previous FF file in the list. """
 
         # Don't allow image change while in star picking mode
@@ -1658,8 +2135,9 @@ class PlateTool(object):
             messagebox.showwarning(title='Star picking mode', message='You cannot cycle through images while in star picking mode!')
             return
 
-        self.current_ff_index = (self.current_ff_index - 1)%len(self.ff_list)
-        self.current_ff_file = self.ff_list[self.current_ff_index]
+
+        self.img_handle.prev()
+
 
         self.paired_stars = []
 
@@ -2037,7 +2515,7 @@ if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description="Tool for fitting astrometry plates and photometric calibration.")
 
     arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
-        help='Path to the folder with FF files.')
+        help='Path to the folder with FF or image files, or path to a video file. If images or videos are given, their names must be in the format: YYYYMMDD_hhmmss.uuuuuu')
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")

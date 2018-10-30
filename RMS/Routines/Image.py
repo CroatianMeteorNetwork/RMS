@@ -79,7 +79,7 @@ def applyBrightnessAndContrast(img, brightness, contrast):
 
 
 
-def adjustLevels(img_array, minv, gamma, maxv, nbits=8):
+def adjustLevels(img_array, minv, gamma, maxv, nbits=None):
     """ Adjusts levels on image with given parameters.
 
     Arguments:
@@ -95,6 +95,14 @@ def adjustLevels(img_array, minv, gamma, maxv, nbits=8):
         [ndarray] Image with adjusted levels.
 
     """
+
+    if nbits is None:
+        
+        # Get the bit depth from the image type
+        nbits = 8*img_array.itemsize
+
+
+    input_type = img_array.dtype
 
     # Calculate maximum image level
     max_lvl = 2**nbits - 1.0
@@ -123,11 +131,13 @@ def adjustLevels(img_array, minv, gamma, maxv, nbits=8):
 
     img_array = np.multiply(img_array, max_lvl)
 
-    # Convert back to 0-255 values
+    # Convert back to 0-maxval values
     img_array = np.clip(img_array, 0, max_lvl)
 
-    # WARNING: This limits the number of image levels to 256!
-    img_array = img_array.astype(np.uint8)
+
+    # Convert the image back to input type
+    img_array.astype(input_type)
+        
 
     return img_array
 
