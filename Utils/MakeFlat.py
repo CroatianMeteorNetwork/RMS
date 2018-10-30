@@ -7,6 +7,7 @@ from __future__ import print_function, division, absolute_import
 import os
 import sys
 import random
+import argparse
 
 import numpy as np
 
@@ -18,13 +19,16 @@ from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Astrometry.Conversions import date2JD
 
 
-def makeFlat(dir_path, config):
+def makeFlat(dir_path, config, nostars=False):
     """ Makes a flat field from the files in the given folder. CALSTARS file is needed to estimate the
         quality of every image by counting the number of detected stars.
 
     Arguments:
         dir_path: [str] Path to the directory which contains the FF files and a CALSTARS file.
         config: [config object]
+
+    Keyword arguments:
+        nostars: [bool] If True, all files will be taken regardless of if they have stars on them or not.
 
     Return:
         [2d ndarray] Flat field image as a numpy array. If the flat generation failed, None will be returned.
@@ -57,13 +61,13 @@ def makeFlat(dir_path, config):
 
     # Get a list of FF files in the folder
     for file_name in os.listdir(dir_path):
-        if validFFName(file_name) and (file_name in calstars_ff_files):
+        if validFFName(file_name) and ((file_name in calstars_ff_files) or nostars):
             ff_list.append(file_name)
-
+            
 
     # Check that there are any FF files in the folder
     if not ff_list:
-        print('No FF files in the selected folder!')
+        print('No valid FF files in the selected folder!')
         return None
 
 
@@ -77,13 +81,20 @@ def makeFlat(dir_path, config):
         if not validFFName(ff_name):
             continue
 
-        if ff_name in calstars:
+        if (ff_name in calstars) or nostars:
 
-            # Get the number of stars detected on the FF image
-            ff_nstars = len(calstars[ff_name])
+            # Disable requiring minimum number of stars if specified
+            if not nostars:
+                
+                # Get the number of stars detected on the FF image
+                ff_nstars = len(calstars[ff_name])
+
+            else:
+                ff_nstars = 0
+
             
             # Check if the number of stars on the image is over the detection threshold
-            if ff_nstars > config.ff_min_stars:
+            if (ff_nstars > config.ff_min_stars) or nostars:
 
                 # Add the FF file to the list of FF files to be used to make a flat
                 ff_list_good.append(ff_name)
@@ -94,13 +105,13 @@ def makeFlat(dir_path, config):
 
 
     # Check that there are enough good FF files in the folder
-    if len(ff_times) < config.flat_min_imgs:
+    if (len(ff_times) < config.flat_min_imgs) and not nostars:
         print('Not enough FF files have enough stars on them!')
         return None
         
     
     # Make sure the files cover at least 2 hours
-    if not (max(ff_times) - min(ff_times))*24 > 2:
+    if (not (max(ff_times) - min(ff_times))*24 > 2) and not nostars:
         print('Good FF files cover less than 2 hours!')
         return None
 
@@ -173,18 +184,31 @@ if __name__ == "__main__":
 
     import scipy.misc
 
-    if len(sys.argv) < 2:
-        print('Usage: python -m RMS.Utils.MakeFlat /path/to/FFbin/dir/')
-        sys.exit()
+    ### COMMAND LINE ARGUMENTS
 
-    dir_path = sys.argv[1].replace('"', '')
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Makes a flat from FF files in the given folder. Only those files with star detection are taken, but this can be disabled.")
+
+    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
+        help='Path to directory with FF files.')
+
+    arg_parser.add_argument('-n', '--nostars', action="store_true", \
+        help="""Disable requiring stars on images for generating the flat field.""")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+
+    dir_path = cml_args.dir_path[0]
 
 
     # Load the configuration file
     config = cr.parse(".config")
 
     # Make the flat
-    ff_median = makeFlat(dir_path, config)
+    ff_median = makeFlat(dir_path, config, nostars=cml_args.nostars)
 
 
     if ff_median is not None:
