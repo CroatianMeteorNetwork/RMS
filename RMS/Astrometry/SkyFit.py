@@ -27,6 +27,7 @@ from __future__ import print_function, division, absolute_import
 import os
 import sys
 import math
+import datetime
 import argparse
     
 # tkinter import that works on both Python 2 and 3
@@ -38,10 +39,10 @@ except:
     import tkFileDialog as filedialog
     import tkMessageBox as messagebox
 
+
+import cv2
 import numpy as np
-
 import scipy.optimize
-
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.font_manager import FontProperties
@@ -71,10 +72,20 @@ from RMS.Astrometry.CyFunctions import subsetCatalog
 
 class InputTypeFF(object):
     def __init__(self, dir_path, config):
+        """ Input file type handle for FF files.
+        
+        Arguments:
+            dir_path: [str] Path to directory with FF files. 
+            config: [ConfigStruct object]
+
+        """
 
 
         self.dir_path = dir_path
         self.config = config
+
+        # This type of input should have the calstars file
+        self.require_calstars = True
 
         print('Using FF files from:', self.dir_path)
 
@@ -102,6 +113,9 @@ class InputTypeFF(object):
         self.current_ff_file = self.ff_list[self.current_ff_index]
 
 
+        self.cache = {}
+
+
 
     def next(self):
         """ Go to the next FF file. """
@@ -122,7 +136,18 @@ class InputTypeFF(object):
     def load(self):
         """ Load the FF file. """
 
-        return readFF(self.dir_path, self.current_ff_file)
+        # Load from cache to avoid recomputing
+        if self.current_ff_file in self.cache:
+            return self.cache[self.current_ff_file]
+
+        # Load the FF file from disk
+        ff = readFF(self.dir_path, self.current_ff_file)
+                
+        # Store the loaded file to cache for faster loading
+        self.cache = {}
+        self.cache[self.current_ff_file] = ff
+
+        return ff
 
 
     def name(self):
@@ -138,8 +163,155 @@ class InputTypeFF(object):
 
 
 
+class FFMimickInterface(object):
+    def __init__(self, maxpixel, avepixel, nrows, ncols):
+        """ Object which mimicks the interface of an FF structure. """
+
+        self.maxpixel = maxpixel
+        self.avepixel = avepixel
+        self.nrows = nrows
+        self.ncols = ncols
 
 
+
+class InputTypeVideo(object):
+    def __init__(self, dir_path, config):
+        """ Input file type handle for video files.
+        
+        Arguments:
+            dir_path: [str] Path to the video file.
+            config: [ConfigStruct object]
+
+        """
+
+        self.dir_path = dir_path
+        self.config = config
+
+        # This type of input probably won't have any calstars files
+        self.require_calstars = False
+
+
+        _, file_name = os.path.split(self.dir_path)
+
+        # Remove the file extension
+        file_name = ".".join(file_name.split('.')[:-1])
+
+        # Try reading the beginning time of the video from the name
+        self.beginning_datetime = datetime.datetime.strptime(file_name, "%Y%m%d_%H%M%S.%f")
+
+
+
+        print('Using video file:', self.dir_path)
+
+        # Open the video file
+        self.cap = cv2.VideoCapture(self.dir_path)
+
+        self.current_frame_chunk = 0
+
+        # Prop values: https://stackoverflow.com/questions/11420748/setting-camera-parameters-in-opencv-python
+
+        # Get the FPS
+        self.fps = self.cap.get(5)
+
+        # Get the total time number of video frames in the file
+        self.total_frames = self.cap.get(7)
+
+        # Get the image size
+        self.nrows = int(self.cap.get(4))
+        self.ncols = int(self.cap.get(3))
+
+
+        # Set the number of frames to be used for averaging and maxpixels
+        self.fr_chunk_no = 256
+
+        self.current_fr_chunk_size = self.fr_chunk_no
+
+
+        self.cache = {}
+
+
+    def next(self):
+        """ Go to the next frame chunk. """
+
+        self.current_frame_chunk += 1
+        self.current_frame_chunk = self.current_frame_chunk%(self.total_frames//self.fr_chunk_no)
+
+
+    def prev(self):
+        """ Go to the previous frame chunk. """
+
+        self.current_frame_chunk -= 1
+        self.current_frame_chunk = self.current_frame_chunk%(self.total_frames//self.fr_chunk_no)
+
+
+    def load(self):
+        """ Load the FF file. """
+
+        # First try to load the frame form cache, if available
+        if self.current_frame_chunk in self.cache:
+            return self.cache[self.current_frame_chunk]
+
+        frames = np.empty(shape=(self.fr_chunk_no, self.nrows, self.ncols), dtype=np.uint8)
+
+        # Set the first frame location
+        self.cap.set(1, self.current_frame_chunk*self.fr_chunk_no)
+
+        # Load the chunk of frames
+        for i in range(self.fr_chunk_no):
+
+            ret, frame = self.cap.read()
+
+            # If the end of the video files was reached, stop the loop
+            if frame is None:
+                break
+
+            # Convert frame to grayscale
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+            frames[i] = frame.astype(np.uint8)
+
+        # Crop the frame number to total size
+        frames = frames[:i]
+
+        self.current_fr_chunk_size = i + 1
+
+
+        # Compute the maxpixel and avepixel
+        maxpixel = np.max(frames, axis=0).astype(np.uint8)
+        avepixel = np.mean(frames, axis=0).astype(np.uint8)
+
+
+        # Init the structure that mimicks the FF file structure
+        ff_struct_fake = FFMimickInterface(maxpixel, avepixel, self.nrows, self.ncols)
+
+        # Store the FF struct to cache to avoid recomputing
+        self.cache = {}
+        self.cache[self.current_frame_chunk] = ff_struct_fake
+
+        return ff_struct_fake
+        
+
+
+    def name(self):
+        """ Return the name of the chunk, which is just the time range. """
+
+        year, month, day, hours, minutes, seconds, milliseconds = self.currentTime()
+        microseconds = int(1000*milliseconds)
+
+        return str(datetime.datetime(year, month, day, hours, minutes, seconds, microseconds))
+
+
+    def currentTime(self):
+        """ Return the time of the current image. """
+
+        # Compute number of seconds since the beginning of the video file to the mean time of the frame chunk
+        seconds_since_beginning = (self.current_frame_chunk*self.fr_chunk_no \
+            + self.current_fr_chunk_size/2)/self.fps
+
+        # Compute the absolute time
+        dt = self.beginning_datetime + datetime.timedelta(seconds=seconds_since_beginning)
+
+        return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
 
 
 
@@ -286,8 +458,30 @@ class PlateTool(object):
 
         # Use the given video file
         else:
-            # PLACEHOLDER !!!
-            sys.exit()
+
+            # Check if the given file is a video file
+            if self.dir_path.endswith('.mp4') or self.dir_path.endswith('.avi'):
+
+                # Init the image hadle for video files
+                self.img_handle = InputTypeVideo(self.dir_path, self.config)
+
+
+            # Check if the given files is the UWO .vid format
+            elif self.dir_path.endswith('.vid'):
+                
+
+                # PLACEHOLDER !!!
+                sys.exit()
+
+
+            else:
+                messagebox.showerror(title='Input format error', message='Only these video formats are supported: .mp4, .avi, .vid!')
+                sys.exit()
+
+
+            # Extract the directory path
+            self.dir_path, _ = os.path.split(self.dir_path)
+
 
 
         ################################################################
@@ -311,18 +505,25 @@ class PlateTool(object):
 
         # Find the CALSTARS file in the given folder
         calstars_file = None
-        for cal_file in os.listdir(dir_path):
+        for cal_file in os.listdir(self.dir_path):
             if ('CALSTARS' in cal_file) and ('.txt' in cal_file):
                 calstars_file = cal_file
                 break
 
         if calstars_file is None:
-            messagebox.showinfo(title='CALSTARS error', message='CALSTARS file could not be found in the given directory!')
+
+            # Check if the calstars file is required
+            if self.img_handle.require_calstars:
+                
+                messagebox.showinfo(title='CALSTARS error', \
+                    message='CALSTARS file could not be found in the given directory!')
+
+            self.calstars = {}
 
         else:
 
             # Load the calstars file
-            calstars_list = CALSTARS.readCALSTARS(dir_path, calstars_file)
+            calstars_list = CALSTARS.readCALSTARS(self.dir_path, calstars_file)
 
             # Convert the list to a dictionary
             self.calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
@@ -2133,7 +2334,7 @@ if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description="Tool for fitting astrometry plates and photometric calibration.")
 
     arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
-        help='Path to the folder with FF files.')
+        help='Path to the folder with FF or image files, or path to a video file. If images or videos are given, their names must be in the format: YYYYMMDD_hhmmss.uuuuuu')
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
