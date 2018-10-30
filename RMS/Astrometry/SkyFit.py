@@ -150,6 +150,7 @@ class PlateTool(object):
         self.photom_deviatons_scat = []
 
         self.catalog_stars_visible = True
+        self.draw_calstars = True
 
         self.show_key_help = 1
 
@@ -191,7 +192,7 @@ class PlateTool(object):
         self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
         self.cat_lim_mag = self.config.catalog_mag_limit
 
-        # Check if the BSC catalog exists
+        # Check if the catalog exists
         if not self.catalog_stars.any():
             messagebox.showerror(title='Star catalog error', message='Star catalog from path ' \
                 + os.path.join(self.config.star_catalog_path, self.config.star_catalog_file) \
@@ -209,32 +210,30 @@ class PlateTool(object):
                 break
 
         if calstars_file is None:
-            messagebox.showerror(title='CALSTARS error', message='CALSTARS file could not be found in the given directory!')
-            sys.exit()
+            messagebox.showinfo(title='CALSTARS error', message='CALSTARS file could not be found in the given directory!')
 
-        # Load the calstars file
-        calstars_list = CALSTARS.readCALSTARS(dir_path, calstars_file)
+        else:
 
-        # Convert the list to a dictionary
-        self.calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
+            # Load the calstars file
+            calstars_list = CALSTARS.readCALSTARS(dir_path, calstars_file)
 
-        print('CALSTARS file: ' + calstars_file + ' loaded!')
+            # Convert the list to a dictionary
+            self.calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
-        # A list of FF files which have any stars on them
-        calstars_ff_files = [line[0] for line in calstars_list]
+            print('CALSTARS file: ' + calstars_file + ' loaded!')
 
 
         self.ff_list = []
 
         # Get a list of FF files in the folder
         for file_name in os.listdir(dir_path):
-            if validFFName(file_name) and (file_name in calstars_ff_files):
+            if validFFName(file_name):
                 self.ff_list.append(file_name)
 
 
         # Check that there are any FF files in the folder
         if not self.ff_list:
-            messagebox.showinfo(title='File list warning', message='No FF files in the selected folder, or in the CALSTARS file!')
+            messagebox.showinfo(title='File list warning', message='No FF files in the selected folder!')
 
             sys.exit()
 
@@ -881,11 +880,15 @@ class PlateTool(object):
         # Show/hide catalog stars
         elif event.key == 'h':
 
-            if self.catalog_stars_visible:
-                self.catalog_stars_visible = False
+            self.catalog_stars_visible = not self.catalog_stars_visible
 
-            else:
-                self.catalog_stars_visible = True
+            self.updateImage()
+
+
+        # Show/hide detected stars
+        elif event.key == 'c':
+
+            self.draw_calstars = not self.draw_calstars
 
             self.updateImage()
 
@@ -1179,7 +1182,8 @@ class PlateTool(object):
         self.drawPairedStars()
 
         # Draw stars detected on this image
-        self.drawCalstars()
+        if self.draw_calstars:
+            self.drawCalstars()
 
         # Update centre of FOV in horizontal coordinates
         self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.JD, self.platepar.lon, 
@@ -1295,6 +1299,7 @@ class PlateTool(object):
             text_str += '\n'
             text_str += 'M - Toggle maxpixel/avepixel\n'
             text_str += 'H - Hide/show catalog stars\n'
+            text_str += 'C - Hide/show detected stars\n'
             text_str += 'U/J - Img Gamma\n'
             text_str += 'CTRL + H - Adjust levels\n'
             text_str += 'V - FOV centre\n'
@@ -1331,13 +1336,16 @@ class PlateTool(object):
     def drawCalstars(self):
         """ Draw extracted stars on the current image. """
 
-        # Get the stars detected on this FF file
-        star_data = self.calstars[self.current_ff_file]
+        # Check if the given FF files is in the calstars list
+        if self.current_ff_file in self.calstars:
 
-        # Get star coordinates
-        y, x, _, _ = np.array(star_data).T
+            # Get the stars detected on this FF file
+            star_data = self.calstars[self.current_ff_file]
 
-        plt.scatter(x, y, edgecolors='g', marker='o', facecolors='none', alpha=0.8, linestyle='dotted')
+            # Get star coordinates
+            y, x, _, _ = np.array(star_data).T
+
+            plt.scatter(x, y, edgecolors='g', marker='o', facecolors='none', alpha=0.8, linestyle='dotted')
 
 
 
