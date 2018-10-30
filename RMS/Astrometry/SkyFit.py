@@ -65,6 +65,87 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog
 
 
+### CLASSES WHICH DEFINE A COMMON INFERFACE FOR DIFFERENT INPUT DATA TYPES (FF files, videos, images) ###
+##############################################################################################################
+
+
+class InputTypeFF(object):
+    def __init__(self, dir_path, config):
+
+
+        self.dir_path = dir_path
+        self.config = config
+
+        print('Using FF files from:', self.dir_path)
+
+
+        self.ff_list = []
+
+        # Get a list of FF files in the folder
+        for file_name in os.listdir(dir_path):
+            if validFFName(file_name):
+                self.ff_list.append(file_name)
+
+
+        # Check that there are any FF files in the folder
+        if not self.ff_list:
+            messagebox.showinfo(title='File list warning', message='No FF files in the selected folder!')
+
+            sys.exit()
+
+
+        # Sort the FF list
+        self.ff_list = sorted(self.ff_list)
+
+        # Init the first file
+        self.current_ff_index = 0
+        self.current_ff_file = self.ff_list[self.current_ff_index]
+
+
+
+    def next(self):
+        """ Go to the next FF file. """
+
+        self.current_ff_index = (self.current_ff_index + 1)%len(self.ff_list)
+        self.current_ff_file = self.ff_list[self.current_ff_index]
+
+
+
+    def prev(self):
+        """ Go to the previous FF file. """
+
+        self.current_ff_index = (self.current_ff_index - 1)%len(self.ff_list)
+        self.current_ff_file = self.ff_list[self.current_ff_index]
+
+
+
+    def load(self):
+        """ Load the FF file. """
+
+        return readFF(self.dir_path, self.current_ff_file)
+
+
+    def name(self):
+        """ Return the name of the FF file. """
+
+        return self.current_ff_file
+
+
+    def currentTime(self):
+        """ Return the time of the current image. """
+
+        return getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
+
+
+
+
+
+
+
+
+##############################################################################################################
+
+
 class FOVinputDialog(object):
     """ Dialog for inputting FOV centre in Alt/Az. """
     def __init__(self, parent):
@@ -128,14 +209,12 @@ class PlateTool(object):
 
         Arguments:
             dir_path: [str] Absolute path to the directory containing image files.
-            config: [COnfig struct]
+            config: [Config struct]
 
         """
 
         self.config = config
         self.dir_path = dir_path
-
-        print('Using FF files from:', self.dir_path)
 
         # Flag which regulates wheter the maxpixel or the avepixel image is shown (avepixel by default)
         self.img_type_flag = 'avepixel'
@@ -188,6 +267,34 @@ class PlateTool(object):
 
 
 
+        ### Detect input file type and load appropriate input plugin ###
+
+        # If the given dir path is a directory
+        if os.path.isdir(self.dir_path):
+
+            # Check if there are valid FF names in the directory
+            if any([validFFName(ff_file) for ff_file in os.listdir(self.dir_path)]):
+
+                # Init the image handle for FF files
+                self.img_handle = InputTypeFF(self.dir_path, self.config)
+
+            # If not, check if there any image files in the folder
+            else:
+                ### PLACEHOLDER !!!
+                sys.exit()
+
+
+        # Use the given video file
+        else:
+            # PLACEHOLDER !!!
+            sys.exit()
+
+
+        ################################################################
+
+
+
+
         # Load catalog stars
         self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
         self.cat_lim_mag = self.config.catalog_mag_limit
@@ -223,30 +330,6 @@ class PlateTool(object):
             print('CALSTARS file: ' + calstars_file + ' loaded!')
 
 
-        self.ff_list = []
-
-        # Get a list of FF files in the folder
-        for file_name in os.listdir(dir_path):
-            if validFFName(file_name):
-                self.ff_list.append(file_name)
-
-
-        # Check that there are any FF files in the folder
-        if not self.ff_list:
-            messagebox.showinfo(title='File list warning', message='No FF files in the selected folder!')
-
-            sys.exit()
-
-
-        # Sort the FF list
-        self.ff_list = sorted(self.ff_list)
-
-        # Init the first file
-        self.current_ff_index = 0
-        self.current_ff_file = self.ff_list[self.current_ff_index]
-
-
-
 
         # Load the platepar file
         self.platepar_file, self.platepar = self.loadPlatepar()
@@ -267,6 +350,7 @@ class PlateTool(object):
         ### INIT IMAGE ###
 
         plt.figure(facecolor='black')
+        plt.gcf().canvas.set_window_title('SkyFit')
 
         # Init the first image
         self.updateImage()
@@ -665,10 +749,10 @@ class PlateTool(object):
 
         # Switch images
         if event.key == 'left':
-            self.prevFF()
+            self.prevImg()
 
         elif event.key == 'right':
-            self.nextFF()
+            self.nextImg()
 
 
         elif event.key == 'm':
@@ -1130,15 +1214,15 @@ class PlateTool(object):
         self.checkParamRange()
 
 
-        # Load the FF from the current file
-        self.current_ff = readFF(self.dir_path, self.current_ff_file)
+        # Load the current image
+        self.current_ff = self.img_handle.load()
 
 
         if self.current_ff is None:
             
             # If the current FF couldn't be opened, go to the next
-            messagebox.showerror(title='Read error', message='The current FF file is corrupted!')
-            self.nextFF()
+            messagebox.showerror(title='Read error', message='The current image is corrupted!')
+            self.nextImg()
 
             return None
 
@@ -1253,7 +1337,7 @@ class PlateTool(object):
         if self.show_key_help > 0:
 
             # Show text on image with platepar parameters
-            text_str  = self.current_ff_file + '\n' + self.img_type_flag + '\n\n'
+            text_str  = self.img_handle.name() + '\n' + self.img_type_flag + '\n\n'
             text_str += 'UT corr  = {:.1f}h\n'.format(self.platepar.UT_corr)
             text_str += 'Ref Az   = {:.3f}$\\degree$\n'.format(self.platepar.az_centre)
             text_str += 'Ref Alt  = {:.3f}$\\degree$\n'.format(self.platepar.alt_centre)
@@ -1337,10 +1421,10 @@ class PlateTool(object):
         """ Draw extracted stars on the current image. """
 
         # Check if the given FF files is in the calstars list
-        if self.current_ff_file in self.calstars:
+        if self.img_handle.name() in self.calstars:
 
             # Get the stars detected on this FF file
-            star_data = self.calstars[self.current_ff_file]
+            star_data = self.calstars[self.img_handle.name()]
 
             # Get star coordinates
             y, x, _, _ = np.array(star_data).T
@@ -1364,11 +1448,11 @@ class PlateTool(object):
     def computeCentreRADec(self):
         """ Compute RA and Dec of the FOV centre in degrees. """
 
-        # The the time of the midle of the FF file
-        ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
+        # The the time of the image
+        img_time = self.img_handle.currentTime()
 
         # Convert the FOV centre to RA/Dec
-        _, ra_centre, dec_centre, _ = XY2CorrectedRADecPP([ff_middle_time], [self.platepar.X_res/2], 
+        _, ra_centre, dec_centre, _ = XY2CorrectedRADecPP([img_time], [self.platepar.X_res/2], 
             [self.platepar.Y_res/2], [0], self.platepar)
         
         ra_centre = ra_centre[0]
@@ -1424,10 +1508,10 @@ class PlateTool(object):
 
         ra_catalog, dec_catalog, mag_catalog = catalog_stars.T
 
-        ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
+        img_time = self.img_handle.currentTime()
 
         # Get the date of the middle of the FF exposure
-        jd = date2JD(*ff_middle_time)
+        jd = date2JD(*img_time)
 
         # Convert star RA, Dec to image coordinates
         x_array, y_array = raDecToCorrectedXY(ra_catalog, dec_catalog, jd, lat, lon, self.platepar.X_res, \
@@ -1451,10 +1535,10 @@ class PlateTool(object):
         root.destroy()
 
         # Get the middle time of the first FF
-        ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
+        img_time = self.img_handle.currentTime()
 
         # Set the referent platepar time to the time of the FF
-        self.platepar.JD = date2JD(*ff_middle_time, UT_corr=float(self.platepar.UT_corr))
+        self.platepar.JD = date2JD(*img_time, UT_corr=float(self.platepar.UT_corr))
 
         # Set the referent hour angle
         T = (self.platepar.JD - 2451545)/36525.0
@@ -1464,7 +1548,7 @@ class PlateTool(object):
         self.platepar.Ho = Ho
 
         
-        time_data = [ff_middle_time]
+        time_data = [img_time]
 
         # Convert FOV centre to RA, Dec
         _, ra_data, dec_data = altAz2RADec(self.platepar.lat, self.platepar.lon, self.platepar.UT_corr, 
@@ -1526,8 +1610,8 @@ class PlateTool(object):
         """ Make a new platepar from the loaded one, but set the parameters from the config file. """
 
         # Update the reference time
-        ff_middle_time = getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
-        self.platepar.JD = date2JD(*ff_middle_time)
+        img_time = self.img_handle.currentTime()
+        self.platepar.JD = date2JD(*img_time)
 
         # Update the location from the config file
         self.platepar.lat = self.config.latitude
@@ -1649,7 +1733,7 @@ class PlateTool(object):
         return flat_file, flat
 
 
-    def nextFF(self):
+    def nextImg(self):
         """ Shows the next FF file in the list. """
 
         # Don't allow image change while in star picking mode
@@ -1657,8 +1741,9 @@ class PlateTool(object):
             messagebox.showwarning(title='Star picking mode', message='You cannot cycle through images while in star picking mode!')
             return
 
-        self.current_ff_index = (self.current_ff_index + 1)%len(self.ff_list)
-        self.current_ff_file = self.ff_list[self.current_ff_index]
+            
+        self.img_handle.next()
+
 
         self.paired_stars = []
 
@@ -1666,7 +1751,7 @@ class PlateTool(object):
 
 
 
-    def prevFF(self):
+    def prevImg(self):
         """ Shows the previous FF file in the list. """
 
         # Don't allow image change while in star picking mode
@@ -1674,8 +1759,9 @@ class PlateTool(object):
             messagebox.showwarning(title='Star picking mode', message='You cannot cycle through images while in star picking mode!')
             return
 
-        self.current_ff_index = (self.current_ff_index - 1)%len(self.ff_list)
-        self.current_ff_file = self.ff_list[self.current_ff_index]
+
+        self.img_handle.prev()
+
 
         self.paired_stars = []
 
