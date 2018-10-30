@@ -1830,9 +1830,9 @@ class PlateTool(object):
 
         """
 
-        # Fit the astrometry parameters, at least 8 stars are needed
-        if len(self.paired_stars) < 6:
-            messagebox.showwarning(title='Number of stars', message="At least 6 paired stars are needed to do the fit!")
+        # Fit the astrometry parameters, at least 5 stars are needed
+        if len(self.paired_stars) < 4:
+            messagebox.showwarning(title='Number of stars', message="At least 5 paired stars are needed to do the fit!")
 
             return False
 
@@ -1938,23 +1938,29 @@ class PlateTool(object):
         self.platepar.Y_res, self.platepar.X_res = self.current_ff.maxpixel.shape
 
 
-        # Fit distorsion parameters in X direction
-        res = scipy.optimize.minimize(_calcImageResidualsDistorsion, self.platepar.x_poly, args=(self, 
-            catalog_stars, img_stars, 'x'), method='Nelder-Mead', options={'maxiter': 10000})
+        # If there are more than 12 paired stars, fit the distortion parameters
+        if len(self.paired_stars) > 12:
 
-        # Exctact fitted X polynomial
-        self.platepar.x_poly = res.x
+            # Fit distorsion parameters in X direction
+            res = scipy.optimize.minimize(_calcImageResidualsDistorsion, self.platepar.x_poly, args=(self, 
+                catalog_stars, img_stars, 'x'), method='Nelder-Mead', options={'maxiter': 10000})
 
-        print(res)
+            # Exctact fitted X polynomial
+            self.platepar.x_poly = res.x
 
-        # Fit distorsion parameters in Y direction
-        res = scipy.optimize.minimize(_calcImageResidualsDistorsion, self.platepar.y_poly, args=(self, 
-            catalog_stars, img_stars, 'y'), method='Nelder-Mead', options={'maxiter': 10000})
+            print(res)
 
-        # Extract fitted Y polynomial
-        self.platepar.y_poly = res.x
+            # Fit distorsion parameters in Y direction
+            res = scipy.optimize.minimize(_calcImageResidualsDistorsion, self.platepar.y_poly, args=(self, 
+                catalog_stars, img_stars, 'y'), method='Nelder-Mead', options={'maxiter': 10000})
 
-        print(res)
+            # Extract fitted Y polynomial
+            self.platepar.y_poly = res.x
+
+            print(res)
+
+        else:
+            print('Too few stars to fit the distorsion, only the astrometric parameters where fitted!')
 
 
 
