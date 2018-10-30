@@ -27,6 +27,7 @@ from __future__ import print_function, division, absolute_import
 import os
 import sys
 import math
+import copy
 import datetime
 import argparse
     
@@ -54,8 +55,10 @@ from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Formats import StarCatalog
+from RMS.Formats.Vid import readFrame as readVidFrame
+from RMS.Formats.Vid import VidStruct
 from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADecPP, raDec2AltAz, raDecToCorrectedXY
-from RMS.Astrometry.Conversions import date2JD, jd2Date
+from RMS.Astrometry.Conversions import date2JD, jd2Date, unixTime2Date
 from RMS.Routines import Image
 from RMS.Math import angularSeparation
 from RMS.Misc import decimalDegreesToSexHours
@@ -224,6 +227,11 @@ class InputTypeVideo(object):
         # Set the number of frames to be used for averaging and maxpixels
         self.fr_chunk_no = 256
 
+        # Compute the number of frame chunks
+        self.total_fr_chunks = self.total_frames//self.fr_chunk_no
+        if self.total_fr_chunks == 0:
+            self.total_fr_chunks = 1
+
         self.current_fr_chunk_size = self.fr_chunk_no
 
 
@@ -234,18 +242,18 @@ class InputTypeVideo(object):
         """ Go to the next frame chunk. """
 
         self.current_frame_chunk += 1
-        self.current_frame_chunk = self.current_frame_chunk%(self.total_frames//self.fr_chunk_no)
+        self.current_frame_chunk = self.current_frame_chunk%self.total_fr_chunks
 
 
     def prev(self):
         """ Go to the previous frame chunk. """
 
         self.current_frame_chunk -= 1
-        self.current_frame_chunk = self.current_frame_chunk%(self.total_frames//self.fr_chunk_no)
+        self.current_frame_chunk = self.current_frame_chunk%self.total_fr_chunks
 
 
     def load(self):
-        """ Load the FF file. """
+        """ Load the frame chunk file. """
 
         # First try to load the frame form cache, if available
         if self.current_frame_chunk in self.cache:
@@ -302,7 +310,7 @@ class InputTypeVideo(object):
 
 
     def currentTime(self):
-        """ Return the time of the current image. """
+        """ Return the mean time of the current image. """
 
         # Compute number of seconds since the beginning of the video file to the mean time of the frame chunk
         seconds_since_beginning = (self.current_frame_chunk*self.fr_chunk_no \
@@ -313,6 +321,152 @@ class InputTypeVideo(object):
 
         return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
 
+
+
+
+class InputTypeUWOVid(object):
+    def __init__(self, dir_path, config):
+        """ Input file type handle for UWO .vid files.
+        
+        Arguments:
+            dir_path: [str] Path to the vid file.
+            config: [ConfigStruct object]
+
+        """
+
+        self.dir_path = dir_path
+        self.config = config
+
+        # This type of input probably won't have any calstars files
+        self.require_calstars = False
+
+
+        print('Using vid file:', self.dir_path)
+
+        # Open the vid file
+        self.vid = VidStruct()
+        self.vid_file = open(self.dir_path, 'rb')
+
+        # Read one video frame and rewind to beginning
+        readVidFrame(self.vid, self.vid_file)
+        self.vidinfo = copy.deepcopy(self.vid)
+        self.vid_file.seek(0)
+        
+        # Try reading the beginning time of the video from the name
+        self.beginning_datetime = unixTime2Date(self.vidinfo.ts, self.vidinfo.tu, dt_obj=True)
+
+
+        self.current_frame_chunk = 0
+
+        # Get the total time number of video frames in the file
+        self.total_frames = os.path.getsize(self.dir_path)//self.vidinfo.seqlen
+
+        # Get the image size
+        self.nrows = self.vidinfo.ht
+        self.ncols = self.vidinfo.wid
+
+
+        # Set the number of frames to be used for averaging and maxpixels
+        self.fr_chunk_no = 64
+
+        # Compute the number of frame chunks
+        self.total_fr_chunks = self.total_frames//self.fr_chunk_no
+        if self.total_fr_chunks == 0:
+            self.total_fr_chunks = 1
+
+        self.frame_chunk_unix_times = []
+
+
+        self.cache = {}
+
+        # Do the initial load
+        self.load()
+
+
+    def next(self):
+        """ Go to the next frame chunk. """
+
+        self.current_frame_chunk += 1
+        self.current_frame_chunk = self.current_frame_chunk%self.total_fr_chunks
+
+
+    def prev(self):
+        """ Go to the previous frame chunk. """
+
+        self.current_frame_chunk -= 1
+        self.current_frame_chunk = self.current_frame_chunk%self.total_fr_chunks
+
+
+    def load(self):
+        """ Load the frame chunk file. """
+
+        # First try to load the frame from cache, if available
+        if self.current_frame_chunk in self.cache:
+            frame, self.frame_chunk_unix_times = self.cache[self.current_frame_chunk]
+            return frame
+
+
+        # Set the vid file pointer to the right byte
+        self.vid_file.seek(self.current_frame_chunk*self.fr_chunk_no*self.vidinfo.seqlen)
+
+        # Init frame container
+        frames = np.empty(shape=(self.fr_chunk_no, self.nrows, self.ncols), dtype=np.uint16)
+
+        self.frame_chunk_unix_times = []
+
+        # Load the chunk of frames
+        for i in range(self.fr_chunk_no):
+
+            frame = readVidFrame(self.vid, self.vid_file)
+
+            # If the end of the vid file was reached, stop the loop
+            if frame is None:
+                break
+
+            frames[i] = frame.astype(np.uint16)
+
+            # Add the unix time to list
+            self.frame_chunk_unix_times.append(self.vid.ts + self.vid.tu/1000000.0)
+
+
+        # Crop the frame number to total size
+        frames = frames[:i]
+
+        # Compute the maxpixel and avepixel
+        maxpixel = np.max(frames, axis=0).astype(np.uint16)
+        avepixel = np.mean(frames, axis=0).astype(np.uint16)
+
+
+        # Init the structure that mimicks the FF file structure
+        ff_struct_fake = FFMimickInterface(maxpixel, avepixel, self.nrows, self.ncols)
+
+        # Store the FF struct to cache to avoid recomputing
+        self.cache = {}
+        self.cache[self.current_frame_chunk] = [ff_struct_fake, self.frame_chunk_unix_times]
+
+        return ff_struct_fake
+        
+
+
+    def name(self):
+        """ Return the name of the chunk, which is just the time range. """
+
+        year, month, day, hours, minutes, seconds, milliseconds = self.currentTime()
+        microseconds = int(1000*milliseconds)
+
+        return str(datetime.datetime(year, month, day, hours, minutes, seconds, microseconds))
+
+
+    def currentTime(self):
+        """ Return the mean time of the current image. """
+
+        # Compute the mean UNIX time
+        mean_utime = np.mean(self.frame_chunk_unix_times)
+
+        mean_ts = int(mean_utime)
+        mean_tu = int((mean_utime - mean_ts)*1000000)
+
+        return unixTime2Date(mean_ts, mean_tu)
 
 
 ##############################################################################################################
@@ -460,7 +614,7 @@ class PlateTool(object):
         else:
 
             # Check if the given file is a video file
-            if self.dir_path.endswith('.mp4') or self.dir_path.endswith('.avi'):
+            if self.dir_path.endswith('.mp4') or self.dir_path.endswith('.avi') or self.dir_path.endswith('.mkv'):
 
                 # Init the image hadle for video files
                 self.img_handle = InputTypeVideo(self.dir_path, self.config)
@@ -469,13 +623,12 @@ class PlateTool(object):
             # Check if the given files is the UWO .vid format
             elif self.dir_path.endswith('.vid'):
                 
-
-                # PLACEHOLDER !!!
-                sys.exit()
+                # Init the image handle for UWO-type .vid files
+                self.img_handle = InputTypeUWOVid(self.dir_path, self.config)
 
 
             else:
-                messagebox.showerror(title='Input format error', message='Only these video formats are supported: .mp4, .avi, .vid!')
+                messagebox.showerror(title='Input format error', message='Only these video formats are supported: .mp4, .avi, .mkv, .vid!')
                 sys.exit()
 
 
@@ -554,7 +707,7 @@ class PlateTool(object):
         plt.gcf().canvas.set_window_title('SkyFit')
 
         # Init the first image
-        self.updateImage()
+        self.updateImage(first_update=True)
 
         self.ax = plt.gca()
 
@@ -1108,11 +1261,21 @@ class PlateTool(object):
 
         # Key increment
         elif event.key == '+':
-            self.key_increment += 0.1
+
+            if self.key_increment <= 0.091:
+                self.key_increment += 0.01
+            else:
+                self.key_increment += 0.1
+
             self.updateImage()
 
         elif event.key == '-':
-            self.key_increment -= 0.1
+            
+            if self.key_increment <= 0.11:
+                self.key_increment -= 0.01
+            else:
+                self.key_increment -= 0.1
+            
             self.updateImage()
 
 
@@ -1385,26 +1548,33 @@ class PlateTool(object):
         ax1.set_facecolor('black')
         ax2.set_facecolor('black')
 
+        # Plot the image level range
+        for i in range(8):
+            rel_i = i/8
+            ax2.text(rel_i*img.shape[1], 0, str(int(rel_i*2**self.bit_depth)), color='red')
+
         plt.sca(ax1)
 
 
 
 
 
-    def updateImage(self, clear_plot=True):
+    def updateImage(self, clear_plot=True, first_update=False):
         """ Update the matplotlib plot to show the current image. 
 
         Keyword arguments:
             clear_plot: [bool] If True, the plot will be cleared before plotting again (default).
+            first_update: [bool] Special lines will be executed if this is True, e.g. the max level will be 
+                computed. False by default.
         """
 
         # Reset circle patches
         self.circle_aperature = None
         self.circle_aperature_outer = None
 
-        # Limit key increment so it can be lower than 0.1
-        if self.key_increment < 0.1:
-            self.key_increment = 0.1
+        # Limit key increment so it can be lower than 0.01
+        if self.key_increment < 0.01:
+            self.key_increment = 0.01
 
 
         if clear_plot:
@@ -1440,6 +1610,12 @@ class PlateTool(object):
         self.bit_depth = 8*img_data.itemsize
 
 
+        if first_update:
+            
+            # Set the maximum image level after reading the bit depth
+            self.img_level_max = 2**self.bit_depth - 1
+
+
         # Apply flat
         if self.flat_struct is not None:
             img_data = Image.applyFlat(img_data, self.flat_struct)
@@ -1451,8 +1627,7 @@ class PlateTool(object):
 
         ### Adjust image levels
 
-        img_data = Image.adjustLevels(img_data, self.img_level_min, self.img_gamma, self.img_level_max, \
-            self.bit_depth)
+        img_data = Image.adjustLevels(img_data, self.img_level_min, self.img_gamma, self.img_level_max)
 
         ###
 

@@ -79,7 +79,67 @@ def floatArguments(func):
 ##################
 
 
-### Time transformations ###
+### Time conversions ###
+
+
+def unixTime2Date(ts, tu, dt_obj=False):
+    """ Convert UNIX time given in ts and tu to date and time. 
+    
+    Arguments:
+        ts: [int] UNIX time, seconds part
+        tu: [int] UNIX time, microsecond part
+
+    Kwargs:
+        dt_obj: [bool] default False, function returns a datetime object if True
+
+    Return:
+        if dt_obj == False (default): [tuple] (year, month, day, hours, minutes, seconds, milliseconds)
+        else: [datetime object]
+
+    """
+
+    # Convert the UNIX timestamp to datetime object
+    dt = datetime.utcfromtimestamp(float(ts) + float(tu)/1000000)
+
+
+    if dt_obj:
+        return dt
+
+    else:
+        return dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, float(tu)/1000
+
+
+
+
+def date2UnixTime(year, month, day, hour, minute, second, millisecond=0, UT_corr=0.0):
+    """ Convert date and time to Unix time. 
+    Arguments:
+        year: [int] year
+        month: [int] month
+        day: [int] day of the date
+        hour: [int] hours
+        minute: [int] minutes
+        second: [int] seconds
+
+    Kwargs:
+        millisecond: [int] milliseconds (optional)
+        UT_corr: [float] UT correction in hours (difference from local time to UT)
+    
+    Return:
+        [float] Unix time
+
+    """# Convert all input arguments to integer (except milliseconds)
+    year, month, day, hour, minute, second = map(int, (year, month, day, hour, minute, second))
+
+    # Create datetime object of current time
+    dt = datetime(year, month, day, hour, minute, second, int(millisecond*1000)) - timedelta(hours=UT_corr)
+
+    # UTC unix timestamp
+    unix_timestamp = (dt - datetime(1970, 1, 1)).total_seconds()
+
+    return unix_timestamp
+
+
 
 def date2JD(year, month, day, hour, minute, second, millisecond=0, UT_corr=0.0):
     """ Convert date and time to Julian Date with epoch J2000.0. 
@@ -161,6 +221,39 @@ def jd2Date(jd, UT_corr=0, dt_obj=False):
 
     return date.year, date.month, date.day, date.hour, date.minute, date.second, date.microsecond/1000.0
 
+
+def unixTime2JD(ts, tu):
+    """ Converts UNIX time to Julian date. 
+    
+    Arguments:
+        ts: [int] UNIX time, seconds part
+        tu: [int] UNIX time, microsecond part
+
+    Return:
+        [float] julian date, epoch 2000.0
+
+    """
+
+    return date2JD(*unixTime2Date(ts, tu))
+
+
+
+def jd2UnixTime(jd, UT_corr=0):
+    """ Converts the given Julian date to Unix timestamp. 
+
+    Arguments:
+        jd: [float] Julian date
+
+    Keyword arguments:
+        UT_corr: [float] UT correction in hours (difference from local time to UT)
+
+    Return:
+        [float] Unix timestamp.
+
+    """
+
+    return date2UnixTime(*jd2Date(jd, UT_corr=UT_corr))
+    
 
 
 def JD2LST(julian_date, lon):
