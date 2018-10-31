@@ -204,7 +204,7 @@ class Config:
         self.flat_min_imgs = 20
 
         self.star_catalog_path = 'Catalogs'
-        self.star_catalog_file = 'BSC5'
+        self.star_catalog_file = 'gaia_dr2_mag_11.5.npy'
         self.star_catalog_band_ratios = [0.0, 1.0, 0.0, 0.0]
 
         self.platepar_name = 'platepar_cmn2010.cal'
