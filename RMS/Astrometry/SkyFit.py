@@ -602,6 +602,7 @@ class PlateTool(object):
         self.img_data_raw = None
 
         self.adjust_levels_mode = False
+        self.auto_levels = False
 
         # Platepar format (json or txt)
         self.platepar_fmt = None
@@ -1342,6 +1343,13 @@ class PlateTool(object):
             self.makeNewPlatepar()
 
 
+        # Toggle auto levels
+        elif event.key == 'ctrl+a':
+            self.auto_levels = not self.auto_levels
+
+            self.updateImage()
+
+
         # Load the flat field
         elif event.key == 'ctrl+f':
             _, self.flat_struct = self.loadFlat()
@@ -1662,11 +1670,25 @@ class PlateTool(object):
         self.img_data_raw = np.copy(img_data)
 
 
-        ### Adjust image levels
+            
 
-        img_data = Image.adjustLevels(img_data, self.img_level_min, self.img_gamma, self.img_level_max)
+        # Do auto levels
+        if self.auto_levels:
 
-        ###
+            # Compute the edge percentiles
+            min_lvl = np.percentile(img_data, 1)
+            max_lvl = np.percentile(img_data, 99)
+
+
+            # Adjust levels (auto)
+            img_data = Image.adjustLevels(img_data, min_lvl, self.img_gamma, max_lvl)
+
+        else:
+            
+            # Adjust levels (manual)
+            img_data = Image.adjustLevels(img_data, self.img_level_min, self.img_gamma, self.img_level_max)
+
+
 
         # Draw levels adjustment histogram
         if self.adjust_levels_mode:
@@ -1801,6 +1823,7 @@ class PlateTool(object):
             text_str += 'CTRL + H - Adjust levels\n'
             text_str += 'V - FOV centre\n'
             text_str += '\n'
+            text_str += 'CTRL + A - Auto levels\n'
             text_str += 'CTRL + D - Load dark\n'
             text_str += 'CTRL + F - Load flat\n'
             text_str += 'CTRL + R - Pick stars\n'
