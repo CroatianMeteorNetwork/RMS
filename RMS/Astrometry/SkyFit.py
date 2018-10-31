@@ -83,6 +83,7 @@ class InputTypeFF(object):
 
         """
 
+        self.input_type = 'ff'
 
         self.dir_path = dir_path
         self.config = config
@@ -186,6 +187,8 @@ class InputTypeVideo(object):
             config: [ConfigStruct object]
 
         """
+
+        self.input_type = 'video'
 
         self.dir_path = dir_path
         self.config = config
@@ -333,6 +336,8 @@ class InputTypeUWOVid(object):
             config: [ConfigStruct object]
 
         """
+
+        self.input_type = 'vid'
 
         self.dir_path = dir_path
         self.config = config
@@ -587,6 +592,9 @@ class PlateTool(object):
 
         # Flat field
         self.flat_struct = None
+
+        # Dark frame
+        self.dark = None
 
         # Image coordinates of catalog stars
         self.catalog_x = self.catalog_y = None
@@ -1318,9 +1326,16 @@ class PlateTool(object):
             self.makeNewPlatepar()
 
 
-        # Load the flat
+        # Load the flat field
         elif event.key == 'ctrl+f':
             _, self.flat_struct = self.loadFlat()
+
+            self.updateImage()
+
+
+        # Load the dark frame
+        elif event.key == 'ctrl+d':
+            _, self.dark = self.loadDark()
 
             self.updateImage()
 
@@ -1512,6 +1527,7 @@ class PlateTool(object):
 
 
     def drawLevelsAdjustmentHistogram(self, img):
+        """ Draw a levels histogram over the image, so the levels can be adjusted. """
 
         nbins = int((2**self.config.bit_depth)/2)
 
@@ -1530,7 +1546,7 @@ class PlateTool(object):
         ax2 = ax1.twinx().twiny()
 
         # Plot the histogram
-        ax2.bar(bin_edges[:-1], hist, color='white', alpha=0.5, width=img.shape[1]/nbins, edgecolor='k')
+        ax2.bar(bin_edges[:-1], hist, color='white', alpha=0.5, width=img.shape[1]/nbins, edgecolor='0.5')
 
         # Plot levels limits
         y_range = np.linspace(0, img.shape[0], 3)
@@ -1614,6 +1630,11 @@ class PlateTool(object):
             
             # Set the maximum image level after reading the bit depth
             self.img_level_max = 2**self.bit_depth - 1
+
+
+        # Apply dark
+        if self.dark is not None:
+            img_data = Image.applyDark(img_data, self.dark)
 
 
         # Apply flat
@@ -1764,6 +1785,7 @@ class PlateTool(object):
             text_str += 'CTRL + H - Adjust levels\n'
             text_str += 'V - FOV centre\n'
             text_str += '\n'
+            text_str += 'CTRL + D - Load dark\n'
             text_str += 'CTRL + F - Load flat\n'
             text_str += 'CTRL + R - Pick stars\n'
             text_str += 'CTRL + N - New platepar\n'
@@ -2088,25 +2110,83 @@ class PlateTool(object):
 
         print(flat_file)
 
-        # Parse the platepar file
         try:
-            flat = Image.loadFlat(*os.path.split(flat_file))
+            # Load the flat. Byteswap the flat if vid file is used
+            flat = Image.loadFlat(*os.path.split(flat_file), byteswap=(self.img_handle.input_type == 'vid'))
         except:
             flat = None
 
 
         # Check if the size of the file matches
         if self.current_ff.maxpixel.shape != flat.flat_img.shape:
-            messagebox.showerror(title='Flat field file error', message='The size of the flat field does not match the size of the image!')
+            messagebox.showerror(title='Flat field file error', \
+                message='The size of the flat field does not match the size of the image!')
+
             flat = None
 
-        # Check if the platepar was successfuly loaded
+        # Check if the flat field was successfuly loaded
         if flat is None:
-            messagebox.showerror(title='Flat field file error', message='The file you selected could not be loaded as a flat field!')
+            messagebox.showerror(title='Flat field file error', \
+                message='The file you selected could not be loaded as a flat field!')
 
         
 
         return flat_file, flat
+
+
+
+    def loadDark(self):
+        """ Open a file dialog and ask user to load a dark frame. """
+
+        root = tkinter.Tk()
+        root.withdraw()
+        root.update()
+
+        # Load the platepar file
+        dark_file = filedialog.askopenfilename(initialdir=self.dir_path, title='Select the flat field file')
+
+        root.update()
+        root.quit()
+
+        if not dark_file:
+            return False, None
+
+        print(dark_file)
+
+        try:
+
+            # Load the dark
+            dark = scipy.misc.imread(dark_file).astype(self.img_data_raw.dtype)
+
+            # Byteswap the flat if vid file is used
+            if self.img_handle.input_type == 'vid':
+                dark = dark.byteswap()
+
+        except:
+            return False, None
+
+
+        print(dark)
+        print(np.min(dark), np.max(dark))
+        print(np.min(self.img_data_raw), np.max(self.img_data_raw))
+
+
+        # Check if the size of the file matches
+        if self.current_ff.maxpixel.shape != dark.shape:
+            messagebox.showerror(title='Dark field file error', \
+                message='The size of the dark frame does not match the size of the image!')
+
+            dark = None
+
+        # Check if the dark frame was successfuly loaded
+        if dark is None:
+            messagebox.showerror(title='Dark field file error', \
+                message='The file you selected could not be loaded as a dark field!')
+
+        
+
+        return dark_file, dark
+
 
 
     def nextImg(self):

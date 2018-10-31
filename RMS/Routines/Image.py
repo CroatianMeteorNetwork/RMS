@@ -159,12 +159,15 @@ class FlatStruct(object):
 
 
 
-def loadFlat(dir_path, file_name):
+def loadFlat(dir_path, file_name, byteswap=False):
     """ Load the flat field image. 
 
     Arguments:
         dir_path: [str] Directory where the flat image is.
         file_name: [str] Name of the flat field file.
+
+    Keyword arguments:
+        byteswap: [bool] Byteswap the flat image. False by default.
 
     Return:
         flat_struct: [Flat struct] Structure containing the flat field info.
@@ -172,6 +175,10 @@ def loadFlat(dir_path, file_name):
 
     # Load the flat image
     flat_img = scipy.misc.imread(os.path.join(dir_path, file_name))
+
+    if byteswap:
+        flat_img = flat_img.byteswap()
+
 
     # Convert the flat to float64
     flat_img = flat_img.astype(np.float64)
@@ -221,6 +228,42 @@ def applyFlat(img, flat_struct):
     img = img.astype(input_type)
 
     return img
+
+
+
+
+def applyDark(img, dark_img):
+    """ Apply the dark frame to an image. 
+    
+    Arguments:
+        img: [ndarray] Input image.
+        dark_img: [ndarray] Dark frame.
+    """
+
+    # Check that the image sizes are the same
+    if img.shape != dark_img.shape:
+        return img
+
+
+    # Save input type
+    input_type = img.dtype
+
+
+    # Convert the image to integer (with negative values)
+    img = img.astype(np.int64)
+
+    # Subtract dark
+    img -= dark_img.astype(np.int64)
+
+    # Make sure there aren't any values smaller than 0
+    img[img < 0] = 0
+
+    # Convert the image back to the input type
+    img = img.astype(input_type)
+
+
+    return img
+
 
 
 def deinterlaceOdd(img):
