@@ -2182,11 +2182,6 @@ class PlateTool(object):
             return False, None
 
 
-        print(dark)
-        print(np.min(dark), np.max(dark))
-        print(np.min(self.img_data_raw), np.max(self.img_data_raw))
-
-
         # Check if the size of the file matches
         if self.current_ff.maxpixel.shape != dark.shape:
             messagebox.showerror(title='Dark field file error', \
