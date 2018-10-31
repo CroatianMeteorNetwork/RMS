@@ -178,12 +178,15 @@ class FFMimickInterface(object):
 
 
 class InputTypeVideo(object):
-    def __init__(self, dir_path, config):
+    def __init__(self, dir_path, config, beginning_time=None):
         """ Input file type handle for video files.
         
         Arguments:
             dir_path: [str] Path to the video file.
             config: [ConfigStruct object]
+
+        Keyword arguments:
+            beginning_time: [datetime] datetime of the beginning of the video. Optional, None by default.
 
         """
 
@@ -199,8 +202,18 @@ class InputTypeVideo(object):
         # Remove the file extension
         file_name = ".".join(file_name.split('.')[:-1])
 
-        # Try reading the beginning time of the video from the name
-        self.beginning_datetime = datetime.datetime.strptime(file_name, "%Y%m%d_%H%M%S.%f")
+        if beginning_time is None:
+            
+            try:
+                # Try reading the beginning time of the video from the name if time is not given
+                self.beginning_datetime = datetime.datetime.strptime(file_name, "%Y%m%d_%H%M%S.%f")
+
+            except:
+                messagebox.showerror('Input error', 'The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using the -t option.')
+                sys.exit()
+
+        else:
+            self.beginning_datetime = beginning_time
 
 
 
@@ -530,13 +543,16 @@ class FOVinputDialog(object):
 
 
 class PlateTool(object):
-    def __init__(self, dir_path, config):
+    def __init__(self, dir_path, config, beginning_time=None):
         """ SkyFit interactive window.
 
         Arguments:
             dir_path: [str] Absolute path to the directory containing image files.
             config: [Config struct]
 
+        Keyword arguments:
+            beginning_time: [datetime] Datetime of the video beginning. Optional, only can be given for
+                video input formats.
         """
 
         self.config = config
@@ -617,7 +633,7 @@ class PlateTool(object):
             if self.dir_path.endswith('.mp4') or self.dir_path.endswith('.avi') or self.dir_path.endswith('.mkv'):
 
                 # Init the image hadle for video files
-                self.img_handle = InputTypeVideo(self.dir_path, self.config)
+                self.img_handle = InputTypeVideo(self.dir_path, self.config, beginning_time=beginning_time)
 
 
             # Check if the given files is the UWO .vid format
@@ -2520,6 +2536,9 @@ if __name__ == '__main__':
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
 
+    arg_parser.add_argument('-t', '--timebeg', nargs=1, metavar='TIME', type=str, \
+        help="The beginning time of the video file in the YYYYMMDD_hhmmss.uuuuuu format.")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -2539,8 +2558,16 @@ if __name__ == '__main__':
         config = cr.parse(".config")
 
 
+    # Parse the beginning time into a datetime object
+    if cml_args.timebeg is not None:
+
+        beginning_time = datetime.datetime.strptime(cml_args.timebeg[0], "%Y%m%d_%H%M%S.%f")
+
+    else:
+        beginning_time = None
+
     # Init the plate tool instance
-    plate_tool = PlateTool(cml_args.dir_path[0].replace('"', ''), config)
+    plate_tool = PlateTool(cml_args.dir_path[0].replace('"', ''), config, beginning_time=beginning_time)
 
     plt.tight_layout()
     plt.show()
