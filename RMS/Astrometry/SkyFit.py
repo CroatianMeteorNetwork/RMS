@@ -385,7 +385,7 @@ class InputTypeUWOVid(object):
 
 
         # Set the number of frames to be used for averaging and maxpixels
-        self.fr_chunk_no = 64
+        self.fr_chunk_no = 128
 
         # Compute the number of frame chunks
         self.total_fr_chunks = self.total_frames//self.fr_chunk_no
@@ -599,6 +599,7 @@ class PlateTool(object):
         self.img_gamma = 1.0
         self.img_level_min = 0
         self.img_level_max = 2**self.bit_depth - 1
+
         self.img_data_raw = None
 
         self.adjust_levels_mode = False
@@ -1677,7 +1678,7 @@ class PlateTool(object):
 
             # Compute the edge percentiles
             min_lvl = np.percentile(img_data, 1)
-            max_lvl = np.percentile(img_data, 99)
+            max_lvl = np.percentile(img_data, 99.9)
 
 
             # Adjust levels (auto)
@@ -2153,7 +2154,7 @@ class PlateTool(object):
             # Load the flat. Byteswap the flat if vid file is used
             flat = Image.loadFlat(*os.path.split(flat_file), byteswap=(self.img_handle.input_type == 'vid'))
         except:
-            flat = None
+            return False, None
 
 
         # Check if the size of the file matches
