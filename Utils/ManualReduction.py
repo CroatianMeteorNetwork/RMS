@@ -9,10 +9,21 @@ import argparse
 import datetime
 import pytz
 
+# tkinter import that works on both Python 2 and 3
+try:
+    import tkinter
+    from tkinter import filedialog, messagebox
+except:
+    import Tkinter as tkinter
+    import tkFileDialog as filedialog
+    import tkMessageBox as messagebox
+
+
 import numpy as np
 import scipy.misc
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from matplotlib.font_manager import FontProperties
 
 import RMS.ConfigReader as cr
 from RMS.Formats.FFfile import read as readFF
@@ -94,6 +105,8 @@ class ManualReductionTool(object):
             self.ff = None
             self.fr = None
 
+            self.dir_path = png_dir
+
 
         # FF mode
         else:
@@ -101,6 +114,8 @@ class ManualReductionTool(object):
             # Variables for PNG mode that are not used
             self.png_list = None
             self.frame0_time = None
+
+            self.dir_path, _ = os.path.split(input1)
 
             self.ff_file = input1
             self.fr_file = input2
@@ -126,7 +141,18 @@ class ManualReductionTool(object):
 
         ###########
 
+        self.flat_struct = None
+
+        # Image gamma and levels
+        self.auto_levels = False
+        self.bit_depth = self.config.bit_depth
         self.img_gamma = 1.0
+        self.img_level_min = 0
+        self.img_level_max = 2**self.bit_depth - 1
+
+
+        self.show_maxpixel = False
+
         self.show_key_help = True
 
         self.current_image = None
@@ -180,7 +206,7 @@ class ManualReductionTool(object):
         plt.figure(facecolor='black')
 
         # Init the first image
-        self.updateImage()
+        self.updateImage(first_update=True)
         self.printStatus()
 
         self.ax = plt.gca()
@@ -227,7 +253,59 @@ class ManualReductionTool(object):
                 print('Line frame range:', min(frames), max(frames))
 
 
-    def updateImage(self):
+
+    def loadFlat(self):
+        """ Open a file dialog and ask user to load a flat field. """
+
+        root = tkinter.Tk()
+        root.withdraw()
+        root.update()
+
+
+        # Check if flat exists in the folder, and set it as the defualt file name if it does
+        if self.config.flat_file in os.listdir(self.dir_path):
+            initialfile = self.config.flat_file
+        else:
+            initialfile = ''
+
+        # Load the platepar file
+        flat_file = filedialog.askopenfilename(initialdir=self.dir_path, \
+            initialfile=initialfile, title='Select the flat field file')
+
+        root.update()
+        root.quit()
+
+        if not flat_file:
+            return False, None
+
+        print(flat_file)
+
+        try:
+            # Load the flat. Byteswap the flat if vid file is used
+            #flat = Image.loadFlat(*os.path.split(flat_file), byteswap=(self.img_handle.input_type == 'vid'))
+            flat = Image.loadFlat(*os.path.split(flat_file))
+        except:
+            return False, None
+
+
+        # Check if the size of the file matches
+        if self.current_image.shape != flat.flat_img.shape:
+            messagebox.showerror(title='Flat field file error', \
+                message='The size of the flat field does not match the size of the image!')
+
+            flat = None
+
+        # Check if the flat field was successfuly loaded
+        if flat is None:
+            messagebox.showerror(title='Flat field file error', \
+                message='The file you selected could not be loaded as a flat field!')
+
+        
+
+        return flat_file, flat
+
+
+    def updateImage(self, first_update=False):
         """ Updates the current plot. """
 
         # Reset circle patches
@@ -332,6 +410,25 @@ class ManualReductionTool(object):
                         edgecolor='red', alpha=0.5))
 
 
+
+
+        # Show the maxpixel if the button has been pressed
+        if self.show_maxpixel and self.ff is not None:
+
+            img = self.ff.maxpixel
+
+
+
+        if first_update:
+
+            # Guess the bit depth from the array type
+            self.bit_depth = 8*img.itemsize
+            
+            # Set the maximum image level after reading the bit depth
+            self.img_level_max = 2**self.bit_depth - 1
+
+
+
         # Apply the deinterlace
         if self.deinterlace_mode > -1:
 
@@ -350,18 +447,35 @@ class ManualReductionTool(object):
             else:
                 img = Image.deinterlaceEven(img)
 
+
+        # Apply flat (cannot be applied if there is no FF file)
+        if (self.ff is not None) or self.png_mode:
+            if self.flat_struct is not None:
+                img = Image.applyFlat(img, self.flat_struct)
+
+
         # Current image without adjustments
         self.current_image = np.copy(img)
 
 
-        ### Adjust image levels
 
-        # Guess the bit depth from the array type
-        bit_depth = 8*img.itemsize
+        # Do auto levels
+        if self.auto_levels:
 
-        img = Image.adjustLevels(img, 0, self.img_gamma, (2**bit_depth - 1), bit_depth)
+            # Compute the edge percentiles
+            min_lvl = np.percentile(img, 1)
+            max_lvl = np.percentile(img, 99.9)
 
-        ###
+
+            # Adjust levels (auto)
+            img = Image.adjustLevels(img, min_lvl, self.img_gamma, max_lvl)
+
+        else:
+            
+            # Adjust levels (manual)
+            img = Image.adjustLevels(img, self.img_level_min, self.img_gamma, self.img_level_max)
+
+
 
         plt.imshow(img, cmap='gray', vmin=0, vmax=255)
 
@@ -391,52 +505,70 @@ class ManualReductionTool(object):
     def drawText(self):
         """ Draw the text on the image. """
 
+        # Setup a monospace font
+        font = FontProperties()
+        font.set_family('monospace')
+        font.set_size(8)
+
+
         if self.show_key_help:
+
 
             # Draw info text
 
-            text_str  = "Frame: {:.1f}\n".format(self.current_frame)
+            # Generate image status text
+            if self.show_maxpixel:
+                text_str = 'maxpixel\n'
+
+            else:
+                
+                text_str  = "Frame: {:.1f}\n".format(self.current_frame)
+
+
             text_str += "Gamma: {:.2f}\n".format(self.img_gamma)
 
             # Get the current plot limit
             x_min, x_max = plt.gca().get_xlim()
             y_max, y_min = plt.gca().get_ylim()
 
-            plt.gca().text(x_min + 10, y_min + 10, text_str, color='w', verticalalignment='top', horizontalalignment='left', \
-                fontsize=8)
+            plt.gca().text(x_min + 10, y_min + 10, text_str, color='w', verticalalignment='top', \
+                horizontalalignment='left', fontproperties=font)
             
 
             # Show text on image with instructions
             text_str  = 'Keys:\n'
             text_str += '-----------\n'
-            text_str += 'Previous/next frame - Arrow keys left/right\n'
-            text_str += 'Previous/next FR line - ,/.\n'
-            text_str += 'Img Gamma - U/J\n'
-            text_str += 'Zoom in/out - +/-\n'
-            text_str += 'Reset view - R\n'
-            text_str += 'Save current frame - CTRL + W\n'
-            text_str += 'Save FTPdetectinfo - CTRL + S\n'
+            text_str += 'Left/Right - Previous/next frame\n'
+            text_str += ',/. - Previous/next FR line\n'
+            text_str += '+/- - Zoom in/out\n'
+            text_str += 'R - Reset view\n'
+            text_str += 'M - Show maxpixel\n'
+            text_str += 'U/J - Img Gamma\n'
+            text_str += 'CTRL + A - Auto levels\n'
+            text_str += 'CTRL + F - Load flat\n'
+            text_str += 'CTRL + W - Save current frame\n'
+            text_str += 'CTRL + S - Save FTPdetectinfo\n'
             text_str += '\n'
             text_str += 'Mouse:\n'
             text_str += '-----------\n'
-            text_str += 'Centroid - Left click\n'
-            text_str += 'Manual pick - CTRL + Left click\n'
-            text_str += 'Photometry coloring add - Shift + Left click\n'
-            text_str += 'Photometry coloring remove - Shift + Right click\n'
-            text_str += 'Annulus size - Mouse scroll\n'
+            text_str += 'Left click - Centroid\n'
+            text_str += 'CTRL + Left click - Manual pick\n'
+            text_str += 'SHIFT + Left click - Photometry coloring add\n'
+            text_str += 'SHIFT + Right click - Photometry coloring remove\n'
+            text_str += 'Mouse scroll - Annulus size\n'
             text_str += '\n'
-            text_str += 'Hide/show text - F1'
+            text_str += 'F1 - Hide/show text'
 
 
             plt.gca().text(10, self.current_image.shape[0] - 5, text_str, color='w', 
-                verticalalignment='bottom', horizontalalignment='left', fontsize=8)
+                verticalalignment='bottom', horizontalalignment='left', fontproperties=font)
 
         else:
 
             text_str = "Show text - F1"
 
             plt.gca().text(self.current_image.shape[1]/2, self.current_image.shape[0], text_str, color='w', 
-                verticalalignment='top', horizontalalignment='center', fontsize=8, alpha=0.5)
+                verticalalignment='top', horizontalalignment='center', fontproperties=font, alpha=0.5)
 
 
 
@@ -509,6 +641,13 @@ class ManualReductionTool(object):
             self.updateGamma(0.9)
 
 
+        elif event.key == 'm':
+
+            self.show_maxpixel = not self.show_maxpixel
+
+            self.updateImage()
+
+
         elif event.key == 'r':
 
             # Reset the plot limits
@@ -528,6 +667,20 @@ class ManualReductionTool(object):
 
             # Save the FTPdetectinfo file
             self.saveFTPdetectinfo()
+
+
+        # Load the flat field
+        elif event.key == 'ctrl+f':
+            _, self.flat_struct = self.loadFlat()
+
+            self.updateImage()
+
+
+        # Toggle auto levels
+        elif event.key == 'ctrl+a':
+            self.auto_levels = not self.auto_levels
+
+            self.updateImage()
 
 
         elif event.key == 'shift':
@@ -1281,7 +1434,7 @@ if __name__ == "__main__":
                     help='Path to an FF file, or an FR file if an FF file is not available. Or, a path to a directory with PNG files can be given.')
 
     arg_parser.add_argument('input2', metavar='INPUT2', type=str, nargs='*',
-                    help='If an FF file was given, an FR file can be given in addition. If PNGs are used, this second argument must be the UTC time of frame 0 in the following format: YYYYMMDD-HHMMSS.uuu')
+                    help='If an FF file was given, an FR file can be given in addition. If PNGs are used, this second argument must be the UTC time of frame 0 in the following format: YYYYMMDD_HHMMSS.uuu')
 
     arg_parser.add_argument('-b', '--begframe', metavar='FIRST FRAME', type=int, help="First frame to show. Has to be between 0-255.")
 
@@ -1338,7 +1491,7 @@ if __name__ == "__main__":
 
         
         # Parse the time
-        frame0_time = datetime.datetime.strptime(cml_args.input2[0], "%Y%m%d-%H%M%S.%f")
+        frame0_time = datetime.datetime.strptime(cml_args.input2[0], "%Y%m%d_%H%M%S.%f")
         frame0_time = frame0_time.replace(tzinfo=pytz.UTC)
 
         # Init the tool

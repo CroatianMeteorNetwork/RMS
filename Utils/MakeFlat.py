@@ -215,8 +215,13 @@ if __name__ == "__main__":
 
         # Save the flat in the root directory
         scipy.misc.imsave(config.flat_file, ff_median)
-
         print('Flat saved to:', os.path.join(os.getcwd(), config.flat_file))
+
+
+        # Save the flat in the input directory
+        input_dir_flat = os.path.join(dir_path, config.flat_file)
+        scipy.misc.imsave(input_dir_flat, ff_median)
+        print('Flat saved to:', input_dir_flat)
 
         import matplotlib.pyplot as plt
         plt.imshow(ff_median, cmap='gray', vmin=0, vmax=255)
