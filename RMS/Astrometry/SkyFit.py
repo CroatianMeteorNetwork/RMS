@@ -124,7 +124,7 @@ class FOVinputDialog(object):
 
 
 class PlateTool(object):
-    def __init__(self, dir_path, config, beginning_time=None):
+    def __init__(self, dir_path, config, beginning_time=None, fps=None):
         """ SkyFit interactive window.
 
         Arguments:
@@ -134,6 +134,7 @@ class PlateTool(object):
         Keyword arguments:
             beginning_time: [datetime] Datetime of the video beginning. Optional, only can be given for
                 video input formats.
+            fps: [float] Frames per second, used only when images in a folder are used.
         """
 
         self.config = config
@@ -193,21 +194,18 @@ class PlateTool(object):
         # Image coordinates of catalog stars
         self.catalog_x = self.catalog_y = None
 
+        ######################################################################################################
 
 
-        ### Detect input file type and load appropriate input plugin ###
-        self.img_handle = detectInputType(self.dir_path, self.config, beginning_time=beginning_time)
+        
+        # Detect input file type and load appropriate input plugin
+        self.img_handle = detectInputType(self.dir_path, self.config, beginning_time=beginning_time, fps=fps)
 
 
         # Extract the directory path if a file was given
         if os.path.isfile(self.dir_path):
             
             self.dir_path, _ = os.path.split(self.dir_path)
-
-
-
-        ################################################################
-
 
 
 
@@ -2181,6 +2179,9 @@ if __name__ == '__main__':
     arg_parser.add_argument('-t', '--timebeg', nargs=1, metavar='TIME', type=str, \
         help="The beginning time of the video file in the YYYYMMDD_hhmmss.uuuuuu format.")
 
+    arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float, \
+        help="Frames per second when images are used. If not given, it will be read from the config file.")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -2209,7 +2210,8 @@ if __name__ == '__main__':
         beginning_time = None
 
     # Init the plate tool instance
-    plate_tool = PlateTool(cml_args.dir_path[0].replace('"', ''), config, beginning_time=beginning_time)
+    plate_tool = PlateTool(cml_args.dir_path[0].replace('"', ''), config, beginning_time=beginning_time, 
+        fps=cml_args.fps)
 
     plt.tight_layout()
     plt.show()

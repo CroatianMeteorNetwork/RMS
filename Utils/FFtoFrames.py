@@ -11,6 +11,7 @@ import cv2
 import RMS.ConfigReader as cr
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import reconstructFrame, filenameToDatetime
+from RMS.Misc import mkdirP
 from RMS.Routines.Image import deinterlaceEven, deinterlaceOdd
 
 
@@ -117,11 +118,12 @@ if __name__ == "__main__":
         sys.exit()
 
 
-    # Check if the output directory exists
+    # Check if the output directory exists, make it if it doesn't
     if not os.path.exists(out_dir):
 
-        print('The output directory {:s} does not exist!'.format(out_dir))
-        sys.exit()
+        print('Making directory: out_dir')
+        mkdirP(out_dir)
+
 
 
     # Open the FF file

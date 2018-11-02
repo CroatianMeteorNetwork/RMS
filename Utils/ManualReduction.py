@@ -27,7 +27,7 @@ from matplotlib.font_manager import FontProperties
 
 import RMS.ConfigReader as cr
 from RMS.Formats.FFfile import read as readFF
-from RMS.Formats.FFfile import validFFName
+from RMS.Formats.FFfile import validFFName, reconstructFrame
 from RMS.Formats.FRbin import read as readFR
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Routines import Image
@@ -343,9 +343,7 @@ class ManualReductionTool(object):
             if self.ff is not None:
 
                 # Take the current frame from FF file
-                img = np.copy(self.ff.avepixel)
-                frame_mask = np.where(self.ff.maxframe == int(self.current_frame))
-                img[frame_mask] = self.ff.maxpixel[frame_mask]
+                img = reconstructFrame(self.ff, self.current_frame, avepixel=True)
 
             # Otherwise, create a blank background with the size enough to fit the FR bin
             else:

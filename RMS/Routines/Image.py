@@ -112,7 +112,7 @@ def adjustLevels(img_array, minv, gamma, maxv, nbits=None):
         maxv = max_lvl
 
     # Check that the image adjustment values are in fact given
-    if (minv == None) and (gamma == None) and (maxv == None):
+    if (minv is None) or (gamma is None) or (maxv is None):
         return img_array
 
     minv = minv/max_lvl
@@ -127,6 +127,10 @@ def adjustLevels(img_array, minv, gamma, maxv, nbits=None):
 
     # Calculate new levels
     img_array = np.divide((img_array - minv), interval)
+
+    # Cut values lower than 0
+    img_array[img_array < 0] = 0
+
     img_array = np.power(img_array, invgamma)
 
     img_array = np.multiply(img_array, max_lvl)

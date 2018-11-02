@@ -154,7 +154,7 @@ def reconstructFrame(ff, frame_no, avepixel=False):
         frame = np.zeros_like(ff.maxpixel)
 
     # Find where the max values occured for this frame
-    indices = np.where(ff.maxframe == frame_no)
+    indices = np.where(ff.maxframe == int(frame_no))
     frame[indices] = ff.maxpixel[indices]
 
     return frame
@@ -278,31 +278,24 @@ def validFFName(ff_file, fmt=None):
     """
 
     if fmt is None:
-        if '.bin' in ff_file:
+        if ff_file.endswith('.bin'):
             fmt = 'bin'
 
         else:
             fmt = 'fits'
 
     # Make sure the file starts with FF
-    if ('FF' in ff_file[:2]):
+    if ff_file.startswith('FF'):
 
-        candidate = False
+        # Check that the format corresponds to the given file
+        if (fmt == 'bin') and (ff_file.endswith('.bin')):
+            return True
 
-        # Check that the format coresponds to the given file
-        if (fmt == 'bin') and ('.bin' in ff_file):
-            candidate = True
-
-        elif (fmt == 'fits') and ('.fits' in ff_file):
-            candidate = True
-
-
-        # Make sure it's not an image file
-        if candidate and (('.jpg' in ff_file) or ('.bmp' in ff_file) or ('.png' in ff_file)):
-            return False
+        elif (fmt == 'fits') and (ff_file.endswith('.fits')):
+            return True
             
         else:
-            return True
+            return False
 
         
     return False

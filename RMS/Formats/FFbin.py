@@ -55,6 +55,9 @@ def read(directory, filename, array=False, full_filename=False):
     ff.nbits = int(np.fromfile(fid, dtype=np.uint32, count=1))
     ff.first = int(np.fromfile(fid, dtype=np.uint32, count=1))
     ff.camno = int(np.fromfile(fid, dtype=np.uint32, count=1))
+
+    # Fixed number of frames
+    ff.nframes = 256
     
     if array:
         N = 4*ff.nrows*ff.ncols
