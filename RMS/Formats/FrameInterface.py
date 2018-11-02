@@ -178,7 +178,7 @@ class InputTypeFF(object):
 
 
 
-    def load(self):
+    def loadChunk(self):
         """ Load the FF file. """
 
         # Load from cache to avoid recomputing
@@ -335,7 +335,7 @@ class InputTypeVideo(object):
         self.current_frame_chunk = self.current_frame_chunk%self.total_fr_chunks
 
 
-    def load(self):
+    def loadChunk(self):
         """ Load the frame chunk file. """
 
         # First try to load the frame form cache, if available
@@ -465,7 +465,7 @@ class InputTypeUWOVid(object):
         self.cache = {}
 
         # Do the initial load
-        self.load()
+        self.loadChunk()
 
 
     def nextChunk(self):
@@ -482,7 +482,7 @@ class InputTypeUWOVid(object):
         self.current_frame_chunk = self.current_frame_chunk%self.total_fr_chunks
 
 
-    def load(self):
+    def loadChunk(self):
         """ Load the frame chunk file. """
 
         # First try to load the frame from cache, if available
@@ -607,8 +607,6 @@ class InputTypeImages(object):
 
 
 
-
-
         ### Find images in the given folder ###
         img_types = ['.png', '.jpg', '.bmp']
 
@@ -669,7 +667,8 @@ class InputTypeImages(object):
         self.cache = {}
 
         # Do the initial load
-        self.load()
+        self.loadChunk()
+
 
 
     def nextChunk(self):
@@ -678,6 +677,8 @@ class InputTypeImages(object):
         self.current_frame_chunk += 1
         self.current_frame_chunk = self.current_frame_chunk%self.total_fr_chunks
 
+        self.current_frame = self.current_frame_chunk*self.fr_chunk_no
+
 
     def prevChunk(self):
         """ Go to the previous frame chunk. """
@@ -685,8 +686,10 @@ class InputTypeImages(object):
         self.current_frame_chunk -= 1
         self.current_frame_chunk = self.current_frame_chunk%self.total_fr_chunks
 
+        self.current_frame = self.current_frame_chunk*self.fr_chunk_no
 
-    def load(self):
+
+    def loadChunk(self):
         """ Load the frame chunk file. """
 
         # First try to load the frame from cache, if available
@@ -715,7 +718,6 @@ class InputTypeImages(object):
 
             
 
-
         # Crop the frame number to total size
         frames = frames[:i]
 
@@ -734,7 +736,20 @@ class InputTypeImages(object):
         self.cache[self.current_frame_chunk] = ff_struct_fake
 
         return ff_struct_fake
-        
+    
+
+    def nextFrame(self):
+        """ Increment current frame. """
+
+        self.current_frame = (self.current_frame + 1)%self.total_frames
+        self.current_img_file = self.img_list[self.current_frame]
+
+
+    def prevFrame(self):
+        """ Increment current frame. """
+
+        self.current_frame = (self.current_frame - 1)%self.total_frames
+        self.current_img_file = self.img_list[self.current_frame]
 
 
     def loadFrame(self, fr_no=None):
@@ -784,7 +799,7 @@ class InputTypeImages(object):
 
 
 
-def detectInputType(input_path, config, beginning_time=None, fps=None):
+def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_dir=False):
     """ Given the folder of a file, detect the input format.
 
     Arguments:
@@ -795,6 +810,8 @@ def detectInputType(input_path, config, beginning_time=None, fps=None):
         beginning_time: [datetime] Datetime of the video beginning. Optional, only can be given for
             video input formats.
         fps: [float] Frames per second, used only when images in a folder are used.
+        skip_ff_dir: [bool] Skip the input type where there are multiple FFs in the same directory. False
+            by default. This is only used for ManualReduction.
 
     """
 
@@ -803,7 +820,7 @@ def detectInputType(input_path, config, beginning_time=None, fps=None):
     if os.path.isdir(input_path):
 
         # Check if there are valid FF names in the directory
-        if any([validFFName(ff_file) for ff_file in os.listdir(input_path)]):            
+        if any([validFFName(ff_file) for ff_file in os.listdir(input_path)]) and not skip_ff_dir:
 
             # Init the image handle for FF files in a directory
             img_handle = InputTypeFF(input_path, config)

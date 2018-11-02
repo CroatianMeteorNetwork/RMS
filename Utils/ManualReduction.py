@@ -410,7 +410,7 @@ class ManualReductionTool(object):
 
 
 
-        # Show the maxpixel if the button has been pressed
+        # Show the maxpixel if the key has been pressed
         if self.show_maxpixel and self.ff is not None:
 
             img = self.ff.maxpixel
@@ -1440,8 +1440,6 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-d', '--deinterlace', nargs='?', type=int, default=-1, help="Perform manual reduction on deinterlaced frames, even first by default. If odd first is desired, -d 1 should be used.")
 
-    arg_parser.add_argument('-p', '--png', help="Work with PNGs, and not FF files.", action="store_true")
-
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1465,8 +1463,15 @@ if __name__ == "__main__":
 
 
 
+    ### Detect the input type ###
+
+    # If only an FR file was given
+
+
+    ##########################################################################################################
+
     # If a directory with PNGs is given
-    if cml_args.png:
+    if os.path.isdir(cml_args.file1[0]):
 
         # Parse the directory with PNGs and check if there are any PNGs inside
         png_dir = os.path.abspath(cml_args.file1[0])

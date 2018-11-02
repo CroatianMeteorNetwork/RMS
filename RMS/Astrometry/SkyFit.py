@@ -1168,7 +1168,7 @@ class PlateTool(object):
 
 
         # Load the current image
-        self.current_ff = self.img_handle.load()
+        self.current_ff = self.img_handle.loadChunk()
 
 
         if self.current_ff is None:
