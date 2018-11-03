@@ -21,7 +21,7 @@ import numpy as np
 from RMS.Astrometry.Conversions import unixTime2Date
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import reconstructFrame as reconstructFrameFF
-from RMS.Formats.FFfile import validFFName
+from RMS.Formats.FFfile import validFFName, filenameToDatetime
 from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
@@ -154,6 +154,9 @@ class InputTypeFF(object):
         self.current_ff_index = 0
         self.current_ff_file = self.ff_list[self.current_ff_index]
 
+        # Update the beginning time
+        self.beginning_datetime = filenameToDatetime(self.current_ff_file)
+
         # Init the frame number
         self.current_frame = 0
 
@@ -168,6 +171,9 @@ class InputTypeFF(object):
         self.current_ff_index = (self.current_ff_index + 1)%len(self.ff_list)
         self.current_ff_file = self.ff_list[self.current_ff_index]
 
+        # Update the beginning time
+        self.beginning_datetime = filenameToDatetime(self.current_ff_file)
+
 
 
     def prevChunk(self):
@@ -175,6 +181,9 @@ class InputTypeFF(object):
 
         self.current_ff_index = (self.current_ff_index - 1)%len(self.ff_list)
         self.current_ff_file = self.ff_list[self.current_ff_index]
+
+        # Update the beginning time
+        self.beginning_datetime = filenameToDatetime(self.current_ff_file)
 
 
 
@@ -205,7 +214,7 @@ class InputTypeFF(object):
 
 
     def currentTime(self):
-        """ Return the time of the current image. """
+        """ Return the middle time of the current image. """
 
         return getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
 
@@ -384,12 +393,9 @@ class InputTypeVideo(object):
 
 
     def name(self):
-        """ Return the name of the chunk, which is just the time range. """
+        """ Return the name of the chunk, which is just the time of the beginning. """
 
-        year, month, day, hours, minutes, seconds, milliseconds = self.currentTime()
-        microseconds = int(1000*milliseconds)
-
-        return str(datetime.datetime(year, month, day, hours, minutes, seconds, microseconds))
+        return str(self.beginning_datetime)
 
 
     def currentTime(self):
@@ -534,12 +540,9 @@ class InputTypeUWOVid(object):
 
 
     def name(self):
-        """ Return the name of the chunk, which is just the time range. """
+        """ Return the name of the chunk, which is just the time of the beginning. """
 
-        year, month, day, hours, minutes, seconds, milliseconds = self.currentTime()
-        microseconds = int(1000*milliseconds)
-
-        return str(datetime.datetime(year, month, day, hours, minutes, seconds, microseconds))
+        return str(self.beginning_datetime)
 
 
     def currentTime(self):
@@ -776,12 +779,9 @@ class InputTypeImages(object):
 
 
     def name(self):
-        """ Return the name of the chunk, which is just the time range. """
+        """ Return the name of the chunk, which is just the time of the beginning. """
 
-        year, month, day, hours, minutes, seconds, milliseconds = self.currentTime()
-        microseconds = int(1000*milliseconds)
-
-        return str(datetime.datetime(year, month, day, hours, minutes, seconds, microseconds))
+        return str(self.beginning_datetime)
 
 
     def currentTime(self):

@@ -128,3 +128,17 @@ def writeArray(arr, dir_path, filename):
                 f.write(struct.pack('I', size))           # cropped frame size
                 frame[:size, :size].tofile(f)             # cropped frame
                 
+
+def validFRName(fr_name):
+    """ Checks if the given file is an FR file. 
+    
+    Arguments:
+        fr_name: [str] Name of the FR file
+    """
+
+
+    if fr_name.startswith('FR') and fr_name.endswith('.bin'):
+        return True
+
+    else:
+        return False
