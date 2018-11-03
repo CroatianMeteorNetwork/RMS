@@ -244,13 +244,14 @@ class InputTypeFF(object):
 
 
 class FFMimickInterface(object):
-    def __init__(self, maxpixel, avepixel, nrows, ncols):
+    def __init__(self, maxpixel, avepixel, nrows, ncols, nframes):
         """ Object which mimicks the interface of an FF structure. """
 
         self.maxpixel = maxpixel
         self.avepixel = avepixel
         self.nrows = nrows
         self.ncols = ncols
+        self.nframes = nframes
 
 
 
@@ -269,23 +270,23 @@ class InputTypeVideo(object):
 
         self.input_type = 'video'
 
-        self.dir_path = dir_path
+        # Separate dir path and file name
+        self.file_path = dir_path
+        self.dir_path, self.file_name = os.path.split(dir_path)
+        
         self.config = config
 
         # This type of input probably won't have any calstars files
         self.require_calstars = False
 
-
-        _, file_name = os.path.split(self.dir_path)
-
         # Remove the file extension
-        file_name = ".".join(file_name.split('.')[:-1])
+        file_name_noext = ".".join(self.file_name.split('.')[:-1])
 
         if beginning_time is None:
             
             try:
                 # Try reading the beginning time of the video from the name if time is not given
-                self.beginning_datetime = datetime.datetime.strptime(file_name, "%Y%m%d_%H%M%S.%f")
+                self.beginning_datetime = datetime.datetime.strptime(file_name_noext, "%Y%m%d_%H%M%S.%f")
 
             except:
                 messagebox.showerror('Input error', 'The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using the -t option.')
@@ -296,10 +297,10 @@ class InputTypeVideo(object):
 
 
 
-        print('Using video file:', self.dir_path)
+        print('Using video file:', self.file_path)
 
         # Open the video file
-        self.cap = cv2.VideoCapture(self.dir_path)
+        self.cap = cv2.VideoCapture(self.file_path)
 
         self.current_frame_chunk = 0
 
@@ -382,7 +383,8 @@ class InputTypeVideo(object):
 
 
         # Init the structure that mimicks the FF file structure
-        ff_struct_fake = FFMimickInterface(maxpixel, avepixel, self.nrows, self.ncols)
+        ff_struct_fake = FFMimickInterface(maxpixel, avepixel, self.nrows, self.ncols, \
+            self.total_frames)
 
         # Store the FF struct to cache to avoid recomputing
         self.cache = {}
@@ -425,18 +427,23 @@ class InputTypeUWOVid(object):
 
         self.input_type = 'vid'
 
-        self.dir_path = dir_path
+
+
+        # Separate directory path and file name
+        self.vid_path = dir_path
+        self.dir_path, vid_file = os.path.split(dir_path)
+
         self.config = config
 
         # This type of input probably won't have any calstars files
         self.require_calstars = False
 
 
-        print('Using vid file:', self.dir_path)
+        print('Using vid file:', self.vid_path)
 
         # Open the vid file
         self.vid = VidStruct()
-        self.vid_file = open(self.dir_path, 'rb')
+        self.vid_file = open(self.vid_path, 'rb')
 
         # Read one video frame and rewind to beginning
         readVidFrame(self.vid, self.vid_file)
@@ -449,8 +456,10 @@ class InputTypeUWOVid(object):
 
         self.current_frame_chunk = 0
 
+        self.current_frame = 0
+
         # Get the total time number of video frames in the file
-        self.total_frames = os.path.getsize(self.dir_path)//self.vidinfo.seqlen
+        self.total_frames = os.path.getsize(self.vid_path)//self.vidinfo.seqlen
 
         # Get the image size
         self.nrows = self.vidinfo.ht
@@ -480,12 +489,18 @@ class InputTypeUWOVid(object):
         self.current_frame_chunk += 1
         self.current_frame_chunk = self.current_frame_chunk%self.total_fr_chunks
 
+        # Update the current frame
+        self.current_frame = self.current_frame_chunk*self.fr_chunk_no
+
 
     def prevChunk(self):
         """ Go to the previous frame chunk. """
 
         self.current_frame_chunk -= 1
         self.current_frame_chunk = self.current_frame_chunk%self.total_fr_chunks
+
+        # Update the current frame
+        self.current_frame = self.current_frame_chunk*self.fr_chunk_no
 
 
     def loadChunk(self):
@@ -529,7 +544,7 @@ class InputTypeUWOVid(object):
 
 
         # Init the structure that mimicks the FF file structure
-        ff_struct_fake = FFMimickInterface(maxpixel, avepixel, self.nrows, self.ncols)
+        ff_struct_fake = FFMimickInterface(maxpixel, avepixel, self.nrows, self.ncols, self.total_frames)
 
         # Store the FF struct to cache to avoid recomputing
         self.cache = {}
@@ -555,6 +570,30 @@ class InputTypeUWOVid(object):
         mean_tu = int((mean_utime - mean_ts)*1000000)
 
         return unixTime2Date(mean_ts, mean_tu)
+
+
+    def nextFrame(self):
+        """ Increment the current frame. """
+
+        self.current_frame = (self.current_frame + 1)%self.total_frames
+
+
+    def prevFrame(self):
+        """ Decrement the current frame. """
+        
+        self.current_frame = (self.current_frame - 1)%self.total_frames
+
+
+    def loadFrame(self, avepixel=False):
+        """ Load the current frame. """
+
+        # Set the vid file pointer to the right byte
+        self.vid_file.seek(self.current_frame*self.vidinfo.seqlen)
+
+        # Load a frame
+        frame = readVidFrame(self.vid, self.vid_file)
+
+        return frame
 
 
 
@@ -732,7 +771,7 @@ class InputTypeImages(object):
 
 
         # Init the structure that mimicks the FF file structure
-        ff_struct_fake = FFMimickInterface(maxpixel, avepixel, self.nrows, self.ncols)
+        ff_struct_fake = FFMimickInterface(maxpixel, avepixel, self.nrows, self.ncols, self.total_frames)
 
         # Store the FF struct to cache to avoid recomputing
         self.cache = {}

@@ -490,7 +490,7 @@ class ManualReductionTool(object):
 
 
 
-        plt.imshow(img, cmap='gray', vmin=0, vmax=255)
+        plt.imshow(img, cmap='gray')
 
         if (self.prev_xlim is not None) and (self.prev_ylim is not None):
 
@@ -1385,7 +1385,8 @@ class ManualReductionTool(object):
 
                 # Construct a fake FF file name
                 ff_name_ftp = "FF_manual_" + self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_") \
-                    + "{:3d}".format(int(round(self.frame0_time.microseconds/1000))) + "_0000000.fits"
+                    + "{:03d}".format(int(round(self.img_handle.beginning_datetime.microsecond/1000))) \
+                    + "_0000000.fits"
 
         else:   
             # Extract the time from the FR file otherwise
@@ -1551,6 +1552,11 @@ if __name__ == "__main__":
 
         img_handle = detectInputType(file1, config, beginning_time=beginning_time, skip_ff_dir=True, 
             fps=cml_args.fps)
+
+
+        # FR files can only be combined with FF files
+        if img_handle.input_type != 'ff':
+            fr_name = None
 
 
     # Init the tool
