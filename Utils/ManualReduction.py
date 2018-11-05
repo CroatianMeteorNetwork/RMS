@@ -258,7 +258,7 @@ class ManualReductionTool(object):
         try:
 
             # Load the dark
-            dark = scipy.misc.imread(dark_file).astype(self.img_data_raw.dtype)
+            dark = scipy.misc.imread(dark_file).astype(self.current_image.dtype)
 
             # Byteswap the flat if vid file is used
             if self.img_handle.input_type == 'vid':
@@ -269,7 +269,7 @@ class ManualReductionTool(object):
 
 
         # Check if the size of the file matches
-        if self.current_ff.maxpixel.shape != dark.shape:
+        if self.current_image.shape != dark.shape:
             messagebox.showerror(title='Dark frame file error', \
                 message='The size of the dark frame does not match the size of the image!')
 

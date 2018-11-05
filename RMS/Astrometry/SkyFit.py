@@ -1699,7 +1699,7 @@ class PlateTool(object):
 
 
         # Check if the size of the file matches
-        if self.current_ff.maxpixel.shape != flat.flat_img.shape:
+        if self.img_data_raw.shape != flat.flat_img.shape:
             messagebox.showerror(title='Flat field file error', \
                 message='The size of the flat field does not match the size of the image!')
 
@@ -1748,7 +1748,7 @@ class PlateTool(object):
 
 
         # Check if the size of the file matches
-        if self.current_ff.maxpixel.shape != dark.shape:
+        if self.img_data_raw.shape != dark.shape:
             messagebox.showerror(title='Dark field file error', \
                 message='The size of the dark frame does not match the size of the image!')
 
