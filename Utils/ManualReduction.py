@@ -86,8 +86,10 @@ class ManualReductionTool(object):
 
         # If the image handle was given, load the first chunk as the FF file
         if self.img_handle is not None:
-            self.ff = self.img_handle.loadChunk()
+            self.ff = self.img_handle.loadChunk(read_nframes=-1)
             self.nframes = self.ff.nframes
+
+            self.dir_path = self.img_handle.dir_path
 
 
         self.fr_file = fr_file
@@ -102,61 +104,11 @@ class ManualReductionTool(object):
             if self.img_handle is None:
                 self.nframes = len(self.fr[self.current_line])
 
+                self.dir_path, _ = os.path.split(self.fr_file)
+
         else:
             self.fr = None
 
-
-        # # Load the PNG files if in PNG mode
-        # if self.png_mode:
-
-        #     self.png_dir = input1
-        #     self.frame0_time = input2
-
-        #     print('PNG dir:', self.png_dir)
-
-        #     self.png_list = sorted([fname for fname in os.listdir(self.png_dir) \
-        #         if fname.lower().endswith('.png')])
-
-        #     self.nframes = len(self.png_list)
-
-        #     self.png_img_path = ''
-
-        #     # Variables for FF mode that are not used
-        #     self.ff = None
-        #     self.fr = None
-
-        #     self.dir_path = png_dir
-
-
-        # # FF mode
-        # else:
-
-        #     # Variables for PNG mode that are not used
-        #     self.png_list = None
-        #     self.frame0_time = None
-
-        #     self.dir_path, _ = os.path.split(input1)
-
-        #     self.ff_file = input1
-        #     self.fr_file = input2
-
-        #     # Load the FF file if given
-        #     if self.ff_file is not None:
-        #         self.ff = readFF(*os.path.split(self.ff_file))
-        #     else:
-        #         self.ff = None
-
-
-        #     # Load the FR file is given
-        #     if self.fr_file is not None:
-        #         self.fr = readFR(*os.path.split(self.fr_file))
-
-        #         print('Total lines:', self.fr.lines)
-        #     else:
-        #         self.fr = None
-
-
-        #     self.nframes = 256
 
 
         ###########
@@ -307,8 +259,7 @@ class ManualReductionTool(object):
 
         try:
             # Load the flat. Byteswap the flat if vid file is used
-            #flat = Image.loadFlat(*os.path.split(flat_file), byteswap=(self.img_handle.input_type == 'vid'))
-            flat = Image.loadFlat(*os.path.split(flat_file))
+            flat = Image.loadFlat(*os.path.split(flat_file), byteswap=(self.img_handle.input_type == 'vid'))
         except:
             return False, None
 
@@ -358,7 +309,6 @@ class ManualReductionTool(object):
 
             # Take the current frame from FF file
             img = self.img_handle.loadFrame(avepixel=True)
-            print(self.img_handle.current_frame)
 
         # Otherwise, create a blank background with the size enough to fit the FR bin
         else:
@@ -552,6 +502,7 @@ class ManualReductionTool(object):
             text_str  = 'Keys:\n'
             text_str += '-----------\n'
             text_str += 'Left/Right - Previous/next frame\n'
+            text_str += 'Page Down/Up - +/- 25 frames\n'
             text_str += ',/. - Previous/next FR line\n'
             text_str += '+/- - Zoom in/out\n'
             text_str += 'R - Reset view\n'
@@ -588,11 +539,33 @@ class ManualReductionTool(object):
     def onKeyPress(self, event):
         """ Handles key presses. """
 
+
         # Cycle frames
         if event.key == 'left':
             self.prevFrame()
 
         elif event.key == 'right':
+            self.nextFrame()
+
+
+        # +/- 25 frames
+        elif event.key == 'pagedown':
+
+            self.prevFrame()
+
+            for i in range(23):
+                self.prevFrame(only_number_update=True)
+
+            self.prevFrame()
+
+
+        elif event.key == 'pageup':
+
+            self.nextFrame()
+
+            for i in range(23):
+                self.nextFrame(only_number_update=True)
+
             self.nextFrame()
 
 
@@ -1325,12 +1298,21 @@ class ManualReductionTool(object):
 
 
 
-    def prevFrame(self):
-        """ Cycle to the previous frame. """
+    def prevFrame(self, only_number_update=False):
+        """ Cycle to the previous frame. 
+    
+        Keyword arguments:
+            only_number_update: [bool] Just cycle the frame number if True. False by default. This is used
+                when skipping multiple frames.
+        """
 
-        # Compute the intensity sum done on the previous frame
-        self.computeIntensitySum()
+        if not only_number_update:
 
+            # Compute the intensity sum done on the previous frame
+            self.computeIntensitySum()
+
+
+        # Decrement the frame numebr
         if self.img_handle is not None:
             self.img_handle.prevFrame()
 
@@ -1339,18 +1321,29 @@ class ManualReductionTool(object):
         else:
             self.current_frame = (self.current_frame - self.frame_step)%self.nframes
 
-        self.updateImage()
 
-        self.printStatus()
+        if not only_number_update:
+            self.updateImage()
+
+            self.printStatus()
 
 
 
-    def nextFrame(self):
-        """ Cycle to the next frame. """
+    def nextFrame(self, only_number_update=False):
+        """ Cycle to the next frame. 
 
-        # Compute the intensity sum done on the previous frame
-        self.computeIntensitySum()
+        Keyword arguments:
+        only_number_update: [bool] Just cycle the frame number if True. False by default. This is used
+                when skipping multiple frames.
+        """
 
+        if not only_number_update:
+            
+            # Compute the intensity sum done on the previous frame
+            self.computeIntensitySum()
+
+
+        # Increment the frame
         if self.img_handle is not None:
             self.img_handle.nextFrame()
 
@@ -1359,9 +1352,10 @@ class ManualReductionTool(object):
         else:
             self.current_frame = (self.current_frame + self.frame_step)%self.nframes
 
-        self.updateImage()
 
-        self.printStatus()
+        if not only_number_update:
+            self.updateImage()
+            self.printStatus()
 
 
 
