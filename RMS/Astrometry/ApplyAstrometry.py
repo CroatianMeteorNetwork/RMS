@@ -352,7 +352,7 @@ def calculateMagnitudes(level_data, mag_0, mag_lev):
     for i, level in enumerate(level_data):
 
         # Save magnitude data to the output array
-        magnitude_data[i] = mag_0*np.log10(float(level)) + mag_lev
+        magnitude_data[i] = mag_0*np.log10(level) + mag_lev
 
 
     return magnitude_data
@@ -464,8 +464,10 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, lat, lon, Ho, X_res
     # Calculate magnitudes
     magnitude_data = calculateMagnitudes(level_data, mag_0, mag_lev)
 
+
+    # CURRENTLY DISABLED!
     # Compute the apparent magnitudes corrected to atmospheric extinction
-    magnitude_data += atmosphericExtinctionCorrection(alt_data, station_ht)
+    # magnitude_data += atmosphericExtinctionCorrection(alt_data, station_ht)
 
 
     return JD_data, RA_data, dec_data, magnitude_data
