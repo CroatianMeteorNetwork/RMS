@@ -466,8 +466,9 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, lat, lon, Ho, X_res
 
 
     # CURRENTLY DISABLED!
-    # Compute the apparent magnitudes corrected to atmospheric extinction
-    # magnitude_data += atmosphericExtinctionCorrection(alt_data, station_ht)
+    # Compute the apparent magnitudes corrected to relative atmospheric extinction
+    # magnitude_data -= atmosphericExtinctionCorrection(alt_data, station_ht) \
+    #   - atmosphericExtinctionCorrection(90, station_ht)
 
 
     return JD_data, RA_data, dec_data, magnitude_data

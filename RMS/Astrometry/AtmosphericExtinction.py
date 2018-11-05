@@ -47,7 +47,7 @@ if __name__ == "__main__":
 
 	import matplotlib.pyplot as plt
 
-	# Plot extionctions for difference elevations and heights above sea level
+	# Plot absolute extionctions for difference elevations and heights above sea level
 	ht_list = [0, 0.5, 1, 2, 3]
 
 	for ht in ht_list:
@@ -60,8 +60,29 @@ if __name__ == "__main__":
 	plt.legend()
 
 	plt.xlabel('Elevation (deg)')
-	plt.ylabel('Extinction (mag)')
+	plt.ylabel('Absolute extinction (mag)')
 
 	plt.show()
 
+
+
+	# Plot relative extionctions for difference elevations and heights above sea level
+	ht_list = [0, 0.5, 1, 2, 3]
+
+	for ht in ht_list:
+
+		elev_list = np.linspace(0, 90, 1000)
+
+		# Compute relative extinction
+		rel_exticntion = atmosphericExtinctionCorrection(elev_list, 1000*ht) - atmosphericExtinctionCorrection(90, 1000*ht)
+
+		plt.plot(elev_list, rel_exticntion, label='Ht = {:.1f} km'.format(ht))
+
+
+	plt.legend()
+
+	plt.xlabel('Elevation (deg)')
+	plt.ylabel('Relative extinction (mag)')
+
+	plt.show()
 
