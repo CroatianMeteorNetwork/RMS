@@ -28,70 +28,6 @@ from RMS.Formats.Vid import VidStruct
 
 
 
-# class InputTypeFR(object):
-#     def __init__(self, input_path, config, ff=None):
-#         """ Input file type handle for FR file, can be combined with FF files. Only used for ManualReduction.
-#         """
-
-#         self.input_type = 'fr'
-
-#         self.input_path = input_path
-
-#         self.dir_path, file_name = os.path.split(input_path)
-
-#         self.config = config
-
-
-#         # If an FF file is given, load it's handle
-#         if ff is not None:
-#             self.ff_handle = InputTypeFF(ff, self.config, single_ff=True)
-
-#         else:
-#             self.ff_handle = None
-
-
-#         self.current_line = 0
-
-#         # Load the FR file
-#         self.fr = readFR(self.dir_path, file_name)
-
-#         # Set the current Frame to the first frame in the FR
-#         self.current_frame = self.fr.t[self.current_line][0]
-
-
-#         # Set the total number of frames
-#         if self.ff is not None:
-#             self.nframes = self.ff.nframes
-
-#         else:
-#             self.nframes = 256
-
-
-
-#     def nextLine(self):
-#         """ Increment the FR line. """
-
-#         self.current_line = (self.current_line + 1)%self.fr.lines
-
-        
-
-
-#     def prevLine(self):
-#         """ Decrement the FR line. """
-
-#         self.current_line = (self.current_line - 1)%self.fr.lines
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 class InputTypeFF(object):
@@ -163,6 +99,16 @@ class InputTypeFF(object):
 
         self.cache = {}
 
+        # Load the first chunk for initing parameters
+        self.loadChunk()
+
+        # Read FPS from FF file if available, otherwise use from config
+        if hasattr(self.ff, 'fps'):
+            self.fps = self.ff.fps
+
+        else:
+            self.fps = self.config.fps
+
 
 
     def nextChunk(self):
@@ -222,11 +168,11 @@ class InputTypeFF(object):
         """ Return the middle time of the current image. """
 
         if dt_obj:
-            return datetime.datetime(*getMiddleTimeFF(self.current_ff_file, self.config.fps, \
+            return datetime.datetime(*getMiddleTimeFF(self.current_ff_file, self.fps, \
                 ret_milliseconds=False))
 
         else:
-            return getMiddleTimeFF(self.current_ff_file, self.config.fps, ret_milliseconds=True)
+            return getMiddleTimeFF(self.current_ff_file, self.fps, ret_milliseconds=True)
 
 
 
@@ -262,6 +208,7 @@ class FFMimickInterface(object):
         self.nrows = nrows
         self.ncols = ncols
         self.nframes = nframes
+
 
 
 def computeFramesToRead(read_nframes, total_frames, fr_chunk_no, current_frame_chunk):
@@ -564,8 +511,8 @@ class InputTypeUWOVid(object):
 
 
         self.current_frame_chunk = 0
-
         self.current_frame = 0
+        self.current_fr_chunk_size = 0
 
         # Get the total time number of video frames in the file
         self.total_frames = os.path.getsize(self.vid_path)//self.vidinfo.seqlen
@@ -590,6 +537,10 @@ class InputTypeUWOVid(object):
 
         # Do the initial load
         self.loadChunk()
+
+
+        # Estimate the FPS
+        self.fps = 1/((self.frame_chunk_unix_times[-1] - self.frame_chunk_unix_times[0])/self.current_fr_chunk_size)
 
 
     def nextChunk(self):
@@ -672,6 +623,8 @@ class InputTypeUWOVid(object):
             # Compute the running average
             avepixel += frame.astype(np.float64)/frames_to_read
 
+
+        self.current_fr_chunk_size = i + 1
 
         avepixel = avepixel.astype(np.uint16)
 

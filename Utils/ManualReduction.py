@@ -1487,7 +1487,17 @@ class ManualReductionTool(object):
                 self.fps = self.ff.fps
 
         if self.fps is None:
-            self.fps = self.config.fps
+
+            # Try reading FPS from image handle
+            if self.img_handle is not None:
+                self.fps = self.img_handle.fps
+
+            else:
+                # Otherwise, read FPS from config
+                self.fps = self.config.fps
+
+
+        print('Using FPS:', self.fps)
 
         # Write the FTPdetect info
         writeFTPdetectinfo(meteor_list, dir_path, ftpdetectinfo_name, '', station_id, self.fps)
