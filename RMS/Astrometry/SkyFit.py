@@ -1724,7 +1724,7 @@ class PlateTool(object):
         root.update()
 
         # Load the platepar file
-        dark_file = filedialog.askopenfilename(initialdir=self.dir_path, title='Select the flat field file')
+        dark_file = filedialog.askopenfilename(initialdir=self.dir_path, title='Select the dark frame file')
 
         root.update()
         root.quit()

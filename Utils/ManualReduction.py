@@ -119,6 +119,7 @@ class ManualReductionTool(object):
         ###########
 
         self.flat_struct = None
+        self.dark = None
 
         # Image gamma and levels
         self.auto_levels = False
@@ -234,6 +235,54 @@ class ManualReductionTool(object):
                     # Print line frame range
                     print('Line frame range:', min(frames), max(frames))
 
+
+
+    def loadDark(self):
+        """ Open a file dialog and ask user to load a dark frame. """
+
+        root = tkinter.Tk()
+        root.withdraw()
+        root.update()
+
+        # Load the platepar file
+        dark_file = filedialog.askopenfilename(initialdir=self.dir_path, title='Select the dark frame file')
+
+        root.update()
+        root.quit()
+
+        if not dark_file:
+            return False, None
+
+        print(dark_file)
+
+        try:
+
+            # Load the dark
+            dark = scipy.misc.imread(dark_file).astype(self.img_data_raw.dtype)
+
+            # Byteswap the flat if vid file is used
+            if self.img_handle.input_type == 'vid':
+                dark = dark.byteswap()
+
+        except:
+            return False, None
+
+
+        # Check if the size of the file matches
+        if self.current_ff.maxpixel.shape != dark.shape:
+            messagebox.showerror(title='Dark frame file error', \
+                message='The size of the dark frame does not match the size of the image!')
+
+            dark = None
+
+        # Check if the dark frame was successfuly loaded
+        if dark is None:
+            messagebox.showerror(title='Dark frame file error', \
+                message='The file you selected could not be loaded as a dark frame!')
+
+        
+
+        return dark_file, dark
 
 
     def loadFlat(self):
@@ -416,8 +465,19 @@ class ManualReductionTool(object):
                 img = Image.deinterlaceEven(img)
 
 
-        # Apply flat (cannot be applied if there is no FF file)
+
+
+
+
+        # Apply dark and flat (cannot be applied if there is no FF file)
         if self.ff is not None:
+
+
+            # Apply dark
+            if self.dark is not None:
+                img = Image.applyDark(img, self.dark)
+
+            # Apply flat
             if self.flat_struct is not None:
                 img = Image.applyFlat(img, self.flat_struct)
 
@@ -514,6 +574,7 @@ class ManualReductionTool(object):
             text_str += 'M - Show maxpixel\n'
             text_str += 'U/J - Img Gamma\n'
             text_str += 'CTRL + A - Auto levels\n'
+            text_str += 'CTRL + D - Load dark\n'
             text_str += 'CTRL + F - Load flat\n'
             text_str += 'CTRL + W - Save current frame\n'
             text_str += 'CTRL + S - Save FTPdetectinfo\n'
@@ -666,6 +727,13 @@ class ManualReductionTool(object):
 
             # Save the FTPdetectinfo file
             self.saveFTPdetectinfo()
+
+
+        # Load the dark frame
+        elif event.key == 'ctrl+d':
+            _, self.dark = self.loadDark()
+
+            self.updateImage()
 
 
         # Load the flat field
