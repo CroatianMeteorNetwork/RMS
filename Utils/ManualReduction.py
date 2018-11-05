@@ -83,6 +83,8 @@ class ManualReductionTool(object):
 
 
         self.img_handle = img_handle
+        self.ff = None
+        self.fr = None
 
         # If the image handle was given, load the first chunk as the FF file
         if self.img_handle is not None:
@@ -94,6 +96,9 @@ class ManualReductionTool(object):
 
         self.fr_file = fr_file
 
+        # Each FR bin can have multiple detections, the first one is by default
+        self.current_line = 0
+
         # Load the FR file is given
         if self.fr_file is not None:
             self.fr = readFR(*os.path.split(self.fr_file))
@@ -102,7 +107,7 @@ class ManualReductionTool(object):
 
             # Update the total frame number
             if self.img_handle is None:
-                self.nframes = len(self.fr[self.current_line])
+                self.nframes = len(self.fr.t[self.current_line])
 
                 self.dir_path, _ = os.path.split(self.fr_file)
 
@@ -155,9 +160,6 @@ class ManualReductionTool(object):
 
         ###########
 
-
-        # Each FR bin can have multiple detections, the first one is by default
-        self.current_line = 0
 
         if first_frame is not None:
             self.current_frame = first_frame%self.nframes
@@ -212,22 +214,25 @@ class ManualReductionTool(object):
         print('----------------------------')
         print('Frame:', self.current_frame)
 
-        # PNG mode
-        if self.img_handle.input_type == 'images':
-            print('File:', self.img_handle.current_img_file)
+        
+        if self.img_handle is not None:
 
-        # FF mode
-        else:
+            # Image mode    
+            if self.img_handle.input_type == 'images':
+                print('File:', self.img_handle.current_img_file)
 
-            if self.fr is not None:
+            # FF mode
+            else:
 
-                print('Line:', self.current_line)
+                if self.fr is not None:
 
-                # Get all frames in the line
-                frames = self.fr.t[self.current_line]
+                    print('Line:', self.current_line)
 
-                # Print line frame range
-                print('Line frame range:', min(frames), max(frames))
+                    # Get all frames in the line
+                    frames = self.fr.t[self.current_line]
+
+                    # Print line frame range
+                    print('Line frame range:', min(frames), max(frames))
 
 
 
@@ -412,7 +417,7 @@ class ManualReductionTool(object):
 
 
         # Apply flat (cannot be applied if there is no FF file)
-        if (self.ff is not None) or self.png_mode:
+        if self.ff is not None:
             if self.flat_struct is not None:
                 img = Image.applyFlat(img, self.flat_struct)
 
@@ -594,7 +599,7 @@ class ManualReductionTool(object):
 
                 # Update the total frame number
                 if self.img_handle is None:
-                    self.nframes = len(self.fr[self.current_line])
+                    self.nframes = len(self.fr.t[self.current_line])
 
                 self.printStatus()
 
@@ -610,7 +615,7 @@ class ManualReductionTool(object):
 
                 # Update the total frame number
                 if self.img_handle is None:
-                    self.nframes = len(self.fr[self.current_line])
+                    self.nframes = len(self.fr.t[self.current_line])
 
                 self.printStatus()
 
@@ -1523,39 +1528,47 @@ if __name__ == "__main__":
     head1, tail1 = os.path.split(file1)
     if validFRName(tail1):
 
+        print('FR only mode!')
+
         # Init the tool with only the FR file
         manual_tool = ManualReductionTool(config, ff_name, file1, first_frame=cml_args.begframe, \
             fps=cml_args.fps, deinterlace_mode=deinterlace_mode)
 
 
-    # If the second argument is an FR file, omit the beginning time
-    if fr_name is not None:
-        img_handle = detectInputType(file1, config, skip_ff_dir=True, fps=cml_args.fps)
-
-    # Otherwise, do automatic detection of file type and feed it the beginning time
     else:
 
-        beginning_time = None
+        # If the second argument is an FR file, omit the beginning time
+        if fr_name is not None:
+            img_handle = detectInputType(file1, config, skip_ff_dir=True, fps=cml_args.fps)
 
-        if input2 is not None:
+        # Otherwise, do automatic detection of file type and feed it the beginning time
+        else:
 
-            # Parse the time
-            beginning_time = datetime.datetime.strptime(input2, "%Y%m%d_%H%M%S.%f")
-            beginning_time = beginning_time.replace(tzinfo=pytz.UTC)
+            beginning_time = None
 
+            if input2 is not None:
 
-        img_handle = detectInputType(file1, config, beginning_time=beginning_time, skip_ff_dir=True, 
-            fps=cml_args.fps)
-
-
-        # FR files can only be combined with FF files
-        if img_handle.input_type != 'ff':
-            fr_name = None
+                # Parse the time
+                beginning_time = datetime.datetime.strptime(input2, "%Y%m%d_%H%M%S.%f")
+                beginning_time = beginning_time.replace(tzinfo=pytz.UTC)
 
 
-    # Init the tool
-    manual_tool = ManualReductionTool(config, img_handle, fr_name, first_frame=cml_args.begframe, \
-            fps=cml_args.fps, deinterlace_mode=deinterlace_mode)
+            img_handle = detectInputType(file1, config, beginning_time=beginning_time, skip_ff_dir=True, 
+                fps=cml_args.fps)
+
+
+            # FR files can only be combined with FF files
+            if img_handle is not None:
+
+                print('Input type:', img_handle.input_type)
+
+                if img_handle.input_type != 'ff':
+                    fr_name = None
+
+
+        # Init the tool
+        manual_tool = ManualReductionTool(config, img_handle, fr_name, first_frame=cml_args.begframe, \
+                fps=cml_args.fps, deinterlace_mode=deinterlace_mode)
 
 
     # ##########################################################################################################
