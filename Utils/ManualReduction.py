@@ -505,7 +505,7 @@ class ManualReductionTool(object):
 
 
 
-        plt.imshow(img, cmap='gray')
+        plt.imshow(img, cmap='gray', interpolation='nearest')
 
         if (self.prev_xlim is not None) and (self.prev_ylim is not None):
 
@@ -756,7 +756,11 @@ class ManualReductionTool(object):
             if not self.photometry_coloring_mode:
                 
                 self.photometry_coloring_mode = True
+
                 self.updateImage()
+
+                # Change the position of the star aperture circle
+                self.drawCursorCircle()
 
 
 
@@ -789,7 +793,10 @@ class ManualReductionTool(object):
             self.drawCursorCircle()
 
             if self.photometry_coloring_mode and self.photometry_coloring_color:
-                self.changePhotometry(self.current_frame, self.photometryColoring(), add_photometry=self.photometry_add)
+
+                # Color in the pixels for photometry
+                self.changePhotometry(self.current_frame, self.photometryColoring(), \
+                    add_photometry=self.photometry_add)
 
                 self.drawPhotometryColoring(update_plot=True)
 
@@ -896,6 +903,15 @@ class ManualReductionTool(object):
                 self.photometry_add = False
 
 
+            if self.photometry_coloring_mode and self.photometry_coloring_color:
+
+                # Color in the pixels for photometry
+                self.changePhotometry(self.current_frame, self.photometryColoring(), \
+                    add_photometry=self.photometry_add)
+                self.drawPhotometryColoring(update_plot=True)
+
+
+
     def zoomImage(self, zoom_in):
         """ Change the zoom if the image. """
 
@@ -987,7 +1003,7 @@ class ManualReductionTool(object):
                     continue
 
                 # Check if the given pixels are within the aperture radius
-                if math.sqrt((x - mouse_x)**2 + (y - mouse_y)**2) <= self.photometry_aperture_radius:
+                if ((x - mouse_x)**2 + (y - mouse_y)**2) <= self.photometry_aperture_radius**2:
                     pixel_list.append((x, y))
 
 
@@ -1179,7 +1195,7 @@ class ManualReductionTool(object):
                 mask_overlay[..., 1] = 1 # Green channel
                 mask_overlay[..., 3] = 0.3*mask_img # Alpha channel
 
-                self.photometry_coloring_handle = plt.imshow(mask_overlay)
+                self.photometry_coloring_handle = plt.imshow(mask_overlay, interpolation='nearest')
 
                 # Update canvas
                 if update_plot:

@@ -50,7 +50,7 @@ def raDec2AltAz(JD, lon, lat, ra, dec):
     """ Calculate the reference azimuth and altitude of the centre of the FOV from the given RA/Dec. 
 
     Arguments:
-        JD: [float] Referent Julian date.
+        JD: [float] Reference Julian date.
         lon: [float] Longitude +E in degrees.
         lat: [float] Latitude +N in degrees.
         ra_: [float] Right ascension in degrees.
@@ -187,9 +187,9 @@ def XY2altAz(lat, lon, RA_d, dec_d, Ho, rot_param, X_data, Y_data):
     Arguments:
         lat: [float] Latitude of the observer +N (degrees).
         lon: [float] Longitde of the observer +E (degress).
-        RA_d: [float] Referent right ascension of the image centre (degrees).
-        dec_d: [float] Referent declination of the image centre (degrees).
-        Ho: [float] Referent hour angle.
+        RA_d: [float] Reference right ascension of the image centre (degrees).
+        dec_d: [float] Reference declination of the image centre (degrees).
+        Ho: [float] Reference hour angle.
         rot_param: [float] Field rotation parameter (degrees).
         X_data: [ndarray] 1D numpy array containing distortion corrected X component.
         Y_data: [ndarray] 1D numpy array containing distortion corrected Y component.
@@ -317,7 +317,7 @@ def altAz2RADec(lat, lon, UT_corr, time_data, azimuth_data, altitude_data, dt_ti
         y = -caz*sl*calt + salt*cl
         HA = math.degrees(math.atan2(x, y))
 
-        # Calculate the referent hour angle
+        # Calculate the reference hour angle
         
         T = (JD - 2451545.0)/36525.0
         Ho = (280.46061837 + 360.98564736629*(JD - 2451545.0) + 0.000387933*T**2 - T**3/38710000.0)%360
@@ -429,11 +429,11 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, lat, lon, Ho, X_res
         level_data: [ndarray] Levels of the meteor centroid.
         lat: [float] Latitude of the observer in degrees.
         lon: [float] Longitde of the observer in degress.
-        Ho: [float] Referent hour angle (deg).
+        Ho: [float] Reference hour angle (deg).
         X_res: [int] Camera X axis resolution.
         Y_res: [int] Camera Y axis resolution.
-        RA_d: [float] Referent right ascension of the image centre (degrees).
-        dec_d: [float] Referent declination of the image centre (degrees).
+        RA_d: [float] Reference right ascension of the image centre (degrees).
+        dec_d: [float] Reference declination of the image centre (degrees).
         pos_angle_ref: [float] Field rotation parameter (degrees).
         F_scale: [float] Sum of image scales per each image axis (arcsec per px).
         mag_0: [float] Magnitude calibration equation parameter (slope).
@@ -519,7 +519,7 @@ def raDecToCorrectedXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_
         y_res: [int] Y resolution of the camera.
         RA_d: [float] Right ascension of the FOV centre (degrees).
         dec_d: [float] Declination of the FOV centre (degrees).
-        ref_jd: [float] Referent Julian date from platepar.
+        ref_jd: [float] Reference Julian date from platepar.
         pos_angle_ref: [float] Rotation from the celestial meridial (degrees).
         F_scale: [float] Sum of image scales per each image axis (arcsec per px).
         x_poly: [ndarray float] Distorsion polynomial in X direction.
@@ -550,10 +550,10 @@ def raDecToCorrectedXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_
     dec_data = np.copy(dec_data)
 
     
-
-    # Calculate the referent hour angle
+    
+    # Calculate the reference hour angle
     T = (jd - 2451545.0)/36525.0
-    Ho = 280.46061837 + 360.98564736629*(jd - 2451545) + 0.000387933*T**2 - (T**3)/38710000.0
+    Ho = (280.46061837 + 360.98564736629*(jd - 2451545) + 0.000387933*T**2 - (T**3)/38710000.0)%360
 
     sl = math.sin(math.radians(lat))
     cl = math.cos(math.radians(lat))

@@ -329,9 +329,9 @@ def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, np.ndarray[FL
 
     # print('jd:', jd)
 
-    # Calculate the referent hour angle
+    # Calculate the reference hour angle
     cdef double T = (jd - 2451545.0)/36525.0
-    cdef double Ho = 280.46061837 + 360.98564736629*(jd - 2451545.0) + 0.000387933*T**2 - (T**3)/38710000.0
+    cdef double Ho = (280.46061837 + 360.98564736629*(jd - 2451545.0) + 0.000387933*T**2 - (T**3)/38710000.0)%360
 
     cdef double sl = sin(radians(lat))
     cdef double cl = cos(radians(lat))

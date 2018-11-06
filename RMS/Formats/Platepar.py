@@ -98,7 +98,7 @@ class Platepar(object):
         # Station coordinates
         self.lat = self.lon = self.elev = 0
 
-        # Referent time and date
+        # Reference time and date
         self.time = 0
         self.JD = 0
 
@@ -232,7 +232,7 @@ class Platepar(object):
                 # Convert time to JD
                 self.JD = date2JD(Y, M, D, h, m, s)
 
-                # Calculate the referent hour angle
+                # Calculate the reference hour angle
                 T = (self.JD - 2451545.0)/36525.0
                 self.Ho = (280.46061837 + 360.98564736629*(self.JD - 2451545.0) + 0.000387933*T**2 - 
                     T**3/38710000.0)%360
@@ -324,23 +324,23 @@ class Platepar(object):
                 # Write geo coords
                 f.write('{:9.6f} {:9.6f} {:04d}\n'.format(self.lon, self.lat, int(self.elev)))
 
-                # Calculate referent time from referent JD
+                # Calculate reference time from reference JD
                 Y, M, D, h, m, s, ms = list(map(int, jd2Date(self.JD)))
 
-                # Write the referent time
+                # Write the reference time
                 f.write('{:02d} {:02d} {:04d} {:02d} {:02d} {:02d}\n'.format(D, M, Y, h, m, s))
 
                 # Write resolution and focal length
                 f.write('{:d} {:d} {:f}\n'.format(int(self.X_res), int(self.Y_res), self.focal_length))
 
-                # Write referent RA
+                # Write reference RA
                 self.RA_H = int(self.RA_d/15)
                 self.RA_M = int((self.RA_d/15 - self.RA_H)*60)
                 self.RA_S = int(((self.RA_d/15 - self.RA_H)*60 - self.RA_M)*60)
 
                 f.write("{:7.3f} {:02d} {:02d} {:02d}\n".format(self.RA_d, self.RA_H, self.RA_M, self.RA_S))
 
-                # Write referent Dec
+                # Write reference Dec
                 self.dec_D = int(self.dec_d)
                 self.dec_M = int((self.dec_d - self.dec_D)*60)
                 self.dec_S = int(((self.dec_d - self.dec_D)*60 - self.dec_M)*60)
@@ -369,6 +369,10 @@ class Platepar(object):
 
 
         return fmt
+
+
+    def __repr__(self):
+        return str(self.__dict__)
 
 
 

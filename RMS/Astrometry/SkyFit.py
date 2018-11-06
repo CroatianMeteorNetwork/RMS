@@ -1198,6 +1198,11 @@ class PlateTool(object):
             self.img_level_max = 2**self.bit_depth - 1
 
 
+            # Set the image resolution to platepar after reading the first image
+            self.platepar.X_res = img_data.shape[1]
+            self.platepar.Y_res = img_data.shape[0]
+
+
         # Apply dark
         if self.dark is not None:
             img_data = Image.applyDark(img_data, self.dark)
@@ -1237,7 +1242,7 @@ class PlateTool(object):
             self.drawLevelsAdjustmentHistogram(self.img_data_raw)
 
         # Show the loaded image
-        plt.imshow(img_data, cmap='gray')
+        plt.imshow(img_data, cmap='gray', interpolation='nearest')
 
         # Draw stars that were paired in picking mode
         self.drawPairedStars()
@@ -1432,7 +1437,7 @@ class PlateTool(object):
 
         # Convert the FOV centre to RA/Dec
         _, ra_centre, dec_centre, _ = XY2CorrectedRADecPP([img_time], [self.platepar.X_res/2], 
-            [self.platepar.Y_res/2], [0], self.platepar)
+            [self.platepar.Y_res/2], [1], self.platepar)
         
         ra_centre = ra_centre[0]
         dec_centre = dec_centre[0]
@@ -1474,9 +1479,9 @@ class PlateTool(object):
             catalog_stars: [2D list] A list of (ra, dec, mag) pairs of catalog stars.
             lon: [float] Longitude in degrees.
             lat: [float] Latitude in degrees.
-            ra_ref: [float] Referent RA of the FOV centre (degrees).
-            dec_ref: [float] Referent Dec of the FOV centre (degrees).
-            pos_angle_ref: [float] Referent position angle in degrees.
+            ra_ref: [float] Reference RA of the FOV centre (degrees).
+            dec_ref: [float] Reference Dec of the FOV centre (degrees).
+            pos_angle_ref: [float] Reference position angle in degrees.
             F_scale: [float] Image scale in pix/arcsec for CIF resolution.
             x_poly: [ndarray float] Distorsion polynomial in X direction.
             y_poly: [ndarray float] Distorsion polynomail in Y direction.
@@ -1516,15 +1521,15 @@ class PlateTool(object):
         # Get the middle time of the first FF
         img_time = self.img_handle.currentTime()
 
-        # Set the referent platepar time to the time of the FF
+        # Set the reference platepar time to the time of the FF
         self.platepar.JD = date2JD(*img_time, UT_corr=float(self.platepar.UT_corr))
 
-        # Set the referent hour angle
+        # Set the reference hour angle
         T = (self.platepar.JD - 2451545)/36525.0
         Ho = 280.46061837 + 360.98564736629*(self.platepar.JD - 2451545.0) + 0.000387933*T**2 \
             - (T**3)/38710000.0
 
-        self.platepar.Ho = Ho
+        self.platepar.Ho = Ho%360
 
         
         time_data = [img_time]
@@ -1617,7 +1622,7 @@ class PlateTool(object):
         self.platepar.station_code = self.config.stationID
 
 
-        # Get referent RA, Dec of the image centre
+        # Get reference RA, Dec of the image centre
         self.platepar.RA_d, self.platepar.dec_d = self.getFOVcentre()
 
         # Recalculate reference alt/az
