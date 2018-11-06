@@ -21,8 +21,8 @@ cdef extern from "math.h":
 
 
 @cython.cdivision(True)
-@cython.boundscheck(False)
-@cython.wraparound(False)
+#@cython.boundscheck(False)
+#@cython.wraparound(False)
 def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order):
 
     # Init the output four frame temporal pixel array
