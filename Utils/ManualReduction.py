@@ -1481,6 +1481,12 @@ class ManualReductionTool(object):
         for pick in self.pick_list:
             centroids.append([pick.frame, pick.x_centroid, pick.y_centroid, pick.intensity_sum])
 
+
+        # If there are no centroids, don't save anything
+        if len(centroids) == 0:
+            messagebox.showinfo('FTPdetectinfo saving error', 'No centroids to save!')
+            return 1
+
         # Sort by frame number
         centroids = sorted(centroids, key=lambda x: x[0])
 
@@ -1525,19 +1531,25 @@ class ManualReductionTool(object):
     def saveCurrentFrame(self):
         """ Saves the current frame to disk. """
 
-        # PNG mode
-        if self.png_mode:
-            dir_path = self.png_img_path
-            ff_name_ftp = "FF_" + self.frame0_time.strftime("%Y%m%d_%H%M%S.%f") + '.bin'
+        # Generate a name for the FF file which will be written to FTPdetectinfo
+        if self.img_handle is not None:
 
-        # FF mode
-        else:
-            # Extract the save directory
-            if self.ff_file is not None:
-                dir_path, ff_name_ftp = os.path.split(self.ff_file)
+            dir_path = self.img_handle.dir_path
 
-            elif self.fr_file is not None:
-                dir_path, ff_name_ftp = os.path.split(self.fr_file)
+            # If the FF file is loaded, just copy its name
+            if self.img_handle.input_type == 'ff':
+                ff_name_ftp = self.img_handle.current_ff_file
+
+            else:
+
+                # Construct a fake FF file name
+                ff_name_ftp = "FF_manual_" + self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_") \
+                    + "{:03d}".format(int(round(self.img_handle.beginning_datetime.microsecond/1000))) \
+                    + "_0000000.fits"
+
+        else:   
+            # Extract the time from the FR file otherwise
+            dir_path, ff_name_ftp = os.path.split(self.fr_file)
 
 
         # Remove the file extension of the image file
@@ -1665,92 +1677,6 @@ if __name__ == "__main__":
                 fps=cml_args.fps, deinterlace_mode=deinterlace_mode)
 
 
-    # ##########################################################################################################
-
-    # # If a directory with PNGs is given
-    # if os.path.isdir(cml_args.file1[0]):
-
-    #     # Parse the directory with PNGs and check if there are any PNGs inside
-    #     png_dir = os.path.abspath(cml_args.file1[0])
-
-    #     if not os.path.exists(png_dir):
-    #         print('Directory does not exist:', png_dir)
-    #         sys.exit()
-
-    #     png_list = [fname for fname in os.listdir(png_dir) if fname.lower().endswith('.png')]
-
-    #     if len(png_list) == 0:
-    #         print('No PNG files in directory:', png_dir)
-    #         sys.exit()
-
-
-    #     # Check if the time was given and can be parsed
-    #     if not cml_args.input2:
-    #         print('The time of frame 0 must be given when doing a manual reduction on PNGs!')
-    #         sys.exit()
-
-        
-    #     # Parse the time
-    #     frame0_time = datetime.datetime.strptime(cml_args.input2[0], "%Y%m%d_%H%M%S.%f")
-    #     frame0_time = frame0_time.replace(tzinfo=pytz.UTC)
-
-    #     # Init the tool
-    #     manual_tool = ManualReductionTool(config, png_dir, frame0_time, first_frame=cml_args.begframe, \
-    #         fps=cml_args.fps, deinterlace_mode=deinterlace_mode, png_mode=True)
-
-
-
-
-    # # If an FF file was given
-    # else:
-
-    #     file1_name = os.path.split(cml_args.file1[0])[-1]
-
-    #     # Check if the first file is an FF file
-    #     if validFFName(file1_name):
-
-    #         # This is an FF file
-    #         ff_name = cml_args.file1[0]
-
-    #     # This is possibly a FR file then
-    #     else:
-
-    #         if file1_name.startswith('FR'):
-    #             fr_name = cml_args.file1[0]
-
-
-    #     if cml_args.input2 and (ff_name is None):
-    #         print('The given FF file is not a proper FF file!')
-    #         sys.exit()
-
-
-    #     # Check if the second file is a good FR file
-    #     if cml_args.input2:
-
-    #         file2_name = os.path.split(cml_args.input2[0])[-1]
-
-    #         if file2_name.startswith('FR'):
-
-    #             fr_name = cml_args.input2[0]
-
-    #         else:
-    #             print('The given FR file is not valid!')
-    #             sys.exit()
-
-
-
-    #     # Make sure there is at least one good file given
-    #     if (ff_name is None) and (fr_name is None):
-    #         print('No valid FF or FR files given!')
-    #         sys.exit()
-
-
-    #     # Init the tool
-    #     manual_tool = ManualReductionTool(config, ff_name, fr_name, first_frame=cml_args.begframe, \
-    #         fps=cml_args.fps, deinterlace_mode=deinterlace_mode, png_mode=False)
-
-
-    # ##########################################################################################################
 
     plt.tight_layout()
     plt.show()
