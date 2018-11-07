@@ -50,7 +50,8 @@ class Pick(object):
 
 
 class ManualReductionTool(object):
-    def __init__(self, config, img_handle, fr_file, first_frame=None, fps=None, deinterlace_mode=-1):
+    def __init__(self, config, img_handle, fr_file, first_frame=None, fps=None, deinterlace_mode=-1, \
+        station_name=None):
         """ Tool for manually picking meteor centroids and photometry. 
         
         Arguments:
@@ -65,6 +66,7 @@ class ManualReductionTool(object):
                 -1 - no deinterlace
                  0 - odd first
                  1 - even first
+            station_name: [str] Station name. None by default, then 'manual' will be used.
         """
 
 
@@ -85,6 +87,20 @@ class ManualReductionTool(object):
         self.img_handle = img_handle
         self.ff = None
         self.fr = None
+
+
+        self.station_name = station_name
+
+        # If the station name was not given and the FF file is used, read it from the FF file name
+        if self.img_handle is not None:
+            if (self.station_name is None) and (self.img_handle.input_type == 'ff'):
+                
+                # Extract the station name from the FF file
+                self.station_name = self.img_handle.current_ff_file.split("_")[1]
+
+        if self.station_name is None:
+            self.station_name = 'manual'
+
 
         # If the image handle was given, load the first chunk as the FF file
         if self.img_handle is not None:
@@ -612,10 +628,32 @@ class ManualReductionTool(object):
 
             else:
                 
-                text_str  = "Frame: {:.1f}\n".format(self.current_frame)
+                text_str  = "Station name: {:s}\n".format(self.station_name)
+                text_str += "Frame: {:.1f}\n".format(self.current_frame)
+
 
 
             text_str += "Gamma: {:.2f}\n".format(self.img_gamma)
+
+
+            # Add info about dark and flats
+            if self.dark is not None:
+
+                text_str += 'Dark'
+
+                if self.flat_struct is not None:
+                    text_str += " + Flat\n"
+
+                else:
+                    text_str += "\n"
+
+            else:
+
+                if self.flat_struct is not None:
+                    text_str += "Flat\n"
+
+
+
 
             # Get the current plot limit
             x_min, x_max = plt.gca().get_xlim()
@@ -1575,7 +1613,8 @@ class ManualReductionTool(object):
             else:
 
                 # Construct a fake FF file name
-                ff_name_ftp = "FF_manual_" + self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_") \
+                ff_name_ftp = "FF_{:s}_".format(self.station_name) \
+                 + self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_") \
                     + "{:03d}".format(int(round(self.img_handle.beginning_datetime.microsecond/1000))) \
                     + "_0000000.fits"
 
@@ -1661,7 +1700,8 @@ class ManualReductionTool(object):
             else:
 
                 # Construct a fake FF file name
-                ff_name_ftp = "FF_manual_" + self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_") \
+                ff_name_ftp = "FF_{:s}_".format(self.station_name) \
+                    + self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_") \
                     + "{:03d}".format(int(round(self.img_handle.beginning_datetime.microsecond/1000))) \
                     + "_0000000.fits"
 
@@ -1705,6 +1745,9 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-d', '--deinterlace', nargs='?', type=int, default=-1, help="Perform manual reduction on deinterlaced frames, even first by default. If odd first is desired, -d 1 should be used.")
 
+    arg_parser.add_argument('-n', '--name', nargs=1, metavar='STATION_NAME', type=str, \
+        help="Station name or code. If not given, it will just be 'manual', or it will be read from the FF file if used.")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1726,6 +1769,11 @@ if __name__ == "__main__":
     if cml_args.deinterlace is None:
         deinterlace_mode = 0
 
+
+    # Extract station name
+    station_name = None
+    if cml_args.name is not None:
+        station_name = cml_args.name[0]
 
 
     # Extract inputs
@@ -1756,7 +1804,7 @@ if __name__ == "__main__":
 
         # Init the tool with only the FR file
         manual_tool = ManualReductionTool(config, ff_name, file1, first_frame=cml_args.begframe, \
-            fps=cml_args.fps, deinterlace_mode=deinterlace_mode)
+            fps=cml_args.fps, deinterlace_mode=deinterlace_mode, station_name=station_name)
 
 
     else:
@@ -1792,7 +1840,7 @@ if __name__ == "__main__":
 
         # Init the tool
         manual_tool = ManualReductionTool(config, img_handle, fr_name, first_frame=cml_args.begframe, \
-                fps=cml_args.fps, deinterlace_mode=deinterlace_mode)
+                fps=cml_args.fps, deinterlace_mode=deinterlace_mode, station_name=station_name)
 
 
 
