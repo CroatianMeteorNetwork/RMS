@@ -26,12 +26,12 @@ import matplotlib.patches as mpatches
 from matplotlib.font_manager import FontProperties
 
 import RMS.ConfigReader as cr
-from RMS.Formats.FFfile import read as readFF
-from RMS.Formats.FFfile import validFFName, reconstructFrame
+from RMS.Astrometry.ApplyAstrometry import XY2CorrectedRADecPP, raDec2AltAz, applyAstrometryFTPdetectinfo
 from RMS.Formats.FRbin import read as readFR
 from RMS.Formats.FRbin import validFRName
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats.FrameInterface import detectInputType
+from RMS.Formats.Platepar import Platepar
 from RMS.Routines import Image
 
 
@@ -121,6 +121,8 @@ class ManualReductionTool(object):
         self.flat_struct = None
         self.dark = None
 
+        self.platepar = None
+
         # Image gamma and levels
         self.auto_levels = False
         self.bit_depth = self.config.bit_depth
@@ -183,6 +185,7 @@ class ManualReductionTool(object):
         ### INIT IMAGE ###
 
         plt.figure(facecolor='black')
+        plt.gcf().canvas.set_window_title('RMS Manual Reduction')
 
         # Init the first image
         self.updateImage(first_update=True)
@@ -207,6 +210,11 @@ class ManualReductionTool(object):
         self.ax.figure.canvas.mpl_connect('button_press_event', self.onMousePress)
         self.ax.figure.canvas.mpl_connect('button_release_event', self.onMouseRelease)
         self.ax.figure.canvas.mpl_connect('scroll_event', self.onScroll)
+
+
+        # Set the status update formatter
+        plt.gca().format_coord = self.mouseOverStatus
+
 
 
     def printStatus(self):
@@ -335,6 +343,57 @@ class ManualReductionTool(object):
         return flat_file, flat
 
 
+
+    def loadPlatepar(self):
+        """ Open a file dialog and ask user to open the platepar file. """
+
+        root = tkinter.Tk()
+        root.withdraw()
+        root.update()
+
+        platepar = Platepar()
+
+
+        # Check if platepar exists in the folder, and set it as the defualt file name if it does
+        if self.config.platepar_name in os.listdir(self.dir_path):
+            initialfile = self.config.platepar_name
+        else:
+            initialfile = ''
+
+        # Load the platepar file
+        platepar_file = filedialog.askopenfilename(initialdir=self.dir_path, \
+            initialfile=initialfile, title='Select the platepar file')
+
+        root.update()
+        root.quit()
+        # root.destroy()
+
+        if not platepar_file:
+            return False, platepar
+
+        print(platepar_file)
+
+        # Parse the platepar file
+        try:
+            self.platepar_fmt = platepar.read(platepar_file)
+        except:
+            platepar = False
+
+        # Check if the platepar was successfuly loaded
+        if not platepar:
+            messagebox.showerror(title='Platepar file error', \
+                message='The file you selected could not be loaded as a platepar file!')
+            
+            self.loadPlatepar()
+
+        
+
+        return platepar_file, platepar
+
+
+
+
+
     def updateImage(self, first_update=False):
         """ Updates the current plot. """
 
@@ -357,6 +416,9 @@ class ManualReductionTool(object):
 
         plt.clf()
         
+
+        # Set the status update formatter
+        plt.gca().format_coord = self.mouseOverStatus
 
         # If FF is given, reconstruct frames
         if self.img_handle is not None:
@@ -576,6 +638,7 @@ class ManualReductionTool(object):
             text_str += 'CTRL + A - Auto levels\n'
             text_str += 'CTRL + D - Load dark\n'
             text_str += 'CTRL + F - Load flat\n'
+            text_str += 'CTRL + P - Load platepar\n'
             text_str += 'CTRL + W - Save current frame\n'
             text_str += 'CTRL + S - Save FTPdetectinfo\n'
             text_str += '\n'
@@ -743,6 +806,13 @@ class ManualReductionTool(object):
             self.updateImage()
 
 
+        # Load the platepar
+        elif event.key == 'ctrl+p':
+            _, self.platepar = self.loadPlatepar()
+
+            self.updateImage()
+
+
         # Toggle auto levels
         elif event.key == 'ctrl+a':
             self.auto_levels = not self.auto_levels
@@ -788,6 +858,7 @@ class ManualReductionTool(object):
             # Read mouse position
             self.mouse_x = event.xdata
             self.mouse_y = event.ydata
+
 
             # Change the position of the star aperture circle
             self.drawCursorCircle()
@@ -909,6 +980,43 @@ class ManualReductionTool(object):
                 self.changePhotometry(self.current_frame, self.photometryColoring(), \
                     add_photometry=self.photometry_add)
                 self.drawPhotometryColoring(update_plot=True)
+
+
+
+    def mouseOverStatus(self, x, y):
+        """ Format the status message which will be printed in the status bar below the plot. 
+
+        Arguments:
+            x: [float] Plot X coordiante.
+            y: [float] Plot Y coordinate.
+
+        Return:
+            [str]: formatted output string to be written in the status bar
+        """
+
+
+        # Write image X, Y coordinates and image intensity
+        status_str = "x={:7.2f}  y={:7.2f}  Intens={:d}".format(x, y, self.current_image[int(y), int(x)])
+
+        # Add coordinate info if platepar is present
+        if (self.platepar is not None) and (self.img_handle is not None):
+
+            # Construct time data
+            time_data = [self.img_handle.currentFrameTime()]
+
+            # Compute RA, dec
+            jd, ra, dec, _ = XY2CorrectedRADecPP(time_data, [x], [y], [1], self.platepar)
+
+            # Compute alt, az
+            azim, alt = raDec2AltAz(jd[0], self.platepar.lon, self.platepar.lat, ra[0], dec[0])
+
+
+            status_str += ",  Azim={:6.2f}  Alt={:6.2f},  RA={:6.2f}  Dec={:+6.2f}".format(azim, alt, \
+                ra[0], dec[0])
+
+
+        return status_str
+
 
 
 
@@ -1525,6 +1633,16 @@ class ManualReductionTool(object):
         writeFTPdetectinfo(meteor_list, dir_path, ftpdetectinfo_name, '', station_id, self.fps)
 
         print('FTPdetecinfo written to:', os.path.join(dir_path, ftpdetectinfo_name))
+
+
+        # If the platepar is given, apply it to the reductions
+        if self.platepar is not None:
+
+            applyAstrometryFTPdetectinfo(self.dir_path, ftpdetectinfo_name, '', \
+                UT_corr=self.platepar.UT_corr, platepar=self.platepar)
+
+            print('Platepar applied to manual picks!')
+
 
 
 

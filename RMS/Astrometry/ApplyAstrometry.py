@@ -658,7 +658,7 @@ def raDecToCorrectedXYPP(RA_data, dec_data, jd, platepar):
 
 
 
-def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, UT_corr=0):
+def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, UT_corr=0, platepar=None):
     """ Use the given platepar to calculate the celestial coordinates of detected meteors from a FTPdetectinfo
         file and save the updates values.
 
@@ -669,6 +669,8 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
 
     Keyword arguments:
         UT_corr: [float] Difference of time from UTC in hours.
+        platepar: [Platepar obj] Loaded platepar. None by default. If given, the platepar file won't be read, 
+            but this platepar structure will be used instead.
 
     Return:
         None
@@ -681,9 +683,13 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
     if not os.path.isfile(os.path.join(dir_path, ftp_detectinfo_copy)):
         shutil.copy2(os.path.join(dir_path, ftp_detectinfo_file), os.path.join(dir_path, ftp_detectinfo_copy))
 
-    # Load the platepar
-    platepar = Platepar()
-    platepar.read(os.path.join(dir_path, platepar_file))
+    # Load platepar from file if not given
+    if platepar is None:
+
+        # Load the platepar
+        platepar = Platepar()
+        platepar.read(os.path.join(dir_path, platepar_file))
+
 
     # Load the FTPdetectinfo file
     meteor_data = readFTPdetectinfo(dir_path, ftp_detectinfo_file)

@@ -197,6 +197,19 @@ class InputTypeFF(object):
         return frame
 
 
+    def currentFrameTime(self, dt_obj=False):
+        """ Return the time of the frame. """
+
+        # Compute the datetime of the current frame
+        dt = self.beginning_datetime + datetime.timedelta(seconds=self.current_frame/self.fps)
+        
+        if dt_obj:
+            return dt
+
+        else:
+            return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
+
+
 
 
 class FFMimickInterface(object):
@@ -469,6 +482,21 @@ class InputTypeVideo(object):
         return frame
 
 
+    def currentFrameTime(self, dt_obj=False):
+        """ Return the time of the frame. """
+
+        # Compute the datetime of the current frame
+        dt = self.beginning_datetime + datetime.timedelta(seconds=self.current_frame/self.fps)
+        
+        if dt_obj:
+            return dt
+
+        else:
+            return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
+
+
+
+
 
 
 class InputTypeUWOVid(object):
@@ -688,7 +716,23 @@ class InputTypeUWOVid(object):
         # Load a frame
         frame = readVidFrame(self.vid, self.vid_file)
 
+        # Save the frame time
+        self.current_frame_time = unixTime2Date(self.vid.ts, self.vid.tu, dt_obj=True) 
+
         return frame
+
+
+
+    def currentFrameTime(self, dt_obj=False):
+        """ Return the time of the frame. """
+        
+        dt = self.current_frame_time
+
+        if dt_obj:
+            return dt
+
+        else:
+            return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
 
 
 
@@ -963,6 +1007,20 @@ class InputTypeImages(object):
         # Compute the absolute time
         dt = self.beginning_datetime + datetime.timedelta(seconds=seconds_since_beginning)
 
+        if dt_obj:
+            return dt
+
+        else:
+            return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
+
+
+
+    def currentFrameTime(self, dt_obj=False):
+        """ Return the time of the frame. """
+
+        # Compute the datetime of the current frame
+        dt = self.beginning_datetime + datetime.timedelta(seconds=self.current_frame/self.fps)
+        
         if dt_obj:
             return dt
 
