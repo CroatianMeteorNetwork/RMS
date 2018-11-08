@@ -167,6 +167,9 @@ class ManualReductionTool(object):
         self.aperture_radius = 5
         self.scroll_counter = 0
 
+        self.mouse_x = None
+        self.mouse_y = None
+
         self.centroid_handle = None
 
         self.photometry_coloring_mode = False
@@ -431,7 +434,6 @@ class ManualReductionTool(object):
 
 
         plt.clf()
-        
 
         # Set the status update formatter
         plt.gca().format_coord = self.mouseOverStatus
@@ -630,6 +632,10 @@ class ManualReductionTool(object):
                 
                 text_str  = "Station name: {:s}\n".format(self.station_name)
                 text_str += "Frame: {:.1f}\n".format(self.current_frame)
+
+                # Print frame time
+                if self.img_handle is not None:
+                    text_str += "Time: {:s}\n".format(self.img_handle.currentFrameTime(dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f")[:-3])
 
 
 
