@@ -51,7 +51,7 @@ if __name__ == '__main__':
             print('Stacking: ', ff_name)
 
             # Load the image
-            img = scipy.misc.imread(os.path.join(dir_path, ff_name))
+            img = scipy.misc.imread(os.path.join(dir_path, ff_name), -1)
 
 
             # Deinterlace the image

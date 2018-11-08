@@ -1742,7 +1742,7 @@ class PlateTool(object):
         try:
 
             # Load the dark
-            dark = scipy.misc.imread(dark_file).astype(self.img_data_raw.dtype)
+            dark = scipy.misc.imread(dark_file, -1).astype(self.img_data_raw.dtype)
 
             # Byteswap the flat if vid file is used
             if self.img_handle.input_type == 'vid':

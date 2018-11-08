@@ -757,6 +757,55 @@ class InputTypeImages(object):
         self.require_calstars = False
 
 
+        ### Find images in the given folder ###
+        img_types = ['.png', '.jpg', '.bmp']
+
+        self.img_list = []
+
+        for file_name in sorted(os.listdir(self.dir_path)):
+
+            # Check if the file ends with support file extensions
+            for fextens in img_types:
+
+                if file_name.lower().endswith(fextens):
+
+                    self.img_list.append(file_name)
+                    break
+
+
+        if len(self.img_list) == 0:
+            messagebox.showerror('Input error', "Can't find any images in the given directory! Only PNG, JPG and BMP are supported!")
+            sys.exit()
+
+        ### ###
+
+
+
+        ### Try to detect if the given images are UWO-style PNGs ###
+        
+        self.uwo_png_mode = False
+
+        # Load the first image
+        img = self.loadFrame(fr_no=0)
+
+        # Check the magick number
+        if (img[0][0] == 22121) and (img[0][1] == 17410):
+            
+            self.uwo_png_mode = True
+
+            # Get the beginning time
+            self.loadFrame(fr_no=0)
+            beginning_time = self.uwo_png_frame_time
+            
+            print('UWO PNG mode')
+
+        ###
+
+
+        self.uwo_png_frame_time = None
+        self.uwo_png_dt_list = None
+
+
         # Check if the beginning time was given
         if beginning_time is None:
             
@@ -787,28 +836,6 @@ class InputTypeImages(object):
             print('Using FPS:', self.fps)
 
 
-
-        ### Find images in the given folder ###
-        img_types = ['.png', '.jpg', '.bmp']
-
-        self.img_list = []
-
-        for file_name in sorted(os.listdir(self.dir_path)):
-
-            # Check if the file ends with support file extensions
-            for fextens in img_types:
-
-                if file_name.lower().endswith(fextens):
-
-                    self.img_list.append(file_name)
-                    break
-
-
-        if len(self.img_list) == 0:
-            messagebox.showerror('Input error', "Can't find any images in the given directory! Only PNG, JPG and BMP are supported!")
-            sys.exit()
-
-        ### ###
 
 
         print('Using folder:', self.dir_path)
@@ -903,8 +930,12 @@ class InputTypeImages(object):
         frames_to_read = computeFramesToRead(read_nframes, self.total_frames, self.fr_chunk_no, \
             self.current_frame_chunk)
 
-        maxpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.uint8)
+
+        maxpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=self.img_dtype)
         avepixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.float64)
+
+
+        self.uwo_png_dt_list = []
 
         # Load the chunk of frames
         for i in range(frames_to_read):
@@ -926,7 +957,12 @@ class InputTypeImages(object):
             avepixel += frame.astype(np.float64)/frames_to_read
 
 
-        avepixel = avepixel.astype(np.uint8)
+            # Add the datetime of the frame to list of the UWO png is used
+            if self.uwo_png_mode:
+                self.uwo_png_dt_list.append(self.currentFrameTime(dt_obj=True))
+
+
+        avepixel = avepixel.astype(self.img_dtype)
 
 
         self.current_fr_chunk_size = i
@@ -981,10 +1017,25 @@ class InputTypeImages(object):
 
 
         # Get the current image
-        img = cv2.imread(os.path.join(self.dir_path, current_img_file))
+        img = cv2.imread(os.path.join(self.dir_path, current_img_file), -1)
 
-        # Convert the image to black and white
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # Convert the image to black and white if it's 8 bit
+        if 8*img.itemsize == 8:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+
+        
+        if self.uwo_png_mode:
+
+            # Byteswap if it's the UWO style png
+            img = img.byteswap()
+
+            # Read the time from the image
+            ts = img[0][6] + (img[0][7] << 16)
+            tu = img[0][8] + (img[0][9] << 16)
+
+            self.uwo_png_frame_time = unixTime2Date(ts, tu, dt_obj=True)
+
 
         return img
 
@@ -1000,12 +1051,28 @@ class InputTypeImages(object):
     def currentTime(self, dt_obj=False):
         """ Return the mean time of the current image. """
 
-        # Compute number of seconds since the beginning of the video file to the mean time of the frame chunk
-        seconds_since_beginning = (self.current_frame_chunk*self.fr_chunk_no \
-            + self.current_fr_chunk_size/2)/self.fps
 
-        # Compute the absolute time
-        dt = self.beginning_datetime + datetime.timedelta(seconds=seconds_since_beginning)
+        if self.uwo_png_mode:
+
+            # Convert datetimes to Unix times
+            unix_times = [(dt - datetime.datetime(1970, 1, 1)).total_seconds() for dt in self.uwo_png_dt_list]
+
+            # Compute the mean of unix times
+            unix_mean = np.mean(unix_times)
+
+            ts = int(unix_mean)
+            tu = (unix_mean - ts)*1000000
+
+            dt = unixTime2Date(ts, tu, dt_obj=True)
+
+        else:
+
+            # Compute number of seconds since the beginning of the video file to the mean time of the frame chunk
+            seconds_since_beginning = (self.current_frame_chunk*self.fr_chunk_no \
+                + self.current_fr_chunk_size/2)/self.fps
+
+            # Compute the absolute time
+            dt = self.beginning_datetime + datetime.timedelta(seconds=seconds_since_beginning)
 
         if dt_obj:
             return dt
@@ -1018,9 +1085,18 @@ class InputTypeImages(object):
     def currentFrameTime(self, dt_obj=False):
         """ Return the time of the frame. """
 
-        # Compute the datetime of the current frame
-        dt = self.beginning_datetime + datetime.timedelta(seconds=self.current_frame/self.fps)
-        
+        # If the UWO png is used, return the time read from the PNG
+        if self.uwo_png_mode:
+            
+            dt = self.uwo_png_frame_time
+
+        else:
+
+            # Compute the datetime of the current frame
+            dt = self.beginning_datetime + datetime.timedelta(seconds=self.current_frame/self.fps)
+            
+
+
         if dt_obj:
             return dt
 

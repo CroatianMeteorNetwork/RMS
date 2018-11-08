@@ -285,7 +285,7 @@ class ManualReductionTool(object):
         try:
 
             # Load the dark
-            dark = scipy.misc.imread(dark_file).astype(self.current_image.dtype)
+            dark = scipy.misc.imread(dark_file, -1).astype(self.current_image.dtype)
 
             # Byteswap the flat if vid file is used
             if self.img_handle.input_type == 'vid':

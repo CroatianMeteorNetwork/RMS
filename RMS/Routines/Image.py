@@ -178,7 +178,7 @@ def loadFlat(dir_path, file_name, byteswap=False):
     """
 
     # Load the flat image
-    flat_img = scipy.misc.imread(os.path.join(dir_path, file_name))
+    flat_img = scipy.misc.imread(os.path.join(dir_path, file_name), -1)
 
     if byteswap:
         flat_img = flat_img.byteswap()
@@ -303,13 +303,17 @@ def deinterlaceEven(img):
 def blendLighten(arr1, arr2):
     """ Blends two image array with lighen method (only takes the lighter pixel on each spot).
     """
-    arr1 = arr1.astype(np.int16)
+
+    # Store input type
+    input_type = arr1.dtype
+
+    arr1 = arr1.astype(np.int64)
 
     temp = arr1 - arr2
     temp[temp > 0] = 0
 
     new_arr = arr1 - temp
-    new_arr = new_arr.astype(np.uint8)
+    new_arr = new_arr.astype(input_type)
 
     return  new_arr
 
