@@ -402,8 +402,11 @@ class InputTypeVideo(object):
             maxpixel = np.max([maxpixel, frame], axis=0)
 
             # Compute the running average
-            avepixel += frame.astype(np.float64)/frames_to_read
+            avepixel += frame.astype(np.float64)/(frames_to_read - 1)
 
+
+        # Remove the contribution of the maxpixel to the avepixel
+        avepixel -= maxpixel.astype(np.float64)/(frames_to_read - 1)
 
         avepixel = avepixel.astype(np.uint8)
 
@@ -649,10 +652,13 @@ class InputTypeUWOVid(object):
             maxpixel = np.max([maxpixel, frame], axis=0)
 
             # Compute the running average
-            avepixel += frame.astype(np.float64)/frames_to_read
+            avepixel += frame.astype(np.float64)/(frames_to_read - 1)
 
 
         self.current_fr_chunk_size = i + 1
+
+        # Remove the contribution of the maxpixel to the avepixel
+        avepixel -= maxpixel.astype(np.float64)/(frames_to_read - 1)
 
         avepixel = avepixel.astype(np.uint16)
 
@@ -954,13 +960,16 @@ class InputTypeImages(object):
             maxpixel = np.max([maxpixel, frame], axis=0)
 
             # Compute the running average
-            avepixel += frame.astype(np.float64)/frames_to_read
+            avepixel += frame.astype(np.float64)/(frames_to_read - 1)
 
 
             # Add the datetime of the frame to list of the UWO png is used
             if self.uwo_png_mode:
                 self.uwo_png_dt_list.append(self.currentFrameTime(dt_obj=True))
 
+
+        # Remove the contribution of the maxpixel to the avepixel
+        avepixel -= maxpixel.astype(np.float64)/(frames_to_read - 1)
 
         avepixel = avepixel.astype(self.img_dtype)
 
