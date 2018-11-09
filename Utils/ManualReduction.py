@@ -221,6 +221,7 @@ class ManualReductionTool(object):
         plt.rcParams['keymap.fullscreen'] = ''
         plt.rcParams['keymap.all_axes'] = ''
         plt.rcParams['keymap.quit'] = ''
+        plt.rcParams['keymap.pan'] = ''
 
 
         # Register event handlers
@@ -288,8 +289,16 @@ class ManualReductionTool(object):
             # Load the dark
             dark = scipy.misc.imread(dark_file, -1).astype(self.current_image.dtype)
 
-            # Byteswap the flat if vid file is used
+            # Byteswap the flat if vid file is used or UWO png
             if self.img_handle.input_type == 'vid':
+                byteswap = True
+
+            if self.img_handle.input_type == 'images':
+                if self.img_handle.uwo_png_mode:
+                    byteswap = True
+
+            # Byteswap the flat if vid file is used
+            if byteswap:
                 dark = dark.byteswap()
 
         except:
@@ -339,9 +348,20 @@ class ManualReductionTool(object):
 
         print(flat_file)
 
+
+        # Byteswap the flat if vid file is used or UWO png
+        if self.img_handle.input_type == 'vid':
+            byteswap = True
+
+        if self.img_handle.input_type == 'images':
+            if self.img_handle.uwo_png_mode:
+                byteswap = True
+
+
         try:
             # Load the flat. Byteswap the flat if vid file is used
-            flat = Image.loadFlat(*os.path.split(flat_file), byteswap=(self.img_handle.input_type == 'vid'))
+            flat = Image.loadFlat(*os.path.split(flat_file), byteswap=byteswap)
+            
         except:
             return False, None
 
@@ -636,15 +656,16 @@ class ManualReductionTool(object):
             else:
                 
                 text_str  = "Station name: {:s}\n".format(self.station_name)
-                text_str += "Frame: {:.1f}\n".format(self.current_frame)
+                text_str += "Frame = {:.1f}\n".format(self.current_frame)
 
                 # Print frame time
                 if self.img_handle is not None:
-                    text_str += "Time: {:s}\n".format(self.img_handle.currentFrameTime(dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f")[:-3])
+                    text_str += "Time  = {:s}\n".format(self.img_handle.currentFrameTime(dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f")[:-3])
 
 
 
-            text_str += "Gamma: {:.2f}\n".format(self.img_gamma)
+            text_str += "Image gamma  = {:.2f}\n".format(self.img_gamma)
+            text_str += "Camera gamma = {:.2f}\n".format(self.config.gamma)
 
 
             # Add info about applied image corrections
@@ -692,6 +713,7 @@ class ManualReductionTool(object):
             text_str += 'M - Show maxpixel\n'
             text_str += 'K - Subtract average\n'
             text_str += 'U/J - Img Gamma\n'
+            text_str += 'P - Show lightcurve\n'
             text_str += 'CTRL + A - Auto levels\n'
             text_str += 'CTRL + D - Load dark\n'
             text_str += 'CTRL + F - Load flat\n'
@@ -719,6 +741,98 @@ class ManualReductionTool(object):
 
             plt.gca().text(self.current_image.shape[1]/2, self.current_image.shape[0], text_str, color='w', 
                 verticalalignment='top', horizontalalignment='center', fontproperties=font, alpha=0.5)
+
+
+
+    def showLightcurve(self):
+        """ Show the meteor lightcurve. """
+
+        # Compute the intensity sum done on the previous frame
+        self.computeIntensitySum()
+
+
+        # Create the list of picks for saving
+        centroids = []
+        for pick in self.pick_list:
+            centroids.append([pick.frame, pick.x_centroid, pick.y_centroid, pick.intensity_sum])
+
+
+        # If there are less than 3 points, don't show the lightcurve
+        if len(centroids) < 3:
+            messagebox.showinfo('Lightcurve info', 'Less than 3 centroids!')
+            return 1
+
+        # Sort by frame number
+        centroids = sorted(centroids, key=lambda x: x[0])
+
+        # Extract frames and intensities
+        fr_intens = [line for line in centroids if line[3] > 0]
+
+
+        # If there are less than 3 points, don't show the lightcurve
+        if len(fr_intens) < 3:
+            messagebox.showinfo('Lightcurve info', 'Less than 3 points have intensities!')
+            return 1
+
+
+        # Extract frames and intensities
+        frames, x_centroids, y_centroids, intensities = np.array(fr_intens).T
+
+
+        # Init plot
+        fig_p = plt.figure(facecolor=None)
+        ax_p = fig_p.add_subplot(1, 1, 1)
+
+
+        # If the platepar is available, compute the magnitudes, otherwise show the instrumental magnitude
+        if self.platepar is not None:
+            
+            # Get mean time
+            time_data = [self.img_handle.currentTime()]*len(intensities)
+
+            # Compute the magntiudes
+            _, _, _, mag_data = XY2CorrectedRADecPP(time_data, x_centroids, y_centroids, intensities, self.platepar)
+
+
+            # Plot the magnitudes
+            ax_p.errorbar(frames, mag_data, yerr=self.platepar.mag_lev_stddev, capsize=5, color='k')
+
+
+            if 'BSC' in self.config.star_catalog_file:
+                mag_str = "V"
+
+            elif 'gaia' in self.config.star_catalog_file.lower():
+                mag_str = 'GAIA G band'
+
+            else:
+                mag_str = "{:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*self.config.star_catalog_band_ratios)
+
+
+            ax_p.set_ylabel("Apparent magnitude ({:s})".format(mag_str))
+
+        else:
+
+
+            # Compute the instrumental magnitude
+            inst_mag = -2.5*np.log10(intensities)
+
+            
+
+            # Plot the magnitudes
+            ax_p.plot(frames, inst_mag)
+
+            ax_p.set_ylabel("Instrumental magnitude")
+        
+
+    
+        ax_p.set_xlabel("Frame")
+
+        ax_p.invert_yaxis()
+        #ax_p.invert_xaxis()
+
+        ax_p.grid()
+
+        fig_p.show()
 
 
 
@@ -843,6 +957,13 @@ class ManualReductionTool(object):
             plt.ylim(self.current_image.shape[0], 0)
 
             self.updateImage()
+
+
+
+        # Show the lightcurve
+        elif event.key == 'p':
+
+            self.showLightcurve()
 
 
         elif event.key == 'ctrl+w':
@@ -1760,20 +1881,26 @@ if __name__ == "__main__":
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Tool for manually picking positions of meteors on video frames and performing manual photometry.")
 
-    arg_parser.add_argument('file1', metavar='FILE1', type=str, nargs=1,
+    arg_parser.add_argument('file1', metavar='FILE1', type=str, nargs=1, \
                     help='Path to an FF file, or an FR file if an FF file is not available. Or, a path to a directory with PNG files can be given.')
 
-    arg_parser.add_argument('input2', metavar='INPUT2', type=str, nargs='*',
+    arg_parser.add_argument('input2', metavar='INPUT2', type=str, nargs='*', \
                     help='If an FF file was given, an FR file can be given in addition. If PNGs are used, this second argument must be the UTC time of frame 0 in the following format: YYYYMMDD_HHMMSS.uuu')
 
-    arg_parser.add_argument('-b', '--begframe', metavar='FIRST FRAME', type=int, help="First frame to show. Has to be between 0-255.")
+    arg_parser.add_argument('-b', '--begframe', metavar='FIRST_FRAME', type=int, \
+        help="First frame to show.")
 
-    arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float, help="Frames per second of the video. If not given, it will be read from a) the FF file if available, b) from the config file.")
+    arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float, \
+        help="Frames per second of the video. If not given, it will be read from a) the FF file if available, b) from the config file.")
 
-    arg_parser.add_argument('-d', '--deinterlace', nargs='?', type=int, default=-1, help="Perform manual reduction on deinterlaced frames, even first by default. If odd first is desired, -d 1 should be used.")
+    arg_parser.add_argument('-d', '--deinterlace', nargs='?', type=int, default=-1, \
+        help="Perform manual reduction on deinterlaced frames, even first by default. If odd first is desired, -d 1 should be used.")
 
     arg_parser.add_argument('-n', '--name', nargs=1, metavar='STATION_NAME', type=str, \
         help="Station name or code. If not given, it will just be 'manual', or it will be read from the FF file if used.")
+
+    arg_parser.add_argument('-g', '--gamma', metavar='CAMERA_GAMMA', type=float, \
+        help="Camera gamma value. Science grade cameras have 1.0, consumer grade cameras have 0.45. Adjusting this is essential for good photometry, and doing star photometry through SkyFit can reveal the real camera gamma.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -1795,6 +1922,12 @@ if __name__ == "__main__":
     deinterlace_mode = cml_args.deinterlace
     if cml_args.deinterlace is None:
         deinterlace_mode = 0
+
+
+
+    # If camera gamma was given, change the value in config
+    if cml_args.gamma is not None:
+        config.gamma = cml_args.gamma
 
 
     # Extract station name

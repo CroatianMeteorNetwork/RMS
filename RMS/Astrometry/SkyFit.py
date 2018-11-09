@@ -286,6 +286,7 @@ class PlateTool(object):
         plt.rcParams['keymap.fullscreen'] = ''
         plt.rcParams['keymap.all_axes'] = ''
         plt.rcParams['keymap.quit'] = ''
+        plt.rcParams['keymap.pan'] = ''
 
 
         
@@ -1330,6 +1331,7 @@ class PlateTool(object):
             text_str += 'Lim mag  = {:.1f}\n'.format(self.cat_lim_mag)
             text_str += 'Increment = {:.2f}\n'.format(self.key_increment)
             text_str += 'Img Gamma = {:.2f}\n'.format(self.img_gamma)
+            text_str += 'Camera Gamma = {:.2f}\n'.format(self.config.gamma)
             text_str += '\n'
             text_str += 'RA centre  = {:2d}h {:2d}m {:5.2f}s\n'.format(*decimalDegreesToSexHours(ra_centre))
             text_str += 'Dec centre = {:.3f}$\\degree$\n'.format(dec_centre)
@@ -1696,9 +1698,17 @@ class PlateTool(object):
 
         print(flat_file)
 
+        # Byteswap the flat if vid file is used or UWO png
+        if self.img_handle.input_type == 'vid':
+            byteswap = True
+
+        if self.img_handle.input_type == 'images':
+            if self.img_handle.uwo_png_mode:
+                byteswap = True
+
         try:
-            # Load the flat. Byteswap the flat if vid file is used
-            flat = Image.loadFlat(*os.path.split(flat_file), byteswap=(self.img_handle.input_type == 'vid'))
+            # Load the flat
+            flat = Image.loadFlat(*os.path.split(flat_file), byteswap=byteswap)
         except:
             return False, None
 
@@ -1744,8 +1754,18 @@ class PlateTool(object):
             # Load the dark
             dark = scipy.misc.imread(dark_file, -1).astype(self.img_data_raw.dtype)
 
-            # Byteswap the flat if vid file is used
+
+            # Byteswap the flat if vid file is used or UWO png
             if self.img_handle.input_type == 'vid':
+                byteswap = True
+
+            if self.img_handle.input_type == 'images':
+                if self.img_handle.uwo_png_mode:
+                    byteswap = True
+
+
+            # Byteswap the flat if vid file is used
+            if byteswap:
                 dark = dark.byteswap()
 
         except:
@@ -1863,7 +1883,7 @@ class PlateTool(object):
         # Crop the image
         img_crop = self.img_data_raw[y_min:y_max, x_min:x_max]
 
-        # perform gamma correction
+        # Perform gamma correction
         img_crop = Image.gammaCorrection(img_crop, self.config.gamma)
 
 
@@ -2187,6 +2207,9 @@ if __name__ == '__main__':
     arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float, \
         help="Frames per second when images are used. If not given, it will be read from the config file.")
 
+    arg_parser.add_argument('-g', '--gamma', metavar='CAMERA_GAMMA', type=float, \
+        help="Camera gamma value. Science grade cameras have 1.0, consumer grade cameras have 0.45. Adjusting this is essential for good photometry, and doing star photometry through SkyFit can reveal the real camera gamma.")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -2204,6 +2227,11 @@ if __name__ == '__main__':
     else:
         # Load the default configuration file
         config = cr.parse(".config")
+
+
+    # If camera gamma was given, change the value in config
+    if cml_args.gamma is not None:
+        config.gamma = cml_args.gamma
 
 
     # Parse the beginning time into a datetime object

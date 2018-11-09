@@ -775,6 +775,11 @@ class InputTypeImages(object):
 
                 if file_name.lower().endswith(fextens):
 
+                    # Don't take flats, biases, darks, etc.
+                    if ('flat' in file_name.lower()) or ('dark' in file_name.lower()) \
+                        or ('bias' in file_name.lower()):
+                            continue
+
                     self.img_list.append(file_name)
                     break
 
@@ -829,21 +834,6 @@ class InputTypeImages(object):
 
 
 
-
-        # If FPS is not given, use one from the config file
-        if fps is None:
-
-            self.fps = self.config.fps
-            print('Using FPS from config file: ', self.fps)
-
-        else:
-
-            self.fps = fps
-            print('Using FPS:', self.fps)
-
-
-
-
         print('Using folder:', self.dir_path)
 
 
@@ -882,6 +872,27 @@ class InputTypeImages(object):
 
         # Do the initial load
         self.loadChunk()
+
+
+        # Estimate the FPS if UWO pngs are given
+        if self.uwo_png_mode:
+
+            # Convert datetimes to Unix times
+            unix_times = [(dt - datetime.datetime(1970, 1, 1)).total_seconds() for dt in self.uwo_png_dt_list]
+
+            fps = 1/((unix_times[-1] - unix_times[0])/self.current_fr_chunk_size)
+
+
+        # If FPS is not given, use one from the config file
+        if fps is None:
+
+            self.fps = self.config.fps
+            print('Using FPS from config file: ', self.fps)
+
+        else:
+
+            self.fps = fps
+            print('Using FPS:', self.fps)
 
 
 

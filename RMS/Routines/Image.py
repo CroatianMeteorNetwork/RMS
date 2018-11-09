@@ -191,7 +191,7 @@ def loadFlat(dir_path, file_name, byteswap=False):
     flat_avg = np.median(flat_img)
 
     # Make sure there are no values close to 0, as images are divided by flats
-    flat_img[flat_img < flat_avg/2] = flat_avg
+    flat_img[(flat_img < flat_avg/10) | (flat_img < 10)] = flat_avg
 
     # Init a new Flat structure
     flat_struct = FlatStruct(flat_img, flat_avg)
