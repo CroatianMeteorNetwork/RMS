@@ -148,6 +148,7 @@ class ManualReductionTool(object):
 
 
         self.show_maxpixel = False
+        self.subtract_avepixel = False
 
         self.show_key_help = True
 
@@ -547,19 +548,23 @@ class ManualReductionTool(object):
 
 
 
-
-
         # Apply dark and flat (cannot be applied if there is no FF file)
         if self.ff is not None:
 
+            # Subtract average to remove background stars (don't ally dark or flat then)
+            if self.subtract_avepixel:
 
-            # Apply dark
-            if self.dark is not None:
-                img = Image.applyDark(img, self.dark)
+                img = Image.applyDark(img, self.ff.avepixel)
 
-            # Apply flat
-            if self.flat_struct is not None:
-                img = Image.applyFlat(img, self.flat_struct)
+            else:
+
+                # Apply dark
+                if self.dark is not None:
+                    img = Image.applyDark(img, self.dark)
+
+                # Apply flat
+                if self.flat_struct is not None:
+                    img = Image.applyFlat(img, self.flat_struct)
 
 
         # Current image without adjustments
@@ -642,21 +647,28 @@ class ManualReductionTool(object):
             text_str += "Gamma: {:.2f}\n".format(self.img_gamma)
 
 
-            # Add info about dark and flats
-            if self.dark is not None:
+            # Add info about applied image corrections
+            if self.subtract_avepixel:
 
-                text_str += 'Dark'
-
-                if self.flat_struct is not None:
-                    text_str += " + Flat\n"
-
-                else:
-                    text_str += "\n"
+                text_str += 'Subtracted average'
 
             else:
 
-                if self.flat_struct is not None:
-                    text_str += "Flat\n"
+                # Add info about dark and flats
+                if self.dark is not None:
+
+                    text_str += 'Dark'
+
+                    if self.flat_struct is not None:
+                        text_str += " + Flat\n"
+
+                    else:
+                        text_str += "\n"
+
+                else:
+
+                    if self.flat_struct is not None:
+                        text_str += "Flat\n"
 
 
 
@@ -678,6 +690,7 @@ class ManualReductionTool(object):
             text_str += '+/- - Zoom in/out\n'
             text_str += 'R - Reset view\n'
             text_str += 'M - Show maxpixel\n'
+            text_str += 'K - Subtract average\n'
             text_str += 'U/J - Img Gamma\n'
             text_str += 'CTRL + A - Auto levels\n'
             text_str += 'CTRL + D - Load dark\n'
@@ -811,6 +824,14 @@ class ManualReductionTool(object):
         elif event.key == 'm':
 
             self.show_maxpixel = not self.show_maxpixel
+
+            self.updateImage()
+
+
+        # Subtract average pixel image to remove background stars
+        elif event.key == 'k':
+
+            self.subtract_avepixel = not self.subtract_avepixel
 
             self.updateImage()
 
