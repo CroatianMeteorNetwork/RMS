@@ -1698,17 +1698,9 @@ class PlateTool(object):
 
         print(flat_file)
 
-        # Byteswap the flat if vid file is used or UWO png
-        if self.img_handle.input_type == 'vid':
-            byteswap = True
-
-        if self.img_handle.input_type == 'images':
-            if self.img_handle.uwo_png_mode:
-                byteswap = True
-
         try:
-            # Load the flat
-            flat = Image.loadFlat(*os.path.split(flat_file), byteswap=byteswap)
+            # Load the flat, byteswap the flat if vid file is used or UWO png
+            flat = Image.loadFlat(*os.path.split(flat_file), byteswap=self.img_handle.byteswap)
         except:
             return False, None
 
@@ -1755,17 +1747,8 @@ class PlateTool(object):
             dark = scipy.misc.imread(dark_file, -1).astype(self.img_data_raw.dtype)
 
 
-            # Byteswap the flat if vid file is used or UWO png
-            if self.img_handle.input_type == 'vid':
-                byteswap = True
-
-            if self.img_handle.input_type == 'images':
-                if self.img_handle.uwo_png_mode:
-                    byteswap = True
-
-
             # Byteswap the flat if vid file is used
-            if byteswap:
+            if self.img_handle.byteswap:
                 dark = dark.byteswap()
 
         except:

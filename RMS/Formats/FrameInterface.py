@@ -52,6 +52,9 @@ class InputTypeFF(object):
         # This type of input should have the calstars file
         self.require_calstars = True
 
+        # Don't byteswap the images
+        self.byteswap = False
+
         if single_ff:
             print('Using FF file:', self.dir_path)
         else:
@@ -188,6 +191,16 @@ class InputTypeFF(object):
         self.current_frame = (self.current_frame - 1)%self.ff.nframes
 
 
+    def setFrame(self, fr_num):
+        """ Set the current frame. 
+    
+        Arguments:
+            fr_num: [float] Frame number to set.
+        """
+
+        self.current_frame = fr_num%self.ff.nframes
+
+
     def loadFrame(self, avepixel=False):
         """ Load the current frame. """
 
@@ -273,6 +286,9 @@ class InputTypeVideo(object):
 
         # This type of input probably won't have any calstars files
         self.require_calstars = False
+
+        # Don't byteswap the images
+        self.byteswap = False
 
         # Remove the file extension
         file_name_noext = ".".join(self.file_name.split('.')[:-1])
@@ -469,6 +485,16 @@ class InputTypeVideo(object):
         self.current_frame = (self.current_frame - 1)%self.total_frames
 
 
+    def setFrame(self, fr_num):
+        """ Set the current frame. 
+    
+        Arguments:
+            fr_num: [float] Frame number to set.
+        """
+
+        self.current_frame = fr_num%self.total_frames
+
+
     def loadFrame(self, avepixel=False):
         """ Load the current frame. """
 
@@ -524,6 +550,9 @@ class InputTypeUWOVid(object):
 
         # This type of input probably won't have any calstars files
         self.require_calstars = False
+
+        # Byteswap the images
+        self.byteswap = True
 
 
         print('Using vid file:', self.vid_path)
@@ -713,6 +742,16 @@ class InputTypeUWOVid(object):
         self.current_frame = (self.current_frame - 1)%self.total_frames
 
 
+    def setFrame(self, fr_num):
+        """ Set the current frame. 
+    
+        Arguments:
+            fr_num: [float] Frame number to set.
+        """
+
+        self.current_frame = fr_num%self.total_frames
+
+
     def loadFrame(self, avepixel=False):
         """ Load the current frame. """
 
@@ -811,6 +850,13 @@ class InputTypeImages(object):
             print('UWO PNG mode')
 
         ###
+
+        # Decide if images need to be byteswapped
+        if self.uwo_png_mode:
+            self.byteswap = True
+
+        else:
+            self.byteswap = False
 
 
         self.uwo_png_frame_time = None
@@ -1016,6 +1062,17 @@ class InputTypeImages(object):
         """ Increment current frame. """
 
         self.current_frame = (self.current_frame - 1)%self.total_frames
+        self.current_img_file = self.img_list[self.current_frame]
+
+
+    def setFrame(self, fr_num):
+        """ Set the current frame. 
+    
+        Arguments:
+            fr_num: [float] Frame number to set.
+        """
+
+        self.current_frame = fr_num%self.total_frames
         self.current_img_file = self.img_list[self.current_frame]
 
 

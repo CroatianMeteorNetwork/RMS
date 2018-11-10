@@ -289,17 +289,10 @@ class ManualReductionTool(object):
             # Load the dark
             dark = scipy.misc.imread(dark_file, -1).astype(self.current_image.dtype)
 
-            # Byteswap the flat if vid file is used or UWO png
-            if self.img_handle.input_type == 'vid':
-                byteswap = True
-
-            if self.img_handle.input_type == 'images':
-                if self.img_handle.uwo_png_mode:
-                    byteswap = True
-
             # Byteswap the flat if vid file is used
-            if byteswap:
-                dark = dark.byteswap()
+            if self.img_handle is not None:
+                if self.img_handle.byteswap:
+                    dark = dark.byteswap()
 
         except:
             return False, None
@@ -342,6 +335,7 @@ class ManualReductionTool(object):
 
         root.update()
         root.quit()
+        
 
         if not flat_file:
             return False, None
@@ -350,11 +344,9 @@ class ManualReductionTool(object):
 
 
         # Byteswap the flat if vid file is used or UWO png
-        if self.img_handle.input_type == 'vid':
-            byteswap = True
-
-        if self.img_handle.input_type == 'images':
-            if self.img_handle.uwo_png_mode:
+        byteswap = False
+        if self.img_handle is not None:
+            if self.img_handle.byteswap:
                 byteswap = True
 
 
@@ -432,32 +424,14 @@ class ManualReductionTool(object):
 
 
 
-
-
-    def updateImage(self, first_update=False):
-        """ Updates the current plot. """
-
-        # Reset circle patches
-        self.circle_aperature = None
-        self.circle_aperature_outer = None
-
-        # Reset centroid patch
-        self.centroid_handle = None
-
-        # Reset photometry coloring
-        self.photometry_coloring_handle = None
-
-        # Save the previous zoom
-        if self.current_image is not None:
-            
-            self.prev_xlim = plt.gca().get_xlim()
-            self.prev_ylim = plt.gca().get_ylim()
-
-
-        plt.clf()
-
-        # Set the status update formatter
-        plt.gca().format_coord = self.mouseOverStatus
+    def loadImage(self):
+        """ Load the current frame and apply calibration. 
+    
+        Return:
+            img, process_img:
+                - img [2D ndarray] Image for viewing.
+                - process_img [2D ndarray] Image on which processing will be done.
+        """
 
         # If FF is given, reconstruct frames
         if self.img_handle is not None:
@@ -529,22 +503,10 @@ class ManualReductionTool(object):
 
 
 
-
         # Show the maxpixel if the key has been pressed
         if self.show_maxpixel and self.ff is not None:
 
             img = self.ff.maxpixel
-
-
-
-        if first_update:
-
-            # Guess the bit depth from the array type
-            self.bit_depth = 8*img.itemsize
-            
-            # Set the maximum image level after reading the bit depth
-            self.img_level_max = 2**self.bit_depth - 1
-
 
 
         # Apply the deinterlace
@@ -566,12 +528,24 @@ class ManualReductionTool(object):
                 img = Image.deinterlaceEven(img)
 
 
+        # Store the image prior to calibration
+        process_img = np.copy(img)
 
-
-        # Apply dark and flat (cannot be applied if there is no FF file)
+        # Subtract the average and apply the flat field for image on which processing will be done
         if self.ff is not None:
 
-            # Subtract average to remove background stars (don't ally dark or flat then)
+            # Subtract the average
+            process_img = Image.applyDark(process_img, self.ff.avepixel)
+
+            # Apply flat
+            if self.flat_struct is not None:
+                process_img = Image.applyFlat(process_img, self.flat_struct)
+
+
+        # Apply dark and flat (cannot be applied if there is no FF file) on the image for showing
+        if self.ff is not None:
+
+            # Subtract average to remove background stars (don't apply dark then)
             if self.subtract_avepixel:
 
                 img = Image.applyDark(img, self.ff.avepixel)
@@ -582,14 +556,59 @@ class ManualReductionTool(object):
                 if self.dark is not None:
                     img = Image.applyDark(img, self.dark)
 
-                # Apply flat
-                if self.flat_struct is not None:
-                    img = Image.applyFlat(img, self.flat_struct)
+
+            # Apply flat
+            if self.flat_struct is not None:
+                img = Image.applyFlat(img, self.flat_struct)
 
 
-        # Current image without adjustments
-        self.current_image = np.copy(img)
+        return img, process_img
 
+
+
+
+    def updateImage(self, first_update=False):
+        """ Updates the current plot. """
+
+        # Reset circle patches
+        self.circle_aperature = None
+        self.circle_aperature_outer = None
+
+        # Reset centroid patch
+        self.centroid_handle = None
+
+        # Reset photometry coloring
+        self.photometry_coloring_handle = None
+
+        # Save the previous zoom
+        if self.current_image is not None:
+            
+            self.prev_xlim = plt.gca().get_xlim()
+            self.prev_ylim = plt.gca().get_ylim()
+
+
+        plt.clf()
+
+        # Set the status update formatter
+        plt.gca().format_coord = self.mouseOverStatus
+
+        
+        # Load the image
+        #   img - image for viewing
+        #   process_img - image for processing (centroiding, photometry) which has the average subtracted
+        img, process_img = self.loadImage()
+
+        # Image for processing
+        self.current_image = process_img
+
+        
+        if first_update:
+
+            # Guess the bit depth from the array type
+            self.bit_depth = 8*img.itemsize
+            
+            # Set the maximum image level after reading the bit depth
+            self.img_level_max = 2**self.bit_depth - 1
 
 
         # Do auto levels
@@ -754,6 +773,11 @@ class ManualReductionTool(object):
         # Create the list of picks for saving
         centroids = []
         for pick in self.pick_list:
+
+            # Make sure to centroid is picked and is not just the photometry
+            if pick.x_centroid is None:
+                continue
+
             centroids.append([pick.frame, pick.x_centroid, pick.y_centroid, pick.intensity_sum])
 
 
@@ -990,6 +1014,9 @@ class ManualReductionTool(object):
             _, self.flat_struct = self.loadFlat()
 
             self.updateImage()
+
+            # Recompute the image intensities
+            self.recomputeAllIntensitySums()
 
 
         # Load the platepar
@@ -1384,6 +1411,34 @@ class ManualReductionTool(object):
             pick.intensity_sum = np.ma.sum(crop_img - background_lvl)
 
 
+    def recomputeAllIntensitySums(self):
+        """ Recompute intensity sums for all frames. """
+
+
+        # Store the current frame
+        current_frame_bak = self.current_frame
+
+        # Disable showing the maxpixel
+        self.show_maxpixel = False
+
+        # Go through all picks and recompute intensities
+        for pick in self.pick_list:
+            
+            # Set the current frame
+            self.setFrame(pick.frame, only_number_update=True)
+
+            # Load the frame without showing it
+            _, self.current_image = self.loadImage()
+
+            # Compute the intensity sum
+            self.computeIntensitySum()
+
+        # Set the current frame back
+        self.setFrame(current_frame_bak, only_number_update=True)
+
+        self.updateImage()
+
+
 
     def drawCursorCircle(self):
         """ Adds a circle around the mouse cursor. """
@@ -1741,6 +1796,37 @@ class ManualReductionTool(object):
             self.printStatus()
 
 
+    def setFrame(self, fr_num, only_number_update=False):
+        """ Set the current frame number.
+        
+        Arguments:
+            fr_num: [float] Frame number to set.
+
+        Keyword arguments:
+            only_number_update: [bool] Just cycle the frame number if True. False by default. This is used
+                when skipping multiple frames.
+        """
+
+        if not only_number_update:
+            
+            # Compute the intensity sum done on the previous frame
+            self.computeIntensitySum()
+
+
+        # Increment the frame
+        if self.img_handle is not None:
+            self.img_handle.setFrame(fr_num)
+
+            self.current_frame = self.img_handle.current_frame
+
+        else:
+            self.current_frame = fr_num%self.nframes
+
+
+        if not only_number_update:
+            self.updateImage()
+            self.printStatus()
+
 
     def saveFTPdetectinfo(self):
         """ Saves the picks to a FTPdetectinfo file in the same folder where the first given file is. """
@@ -1774,6 +1860,11 @@ class ManualReductionTool(object):
         # Create the list of picks for saving
         centroids = []
         for pick in self.pick_list:
+            
+            # Make sure to centroid is picked and is not just the photometry
+            if pick.x_centroid is None:
+                continue
+
             centroids.append([pick.frame, pick.x_centroid, pick.y_centroid, pick.intensity_sum])
 
 
@@ -1879,7 +1970,10 @@ if __name__ == "__main__":
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Tool for manually picking positions of meteors on video frames and performing manual photometry.")
+    arg_parser = argparse.ArgumentParser(description="""Tool for manually picking positions of meteors on video frames and performing manual photometry.
+
+        NOTE: The centroiding and photometry will always be done on the image with the subtracted average, except when only the FR file is given.
+        """, formatter_class=argparse.RawTextHelpFormatter)
 
     arg_parser.add_argument('file1', metavar='FILE1', type=str, nargs=1, \
                     help='Path to an FF file, or an FR file if an FF file is not available. Or, a path to a directory with PNG files can be given.')
