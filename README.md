@@ -1,6 +1,6 @@
 # RPi Meteor Station
 
-Open source powered meteor station. We are currently using the Raspberry Pi 3 as the main development platform. **The code also works on Linux PCs.**
+Open source powered meteor station. We are currently using the Raspberry Pi 3 as the main development platform and use digital IP cameras. **The code also works on Linux PCs.** We are slowly phasing out the support for analog cameras, but they should work well regardless.
 The software is still in the development phase, but here are the current features:
 
 1. Automated video capture - start at dusk, stop at dawn. Analog cameras supported through EasyCap, **IP cameras up to 720p resolution - CONTACT US FOR MORE DETAILS.**
@@ -13,17 +13,16 @@ The software is still in the development phase, but here are the current feature
 1. Automatic upload of calibrated detections to central server
 1. Manual reduction of fireballs/meteors
 
-You can see out Hackaday project web-page for background and more info: https://hackaday.io/project/6811-asteria-network
+Please see our website for more info: https://gmn.duckdns.org/
+We are also selling Plug And Play meteor systems which run this code!
 
 
 ## Requirements
 This guide will assume basic knowledge of electronics, the Unix environment, and some minor experience with the Raspberry Pi platform itself.
 
 ### Hardware
-This code was designed to work on specific hardware, not because we wanted it to, but because only a unique combination of hardware will work at all. Thus, it is recommended that you follow the list as closely as possible. 
-You can find a **step-by-step guide how to assemble the hardware for an analog camera and install the software on Instructables** (**NOTE:** we have an SD card image available too, see below for more details): http://www.instructables.com/id/Raspberry-Pi-Meteor-Station/
 
-#### RPi
+#### RPi control box
 
 1. **Raspberry Pi 3 single-board computer.**
 The first version of the system was developed on the Raspberry Pi 2, while the system is now being tested on the RPi3, which is what we recommend you use, as it provides much more computing power. The code will NOT work on Raspberry Pi 1.
@@ -41,26 +40,11 @@ You **will** need to use a RPi case **with a fan**, as the software will likely 
 The RPi itself does not have a battery, so every time you turn it off, it loses the current time. The time then needs to be fetched from the Internet. If for some reason you do not have access to the Internet, or you network connection is down, it is a good idea to have the correct time as it is **essential for meteor trajectory estimation**.
 We recommend buying the DS3231 RTC module. See under [Guides/rpi3_rtc_setup.md](Guides/rpi3_rtc_setup.md) for information on installing this RTC module.
 
-#### Cameras
-
-##### Analog
-
-1. **EasyCap UTV007 video digitizer.** 
-This device is used to digitize the video signal from the analogue camera, so it can be digitally processed and stored. We have tried numerous EasyCap devices, but **only the one the UTV007 chipset** works without any issues on the RPi.
-
-1. **Sony Effio 673 CCTV camera and widefield lens (4mm or 6mm).**
-Upon thorough testing, it was found that this camera has the best price–performance ratio among analog cameras, especially when it is paired with a wide-field lens. A 4 mm f/1.2 lens will give a field-of-view of about 64x48 degrees. This camera needs a 12V power supply. One important thing to note is that the camera needs to have the IR-cut filter removed (this filter will filter out all infrared light, but as meteors are radiating in that part of the spectrum, we want to record that light as well). Alternatives to the proposed camera are possible, see [Samuels et al. (2014) "Performance of 
-new low-cost 1/3" security cameras for meteor surveillance"](http://www.imo.net/imcs/imc2014/2014-29-wray-final.pdf) for more information.
-
----------
-
-OR:
-
-##### Digital IP
+#### Camera
 
 
 1. **IP camera**
-Preferably an IMX225 or IMX291 based camera. This part is still in the testing phase, but contact us for more details!
+Preferably an IMX225 or IMX291 based camera. Contact us for more details!
 
 ---------
 
@@ -79,7 +63,7 @@ s not 100% tested, but contact us if you want a copy and more details. Then you'
 
 ---------
 
-The code was designed to run on a RPi, but it will also run an some Linux distributions. We have tested Linux Mint 18 and Ubuntu 16. 
+The code was designed to run on a RPi, but it will also run an some Linux distributions. We have tested it on Linux Mint 18 and Ubuntu 16. 
 
 The recording **will not** run on Windows, but most of other submodules will (astrometric calibration, viewing the data, manual reduction, etc.). The problem under Windows is that for some reason the logging module object cannot be pickled when parallelized by the multiprocessing library. **We weren't able to solve this issue, but we invite people to try to take a stab at it.**
 
@@ -150,26 +134,6 @@ sudo apt-get install libopencv-dev python-opencv
 ### Checking video device and initializing proper settings - ANALOG CAMERAS ONLY!
 Once you connect the EasyCap digitizer and the camera, you need to check if the video signal is being properly received.
 
-#### NTSC
-If you have a NTSC camera (i.e. you are living in North America), run this in the terminal:
-
-```
-mplayer tv:// -tv driver=v4l2:device=/dev/video0:input=0:norm=NTSC
-```
-
-#### PAL
-
-If you are in Europe, you most likely have a PAL camera, not NTSC. There is a 'hack' you can use to force the EasyCap UTV007 to set itself up in the PAL format. Run this in the terminal:
-
-```
-mplayer tv:// -vo null
-```
-After a few seconds, kill the script with Ctrl+C. Now, you can see the video if you run:
-
-```
-mplayer tv:// -tv driver=v4l2:device=/dev/video0:input=0:norm=PAL
-```
-
 ### Editing the configuration file
 This is a very important step as all settings are read from the configuration file. The file in question is the [.config](.config) file. Once you download this repository, start editing the file with your favorite editor.
 
@@ -178,20 +142,12 @@ This is a very important step as all settings are read from the configuration fi
 If you want to join our network of global cameras, please send me an e-mail and I will give you a station code. The codes are made up of the 2-letter ISO code of your country (e.g. DE for Germany), followed by a 4 character alphanumeric code starting at 0001 and ending with ZZZZ, giving a total number of 1.5 million unique combinations for every country. For testing purposes you might use XX0001.
 
 ##### GPS location
-Edit the latitude, longitude and elevation of the location of your camera. This is used for automatically calculating the starting and ending time of the time of capture, as well as the astrometric plates. Try to be as precise as possible, **use at least 5 decimal places**, possibly measuring the location of the camera with the GPS on your phone.
+Edit the latitude, longitude and elevation of the location of your camera. This is used for automatically calculating the starting and ending time of the time of capture, as well as the astrometric plates. Try to be as precise as possible, **use at least 5 decimal places for latitude and longitude, and the elevation to a precision of 1 meter**. Measure the location of the camera with the GPS on your phone. This is extremely crucial and make sure to get a good location of the camera, otherwise the trajectories will be significantly off.
 
 
 #### [Capture]
 #### Resolution and FPS
-To be able to capture the video properly, you need to set up the right resolution and FPS (frames per second). Here is a table giving the numbers for the two analog video standards.
-
-| Option | PAL | NTSC |
-|--------|-----|------|
-| width  |720  |720   |
-| height |576  |480   |
-| fps    |25.0 |29.97 |
-
-For IP cameras, use the maximum resolution od 1280x720, as the Pi can't really handle 1080p, and such a high resolution produces an enormous amount of data.
+To be able to capture the video properly, you need to set up the right resolution and FPS (frames per second). For IP cameras, use the maximum resolution of 1280x720, as the Pi can't really handle 1080p, and such a high resolution produces enormous amounts of data.
 
 
 ## Running the code
