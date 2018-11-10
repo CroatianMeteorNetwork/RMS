@@ -28,8 +28,6 @@ from RMS.Formats.Vid import VidStruct
 
 
 
-
-
 class InputTypeFF(object):
     def __init__(self, dir_path, config, single_ff=False):
         """ Input file type handle for FF files.
@@ -236,8 +234,7 @@ class FFMimickInterface(object):
         self.nframes = nframes
 
 
-
-def computeFramesToRead(read_nframes, total_frames, fr_chunk_no, current_frame_chunk):
+def computeFramesToRead(read_nframes, total_frames, fr_chunk_no, current_frame_chunk, first_frame):
 
     ### Compute the number of frames to read
 
@@ -253,14 +250,18 @@ def computeFramesToRead(read_nframes, total_frames, fr_chunk_no, current_frame_c
         else:
             frames_to_read = read_nframes
 
-
         # Make sure not to try to read more frames than there's available
-        if (current_frame_chunk + 1)*fr_chunk_no > total_frames:
-            frames_to_read = total_frames - current_frame_chunk*fr_chunk_no
+        if first_frame + fr_chunk_no > total_frames:
+            frames_to_read = total_frames - first_frame
 
 
     return int(frames_to_read)
 
+
+def getCacheID(first_frame, size):
+    """ Get the frame chunk ID. """
+
+    return "first:{:d},size:{:d}".format(int(first_frame), int(size))
 
 
 class InputTypeVideo(object):
@@ -321,7 +322,7 @@ class InputTypeVideo(object):
         self.fps = self.cap.get(5)
 
         # Get the total time number of video frames in the file
-        self.total_frames = self.cap.get(7)
+        self.total_frames = int(self.cap.get(7))
 
         # Get the image size
         self.nrows = int(self.cap.get(4))
@@ -364,40 +365,52 @@ class InputTypeVideo(object):
         self.current_frame = self.current_frame_chunk*self.fr_chunk_no
 
 
-    def loadChunk(self, read_nframes=None):
+    def loadChunk(self, first_frame=None, read_nframes=None):
         """ Load the frame chunk file. 
     
         Keyword arguments:
+            first_frame: [int] First frame to read.
             read_nframes: [int] Number of frames to read. If not given (None), self.fr_chunk_no frames will be
                 read. If -1, all frames will be read in.
         """
 
-        # Check if all frames FF was cached and read that from cache
-        if read_nframes == -1:
-            if -1 in self.cache:
-                return self.cache[-1]
-
-        else:
-
-            # First try to load the frame from cache, if available
-            if self.current_frame_chunk in self.cache:
-                return self.cache[self.current_frame_chunk]
-
 
         # If all frames should be taken, set the frame to 0
         if read_nframes == -1:
+
+            first_frame = 0
+
             self.cap.set(1, 0)
 
         # Otherwise, set it to the appropriate chunk
         else:
 
-            # Set the first frame location
-            self.cap.set(1, self.current_frame_chunk*self.fr_chunk_no)
+            # Compute the first frame if it wasn't given
+            if first_frame is None:
+                first_frame = self.current_frame_chunk*self.fr_chunk_no
+
+            # Make sure the first frame is within the limits
+            first_frame = first_frame%self.total_frames
+
+
+        # Set the first frame location
+        self.cap.set(1, first_frame)
 
 
         # Compute the number of frames to read
         frames_to_read = computeFramesToRead(read_nframes, self.total_frames, self.fr_chunk_no, \
-            self.current_frame_chunk)
+            self.current_frame_chunk, first_frame)
+
+
+        # Get the cache ID
+        cache_id = getCacheID(first_frame, frames_to_read)
+
+
+        # Check if this chunk has been cached
+        if cache_id in self.cache:
+            frame, self.current_fr_chunk_size = self.cache[cache_id]
+            return frame
+
 
         maxpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.uint8)
         avepixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.float64)
@@ -437,14 +450,7 @@ class InputTypeVideo(object):
         # Store the FF struct to cache to avoid recomputing
         self.cache = {}
 
-        if read_nframes == -1:
-            cache_id = -1
-
-        else:
-            cache_id = self.current_frame_chunk
-
-        self.cache[cache_id] = ff_struct_fake
-
+        self.cache[cache_id] = [ff_struct_fake, self.current_fr_chunk_size]
 
         return ff_struct_fake
         
@@ -623,42 +629,50 @@ class InputTypeUWOVid(object):
         self.current_frame = self.current_frame_chunk*self.fr_chunk_no
 
 
-    def loadChunk(self, read_nframes=None):
+    def loadChunk(self, first_frame=None, read_nframes=None):
         """ Load the frame chunk file. 
     
         Keyword arguments:
+            first_frame: [int] First frame to read.
             read_nframes: [int] Number of frames to read. If not given (None), self.fr_chunk_no frames will be
                 read. If -1, all frames will be read in.
         """
 
-        # Check if all frames FF was cached and read that from cache
-        if read_nframes == -1:
-            if -1 in self.cache:
-                return self.cache[-1]
-
-        else:
-
-            # First try to load the frame from cache, if available
-            if self.current_frame_chunk in self.cache:
-                frame, self.frame_chunk_unix_times = self.cache[self.current_frame_chunk]
-                return frame
-
-
 
         # If all frames should be taken, set the frame to 0
         if read_nframes == -1:
-            self.vid_file.seek(0)
 
-        # Otherwise, set it to the appropriate chunk
+            first_frame = 0
+
+        # Otherwise, set it to the appropriate chunk or given first frame
         else:
 
-            # Set the vid file pointer to the right byte
-            self.vid_file.seek(self.current_frame_chunk*self.fr_chunk_no*self.vidinfo.seqlen)
+            # Compute the first frame if not given
+            if first_frame is None:
+                first_frame = self.current_frame_chunk*self.fr_chunk_no
 
+            # Make sure the first frame is within the limits
+            first_frame = first_frame%self.total_frames
 
         # Compute the number of frames to read
         frames_to_read = computeFramesToRead(read_nframes, self.total_frames, self.fr_chunk_no, \
-            self.current_frame_chunk)
+            self.current_frame_chunk, first_frame)
+
+
+        # Get the cache ID
+        cache_id = getCacheID(first_frame, frames_to_read)
+
+
+        # Check if this chunk has been cached
+        if cache_id in self.cache:
+            frame, self.frame_chunk_unix_times, self.current_fr_chunk_size = self.cache[cache_id]
+            return frame
+
+
+
+
+        # Set the vid file pointer to the right byte
+        self.vid_file.seek(first_frame*self.vidinfo.seqlen)
 
         maxpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.uint16)
         avepixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.float64)
@@ -697,16 +711,8 @@ class InputTypeUWOVid(object):
         # Store the FF struct to cache to avoid recomputing
         self.cache = {}
 
-
-
-        if read_nframes == -1:
-            cache_id = -1
-
-        else:
-            cache_id = self.current_frame_chunk
-
         # Save the computed FF to cache
-        self.cache[cache_id] = [ff_struct_fake, self.frame_chunk_unix_times]
+        self.cache[cache_id] = [ff_struct_fake, self.frame_chunk_unix_times, self.current_fr_chunk_size]
 
         return ff_struct_fake
         
@@ -960,38 +966,43 @@ class InputTypeImages(object):
         self.current_frame = self.current_frame_chunk*self.fr_chunk_no
 
 
-    def loadChunk(self, read_nframes=None):
+    def loadChunk(self, first_frame=None, read_nframes=None):
         """ Load the frame chunk file. 
     
         Keyword arguments:
+            first_frame: [int] First frame to read.
             read_nframes: [int] Number of frames to read. If not given (None), self.fr_chunk_no frames will be
                 read. If -1, all frames will be read in.
         """
 
-        # Check if all frames FF was cached and read that from cache
-        if read_nframes == -1:
-            if -1 in self.cache:
-                return self.cache[-1]
-
-        else:
-
-            # First try to load the frame from cache, if available
-            if self.current_frame_chunk in self.cache:
-                frame = self.cache[self.current_frame_chunk]
-                return frame
-
             
         # Compute the first index of the chunk
         if read_nframes == -1:
-            first_img_indx = 0
+            first_frame = 0
 
         else:
-            first_img_indx = self.current_frame_chunk*self.fr_chunk_no
+
+            # Compute the first frame if it wasn't given
+            if first_frame is None:
+                first_frame = self.current_frame_chunk*self.fr_chunk_no
+
+            # Make sure the first frame is within the limits
+            first_frame = first_frame%self.total_frames
 
 
         # Compute the number of frames to read
         frames_to_read = computeFramesToRead(read_nframes, self.total_frames, self.fr_chunk_no, \
-            self.current_frame_chunk)
+            self.current_frame_chunk, first_frame)
+
+        # Get the cache ID
+        cache_id = getCacheID(first_frame, frames_to_read)
+
+
+        # Check if this chunk has been cached
+        if cache_id in self.cache:
+            frame, self.uwo_png_dt_list, self.current_fr_chunk_size = self.cache[cache_id]
+            return frame
+
 
 
         maxpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=self.img_dtype)
@@ -1004,7 +1015,7 @@ class InputTypeImages(object):
         for i in range(frames_to_read):
 
             # Compute the image index
-            img_indx = first_img_indx + i
+            img_indx = first_frame + i
 
             # Stop the loop if the ends of images has been reached
             if img_indx >= self.total_frames - 1:
@@ -1040,13 +1051,7 @@ class InputTypeImages(object):
         # Store the FF struct to cache to avoid recomputing
         self.cache = {}
 
-        if read_nframes == -1:
-            cache_id = -1
-
-        else:
-            cache_id = self.current_frame_chunk
-
-        self.cache[cache_id] = ff_struct_fake
+        self.cache[cache_id] = [ff_struct_fake, self.uwo_png_dt_list, self.current_fr_chunk_size]
 
         return ff_struct_fake
     
@@ -1246,3 +1251,50 @@ def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_d
 
 
     return img_handle
+
+
+
+
+if __name__ == "__main__":
+
+    import argparse
+
+    import matplotlib.pyplot as plt
+
+    import RMS.ConfigReader as cr
+
+    ### Functions for testing
+
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="""Test.""", formatter_class=argparse.RawTextHelpFormatter)
+
+    arg_parser.add_argument('dir_path', metavar='DIRPATH', type=str, nargs=1, \
+                    help='Path to data.')
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+
+    # Load the configuration file
+    config = cr.parse(".config")
+
+    # Load the appropriate files
+    img_handle = detectInputType(cml_args.dir_path[0], config, skip_ff_dir=True)
+
+    first_frame = 0
+    chunk_size = 256
+
+    for i in range(int(img_handle.total_frames//chunk_size)):
+        
+        first_frame = i*chunk_size
+
+        # Load a chunk of frames
+        ff = img_handle.loadChunk(first_frame=first_frame, read_nframes=chunk_size)
+
+
+        plt.imshow(ff.maxpixel - ff.avepixel, cmap='gray')
+        plt.show()
