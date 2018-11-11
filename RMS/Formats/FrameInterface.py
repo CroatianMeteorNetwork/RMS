@@ -70,6 +70,7 @@ class FFMimickInterface(object):
         # Init the empty structures
         self.maxpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=self.dtype)
         self.avepixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.float64)
+        self.stdpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.float64)
 
 
     def addFrame(self, frame):
@@ -78,8 +79,9 @@ class FFMimickInterface(object):
         # Get the maximum values
         self.maxpixel = np.max([self.maxpixel, frame], axis=0)
 
-        # Compute the running average
+        # # Compute the running average
         self.avepixel += frame.astype(np.float64)/(self.nframes - 1)
+        self.stdpixel += (frame.astype(np.float64)**2)/(self.nframes - 2)
 
 
     def finish(self):
@@ -87,8 +89,20 @@ class FFMimickInterface(object):
 
         # Remove the contribution of the maxpixel to the avepixel
         self.avepixel -= self.maxpixel.astype(np.float64)/(self.nframes - 1)
-        self.avepixel = self.avepixel.astype(self.dtype)
+        
 
+        # Compute the standard deviation
+        self.stdpixel -= (self.maxpixel.astype(np.float64)**2)/(self.nframes - 2)
+        self.stdpixel -= self.avepixel**2
+        self.stdpixel = np.sqrt(self.stdpixel)
+
+        # Make sure there are no zeros in standard deviation
+        self.stdpixel[self.stdpixel == 0] = 1
+
+        # Convert stddev and avepixel to appropriate format
+        self.avepixel = self.avepixel.astype(self.dtype)
+        self.stdpixel = self.stdpixel.astype(self.dtype)
+        
         
 
 
@@ -124,6 +138,9 @@ class InputTypeFF(object):
 
 
         self.ff_list = []
+        self.ff = None
+        self.ff_frame = None
+        self.frame_ff_name = None
 
 
         # Add the single FF file to the list
@@ -294,6 +311,9 @@ class InputTypeFF(object):
             # Init making the FF structure
             self.ff = FFMimickInterface(self.nrows, self.ncols, frames_to_read, np.uint8)
 
+            # Store standard deviation frames
+            stddev_list = []
+
             # Go through the frames
             for i in range(frames_to_read):
 
@@ -309,9 +329,18 @@ class InputTypeFF(object):
                 # Add frame for FF processing
                 self.ff.addFrame(frame)
 
+                # Store the stddev of the FF from which the current frame was read
+                if self.frame_ff_name not in [entry[0] for entry in stddev_list]:
+                    stddev_list.append([self.frame_ff_name, self.ff_frame.stdpixel])
+
             
             # Finish making the fake FF file
             self.ff.finish()
+
+            # Because the stddev can't be computed from FF images, take the average of stddev frames of all 
+            #   participating FF files
+            stddev_list = np.array([entry[1] for entry in stddev_list])
+            self.ff.stdpixel = np.mean(stddev_list, axis=0)
 
             # Set the current frame back to the value before the reconstruction
             self.setFrame(current_frame_bak)
@@ -373,17 +402,20 @@ class InputTypeFF(object):
 
         # Try loading the FF file from cache
         if file_name in self.cache_frames:
-            ff = self.cache_frames[file_name]
+            self.ff_frame = self.cache_frames[file_name]
         else:
             # Load the FF file from disk
-            ff = readFF(self.dir_path, file_name)
+            self.ff_frame = readFF(self.dir_path, file_name)
 
             # Put the FF into separate cache
             self.cache_frames = {}
-            self.cache_frames[file_name] = ff
+            self.cache_frames[file_name] = self.ff_frame
+
+        # Store the name of the current FF file from which the frame was read
+        self.frame_ff_name = file_name
 
         # Reconstruct the frame from an FF file
-        frame = reconstructFrameFF(ff, self.current_frame%self.fr_chunk_no, avepixel=avepixel)
+        frame = reconstructFrameFF(self.ff_frame, self.current_frame%self.fr_chunk_no, avepixel=avepixel)
 
         return frame
 
@@ -1401,15 +1433,20 @@ if __name__ == "__main__":
     img_handle = detectInputType(cml_args.dir_path[0], config)
 
     first_frame = 0
-    chunk_size = 64
+    chunk_size = 128
 
     for i in range(int(img_handle.total_frames//chunk_size)):
         
-        first_frame = i*chunk_size
+        first_frame = i*chunk_size + chunk_size//2
 
         # Load a chunk of frames
         ff = img_handle.loadChunk(first_frame=first_frame, read_nframes=chunk_size)
 
         print(first_frame, chunk_size)
         plt.imshow(ff.maxpixel - ff.avepixel, cmap='gray')
+        plt.show()
+
+
+        # Show stdpixel
+        plt.imshow(ff.stdpixel, cmap='gray')
         plt.show()

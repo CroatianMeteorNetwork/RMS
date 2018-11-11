@@ -153,6 +153,7 @@ class ManualReductionTool(object):
         self.show_key_help = True
 
         self.current_image = None
+        self.current_image_viewing = None
 
         self.fr_xmin = None
         self.fr_xmax = None
@@ -600,6 +601,9 @@ class ManualReductionTool(object):
 
         # Image for processing
         self.current_image = process_img
+
+        # Image for viewing before levels correction
+        self.current_image_viewing = np.copy(img)
 
         
         if first_update:
@@ -1209,7 +1213,7 @@ class ManualReductionTool(object):
 
 
         # Write image X, Y coordinates and image intensity
-        status_str = "x={:7.2f}  y={:7.2f}  Intens={:d}".format(x, y, self.current_image[int(y), int(x)])
+        status_str = "x={:7.2f}  y={:7.2f}  Intens={:d}".format(x, y, self.current_image_viewing[int(y), int(x)])
 
         # Add coordinate info if platepar is present
         if (self.platepar is not None) and (self.img_handle is not None):
