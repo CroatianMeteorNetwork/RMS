@@ -27,6 +27,70 @@ from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
 
 
+def getCacheID(first_frame, size):
+    """ Get the frame chunk ID. """
+
+    return "first:{:d},size:{:d}".format(int(first_frame), int(size))
+
+
+
+def computeFramesToRead(read_nframes, total_frames, fr_chunk_no, current_frame_chunk, first_frame):
+
+    ### Compute the number of frames to read
+
+    if read_nframes == -1:
+        frames_to_read = total_frames
+
+    else:
+
+        # If the number of frames to read was not given, use the default value
+        if read_nframes is None:
+            frames_to_read = fr_chunk_no
+
+        else:
+            frames_to_read = read_nframes
+
+        # Make sure not to try to read more frames than there's available
+        if first_frame + fr_chunk_no > total_frames:
+            frames_to_read = total_frames - first_frame
+
+
+    return int(frames_to_read)
+
+
+class FFMimickInterface(object):
+    def __init__(self, nrows, ncols, nframes, dtype):
+        """ Structure which is used to make FF file format data. It mimicks the interface of an FF structure. """
+
+        self.nrows = nrows
+        self.ncols = ncols
+        self.nframes = nframes
+        self.dtype = dtype
+
+        # Init the empty structures
+        self.maxpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=self.dtype)
+        self.avepixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.float64)
+
+
+    def addFrame(self, frame):
+        """ Add raw frame for computation of FF data. """
+
+        # Get the maximum values
+        self.maxpixel = np.max([self.maxpixel, frame], axis=0)
+
+        # Compute the running average
+        self.avepixel += frame.astype(np.float64)/(self.nframes - 1)
+
+
+    def finish(self):
+        """ Finish making an FF structure. """
+
+        # Remove the contribution of the maxpixel to the avepixel
+        self.avepixel -= self.maxpixel.astype(np.float64)/(self.nframes - 1)
+        self.avepixel = self.avepixel.astype(self.dtype)
+
+        
+
 
 class InputTypeFF(object):
     def __init__(self, dir_path, config, single_ff=False):
@@ -98,7 +162,15 @@ class InputTypeFF(object):
         self.current_frame = 0
 
 
+        # Number for frames to read by default
+        self.fr_chunk_no = 256
+
+        # Initially assume this to be true, but this will change after the first load
+        self.total_frames = self.fr_chunk_no
+
+
         self.cache = {}
+        self.cache_frames = {}
 
         # Load the first chunk for initing parameters
         self.loadChunk()
@@ -109,6 +181,13 @@ class InputTypeFF(object):
 
         else:
             self.fps = self.config.fps
+
+        # Get the image size
+        self.nrows = self.ff.nrows
+        self.ncols = self.ff.ncols
+
+        # Compute the total number of frames in all video files
+        self.total_frames = len(self.ff_list)*self.ff.nframes
 
 
 
@@ -134,27 +213,113 @@ class InputTypeFF(object):
 
 
 
-    def loadChunk(self, read_nframes=None):
-        """ Load the FF file. 
+    def loadChunk(self, first_frame=None, read_nframes=None):
+        """ Load the frame chunk file. 
     
         Keyword arguments:
-            read_nframes: [bool] Does nothing, here to preserve common function interface with other file
-                types.
+            first_frame: [int] First frame to read.
+            read_nframes: [int] Number of frames to read. If not given (None), self.fr_chunk_no frames will be
+                read. If -1, all frames will be read in.
         """
 
-        # Load from cache to avoid recomputing
-        if self.current_ff_file in self.cache:
-            return self.cache[self.current_ff_file]
+        # If no extra arguments were given, assume it's a normal read and read the current FF file
+        if (first_frame is None) and (read_nframes is None):
+            ff_file = self.current_ff_file
 
-        # Load the FF file from disk
-        self.ff = readFF(self.dir_path, self.current_ff_file)
+        else:
+            ff_file = None
 
-        # Reset the current frame number
-        self.current_frame = 0
+
+        # If all frames should be taken, set the frame to 0
+        if read_nframes == -1:
+
+            first_frame = 0
+
+        # Otherwise, set it to the appropriate chunk or given first frame
+        else:
+
+            # Compute the first frame if not given
+            if first_frame is None:
+                first_frame = self.current_ff_index*self.fr_chunk_no
+
+            # Make sure the first frame is within the limits
+            first_frame = first_frame%self.total_frames
+
+        # Compute the number of frames to read
+        frames_to_read = computeFramesToRead(read_nframes, self.total_frames, self.fr_chunk_no, \
+            self.current_ff_index, first_frame)
+
+
+        # If it's a normal read, get the current FF file
+        if ff_file is not None:
+            cache_id = self.current_ff_file
+            whole_ff = True
+
+        # If the number of frames is exactly one FF file from beginning to end
+        #   just return the whole FF file
+        elif (first_frame%self.fr_chunk_no == 0) and (frames_to_read == self.fr_chunk_no):
+
+            # Find the FF file to read
+            ff_file = self.ff_list[first_frame//self.fr_chunk_no]
+
+            cache_id = ff_file
+            whole_ff = True
+
+        else:
+
+            # Get the cache ID
+            cache_id = getCacheID(first_frame, frames_to_read)
+            whole_ff = False
+
+
+        # Check if this chunk has been cached
+        if cache_id in self.cache:
+            self.ff = self.cache[cache_id]
+            return self.ff
+
+
+        # If the whole file has to be returned
+        if whole_ff:
+
+            # Load the FF file from disk
+            self.ff = readFF(self.dir_path, ff_file)
+
+        # If a selection of frames has to be reconstructed, go through all FF files and create new FF
+        else:
+
+            # Store the current frame
+            current_frame_bak = self.current_frame
+
+
+            # Init making the FF structure
+            self.ff = FFMimickInterface(self.nrows, self.ncols, frames_to_read, np.uint8)
+
+            # Go through the frames
+            for i in range(frames_to_read):
+
+                # Compute the frame index
+                fr_index = first_frame + i
+
+                # Set the frame to read
+                self.setFrame(fr_index)
+
+                # Read the given frame
+                frame = self.loadFrame(avepixel=False)
+
+                # Add frame for FF processing
+                self.ff.addFrame(frame)
+
+            
+            # Finish making the fake FF file
+            self.ff.finish()
+
+            # Set the current frame back to the value before the reconstruction
+            self.setFrame(current_frame_bak)
+
                 
         # Store the loaded file to cache for faster loading
         self.cache = {}
-        self.cache[self.current_ff_file] = self.ff
+        self.cache[cache_id] = self.ff
 
         return self.ff
 
@@ -180,13 +345,13 @@ class InputTypeFF(object):
     def nextFrame(self):
         """ Increment the current frame. """
 
-        self.current_frame = (self.current_frame + 1)%self.ff.nframes
+        self.current_frame = (self.current_frame + 1)%self.total_frames
 
 
     def prevFrame(self):
         """ Decrement the current frame. """
         
-        self.current_frame = (self.current_frame - 1)%self.ff.nframes
+        self.current_frame = (self.current_frame - 1)%self.total_frames
 
 
     def setFrame(self, fr_num):
@@ -196,14 +361,29 @@ class InputTypeFF(object):
             fr_num: [float] Frame number to set.
         """
 
-        self.current_frame = fr_num%self.ff.nframes
+        self.current_frame = fr_num%self.total_frames
 
 
     def loadFrame(self, avepixel=False):
         """ Load the current frame. """
 
+        # Compute which file read
+        file_index = self.current_frame//self.fr_chunk_no
+        file_name = self.ff_list[file_index]
+
+        # Try loading the FF file from cache
+        if file_name in self.cache_frames:
+            ff = self.cache_frames[file_name]
+        else:
+            # Load the FF file from disk
+            ff = readFF(self.dir_path, file_name)
+
+            # Put the FF into separate cache
+            self.cache_frames = {}
+            self.cache_frames[file_name] = ff
+
         # Reconstruct the frame from an FF file
-        frame = reconstructFrameFF(self.ff, self.current_frame, avepixel=avepixel)
+        frame = reconstructFrameFF(ff, self.current_frame%self.fr_chunk_no, avepixel=avepixel)
 
         return frame
 
@@ -221,47 +401,6 @@ class InputTypeFF(object):
             return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
 
 
-
-
-class FFMimickInterface(object):
-    def __init__(self, maxpixel, avepixel, nrows, ncols, nframes):
-        """ Object which mimicks the interface of an FF structure. """
-
-        self.maxpixel = maxpixel
-        self.avepixel = avepixel
-        self.nrows = nrows
-        self.ncols = ncols
-        self.nframes = nframes
-
-
-def computeFramesToRead(read_nframes, total_frames, fr_chunk_no, current_frame_chunk, first_frame):
-
-    ### Compute the number of frames to read
-
-    if read_nframes == -1:
-        frames_to_read = total_frames
-
-    else:
-
-        # If the number of frames to read was not given, use the default value
-        if read_nframes is None:
-            frames_to_read = fr_chunk_no
-
-        else:
-            frames_to_read = read_nframes
-
-        # Make sure not to try to read more frames than there's available
-        if first_frame + fr_chunk_no > total_frames:
-            frames_to_read = total_frames - first_frame
-
-
-    return int(frames_to_read)
-
-
-def getCacheID(first_frame, size):
-    """ Get the frame chunk ID. """
-
-    return "first:{:d},size:{:d}".format(int(first_frame), int(size))
 
 
 class InputTypeVideo(object):
@@ -412,8 +551,8 @@ class InputTypeVideo(object):
             return frame
 
 
-        maxpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.uint8)
-        avepixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.float64)
+        # Init making the FF structure
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, frames_to_read, np.uint8)
 
         # Load the chunk of frames
         for i in range(frames_to_read):
@@ -427,25 +566,16 @@ class InputTypeVideo(object):
             # Convert frame to grayscale
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-            # Get the maximum values
-            maxpixel = np.max([maxpixel, frame], axis=0)
-
-            # Compute the running average
-            avepixel += frame.astype(np.float64)/(frames_to_read - 1)
+            # Add frame for FF processing
+            ff_struct_fake.addFrame(frame)
 
 
-        # Remove the contribution of the maxpixel to the avepixel
-        avepixel -= maxpixel.astype(np.float64)/(frames_to_read - 1)
-
-        avepixel = avepixel.astype(np.uint8)
+        # Finish making the fake FF file
+        ff_struct_fake.finish()
 
 
         self.current_fr_chunk_size = i + 1
 
-
-        # Init the structure that mimicks the FF file structure
-        ff_struct_fake = FFMimickInterface(maxpixel, avepixel, self.nrows, self.ncols, \
-            self.total_frames)
 
         # Store the FF struct to cache to avoid recomputing
         self.cache = {}
@@ -674,8 +804,8 @@ class InputTypeUWOVid(object):
         # Set the vid file pointer to the right byte
         self.vid_file.seek(first_frame*self.vidinfo.seqlen)
 
-        maxpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.uint16)
-        avepixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.float64)
+        # Init making the FF structure
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, frames_to_read, np.uint16)
 
         self.frame_chunk_unix_times = []
 
@@ -691,22 +821,14 @@ class InputTypeUWOVid(object):
             # Add the unix time to list
             self.frame_chunk_unix_times.append(self.vid.ts + self.vid.tu/1000000.0)
 
-            # Get the maximum values
-            maxpixel = np.max([maxpixel, frame], axis=0)
+            # Add frame for FF processing
+            ff_struct_fake.addFrame(frame)
 
-            # Compute the running average
-            avepixel += frame.astype(np.float64)/(frames_to_read - 1)
 
+        # Finish making the fake FF file
+        ff_struct_fake.finish()
 
         self.current_fr_chunk_size = i + 1
-
-        # Remove the contribution of the maxpixel to the avepixel
-        avepixel -= maxpixel.astype(np.float64)/(frames_to_read - 1)
-
-        avepixel = avepixel.astype(np.uint16)
-
-        # Init the structure that mimicks the FF file structure
-        ff_struct_fake = FFMimickInterface(maxpixel, avepixel, self.nrows, self.ncols, self.total_frames)
 
         # Store the FF struct to cache to avoid recomputing
         self.cache = {}
@@ -1004,10 +1126,9 @@ class InputTypeImages(object):
             return frame
 
 
-
-        maxpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=self.img_dtype)
-        avepixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.float64)
-
+        # Init making the FF structure
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, frames_to_read, self.img_dtype)
+        
 
         self.uwo_png_dt_list = []
 
@@ -1024,29 +1145,19 @@ class InputTypeImages(object):
             # Load the image
             frame = self.loadFrame(fr_no=img_indx)
 
-            # Get the maximum values
-            maxpixel = np.max([maxpixel, frame], axis=0)
-
-            # Compute the running average
-            avepixel += frame.astype(np.float64)/(frames_to_read - 1)
-
+            # Add frame for FF processing
+            ff_struct_fake.addFrame(frame)
 
             # Add the datetime of the frame to list of the UWO png is used
             if self.uwo_png_mode:
                 self.uwo_png_dt_list.append(self.currentFrameTime(dt_obj=True))
 
 
-        # Remove the contribution of the maxpixel to the avepixel
-        avepixel -= maxpixel.astype(np.float64)/(frames_to_read - 1)
-
-        avepixel = avepixel.astype(self.img_dtype)
-
+        # Finish making the fake FF file
+        ff_struct_fake.finish()
 
         self.current_fr_chunk_size = i
 
-
-        # Init the structure that mimicks the FF file structure
-        ff_struct_fake = FFMimickInterface(maxpixel, avepixel, self.nrows, self.ncols, self.total_frames)
 
         # Store the FF struct to cache to avoid recomputing
         self.cache = {}
@@ -1209,10 +1320,14 @@ def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_d
     if os.path.isdir(input_path):
 
         # Check if there are valid FF names in the directory
-        if any([validFFName(ff_file) for ff_file in os.listdir(input_path)]) and not skip_ff_dir:
+        if any([validFFName(ff_file) for ff_file in os.listdir(input_path)]):
 
-            # Init the image handle for FF files in a directory
-            img_handle = InputTypeFF(input_path, config)
+            if skip_ff_dir:
+                messagebox.showinfo('FF directory', 'ManualReduction only works on individual FF files, and not directories with FF files!')
+                return None
+            else:
+                # Init the image handle for FF files in a directory
+                img_handle = InputTypeFF(input_path, config)
 
         # If not, check if there any image files in the folder
         else:
@@ -1283,10 +1398,10 @@ if __name__ == "__main__":
     config = cr.parse(".config")
 
     # Load the appropriate files
-    img_handle = detectInputType(cml_args.dir_path[0], config, skip_ff_dir=True)
+    img_handle = detectInputType(cml_args.dir_path[0], config)
 
     first_frame = 0
-    chunk_size = 256
+    chunk_size = 64
 
     for i in range(int(img_handle.total_frames//chunk_size)):
         
@@ -1295,6 +1410,6 @@ if __name__ == "__main__":
         # Load a chunk of frames
         ff = img_handle.loadChunk(first_frame=first_frame, read_nframes=chunk_size)
 
-
+        print(first_frame, chunk_size)
         plt.imshow(ff.maxpixel - ff.avepixel, cmap='gray')
         plt.show()

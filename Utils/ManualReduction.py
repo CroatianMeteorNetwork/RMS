@@ -2091,6 +2091,9 @@ if __name__ == "__main__":
                 if img_handle.input_type != 'ff':
                     fr_name = None
 
+            else:
+                sys.exit()
+
 
         # Init the tool
         manual_tool = ManualReductionTool(config, img_handle, fr_name, first_frame=cml_args.begframe, \
