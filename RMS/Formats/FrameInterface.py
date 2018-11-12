@@ -1230,7 +1230,6 @@ class InputTypeImages(object):
 
         # Init making the FF structure
         ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, frames_to_read, self.img_dtype)
-        
 
         self.uwo_png_dt_list = []
 
@@ -1309,7 +1308,6 @@ class InputTypeImages(object):
 
         else:
             current_img_file = self.current_img_file
-
 
         # Get the current image
         img = cv2.imread(os.path.join(self.dir_path, current_img_file), -1)
@@ -1504,7 +1502,7 @@ if __name__ == "__main__":
 
     chunk_size = 64
 
-    for i in range(int(img_handle.total_frames//chunk_size)):
+    for i in range(img_handle.total_frames//chunk_size + 1):
         
         first_frame = i*chunk_size
 
@@ -1518,4 +1516,9 @@ if __name__ == "__main__":
 
         # Show stdpixel
         plt.imshow(ff.stdpixel, cmap='gray')
+        plt.show()
+
+        # Show thresholded image
+        thresh_img = (ff.maxpixel - ff.avepixel) > (1.0*ff.stdpixel + 30)
+        plt.imshow(thresh_img, cmap='gray')
         plt.show()
