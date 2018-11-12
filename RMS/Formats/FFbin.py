@@ -50,14 +50,39 @@ def read(directory, filename, array=False, full_filename=False):
 
     ff = FFStruct()
     
-    ff.nrows = int(np.fromfile(fid, dtype=np.uint32, count=1))
-    ff.ncols = int(np.fromfile(fid, dtype=np.uint32, count=1))
-    ff.nbits = int(np.fromfile(fid, dtype=np.uint32, count=1))
-    ff.first = int(np.fromfile(fid, dtype=np.uint32, count=1))
-    ff.camno = int(np.fromfile(fid, dtype=np.uint32, count=1))
+    # Check if it is the new of the old CAMS data format
+    version_flag = int(np.fromfile(fid, dtype=np.int32, count = 1))
 
-    # Fixed number of frames
-    ff.nframes = 256
+    # Old format
+    if version_flag > 0:
+
+        ff.nrows = version_flag
+        ff.ncols = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+        ff.nbits = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+        ff.nframes = 2**ff.nbits
+        ff.first = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+        ff.camno = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+
+        ff.decimation_fact = 1
+
+        
+
+    # New format
+    elif version_flag == -1:
+
+        ff.nrows = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+        ff.ncols = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+
+        ff.nframes = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+        ff.first = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+        ff.camno = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+
+        ff.decimation_fact = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+
+        ff.interleave_flag = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+
+        ff.fps = float(np.fromfile(fid, dtype=np.uint32, count = 1))/1000
+
     
     if array:
         N = 4*ff.nrows*ff.ncols
@@ -76,13 +101,16 @@ def read(directory, filename, array=False, full_filename=False):
 
 
 
-def write(ff, directory, filename):
+def write(ff, directory, filename, version=2):
     """ Write FF structure to a .bin file in the specified directory.
     
     Arguments:
         ff: [ff bin struct] FF bin file loaded in the FF bin structure
         directory: [str] path to the directory where the file will be written
         filename: [str] name of the file which will be written
+
+    Keyword arguments:
+        version: [int] CAMS bin format version. Old version is 1, the new version is 2 (defualt).
     
     Return:
         None
@@ -105,13 +133,43 @@ def write(ff, directory, filename):
             arr[3] = ff.stdpixel
         
         # Extract only the number from the camera code
-        camno_num = int(re.findall('\d+', ff.camno)[0])
+        camno_num = int(re.findall('\d+', str(ff.camno))[0])
 
-        fid.write(struct.pack('I', ff.nrows))
-        fid.write(struct.pack('I', ff.ncols))
-        fid.write(struct.pack('I', ff.nbits))
-        fid.write(struct.pack('I', ff.first))
-        fid.write(struct.pack('I', camno_num))
-    
+
+        # Write the old version
+        if version == 1:
+
+            fid.write(struct.pack('I', ff.nrows))
+            fid.write(struct.pack('I', ff.ncols))
+            fid.write(struct.pack('I', ff.nbits))
+            fid.write(struct.pack('I', ff.first))
+            fid.write(struct.pack('I', camno_num))
+
+
+        # Write the new version
+        else:
+
+            # Write new version indicator
+            fid.write(struct.pack('i', -1))
+
+            fid.write(struct.pack('I', ff.nrows))
+            fid.write(struct.pack('I', ff.ncols))
+
+            fid.write(struct.pack('I', ff.nframes))
+            fid.write(struct.pack('I', ff.first))
+            fid.write(struct.pack('I', camno_num))
+
+            fid.write(struct.pack('I', ff.decimation_fact))
+
+            fid.write(struct.pack('I', ff.interleave_flag))
+
+            if ff.fps < 0:
+                ff.fps = 25
+
+            # Store FPS as unsigned integer, 1000*fps
+            fid.write(struct.pack('I', int(1000*ff.fps)))
+
+
+        # Write image arrays
         arr.tofile(fid)
         

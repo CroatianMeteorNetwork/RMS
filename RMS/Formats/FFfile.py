@@ -126,9 +126,15 @@ def write(ff, directory, filename, fmt=None):
             fmt = 'fits'
 
 
+    # New CAMS format version by default
     if fmt == 'bin':
-        writeFFbin(ff, directory, filename)
+        writeFFbin(ff, directory, filename, version=2)
 
+    # Old CAMS format
+    elif fmt == 'bin1':
+        writeFFbin(ff, directory, filename, version=1)
+
+    # RMS fits format
     elif fmt == 'fits':
         writeFFfits(ff, directory, filename)
 
@@ -309,7 +315,7 @@ if __name__ == '__main__':
     ### TEST ###
 
     # Load a .bin file
-    dir_path = 'D:\\Dropbox\\RPi Meteor Station\\samples\\sample_bins'
+    dir_path = "D:/Dropbox/RPi_Meteor_Station/samples/sample_bins"
 
     file_name = 'FF453_20150620_201239_920_0058880.bin'
 
@@ -318,13 +324,22 @@ if __name__ == '__main__':
 
     print(ff)
 
-    file_name_fits = file_name.replace('.bin', '.fits')
+    # file_name_fits = file_name.replace('.bin', '.fits')
 
-    # Write the read FF file as FITS
-    write(ff, dir_path, file_name_fits, fmt='fits')
+    # # Write the read FF file as FITS
+    # write(ff, dir_path, file_name_fits, fmt='fits')
 
-    # Read the FFfits
-    ff = read(dir_path, file_name_fits)
+    # # Read the FFfits
+    # ff = read(dir_path, file_name_fits)
+
+
+    # Save as new CAMS format
+    file_name_new_bin = file_name[:-5] + '_new.bin'
+
+    write(ff, dir_path, file_name_new_bin, fmt='bin')
+
+    # Read the newly written file
+    ff = read(dir_path, file_name_new_bin)
 
 
     import matplotlib.pyplot as plt
