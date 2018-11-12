@@ -12,9 +12,10 @@ from RMS.Formats.FFbin import read as readFFbin
 from RMS.Formats.FFbin import write as writeFFbin
 from RMS.Formats.FFfits import read as readFFfits
 from RMS.Formats.FFfits import write as writeFFfits
+from RMS.Decorators import memoizeSingle
 
 
-
+@memoizeSingle
 def read(directory, filename, fmt=None, array=False, full_filename=False):
     """ Read FF file from the specified directory and choose the proper format for reading.
     
