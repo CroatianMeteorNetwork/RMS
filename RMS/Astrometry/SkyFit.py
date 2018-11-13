@@ -124,7 +124,7 @@ class FOVinputDialog(object):
 
 
 class PlateTool(object):
-    def __init__(self, dir_path, config, beginning_time=None, fps=None):
+    def __init__(self, dir_path, config, beginning_time=None, fps=None, gamma=None):
         """ SkyFit interactive window.
 
         Arguments:
@@ -135,10 +135,18 @@ class PlateTool(object):
             beginning_time: [datetime] Datetime of the video beginning. Optional, only can be given for
                 video input formats.
             fps: [float] Frames per second, used only when images in a folder are used.
+            gamma: [float] Camera gamma. None by default, then it will be used from the platepar file or
+                config.
         """
 
         self.config = config
         self.dir_path = dir_path
+
+
+        # If camera gamma was given, change the value in config
+        if gamma is not None:
+            config.gamma = gamma
+
 
         # Flag which regulates wheter the maxpixel or the avepixel image is shown (avepixel by default)
         self.img_type_flag = 'avepixel'
@@ -255,17 +263,25 @@ class PlateTool(object):
         # Load the platepar file
         self.platepar_file, self.platepar = self.loadPlatepar()
 
-        print('Platepar loaded:', self.platepar_file)
+        if self.platepar_file:
 
-        # Print the field of view size
-        print("FOV: {:.2f} x {:.2f} deg".format(*self.computeFOVSize()))
+            print('Platepar loaded:', self.platepar_file)
+
+            # Print the field of view size
+            print("FOV: {:.2f} x {:.2f} deg".format(*self.computeFOVSize()))
+
         
         # If the platepar file was not loaded, set initial values from config
-        if not self.platepar_file:
+        else:
             self.makeNewPlatepar(update_image=False)
 
             # Create the name of the platepar file
             self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
+
+
+        # Set the given gamma value to platepar
+        if gamma is not None:
+            self.platepar.gamma = gamma
 
 
         ### INIT IMAGE ###
@@ -2212,11 +2228,6 @@ if __name__ == '__main__':
         config = cr.parse(".config")
 
 
-    # If camera gamma was given, change the value in config
-    if cml_args.gamma is not None:
-        config.gamma = cml_args.gamma
-
-
     # Parse the beginning time into a datetime object
     if cml_args.timebeg is not None:
 
@@ -2227,7 +2238,7 @@ if __name__ == '__main__':
 
     # Init the plate tool instance
     plate_tool = PlateTool(cml_args.dir_path[0].replace('"', ''), config, beginning_time=beginning_time, 
-        fps=cml_args.fps)
+        fps=cml_args.fps, gamma=cml_args.gamma)
 
     plt.tight_layout()
     plt.show()
