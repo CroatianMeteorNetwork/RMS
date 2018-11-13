@@ -54,7 +54,7 @@ def writeCAL(night_dir, config, platepar):
         s +=" Cal center Elev (deg)    = {:8.3f}\n".format(platepar.alt_centre)
         s +=" Cal center col (colcen)  = {:8.3f}\n".format(platepar.X_res/2)
         s +=" Cal center row (rowcen)  = {:8.3f}\n".format(platepar.Y_res/2)
-        s +=" Cal fit order            = 03\n"
+        s +=" Cal fit order            = 201\n" # 201 = RMS 3rd order poly with radial terms
         s +="\n"
         s +=" Camera description       = None\n"
         s +=" Lens description         = None\n"
