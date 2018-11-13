@@ -94,7 +94,7 @@ def writeCAL(night_dir, config, platepar):
         s +="         B =   -2.50 \n"
         s +="\n"
         s +=" Magnitude = -2.5 ( C + D (logI-logVig) )   fit logFlux vs. Gamma (logI-logVig), mV <  6.60\n"
-        s +="         C =   -4.06 \n"
+        s +="         C = {:8.3f} \n".format(platepar.mag_lev/(-2.5))
         s +="         D =    1.00 \n"
         s +="\n"
         s +=" logVig = log( cos( Vignetting_coef * Rpixels * pi/180 )^4 )\n"
