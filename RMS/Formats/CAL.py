@@ -85,6 +85,8 @@ def writeCAL(night_dir, config, platepar):
         s +=" xxy              0.0              0.0 \n"
         s +=" xyy              0.0              0.0 \n"
         s +=" yyy              0.0              0.0 \n"
+        s +=" rx               0.0              0.0 \n"
+        s +=" ry               0.0              0.0 \n"
         s +=" ----  ---------------  ---------------\n"
         s +="\n"
         s +=" Mean O-C =   0.000 +-   0.000 arcmin\n"
