@@ -129,13 +129,15 @@ class InputTypeFF(object):
         self.dir_path = dir_path
         self.config = config
 
+        self.single_ff = single_ff
+
         # This type of input should have the calstars file
         self.require_calstars = True
 
         # Don't byteswap the images
         self.byteswap = False
 
-        if single_ff:
+        if self.single_ff:
             print('Using FF file:', self.dir_path)
         else:
             print('Using FF files from:', self.dir_path)
@@ -148,7 +150,7 @@ class InputTypeFF(object):
 
 
         # Add the single FF file to the list
-        if single_ff:
+        if self.single_ff:
 
             self.dir_path, file_name = os.path.split(self.dir_path)
 
@@ -308,9 +310,6 @@ class InputTypeFF(object):
         # If a selection of frames has to be reconstructed, go through all FF files and create new FF
         else:
 
-            # Store the current frame
-            current_frame_bak = self.current_frame
-
             # Determine which FF files are to be read and which frame ranges from each
             frame_ranges = []
             ffs_to_read = []
@@ -339,60 +338,77 @@ class InputTypeFF(object):
                 else:
                     frame_ranges[len(ffs_to_read) - 1].append(ff_local_index)
 
+            # If there is only one FF file to read, make a selection of frames, but preserve everything else
+            if len(ffs_to_read) == 1:
 
-            # Init an empty FF structure
-            self.ff = FFMimickInterface(self.nrows, self.ncols, self.fr_chunk_no, np.uint8)
+                file_name = ffs_to_read[0]
 
-            # Store maxpixel selections, avepixels, stdpixels
-            maxpixel_list = []
-            avepixel_list = []
-            stdpixel_list = []
-
-            # Read the FF files that have to read and reconstruct the frames
-            for file_name, frame_range in zip(ffs_to_read, frame_ranges):
+                frame_range = frame_ranges[0]
 
                 # Compute the range of frames to read
                 min_frame = np.min(frame_range)
                 max_frame = np.max(frame_range)
 
                 # Read the FF file
-                ff = readFF(self.dir_path, file_name)
+                self.ff = readFF(self.dir_path, file_name)
 
-                # Reconstruct the maxpixel in the given frame range
-                maxpixel = selectFFFrames(ff.maxpixel, ff, min_frame, max_frame)
-
-                # Reconstruct the avepixel in the given frame range
-                avepixel = selectFFFrames(ff.avepixel, ff, min_frame, max_frame)
-
-                # Store the computed frames
-                maxpixel_list.append(maxpixel)
-                avepixel_list.append(avepixel)
-                stdpixel_list.append(ff.stdpixel)
+                # Select the frames
+                self.ff.maxpixel = selectFFFrames(self.ff.maxpixel, self.ff, min_frame, max_frame)
 
 
-            # Immidiately extract the appropriate frames
-            if len(maxpixel_list) == 1:
-
-                self.ff.maxpixel = maxpixel_list[0]
-                self.ff.avepixel = avepixel_list[0]
-                self.ff.stdpixel = stdpixel_list[0]
-
-            # Otherwise, compute the combined FF
             else:
-                maxpixel_list = np.array(maxpixel_list)
-                avepixel_list = np.array(avepixel_list)
-                stdpixel_list = np.array(stdpixel_list)
-
-                self.ff.maxpixel = np.max(maxpixel_list, axis=0)
-
-                # The maximum of the avepixel is taken because only the frame range of avepixel is taken
-                self.ff.avepixel = np.max(avepixel_list, axis=0)
-
-                self.ff.stdpixel = np.max(stdpixel_list, axis=0)
 
 
-            # Set the current frame back to the value before the reconstruction
-            self.setFrame(current_frame_bak)
+
+                # Init an empty FF structure
+                self.ff = FFMimickInterface(self.nrows, self.ncols, self.fr_chunk_no, np.uint8)
+
+                # Store maxpixel selections, avepixels, stdpixels
+                maxpixel_list = []
+                avepixel_list = []
+                stdpixel_list = []
+
+                # Read the FF files that have to read and reconstruct the frames
+                for file_name, frame_range in zip(ffs_to_read, frame_ranges):
+
+                    # Compute the range of frames to read
+                    min_frame = np.min(frame_range)
+                    max_frame = np.max(frame_range)
+
+                    # Read the FF file
+                    ff = readFF(self.dir_path, file_name)
+
+                    # Reconstruct the maxpixel in the given frame range
+                    maxpixel = selectFFFrames(ff.maxpixel, ff, min_frame, max_frame)
+
+                    # Reconstruct the avepixel in the given frame range
+                    avepixel = selectFFFrames(ff.avepixel, ff, min_frame, max_frame)
+
+                    # Store the computed frames
+                    maxpixel_list.append(maxpixel)
+                    avepixel_list.append(avepixel)
+                    stdpixel_list.append(ff.stdpixel)
+
+
+                # Immidiately extract the appropriate frames
+                if len(maxpixel_list) == 1:
+
+                    self.ff.maxpixel = maxpixel_list[0]
+                    self.ff.avepixel = avepixel_list[0]
+                    self.ff.stdpixel = stdpixel_list[0]
+
+                # Otherwise, compute the combined FF
+                else:
+                    maxpixel_list = np.array(maxpixel_list)
+                    avepixel_list = np.array(avepixel_list)
+                    stdpixel_list = np.array(stdpixel_list)
+
+                    self.ff.maxpixel = np.max(maxpixel_list, axis=0)
+
+                    # The maximum of the avepixel is taken because only the frame range of avepixel is taken
+                    self.ff.avepixel = np.max(avepixel_list, axis=0)
+
+                    self.ff.stdpixel = np.max(stdpixel_list, axis=0)
 
                 
         # Store the loaded file to cache for faster loading
@@ -1421,7 +1437,7 @@ def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_d
         # Check if a single FF file was given
         if validFFName(file_name):
 
-            # Init the image handle for FF a single FF files
+            # Init the image handle for FF a single FF file
             img_handle = InputTypeFF(input_path, config, single_ff=True)
 
 
