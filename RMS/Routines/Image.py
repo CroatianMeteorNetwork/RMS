@@ -8,6 +8,47 @@ import math
 import numpy as np
 import scipy.misc
 
+from RMS.Decorators import memoizeSingle
+
+
+
+
+def thresholdImg(maxpixel, avepixel, stdpixel, k1, j1):
+    """ Threshold the image with given parameters.
+    
+    Arguments:
+        maxpixel: [2D ndarray]
+        avepixel: [2D ndarray]
+        stdpixel: [2D ndarray]
+        k1: [float] relative thresholding factor (how many standard deviations above mean the maxpixel image 
+            should be)
+        j1: [float] absolute thresholding factor (how many minimum abuolute levels above mean the maxpixel 
+            image should be)
+    
+    Return:
+        [ndarray] thresholded 2D image
+    """
+
+    return maxpixel - avepixel > (k1 * stdpixel + j1)
+
+
+@memoizeSingle
+def thresholdFF(ff, k1, j1):
+    """ Threshold the FF with given parameters.
+    
+    Arguments:
+        ff: [FF object] input FF image object on which the thresholding will be applied
+        k1: [float] relative thresholding factor (how many standard deviations above mean the maxpixel image 
+            should be)
+        j1: [float] absolute thresholding factor (how many minimum abuolute levels above mean the maxpixel 
+            image should be)
+    
+    Return:
+        [ndarray] thresholded 2D image
+    """
+
+    return thresholdImg(ff.maxpixel, ff.avepixel, ff.stdpixel, k1, j1)
+
 
 
 @np.vectorize

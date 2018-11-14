@@ -22,7 +22,7 @@ from RMS.Astrometry.Conversions import unixTime2Date
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import reconstructFrame as reconstructFrameFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
-from RMS.Formats.FFfile import getMiddleTimeFF
+from RMS.Formats.FFfile import getMiddleTimeFF, selectFFFrames
 from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
 
@@ -59,27 +59,6 @@ def computeFramesToRead(read_nframes, total_frames, fr_chunk_no, current_frame_c
 
 
 
-def selectFFFrames(img_input, ff, frame_min, frame_max):
-    """ Select only pixels in a given frame range. 
-    
-    Arguments:
-        img_input: [2D ndarray] Input image.
-        ff: [FF object] FF image object
-        frame_min: [int] first frame in a range to take
-        frame_max: [int] last frame in a range to take
-    
-    Return:
-        [ndarray] image with pixels only from the given frame range
-    """
-
-    # Get the indices of image positions with times correspondng to the subdivision
-    indices = np.where((ff.maxframe >= frame_min) & (ff.maxframe <= frame_max))
-
-    # Reconstruct the image with given indices
-    img = np.copy(ff.avepixel)
-    img[indices] = img_input[indices]
-
-    return img
 
 
 

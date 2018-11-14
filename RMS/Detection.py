@@ -31,6 +31,7 @@ import matplotlib.gridspec as gridspec
 from mpl_toolkits.mplot3d import Axes3D
 
 # RMS imports
+from RMS.DetectionTools import getThresholdedStripe3DPoints
 from RMS.Formats import FFfile
 from RMS.Formats import FTPdetectinfo
 import RMS.ConfigReader as cr
@@ -39,6 +40,7 @@ from RMS.Routines.CompareLines import compareLines
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
 from RMS.Routines import RollingShutterCorrection
+from RMS.Routines import thresholdFF
 
 # Morphology - Cython init
 import pyximport
@@ -64,23 +66,6 @@ def logDebug(*log_str):
         log.debug(" ".join(log_str))
 
 
-
-
-def thresholdImg(ff, k1, j1):
-    """ Threshold the image with given parameters.
-    
-    Arguments:
-        ff: [FF object] input FF image object on which the thresholding will be applied
-        k1: [float] relative thresholding factor (how many standard deviations above mean the maxpixel image 
-            should be)
-        j1: [float] absolute thresholding factor (how many minimum abuolute levels above mean the maxpixel 
-            image should be)
-    
-    Return:
-        [ndarray] thresholded 2D image
-    """
-
-    return ff.maxpixel - ff.avepixel > (k1 * ff.stdpixel + j1)
 
 
 
@@ -142,99 +127,6 @@ def getPolarLine(x1, y1, x2, y2, img_h, img_w):
 
     return rho, np.degrees(theta)
 
-
-
-def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
-    """ Get indices of the stripe centered on a line. Line parameters are in Hough Transform form.
-    
-    Arguments:
-        rho: [float] Line distance from the center in HT space (pixels).
-        theta: [float] Angle in degrees in HT space.
-        stripe_width: [int] Width of the stripe around the line.
-        img_h: [int] Original image height in pixels.
-        img_w: [int] Original image width in pixels.
-
-    Return:
-        (indicesy, indicesx): [tuple] a tuple of x and y indices of stripe pixels
-
-    """
-
-    # minimum angle offset from 90 degrees
-    angle_eps = 0.2
-
-    # Check for vertical/horizontal lines and set theta to a small angle
-    if (theta%90 < angle_eps):
-        theta = 90 + angle_eps
-
-    # Normalize theta to 0-360 range
-    theta = theta%360
-
-    hh = img_h/2.0
-    hw = img_w/2.0
-
-    indicesy = []
-    indicesx = []
-     
-    if theta < 45 or (theta > 90 and theta < 135):
-
-        theta = np.radians(theta)
-        half_limit = (stripe_width/2)/np.cos(theta)
-
-        a = -np.tan(theta)
-        b = rho/np.cos(theta)
-         
-        for y in range(int(-hh), int(hh)):
-
-            x0 = a*y + b
-             
-            x1 = int(x0 - half_limit + hw)
-            x2 = int(x0 + half_limit + hw)
-             
-            if x1 > x2:
-                x1, x2 = x2, x1
-             
-            if x2 < 0 or x1 >= img_w:
-                continue
-            
-            for x in range(x1, x2):
-                if x < 0 or x >= img_w:
-                    continue
-                 
-                indicesy.append(y + hh)
-                indicesx.append(x)
-                 
-    else:
-
-        theta = np.radians(theta)
-        half_limit = (stripe_width/2)/np.sin(theta)
-
-        a = -1/np.tan(theta)
-        b = rho/np.sin(theta)
-         
-        for x in range(int(-hw), int(hw)):
-            y0 = a*x + b
-             
-            y1 = int(y0 - half_limit + hh)
-            y2 = int(y0 + half_limit + hh)
-             
-            if y1 > y2:
-                y1, y2 = y2, y1
-             
-            if y2 < 0 or y1 >= img_h:
-                continue
-                
-            for y in range(y1, y2):
-                if y < 0 or y >= img_h:
-                    continue
-                 
-                indicesy.append(y)
-                indicesx.append(x + hw)
-
-    # Convert indices to integer
-    indicesx = list(map(int, indicesx))
-    indicesy = list(map(int, indicesy))
-
-    return (indicesy, indicesx)
 
 
 
@@ -511,7 +403,7 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
     line_results = []
 
     # Threshold the image
-    img_thres = thresholdImg(ff, k1, j1)
+    img_thres = thresholdFF(ff, k1, j1)
 
     # # Show thresholded image
     # show("thresholded ALL", img_thres)
@@ -894,8 +786,8 @@ def show3DCloud(ff, stripe, detected_line=None, stripe_points=None, config=None)
 
 
 
-def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
-    """ Detect meteors on the given FF bin image. Here are the steps in the detection:
+def detectMeteors(img_handle, config, flat_struct=None):
+    """ Detect meteors on the given image. Here are the steps in the detection:
             - input image (FF bin format file) is thresholded (converted to black and white)
             - several morphological operations are applied to clean the image
             - image is then broken into several image "windows" (these "windows" are reconstructed from the input FF file, given
@@ -907,8 +799,7 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
             - centroiding is performed, which calculates the position and intensity of meteor on each frame
     
     Arguments:
-        ff_directory: [string] an absolute path to the input FF bin file
-        ff_name: [string] file name of the FF bin file on which to run the detection on
+        img_handle: [FrameInterface instance] Object which has a common interface to various input files.
         config: [config object] configuration object (loaded from the .config file)
 
     Keyword arguments:
@@ -925,24 +816,22 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
     t1 = time()
     t_all = time()
 
-    # Load the FF bin file
-    ff = FFfile.read(ff_directory, ff_name)
-
-    # If the file could not be read, skip detection
-    if ff is None:
-        return []
-
     # Load the mask file
     mask = MaskImage.loadMask(config.mask_file)
 
-    # Mask the FF file
-    ff = MaskImage.applyMask(ff, mask, ff_flag=True)
 
-    # Apply the flat to maxpixel and avepixel
-    if flat_struct is not None:
+    # Do all image processing on single FF file, if given
+    #   Otherwise, the image processing will be done on every frame chunk that is extracted
+    if img_handle == 'ff':
 
-        ff.maxpixel = Image.applyFlat(ff.maxpixel, flat_struct)
-        ff.avepixel = Image.applyFlat(ff.avepixel, flat_struct)
+        # Mask the FF file
+        img_handle.ff = MaskImage.applyMask(img_handle.ff, mask, ff_flag=True)
+
+        # Apply the flat to maxpixel and avepixel
+        if flat_struct is not None:
+
+            img_handle.ff.maxpixel = Image.applyFlat(img_handle.ff.maxpixel, flat_struct)
+            img_handle.ff.avepixel = Image.applyFlat(img_handle.ff.avepixel, flat_struct)
 
 
     # # Show the maxpixel image
@@ -973,7 +862,7 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
         # plotLines(ff, line_list)
 
         # Threshold the image
-        img_thres = thresholdImg(ff, config.k1_det, config.j1_det)
+        img_thres = thresholdFF(ff, config.k1_det, config.j1_det)
 
         filtered_lines = []
 
@@ -1002,30 +891,10 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
             logDebug('rho, theta, frame_min, frame_max')
             logDebug(rho, theta, frame_min, frame_max)
 
-            # Bounded the thresholded image by min and max frames
-            img = selectFrames(np.copy(img_thres), ff, frame_min, frame_max)
 
-            # Remove lonely pixels
-            img = morph.clean(img)
-
-            # Get indices of stripe pixels around the line
-            stripe_indices = getStripeIndices(rho, theta, config.stripe_width, img.shape[0], img.shape[1])
-
-            # Extract the stripe from the thresholded image
-            stripe = np.zeros((ff.nrows, ff.ncols), np.uint8)
-            stripe[stripe_indices] = img[stripe_indices]
-
-            # Show stripe
-            # show2("stripe", stripe*255)
-
-            # Show 3D could
-            # show3DCloud(ff, stripe)
-
-            # Get stripe positions
-            stripe_positions = stripe.nonzero()
-            xs = stripe_positions[1]
-            ys = stripe_positions[0]
-            zs = ff.maxframe[stripe_positions]
+            # Extract (x, y, frame) of thresholded frames
+            xs, ys, zs = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta)
+            
 
             # Limit the number of points to search if too large
             if len(zs) > config.max_points_det:
@@ -1040,7 +909,7 @@ def detectMeteors(ff_directory, ff_name, config, flat_struct=None):
                 xs = xs[indices]
                 zs = zs[indices]
 
-            # Make an array to feed into the gropuing algorithm
+            # Make an array to feed into the grouping algorithm
             stripe_points = np.vstack((xs, ys, zs))
             stripe_points = np.swapaxes(stripe_points, 0, 1)
             
