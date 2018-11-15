@@ -135,6 +135,10 @@ class Platepar(object):
         self.x_poly = np.zeros(shape=(12,), dtype=np.float64)
         self.y_poly = np.zeros(shape=(12,), dtype=np.float64)
 
+        # Set the first coeffs to 0.5, as that is the real centre of the FOV
+        self.x_poly[0] = 0.5
+        self.y_poly[0] = 0.5
+
         self.station_code = None
 
 

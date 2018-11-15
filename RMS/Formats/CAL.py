@@ -23,14 +23,13 @@ def writeCAL(night_dir, config, platepar):
 
     # Extract time from night name
     _, night_name = os.path.split(night_dir)
-    night_time = "_".join(night_name[1:4])[:-3]
-
+    night_time = "_".join(night_name.split('_')[1:4])[:-3]
 
     # Construct the CAL file name
-    file_name = "CAL_{:6d}_{:s}.txt".format(config.cams_code, night_time)
+    file_name = "CAL_{:06d}_{:s}.txt".format(config.cams_code, night_time)
 
     # Open the file
-    with open(os.path.join(night_dir, file_name)) as f:
+    with open(os.path.join(night_dir, file_name), 'w') as f:
 
         # Construct calibration date and time
         calib_dt = jd2Date(platepar.JD, dt_obj=True)
@@ -47,7 +46,7 @@ def writeCAL(night_dir, config, platepar):
         s +=" Plate scale (arcmin/pix) = {:8.3f}\n".format(60/platepar.F_scale)
         s +=" Plate roll wrt Std (deg) = {:8.3f}\n".format(platepar.pos_angle_ref)
         s +=" Cam tilt wrt Horiz (deg) =    0.000\n"
-        s +=" Frame rate (Hz)          = {:8.3f}\n".format(platepar.fps)
+        s +=" Frame rate (Hz)          = {:8.3f}\n".format(config.fps)
         s +=" Cal center RA (deg)      = {:8.3f}\n".format(platepar.RA_d)
         s +=" Cal center Dec (deg)     = {:8.3f}\n".format(platepar.dec_d)
         s +=" Cal center Azim (deg)    = {:8.3f}\n".format(platepar.az_centre)
@@ -69,24 +68,24 @@ def writeCAL(night_dir, config, platepar):
         s +=" Vignetting coef(deg/pix) =    0.000\n"
         s +=" Gamma                    = {:8.3f}\n".format(config.gamma)
         s +="\n"
-        s +=" Xstd, Ystd = Cubicxy2Standard( col, row, colcen, rowcen, Xcoef, Ycoef )\n"
+        s +=" Xstd, Ystd = Radialxy2Standard( col, row, colcen, rowcen, Xcoef, Ycoef )\n"
         s +=" x = col - colcen\n"
         s +=" y = rowcen - row\n"
         s +="\n"
         s +=" Term       Xcoef            Ycoef     \n"
         s +=" ----  ---------------  ---------------\n"
-        s +=" 1     {:.10e}  {:.10e} \n".format(platepar.x_poly[0], platepar.y_poly[0])
-        s +=" x     {:.10e}  {:.10e} \n".format(platepar.x_poly[1], platepar.y_poly[1])
-        s +=" y     {:.10e}  {:.10e} \n".format(platepar.x_poly[2], platepar.y_poly[2])
-        s +=" xx    {:.10e}  {:.10e} \n".format(platepar.x_poly[3], platepar.y_poly[3])
-        s +=" xy    {:.10e}  {:.10e} \n".format(platepar.x_poly[4], platepar.y_poly[4])
-        s +=" yy    {:.10e}  {:.10e} \n".format(platepar.x_poly[5], platepar.y_poly[5])
-        s +=" xxx   {:.10e}  {:.10e} \n".format(platepar.x_poly[6], platepar.y_poly[6])
-        s +=" xxy   {:.10e}  {:.10e} \n".format(platepar.x_poly[7], platepar.y_poly[7])
-        s +=" xyy   {:.10e}  {:.10e} \n".format(platepar.x_poly[8], platepar.y_poly[8])
-        s +=" yyy   {:.10e}  {:.10e} \n".format(platepar.x_poly[9], platepar.y_poly[9])
-        s +=" rx    {:.10e}  {:.10e} \n".format(platepar.x_poly[10], platepar.y_poly[11])
-        s +=" ry    {:.10e}  {:.10e} \n".format(platepar.x_poly[11], platepar.y_poly[10])
+        s +=" 1     {:+.8e}  {:+.8e} \n".format(platepar.x_poly[0], platepar.y_poly[0])
+        s +=" x     {:+.8e}  {:+.8e} \n".format(platepar.x_poly[1], platepar.y_poly[1])
+        s +=" y     {:+.8e}  {:+.8e} \n".format(platepar.x_poly[2], platepar.y_poly[2])
+        s +=" xx    {:+.8e}  {:+.8e} \n".format(platepar.x_poly[3], platepar.y_poly[3])
+        s +=" xy    {:+.8e}  {:+.8e} \n".format(platepar.x_poly[4], platepar.y_poly[4])
+        s +=" yy    {:+.8e}  {:+.8e} \n".format(platepar.x_poly[5], platepar.y_poly[5])
+        s +=" xxx   {:+.8e}  {:+.8e} \n".format(platepar.x_poly[6], platepar.y_poly[6])
+        s +=" xxy   {:+.8e}  {:+.8e} \n".format(platepar.x_poly[7], platepar.y_poly[7])
+        s +=" xyy   {:+.8e}  {:+.8e} \n".format(platepar.x_poly[8], platepar.y_poly[8])
+        s +=" yyy   {:+.8e}  {:+.8e} \n".format(platepar.x_poly[9], platepar.y_poly[9])
+        s +=" rx    {:+.8e}  {:+.8e} \n".format(platepar.x_poly[10], platepar.y_poly[11])
+        s +=" ry    {:+.8e}  {:+.8e} \n".format(platepar.x_poly[11], platepar.y_poly[10])
         s +=" ----  ---------------  ---------------\n"
         s +="\n"
         s +=" Mean O-C =   0.000 +-   0.000 arcmin\n"
@@ -110,3 +109,21 @@ def writeCAL(night_dir, config, platepar):
         f.write(s)
 
 
+
+if __name__ == "__main__":
+
+    import RMS.ConfigReader as cr
+    from RMS.Formats import Platepar
+
+    # Load the default configuration file
+    config = cr.parse(".config")
+
+    # Load a platepar file
+    pp = Platepar.Platepar()
+    pp.read("/mnt/bulk/2018Draconids/ConfirmedFiles/HR0010_20181008_170022_956418_detected/platepar_cmn2010.cal")
+
+
+    night_dir = "/mnt/bulk/2018Draconids/ConfirmedFiles/HR0010_20181008_170022_956418_detected"
+
+    # Write the CAL file
+    writeCAL(night_dir, config, pp)

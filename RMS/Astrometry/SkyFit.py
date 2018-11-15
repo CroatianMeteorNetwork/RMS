@@ -1636,6 +1636,10 @@ class PlateTool(object):
         self.platepar.x_poly *= 0
         self.platepar.y_poly *= 0
 
+        # Set the first coeffs to 0.5, as that is the real centre of the FOV
+        self.platepar.x_poly[0] = 0.5
+        self.platepar.y_poly[0] = 0.5
+
         # Set station ID
         self.platepar.station_code = self.config.stationID
 
