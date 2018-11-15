@@ -1053,7 +1053,7 @@ class InputTypeImages(object):
 
                     # Don't take flats, biases, darks, etc.
                     if ('flat' in file_name.lower()) or ('dark' in file_name.lower()) \
-                        or ('bias' in file_name.lower()):
+                        or ('bias' in file_name.lower()) or ('grid' in file_name.lower()):
                             continue
 
                     self.img_list.append(file_name)

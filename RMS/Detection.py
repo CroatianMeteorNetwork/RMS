@@ -752,18 +752,12 @@ def plotLines(ff, line_list):
 
 
 
-def show3DCloud(ff, stripe, detected_line=None, stripe_points=None, config=None):
+def show3DCloud(ff, xs, ys, zs, detected_line=None, stripe_points=None, config=None):
     """ Shows 3D point cloud of stripe points.
     """
 
     if detected_line is None:
         detected_line = []
-
-    stripe_indices = stripe.nonzero()
-
-    xs = stripe_indices[1]
-    ys = stripe_indices[0]
-    zs = ff.maxframe[stripe_indices]
 
     logDebug('points: ', len(xs))
 
@@ -809,6 +803,25 @@ def show3DCloud(ff, stripe, detected_line=None, stripe_points=None, config=None)
 
 
 
+def preprocessFF(img_handle, mask, flat_struct):
+    """ Apply the mask and flat to FF file in img_handle. """
+
+    # Mask the FF file
+    img_handle.ff = MaskImage.applyMask(img_handle.ff, mask, ff_flag=True)
+
+    # Apply the flat to maxpixel and avepixel
+    if flat_struct is not None:
+
+        img_handle.ff.maxpixel = Image.applyFlat(img_handle.ff.maxpixel, flat_struct)
+        img_handle.ff.avepixel = Image.applyFlat(img_handle.ff.avepixel, flat_struct)
+
+
+    return img_handle
+
+
+
+
+
 def detectMeteors(img_handle, config, flat_struct=None):
     """ Detect meteors on the given image. Here are the steps in the detection:
             - input image (FF bin format file) is thresholded (converted to black and white)
@@ -847,15 +860,8 @@ def detectMeteors(img_handle, config, flat_struct=None):
     #   Otherwise, the image processing will be done on every frame chunk that is extracted
     if img_handle == 'ff':
 
-        # Mask the FF file
-        img_handle.ff = MaskImage.applyMask(img_handle.ff, mask, ff_flag=True)
-
-        # Apply the flat to maxpixel and avepixel
-        if flat_struct is not None:
-
-            img_handle.ff.maxpixel = Image.applyFlat(img_handle.ff.maxpixel, flat_struct)
-            img_handle.ff.avepixel = Image.applyFlat(img_handle.ff.avepixel, flat_struct)
-
+        # Apply mask and flat to FF
+        img_handle = preprocessFF(img_handle, mask, flat_struct)
 
 
     # Get lines on the image
@@ -883,52 +889,43 @@ def detectMeteors(img_handle, config, flat_struct=None):
         # plotLines(img_handle.ff, line_list)
 
 
-        ### TEST!!!
-        print('EXITING...')
-        sys.exit()
-
-        ###
-
-        # Threshold the image
-        img_thres = thresholdFF(img_handle.ff, config.k1_det, config.j1_det)
-
         filtered_lines = []
 
-
-        # Gamma correct image files
-        maxpixel_gamma_corr = Image.gammaCorrection(ff.maxpixel, config.gamma)
-        avepixel_gamma_corr = Image.gammaCorrection(ff.avepixel, config.gamma)
-        stdpixel_gamma_corr = Image.gammaCorrection(ff.stdpixel, config.gamma)
-
-        # Calculate weights for centroiding (apply gamma correction on both images)
-        max_avg_corrected = maxpixel_gamma_corr - avepixel_gamma_corr
-        flattened_weights = (max_avg_corrected).astype(np.float32)/stdpixel_gamma_corr
-
-
-        # At the end, a check that the detection has a surface brightness above the background will be performed.
-        # The assumption here is that the peak of the meteor should have the intensity which is at least
-        # that of a patch of 4x4 pixels that are of the mean background brightness
-        min_patch_intensity = 4*4*(np.mean(maxpixel_gamma_corr - avepixel_gamma_corr) \
-            + config.k1_det*np.mean(stdpixel_gamma_corr) + config.j1)
-
-
         # Analyze stripes of each line
+        # This step makes sure that there is a linear propagation of the detections in time
         for line in line_list:
+
             rho, theta, frame_min, frame_max = line
 
             logDebug('rho, theta, frame_min, frame_max')
             logDebug(rho, theta, frame_min, frame_max)
 
 
-            # Extract (x, y, frame) of thresholded frames
-            xs, ys, zs = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta)
+            # If FF files are not used as input, reconstruct it
+            if img_handle.input_type != 'ff':
+
+                # Compute the FF for this chunk
+                img_handle.loadChunk(first_frame=frame_min, read_nframes=(frame_max - frame_min))
+
+                # Apply mask and flat to FF
+                img_handle = preprocessFF(img_handle, mask, flat_struct)
+
+
+                # # Show the image chunk, average subtracted
+                # plt.imshow(img_handle.ff.maxpixel - img_handle.ff.avepixel, cmap='gray')
+                # plt.show()
+                
+
+            # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
+            xs, ys, zs = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, \
+                mask, flat_struct)
             
 
             # Limit the number of points to search if too large
             if len(zs) > config.max_points_det:
 
                 # Extract weights of each point
-                maxpix_elements = ff.maxpixel[ys,xs].astype(np.float64)
+                maxpix_elements = img_handle.ff.maxpixel[ys,xs].astype(np.float64)
                 weights = maxpix_elements/np.sum(maxpix_elements)
 
                 # Random sample the point, sampling is weighted by pixel intensity
@@ -959,8 +956,8 @@ def detectMeteors(img_handle, config, flat_struct=None):
 
                 # logDebug(detected_line)
 
-                # Show 3D cloud
-                # show3DCloud(ff, stripe, detected_line, stripe_points, config)
+                # # Show 3D cloud
+                # show3DCloud(img_handle.ff, xs, ys, zs, detected_line, stripe_points, config)
 
                 # Add the line to the results list
                 filtered_lines.append(detected_line)
@@ -970,6 +967,44 @@ def detectMeteors(img_handle, config, flat_struct=None):
 
         logDebug('after filtering:')
         logDebug(filtered_lines)
+
+
+        ### TEST!!!
+        print('EXITING...')
+        sys.exit()
+
+        ###
+
+
+        # If the input is a single FF file, threshold the image right away
+        if img_handle.input_type == 'ff':
+
+            # Threshold the FF
+            img_thres = thresholdFF(img_handle.ff, config.k1_det, config.j1_det)
+
+
+            # Gamma correct image files
+            maxpixel_gamma_corr = Image.gammaCorrection(img_handle.ff.maxpixel, config.gamma)
+            avepixel_gamma_corr = Image.gammaCorrection(img_handle.ff.avepixel, config.gamma)
+            stdpixel_gamma_corr = Image.gammaCorrection(img_handle.ff.stdpixel, config.gamma)
+
+
+            # Calculate weights for centroiding (apply gamma correction on both images)
+            max_avg_corrected = maxpixel_gamma_corr - avepixel_gamma_corr
+            flattened_weights = (max_avg_corrected).astype(np.float32)/stdpixel_gamma_corr
+
+
+            # At the end, a check that the detection has a surface brightness above the background will be performed.
+            # The assumption here is that the peak of the meteor should have the intensity which is at least
+            # that of a patch of 4x4 pixels that are of the mean background brightness
+            min_patch_intensity = 4*4*(np.mean(maxpixel_gamma_corr - avepixel_gamma_corr) \
+                + config.k1_det*np.mean(stdpixel_gamma_corr) + config.j1)
+
+
+        # For other input types
+        else:
+            pass
+
 
 
         for detected_line in filtered_lines:
@@ -982,7 +1017,7 @@ def detectMeteors(img_handle, config, flat_struct=None):
             if (abs(frame_max - frame_min) + 1 < config.line_minimum_frame_range_det):
                 continue
 
-            # Extand the frame range for several frames, just to be sure to catch all parts of a meteor
+            # Extend the frame range for several frames, just to be sure to catch all parts of a meteor
             frame_min -= config.frame_extension
             frame_max += config.frame_extension
 

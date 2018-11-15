@@ -4,10 +4,12 @@ from __future__ import print_function, division, absolute_import
 
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 from RMS.Formats.FFfile import selectFFFrames
-from RMS.Routines.Image import thresholdFF
+from RMS.Routines import Image
+from RMS.Routines import MaskImage
 
 # Morphology - Cython init
 import pyximport
@@ -111,23 +113,28 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
 
 
 
-def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta):
+def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, mask, flat_struct):
+    """ Threshold the image and get a list of pixel positions and frames of threshold passers. 
+        This function handles all input types of data.
 
+    """
+
+
+    # Get indices of stripe pixels around the line
+    img_h, img_w = img_handle.ff.maxpixel.shape
+    stripe_indices = getStripeIndices(rho, theta, config.stripe_width, img_h, img_w)
 
     # If the FF files is given, extract the points from FF after threshold
     if img_handle.input_type == 'ff':
 
         # Threshold the FF file
-        img_thres = thresholdFF(img_handle.ff, config.k1_det, config.j1_det)
+        img_thres = Image.thresholdFF(img_handle.ff, config.k1_det, config.j1_det)
 
         # Extract the thresholded image by min and max frames from FF file
         img = selectFFFrames(np.copy(img_thres), img_handle.ff, frame_min, frame_max)
 
         # Remove lonely pixels
         img = morph.clean(img)
-
-        # Get indices of stripe pixels around the line
-        stripe_indices = getStripeIndices(rho, theta, config.stripe_width, img.shape[0], img.shape[1])
 
         # Extract the stripe from the thresholded image
         stripe = np.zeros(img.shape, img.dtype)
@@ -145,13 +152,81 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
         ys = stripe_positions[0]
         zs = img_handle.ff.maxframe[stripe_positions]
 
+        return xs, ys, zs
 
-    # If video frames are available, extract indices on all frames
+
+    # If video frames are available, extract indices on all frames in the given range
     else:
 
-        pass
+        xs_array = []
+        ys_array = []
+        zs_array = []
+
+        # Go through all frames in the frame range
+        for fr in range(frame_min, frame_max + 1):
 
 
+            # Break the loop if outside frame size
+            if fr == (img_handle.total_frames - 1):
+                break
+
+            # Set the frame number
+            img_handle.setFrame(fr)
+
+            # Load the frame
+            fr_img = img_handle.loadFrame()
+
+            # Mask the image
+            fr_img = MaskImage.applyMask(fr_img, mask)
+
+            # Apply the flat to frame
+            if flat_struct is not None:
+
+                fr_img = Image.applyFlat(fr_img, flat_struct)
+                
 
 
-    return xs, ys, zs
+            # plt.imshow(fr_img, cmap='gray', vmin=100, vmax=10000)
+            # plt.show()
+
+            # Threshold the frame
+            img_thres = Image.thresholdImg(fr_img, img_handle.ff.avepixel, img_handle.ff.stdpixel, \
+                config.k1_det, config.j1_det)
+
+
+            # print(fr)
+            # fig, (ax1, ax2) = plt.subplots(nrows=2)
+            # ax1.imshow(img_thres, cmap='gray')
+            # ax2.imshow(fr_img, cmap='gray', vmax=10000)
+            # plt.show()
+
+            # Remove lonely pixels
+            img_thres = morph.clean(img_thres)
+
+
+            # Extract the stripe from the thresholded image
+            stripe = np.zeros(img_thres.shape, img_thres.dtype)
+            stripe[stripe_indices] = img_thres[stripe_indices]
+
+            # plt.imshow(stripe, cmap='gray')
+            # plt.show()
+
+            # Get stripe positions (x, y, frame)
+            stripe_positions = stripe.nonzero()
+            xs = stripe_positions[1]
+            ys = stripe_positions[0]
+            zs = np.zeros_like(xs) + fr
+
+            # Add the points to the list
+            xs_array.append(xs)
+            ys_array.append(ys)
+            zs_array.append(zs)
+
+        
+        # Flatten the arrays
+        xs_array = np.concatenate(xs_array)
+        ys_array = np.concatenate(ys_array)
+        zs_array = np.concatenate(zs_array)
+
+
+        return xs_array, ys_array, zs_array

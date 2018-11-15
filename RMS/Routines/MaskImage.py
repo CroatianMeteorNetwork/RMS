@@ -53,7 +53,7 @@ def maskImage(input_image, mask):
 
 	# If the image dimensions don't agree, dont apply the mask
 	if input_image.shape != mask.shape:
-		log.warning('Image and mask dimensions do not agree! Skipping masking...')
+		# log.warning('Image and mask dimensions do not agree! Skipping masking...')
 		return input_image
 
 	# Set all image pixels where the mask is black to 0
