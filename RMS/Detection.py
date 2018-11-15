@@ -34,13 +34,14 @@ from mpl_toolkits.mplot3d import Axes3D
 from RMS.DetectionTools import getThresholdedStripe3DPoints
 from RMS.Formats import FFfile
 from RMS.Formats import FTPdetectinfo
+from RMS.Formats.FrameInterface import detectInputType
 import RMS.ConfigReader as cr
 from RMS.Routines.Grouping3D import find3DLines, getAllPoints
 from RMS.Routines.CompareLines import compareLines
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
 from RMS.Routines import RollingShutterCorrection
-from RMS.Routines import thresholdFF
+from RMS.Routines.Image import thresholdFF
 
 # Morphology - Cython init
 import pyximport
@@ -65,31 +66,6 @@ def logDebug(*log_str):
 
         log.debug(" ".join(log_str))
 
-
-
-
-
-def selectFrames(img_thres, ff, frame_min, frame_max):
-    """ Select only pixels in a given frame range. 
-    
-    Arguments:
-        img_thres: [ndarray] 2D numpy array containing the thresholded image
-        ff: [FF object] FF image object
-        frame_min: [int] first frame in a range to take
-        frame_max: [int] last frame in a range to take
-    
-    Return:
-        [ndarray] image with pixels only from the given frame range
-    """
-
-    # Get the indices of image positions with times correspondng to the subdivision
-    indices = np.where((ff.maxframe >= frame_min) & (ff.maxframe <= frame_max))
-
-    # Reconstruct the image with given indices
-    img = np.zeros((ff.nrows, ff.ncols), dtype=np.uint8)
-    img[indices] = img_thres[indices]
-
-    return img
 
 
 
@@ -369,11 +345,34 @@ def merge3DLines(line_list, vect_angle_thresh, last_count=0):
 
 
 
-def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_ratio, kht_lib_path):
+def checkWhiteRatio(img_thres, ff, max_white_ratio):
+    """ Checks if there are too many threshold passers on an image. """
+
+    # Check if the image is too "white" and any futher processing makes no sense
+    # Compute the radio between the number of threshold passers and all pixels
+    white_ratio = np.count_nonzero(img_thres)/float(ff.nrows*ff.ncols)
+
+    logDebug('white ratio: ' + str(white_ratio))
+
+    if white_ratio > max_white_ratio:
+
+        log.debug(("Too many threshold passers! White ratio is {:.2f}, which is higher than the "\
+            "max_white_ratio threshold: {:.2f}").format(white_ratio, max_white_ratio))
+
+        return False
+
+
+    return True
+
+
+
+
+def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_white_ratio, kht_lib_path, \
+    mask, flat_struct):
     """ Get (rho, phi) pairs for each meteor present on the image using KHT.
         
     Arguments:
-        ff: [FF bin object] FF bin file loaded into the FF bin class
+        img_handle: [FrameInterface instance] Object with common interface to various input formats.
         k1: [float] weight parameter for the standard deviation during thresholding
         j1: [float] absolute threshold above average during thresholding
         time_slide: [int] subdivision size of the time axis (256 will be divided into 256/time_slide parts)
@@ -402,34 +401,58 @@ def getLines(ff, k1, j1, time_slide, time_window_size, max_lines, max_white_rati
 
     line_results = []
 
-    # Threshold the image
-    img_thres = thresholdFF(ff, k1, j1)
 
-    # # Show thresholded image
-    # show("thresholded ALL", img_thres)
+    # If the input is a single FF file, threshold the image right away
+    if img_handle.input_type == 'ff':
 
+        # Threshold the FF
+        img_thres = thresholdFF(img_handle.ff, k1, j1)
 
-    logDebug('white ratio: ' + str(np.count_nonzero(img_thres)/float(ff.nrows*ff.ncols)))
+        # # Show thresholded image
+        # show("thresholded ALL", img_thres)
 
-    # Check if the image is too "white" and any futher processing makes no sense
-    # This checks the max percentage of white pixels in the thresholded image
-    white_ratio = np.count_nonzero(img_thres)/float(ff.nrows*ff.ncols)
-    if white_ratio > max_white_ratio:
-
-        log.debug(("Too many threshold passers! White ratio is {:.2f}, which is higher than the "\
-            "max_white_ratio threshold: {:.2f}").format(white_ratio, max_white_ratio))
-
-        return line_results
+        # Check if there are too many threshold passers, if so report that no lines were found
+        if not checkWhiteRatio(img_thres, img_handle.ff, max_white_ratio):
+            return line_results
 
 
     # Subdivide the image by time into overlapping parts (decreases noise when searching for meteors)
-    for i in range(0, int(256/time_slide - 1)):
+    for i in range(0, int(img_handle.total_frames/time_slide - 1)):
 
         frame_min = i*time_slide
         frame_max = i*time_slide + time_window_size
 
-        # Select the time range of the thresholded image
-        img = selectFrames(img_thres, ff, frame_min, frame_max)
+
+        # If an FF file is used
+        if img_handle.input_type == 'ff':
+            
+            # Select the time range of the thresholded image
+            img = FFfile.selectFFFrames(img_thres, img_handle.ff, frame_min, frame_max)
+
+
+        # If not, load a range of frames and threshold it
+        else:
+
+            # Load the frame chunk
+            img_handle.loadChunk(first_frame=frame_min, read_nframes=(frame_max - frame_min + 1))
+
+            # Mask the FF file
+            img_handle.ff = MaskImage.applyMask(img_handle.ff, mask, ff_flag=True)
+
+            # Apply the flat to maxpixel and avepixel
+            if flat_struct is not None:
+
+                img_handle.ff.maxpixel = Image.applyFlat(img_handle.ff.maxpixel, flat_struct)
+                img_handle.ff.avepixel = Image.applyFlat(img_handle.ff.avepixel, flat_struct)
+
+            # Threshold the frame chunk
+            img = thresholdFF(img_handle.ff, k1, j1)
+
+            # Check if there are too many threshold passers, if so report that no lines were found
+            if not checkWhiteRatio(img, img_handle.ff, max_white_ratio):
+                return line_results
+
+
 
         # Show thresholded image
         # show(str(frame_min) + "-" + str(frame_max) + " threshold", img)
@@ -838,11 +861,17 @@ def detectMeteors(img_handle, config, flat_struct=None):
     # show2(ff_name+' maxpixel', ff.maxpixel)
 
     # Get lines on the image
-    line_list = getLines(ff, config.k1_det, config.j1_det, config.time_slide, config.time_window_size, 
-        config.max_lines_det, config.max_white_ratio, config.kht_lib_path)
+    line_list = getLines(img_handle, config.k1_det, config.j1_det, config.time_slide, config.time_window_size, 
+        config.max_lines_det, config.max_white_ratio, config.kht_lib_path, mask, flat_struct)
 
     logDebug('List of lines:', line_list)
 
+
+    ### TEST!!!
+    print('EXITING...')
+    sys.exit()
+
+    ###
 
     # Init meteor list
     meteor_detections = []
@@ -851,7 +880,7 @@ def detectMeteors(img_handle, config, flat_struct=None):
     if len(line_list):
 
         # Join similar lines
-        line_list = mergeLines(line_list, config.line_min_dist, ff.ncols, ff.nrows)
+        line_list = mergeLines(line_list, config.line_min_dist, img_handle.ff.ncols, img_handle.ff.nrows)
 
         logDebug('Time for finding lines:', time() - t1)
 
@@ -859,10 +888,10 @@ def detectMeteors(img_handle, config, flat_struct=None):
         logDebug(line_list)
 
         # Plot lines
-        # plotLines(ff, line_list)
+        # plotLines(img_handle.ff, line_list)
 
         # Threshold the image
-        img_thres = thresholdFF(ff, config.k1_det, config.j1_det)
+        img_thres = thresholdFF(img_handle.ff, config.k1_det, config.j1_det)
 
         filtered_lines = []
 
@@ -979,7 +1008,7 @@ def detectMeteors(img_handle, config, flat_struct=None):
             logDebug(rho, theta)
 
             # Bounded the thresholded image by min and max frames
-            img = selectFrames(np.copy(img_thres), ff, frame_min, frame_max)
+            img = FFfile.selectFFFrames(np.copy(img_thres), ff, frame_min, frame_max)
 
             # Remove lonely pixels
             img = morph.clean(img)
@@ -1206,14 +1235,28 @@ if __name__ == "__main__":
 
     dir_path = sys.argv[1]
         
-    
-    # Get paths to every FF bin file in a directory 
-    ff_list = [ff for ff in os.listdir(dir_path) if FFfile.validFFName(ff)]
 
-    # Check if there are any file in the directory
-    if(len(ff_list) == None):
-        print("No files found!")
-        sys.exit()
+    # Detect the input file format
+    img_handle_main = detectInputType(dir_path, config)
+
+    img_handle_list = []
+
+    # If the input format are FF files, break them down into single FF files
+    if img_handle_main.input_type == 'ff':
+        if img_handle_main.single_ff:
+
+            # Go through all FF files and add them as individual files
+            for file_name in img_handle_main.ff_list:
+
+                img_handle = detectInputType(os.path.join(dir_path, file_name))
+
+                img_handle_list.append(img_handle)
+
+
+    # Otherwise, just add the main image handle to the list
+    if len(img_handle_list) == 0:
+        img_handle_list.append(img_handle_main)
+
 
 
     # Try loading a flat field image
@@ -1237,18 +1280,18 @@ if __name__ == "__main__":
     # Open a file for results
     results_path = os.path.abspath(dir_path) + os.sep
     results_name = results_path.split(os.sep)[-2]
-    results_file = open(results_path + results_name+'_results.txt', 'w')
+    results_file = open(results_path + results_name + '_results.txt', 'w')
 
     total_meteors = 0
 
     # Run meteor search on every file
-    for ff_name in sorted(ff_list):
+    for img_handle in img_handle_list:
 
         print('--------------------------------------------')
-        print(ff_name)
+        print(img_handle.name())
 
         # Run the meteor detection algorithm
-        meteor_detections = detectMeteors(results_path, ff_name, config, flat_struct=flat_struct)
+        meteor_detections = detectMeteors(img_handle, config, flat_struct=flat_struct)
 
         meteor_No = 1
         for meteor in meteor_detections:
@@ -1257,12 +1300,12 @@ if __name__ == "__main__":
 
             # Print detection to file
             results_file.write('-------------------------------------------------------\n')
-            results_file.write(ff_name+'\n')
+            results_file.write(img_handle.name() + '\n')
             results_file.write(str(rho) + ',' + str(theta) + '\n')
             results_file.write(str(centroids)+'\n')
 
             # Append to the results list
-            results_list.append([ff_name, meteor_No, rho, theta, centroids])
+            results_list.append([img_handle.name(), meteor_No, rho, theta, centroids])
             meteor_No += 1
 
             total_meteors += 1
