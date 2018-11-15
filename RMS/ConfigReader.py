@@ -52,6 +52,7 @@ class Config:
         self.latitude = 0
         self.longitude = 0
         self.elevation = 0
+        self.cams_code = 0
         
         ##### Capture
         self.deviceID = 0
@@ -303,6 +304,10 @@ def parseSystem(config, parser):
 
     if parser.has_option(section, "elevation"):
         config.elevation = parser.getfloat(section, "elevation")
+        
+
+    if parser.has_option(section, "cams_code"):
+        config.cams_code = parser.getint(section, "cams_code")
 
 
 
