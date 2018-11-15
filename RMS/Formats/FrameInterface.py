@@ -521,6 +521,8 @@ class InputTypeVideo(object):
         
         self.config = config
 
+        self.ff = None
+
         # This type of input probably won't have any calstars files
         self.require_calstars = False
 
@@ -679,6 +681,9 @@ class InputTypeVideo(object):
 
         self.cache[cache_id] = [ff_struct_fake, self.current_fr_chunk_size]
 
+        # Set the computed chunk as the current FF
+        self.ff = ff_struct_fake
+
         return ff_struct_fake
         
 
@@ -780,6 +785,8 @@ class InputTypeUWOVid(object):
         self.dir_path, vid_file = os.path.split(dir_path)
 
         self.config = config
+
+        self.ff = None
 
         # This type of input probably won't have any calstars files
         self.require_calstars = False
@@ -933,6 +940,9 @@ class InputTypeUWOVid(object):
         # Save the computed FF to cache
         self.cache[cache_id] = [ff_struct_fake, self.frame_chunk_unix_times, self.current_fr_chunk_size]
 
+        # Set the computed chunk as the current FF
+        self.ff = ff_struct_fake
+
         return ff_struct_fake
         
 
@@ -1022,6 +1032,8 @@ class InputTypeImages(object):
 
         self.dir_path = dir_path
         self.config = config
+
+        self.ff = None
 
         # This type of input probably won't have any calstars files
         self.require_calstars = False
@@ -1259,6 +1271,9 @@ class InputTypeImages(object):
         self.cache = {}
 
         self.cache[cache_id] = [ff_struct_fake, self.uwo_png_dt_list, self.current_fr_chunk_size]
+
+        # Set the computed chunk as the current FF
+        self.ff = ff_struct_fake
 
         return ff_struct_fake
     

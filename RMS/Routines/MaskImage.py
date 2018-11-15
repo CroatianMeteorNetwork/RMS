@@ -77,7 +77,7 @@ def applyMask(input_image, mask_tuple, ff_flag=False):
 		input_image.maxpixel = maskImage(input_image.maxpixel, mask)
 		input_image.avepixel = maskImage(input_image.avepixel, mask)
 		input_image.stdpixel = maskImage(input_image.stdpixel, mask)
-		input_image.maxframe = maskImage(input_image.maxframe, mask)
+		#input_image.maxframe = maskImage(input_image.maxframe, mask)
 
 		return input_image
 

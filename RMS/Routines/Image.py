@@ -29,7 +29,11 @@ def thresholdImg(maxpixel, avepixel, stdpixel, k1, j1):
         [ndarray] thresholded 2D image
     """
 
-    return maxpixel - avepixel > (k1 * stdpixel + j1)
+    # Compute the thresholded image
+    img_thresh = maxpixel - avepixel > (k1 * stdpixel + j1)
+
+    # The thresholded image is always 8 bit
+    return img_thresh.astype(np.uint8)
 
 
 @memoizeSingle

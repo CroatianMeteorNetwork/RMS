@@ -49,7 +49,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 import RMS.Routines.MorphCy as morph
 
 # If True, all detection details will be logged
-VERBOSE_DEBUG = False
+VERBOSE_DEBUG = True
 
 
 # Get the logger from the main module
@@ -417,7 +417,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
 
 
     # Subdivide the image by time into overlapping parts (decreases noise when searching for meteors)
-    for i in range(0, int(img_handle.total_frames/time_slide - 1)):
+    for i in range(0, int(np.ceil(img_handle.total_frames/time_slide)) - 1):
 
         frame_min = i*time_slide
         frame_max = i*time_slide + time_window_size
@@ -454,7 +454,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
 
 
 
-        # Show thresholded image
+        # # Show thresholded image
         # show(str(frame_min) + "-" + str(frame_max) + " threshold", img)
 
         # # Show maxpixel of the thresholded part
@@ -857,8 +857,6 @@ def detectMeteors(img_handle, config, flat_struct=None):
             img_handle.ff.avepixel = Image.applyFlat(img_handle.ff.avepixel, flat_struct)
 
 
-    # # Show the maxpixel image
-    # show2(ff_name+' maxpixel', ff.maxpixel)
 
     # Get lines on the image
     line_list = getLines(img_handle, config.k1_det, config.j1_det, config.time_slide, config.time_window_size, 
@@ -866,12 +864,6 @@ def detectMeteors(img_handle, config, flat_struct=None):
 
     logDebug('List of lines:', line_list)
 
-
-    ### TEST!!!
-    print('EXITING...')
-    sys.exit()
-
-    ###
 
     # Init meteor list
     meteor_detections = []
@@ -889,6 +881,13 @@ def detectMeteors(img_handle, config, flat_struct=None):
 
         # Plot lines
         # plotLines(img_handle.ff, line_list)
+
+
+        ### TEST!!!
+        print('EXITING...')
+        sys.exit()
+
+        ###
 
         # Threshold the image
         img_thres = thresholdFF(img_handle.ff, config.k1_det, config.j1_det)
@@ -1243,12 +1242,12 @@ if __name__ == "__main__":
 
     # If the input format are FF files, break them down into single FF files
     if img_handle_main.input_type == 'ff':
-        if img_handle_main.single_ff:
+        if not img_handle_main.single_ff:
 
             # Go through all FF files and add them as individual files
             for file_name in img_handle_main.ff_list:
 
-                img_handle = detectInputType(os.path.join(dir_path, file_name))
+                img_handle = detectInputType(os.path.join(dir_path, file_name), config, skip_ff_dir=True)
 
                 img_handle_list.append(img_handle)
 

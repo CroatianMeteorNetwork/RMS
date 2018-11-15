@@ -215,7 +215,7 @@ def selectFFFrames(img_input, ff, frame_min, frame_max):
     indices = np.where((ff.maxframe >= frame_min) & (ff.maxframe <= frame_max))
 
     # Reconstruct the image with given indices
-    img = np.copy(ff.avepixel)
+    img = np.zeros_like(img_input)
     img[indices] = img_input[indices]
 
     return img
