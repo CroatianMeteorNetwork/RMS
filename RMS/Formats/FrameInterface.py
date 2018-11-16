@@ -89,18 +89,19 @@ class FFMimickInterface(object):
     def finish(self):
         """ Finish making an FF structure. """
 
-        # # Remove the contribution of the maxpixel to the avepixel
-        # self.acc -= self.maxpixel
+        # Remove the contribution of the maxpixel to the avepixel
+        self.acc -= self.maxpixel
 
-        #self.avepixel = self.acc//(self.nframes - 1)
-        self.avepixel = self.acc//self.nframes
+        self.avepixel = self.acc//(self.nframes - 1)
+        #self.avepixel = self.acc//self.nframes
 
 
         # Compute the standard deviation
-        #self.stdpixel -= (self.maxpixel.astype(np.uint64))**2
+        self.stdpixel -= (self.maxpixel.astype(np.uint64))**2
         self.stdpixel -= self.acc*self.avepixel
-        #self.stdpixel  = np.sqrt(self.stdpixel/(self.nframes - 2))
-        self.stdpixel  = np.sqrt(self.stdpixel//(self.nframes - 1))
+        
+        self.stdpixel  = np.sqrt(self.stdpixel/(self.nframes - 2))
+        #self.stdpixel  = np.sqrt(self.stdpixel//(self.nframes - 1))
 
         # Make sure there are no zeros in standard deviation
         self.stdpixel[self.stdpixel == 0] = 1
