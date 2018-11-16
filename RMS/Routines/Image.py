@@ -13,7 +13,7 @@ from RMS.Decorators import memoizeSingle
 
 
 
-def thresholdImg(img, avepixel, stdpixel, k1, j1):
+def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False):
     """ Threshold the image with given parameters.
     
     Arguments:
@@ -29,8 +29,13 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1):
         [ndarray] thresholded 2D image
     """
 
-    # Subtract input image and average, making sure there are no values below 0 which will wrap around
-    img_avg_sub = applyDark(img, avepixel)
+    # If the FF file is used, then values in max will always be larger than values in average
+    if ff:
+        img_avg_sub = img - avepixel
+    else:
+        
+        # Subtract input image and average, making sure there are no values below 0 which will wrap around
+        img_avg_sub = applyDark(img, avepixel)
 
     # Compute the thresholded image
     img_thresh = img_avg_sub > (k1 * stdpixel + j1)
@@ -54,7 +59,7 @@ def thresholdFF(ff, k1, j1):
         [ndarray] thresholded 2D image
     """
 
-    return thresholdImg(ff.maxpixel, ff.avepixel, ff.stdpixel, k1, j1)
+    return thresholdImg(ff.maxpixel, ff.avepixel, ff.stdpixel, k1, j1, ff=True)
 
 
 
