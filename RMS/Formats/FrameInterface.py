@@ -109,11 +109,11 @@ class FFMimickInterface(object):
         self.avepixel = self.avepixel.astype(self.dtype)
         self.stdpixel = self.stdpixel.astype(self.dtype)
 
-        print('---')
-        print('nframes', self.nframes)
-        print('mean stddev2:', np.mean(self.stdpixel))
-        print('mean avepixel2', np.mean(self.avepixel))
-        print('mean maxpixel', np.mean(self.maxpixel))
+        # print('---')
+        # print('nframes', self.nframes)
+        # print('mean stddev2:', np.mean(self.stdpixel))
+        # print('mean avepixel2', np.mean(self.avepixel))
+        # print('mean maxpixel', np.mean(self.maxpixel))
 
 
 

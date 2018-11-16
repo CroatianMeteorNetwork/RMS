@@ -436,6 +436,9 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # Load the frame chunk
             img_handle.loadChunk(first_frame=frame_min, read_nframes=(frame_max - frame_min + 1))
 
+            # Print the time
+            logDebug('Time:', img_handle.name())
+
             # Mask the FF file
             img_handle.ff = MaskImage.applyMask(img_handle.ff, mask, ff_flag=True)
 
@@ -1357,7 +1360,7 @@ if __name__ == "__main__":
     # Open a file for results
     results_path = os.path.abspath(dir_path) + os.sep
     results_name = results_path.split(os.sep)[-2]
-    results_file = open(results_path + results_name + '_results.txt', 'w')
+    results_file = open(img_handle_main.dir_path + results_name + '_results.txt', 'w')
 
     total_meteors = 0
 
