@@ -185,20 +185,19 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
                 fr_img = Image.applyFlat(fr_img, flat_struct)
                 
 
-
-            # plt.imshow(fr_img, cmap='gray', vmin=100, vmax=10000)
-            # plt.show()
-
             # Threshold the frame
             img_thres = Image.thresholdImg(fr_img, img_handle.ff.avepixel, img_handle.ff.stdpixel, \
                 config.k1_det, config.j1_det)
 
 
-            print(fr)
-            fig, (ax1, ax2) = plt.subplots(nrows=2)
-            ax1.imshow(img_thres, cmap='gray')
-            ax2.imshow(fr_img, cmap='gray', vmax=10000)
-            plt.show()
+            # print(fr)
+            # print('mean stdpixel3:', np.mean(img_handle.ff.stdpixel))
+            # print('mean avepixel3:', np.mean(img_handle.ff.avepixel))
+            # print('mean frame:', np.mean(fr_img))
+            # fig, (ax1, ax2) = plt.subplots(nrows=2)
+            # ax1.imshow(img_thres, cmap='gray')
+            # ax2.imshow(img_handle.ff.maxpixel - fr_img, cmap='gray', vmax=10000)
+            # plt.show()
 
             # Remove lonely pixels
             img_thres = morph.clean(img_thres)

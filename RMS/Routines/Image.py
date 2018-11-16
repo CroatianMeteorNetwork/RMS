@@ -13,11 +13,11 @@ from RMS.Decorators import memoizeSingle
 
 
 
-def thresholdImg(maxpixel, avepixel, stdpixel, k1, j1):
+def thresholdImg(img, avepixel, stdpixel, k1, j1):
     """ Threshold the image with given parameters.
     
     Arguments:
-        maxpixel: [2D ndarray]
+        img: [2D ndarray]
         avepixel: [2D ndarray]
         stdpixel: [2D ndarray]
         k1: [float] relative thresholding factor (how many standard deviations above mean the maxpixel image 
@@ -29,8 +29,11 @@ def thresholdImg(maxpixel, avepixel, stdpixel, k1, j1):
         [ndarray] thresholded 2D image
     """
 
+    # Subtract input image and average, making sure there are no values below 0 which will wrap around
+    img_avg_sub = applyDark(img, avepixel)
+
     # Compute the thresholded image
-    img_thresh = maxpixel - avepixel > (k1 * stdpixel + j1)
+    img_thresh = img_avg_sub > (k1 * stdpixel + j1)
 
     # The thresholded image is always 8 bit
     return img_thresh.astype(np.uint8)

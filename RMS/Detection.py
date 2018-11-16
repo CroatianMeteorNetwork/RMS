@@ -455,8 +455,8 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
 
 
 
-        # Show thresholded image
-        show(str(frame_min) + "-" + str(frame_max) + " threshold", img)
+        # # Show thresholded image
+        # show(str(frame_min) + "-" + str(frame_max) + " threshold", img)
 
         # # Show maxpixel of the thresholded part
         # mask = np.zeros(shape=img.shape)
@@ -927,8 +927,8 @@ def detectMeteors(img_handle, config, flat_struct=None):
         logDebug('Number of KHT lines: ', len(line_list))
         logDebug(line_list)
 
-        # Plot lines
-        plotLines(img_handle.ff, line_list)
+        # # Plot lines
+        # plotLines(img_handle.ff, line_list)
 
 
         filtered_lines = []
@@ -1008,8 +1008,8 @@ def detectMeteors(img_handle, config, flat_struct=None):
 
                 # logDebug(detected_line)
 
-                # Show 3D cloud
-                show3DCloud(img_handle.ff, xs, ys, zs, detected_line, stripe_points, config)
+                # # Show 3D cloud
+                # show3DCloud(img_handle.ff, xs, ys, zs, detected_line, stripe_points, config)
 
                 # Add the line to the results list
                 filtered_lines.append(detected_line)
@@ -1075,12 +1075,6 @@ def detectMeteors(img_handle, config, flat_struct=None):
 
                 img_thres, max_avg_corrected, flattened_weights, \
                     min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config)
-
-
-                
-                plt.imshow(img_thres, cmap='gray')
-                plt.title('centroiding')
-                plt.show()
                 
 
 
@@ -1140,12 +1134,12 @@ def detectMeteors(img_handle, config, flat_struct=None):
                     if config.deinterlace_order >= 0:
 
                         # Deinterlace by fields (line lixels)
-                        half_frame_pixels = frame_pixels[frame_pixels[:,1] % 2 == (config.deinterlace_order 
-                            + half_frame) % 2]
+                        half_frame_pixels = frame_pixels[frame_pixels[:,1]%2 == (config.deinterlace_order 
+                            + half_frame)%2]
 
                         # Deinterlace by fields (stripe pixels)
                         half_frame_pixels_stripe = frame_pixels_stripe[frame_pixels_stripe[:,1] % 2 == (config.deinterlace_order 
-                            + half_frame) % 2]
+                            + half_frame)%2]
 
 
                         # Skip if there are no pixels in the half-frame
@@ -1153,7 +1147,7 @@ def detectMeteors(img_handle, config, flat_struct=None):
                             continue
 
                         # Calculate half-frame value
-                        frame_no = i+half_frame*0.5
+                        frame_no = i + half_frame*0.5
 
 
                     # No deinterlacing
