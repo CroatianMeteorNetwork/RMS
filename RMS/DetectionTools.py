@@ -113,7 +113,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
 
 
 
-def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, mask, flat_struct):
+def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, mask, flat_struct, stripe_width_factor=1.0):
     """ Threshold the image and get a list of pixel positions and frames of threshold passers. 
         This function handles all input types of data.
 
@@ -122,7 +122,7 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
 
     # Get indices of stripe pixels around the line
     img_h, img_w = img_handle.ff.maxpixel.shape
-    stripe_indices = getStripeIndices(rho, theta, config.stripe_width, img_h, img_w)
+    stripe_indices = getStripeIndices(rho, theta, stripe_width_factor*config.stripe_width, img_h, img_w)
 
     # If the FF files is given, extract the points from FF after threshold
     if img_handle.input_type == 'ff':
@@ -194,11 +194,11 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
                 config.k1_det, config.j1_det)
 
 
-            # print(fr)
-            # fig, (ax1, ax2) = plt.subplots(nrows=2)
-            # ax1.imshow(img_thres, cmap='gray')
-            # ax2.imshow(fr_img, cmap='gray', vmax=10000)
-            # plt.show()
+            print(fr)
+            fig, (ax1, ax2) = plt.subplots(nrows=2)
+            ax1.imshow(img_thres, cmap='gray')
+            ax2.imshow(fr_img, cmap='gray', vmax=10000)
+            plt.show()
 
             # Remove lonely pixels
             img_thres = morph.clean(img_thres)

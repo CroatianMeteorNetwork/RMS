@@ -59,23 +59,20 @@ def computeFramesToRead(read_nframes, total_frames, fr_chunk_no, current_frame_c
 
 
 
-
-
-
 class FFMimickInterface(object):
-    def __init__(self, nrows, ncols, nframes, dtype):
+    def __init__(self, nrows, ncols, dtype):
         """ Structure which is used to make FF file format data. It mimicks the interface of an FF structure. """
 
         self.nrows = nrows
         self.ncols = ncols
-        self.nframes = nframes
         self.dtype = dtype
 
         # Init the empty structures
         self.maxpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=self.dtype)
-        self.avepixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.float64)
-        self.stdpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.float64)
+        self.acc = np.zeros(shape=(self.nrows, self.ncols), dtype=np.uint64)
+        self.stdpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.uint64)
 
+        self.nframes = 0
 
     def addFrame(self, frame):
         """ Add raw frame for computation of FF data. """
@@ -83,22 +80,27 @@ class FFMimickInterface(object):
         # Get the maximum values
         self.maxpixel = np.max([self.maxpixel, frame], axis=0)
 
-        # Compute the running average
-        self.avepixel += frame.astype(np.float64)/(self.nframes - 1)
-        self.stdpixel += (frame.astype(np.float64)**2)/(self.nframes - 2)
+        self.acc += frame
+        self.stdpixel += (frame.astype(np.uint64))**2
+
+        self.nframes += 1
 
 
     def finish(self):
         """ Finish making an FF structure. """
 
-        # Remove the contribution of the maxpixel to the avepixel
-        self.avepixel -= self.maxpixel.astype(np.float64)/(self.nframes - 1)
-        
+        # # Remove the contribution of the maxpixel to the avepixel
+        # self.acc -= self.maxpixel
+
+        #self.avepixel = self.acc//(self.nframes - 1)
+        self.avepixel = self.acc//self.nframes
+
 
         # Compute the standard deviation
-        self.stdpixel -= (self.maxpixel.astype(np.float64)**2)/(self.nframes - 2)
-        self.stdpixel -= self.avepixel**2
-        self.stdpixel = np.sqrt(self.stdpixel)
+        #self.stdpixel -= (self.maxpixel.astype(np.uint64))**2
+        self.stdpixel -= self.acc*self.avepixel
+        #self.stdpixel  = np.sqrt(self.stdpixel/(self.nframes - 2))
+        self.stdpixel  = np.sqrt(self.stdpixel//(self.nframes - 1))
 
         # Make sure there are no zeros in standard deviation
         self.stdpixel[self.stdpixel == 0] = 1
@@ -106,8 +108,14 @@ class FFMimickInterface(object):
         # Convert stddev and avepixel to appropriate format
         self.avepixel = self.avepixel.astype(self.dtype)
         self.stdpixel = self.stdpixel.astype(self.dtype)
-        
-        
+
+        print('---')
+        print('nframes', self.nframes)
+        print('mean stddev2:', np.mean(self.stdpixel))
+        print('mean avepixel2', np.mean(self.avepixel))
+        print('mean maxpixel', np.mean(self.maxpixel))
+
+
 
 
 class InputTypeFF(object):
@@ -651,7 +659,7 @@ class InputTypeVideo(object):
 
 
         # Init making the FF structure
-        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, frames_to_read, np.uint8)
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, np.uint8)
 
         # Load the chunk of frames
         for i in range(frames_to_read):
@@ -669,11 +677,10 @@ class InputTypeVideo(object):
             ff_struct_fake.addFrame(frame)
 
 
+        self.current_fr_chunk_size = i + 1
+
         # Finish making the fake FF file
         ff_struct_fake.finish()
-
-
-        self.current_fr_chunk_size = i + 1
 
 
         # Store the FF struct to cache to avoid recomputing
@@ -909,7 +916,7 @@ class InputTypeUWOVid(object):
         self.vid_file.seek(first_frame*self.vidinfo.seqlen)
 
         # Init making the FF structure
-        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, frames_to_read, np.uint16)
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, np.uint16)
 
         self.frame_chunk_unix_times = []
 
@@ -929,10 +936,10 @@ class InputTypeUWOVid(object):
             ff_struct_fake.addFrame(frame)
 
 
+        self.current_fr_chunk_size = i + 1
+
         # Finish making the fake FF file
         ff_struct_fake.finish()
-
-        self.current_fr_chunk_size = i + 1
 
         # Store the FF struct to cache to avoid recomputing
         self.cache = {}
@@ -1236,7 +1243,7 @@ class InputTypeImages(object):
 
 
         # Init making the FF structure
-        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, frames_to_read, self.img_dtype)
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, self.img_dtype)
 
         self.uwo_png_dt_list = []
 
@@ -1261,10 +1268,10 @@ class InputTypeImages(object):
                 self.uwo_png_dt_list.append(self.currentFrameTime(dt_obj=True))
 
 
+        self.current_fr_chunk_size = i
+
         # Finish making the fake FF file
         ff_struct_fake.finish()
-
-        self.current_fr_chunk_size = i
 
 
         # Store the FF struct to cache to avoid recomputing
@@ -1507,28 +1514,68 @@ if __name__ == "__main__":
     # Load the configuration file
     config = cr.parse(".config")
 
-    # Load the appropriate files
-    img_handle = detectInputType(cml_args.dir_path[0], config)
 
-    chunk_size = 64
+    # Test creating a fake FF
+    nframes = 64
+    img_h = 20
+    img_w = 20
 
-    for i in range(img_handle.total_frames//chunk_size + 1):
+    ff = FFMimickInterface(img_h, img_w, np.uint16)
+
+    frames = np.random.normal(10000, 500, size=(nframes, img_h, img_w)).astype(np.uint16)
+
+    for frame in frames:
+
+        ff.addFrame(frame)
+
+
+    ff.finish()
+
+
+    # Compute real values
+    avepixel = np.mean(frames, axis=0)
+    stdpixel = np.std(frames, axis=0)
+
+
+    print('Std mean ff:', np.mean(ff.stdpixel))
+    print('Std mean:', np.mean(stdpixel))
+    print('Mean diff:', np.mean(stdpixel - ff.stdpixel))
+    plt.imshow(stdpixel - ff.stdpixel)
+    plt.show()
+
+
+    print('ave mean ff:', np.mean(ff.avepixel))
+    print('ave mean:', np.mean(avepixel))
+    print('Mean diff:', np.mean(avepixel - ff.avepixel))
+    plt.imshow(avepixel - ff.avepixel)
+    plt.show()
+
         
-        first_frame = i*chunk_size
-
-        # Load a chunk of frames
-        ff = img_handle.loadChunk(first_frame=first_frame, read_nframes=chunk_size)
-
-        print(first_frame, first_frame + chunk_size)
-        plt.imshow(ff.maxpixel - ff.avepixel, cmap='gray')
-        plt.show()
 
 
-        # Show stdpixel
-        plt.imshow(ff.stdpixel, cmap='gray')
-        plt.show()
 
-        # Show thresholded image
-        thresh_img = (ff.maxpixel - ff.avepixel) > (1.0*ff.stdpixel + 30)
-        plt.imshow(thresh_img, cmap='gray')
-        plt.show()
+    # # Load the appropriate files
+    # img_handle = detectInputType(cml_args.dir_path[0], config)
+
+    # chunk_size = 64
+
+    # for i in range(img_handle.total_frames//chunk_size + 1):
+        
+    #     first_frame = i*chunk_size
+
+    #     # Load a chunk of frames
+    #     ff = img_handle.loadChunk(first_frame=first_frame, read_nframes=chunk_size)
+
+    #     print(first_frame, first_frame + chunk_size)
+    #     plt.imshow(ff.maxpixel - ff.avepixel, cmap='gray')
+    #     plt.show()
+
+
+    #     # Show stdpixel
+    #     plt.imshow(ff.stdpixel, cmap='gray')
+    #     plt.show()
+
+    #     # Show thresholded image
+    #     thresh_img = (ff.maxpixel - ff.avepixel) > (1.0*ff.stdpixel + 30)
+    #     plt.imshow(thresh_img, cmap='gray')
+    #     plt.show()

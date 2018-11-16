@@ -185,8 +185,7 @@ def adjustLevels(img_array, minv, gamma, maxv, nbits=None):
 
 
     # Convert the image back to input type
-    img_array.astype(input_type)
-        
+    img_array = img_array.astype(input_type)
 
     return img_array
 

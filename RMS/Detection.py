@@ -445,6 +445,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
                 img_handle.ff.maxpixel = Image.applyFlat(img_handle.ff.maxpixel, flat_struct)
                 img_handle.ff.avepixel = Image.applyFlat(img_handle.ff.avepixel, flat_struct)
 
+
             # Threshold the frame chunk
             img = thresholdFF(img_handle.ff, k1, j1)
 
@@ -454,8 +455,8 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
 
 
 
-        # # Show thresholded image
-        # show(str(frame_min) + "-" + str(frame_max) + " threshold", img)
+        # Show thresholded image
+        show(str(frame_min) + "-" + str(frame_max) + " threshold", img)
 
         # # Show maxpixel of the thresholded part
         # mask = np.zeros(shape=img.shape)
@@ -730,8 +731,19 @@ def plotLines(ff, line_list):
 
     img = np.copy(ff.maxpixel)
 
+
+    # Auto adjust levels
+    min_lvl = np.percentile(img[2:], 1)
+    max_lvl = np.percentile(img[2:], 99.0)
+
+    # Adjust levels
+    img = Image.adjustLevels(img, min_lvl, 1.0, max_lvl)
+
     hh = img.shape[0]/2.0
     hw = img.shape[1]/2.0
+
+    # Compute the maximum level value
+    max_lvl = 2**(img.itemsize*8) - 1
 
     for rho, theta, frame_min, frame_max in line_list:
         theta = np.deg2rad(theta)
@@ -746,7 +758,7 @@ def plotLines(ff, line_list):
         x2 = int(x0 - 1000*(-b) + hw)
         y2 = int(y0 - 1000*(a) + hh)
         
-        cv2.line(img, (x1, y1), (x2, y2), (255, 0, 255), 1)
+        cv2.line(img, (x1, y1), (x2, y2), (max_lvl, 0, max_lvl), 1)
         
     show2("KHT", img)
 
@@ -820,6 +832,36 @@ def preprocessFF(img_handle, mask, flat_struct):
 
 
 
+def thresholdAndCorrectGammaFF(img_handle, config):
+    """ Prepare the FF for centroid extraction by performing gamma correction. """
+
+    # Threshold the FF
+    img_thres = thresholdFF(img_handle.ff, config.k1_det, config.j1_det)
+
+
+    # Gamma correct image files
+    maxpixel_gamma_corr = Image.gammaCorrection(img_handle.ff.maxpixel, config.gamma)
+    avepixel_gamma_corr = Image.gammaCorrection(img_handle.ff.avepixel, config.gamma)
+    stdpixel_gamma_corr = Image.gammaCorrection(img_handle.ff.stdpixel, config.gamma)
+
+    # Make sure there are no zeros in standard deviation
+    stdpixel_gamma_corr[stdpixel_gamma_corr == 0] = 1
+
+    # Calculate weights for centroiding (apply gamma correction on both images)
+    max_avg_corrected = maxpixel_gamma_corr - avepixel_gamma_corr
+    flattened_weights = (max_avg_corrected).astype(np.float32)/stdpixel_gamma_corr
+
+
+    # At the end, a check that the detection has a surface brightness above the background will be performed.
+    # The assumption here is that the peak of the meteor should have the intensity which is at least
+    # that of a patch of 4x4 pixels that are of the mean background brightness
+    min_patch_intensity = 4*4*(np.mean(maxpixel_gamma_corr - avepixel_gamma_corr) \
+        + config.k1_det*np.mean(stdpixel_gamma_corr) + config.j1)
+
+
+    return img_thres, max_avg_corrected, flattened_weights, min_patch_intensity
+
+
 
 
 def detectMeteors(img_handle, config, flat_struct=None):
@@ -886,7 +928,7 @@ def detectMeteors(img_handle, config, flat_struct=None):
         logDebug(line_list)
 
         # Plot lines
-        # plotLines(img_handle.ff, line_list)
+        plotLines(img_handle.ff, line_list)
 
 
         filtered_lines = []
@@ -905,15 +947,25 @@ def detectMeteors(img_handle, config, flat_struct=None):
             if img_handle.input_type != 'ff':
 
                 # Compute the FF for this chunk
-                img_handle.loadChunk(first_frame=frame_min, read_nframes=(frame_max - frame_min))
+                img_handle.loadChunk(first_frame=frame_min, read_nframes=(frame_max - frame_min + 1))
 
                 # Apply mask and flat to FF
                 img_handle = preprocessFF(img_handle, mask, flat_struct)
 
+                # ### PLOT CHUNK
+                # img = img_handle.ff.maxpixel - img_handle.ff.avepixel
+
+                # # Auto adjust levels
+                # min_lvl = np.percentile(img[2:], 1)
+                # max_lvl = np.percentile(img[2:], 99.0)
+
+                # # Adjust levels
+                # img = Image.adjustLevels(img, min_lvl, 1.0, max_lvl)
 
                 # # Show the image chunk, average subtracted
-                # plt.imshow(img_handle.ff.maxpixel - img_handle.ff.avepixel, cmap='gray')
+                # plt.imshow(img, cmap='gray')
                 # plt.show()
+                # ### ###
                 
 
             # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
@@ -956,8 +1008,8 @@ def detectMeteors(img_handle, config, flat_struct=None):
 
                 # logDebug(detected_line)
 
-                # # Show 3D cloud
-                # show3DCloud(img_handle.ff, xs, ys, zs, detected_line, stripe_points, config)
+                # Show 3D cloud
+                show3DCloud(img_handle.ff, xs, ys, zs, detected_line, stripe_points, config)
 
                 # Add the line to the results list
                 filtered_lines.append(detected_line)
@@ -969,44 +1021,14 @@ def detectMeteors(img_handle, config, flat_struct=None):
         logDebug(filtered_lines)
 
 
-        ### TEST!!!
-        print('EXITING...')
-        sys.exit()
-
-        ###
-
-
-        # If the input is a single FF file, threshold the image right away
+        # If the input is a single FF file, threshold the image right away and do gamma correction
         if img_handle.input_type == 'ff':
 
-            # Threshold the FF
-            img_thres = thresholdFF(img_handle.ff, config.k1_det, config.j1_det)
+            img_thres, max_avg_corrected, flattened_weights, \
+                min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config)
 
 
-            # Gamma correct image files
-            maxpixel_gamma_corr = Image.gammaCorrection(img_handle.ff.maxpixel, config.gamma)
-            avepixel_gamma_corr = Image.gammaCorrection(img_handle.ff.avepixel, config.gamma)
-            stdpixel_gamma_corr = Image.gammaCorrection(img_handle.ff.stdpixel, config.gamma)
-
-
-            # Calculate weights for centroiding (apply gamma correction on both images)
-            max_avg_corrected = maxpixel_gamma_corr - avepixel_gamma_corr
-            flattened_weights = (max_avg_corrected).astype(np.float32)/stdpixel_gamma_corr
-
-
-            # At the end, a check that the detection has a surface brightness above the background will be performed.
-            # The assumption here is that the peak of the meteor should have the intensity which is at least
-            # that of a patch of 4x4 pixels that are of the mean background brightness
-            min_patch_intensity = 4*4*(np.mean(maxpixel_gamma_corr - avepixel_gamma_corr) \
-                + config.k1_det*np.mean(stdpixel_gamma_corr) + config.j1)
-
-
-        # For other input types
-        else:
-            pass
-
-
-
+        # Go through all detected and filtered lines and compute centroids
         for detected_line in filtered_lines:
 
             # Get frame range
@@ -1021,9 +1043,9 @@ def detectMeteors(img_handle, config, flat_struct=None):
             frame_min -= config.frame_extension
             frame_max += config.frame_extension
 
-            # Cap values to 0-255
+            # Cap values
             frame_min = max(frame_min, 0)
-            frame_max = min(frame_max, 255)
+            frame_max = min(frame_max, img_handle.total_frames - 1)
 
             logDebug(detected_line)
 
@@ -1032,37 +1054,40 @@ def detectMeteors(img_handle, config, flat_struct=None):
             x2, y2, z2 = detected_line[1]
 
             # Convert Cartesian line coordinates to polar
-            rho, theta = getPolarLine(x1, y1, x2, y2, ff.nrows, ff.ncols)
+            rho, theta = getPolarLine(x1, y1, x2, y2, img_handle.ff.nrows, img_handle.ff.ncols)
 
             # Convert Cartesian line coordinate to CAMS compatible polar coordinates (flipped Y axis)
-            rho_cams, theta_cams = getPolarLine(x1, ff.nrows - y1, x2, ff.nrows - y2, ff.nrows, ff.ncols)
+            rho_cams, theta_cams = getPolarLine(x1, img_handle.ff.nrows - y1, x2, img_handle.ff.nrows - y2, \
+                img_handle.ff.nrows, img_handle.ff.ncols)
 
 
             logDebug('converted rho, theta')
             logDebug(rho, theta)
 
-            # Bounded the thresholded image by min and max frames
-            img = FFfile.selectFFFrames(np.copy(img_thres), ff, frame_min, frame_max)
+            # If other input types are given, load the frames and preprocess them
+            if img_handle.input_type != 'ff':
+                
+                # Compute the FF for this chunk
+                img_handle.loadChunk(first_frame=frame_min, read_nframes=(frame_max - frame_min + 1))
 
-            # Remove lonely pixels
-            img = morph.clean(img)
+                # Preprocess image for this chunk
+                img_handle = preprocessFF(img_handle, mask, flat_struct)
+
+                img_thres, max_avg_corrected, flattened_weights, \
+                    min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config)
 
 
-            # Get indices of stripe pixels around the line
-            stripe_indices = getStripeIndices(rho, theta, int(config.stripe_width*1.5), img.shape[0], img.shape[1])
+                
+                plt.imshow(img_thres, cmap='gray')
+                plt.title('centroiding')
+                plt.show()
+                
 
-            # Extract the stripe from the thresholded image
-            stripe = np.zeros((ff.nrows, ff.ncols), np.uint8)
-            stripe[stripe_indices] = img[stripe_indices]
 
-            # Show detected line
-            # show('detected line: '+str(frame_min)+'-'+str(frame_max), stripe)
+            # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
+            xs, ys, zs = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, \
+                mask, flat_struct, stripe_width_factor=1.5)
 
-            # Get stripe positions
-            stripe_positions = stripe.nonzero()
-            xs = stripe_positions[1]
-            ys = stripe_positions[0]
-            zs = ff.maxframe[stripe_positions]
 
             # Make an array to feed into the centroiding algorithm
             stripe_points = np.vstack((xs, ys, zs))
@@ -1071,8 +1096,8 @@ def detectMeteors(img_handle, config, flat_struct=None):
             # Sort stripe points by frame
             stripe_points = stripe_points[stripe_points[:,2].argsort()]
 
-            # Show 3D cloud
-            # show3DCloud(ff, stripe, detected_line, stripe_points, config)
+            # # Show 3D cloud
+            # show3DCloud(img_handle.ff, xs, ys, zs, detected_line, stripe_points, config)
 
             # Get points of the given line
             line_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config, 
@@ -1087,13 +1112,12 @@ def detectMeteors(img_handle, config, flat_struct=None):
                 continue
 
 
-            # Compute the average angular velocity in px per frame
-            ang_vel_avg = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)/(z2 - z1)
+            # # Compute the average angular velocity in px per frame
+            # ang_vel_avg = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)/(z2 - z1)
+
 
             # Calculate centroids
             centroids = []
-
-
             for i in range(frame_min, frame_max+1):
                 
                 # Select pixel indicies belonging to a given frame
@@ -1160,16 +1184,41 @@ def detectMeteors(img_handle, config, flat_struct=None):
 
                         # Compute the corrected frame time
                         frame_no = RollingShutterCorrection.correctRollingShutterTemporal(frame_no, \
-                            y_centroid, ff.maxpixel.shape[0])
+                            y_centroid, img_handle.ff.maxpixel.shape[0])
+
+
+                    # Get current frame if video or images are used as input
+                    if img_handle.input_type != 'ff':
+
+                        ### Extract intensity from frame ###
+
+                        # Load the frame
+                        img_handle.setFrame(int(frame_no))
+                        fr_img = img_handle.loadFrame()
+
+                        # Mask the image
+                        fr_img = MaskImage.applyMask(fr_img, mask)
+
+                        # Apply the flat to frame
+                        if flat_struct is not None:
+
+                            fr_img = Image.applyFlat(fr_img, flat_struct)
+                
+
+                        # Apply gamma correction
+                        fr_img = Image.gammaCorrection(fr_img, config.gamma)
+
+                        # Subtract average
+                        max_avg_corrected = Image.applyDark(fr_img, img_handle.ff.avepixel)
 
 
                     # Calculate intensity as the sum of threshold passer pixels on the stripe
-                    #intensity_values = max_avg_corrected[half_frame_pixels[:,1], half_frame_pixels[:,0]]
                     intensity_values = max_avg_corrected[half_frame_pixels_stripe[:,1], 
-                        half_frame_pixels_stripe[:,0]]
-                    intensity = np.sum(intensity_values)
+                            half_frame_pixels_stripe[:,0]]
+
+                    intensity = int(np.sum(intensity_values))
                     
-                    logDebug("centroid: ", frame_no, x_centroid, y_centroid, intensity)
+                    logDebug("centroid: fr {:.1f}, x {:.2f}, y {:.2f}, intens {:d}".format(frame_no, x_centroid, y_centroid, intensity))
 
                     centroids.append([frame_no, x_centroid, y_centroid, intensity])
 
