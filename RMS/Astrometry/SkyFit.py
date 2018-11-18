@@ -538,12 +538,14 @@ class PlateTool(object):
                 star_x, star_y, px_intens = img_star
                 _, _, star_mag = catalog_star
 
+                lsp = np.log10(px_intens)
+
                 # Skip intensities which were not properly calculated
-                if np.isnan(px_intens) or np.isinf(px_intens):
+                if np.isnan(lsp) or np.isinf(lsp):
                     continue
 
                 star_coords.append([star_x, star_y])
-                logsum_px.append(np.log10(px_intens))
+                logsum_px.append(lsp)
                 catalog_mags.append(star_mag)
 
 
