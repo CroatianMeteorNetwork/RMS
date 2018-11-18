@@ -40,13 +40,18 @@ from RMS.Routines import Image
 # so we need to force another backend
 if matplotlib.get_backend() == 'TkAgg':
 
-    # Try Qt5
-    try:
-        plt.switch_backend('Qt5Agg')
+    backends = ['Qt5Agg', 'Qt4Agg', 'GTKAgg', 'WXAgg']
 
-    # Try Qt4
-    except:
-        plt.switch_backend('Qt4Agg')
+    for bk in backends:
+        # Try setting backend
+        try:
+            plt.switch_backend(bk)
+
+        except:
+            pass
+
+
+    print('Using backend: ', matplotlib.get_backend())
 
 
 class Pick(object):
