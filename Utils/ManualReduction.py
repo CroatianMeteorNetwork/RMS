@@ -21,6 +21,7 @@ except:
 
 import numpy as np
 import scipy.misc
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.font_manager import FontProperties
@@ -34,6 +35,18 @@ from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats.Platepar import Platepar
 from RMS.Routines import Image
 
+
+# For some reason TkAgg backend crashes the ManualReduction window when an external file prompt is opened,
+# so we need to force another backend
+if matplotlib.get_backend() == 'TkAgg':
+
+    # Try Qt5
+    try:
+        matplotlib.switch_backend('Qt5Agg')
+
+    # Try Qt4
+    except:
+        matplotlib.switch_backend('Qt4Agg')
 
 
 class Pick(object):
