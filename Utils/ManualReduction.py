@@ -42,11 +42,11 @@ if matplotlib.get_backend() == 'TkAgg':
 
     # Try Qt5
     try:
-        matplotlib.switch_backend('Qt5Agg')
+        plt.switch_backend('Qt5Agg')
 
     # Try Qt4
     except:
-        matplotlib.switch_backend('Qt4Agg')
+        plt.switch_backend('Qt4Agg')
 
 
 class Pick(object):
