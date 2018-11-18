@@ -120,6 +120,22 @@ def adjustLevels(img_array, minv, gamma, maxv, nbits=None):
     interval = maxv - minv
     invgamma = 1.0/gamma
 
+    # Make sure the interval is at least 10 levels of difference
+    if interval < 10:
+        interval = 10
+
+        minv -= 5
+        maxv += 5
+
+
+    # Make sure the minimum and maximum levels are in the correct range
+    if minv < 0:
+        minv = 0
+
+    if maxv > max_lvl:
+        maxv = max_lvl
+        
+
     img_array = img_array.astype(np.float64)
 
     # Reduce array to 0-1 values
@@ -189,6 +205,10 @@ def loadFlat(dir_path, file_name, byteswap=False):
 
     # Calculate the median of the flat
     flat_avg = np.median(flat_img)
+
+    # Make sure the flat_avg value is relatively high
+    if flat_avg < 1:
+        flat_avg = 1
 
     # Make sure there are no values close to 0, as images are divided by flats
     flat_img[(flat_img < flat_avg/10) | (flat_img < 10)] = flat_avg
