@@ -285,18 +285,21 @@ class ManualReductionTool(object):
 
         print(dark_file)
 
-        try:
 
-            # Load the dark
-            dark = scipy.misc.imread(dark_file, -1).astype(self.current_image.dtype)
+        # Byteswap the flat if vid file is used or UWO png
+        byteswap = False
+        if self.img_handle is not None:
+            if self.img_handle.byteswap:
+                byteswap = True
 
-            # Byteswap the flat if vid file is used
-            if self.img_handle is not None:
-                if self.img_handle.byteswap:
-                    dark = dark.byteswap()
 
-        except:
+        # Load the dark
+        dark = Image.loadDark(*os.path.split(dark_file), byteswap=byteswap)
+
+        if dark is None:
             return False, None
+
+        dark = dark.astype(self.current_image.dtype)
 
 
         # Check if the size of the file matches

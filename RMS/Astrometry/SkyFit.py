@@ -1741,18 +1741,16 @@ class PlateTool(object):
 
         print(dark_file)
 
-        try:
-
-            # Load the dark
-            dark = scipy.misc.imread(dark_file, -1).astype(self.img_data_raw.dtype)
 
 
-            # Byteswap the flat if vid file is used
-            if self.img_handle.byteswap:
-                dark = dark.byteswap()
+        # Load the dark
+        dark = Image.loadDark(*os.path.split(dark_file), byteswap=self.img_handle.byteswap)
 
-        except:
+        if dark is None:
             return False, None
+
+        dark = dark.astype(self.img_data_raw.dtype)
+
 
 
         # Check if the size of the file matches

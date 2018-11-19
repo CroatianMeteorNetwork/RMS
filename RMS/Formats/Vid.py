@@ -61,9 +61,16 @@ class VidStruct(object):
 
 
 
-def readFrame(st, fid):
+def readFrame(st, fid, metadata_only=False):
     """ Read in the information from the next frame, save them to the given structure and return the image 
         data.
+
+    Arguments:
+        st: [Vid structure]
+        fid: [file handle] File handle to the vid file. Make sure it was open in the 'rb' mode.
+
+    Keyword arguments:
+        metadata_only: [bool] Only read the metadata, but not the whole frame. False by default
     """
 
     # Get the current position in the file
@@ -116,17 +123,24 @@ def readFrame(st, fid):
 
     ##########################################################################################################
 
-    # Rewind the file to the beginning of the frame
-    fid.seek(file_pos)
+    if not metadata_only:
 
-    # Read one whole frame
-    fr = np.fromfile(fid, dtype=np.uint16, count=st.seqlen//2)
+        # Rewind the file to the beginning of the frame
+        fid.seek(file_pos)
 
-    # Set the values of the first row to 0
-    fr[:st.ht] = 0
+        # Read one whole frame
+        fr = np.fromfile(fid, dtype=np.uint16, count=st.seqlen//2)
 
-    # Reshape the frame to the proper image size
-    img = fr.reshape(st.ht, st.wid)
+        # Set the values of the first row to 0
+        fr[:st.ht] = 0
+
+        # Reshape the frame to the proper image size
+        img = fr.reshape(st.ht, st.wid)
+
+    else:
+
+        # If only the metadata was read, set the image to None
+        img = None
 
 
     return img
@@ -152,7 +166,7 @@ def readVid(dir_path, file_name):
     vid = VidStruct()
 
     # Read the info from the first frame
-    readFrame(vid, fid)
+    readFrame(vid, fid, metadata_only=True)
 
     # Reset the file pointer to the beginning
     fid.seek(0)

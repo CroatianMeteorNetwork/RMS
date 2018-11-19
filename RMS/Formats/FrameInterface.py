@@ -427,7 +427,7 @@ class InputTypeFF(object):
         return self.ff
 
 
-    def name(self):
+    def name(self, beginning=None):
         """ Return the name of the FF file. """
 
         return self.current_ff_file
@@ -494,11 +494,14 @@ class InputTypeFF(object):
         return frame
 
 
-    def currentFrameTime(self, dt_obj=False):
+    def currentFrameTime(self, frame_no=None, dt_obj=False):
         """ Return the time of the frame. """
 
+        if frame_no is None:
+            frame_no = self.current_frame
+
         # Compute the datetime of the current frame
-        dt = self.beginning_datetime + datetime.timedelta(seconds=self.current_frame/self.fps)
+        dt = self.beginning_datetime + datetime.timedelta(seconds=frame_no/self.fps)
         
         if dt_obj:
             return dt
@@ -696,10 +699,13 @@ class InputTypeVideo(object):
         
 
 
-    def name(self):
+    def name(self, beginning=False):
         """ Return the name of the chunk, which is just the time of the middle of the current frame chunk. """
 
-        return str(self.currentTime(dt_obj=True))
+        if beginning:
+            return str(self.beginning_datetime)
+        else:
+            return str(self.currentTime(dt_obj=True))
 
 
     def currentTime(self, dt_obj=False):
@@ -757,11 +763,14 @@ class InputTypeVideo(object):
         return frame
 
 
-    def currentFrameTime(self, dt_obj=False):
+    def currentFrameTime(self, frame_no=None, dt_obj=False):
         """ Return the time of the frame. """
 
+        if frame_no is None:
+            frame_no = self.current_frame
+
         # Compute the datetime of the current frame
-        dt = self.beginning_datetime + datetime.timedelta(seconds=self.current_frame/self.fps)
+        dt = self.beginning_datetime + datetime.timedelta(seconds=frame_no/self.fps)
         
         if dt_obj:
             return dt
@@ -842,6 +851,9 @@ class InputTypeUWOVid(object):
 
 
         self.cache = {}
+
+        # Init the dictionary for storing unix times of corresponding frames that were already loaded
+        self.utime_frame_dict = {}
 
         # Do the initial load
         self.loadChunk()
@@ -930,11 +942,18 @@ class InputTypeUWOVid(object):
             if frame is None:
                 break
 
+
+            unix_time = self.vid.ts + self.vid.tu/1000000.0
+
             # Add the unix time to list
-            self.frame_chunk_unix_times.append(self.vid.ts + self.vid.tu/1000000.0)
+            self.frame_chunk_unix_times.append(unix_time)
 
             # Add frame for FF processing
             ff_struct_fake.addFrame(frame)
+
+            unix_time_lst = (self.vid.ts, self.vid.tu)
+            if unix_time_lst not in self.utime_frame_dict:
+                self.utime_frame_dict[first_frame + i] = unix_time_lst
 
 
         self.current_fr_chunk_size = i + 1
@@ -955,10 +974,13 @@ class InputTypeUWOVid(object):
         
 
 
-    def name(self):
+    def name(self, beginning=False):
         """ Return the name of the chunk, which is just the time of the middle of the current frame chunk. """
 
-        return str(self.currentTime(dt_obj=True))
+        if beginning:
+            return str(self.beginning_datetime)
+        else:
+            return str(self.currentTime(dt_obj=True))
 
 
     def currentTime(self, dt_obj=False):
@@ -1007,14 +1029,47 @@ class InputTypeUWOVid(object):
         # Save the frame time
         self.current_frame_time = unixTime2Date(self.vid.ts, self.vid.tu, dt_obj=True) 
 
+        unix_time_lst = (self.vid.ts, self.vid.tu)
+        if unix_time_lst not in self.utime_frame_dict:
+            self.utime_frame_dict[self.current_frame] = unix_time_lst
+
         return frame
 
 
 
-    def currentFrameTime(self, dt_obj=False):
+    def currentFrameTime(self, frame_no=None, dt_obj=False):
         """ Return the time of the frame. """
         
-        dt = self.current_frame_time
+        if frame_no is None:
+            dt = self.current_frame_time
+
+
+        else:
+
+            # If the frame number was given, read it from the dictionary or from the file
+            if frame_no in self.utime_frame_dict:
+                dt = unixTime2Date(*self.utime_frame_dict[frame_no], dt_obj=True)
+
+
+            else:
+
+                # Set the vid file to the right frame
+                self.vid_file.seek(frame_no*self.vidinfo.seqlen)
+
+                # Read the vid file metadata
+                readVidFrame(self.vid, self.vid_file)
+
+                # Store the current time to the dictionary
+                unix_time_lst = (self.vid.ts, self.vid.tu)
+                if unix_time_lst not in self.utime_frame_dict:
+                    self.utime_frame_dict[frame_no] = unix_time_lst
+
+
+                # Revert the vid file pointer to the current frame in the image handle
+                self.vid_file.seek((self.current_frame + 1)*self.vidinfo.seqlen)
+
+                dt = unixTime2Date(*unix_time_lst, dt_obj=True)
+
 
         if dt_obj:
             return dt
@@ -1353,10 +1408,14 @@ class InputTypeImages(object):
 
 
 
-    def name(self):
+    def name(self, beginning=False):
         """ Return the name of the chunk, which is just the time of the middle of the current frame chunk. """
 
-        return str(self.currentTime(dt_obj=True))
+        if beginning:
+            return str(self.beginning_datetime)
+
+        else:
+            return str(self.currentTime(dt_obj=True))
 
 
     def currentTime(self, dt_obj=False):

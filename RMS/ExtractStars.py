@@ -39,7 +39,7 @@ from RMS.QueuedPool import QueuedPool
 
 
 def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=10, neighborhood_size=10, 
-        intensity_threshold=5, flat_struct=None):
+        intensity_threshold=5, flat_struct=None, dark=None):
     """ Extracts stars on a given FF bin by searching for local maxima and applying PSF fit for star 
         confirmation.
 
@@ -55,6 +55,7 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
         neighborhood_size: [int] size of the neighbourhood for the maximum search (in pixels)
         intensity_threshold: [float] a threshold for cutting the detections which are too faint (0-255)
         flat_struct: [Flat struct] Structure containing the flat field. None by default.
+        dark: [ndarray] Dark frame. None by default
 
     Return:
         x2, y2, background, intensity: [list of ndarrays]
@@ -87,6 +88,11 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     # If the FF file could not be read, skip star extraction
     if ff is None:
         return error_return
+
+
+    # Apply the dark frame
+    if dark is not None:
+        ff.avepixel = Image.applyDark(ff.avepixel, dark)
 
 
     # Apply the flat

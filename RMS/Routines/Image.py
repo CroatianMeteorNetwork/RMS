@@ -201,7 +201,7 @@ def adjustLevels(img_array, minv, gamma, maxv, nbits=None):
 
 
 class FlatStruct(object):
-    def __init__(self, flat_img, flat_avg):
+    def __init__(self, flat_img, flat_avg, flat_path):
         """ Structure containing the flat field.
 
         Arguments:
@@ -212,6 +212,8 @@ class FlatStruct(object):
 
         self.flat_img = flat_img
         self.flat_avg = flat_avg
+
+        self.flat_path = flat_path
 
 
 
@@ -229,8 +231,10 @@ def loadFlat(dir_path, file_name, byteswap=False):
         flat_struct: [Flat struct] Structure containing the flat field info.
     """
 
+    flat_path = os.path.join(dir_path, file_name)
+
     # Load the flat image
-    flat_img = scipy.misc.imread(os.path.join(dir_path, file_name), -1)
+    flat_img = scipy.misc.imread(flat_path, -1)
 
     if byteswap:
         flat_img = flat_img.byteswap()
@@ -246,7 +250,7 @@ def loadFlat(dir_path, file_name, byteswap=False):
     flat_img[(flat_img < flat_avg/10) | (flat_img < 10)] = flat_avg
 
     # Init a new Flat structure
-    flat_struct = FlatStruct(flat_img, flat_avg)
+    flat_struct = FlatStruct(flat_img, flat_avg, flat_path)
 
     return flat_struct
 
@@ -319,6 +323,39 @@ def applyDark(img, dark_img):
 
 
     return img
+
+
+
+def loadDark(dir_path, file_name, byteswap=False):
+    """ Load the dark frame. 
+
+    Arguments:
+        dir_path: [str] Directory where the dark frame is.
+        file_name: [str] Name of the dark frame file.
+
+    Keyword arguments:
+        byteswap: [bool] Byteswap the dark. False by default.
+
+    Return:
+        dark_img: [ndarray] Dark frame image.
+    """
+
+
+    dark_path = os.path.join(dir_path, file_name)
+
+    try:
+        # Load the dark image
+        dark_img = scipy.misc.imread(dark_path, -1)
+    
+    except OSError as e:
+        print('Dark could not be loaded:', e)
+        return None
+
+    if byteswap:
+        dark_img = dark_img.byteswap()
+
+
+    return dark_img
 
 
 

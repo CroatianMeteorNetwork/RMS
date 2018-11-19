@@ -16,8 +16,10 @@
 
 from __future__ import print_function, absolute_import, division
 
+import argparse
 import logging
 from time import time
+import datetime
 import sys, os
 import ctypes
 
@@ -149,7 +151,7 @@ def mergeLines(line_list, min_distance, img_w, img_h, last_count=0):
         found_pair = False
 
         # Get polar coordinates of line
-        rho1, theta1 = line1[0:2]
+        rho1, theta1, min_frame1, max_frame1 = line1
 
         
 
@@ -163,7 +165,18 @@ def mergeLines(line_list, min_distance, img_w, img_h, last_count=0):
                 continue
 
             # Get polar coordinates of line
-            rho2, theta2 = line2[0:2]
+            rho2, theta2, min_frame2, max_frame2 = line2
+
+            # If the minimum frame of this line is larger than the maximum frame of the reference line
+            #   skip this loop because there is no time overlap, and we know the lines are ordered by frame
+            if min_frame2 > max_frame1:
+                break
+
+
+            # If there is no time overlap, skip this pair
+            if not ((max_frame1 >= min_frame2) and (min_frame1 <= max_frame2)):
+                continue
+
 
             # Check if the points are close enough
             if compareLines(rho1, theta1, rho2, theta2, img_w, img_h) < min_distance:
@@ -368,7 +381,7 @@ def checkWhiteRatio(img_thres, ff, max_white_ratio):
 
 
 def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_white_ratio, kht_lib_path, \
-    mask, flat_struct):
+    mask=None, flat_struct=None, dark=None):
     """ Get (rho, phi) pairs for each meteor present on the image using KHT.
         
     Arguments:
@@ -380,6 +393,10 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         max_lines: [int] maximum number of lines to find by KHT
         max_white_ratio: [float] max ratio between write and all pixels after thresholding
         kht_lib_path: [string] path to the compiled KHT library
+        mask: [ndarray] Mask image.
+        flat_struct: [FlatStruct]  Flat frame sturcture.
+        dark: [ndarray] Dark frame.
+
     
     Return:
         [list] a list of all found lines
@@ -442,6 +459,11 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # Mask the FF file
             img_handle.ff = MaskImage.applyMask(img_handle.ff, mask, ff_flag=True)
 
+            # Apply the dark frame
+            if dark is not None:
+                img_handle.ff.maxpixel = Image.applyDark(img_handle.ff.maxpixel, dark)
+                img_handle.ff.avepixel = Image.applyDark(img_handle.ff.avepixel, dark)
+
             # Apply the flat to maxpixel and avepixel
             if flat_struct is not None:
 
@@ -449,17 +471,30 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
                 img_handle.ff.avepixel = Image.applyFlat(img_handle.ff.avepixel, flat_struct)
 
 
+
             # Threshold the frame chunk
             img = thresholdFF(img_handle.ff, k1, j1)
 
             # Check if there are too many threshold passers, if so report that no lines were found
             if not checkWhiteRatio(img, img_handle.ff, max_white_ratio):
-                return line_results
+                continue
 
 
 
-        # # Show thresholded image
-        # show(str(frame_min) + "-" + str(frame_max) + " threshold", img)
+        # ### Show maxpixel and thresholded image
+
+        # # Auto levels on maxpixel
+        # min_lvl = np.percentile(img_handle.ff.maxpixel[2:], 1)
+        # max_lvl = np.percentile(img_handle.ff.maxpixel[2:], 99.0)
+
+        # # Adjust levels
+        # maxpixel_autolevel = Image.adjustLevels(img_handle.ff.maxpixel, min_lvl, 1.0, max_lvl)
+
+        # show2(str(frame_min) + "-" + str(frame_max) + " threshold", np.concatenate((maxpixel_autolevel, \
+        #     img.astype(img_handle.ff.maxpixel.dtype)*(2**(img_handle.ff.maxpixel.itemsize*8) - 1)), axis=0))
+
+        # ###
+
 
         # # Show maxpixel of the thresholded part
         # mask = np.zeros(shape=img.shape)
@@ -504,13 +539,15 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
 
 
         # Skip further operations if there are no lines
+        frame_lines = []
         if lines.any():
             for rho, theta in lines:
                 line_results.append([rho, theta, frame_min, frame_max])
+                frame_lines.append([rho, theta, frame_min, frame_max])
 
 
-        # if line_results:
-        #     plotLines(ff, line_results)
+        # if frame_lines:
+        #     plotLines(img_handle.ff, frame_lines)
 
 
     return line_results
@@ -818,17 +855,25 @@ def show3DCloud(ff, xs, ys, zs, detected_line=None, stripe_points=None, config=N
 
 
 
-def preprocessFF(img_handle, mask, flat_struct):
+def preprocessFF(img_handle, mask, flat_struct, dark):
     """ Apply the mask and flat to FF file in img_handle. """
 
     # Mask the FF file
     img_handle.ff = MaskImage.applyMask(img_handle.ff, mask, ff_flag=True)
+
+    # Apply the dark frame to maxpixel and avepixel    
+    if dark is not None:
+        img_handle.ff.maxpixel = Image.applyDark(img_handle.ff.maxpixel, dark)
+        img_handle.ff.avepixel = Image.applyDark(img_handle.ff.avepixel, dark)
+
 
     # Apply the flat to maxpixel and avepixel
     if flat_struct is not None:
 
         img_handle.ff.maxpixel = Image.applyFlat(img_handle.ff.maxpixel, flat_struct)
         img_handle.ff.avepixel = Image.applyFlat(img_handle.ff.avepixel, flat_struct)
+
+    
 
 
     return img_handle
@@ -867,7 +912,7 @@ def thresholdAndCorrectGammaFF(img_handle, config):
 
 
 
-def detectMeteors(img_handle, config, flat_struct=None):
+def detectMeteors(img_handle, config, flat_struct=None, dark=None):
     """ Detect meteors on the given image. Here are the steps in the detection:
             - input image (FF bin format file) is thresholded (converted to black and white)
             - several morphological operations are applied to clean the image
@@ -885,6 +930,7 @@ def detectMeteors(img_handle, config, flat_struct=None):
 
     Keyword arguments:
         flat_struct: [Flat struct] Structure containing the flat field. None by default.
+        dark: [ndarray] Dark frame.
     
     Return:
         meteor_detections: [list] a list of detected meteors, with these elements:
@@ -906,12 +952,13 @@ def detectMeteors(img_handle, config, flat_struct=None):
     if img_handle == 'ff':
 
         # Apply mask and flat to FF
-        img_handle = preprocessFF(img_handle, mask, flat_struct)
+        img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
 
 
     # Get lines on the image
     line_list = getLines(img_handle, config.k1_det, config.j1_det, config.time_slide, config.time_window_size, 
-        config.max_lines_det, config.max_white_ratio, config.kht_lib_path, mask, flat_struct)
+        config.max_lines_det, config.max_white_ratio, config.kht_lib_path, mask=mask, \
+        flat_struct=flat_struct, dark=dark)
 
     logDebug('List of lines:', line_list)
 
@@ -930,8 +977,8 @@ def detectMeteors(img_handle, config, flat_struct=None):
         logDebug('Number of KHT lines: ', len(line_list))
         logDebug(line_list)
 
-        # # Plot lines
-        # plotLines(img_handle.ff, line_list)
+        # Plot lines
+        plotLines(img_handle.ff, line_list)
 
 
         filtered_lines = []
@@ -953,7 +1000,7 @@ def detectMeteors(img_handle, config, flat_struct=None):
                 img_handle.loadChunk(first_frame=frame_min, read_nframes=(frame_max - frame_min + 1))
 
                 # Apply mask and flat to FF
-                img_handle = preprocessFF(img_handle, mask, flat_struct)
+                img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
 
                 # ### PLOT CHUNK
                 # img = img_handle.ff.maxpixel - img_handle.ff.avepixel
@@ -973,7 +1020,7 @@ def detectMeteors(img_handle, config, flat_struct=None):
 
             # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
             xs, ys, zs = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, \
-                mask, flat_struct)
+                mask, flat_struct, dark, debug=False)
             
 
             # Limit the number of points to search if too large
@@ -1042,7 +1089,7 @@ def detectMeteors(img_handle, config, flat_struct=None):
             if (abs(frame_max - frame_min) + 1 < config.line_minimum_frame_range_det):
                 continue
 
-            # Extend the frame range for several frames, just to be sure to catch all parts of a meteor
+            # Extend the frame range for several frames, just to be sure to catch all parts of the meteor
             frame_min -= config.frame_extension
             frame_max += config.frame_extension
 
@@ -1074,7 +1121,7 @@ def detectMeteors(img_handle, config, flat_struct=None):
                 img_handle.loadChunk(first_frame=frame_min, read_nframes=(frame_max - frame_min + 1))
 
                 # Preprocess image for this chunk
-                img_handle = preprocessFF(img_handle, mask, flat_struct)
+                img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
 
                 img_thres, max_avg_corrected, flattened_weights, \
                     min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config)
@@ -1083,7 +1130,7 @@ def detectMeteors(img_handle, config, flat_struct=None):
 
             # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
             xs, ys, zs = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, \
-                mask, flat_struct, stripe_width_factor=1.5)
+                mask, flat_struct, dark, stripe_width_factor=1.5, debug=True)
 
 
             # Make an array to feed into the centroiding algorithm
@@ -1093,8 +1140,8 @@ def detectMeteors(img_handle, config, flat_struct=None):
             # Sort stripe points by frame
             stripe_points = stripe_points[stripe_points[:,2].argsort()]
 
-            # # Show 3D cloud
-            # show3DCloud(img_handle.ff, xs, ys, zs, detected_line, stripe_points, config)
+            # Show 3D cloud
+            show3DCloud(img_handle.ff, xs, ys, zs, detected_line, stripe_points, config)
 
             # Get points of the given line
             line_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config, 
@@ -1196,6 +1243,12 @@ def detectMeteors(img_handle, config, flat_struct=None):
                         # Mask the image
                         fr_img = MaskImage.applyMask(fr_img, mask)
 
+
+                        # Apply dark frame
+                        if dark is not None:
+                            fr_img = Image.applyDark(fr_img, dark)
+
+
                         # Apply the flat to frame
                         if flat_struct is not None:
 
@@ -1290,8 +1343,62 @@ def detectMeteors(img_handle, config, flat_struct=None):
 
 if __name__ == "__main__":
 
-    # Load config file
-    config = cr.parse(".config")
+
+
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Run RMS meteor detection on given data.")
+
+    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
+        help='Path to the folder with FF or image files, or path to a video file. If images or videos are given, their names must be in the format: YYYYMMDD_hhmmss.uuuuuu, or the beginning time has to be given.')
+
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
+    arg_parser.add_argument('-t', '--timebeg', nargs=1, metavar='TIME', type=str, \
+        help="The beginning time of the video file in the YYYYMMDD_hhmmss.uuuuuu format.")
+
+    arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float, \
+        help="Frames per second when images are used. If not given, it will be read from the config file.")
+
+    arg_parser.add_argument('-g', '--gamma', metavar='CAMERA_GAMMA', type=float, \
+        help="Camera gamma value. Science grade cameras have 1.0, consumer grade cameras have 0.45. Adjusting this is essential for good photometry, and doing star photometry through SkyFit can reveal the real camera gamma.")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+
+    if cml_args.config is not None:
+
+        config_file = os.path.abspath(cml_args.config[0].replace('"', ''))
+
+        print('Loading config file:', config_file)
+
+        # Load the given config file
+        config = cr.parse(config_file)
+
+    else:
+        # Load the default configuration file
+        config = cr.parse(".config")
+
+
+    # If camera gamma was given, change the value in config
+    if cml_args.gamma is not None:
+        config.gamma = cml_args.gamma
+
+
+    # Parse the beginning time into a datetime object
+    if cml_args.timebeg is not None:
+
+        beginning_time = datetime.datetime.strptime(cml_args.timebeg[0], "%Y%m%d_%H%M%S.%f")
+
+    else:
+        beginning_time = None
+
+
 
 
     # Measure the time of the whole operation
@@ -1307,17 +1414,12 @@ if __name__ == "__main__":
 
     ######
 
-    
-    if len(sys.argv) == 1:
-        print("Usage: python -m RMS.Detection /path/to/ff/files/")
-        sys.exit()
 
-
-    dir_path = sys.argv[1]
+    dir_path_input = cml_args.dir_path[0].replace('"', '')
         
 
     # Detect the input file format
-    img_handle_main = detectInputType(dir_path, config)
+    img_handle_main = detectInputType(dir_path_input, config, beginning_time=beginning_time, fps=cml_args.fps)
 
     img_handle_list = []
 
@@ -1328,7 +1430,7 @@ if __name__ == "__main__":
             # Go through all FF files and add them as individual files
             for file_name in img_handle_main.ff_list:
 
-                img_handle = detectInputType(os.path.join(dir_path, file_name), config, skip_ff_dir=True)
+                img_handle = detectInputType(os.path.join(dir_path_input, file_name), config, skip_ff_dir=True)
 
                 img_handle_list.append(img_handle)
 
@@ -1339,18 +1441,42 @@ if __name__ == "__main__":
 
 
 
+    dir_path = img_handle_main.dir_path
+
+
+    # Try loading the dark frame
+    dark = None
+    if config.use_dark:
+
+        # Check if there is flat in the data directory
+        if os.path.exists(os.path.join(dir_path, config.dark_file)):
+            dark = Image.loadDark(dir_path, config.dark_file, byteswap=img_handle_main.byteswap)
+
+        # Try loading the default dark
+        elif os.path.exists(config.dark_file):
+            dark = Image.loadDark(os.getcwd(), config.dark_file, byteswap=img_handle_main.byteswap)
+
+
+        if dark is not None:
+            print('Loaded dark:', config.dark_file)
+
+
+
     # Try loading a flat field image
     flat_struct = None
-
     if config.use_flat:
         
         # Check if there is flat in the data directory
         if os.path.exists(os.path.join(dir_path, config.flat_file)):
-            flat_struct = Image.loadFlat(dir_path, config.flat_file)
+            flat_struct = Image.loadFlat(dir_path, config.flat_file, byteswap=img_handle_main.byteswap)
 
         # Try loading the default flat
         elif os.path.exists(config.flat_file):
-            flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
+            flat_struct = Image.loadFlat(os.getcwd(), config.flat_file, byteswap=img_handle_main.byteswap)
+
+
+        if flat_struct is not None:
+            print('Loaded flat:', flat_struct.flat_path)
 
 
 
@@ -1358,9 +1484,9 @@ if __name__ == "__main__":
     results_list = []
 
     # Open a file for results
-    results_path = os.path.abspath(dir_path) + os.sep
-    results_name = results_path.split(os.sep)[-2]
-    results_file = open(img_handle_main.dir_path + results_name + '_results.txt', 'w')
+    results_path = img_handle_main.dir_path
+    results_name = config.stationID + "_" + img_handle_main.beginning_datetime.strftime("%Y%m%d_%H%M%S_%f")
+    results_file = open(os.path.join(img_handle_main.dir_path, results_name + '_results.txt'), 'w')
 
     total_meteors = 0
 
@@ -1373,19 +1499,30 @@ if __name__ == "__main__":
         # Run the meteor detection algorithm
         meteor_detections = detectMeteors(img_handle, config, flat_struct=flat_struct)
 
+        # Supress numpy scientific notation printing
+        np.set_printoptions(suppress=True)
+
         meteor_No = 1
         for meteor in meteor_detections:
 
             rho, theta, centroids = meteor
 
+            first_pick_time = img_handle.currentFrameTime(frame_no=int(centroids[0][0]), dt_obj=True)
+
             # Print detection to file
             results_file.write('-------------------------------------------------------\n')
-            results_file.write(img_handle.name() + '\n')
+            results_file.write(str(first_pick_time) + '\n')
             results_file.write(str(rho) + ',' + str(theta) + '\n')
-            results_file.write(str(centroids)+'\n')
+
+            # Write the time in results file instead of the frame
+            res_centroids = centroids.tolist()
+            for entry in res_centroids:
+                entry[0] = (img_handle.currentFrameTime(frame_no=int(entry[0]), dt_obj=True) - first_pick_time).total_seconds()
+
+            results_file.write(str(np.array(res_centroids)) + '\n')
 
             # Append to the results list
-            results_list.append([img_handle.name(), meteor_No, rho, theta, centroids])
+            results_list.append([img_handle.name(beginning=True), meteor_No, rho, theta, centroids])
             meteor_No += 1
 
             total_meteors += 1

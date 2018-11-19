@@ -39,7 +39,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
 
     # Check for vertical/horizontal lines and set theta to a small angle
     if (theta%90 < angle_eps):
-        theta = 90 + angle_eps
+        theta = theta + angle_eps
 
     # Normalize theta to 0-360 range
     theta = theta%360
@@ -113,7 +113,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
 
 
 
-def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, mask, flat_struct, stripe_width_factor=1.0):
+def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, mask, flat_struct, dark, stripe_width_factor=1.0, debug=False):
     """ Threshold the image and get a list of pixel positions and frames of threshold passers. 
         This function handles all input types of data.
 
@@ -123,6 +123,18 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
     # Get indices of stripe pixels around the line
     img_h, img_w = img_handle.ff.maxpixel.shape
     stripe_indices = getStripeIndices(rho, theta, stripe_width_factor*config.stripe_width, img_h, img_w)
+
+
+    if debug:
+
+        img_test = np.zeros(shape=(img_h, img_w))
+        img_test[stripe_indices] = 1
+
+        plt.imshow(img_test)
+        plt.show()
+
+        pass
+
 
     # If the FF files is given, extract the points from FF after threshold
     if img_handle.input_type == 'ff':
@@ -179,6 +191,12 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             # Mask the image
             fr_img = MaskImage.applyMask(fr_img, mask)
 
+
+            # Apply the dark frame
+            if dark is not None:
+                fr_img = Image.applyDark(fr_img, dark)
+
+
             # Apply the flat to frame
             if flat_struct is not None:
 
@@ -189,15 +207,17 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             img_thres = Image.thresholdImg(fr_img, img_handle.ff.avepixel, img_handle.ff.stdpixel, \
                 config.k1_det, config.j1_det)
 
+            if debug:
+                # print(fr)
+                # print('mean stdpixel3:', np.mean(img_handle.ff.stdpixel))
+                # print('mean avepixel3:', np.mean(img_handle.ff.avepixel))
+                # print('mean frame:', np.mean(fr_img))
+                # fig, (ax1, ax2) = plt.subplots(nrows=2)
+                # ax1.imshow(img_thres, cmap='gray')
+                # ax2.imshow(img_handle.ff.maxpixel - fr_img, cmap='gray', vmax=10000)
+                # plt.show()
 
-            # print(fr)
-            # print('mean stdpixel3:', np.mean(img_handle.ff.stdpixel))
-            # print('mean avepixel3:', np.mean(img_handle.ff.avepixel))
-            # print('mean frame:', np.mean(fr_img))
-            # fig, (ax1, ax2) = plt.subplots(nrows=2)
-            # ax1.imshow(img_thres, cmap='gray')
-            # ax2.imshow(img_handle.ff.maxpixel - fr_img, cmap='gray', vmax=10000)
-            # plt.show()
+                pass
 
             # Remove lonely pixels
             img_thres = morph.clean(img_thres)
@@ -206,9 +226,6 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             # Extract the stripe from the thresholded image
             stripe = np.zeros(img_thres.shape, img_thres.dtype)
             stripe[stripe_indices] = img_thres[stripe_indices]
-
-            # plt.imshow(stripe, cmap='gray')
-            # plt.show()
 
             # Get stripe positions (x, y, frame)
             stripe_positions = stripe.nonzero()
@@ -220,6 +237,12 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             xs_array.append(xs)
             ys_array.append(ys)
             zs_array.append(zs)
+
+
+            if debug:
+                print('---')
+                print(stripe.nonzero())
+                print(xs, ys, zs)
 
         
         # Flatten the arrays

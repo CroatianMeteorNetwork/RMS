@@ -199,9 +199,12 @@ class Config:
 
 
         ##### Calibration
-        self.use_flat = True
+        self.use_flat = False
         self.flat_file = 'flat.bmp'
         self.flat_min_imgs = 20
+
+        self.use_dark = False
+        self.dark_file = 'dark.bmp'
 
         self.star_catalog_path = 'Catalogs'
         self.star_catalog_file = 'gaia_dr2_mag_11.5.npy'
@@ -730,6 +733,15 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "flat_min_imgs"):
         config.flat_min_imgs = parser.getint(section, "flat_min_imgs")
+
+
+    if parser.has_option(section, "use_dark"):
+        config.use_dark = parser.getboolean(section, "use_dark")
+
+    if parser.has_option(section, "dark_file"):
+        config.dark_file = parser.get(section, "dark_file")
+
+
 
     if parser.has_option(section, "star_catalog_path"):
         config.star_catalog_path = parser.get(section, "star_catalog_path")
