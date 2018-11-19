@@ -164,7 +164,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
 
     # Check for vertical/horizontal lines and set theta to a small angle
     if (theta%90 < angle_eps):
-        theta = 90 + angle_eps
+        theta = theta + angle_eps
 
     # Normalize theta to 0-360 range
     theta = theta%360
