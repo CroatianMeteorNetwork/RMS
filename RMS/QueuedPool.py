@@ -58,7 +58,7 @@ class BackupContainer(object):
 
 
 class QueuedPool(object):
-    def __init__(self, func, cores=None, log=None, delay_start=0, worker_timeout=5000, backup_dir='.'):
+    def __init__(self, func, cores=None, log=None, delay_start=0, worker_timeout=2000, backup_dir='.'):
         """ Provides capability of creating a pool of workers which will process jobs in a given queue, and 
         the input queue can be updated in another thread. 
 
