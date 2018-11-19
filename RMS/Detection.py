@@ -977,8 +977,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
         logDebug('Number of KHT lines: ', len(line_list))
         logDebug(line_list)
 
-        # Plot lines
-        plotLines(img_handle.ff, line_list)
+        # # Plot lines
+        # plotLines(img_handle.ff, line_list)
 
 
         filtered_lines = []
@@ -1130,7 +1130,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
 
             # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
             xs, ys, zs = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, \
-                mask, flat_struct, dark, stripe_width_factor=1.5, debug=True)
+                mask, flat_struct, dark, stripe_width_factor=1.5, debug=False)
 
 
             # Make an array to feed into the centroiding algorithm
@@ -1140,8 +1140,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
             # Sort stripe points by frame
             stripe_points = stripe_points[stripe_points[:,2].argsort()]
 
-            # Show 3D cloud
-            show3DCloud(img_handle.ff, xs, ys, zs, detected_line, stripe_points, config)
+            # # Show 3D cloud
+            # show3DCloud(img_handle.ff, xs, ys, zs, detected_line, stripe_points, config)
 
             # Get points of the given line
             line_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config, 
