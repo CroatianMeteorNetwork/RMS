@@ -182,6 +182,8 @@ class Config:
         self.ang_vel_min = 0.5
         self.ang_vel_max = 35.0
 
+        # By default the peak of the meteor should be at least 16x brighter than the background. This is the multiplier that scales this number (1.0 = 16x).
+        self.min_patch_intensity_multiplier = 1.0
 
         ##### StarExtraction
 
@@ -683,6 +685,10 @@ def parseMeteorDetection(config, parser):
 
     if parser.has_option(section, "ang_vel_max"):
         config.ang_vel_max = parser.getfloat(section, "ang_vel_max")
+
+
+    if parser.has_option(section, "min_patch_intensity_multiplier"):
+        config.min_patch_intensity_multiplier = parser.getfloat(section, "min_patch_intensity_multiplier")
 
 
 

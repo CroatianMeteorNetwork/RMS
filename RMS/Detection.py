@@ -738,10 +738,10 @@ def checkAngularVelocity(centroids, config):
 
     # Check if the meteor is in the possible angular velocity range (deg/s)
     if (ang_vel >= config.ang_vel_min and ang_vel <= config.ang_vel_max):
-        return True
+        return ang_vel, True
 
     else:
-        return False
+        return ang_vel, False
 
 
 
@@ -905,6 +905,9 @@ def thresholdAndCorrectGammaFF(img_handle, config):
     # that of a patch of 4x4 pixels that are of the mean background brightness
     min_patch_intensity = 4*4*(np.mean(maxpixel_gamma_corr - avepixel_gamma_corr) \
         + config.k1_det*np.mean(stdpixel_gamma_corr) + config.j1)
+
+    # Apply a special minimum path intensity multiplier
+    min_patch_intensity *= config.min_patch_intensity_multiplier
 
 
     return img_thres, max_avg_corrected, flattened_weights, min_patch_intensity
@@ -1282,6 +1285,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
 
             # Reject the solution if there are too few centroids
             if len(centroids) < config.line_minimum_frame_range_det:
+                logDebug('Rejected due to too few frames!')
                 continue
 
 
@@ -1289,11 +1293,15 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
             # The assumption here is that the peak of the meteor should have the intensity which is at least
             # that of a patch of 4x4 pixels that are of the mean background brightness
             if np.max(centroids[:, 3]) < min_patch_intensity:
+                logDebug('Rejected due to too low max patch intensity:', np.max(centroids[:, 3]), ' < ', \
+                    min_patch_intensity)
                 continue
 
 
             # Check the detection if it has the proper angular velocity
-            if not checkAngularVelocity(centroids, config):
+            ang_vel, ang_vel_status = checkAngularVelocity(centroids, config)
+            if not ang_vel_status:
+                logDebug('Rejected due to the angular velocity:', ang_vel, 'deg/s')
                 continue
 
 

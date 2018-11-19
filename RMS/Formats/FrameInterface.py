@@ -936,11 +936,13 @@ class InputTypeUWOVid(object):
         # Load the chunk of frames
         for i in range(frames_to_read):
 
-            frame = readVidFrame(self.vid, self.vid_file).astype(np.uint16)
+            frame = readVidFrame(self.vid, self.vid_file)
 
             # If the end of the vid file was reached, stop the loop
             if frame is None:
                 break
+
+            frame = frame.astype(np.uint16)
 
 
             unix_time = self.vid.ts + self.vid.tu/1000000.0
