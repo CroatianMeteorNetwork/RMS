@@ -706,17 +706,58 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
     return best_chain
 
 
-
-def checkAngularVelocity(centroids, config):
+def checkAngularVelocity3D(detected_line, config):
     """ Check the angular velocity of the detection, and reject those too slow or too fast to be meteors. 
         The minimum ang. velocity is 0.5 deg/s, while maximum is 35 deg/s (Peter Gural, private comm.).
+    
+    Arguments:
+        detected_line: [list] A list which contains the 3D coordinates of the detected line.
+        config: [config object] configuration object (loaded from the .config file)
+    
+    Return:
+        ang_vel, ang_vel_status: [float, bool]
+            - ang_vel - angular velovity in deg/s
+            - ang_vel_status - True if the velocity is in the meteor ang. velocity range, False otherwise
+
+    """
+
+    # Get coordinates of 2 points that describe the line
+    x1, y1, z1 = detected_line[0]
+    x2, y2, z2 = detected_line[1]
+
+
+    # Compute the average angular velocity in px per frame
+    ang_vel = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)/(z2 - z1)
+
+    # Convert to px/sec
+    ang_vel = ang_vel*config.fps
+
+    # Convert to deg/sec
+    scale = (config.fov_h/float(config.height) + config.fov_w/float(config.width))/2.0
+    ang_vel = ang_vel*scale
+
+    # Check if the meteor is in the possible angular velocity range (deg/s)
+    if (ang_vel >= config.ang_vel_min and ang_vel <= config.ang_vel_max):
+        return ang_vel, True
+
+    else:
+        return ang_vel, False
+
+
+
+def checkAngularVelocity(centroids, config):
+    """ Check the angular velocity of the detected centroids, and reject those too slow or too fast to be 
+        meteors. The minimum ang. velocity is 0.5 deg/s, while maximum is 35 deg/s (Peter Gural, private 
+        comm.).
     
     Arguments:
         centroids: [ndarray] meteor centroids from the detector
         config: [config object] configuration object (loaded from the .config file)
     
     Return:
-        [bool] True if the velocity is in the meteor ang. velocity range, False otherwise
+        ang_vel, ang_vel_status: [float, bool]
+            - ang_vel - angular velovity in deg/s
+            - ang_vel_status - True if the velocity is in the meteor ang. velocity range, False otherwise
 
     """
 
@@ -742,6 +783,7 @@ def checkAngularVelocity(centroids, config):
 
     else:
         return ang_vel, False
+
 
 
 
@@ -1060,6 +1102,13 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
                 detected_line = detected_line[0]
 
                 # logDebug(detected_line)
+                
+
+                # Check the detection if it has the proper angular velocity
+                ang_vel, ang_vel_status = checkAngularVelocity3D(detected_line, config)
+                if not ang_vel_status:
+                    logDebug('Rejected at initial stage due to the angular velocity: {:.2f} deg/s'.format(ang_vel))
+                    continue
 
                 # # Show 3D cloud
                 # show3DCloud(img_handle.ff, xs, ys, zs, detected_line, stripe_points, config)
@@ -1161,10 +1210,6 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
             # Skip if the points cover too small a frame range
             if abs(np.max(line_points[:,2]) - np.min(line_points[:,2])) + 1 < config.line_minimum_frame_range_det:
                 continue
-
-
-            # # Compute the average angular velocity in px per frame
-            # ang_vel_avg = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)/(z2 - z1)
 
 
             # Calculate centroids
@@ -1305,7 +1350,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
             # Check the detection if it has the proper angular velocity
             ang_vel, ang_vel_status = checkAngularVelocity(centroids, config)
             if not ang_vel_status:
-                logDebug('Rejected due to the angular velocity:', ang_vel, 'deg/s')
+                logDebug('Rejected due to the angular velocity: {:.2f} deg/s'.format(ang_vel))
                 continue
 
 
