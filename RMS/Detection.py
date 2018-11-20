@@ -1109,6 +1109,10 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
             # Convert Cartesian line coordinates to polar
             rho, theta = getPolarLine(x1, y1, x2, y2, img_handle.ff.nrows, img_handle.ff.ncols)
 
+            # Skip the line if rho could not be computed
+            if np.isnan(rho):
+                continue
+
             # Convert Cartesian line coordinate to CAMS compatible polar coordinates (flipped Y axis)
             rho_cams, theta_cams = getPolarLine(x1, img_handle.ff.nrows - y1, x2, img_handle.ff.nrows - y2, \
                 img_handle.ff.nrows, img_handle.ff.ncols)
