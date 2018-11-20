@@ -5,6 +5,7 @@ from __future__ import print_function, division, absolute_import
 
 import os
 from RMS.Astrometry.Conversions import jd2Date
+from RMS.Formats.Platepar import Platepar
 
 def writeCAL(night_dir, config, platepar):
     """ Write the CAL file. 
@@ -27,6 +28,11 @@ def writeCAL(night_dir, config, platepar):
 
     # Construct the CAL file name
     file_name = "CAL_{:06d}_{:s}.txt".format(config.cams_code, night_time)
+
+
+    # If there was no platepar, init an empty one
+    if platepar is None:
+        platepar = Platepar()
 
     # Open the file
     with open(os.path.join(night_dir, file_name), 'w') as f:
@@ -113,17 +119,17 @@ def writeCAL(night_dir, config, platepar):
 if __name__ == "__main__":
 
     import RMS.ConfigReader as cr
-    from RMS.Formats import Platepar
 
     # Load the default configuration file
     config = cr.parse(".config")
 
     # Load a platepar file
-    pp = Platepar.Platepar()
-    pp.read("/mnt/bulk/2018Draconids/ConfirmedFiles/HR0010_20181008_170022_956418_detected/platepar_cmn2010.cal")
+    pp = Platepar()
+    #pp.read("/mnt/bulk/2018Draconids/ConfirmedFiles/HR0010_20181008_170022_956418_detected/platepar_cmn2010.cal")
 
 
-    night_dir = "/mnt/bulk/2018Draconids/ConfirmedFiles/HR0010_20181008_170022_956418_detected"
+    #night_dir = "/mnt/bulk/2018Draconids/ConfirmedFiles/HR0010_20181008_170022_956418_detected"
+    night_dir = "D:/Dropbox/RPi_Meteor_Station/data/CA0004_20180516_040459_588816_detected"
 
     # Write the CAL file
     writeCAL(night_dir, config, pp)
