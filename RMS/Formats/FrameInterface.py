@@ -18,7 +18,7 @@ except:
 import cv2
 import numpy as np
 
-from RMS.Astrometry.Conversions import unixTime2Date
+from RMS.Astrometry.Conversions import unixTime2Date, datetime2UnixTime
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import reconstructFrame as reconstructFrameFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
@@ -1226,7 +1226,7 @@ class InputTypeImages(object):
         if self.uwo_png_mode:
 
             # Convert datetimes to Unix times
-            unix_times = [(dt - datetime.datetime(1970, 1, 1)).total_seconds() for dt in self.uwo_png_dt_list]
+            unix_times = [datetime2UnixTime(dt) for dt in self.uwo_png_dt_list]
 
             fps = 1/((unix_times[-1] - unix_times[0])/self.current_fr_chunk_size)
 
@@ -1427,7 +1427,7 @@ class InputTypeImages(object):
         if self.uwo_png_mode:
 
             # Convert datetimes to Unix times
-            unix_times = [(dt - datetime.datetime(1970, 1, 1)).total_seconds() for dt in self.uwo_png_dt_list]
+            unix_times = [datetime2UnixTime(dt) for dt in self.uwo_png_dt_list]
 
             # Compute the mean of unix times
             unix_mean = np.mean(unix_times)

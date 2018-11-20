@@ -33,10 +33,14 @@ import matplotlib.gridspec as gridspec
 from mpl_toolkits.mplot3d import Axes3D
 
 # RMS imports
+from RMS.Astrometry.Conversions import datetime2UnixTime, jd2Date
+from RMS.Astrometry.ApplyAstrometry import XY2CorrectedRADecPP, raDec2AltAz
 from RMS.DetectionTools import getThresholdedStripe3DPoints
+from RMS.Formats.AsgardEv import writeEv
 from RMS.Formats import FFfile
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats.FrameInterface import detectInputType
+from RMS.Formats.Platepar import Platepar
 import RMS.ConfigReader as cr
 from RMS.Routines.Grouping3D import find3DLines, getAllPoints
 from RMS.Routines.CompareLines import compareLines
@@ -1422,6 +1426,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-g', '--gamma', metavar='CAMERA_GAMMA', type=float, \
         help="Camera gamma value. Science grade cameras have 1.0, consumer grade cameras have 0.45. Adjusting this is essential for good photometry, and doing star photometry through SkyFit can reveal the real camera gamma.")
 
+    arg_parser.add_argument('-a', '--asgard', nargs=1, metavar='ASGARD_PLATEPAR', type=str, \
+        help="""Write output as ASGARD event files, not CAMS FTPdetectinfo. Path to the platepar file needs to be given.""")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1455,6 +1462,22 @@ if __name__ == "__main__":
     else:
         beginning_time = None
 
+
+
+    # Check if a correct platepar file was given for ASGARD data
+    if cml_args.asgard is not None:
+
+        # Extract the path to the platepar file
+        platepar_path = cml_args.asgard[0]
+
+        platepar = Platepar()
+        pp_status = platepar.read(platepar_path)
+
+        if not pp_status:
+            print('The platepar file could not be loaded: {:s}'.format(platepar_path))
+            print('Exiting...')
+
+            sys.exit()
 
 
 
@@ -1585,14 +1608,97 @@ if __name__ == "__main__":
             total_meteors += 1
 
 
+
+        # Write output as ASGARD event file
+        if cml_args.asgard is not None:
+
+            # Letter of event for simultaneous event (65 = A, 66 = B, etc.)
+            current_letter = 65
+            prev_fn_time = 0
+
+            # Go through all centroids
+            for meteor in meteor_detections:
+
+                rho, theta, centroids = meteor
+
+
+                # Extract centroid columns
+                frame_array, x_array, y_array, intensity_array = centroids.T
+
+
+                # Compute frame time for every centroid
+                time_array = []
+                for entry in centroids:
+
+                    # Compute the datetime for every frame
+                    frame_time = img_handle.currentFrameTime(frame_no=int(entry[0]))
+                    time_array.append(frame_time)
+
+
+                ### Compute alt/az and magnitudes
+                
+                # Compute ra/dec
+                jd_array, ra_array, dec_array, mag_array = XY2CorrectedRADecPP(time_array, x_array, y_array, \
+                    intensity_array, platepar)
+
+                # Compute alt/az
+                azim_array = []
+                alt_array = []
+                for jd, ra, dec in zip(jd_array, ra_array, dec_array):
+
+                    azim, alt = raDec2AltAz(jd, platepar.lon, platepar.lat, ra, dec)
+
+                    azim_array.append(azim)
+                    alt_array.append(alt)
+
+                ###
+
+                # Construct an input array for ASGARD event file function
+                ev_array = np.array([frame_array, jd_array, intensity_array, x_array, y_array, azim_array, \
+                    alt_array, mag_array]).T
+
+
+                ### Construct the file name for the event file
+
+                # Find the time of the peak
+                jd_peak = jd_array[mag_array.argmin()]
+
+
+                # Construct the time part of the file name
+                fn_time = jd2Date(jd_peak, dt_obj=True)
+                fn_time = fn_time.strftime('%Y%m%d_%H%M%S')
+
+                # If the previous file name was the same, increment the file name letter
+                if fn_time == prev_fn_time:
+                    current_letter += 1
+                else:
+                    # Reset to 'A'
+                    current_letter = 65
+
+                # Construct a file name for the event
+                file_name = 'ev_' + fn_time + chr(current_letter) + "_" + config.stationID + '.txt'
+
+                ###
+
+
+                # Write the ev file
+                writeEv(results_path, file_name, ev_array, platepar)
+
+
+
     results_file.close()
 
 
-    ftpdetectinfo_name = 'FTPdetectinfo_' + results_name + '.txt'
 
-    # Write FTPdetectinfo file
-    FTPdetectinfo.writeFTPdetectinfo(results_list, results_path, ftpdetectinfo_name, results_path, 
-        config.stationID, config.fps)
+
+    # Write output as CAMS FTPdetectinfo files
+    if cml_args.asgard is None:
+
+        ftpdetectinfo_name = 'FTPdetectinfo_' + results_name + '.txt'
+
+        # Write FTPdetectinfo file
+        FTPdetectinfo.writeFTPdetectinfo(results_list, results_path, ftpdetectinfo_name, results_path, 
+            config.stationID, config.fps)
                 
 
 

@@ -111,6 +111,24 @@ def unixTime2Date(ts, tu, dt_obj=False):
 
 
 
+def datetime2UnixTime(dt):
+    """ Convert the given datetime to UNIX time. 
+    
+    Arguments:
+        dt: [datetime]
+
+    Return:
+        [float] Unix time.
+    """
+
+    # UTC unix timestamp
+    unix_timestamp = (dt - datetime(1970, 1, 1)).total_seconds()
+
+    return unix_timestamp
+
+
+
+
 def date2UnixTime(year, month, day, hour, minute, second, millisecond=0, UT_corr=0.0):
     """ Convert date and time to Unix time. 
     Arguments:
@@ -134,10 +152,8 @@ def date2UnixTime(year, month, day, hour, minute, second, millisecond=0, UT_corr
     # Create datetime object of current time
     dt = datetime(year, month, day, hour, minute, second, int(millisecond*1000)) - timedelta(hours=UT_corr)
 
-    # UTC unix timestamp
-    unix_timestamp = (dt - datetime(1970, 1, 1)).total_seconds()
+    return datetime2UnixTime(dt)
 
-    return unix_timestamp
 
 
 
