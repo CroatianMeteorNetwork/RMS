@@ -113,7 +113,7 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
 
 
 
-def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, mask, flat_struct, dark, stripe_width_factor=1.0, debug=False):
+def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, mask, flat_struct, dark, stripe_width_factor=1.0, centroiding=False, debug=False):
     """ Threshold the image and get a list of pixel positions and frames of threshold passers. 
         This function handles all input types of data.
 
@@ -207,25 +207,33 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             img_thres = Image.thresholdImg(fr_img, img_handle.ff.avepixel, img_handle.ff.stdpixel, \
                 config.k1_det, config.j1_det)
 
-            if debug:
-                # print(fr)
-                # print('mean stdpixel3:', np.mean(img_handle.ff.stdpixel))
-                # print('mean avepixel3:', np.mean(img_handle.ff.avepixel))
-                # print('mean frame:', np.mean(fr_img))
-                # fig, (ax1, ax2) = plt.subplots(nrows=2)
-                # ax1.imshow(img_thres, cmap='gray')
-                # ax2.imshow(img_handle.ff.maxpixel - fr_img, cmap='gray', vmax=10000)
-                # plt.show()
-
-                pass
 
             # Remove lonely pixels
             img_thres = morph.clean(img_thres)
 
-
             # Extract the stripe from the thresholded image
             stripe = np.zeros(img_thres.shape, img_thres.dtype)
             stripe[stripe_indices] = img_thres[stripe_indices]
+
+            # Include more pixels for centroiding and photometry
+            if centroiding:
+                
+                # Dilate the pixels in the stripe
+                stripe = morph.dilate(stripe)
+
+
+            if debug:
+                print(fr)
+                print('mean stdpixel3:', np.mean(img_handle.ff.stdpixel))
+                print('mean avepixel3:', np.mean(img_handle.ff.avepixel))
+                print('mean frame:', np.mean(fr_img))
+                fig, (ax1, ax2) = plt.subplots(nrows=2)
+                ax1.imshow(stripe, cmap='gray')
+                ax2.imshow(img_handle.ff.maxpixel - fr_img, cmap='gray', vmax=10000)
+                plt.show()
+
+                pass
+
 
             # Get stripe positions (x, y, frame)
             stripe_positions = stripe.nonzero()

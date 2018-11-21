@@ -241,6 +241,22 @@ def close(np.ndarray[INT_TYPE_t, ndim=2] img):
     return img
 
 
+@cython.boundscheck(False)
+@cython.wraparound(False) 
+def dilate(np.ndarray[INT_TYPE_t, ndim=2] img):
+    """ Morphological dilation with OpenCV.
+    
+    @param image: input image
+    
+    @return dilated image
+    """
+    
+    kernel = np.ones((3, 3), np.uint8)
+    
+    img = cv2.dilate(img, kernel)
+    
+    return img
+
 
 @cython.boundscheck(False)
 @cython.wraparound(False) 

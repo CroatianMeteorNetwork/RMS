@@ -1190,7 +1190,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
 
             # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
             xs, ys, zs = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, \
-                mask, flat_struct, dark, stripe_width_factor=1.5, debug=False)
+                mask, flat_struct, dark, stripe_width_factor=1.5, centroiding=True, debug=False)
 
 
             # Make an array to feed into the centroiding algorithm
