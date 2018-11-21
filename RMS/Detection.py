@@ -1411,7 +1411,7 @@ if __name__ == "__main__":
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Run RMS meteor detection on given data.")
 
-    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
+    arg_parser.add_argument('dir_path', nargs='+', metavar='DIR_PATH', type=str, \
         help='Path to the folder with FF or image files, or path to a video file. If images or videos are given, their names must be in the format: YYYYMMDD_hhmmss.uuuuuu, or the beginning time has to be given.')
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
@@ -1494,30 +1494,49 @@ if __name__ == "__main__":
 
     ######
 
+    # Check if a list of files is given
+    if len(cml_args.dir_path) > 1:
 
-    dir_path_input = cml_args.dir_path[0].replace('"', '')
-        
+        img_handle_list = []
 
-    # Detect the input file format
-    img_handle_main = detectInputType(dir_path_input, config, beginning_time=beginning_time, fps=cml_args.fps)
+        # If it is, load files individually as separate image handles
+        for file_path in cml_args.dir_path:
 
-    img_handle_list = []
+            file_path = file_path.replace('"', '')
 
-    # If the input format are FF files, break them down into single FF files
-    if img_handle_main.input_type == 'ff':
-        if not img_handle_main.single_ff:
+            img_handle = detectInputType(file_path, config, beginning_time=beginning_time, fps=cml_args.fps)
 
-            # Go through all FF files and add them as individual files
-            for file_name in img_handle_main.ff_list:
-
-                img_handle = detectInputType(os.path.join(dir_path_input, file_name), config, skip_ff_dir=True)
-
-                img_handle_list.append(img_handle)
+            img_handle_list.append(img_handle)
 
 
-    # Otherwise, just add the main image handle to the list
-    if len(img_handle_list) == 0:
-        img_handle_list.append(img_handle_main)
+        # Set the first image handle as the main one
+        img_handle_main = img_handle_list[0]
+
+
+
+    else:
+        dir_path_input = cml_args.dir_path[0].replace('"', '')
+
+        # Detect the input file format
+        img_handle_main = detectInputType(dir_path_input, config, beginning_time=beginning_time, fps=cml_args.fps)
+
+        img_handle_list = []
+
+        # If the input format are FF files, break them down into single FF files
+        if img_handle_main.input_type == 'ff':
+            if not img_handle_main.single_ff:
+
+                # Go through all FF files and add them as individual files
+                for file_name in img_handle_main.ff_list:
+
+                    img_handle = detectInputType(os.path.join(dir_path_input, file_name), config, skip_ff_dir=True)
+
+                    img_handle_list.append(img_handle)
+
+
+        # Otherwise, just add the main image handle to the list
+        if len(img_handle_list) == 0:
+            img_handle_list.append(img_handle_main)
 
 
 
