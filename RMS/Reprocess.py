@@ -22,6 +22,7 @@ from RMS.Formats import CALSTARS
 from RMS.UploadManager import UploadManager
 from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
+from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 
 
 
@@ -130,6 +131,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
             # Calculate astrometry for meteor detections
             applyAstrometryFTPdetectinfo(night_data_dir, ftpdetectinfo_name, platepar_path)
+
+
+            # Convert the FTPdetectinfo into UFOOrbit input file
+            FTPdetectinfo2UFOOrbitInput(night_data_dir, ftpdetectinfo_name, platepar_path)
 
 
 

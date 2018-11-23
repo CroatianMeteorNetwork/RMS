@@ -34,8 +34,8 @@ def selectFiles(dir_path, ff_detected):
     # Go through all files in the night directory
     for file_name in os.listdir(dir_path):
 
-        # Take all .txt files
-        if '.txt' in file_name:
+        # Take all .txt and .csv files
+        if (file_name.lower().endswith('.txt')) or (file_name.lower().endswith('.csv')):
             selected_list.append(file_name)
 
 
