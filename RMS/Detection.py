@@ -1559,7 +1559,7 @@ if __name__ == "__main__":
             dark_path = os.getcwd()
 
         # Load the dark
-        dark = Image.loadDark(dark_path, config.dark_file, dtype=img_handle_main.dtype, \
+        dark = Image.loadDark(dark_path, config.dark_file, dtype=img_handle_main.ff.dtype, \
                 byteswap=img_handle_main.byteswap)
 
         if dark is not None:
@@ -1580,7 +1580,7 @@ if __name__ == "__main__":
             flat_path = os.getcwd()
 
         # Load the flat
-        flat_struct = Image.loadFlat(dir_path, config.flat_file, dtype=img_handle_main.dtype, \
+        flat_struct = Image.loadFlat(dir_path, config.flat_file, dtype=img_handle_main.ff.dtype, \
             byteswap=img_handle_main.byteswap)
 
 
