@@ -217,7 +217,7 @@ class FlatStruct(object):
 
 
 
-def loadFlat(dir_path, file_name, byteswap=False):
+def loadFlat(dir_path, file_name, dtype=None, byteswap=False):
     """ Load the flat field image. 
 
     Arguments:
@@ -225,6 +225,7 @@ def loadFlat(dir_path, file_name, byteswap=False):
         file_name: [str] Name of the flat field file.
 
     Keyword arguments:
+        dtype: [bool] A given file type fill be force if given (e.g. np.uint16).
         byteswap: [bool] Byteswap the flat image. False by default.
 
     Return:
@@ -235,6 +236,14 @@ def loadFlat(dir_path, file_name, byteswap=False):
 
     # Load the flat image
     flat_img = scipy.misc.imread(flat_path, -1)
+
+    # Change the file type if given
+    if dtype is not None:
+        flat_img = flat_img.astype(dtype)
+
+    # If the flat isn't a 8 bit integer, convert it to uint16
+    elif flat_img.dtype != np.uint8:
+        flat_img = flat_img.astype(np.uint16)
 
     if byteswap:
         flat_img = flat_img.byteswap()
@@ -291,6 +300,47 @@ def applyFlat(img, flat_struct):
 
 
 
+def loadDark(dir_path, file_name, dtype=None, byteswap=False):
+    """ Load the dark frame. 
+
+    Arguments:
+        dir_path: [str] Path to the directory which containes the dark frame.
+        file_name: [str] Name of the dark frame file.
+
+    Keyword arguments:
+        dtype: [bool] A given file type fill be force if given (e.g. np.uint16).
+        byteswap: [bool] Byteswap the dark. False by default.
+    
+    Return:
+        dark: [ndarray] Dark frame.
+
+    """
+
+    try:
+        # Load the dark
+        dark = scipy.misc.imread(os.path.join(dir_path, file_name), -1)
+
+    except OSError as e:
+        print('Dark could not be loaded:', e)
+        return None
+
+
+    # Change the file type if given
+    if dtype is not None:
+        dark = dark.astype(dtype)
+
+    # If the flat isn't a 8 bit integer, convert it to uint16
+    if dark.dtype != np.uint8:
+        dark = dark.astype(np.uint16)
+
+
+    if byteswap:
+        dark = dark.byteswap()
+
+
+    return dark
+
+
 
 def applyDark(img, dark_img):
     """ Apply the dark frame to an image. 
@@ -325,37 +375,6 @@ def applyDark(img, dark_img):
     return img
 
 
-
-def loadDark(dir_path, file_name, byteswap=False):
-    """ Load the dark frame. 
-
-    Arguments:
-        dir_path: [str] Directory where the dark frame is.
-        file_name: [str] Name of the dark frame file.
-
-    Keyword arguments:
-        byteswap: [bool] Byteswap the dark. False by default.
-
-    Return:
-        dark_img: [ndarray] Dark frame image.
-    """
-
-
-    dark_path = os.path.join(dir_path, file_name)
-
-    try:
-        # Load the dark image
-        dark_img = scipy.misc.imread(dark_path, -1)
-    
-    except OSError as e:
-        print('Dark could not be loaded:', e)
-        return None
-
-    if byteswap:
-        dark_img = dark_img.byteswap()
-
-
-    return dark_img
 
 
 

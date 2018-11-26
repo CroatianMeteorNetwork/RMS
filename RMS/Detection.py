@@ -583,7 +583,7 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
         """
 
         A = np.vstack([x, np.ones(len(x))]).T
-        m, c = np.linalg.lstsq(A, y)[0]
+        m, c = np.linalg.lstsq(A, y, rcond=None)[0]
 
         return m, c
 
@@ -1185,12 +1185,15 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
 
                 img_thres, max_avg_corrected, flattened_weights, \
                     min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config)
+
+                logDebug('Centroiding at time:', img_handle.name())
                 
 
 
             # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
             xs, ys, zs = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, \
-                mask, flat_struct, dark, stripe_width_factor=1.5, centroiding=True, debug=False)
+                mask, flat_struct, dark, stripe_width_factor=1.5, centroiding=True, \
+                point1=detected_line[0], point2=detected_line[1], debug=False)
 
 
             # Make an array to feed into the centroiding algorithm
@@ -1218,7 +1221,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
 
             # Calculate centroids
             centroids = []
-            for i in range(frame_min, frame_max+1):
+            for i in range(frame_min, frame_max + 1):
                 
                 # Select pixel indicies belonging to a given frame
                 frame_pixels_inds = np.where(line_points[:,2] == i)
@@ -1549,12 +1552,15 @@ if __name__ == "__main__":
 
         # Check if there is flat in the data directory
         if os.path.exists(os.path.join(dir_path, config.dark_file)):
-            dark = Image.loadDark(dir_path, config.dark_file, byteswap=img_handle_main.byteswap)
+            dark_path = dir_path
 
         # Try loading the default dark
         elif os.path.exists(config.dark_file):
-            dark = Image.loadDark(os.getcwd(), config.dark_file, byteswap=img_handle_main.byteswap)
+            dark_path = os.getcwd()
 
+        # Load the dark
+        dark = Image.loadDark(dark_path, config.dark_file, dtype=img_handle_main.dtype, \
+                byteswap=img_handle_main.byteswap)
 
         if dark is not None:
             print('Loaded dark:', config.dark_file)
@@ -1567,11 +1573,15 @@ if __name__ == "__main__":
         
         # Check if there is flat in the data directory
         if os.path.exists(os.path.join(dir_path, config.flat_file)):
-            flat_struct = Image.loadFlat(dir_path, config.flat_file, byteswap=img_handle_main.byteswap)
-
+            flat_path = dir_path
+            
         # Try loading the default flat
         elif os.path.exists(config.flat_file):
-            flat_struct = Image.loadFlat(os.getcwd(), config.flat_file, byteswap=img_handle_main.byteswap)
+            flat_path = os.getcwd()
+
+        # Load the flat
+        flat_struct = Image.loadFlat(dir_path, config.flat_file, dtype=img_handle_main.dtype, \
+            byteswap=img_handle_main.byteswap)
 
 
         if flat_struct is not None:

@@ -10,11 +10,50 @@ import matplotlib.pyplot as plt
 from RMS.Formats.FFfile import selectFFFrames
 from RMS.Routines import Image
 from RMS.Routines import MaskImage
+from RMS.Math import vectNorm
 
 # Morphology - Cython init
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 import RMS.Routines.MorphCy as morph
+
+
+
+def htLinePerpendicular(rho, theta, x_inters, y_inters, img_h, img_w):
+    """ Compute a parpendicular line to the one given in Hough polar coordinates. The new line will intersect
+        the given line in point (x_inters, y_inters).
+    
+    Arguments:
+        rho: [float] Distance of the line from image centre.
+        theta: [float] Angle of the line in degrees (positive clockwise from the vertical).
+        x_inters: [float] X coordinate of the point on the line described by (rho, theta) where the 
+            perpendicular line will intersect.
+        y_inters: [float] Y coordinate of the point on the line described by (rho, theta) where the 
+            perpendicular line will intersect.
+        img_w: [int] Image width.
+        img_h: [int] Image height.
+
+    Return:
+        (rho, theta): [tuple of floats] Parameters of the perpendicular line.
+
+    """
+
+    x_inters = -img_w/2 - rho*np.cos(np.radians(theta)) + x_inters
+    y_inters = -img_h/2 - rho*np.sin(np.radians(theta)) + y_inters
+
+    theta += 90
+    theta = theta%360
+
+    # If the direction of the line is close to up/down, use X to compute the rho because X is not defined
+    th_check = theta + 45
+    if (((th_check > 0) and (th_check < 45)) or ((th_check > 180) and (th_check < 270))) or \
+        (x_inters !=0) or (y_inters == 0):
+        rho = x_inters/np.cos(np.radians(theta))
+    else:
+        rho = y_inters/np.sin(np.radians(theta))
+        
+
+    return rho, theta
 
 
 
@@ -113,27 +152,58 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
 
 
 
-def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, mask, flat_struct, dark, stripe_width_factor=1.0, centroiding=False, debug=False):
+def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, mask, flat_struct, \
+    dark, stripe_width_factor=1.0, centroiding=False, point1=None, point2=None, debug=False):
     """ Threshold the image and get a list of pixel positions and frames of threshold passers. 
         This function handles all input types of data.
 
+    Arguments;
+        config: [config object] configuration object (loaded from the .config file).
+        img_handle: [FrameInterface instance] Object which has a common interface to various input files.
+        frame_min: [int] First frame to process.
+        frame_max: [int] Last frame to process.
+        rho: [float] Line distance from the center in HT space (pixels).
+        theta: [float] Angle in degrees in HT space.
+        mask: [ndarray] Image mask.
+        flat_struct: [Flat struct] Structure containing the flat field. None by default.
+        dark: [ndarray] Dark frame.
+
+    Keyword arguments:
+        stripe_width_factor: [float] Multipler by which the default stripe width will be multiplied. Default
+            is 1.0
+        centroiding: [bool] If True, the indices will be returned in the centroiding mode, which means
+            that point1 and point2 arguments must be given.
+        point1: [list] (x, y, frame) Of the first reference point of the detection.
+        point2: [list] (x, y, frame) Of the second reference point of the detection.
+        debug: [bool] If True, extra debug messages and plots will be shown.
+    
+    Return:
+        xs, ys, zs: [tuple of lists] Indices of (x, y, frame) of threshold passers for every frame.
     """
 
 
-    # Get indices of stripe pixels around the line
+    # Get indices of stripe pixels around the line of the meteor
     img_h, img_w = img_handle.ff.maxpixel.shape
     stripe_indices = getStripeIndices(rho, theta, stripe_width_factor*config.stripe_width, img_h, img_w)
 
+    # If centroiding should be done, prepare everything for cutting out parts of the image for photometry
+    if centroiding:
 
-    if debug:
+        # Compute the unit vector which describes the motion of the meteor in the image domain
+        point1 = np.array(point1)
+        point2 = np.array(point2)
+        motion_vect = point2[:2] - point1[:2]
+        motion_vect_unit = vectNorm(motion_vect)
 
-        img_test = np.zeros(shape=(img_h, img_w))
-        img_test[stripe_indices] = 1
+        # Get coordinates of 2 points that describe the line
+        x1, y1, z1 = point1
+        x2, y2, z2 = point2
 
-        plt.imshow(img_test)
-        plt.show()
+        # Compute the average angular velocity in px per frame
+        ang_vel = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)/(z2 - z1)
 
-        pass
+        # Compute the vector describing the length and direction of the meteor per frame
+        motion_vect = ang_vel*motion_vect_unit
 
 
     # If the FF files is given, extract the points from FF after threshold
@@ -215,14 +285,53 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             stripe = np.zeros(img_thres.shape, img_thres.dtype)
             stripe[stripe_indices] = img_thres[stripe_indices]
 
-            # Include more pixels for centroiding and photometry
+            # Include more pixels for centroiding and photometry and mask out per frame pixels
             if centroiding:
                 
                 # Dilate the pixels in the stripe
                 stripe = morph.dilate(stripe)
 
+                # Get indices of the stripe that is perpendicular to the meteor, and whose thickness is the 
+                # length of the meteor on this particular frame
+
+                # Compute the current linear model position of the meteor on the image
+                model_pos = point1[:2] + (fr - z1)*motion_vect
+
+                # Get the rho, theta of the line perpendicular to the meteor line
+                x_inters, y_inters = model_pos
+
+                # If any of the model positions are out of bounds, skip this frame
+                if (x_inters < 0) or (x_inters >= img_w) or (y_inters < 0) or (y_inters >= img_h):
+                    continue
+
+                rho2, theta2 = htLinePerpendicular(rho, theta, x_inters, y_inters, img_h, img_w)
+
+                # Compute the image indices of this position which will be intersected with the stripe
+                #   The width of the line will be 2x the angular velocity
+                stripe_length = 6*ang_vel
+                if stripe_length < stripe_width_factor*config.stripe_width:
+                    stripe_length = stripe_width_factor*config.stripe_width
+                stripe_indices_motion = getStripeIndices(rho2, theta2, stripe_length, img_h, img_w)
+
+                # Mark only those parts which overlap both lines
+                stripe_new = np.zeros_like(stripe)
+                stripe_new[stripe_indices_motion] = stripe[stripe_indices_motion]
+                stripe = stripe_new
+
+
+                if debug:
+
+                    # Show the extracted stripe
+                    img_stripe = np.zeros_like(stripe)
+                    img_stripe[stripe_indices_motion] = 1
+                    img_stripe[stripe_indices] = 1
+
+                    plt.imshow(img_stripe)
+                    plt.show()
+
 
             if debug:
+
                 print(fr)
                 print('mean stdpixel3:', np.mean(img_handle.ff.stdpixel))
                 print('mean avepixel3:', np.mean(img_handle.ff.avepixel))

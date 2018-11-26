@@ -700,7 +700,13 @@ class InputTypeVideo(object):
 
 
     def name(self, beginning=False):
-        """ Return the name of the chunk, which is just the time of the middle of the current frame chunk. """
+        """ Return the name of the chunk, which is just the time of the middle of the current frame chunk. 
+            Alternatively, the beginning of the whole file can be returned.
+
+        Keyword arguments:
+            beginning: [bool] If True, the beginning time of the file will be retunred instead of the middle
+                time of the chunk.
+        """
 
         if beginning:
             return str(self.beginning_datetime)
@@ -977,7 +983,13 @@ class InputTypeUWOVid(object):
 
 
     def name(self, beginning=False):
-        """ Return the name of the chunk, which is just the time of the middle of the current frame chunk. """
+        """ Return the name of the chunk, which is just the time of the middle of the current frame chunk. 
+            Alternatively, the beginning of the whole file can be returned.
+
+        Keyword arguments:
+            beginning: [bool] If True, the beginning time of the file will be retunred instead of the middle
+                time of the chunk.
+        """
 
         if beginning:
             return str(self.beginning_datetime)
@@ -1411,7 +1423,13 @@ class InputTypeImages(object):
 
 
     def name(self, beginning=False):
-        """ Return the name of the chunk, which is just the time of the middle of the current frame chunk. """
+        """ Return the name of the chunk, which is just the time of the middle of the current frame chunk. 
+            Alternatively, the beginning of the whole file can be returned.
+
+        Keyword arguments:
+            beginning: [bool] If True, the beginning time of the file will be retunred instead of the middle
+                time of the chunk.
+        """
 
         if beginning:
             return str(self.beginning_datetime)
