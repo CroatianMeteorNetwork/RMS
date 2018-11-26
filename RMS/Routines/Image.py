@@ -283,8 +283,14 @@ def loadDark(dir_path, file_name, dtype=None, byteswap=False):
 
     """
 
-    # Load the dark
-    dark = scipy.misc.imread(os.path.join(dir_path, file_name), -1)
+    try:
+        # Load the dark
+        dark = scipy.misc.imread(os.path.join(dir_path, file_name), -1)
+
+    except OSError as e:
+        print('Dark could not be loaded:', e)
+        return None
+
 
     # Change the file type if given
     if dtype is not None:
