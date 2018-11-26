@@ -121,20 +121,22 @@ def adjustLevels(img_array, minv, gamma, maxv, nbits=None):
     invgamma = 1.0/gamma
 
     # Make sure the interval is at least 10 levels of difference
-    if interval < 10:
-        interval = 10
+    if interval*max_lvl < 10:
 
-        minv -= 5
-        maxv += 5
+        minv *= 0.9
+        maxv *= 1.1
+
+        interval = maxv - minv
+        
 
 
     # Make sure the minimum and maximum levels are in the correct range
     if minv < 0:
         minv = 0
 
-    if maxv > max_lvl:
-        maxv = max_lvl
-        
+    if maxv*max_lvl > max_lvl:
+        maxv = 1.0
+    
 
     img_array = img_array.astype(np.float64)
 
