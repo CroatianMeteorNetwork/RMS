@@ -293,15 +293,19 @@ class ManualReductionTool(object):
 
         try:
 
-            # Load the dark
-            dark = scipy.misc.imread(dark_file, -1).astype(self.current_image.dtype)
-
-            # Byteswap the flat if vid file is used
+            # Byteswap the dark if vid file is used or UWO png
+            byteswap = False
             if self.img_handle is not None:
                 if self.img_handle.byteswap:
-                    dark = dark.byteswap()
+                    byteswap = True
+
+            # Load the dark
+            dark = Image.loadDark(*os.path.split(dark_file), dtype=self.current_image.dtype, 
+                byteswap=byteswap)
 
         except:
+            messagebox.showerror(title='Dark frame error', \
+                message='Dark frame could not be loaded!')
             return False, None
 
 
@@ -348,9 +352,12 @@ class ManualReductionTool(object):
 
         try:
             # Load the flat. Byteswap the flat if vid file is used
-            flat = Image.loadFlat(*os.path.split(flat_file), byteswap=byteswap)
+            flat = Image.loadFlat(*os.path.split(flat_file), dtype=self.current_image.dtype, \
+                byteswap=byteswap)
             
         except:
+            messagebox.showerror(title='Flat field file error', \
+                message='Flat could not be loaded!')
             return False, None
 
 

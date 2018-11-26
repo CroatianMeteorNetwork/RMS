@@ -1718,8 +1718,11 @@ class PlateTool(object):
 
         try:
             # Load the flat, byteswap the flat if vid file is used or UWO png
-            flat = Image.loadFlat(*os.path.split(flat_file), byteswap=self.img_handle.byteswap)
+            flat = Image.loadFlat(*os.path.split(flat_file), dtype=self.img_data_raw.dtype, \
+                byteswap=self.img_handle.byteswap)
         except:
+            messagebox.showerror(title='Flat field file error', \
+                message='Flat could not be loaded!')
             return False, None
 
 
@@ -1754,14 +1757,12 @@ class PlateTool(object):
         try:
 
             # Load the dark
-            dark = scipy.misc.imread(dark_file, -1).astype(self.img_data_raw.dtype)
-
-
-            # Byteswap the flat if vid file is used
-            if self.img_handle.byteswap:
-                dark = dark.byteswap()
+            dark = Image.loadDark(*os.path.split(dark_file), dtype=self.img_data_raw.dtype, 
+                byteswap=self.img_handle.byteswap)
 
         except:
+            messagebox.showerror(title='Dark frame error', \
+                message='Dark frame could not be loaded!')
             return False, None
 
 
