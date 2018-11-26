@@ -1978,6 +1978,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('input2', metavar='INPUT2', type=str, nargs='*', \
                     help='If an FF file was given, an FR file can be given in addition. If PNGs are used, this second argument must be the UTC time of frame 0 in the following format: YYYYMMDD_HHMMSS.uuu')
 
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
     arg_parser.add_argument('-b', '--begframe', metavar='FIRST_FRAME', type=int, \
         help="First frame to show.")
 
@@ -1999,8 +2002,18 @@ if __name__ == "__main__":
     #########################
 
 
-    # Load the configuration file
-    config = cr.parse(".config")
+    if cml_args.config is not None:
+
+        config_file = os.path.abspath(cml_args.config[0].replace('"', ''))
+
+        print('Loading config file:', config_file)
+
+        # Load the given config file
+        config = cr.parse(config_file)
+
+    else:
+        # Load the default configuration file
+        config = cr.parse(".config")
 
 
     ff_name = None
