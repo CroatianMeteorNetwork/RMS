@@ -610,9 +610,9 @@ class ManualReductionTool(object):
         # Do auto levels
         if self.auto_levels:
 
-            # Compute the edge percentiles
-            min_lvl = np.percentile(img, 1)
-            max_lvl = np.percentile(img, 99.9)
+            # Compute the edge percentiles (skip the first 2 rows)
+            min_lvl = np.percentile(img[2:, :], 1)
+            max_lvl = np.percentile(img[2:, :], 99.9)
 
 
             # Adjust levels (auto)
