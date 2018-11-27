@@ -4,6 +4,7 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import sys
+import copy
 import math
 import argparse
 import datetime
@@ -124,6 +125,9 @@ class ManualReductionTool(object):
             self.nframes = self.ff.nframes
 
             self.dir_path = self.img_handle.dir_path
+
+            # Save the original FF file which will be used for applying various flats and darks to it
+            self.ff_original = copy.copy(self.ff)            
 
 
         self.fr_file = fr_file
@@ -280,6 +284,19 @@ class ManualReductionTool(object):
 
                     # Print line frame range
                     print('Line frame range:', min(frames), max(frames))
+
+
+    def preprocessFF(self):
+        """ Apply dark and flat on FF. """
+
+        return None
+        if self.dark is not None:
+            self.ff.maxpixel = Image.applyDark(self.ff_original.maxpixel, self.dark)
+            self.ff.avepixel = Image.applyDark(self.ff_original.avepixel, self.dark)
+
+        if self.flat_struct is not None:
+            self.ff.maxpixel = Image.applyFlat(self.ff_original.maxpixel, self.flat_struct)
+            self.ff.avepixel = Image.applyFlat(self.ff_original.avepixel, self.flat_struct)
 
 
 
@@ -528,8 +545,8 @@ class ManualReductionTool(object):
         # Subtract the average and apply the flat field for image on which processing will be done
         if self.ff is not None:
 
-            # Subtract the average
-            process_img = Image.applyDark(process_img, self.ff.avepixel)
+            # Subtract the average without flat correction
+            process_img = Image.applyDark(process_img, self.ff_original.avepixel)
 
             # Apply flat
             if self.flat_struct is not None:
@@ -1003,12 +1020,18 @@ class ManualReductionTool(object):
         elif event.key == 'ctrl+d':
             _, self.dark = self.loadDark()
 
+            # Apply dark to FF
+            self.preprocessFF()
+
             self.updateImage()
 
 
         # Load the flat field
         elif event.key == 'ctrl+f':
             _, self.flat_struct = self.loadFlat()
+
+            # Apply flat to FF
+            self.preprocessFF()
 
             self.updateImage()
 
