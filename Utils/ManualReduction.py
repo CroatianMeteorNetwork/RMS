@@ -321,7 +321,6 @@ class ManualReductionTool(object):
             messagebox.showerror(title='Dark frame file error', \
                 message='The file you selected could not be loaded as a dark frame!')
 
-        
 
         return dark_file, dark
 
@@ -353,7 +352,7 @@ class ManualReductionTool(object):
         try:
             # Load the flat. Byteswap the flat if vid file is used
             flat = Image.loadFlat(*os.path.split(flat_file), dtype=self.current_image.dtype, \
-                byteswap=byteswap)
+                byteswap=byteswap, dark=self.dark)
             
         except:
             messagebox.showerror(title='Flat field file error', \
@@ -1003,7 +1002,15 @@ class ManualReductionTool(object):
         elif event.key == 'ctrl+d':
             _, self.dark = self.loadDark()
 
+            
+            # Apply the dark to the flat
+            if self.flat_struct is not None:
+                self.flat_struct.applyDark(self.dark)
+
             self.updateImage()
+
+            # Recompute the image intensities
+            self.recomputeAllIntensitySums()
 
 
         # Load the flat field
