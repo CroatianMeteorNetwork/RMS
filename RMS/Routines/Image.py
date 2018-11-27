@@ -201,23 +201,74 @@ def adjustLevels(img_array, minv, gamma, maxv, nbits=None):
 
 
 class FlatStruct(object):
-    def __init__(self, flat_img, flat_avg, flat_path):
+    def __init__(self, flat_img, dark=None):
         """ Structure containing the flat field.
 
         Arguments:
             flat_img: [ndarray] Flat field.
-            flat_avg: [float] Average value of the flat field.
 
         """
 
-        self.flat_img = flat_img
-        self.flat_avg = flat_avg
+        # Convert the flat to float64
+        self.flat_img = flat_img.astype(np.float64)
 
-        self.flat_path = flat_path
+        # Store the original flat
+        self.flat_img_raw = np.copy(self.flat_img)
+
+        # Apply the dark, if given
+        self.applyDark(dark)
+
+        # Compute the flat median
+        self.computeAverage()
+
+        # Fix values close to 0
+        self.fixValues()
+
+
+    def applyDark(self, dark):
+        """ Apply a dark to the flat. """
+
+        # Apply a dark frame to the flat, if given
+        if dark is not None:
+            self.flat_img = applyDark(self.flat_img_raw, dark)
+            self.dark_applied = True
+
+        else:
+            self.flat_img = np.copy(self.flat_img_raw)
+            self.dark_applied = False
+
+        # Compute flat median
+        self.computeAverage()
+
+        # Fix values close to 0
+        self.fixValues()
+
+
+    def computeAverage(self):
+        """ Compute the flat average. """
+
+        # Calculate the median of the flat, excluding the first 10 rows
+        self.flat_avg = np.median(self.flat_img[10:, :])
+
+        # Make sure the self.flat_avg value is relatively high
+        if self.flat_avg < 1:
+            self.flat_avg = 1
+
+
+    def fixValues(self):
+        """ Handle values close to 0 on flats. """
+
+        # Make sure there are no values close to 0, as images are divided by flats
+        self.flat_img[(self.flat_img < self.flat_avg/10) | (self.flat_img < 10)] = self.flat_avg
 
 
 
-def loadFlat(dir_path, file_name, dtype=None, byteswap=False):
+
+
+
+
+
+def loadFlat(dir_path, file_name, dtype=None, byteswap=False, dark=None):
     """ Load the flat field image. 
 
     Arguments:
@@ -232,10 +283,8 @@ def loadFlat(dir_path, file_name, dtype=None, byteswap=False):
         flat_struct: [Flat struct] Structure containing the flat field info.
     """
 
-    flat_path = os.path.join(dir_path, file_name)
-
     # Load the flat image
-    flat_img = scipy.misc.imread(flat_path, -1)
+    flat_img = scipy.misc.imread(os.path.join(dir_path, file_name), -1)
 
     # Change the file type if given
     if dtype is not None:
@@ -245,21 +294,13 @@ def loadFlat(dir_path, file_name, dtype=None, byteswap=False):
     elif flat_img.dtype != np.uint8:
         flat_img = flat_img.astype(np.uint16)
 
+
     if byteswap:
         flat_img = flat_img.byteswap()
 
 
-    # Convert the flat to float64
-    flat_img = flat_img.astype(np.float64)
-
-    # Calculate the median of the flat
-    flat_avg = np.median(flat_img)
-
-    # Make sure there are no values close to 0, as images are divided by flats
-    flat_img[(flat_img < flat_avg/10) | (flat_img < 10)] = flat_avg
-
     # Init a new Flat structure
-    flat_struct = FlatStruct(flat_img, flat_avg, flat_path)
+    flat_struct = FlatStruct(flat_img, dark=dark)
 
     return flat_struct
 

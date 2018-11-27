@@ -296,8 +296,23 @@ class ManualReductionTool(object):
         # Load the dark
         dark = Image.loadDark(*os.path.split(dark_file), byteswap=byteswap)
 
-        if dark is None:
+        try:
+
+            # Byteswap the dark if vid file is used or UWO png
+            byteswap = False
+            if self.img_handle is not None:
+                if self.img_handle.byteswap:
+                    byteswap = True
+
+            # Load the dark
+            dark = Image.loadDark(*os.path.split(dark_file), dtype=self.current_image.dtype, 
+                byteswap=byteswap)
+
+        except:
+            messagebox.showerror(title='Dark frame error', \
+                message='Dark frame could not be loaded!')
             return False, None
+            
 
         dark = dark.astype(self.current_image.dtype)
 
@@ -356,9 +371,12 @@ class ManualReductionTool(object):
 
         try:
             # Load the flat. Byteswap the flat if vid file is used
-            flat = Image.loadFlat(*os.path.split(flat_file), byteswap=byteswap)
+            flat = Image.loadFlat(*os.path.split(flat_file), dtype=self.current_image.dtype, \
+                byteswap=byteswap)
             
         except:
+            messagebox.showerror(title='Flat field file error', \
+                message='Flat could not be loaded!')
             return False, None
 
 

@@ -152,6 +152,30 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
 
 
 
+def checkCentroidBounds(model_pos, img_w, img_h):
+    """ Checks if the given position is within the image. 
+    
+    Arguments:
+        moodel_pos: [array like] (X, Y) coordinate to check.
+        img_w: [int] Image width.
+        img_h: [int] Image height.
+
+    Return:
+        [bool] True if witing image, False otherwise.
+
+    """
+
+    # Get the rho, theta of the line perpendicular to the meteor line
+    x_inters, y_inters = model_pos
+
+    # If any of the model positions are out of bounds, skip this frame
+    if (x_inters < 0) or (x_inters >= img_w) or (y_inters < 0) or (y_inters >= img_h):
+        return False
+
+    return True
+
+
+
 def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, mask, flat_struct, \
     dark, stripe_width_factor=1.0, centroiding=False, point1=None, point2=None, debug=False):
     """ Threshold the image and get a list of pixel positions and frames of threshold passers. 
@@ -288,32 +312,42 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             # Include more pixels for centroiding and photometry and mask out per frame pixels
             if centroiding:
                 
-                # Dilate the pixels in the stripe
+                # Dilate the pixels in the stripe twice, to include more pixels for photometry
+                stripe = morph.dilate(stripe)
                 stripe = morph.dilate(stripe)
 
                 # Get indices of the stripe that is perpendicular to the meteor, and whose thickness is the 
-                # length of the meteor on this particular frame
+                # length of the meteor on this particular frame - this is called stripe_indices_motion
 
-                # Compute the current linear model position of the meteor on the image
+                # Compute the previoius, current, and the next linear model position of the meteor on the 
+                #   image
+                model_pos_prev = point1[:2] + (fr - 1 - z1)*motion_vect
                 model_pos = point1[:2] + (fr - z1)*motion_vect
+                model_pos_next = point1[:2] + (fr + 1 - z1)*motion_vect
 
                 # Get the rho, theta of the line perpendicular to the meteor line
                 x_inters, y_inters = model_pos
 
-                # If any of the model positions are out of bounds, skip this frame
-                if (x_inters < 0) or (x_inters >= img_w) or (y_inters < 0) or (y_inters >= img_h):
+                # Check if the previous, current or the next centroids are outside bounds, and if so, skip the
+                #   frame
+                if (not checkCentroidBounds(model_pos_prev, img_w, img_h)) or \
+                    (not checkCentroidBounds(model_pos, img_w, img_h)) or \
+                    (not checkCentroidBounds(model_pos_next, img_w, img_h)):
+
                     continue
 
+                # Get parameters of the perpendicular line to the meteor line
                 rho2, theta2 = htLinePerpendicular(rho, theta, x_inters, y_inters, img_h, img_w)
 
-                # Compute the image indices of this position which will be intersected with the stripe
+                # Compute the image indices of this position which will be the intersection with the stripe
                 #   The width of the line will be 2x the angular velocity
                 stripe_length = 6*ang_vel
                 if stripe_length < stripe_width_factor*config.stripe_width:
                     stripe_length = stripe_width_factor*config.stripe_width
                 stripe_indices_motion = getStripeIndices(rho2, theta2, stripe_length, img_h, img_w)
 
-                # Mark only those parts which overlap both lines
+                # Mark only those parts which overlap both lines, which effectively creates a mask for
+                #    photometry an centroiding, excluding other influences
                 stripe_new = np.zeros_like(stripe)
                 stripe_new[stripe_indices_motion] = stripe[stripe_indices_motion]
                 stripe = stripe_new
@@ -323,10 +357,11 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
 
                     # Show the extracted stripe
                     img_stripe = np.zeros_like(stripe)
-                    img_stripe[stripe_indices_motion] = 1
                     img_stripe[stripe_indices] = 1
+                    final_stripe = np.zeros_like(stripe)
+                    final_stripe[stripe_indices_motion] = img_stripe[stripe_indices_motion]
 
-                    plt.imshow(img_stripe)
+                    plt.imshow(final_stripe)
                     plt.show()
 
 
@@ -336,9 +371,20 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
                 print('mean stdpixel3:', np.mean(img_handle.ff.stdpixel))
                 print('mean avepixel3:', np.mean(img_handle.ff.avepixel))
                 print('mean frame:', np.mean(fr_img))
-                fig, (ax1, ax2) = plt.subplots(nrows=2)
+                fig, (ax1, ax2) = plt.subplots(nrows=2, sharex=True, sharey=True)
+
+
+                fr_img_noavg = Image.applyDark(fr_img, img_handle.ff.avepixel)
+
+                # Auto levels
+                min_lvl = np.percentile(fr_img_noavg[2:], 1)
+                max_lvl = np.percentile(fr_img_noavg[2:], 99.0)
+
+                # Adjust levels
+                fr_img_autolevel = Image.adjustLevels(fr_img_noavg, min_lvl, 1.0, max_lvl)
+
                 ax1.imshow(stripe, cmap='gray')
-                ax2.imshow(img_handle.ff.maxpixel - fr_img, cmap='gray', vmax=10000)
+                ax2.imshow(fr_img_autolevel, cmap='gray')
                 plt.show()
 
                 pass

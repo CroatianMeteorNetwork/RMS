@@ -811,6 +811,23 @@ def show2(name, img):
 
 
 
+def showAutoLevels(img):
+
+    # Auto levels
+    min_lvl = np.percentile(img[2:], 1)
+    max_lvl = np.percentile(img[2:], 99.0)
+
+    # Adjust levels
+    img_autolevel = Image.adjustLevels(img, min_lvl, 1.0, max_lvl)
+
+    plt.imshow(img_autolevel, cmap='gray')
+    plt.show()
+
+    ###
+
+
+
+
 def plotLines(ff, line_list):
     """ Plot lines on the image.
     """
@@ -918,9 +935,6 @@ def preprocessFF(img_handle, mask, flat_struct, dark):
 
         img_handle.ff.maxpixel = Image.applyFlat(img_handle.ff.maxpixel, flat_struct)
         img_handle.ff.avepixel = Image.applyFlat(img_handle.ff.avepixel, flat_struct)
-
-    
-
 
     return img_handle
 
@@ -1310,9 +1324,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
 
                         # Apply the flat to frame
                         if flat_struct is not None:
-
                             fr_img = Image.applyFlat(fr_img, flat_struct)
-                
 
                         # Apply gamma correction
                         fr_img = Image.gammaCorrection(fr_img, config.gamma)
@@ -1563,7 +1575,7 @@ if __name__ == "__main__":
                 byteswap=img_handle_main.byteswap)
 
         if dark is not None:
-            print('Loaded dark:', config.dark_file)
+            print('Loaded dark:', os.path.join(dark_path, config.dark_file))
 
 
 
@@ -1580,13 +1592,12 @@ if __name__ == "__main__":
             flat_path = os.getcwd()
 
         # Load the flat
-        flat_struct = Image.loadFlat(dir_path, config.flat_file, dtype=img_handle_main.ff.dtype, \
-            byteswap=img_handle_main.byteswap)
+        flat_struct = Image.loadFlat(flat_path, config.flat_file, dtype=img_handle_main.ff.dtype, \
+            byteswap=img_handle_main.byteswap, dark=dark)
 
 
         if flat_struct is not None:
-            print('Loaded flat:', flat_struct.flat_path)
-
+            print('Loaded flat:', os.path.join(flat_path, config.flat_file))
 
 
     # Init results list
