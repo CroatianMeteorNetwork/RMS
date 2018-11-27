@@ -35,6 +35,10 @@ class FFStruct:
         self.array = None
 
 
+        # False if dark and flat weren't applied, True otherwise (False be default)
+        self.calibrated = False
+
+
     def __repr__(self):
 
         out  = ''

@@ -293,7 +293,6 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
 
             # Apply the flat to frame
             if flat_struct is not None:
-
                 fr_img = Image.applyFlat(fr_img, flat_struct)
                 
 
@@ -308,6 +307,7 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             # Extract the stripe from the thresholded image
             stripe = np.zeros(img_thres.shape, img_thres.dtype)
             stripe[stripe_indices] = img_thres[stripe_indices]
+
 
             # Include more pixels for centroiding and photometry and mask out per frame pixels
             if centroiding:
@@ -365,7 +365,7 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
                     plt.show()
 
 
-            if debug:
+            if debug and centroiding:
 
                 print(fr)
                 print('mean stdpixel3:', np.mean(img_handle.ff.stdpixel))
@@ -374,11 +374,12 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
                 fig, (ax1, ax2) = plt.subplots(nrows=2, sharex=True, sharey=True)
 
 
-                fr_img_noavg = Image.applyDark(fr_img, img_handle.ff.avepixel)
+                #fr_img_noavg = Image.applyDark(fr_img, img_handle.ff.avepixel)
+                fr_img_noavg = fr_img
 
                 # Auto levels
-                min_lvl = np.percentile(fr_img_noavg[2:], 1)
-                max_lvl = np.percentile(fr_img_noavg[2:], 99.0)
+                min_lvl = np.percentile(fr_img_noavg[2:, :], 1)
+                max_lvl = np.percentile(fr_img_noavg[2:, :], 99.0)
 
                 # Adjust levels
                 fr_img_autolevel = Image.adjustLevels(fr_img_noavg, min_lvl, 1.0, max_lvl)

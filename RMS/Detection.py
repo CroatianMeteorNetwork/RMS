@@ -919,22 +919,30 @@ def show3DCloud(ff, xs, ys, zs, detected_line=None, stripe_points=None, config=N
 
 
 def preprocessFF(img_handle, mask, flat_struct, dark):
-    """ Apply the mask and flat to FF file in img_handle. """
-
-    # Mask the FF file
-    img_handle.ff = MaskImage.applyMask(img_handle.ff, mask, ff_flag=True)
-
-    # Apply the dark frame to maxpixel and avepixel    
-    if dark is not None:
-        img_handle.ff.maxpixel = Image.applyDark(img_handle.ff.maxpixel, dark)
-        img_handle.ff.avepixel = Image.applyDark(img_handle.ff.avepixel, dark)
+    """ Apply the mask, dark and flat to FF file in img_handle. """
 
 
-    # Apply the flat to maxpixel and avepixel
-    if flat_struct is not None:
+    if not img_handle.ff.calibrated:
 
-        img_handle.ff.maxpixel = Image.applyFlat(img_handle.ff.maxpixel, flat_struct)
-        img_handle.ff.avepixel = Image.applyFlat(img_handle.ff.avepixel, flat_struct)
+        # Mask the FF file
+        img_handle.ff = MaskImage.applyMask(img_handle.ff, mask, ff_flag=True)
+
+        # Apply the dark frame to maxpixel and avepixel    
+        if dark is not None:
+            img_handle.ff.maxpixel = Image.applyDark(img_handle.ff.maxpixel, dark)
+            img_handle.ff.avepixel = Image.applyDark(img_handle.ff.avepixel, dark)
+
+
+        # Apply the flat to maxpixel and avepixel
+        if flat_struct is not None:
+
+            img_handle.ff.maxpixel = Image.applyFlat(img_handle.ff.maxpixel, flat_struct)
+            img_handle.ff.avepixel = Image.applyFlat(img_handle.ff.avepixel, flat_struct)
+
+
+        # Set the FF calibration status to True
+        img_handle.ff.calibrated = True
+
 
     return img_handle
 
@@ -1084,7 +1092,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
             # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
             xs, ys, zs = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, \
                 mask, flat_struct, dark, debug=False)
-            
+
 
             # Limit the number of points to search if too large
             if len(zs) > config.max_points_det:
@@ -1617,7 +1625,7 @@ if __name__ == "__main__":
         print(img_handle.name())
 
         # Run the meteor detection algorithm
-        meteor_detections = detectMeteors(img_handle, config, flat_struct=flat_struct)
+        meteor_detections = detectMeteors(img_handle, config, flat_struct=flat_struct, dark=dark)
 
         # Supress numpy scientific notation printing
         np.set_printoptions(suppress=True)

@@ -173,7 +173,7 @@ def adjustLevels(img_array, minv, gamma, maxv, nbits=None):
     interval = maxv - minv
     invgamma = 1.0/gamma
 
-    img_array = img_array.astype(np.float64)
+    img_array = np.copy(img_array).astype(np.float64)
 
     # Reduce array to 0-1 values
     img_array = np.divide(img_array, max_lvl)

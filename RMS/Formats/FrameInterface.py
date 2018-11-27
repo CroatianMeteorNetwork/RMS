@@ -74,6 +74,10 @@ class FFMimickInterface(object):
 
         self.nframes = 0
 
+        # False if dark and flat weren't applied, True otherwise (False be default)
+        self.calibrated = False
+
+
     def addFrame(self, frame):
         """ Add raw frame for computation of FF data. """
 
