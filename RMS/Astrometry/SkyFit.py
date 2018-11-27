@@ -938,6 +938,10 @@ class PlateTool(object):
         elif event.key == 'ctrl+d':
             _, self.dark = self.loadDark()
 
+            # Apply the dark to the flat
+            if self.flat_struct is not None:
+                self.flat_struct.applyDark(self.dark)
+
             self.updateImage()
 
 
@@ -1133,7 +1137,7 @@ class PlateTool(object):
         nbins = int((2**self.config.bit_depth)/2)
 
         # Compute the intensity histogram
-        hist, bin_edges = np.histogram(img.flatten(), normed=True, range=(0, 2**self.bit_depth), \
+        hist, bin_edges = np.histogram(img.flatten(), density=True, range=(0, 2**self.bit_depth), \
             bins=nbins)
 
         # Scale the maximum histogram peak to half the image height
@@ -1719,7 +1723,7 @@ class PlateTool(object):
         try:
             # Load the flat, byteswap the flat if vid file is used or UWO png
             flat = Image.loadFlat(*os.path.split(flat_file), dtype=self.img_data_raw.dtype, \
-                byteswap=self.img_handle.byteswap)
+                byteswap=self.img_handle.byteswap, dark=self.dark)
         except:
             messagebox.showerror(title='Flat field file error', \
                 message='Flat could not be loaded!')
