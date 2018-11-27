@@ -374,8 +374,8 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
                 fig, (ax1, ax2) = plt.subplots(nrows=2, sharex=True, sharey=True)
 
 
-                #fr_img_noavg = Image.applyDark(fr_img, img_handle.ff.avepixel)
-                fr_img_noavg = fr_img
+                fr_img_noavg = Image.applyDark(fr_img, img_handle.ff.avepixel)
+                #fr_img_noavg = fr_img
 
                 # Auto levels
                 min_lvl = np.percentile(fr_img_noavg[2:, :], 1)

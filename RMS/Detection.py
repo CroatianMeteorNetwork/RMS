@@ -460,21 +460,9 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # Print the time
             logDebug('Time:', img_handle.name())
 
-            # Mask the FF file
-            img_handle.ff = MaskImage.applyMask(img_handle.ff, mask, ff_flag=True)
 
-            # Apply the dark frame
-            if dark is not None:
-                img_handle.ff.maxpixel = Image.applyDark(img_handle.ff.maxpixel, dark)
-                img_handle.ff.avepixel = Image.applyDark(img_handle.ff.avepixel, dark)
-
-            # Apply the flat to maxpixel and avepixel
-            if flat_struct is not None:
-
-                img_handle.ff.maxpixel = Image.applyFlat(img_handle.ff.maxpixel, flat_struct)
-                img_handle.ff.avepixel = Image.applyFlat(img_handle.ff.avepixel, flat_struct)
-
-
+            # Apply the mask, dark, flat
+            img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
 
             # Threshold the frame chunk
             img = thresholdFF(img_handle.ff, k1, j1)
