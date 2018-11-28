@@ -385,7 +385,7 @@ def checkWhiteRatio(img_thres, ff, max_white_ratio):
 
 
 def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_white_ratio, kht_lib_path, \
-    mask=None, flat_struct=None, dark=None):
+    mask=None, flat_struct=None, dark=None, debug=False):
     """ Get (rho, phi) pairs for each meteor present on the image using KHT.
         
     Arguments:
@@ -427,7 +427,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
     if img_handle.input_type == 'ff':
 
         # Threshold the FF
-        img_thres = thresholdFF(img_handle.ff, k1, j1)
+        img_thres = thresholdFF(img_handle.ff, k1, j1, mask=mask)
 
         # # Show thresholded image
         # show("thresholded ALL", img_thres)
@@ -460,32 +460,31 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # Print the time
             logDebug('Time:', img_handle.name())
 
-
             # Apply the mask, dark, flat
             img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
 
             # Threshold the frame chunk
-            img = thresholdFF(img_handle.ff, k1, j1)
+            img = thresholdFF(img_handle.ff, k1, j1, mask=mask)
 
             # Check if there are too many threshold passers, if so report that no lines were found
             if not checkWhiteRatio(img, img_handle.ff, max_white_ratio):
                 continue
 
 
+        if debug:
+            ### Show maxpixel and thresholded image
 
-        # ### Show maxpixel and thresholded image
+            # Auto levels on maxpixel
+            min_lvl = np.percentile(img_handle.ff.maxpixel[2:], 1)
+            max_lvl = np.percentile(img_handle.ff.maxpixel[2:], 99.0)
 
-        # # Auto levels on maxpixel
-        # min_lvl = np.percentile(img_handle.ff.maxpixel[2:], 1)
-        # max_lvl = np.percentile(img_handle.ff.maxpixel[2:], 99.0)
+            # Adjust levels
+            maxpixel_autolevel = Image.adjustLevels(img_handle.ff.maxpixel, min_lvl, 1.0, max_lvl)
 
-        # # Adjust levels
-        # maxpixel_autolevel = Image.adjustLevels(img_handle.ff.maxpixel, min_lvl, 1.0, max_lvl)
+            show2(str(frame_min) + "-" + str(frame_max) + " threshold", np.concatenate((maxpixel_autolevel, \
+                img.astype(img_handle.ff.maxpixel.dtype)*(2**(img_handle.ff.maxpixel.itemsize*8) - 1)), axis=1))
 
-        # show2(str(frame_min) + "-" + str(frame_max) + " threshold", np.concatenate((maxpixel_autolevel, \
-        #     img.astype(img_handle.ff.maxpixel.dtype)*(2**(img_handle.ff.maxpixel.itemsize*8) - 1)), axis=0))
-
-        # ###
+            ###
 
 
         # # Show maxpixel of the thresholded part
@@ -503,15 +502,11 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # 1 - Remove lonely pixels
         img = morph.morphApply(img, [1, 2, 3, 4, 1])
 
-        # # Show morphed over maxpixel
-        # temp = ff.maxpixel - img.astype(np.int16)*255
-        # temp[temp>0] = 0
-        # show('compare', temp-ff.maxpixel)
 
-        # # Show morphed image
-        # show(str(frame_min) + "-" + str(frame_max) + " morph", img)
+        if debug:
+            # Show morphed image
+            show(str(frame_min) + "-" + str(frame_max) + " morph", img)
 
-        ###
 
         # Get image shape
         w, h = img.shape[1], img.shape[0]
@@ -538,8 +533,9 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
                 frame_lines.append([rho, theta, frame_min, frame_max])
 
 
-        # if frame_lines:
-        #     plotLines(img_handle.ff, frame_lines)
+        if debug:
+            if frame_lines:
+                plotLines(img_handle.ff, frame_lines)
 
 
     return line_results
@@ -912,9 +908,6 @@ def preprocessFF(img_handle, mask, flat_struct, dark):
 
     if not img_handle.ff.calibrated:
 
-        # Mask the FF file
-        img_handle.ff = MaskImage.applyMask(img_handle.ff, mask, ff_flag=True)
-
         # Apply the dark frame to maxpixel and avepixel    
         if dark is not None:
             img_handle.ff.maxpixel = Image.applyDark(img_handle.ff.maxpixel, dark)
@@ -928,6 +921,9 @@ def preprocessFF(img_handle, mask, flat_struct, dark):
             img_handle.ff.avepixel = Image.applyFlat(img_handle.ff.avepixel, flat_struct)
 
 
+        # Mask the FF file
+        img_handle.ff = MaskImage.applyMask(img_handle.ff, mask, ff_flag=True)
+
         # Set the FF calibration status to True
         img_handle.ff.calibrated = True
 
@@ -936,7 +932,7 @@ def preprocessFF(img_handle, mask, flat_struct, dark):
 
 
 
-def thresholdAndCorrectGammaFF(img_handle, config):
+def thresholdAndCorrectGammaFF(img_handle, config, mask):
     """ Prepare the FF for centroid extraction by performing gamma correction. """
 
     # Threshold the FF
@@ -971,7 +967,7 @@ def thresholdAndCorrectGammaFF(img_handle, config):
 
 
 
-def detectMeteors(img_handle, config, flat_struct=None, dark=None):
+def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, debug=False):
     """ Detect meteors on the given image. Here are the steps in the detection:
             - input image (FF bin format file) is thresholded (converted to black and white)
             - several morphological operations are applied to clean the image
@@ -989,7 +985,9 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
 
     Keyword arguments:
         flat_struct: [Flat struct] Structure containing the flat field. None by default.
-        dark: [ndarray] Dark frame.
+        dark: [ndarray] Dark frame. None by default.
+        mask: [ndarray] Mask image. None by default.
+        debug: [bool] If True, graphs for testing the detection settings will be shown. False by default.
     
     Return:
         meteor_detections: [list] a list of detected meteors, with these elements:
@@ -1002,8 +1000,9 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
     t1 = time()
     t_all = time()
 
-    # Load the mask file
-    mask = MaskImage.loadMask(config.mask_file)
+    # Load the mask file if not given
+    if mask is None:
+        mask = MaskImage.loadMask(config.mask_file)
 
 
     # Do all image processing on single FF file, if given
@@ -1017,7 +1016,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
     # Get lines on the image
     line_list = getLines(img_handle, config.k1_det, config.j1_det, config.time_slide, config.time_window_size, 
         config.max_lines_det, config.max_white_ratio, config.kht_lib_path, mask=mask, \
-        flat_struct=flat_struct, dark=dark)
+        flat_struct=flat_struct, dark=dark, debug=debug)
 
     logDebug('List of lines:', line_list)
 
@@ -1141,7 +1140,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
         if img_handle.input_type == 'ff':
 
             img_thres, max_avg_corrected, flattened_weights, \
-                min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config)
+                min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config, mask)
 
 
         # Go through all detected and filtered lines and compute centroids
@@ -1194,7 +1193,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
                 img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
 
                 img_thres, max_avg_corrected, flattened_weights, \
-                    min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config)
+                    min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config, mask)
 
                 logDebug('Centroiding at time:', img_handle.name())
                 
@@ -1309,10 +1308,6 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
                         img_handle.setFrame(int(frame_no))
                         fr_img = img_handle.loadFrame()
 
-                        # Mask the image
-                        fr_img = MaskImage.applyMask(fr_img, mask)
-
-
                         # Apply dark frame
                         if dark is not None:
                             fr_img = Image.applyDark(fr_img, dark)
@@ -1321,6 +1316,11 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None):
                         # Apply the flat to frame
                         if flat_struct is not None:
                             fr_img = Image.applyFlat(fr_img, flat_struct)
+
+
+                        # Mask the image
+                        fr_img = MaskImage.applyMask(fr_img, mask)
+
 
                         # Apply gamma correction
                         fr_img = Image.gammaCorrection(fr_img, config.gamma)
@@ -1440,6 +1440,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-a', '--asgard', nargs=1, metavar='ASGARD_PLATEPAR', type=str, \
         help="""Write output as ASGARD event files, not CAMS FTPdetectinfo. Path to the platepar file needs to be given.""")
 
+    arg_parser.add_argument('-d', '--debug', action="store_true", \
+        help="""Show graphs (calibrated image, thresholded image, detected lines) which can help adjust the detection settings.""")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1554,9 +1557,29 @@ if __name__ == "__main__":
     dir_path = img_handle_main.dir_path
 
 
+
+    # Try loading the mask
+    if os.path.exists(os.path.join(dir_path, config.mask_file)):
+        mask_path = dir_path
+
+    # Try loading the default mask
+    elif os.path.exists(config.mask_file):
+        mask_path = os.getcwd()
+
+    # Load the dark
+    mask = MaskImage.loadMask(os.path.join(mask_path, config.mask_file))
+
+    if mask is not None:
+        print('Loaded mask:', os.path.join(mask_path, config.mask_file))
+
+
+
+
     # Try loading the dark frame
     dark = None
     if config.use_dark:
+
+        dark_path = None
 
         # Check if there is flat in the data directory
         if os.path.exists(os.path.join(dir_path, config.dark_file)):
@@ -1566,9 +1589,11 @@ if __name__ == "__main__":
         elif os.path.exists(config.dark_file):
             dark_path = os.getcwd()
 
-        # Load the dark
-        dark = Image.loadDark(dark_path, config.dark_file, dtype=img_handle_main.ff.dtype, \
-                byteswap=img_handle_main.byteswap)
+        if dark_path is not None:
+
+            # Load the dark
+            dark = Image.loadDark(dark_path, config.dark_file, dtype=img_handle_main.ff.dtype, \
+                    byteswap=img_handle_main.byteswap)
 
         if dark is not None:
             print('Loaded dark:', os.path.join(dark_path, config.dark_file))
@@ -1578,6 +1603,8 @@ if __name__ == "__main__":
     # Try loading a flat field image
     flat_struct = None
     if config.use_flat:
+
+        flat_path = None
         
         # Check if there is flat in the data directory
         if os.path.exists(os.path.join(dir_path, config.flat_file)):
@@ -1587,9 +1614,11 @@ if __name__ == "__main__":
         elif os.path.exists(config.flat_file):
             flat_path = os.getcwd()
 
-        # Load the flat
-        flat_struct = Image.loadFlat(flat_path, config.flat_file, dtype=img_handle_main.ff.dtype, \
-            byteswap=img_handle_main.byteswap, dark=dark)
+        if flat_path is not None:
+            
+            # Load the flat
+            flat_struct = Image.loadFlat(flat_path, config.flat_file, dtype=img_handle_main.ff.dtype, \
+                byteswap=img_handle_main.byteswap, dark=dark)
 
 
         if flat_struct is not None:
@@ -1613,7 +1642,8 @@ if __name__ == "__main__":
         print(img_handle.name())
 
         # Run the meteor detection algorithm
-        meteor_detections = detectMeteors(img_handle, config, flat_struct=flat_struct, dark=dark)
+        meteor_detections = detectMeteors(img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask, \
+            debug=cml_args.debug)
 
         # Supress numpy scientific notation printing
         np.set_printoptions(suppress=True)

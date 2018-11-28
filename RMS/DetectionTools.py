@@ -234,7 +234,7 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
     if img_handle.input_type == 'ff':
 
         # Threshold the FF file
-        img_thres = Image.thresholdFF(img_handle.ff, config.k1_det, config.j1_det)
+        img_thres = Image.thresholdFF(img_handle.ff, config.k1_det, config.j1_det, mask=mask)
 
         # Extract the thresholded image by min and max frames from FF file
         img = selectFFFrames(np.copy(img_thres), img_handle.ff, frame_min, frame_max)
@@ -282,23 +282,22 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             # Load the frame
             fr_img = img_handle.loadFrame()
 
-            # Mask the image
-            fr_img = MaskImage.applyMask(fr_img, mask)
-
 
             # Apply the dark frame
             if dark is not None:
                 fr_img = Image.applyDark(fr_img, dark)
 
-
             # Apply the flat to frame
             if flat_struct is not None:
                 fr_img = Image.applyFlat(fr_img, flat_struct)
+
+            # Mask the image
+            fr_img = MaskImage.applyMask(fr_img, mask)
                 
 
             # Threshold the frame
             img_thres = Image.thresholdImg(fr_img, img_handle.ff.avepixel, img_handle.ff.stdpixel, \
-                config.k1_det, config.j1_det)
+                config.k1_det, config.j1_det, mask=mask)
 
 
             # Remove lonely pixels

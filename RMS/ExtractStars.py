@@ -39,7 +39,7 @@ from RMS.QueuedPool import QueuedPool
 
 
 def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=10, neighborhood_size=10, 
-        intensity_threshold=5, flat_struct=None, dark=None):
+        intensity_threshold=5, flat_struct=None, dark=None, mask=None):
     """ Extracts stars on a given FF bin by searching for local maxima and applying PSF fit for star 
         confirmation.
 
@@ -55,7 +55,8 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
         neighborhood_size: [int] size of the neighbourhood for the maximum search (in pixels)
         intensity_threshold: [float] a threshold for cutting the detections which are too faint (0-255)
         flat_struct: [Flat struct] Structure containing the flat field. None by default.
-        dark: [ndarray] Dark frame. None by default
+        dark: [ndarray] Dark frame. None by default.
+        mask: [ndarray] Mask image. None by default.
 
     Return:
         x2, y2, background, intensity: [list of ndarrays]
@@ -79,11 +80,10 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     # Load the FF bin file
     ff = FFfile.read(ff_dir, ff_name)
 
-    # Load the mask file
-    mask = MaskImage.loadMask(config.mask_file)
+    # Load the mask file if not given
+    if mask is None:
+        mask = MaskImage.loadMask(config.mask_file)
 
-    # Mask the FF file
-    ff = MaskImage.applyMask(ff, mask, ff_flag=True)
 
     # If the FF file could not be read, skip star extraction
     if ff is None:
@@ -94,10 +94,12 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     if dark is not None:
         ff.avepixel = Image.applyDark(ff.avepixel, dark)
 
-
     # Apply the flat
     if flat_struct is not None:
         ff.avepixel = Image.applyFlat(ff.avepixel, flat_struct)
+
+    # Mask the FF file
+    ff = MaskImage.applyMask(ff, mask, ff_flag=True)
 
 
     # Calculate image mean and stddev
@@ -126,7 +128,7 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     border_mask[-border:,:] = 0
     border_mask[:,:border] = 0
     border_mask[:,-border:] = 0
-    maxima = MaskImage.applyMask(maxima, (True, border_mask))
+    maxima = MaskImage.applyMask(maxima, (True, border_mask), image=True)
 
 
     # Find and label the maxima

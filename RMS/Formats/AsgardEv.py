@@ -55,7 +55,7 @@ def writeEv(dir_path, file_name, ev_array, platepar):
         f.write("#      geom : {:d} {:d}\n".format(platepar.X_res, platepar.Y_res))
         f.write("#    filter : 0\n")
         f.write("#\n")
-        f.write("#  fr    time    sum     seq       cx       cy      th      phi     lsp    mag  flag   bak    max\n")
+        f.write("#  fr    time        sum     seq       cx       cy      th      phi     lsp    mag  flag   bak    max\n")
 
 
         ###
@@ -72,5 +72,5 @@ def writeEv(dir_path, file_name, ev_array, platepar):
             theta = 90 - alt
             phi = (90 - azim)%360
 
-            f.write("{:5d} {:7.3f} {:6d} {:7d} {:8.3f} {:8.3f} {:7.3f} {:8.3f} {:7.3f} {:6.2f}  0000   0.0    0.0\n".format(31 + i, \
+            f.write("{:5d} {:7.3f} {:10d} {:7d} {:8.3f} {:8.3f} {:7.3f} {:8.3f} {:7.3f} {:6.2f}  0000   0.0    0.0\n".format(31 + i, \
                 t_rel, int(intensity), int(frame), x, y, theta, phi, -2.5*np.log10(intensity), mag))

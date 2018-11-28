@@ -2,6 +2,7 @@
 
 
 import functools
+import inspect
 
 
 class memoizeAll(object):
@@ -60,11 +61,14 @@ class memoizeSingle(object):
         self.cache = {}
 
 
-    def __call__(self, *args):
+    def __call__(self, *args, **kwargs):
+
+        key = self.key(args, kwargs)
 
         # Check if arguments already cached
-        if args in self.cache:
-            return self.cache[args]
+        if key in self.cache:
+            print('CACHED!!!!!!!!!!!')
+            return self.cache[key]
 
         # If not, compute the function value and store in cache
         else:
@@ -73,10 +77,10 @@ class memoizeSingle(object):
             self.cache = {}
 
             # Compute the function value
-            value = self.func(*args)
+            value = self.func(*args, **kwargs)
 
             # Store the compute value in cache
-            self.cache[args] = value
+            self.cache[key] = value
 
             return value
 
@@ -91,3 +95,11 @@ class memoizeSingle(object):
         """ Support instance methods. """
 
         return functools.partial(self.__call__, obj)
+
+    def normalize_args(self, args, kwargs):
+        spec = inspect.getargs(self.func.__code__).args
+        return dict(list(kwargs.items()) + list(zip(spec, args)))
+
+    def key(self, args, kwargs):
+        a = self.normalize_args(args, kwargs)
+        return tuple(sorted(a.items()))

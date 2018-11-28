@@ -13,7 +13,7 @@ from RMS.Decorators import memoizeSingle
 
 
 
-def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False):
+def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None):
     """ Threshold the image with given parameters.
     
     Arguments:
@@ -24,6 +24,10 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False):
             should be)
         j1: [float] absolute thresholding factor (how many minimum abuolute levels above mean the maxpixel 
             image should be)
+
+    Keyword arguments:
+        ff: [bool] If true, it indicated that the FF file is being thresholded.
+        mask: [ndarray] Mask image. None by default.
     
     Return:
         [ndarray] thresholded 2D image
@@ -40,12 +44,17 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False):
     # Compute the thresholded image
     img_thresh = img_avg_sub > (k1 * stdpixel + j1)
 
+    # If the mask was given, set all areas of the thresholded image convered by the mask to false
+    if mask is not None:
+        if img_thresh.shape == mask.img.shape:
+            img_thresh[mask.img == 0] = False
+
     # The thresholded image is always 8 bit
     return img_thresh.astype(np.uint8)
 
 
 @memoizeSingle
-def thresholdFF(ff, k1, j1):
+def thresholdFF(ff, k1, j1, mask=None):
     """ Threshold the FF with given parameters.
     
     Arguments:
@@ -54,12 +63,15 @@ def thresholdFF(ff, k1, j1):
             should be)
         j1: [float] absolute thresholding factor (how many minimum abuolute levels above mean the maxpixel 
             image should be)
+
+    Keyword arguments:
+        mask: [ndarray] Mask image. None by default.
     
     Return:
         [ndarray] thresholded 2D image
     """
 
-    return thresholdImg(ff.maxpixel, ff.avepixel, ff.stdpixel, k1, j1, ff=True)
+    return thresholdImg(ff.maxpixel, ff.avepixel, ff.stdpixel, k1, j1, ff=True, mask=mask)
 
 
 
