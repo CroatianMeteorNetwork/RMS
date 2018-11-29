@@ -1080,7 +1080,6 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, de
             xs, ys, zs = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, \
                 mask, flat_struct, dark, debug=False)
 
-
             # Limit the number of points to search if too large
             if len(zs) > config.max_points_det:
 

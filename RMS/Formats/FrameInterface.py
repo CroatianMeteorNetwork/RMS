@@ -6,6 +6,7 @@ from __future__ import print_function, division, absolute_import
 import os
 import sys
 import copy
+import time
 import datetime
 
 # tkinter import that works on both Python 2 and 3
@@ -82,10 +83,12 @@ class FFMimickInterface(object):
         """ Add raw frame for computation of FF data. """
 
         # Get the maximum values
-        self.maxpixel = np.max([self.maxpixel, frame], axis=0)
+        self.maxpixel = np.fmax(self.maxpixel, frame)
 
-        self.acc += frame
-        self.stdpixel += (frame.astype(np.uint64))**2
+        frame_conv = frame.astype(np.uint64)
+
+        self.acc += frame_conv
+        self.stdpixel += frame_conv**2
 
         self.nframes += 1
 
