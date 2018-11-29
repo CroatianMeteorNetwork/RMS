@@ -278,8 +278,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # If there are some more files to process, process them on more cores
             if detector.input_queue.qsize() > 0:
 
-                # Let the detector use all cores, but leave 1 free
-                available_cores = multiprocessing.cpu_count() - 1
+                # Let the detector use all cores, but leave 2 free
+                available_cores = multiprocessing.cpu_count() - 2
 
 
                 if available_cores > 1:
