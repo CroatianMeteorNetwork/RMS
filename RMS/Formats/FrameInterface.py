@@ -28,6 +28,12 @@ from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
 
 
+# Morphology - Cython init
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+from RMS.Routines.DynamicFTPCompressionCy import FFMimickInterface
+
+
 def getCacheID(first_frame, size):
     """ Get the frame chunk ID. """
 
@@ -60,68 +66,68 @@ def computeFramesToRead(read_nframes, total_frames, fr_chunk_no, current_frame_c
 
 
 
-class FFMimickInterface(object):
-    def __init__(self, nrows, ncols, dtype):
-        """ Structure which is used to make FF file format data. It mimicks the interface of an FF structure. """
+# class FFMimickInterface(object):
+#     def __init__(self, nrows, ncols, dtype):
+#         """ Structure which is used to make FF file format data. It mimicks the interface of an FF structure. """
 
-        self.nrows = nrows
-        self.ncols = ncols
-        self.dtype = dtype
+#         self.nrows = nrows
+#         self.ncols = ncols
+#         self.dtype = dtype
 
-        # Init the empty structures
-        self.maxpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=self.dtype)
-        self.acc = np.zeros(shape=(self.nrows, self.ncols), dtype=np.uint64)
-        self.stdpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.uint64)
+#         # Init the empty structures
+#         self.maxpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=self.dtype)
+#         self.acc = np.zeros(shape=(self.nrows, self.ncols), dtype=np.uint64)
+#         self.stdpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.uint64)
 
-        self.nframes = 0
+#         self.nframes = 0
 
-        # False if dark and flat weren't applied, True otherwise (False be default)
-        self.calibrated = False
-
-
-    def addFrame(self, frame):
-        """ Add raw frame for computation of FF data. """
-
-        # Get the maximum values
-        self.maxpixel = np.fmax(self.maxpixel, frame)
-
-        frame_conv = frame.astype(np.uint64)
-
-        self.acc += frame_conv
-        self.stdpixel += frame_conv**2
-
-        self.nframes += 1
+#         # False if dark and flat weren't applied, True otherwise (False be default)
+#         self.calibrated = False
 
 
-    def finish(self):
-        """ Finish making an FF structure. """
+#     def addFrame(self, frame):
+#         """ Add raw frame for computation of FF data. """
 
-        # Remove the contribution of the maxpixel to the avepixel
-        self.acc -= self.maxpixel
+#         # Get the maximum values
+#         self.maxpixel = np.fmax(self.maxpixel, frame)
 
-        self.avepixel = self.acc//(self.nframes - 1)
-        #self.avepixel = self.acc//self.nframes
+#         frame_conv = frame.astype(np.uint64)
+
+#         self.acc += frame_conv
+#         self.stdpixel += frame_conv**2
+
+#         self.nframes += 1
 
 
-        # Compute the standard deviation
-        self.stdpixel -= (self.maxpixel.astype(np.uint64))**2
-        self.stdpixel -= self.acc*self.avepixel
+#     def finish(self):
+#         """ Finish making an FF structure. """
+
+#         # Remove the contribution of the maxpixel to the avepixel
+#         self.acc -= self.maxpixel
+
+#         self.avepixel = self.acc//(self.nframes - 1)
+#         #self.avepixel = self.acc//self.nframes
+
+
+#         # Compute the standard deviation
+#         self.stdpixel -= (self.maxpixel.astype(np.uint64))**2
+#         self.stdpixel -= self.acc*self.avepixel
         
-        self.stdpixel  = np.sqrt(self.stdpixel/(self.nframes - 2))
-        #self.stdpixel  = np.sqrt(self.stdpixel//(self.nframes - 1))
+#         self.stdpixel  = np.sqrt(self.stdpixel/(self.nframes - 2))
+#         #self.stdpixel  = np.sqrt(self.stdpixel//(self.nframes - 1))
 
-        # Make sure there are no zeros in standard deviation
-        self.stdpixel[self.stdpixel == 0] = 1
+#         # Make sure there are no zeros in standard deviation
+#         self.stdpixel[self.stdpixel == 0] = 1
 
-        # Convert stddev and avepixel to appropriate format
-        self.avepixel = self.avepixel.astype(self.dtype)
-        self.stdpixel = self.stdpixel.astype(self.dtype)
+#         # Convert stddev and avepixel to appropriate format
+#         self.avepixel = self.avepixel.astype(self.dtype)
+#         self.stdpixel = self.stdpixel.astype(self.dtype)
 
-        # print('---')
-        # print('nframes', self.nframes)
-        # print('mean stddev2:', np.mean(self.stdpixel))
-        # print('mean avepixel2', np.mean(self.avepixel))
-        # print('mean maxpixel', np.mean(self.maxpixel))
+#         # print('---')
+#         # print('nframes', self.nframes)
+#         # print('mean stddev2:', np.mean(self.stdpixel))
+#         # print('mean avepixel2', np.mean(self.avepixel))
+#         # print('mean maxpixel', np.mean(self.maxpixel))
 
 
 
@@ -962,7 +968,7 @@ class InputTypeUWOVid(object):
 
             # Add the unix time to list
             self.frame_chunk_unix_times.append(unix_time)
-
+            
             # Add frame for FF processing
             ff_struct_fake.addFrame(frame)
 
