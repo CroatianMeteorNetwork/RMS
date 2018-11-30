@@ -38,7 +38,7 @@ def binImage(img, bin_factor, method='avg'):
     # Make sure the input image is of the correct type
     if img.dtype != np.uint16:
         img = img.astype(np.uint16)
-
+    
     # Perform the binning
     img = binImageCy(img, bin_factor, method=method)
 

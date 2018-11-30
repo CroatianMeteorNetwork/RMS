@@ -1105,6 +1105,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, de
                 # plt.imshow(img, cmap='gray')
                 # plt.show()
                 # ### ###
+
+                logDebug('Checking temporal propagation at time:', img_handle.name())
                 
 
             # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
@@ -1367,8 +1369,6 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, de
                             half_frame_pixels_stripe[:,0]]
 
                     intensity = int(np.sum(intensity_values))
-                    
-                    logDebug("centroid: fr {:.1f}, x {:.2f}, y {:.2f}, intens {:d}".format(frame_no, x_centroid, y_centroid, intensity))
 
 
                     # Rescale the centroid position and intensity back to the pre-binned size
@@ -1380,6 +1380,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, de
                         if config.detection_binning_method == 'avg':
                             intensity *= config.detection_binning_factor**2
 
+                    logDebug("centroid: fr {:.1f}, x {:.2f}, y {:.2f}, intens {:d}".format(frame_no, \
+                        x_centroid, y_centroid, intensity))
 
                     # Add computed centroid to the centroid list
                     centroids.append([frame_no, x_centroid, y_centroid, intensity])

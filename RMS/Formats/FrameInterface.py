@@ -994,7 +994,7 @@ class InputTypeUWOVid(object):
                 break
 
             frame = frame.astype(np.uint16)
-
+            
             # Bin the frame
             if self.detection and (self.config.detection_binning_factor > 1):
                 frame = Image.binImage(frame, self.config.detection_binning_factor, \
