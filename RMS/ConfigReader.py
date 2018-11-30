@@ -609,26 +609,26 @@ def parseMeteorDetection(config, parser):
         bin_factor = parser.getint(section, "detection_binning_factor")
         # config.detection_binning_factor
 
-    # Check that the given bin size is a factor of 2
-    if bin_factor > 1:
-        if math.log(bin_factor, 2)/int(math.log(bin_factor, 2)) != 1:
-            print('Warning! The given binning factor is not a factor of 2!')
-            print('Defaulting to 1...')
-            bin_factor = 1
-    
-    config.detection_binning_factor = bin_factor
+        # Check that the given bin size is a factor of 2
+        if bin_factor > 1:
+            if math.log(bin_factor, 2)/int(math.log(bin_factor, 2)) != 1:
+                print('Warning! The given binning factor is not a factor of 2!')
+                print('Defaulting to 1...')
+                bin_factor = 1
+        
+        config.detection_binning_factor = bin_factor
 
 
     if parser.has_option(section, "detection_binning_method"):
         bin_method = parser.get(section, "detection_binning_method").strip().lower()
 
-    bin_method_list = ['sum', 'avg']
-    if bin_method not in bin_method_list:
-        print('Warning! The binning method {:s} is not an allowed binning method: ', bin_method_list)
-        print('Defaulting to avg...')
-        bin_method = 'avg'
+        bin_method_list = ['sum', 'avg']
+        if bin_method not in bin_method_list:
+            print('Warning! The binning method {:s} is not an allowed binning method: ', bin_method_list)
+            print('Defaulting to avg...')
+            bin_method = 'avg'
 
-    config.detection_binning_method = bin_method
+        config.detection_binning_method = bin_method
 
     
     if parser.has_option(section, "k1"):
