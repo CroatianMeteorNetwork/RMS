@@ -16,6 +16,7 @@
 
 import os
 import sys
+import math
 
 try:
     # Python 3
@@ -246,7 +247,7 @@ class Config:
         self.thumb_n_width = 10
 
 
-def normalizeParameter(param, config):
+def normalizeParameter(param, config, binning=1):
     """ Normalize detection parameter to be size independent.
     
     @param param: parameter to be normalized
@@ -254,7 +255,10 @@ def normalizeParameter(param, config):
     @return: normalized param
     """
 
-    return param*config.width/config.f*config.height/config.f/(720*576)
+    width_factor = config.width/binning/config.f/720
+    height_factor = config.height/binning/config.f/576
+
+    return param*width_factor*height_factor
 
 
 def parse(filename):
@@ -602,10 +606,29 @@ def parseMeteorDetection(config, parser):
 
 
     if parser.has_option(section, "detection_binning_factor"):
-        config.detection_binning_factor = parser.getint(section, "detection_binning_factor")
+        bin_factor = parser.getint(section, "detection_binning_factor")
+        # config.detection_binning_factor
+
+    # Check that the given bin size is a factor of 2
+    if bin_factor > 1:
+        if math.log(bin_factor, 2)/int(math.log(bin_factor, 2)) != 1:
+            print('Warning! The given binning factor is not a factor of 2!')
+            print('Defaulting to 1...')
+            bin_factor = 1
+    
+    config.detection_binning_factor = bin_factor
+
 
     if parser.has_option(section, "detection_binning_method"):
-        config.detection_binning_method = parser.get(section, "detection_binning_method").strip().lower()
+        bin_method = parser.get(section, "detection_binning_method").strip().lower()
+
+    bin_method_list = ['sum', 'avg']
+    if bin_method not in bin_method_list:
+        print('Warning! The binning method {:s} is not an allowed binning method: ', bin_method_list)
+        print('Defaulting to avg...')
+        bin_method = 'avg'
+
+    config.detection_binning_method = bin_method
 
     
     if parser.has_option(section, "k1"):
@@ -632,12 +655,14 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "distance_threshold_det"):
         config.distance_threshold_det = parser.getint(section, "distance_threshold_det")**2
 
-    config.distance_threshold_det = normalizeParameter(config.distance_threshold_det, config)
+    config.distance_threshold_det = normalizeParameter(config.distance_threshold_det, config, \
+        binning=config.detection_binning_factor)
 
     if parser.has_option(section, "gap_threshold_det"):
         config.gap_threshold_det = parser.getint(section, "gap_threshold_det")**2
 
-    config.gap_threshold_det = normalizeParameter(config.gap_threshold_det, config)
+    config.gap_threshold_det = normalizeParameter(config.gap_threshold_det, config, 
+        binning=config.detection_binning_factor)
 
     if parser.has_option(section, "min_pixels_det"):
         config.min_pixels_det = parser.getint(section, "min_pixels_det")

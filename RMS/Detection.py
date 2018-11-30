@@ -53,6 +53,7 @@ from RMS.Routines.Image import thresholdFF
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 import RMS.Routines.MorphCy as morph
+from RMS.Routines.BinImageCy import binImage
 
 # If True, all detection details will be logged
 VERBOSE_DEBUG = True
@@ -694,13 +695,16 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
     return best_chain
 
 
-def checkAngularVelocity3D(detected_line, config):
+def checkAngularVelocity3D(detected_line, config, correct_binning=False):
     """ Check the angular velocity of the detection, and reject those too slow or too fast to be meteors. 
         The minimum ang. velocity is 0.5 deg/s, while maximum is 35 deg/s (Peter Gural, private comm.).
     
     Arguments:
         detected_line: [list] A list which contains the 3D coordinates of the detected line.
         config: [config object] configuration object (loaded from the .config file)
+
+    Keyword arguments:
+        correct_binning: [bool] Correct the centroids for binning.
     
     Return:
         ang_vel, ang_vel_status: [float, bool]
@@ -712,6 +716,13 @@ def checkAngularVelocity3D(detected_line, config):
     # Get coordinates of 2 points that describe the line
     x1, y1, z1 = detected_line[0]
     x2, y2, z2 = detected_line[1]
+
+    # Correct the points for binning
+    if correct_binning and (config.detection_binning_factor > 1):
+        x1 *= config.detection_binning_factor
+        y1 *= config.detection_binning_factor
+        x2 *= config.detection_binning_factor
+        y2 *= config.detection_binning_factor
 
 
     # Compute the average angular velocity in px per frame
@@ -961,6 +972,10 @@ def thresholdAndCorrectGammaFF(img_handle, config, mask):
     # Apply a special minimum path intensity multiplier
     min_patch_intensity *= config.min_patch_intensity_multiplier
 
+    # Correct the minimum patch intensity if the image was binned with the 'avg' method
+    if (img_handle != 'ff') and (config.detection_binning_method == 'avg'):
+        min_patch_intensity *= config.detection_binning_factor**2
+
 
     return img_thres, max_avg_corrected, flattened_weights, min_patch_intensity
 
@@ -1005,9 +1020,25 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, de
         mask = MaskImage.loadMask(config.mask_file)
 
 
+    # Bin the mask, dark and flat, only when not running on FF files
+    if (img_handle.input_type != 'ff') and (config.detection_binning_factor > 1):
+
+        # Bin the mask
+        if mask is not None:
+            mask.img = Image.binImage(mask.img, config.detection_binning_factor, 'avg')
+
+        # Bin the dark
+        if dark is not None:
+            dark = Image.binImage(dark, config.detection_binning_factor, 'avg')
+
+        # Bin the flat
+        if flat_struct is not None:
+            flat_struct.binFlat(config.detection_binning_factor, 'avg')
+
+
     # Do all image processing on single FF file, if given
-    #   Otherwise, the image processing will be done on every frame chunk that is extracted
-    if img_handle == 'ff':
+    # Otherwise, the image processing will be done on every frame chunk that is extracted
+    if img_handle.input_type == 'ff':
 
         # Apply mask and flat to FF
         img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
@@ -1116,8 +1147,11 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, de
                 # logDebug(detected_line)
                 
 
-                # Check the detection if it has the proper angular velocity
-                ang_vel, ang_vel_status = checkAngularVelocity3D(detected_line, config)
+                # Check the detection if it has the proper angular velocity (correct for binning if not 
+                #   using FF files as input)
+                ang_vel, ang_vel_status = checkAngularVelocity3D(detected_line, config, 
+                    correct_binning=(img_handle.input_type != 'ff'))
+
                 if not ang_vel_status:
                     logDebug('Rejected at initial stage due to the angular velocity: {:.2f} deg/s'.format(ang_vel))
                     continue
@@ -1336,6 +1370,18 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, de
                     
                     logDebug("centroid: fr {:.1f}, x {:.2f}, y {:.2f}, intens {:d}".format(frame_no, x_centroid, y_centroid, intensity))
 
+
+                    # Rescale the centroid position and intensity back to the pre-binned size
+                    if (img_handle.input_type != 'ff') and (config.detection_binning_factor > 1):
+                        x_centroid *= config.detection_binning_factor
+                        y_centroid *= config.detection_binning_factor
+
+                        # Rescale the intensity only if the binning method was 'average'
+                        if config.detection_binning_method == 'avg':
+                            intensity *= config.detection_binning_factor**2
+
+
+                    # Add computed centroid to the centroid list
                     centroids.append([frame_no, x_centroid, y_centroid, intensity])
 
 
@@ -1350,7 +1396,6 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, de
             if len(centroids) < config.line_minimum_frame_range_det:
                 logDebug('Rejected due to too few frames!')
                 continue
-
 
             # Check that the detection has a surface brightness above the background
             # The assumption here is that the peak of the meteor should have the intensity which is at least

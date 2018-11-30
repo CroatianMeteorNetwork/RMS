@@ -26,6 +26,7 @@ from RMS.Formats.FFfile import validFFName, filenameToDatetime
 from RMS.Formats.FFfile import getMiddleTimeFF, selectFFFrames
 from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
+from RMS.Routines import Image
 
 
 # Morphology - Cython init
@@ -143,6 +144,8 @@ class InputTypeFF(object):
         Keyword arguments:
             single_ff: [bool] If True, a single FF file should be given as input, and not a directory with FF
                 files. False by default.
+            detection: [bool] Indicates that the input is used for detection. False by default. Has no effect
+                for FF files.
 
         """
 
@@ -526,7 +529,7 @@ class InputTypeFF(object):
 
 
 class InputTypeVideo(object):
-    def __init__(self, dir_path, config, beginning_time=None):
+    def __init__(self, dir_path, config, beginning_time=None, detection=False):
         """ Input file type handle for video files.
         
         Arguments:
@@ -535,6 +538,8 @@ class InputTypeVideo(object):
 
         Keyword arguments:
             beginning_time: [datetime] datetime of the beginning of the video. Optional, None by default.
+            detection: [bool] Indicates that the input is used for detection. False by default. This will
+                control whether the binning is applied or not.
 
         """
 
@@ -571,6 +576,8 @@ class InputTypeVideo(object):
             self.beginning_datetime = beginning_time
 
 
+        self.detection = detection
+
 
         print('Using video file:', self.file_path)
 
@@ -590,6 +597,11 @@ class InputTypeVideo(object):
         # Get the image size
         self.nrows = int(self.cap.get(4))
         self.ncols = int(self.cap.get(3))
+
+        # Apply the binning if the detection is used
+        if self.detection:
+            self.nrows = self.nrows//self.config.detection_binning_factor
+            self.ncols = self.ncols//self.config.detection_binning_factor
 
 
         # Set the number of frames to be used for averaging and maxpixels
@@ -690,6 +702,11 @@ class InputTypeVideo(object):
             # Convert frame to grayscale
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
+            # Bin the frame
+            if self.detection and (self.config.detection_binning_factor > 1):
+                frame = Image.binImage(frame, self.config.detection_binning_factor, \
+                    self.config.detection_binning_method)
+
             # Add frame for FF processing
             ff_struct_fake.addFrame(frame)
 
@@ -779,6 +796,11 @@ class InputTypeVideo(object):
         # Convert frame to grayscale
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
+        # Bin the frame
+        if self.detection and (self.config.detection_binning_factor > 1):
+            frame = Image.binImage(frame, self.config.detection_binning_factor, \
+                self.config.detection_binning_method)
+
         return frame
 
 
@@ -803,24 +825,29 @@ class InputTypeVideo(object):
 
 
 class InputTypeUWOVid(object):
-    def __init__(self, dir_path, config):
+    def __init__(self, dir_path, config, detection=False):
         """ Input file type handle for UWO .vid files.
         
         Arguments:
             dir_path: [str] Path to the vid file.
             config: [ConfigStruct object]
 
+        Keyword arguments:
+            detection: [bool] Indicates that the input is used for detection. False by default. This will
+                control whether the binning is applied or not.
+
         """
 
         self.input_type = 'vid'
-
-
 
         # Separate directory path and file name
         self.vid_path = dir_path
         self.dir_path, vid_file = os.path.split(dir_path)
 
         self.config = config
+
+        self.detection = detection
+
 
         self.ff = None
 
@@ -856,6 +883,11 @@ class InputTypeUWOVid(object):
         # Get the image size
         self.nrows = self.vidinfo.ht
         self.ncols = self.vidinfo.wid
+
+        # Apply the binning if the detection is used
+        if self.detection:
+            self.nrows = self.nrows//self.config.detection_binning_factor
+            self.ncols = self.ncols//self.config.detection_binning_factor
 
 
         # Set the number of frames to be used for averaging and maxpixels
@@ -963,6 +995,11 @@ class InputTypeUWOVid(object):
 
             frame = frame.astype(np.uint16)
 
+            # Bin the frame
+            if self.detection and (self.config.detection_binning_factor > 1):
+                frame = Image.binImage(frame, self.config.detection_binning_factor, \
+                    self.config.detection_binning_method)
+
             unix_time = self.vid.ts + self.vid.tu/1000000.0
 
             # Add the unix time to list
@@ -1052,6 +1089,11 @@ class InputTypeUWOVid(object):
         # Load a frame
         frame = readVidFrame(self.vid, self.vid_file)
 
+        # Bin the frame
+        if self.detection and (self.config.detection_binning_factor > 1):
+            frame = Image.binImage(frame, self.config.detection_binning_factor, \
+                self.config.detection_binning_method)
+
         # Save the frame time
         self.current_frame_time = unixTime2Date(self.vid.ts, self.vid.tu, dt_obj=True) 
 
@@ -1108,12 +1150,19 @@ class InputTypeUWOVid(object):
 
 
 class InputTypeImages(object):
-    def __init__(self, dir_path, config, beginning_time=None, fps=None):
+    def __init__(self, dir_path, config, beginning_time=None, fps=None, detection=False):
         """ Input file type handle for a folder with images.
         
         Arguments:
             dir_path: [str] Path to the vid file.
             config: [ConfigStruct object]
+
+        Keyword arguments:
+            beginning_time: [datetime] datetime of the beginning of the video. Optional, None by default.
+            fps: [float] Known FPS of the images. None by default, in which case it will be read from the
+                config file.
+            detection: [bool] Indicates that the input is used for detection. False by default. This will
+                control whether the binning is applied or not.
 
         """
 
@@ -1121,6 +1170,8 @@ class InputTypeImages(object):
 
         self.dir_path = dir_path
         self.config = config
+
+        self.detection = detection
 
         self.ff = None
 
@@ -1220,13 +1271,13 @@ class InputTypeImages(object):
         # Load the first image
         img = self.loadFrame()
 
-        # Get the image size
+        # Get the image size (the binning correction doesn't have to be applied because the image is already
+        #   binned)
         self.nrows = img.shape[0]
         self.ncols = img.shape[1]
 
         # Get the image dtype
         self.img_dtype = img.dtype
-
 
         # Set the number of frames to be used for averaging and maxpixels
         self.fr_chunk_no = 64
@@ -1409,27 +1460,33 @@ class InputTypeImages(object):
             current_img_file = self.current_img_file
 
         # Get the current image
-        img = cv2.imread(os.path.join(self.dir_path, current_img_file), -1)
+        frame = cv2.imread(os.path.join(self.dir_path, current_img_file), -1)
 
         # Convert the image to black and white if it's 8 bit
-        if 8*img.itemsize == 8:
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        if 8*frame.itemsize == 8:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
 
-        
+        # If UWO PNG's are used, byteswap the image and read the image time
         if self.uwo_png_mode:
 
             # Byteswap if it's the UWO style png
-            img = img.byteswap()
+            frame = frame.byteswap()
 
             # Read the time from the image
-            ts = img[0][6] + (img[0][7] << 16)
-            tu = img[0][8] + (img[0][9] << 16)
+            ts = frame[0][6] + (frame[0][7] << 16)
+            tu = frame[0][8] + (frame[0][9] << 16)
 
             self.uwo_png_frame_time = unixTime2Date(ts, tu, dt_obj=True)
 
 
-        return img
+        # Bin the frame
+        if self.detection and (self.config.detection_binning_factor > 1):
+            frame = Image.binImage(frame, self.config.detection_binning_factor, \
+                self.config.detection_binning_method)
+
+
+        return frame
 
 
 
@@ -1508,7 +1565,7 @@ class InputTypeImages(object):
 
 
 
-def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_dir=False):
+def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_dir=False, detection=False):
     """ Given the folder of a file, detect the input format.
 
     Arguments:
@@ -1518,9 +1575,12 @@ def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_d
     Keyword arguments:
         beginning_time: [datetime] Datetime of the video beginning. Optional, only can be given for
             video input formats.
-        fps: [float] Frames per second, used only when images in a folder are used.
+        fps: [float] Frames per second, used only when images in a folder are used. If it's not given,
+            it will be read from the config file.
         skip_ff_dir: [bool] Skip the input type where there are multiple FFs in the same directory. False
             by default. This is only used for ManualReduction.
+        detection: [bool] Indicates that the input is used for detection. False by default. This will
+                control whether the binning is applied or not. No effect on FF image handle.
 
     """
 
@@ -1540,7 +1600,8 @@ def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_d
 
         # If not, check if there any image files in the folder
         else:
-            img_handle = InputTypeImages(input_path, config, beginning_time=beginning_time, fps=fps)
+            img_handle = InputTypeImages(input_path, config, beginning_time=beginning_time, fps=fps, \
+                detection=detection)
 
 
     # If the given path is a file, look for a single FF file, video files, or vid files
@@ -1559,14 +1620,15 @@ def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_d
         elif file_name.endswith('.mp4') or file_name.endswith('.avi') or file_name.endswith('.mkv'):
 
             # Init the image hadle for video files
-            img_handle = InputTypeVideo(input_path, config, beginning_time=beginning_time)
+            img_handle = InputTypeVideo(input_path, config, beginning_time=beginning_time, \
+                detection=detection)
 
 
         # Check if the given files is the UWO .vid format
         elif file_name.endswith('.vid'):
             
             # Init the image handle for UWO-type .vid files
-            img_handle = InputTypeUWOVid(input_path, config)
+            img_handle = InputTypeUWOVid(input_path, config, detection=detection)
 
 
         else:

@@ -10,6 +10,42 @@ import scipy.misc
 
 from RMS.Decorators import memoizeSingle
 
+# Cython init
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+from RMS.Routines.BinImageCy import binImage as binImageCy
+
+
+def binImage(img, bin_factor, method='avg'):
+    """ Bin the given image. The binning has to be a factor of 2, e.g. 2, 4, 8, etc.
+    This is just a wrapper function for a cythonized function that does the binning.
+    
+    Arguments:
+        img: [ndarray] Numpy array representing an image.
+        bin_factor: [int] The binning factor. Has to be a factor of 2 (e.g. 2, 4, 8).
+
+    Keyword arguments:
+        method: [str] Binning method.  'avg' by default.
+            - 'sum' will sum all values in the binning window and assign it to the new pixel.
+            - 'avg' will take the average.
+
+    Return:
+        out_img: [ndarray] Binned image.
+    """
+
+    input_type = img.dtype
+
+    # Make sure the input image is of the correct type
+    if img.dtype != np.uint16:
+        img = img.astype(np.uint16)
+
+    # Perform the binning
+    img = binImageCy(img, bin_factor, method=method)
+
+    # Convert the image back to the input type
+    img = img.astype(input_type)
+
+    return img
 
 
 
@@ -274,9 +310,14 @@ class FlatStruct(object):
         self.flat_img[(self.flat_img < self.flat_avg/10) | (self.flat_img < 10)] = self.flat_avg
 
 
+    def binFlat(self, binning_factor, binning_method):
+        """ Bin the flat. """
 
+        # Bin the processed flat
+        self.flat_img = binImage(self.flat_img, binning_factor, binning_method)
 
-
+        # Bin the raw flat image
+        self.flat_img_raw = binImage(self.flat_img_raw, binning_factor, binning_method)
 
 
 
