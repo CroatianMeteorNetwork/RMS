@@ -956,21 +956,20 @@ class InputTypeUWOVid(object):
         for i in range(frames_to_read):
 
             frame = readVidFrame(self.vid, self.vid_file)
-
+            
             # If the end of the vid file was reached, stop the loop
             if frame is None:
                 break
 
             frame = frame.astype(np.uint16)
 
-
             unix_time = self.vid.ts + self.vid.tu/1000000.0
 
             # Add the unix time to list
             self.frame_chunk_unix_times.append(unix_time)
-            
+
             # Add frame for FF processing
-            ff_struct_fake.addFrame(frame)
+            ff_struct_fake.addFrame(frame)            
 
             unix_time_lst = (self.vid.ts, self.vid.tu)
             if unix_time_lst not in self.utime_frame_dict:

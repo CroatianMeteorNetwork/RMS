@@ -148,8 +148,11 @@ class Config:
         ##### MeteorDetection
         
         # KHT detection parameters
-        self.ff_min_stars = 5
+        self.ff_min_stars = 10
         
+        self.detection_binning_factor = 1
+        self.detection_binning_method = 'avg'
+
         self.k1_det = 1.5 # weight for stddev in thresholding for faint meteor detection
         self.j1_det = 9 # absolute levels above average in thresholding for faint meteor detection
         self.max_white_ratio = 0.07 # maximum ratio of white to all pixels on a thresholded image (used to avoid searching on very messed up images)
@@ -596,6 +599,14 @@ def parseMeteorDetection(config, parser):
 
     if parser.has_option(section, "ff_min_stars"):
         config.ff_min_stars = parser.getint(section, "ff_min_stars")
+
+
+    if parser.has_option(section, "detection_binning_factor"):
+        config.detection_binning_factor = parser.getint(section, "detection_binning_factor")
+
+    if parser.has_option(section, "detection_binning_method"):
+        config.detection_binning_method = parser.get(section, "detection_binning_method").strip().lower()
+
     
     if parser.has_option(section, "k1"):
         config.k1_det = parser.getfloat(section, "k1")
