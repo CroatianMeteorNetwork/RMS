@@ -1562,7 +1562,8 @@ if __name__ == "__main__":
 
             file_path = file_path.replace('"', '')
 
-            img_handle = detectInputType(file_path, config, beginning_time=beginning_time, fps=cml_args.fps)
+            img_handle = detectInputType(file_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
+                detection=True)
 
             img_handle_list.append(img_handle)
 
@@ -1576,7 +1577,8 @@ if __name__ == "__main__":
         dir_path_input = cml_args.dir_path[0].replace('"', '')
 
         # Detect the input file format
-        img_handle_main = detectInputType(dir_path_input, config, beginning_time=beginning_time, fps=cml_args.fps)
+        img_handle_main = detectInputType(dir_path_input, config, beginning_time=beginning_time, \
+            fps=cml_args.fps, detection=True)
 
         img_handle_list = []
 
@@ -1587,7 +1589,8 @@ if __name__ == "__main__":
                 # Go through all FF files and add them as individual files
                 for file_name in img_handle_main.ff_list:
 
-                    img_handle = detectInputType(os.path.join(dir_path_input, file_name), config, skip_ff_dir=True)
+                    img_handle = detectInputType(os.path.join(dir_path_input, file_name), config, \
+                        skip_ff_dir=True, detection=True)
 
                     img_handle_list.append(img_handle)
 
