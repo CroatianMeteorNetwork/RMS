@@ -695,8 +695,12 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
     y_array = centroids_array[:,2]
 
     # LSQ fit by both axes
-    mX, cX = _LSQfit(x_array, frame_array)
-    mY, cY = _LSQfit(y_array, frame_array)
+    try:
+        mX, cX = _LSQfit(x_array, frame_array)
+        mY, cY = _LSQfit(y_array, frame_array)
+    except:
+        log.debug('Filtering centroids failed at fitting X and Y progressions in time, skipping filtering...')
+        return centroids
 
     filtered_centroids = []
 
