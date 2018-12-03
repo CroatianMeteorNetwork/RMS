@@ -35,13 +35,14 @@ from mpl_toolkits.mplot3d import Axes3D
 # RMS imports
 from RMS.Astrometry.Conversions import datetime2UnixTime, jd2Date
 from RMS.Astrometry.ApplyAstrometry import XY2CorrectedRADecPP, raDec2AltAz
+import RMS.ConfigReader as cr
 from RMS.DetectionTools import getThresholdedStripe3DPoints
 from RMS.Formats.AsgardEv import writeEv
 from RMS.Formats import FFfile
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats.Platepar import Platepar
-import RMS.ConfigReader as cr
+from RMS.Misc import mkdirP
 from RMS.Routines.Grouping3D import find3DLines, getAllPoints
 from RMS.Routines.CompareLines import compareLines
 from RMS.Routines import MaskImage
@@ -1480,11 +1481,14 @@ if __name__ == "__main__":
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
 
+    arg_parser.add_argument('-o', '--outdir', nargs=1, metavar='OUTDIR', type=str, \
+        help="Path to the output directory where the detections will be saved.")
+
     arg_parser.add_argument('-t', '--timebeg', nargs=1, metavar='TIME', type=str, \
-        help="The beginning time of the video file in the YYYYMMDD_hhmmss.uuuuuu format.")
+        help="The beginning time of the video file in the YYYYMMDD_hhmmss.uuuuuu format. Not needed for FF or vid files.")
 
     arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float, \
-        help="Frames per second when images are used. If not given, it will be read from the config file.")
+        help="Frames per second when images are used. If not given, it will be read from the config file. Not needed for FF or vid files.")
 
     arg_parser.add_argument('-g', '--gamma', metavar='CAMERA_GAMMA', type=float, \
         help="Camera gamma value. Science grade cameras have 1.0, consumer grade cameras have 0.45. Adjusting this is essential for good photometry, and doing star photometry through SkyFit can reveal the real camera gamma.")
@@ -1611,6 +1615,15 @@ if __name__ == "__main__":
 
     dir_path = img_handle_main.dir_path
 
+    # Check if the output directory was given. If not, the detection will be saved in the input directory
+    if cml_args.outdir:
+        out_dir = cml_args.outdir[0]
+
+        # Make sure the output directory exists
+        mkdirP(out_dir)
+
+    else:
+        out_dir = dir_path
 
 
     # Try loading the mask
@@ -1684,9 +1697,9 @@ if __name__ == "__main__":
     results_list = []
 
     # Open a file for results
-    results_path = img_handle_main.dir_path
+    results_path = out_dir
     results_name = config.stationID + "_" + img_handle_main.beginning_datetime.strftime("%Y%m%d_%H%M%S_%f")
-    results_file = open(os.path.join(img_handle_main.dir_path, results_name + '_results.txt'), 'w')
+    results_file = open(os.path.join(results_path, results_name + '_results.txt'), 'w')
 
     total_meteors = 0
 
@@ -1795,6 +1808,8 @@ if __name__ == "__main__":
                 else:
                     # Reset to 'A'
                     current_letter = 65
+
+                prev_fn_time = fn_time
 
                 # Construct a file name for the event
                 file_name = 'ev_' + fn_time + chr(current_letter) + "_" + config.stationID + '.txt'
