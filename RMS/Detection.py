@@ -1615,17 +1615,17 @@ if __name__ == "__main__":
 
     # Try loading the mask
     if os.path.exists(os.path.join(dir_path, config.mask_file)):
-        mask_path = dir_path
+        mask_path = os.path.join(dir_path, config.mask_file)
 
     # Try loading the default mask
     elif os.path.exists(config.mask_file):
-        mask_path = os.getcwd()
+        mask_path = os.path.abspath(config.mask_file)
 
     # Load the dark
-    mask = MaskImage.loadMask(os.path.join(mask_path, config.mask_file))
+    mask = MaskImage.loadMask(mask_path)
 
     if mask is not None:
-        print('Loaded mask:', os.path.join(mask_path, config.mask_file))
+        print('Loaded mask:', mask_path)
 
 
 
@@ -1636,22 +1636,22 @@ if __name__ == "__main__":
 
         dark_path = None
 
-        # Check if there is flat in the data directory
+        # Check if dark is in the data directory
         if os.path.exists(os.path.join(dir_path, config.dark_file)):
-            dark_path = dir_path
+            dark_path = os.path.join(dir_path, config.dark_file)
 
         # Try loading the default dark
         elif os.path.exists(config.dark_file):
-            dark_path = os.getcwd()
+            dark_path = os.path.abspath(config.dark_file)
 
         if dark_path is not None:
 
             # Load the dark
-            dark = Image.loadDark(dark_path, config.dark_file, dtype=img_handle_main.ff.dtype, \
+            dark = Image.loadDark(*os.path.split(dark_path), dtype=img_handle_main.ff.dtype, \
                     byteswap=img_handle_main.byteswap)
 
         if dark is not None:
-            print('Loaded dark:', os.path.join(dark_path, config.dark_file))
+            print('Loaded dark:', dark_path)
 
 
 
@@ -1663,21 +1663,21 @@ if __name__ == "__main__":
         
         # Check if there is flat in the data directory
         if os.path.exists(os.path.join(dir_path, config.flat_file)):
-            flat_path = dir_path
+            flat_path = os.path.join(dir_path, config.flat_file)
             
         # Try loading the default flat
         elif os.path.exists(config.flat_file):
-            flat_path = os.getcwd()
+            flat_path = os.path.abspath(config.flat_file)
 
         if flat_path is not None:
             
             # Load the flat
-            flat_struct = Image.loadFlat(flat_path, config.flat_file, dtype=img_handle_main.ff.dtype, \
+            flat_struct = Image.loadFlat(*os.path.split(flat_path), dtype=img_handle_main.ff.dtype, \
                 byteswap=img_handle_main.byteswap, dark=dark)
 
 
         if flat_struct is not None:
-            print('Loaded flat:', os.path.join(flat_path, config.flat_file))
+            print('Loaded flat:', flat_path)
 
 
     # Init results list
