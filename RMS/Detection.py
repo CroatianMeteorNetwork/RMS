@@ -458,6 +458,12 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # Load the frame chunk
             img_handle.loadChunk(first_frame=frame_min, read_nframes=(frame_max - frame_min + 1))
 
+            # If making the synthetic FF has failed, skip it
+            if not img_handle.ff.successful:
+                print('Skipped frame range due to failed synthetic FF generation: frames {:d} to {:d}'.format(\
+                    frame_min, frame_max))
+                continue
+
             # Print the time
             logDebug('Time:', img_handle.name())
 

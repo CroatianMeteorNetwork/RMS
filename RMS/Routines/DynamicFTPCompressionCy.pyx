@@ -20,7 +20,7 @@ ctypedef np.uint64_t INT64_TYPE_t
 cdef class FFMimickInterface:
     cdef public int nrows, ncols, nframes
     cdef public object dtype
-    cdef public np.npy_bool calibrated
+    cdef public np.npy_bool calibrated, successful
     cdef public np.ndarray maxpixel, acc, stdpixel, avepixel
 
     def __init__(self, nrows, ncols, dtype):
@@ -36,6 +36,8 @@ cdef class FFMimickInterface:
             dtype=INT16_TYPE)
         cdef np.ndarray[INT64_TYPE_t, ndim=2] acc = np.zeros(shape=(nrows, ncols), \
             dtype=INT64_TYPE)
+        cdef np.ndarray[INT64_TYPE_t, ndim=2] avepixel = np.zeros(shape=(nrows, ncols), \
+            dtype=INT64_TYPE)
         cdef np.ndarray[INT64_TYPE_t, ndim=2] stdpixel = np.zeros(shape=(nrows, ncols), \
             dtype=INT64_TYPE)
 
@@ -47,8 +49,12 @@ cdef class FFMimickInterface:
         # False if dark and flat weren't applied, True otherwise (False be default)
         self.calibrated = False
 
+        # Flag to inicate if making the FF was success or not
+        self.successful = False
+
         self.maxpixel = maxpixel
         self.acc = acc
+        self.avepixel = avepixel
         self.stdpixel = stdpixel
 
 
@@ -89,6 +95,10 @@ cdef class FFMimickInterface:
     cpdef finish(self):
         """ Finish making an FF structure. """
 
+        # Finish the FF only if there are more than 3 frames
+        if self.nframes < 3:
+            return False
+
         # Remove the contribution of the maxpixel to the avepixel
         self.acc -= self.maxpixel
 
@@ -110,3 +120,7 @@ cdef class FFMimickInterface:
         self.maxpixel = self.maxpixel.astype(self.dtype)
         self.avepixel = self.avepixel.astype(self.dtype)
         self.stdpixel = self.stdpixel.astype(self.dtype)
+
+        self.successful = True
+
+        return True

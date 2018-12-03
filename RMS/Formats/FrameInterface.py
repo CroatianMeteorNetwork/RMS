@@ -987,14 +987,17 @@ class InputTypeUWOVid(object):
         # Load the chunk of frames
         for i in range(frames_to_read):
 
-            frame = readVidFrame(self.vid, self.vid_file)
+            try:
+                frame = readVidFrame(self.vid, self.vid_file)
+            except:
+                frame = None
             
             # If the end of the vid file was reached, stop the loop
             if frame is None:
                 break
 
             frame = frame.astype(np.uint16)
-            
+
             # Bin the frame
             if self.detection and (self.config.detection_binning_factor > 1):
                 frame = Image.binImage(frame, self.config.detection_binning_factor, \
