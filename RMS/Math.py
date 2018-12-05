@@ -21,6 +21,7 @@ def angularSeparation(ra1, dec1, ra2, dec2):
 
 
 
+
 ### VECTORS ###
 ##############################################################################################################
 
@@ -39,3 +40,43 @@ def vectMag(vect):
 
 
 ##############################################################################################################
+
+
+def cartesianToPolar(x, y, z):
+    """ Converts 3D cartesian coordinates to polar coordinates. 
+
+    Arguments:
+        x: [float] Px coordinate.
+        y: [float] Py coordinate.
+        z: [float] Pz coordinate.
+
+    Return:
+        (theta, phi): [float] Polar angles in radians (inclination, azimuth).
+
+    """
+
+    theta = np.arccos(z)
+    phi = np.arctan2(y, x)
+
+    return theta, phi
+
+
+
+def polarToCartesian(theta, phi):
+    """ Converts 3D spherical coordinates to 3D cartesian coordinates. 
+
+    Arguments:
+        theta: [float] Inclination in radians.
+        phi: [float] Azimuth angle in radians.
+
+    Return:
+        (x, y, z): [tuple of floats] Coordinates of the point in 3D cartiesian coordinates.
+    """
+
+
+    x = np.sin(phi)*np.cos(theta)
+    y = np.sin(phi)*np.sin(theta)
+    z = np.cos(phi)
+
+    return x, y, z
+

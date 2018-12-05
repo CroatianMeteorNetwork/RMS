@@ -66,7 +66,7 @@ from RMS.Astrometry.CyFunctions import subsetCatalog
 # TkAgg has issues when opening an external file prompt, so other backends are forced if available
 if matplotlib.get_backend() == 'TkAgg':
 
-    backends = ['Qt5Agg', 'Qt4Agg', 'WXAgg']
+    backends = ['Qt5Agg', 'Qt4Agg']
 
     for bk in backends:
         
@@ -938,6 +938,10 @@ class PlateTool(object):
         elif event.key == 'ctrl+d':
             _, self.dark = self.loadDark()
 
+            # Apply the dark to the flat
+            if self.flat_struct is not None:
+                self.flat_struct.applyDark(self.dark)
+
             self.updateImage()
 
 
@@ -1133,7 +1137,7 @@ class PlateTool(object):
         nbins = int((2**self.config.bit_depth)/2)
 
         # Compute the intensity histogram
-        hist, bin_edges = np.histogram(img.flatten(), normed=True, range=(0, 2**self.bit_depth), \
+        hist, bin_edges = np.histogram(img.flatten(), density=True, range=(0, 2**self.bit_depth), \
             bins=nbins)
 
         # Scale the maximum histogram peak to half the image height
@@ -1718,8 +1722,11 @@ class PlateTool(object):
 
         try:
             # Load the flat, byteswap the flat if vid file is used or UWO png
-            flat = Image.loadFlat(*os.path.split(flat_file), byteswap=self.img_handle.byteswap)
+            flat = Image.loadFlat(*os.path.split(flat_file), dtype=self.img_data_raw.dtype, \
+                byteswap=self.img_handle.byteswap, dark=self.dark)
         except:
+            messagebox.showerror(title='Flat field file error', \
+                message='Flat could not be loaded!')
             return False, None
 
 
@@ -1752,11 +1759,16 @@ class PlateTool(object):
         print(dark_file)
 
 
+        try:
 
-        # Load the dark
-        dark = Image.loadDark(*os.path.split(dark_file), byteswap=self.img_handle.byteswap)
+            # Load the dark
+            dark = Image.loadDark(*os.path.split(dark_file), dtype=self.img_data_raw.dtype, 
+                byteswap=self.img_handle.byteswap)
 
-        if dark is None:
+        except:
+            messagebox.showerror(title='Dark frame error', \
+                message='Dark frame could not be loaded!')
+
             return False, None
 
         dark = dark.astype(self.img_data_raw.dtype)

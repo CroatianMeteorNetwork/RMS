@@ -16,11 +16,13 @@ from RMS.Astrometry.CheckFit import autoCheckFit
 import RMS.ConfigReader as cr
 from RMS.DownloadPlatepar import downloadNewPlatepar
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteorsDirectory, saveDetections
+from RMS.Formats.CAL import writeCAL
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats import CALSTARS
 from RMS.UploadManager import UploadManager
 from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
+from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 
 
 
@@ -131,6 +133,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             applyAstrometryFTPdetectinfo(night_data_dir, ftpdetectinfo_name, platepar_path)
 
 
+            # Convert the FTPdetectinfo into UFOOrbit input file
+            FTPdetectinfo2UFOOrbitInput(night_data_dir, ftpdetectinfo_name, platepar_path)
+
+
 
     log.info('Plotting field sums...')
 
@@ -144,6 +150,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     # List for any extra files which will be copied to the night archive directory. Full paths have to be 
     #   given
     extra_files = []
+
 
     log.info('Making a flat...')
 
@@ -164,6 +171,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     else:
         log.info('Making flat image FAILED!')
 
+
+    # Make a CAL file if full CAMS compatibility is desired
+    if config.cams_code > 0:
+        writeCAL(night_data_dir, config, platepar)
 
 
     ### Add extra files to archive

@@ -368,6 +368,7 @@ def loadFlat(dir_path, file_name, dtype=None, byteswap=False, dark=None):
 
     if byteswap:
         flat_img = flat_img.byteswap()
+        
 
     # Init a new Flat structure
     flat_struct = FlatStruct(flat_img, dark=dark)

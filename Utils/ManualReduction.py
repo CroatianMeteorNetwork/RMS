@@ -123,7 +123,7 @@ class ManualReductionTool(object):
             self.ff = self.img_handle.loadChunk(read_nframes=-1)
             self.nframes = self.ff.nframes
 
-            self.dir_path = self.img_handle.dir_path
+            self.dir_path = self.img_handle.dir_path    
 
 
         self.fr_file = fr_file
@@ -325,7 +325,6 @@ class ManualReductionTool(object):
             messagebox.showerror(title='Dark frame file error', \
                 message='The file you selected could not be loaded as a dark frame!')
 
-        
 
         return dark_file, dark
 
@@ -357,7 +356,7 @@ class ManualReductionTool(object):
         try:
             # Load the flat. Byteswap the flat if vid file is used
             flat = Image.loadFlat(*os.path.split(flat_file), dtype=self.current_image.dtype, \
-                byteswap=byteswap)
+                byteswap=byteswap, dark=self.dark)
             
         except:
             messagebox.showerror(title='Flat field file error', \
@@ -532,7 +531,7 @@ class ManualReductionTool(object):
         # Subtract the average and apply the flat field for image on which processing will be done
         if self.ff is not None:
 
-            # Subtract the average
+            # Subtract the average without flat correction
             process_img = Image.applyDark(process_img, self.ff.avepixel)
 
             # Apply flat
@@ -556,7 +555,7 @@ class ManualReductionTool(object):
 
 
             # Apply flat
-            if self.flat_struct is not None:
+            if (self.flat_struct is not None):
                 img = Image.applyFlat(img, self.flat_struct)
 
 
@@ -615,9 +614,9 @@ class ManualReductionTool(object):
         # Do auto levels
         if self.auto_levels:
 
-            # Compute the edge percentiles
-            min_lvl = np.percentile(img, 1)
-            max_lvl = np.percentile(img, 99.9)
+            # Compute the edge percentiles (skip the first 2 rows)
+            min_lvl = np.percentile(img[2:, :], 1)
+            max_lvl = np.percentile(img[2:, :], 99.9)
 
 
             # Adjust levels (auto)
@@ -1007,7 +1006,15 @@ class ManualReductionTool(object):
         elif event.key == 'ctrl+d':
             _, self.dark = self.loadDark()
 
+            
+            # Apply the dark to the flat
+            if self.flat_struct is not None:
+                self.flat_struct.applyDark(self.dark)
+
             self.updateImage()
+
+            # Recompute the image intensities
+            self.recomputeAllIntensitySums()
 
 
         # Load the flat field
@@ -1982,6 +1989,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('input2', metavar='INPUT2', type=str, nargs='*', \
                     help='If an FF file was given, an FR file can be given in addition. If PNGs are used, this second argument must be the UTC time of frame 0 in the following format: YYYYMMDD_HHMMSS.uuu')
 
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
     arg_parser.add_argument('-b', '--begframe', metavar='FIRST_FRAME', type=int, \
         help="First frame to show.")
 
@@ -2003,8 +2013,18 @@ if __name__ == "__main__":
     #########################
 
 
-    # Load the configuration file
-    config = cr.parse(".config")
+    if cml_args.config is not None:
+
+        config_file = os.path.abspath(cml_args.config[0].replace('"', ''))
+
+        print('Loading config file:', config_file)
+
+        # Load the given config file
+        config = cr.parse(config_file)
+
+    else:
+        # Load the default configuration file
+        config = cr.parse(".config")
 
 
     ff_name = None
