@@ -117,6 +117,10 @@ def saveDetections(detection_results, ff_dir, config):
     # Remove all 'None' results, which were errors
     detection_results = [res for res in detection_results if res is not None]
 
+    # Sort by FF name
+    detection_results = sorted(detection_results, key=lambda x: x[0])
+
+
     # Count the number of detected meteors
     meteors_num = 0
     for _, _, meteor_data in detection_results:
