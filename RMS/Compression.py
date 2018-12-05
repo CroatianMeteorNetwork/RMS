@@ -48,7 +48,7 @@ class Compressor(multiprocessing.Process):
     running = False
     
     def __init__(self, data_dir, array1, startTime1, array2, startTime2, config, detector=None, 
-        live_view=None, flat_struct=None):
+        live_view=None, flat_struct=None, dark=None, mask=None):
         """
 
         Arguments:
@@ -64,6 +64,8 @@ class Compressor(multiprocessing.Process):
             live_view: [LiveViewer object] Handle to the LiveViewer object which will show in real time 
                 the latest maxpixel on the screen.
             flat_struct: [Flat struct] Structure containing the flat field. None by default.
+            dark: [ndarray] Dark frame.
+            maks: [MaskStruct] Mask structure.
 
         """
         
@@ -79,6 +81,8 @@ class Compressor(multiprocessing.Process):
         self.detector = detector
         self.live_view = live_view
         self.flat_struct = flat_struct
+        self.dark = dark
+        self.mask = mask
 
         self.exit = multiprocessing.Event()
 
@@ -272,7 +276,8 @@ class Compressor(multiprocessing.Process):
             if self.detector is not None:
 
                 # Add the file to the detector queue
-                self.detector.addJob([self.data_dir, filename, self.config, self.flat_struct])
+                self.detector.addJob([self.data_dir, filename, self.config, self.flat_struct, self.dark, 
+                    self.mask])
 
 
             # Refresh the maxpixel currently shown on the screen

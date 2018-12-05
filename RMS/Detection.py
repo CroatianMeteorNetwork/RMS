@@ -36,7 +36,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from RMS.Astrometry.Conversions import datetime2UnixTime, jd2Date
 from RMS.Astrometry.ApplyAstrometry import XY2CorrectedRADecPP, raDec2AltAz
 import RMS.ConfigReader as cr
-from RMS.DetectionTools import getThresholdedStripe3DPoints
+from RMS.DetectionTools import getThresholdedStripe3DPoints, loadImageCalibration
 from RMS.Formats.AsgardEv import writeEv
 from RMS.Formats import FFfile
 from RMS.Formats import FTPdetectinfo
@@ -399,7 +399,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         max_lines: [int] maximum number of lines to find by KHT
         max_white_ratio: [float] max ratio between write and all pixels after thresholding
         kht_lib_path: [string] path to the compiled KHT library
-        mask: [ndarray] Mask image.
+        mask: [MaskStruct] Mask structure.
         flat_struct: [FlatStruct]  Flat frame sturcture.
         dark: [ndarray] Dark frame.
 
@@ -1022,10 +1022,6 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, de
     t1 = time()
     t_all = time()
 
-    # Load the mask file if not given
-    if mask is None:
-        mask = MaskImage.loadMask(config.mask_file)
-
 
     # Bin the mask, dark and flat, only when not running on FF files
     if (img_handle.input_type != 'ff') and (config.detection_binning_factor > 1):
@@ -1626,71 +1622,9 @@ if __name__ == "__main__":
         out_dir = dir_path
 
 
-    # Try loading the mask
-    if os.path.exists(os.path.join(dir_path, config.mask_file)):
-        mask_path = os.path.join(dir_path, config.mask_file)
-
-    # Try loading the default mask
-    elif os.path.exists(config.mask_file):
-        mask_path = os.path.abspath(config.mask_file)
-
-    # Load the dark
-    mask = MaskImage.loadMask(mask_path)
-
-    if mask is not None:
-        print('Loaded mask:', mask_path)
-
-
-
-
-    # Try loading the dark frame
-    dark = None
-    if config.use_dark:
-
-        dark_path = None
-
-        # Check if dark is in the data directory
-        if os.path.exists(os.path.join(dir_path, config.dark_file)):
-            dark_path = os.path.join(dir_path, config.dark_file)
-
-        # Try loading the default dark
-        elif os.path.exists(config.dark_file):
-            dark_path = os.path.abspath(config.dark_file)
-
-        if dark_path is not None:
-
-            # Load the dark
-            dark = Image.loadDark(*os.path.split(dark_path), dtype=img_handle_main.ff.dtype, \
-                    byteswap=img_handle_main.byteswap)
-
-        if dark is not None:
-            print('Loaded dark:', dark_path)
-
-
-
-    # Try loading a flat field image
-    flat_struct = None
-    if config.use_flat:
-
-        flat_path = None
-        
-        # Check if there is flat in the data directory
-        if os.path.exists(os.path.join(dir_path, config.flat_file)):
-            flat_path = os.path.join(dir_path, config.flat_file)
-            
-        # Try loading the default flat
-        elif os.path.exists(config.flat_file):
-            flat_path = os.path.abspath(config.flat_file)
-
-        if flat_path is not None:
-            
-            # Load the flat
-            flat_struct = Image.loadFlat(*os.path.split(flat_path), dtype=img_handle_main.ff.dtype, \
-                byteswap=img_handle_main.byteswap, dark=dark)
-
-
-        if flat_struct is not None:
-            print('Loaded flat:', flat_path)
+    # Load mask, dark, flat
+    mask, dark, flat_struct = loadImageCalibration(dir_path, config, dtype=img_handle_main.ff.dtype, \
+        byteswap=img_handle_main.byteswap)
 
 
     # Init results list
@@ -1731,7 +1665,8 @@ if __name__ == "__main__":
             # Write the time in results file instead of the frame
             res_centroids = centroids.tolist()
             for entry in res_centroids:
-                entry[0] = (img_handle.currentFrameTime(frame_no=int(entry[0]), dt_obj=True) - first_pick_time).total_seconds()
+                entry[0] = (img_handle.currentFrameTime(frame_no=int(entry[0]), \
+                    dt_obj=True) - first_pick_time).total_seconds()
 
             results_file.write(str(np.array(res_centroids)) + '\n')
 
@@ -1823,8 +1758,6 @@ if __name__ == "__main__":
 
 
     results_file.close()
-
-
 
 
     # Write output as CAMS FTPdetectinfo files

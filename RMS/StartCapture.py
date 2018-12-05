@@ -37,6 +37,7 @@ from RMS.CaptureDuration import captureDuration
 from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
+from RMS.DetectionTools import loadImageCalibration
 from RMS.LiveViewer import LiveViewer
 from RMS.Misc import mkdirP
 from RMS.QueuedPool import QueuedPool
@@ -150,18 +151,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
 
-    # Load the default flat field image if it is available
-    flat_struct = None
-
-    if config.use_flat:
-
-        # Check if the flat exists
-        if os.path.exists(os.path.join(os.getcwd(), config.flat_file)):
-            flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
-
-            log.info('Loaded flat field image: ' + os.path.join(os.getcwd(), config.flat_file))
-
-
+    # Load mask, dark, flat
+    mask, dark, flat_struct = loadImageCalibration(dir_path, config)
 
     # Get the platepar file
     platepar, platepar_path, platepar_fmt = getPlatepar(config)
@@ -223,7 +214,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     
     # Initialize compression
     compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config, 
-        detector=detector, live_view=live_view, flat_struct=flat_struct)
+        detector=detector, live_view=live_view, flat_struct=flat_struct, dark=dark, mask=mask)
 
     
     # Start buffered capture

@@ -67,7 +67,6 @@ class memoizeSingle(object):
 
         # Check if arguments already cached
         if key in self.cache:
-            print('CACHED!!!!!!!!!!!')
             return self.cache[key]
 
         # If not, compute the function value and store in cache

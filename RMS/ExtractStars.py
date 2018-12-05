@@ -80,10 +80,6 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     # Load the FF bin file
     ff = FFfile.read(ff_dir, ff_name)
 
-    # Load the mask file if not given
-    if mask is None:
-        mask = MaskImage.loadMask(config.mask_file)
-
 
     # If the FF file could not be read, skip star extraction
     if ff is None:
@@ -99,7 +95,8 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
         ff.avepixel = Image.applyFlat(ff.avepixel, flat_struct)
 
     # Mask the FF file
-    ff = MaskImage.applyMask(ff, mask, ff_flag=True)
+    if mask is not None:
+        ff = MaskImage.applyMask(ff, mask, ff_flag=True)
 
 
     # Calculate image mean and stddev
@@ -128,7 +125,7 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     border_mask[-border:,:] = 0
     border_mask[:,:border] = 0
     border_mask[:,-border:] = 0
-    maxima = MaskImage.applyMask(maxima, (True, border_mask), image=True)
+    maxima = MaskImage.applyMask(maxima, border_mask, image=True)
 
 
     # Find and label the maxima

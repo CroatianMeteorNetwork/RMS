@@ -2,6 +2,8 @@
 
 from __future__ import print_function, division, absolute_import
 
+import os
+import logging
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -16,6 +18,100 @@ from RMS.Math import vectNorm
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 import RMS.Routines.MorphCy as morph
+
+
+# Get the logger from the main module
+log = logging.getLogger("logger")
+
+
+def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
+    """ Load the mask, dark and flat. 
+    
+    Arguments:
+        dir_path: [str] Path to the directory with calibration.
+        config: [ConfigStruct]
+
+    Keyword arguments:
+        dtype: [object] Numpy array dtype for the image. None by default, if which case it will be determined
+            from the input image.
+        byteswap: [bool] If the dark and flat should be byteswapped. False by default, and should be True for
+            UWO PNGs.
+
+    Return:
+        mask, dark, flat_struct: [tuple of ndarrays]
+    """
+
+
+    # Try loading the mask
+    if os.path.exists(os.path.join(dir_path, config.mask_file)):
+        mask_path = os.path.join(dir_path, config.mask_file)
+
+    # Try loading the default mask
+    elif os.path.exists(config.mask_file):
+        mask_path = os.path.abspath(config.mask_file)
+
+    # Load the dark
+    mask = MaskImage.loadMask(mask_path)
+
+    if mask is not None:
+        print('Loaded mask:', mask_path)
+        log.info('Loaded mask: {:s}'.format(mask_path))
+
+
+
+
+    # Try loading the dark frame
+    dark = None
+    if config.use_dark:
+
+        dark_path = None
+
+        # Check if dark is in the data directory
+        if os.path.exists(os.path.join(dir_path, config.dark_file)):
+            dark_path = os.path.join(dir_path, config.dark_file)
+
+        # Try loading the default dark
+        elif os.path.exists(config.dark_file):
+            dark_path = os.path.abspath(config.dark_file)
+
+        if dark_path is not None:
+
+            # Load the dark
+            dark = Image.loadDark(*os.path.split(dark_path), dtype=dtype, byteswap=byteswap)
+
+        if dark is not None:
+            print('Loaded dark:', dark_path)
+            log.info('Loaded dark: {:s}'.format(dark_path))
+
+
+
+    # Try loading a flat field image
+    flat_struct = None
+    if config.use_flat:
+
+        flat_path = None
+        
+        # Check if there is flat in the data directory
+        if os.path.exists(os.path.join(dir_path, config.flat_file)):
+            flat_path = os.path.join(dir_path, config.flat_file)
+            
+        # Try loading the default flat
+        elif os.path.exists(config.flat_file):
+            flat_path = os.path.abspath(config.flat_file)
+
+        if flat_path is not None:
+            
+            # Load the flat
+            flat_struct = Image.loadFlat(*os.path.split(flat_path), dtype=dtype, byteswap=byteswap, dark=dark)
+
+
+        if flat_struct is not None:
+            print('Loaded flat:', flat_path)
+            log.info('Loaded flat: {:s}'.format(flat_path))
+
+
+
+    return mask, dark, flat_struct
 
 
 

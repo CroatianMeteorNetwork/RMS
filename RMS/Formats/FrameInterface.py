@@ -435,6 +435,9 @@ class InputTypeFF(object):
 
                     self.ff.stdpixel = np.max(stdpixel_list, axis=0)
 
+
+        # Set the fixed dtype of uint8 to the FF
+        self.ff.dtype = np.uint8
                 
         # Store the loaded file to cache for faster loading
         self.cache = {}

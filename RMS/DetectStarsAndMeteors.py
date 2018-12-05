@@ -28,17 +28,18 @@ import RMS.ConfigReader as cr
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats import CALSTARS
 from RMS.Formats.FFfile import validFFName
+from RMS.Formats.FrameInterface import detectInputType
 from RMS.ExtractStars import extractStars
 from RMS.Detection import detectMeteors
+from RMS.DetectionTools import loadImageCalibration
 from RMS.QueuedPool import QueuedPool
-from RMS.Routines import Image
 
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
 
 
-def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None):
+def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=None, mask=None):
     """ Run the star extraction and subsequently runs meteor detection on the FF file if there are enough
         stars on the image.
 
@@ -49,6 +50,8 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None):
 
     Keyword arguments:
         flat_struct: [Flat struct] Structure containing the flat field. None by default.
+        dark: [ndarray]
+        mask: [MaskStruct]
 
     Return:
         [ff_name, star_list, meteor_list] detected stars and meteors
@@ -57,22 +60,32 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None):
 
     log.info('Running detection on file: ' + ff_name)
 
-    # Run star extraction on the FF bin
-    star_list = extractStars(ff_directory, ff_name, config, flat_struct=flat_struct)
+
+    # Construct the image handle for the detection
+    img_handle = detectInputType(os.path.join(ff_directory, ff_name), config, skip_ff_dir=True, \
+        detection=True)
+
+
+    # Run star extraction
+    star_list = extractStars(ff_directory, ff_name, config, flat_struct=flat_struct, dark=dark, mask=mask)
+
 
     log.info('Detected stars: ' + str(len(star_list[0])))
+
 
     # Run meteor detection if there are enough stars on the image
     if len(star_list[0]) >= config.ff_min_stars:
 
         log.debug('More than ' + str(config.ff_min_stars) + ' stars, detecting meteors...')
 
-        meteor_list = detectMeteors(ff_directory, ff_name, config, flat_struct=flat_struct)
+        # Runt the detection
+        meteor_list = detectMeteors(img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask)
 
         log.info(ff_name + ' detected meteors: ' + str(len(meteor_list)))
 
     else:
         meteor_list = []
+
 
 
     return ff_name, star_list, meteor_list
@@ -183,24 +196,19 @@ def detectStarsAndMeteorsDirectory(dir_path, config):
     ff_list = [ff_name for ff_name in sorted(os.listdir(ff_dir)) if validFFName(ff_name)]
 
 
+    # Construct an image handle for a directory of FF files
+    img_handle = detectInputType(dir_path, config, detection=True)
+
+    # Load mask, dark, flat
+    mask, dark, flat_struct = loadImageCalibration(dir_path, config, dtype=img_handle.ff.dtype, \
+        byteswap=img_handle.byteswap)
+
+
     # Check if there are any file in the directory
-    if(len(ff_list) == None):
-        print("No files found!")
-        sys.exit()
+    if not len(ff_list):
 
-
-    # Try loading a flat field image
-    flat_struct = None
-
-    if config.use_flat:
-        
-        # Check if there is flat in the data directory
-        if os.path.exists(os.path.join(ff_dir, config.flat_file)):
-            flat_struct = Image.loadFlat(ff_dir, config.flat_file)
-
-        # Try loading the default flat
-        elif os.path.exists(config.flat_file):
-            flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
+        print("No files for processing found!")
+        return None, None, None, None
 
 
     print('Starting detection...')
@@ -211,7 +219,7 @@ def detectStarsAndMeteorsDirectory(dir_path, config):
     # Give detector jobs
     for ff_name in ff_list:
         print('Adding for detection:', ff_name)
-        detector.addJob([ff_dir, ff_name, config, flat_struct], wait_time=0)
+        detector.addJob([ff_dir, ff_name, config, flat_struct, dark, mask], wait_time=0)
 
 
     # Start the detection
