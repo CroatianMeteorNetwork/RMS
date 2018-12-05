@@ -9,6 +9,17 @@ import random
 import string
 import inspect
 
+
+# tkinter import that works on both Python 2 and 3
+try:
+    import tkinter
+    from tkinter import filedialog
+except:
+    import Tkinter as tkinter
+    import tkFileDialog as filedialog
+
+
+
 # Get the logger from the main module
 log = logging.getLogger("logger")
 
@@ -75,6 +86,42 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
 
 
     return archive_name
+
+
+
+
+def openFileDialog(dir_path, initialfile, title, mpl):
+    """ Open the file dialog and close it properly, depending on the backend used. 
+    
+    Arguments:
+        dir_path: [str] Initial path of the directory.
+        initialfile: [str] Initial file to load.
+        title: [str] Title of the file dialog window.
+        mpl: [matplotlib instance] Instace of matplotlib import which is used to determine the used backend.
+
+    Return:
+        file_name: [str] Path to the chosen file.
+    """
+
+    root = tkinter.Tk()
+    root.withdraw()
+    root.update()
+
+    # Open the file dialog
+    file_name = filedialog.askopenfilename(initialdir=dir_path, \
+        initialfile=initialfile, title=title)
+
+    root.update()
+
+    if (mpl.get_backend() != 'TkAgg') and (mpl.get_backend() != 'WXAgg'):
+        root.quit()
+    else:
+        root.destroy()
+
+
+    return file_name
+
+
 
 
 

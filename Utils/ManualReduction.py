@@ -11,16 +11,14 @@ import pytz
 
 # tkinter import that works on both Python 2 and 3
 try:
-    import tkinter
-    from tkinter import filedialog, messagebox
+    from tkinter import messagebox
 except:
-    import Tkinter as tkinter
-    import tkFileDialog as filedialog
     import tkMessageBox as messagebox
 
 
 import numpy as np
 import scipy.misc
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.font_manager import FontProperties
@@ -32,8 +30,26 @@ from RMS.Formats.FRbin import validFRName
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats.Platepar import Platepar
+from RMS.Misc import openFileDialog
 from RMS.Routines import Image
 
+
+# TkAgg has issues when opening an external file prompt, so other backends are forced if available
+if matplotlib.get_backend() == 'TkAgg':
+
+    backends = ['Qt5Agg', 'Qt4Agg', 'WXAgg']
+
+    for bk in backends:
+        
+        # Try setting backend
+        try:
+            plt.switch_backend(bk)
+
+        except:
+            pass
+
+
+print('Using backend: ', matplotlib.get_backend())
 
 
 class Pick(object):
@@ -270,31 +286,11 @@ class ManualReductionTool(object):
     def loadDark(self):
         """ Open a file dialog and ask user to load a dark frame. """
 
-        root = tkinter.Tk()
-        root.withdraw()
-        root.update()
-
-        # Load the platepar file
-        dark_file = filedialog.askopenfilename(initialdir=self.dir_path, title='Select the dark frame file')
-
-        root.update()
-        root.quit()
+        dark_file = openFileDialog(self.dir_path, None, 'Select the dark frame file', matplotlib)
 
         if not dark_file:
             return False, None
 
-        print(dark_file)
-
-
-        # Byteswap the flat if vid file is used or UWO png
-        byteswap = False
-        if self.img_handle is not None:
-            if self.img_handle.byteswap:
-                byteswap = True
-
-
-        # Load the dark
-        dark = Image.loadDark(*os.path.split(dark_file), byteswap=byteswap)
 
         try:
 
@@ -337,10 +333,6 @@ class ManualReductionTool(object):
     def loadFlat(self):
         """ Open a file dialog and ask user to load a flat field. """
 
-        root = tkinter.Tk()
-        root.withdraw()
-        root.update()
-
 
         # Check if flat exists in the folder, and set it as the defualt file name if it does
         if self.config.flat_file in os.listdir(self.dir_path):
@@ -348,18 +340,11 @@ class ManualReductionTool(object):
         else:
             initialfile = ''
 
-        # Load the platepar file
-        flat_file = filedialog.askopenfilename(initialdir=self.dir_path, \
-            initialfile=initialfile, title='Select the flat field file')
 
-        root.update()
-        root.quit()
-        
+        flat_file = openFileDialog(self.dir_path, initialfile, 'Select the flat field file', matplotlib)
 
         if not flat_file:
             return False, None
-
-        print(flat_file)
 
 
         # Byteswap the flat if vid file is used or UWO png
@@ -401,12 +386,8 @@ class ManualReductionTool(object):
     def loadPlatepar(self):
         """ Open a file dialog and ask user to open the platepar file. """
 
-        root = tkinter.Tk()
-        root.withdraw()
-        root.update()
 
         platepar = Platepar()
-
 
         # Check if platepar exists in the folder, and set it as the defualt file name if it does
         if self.config.platepar_name in os.listdir(self.dir_path):
@@ -415,26 +396,21 @@ class ManualReductionTool(object):
             initialfile = ''
 
         # Load the platepar file
-        platepar_file = filedialog.askopenfilename(initialdir=self.dir_path, \
-            initialfile=initialfile, title='Select the platepar file')
+        platepar_file = openFileDialog(self.dir_path, initialfile, 'Select the platepar file', matplotlib)
 
-        root.update()
-        root.quit()
-        # root.destroy()
 
         if not platepar_file:
-            return False, platepar
+            return False, None
 
-        print(platepar_file)
 
         # Parse the platepar file
         try:
             self.platepar_fmt = platepar.read(platepar_file)
         except:
-            platepar = False
+            platepar = None
 
         # Check if the platepar was successfuly loaded
-        if not platepar:
+        if platepar is None:
             messagebox.showerror(title='Platepar file error', \
                 message='The file you selected could not be loaded as a platepar file!')
             

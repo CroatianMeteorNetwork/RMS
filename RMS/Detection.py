@@ -113,7 +113,6 @@ def getPolarLine(x1, y1, x2, y2, img_h, img_w):
 
 
 
-
 def _getCartesian(rho, theta):
         """ Convert rho and theta to cartesian x and y points.
         """

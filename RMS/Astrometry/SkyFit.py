@@ -33,10 +33,9 @@ import argparse
 # tkinter import that works on both Python 2 and 3
 try:
     import tkinter
-    from tkinter import filedialog, messagebox
+    from tkinter import messagebox
 except:
     import Tkinter as tkinter
-    import tkFileDialog as filedialog
     import tkMessageBox as messagebox
 
 
@@ -55,7 +54,7 @@ from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADecPP, raD
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Routines import Image
 from RMS.Math import angularSeparation
-from RMS.Misc import decimalDegreesToSexHours
+from RMS.Misc import decimalDegreesToSexHours, openFileDialog
 
 # Import Cython functions
 import pyximport
@@ -63,6 +62,23 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog
 
 
+
+# TkAgg has issues when opening an external file prompt, so other backends are forced if available
+if matplotlib.get_backend() == 'TkAgg':
+
+    backends = ['Qt5Agg', 'Qt4Agg', 'WXAgg']
+
+    for bk in backends:
+        
+        # Try setting backend
+        try:
+            plt.switch_backend(bk)
+
+        except:
+            pass
+
+
+print('Using backend: ', matplotlib.get_backend())
 
 
 
@@ -124,7 +140,7 @@ class FOVinputDialog(object):
 
 
 class PlateTool(object):
-    def __init__(self, dir_path, config, beginning_time=None, fps=None):
+    def __init__(self, dir_path, config, beginning_time=None, fps=None, gamma=None):
         """ SkyFit interactive window.
 
         Arguments:
@@ -135,10 +151,18 @@ class PlateTool(object):
             beginning_time: [datetime] Datetime of the video beginning. Optional, only can be given for
                 video input formats.
             fps: [float] Frames per second, used only when images in a folder are used.
+            gamma: [float] Camera gamma. None by default, then it will be used from the platepar file or
+                config.
         """
 
         self.config = config
         self.dir_path = dir_path
+
+
+        # If camera gamma was given, change the value in config
+        if gamma is not None:
+            config.gamma = gamma
+
 
         # Flag which regulates wheter the maxpixel or the avepixel image is shown (avepixel by default)
         self.img_type_flag = 'avepixel'
@@ -255,17 +279,25 @@ class PlateTool(object):
         # Load the platepar file
         self.platepar_file, self.platepar = self.loadPlatepar()
 
-        print('Platepar loaded:', self.platepar_file)
+        if self.platepar_file:
 
-        # Print the field of view size
-        print("FOV: {:.2f} x {:.2f} deg".format(*self.computeFOVSize()))
+            print('Platepar loaded:', self.platepar_file)
+
+            # Print the field of view size
+            print("FOV: {:.2f} x {:.2f} deg".format(*self.computeFOVSize()))
+
         
         # If the platepar file was not loaded, set initial values from config
-        if not self.platepar_file:
+        else:
             self.makeNewPlatepar(update_image=False)
 
             # Create the name of the platepar file
             self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
+
+
+        # Set the given gamma value to platepar
+        if gamma is not None:
+            self.platepar.gamma = gamma
 
 
         ### INIT IMAGE ###
@@ -506,12 +538,14 @@ class PlateTool(object):
                 star_x, star_y, px_intens = img_star
                 _, _, star_mag = catalog_star
 
+                lsp = np.log10(px_intens)
+
                 # Skip intensities which were not properly calculated
-                if np.isnan(px_intens) or np.isinf(px_intens):
+                if np.isnan(lsp) or np.isinf(lsp):
                     continue
 
                 star_coords.append([star_x, star_y])
-                logsum_px.append(np.log10(px_intens))
+                logsum_px.append(lsp)
                 catalog_mags.append(star_mag)
 
 
@@ -1548,10 +1582,6 @@ class PlateTool(object):
     def loadPlatepar(self):
         """ Open a file dialog and ask user to open the platepar file. """
 
-        root = tkinter.Tk()
-        root.withdraw()
-        root.update()
-
         platepar = Platepar()
 
 
@@ -1562,23 +1592,16 @@ class PlateTool(object):
             initialfile = ''
 
         # Load the platepar file
-        platepar_file = filedialog.askopenfilename(initialdir=self.dir_path, \
-            initialfile=initialfile, title='Select the platepar file')
-
-        root.update()
-        root.quit()
-        # root.destroy()
+        platepar_file = openFileDialog(self.dir_path, initialfile, 'Select the platepar file', matplotlib)
 
         if not platepar_file:
             return False, platepar
-
-        print(platepar_file)
 
         # Parse the platepar file
         try:
             self.platepar_fmt = platepar.read(platepar_file)
         except:
-            platepar = False
+            platepar = None
 
         # Check if the platepar was successfuly loaded
         if not platepar:
@@ -1619,6 +1642,10 @@ class PlateTool(object):
         # Set distorsion polynomials to zero
         self.platepar.x_poly *= 0
         self.platepar.y_poly *= 0
+
+        # Set the first coeffs to 0.5, as that is the real centre of the FOV
+        self.platepar.x_poly[0] = 0.5
+        self.platepar.y_poly[0] = 0.5
 
         # Set station ID
         self.platepar.station_code = self.config.stationID
@@ -1675,10 +1702,6 @@ class PlateTool(object):
     def loadFlat(self):
         """ Open a file dialog and ask user to load a flat field. """
 
-        root = tkinter.Tk()
-        root.withdraw()
-        root.update()
-
 
         # Check if flat exists in the folder, and set it as the defualt file name if it does
         if self.config.flat_file in os.listdir(self.dir_path):
@@ -1686,12 +1709,7 @@ class PlateTool(object):
         else:
             initialfile = ''
 
-        # Load the platepar file
-        flat_file = filedialog.askopenfilename(initialdir=self.dir_path, \
-            initialfile=initialfile, title='Select the flat field file')
-
-        root.update()
-        root.quit()
+        flat_file = openFileDialog(self.dir_path, initialfile, 'Select the flat field file', matplotlib)
 
         if not flat_file:
             return False, None
@@ -1726,15 +1744,7 @@ class PlateTool(object):
     def loadDark(self):
         """ Open a file dialog and ask user to load a dark frame. """
 
-        root = tkinter.Tk()
-        root.withdraw()
-        root.update()
-
-        # Load the platepar file
-        dark_file = filedialog.askopenfilename(initialdir=self.dir_path, title='Select the dark frame file')
-
-        root.update()
-        root.quit()
+        dark_file = openFileDialog(self.dir_path, None, 'Select the dark frame file', matplotlib)
 
         if not dark_file:
             return False, None
@@ -2210,11 +2220,6 @@ if __name__ == '__main__':
         config = cr.parse(".config")
 
 
-    # If camera gamma was given, change the value in config
-    if cml_args.gamma is not None:
-        config.gamma = cml_args.gamma
-
-
     # Parse the beginning time into a datetime object
     if cml_args.timebeg is not None:
 
@@ -2225,7 +2230,7 @@ if __name__ == '__main__':
 
     # Init the plate tool instance
     plate_tool = PlateTool(cml_args.dir_path[0].replace('"', ''), config, beginning_time=beginning_time, 
-        fps=cml_args.fps)
+        fps=cml_args.fps, gamma=cml_args.gamma)
 
     plt.tight_layout()
     plt.show()
