@@ -369,16 +369,6 @@ def loadFlat(dir_path, file_name, dtype=None, byteswap=False, dark=None):
     if byteswap:
         flat_img = flat_img.byteswap()
 
-<<<<<<< HEAD
-=======
-    # Make sure the flat_avg value is relatively high
-    if flat_avg < 1:
-        flat_avg = 1
-
-    # Make sure there are no values close to 0, as images are divided by flats
-    flat_img[(flat_img < flat_avg/10) | (flat_img < 10)] = flat_avg
->>>>>>> master
-
     # Init a new Flat structure
     flat_struct = FlatStruct(flat_img, dark=dark)
 
