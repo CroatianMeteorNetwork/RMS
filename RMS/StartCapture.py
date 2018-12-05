@@ -152,7 +152,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # Load mask, dark, flat
-    mask, dark, flat_struct = loadImageCalibration(dir_path, config)
+    mask, dark, flat_struct = loadImageCalibration(night_data_dir, config)
 
     # Get the platepar file
     platepar, platepar_path, platepar_fmt = getPlatepar(config)
