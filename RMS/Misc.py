@@ -1,4 +1,6 @@
 
+from __future__ import print_function, division, absolute_import
+
 import platform
 import os
 import shutil
@@ -18,6 +20,8 @@ except:
     import Tkinter as tkinter
     import tkFileDialog as filedialog
 
+
+import numpy as np
 
 
 # Get the logger from the main module
@@ -207,9 +211,29 @@ def checkListEquality(t1, t2):
                 else: 
                     return False
 
-            # If they are instances of objects, compare their attributes
-            elif e1.__dict__ != e2.__dict__:
-                return False
+
+            # Check the dictionaries
+            else:
+
+                # If they are instances of objects, compare their attributes
+                for key1 in e1.__dict__:
+
+                    # If the other dictionary doesn't have the same keys, it's obviously not the same dict
+                    if key1 not in e2.__dict__:
+                        return False
+
+                    val1 = e1.__dict__[key1]
+                    val2 = e2.__dict__[key1]
+
+                    # Check if the value is a numpy array, and check if they are the same
+                    if isinstance(val1, np.ndarray):
+                        if not np.array_equal(val1, val2):
+                            return False
+
+                    else:
+                        # Check if the values are the same
+                        if val1 != val2:
+                            return False
 
         else:
 

@@ -444,6 +444,13 @@ def parseCapture(config, parser):
     if parser.has_option(section, "fov_h"):
         config.fov_h = parser.getfloat(section, "fov_h")
 
+
+    if (config.fov_w <= 0) or (config.fov_h <= 0):
+        print('The field of view in the config file (fov_h and fov_w) have to be positive numbers!')
+        print('Make sure to set the approximate FOV size correctly!')
+        sys.exit()
+
+
     if parser.has_option(section, "deinterlace_order"):
         config.deinterlace_order = parser.getint(section, "deinterlace_order")
 

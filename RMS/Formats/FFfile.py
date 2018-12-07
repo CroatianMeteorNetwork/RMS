@@ -15,7 +15,7 @@ from RMS.Formats.FFfits import write as writeFFfits
 from RMS.Decorators import memoizeSingle
 
 
-@memoizeSingle
+#@memoizeSingle
 def read(directory, filename, fmt=None, array=False, full_filename=False):
     """ Read FF file from the specified directory and choose the proper format for reading.
     
