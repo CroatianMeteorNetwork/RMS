@@ -29,6 +29,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-f', '--fireball', action="store_true", help="""Estimate threshold for fireball
         detection, not meteor detection. """)
 
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
     #############################
 
     # Parse the command line arguments
@@ -41,8 +44,20 @@ if __name__ == "__main__":
         print('MeteorDetection')
 
     
-    # Load the configuration file
-    config = cr.parse(".config")
+    
+    if cml_args.config is not None:
+
+        config_file = os.path.abspath(cml_args.config[0].replace('"', ''))
+
+        print('Loading config file:', config_file)
+
+        # Load the given config file
+        config = cr.parse(config_file)
+
+    else:
+        # Load the default configuration file
+        config = cr.parse(".config")
+
 
 
     if not os.path.exists(cml_args.dir_path):

@@ -1589,7 +1589,7 @@ class PlateTool(object):
         platepar = Platepar()
 
 
-        # Check if platepar exists in the folder, and set it as the defualt file name if it does
+        # Check if platepar exists in the folder, and set it as the default file name if it does
         if self.config.platepar_name in os.listdir(self.dir_path):
             initialfile = self.config.platepar_name
         else:
@@ -1614,6 +1614,24 @@ class PlateTool(object):
             self.loadPlatepar()
 
         
+        # Set geo location and gamma from config, if they were updated
+        if platepar is not None:
+            
+            # Update the location from the config file
+            platepar.lat = self.config.latitude
+            platepar.lon = self.config.longitude
+            platepar.elev = self.config.elevation
+
+            # Update image resolution from config
+            platepar.X_res = self.config.width
+            platepar.Y_res = self.config.height
+
+            # Set the camera gamma from the config file
+            platepar.gamma = self.config.gamma
+
+            # Set station ID
+            platepar.station_code = self.config.stationID
+
 
         return platepar_file, platepar
 
