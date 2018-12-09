@@ -37,12 +37,10 @@ from RMS.CaptureDuration import captureDuration
 from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
-from RMS.DetectionTools import loadImageCalibration
 from RMS.LiveViewer import LiveViewer
 from RMS.Misc import mkdirP
 from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight
-from RMS.Routines import Image
 from RMS.UploadManager import UploadManager
 
 
@@ -150,10 +148,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     log.info('Data directory: ' + night_data_dir)
 
 
-
-    # Load mask, dark, flat
-    mask, dark, flat_struct = loadImageCalibration(night_data_dir, config)
-
     # Get the platepar file
     platepar, platepar_path, platepar_fmt = getPlatepar(config)
 
@@ -214,7 +208,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     
     # Initialize compression
     compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config, 
-        detector=detector, live_view=live_view, flat_struct=flat_struct, dark=dark, mask=mask)
+        detector=detector, live_view=live_view)
 
     
     # Start buffered capture
