@@ -229,7 +229,7 @@ def detectStarsAndMeteorsDirectory(dir_path, config):
         while True:
             
             # Add a job as long as there are available workers to receive it
-            if (detector.cores - detector.active_workers) > 0:
+            if (detector.cores.value() - detector.active_workers.value()) > 0:
                 print('Adding for detection:', ff_name)
                 detector.addJob([ff_dir, ff_name, config, flat_struct, dark, mask], wait_time=0)
                 break
