@@ -220,14 +220,22 @@ def detectStarsAndMeteorsDirectory(dir_path, config):
     # Initialize the detector
     detector = QueuedPool(detectStarsAndMeteors, cores=-1, log=log, backup_dir=ff_dir)
 
-    # Give detector jobs
-    for ff_name in ff_list:
-        print('Adding for detection:', ff_name)
-        detector.addJob([ff_dir, ff_name, config, flat_struct, dark, mask], wait_time=0)
-
-
     # Start the detection
     detector.startPool()
+
+    # Give detector jobs
+    for ff_name in ff_list:
+
+        while True:
+            
+            # Add a job as long as there are available workers to receive it
+            if (detector.cores - detector.active_workers) > 0:
+                print('Adding for detection:', ff_name)
+                detector.addJob([ff_dir, ff_name, config, flat_struct, dark, mask], wait_time=0)
+                break
+            else:
+                time.sleep(0.1)
+
 
 
     log.info('Waiting for the detection to finish...')
