@@ -118,6 +118,7 @@ class QueuedPool(object):
         self.total_jobs = SafeValue()
         self.results_counter = SafeValue()
         self.active_workers = SafeValue()
+        self.available_workers = SafeValue(self.cores)
         self.kill_workers = multiprocessing.Event()
 
 
@@ -236,6 +237,8 @@ class QueuedPool(object):
             if args is None:
                 break
 
+            self.available_workers.decrement()
+
             # First do a lookup in the dictionary if this set of inputs have already been processed
             read_from_backup = False
             args_tpl = listToTupleRecursive(args)
@@ -273,7 +276,7 @@ class QueuedPool(object):
             # Save the results to an output queue
             self.output_queue.put(result)
             self.results_counter.increment()
-
+            self.available_workers.increment()
             time.sleep(0.1)
 
             # Back up the result to disk, if it was not already in the backup
