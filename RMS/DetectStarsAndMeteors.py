@@ -66,6 +66,11 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=
         detection=True)
 
 
+    # Load mask, dark, flat
+    mask, dark, flat_struct = loadImageCalibration(ff_directory, config, dtype=img_handle.ff.dtype, \
+        byteswap=img_handle.byteswap)
+
+
     # Run star extraction
     star_list = extractStars(ff_directory, ff_name, config, flat_struct=flat_struct, dark=dark, mask=mask)
 
@@ -200,14 +205,6 @@ def detectStarsAndMeteorsDirectory(dir_path, config):
     ff_list = [ff_name for ff_name in sorted(os.listdir(ff_dir)) if validFFName(ff_name)]
 
 
-    # Construct an image handle for a directory of FF files
-    img_handle = detectInputType(dir_path, config, detection=True)
-
-    # Load mask, dark, flat
-    mask, dark, flat_struct = loadImageCalibration(dir_path, config, dtype=img_handle.ff.dtype, \
-        byteswap=img_handle.byteswap)
-
-
     # Check if there are any file in the directory
     if not len(ff_list):
 
@@ -231,8 +228,7 @@ def detectStarsAndMeteorsDirectory(dir_path, config):
             # Add a job as long as there are available workers to receive it
             if detector.available_workers.value() > 0:
                 print('Adding for detection:', ff_name)
-                detector.addJob([ff_dir, ff_name, config, flat_struct, dark, mask], wait_time=0)
-                time.sleep(0.1)
+                detector.addJob([ff_dir, ff_name, config], wait_time=0)
                 break
             else:
                 time.sleep(0.1)
