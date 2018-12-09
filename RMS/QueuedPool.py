@@ -118,7 +118,7 @@ class QueuedPool(object):
         self.total_jobs = SafeValue()
         self.results_counter = SafeValue()
         self.active_workers = SafeValue()
-        self.available_workers = SafeValue(self.cores)
+        self.available_workers = SafeValue(self.cores.value())
         self.kill_workers = multiprocessing.Event()
 
 
