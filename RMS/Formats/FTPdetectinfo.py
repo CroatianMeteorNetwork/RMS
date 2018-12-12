@@ -111,6 +111,10 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
 
                     frame, x, y, ra, dec, azim, elev, level, mag = line
 
+                    # If the magnitude is NaN, skip this centroid
+                    if np.isnan(mag):
+                        continue
+
                     detection_line_str = "{:06.4f} {:07.2f} {:07.2f} {:08.4f} {:+08.4f} {:08.4f} {:+08.4f} {:06d} {:.2f}"
 
                     ftpdetect_file.write(detection_line_str.format(round(frame, 4), round(x, 2), \
@@ -194,6 +198,9 @@ def readFTPdetectinfo(ff_directory, file_name):
             # Read meteor measurements
             if entry_counter > 3:
                 
+                # Fix occurances when nan was written for magnitude
+                line = line.replace('000nan', '000000')
+
                 mag = np.nan
 
                 # Read magnitude if it is in the file
@@ -202,7 +209,6 @@ def readFTPdetectinfo(ff_directory, file_name):
                     line_sp = line.split()
 
                     mag = float(line_sp[8])
-
 
                 # Read meteor frame-by-frame measurements
                 frame_n, x, y, ra, dec, azim, elev, inten = list(map(float, line.split()[:8]))

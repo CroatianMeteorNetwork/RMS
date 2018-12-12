@@ -464,6 +464,13 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, lat, lon, Ho, X_res
     # Calculate magnitudes
     magnitude_data = calculateMagnitudes(level_data, mag_0, mag_lev)
 
+    # Remove all occurances of nans in magnitudes
+    non_nan_indices = ~np.isnan(magnitude_data)
+    JD_data = JD_data[non_nan_indices]
+    RA_data = RA_data[non_nan_indices]
+    dec_data = dec_data[non_nan_indices]
+    magnitude_data = magnitude_data[non_nan_indices]
+
 
     # CURRENTLY DISABLED!
     # Compute the apparent magnitudes corrected to relative atmospheric extinction
