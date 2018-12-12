@@ -73,7 +73,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
     for jd in star_dict:
 
         # Estimate RA,dec of the centre of the FOV
-        _, RA_c, dec_c, _ = XY2CorrectedRADecPP([jd2Date(jd)], [platepar.X_res/2], [platepar.Y_res/2], [0], 
+        _, RA_c, dec_c, _ = XY2CorrectedRADecPP([jd2Date(jd)], [platepar.X_res/2], [platepar.Y_res/2], [1], 
             platepar)
 
         RA_c = RA_c[0]

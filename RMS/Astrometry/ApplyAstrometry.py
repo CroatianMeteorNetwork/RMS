@@ -464,12 +464,12 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, lat, lon, Ho, X_res
     # Calculate magnitudes
     magnitude_data = calculateMagnitudes(level_data, mag_0, mag_lev)
 
-    # Remove all occurances of nans and infs in magnitudes
-    good_mag_indices = ~np.isnan(magnitude_data) & ~np.isinf(magnitude_data)
-    JD_data = JD_data[good_mag_indices]
-    RA_data = RA_data[good_mag_indices]
-    dec_data = dec_data[good_mag_indices]
-    magnitude_data = magnitude_data[good_mag_indices]
+    # # Remove all occurances of nans and infs in magnitudes
+    # good_mag_indices = ~np.isnan(magnitude_data) & ~np.isinf(magnitude_data)
+    # JD_data = JD_data[good_mag_indices]
+    # RA_data = RA_data[good_mag_indices]
+    # dec_data = dec_data[good_mag_indices]
+    # magnitude_data = magnitude_data[good_mag_indices]
 
 
     # CURRENTLY DISABLED!
@@ -848,7 +848,7 @@ if __name__ == "__main__":
 
     # print('Star X, Y:', star_x, star_y)
 
-    # jd, ra, dec, mag = XY2CorrectedRADecPP(np.array([time]), np.array([star_x]), np.array([star_y]), np.array([0]), platepar)
+    # jd, ra, dec, mag = XY2CorrectedRADecPP(np.array([time]), np.array([star_x]), np.array([star_y]), np.array([1]), platepar)
 
 
     # ra_h = int(ra/15)
