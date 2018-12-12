@@ -381,7 +381,7 @@ if __name__ == "__main__":
 
 
     # Initialize the logger
-    initLogging()
+    initLogging(config)
 
     # Get the logger handle
     log = logging.getLogger("logger")

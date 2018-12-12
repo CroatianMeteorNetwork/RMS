@@ -16,14 +16,16 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-
+import os
 import sys
 import logging
 import logging.handlers
 import datetime
 
+from RMS.Misc import mkdirP
 
-def initLogging(log_file_prefix=""):
+
+def initLogging(config, log_file_prefix=""):
     """ Initializes the logger. 
     
     Arguments:
@@ -31,6 +33,14 @@ def initLogging(log_file_prefix=""):
 
     """
 
+    # Path to the directory with log files
+    log_path = os.path.join(config.data_dir, config.log_dir)
+
+    # Make directories
+    mkdirP(config.data_dir)
+    mkdirP(log_path)
+
+    # Generate a file name for the log file
     log_file_name = log_file_prefix + "log_" + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + ".log"
         
     # Init logging
@@ -39,7 +49,8 @@ def initLogging(log_file_prefix=""):
     log.setLevel(logging.DEBUG)
 
     # Make a new log file each day
-    handler = logging.handlers.TimedRotatingFileHandler(log_file_name, when='D', interval=1) 
+    handler = logging.handlers.TimedRotatingFileHandler(os.path.join(log_path, log_file_name), when='D', \
+        interval=1) 
     handler.setLevel(logging.INFO)
     handler.setLevel(logging.DEBUG)
 

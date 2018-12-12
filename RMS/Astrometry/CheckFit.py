@@ -9,6 +9,7 @@ import sys
 import copy
 import shutil
 import random
+import argparse
 
 import numpy as np
 import scipy.optimize
@@ -619,13 +620,23 @@ def autoCheckFit(config, platepar, calstars_list):
 if __name__ == "__main__":
 
 
-    if len(sys.argv) < 2:
-        print('Usage: python -m RMS.Astrometry.CheckFit /path/to/FF/dir/')
-        sys.exit()
+    ### COMMAND LINE ARGUMENTS
 
-    # Night directory
-    dir_path = sys.argv[1].replace('"', '')
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Check if the calibration file matches the stars, and improve it.")
 
+    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
+        help='Path to the folder with FF or image files. This folder also has to contain the platepar file.')
+
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+    dir_path = cml_args.dir_path[0]
 
     # Check if the given directory is OK
     if not os.path.exists(dir_path):
@@ -633,8 +644,18 @@ if __name__ == "__main__":
         sys.exit()
 
 
-    # Load the configuration file
-    conf = cr.parse(".config")
+    if cml_args.config is not None:
+
+        config_file = os.path.abspath(cml_args.config[0].replace('"', ''))
+
+        print('Loading config file:', config_file)
+
+        # Load the given config file
+        config = cr.parse(config_file)
+
+    else:
+        # Load the default configuration file
+        config = cr.parse(".config")
 
 
     # Get a list of files in the night folder
@@ -643,14 +664,14 @@ if __name__ == "__main__":
 
 
     # Find and load the platepar file
-    if conf.platepar_name in file_list:
+    if config.platepar_name in file_list:
 
         # Load the platepar
         platepar = Platepar.Platepar()
-        platepar.read(os.path.join(dir_path, conf.platepar_name))
+        platepar.read(os.path.join(dir_path, config.platepar_name))
 
     else:
-        print('Cannot find the platepar file in the night directory: ', conf.platepar_name)
+        print('Cannot find the platepar file in the night directory: ', config.platepar_name)
         sys.exit()
 
 
@@ -673,7 +694,7 @@ if __name__ == "__main__":
 
 
     # Run the automatic astrometry fit
-    pp, fit_status = autoCheckFit(conf, platepar, calstars_list)
+    pp, fit_status = autoCheckFit(config, platepar, calstars_list)
 
     # If the fit suceeded, save the platepar
     if fit_status:
@@ -681,8 +702,8 @@ if __name__ == "__main__":
         print('ACF sucessful!')
 
         # Save the old platepar
-        shutil.move(os.path.join(dir_path, conf.platepar_name), os.path.join(dir_path, 
-            conf.platepar_name + '.old'))
+        shutil.move(os.path.join(dir_path, config.platepar_name), os.path.join(dir_path, 
+            config.platepar_name + '.old'))
 
         # Save the new platepar
-        pp.write(os.path.join(dir_path, conf.platepar_name))
+        pp.write(os.path.join(dir_path, config.platepar_name))

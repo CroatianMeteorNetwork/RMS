@@ -17,8 +17,10 @@ def writeEv(dir_path, file_name, ev_array, platepar):
     with open(os.path.join(dir_path, file_name), 'w') as f:
 
 
-        frame_array, jd_array, intensity_array, x_array, y_array, azim_array, alt_array, \
+        frame_array, seq_array, jd_array, intensity_array, x_array, y_array, azim_array, alt_array, \
             mag_array = ev_array.T
+
+        seq_array = seq_array.astype(np.uint32)
 
         # Get the Julian date of the peak
         jd_peak = jd_array[mag_array.argmin()]
@@ -63,7 +65,7 @@ def writeEv(dir_path, file_name, ev_array, platepar):
         # Go through all centroids and write them to file
         for i, entry in enumerate(ev_array):
 
-            frame, jd, intensity, x, y, azim, alt, mag = entry
+            frame, seq_num, jd, intensity, x, y, azim, alt, mag = entry
 
             # Compute the relative time in seconds
             t_rel = (jd - jd_peak)*86400
@@ -72,5 +74,5 @@ def writeEv(dir_path, file_name, ev_array, platepar):
             theta = 90 - alt
             phi = (90 - azim)%360
 
-            f.write("{:5d} {:7.3f} {:10d} {:7d} {:8.3f} {:8.3f} {:7.3f} {:8.3f} {:7.3f} {:6.2f}  0000   0.0    0.0\n".format(31 + i, \
-                t_rel, int(intensity), int(frame), x, y, theta, phi, -2.5*np.log10(intensity), mag))
+            f.write("{:5d} {:7.3f} {:10d} {:7d} {:8.3f} {:8.3f} {:7.3f} {:8.3f} {:7.3f} {:6.2f}  0000   0.0    0.0\n".format(int(31 + int(seq_num) - seq_array[0]), \
+                t_rel, int(intensity), int(seq_num), x, y, theta, phi, -2.5*np.log10(intensity), mag))

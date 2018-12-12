@@ -263,16 +263,6 @@ if __name__ == "__main__":
     time_start = datetime.datetime.utcnow()
 
 
-    ### Init the logger
-
-    from RMS.Logger import initLogging
-    initLogging('detection_')
-
-    log = logging.getLogger("logger")
-
-    ######
-
-
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
@@ -301,6 +291,16 @@ if __name__ == "__main__":
     else:
         # Load the default configuration file
         config = cr.parse(".config")
+
+
+    ### Init the logger
+
+    from RMS.Logger import initLogging
+    initLogging(config, 'detection_')
+
+    log = logging.getLogger("logger")
+
+    ######
 
 
     # Run detection on the folder

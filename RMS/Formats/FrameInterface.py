@@ -513,6 +513,17 @@ class InputTypeFF(object):
         return frame
 
 
+    def getSequenceNumber(self):
+        """ Returns the frame sequence number for the current frame. For FF file this is just the frame
+            number.
+
+        Return:
+            [int] Frame sequence number.
+        """
+
+        return self.current_frame
+
+
     def currentFrameTime(self, frame_no=None, dt_obj=False):
         """ Return the time of the frame. """
 
@@ -805,6 +816,17 @@ class InputTypeVideo(object):
                 self.config.detection_binning_method)
 
         return frame
+
+
+    def getSequenceNumber(self):
+        """ Returns the frame sequence number for the current frame. For video files this is just the frame
+            number.
+
+        Return:
+            [int] Frame sequence number.
+        """
+
+        return self.current_frame
 
 
     def currentFrameTime(self, frame_no=None, dt_obj=False):
@@ -1109,6 +1131,16 @@ class InputTypeUWOVid(object):
 
         return frame
 
+
+    def getSequenceNumber(self):
+        """ Returns the frame sequence number for the current frame. For vid files this is the frame number
+            since the beginning of the recording.
+
+        Return:
+            [int] Frame sequence number.
+        """
+
+        return self.vid.seq
 
 
     def currentFrameTime(self, frame_no=None, dt_obj=False):
@@ -1495,6 +1527,15 @@ class InputTypeImages(object):
         return frame
 
 
+    def getSequenceNumber(self):
+        """ Returns the frame sequence number for the current frame. For a stream of images this is just the 
+            image index.
+
+        Return:
+            [int] Frame sequence number.
+        """
+
+        return self.current_frame
 
 
     def name(self, beginning=False):

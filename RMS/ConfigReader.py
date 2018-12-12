@@ -86,6 +86,7 @@ class Config:
         self.mask_file = "mask.bmp"
 
         self.data_dir = "~/RMS_data"
+        self.log_dir = "logs"
         self.captured_dir = "CapturedFiles"
         self.archived_dir = "ArchivedFiles"
 
@@ -344,6 +345,9 @@ def parseCapture(config, parser):
             
             config.data_dir = os.path.join(os.path.expanduser('~'), config.data_dir)
     
+
+    if parser.has_option(section, "log_dir"):
+        config.log_dir = parser.get(section, "log_dir")
 
     if parser.has_option(section, "captured_dir"):
         config.captured_dir = parser.get(section, "captured_dir")

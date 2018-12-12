@@ -580,7 +580,7 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
 
 
 
-    def _connectBrokenChains(centroids, max_distance, last_count=0):
+    def _connectBrokenChains(chains, max_distance, last_count=0):
         """ Connect broken chains of centroids.
         """
 
@@ -593,8 +593,8 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
                 continue
 
             # Get last point of first chain
-            x1 = chain1[-1][1]
-            y1 = chain1[-1][2]
+            x1 = chain1[-1][2]
+            y1 = chain1[-1][3]
 
             found_pair = False
             for j, chain2 in enumerate(chains[i+1:]):
@@ -607,8 +607,8 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
                     continue
 
                 # Get first point of the second chain
-                x2 = chain2[0][1]
-                y2 = chain2[0][2]
+                x2 = chain2[0][2]
+                y2 = chain2[0][3]
 
                 # Check if chains connect
                 if _pointDistance(x1, y1, x2, y2) <= max_distance:
@@ -628,7 +628,7 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
 
         # Iteratively connect chains until all chains are connected
         if len(filtered_chains) != last_count:
-            filtered_chains = _connectBrokenChains(centroids, max_distance, len(filtered_chains))
+            filtered_chains = _connectBrokenChains(chains, max_distance, len(filtered_chains))
 
         return filtered_chains
 
@@ -642,8 +642,8 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
 
     # Separate by individual columns of the centroid array
     frame_array = centroids_array[:,0]
-    x_array = centroids_array[:,1]
-    y_array = centroids_array[:,2]
+    x_array = centroids_array[:,2]
+    y_array = centroids_array[:,3]
 
     # LSQ fit by both axes
     try:
@@ -675,12 +675,12 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
             chains.append([filtered_centroids[i]])
 
         # Current point position
-        x1 = filtered_centroids[i][1]
-        y1 = filtered_centroids[i][2]
+        x1 = filtered_centroids[i][2]
+        y1 = filtered_centroids[i][3]
 
         # Next point position
-        x2 = filtered_centroids[i+1][1]
-        y2 = filtered_centroids[i+1][2]
+        x2 = filtered_centroids[i+1][2]
+        y2 = filtered_centroids[i+1][3]
 
         # Check if the current and the next point are sufficiently close
         if _pointDistance(x1, y1, x2, y2) <= max_distance:
@@ -692,7 +692,7 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
             
 
     # Connect broken chains
-    filtered_chains = _connectBrokenChains(centroids, max_distance)
+    filtered_chains = _connectBrokenChains(chains, max_distance)
 
 
     # Choose the chain with the greatest length
@@ -774,8 +774,8 @@ def checkAngularVelocity(centroids, config):
     first_centroid = centroids[0]
     last_centroid = centroids[-1]
     
-    frame1, x1, y1, _ = first_centroid
-    frame2, x2, y2, _ = last_centroid
+    frame1, _, x1, y1, _ = first_centroid
+    frame2, _, x2, y2, _ = last_centroid
 
     ang_vel = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)/float(frame2 - frame1 + 1)
 
@@ -992,7 +992,7 @@ def thresholdAndCorrectGammaFF(img_handle, config, mask):
 
 
 
-def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, debug=False):
+def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, asgard=False, debug=False):
     """ Detect meteors on the given image. Here are the steps in the detection:
             - input image (FF bin format file) is thresholded (converted to black and white)
             - several morphological operations are applied to clean the image
@@ -1012,6 +1012,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, de
         flat_struct: [Flat struct] Structure containing the flat field. None by default.
         dark: [ndarray] Dark frame. None by default.
         mask: [ndarray] Mask image. None by default.
+        asgard: [bool] If True, the vid file sequence number will be added in with the frame. False by 
+            default, in which case only the frame number will be in the centroids.
         debug: [bool] If True, graphs for testing the detection settings will be shown. False by default.
     
     Return:
@@ -1349,6 +1351,9 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, de
                         img_handle.setFrame(int(frame_no))
                         fr_img = img_handle.loadFrame()
 
+                        # Get the frame sequence number (frame number since the beginning of the recording)
+                        seq_num = img_handle.getSequenceNumber()
+
                         # Apply dark frame
                         if dark is not None:
                             fr_img = Image.applyDark(fr_img, dark)
@@ -1368,6 +1373,11 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, de
 
                         # Subtract average
                         max_avg_corrected = Image.applyDark(fr_img, img_handle.ff.avepixel)
+
+                    else:
+
+                        # If the FF file is used, set the sequence number to the current frame number
+                        seq_num = i
 
 
                     # Calculate intensity as the sum of threshold passer pixels on the stripe
@@ -1390,7 +1400,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, de
                         x_centroid, y_centroid, intensity))
 
                     # Add computed centroid to the centroid list
-                    centroids.append([frame_no, x_centroid, y_centroid, intensity])
+                    centroids.append([frame_no, seq_num, x_centroid, y_centroid, intensity])
 
 
             # Filter centroids
@@ -1408,8 +1418,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, de
             # Check that the detection has a surface brightness above the background
             # The assumption here is that the peak of the meteor should have the intensity which is at least
             # that of a patch of 4x4 pixels that are of the mean background brightness
-            if np.max(centroids[:, 3]) < min_patch_intensity:
-                logDebug('Rejected due to too low max patch intensity:', np.max(centroids[:, 3]), ' < ', \
+            if np.max(centroids[:, 4]) < min_patch_intensity:
+                logDebug('Rejected due to too low max patch intensity:', np.max(centroids[:, 4]), ' < ', \
                     min_patch_intensity)
                 continue
 
@@ -1419,6 +1429,12 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, de
             if not ang_vel_status:
                 logDebug('Rejected due to the angular velocity: {:.2f} deg/s'.format(ang_vel))
                 continue
+
+
+            # If the FTPdetectinfo format is requested, exclude the sequence number column from centroids
+            if not asgard:
+                print('EXCLUDING...............')
+                centroids = np.delete(centroids, 1, axis=1)
 
 
             # Append the result to the meteor detections
@@ -1557,7 +1573,7 @@ if __name__ == "__main__":
     ### Init the logger
 
     from RMS.Logger import initLogging
-    initLogging('detection_')
+    initLogging(config, 'detection_')
 
     log = logging.getLogger("logger")
 
@@ -1636,7 +1652,9 @@ if __name__ == "__main__":
     # Open a file for results
     results_path = out_dir
     results_name = config.stationID + "_" + img_handle_main.beginning_datetime.strftime("%Y%m%d_%H%M%S_%f")
-    results_file = open(os.path.join(results_path, results_name + '_results.txt'), 'w')
+
+    if cml_args.debug:
+        results_file = open(os.path.join(results_path, results_name + '_results.txt'), 'w')
 
     total_meteors = 0
 
@@ -1648,7 +1666,7 @@ if __name__ == "__main__":
 
         # Run the meteor detection algorithm
         meteor_detections = detectMeteors(img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask, \
-            debug=cml_args.debug)
+            debug=cml_args.debug, asgard=cml_args.asgard)
 
         # Supress numpy scientific notation printing
         np.set_printoptions(suppress=True)
@@ -1660,10 +1678,11 @@ if __name__ == "__main__":
 
             first_pick_time = img_handle.currentFrameTime(frame_no=int(centroids[0][0]), dt_obj=True)
 
-            # Print detection to file
-            results_file.write('-------------------------------------------------------\n')
-            results_file.write(str(first_pick_time) + '\n')
-            results_file.write(str(rho) + ',' + str(theta) + '\n')
+            if cml_args.debug:
+                # Print detection to file
+                results_file.write('-------------------------------------------------------\n')
+                results_file.write(str(first_pick_time) + '\n')
+                results_file.write(str(rho) + ',' + str(theta) + '\n')
 
             # Write the time in results file instead of the frame
             res_centroids = centroids.tolist()
@@ -1671,7 +1690,9 @@ if __name__ == "__main__":
                 entry[0] = (img_handle.currentFrameTime(frame_no=int(entry[0]), \
                     dt_obj=True) - first_pick_time).total_seconds()
 
-            results_file.write(str(np.array(res_centroids)) + '\n')
+            print(res_centroids)
+            if cml_args.debug:
+                results_file.write(str(np.array(res_centroids)) + '\n')
 
             # Append to the results list
             results_list.append([img_handle.name(beginning=True), meteor_No, rho, theta, centroids])
@@ -1695,7 +1716,7 @@ if __name__ == "__main__":
 
 
                 # Extract centroid columns
-                frame_array, x_array, y_array, intensity_array = centroids.T
+                frame_array, seq_array, x_array, y_array, intensity_array = centroids.T
 
 
                 # Compute frame time for every centroid
@@ -1726,8 +1747,8 @@ if __name__ == "__main__":
                 ###
 
                 # Construct an input array for ASGARD event file function
-                ev_array = np.array([frame_array, jd_array, intensity_array, x_array, y_array, azim_array, \
-                    alt_array, mag_array]).T
+                ev_array = np.array([frame_array, seq_array, jd_array, intensity_array, x_array, y_array, \
+                    azim_array, alt_array, mag_array]).T
 
 
                 ### Construct the file name for the event file
@@ -1759,8 +1780,8 @@ if __name__ == "__main__":
                 writeEv(results_path, file_name, ev_array, platepar)
 
 
-
-    results_file.close()
+    if cml_args.debug:
+        results_file.close()
 
 
     # Write output as CAMS FTPdetectinfo files

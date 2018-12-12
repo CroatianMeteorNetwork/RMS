@@ -380,6 +380,9 @@ if __name__ == "__main__":
 
             self.upload_queue_file = 'FILES_TO_UPLOAD.inf'
 
+            self.data_dir = os.path.join(os.path.expanduser('~'), 'RMS_data')
+            self.log_dir = 'logs'
+
 
     config = FakeConf()
 
@@ -389,7 +392,7 @@ if __name__ == "__main__":
     #uploadSFTP(config.hostname, config.stationID, dir_local, dir_remote, file_list, rsa_private_key=config.rsa_private_key)
 
     # Init the logger
-    initLogging()
+    initLogging(config)
 
     up = UploadManager(config)
     up.start()

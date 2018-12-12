@@ -243,7 +243,7 @@ if __name__ == "__main__":
     ### Init the logger
 
     from RMS.Logger import initLogging
-    initLogging('reprocess_')
+    initLogging(config, 'reprocess_')
 
     log = logging.getLogger("logger")
 
