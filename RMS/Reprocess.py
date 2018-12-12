@@ -17,6 +17,7 @@ import RMS.ConfigReader as cr
 from RMS.DownloadPlatepar import downloadNewPlatepar
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteorsDirectory, saveDetections
 from RMS.Formats.CAL import writeCAL
+from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats import CALSTARS
 from RMS.UploadManager import UploadManager
@@ -89,8 +90,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         if detection_results is None:
 
             # Run detection on the given directory
-            calstars_name, ftpdetectinfo_name, ff_detected, detector = detectStarsAndMeteorsDirectory(night_data_dir, \
-                config)
+            calstars_name, ftpdetectinfo_name, ff_detected, \
+                detector = detectStarsAndMeteorsDirectory(night_data_dir, config)
 
         # Otherwise, save detection results
         else:
@@ -174,7 +175,17 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     # Make a CAL file if full CAMS compatibility is desired
     if config.cams_code > 0:
-        writeCAL(night_data_dir, config, platepar)
+
+        # Write the CAL file to disk
+        cal_file_name = writeCAL(night_data_dir, config, platepar)
+
+        # Load the FTPdetectinfo
+        cam_code, fps, meteor_list = readFTPdetectinfo(night_data_dir, ftpdetectinfo_name, ret_input_format=True)
+
+        # Write the CAL file in FTPdetectinfo
+        writeFTPdetectinfo(meteor_list, night_data_dir, ftpdetectinfo_name, night_data_dir, \
+            cam_code, fps, calibration=cal_file_name, celestial_coords_given=(platepar is not None))
+        
 
 
     ### Add extra files to archive
