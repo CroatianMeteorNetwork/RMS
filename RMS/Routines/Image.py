@@ -49,7 +49,7 @@ def binImage(img, bin_factor, method='avg'):
 
 
 
-def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None):
+def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_bright=True):
     """ Threshold the image with given parameters.
     
     Arguments:
@@ -64,6 +64,8 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None):
     Keyword arguments:
         ff: [bool] If true, it indicated that the FF file is being thresholded.
         mask: [ndarray] Mask image. None by default.
+        mask_ave_bright: [bool] Mask out regions that are 5 sigma brighter in avepixel than the mean.
+            This gets rid of very bright stars, saturating regions, static bright parts, etc.
     
     Return:
         [ndarray] thresholded 2D image
@@ -79,6 +81,17 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None):
 
     # Compute the thresholded image
     img_thresh = img_avg_sub > (k1 * stdpixel + j1)
+
+
+    # Mask out regions that are very bright in avepixel
+    if mask_ave_bright:
+
+        # Compute the average saturation mask and mask out everything that's saturating in avepixel
+        ave_saturation_mask = avepixel >= np.min([np.mean(avepixel) + 5*np.std(avepixel), \
+            np.iinfo(avepixel.dtype).max])
+
+        img_thresh = img_thresh & ~ave_saturation_mask
+
 
     # If the mask was given, set all areas of the thresholded image convered by the mask to false
     if mask is not None:
