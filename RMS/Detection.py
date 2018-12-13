@@ -1172,6 +1172,10 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 # Add the line to the results list
                 filtered_lines.append(detected_line)
 
+            else:
+                logDebug('No temporal propagation found!')
+                
+
         # Merge similar lines in 3D
         filtered_lines = merge3DLines(filtered_lines, config.vect_angle_thresh)
 
