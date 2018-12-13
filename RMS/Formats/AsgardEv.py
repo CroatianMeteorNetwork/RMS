@@ -25,8 +25,8 @@ def writeEv(dir_path, file_name, ev_array, platepar):
         # Get the Julian date of the peak
         jd_peak = jd_array[mag_array.argmin()]
 
-        # Get the frame of the peak
-        frame_peak = int(frame_array[mag_array.argmin()])
+        # Get the sequence number of the peak
+        seq_peak = int(seq_array[mag_array.argmin()])
 
 
         # Extract the site number and stream
@@ -47,7 +47,7 @@ def writeEv(dir_path, file_name, ev_array, platepar):
         f.write("#      time : {:s} UTC\n".format(jd2Date(jd_peak, dt_obj=True).strftime('%Y%m%d %H:%M:%S.%f')[:-3]))
         f.write("#      unix : {:.6f}\n".format(jd2UnixTime(jd_peak)))
         f.write("#       ntp : LOCK 0 0 0\n")
-        f.write("#       seq : {:d}\n".format(frame_peak))
+        f.write("#       seq : {:d}\n".format(seq_peak))
         f.write("#       mul : 0 [A]\n")
         f.write("#      site : {:s}\n".format(site))
         f.write("#    latlon : {:.4f} {:.4f} {:.1f}\n".format(platepar.lat, platepar.lon, platepar.elev))

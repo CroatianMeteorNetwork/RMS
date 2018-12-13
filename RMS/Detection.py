@@ -1072,7 +1072,6 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         logDebug('Time for finding lines:', time() - t1)
 
         logDebug('Number of KHT lines: ', len(line_list))
-        logDebug(line_list)
 
         # # Plot lines
         # plotLines(img_handle.ff, line_list)
@@ -1086,8 +1085,9 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
             rho, theta, frame_min, frame_max = line
 
-            logDebug('rho, theta, frame_min, frame_max')
-            logDebug(rho, theta, frame_min, frame_max)
+            logDebug('\n--------------------------------')
+            logDebug('    rho,  theta, frame_min, frame_max')
+            logDebug("{:7.2f}, {:6.2f}, {:9d}, {:9d}".format(rho, theta, frame_min, frame_max))
 
 
             # If FF files are not used as input, reconstruct it
@@ -1148,7 +1148,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             # Find a single line in the point cloud
             detected_line = find3DLines(stripe_points, time(), config, fireball_detection=False)
 
-            logDebug('time for GROUPING: ', time() - t1)
+            logDebug('time for GROUPING: {:.3f}'.format(time() - t1))
 
             # Extract the first and only line if any
             if detected_line:
@@ -1174,13 +1174,13 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
             else:
                 logDebug('No temporal propagation found!')
-                
+
 
         # Merge similar lines in 3D
         filtered_lines = merge3DLines(filtered_lines, config.vect_angle_thresh)
 
-        logDebug('after filtering:')
-        logDebug(filtered_lines)
+        # logDebug('after filtering:')
+        # logDebug(filtered_lines)
 
 
         # If the input is a single FF file, threshold the image right away and do gamma correction
@@ -1227,8 +1227,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 img_handle.ff.nrows, img_handle.ff.ncols)
 
 
-            logDebug('converted rho, theta')
-            logDebug(rho, theta)
+            # logDebug('converted rho, theta')
+            # logDebug(rho, theta)
 
             # If other input types are given, load the frames and preprocess them
             if img_handle.input_type != 'ff':
@@ -1694,7 +1694,6 @@ if __name__ == "__main__":
                 entry[0] = (img_handle.currentFrameTime(frame_no=int(entry[0]), \
                     dt_obj=True) - first_pick_time).total_seconds()
 
-            print(res_centroids)
             if cml_args.debug:
                 results_file.write(str(np.array(res_centroids)) + '\n')
 
