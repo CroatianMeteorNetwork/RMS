@@ -134,14 +134,20 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
 
 
 
-def readFTPdetectinfo(ff_directory, file_name):
+def readFTPdetectinfo(ff_directory, file_name, ret_input_format=False):
     """ Read the CAMS format FTPdetectinfo file. 
 
     Arguments:
         ff_directory: [str] Directory where the FTPdetectinfo file is.
         file_name: [str] Name of the FTPdetectinfo file.
 
+    Keyword arguments:
+        ret_input_format: [bool] If True, the list that can be written back using writeFTPdetectinfo is 
+            returned. False returnes the expanded list containing everyting that was read from the file (this
+            is the default behavious, thus it's False by default)
 
+    Return:
+        [tuple]: Two options, see ret_input_format.
     """
 
     ff_name = ''
@@ -171,8 +177,8 @@ def readFTPdetectinfo(ff_directory, file_name):
 
                 # Add the read meteor info to the final list
                 if meteor_meas:
-                    meteor_list.append([ff_name, cam_code, meteor_No, n_segments, fps, hnr, mle, binn, px_fm, 
-                        rho, phi, meteor_meas])
+                    meteor_list.append([ff_name, cam_code, meteor_No, n_segments, fps, hnr, mle, binn, \
+                        px_fm, rho, phi, meteor_meas])
 
                 # Reset the line counter to 0
                 entry_counter = 0
@@ -230,7 +236,24 @@ def readFTPdetectinfo(ff_directory, file_name):
                 rho, phi, meteor_meas])
 
 
-        return meteor_list
+        # If the return in the format suitable for the writeFTPdetectinfo function, reformat the output list
+        if ret_input_format:
+
+            output_list = []
+
+            for entry in meteor_list:
+                ff_name, cam_code, meteor_No, n_segments, fps, hnr, mle, binn, px_fm, rho, phi, \
+                    meteor_meas = entry
+
+                # Remove the calibration status from the list of centroids
+                meteor_meas = [line[1:] for line in meteor_meas]
+
+                output_list.append([ff_name, meteor_No, rho, phi, meteor_meas])
+
+            return cam_code, fps, output_list
+
+        else:
+            return meteor_list
 
 
 
