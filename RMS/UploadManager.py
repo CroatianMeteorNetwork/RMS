@@ -182,6 +182,8 @@ class UploadManager(multiprocessing.Process):
         self.file_queue = Queue.Queue()
         self.exit = multiprocessing.Event()
         self.upload_in_progress = multiprocessing.Value(ctypes.c_bool, False)
+        self.last_runtime = None
+        self.last_runtime_lock = multiprocessing.Lock()
 
         # Load the list of files to upload, and have not yet been uploaded
         self.loadQueue()
@@ -215,8 +217,9 @@ class UploadManager(multiprocessing.Process):
         # Write the queue to disk
         self.saveQueue()
 
-        # Upload the data
-        self.uploadData()
+        # Make sure the data gets uploaded right away
+        with self.last_runtime_lock:
+            self.last_runtime = None
 
 
 
@@ -342,16 +345,20 @@ class UploadManager(multiprocessing.Process):
     def run(self):
         """ Try uploading the files every 15 minutes. """
 
-        last_runtime = None
+        with self.last_runtime_lock:
+            self.last_runtime = None
+
         while not self.exit.is_set():
 
-            # Check if the upload should be run
-            if last_runtime is not None:
-                if (datetime.datetime.utcnow() - last_runtime).total_seconds() < 15*60:
-                    time.sleep(5)
-                    continue
+            with self.last_runtime_lock:
+                # Check if the upload should be run
+                if self.last_runtime is not None:
+                    if (datetime.datetime.utcnow() - self.last_runtime).total_seconds() < 15*60:
+                        time.sleep(1)
+                        continue
 
-            last_runtime = datetime.datetime.utcnow()
+            with self.last_runtime_lock:
+                self.last_runtime = datetime.datetime.utcnow()
 
             # Run the upload procedure
             self.uploadData()
