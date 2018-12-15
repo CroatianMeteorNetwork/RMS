@@ -276,6 +276,7 @@ class Compressor(multiprocessing.Process):
 
                 # Add the file to the detector queue
                 self.detector.addJob([self.data_dir, filename, self.config, self.flat_struct])
+                log.info('Added file for detection: {:s}'.format(filename))
 
 
             # Refresh the maxpixel currently shown on the screen
@@ -283,6 +284,7 @@ class Compressor(multiprocessing.Process):
 
                 # Add the image to the image queue
                 self.live_view.updateImage(compressed[0], filename + " maxpixel")
+                log.debug('Updated maxpixel on the screen: {:s}'.format(filename))
 
 
 
