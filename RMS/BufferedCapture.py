@@ -279,6 +279,7 @@ class BufferedCapture(Process):
             t_assignment = 0
             t_convert = 0
 
+            log.info('Grabbing a new block of 256 frames...')
             for i in range(256):
 
                 # Read the frame
@@ -392,6 +393,8 @@ class BufferedCapture(Process):
 
                 else:
                     self.startTime2.value = startTime
+
+                log.info('New block of raw frames available for compression with starting time: {:s}'.format(str(startTime)))
 
             
             # Switch the frame block buffer flags

@@ -233,6 +233,9 @@ class Compressor(multiprocessing.Process):
                 self.startTime2.value = 0
 
             
+
+            log.debug("Compression frame block with start time at: {:s}".format(str(startTime)))
+
             #log.debug("memory copy: " + str(time.time() - t) + "s")
             t = time.time()
             
