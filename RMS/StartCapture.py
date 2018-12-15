@@ -333,7 +333,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # Save detection to disk and archive detection    
-    archive_name, _ = processNight(night_data_dir, config, detection_results=detection_results, nodetect=nodetect)
+    archive_name, _ = processNight(night_data_dir, config, detection_results=detection_results, \
+        nodetect=nodetect)
 
 
     # Put the archive up for upload
@@ -346,6 +347,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Delete detector backup files
     detector.deleteBackupFiles()
 
+
+    # If the capture was run for a limited time, run the upload right away
+    if duration is not None:
+        log.info('Uploading data before exiting...')
+        upload_manager.uploadData()
 
     # If capture was manually stopped, end program
     if STOP_CAPTURE:
