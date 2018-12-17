@@ -2215,7 +2215,7 @@ if __name__ == '__main__':
         help='Path to the folder with FF or image files, or path to a video file. If images or videos are given, their names must be in the format: YYYYMMDD_hhmmss.uuuuuu')
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
-        help="Path to a config file which will be used instead of the default one.")
+        help="Path to a config file which will be used instead of the default one. To load the .config file in the given data directory, write '.' (dot).")
 
     arg_parser.add_argument('-t', '--timebeg', nargs=1, metavar='TIME', type=str, \
         help="The beginning time of the video file in the YYYYMMDD_hhmmss.uuuuuu format.")
@@ -2231,9 +2231,36 @@ if __name__ == '__main__':
 
     #########################
 
+    # Extract the data directory path
+    dir_path = cml_args.dir_path[0].replace('"', '')
+
+
+
     if cml_args.config is not None:
 
-        config_file = os.path.abspath(cml_args.config[0].replace('"', ''))
+        config_file = None
+
+        # If the config should be taken from the data directory, find it and load it. The config will be
+        #   loaded only if there's one file with '.config' in the directory
+        if cml_args.config[0] == '.':
+
+            # Locate all files in the data directory that have '.config' in them
+            config_files = [file_name for file_name in os.listdir(dir_path) if '.config' in file_name]
+
+            # If there is exactly one config file, use it
+            if len(config_files) == 1:
+                config_file = os.path.join(os.path.abspath(dir_path), config_files[0])
+
+            else:
+                print('There are several config files in the given directory, choose one and provide the full path to it:')
+                for cfile in config_files:
+                    print('    {:s}'.format(os.path.join(dir_path, cfile)))
+
+        else:
+            # Load the config file from the full path
+            config_file = os.path.abspath(cml_args.config[0].replace('"', ''))
+
+
 
         print('Loading config file:', config_file)
 
@@ -2254,7 +2281,7 @@ if __name__ == '__main__':
         beginning_time = None
 
     # Init the plate tool instance
-    plate_tool = PlateTool(cml_args.dir_path[0].replace('"', ''), config, beginning_time=beginning_time, 
+    plate_tool = PlateTool(dir_path, config, beginning_time=beginning_time, 
         fps=cml_args.fps, gamma=cml_args.gamma)
 
     plt.tight_layout()
