@@ -217,7 +217,7 @@ class Compressor(multiprocessing.Process):
             if self.startTime1.value != 0:
 
                 # Retrieve time of first frame
-                startTime = self.startTime1.value 
+                startTime = float(self.startTime1.value)
 
                 # Copy frames
                 frames = self.array1 
@@ -226,7 +226,7 @@ class Compressor(multiprocessing.Process):
             else:
 
                 # Retrieve time of first frame
-                startTime = self.startTime2.value 
+                startTime = float(self.startTime2.value)
 
                 # Copy frames
                 frames = self.array2 
