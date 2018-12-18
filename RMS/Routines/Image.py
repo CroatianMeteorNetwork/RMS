@@ -13,6 +13,7 @@ from RMS.Decorators import memoizeSingle
 # Cython init
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+import RMS.Routines.MorphCy as morph
 from RMS.Routines.BinImageCy import binImage as binImageCy
 
 
@@ -89,6 +90,10 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_
         # Compute the average saturation mask and mask out everything that's saturating in avepixel
         ave_saturation_mask = avepixel >= np.min([np.mean(avepixel) + 5*np.std(avepixel), \
             np.iinfo(avepixel.dtype).max])
+
+        # Dilate the mask 2 times
+        input_type = ave_saturation_mask.dtype
+        ave_saturation_mask = morph.morphApply(ave_saturation_mask.astype(np.uint8), [5, 5]).astype(input_type)
 
         img_thresh = img_thresh & ~ave_saturation_mask
 

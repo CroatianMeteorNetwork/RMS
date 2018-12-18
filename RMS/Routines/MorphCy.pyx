@@ -21,6 +21,7 @@ def morphApply(np.ndarray[INT_TYPE_t, ndim=2] img, operations):
     2 - brigde
     3 - close
     4 - thin
+    5 - dilate
 
     """
 
@@ -39,6 +40,9 @@ def morphApply(np.ndarray[INT_TYPE_t, ndim=2] img, operations):
 
         elif (operation == 4):
             img = thin(img)
+
+        elif (operation == 5):
+            img = dilate(img)
 
 
     return img
