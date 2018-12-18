@@ -77,7 +77,7 @@ def resetSIGINT():
 
 
 
-def wait(duration=None):
+def wait(duration, compressor):
     """ The function will wait for the specified time, or it will stop when Enter is pressed. If no time was
         given (in seconds), it will wait until Enter is pressed. 
 
@@ -99,6 +99,11 @@ def wait(duration=None):
 
         # Sleep for a short interval
         time.sleep(0.1)
+
+        # If the compressor has died, start it again
+        if not compressor.is_alive():
+            log.info('The compressor has died, restarting it!')
+            compressor.start()
 
         # If some wait time was given, check if it passed
         if duration is not None:
@@ -234,7 +239,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     
     # Capture until Ctrl+C is pressed
-    wait(duration)
+    wait(duration, compressor)
         
     # If capture was manually stopped, end capture
     if STOP_CAPTURE:
