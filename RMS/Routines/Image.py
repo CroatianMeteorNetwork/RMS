@@ -108,7 +108,7 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_
 
 
 @memoizeSingle
-def thresholdFF(ff, k1, j1, mask=None):
+def thresholdFF(ff, k1, j1, mask=None, mask_ave_bright=False):
     """ Threshold the FF with given parameters.
     
     Arguments:
@@ -120,12 +120,15 @@ def thresholdFF(ff, k1, j1, mask=None):
 
     Keyword arguments:
         mask: [ndarray] Mask image. None by default.
+        mask_ave_bright: [bool] Mask out regions that are 5 sigma brighter in avepixel than the mean.
+            This gets rid of very bright stars, saturating regions, static bright parts, etc.
     
     Return:
         [ndarray] thresholded 2D image
     """
 
-    return thresholdImg(ff.maxpixel, ff.avepixel, ff.stdpixel, k1, j1, ff=True, mask=mask)
+    return thresholdImg(ff.maxpixel, ff.avepixel, ff.stdpixel, k1, j1, ff=True, mask=mask, \
+        mask_ave_bright=mask_ave_bright)
 
 
 
