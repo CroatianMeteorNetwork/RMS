@@ -150,4 +150,4 @@ Congratulations, you have successfully performed the calibration procedure!
 
 If you have done the astrometry on another computer, you need to **copy the plate from the directory you were working in to the RMS source directory.** Astrometric parameters will be recalibrated automatically as long as the initial plate is close enough.
 
-**If you move the camera, the plate will have to be redone!** Fortunately the only paramters that will have to be changed are the reference RA, Dec, and possibly the position angle, while all other parameters shouldn't change.
+**If you move the camera, the plate will have to be redone!** Fortunately the only parameters that will have to be changed are the reference RA, Dec, and possibly the position angle, while all other parameters shouldn't change.
