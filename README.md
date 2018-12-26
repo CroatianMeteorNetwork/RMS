@@ -13,7 +13,7 @@ The software is still in the development phase, but here are the current feature
 1. Automatic upload of calibrated detections to central server
 1. Manual reduction of fireballs/meteors
 
-Please see our website for more info: https://gmn.duckdns.org/
+Please see our website for more info: https://globalmeteornetwork.org/
 We are also selling Plug And Play meteor systems which run this code!
 
 
