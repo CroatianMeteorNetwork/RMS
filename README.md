@@ -134,6 +134,18 @@ sudo apt-get install libopencv-dev python-opencv
 ### Checking video device and initializing proper settings - ANALOG CAMERAS ONLY!
 Once you connect the EasyCap digitizer and the camera, you need to check if the video signal is being properly received.
 
+If you have a NTSC camera (North American standard), run this in the terminal:
+
+```
+mplayer tv:// -tv driver=v4l2:device=/dev/video0:input=0:norm=NTSC -vo x11
+```
+
+If you have a PAL camera (Europe), enter the following:
+
+```
+mplayer tv:// -tv driver=v4l2:device=/dev/video0:input=0:norm=PAL -vo x11
+```
+
 ### Editing the configuration file
 This is a very important step as all settings are read from the configuration file. The file in question is the [.config](.config) file. Once you download this repository, start editing the file with your favorite editor.
 
@@ -168,6 +180,14 @@ python -m RMS.StartCapture -d 1.5
 ```
 
 The data will be saved in /home/pi/RMS_data/YYYYMMDD_hhmmss_uuuuuu, where YYYYMMDD_hhmmss_uuuuuu is the timestamp of the time when the recording was started, which is used as a name for the directory where the data for the night will be stored. 
+
+#### Live Stream
+To test your camera with RMS configuration without a real capture - after certify it your camera is working properly - you can run the Live Stream module.
+Navigate with terminal to base project directory and run:
+
+```
+python -m Utils.ShowLiveStream
+```
 
 #### Viewing FF bin files (compressed video data)
 You can view the recorded data using the [CMN_binViewer](https://github.com/CroatianMeteorNetwork/cmn_binviewer) software. You can either run it off the Pi, or you can install it on Windows (builds are provided).
