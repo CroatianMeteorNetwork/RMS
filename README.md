@@ -181,7 +181,7 @@ python -m RMS.StartCapture -d 1.5
 
 The data will be saved in /home/pi/RMS_data/YYYYMMDD_hhmmss_uuuuuu, where YYYYMMDD_hhmmss_uuuuuu is the timestamp of the time when the recording was started, which is used as a name for the directory where the data for the night will be stored. 
 
-### Live Stream
+#### Live Stream
 To test your camera with RMS configuration without a real capture - after certify it your camera is working properly - you can run the Live Stream module.
 Navigate with terminal to base project directory and run:
 
