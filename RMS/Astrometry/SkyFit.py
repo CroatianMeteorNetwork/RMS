@@ -1390,8 +1390,8 @@ class PlateTool(object):
             # Show text on image with instructions
             text_str  = 'Keys:\n'
             text_str += '-----\n'
-            text_str += 'A/D - RA\n'
-            text_str += 'S/W - Dec\n'
+            text_str += 'A/D - Azimuth\n'
+            text_str += 'S/W - Altitude\n'
             text_str += 'Q/E - Position angle\n'
             text_str += 'Up/Down - Scale\n'
             text_str += '1/2 - X offset\n'

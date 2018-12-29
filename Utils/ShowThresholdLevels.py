@@ -96,6 +96,9 @@ if __name__ == "__main__":
             # Plot the threshold map
             k1map = ax1.imshow(k1_vals, cmap='inferno', vmin=1, vmax=6,  aspect='auto')
 
+            # Plot file name
+            ax1.text(0, 0, "{:s}".format(file_name), color='white', verticalalignment='top')
+
             cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
             if cml_args.fireball:
                 plt.colorbar(k1map, cax=cbar_ax, label='Top plot: k1')
