@@ -481,15 +481,22 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         if debug:
             ### Show maxpixel and thresholded image
 
+            if img_handle.input_type == 'ff':
+                maxpix_img = FFfile.selectFFFrames(img_handle.ff.maxpixel, img_handle.ff, frame_min, frame_max)
+
+            else:
+                maxpix_img = img_handle.ff.maxpixel
+
+
             # Auto levels on maxpixel
             min_lvl = np.percentile(img_handle.ff.maxpixel[2:], 1)
             max_lvl = np.percentile(img_handle.ff.maxpixel[2:], 99.0)
 
             # Adjust levels
-            maxpixel_autolevel = Image.adjustLevels(img_handle.ff.maxpixel, min_lvl, 1.0, max_lvl)
+            maxpixel_autolevel = Image.adjustLevels(maxpix_img, min_lvl, 1.0, max_lvl)
 
             show2(str(frame_min) + "-" + str(frame_max) + " threshold", np.concatenate((maxpixel_autolevel, \
-                img.astype(img_handle.ff.maxpixel.dtype)*(2**(img_handle.ff.maxpixel.itemsize*8) - 1)), axis=1))
+                img.astype(maxpix_img.dtype)*(2**(maxpix_img.itemsize*8) - 1)), axis=1))
 
             ###
 
