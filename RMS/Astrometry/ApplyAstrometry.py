@@ -747,6 +747,7 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
             ra_tmp = RA_data[i]
             dec_tmp = dec_data[i]
 
+            # Alt and az are kept in the J2000 epoch, which is the CAMS standard!
             az_tmp, alt_tmp = raDec2AltAz(jd, platepar.lon, platepar.lat, ra_tmp, dec_tmp)
 
             az_data[i] = az_tmp
