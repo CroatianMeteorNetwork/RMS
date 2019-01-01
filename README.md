@@ -97,6 +97,11 @@ All python libraries will be installed when you run the setup.py script (instruc
 
 ## Setting up
 
+### Installing on Windows
+The RMS code runs on Windows with the exception of meteor detection (I guess the most crucial part). I wasn't able to get the detection to work, but we encourage everybody to try!
+
+Nevertheless, other RMS tools work well under Windows and you can follow [these instructions](Guides/RMS_windows_install.pdf) to install it.
+
 ### Setting the timezone to UTC
 It is always a good idea to set the timezone to UTC when recording any data. This provides a common time reference among observatons, and more than once there have been issues when people were using different time zones. So, use your favorite search engine to find how to change the timezone on your RPi to UTC.
 
