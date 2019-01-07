@@ -104,6 +104,7 @@ def wait(duration, compressor):
         if not compressor.is_alive():
             log.info('The compressor has died, restarting it!')
             try:
+                log.info('Terminating the compressor...')
                 compressor.terminate()
                 time.sleep(5)
                 
