@@ -97,8 +97,15 @@ def wait(duration, compressor_handle):
     
     while True:
 
+        # Wait until the compressor inits
+        if compressor_handle.compressor is None:
+            log.info('The compressor is None, waiting until it inits...')
+            time.sleep(5)
+            continue
+
         # Sleep for a short interval
         time.sleep(0.1)
+
 
         # If the compressor has died, start it again
         if not compressor_handle.compressor.is_alive():
@@ -244,8 +251,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Start buffered capture
     bc.startCapture()
 
-    # Start the compression
+    # Init and start the compression
     compressor = compressor_handle.init_compressor()
+    compressor.start()
 
     
     # Capture until Ctrl+C is pressed
