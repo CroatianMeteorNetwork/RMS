@@ -34,7 +34,7 @@ from RMS.Logger import initLogging
 
 from RMS.BufferedCapture import BufferedCapture
 from RMS.CaptureDuration import captureDuration
-from RMS.Compression import Compressor
+from RMS.Compression import CompressorHandler
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
 from RMS.LiveViewer import LiveViewer
@@ -77,7 +77,7 @@ def resetSIGINT():
 
 
 
-def wait(duration, compressor):
+def wait(duration, compressor_handle):
     """ The function will wait for the specified time, or it will stop when Enter is pressed. If no time was
         given (in seconds), it will wait until Enter is pressed. 
 
@@ -101,14 +101,14 @@ def wait(duration, compressor):
         time.sleep(0.1)
 
         # If the compressor has died, start it again
-        if not compressor.is_alive():
+        if not compressor_handle.compressor.is_alive():
             log.info('The compressor has died, restarting it!')
             try:
                 log.info('Terminating the compressor...')
-                compressor.terminate()
+                compressor_handle.compressor.terminate()
                 time.sleep(5)
                 
-                compressor.start()
+                compressor_handle.init_compressor()
                 log.info('Compressor restarted!')
 
             except Exception as e:
@@ -237,19 +237,19 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     live_view = LiveViewer(window_name='Maxpixel')
     
     # Initialize compression
-    compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config, 
-        detector=detector, live_view=live_view, flat_struct=flat_struct)
+    compressor_handle = CompressorHandler(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, \
+        config, detector=detector, live_view=live_view, flat_struct=flat_struct)
 
     
     # Start buffered capture
     bc.startCapture()
 
     # Start the compression
-    compressor.start()
+    compressor = compressor_handle.init_compressor()
 
     
     # Capture until Ctrl+C is pressed
-    wait(duration, compressor)
+    wait(duration, compressor_handle)
         
     # If capture was manually stopped, end capture
     if STOP_CAPTURE:
