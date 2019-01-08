@@ -42,6 +42,7 @@ We recommend buying the DS3231 RTC module. See under [Guides/rpi3_rtc_setup.md](
 
 #### Camera
 
+What cameras are supported? Basically any cameras that can be read as video devices in Linux and all network IP cameras. Read the sections below for ways how to configure RMS to use different devices.
 
 1. **IP camera**
 Preferably an IMX225 or IMX291 based camera. Contact us for more details!
@@ -92,8 +93,20 @@ Furthermore, you will need the following software and libraries to run the code:
 	- cython (0.25.2 or later)
 	- pyephem (3.7.6.0 or later)
 	- paramiko
+
 	
-All python libraries will be installed when you run the setup.py script (instructions below). If you want use IP cameras, you need to install a special compilation of OpenCV that supports gstreamer. Run the opencv3_install.sh scripts that is provided in this repository to install this.
+All python libraries will be installed when you run the setup.py script (instructions below). If you want use IP cameras, you need to install a special compilation of OpenCV that supports gstreamer. Run the opencv3_install.sh script that is provided in this repository to install this.
+
+Alternatively, if you are using Anaconda Python, you can install all libraries except OpenCV by running:
+
+```
+conda install -y numpy scipy gitpython cython matplotlib
+conda install -y -c conda-forge pyephem Pillow
+conda install -y -c astropy astropy
+```
+
+To install OpenCV, use the ```opencv3_install.sh``` script. This will build OpenCV with gstreamer support.
+
 
 ## Setting up
 
@@ -130,11 +143,14 @@ sudo python setup.py install
 
 This will compile the code in C++ which we are using as one of the processing steps in meteor detection. The method in question is called Kernel-based Hough Transform, and you can read more about it here: [KHT](http://www2.ic.uff.br/~laffernandes/projects/kht/)
 
-This will also install all Python libraries that you might need, except OpenCV. To install OpenCV, open the terminal and run:
+This will also install all Python libraries that you might need, except OpenCV. If you are using a Linux device for video capture, you can install OpenCV this way:
 
 ```
 sudo apt-get install libopencv-dev python-opencv
 ```
+
+If you are using an IP camera, you will need gstreamer support and then use the ```opencv3_install.sh``` script.
+
 
 ### Checking video device and initializing proper settings - ANALOG CAMERAS ONLY!
 Once you connect the EasyCap digitizer and the camera, you need to check if the video signal is being properly received.
@@ -163,7 +179,49 @@ Edit the latitude, longitude and elevation of the location of your camera. This 
 
 
 #### [Capture]
-#### Resolution and FPS
+
+##### Capture cards, video devices
+If you are using an analog camera or some other Linux video device, make sure you can see it as ```/dev/videoX```, where ```X``` is the number of the video device. This will usually be 0. So if you want RMS to use ```/dev/video0``` as the video source, specify the device in the config file as:
+
+```
+device: 0
+```
+
+##### IP cameras
+Althernatively, if you are using IP cameras and use gstreamer for capture, you need to give it the full gstreamer string and the IP camera address (gstreamer should be installed during OpenCV installation with the provided script). Let's say that you're on the RPi, the RTSP protocol is used to read the video and the camera is at 192.168.42.10, then the device setting should look something like this:
+
+```
+device: rtspsrc location=rtsp://192.168.42.10:554/user=admin&password=&channel=1&stream=0.sdp ! rtph264depay ! queue ! h264parse ! omxh264dec ! queue ! videoconvert ! appsink sync=1
+```
+
+This string will make sure that the H.264 encoded video is decoded using the hardware decoding on the Pi (omxh264dec module). 
+
+If you are running on a PC, the string should look something like this:
+
+```
+device: rtspsrc location=rtsp://192.168.42.10:554/user=admin&password=&channel=1&stream=0.sdp ! rtph264depay ! h264parse ! decodebin ! videoconvert ! appsink sync=1
+```
+
+because the omxh264dec module is only available on the Pi. It's possible that some gstreamer libraries will be missing on some PC Linux distributions, you can install them by running:
+
+```
+sudo apt-get install gstreamer1.0-plugins-bad gstreamer1.0-libav
+```
+
+You can also preview the video directly in gstreamer. If you're on the Pi, run something like this:
+
+```
+gst-launch-1.0 rtspsrc location="rtsp://192.168.42.10:554/user=admin&password=&channel=1&stream=0.sdp" ! rtph264depay ! h264parse ! omxh264dec ! autovideosink
+```
+
+and this if you're on a Linux PC:
+
+```
+gst-launch-1.0 rtspsrc location="rtsp://192.168.42.10:554/user=admin&password=&channel=1&stream=0.sdp" ! rtph264depay ! h264parse ! decodebin ! autovideosink
+```
+
+
+##### Resolution and FPS
 To be able to capture the video properly, you need to set up the right resolution and FPS (frames per second). For IP cameras, use the maximum resolution of 1280x720, as the Pi can't really handle 1080p, and such a high resolution produces enormous amounts of data.
 
 
