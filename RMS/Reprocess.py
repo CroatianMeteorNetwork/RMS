@@ -198,6 +198,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             met[1] = cams_code_formatted
 
 
+        print(ftpdetectinfo_name, cam_code, cams_code_formatted)
+
         # Write the CAMS compatible FTPdetectinfo file
         writeFTPdetectinfo(meteor_list, night_data_dir, \
             ftpdetectinfo_name.replace(cam_code, cams_code_formatted),\
