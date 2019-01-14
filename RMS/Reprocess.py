@@ -193,7 +193,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     log.info('Generating a stack of detection...')
 
     # Make a co-added image of all detection. Filter out possible clouds
-    stackFFs(night_data_dir, 'jpg', deinterlace=(config.deinterlace > 0), subavg=True, filter_bright=True)
+    stackFFs(night_data_dir, 'jpg', deinterlace=(config.deinterlace_order > 0), subavg=True, \
+        filter_bright=True)
 
 
     ### Add extra files to archive
