@@ -199,7 +199,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
 
         # Write the CAMS compatible FTPdetectinfo file
-        writeFTPdetectinfo(meteor_list, night_data_dir, ftpdetectinfo_name.replace('.txt', '') + "_CAMS.txt",\
+        writeFTPdetectinfo(meteor_list, night_data_dir, \
+            ftpdetectinfo_name.replace(cam_code, cams_code_formatted),\
             night_data_dir, cams_code_formatted, fps, calibration=cal_file_name, \
             celestial_coords_given=(platepar is not None))
         
