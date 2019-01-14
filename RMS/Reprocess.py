@@ -24,7 +24,6 @@ from RMS.UploadManager import UploadManager
 from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
-from Utils.StackFFs import stackFFs
 
 
 
@@ -188,13 +187,6 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         # Write the CAL file in FTPdetectinfo
         writeFTPdetectinfo(meteor_list, night_data_dir, ftpdetectinfo_name, night_data_dir, \
             cam_code, fps, calibration=cal_file_name, celestial_coords_given=(platepar is not None))
-
-
-    log.info('Generating a stack of detection...')
-
-    # Make a co-added image of all detection. Filter out possible clouds
-    stackFFs(night_data_dir, 'jpg', deinterlace=(config.deinterlace_order > 0), subavg=True, \
-        filter_bright=True)
 
 
     ### Add extra files to archive

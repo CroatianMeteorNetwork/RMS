@@ -15,7 +15,30 @@ from RMS.Routines.Image import deinterlaceBlend, blendLighten, loadFlat, applyFl
 
 
 
-def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_bright=False, flat_path=None):
+def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_bright=False, flat_path=None,
+    file_list=None):
+    """ Stack FF files in the given folder. 
+
+    Arguments:
+        dir_path: [str] Path to the directory with FF files.
+        file_format: [str] Image format for the stack. E.g. jpg, png, bmp
+
+    Keyword arguments:
+        deinterlace: [bool] True if the image shoud be deinterlaced prior to stacking. False by default.
+        subavg: [bool] Whether the average pixel image should be subtracted form the max pixel image. False
+            by default. 
+        filter_bright: [bool] Whether images with bright backgrounds (after average subtraction) should be
+            skipped. False by defualt.
+        flat_path: [str] Path to the flat calibration file. None by default. Will only be used if subavg is
+            False.
+        file_list: [list] A list of file for stacking. False by default, in which case all FF files in the
+            given directory will be used.
+
+    Return:
+        stack_path, merge_img:
+            - stack_path: [str] Path of the save stack.
+            - merge_img: [ndarray] Numpy array of the stacked image.
+    """
 
     # Load the flat if it was given
     flat = None
@@ -44,8 +67,13 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
     total_ff_files = 0
     merge_img = None
 
+    # If the list of files was not given, take all files in the given folder
+    if file_list is None:
+        file_list = sorted(os.listdir(dir_path))
+
+
     # List all FF files in the current dir
-    for ff_name in sorted(os.listdir(dir_path)):
+    for ff_name in file_list:
         if validFFName(ff_name):
 
             # Load FF file
@@ -113,12 +141,12 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
     # If the number of stacked image is less than 20% of the given images, stack without filtering
     if n_stacked < 0.2*total_ff_files:
         return stackFFs(dir_path, file_format, deinterlace=deinterlace, subavg=subavg, 
-            filter_bright=False, flat_path=flat_path)
+            filter_bright=False, flat_path=flat_path, file_list=file_list)
 
     # If no images were stacked, do nothing
     if n_stacked == 0:
         return None, None
-        
+
 
     # Extract the name of the night directory which contains the FF files
     night_dir = os.path.basename(dir_path)
