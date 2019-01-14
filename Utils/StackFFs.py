@@ -42,6 +42,7 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
 
     n_stacked = 0
     total_ff_files = 0
+    merge_img = None
 
     # List all FF files in the current dir
     for ff_name in sorted(os.listdir(dir_path)):
@@ -114,6 +115,10 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
         return stackFFs(dir_path, file_format, deinterlace=deinterlace, subavg=subavg, 
             filter_bright=False, flat_path=flat_path)
 
+    # If no images were stacked, do nothing
+    if n_stacked == 0:
+        return None, None
+        
 
     # Extract the name of the night directory which contains the FF files
     night_dir = os.path.basename(dir_path)
