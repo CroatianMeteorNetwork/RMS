@@ -105,9 +105,9 @@ def applyFieldCorrection(x_poly, y_poly, X_res, Y_res, F_scale, X_data, Y_data):
         y_poly: [ndarray] 1D numpy array of 12 elements containing Y axis polynomial parameters
         X_res: [int] Camera X axis resolution.
         Y_res: [int] Camera Y axis resolution.
-        F_scale: [float] Sum of image scales per each image axis (arcsec per px).
-        X_data: [ndarray] 1D float numpy array containing X component of the detection point.
-        Y_data: [ndarray] 1D float numpy array containing Y component of the detection point.
+        F_scale: [float] Image scale in arcsec per px.
+        X_data: [ndarray] 1D float numpy array containing the image COLUMN of the detection.
+        Y_data: [ndarray] 1D float numpy array containing the image ROW of the detection.
     
     Return:
         (X_corrected, Y_corrected, levels_corrected): [tuple of ndarrays]
@@ -115,10 +115,6 @@ def applyFieldCorrection(x_poly, y_poly, X_res, Y_res, F_scale, X_data, Y_data):
             Y_corrected: 1D numpy array containing distortion corrected Y component.
             
     """
-
-    # # Scale the resolution to CIF
-    # X_scale = X_res/384.0
-    # Y_scale = Y_res/288.0
 
     # Initialize final values containers
     X_corrected = np.zeros_like(X_data, dtype=np.float64)
@@ -131,9 +127,8 @@ def applyFieldCorrection(x_poly, y_poly, X_res, Y_res, F_scale, X_data, Y_data):
     # Go through all given data points
     for Xdet, Ydet in data_matrix:
 
-        # Scale the point coordinates to CIF resolution
-        Xdet = (Xdet - X_res/2.0)#/X_scale
-        Ydet = (Ydet - Y_res/2.0)#/Y_scale
+        Xdet = Xdet - X_res/2.0
+        Ydet = Ydet - Y_res/2.0
 
         dX = (x_poly[0]
             + x_poly[1]*Xdet
@@ -361,7 +356,7 @@ def calculateMagnitudes(level_data, mag_0, mag_lev):
 
 def calculateMagnitudes_old(level_data, ra_beg, ra_end, dec_beg, dec_end, duration, mag_0, mag_lev, 
     w_pix):
-    """ OLD CMN FUNCTION, DO NOT USE, HERE FOR LEGACY!
+    """ OLD CMN FUNCTION, DO NOT USE, HERE FOR LEGACY PURPOSES!
     Calculate the magnitude of the data points with given magnitude calibration parameters. 
 
     @param level_data: [ndarray] levels of the meteor centroid (arbirtary units)
