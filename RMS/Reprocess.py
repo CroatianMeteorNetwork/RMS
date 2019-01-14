@@ -182,7 +182,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         cams_code_formatted = "{:06d}".format(int(config.cams_code))
 
         # Load the FTPdetectinfo
-        cam_code, fps, meteor_list = readFTPdetectinfo(night_data_dir, ftpdetectinfo_name, \
+        _, fps, meteor_list = readFTPdetectinfo(night_data_dir, ftpdetectinfo_name, \
             ret_input_format=True)
 
         # Replace the camera code with the CAMS code
@@ -191,18 +191,16 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             # Replace the station name and the FF file format
             ff_name = met[0]
             ff_name = ff_name.replace('.fits', '.bin')
-            ff_name = ff_name.replace(cam_code, cams_code_formatted)
+            ff_name = ff_name.replace(config.stationID, cams_code_formatted)
             met[0] = ff_name
 
             # Replace the station name
             met[1] = cams_code_formatted
 
 
-        print(ftpdetectinfo_name, cam_code, cams_code_formatted)
-
         # Write the CAMS compatible FTPdetectinfo file
         writeFTPdetectinfo(meteor_list, night_data_dir, \
-            ftpdetectinfo_name.replace(cam_code, cams_code_formatted),\
+            ftpdetectinfo_name.replace(config.stationID, cams_code_formatted),\
             night_data_dir, cams_code_formatted, fps, calibration=cal_file_name, \
             celestial_coords_given=(platepar is not None))
         
