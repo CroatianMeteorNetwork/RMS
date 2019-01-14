@@ -163,8 +163,10 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
     stack_path, _ = stackFFs(captured_path, 'jpg', deinterlace=(config.deinterlace_order > 0), subavg=True, \
         filter_bright=True, file_list=sorted(file_list))
 
-    # Add the stack path to the list of files to put in the archive
-    file_list.append(stack_path)
+    if stack_path is not None:
+        
+        # Add the stack path to the list of files to put in the archive
+        file_list.append(stack_path)
 
 
     if file_list:
