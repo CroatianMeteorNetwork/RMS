@@ -151,7 +151,7 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
     # Extract the name of the night directory which contains the FF files
     night_dir = os.path.basename(dir_path)
 
-    stack_path = os.path.join(dir_path, night_dir + '_stack.' + file_format)
+    stack_path = os.path.join(dir_path, night_dir + '_stack_{:d}_meteors.'.format(n_stacked) + file_format)
 
     print("Saving stack to:", stack_path)
 

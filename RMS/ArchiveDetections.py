@@ -164,9 +164,12 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         filter_bright=True, file_list=sorted(file_list))
 
     if stack_path is not None:
+
+        # Extract the name of the stack image
+        stack_file = os.path.basename(stack_path)
         
         # Add the stack path to the list of files to put in the archive
-        file_list.append(stack_path)
+        file_list.append(stack_file)
 
 
     if file_list:
