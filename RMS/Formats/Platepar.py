@@ -253,7 +253,7 @@ class Platepar(object):
                 # Parse the rotation parameter
                 self.pos_angle_ref = self.parseLine(f)[0]
 
-                # Parse the sum of image scales per each image axis (arcsec per px)
+                # Parse the image scale (convert from arcsec/px to px/deg)
                 self.F_scale = self.parseLine(f)[0]
                 self.w_pix = 50*self.F_scale/3600
                 self.F_scale = 3600/self.F_scale

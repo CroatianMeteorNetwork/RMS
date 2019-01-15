@@ -315,7 +315,7 @@ def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, np.ndarray[FL
         az_centre: [float] Azimuth of the FOV centre (degrees).
         alt_centre: [float] Altitude of the FOV centre (degrees).
         pos_angle_ref: [float] Rotation from the celestial meridial (degrees).
-        F_scale: [float] Sum of image scales per each image axis (arcsec per px).
+        F_scale: [float] Image scale (px/deg).
         x_poly: [ndarray float] Distorsion polynomial in X direction.
         y_poly: [ndarray float] Distorsion polynomail in Y direction.
     
@@ -374,7 +374,7 @@ def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, np.ndarray[FL
 
         #dist = np.degrees(acos(sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra1 - ra2)))
 
-        # Calculate the image coordinates (scale the F_scale from CIF resolution)
+        # Calculate the image coordinates
         X1 = radius*cos(radians(theta))*F_scale
         Y1 = radius*sin(radians(theta))*F_scale
 
@@ -393,7 +393,6 @@ def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, np.ndarray[FL
             + x_poly[11]*Y1*sqrt(X1**2 + Y1**2))
 
         # Add the distortion correction and calculate X image coordinates
-        #x_array[i] = (X1 - dX)*x_res/384.0 + x_res/2.0
         x_array[i] = X1 - dX + x_res/2.0
 
         # Calculate distortion in Y direction
@@ -411,7 +410,6 @@ def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, np.ndarray[FL
             + y_poly[11]*X1*sqrt(X1**2 + Y1**2))
 
         # Add the distortion correction and calculate Y image coordinates
-        #y_array[i] = (Y1 - dY)*y_res/288.0 + y_res/2.0
         y_array[i] = Y1 - dY + y_res/2.0
 
 
