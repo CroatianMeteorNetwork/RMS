@@ -1522,7 +1522,7 @@ class PlateTool(object):
             ra_ref: [float] Reference RA of the FOV centre (degrees).
             dec_ref: [float] Reference Dec of the FOV centre (degrees).
             pos_angle_ref: [float] Reference position angle in degrees.
-            F_scale: [float] Image scale in pix/arcsec for CIF resolution.
+            F_scale: [float] Image scale in pix/deg.
             x_poly: [ndarray float] Distorsion polynomial in X direction.
             y_poly: [ndarray float] Distorsion polynomail in Y direction.
 
