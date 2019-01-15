@@ -142,6 +142,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
     """
 
+    log.info('Generating thumbnails...')
 
     # Generate captured thumbnails
     generateThumbnails(captured_path, config, 'CAPTURED')
@@ -157,6 +158,8 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
     # Add the detected mosaic file to the selected list
     file_list.append(mosaic_file)
 
+
+
     log.info('Generating a stack of detection...')
 
     # Make a co-added image of all detection. Filter out possible clouds
@@ -170,6 +173,8 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         
         # Add the stack path to the list of files to put in the archive
         file_list.append(stack_file)
+
+
 
 
     if file_list:
