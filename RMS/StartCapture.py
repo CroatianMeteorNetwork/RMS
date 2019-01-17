@@ -278,6 +278,18 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Stop the compressor
     log.debug('Stopping compression...')
     detector, live_view = compressor.stop()
+
+    # Free shared memory after the compressor is done
+    try:
+        log.debug('Freeing frame buffers...')
+        del sharedArrayBase
+        del sharedArray
+        del sharedArrayBase2
+        del sharedArray2
+
+    except Exception as e:
+        log.debug('Freeing frame buffers failed with error:' + repr(e))
+
     log.debug('Compression stopped')
 
     # Stop the live viewer
