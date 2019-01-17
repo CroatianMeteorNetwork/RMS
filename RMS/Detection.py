@@ -1319,6 +1319,8 @@ if __name__ == "__main__":
     # Load config file
     config = cr.parse(".config")
 
+    print(config.kht_lib_path)
+
 
     # Measure the time of the whole operation
     time_whole = time()
