@@ -27,20 +27,74 @@ except:
 
 
 
-def choosePlatform(win_conf, rpi_conf, linux_pc_conf):
-    """ Choose the setting depending on if this is running on the RPi or a Linux PC. """
+def findBinaryPath(dir_path, binary_name, binary_extension):
+    """ Given the path of the build directory and the name of the binary (without the extension!), the
+        function will find the path to the binary file.
 
-    # Check if running on Windows
-    if 'win' in sys.platform:
-        return win_conf
+    Arguments:
+        dir_path: [str] The build directory with binaries.
+        binary_name: [str] The name of the binary without the extension.
+        binary_extension: [str] The extension of the binary (e.g. 'so'), without the dot.
+
+    Return:
+        file_path: [str] Relative path to the binary.
+    """
+
+
+    if binary_extension is not None:
+        binary_extension = '.' + binary_extension
+
+
+    file_candidates = []
+
+    # Recursively find all files with the given extension in the given directory
+    for file_path in os.walk(dir_path):
+        for file_name in file_path[-1]:
+
+            found = False
+
+            # Check if the files correspond to the search pattern
+            if file_name.startswith(binary_name):
+
+                if binary_extension is not None:
+                    if file_name.endswith(binary_extension):
+                        found = True
+
+                else:
+                    found = True
+
+
+            if found:
+                file_path = os.path.join(file_path[0], file_name)
+                file_candidates.append(file_path)
+
+
+    # If there is only one file candiate, take that one
+    if len(file_candidates) == 0:
+        return None
+
+    elif len(file_candidates) == 1:
+        return file_candidates
 
     else:
+        # If there are more candidates, find the right one for the running version of python, platform, and
+        #   bits
+        py_version = "{:d}.{:d}".format(sys.version_info.major, sys.version_info.minor)
 
-        if 'arm' in os.uname()[4]:
-            return rpi_conf
+        # Find the compiled module for the correct python version
+        for file_path in file_candidates:
+            
+            # Extract the name of the dir where the binary is located
+            binary_dir = os.path.split(os.path.split(file_path)[0])[1]
 
-        else:
-            return linux_pc_conf
+            # If the directory ends with the correct python version, take that binary
+            if binary_dir.endswith('-' + py_version):
+                return file_path
+
+
+        # If no appropriate binary was found, give up
+        return None
+
 
 
 
@@ -159,7 +213,9 @@ class Config:
         self.max_lines_det = 30 # maximum number of lines to be found on the time segment with KHT
         self.line_min_dist = 40 # Minimum distance between KHT lines in Cartesian space to merge them (used for merging similar lines after KHT)
         self.stripe_width = 20 # width of the stripe around the line
-        self.kht_lib_path = "build/lib.linux-x86_64-2.7/kht_module.so" # path to the compiled KHT module
+        self.kht_build_dir = 'build'
+        self.kht_binary_name = 'kht_module'
+        self.kht_binary_extension = 'so'
 
         # 3D line finding for meteor detection
         self.max_points_det = 600 # maximumum number of points during 3D line search in faint meteor detection (used to minimize runtime)
@@ -649,21 +705,18 @@ def parseMeteorDetection(config, parser):
     
     # Read in the KHT library path for both the PC and the RPi, but decide which one to take based on the 
     # system this is running on
-    rpi_kht_lib_path = None
-    linux_pc_kht_lib_path = None
-    win_pc_kht_lib_path = None
-    
-    if parser.has_option(section, "rpi_kht_lib_path"):
-        rpi_kht_lib_path = parser.get(section, "rpi_kht_lib_path")
 
-    if parser.has_option(section, "linux_pc_kht_lib_path"):
-        linux_pc_kht_lib_path = parser.get(section, "linux_pc_kht_lib_path")
+    if parser.has_option(section, "kht_build_dir"):
+        config.kht_build_dir = parser.get(section, "kht_build_dir")
 
-    if parser.has_option(section, "win_pc_kht_lib_path"):
-        win_pc_kht_lib_path = parser.get(section, "win_pc_kht_lib_path")
+    if parser.has_option(section, "kht_binary_name"):
+        config.kht_binary_name = parser.get(section, "kht_binary_name")
 
-    config.kht_lib_path = choosePlatform(win_pc_kht_lib_path, rpi_kht_lib_path, linux_pc_kht_lib_path)
+    if parser.has_option(section, "kht_binary_extension"):
+        config.kht_binary_extension = parser.get(section, "kht_binary_extension")
 
+    config.kht_lib_path = findBinaryPath(config.kht_build_dir, config.kht_binary_name, \
+        config.kht_binary_extension)
 
 
     if parser.has_option(section, "vect_angle_thresh"):
