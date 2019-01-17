@@ -2152,7 +2152,7 @@ class PlateTool(object):
         print()
         print('Residuals')
         print('----------')
-        print(' No,   Img X,   Img Y, RA (deg), Dec (deg),    Mag,   Cat X,   Cat Y,    Dist,  Angle')
+        print(' No,   Img X,   Img Y, RA (deg), Dec (deg),    Mag,   Cat X,   Cat Y, Err asec,  Err px, Direction')
 
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
         for star_no, (cat_x, cat_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y, catalog_stars, \
@@ -2164,17 +2164,32 @@ class PlateTool(object):
             delta_x = cat_x - img_x
             delta_y = cat_y - img_y
 
+            # Compute image residual and angle of the error
             angle = np.arctan2(delta_y, delta_x)
             distance = np.sqrt(delta_x**2 + delta_y**2)
 
 
-            residuals.append([img_x, img_y, angle, distance])
+            # Compute the residuals in ra/dec in angular coordiniates
+            img_time = self.img_handle.currentTime()
+            _, ra_img, dec_img, _ = XY2CorrectedRADecPP([img_time], [img_x], [img_y], [1], self.platepar)
+
+            ra_img = ra_img[0]
+            dec_img = dec_img[0]
+
+            # Compute the angular distance in arc seconds
+            angular_distance = 3600*np.degrees(angularSeparation(np.radians(ra), np.radians(dec), \
+                np.radians(ra_img), np.radians(dec_img)))
+
+
+            residuals.append([img_x, img_y, angle, distance, angular_distance])
+
 
             # Print out the residuals
-            print('{:3d}, {:7.2f}, {:7.2f}, {:>8.3f}, {:>+9.3f}, {:+6.2}, {:7.2f}, {:7.2f}, {:7.2f}, {:+5.1f}'.format(star_no + 1, img_x, img_y, \
-                ra, dec, mag, cat_x, cat_y, distance, np.degrees(angle)))
+            print('{:3d}, {:7.2f}, {:7.2f}, {:>8.3f}, {:>+9.3f}, {:+6.2}, {:7.2f}, {:7.2f}, {:8.2f}, {:7.2f}, {:+9.1f}'.format(star_no + 1, img_x, img_y, \
+                ra, dec, mag, cat_x, cat_y, angular_distance, distance, np.degrees(angle)))
 
-        print('Average distance: {:.2f} px'.format(np.mean([entry[3] for entry in residuals])))
+        print('Average error: {:.2f} px, {:.2f} arcsec'.format(np.mean([entry[3] for entry in residuals]), \
+            np.mean([entry[4] for entry in residuals])))
 
         # Print the field of view size
         print("FOV: {:.2f} x {:.2f} deg".format(*self.computeFOVSize()))
@@ -2190,7 +2205,7 @@ class PlateTool(object):
         res_scale = 100
         for entry in residuals:
 
-            img_x, img_y, angle, distance = entry
+            img_x, img_y, angle, distance, _ = entry
 
             # Calculate coordinates of the end of the residual line
             res_x = img_x + res_scale*np.cos(angle)*distance
