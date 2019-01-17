@@ -50,7 +50,8 @@ import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats import StarCatalog
-from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADecPP, raDec2AltAz, raDecToCorrectedXY
+from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADecPP, raDec2AltAz, raDecToCorrectedXY,\
+    rotationWrtHorizon, rotationWrtHorizonToPosAngle
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Routines import Image
 from RMS.Math import angularSeparation
@@ -217,6 +218,9 @@ class PlateTool(object):
 
         # Image coordinates of catalog stars
         self.catalog_x = self.catalog_y = None
+
+        # Rotation with respect to the horizon
+        self.rotation_horizon = None
 
         ######################################################################################################
 
@@ -686,6 +690,9 @@ class PlateTool(object):
     def updateRefRADec(self):
         """ Update the reference RA and Dec from Alt/Az. """
 
+        # Save the current rotation w.r.t horizon value
+        self.rotation_horizon = rotationWrtHorizon(self.platepar)
+
         # Compute the datetime object of the reference Julian date
         time_data = [jd2Date(self.platepar.JD, dt_obj=True)]
 
@@ -696,6 +703,9 @@ class PlateTool(object):
         # Assign the computed RA/Dec to platepar
         self.platepar.RA_d = ra_data[0]
         self.platepar.dec_d = dec_data[0]
+
+        # Update the position angle so that the rotation wrt horizon doesn't change
+        self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, self.rotation_horizon)
 
 
 
@@ -740,7 +750,7 @@ class PlateTool(object):
 
         # Move RA/Dec
         elif event.key == 'a':
-            
+
             self.platepar.az_centre += self.key_increment
             self.updateRefRADec()
 
@@ -1362,7 +1372,7 @@ class PlateTool(object):
             text_str += 'UT corr  = {:.1f}h\n'.format(self.platepar.UT_corr)
             text_str += 'Ref Az   = {:.3f}$\\degree$\n'.format(self.platepar.az_centre)
             text_str += 'Ref Alt  = {:.3f}$\\degree$\n'.format(self.platepar.alt_centre)
-            text_str += 'Rotation = {:.3f}$\\degree$\n'.format(self.platepar.pos_angle_ref)
+            text_str += 'Rotation = {:.3f}$\\degree$\n'.format(rotationWrtHorizon(self.platepar))
             #text_str += 'Ref RA  = {:.3f}\n'.format(self.platepar.RA_d)
             #text_str += 'Ref Dec = {:.3f}\n'.format(self.platepar.dec_d)
             text_str += "F_scale  = {:.3f}'/px\n".format(60/self.platepar.F_scale)
@@ -1632,6 +1642,9 @@ class PlateTool(object):
             # Set station ID
             platepar.station_code = self.config.stationID
 
+            # Compute the rotation w.r.t. horizon
+            self.rotation_horizon = rotationWrtHorizon(platepar)
+
 
         return platepar_file, platepar
 
@@ -1682,6 +1695,10 @@ class PlateTool(object):
 
         # Check that the calibration parameters are within the nominal range
         self.checkParamRange()
+
+        # Compute the position angle, assuming that the rotation wrt horizon is 0
+        self.rotation_horizon = 0
+        self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, self.rotation_horizon)
 
 
         if update_image:
