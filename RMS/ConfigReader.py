@@ -41,7 +41,7 @@ def choosePlatform(win_conf, rpi_conf, linux_pc_conf):
 
         else:
             return linux_pc_conf
-            
+
 
 
 def findBinaryPath(dir_path, binary_name, binary_extension):
@@ -91,7 +91,7 @@ def findBinaryPath(dir_path, binary_name, binary_extension):
         return None
 
     elif len(file_candidates) == 1:
-        return file_candidates
+        return file_candidates[0]
 
     else:
         # If there are more candidates, find the right one for the running version of python, platform, and
