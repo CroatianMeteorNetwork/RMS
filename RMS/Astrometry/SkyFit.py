@@ -1506,9 +1506,9 @@ class PlateTool(object):
         ra_centre, dec_centre = self.computeCentreRADec()
 
         # Calculate the FOV radius in degrees
-        fov_x = (self.platepar.X_res/2)/self.platepar.F_scale
-        fov_y = (self.platepar.Y_res/2)/self.platepar.F_scale
-
+        #fov_x = (self.platepar.X_res/2)/self.platepar.F_scale
+        #fov_y = (self.platepar.Y_res/2)/self.platepar.F_scale
+        fov_y, fov_x = self.computeFOVSize()
         fov_radius = np.sqrt(fov_x**2 + fov_y**2)
 
 
@@ -2205,8 +2205,20 @@ class PlateTool(object):
             print('{:3d}, {:7.2f}, {:7.2f}, {:>8.3f}, {:>+9.3f}, {:+6.2}, {:7.2f}, {:7.2f}, {:8.2f}, {:7.2f}, {:+9.1f}'.format(star_no + 1, img_x, img_y, \
                 ra, dec, mag, cat_x, cat_y, angular_distance, distance, np.degrees(angle)))
 
-        print('Average error: {:.2f} px, {:.2f} arcsec'.format(np.mean([entry[3] for entry in residuals]), \
-            np.mean([entry[4] for entry in residuals])))
+
+        mean_angular_error = np.mean([entry[4] for entry in residuals])
+
+        # If the average angular error is larger than 60 arcsec, report it in arc minutes
+        if mean_angular_error > 60:
+            mean_angular_error /= 60
+            angular_error_label = 'arcmin'
+        
+        else:
+            angular_error_label = 'arcsec'
+
+
+        print('Average error: {:.2f} px, {:.2f} {:s}'.format(np.mean([entry[3] for entry in residuals]), \
+            mean_angular_error, angular_error_label))
 
         # Print the field of view size
         print("FOV: {:.2f} x {:.2f} deg".format(*self.computeFOVSize()))
