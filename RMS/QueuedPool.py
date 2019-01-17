@@ -323,6 +323,7 @@ class QueuedPool(object):
                     self.printAndLog('-----')
                     self.printAndLog('Queue size:', self.output_queue.qsize())
                     self.printAndLog('Total jobs:', self.total_jobs.value())
+                    self.printAndLog('Active workers:', self.active_workers.value())
 
 
                 # Keep track of the changes of the output queue size
