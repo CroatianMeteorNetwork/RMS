@@ -7,3 +7,4 @@ cython==0.27.3
 scipy==1.0.0
 Pillow==4.3.0
 astropy==2.0.3
+mem_top

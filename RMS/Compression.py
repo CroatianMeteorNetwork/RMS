@@ -22,6 +22,12 @@ from math import floor
 import numpy as np
 import multiprocessing
 
+try:
+    from mem_top import mem_top
+    USE_MEMTOP = True
+except:
+    USE_MEMTOP = False
+
 
 from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFfile, FFStruct
@@ -293,6 +299,9 @@ class Compressor(multiprocessing.Process):
             # Save the extracted intensitites per every field
             FieldIntensities.saveFieldIntensitiesBin(field_intensities, self.data_dir, filename)
 
+            # Log memory
+            if USE_MEMTOP:
+                log.debug(mem_top())
 
             # Run the extractor
             extractor = Extractor(self.config, self.data_dir)
