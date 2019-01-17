@@ -27,6 +27,23 @@ except:
 
 
 
+def choosePlatform(win_conf, rpi_conf, linux_pc_conf):
+    """ Choose the setting depending on if this is running on the RPi or a Linux PC. """
+
+    # Check if running on Windows
+    if 'win' in sys.platform:
+        return win_conf
+
+    else:
+
+        if 'arm' in os.uname()[4]:
+            return rpi_conf
+
+        else:
+            return linux_pc_conf
+            
+
+
 def findBinaryPath(dir_path, binary_name, binary_extension):
     """ Given the path of the build directory and the name of the binary (without the extension!), the
         function will find the path to the binary file.
