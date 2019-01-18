@@ -44,7 +44,7 @@ from RMS.Formats.FFfile import filenameToDatetime
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import cyRaDecToCorrectedXY
+from RMS.Astrometry.CyFunctions import cyRaDecToCorrectedXY, cyXYToRADec
 
 
 
@@ -408,9 +408,9 @@ def altAz2RADec(lat, lon, UT_corr, time_data, azimuth_data, altitude_data, dt_ti
         # Calculate the reference hour angle
         
         T = (JD - 2451545.0)/36525.0
-        Ho = (280.46061837 + 360.98564736629*(JD - 2451545.0) + 0.000387933*T**2 - T**3/38710000.0)%360
+        hour_angle = (280.46061837 + 360.98564736629*(JD - 2451545.0) + 0.000387933*T**2 - T**3/38710000.0)%360
 
-        RA = (Ho + lon - HA)%360
+        RA = (hour_angle + lon - HA)%360
         dec = math.degrees(math.asin(sl*salt + cl*calt*caz))
 
         # Save calculated values to an output array
@@ -426,12 +426,14 @@ def altAz2RADec(lat, lon, UT_corr, time_data, azimuth_data, altitude_data, dt_ti
 
 def calculateMagnitudes(level_data, mag_0, mag_lev):
     """ Calculate the magnitude of the data points with given magnitude calibration parameters. 
+    
+    Arguments:
+        level_data: [ndarray] Levels of the meteor centroid (arbitrary units).
+        mag_0: [float] Magnitude slope (should be -2.5).
+        mag_lev: [float] Magnitude intercept, i.e. the photometric offset.
 
-    @param level_data: [ndarray] levels of the meteor centroid (arbirtary units)
-    @param mag_0: [float] magnitude slope
-    @param mag_lev: [float] magnitude intercept
-
-    @return magnitude_data: [ndarray] array of meteor's lightcurve apparent magnitudes
+    Return:
+        magnitude_data: [ndarray] Apparent magnitude.
     """
 
     magnitude_data = np.zeros_like(level_data, dtype=np.float64)
@@ -451,7 +453,7 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, lat, lon, Ho, X_res
     pos_angle_ref, F_scale, mag_0, mag_lev, x_poly_fwd, y_poly_fwd, station_ht):
     """ A function that does the complete calibration and coordinate transformations of a meteor detection.
 
-    First, it applies field distortion and vignetting correction on the data, then converts the XY coordinates
+    First, it applies field distortion on the data, then converts the XY coordinates
     to altitude and azimuth. Then it converts the altitude and azimuth data to right ascension and 
     declination. The resulting coordinates are in J2000.0 epoch.
     
@@ -485,10 +487,29 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, lat, lon, Ho, X_res
 
     """
 
+
+    # Convert time to Julian date
+    JD_data = np.array([date2JD(*time_data_entry) for time_data_entry in time_data])
+
+    # Convert x,y to RA/Dec using a fast cython function
+    RA_data, dec_data = cyXYToRADec(JD_data, np.array(X_data), np.array(Y_data), float(lat), float(lon), \
+        float(Ho), float(X_res), float(Y_res), float(RA_d), float(dec_d), float(pos_angle_ref), \
+        float(F_scale), x_poly_fwd, y_poly_fwd)
+
+    # Calculate magnitudes
+    magnitude_data = calculateMagnitudes(level_data, mag_0, mag_lev)
+
+    
+    return JD_data, RA_data, dec_data, magnitude_data
+
+
+
+    ### CODE BELOW NOT USED !!! #
+    ### SLOW PYTHON VERSION OF THE CODE BELOW, HERE FOR LEGACY PURPOSES ###
+
     # Convert XY image coordinates to azimuth and altitude
     az_data, alt_data = XY2altAz(X_data, Y_data, lat, lon, RA_d, dec_d, Ho, X_res, Y_res, pos_angle_ref, \
         F_scale, x_poly_fwd, y_poly_fwd)
-
 
     # Convert azimuth and altitude data to right ascension and declination
     JD_data, RA_data, dec_data = altAz2RADec(lat, lon, 0, time_data, az_data, alt_data)
@@ -857,23 +878,26 @@ if __name__ == "__main__":
 
     # # Load the platepar
     # platepar = Platepar()
-    # platepar.read("C:\Users\delorayn1\Desktop\HR0002_20180119_162419_928144_detected\platepar_cmn2010.cal")
+    # platepar.read("/home/dvida/Desktop/HR000A_20181214_170136_990012_detected/platepar_cmn2010.cal")
 
     # from RMS.Formats.FFfile import getMiddleTimeFF
     # from RMS.Astrometry.Conversions import date2JD, jd2Date
-    # time = getMiddleTimeFF('FF_HR0002_20180119_210212_876_0414720.fits', 25)
+    # time = getMiddleTimeFF('FF_HR000A_20181215_015724_739_0802560.fits', 25)
 
     # # Convert time to UT
     # #time = jd2Date(date2JD(*time, UT_corr=platepar.UT_corr))
 
-    # # Sirius
-    # star_x = 619
-    # star_y = 401
+    # # Star
+    # star_x = 435.0
+    # star_y = 285.0
 
     # print('Star X, Y:', star_x, star_y)
 
-    # jd, ra, dec, mag = XY2CorrectedRADecPP(np.array([time]), np.array([star_x]), np.array([star_y]), np.array([1]), platepar)
+    # jd, ra_array, dec_array, mag = XY2CorrectedRADecPP(np.array([time, time]), np.array([star_x, 100]), np.array([star_y, 100]), np.array([1, 1]), platepar)
 
+    # print(ra_array, dec_array)
+    # ra = ra_array[0]
+    # dec = dec_array[0]
 
     # ra_h = int(ra/15)
     # ra_min = int((ra/15 - ra_h)*60)
@@ -884,15 +908,15 @@ if __name__ == "__main__":
     # dec_sec = ((dec - dec_d)*60 - dec_min)*60
 
     # print('Computed RA, Dec:')
-    # print(ra_h, ra_min, ra_sec[0])
-    # print(dec_d, dec_min, dec_sec[0])
+    # print(ra_h, ra_min, ra_sec)
+    # print(dec_d, dec_min, dec_sec)
 
 
-    # # Convert the coordinates of Sirius back to image coordinates
+    # # Convert the coordinates back to image coordinates
     # # ra_star = (6 + (45 + 8/60)/60)*15
     # # dec_star = -(16 + (43 + 21/60)/60)
-    # ra_star = ra[0]
-    # dec_star = dec[0]
+    # ra_star = ra
+    # dec_star = dec
     # x_star, y_star = raDecToCorrectedXYPP(np.array([ra_star]), np.array([dec_star]), \
     #     np.array([date2JD(*time)]), platepar)
 

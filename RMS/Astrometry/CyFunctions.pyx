@@ -298,10 +298,10 @@ def matchStars(np.ndarray[FLOAT_TYPE_t, ndim=2] stars_list, np.ndarray[FLOAT_TYP
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data, \
-    double jd, double lat, double lon, double x_res, double y_res, double az_centre, double alt_centre, \
-    double pos_angle_ref, double F_scale, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, \
-    np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev):
+def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data, double jd, double lat, double lon, double x_res, \
+    double y_res, double az_centre, double alt_centre, double pos_angle_ref, double F_scale, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev):
     """ Convert RA, Dec to distorion corrected image coordinates. 
 
     Arguments:
@@ -415,3 +415,172 @@ def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, np.ndarray[FL
 
 
     return x_array, y_array
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_t, ndim=1] X_data, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] Y_data, double lat, double lon, double Ho, double X_res, double Y_res, \
+    double RA_d, double dec_d, double pos_angle_ref, double F_scale, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd):
+    """
+    Arguments:
+        jd_data: [ndarray] Julian date of each data point.
+        X_data: [ndarray] 1D numpy array containing the image column.
+        Y_data: [ndarray] 1D numpy array containing the image row.
+        lat: [float] Latitude of the observer in degrees.
+        lon: [float] Longitde of the observer in degress.
+        Ho: [float] Reference hour angle (deg).
+        X_res: [int] Image size, X dimension (px).
+        Y_res: [int] Image size, Y dimenstion (px).
+        RA_d: [float] Reference right ascension of the image centre (degrees).
+        dec_d: [float] Reference declination of the image centre (degrees).
+        pos_angle_ref: [float] Field rotation parameter (degrees).
+        F_scale: [float] Sum of image scales per each image axis (arcsec per px).
+        x_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward X axis polynomial parameters.
+        y_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward Y axis polynomial parameters.
+    
+    Return:
+        (RA_data, dec_data): [tuple of ndarrays]
+            
+            RA_data: [ndarray] Right ascension of each point (deg).
+            dec_data: [ndarray] Declination of each point (deg).
+            magnitude_data: [ndarray] Array of meteor's lightcurve apparent magnitudes.
+    """
+
+    cdef int i
+    cdef double jd, x_det, y_det, dx, x_pix, dy, y_pix
+    cdef double dec_rad, sl, cl
+    cdef double radius, theta, sin_t, Dec0det, cos_t, RA0det, h, sh, sd, ch, cd, x, y, z, r, azimuth, altitude
+    cdef double az_rad, alt_rad, saz, salt, caz, calt, HA, T, RA, dec, hour_angle
+
+    # Convert declination to radians
+    dec_rad = radians(dec_d)
+
+    # Precalculate some parameters
+    sl = sin(radians(lat))
+    cl = cos(radians(lat))
+
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data = np.zeros_like(jd_data)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data = np.zeros_like(jd_data)
+
+    # Go through all given data points
+    for i in range(jd_data.shape[0]):
+
+        jd = jd_data[i]
+        x_det = X_data[i]
+        y_det = Y_data[i]
+
+
+        ### APPLY DISTORSION CORRECTION ###
+
+        x_det = x_det - X_res/2.0
+        y_det = y_det - Y_res/2.0
+
+        dx = (x_poly_fwd[0]
+            + x_poly_fwd[1]*x_det
+            + x_poly_fwd[2]*y_det
+            + x_poly_fwd[3]*x_det**2
+            + x_poly_fwd[4]*x_det*y_det
+            + x_poly_fwd[5]*y_det**2
+            + x_poly_fwd[6]*x_det**3
+            + x_poly_fwd[7]*x_det**2*y_det
+            + x_poly_fwd[8]*x_det*y_det**2
+            + x_poly_fwd[9]*y_det**3
+            + x_poly_fwd[10]*x_det*sqrt(x_det**2 + y_det**2)
+            + x_poly_fwd[11]*y_det*sqrt(x_det**2 + y_det**2))
+
+        # Add the distortion correction
+        x_pix = x_det + dx
+
+        dy = (y_poly_fwd[0]
+            + y_poly_fwd[1]*x_det
+            + y_poly_fwd[2]*y_det
+            + y_poly_fwd[3]*x_det**2
+            + y_poly_fwd[4]*x_det*y_det
+            + y_poly_fwd[5]*y_det**2
+            + y_poly_fwd[6]*x_det**3
+            + y_poly_fwd[7]*x_det**2*y_det
+            + y_poly_fwd[8]*x_det*y_det**2
+            + y_poly_fwd[9]*y_det**3
+            + y_poly_fwd[10]*y_det*sqrt(x_det**2 + y_det**2)
+            + y_poly_fwd[11]*x_det*sqrt(x_det**2 + y_det**2))
+
+        # Add the distortion correction
+        y_pix = y_det + dy
+
+        # Scale back image coordinates
+        x_pix = x_pix/F_scale
+        y_pix = y_pix/F_scale
+
+        ### ###
+
+
+        ### Convert gnomonic X, Y to alt, az ###
+
+        # Caulucate the needed parameters
+        radius = radians(sqrt(x_pix**2 + y_pix**2))
+        theta = radians((90 - pos_angle_ref + degrees(atan2(y_pix, x_pix)))%360)
+
+        sin_t = sin(dec_rad)*cos(radius) + cos(dec_rad)*sin(radius)*cos(theta)
+        Dec0det = atan2(sin_t, sqrt(1 - sin_t**2))
+
+        sin_t = sin(theta)*sin(radius)/cos(Dec0det)
+        cos_t = (cos(radius) - sin(Dec0det)*sin(dec_rad))/(cos(Dec0det)*cos(dec_rad))
+        RA0det = (RA_d - degrees(atan2(sin_t, cos_t)))%360
+
+        h = radians(Ho + lon - RA0det)
+        sh = sin(h)
+        sd = sin(Dec0det)
+        ch = cos(h)
+        cd = cos(Dec0det)
+
+        x = -ch*cd*sl + sd*cl
+        y = -sh*cd
+        z = ch*cd*cl + sd*sl
+
+        r = sqrt(x**2 + y**2)
+
+        # Calculate azimuth and altitude
+        azimuth = degrees(atan2(y, x))%360
+        altitude = degrees(atan2(z, r))
+
+        ### ###
+
+
+        ### Convert alt, az to RA, Dec ###
+
+        # Never allow the altitude to be exactly 90 deg due to numerical issues
+        if altitude == 90:
+            altitude = 89.9999
+
+        # Convert altitude and azimuth to radians
+        az_rad = radians(azimuth)
+        alt_rad = radians(altitude)
+
+        saz = sin(az_rad)
+        salt = sin(alt_rad)
+        caz = cos(az_rad)
+        calt = cos(alt_rad)
+
+        x = -saz*calt
+        y = -caz*sl*calt + salt*cl
+        HA = degrees(atan2(x, y))
+
+        # Calculate the hour angle
+        T = (jd - 2451545.0)/36525.0
+        hour_angle = (280.46061837 + 360.98564736629*(jd - 2451545.0) + 0.000387933*T**2 - T**3/38710000.0)%360
+
+        RA = (hour_angle + lon - HA)%360
+        dec = degrees(asin(sl*salt + cl*calt*caz))
+
+        ### ###
+
+
+        RA_data[i] = RA
+        dec_data[i] = dec
+
+
+    return RA_data, dec_data

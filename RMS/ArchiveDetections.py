@@ -160,7 +160,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
 
 
-    log.info('Generating a stack of detection...')
+    log.info('Generating a stack of detections...')
 
     # Make a co-added image of all detection. Filter out possible clouds
     stack_path, _ = stackFFs(captured_path, 'jpg', deinterlace=(config.deinterlace_order > 0), subavg=True, \
