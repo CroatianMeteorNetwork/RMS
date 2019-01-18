@@ -185,6 +185,9 @@ class Config:
         self.extra_compile_args = ["-O3"]
         
         ##### FireballDetection
+
+        self.enable_fireball_detection = True
+
         self.f = 16                    # subsampling factor
         self.max_time = 25             # maximum time for line finding
         
@@ -582,6 +585,9 @@ def parseFireballDetection(config, parser):
     
     if not parser.has_section(section):
         return
+
+    if parser.has_option(section, "enable_fireball_detection"):
+        config.enable_fireball_detection = parser.getboolean(section, "enable_fireball_detection")
     
     if parser.has_option(section, "subsampling_size"):
         config.f = parser.getint(section, "subsampling_size")
