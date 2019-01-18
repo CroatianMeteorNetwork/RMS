@@ -95,6 +95,8 @@ class Platepar(object):
 
         """
 
+        self.version = 2
+
         # Station coordinates
         self.lat = self.lon = self.elev = 0
 
@@ -123,23 +125,28 @@ class Platepar(object):
 
         # FOV scale
         self.F_scale = 1.0
-        self.w_pix = 0
 
         # Photometry calibration
         self.mag_0 = -2.5
         self.mag_lev = 1.0
         self.mag_lev_stddev = 0.0
-        self.gamma = 0.45
+        self.gamma = 1.0
 
-        # Distortion fit
-        self.x_poly = np.zeros(shape=(12,), dtype=np.float64)
-        self.y_poly = np.zeros(shape=(12,), dtype=np.float64)
+        # Distortion fit (forward and reverse)
+        self.x_poly_fwd = np.zeros(shape=(12,), dtype=np.float64)
+        self.y_poly_fwd = np.zeros(shape=(12,), dtype=np.float64)
+        self.x_poly_rev = np.zeros(shape=(12,), dtype=np.float64)
+        self.y_poly_rev = np.zeros(shape=(12,), dtype=np.float64)
 
         # Set the first coeffs to 0.5, as that is the real centre of the FOV
-        self.x_poly[0] = 0.5
-        self.y_poly[0] = 0.5
+        self.x_poly_fwd[0] = 0.5
+        self.y_poly_fwd[0] = 0.5
+        self.x_poly_rev[0] = 0.5
+        self.y_poly_rev[0] = 0.5
 
         self.station_code = None
+
+        self.star_list = None
 
 
 
@@ -202,18 +209,39 @@ class Platepar(object):
             self.__dict__ = json.loads(data)
 
 
+            # Add the version if it was not in the platepar (v1 platepars didn't have a version)
+            if not 'version' in self.__dict__:
+                self.gamma = 1
+
             # Add UT correction if it was not in the platepar
             if not 'UT_corr' in self.__dict__:
                 self.UT_corr = 0
 
             # Add the gamma if it was not in the platepar
             if not 'gamma' in self.__dict__:
-                self.gamma = 0.45
+                self.gamma = 1.0
+
+
+            # Add the list of calibration stars if it was not in the platepar
+            if not 'star_list' in self.__dict__:
+                self.star_list = []
+
+
+            # If v1 only the backward distorsion coeffs were fitted, so use load them for both forward and
+            #   reverse if nothing else is available
+            if not 'x_poly_fwd' in self.__dict__:
+                
+                self.x_poly_fwd = np.array(self.x_poly)
+                self.x_poly_rev = np.array(self.x_poly)
+                self.y_poly_fwd = np.array(self.y_poly)
+                self.y_poly_rev = np.array(self.y_poly)
 
 
             # Convert lists to numpy arrays
-            self.x_poly = np.array(self.x_poly)
-            self.y_poly = np.array(self.y_poly)
+            self.x_poly_fwd = np.array(self.x_poly_fwd)
+            self.x_poly_rev = np.array(self.x_poly_rev)
+            self.y_poly_fwd = np.array(self.y_poly_fwd)
+            self.y_poly_rev = np.array(self.y_poly_rev)
 
             # Calculate the datetime
             self.time = jd2Date(self.JD, dt_obj=True)
@@ -223,6 +251,10 @@ class Platepar(object):
         else:
 
             with open(file_name) as f:
+
+                self.UT_corr = 0
+                self.gamma = 1.0
+                self.star_list = []
 
                 # Parse latitude, longitude, elevation
                 self.lon, self.lat, self.elev = self.parseLine(f)
@@ -255,21 +287,20 @@ class Platepar(object):
 
                 # Parse the sum of image scales per each image axis (arcsec per px)
                 self.F_scale = self.parseLine(f)[0]
-                self.w_pix = 50*self.F_scale/3600
                 self.F_scale = 3600/self.F_scale
 
                 # Load magnitude slope parameters
                 self.mag_0, self.mag_lev = self.parseLine(f)
 
                 # Load X axis polynomial parameters
-                self.x_poly = np.zeros(shape=(12,), dtype=np.float64)
+                self.x_poly_fwd = self.x_poly_rev = np.zeros(shape=(12,), dtype=np.float64)
                 for i in range(12):
-                    self.x_poly[i] = self.parseLine(f)[0]
+                    self.x_poly_fwd[i] = self.x_poly_fwd[i] = self.parseLine(f)[0]
 
                 # Load Y axis polynomial parameters
-                self.y_poly = np.zeros(shape=(12,), dtype=np.float64)
+                self.y_poly_fwd = self.y_poly_rev = np.zeros(shape=(12,), dtype=np.float64)
                 for i in range(12):
-                    self.y_poly[i] = self.parseLine(f)[0]
+                    self.y_poly_fwd[i] = self.y_poly_rev[i] = self.parseLine(f)[0]
 
                 # Read station code
                 self.station_code = f.readline().replace('\r', '').replace('\n', '')
@@ -312,8 +343,10 @@ class Platepar(object):
             self2 = copy.deepcopy(self)
 
             # Convert numpy arrays to list, which can be serialized
-            self2.x_poly = self.x_poly.tolist()
-            self2.y_poly = self.y_poly.tolist()
+            self2.x_poly_fwd = self.x_poly_fwd.tolist()
+            self2.x_poly_rev = self.x_poly_rev.tolist()
+            self2.y_poly_fwd = self.y_poly_fwd.tolist()
+            self2.y_poly_rev = self.y_poly_rev.tolist()
             del self2.time
 
             out_str = json.dumps(self2, default=lambda o: o.__dict__, indent=4, sort_keys=True)
@@ -361,11 +394,11 @@ class Platepar(object):
                 f.write("{:.3f} {:.3f}\n".format(self.mag_0, self.mag_lev))
 
                 # Write X distorsion polynomial
-                for x_elem in self.x_poly:
+                for x_elem in self.x_poly_fwd:
                     f.write('{:+E}\n'.format(x_elem))
 
                 # Write y distorsion polynomial
-                for y_elem in self.y_poly:
+                for y_elem in self.y_poly_fwd:
                     f.write('{:+E}\n'.format(y_elem))
 
                 # Write station code
@@ -390,7 +423,7 @@ if __name__ == "__main__":
     pp = Platepar()
     pp.read(pp_file)
 
-    print(pp.x_poly)
+    print(pp.x_poly_fwd)
     print(pp.station_code)
 
     #txt = json.dumps(pp, default=lambda o: o.__dict__)

@@ -307,10 +307,10 @@ def _calcImageResidualsDistorsion(params, config, platepar, catalog_stars, star_
     pp = copy.deepcopy(platepar)
 
     if dimension == 'x':
-        pp.x_poly = params
+        pp.x_poly_rev = params
 
     else:
-        pp.y_poly = params
+        pp.y_poly_rev = params
 
     print('{:s} distortion params:'.format(dimension))
 
@@ -567,8 +567,8 @@ def autoCheckFit(config, platepar, calstars_list):
         if fit_distorsion:
 
             # Fit the distortion parameters (X axis)
-            res = scipy.optimize.minimize(_calcImageResidualsDistorsion, platepar.x_poly, args=(config, platepar,\
-                catalog_stars, star_dict, match_radius, 'x'), method='Nelder-Mead', \
+            res = scipy.optimize.minimize(_calcImageResidualsDistorsion, platepar.x_poly_rev, args=(config, \
+                platepar, catalog_stars, star_dict, match_radius, 'x'), method='Nelder-Mead', \
                 options={'fatol': fatol, 'xatol': 0.1})
 
             print(res)
@@ -578,7 +578,7 @@ def autoCheckFit(config, platepar, calstars_list):
                 return platepar, False
 
             else:
-                platepar.x_poly = res.x
+                platepar.x_poly_rev = res.x
 
 
             # Check if the platepar is good enough and do not estimate further parameters
@@ -587,8 +587,8 @@ def autoCheckFit(config, platepar, calstars_list):
 
 
             # Fit the distortion parameters (Y axis)
-            res = scipy.optimize.minimize(_calcImageResidualsDistorsion, platepar.y_poly, args=(config, platepar,\
-                catalog_stars, star_dict, match_radius, 'y'), method='Nelder-Mead', \
+            res = scipy.optimize.minimize(_calcImageResidualsDistorsion, platepar.y_poly_rev, args=(config, \
+                platepar,catalog_stars, star_dict, match_radius, 'y'), method='Nelder-Mead', \
                 options={'fatol': fatol, 'xatol': 0.1})
 
             print(res)
@@ -598,7 +598,7 @@ def autoCheckFit(config, platepar, calstars_list):
                 return platepar, False
 
             else:
-                platepar.y_poly = res.x
+                platepar.y_poly_rev = res.x
 
 
 

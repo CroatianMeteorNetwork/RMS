@@ -300,8 +300,8 @@ def matchStars(np.ndarray[FLOAT_TYPE_t, ndim=2] stars_list, np.ndarray[FLOAT_TYP
 @cython.cdivision(True)
 def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data, \
     double jd, double lat, double lon, double x_res, double y_res, double az_centre, double alt_centre, \
-    double pos_angle_ref, double F_scale, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly, \
-    np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly):
+    double pos_angle_ref, double F_scale, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev):
     """ Convert RA, Dec to distorion corrected image coordinates. 
 
     Arguments:
@@ -316,8 +316,8 @@ def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, np.ndarray[FL
         alt_centre: [float] Altitude of the FOV centre (degrees).
         pos_angle_ref: [float] Rotation from the celestial meridial (degrees).
         F_scale: [float] Sum of image scales per each image axis (arcsec per px).
-        x_poly: [ndarray float] Distorsion polynomial in X direction.
-        y_poly: [ndarray float] Distorsion polynomail in Y direction.
+        x_poly_rev: [ndarray float] Distorsion polynomial in X direction for reverse mapping.
+        y_poly_rev: [ndarray float] Distorsion polynomail in Y direction for reverse mapping.
     
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
@@ -331,7 +331,8 @@ def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, np.ndarray[FL
 
     # Calculate the reference hour angle
     cdef double T = (jd - 2451545.0)/36525.0
-    cdef double Ho = (280.46061837 + 360.98564736629*(jd - 2451545.0) + 0.000387933*T**2 - (T**3)/38710000.0)%360
+    cdef double Ho = (280.46061837 + 360.98564736629*(jd - 2451545.0) + 0.000387933*T**2 \
+        - (T**3)/38710000.0)%360
 
     cdef double sl = sin(radians(lat))
     cdef double cl = cos(radians(lat))
@@ -374,44 +375,42 @@ def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, np.ndarray[FL
 
         #dist = np.degrees(acos(sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra1 - ra2)))
 
-        # Calculate the image coordinates (scale the F_scale from CIF resolution)
+        # Calculate the image coordinates
         X1 = radius*cos(radians(theta))*F_scale
         Y1 = radius*sin(radians(theta))*F_scale
 
         # Calculate distortion in X direction
-        dX = (x_poly[0]
-            + x_poly[1]*X1
-            + x_poly[2]*Y1
-            + x_poly[3]*X1**2
-            + x_poly[4]*X1*Y1
-            + x_poly[5]*Y1**2
-            + x_poly[6]*X1**3
-            + x_poly[7]*X1**2*Y1
-            + x_poly[8]*X1*Y1**2
-            + x_poly[9]*Y1**3
-            + x_poly[10]*X1*sqrt(X1**2 + Y1**2)
-            + x_poly[11]*Y1*sqrt(X1**2 + Y1**2))
+        dX = (x_poly_rev[0]
+            + x_poly_rev[1]*X1
+            + x_poly_rev[2]*Y1
+            + x_poly_rev[3]*X1**2
+            + x_poly_rev[4]*X1*Y1
+            + x_poly_rev[5]*Y1**2
+            + x_poly_rev[6]*X1**3
+            + x_poly_rev[7]*X1**2*Y1
+            + x_poly_rev[8]*X1*Y1**2
+            + x_poly_rev[9]*Y1**3
+            + x_poly_rev[10]*X1*sqrt(X1**2 + Y1**2)
+            + x_poly_rev[11]*Y1*sqrt(X1**2 + Y1**2))
 
         # Add the distortion correction and calculate X image coordinates
-        #x_array[i] = (X1 - dX)*x_res/384.0 + x_res/2.0
         x_array[i] = X1 - dX + x_res/2.0
 
         # Calculate distortion in Y direction
-        dY = (y_poly[0]
-            + y_poly[1]*X1
-            + y_poly[2]*Y1
-            + y_poly[3]*X1**2
-            + y_poly[4]*X1*Y1
-            + y_poly[5]*Y1**2
-            + y_poly[6]*X1**3
-            + y_poly[7]*X1**2*Y1
-            + y_poly[8]*X1*Y1**2
-            + y_poly[9]*Y1**3
-            + y_poly[10]*Y1*sqrt(X1**2 + Y1**2)
-            + y_poly[11]*X1*sqrt(X1**2 + Y1**2))
+        dY = (y_poly_rev[0]
+            + y_poly_rev[1]*X1
+            + y_poly_rev[2]*Y1
+            + y_poly_rev[3]*X1**2
+            + y_poly_rev[4]*X1*Y1
+            + y_poly_rev[5]*Y1**2
+            + y_poly_rev[6]*X1**3
+            + y_poly_rev[7]*X1**2*Y1
+            + y_poly_rev[8]*X1*Y1**2
+            + y_poly_rev[9]*Y1**3
+            + y_poly_rev[10]*Y1*sqrt(X1**2 + Y1**2)
+            + y_poly_rev[11]*X1*sqrt(X1**2 + Y1**2))
 
         # Add the distortion correction and calculate Y image coordinates
-        #y_array[i] = (Y1 - dY)*y_res/288.0 + y_res/2.0
         y_array[i] = Y1 - dY + y_res/2.0
 
 
