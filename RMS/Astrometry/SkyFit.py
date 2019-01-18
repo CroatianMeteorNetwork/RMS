@@ -1149,7 +1149,7 @@ class PlateTool(object):
                 x, y, _ = img_star
 
                 # Plot all paired stars
-                plt.scatter(x, y, marker='x', c='b', s=100, lw=3)
+                plt.scatter(x, y, marker='x', c='b', s=100, lw=3, alpha=0.5)
 
 
 
@@ -2093,6 +2093,37 @@ class PlateTool(object):
             return dist_sum
 
 
+        def _calcSkyResidualsAstro(params, self, catalog_stars, img_stars):
+            """ Calculates the differences between the stars on the image and catalog stars in sky 
+                coordinates with the given astrometrical solution. 
+
+            """
+
+            # Extract fitting parameters
+            ra_ref, dec_ref, pos_angle_ref, F_scale = params
+
+            pp_copy = copy.deepcopy(self.platepar)
+
+            pp_copy.RA_d = ra_ref
+            pp_copy.dec_d = dec_ref
+            pp_copy.pos_angle_ref = pos_angle_ref
+            pp_copy.F_scale = F_scale
+
+            img_x, img_y, _ = img_stars.T
+
+            # Get image coordinates of catalog stars
+            ra_array, dec_array = self.getPairedStarsSkyPositions(img_x, img_y, pp_copy)
+
+            ra_catalog, dec_catalog, _ = catalog_stars.T
+
+            # Compute the sum of the angular separation
+            separation_sum = np.sum(angularSeparation(np.radians(ra_array), np.radians(dec_array), \
+                np.radians(ra_catalog), np.radians(dec_catalog))**2)
+
+
+            return separation_sum
+
+
 
         def _calcImageResidualsDistorsion(params, self, catalog_stars, img_stars, dimension):
             """ Calculates the differences between the stars on the image and catalog stars in image 
@@ -2181,12 +2212,19 @@ class PlateTool(object):
         #     img_stars, 'y'))
 
 
+
+        ### ASTROMETRIC PARAMETERS FIT ###
+
         # Initial parameters for the astrometric fit
         p0 = [self.platepar.RA_d, self.platepar.dec_d, self.platepar.pos_angle_ref, self.platepar.F_scale]
 
-        # Fit the astrometric parameters
+        # Fit the astrometric parameters using the reverse transform for reference        
         res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, args=(self, catalog_stars, img_stars),
             method='Nelder-Mead')
+
+        # # Fit the astrometric parameters using the forward transform for reference
+        # res = scipy.optimize.minimize(_calcSkyResidualsAstro, p0, args=(self, catalog_stars, img_stars),
+        #     method='Nelder-Mead')
 
         print(res)
 
@@ -2201,6 +2239,10 @@ class PlateTool(object):
         # Save the size of the image
         self.platepar.Y_res, self.platepar.X_res = self.current_ff.maxpixel.shape
 
+        ### ###
+
+
+        ### DISTORSION FIT ###
 
         # If there are more than 12 paired stars, fit the distortion parameters
         if len(self.paired_stars) > 12:
@@ -2264,6 +2306,8 @@ class PlateTool(object):
             print('Too few stars to fit the distorsion, only the astrometric parameters where fitted!')
 
 
+        ### ###
+
 
         ### Calculate the fit residuals for every fitted star ###
         
@@ -2279,7 +2323,7 @@ class PlateTool(object):
         print()
         print('Residuals')
         print('----------')
-        print(' No,   Img X,   Img Y, RA (deg), Dec (deg),    Mag,   Cat X,   Cat Y, Err asec,  Err px, Direction')
+        print(' No,   Img X,   Img Y, RA (deg), Dec (deg),    Mag,   Cat X,   Cat Y, Err amin,  Err px, Direction')
 
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
         for star_no, (cat_x, cat_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y, catalog_stars, \
@@ -2313,18 +2357,18 @@ class PlateTool(object):
 
             # Print out the residuals
             print('{:3d}, {:7.2f}, {:7.2f}, {:>8.3f}, {:>+9.3f}, {:+6.2}, {:7.2f}, {:7.2f}, {:8.2f}, {:7.2f}, {:+9.1f}'.format(star_no + 1, img_x, img_y, \
-                ra, dec, mag, cat_x, cat_y, 3600*angular_distance, distance, np.degrees(angle)))
+                ra, dec, mag, cat_x, cat_y, 60*angular_distance, distance, np.degrees(angle)))
 
 
-        mean_angular_error = 3600*np.mean([entry[4] for entry in residuals])
+        mean_angular_error = 60*np.mean([entry[4] for entry in residuals])
 
-        # If the average angular error is larger than 60 arcsec, report it in arc minutes
+        # If the average angular error is larger than 60 arc minutes, report it in degrees
         if mean_angular_error > 60:
             mean_angular_error /= 60
-            angular_error_label = 'arcmin'
+            angular_error_label = 'deg'
         
         else:
-            angular_error_label = 'arcsec'
+            angular_error_label = 'arcmin'
 
 
         print('Average error: {:.2f} px, {:.2f} {:s}'.format(np.mean([entry[3] for entry in residuals]), \
@@ -2351,16 +2395,16 @@ class PlateTool(object):
             res_y = img_y + res_scale*np.sin(angle)*distance
 
             # Plot the image residuals
-            plt.plot([img_x, res_x], [img_y, res_y], color='orange')
+            plt.plot([img_x, res_x], [img_y, res_y], color='orange', alpha=0.25)
 
             
             # Convert the angular distance from degrees to equivalent image pixels
             ang_dist_img = angular_distance*self.platepar.F_scale
             res_x = img_x + res_scale*np.cos(angle)*ang_dist_img
-            res_y = img_y + res_scale*np.sin(angle)*ang_dist_img        
+            res_y = img_y + res_scale*np.sin(angle)*ang_dist_img
             
             # Plot the sky residuals
-            plt.plot([img_x, res_x], [img_y, res_y], color='yellow')
+            plt.plot([img_x, res_x], [img_y, res_y], color='yellow', alpha=0.25)
 
 
         plt.draw()
