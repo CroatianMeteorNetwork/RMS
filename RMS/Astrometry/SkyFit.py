@@ -2223,6 +2223,7 @@ class PlateTool(object):
             method='Nelder-Mead')
 
         # # Fit the astrometric parameters using the forward transform for reference
+        #   WARNING: USING THIS MAKES THE FIT UNSTABLE
         # res = scipy.optimize.minimize(_calcSkyResidualsAstro, p0, args=(self, catalog_stars, img_stars),
         #     method='Nelder-Mead')
 
