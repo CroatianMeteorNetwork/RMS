@@ -2307,6 +2307,19 @@ class PlateTool(object):
             print('Too few stars to fit the distorsion, only the astrometric parameters where fitted!')
 
 
+        # Set the list of stars used for the fit to the platepar
+        fit_star_list = []
+        for img_coords, cat_coords in self.paired_stars:
+
+            # Compute the Julian date of the image
+            img_time = self.img_handle.currentTime()
+            jd = date2JD(*img_time)
+
+            # Store time, image coordinate x, y, intensity, catalog ra, dec, mag
+            fit_star_list.append([jd] + img_coords + cat_coords.tolist())
+
+        self.platepar.star_list = fit_star_list
+
         ### ###
 
 
