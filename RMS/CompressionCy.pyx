@@ -114,9 +114,6 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
                 fieldsum_indx = deinterlace_multiplier*n \
                     + (deinterlace_multiplier - 1)*((y + deinterlace_order)%2)
 
-                # Make sure that the fieldsum index is within the bounds of the array
-                fieldsum_indx = fieldsum_indx%fieldsum.shape[0]
-
                 # Sum intensity per every field
                 fieldsum[fieldsum_indx] += <unsigned long> pixel
 
