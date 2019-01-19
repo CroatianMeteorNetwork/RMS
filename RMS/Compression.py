@@ -261,7 +261,7 @@ class Compressor(multiprocessing.Process):
                 startTime = float(self.startTime1.value)
 
                 # Copy frames
-                frames = np.array(self.array1)
+                frames = self.array1
                 self.startTime1.value = 0
 
             else:
@@ -270,13 +270,13 @@ class Compressor(multiprocessing.Process):
                 startTime = float(self.startTime2.value)
 
                 # Copy frames
-                frames = np.array(self.array2)
+                frames = self.array2
                 self.startTime2.value = 0
 
             
             log.debug("Compressing frame block with start time at: {:s}".format(str(startTime)))
 
-            log.debug("memory copy: " + str(time.time() - t) + "s")
+            #log.debug("memory copy: " + str(time.time() - t) + "s")
             t = time.time()
             
             # Run the compression
