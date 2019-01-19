@@ -34,7 +34,7 @@ from RMS.Logger import initLogging
 
 from RMS.BufferedCapture import BufferedCapture
 from RMS.CaptureDuration import captureDuration
-from RMS.Compression import CompressorHandler
+from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
 from RMS.LiveViewer import LiveViewer
@@ -77,7 +77,7 @@ def resetSIGINT():
 
 
 
-def wait(duration, compressor_handle):
+def wait(duration, compressor):
     """ The function will wait for the specified time, or it will stop when Enter is pressed. If no time was
         given (in seconds), it will wait until Enter is pressed. 
 
@@ -97,31 +97,14 @@ def wait(duration, compressor_handle):
     
     while True:
 
-        # Wait until the compressor inits
-        if compressor_handle.compressor is None:
-            log.info('The compressor is None, waiting until it inits...')
-            time.sleep(5)
-            continue
-
         # Sleep for a short interval
         time.sleep(0.1)
 
 
-        # If the compressor has died, start it again
-        if not compressor_handle.compressor.is_alive():
-            log.info('The compressor has died, restarting it!')
-            try:
-                log.info('Terminating the old compressor...')
-                compressor_handle.compressor.terminate()
-                time.sleep(5)
-                
-                log.info('Restarting the compressor...')
-                compressor_handle.init_compressor()
-                compressor_handle.compressor.start()
-                log.info('Compressor restarted!')
-
-            except Exception as e:
-                log.info('Compressor restart failed with error:' + repr(e))
+        # If the compressor has died, restart capture
+        if not compressor.is_alive():
+            log.info('The compressor has died, restarting the capture!')
+            break
             
 
         # If some wait time was given, check if it passed
@@ -246,7 +229,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     live_view = LiveViewer(window_name='Maxpixel')
     
     # Initialize compression
-    compressor_handle = CompressorHandler(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, \
+    #compressor_handle = CompressorHandler(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, \
+    #    config, detector=detector, live_view=live_view, flat_struct=flat_struct)
+    compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, \
         config, detector=detector, live_view=live_view, flat_struct=flat_struct)
 
     
@@ -254,12 +239,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     bc.startCapture()
 
     # Init and start the compression
-    compressor = compressor_handle.init_compressor()
     compressor.start()
 
     
     # Capture until Ctrl+C is pressed
-    wait(duration, compressor_handle)
+    wait(duration, compressor)
         
     # If capture was manually stopped, end capture
     if STOP_CAPTURE:
