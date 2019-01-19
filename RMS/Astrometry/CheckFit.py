@@ -21,6 +21,7 @@ from RMS.Formats import StarCatalog
 from RMS.Formats import FFfile
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Astrometry.ApplyAstrometry import raDec2AltAz, raDecToCorrectedXYPP, XY2CorrectedRADecPP
+from RMS.Math import angularSeparation
 
 
 # Import Cython functions
@@ -30,7 +31,8 @@ from RMS.Astrometry.CyFunctions import matchStars, subsetCatalog, cyRaDecToCorre
 
 
 
-def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius, ret_nmatch=False):
+def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius, ret_nmatch=False, \
+    sky_coords=True):
     """ Match the image and catalog stars with the given astrometry solution and estimate the residuals 
         between them.
     
@@ -45,7 +47,9 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
 
     Keyword arguments:
         ret_nmatch: [bool] If True, the function returns the number of matched stars and the average 
-            deviation. False by defualt.
+            deviation. False by default.
+        sky_coords: [bool] If True, sky coordinate residuals in RA, dec will be used to compute the cost,
+            function, not image coordinates.
 
     Return:
         cost: [float] The cost function which weights the number of matched stars and the average deviation.
@@ -142,28 +146,67 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
         # plt.show()
 
 
-    # Extract all distances
-    global_dist_list = []
-    # level_list = []
-    # mag_list = []
-    for jd in matched_stars:
-        # matched_img_stars, matched_cat_stars, dist_list = matched_stars[jd]
 
-        _, _, dist_list = matched_stars[jd]
-        
-        global_dist_list += dist_list.tolist()
+    # If residuals on the image should be computed
+    if not sky_coords:
 
-        # # TEST
-        # level_list += matched_img_stars[:, 3].tolist()
-        # mag_list += matched_cat_stars[:, 2].tolist()
+        unit_label = 'px'
+
+        # Extract all distances
+        global_dist_list = []
+        # level_list = []
+        # mag_list = []
+        for jd in matched_stars:
+            # matched_img_stars, matched_cat_stars, dist_list = matched_stars[jd]
+
+            _, _, dist_list = matched_stars[jd]
+            
+            global_dist_list += dist_list.tolist()
+
+            # # TEST
+            # level_list += matched_img_stars[:, 3].tolist()
+            # mag_list += matched_cat_stars[:, 2].tolist()
 
 
 
-    # # Plot levels vs. magnitudes
-    # plt.scatter(mag_list, np.log10(level_list))
-    # plt.xlabel('Magnitude')
-    # plt.ylabel('Log10 level')
-    # plt.show()
+        # # Plot levels vs. magnitudes
+        # plt.scatter(mag_list, np.log10(level_list))
+        # plt.xlabel('Magnitude')
+        # plt.ylabel('Log10 level')
+        # plt.show()
+
+    # Compute the residuals on the sky
+    else:
+
+        unit_label = 'arcmin'
+
+        global_dist_list = []
+
+        # Go through all matched stars
+        for jd in matched_stars:
+
+            matched_img_stars, matched_cat_stars, dist_list = matched_stars[jd]
+
+            # Go through all stars on the image
+            for img_star_entry, cat_star_entry in zip(matched_img_stars, matched_cat_stars):
+
+                # Extract star coords
+                star_y = img_star_entry[0]
+                star_x = img_star_entry[1]
+                cat_ra = matched_cat_stars[0]
+                cat_dec = matched_cat_stars[1]
+
+                # Convert image coordinates to RA/Dec
+                _, star_ra, star_dec, _ = XY2CorrectedRADecPP([*jd2Date(jd)], [star_x], [star_y], [1], \
+                    platepar)
+
+                # Compute angular distance between the predicted and the catalog position
+                ang_dist = np.degrees(angularSeparation(np.radians(cat_ra), np.radians(cat_dec), \
+                    np.radians(star_ra[0]), np.radians(star_dec[0])))
+
+                # Store the angular separation in arc minutes
+                global_dist_list.append(ang_dist*60)
+
 
 
     # Number of matched stars
@@ -183,7 +226,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
     cost = (avg_dist**2)*(1.0/np.sqrt(n_matched + 1))
 
     print('Matched {:d} stars with radius of {:.2f} px'.format(n_matched, match_radius))
-    print('Avg dist', avg_dist)
+    print('Avg dist', avg_dist, unit_label)
     print('Cost:', cost)
     print('-----')
 
@@ -218,8 +261,8 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius):
     print('CHECK FIT GOODNESS:')
 
     # Match the stars and calculate the residuals
-    n_matched, avg_dist, cost, matched_stars = matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius,\
-        ret_nmatch=True)
+    n_matched, avg_dist, cost, matched_stars = matchStarsResiduals(config, platepar, catalog_stars, \
+        star_dict, match_radius, ret_nmatch=True)
 
 
 
@@ -312,11 +355,31 @@ def _calcImageResidualsDistorsion(params, config, platepar, catalog_stars, star_
     else:
         pp.y_poly_rev = params
 
-    print('{:s} distortion params:'.format(dimension))
+    print('{:s} reverse distortion params:'.format(dimension))
 
-    # Match stars and calculate image residuals
+    # Match stars and calculate the cost function using image coordinates
     return matchStarsResiduals(config, pp, catalog_stars, star_dict, match_radius)
 
+
+def _calcSkyResidualsDistorsion(params, config, platepar, catalog_stars, star_dict, match_radius, \
+        dimension):
+    """ Calculates the differences between the stars on the image and catalog stars in image coordinates with 
+        the given astrometrical solution. 
+    """
+
+    # Make a copy of the platepar
+    pp = copy.deepcopy(platepar)
+
+    if dimension == 'x':
+        pp.x_poly_fwd = params
+
+    else:
+        pp.y_poly_fwd = params
+
+    print('{:s} forward distortion params:'.format(dimension))
+
+    # Match stars and calculate the cost function using sky coordinates
+    return matchStarsResiduals(config, pp, catalog_stars, star_dict, match_radius, sky_coords=True)
 
 
 
