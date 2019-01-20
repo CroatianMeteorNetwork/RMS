@@ -139,7 +139,7 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
 
 
     # If the number of stacked image is less than 20% of the given images, stack without filtering
-    if n_stacked < 0.2*total_ff_files:
+    if filter_bright and (n_stacked < 0.2*total_ff_files):
         return stackFFs(dir_path, file_format, deinterlace=deinterlace, subavg=subavg, 
             filter_bright=False, flat_path=flat_path, file_list=file_list)
 
