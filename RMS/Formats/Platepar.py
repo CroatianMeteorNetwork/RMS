@@ -148,6 +148,9 @@ class Platepar(object):
 
         self.star_list = None
 
+        # Flag to indicate that the platepar was refined with CheckFit
+        self.auto_check_fit_refined = False
+
 
 
 

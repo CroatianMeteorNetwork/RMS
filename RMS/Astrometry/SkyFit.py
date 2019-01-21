@@ -1737,8 +1737,13 @@ class PlateTool(object):
         self.rotation_horizon = 0
         self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, self.rotation_horizon)
 
+        self.platepar.auto_check_fit_refined = False
+
+        # Indicate that this is the first fit of the platepar
         self.first_platepar_fit = True
 
+        # Reset paired stars
+        self.paired_stars = []
 
         if update_image:
             self.updateImage()
@@ -1873,7 +1878,7 @@ class PlateTool(object):
             
         self.img_handle.nextChunk()
 
-
+        # Reset paired stars
         self.paired_stars = []
 
         self.updateImage()
@@ -1891,7 +1896,7 @@ class PlateTool(object):
 
         self.img_handle.prevChunk()
 
-
+        # Reset paired stars
         self.paired_stars = []
 
         self.updateImage()
@@ -2319,6 +2324,10 @@ class PlateTool(object):
             fit_star_list.append([jd] + img_coords + cat_coords.tolist())
 
         self.platepar.star_list = fit_star_list
+
+
+        # Set the flag to indicate that the platepar was manually fitted
+        self.auto_check_fit_refined = False
 
         ### ###
 

@@ -714,6 +714,9 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False):
     print('Average deviation:', avg_dist)
 
 
+    # Mark the platepar to indicate that it was automatically refined with CheckFit
+    platepar.auto_check_fit_refined = True
+
     return platepar, True
     
 
