@@ -32,7 +32,7 @@ from RMS.Astrometry.CyFunctions import matchStars, subsetCatalog, cyRaDecToCorre
 
 
 def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius, ret_nmatch=False, \
-    sky_coords=True):
+    sky_coords=False):
     """ Match the image and catalog stars with the given astrometry solution and estimate the residuals 
         between them.
     
@@ -199,6 +199,8 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
                 # Convert image coordinates to RA/Dec
                 _, star_ra, star_dec, _ = XY2CorrectedRADecPP([jd2Date(jd)], [star_x], [star_y], [1], \
                     platepar)
+
+                print(jd, star_ra, star_dec, cat_ra, cat_dec)
 
                 # Compute angular distance between the predicted and the catalog position
                 ang_dist = np.degrees(angularSeparation(np.radians(cat_ra), np.radians(cat_dec), \
@@ -467,7 +469,7 @@ def photometryFit(config, matched_stars):
 
 
 
-def autoCheckFit(config, platepar, calstars_list):
+def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False):
     """ Attempts to refine the astrometry fit with the given stars and and initial astrometry parameters.
 
     Arguments:
@@ -475,6 +477,9 @@ def autoCheckFit(config, platepar, calstars_list):
         platepar: [Platepar structure] Initial astrometry parameters.
         calstars_list: [list] A list containing stars extracted from FF files. See RMS.Formats.CALSTARS for
             more details.
+
+    Keyword arguments:
+        distorsion_refinement: [bool] Whether the distorsion should be fitted as well. False by defualt.
     
     Return:
         (platepar, fit_status):
@@ -532,12 +537,13 @@ def autoCheckFit(config, platepar, calstars_list):
 
 
     # A list of matching radiuses to try, pairs of [radius, fit_distorsion_flag]
+    #   The distorsion will be fitted only if explicity requested
     min_radius = 0.5
-    radius_list = [[10, False], 
-                    [5, False], 
-                    [3, False], 
-                    [1.5, True], 
-                    [min_radius, True]]
+    radius_list = [[10, False and distorsion_refinement], 
+                    [5, False and distorsion_refinement], 
+                    [3, False and distorsion_refinement],
+                    [1.5, True and distorsion_refinement], 
+                    [min_radius, True and distorsion_refinement]]
 
     # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
     # in the same reagrd as the cost function)
@@ -560,7 +566,8 @@ def autoCheckFit(config, platepar, calstars_list):
         if avg_dist < config.dist_check_quick_threshold:
 
             # Use a reduced set of initial radius values
-            radius_list = [[1.5, True], [min_radius, True]]
+            radius_list = [[1.5, True and distorsion_refinement], [min_radius, \
+                True and distorsion_refinement]]
 
     ##########
 
@@ -771,7 +778,7 @@ if __name__ == "__main__":
 
 
     # Run the automatic astrometry fit
-    pp, fit_status = autoCheckFit(conf, platepar, calstars_list)
+    pp, fit_status = autoCheckFit(conf, platepar, calstars_list, distorsion_refinement=True)
 
     # If the fit suceeded, save the platepar
     if fit_status:
