@@ -193,14 +193,12 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
                 # Extract star coords
                 star_y = img_star_entry[0]
                 star_x = img_star_entry[1]
-                cat_ra = matched_cat_stars[0]
-                cat_dec = matched_cat_stars[1]
+                cat_ra = cat_star_entry[0]
+                cat_dec = cat_star_entry[1]
 
                 # Convert image coordinates to RA/Dec
                 _, star_ra, star_dec, _ = XY2CorrectedRADecPP([jd2Date(jd)], [star_x], [star_y], [1], \
                     platepar)
-
-                print(jd, star_ra, star_dec, cat_ra, cat_dec)
 
                 # Compute angular distance between the predicted and the catalog position
                 ang_dist = np.degrees(angularSeparation(np.radians(cat_ra), np.radians(cat_dec), \
