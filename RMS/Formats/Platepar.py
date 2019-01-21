@@ -352,6 +352,10 @@ class Platepar(object):
             self2.y_poly_rev = self.y_poly_rev.tolist()
             del self2.time
 
+            # For compatibility with old procedures, write the forward distorsion parameters as x, y
+            self2.x_poly = self.x_poly_fwd.tolist()
+            self2.y_poly = self.y_poly_fwd.tolist()
+
             out_str = json.dumps(self2, default=lambda o: o.__dict__, indent=4, sort_keys=True)
 
             with open(file_path, 'w') as f:
