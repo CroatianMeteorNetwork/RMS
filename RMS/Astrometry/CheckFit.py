@@ -197,7 +197,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
                 cat_dec = matched_cat_stars[1]
 
                 # Convert image coordinates to RA/Dec
-                _, star_ra, star_dec, _ = XY2CorrectedRADecPP([*jd2Date(jd)], [star_x], [star_y], [1], \
+                _, star_ra, star_dec, _ = XY2CorrectedRADecPP([jd2Date(jd)], [star_x], [star_y], [1], \
                     platepar)
 
                 # Compute angular distance between the predicted and the catalog position
@@ -629,6 +629,9 @@ def autoCheckFit(config, platepar, calstars_list):
         # Fit the lens distorsion parameters
         if fit_distorsion:
 
+
+            ### REVERSE DISTORSION POLYNOMIALS FIT ###
+
             # Fit the distortion parameters (X axis)
             res = scipy.optimize.minimize(_calcImageResidualsDistorsion, platepar.x_poly_rev, args=(config, \
                 platepar, catalog_stars, star_dict, match_radius, 'x'), method='Nelder-Mead', \
@@ -644,11 +647,6 @@ def autoCheckFit(config, platepar, calstars_list):
                 platepar.x_poly_rev = res.x
 
 
-            # Check if the platepar is good enough and do not estimate further parameters
-            if checkFitGoodness(config, platepar, catalog_stars, star_dict, min_radius):
-                return platepar, True
-
-
             # Fit the distortion parameters (Y axis)
             res = scipy.optimize.minimize(_calcImageResidualsDistorsion, platepar.y_poly_rev, args=(config, \
                 platepar,catalog_stars, star_dict, match_radius, 'y'), method='Nelder-Mead', \
@@ -662,6 +660,43 @@ def autoCheckFit(config, platepar, calstars_list):
 
             else:
                 platepar.y_poly_rev = res.x
+
+
+            ### ###
+
+
+            ### FORWARD DISTORSION POLYNOMIALS FIT ###
+
+            # Fit the distortion parameters (X axis)
+            res = scipy.optimize.minimize(_calcSkyResidualsDistorsion, platepar.x_poly_fwd, args=(config, \
+                platepar, catalog_stars, star_dict, match_radius, 'x'), method='Nelder-Mead', \
+                options={'fatol': fatol, 'xatol': 0.1})
+
+            print(res)
+
+            # If the fit was not successfull, stop further fitting
+            if not res.success:
+                return platepar, False
+
+            else:
+                platepar.x_poly_fwd = res.x
+
+
+            # Fit the distortion parameters (Y axis)
+            res = scipy.optimize.minimize(_calcSkyResidualsDistorsion, platepar.y_poly_fwd, args=(config, \
+                platepar,catalog_stars, star_dict, match_radius, 'y'), method='Nelder-Mead', \
+                options={'fatol': fatol, 'xatol': 0.1})
+
+            print(res)
+
+            # If the fit was not successfull, stop further fitting
+            if not res.success:
+                return platepar, False
+
+            else:
+                platepar.y_poly_fwd = res.x
+
+            ### ###
 
 
 
