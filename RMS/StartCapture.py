@@ -354,6 +354,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         # Get the detection results from the queue
         detection_results = detector.getResults()
 
+    else:
+        
+        detection_results = []
+
 
 
 
