@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import gc
 import time
 import logging
 
@@ -180,6 +181,10 @@ class Compressor(multiprocessing.Process):
         
         # Write the FF file
         FFfile.write(ff, self.data_dir, filename, fmt=self.config.ff_format)
+
+        # Remove FF file structure from memory
+        del ff
+        gc.collect()
         
         return filename
     
