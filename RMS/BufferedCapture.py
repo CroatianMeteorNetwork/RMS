@@ -23,6 +23,14 @@ from multiprocessing import Process, Event
 
 import cv2
 
+try:
+    from mem_top import mem_top
+    USE_MEMTOP = True
+except:
+    USE_MEMTOP = False
+
+
+
 from RMS.Misc import ping
 
 # Get the logger from the main module
@@ -399,6 +407,11 @@ class BufferedCapture(Process):
             
             # Switch the frame block buffer flags
             first = not first
+
+
+            # Log memory
+            if USE_MEMTOP:
+                log.debug(mem_top())
         
 
         log.info('Releasing video device...')

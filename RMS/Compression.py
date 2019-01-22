@@ -298,9 +298,9 @@ class Compressor(multiprocessing.Process):
             # Save the extracted intensitites per every field
             FieldIntensities.saveFieldIntensitiesBin(field_intensities, self.data_dir, filename)
 
-            # Log memory
-            if USE_MEMTOP:
-                log.debug(mem_top())
+            # # Log memory
+            # if USE_MEMTOP:
+            #     log.debug(mem_top())
 
 
             # Fully format the filename (this could not have been done before as the extractor will add

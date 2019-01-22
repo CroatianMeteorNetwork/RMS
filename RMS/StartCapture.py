@@ -99,7 +99,7 @@ def wait(duration, compressor):
     while True:
 
         # Sleep for a short interval
-        time.sleep(0.1)
+        time.sleep(1)
 
 
         # If the compressor has died, restart capture
