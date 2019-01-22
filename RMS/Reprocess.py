@@ -138,6 +138,11 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             FTPdetectinfo2UFOOrbitInput(night_data_dir, ftpdetectinfo_name, platepar_path)
 
 
+    else:
+        ff_detected = []
+        detector = None
+
+
 
     log.info('Plotting field sums...')
 
@@ -173,34 +178,39 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         log.info('Making flat image FAILED!')
 
 
-    # Make a CAL file if full CAMS compatibility is desired
-    if config.cams_code > 0:
-
-        log.info('Generating a CAMS FTPdetectinfo file...')
-
-        # Write the CAL file to disk
-        cal_file_name = writeCAL(night_data_dir, config, platepar)
-
-        # Load the FTPdetectinfo
-        cam_code, fps, meteor_list = readFTPdetectinfo(night_data_dir, ftpdetectinfo_name, ret_input_format=True)
-
-        # Write the CAL file in FTPdetectinfo
-        writeFTPdetectinfo(meteor_list, night_data_dir, ftpdetectinfo_name, night_data_dir, \
-            cam_code, fps, calibration=cal_file_name, celestial_coords_given=(platepar is not None))
-
 
     ### Add extra files to archive
-
-    # Add the platepar to the archive if it exists
-    if os.path.exists(platepar_path):
-        extra_files.append(platepar_path)
-
 
     # Add the config file to the archive too
     extra_files.append(os.path.join(os.getcwd(), '.config'))
 
 
+    # Add the platepar to the archive if it exists
+    if (not nodetect):
+        if os.path.exists(platepar_path):
+            extra_files.append(platepar_path)
+
     ### ###
+
+
+    # If the detection should be run
+    if (not nodetect):
+
+        # Make a CAL file if full CAMS compatibility is desired
+        if config.cams_code > 0:
+
+            log.info('Generating a CAMS FTPdetectinfo file...')
+
+            # Write the CAL file to disk
+            cal_file_name = writeCAL(night_data_dir, config, platepar)
+
+            # Load the FTPdetectinfo
+            cam_code, fps, meteor_list = readFTPdetectinfo(night_data_dir, ftpdetectinfo_name, ret_input_format=True)
+
+            # Write the CAL file in FTPdetectinfo
+            writeFTPdetectinfo(meteor_list, night_data_dir, ftpdetectinfo_name, night_data_dir, \
+                cam_code, fps, calibration=cal_file_name, celestial_coords_given=(platepar is not None))
+
 
 
     night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir, 
