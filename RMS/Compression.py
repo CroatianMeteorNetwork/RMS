@@ -181,10 +181,6 @@ class Compressor(multiprocessing.Process):
         
         # Write the FF file
         FFfile.write(ff, self.data_dir, filename, fmt=self.config.ff_format)
-
-        # Remove FF file structure from memory
-        del ff
-        gc.collect()
         
         return filename
     
