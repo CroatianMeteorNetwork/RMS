@@ -355,7 +355,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         detection_results = detector.getResults()
 
     else:
-        
+
         detection_results = []
 
 
@@ -374,7 +374,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # Delete detector backup files
-    detector.deleteBackupFiles()
+    if detector is not None:
+        detector.deleteBackupFiles()
 
 
     # If the capture was run for a limited time, run the upload right away
