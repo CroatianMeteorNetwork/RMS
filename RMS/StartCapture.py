@@ -226,8 +226,15 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Initialize buffered capture
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file)
 
+
     # Initialize the live image viewer
-    live_view = LiveViewer(window_name='Maxpixel')
+    if config.live_view_enable:
+        
+        live_view = LiveViewer(window_name='Maxpixel')
+
+    else:
+        live_view = None
+
     
     # Initialize compression
     #compressor_handle = CompressorHandler(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, \
@@ -280,11 +287,16 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     log.debug('Compression stopped')
 
-    # Stop the live viewer
-    log.debug('Stopping live viewer...')
-    live_view.stop()
-    del live_view
-    log.debug('Live view stopped')
+
+    if live_view is not None:
+
+        # Stop the live viewer
+        log.debug('Stopping live viewer...')
+
+        live_view.stop()
+        del live_view
+
+        log.debug('Live view stopped')
 
 
 

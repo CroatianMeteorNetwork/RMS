@@ -159,6 +159,8 @@ class Config:
         self.captured_dir = "CapturedFiles"
         self.archived_dir = "ArchivedFiles"
 
+        # Enable/disable showing maxpixel on the screen
+        self.live_view_enable = True
 
         ##### Upload
 
@@ -513,6 +515,11 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "mask"):
         config.mask_file = parser.get(section, "mask")
+
+
+    # Enable/disable showing maxpixel on the screen
+    if parser.has_option(section, "live_view_enable"):
+        config.live_view_enable = parser.getboolean(section, "live_view_enable")
 
 
 
