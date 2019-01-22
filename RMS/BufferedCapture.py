@@ -409,9 +409,9 @@ class BufferedCapture(Process):
             first = not first
 
 
-            # Log memory
-            if USE_MEMTOP:
-                log.debug(mem_top())
+            # # Log memory
+            # if USE_MEMTOP:
+            #     log.debug(mem_top())
         
 
         log.info('Releasing video device...')
