@@ -1216,6 +1216,9 @@ class InputTypeImages(object):
         # This type of input probably won't have any calstars files
         self.require_calstars = False
 
+        # Disctionary which holds the time of every frame, used for fast frame time lookup
+        self.uwo_png_dt_dict = {}
+
 
         ### Find images in the given folder ###
         img_types = ['.png', '.jpg', '.bmp']
@@ -1278,7 +1281,7 @@ class InputTypeImages(object):
         self.uwo_png_dt_list = None
 
 
-        # Check if the beginning time was given
+        # Check if the beginning time was given (it will be read from the PNG if the UWO format is given)
         if beginning_time is None:
             
             try:
@@ -1436,7 +1439,7 @@ class InputTypeImages(object):
 
             # Add the datetime of the frame to list of the UWO png is used
             if self.uwo_png_mode:
-                self.uwo_png_dt_list.append(self.currentFrameTime(dt_obj=True))
+                self.uwo_png_dt_list.append(self.currentFrameTime(frame_no=img_indx, dt_obj=True))
 
 
         self.current_fr_chunk_size = i
@@ -1486,7 +1489,7 @@ class InputTypeImages(object):
     
         Keyword arguments:
             avepixel: [bool] Does nothing, just for function interface consistency with other input types.
-            fr_no: [int] Load a specific frame. None by defualt, then the current frame will be loaded.
+            fr_no: [int] Load a specific frame. None by default, then the current frame will be loaded.
         """
 
 
@@ -1496,6 +1499,7 @@ class InputTypeImages(object):
 
         else:
             current_img_file = self.current_img_file
+            fr_no = self.current_frame
 
         # Get the current image
         frame = cv2.imread(os.path.join(self.dir_path, current_img_file), -1)
@@ -1515,7 +1519,14 @@ class InputTypeImages(object):
             ts = frame[0][6] + (frame[0][7] << 16)
             tu = frame[0][8] + (frame[0][9] << 16)
 
-            self.uwo_png_frame_time = unixTime2Date(ts, tu, dt_obj=True)
+
+            frame_dt = unixTime2Date(ts, tu, dt_obj=True)
+
+            self.uwo_png_frame_time = frame_dt
+
+            # Save the frame time of the current frame
+            if fr_no not in self.uwo_png_dt_dict:
+                self.uwo_png_dt_dict[fr_no] = frame_dt
 
 
         # Bin the frame
@@ -1588,18 +1599,45 @@ class InputTypeImages(object):
 
 
 
-    def currentFrameTime(self, dt_obj=False):
+    def currentFrameTime(self, frame_no=None, dt_obj=False):
         """ Return the time of the frame. """
+
+        if frame_no is None:
+            frame_no = self.current_frame
+
 
         # If the UWO png is used, return the time read from the PNG
         if self.uwo_png_mode:
+
+            # If the frame number is not given, return the time of the current frame
+            if frame_no is None:
+
+                dt = self.uwo_png_frame_time
+
+
+            # Otherwise, load the frame time
+            else:
+
+                # If the frame number is not in the dictionary, load the frame and read the time from it
+                if frame_no not in self.uwo_png_dt_dict:
+
+                    current_frame_backup = self.current_frame
+
+                    # Load the time from the given frame
+                    self.loadFrame(fr_no=frame_no)
+
+                    # Load back the current frame
+                    self.loadFrame(fr_no=current_frame_backup)
+                    
+
+                # Read the frame time from the dictionary
+                dt = self.uwo_png_dt_dict[frame_no]
             
-            dt = self.uwo_png_frame_time
 
         else:
 
             # Compute the datetime of the current frame
-            dt = self.beginning_datetime + datetime.timedelta(seconds=self.current_frame/self.fps)
+            dt = self.beginning_datetime + datetime.timedelta(seconds=frame_no/self.fps)
             
 
 
