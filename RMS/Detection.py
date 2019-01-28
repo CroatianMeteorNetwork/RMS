@@ -1609,8 +1609,16 @@ if __name__ == "__main__":
         # Set the first image handle as the main one
         img_handle_main = img_handle_list[0]
 
-        # Set the main directory to be the parent directory of all files
-        main_dir = os.path.abspath(os.path.join(img_handle_main.dir_path, os.pardir))
+
+        # If folders with images are gicen, dump the detections in the parent directory
+        if img_handle_main.input_type == 'images':
+            
+            # Set the main directory to be the parent directory of all files
+            main_dir = os.path.abspath(os.path.join(img_handle_main.dir_path, os.pardir))
+
+        # For all else, dump detections into the directory with the data file
+        else:
+            main_dir = img_handle_main.dir_path
 
 
 
