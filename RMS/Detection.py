@@ -1609,6 +1609,9 @@ if __name__ == "__main__":
         # Set the first image handle as the main one
         img_handle_main = img_handle_list[0]
 
+        # Set the main directory to be the parent directory of all files
+        main_dir = os.path.abspath(os.path.join(img_handle_main.dir_path, os.pardir))
+
 
 
     else:
@@ -1638,8 +1641,10 @@ if __name__ == "__main__":
             img_handle_list.append(img_handle_main)
 
 
+        # Set the main directory to the the given input directory
+        main_dir = dir_path_input
 
-    dir_path = img_handle_main.dir_path
+
 
     # Check if the output directory was given. If not, the detection will be saved in the input directory
     if cml_args.outdir:
@@ -1649,11 +1654,11 @@ if __name__ == "__main__":
         mkdirP(out_dir)
 
     else:
-        out_dir = dir_path
+        out_dir = main_dir
 
 
     # Load mask, dark, flat
-    mask, dark, flat_struct = loadImageCalibration(dir_path, config, dtype=img_handle_main.ff.dtype, \
+    mask, dark, flat_struct = loadImageCalibration(main_dir, config, dtype=img_handle_main.ff.dtype, \
         byteswap=img_handle_main.byteswap)
 
 
