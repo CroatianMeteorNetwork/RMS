@@ -504,11 +504,18 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
                 print(stripe.nonzero())
                 print(xs, ys, zs)
 
-        
-        # Flatten the arrays
-        xs_array = np.concatenate(xs_array)
-        ys_array = np.concatenate(ys_array)
-        zs_array = np.concatenate(zs_array)
+
+        if len(xs_array) > 0:
+            
+            # Flatten the arrays
+            xs_array = np.concatenate(xs_array)
+            ys_array = np.concatenate(ys_array)
+            zs_array = np.concatenate(zs_array)
+
+        else:
+            xs_array = np.array(xs_array)
+            ys_array = np.array(ys_array)
+            zs_array = np.array(zs_array)
 
 
         return xs_array, ys_array, zs_array
