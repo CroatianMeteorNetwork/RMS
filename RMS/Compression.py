@@ -303,17 +303,17 @@ class Compressor(multiprocessing.Process):
             # if USE_MEMTOP:
             #     log.debug(mem_top())
 
-
-            # Fully format the filename (this could not have been done before as the extractor will add
-            # the FR prefix)
-            filename = "FF_" + filename + "." + self.config.ff_format
-
             # Run the extractor
             if self.config.enable_fireball_detection:
                 extractor = Extractor(self.config, self.data_dir)
                 extractor.start(frames, compressed, filename)
 
                 log.debug('Extractor started for: ' + filename)
+
+
+            # Fully format the filename (this could not have been done before as the extractor has to add
+            # the FR prefix to the given file name)
+            filename = "FF_" + filename + "." + self.config.ff_format
 
 
             # Run the detection on the file, if the detector handle was given
