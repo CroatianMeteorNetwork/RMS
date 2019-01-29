@@ -471,7 +471,7 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, lat, lon, Ho, X_res
         RA_d: [float] Reference right ascension of the image centre (degrees).
         dec_d: [float] Reference declination of the image centre (degrees).
         pos_angle_ref: [float] Field rotation parameter (degrees).
-        F_scale: [float] Sum of image scales per each image axis (arcsec per px).
+        F_scale: [float] Image scale (px/deg).
         mag_0: [float] Magnitude calibration equation parameter (slope).
         mag_lev: [float] Magnitude calibration equation parameter (intercept).
         x_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward X axis polynomial parameters.
@@ -581,7 +581,7 @@ def raDecToCorrectedXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_
         dec_d: [float] Declination of the FOV centre (degrees).
         ref_jd: [float] Reference Julian date from platepar.
         pos_angle_ref: [float] Rotation from the celestial meridial (degrees).
-        F_scale: [float] Sum of image scales per each image axis (arcsec per px).
+        F_scale: [float] Image scale (px/deg).
         x_poly_rev: [ndarray float] Distorsion polynomial in X direction for reverse mapping.
         y_poly_rev: [ndarray float] Distorsion polynomail in Y direction for reverse mapping.
 

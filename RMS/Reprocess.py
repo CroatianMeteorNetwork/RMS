@@ -178,25 +178,25 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         log.info('Making flat image FAILED!')
 
 
-
     ### Add extra files to archive
 
     # Add the config file to the archive too
     extra_files.append(os.path.join(os.getcwd(), '.config'))
 
-
     # Add the platepar to the archive if it exists
     if (not nodetect):
+
         if os.path.exists(platepar_path):
             extra_files.append(platepar_path)
 
     ### ###
 
 
+
     # If the detection should be run
     if (not nodetect):
 
-        # Make a CAL file if full CAMS compatibility is desired
+        # Make a CAL file and a special CAMS FTpdetectinfo if full CAMS compatibility is desired
         if config.cams_code > 0:
 
             log.info('Generating a CAMS FTPdetectinfo file...')
@@ -204,12 +204,31 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             # Write the CAL file to disk
             cal_file_name = writeCAL(night_data_dir, config, platepar)
 
-            # Load the FTPdetectinfo
-            cam_code, fps, meteor_list = readFTPdetectinfo(night_data_dir, ftpdetectinfo_name, ret_input_format=True)
 
-            # Write the CAL file in FTPdetectinfo
-            writeFTPdetectinfo(meteor_list, night_data_dir, ftpdetectinfo_name, night_data_dir, \
-                cam_code, fps, calibration=cal_file_name, celestial_coords_given=(platepar is not None))
+            cams_code_formatted = "{:06d}".format(int(config.cams_code))
+
+            # Load the FTPdetectinfo
+            _, fps, meteor_list = readFTPdetectinfo(night_data_dir, ftpdetectinfo_name, \
+                ret_input_format=True)
+
+            # Replace the camera code with the CAMS code
+            for met in meteor_list:
+
+                # Replace the station name and the FF file format
+                ff_name = met[0]
+                ff_name = ff_name.replace('.fits', '.bin')
+                ff_name = ff_name.replace(config.stationID, cams_code_formatted)
+                met[0] = ff_name
+
+                # Replace the station name
+                met[1] = cams_code_formatted
+
+
+            # Write the CAMS compatible FTPdetectinfo file
+            writeFTPdetectinfo(meteor_list, night_data_dir, \
+                ftpdetectinfo_name.replace(config.stationID, cams_code_formatted),\
+                night_data_dir, cams_code_formatted, fps, calibration=cal_file_name, \
+                celestial_coords_given=(platepar is not None))
 
 
 

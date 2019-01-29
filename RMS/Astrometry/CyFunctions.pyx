@@ -315,7 +315,7 @@ def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, \
         az_centre: [float] Azimuth of the FOV centre (degrees).
         alt_centre: [float] Altitude of the FOV centre (degrees).
         pos_angle_ref: [float] Rotation from the celestial meridial (degrees).
-        F_scale: [float] Sum of image scales per each image axis (arcsec per px).
+        F_scale: [float] Image scale (px/deg).
         x_poly_rev: [ndarray float] Distorsion polynomial in X direction for reverse mapping.
         y_poly_rev: [ndarray float] Distorsion polynomail in Y direction for reverse mapping.
     
