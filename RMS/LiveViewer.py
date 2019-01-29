@@ -118,6 +118,9 @@ class LiveViewer(multiprocessing.Process):
             screen_w = root.winfo_screenwidth()
             screen_h = root.winfo_screenheight()
 
+            root.destroy()
+            del root
+
             # If the screen is smaller than the image, resize the image
             if (screen_h < img.shape[0]) or (screen_w < img.shape[1]):
 

@@ -1,10 +1,10 @@
-gitpython==2.1.8
+gitpython>=2.1.8
 paramiko>=2.4.2
-numpy==1.13.3
+numpy>=1.13.3
 matplotlib==2.1.1
-pyephem==3.7.6.0
-cython==0.27.3
-scipy==1.0.0
+pyephem>=3.7.6.0
+cython>=0.27.3
+scipy>=1.0.0
 Pillow==4.3.0
 astropy==2.0.3
 mem_top

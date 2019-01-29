@@ -159,6 +159,8 @@ class Config:
         self.captured_dir = "CapturedFiles"
         self.archived_dir = "ArchivedFiles"
 
+        # Enable/disable showing maxpixel on the screen
+        self.live_view_enable = True
 
         ##### Upload
 
@@ -185,6 +187,9 @@ class Config:
         self.extra_compile_args = ["-O3"]
         
         ##### FireballDetection
+
+        self.enable_fireball_detection = True
+
         self.f = 16                    # subsampling factor
         self.max_time = 25             # maximum time for line finding
         
@@ -512,6 +517,11 @@ def parseCapture(config, parser):
         config.mask_file = parser.get(section, "mask")
 
 
+    # Enable/disable showing maxpixel on the screen
+    if parser.has_option(section, "live_view_enable"):
+        config.live_view_enable = parser.getboolean(section, "live_view_enable")
+
+
 
 def parseUpload(config, parser):
     section = "Upload"
@@ -582,6 +592,9 @@ def parseFireballDetection(config, parser):
     
     if not parser.has_section(section):
         return
+
+    if parser.has_option(section, "enable_fireball_detection"):
+        config.enable_fireball_detection = parser.getboolean(section, "enable_fireball_detection")
     
     if parser.has_option(section, "subsampling_size"):
         config.f = parser.getint(section, "subsampling_size")
