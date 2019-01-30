@@ -2492,6 +2492,11 @@ if __name__ == '__main__':
             config_file = os.path.abspath(cml_args.config[0].replace('"', ''))
 
 
+        if config_file is None:
+            print('The config file could not be found!')
+            sys.exit()
+
+
 
         print('Loading config file:', config_file)
 
