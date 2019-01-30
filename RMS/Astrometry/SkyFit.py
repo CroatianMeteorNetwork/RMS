@@ -91,7 +91,7 @@ class FOVinputDialog(object):
         self.parent = parent
 
         # Set initial angle values
-        self.azim = self.alt = 0
+        self.azim = self.alt, self.rot = 0
 
         self.top = tkinter.Toplevel(parent)
 
