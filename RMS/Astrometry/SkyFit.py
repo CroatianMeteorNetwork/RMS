@@ -881,6 +881,10 @@ class PlateTool(object):
             else:
                 self.key_increment += 1.0
 
+            # Don't allow the increment to be larger than 20
+            if self.key_increment > 20:
+                self.key_increment = 20
+
             self.updateImage()
 
         elif event.key == '-':
@@ -891,6 +895,10 @@ class PlateTool(object):
                 self.key_increment -= 0.1
             else:
                 self.key_increment -= 1.0
+
+            # Don't allow the increment to be smaller than 0
+            if self.key_increment <= 0:
+                self.key_increment = 0.01
             
             self.updateImage()
 
