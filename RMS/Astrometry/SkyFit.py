@@ -98,7 +98,7 @@ class FOVinputDialog(object):
         # Bind the Enter key to run the verify function
         self.top.bind('<Return>', self.verify)
 
-        tkinter.Label(self.top, text="FOV centre (degrees)").grid(row=0, columnspan=2)
+        tkinter.Label(self.top, text="FOV centre (degrees) \nAzim +E of due N\nRotation from vertical").grid(row=0, columnspan=2)
 
         azim_label = tkinter.Label(self.top, text='Azim = ')
         azim_label.grid(row=1, column=0)
@@ -111,8 +111,14 @@ class FOVinputDialog(object):
         self.altitude = tkinter.Entry(self.top)
         self.altitude.grid(row=2, column=1)
 
+        rot_label = tkinter.Label(self.top, text='Rotation  =')
+        rot_label.grid(row=3, column=0)
+        self.rotation = tkinter.Entry(self.top)
+        self.rotation.grid(row=3, column=1)
+        self.rotation.insert(0, '0')
+
         b = tkinter.Button(self.top, text="OK", command=self.verify)
-        b.grid(row=3, columnspan=2)
+        b.grid(row=4, columnspan=2)
 
 
     def verify(self, event=None):
@@ -120,23 +126,24 @@ class FOVinputDialog(object):
 
         try:
             # Read values
-            self.azim = float(self.azimuth.get())
+            self.azim = float(self.azimuth.get())%360
             self.alt  = float(self.altitude.get())
+            self.rot = float(self.rotation.get())%360
 
             # Check that the values are within the bounds
-            if ((self.azim < 0) and (self.azim > 360)) or ((self.alt < 0) or (self.alt > 90)):
-                messagebox.showerror(title='Range error', message='The azimuth or altitude are not within the limits!')
+            if (self.alt < 0) or (self.alt > 90):
+                messagebox.showerror(title='Range error', message='The altitude is not within the limits!')
             else:
                 self.top.destroy()
 
         except:
-            messagebox.showerror(title='Range error', message='The azimuth or altitude are not within the limits!')
+            messagebox.showerror(title='Range error', message='Please enter floating point numbers, not text!')
 
 
     def getAltAz(self):
         """ Returns inputed FOV centre. """
 
-        return self.azim, self.alt
+        return self.azim, self.alt, self.rot
 
 
 
@@ -888,8 +895,14 @@ class PlateTool(object):
 
             if self.key_increment <= 0.091:
                 self.key_increment += 0.01
-            else:
+            elif self.key_increment <= 0.91:
                 self.key_increment += 0.1
+            else:
+                self.key_increment += 1.0
+
+            # Don't allow the increment to be larger than 20
+            if self.key_increment > 20:
+                self.key_increment = 20
 
             self.updateImage()
 
@@ -897,8 +910,14 @@ class PlateTool(object):
             
             if self.key_increment <= 0.11:
                 self.key_increment -= 0.01
-            else:
+            elif self.key_increment <= 1.11:
                 self.key_increment -= 0.1
+            else:
+                self.key_increment -= 1.0
+
+            # Don't allow the increment to be smaller than 0
+            if self.key_increment <= 0:
+                self.key_increment = 0.01
             
             self.updateImage()
 
@@ -906,11 +925,14 @@ class PlateTool(object):
         # Enter FOV centre
         elif event.key == 'v':
 
-            self.platepar.RA_d, self.platepar.dec_d = self.getFOVcentre()
+            self.platepar.RA_d, self.platepar.dec_d, self.rotation_horizon = self.getFOVcentre()
             
             # Recalculate reference alt/az
             self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.JD, \
                 self.platepar.lon, self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d)
+
+            # Compute the position angle
+            self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, self.rotation_horizon)
             
             self.updateImage()
 
@@ -1595,7 +1617,7 @@ class PlateTool(object):
         root.withdraw()
         d = FOVinputDialog(root)
         root.wait_window(d.top)
-        self.azim_centre, self.alt_centre = d.getAltAz()
+        self.azim_centre, self.alt_centre, rot_horizontal = d.getAltAz()
 
         root.destroy()
 
@@ -1620,7 +1642,7 @@ class PlateTool(object):
             time_data, [self.azim_centre], [self.alt_centre])
 
 
-        return ra_data[0], dec_data[0]
+        return ra_data[0], dec_data[0], rot_horizontal
 
 
 
@@ -1724,7 +1746,7 @@ class PlateTool(object):
 
 
         # Get reference RA, Dec of the image centre
-        self.platepar.RA_d, self.platepar.dec_d = self.getFOVcentre()
+        self.platepar.RA_d, self.platepar.dec_d, self.rotation_horizon = self.getFOVcentre()
 
         # Recalculate reference alt/az
         self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.JD, \
@@ -1733,8 +1755,7 @@ class PlateTool(object):
         # Check that the calibration parameters are within the nominal range
         self.checkParamRange()
 
-        # Compute the position angle, assuming that the rotation wrt horizon is 0
-        self.rotation_horizon = 0
+        # Compute the position angle
         self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, self.rotation_horizon)
 
         self.platepar.auto_check_fit_refined = False
