@@ -876,8 +876,10 @@ class PlateTool(object):
 
             if self.key_increment <= 0.091:
                 self.key_increment += 0.01
-            else:
+            elif self.key_increment <= 0.91:
                 self.key_increment += 0.1
+            else:
+                self.key_increment += 1.0
 
             self.updateImage()
 
@@ -885,8 +887,10 @@ class PlateTool(object):
             
             if self.key_increment <= 0.11:
                 self.key_increment -= 0.01
-            else:
+            elif self.key_increment <= 1.11:
                 self.key_increment -= 0.1
+            else:
+                self.key_increment -= 1.0
             
             self.updateImage()
 
