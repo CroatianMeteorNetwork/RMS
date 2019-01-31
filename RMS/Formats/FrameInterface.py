@@ -104,22 +104,36 @@ class FFMimickInterface(object):
         # Get the maximum values
         self.maxpixel = np.max([self.maxpixel, frame], axis=0)
 
-        # Compute the running average
-        self.avepixel += frame.astype(np.float64)/(self.nframes - 1)
-        self.stdpixel += (frame.astype(np.float64)**2)/(self.nframes - 2)
+        # If there are less than 3 frames, don't compute the std, compute simplified average
+        if self.nframes < 3:
+
+            self.avepixel += frame.astype(np.float64)/self.nframes
+
+
+        # If there are 3 or more frames, compute the max subtracted average and stddev
+        else:
+            
+            # Compute the running average
+            self.avepixel += frame.astype(np.float64)/(self.nframes - 1)
+
+            # Add frame values for standard deviation computation
+            self.stdpixel += (frame.astype(np.float64)**2)/(self.nframes - 2)
 
 
     def finish(self):
         """ Finish making an FF structure. """
 
-        # Remove the contribution of the maxpixel to the avepixel
-        self.avepixel -= self.maxpixel.astype(np.float64)/(self.nframes - 1)
-        
+        # If there are 3 or more frames, compute the max subtracted average and stddev
+        if self.nframes >= 3:
 
-        # Compute the standard deviation
-        self.stdpixel -= (self.maxpixel.astype(np.float64)**2)/(self.nframes - 2)
-        self.stdpixel -= self.avepixel**2
-        self.stdpixel = np.sqrt(self.stdpixel)
+            # Remove the contribution of the maxpixel to the avepixel
+            self.avepixel -= self.maxpixel.astype(np.float64)/(self.nframes - 1)
+            
+
+            # Compute the standard deviation
+            self.stdpixel -= (self.maxpixel.astype(np.float64)**2)/(self.nframes - 2)
+            self.stdpixel -= self.avepixel**2
+            self.stdpixel = np.sqrt(self.stdpixel)
 
         # Make sure there are no zeros in standard deviation
         self.stdpixel[self.stdpixel == 0] = 1
@@ -569,6 +583,9 @@ class InputTypeVideo(object):
         self.nrows = int(self.cap.get(4))
         self.ncols = int(self.cap.get(3))
 
+        print('FPS:', self.fps)
+        print('Total frames:', self.total_frames)
+
 
         # Set the number of frames to be used for averaging and maxpixels
         self.fr_chunk_no = 256
@@ -656,6 +673,11 @@ class InputTypeVideo(object):
         # Init making the FF structure
         ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, frames_to_read, np.uint8)
 
+        # If there are no frames to read, return an empty array
+        if frames_to_read == 0:
+            print('There are no frames to read!')
+            return ff_struct_fake
+
         # Load the chunk of frames
         for i in range(frames_to_read):
 
@@ -675,7 +697,7 @@ class InputTypeVideo(object):
         # Finish making the fake FF file
         ff_struct_fake.finish()
 
-
+        print(i)
         self.current_fr_chunk_size = i + 1
 
 
@@ -1171,6 +1193,9 @@ class InputTypeImages(object):
             print('Using FPS:', self.fps)
 
 
+        print('Total frames:', self.total_frames)
+
+
 
     def nextChunk(self):
         """ Go to the next frame chunk. """
@@ -1240,7 +1265,7 @@ class InputTypeImages(object):
             img_indx = first_frame + i
 
             # Stop the loop if the ends of images has been reached
-            if img_indx >= self.total_frames - 1:
+            if img_indx >= self.total_frames:
                 break
 
             # Load the image
