@@ -348,6 +348,8 @@ class PlateTool(object):
 
         self.ax.figure.canvas.mpl_connect('key_press_event', self.onKeyPress)
 
+        # Get the figure manager
+        self.figure_manager = plt.get_current_fig_manager()
 
 
     def onMousePress(self, event):
@@ -360,6 +362,10 @@ class PlateTool(object):
 
     def onMouseRelease(self, event):
         """ Called when the mouse click is released. """
+
+        # Do nothing if some button on the toolbar is active (e.g. zoom, move)
+        if self.figure_manager.toolbar.mode:
+            return None
 
         # Call the same function for mouse movements to update the variables in the background
         self.onMouseMotion(event)
