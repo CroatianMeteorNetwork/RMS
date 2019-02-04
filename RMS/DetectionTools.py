@@ -41,6 +41,8 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
         mask, dark, flat_struct: [tuple of ndarrays]
     """
 
+    mask_path = None
+    mask = None
 
     # Try loading the mask
     if os.path.exists(os.path.join(dir_path, config.mask_file)):
@@ -50,8 +52,9 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
     elif os.path.exists(config.mask_file):
         mask_path = os.path.abspath(config.mask_file)
 
-    # Load the dark
-    mask = MaskImage.loadMask(mask_path)
+    # Load the mask if given
+    if mask_path:
+        mask = MaskImage.loadMask(mask_path)
 
     if mask is not None:
         print('Loaded mask:', mask_path)
