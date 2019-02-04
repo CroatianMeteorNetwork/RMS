@@ -294,7 +294,7 @@ if __name__ == "__main__":
         upload_manager.start()
 
         # Add file for upload
-        print('Adding file on upload list: ' + archive_name)
+        print('Adding file to upload list: ' + archive_name)
         upload_manager.addFiles([archive_name])
 
         # Stop the upload manager
