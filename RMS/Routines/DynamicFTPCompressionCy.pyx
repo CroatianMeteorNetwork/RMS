@@ -95,23 +95,28 @@ cdef class FFMimickInterface:
     cpdef finish(self):
         """ Finish making an FF structure. """
 
-        # Finish the FF only if there are more than 3 frames
+        # If there are less than 3 frames, don't subtract the max from average
         if self.nframes < 3:
-            return False
 
-        # Remove the contribution of the maxpixel to the avepixel
-        self.acc -= self.maxpixel
+            # Compute normal average
+            self.avepixel = self.acc//self.nframes
 
-        self.avepixel = self.acc//(self.nframes - 1)
-        #self.avepixel = self.acc//self.nframes
+            # Don't compute the standard deviation
+            self.stdpixel *= 0
 
 
-        # Compute the standard deviation
-        self.stdpixel -= (self.maxpixel.astype(np.uint64))**2
-        self.stdpixel -= self.acc*self.avepixel
-        
-        self.stdpixel  = np.sqrt(self.stdpixel/(self.nframes - 2))
-        #self.stdpixel  = np.sqrt(self.stdpixel//(self.nframes - 1))
+        else:
+            
+            # Remove the contribution of the maxpixel to the avepixel
+            self.acc -= self.maxpixel
+
+            self.avepixel = self.acc//(self.nframes - 1)
+            
+            # Compute the max subtracted standard deviation
+            self.stdpixel -= (self.maxpixel.astype(np.uint64))**2
+            self.stdpixel -= self.acc*self.avepixel
+            self.stdpixel  = np.sqrt(self.stdpixel/(self.nframes - 2))
+
 
         # Make sure there are no zeros in standard deviation
         self.stdpixel[self.stdpixel == 0] = 1

@@ -17,6 +17,7 @@ import RMS.ConfigReader as cr
 from RMS.DownloadPlatepar import downloadNewPlatepar
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteorsDirectory, saveDetections
 from RMS.Formats.CAL import writeCAL
+from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats import CALSTARS
 from RMS.UploadManager import UploadManager
@@ -89,8 +90,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         if detection_results is None:
 
             # Run detection on the given directory
-            calstars_name, ftpdetectinfo_name, ff_detected, detector = detectStarsAndMeteorsDirectory(night_data_dir, \
-                config)
+            calstars_name, ftpdetectinfo_name, ff_detected, \
+                detector = detectStarsAndMeteorsDirectory(night_data_dir, config)
 
         # Otherwise, save detection results
         else:
@@ -137,6 +138,11 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             FTPdetectinfo2UFOOrbitInput(night_data_dir, ftpdetectinfo_name, platepar_path)
 
 
+    else:
+        ff_detected = []
+        detector = None
+
+
 
     log.info('Plotting field sums...')
 
@@ -154,7 +160,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     log.info('Making a flat...')
 
-    # Make a new flat field
+    # Make a new flat field image
     flat_img = makeFlat(night_data_dir, config)
 
     # If making flat was sucessfull, save it
@@ -172,23 +178,58 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         log.info('Making flat image FAILED!')
 
 
-    # Make a CAL file if full CAMS compatibility is desired
-    if config.cams_code > 0:
-        writeCAL(night_data_dir, config, platepar)
-
-
     ### Add extra files to archive
-
-    # Add the platepar to the archive if it exists
-    if os.path.exists(platepar_path):
-        extra_files.append(platepar_path)
-
 
     # Add the config file to the archive too
     extra_files.append(os.path.join(os.getcwd(), '.config'))
 
+    # Add the platepar to the archive if it exists
+    if (not nodetect):
+
+        if os.path.exists(platepar_path):
+            extra_files.append(platepar_path)
 
     ### ###
+
+
+
+    # If the detection should be run
+    if (not nodetect):
+
+        # Make a CAL file and a special CAMS FTpdetectinfo if full CAMS compatibility is desired
+        if config.cams_code > 0:
+
+            log.info('Generating a CAMS FTPdetectinfo file...')
+
+            # Write the CAL file to disk
+            cal_file_name = writeCAL(night_data_dir, config, platepar)
+
+
+            cams_code_formatted = "{:06d}".format(int(config.cams_code))
+
+            # Load the FTPdetectinfo
+            _, fps, meteor_list = readFTPdetectinfo(night_data_dir, ftpdetectinfo_name, \
+                ret_input_format=True)
+
+            # Replace the camera code with the CAMS code
+            for met in meteor_list:
+
+                # Replace the station name and the FF file format
+                ff_name = met[0]
+                ff_name = ff_name.replace('.fits', '.bin')
+                ff_name = ff_name.replace(config.stationID, cams_code_formatted)
+                met[0] = ff_name
+
+                # Replace the station name
+                met[1] = cams_code_formatted
+
+
+            # Write the CAMS compatible FTPdetectinfo file
+            writeFTPdetectinfo(meteor_list, night_data_dir, \
+                ftpdetectinfo_name.replace(config.stationID, cams_code_formatted),\
+                night_data_dir, cams_code_formatted, fps, calibration=cal_file_name, \
+                celestial_coords_given=(platepar is not None))
+
 
 
     night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir, 

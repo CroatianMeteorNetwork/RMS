@@ -1,0 +1,37 @@
+package:
+  name: rms
+  version: "0.1.0"
+
+source:
+  git_rev: v0.1.0
+  git_url: https://github.com/CroatianMeteorNetwork/RMS
+
+requirements:
+  host:
+    - python
+    - gitpython
+    - cython
+    - numpy
+    - scipy
+    - matplotlib
+    - paramiko
+    - pyephem
+    - astropy
+    - opencv
+    - setuptools
+  run:
+    - python
+    - gitpython
+    - cython
+    - numpy
+    - scipy
+    - matplotlib
+    - paramiko
+    - pyephem
+    - astropy
+    - opencv
+
+about:
+  home: https://gmn.duckdns.org/
+  license: MIT
+  license_file: LICENSE

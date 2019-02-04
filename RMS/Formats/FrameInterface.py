@@ -67,72 +67,6 @@ def computeFramesToRead(read_nframes, total_frames, fr_chunk_no, current_frame_c
 
 
 
-# class FFMimickInterface(object):
-#     def __init__(self, nrows, ncols, dtype):
-#         """ Structure which is used to make FF file format data. It mimicks the interface of an FF structure. """
-
-#         self.nrows = nrows
-#         self.ncols = ncols
-#         self.dtype = dtype
-
-#         # Init the empty structures
-#         self.maxpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=self.dtype)
-#         self.acc = np.zeros(shape=(self.nrows, self.ncols), dtype=np.uint64)
-#         self.stdpixel = np.zeros(shape=(self.nrows, self.ncols), dtype=np.uint64)
-
-#         self.nframes = 0
-
-#         # False if dark and flat weren't applied, True otherwise (False be default)
-#         self.calibrated = False
-
-
-#     def addFrame(self, frame):
-#         """ Add raw frame for computation of FF data. """
-
-#         # Get the maximum values
-#         self.maxpixel = np.fmax(self.maxpixel, frame)
-
-#         frame_conv = frame.astype(np.uint64)
-
-#         self.acc += frame_conv
-#         self.stdpixel += frame_conv**2
-
-#         self.nframes += 1
-
-
-#     def finish(self):
-#         """ Finish making an FF structure. """
-
-#         # Remove the contribution of the maxpixel to the avepixel
-#         self.acc -= self.maxpixel
-
-#         self.avepixel = self.acc//(self.nframes - 1)
-#         #self.avepixel = self.acc//self.nframes
-
-
-#         # Compute the standard deviation
-#         self.stdpixel -= (self.maxpixel.astype(np.uint64))**2
-#         self.stdpixel -= self.acc*self.avepixel
-        
-#         self.stdpixel  = np.sqrt(self.stdpixel/(self.nframes - 2))
-#         #self.stdpixel  = np.sqrt(self.stdpixel//(self.nframes - 1))
-
-#         # Make sure there are no zeros in standard deviation
-#         self.stdpixel[self.stdpixel == 0] = 1
-
-#         # Convert stddev and avepixel to appropriate format
-#         self.avepixel = self.avepixel.astype(self.dtype)
-#         self.stdpixel = self.stdpixel.astype(self.dtype)
-
-#         # print('---')
-#         # print('nframes', self.nframes)
-#         # print('mean stddev2:', np.mean(self.stdpixel))
-#         # print('mean avepixel2', np.mean(self.avepixel))
-#         # print('mean maxpixel', np.mean(self.maxpixel))
-
-
-
-
 class InputTypeFF(object):
     def __init__(self, dir_path, config, single_ff=False):
         """ Input file type handle for FF files.
@@ -617,6 +551,9 @@ class InputTypeVideo(object):
             self.nrows = self.nrows//self.config.detection_binning_factor
             self.ncols = self.ncols//self.config.detection_binning_factor
 
+        print('FPS:', self.fps)
+        print('Total frames:', self.total_frames)
+
 
         # Set the number of frames to be used for averaging and maxpixels
         self.fr_chunk_no = 256
@@ -704,6 +641,11 @@ class InputTypeVideo(object):
         # Init making the FF structure
         ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, np.uint8)
 
+        # If there are no frames to read, return an empty array
+        if frames_to_read == 0:
+            print('There are no frames to read!')
+            return ff_struct_fake
+
         # Load the chunk of frames
         for i in range(frames_to_read):
 
@@ -729,7 +671,6 @@ class InputTypeVideo(object):
 
         # Finish making the fake FF file
         ff_struct_fake.finish()
-
 
         # Store the FF struct to cache to avoid recomputing
         self.cache = {}
@@ -1359,6 +1300,9 @@ class InputTypeImages(object):
             print('Using FPS:', self.fps)
 
 
+        print('Total frames:', self.total_frames)
+
+
 
     def nextChunk(self):
         """ Go to the next frame chunk. """
@@ -1428,7 +1372,7 @@ class InputTypeImages(object):
             img_indx = first_frame + i
 
             # Stop the loop if the ends of images has been reached
-            if img_indx >= self.total_frames - 1:
+            if img_indx >= self.total_frames:
                 break
 
             # Load the image

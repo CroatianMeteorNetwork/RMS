@@ -16,6 +16,9 @@ def writeCAL(night_dir, config, platepar):
         config: [Config]
         platepar: [Platepar]
 
+    Return:
+        file_name: [str] Name of the CAL file.
+
     """
 
     # Remove the last slash, if it exists
@@ -113,6 +116,9 @@ def writeCAL(night_dir, config, platepar):
 
         # Write CAL content
         f.write(s)
+
+
+        return file_name
 
 
 

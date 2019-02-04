@@ -37,6 +37,41 @@ from RMS.CompressionCy import compressFrames
 log = logging.getLogger("logger")
 
 
+# class CompressorHandler(object):
+#     def __init__(self, data_dir, array1, startTime1, array2, startTime2, config, detector=None, 
+#         live_view=None, flat_struct=None):
+#         """ Handles starting and restarting compressor objects. See the Compressor class for details. 
+            
+#             This object had a 'compressor' property which is the Compressor class instance once it has been
+#             started.
+#         """
+
+#         self.data_dir = data_dir
+#         self.array1 = array1
+#         self.startTime1 = startTime1
+#         self.array2 = array2
+#         self.startTime2 = startTime2
+#         self.config = config
+
+#         self.detector = detector
+#         self.live_view = live_view
+#         self.flat_struct = flat_struct
+
+#         self.compressor = None
+
+
+#     def init_compressor(self):
+#         """ Starts a compressor instance with the inited parameters. """
+
+#         self.compressor = Compressor(self.data_dir, self.array1, self.startTime1, self.array2, \
+#             self.startTime2, self.config, detector=self.detector, live_view=self.live_view, \
+#             flat_struct=self.flat_struct)
+
+#         return self.compressor
+
+
+
+
 class Compressor(multiprocessing.Process):
     """Compress list of numpy arrays (video frames).
 
@@ -215,22 +250,24 @@ class Compressor(multiprocessing.Process):
             if self.startTime1.value != 0:
 
                 # Retrieve time of first frame
-                startTime = self.startTime1.value 
+                startTime = float(self.startTime1.value)
 
                 # Copy frames
-                frames = self.array1 
+                frames = self.array1
                 self.startTime1.value = 0
 
             else:
 
                 # Retrieve time of first frame
-                startTime = self.startTime2.value 
+                startTime = float(self.startTime2.value)
 
                 # Copy frames
-                frames = self.array2 
+                frames = self.array2
                 self.startTime2.value = 0
 
             
+            log.debug("Compressing frame block with start time at: {:s}".format(str(startTime)))
+
             #log.debug("memory copy: " + str(time.time() - t) + "s")
             t = time.time()
             
@@ -253,17 +290,17 @@ class Compressor(multiprocessing.Process):
             # Save the extracted intensitites per every field
             FieldIntensities.saveFieldIntensitiesBin(field_intensities, self.data_dir, filename)
 
-
             # Run the extractor
-            extractor = Extractor(self.config, self.data_dir)
-            extractor.start(frames, compressed, filename)
+            if self.config.enable_fireball_detection:
+                extractor = Extractor(self.config, self.data_dir)
+                extractor.start(frames, compressed, filename)
 
-            # Fully format the filename (this could not have been done before as the extractor will add
-            # the FR prefix)
+                log.debug('Extractor started for: ' + filename)
+
+
+            # Fully format the filename (this could not have been done before as the extractor has to add
+            # the FR prefix to the given file name)
             filename = "FF_" + filename + "." + self.config.ff_format
-
-
-            log.debug('Extractor started for: ' + filename)
 
 
             # Run the detection on the file, if the detector handle was given
@@ -271,6 +308,7 @@ class Compressor(multiprocessing.Process):
 
                 # Add the file to the detector queue
                 self.detector.addJob([self.data_dir, filename, self.config])
+                log.info('Added file for detection: {:s}'.format(filename))
 
 
             # Refresh the maxpixel currently shown on the screen
@@ -278,6 +316,7 @@ class Compressor(multiprocessing.Process):
 
                 # Add the image to the image queue
                 self.live_view.updateImage(compressed[0], filename + " maxpixel")
+                log.debug('Updated maxpixel on the screen: {:s}'.format(filename))
 
 
 

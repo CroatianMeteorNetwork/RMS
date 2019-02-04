@@ -18,6 +18,7 @@ from __future__ import print_function, absolute_import
 
 import os
 import sys
+import gc
 import argparse
 import time
 import datetime
@@ -76,7 +77,7 @@ def resetSIGINT():
 
 
 
-def wait(duration=None):
+def wait(duration, compressor):
     """ The function will wait for the specified time, or it will stop when Enter is pressed. If no time was
         given (in seconds), it will wait until Enter is pressed. 
 
@@ -97,7 +98,14 @@ def wait(duration=None):
     while True:
 
         # Sleep for a short interval
-        time.sleep(0.1)
+        time.sleep(1)
+
+
+        # If the compressor has died, restart capture
+        if not compressor.is_alive():
+            log.info('The compressor has died, restarting the capture!')
+            break
+            
 
         # If some wait time was given, check if it passed
         if duration is not None:
@@ -203,8 +211,19 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Initialize buffered capture
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file)
 
-    # Initialize the live image viewer
-    live_view = LiveViewer(window_name='Maxpixel')
+
+    ### TEMPORARY DISABLED UNTIL THE LIVE VIEWER IS FIXED !!! ###
+    # # Initialize the live image viewer
+    # if config.live_view_enable:
+
+    #     live_view = LiveViewer(window_name='Maxpixel')
+
+    # else:
+    
+    live_view = None
+
+    ### ###
+
     
     # Initialize compression
     compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config, 
@@ -214,12 +233,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Start buffered capture
     bc.startCapture()
 
-    # Start the compression
+    # Init and start the compression
     compressor.start()
 
     
     # Capture until Ctrl+C is pressed
-    wait(duration)
+    wait(duration, compressor)
         
     # If capture was manually stopped, end capture
     if STOP_CAPTURE:
@@ -238,13 +257,33 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Stop the compressor
     log.debug('Stopping compression...')
     detector, live_view = compressor.stop()
+
+    # Free shared memory after the compressor is done
+    try:
+        log.debug('Freeing frame buffers...')
+        del sharedArrayBase
+        del sharedArray
+        del sharedArrayBase2
+        del sharedArray2
+
+        # Run garbage collection
+        gc.collect()
+
+    except Exception as e:
+        log.debug('Freeing frame buffers failed with error:' + repr(e))
+
     log.debug('Compression stopped')
 
-    # Stop the live viewer
-    log.debug('Stopping live viewer...')
-    live_view.stop()
-    del live_view
-    log.debug('Live view stopped')
+
+    if live_view is not None:
+
+        # Stop the live viewer
+        log.debug('Stopping live viewer...')
+
+        live_view.stop()
+        del live_view
+
+        log.debug('Live view stopped')
 
 
 
@@ -314,22 +353,34 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         # Get the detection results from the queue
         detection_results = detector.getResults()
 
+    else:
+
+        detection_results = []
+
 
 
 
     # Save detection to disk and archive detection    
-    archive_name, _ = processNight(night_data_dir, config, detection_results=detection_results, nodetect=nodetect)
+    archive_name, _ = processNight(night_data_dir, config, detection_results=detection_results, \
+        nodetect=nodetect)
 
 
     # Put the archive up for upload
     if upload_manager is not None:
         log.info('Adding file on upload list: ' + archive_name)
         upload_manager.addFiles([archive_name])
+        log.info('File added...')
 
 
     # Delete detector backup files
-    detector.deleteBackupFiles()
+    if detector is not None:
+        detector.deleteBackupFiles()
 
+
+    # If the capture was run for a limited time, run the upload right away
+    if duration is not None:
+        log.info('Uploading data before exiting...')
+        upload_manager.uploadData()
 
     # If capture was manually stopped, end program
     if STOP_CAPTURE:

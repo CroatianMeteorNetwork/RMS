@@ -64,18 +64,6 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
     return degrees(acos(sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra2 - ra1)))
 
 
-# cpdef double calcBearing(double ra1, double dec1, double ra2, double dec2):
-#     """ Calculate the bearing angle between 2 stars in equatorial celestial coordinates.
-#     """
-
-#     # Convert input coordinates to radians
-#     ra1 = radians(ra1)
-#     dec1 =  radians(dec1)
-#     ra2 = radians(ra2)
-#     dec2 = radians(dec2)
-
-#     return degrees(atan2(sin(ra2 - ra1)*cos(dec2), cos(dec1)*sin(dec2) - sin(dec1)*cos(dec2)*cos(ra2 - ra1))) % 360
-
 
 @cython.boundscheck(False)
 @cython.wraparound(False) 
@@ -142,84 +130,6 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
 
 
     return filtered_indices[:k], filtered_list[:k]
-
-
-
-# @cython.boundscheck(False)
-# @cython.wraparound(False)
-# def starsNNevaluation(np.ndarray[FLOAT_TYPE_t, ndim=2] stars, np.ndarray[FLOAT_TYPE_t, ndim=2] ref_stars, double consideration_radius, int min_matched_stars, int ret_indices=0):
-#     """ Finds nearest neighbours between the catalog stars and the calibration stars and evaluate their matching.
-#     """
-
-#     # Get the size of each point set
-#     cdef int stars_len = stars.shape[0]
-#     cdef int ref_stars_len = ref_stars.shape[0]
-
-#     # Init evaluation parameter
-#     cdef double evaluation = 0
-
-#     # Define difference vector's magnitude and directions, and the matched stars index vectors
-#     cdef np.ndarray[np.uint16_t, ndim=1] catalog_matched_idx = np.zeros(shape=(stars_len), dtype=np.uint16)
-#     cdef np.ndarray[np.uint16_t, ndim=1] image_matched_idx = np.zeros(shape=(stars_len), dtype=np.uint16)
-#     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] vect_separation = np.zeros(shape=(stars_len), dtype=FLOAT_TYPE)
-#     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] vect_bearing = np.zeros(shape=(stars_len), dtype=FLOAT_TYPE)
-#     cdef int k = 0
-#     cdef int i, j, min_idx
-#     cdef double min_dist, ang_sep
-
-#     for i in range(stars_len):
-
-#         min_dist = consideration_radius
-#         min_idx = 0
-
-#         for j in range(ref_stars_len):
-
-#             # Calculate the angular separation between the stars
-#             ang_sep = angularSeparation(stars[i, 0], stars[i, 1], ref_stars[j, 0], ref_stars[j, 1])
-
-#             if ang_sep <= min_dist:
-#                 min_dist = ang_sep
-#                 min_idx = j
-
-#         # Add to the evaluation if the neighbour is close enough
-#         if min_dist < consideration_radius:
-#             catalog_matched_idx[k] = min_idx
-#             image_matched_idx[k] = i
-#             vect_separation[k] = min_dist
-#             vect_bearing[k] = calcBearing(stars[i, 0], stars[i, 1], ref_stars[min_idx, 0], ref_stars[min_idx, 1])
-#             k += 1
-
-#     # Check if there is a minimum number of matched stars
-#     if k < min_matched_stars:
-        
-#         if ret_indices:
-#             return None, None
-#         else:
-#             return (None, None, None, None, None)
-    
-#     # Crop the vectors to their real size and convert to radians
-#     vect_separation = np.radians(vect_separation[:k])
-#     vect_bearing = np.radians(vect_bearing[:k])
-
-#     # Calculate the mean of the given vector
-#     # Calculate Ra and Dec components from the angular separation and bearing
-#     ra_diff = np.degrees(np.arctan2(np.sin(vect_bearing)*np.sin(vect_separation), np.cos(vect_separation)))
-#     dec_diff = np.degrees(np.arcsin(np.sin(vect_separation)*np.cos(vect_bearing)))
-
-#     ra_mean = np.mean(ra_diff)
-#     ra_std = np.std(ra_diff)
-#     dec_mean = np.mean(dec_diff)
-#     dec_std = np.std(dec_diff)
-
-#     # Evaluate the solution (smaller STDDEV the better, more stars the better) -> smaller evaluation is better
-#     evaluation = (ra_std + dec_std)/k
-
-#     # If ret_indices is 1, then only return indices of the matched stars
-#     if ret_indices:
-#         return catalog_matched_idx[:k], image_matched_idx[:k]
-
-#     else:
-#         return evaluation, ra_mean, ra_std, dec_mean, dec_std
 
 
 
@@ -298,10 +208,10 @@ def matchStars(np.ndarray[FLOAT_TYPE_t, ndim=2] stars_list, np.ndarray[FLOAT_TYP
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data, \
-    double jd, double lat, double lon, double x_res, double y_res, double az_centre, double alt_centre, \
-    double pos_angle_ref, double F_scale, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly, \
-    np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly):
+def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data, double jd, double lat, double lon, double x_res, \
+    double y_res, double az_centre, double alt_centre, double pos_angle_ref, double F_scale, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev):
     """ Convert RA, Dec to distorion corrected image coordinates. 
 
     Arguments:
@@ -315,9 +225,9 @@ def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, np.ndarray[FL
         az_centre: [float] Azimuth of the FOV centre (degrees).
         alt_centre: [float] Altitude of the FOV centre (degrees).
         pos_angle_ref: [float] Rotation from the celestial meridial (degrees).
-        F_scale: [float] Sum of image scales per each image axis (arcsec per px).
-        x_poly: [ndarray float] Distorsion polynomial in X direction.
-        y_poly: [ndarray float] Distorsion polynomail in Y direction.
+        F_scale: [float] Image scale (px/deg).
+        x_poly_rev: [ndarray float] Distorsion polynomial in X direction for reverse mapping.
+        y_poly_rev: [ndarray float] Distorsion polynomail in Y direction for reverse mapping.
     
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
@@ -331,7 +241,8 @@ def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, np.ndarray[FL
 
     # Calculate the reference hour angle
     cdef double T = (jd - 2451545.0)/36525.0
-    cdef double Ho = (280.46061837 + 360.98564736629*(jd - 2451545.0) + 0.000387933*T**2 - (T**3)/38710000.0)%360
+    cdef double Ho = (280.46061837 + 360.98564736629*(jd - 2451545.0) + 0.000387933*T**2 \
+        - (T**3)/38710000.0)%360
 
     cdef double sl = sin(radians(lat))
     cdef double cl = cos(radians(lat))
@@ -374,45 +285,212 @@ def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, np.ndarray[FL
 
         #dist = np.degrees(acos(sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra1 - ra2)))
 
-        # Calculate the image coordinates (scale the F_scale from CIF resolution)
+        # Calculate the image coordinates
         X1 = radius*cos(radians(theta))*F_scale
         Y1 = radius*sin(radians(theta))*F_scale
 
         # Calculate distortion in X direction
-        dX = (x_poly[0]
-            + x_poly[1]*X1
-            + x_poly[2]*Y1
-            + x_poly[3]*X1**2
-            + x_poly[4]*X1*Y1
-            + x_poly[5]*Y1**2
-            + x_poly[6]*X1**3
-            + x_poly[7]*X1**2*Y1
-            + x_poly[8]*X1*Y1**2
-            + x_poly[9]*Y1**3
-            + x_poly[10]*X1*sqrt(X1**2 + Y1**2)
-            + x_poly[11]*Y1*sqrt(X1**2 + Y1**2))
+        dX = (x_poly_rev[0]
+            + x_poly_rev[1]*X1
+            + x_poly_rev[2]*Y1
+            + x_poly_rev[3]*X1**2
+            + x_poly_rev[4]*X1*Y1
+            + x_poly_rev[5]*Y1**2
+            + x_poly_rev[6]*X1**3
+            + x_poly_rev[7]*X1**2*Y1
+            + x_poly_rev[8]*X1*Y1**2
+            + x_poly_rev[9]*Y1**3
+            + x_poly_rev[10]*X1*sqrt(X1**2 + Y1**2)
+            + x_poly_rev[11]*Y1*sqrt(X1**2 + Y1**2))
 
         # Add the distortion correction and calculate X image coordinates
-        #x_array[i] = (X1 - dX)*x_res/384.0 + x_res/2.0
         x_array[i] = X1 - dX + x_res/2.0
 
         # Calculate distortion in Y direction
-        dY = (y_poly[0]
-            + y_poly[1]*X1
-            + y_poly[2]*Y1
-            + y_poly[3]*X1**2
-            + y_poly[4]*X1*Y1
-            + y_poly[5]*Y1**2
-            + y_poly[6]*X1**3
-            + y_poly[7]*X1**2*Y1
-            + y_poly[8]*X1*Y1**2
-            + y_poly[9]*Y1**3
-            + y_poly[10]*Y1*sqrt(X1**2 + Y1**2)
-            + y_poly[11]*X1*sqrt(X1**2 + Y1**2))
+        dY = (y_poly_rev[0]
+            + y_poly_rev[1]*X1
+            + y_poly_rev[2]*Y1
+            + y_poly_rev[3]*X1**2
+            + y_poly_rev[4]*X1*Y1
+            + y_poly_rev[5]*Y1**2
+            + y_poly_rev[6]*X1**3
+            + y_poly_rev[7]*X1**2*Y1
+            + y_poly_rev[8]*X1*Y1**2
+            + y_poly_rev[9]*Y1**3
+            + y_poly_rev[10]*Y1*sqrt(X1**2 + Y1**2)
+            + y_poly_rev[11]*X1*sqrt(X1**2 + Y1**2))
 
         # Add the distortion correction and calculate Y image coordinates
-        #y_array[i] = (Y1 - dY)*y_res/288.0 + y_res/2.0
         y_array[i] = Y1 - dY + y_res/2.0
 
 
     return x_array, y_array
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_t, ndim=1] X_data, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] Y_data, double lat, double lon, double Ho, double X_res, double Y_res, \
+    double RA_d, double dec_d, double pos_angle_ref, double F_scale, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd):
+    """
+    Arguments:
+        jd_data: [ndarray] Julian date of each data point.
+        X_data: [ndarray] 1D numpy array containing the image column.
+        Y_data: [ndarray] 1D numpy array containing the image row.
+        lat: [float] Latitude of the observer in degrees.
+        lon: [float] Longitde of the observer in degress.
+        Ho: [float] Reference hour angle (deg).
+        X_res: [int] Image size, X dimension (px).
+        Y_res: [int] Image size, Y dimenstion (px).
+        RA_d: [float] Reference right ascension of the image centre (degrees).
+        dec_d: [float] Reference declination of the image centre (degrees).
+        pos_angle_ref: [float] Field rotation parameter (degrees).
+        F_scale: [float] Sum of image scales per each image axis (arcsec per px).
+        x_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward X axis polynomial parameters.
+        y_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward Y axis polynomial parameters.
+    
+    Return:
+        (RA_data, dec_data): [tuple of ndarrays]
+            
+            RA_data: [ndarray] Right ascension of each point (deg).
+            dec_data: [ndarray] Declination of each point (deg).
+            magnitude_data: [ndarray] Array of meteor's lightcurve apparent magnitudes.
+    """
+
+    cdef int i
+    cdef double jd, x_det, y_det, dx, x_pix, dy, y_pix
+    cdef double dec_rad, sl, cl
+    cdef double radius, theta, sin_t, Dec0det, cos_t, RA0det, h, sh, sd, ch, cd, x, y, z, r, azimuth, altitude
+    cdef double az_rad, alt_rad, saz, salt, caz, calt, HA, T, RA, dec, hour_angle
+
+    # Convert declination to radians
+    dec_rad = radians(dec_d)
+
+    # Precalculate some parameters
+    sl = sin(radians(lat))
+    cl = cos(radians(lat))
+
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data = np.zeros_like(jd_data)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data = np.zeros_like(jd_data)
+
+    # Go through all given data points
+    for i in range(jd_data.shape[0]):
+
+        jd = jd_data[i]
+        x_det = X_data[i]
+        y_det = Y_data[i]
+
+
+        ### APPLY DISTORSION CORRECTION ###
+
+        x_det = x_det - X_res/2.0
+        y_det = y_det - Y_res/2.0
+
+        dx = (x_poly_fwd[0]
+            + x_poly_fwd[1]*x_det
+            + x_poly_fwd[2]*y_det
+            + x_poly_fwd[3]*x_det**2
+            + x_poly_fwd[4]*x_det*y_det
+            + x_poly_fwd[5]*y_det**2
+            + x_poly_fwd[6]*x_det**3
+            + x_poly_fwd[7]*x_det**2*y_det
+            + x_poly_fwd[8]*x_det*y_det**2
+            + x_poly_fwd[9]*y_det**3
+            + x_poly_fwd[10]*x_det*sqrt(x_det**2 + y_det**2)
+            + x_poly_fwd[11]*y_det*sqrt(x_det**2 + y_det**2))
+
+        # Add the distortion correction
+        x_pix = x_det + dx
+
+        dy = (y_poly_fwd[0]
+            + y_poly_fwd[1]*x_det
+            + y_poly_fwd[2]*y_det
+            + y_poly_fwd[3]*x_det**2
+            + y_poly_fwd[4]*x_det*y_det
+            + y_poly_fwd[5]*y_det**2
+            + y_poly_fwd[6]*x_det**3
+            + y_poly_fwd[7]*x_det**2*y_det
+            + y_poly_fwd[8]*x_det*y_det**2
+            + y_poly_fwd[9]*y_det**3
+            + y_poly_fwd[10]*y_det*sqrt(x_det**2 + y_det**2)
+            + y_poly_fwd[11]*x_det*sqrt(x_det**2 + y_det**2))
+
+        # Add the distortion correction
+        y_pix = y_det + dy
+
+        # Scale back image coordinates
+        x_pix = x_pix/F_scale
+        y_pix = y_pix/F_scale
+
+        ### ###
+
+
+        ### Convert gnomonic X, Y to alt, az ###
+
+        # Caulucate the needed parameters
+        radius = radians(sqrt(x_pix**2 + y_pix**2))
+        theta = radians((90 - pos_angle_ref + degrees(atan2(y_pix, x_pix)))%360)
+
+        sin_t = sin(dec_rad)*cos(radius) + cos(dec_rad)*sin(radius)*cos(theta)
+        Dec0det = atan2(sin_t, sqrt(1 - sin_t**2))
+
+        sin_t = sin(theta)*sin(radius)/cos(Dec0det)
+        cos_t = (cos(radius) - sin(Dec0det)*sin(dec_rad))/(cos(Dec0det)*cos(dec_rad))
+        RA0det = (RA_d - degrees(atan2(sin_t, cos_t)))%360
+
+        h = radians(Ho + lon - RA0det)
+        sh = sin(h)
+        sd = sin(Dec0det)
+        ch = cos(h)
+        cd = cos(Dec0det)
+
+        x = -ch*cd*sl + sd*cl
+        y = -sh*cd
+        z = ch*cd*cl + sd*sl
+
+        r = sqrt(x**2 + y**2)
+
+        # Calculate azimuth and altitude
+        azimuth = degrees(atan2(y, x))%360
+        altitude = degrees(atan2(z, r))
+
+        ### ###
+
+
+        ### Convert alt, az to RA, Dec ###
+
+        # Never allow the altitude to be exactly 90 deg due to numerical issues
+        if altitude == 90:
+            altitude = 89.9999
+
+        # Convert altitude and azimuth to radians
+        az_rad = radians(azimuth)
+        alt_rad = radians(altitude)
+
+        saz = sin(az_rad)
+        salt = sin(alt_rad)
+        caz = cos(az_rad)
+        calt = cos(alt_rad)
+
+        x = -saz*calt
+        y = -caz*sl*calt + salt*cl
+        HA = degrees(atan2(x, y))
+
+        # Calculate the hour angle
+        T = (jd - 2451545.0)/36525.0
+        hour_angle = (280.46061837 + 360.98564736629*(jd - 2451545.0) + 0.000387933*T**2 - T**3/38710000.0)%360
+
+        RA = (hour_angle + lon - HA)%360
+        dec = degrees(asin(sl*salt + cl*calt*caz))
+
+        ### ###
+
+
+        RA_data[i] = RA
+        dec_data[i] = dec
+
+
+    return RA_data, dec_data

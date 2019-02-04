@@ -2,13 +2,17 @@
 
 
 import os
+import logging
 
-from RMS.Misc import archiveDir
 
-from Utils.GenerateThumbnails import generateThumbnails
 from RMS.Formats.FFfile import validFFName
+from RMS.Misc import archiveDir
+from Utils.GenerateThumbnails import generateThumbnails
+from Utils.StackFFs import stackFFs
 
 
+# Get the logger from the main module
+log = logging.getLogger("logger")
 
 
 def selectFiles(dir_path, ff_detected):
@@ -138,6 +142,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
     """
 
+    log.info('Generating thumbnails...')
 
     # Generate captured thumbnails
     generateThumbnails(captured_path, config, 'CAPTURED')
@@ -152,6 +157,24 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
     # Add the detected mosaic file to the selected list
     file_list.append(mosaic_file)
+
+
+
+    log.info('Generating a stack of detections...')
+
+    # Make a co-added image of all detection. Filter out possible clouds
+    stack_path, _ = stackFFs(captured_path, 'jpg', deinterlace=(config.deinterlace_order > 0), subavg=True, \
+        filter_bright=True, file_list=sorted(file_list))
+
+    if stack_path is not None:
+
+        # Extract the name of the stack image
+        stack_file = os.path.basename(stack_path)
+        
+        # Add the stack path to the list of files to put in the archive
+        file_list.append(stack_file)
+
+
 
 
     if file_list:

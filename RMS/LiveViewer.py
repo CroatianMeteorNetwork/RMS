@@ -13,6 +13,12 @@ from PIL import Image
 from PIL import ImageFont
 from PIL import ImageDraw
 
+# tkinter import that works on both Python 2 and 3
+try:
+    import tkinter
+except:
+    import Tkinter as tkinter
+
 
 def drawText(ff_array, img_text):
     """ Draws text on the image represented as a numpy array.
@@ -103,6 +109,34 @@ class LiveViewer(multiprocessing.Process):
 
 
             img, img_text = item
+
+
+            # Find the screen size
+            root = tkinter.Tk()
+            root.withdraw()
+
+            screen_w = root.winfo_screenwidth()
+            screen_h = root.winfo_screenheight()
+
+            root.destroy()
+            del root
+
+            # If the screen is smaller than the image, resize the image
+            if (screen_h < img.shape[0]) or (screen_w < img.shape[1]):
+
+                # Find the ratios between dimentions
+                y_ratio = screen_h/img.shape[0]
+                x_ratio = screen_w/img.shape[1]
+
+                # Resize the image so that the image fits the screen
+                min_ratio = min(x_ratio, y_ratio)
+
+                width_new = int(img.shape[1]*min_ratio)
+                height_new = int(img.shape[0]*min_ratio)
+
+                img = cv2.resize(img, (width_new, height_new))
+
+
 
             # Write text on the image if any is given
             if img_text is not None:

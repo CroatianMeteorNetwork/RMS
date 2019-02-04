@@ -29,6 +29,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-f', '--fireball', action="store_true", help="""Estimate threshold for fireball
         detection, not meteor detection. """)
 
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
     #############################
 
     # Parse the command line arguments
@@ -41,8 +44,20 @@ if __name__ == "__main__":
         print('MeteorDetection')
 
     
-    # Load the configuration file
-    config = cr.parse(".config")
+    
+    if cml_args.config is not None:
+
+        config_file = os.path.abspath(cml_args.config[0].replace('"', ''))
+
+        print('Loading config file:', config_file)
+
+        # Load the given config file
+        config = cr.parse(config_file)
+
+    else:
+        # Load the default configuration file
+        config = cr.parse(".config")
+
 
 
     if not os.path.exists(cml_args.dir_path):
@@ -80,6 +95,9 @@ if __name__ == "__main__":
 
             # Plot the threshold map
             k1map = ax1.imshow(k1_vals, cmap='inferno', vmin=1, vmax=6,  aspect='auto')
+
+            # Plot file name
+            ax1.text(0, 0, "{:s}".format(file_name), color='white', verticalalignment='top')
 
             cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
             if cml_args.fireball:
