@@ -401,10 +401,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 if __name__ == "__main__":
 
-    # Load the configuration file
-    config = cr.parse(".config")
-
-
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
@@ -414,8 +410,12 @@ if __name__ == "__main__":
     # Add a mutually exclusive for the parser (the arguments in the group can't be given at the same)
     arg_group = arg_parser.add_mutually_exclusive_group()
 
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
     arg_group.add_argument('-d', '--duration', metavar='DURATION_HOURS', help="""Start capturing right away, 
         with the given duration in hours. """)
+
     arg_group.add_argument('-i', '--input', metavar='FILE_PATH', help="""Use video from the given file, 
         not from a video device. """)
 
@@ -430,6 +430,8 @@ if __name__ == "__main__":
 
     ######
 
+    # Load the config file
+    config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
 
     # Initialize the logger
     initLogging(config)

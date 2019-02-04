@@ -1444,7 +1444,6 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
             # If the FTPdetectinfo format is requested, exclude the sequence number column from centroids
             if not asgard:
-                print('EXCLUDING...............')
                 centroids = np.delete(centroids, 1, axis=1)
 
 
@@ -1531,18 +1530,8 @@ if __name__ == "__main__":
     #########################
 
 
-    if cml_args.config is not None:
-
-        config_file = os.path.abspath(cml_args.config[0].replace('"', ''))
-
-        print('Loading config file:', config_file)
-
-        # Load the given config file
-        config = cr.parse(config_file)
-
-    else:
-        # Load the default configuration file
-        config = cr.parse(".config")
+    # Load the config file
+    config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
 
 
     # If camera gamma was given, change the value in config

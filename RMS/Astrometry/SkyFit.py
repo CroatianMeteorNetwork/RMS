@@ -320,6 +320,9 @@ class PlateTool(object):
         plt.figure(facecolor='black')
         plt.gcf().canvas.set_window_title('SkyFit')
 
+        # Get the figure manager
+        self.figure_manager = plt.get_current_fig_manager()
+
         # Init the first image
         self.updateImage(first_update=True)
 
@@ -347,9 +350,6 @@ class PlateTool(object):
         self.scroll_counter = 0
 
         self.ax.figure.canvas.mpl_connect('key_press_event', self.onKeyPress)
-
-        # Get the figure manager
-        self.figure_manager = plt.get_current_fig_manager()
 
 
     def onMousePress(self, event):
@@ -1080,6 +1080,7 @@ class PlateTool(object):
 
                     self.drawCursorCircle()
 
+
         elif event.key == 'escape':
 
             if self.star_pick_mode:
@@ -1127,8 +1128,8 @@ class PlateTool(object):
         if self.star_aperature_radius < 2:
             self.star_aperature_radius = 2
 
-        if self.star_aperature_radius > 50:
-            self.star_aperature_radius = 50
+        if self.star_aperature_radius > 100:
+            self.star_aperature_radius = 100
 
         # Change the size of the star aperature circle
         if self.star_pick_mode:
@@ -1290,6 +1291,11 @@ class PlateTool(object):
             # Set the image resolution to platepar after reading the first image
             self.platepar.X_res = img_data.shape[1]
             self.platepar.Y_res = img_data.shape[0]
+
+
+            # Scale the size of the annulus (normalize so the percieved size is the same as for 1280x720)
+            self.star_aperature_radius *= np.sqrt(img_data.shape[1]**2 + img_data.shape[0]**2)/1500
+
 
 
         # Apply dark
@@ -2498,46 +2504,8 @@ if __name__ == '__main__':
     dir_path = cml_args.dir_path[0].replace('"', '')
 
 
-
-    if cml_args.config is not None:
-
-        config_file = None
-
-        # If the config should be taken from the data directory, find it and load it. The config will be
-        #   loaded only if there's one file with '.config' in the directory
-        if cml_args.config[0] == '.':
-
-            # Locate all files in the data directory that have '.config' in them
-            config_files = [file_name for file_name in os.listdir(dir_path) if '.config' in file_name]
-
-            # If there is exactly one config file, use it
-            if len(config_files) == 1:
-                config_file = os.path.join(os.path.abspath(dir_path), config_files[0])
-
-            else:
-                print('There are several config files in the given directory, choose one and provide the full path to it:')
-                for cfile in config_files:
-                    print('    {:s}'.format(os.path.join(dir_path, cfile)))
-
-        else:
-            # Load the config file from the full path
-            config_file = os.path.abspath(cml_args.config[0].replace('"', ''))
-
-
-        if config_file is None:
-            print('The config file could not be found!')
-            sys.exit()
-
-
-
-        print('Loading config file:', config_file)
-
-        # Load the given config file
-        config = cr.parse(config_file)
-
-    else:
-        # Load the default configuration file
-        config = cr.parse(".config")
+    # Load the config file
+    config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
 
 
     # Parse the beginning time into a datetime object

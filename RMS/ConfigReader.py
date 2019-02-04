@@ -116,6 +116,88 @@ def findBinaryPath(dir_path, binary_name, binary_extension):
 
 
 
+def loadConfigFromDirectory(cml_args_config, dir_path):
+    """ Given an input from argparse for the config file and the current directory, return the proper config
+        file to load. 
+
+    Arguments:
+        cml_args_confg: [None/str/list] Input from cml_args.confg from argparse.
+        dir_path: [list or str] Path to the working directory, or multiple paths.
+
+    Return:
+        config: [Config instance] Loaded config file.
+
+    """
+
+    # If the dir path is given as a string, use that dir path
+    if isinstance(dir_path, str):
+        pass
+
+    # If dir path is a list with more than 1 entry, take the parent directory of the first directory in the 
+    # list
+    else:
+
+        # If there are more than 1 element, take the parent of the 1st
+        if len(dir_path) > 1:
+            dir_path = os.path.join(os.path.abspath(dir_path), os.pardir)
+
+        # Otherwise, take the one and only path in the list
+        else:
+            dir_path = dir_path[0]
+
+
+    # If the given path is a file, take the parent
+    if os.path.isfile(dir_path):
+        dir_path = os.path.dirname(dir_path)
+
+
+    if cml_args_config is not None:
+
+        config_file = None
+
+        # If the config should be taken from the data directory, find it and load it. The config will be
+        #   loaded only if there's one file with '.config' in the directory
+        if cml_args_config[0] == '.':
+
+            # Locate all files in the data directory that have '.config' in them
+            config_files = [file_name for file_name in os.listdir(dir_path) if '.config' in file_name]
+
+            # If there is exactly one config file, use it
+            if len(config_files) == 1:
+                config_file = os.path.join(os.path.abspath(dir_path), config_files[0])
+
+            else:
+                print('There are several config files in the given directory, choose one and provide the full path to it:')
+                for cfile in config_files:
+                    print('    {:s}'.format(os.path.join(dir_path, cfile)))
+
+        else:
+            # Load the config file from the full path
+            config_file = os.path.abspath(cml_args_config[0].replace('"', ''))
+
+
+        if config_file is None:
+            print('The config file could not be found!')
+            sys.exit()
+
+
+
+        print('Loading config file:', config_file)
+
+        # Load the given config file
+        config = parse(config_file)
+
+    # If the config file is not given, load the default config file
+    else:
+        # Load the default configuration file
+        config = parse(".config")
+
+
+    return config
+
+
+
+
 class Config:
     def __init__(self):
 

@@ -664,7 +664,7 @@ class InputTypeVideo(object):
                     self.config.detection_binning_method)
 
             # Add frame for FF processing
-            ff_struct_fake.addFrame(frame)
+            ff_struct_fake.addFrame(frame.astype(np.uint16))
 
 
         self.current_fr_chunk_size = i + 1
@@ -974,7 +974,7 @@ class InputTypeUWOVid(object):
             # Add the unix time to list
             self.frame_chunk_unix_times.append(unix_time)
 
-            # Add frame for FF processing
+            # Add frame for FF processing (the frame should already be uint16)
             ff_struct_fake.addFrame(frame)            
 
             unix_time_lst = (self.vid.ts, self.vid.tu)
@@ -1379,7 +1379,7 @@ class InputTypeImages(object):
             frame = self.loadFrame(fr_no=img_indx)
 
             # Add frame for FF processing
-            ff_struct_fake.addFrame(frame)
+            ff_struct_fake.addFrame(frame.astype(np.uint16))
 
             # Add the datetime of the frame to list of the UWO png is used
             if self.uwo_png_mode:
@@ -1709,7 +1709,7 @@ if __name__ == "__main__":
 
     for frame in frames:
 
-        ff.addFrame(frame)
+        ff.addFrame(frame.astype(np.uint16))
 
 
     ff.finish()

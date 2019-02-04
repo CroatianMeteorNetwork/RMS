@@ -266,19 +266,8 @@ if __name__ == "__main__":
 
     #########################
 
-    if cml_args.config is not None:
-
-        config_file = os.path.abspath(cml_args.config[0].replace('"', ''))
-
-        print('Loading config file:', config_file)
-
-        # Load the given config file
-        config = cr.parse(config_file)
-
-    else:
-        # Load the default configuration file
-        config = cr.parse(".config")
-
+    # Load the config file
+    config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
 
     
     ### Init the logger

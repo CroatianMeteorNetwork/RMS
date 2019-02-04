@@ -753,18 +753,8 @@ if __name__ == "__main__":
         sys.exit()
 
 
-    if cml_args.config is not None:
-
-        config_file = os.path.abspath(cml_args.config[0].replace('"', ''))
-
-        print('Loading config file:', config_file)
-
-        # Load the given config file
-        config = cr.parse(config_file)
-
-    else:
-        # Load the default configuration file
-        config = cr.parse(".config")
+    # Load the config file
+    config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
 
     # Get a list of files in the night folder
