@@ -57,7 +57,7 @@ import RMS.Routines.MorphCy as morph
 from RMS.Routines.BinImageCy import binImage
 
 # If True, all detection details will be logged
-VERBOSE_DEBUG = True
+VERBOSE_DEBUG = False
 
 
 # Get the logger from the main module
@@ -460,7 +460,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
 
             # If making the synthetic FF has failed, skip it
             if not img_handle.ff.successful:
-                print('Skipped frame range due to failed synthetic FF generation: frames {:d} to {:d}'.format(\
+                logDebug('Skipped frame range due to failed synthetic FF generation: frames {:d} to {:d}'.format(\
                     frame_min, frame_max))
                 continue
 
@@ -1064,7 +1064,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         config.max_lines_det, config.max_white_ratio, config.kht_lib_path, mask=mask, \
         flat_struct=flat_struct, dark=dark, debug=debug)
 
-    logDebug('List of lines:', line_list)
+    # logDebug('List of lines:', line_list)
 
 
     # Init meteor list
@@ -1521,8 +1521,12 @@ if __name__ == "__main__":
     arg_parser.add_argument('-a', '--asgard', nargs=1, metavar='ASGARD_PLATEPAR', type=str, \
         help="""Write output as ASGARD event files, not CAMS FTPdetectinfo. Path to the platepar file needs to be given.""")
 
+
     arg_parser.add_argument('-d', '--debug', action="store_true", \
-        help="""Show graphs (calibrated image, thresholded image, detected lines) which can help adjust the detection settings.""")
+        help="""Show debug info on the screen. """)
+
+    arg_parser.add_argument('-i', '--debugplots', action="store_true", \
+        help="""Show graphs (calibrated image, thresholded image, detected lines) which can help adjust the detection settings. """)
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -1654,6 +1658,11 @@ if __name__ == "__main__":
         out_dir = main_dir
 
 
+    # If debug is on, enable debug logging
+    if cml_args.debug:
+        VERBOSE_DEBUG = True
+
+
     # Load mask, dark, flat
     mask, dark, flat_struct = loadImageCalibration(main_dir, config, dtype=img_handle_main.ff.dtype, \
         byteswap=img_handle_main.byteswap)
@@ -1674,12 +1683,12 @@ if __name__ == "__main__":
     # Run meteor search on every file
     for img_handle in img_handle_list:
 
-        print('--------------------------------------------')
-        print(img_handle.name())
+        logDebug('--------------------------------------------')
+        logDebug(img_handle.name())
 
         # Run the meteor detection algorithm
         meteor_detections = detectMeteors(img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask, \
-            debug=cml_args.debug, asgard=cml_args.asgard)
+            debug=cml_args.debugplots, asgard=cml_args.asgard)
 
         # Supress numpy scientific notation printing
         np.set_printoptions(suppress=True)
