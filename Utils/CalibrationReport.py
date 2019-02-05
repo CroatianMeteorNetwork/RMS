@@ -69,18 +69,15 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
     platepar.read(os.path.join(night_dir_path, platepar_file))
 
 
-
     night_name = os.path.split(night_dir_path.strip(os.sep))[1]
-
-    print(night_name)
 
 
     # Go one mag deeper than in the config
     lim_mag = config.catalog_mag_limit + 1
 
     # Load catalog stars (load one magnitude deeper)
-    catalog_stars = StarCatalog.readStarCatalog(config.star_catalog_path, config.star_catalog_file, \
-        lim_mag=lim_mag, mag_band_ratios=config.star_catalog_band_ratios)
+    catalog_stars, mag_band_str = StarCatalog.readStarCatalog(config.star_catalog_path, \
+        config.star_catalog_file, lim_mag=lim_mag, mag_band_ratios=config.star_catalog_band_ratios)
 
     
     ### Take only those CALSTARS entires for which FF files exist in the folder ###
@@ -261,7 +258,7 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
     # Remove the margins
     plt.subplots_adjust(left=0, bottom=0, right=1, top=1, wspace=0, hspace=0)
 
-    plt.savefig(os.path.join(night_dir_path, night_name + '_calib_report_astrometry.png'), \
+    plt.savefig(os.path.join(night_dir_path, night_name + '_calib_report_astrometry.jpg'), \
         bbox_inches='tight', pad_inches=0, dpi=dpi)
 
 
@@ -284,9 +281,6 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
     filter_indices = ((image_stars[:, 0] - img_h/2)**2 + (image_stars[:, 1] - img_w/2)**2) <= photom_selection_radius**2
     star_intensities = image_stars[filter_indices, 2]
     catalog_mags = matched_catalog_stars[filter_indices, 2]
-
-
-    print(len(image_stars), len(star_intensities))
 
     # Plot intensities of image stars
     #star_intensities = image_stars[:, 2]
@@ -311,8 +305,7 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
 
     plt.legend()
 
-    #plt.ylabel("Catalog magnitude ({:s})".format(mag_str))
-    plt.ylabel("Catalog magnitude")
+    plt.ylabel("Catalog magnitude ({:s})".format(mag_band_str))
     plt.xlabel("Uncalibrated magnitude")
 
     # Set wider axis limits
@@ -324,7 +317,7 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
 
     plt.grid()
 
-    plt.savefig(os.path.join(night_dir_path, night_name + '_calib_report_photometry.png'), dpi=200)
+    plt.savefig(os.path.join(night_dir_path, night_name + '_calib_report_photometry.png'), dpi=150)
 
 
     if show_graphs:

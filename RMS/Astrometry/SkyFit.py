@@ -226,6 +226,7 @@ class PlateTool(object):
 
         # Image coordinates of catalog stars
         self.catalog_x = self.catalog_y = None
+        self.mag_band_string = ''
 
         # Rotation with respect to the horizon
         self.rotation_horizon = None
@@ -671,17 +672,8 @@ class PlateTool(object):
                     ax_p.plot(logsum_arr, _photomLine(logsum_arr/(-2.5), *photom_params), label=fit_info, linestyle='--', color='k', alpha=0.5)
 
                     ax_p.legend()
-
-                    if 'BSC' in self.config.star_catalog_file:
-                        mag_str = "V"
-
-                    elif 'gaia' in self.config.star_catalog_file.lower():
-                        mag_str = 'GAIA G band'
-
-                    else:
-                        mag_str = "{:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*self.config.star_catalog_band_ratios)
                         
-                    ax_p.set_ylabel("Catalog magnitude ({:s})".format(mag_str))
+                    ax_p.set_ylabel("Catalog magnitude ({:s})".format(self.mag_band_string))
                     ax_p.set_xlabel("Uncalibrated magnitude")
 
                     # Set wider axis limits
@@ -1157,7 +1149,7 @@ class PlateTool(object):
         """
 
         # Load catalog stars
-        catalog_stars = StarCatalog.readStarCatalog(self.config.star_catalog_path, \
+        catalog_stars, self.mag_band_string = StarCatalog.readStarCatalog(self.config.star_catalog_path, \
             self.config.star_catalog_file, lim_mag=lim_mag, \
             mag_band_ratios=self.config.star_catalog_band_ratios)
 

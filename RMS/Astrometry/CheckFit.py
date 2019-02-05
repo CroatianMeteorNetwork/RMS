@@ -495,7 +495,7 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False):
     calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
     # Load catalog stars
-    catalog_stars = StarCatalog.readStarCatalog(config.star_catalog_path, config.star_catalog_file, \
+    catalog_stars, _ = StarCatalog.readStarCatalog(config.star_catalog_path, config.star_catalog_file, \
         lim_mag=config.catalog_mag_limit, mag_band_ratios=config.star_catalog_band_ratios)
 
 
