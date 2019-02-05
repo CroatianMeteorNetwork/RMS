@@ -126,8 +126,6 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
         top_nstars_indices = np.argsort([len(x) for x in star_dict.values()])[::-1][:config.calstars_files_N \
             - 1]
 
-        print(top_nstars_indices)
-
         filtered_star_dict = {}
         for i in top_nstars_indices:
             filtered_star_dict[list(star_dict.keys())[i]] = list(star_dict.values())[i]
