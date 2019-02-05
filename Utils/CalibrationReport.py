@@ -24,7 +24,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog
 
 
-def generateCalibrationReport(config, night_dir_path, show_graphs=False):
+def generateCalibrationReport(config, night_dir_path, platepar=None, show_graphs=False):
     """ Given the folder of the night, find the Calstars file, check the star fit and generate a report
         with the quality of the calibration. The report contains information about both the astrometry and
         the photometry calibration. Graphs will be saved in the given directory of the night.
@@ -32,6 +32,10 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
     Arguments:
         config: [Config instance]
         night_dir_path: [str] Full path to the directory of the night.
+
+    Keyword arguments:
+        platepar: [Platepar instance] Use this platepar instead of finding one in the folder.
+        show_graphs: [bool] Show the graphs on the screen. False by default.
 
     Return:
         None
@@ -53,21 +57,22 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
 
 
 
-    # Find the platepar file in the given directory
-    platepar_file = None
-    for file_name in os.listdir(night_dir_path):
-        if file_name == config.platepar_name:
-            platepar_file = file_name
-            break
+    # Find the platepar file in the given directory if it was not given
+    if platepar is None:
 
-    if platepar_file is None:
-        print('The platepar cannot be found in the night directory!')
-        return None
+        platepar_file = None
+        for file_name in os.listdir(night_dir_path):
+            if file_name == config.platepar_name:
+                platepar_file = file_name
+                break
 
+        if platepar_file is None:
+            print('The platepar cannot be found in the night directory!')
+            return None
 
-    # Load the platepar file
-    platepar = Platepar()
-    platepar.read(os.path.join(night_dir_path, platepar_file))
+        # Load the platepar file
+        platepar = Platepar()
+        platepar.read(os.path.join(night_dir_path, platepar_file))
 
 
     night_name = os.path.split(night_dir_path.strip(os.sep))[1]
