@@ -140,6 +140,7 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
 
     # Load the FF file with the largest number of matched stars
     ff = readFF(night_dir_path, ff_dict[max_jd])
+    img_h, img_w = ff.avepixel.shape
 
     dpi = 200
     plt.figure(figsize=(ff.avepixel.shape[1]/dpi, ff.avepixel.shape[0]/dpi), dpi=dpi)
@@ -213,6 +214,12 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
         legend_handles.append(res_plot[0])
 
         ### ###
+
+    else:
+        
+        # If there are no matched stars, plot large text in the middle of the screen
+        plt.text(img_w/2, img_h/2, "NO MATCHED STARS!", color='r', alpha=0.5, fontsize=20, ha='center',
+            va='center')
 
 
     ### Plot positions of catalog stars to the limiting magnitude of the faintest matched star + 1 mag ###
@@ -302,7 +309,6 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
         ### Plot the photometry ###
 
         # Take only those stars which are inside the 3/4 of the shorter image axis from the center
-        img_h, img_w = ff.avepixel.shape
         photom_selection_radius = np.min([img_h, img_w])/3
         filter_indices = ((image_stars[:, 0] - img_h/2)**2 + (image_stars[:, 1] \
             - img_w/2)**2) <= photom_selection_radius**2
