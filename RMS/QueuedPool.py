@@ -58,7 +58,8 @@ class BackupContainer(object):
 
 
 class QueuedPool(object):
-    def __init__(self, func, cores=None, log=None, delay_start=0, worker_timeout=2000, backup_dir='.'):
+    def __init__(self, func, cores=None, log=None, delay_start=0, worker_timeout=2000, backup_dir='.', \
+        low_priority=False):
         """ Provides capability of creating a pool of workers which will process jobs in a given queue, and 
         the input queue can be updated in another thread. 
 
@@ -78,7 +79,8 @@ class QueuedPool(object):
             worker_timeout: [int] Number of seconds to wait before the queue is killed due to a worker getting 
                 stuck.
             backup_dir: [str] Path to the directory where result backups will be held.
-
+            low_priority: [bool] If True, the child processess will run with a lower priority, i.e. larger
+                'niceness' (available only on Unix).
         """
 
 
@@ -105,6 +107,7 @@ class QueuedPool(object):
         self.start_time = time.time()
         self.delay_start = delay_start
         self.worker_timeout = worker_timeout
+        self.low_priority = low_priority
 
         # Initialize queues (for some reason queues from Manager need to be created, otherwise they are 
         # blocking when using get_nowait)
@@ -221,6 +224,16 @@ class QueuedPool(object):
     def _workerFunc(self, func):
         """ A wrapper function for the given worker function. Handles the queue operations. """
         
+        # Set lower priority, if given
+        if self.low_priority:
+
+            # Try setting the process niceness (available only on Unix systems)
+            try:
+                os.nice(20)
+                self.printAndLog('Set low priority for processing thread!')
+            except Exception as e:
+                self.printAndLog('Setting niceness failed with message:\n' + repr(e))
+
 
         # Wait until delay has passed
         while (self.start_time + self.delay_start) > time.time():

@@ -21,6 +21,7 @@ from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats import CALSTARS
 from RMS.UploadManager import UploadManager
+from Utils.CalibrationReport import generateCalibrationReport
 from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
@@ -127,7 +128,16 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 platepar.write(platepar_path, fmt=platepar_fmt)
 
             else:
-                log.info('Astrometric calibration FAILED!, Using old platepar for calibration...')    
+                log.info('Astrometric calibration FAILED!, Using old platepar for calibration...')
+
+
+            # Generate a calibration report
+            try:
+                log.info('Generating a calibration report...')
+                generateCalibrationReport(config, night_data_dir, platepar=platepar)
+
+            except Exception as e:
+                log.debug('Generating calibration report failed with message:\n' + repr(e))
 
 
             # Calculate astrometry for meteor detections
@@ -166,9 +176,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     # If making flat was sucessfull, save it
     if flat_img is not None:
 
-        # Save the flat in the root directory, to keep the operational flat updated
-        scipy.misc.imsave(config.flat_file, flat_img)
-        flat_path = os.path.join(os.getcwd(), config.flat_file)
+        # Save the flat in the night directory, to keep the operational flat updated
+        flat_path = os.path.join(night_data_dir, os.path.basename(config.flat_file))
+        scipy.misc.imsave(flat_path, flat_img)
         log.info('Flat saved to: ' + flat_path)
 
         # Copy the flat to the night's directory as well
