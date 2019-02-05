@@ -23,14 +23,17 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog
 
 
-def generateCalibrationReport(config, night_dir_path):
+def generateCalibrationReport(config, night_dir_path, show_graphs=False):
     """ Given the folder of the night, find the Calstars file, check the star fit and generate a report
         with the quality of the calibration. The report contains information about both the astrometry and
-        the photometry calibration.
+        the photometry calibration. Graphs will be saved in the given directory of the night.
     
     Arguments:
+        config: [Config instance]
+        night_dir_path: [str] Full path to the directory of the night.
 
-
+    Return:
+        None
     """
 
     # Find the CALSTARS file in the given folder
@@ -261,7 +264,13 @@ def generateCalibrationReport(config, night_dir_path):
     plt.savefig(os.path.join(night_dir_path, night_name + '_calib_report_astrometry.png'), \
         bbox_inches='tight', pad_inches=0, dpi=dpi)
 
-    plt.show()
+
+    if show_graphs:
+        plt.show()
+
+    else:
+        plt.clf()
+        plt.close()
 
 
 
@@ -297,7 +306,8 @@ def generateCalibrationReport(config, night_dir_path):
         platepar.mag_lev, platepar.mag_lev_stddev, platepar.gamma)
 
     logsum_arr = np.linspace(x_min_w, x_max_w, 10)
-    plt.plot(logsum_arr, logsum_arr + platepar.mag_lev, label=photometry_info, linestyle='--', color='k', alpha=0.5)
+    plt.plot(logsum_arr, logsum_arr + platepar.mag_lev, label=photometry_info, linestyle='--', color='k', \
+        alpha=0.5)
 
     plt.legend()
 
@@ -316,7 +326,13 @@ def generateCalibrationReport(config, night_dir_path):
 
     plt.savefig(os.path.join(night_dir_path, night_name + '_calib_report_photometry.png'), dpi=200)
 
-    plt.show()
+
+    if show_graphs:
+        plt.show()
+
+    else:
+        plt.clf()
+        plt.close()
 
     ## ##
 
@@ -350,7 +366,7 @@ if __name__ == "__main__":
     config = cr.parse(".config")
 
 
-    generateCalibrationReport(config, cml_args.dir_path)
+    generateCalibrationReport(config, cml_args.dir_path, show_graphs=True)
 
 
 
