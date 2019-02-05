@@ -110,7 +110,7 @@ def loadGaiaCatalog(dir_path, file_name, lim_mag=None):
     # Filter by limiting magnitude
     if lim_mag is not None:
 
-        results = results[results[:, 2] < lim_mag]
+        results = results[results[:, 2] <= lim_mag]
 
 
     # Sort stars by descending declination
