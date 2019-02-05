@@ -133,6 +133,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
             # Generate a calibration report
             try:
+                log.info('Generating a calibration report...')
                 generateCalibrationReport(config, night_data_dir)
 
             except Exception as e:
