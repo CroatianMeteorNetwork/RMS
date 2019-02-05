@@ -269,9 +269,19 @@ def generateCalibrationReport(config, night_dir_path):
 
     ### Plot the photometry ###
 
+    # Take only those stars which are inside the 3/4 of the shorter image axis from the center
+    img_h, img_w = ff.avepixel.shape
+    photom_selection_radius = np.min([img_h, img_w])/3
+    filter_indices = ((image_stars[:, 0] - img_h/2)**2 + (image_stars[:, 1] - img_w/2)**2) <= photom_selection_radius**2
+    star_intensities = image_stars[filter_indices, 2]
+    catalog_mags = matched_catalog_stars[filter_indices, 2]
+
+
+    print(len(image_stars), len(star_intensities))
+
     # Plot intensities of image stars
-    star_intensities = image_stars[:, 2]
-    plt.scatter(-2.5*np.log10(star_intensities), matched_catalog_stars[:, 2], s=5, c='r')
+    #star_intensities = image_stars[:, 2]
+    plt.scatter(-2.5*np.log10(star_intensities), catalog_mags, s=5, c='r')
 
 
     # Plot photometric offset from the platepar
