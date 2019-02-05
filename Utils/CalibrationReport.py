@@ -9,7 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from RMS.Astrometry.ApplyAstrometry import computeFOVSize, XY2CorrectedRADecPP, raDecToCorrectedXYPP, \
-    photomLine, photometryFit
+    photometryFit
 from RMS.Astrometry.CheckFit import matchStarsResiduals
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Formats.CALSTARS import readCALSTARS
