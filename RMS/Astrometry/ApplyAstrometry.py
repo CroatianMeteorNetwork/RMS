@@ -48,6 +48,46 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import cyRaDecToCorrectedXY, cyXYToRADec
 
 
+def photomLine(lsp, photom_offset):
+    """ Line used for photometry, the slope is fixed to -2.5, only the photometric offset is given. 
+    
+    Arguments:
+        lsp: [float] LogSum Pixel - logarith of the sum of pixel intensities.
+        photom_offset: [float] The photometric offet.
+
+    Return: 
+        [float] Magnitude.
+    """
+    
+    # The slope is fixed to -2.5, coming from the definition of magnitude
+    return -2.5*lsp + photom_offset
+
+
+def photometryFit(logsum_px, catalog_mags):
+    """ Fit the photometry on given data. 
+    
+    Arguments:
+        logsum_px: [list] A list of log sum pixel values (logarithms of sums of pixel intensities).
+        catalog_mags: [list] A list of corresponding catalog magnitudes of stars.
+
+    Return:
+        (photom_offset, fit_stddev, fit_resid):
+            photom_offset: [float] The photometric offset.
+            fit_stddev: [float] The standard deviation of the fit.
+            fit_resid: [float] Magnitude fit residuals.
+    """
+
+    # Fit a line to the star data, where only the intercept has to be estimated
+    photom_params, _ = scipy.optimize.curve_fit(photomLine, logsum_px, catalog_mags, \
+        method='trf', loss='soft_l1')
+
+    # Calculate the standard deviation
+    fit_resids = np.array(catalog_mags) - photomLine(np.array(logsum_px), *photom_params)
+    fit_stddev = np.std(fit_resids)
+
+    return photom_params[0], fit_stddev, fit_resids
+
+
 def computeFOVSize(platepar):
     """ Computes the size of the FOV in deg from the given platepar. 
         

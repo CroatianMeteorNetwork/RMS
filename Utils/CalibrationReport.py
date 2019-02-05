@@ -8,7 +8,8 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from RMS.Astrometry.ApplyAstrometry import computeFOVSize, XY2CorrectedRADecPP, raDecToCorrectedXYPP
+from RMS.Astrometry.ApplyAstrometry import computeFOVSize, XY2CorrectedRADecPP, raDecToCorrectedXYPP, \
+    photomLine, photometryFit
 from RMS.Astrometry.CheckFit import matchStarsResiduals
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Formats.CALSTARS import readCALSTARS
@@ -69,18 +70,15 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
     platepar.read(os.path.join(night_dir_path, platepar_file))
 
 
-
     night_name = os.path.split(night_dir_path.strip(os.sep))[1]
-
-    print(night_name)
 
 
     # Go one mag deeper than in the config
     lim_mag = config.catalog_mag_limit + 1
 
     # Load catalog stars (load one magnitude deeper)
-    catalog_stars = StarCatalog.readStarCatalog(config.star_catalog_path, config.star_catalog_file, \
-        lim_mag=lim_mag, mag_band_ratios=config.star_catalog_band_ratios)
+    catalog_stars, mag_band_str = StarCatalog.readStarCatalog(config.star_catalog_path, \
+        config.star_catalog_file, lim_mag=lim_mag, mag_band_ratios=config.star_catalog_band_ratios)
 
     
     ### Take only those CALSTARS entires for which FF files exist in the folder ###
@@ -126,24 +124,29 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
 
     # Find the image with the largest number of matched stars
     max_jd = 0
-    max_jd_len = 0
+    max_matched_stars = 0
     for jd in matched_stars:
         _, _, distances = matched_stars[jd]
-        if len(distances) > max_jd_len:
+        if len(distances) > max_matched_stars:
             max_jd = jd
-            max_jd_len = len(distances)
+            max_matched_stars = len(distances)
 
+    
+    # If there are no matched stars, use the image with the largest number of detected stars
+    if max_matched_stars <= 2:
+        max_jd = max(star_dict, key=lambda x: len(star_dict[x]))
+        distances = [np.inf]
 
 
     # Load the FF file with the largest number of matched stars
     ff = readFF(night_dir_path, ff_dict[max_jd])
-
-    # Take the solution with the largest number of matched stars
-    image_stars, matched_catalog_stars, distances = matched_stars[max_jd]
+    img_h, img_w = ff.avepixel.shape
 
     dpi = 200
     plt.figure(figsize=(ff.avepixel.shape[1]/dpi, ff.avepixel.shape[0]/dpi), dpi=dpi)
     plt.imshow(ff.avepixel, cmap='gray', interpolation='nearest')
+
+    legend_handles = []
 
 
     # Plot detected stars
@@ -157,53 +160,78 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
 
         plt.gca().add_artist(square_patch)
 
+    legend_handles.append(square_patch)
 
 
-    # Plot matched stars
-    for img_star in image_stars:
-        x, y, _, _ = img_star
 
-        circle_patch = plt.Circle((y, x), radius=3*match_radius, color='y', fill=False, label='Matched stars')
+    # If there are matched stars, plot them
+    if max_matched_stars > 2:
 
-        plt.gca().add_artist(circle_patch)
+        # Take the solution with the largest number of matched stars
+        image_stars, matched_catalog_stars, distances = matched_stars[max_jd]
 
+        # Plot matched stars
+        for img_star in image_stars:
+            x, y, _, _ = img_star
 
-    
-    ### Plot match residuals ###
+            circle_patch = plt.Circle((y, x), radius=3*match_radius, color='y', fill=False, \
+                label='Matched stars')
 
-    # Compute preducted positions of matched image stars from the catalog
-    x_predicted, y_predicted = raDecToCorrectedXYPP(matched_catalog_stars[:, 0], \
-        matched_catalog_stars[:, 1], max_jd, platepar)
+            plt.gca().add_artist(circle_patch)
 
-    img_y, img_x, _, _ = image_stars.T
-
-    delta_x = x_predicted - img_x
-    delta_y = y_predicted - img_y
-
-    # Compute image residual and angle of the error
-    res_angle = np.arctan2(delta_y, delta_x)
-    res_distance = np.sqrt(delta_x**2 + delta_y**2)
+        legend_handles.append(circle_patch)
 
 
-    # Calculate coordinates of the beginning of the residual line
-    res_x_beg = img_x + 3*match_radius*np.cos(res_angle)
-    res_y_beg = img_y + 3*match_radius*np.sin(res_angle)
+        ### Plot match residuals ###
 
-    # Calculate coordinates of the end of the residual line
-    res_x_end = img_x + 100*np.cos(res_angle)*res_distance
-    res_y_end = img_y + 100*np.sin(res_angle)*res_distance
+        # Compute preducted positions of matched image stars from the catalog
+        x_predicted, y_predicted = raDecToCorrectedXYPP(matched_catalog_stars[:, 0], \
+            matched_catalog_stars[:, 1], max_jd, platepar)
 
-    # Plot the 100x residuals
-    for i in range(len(x_predicted)):
-        res_plot = plt.plot([res_x_beg[i], res_x_end[i]], [res_y_beg[i], res_y_end[i]], color='orange', \
-            lw=0.5, label='100x residuals')
+        img_y, img_x, _, _ = image_stars.T
 
-    ### ###
+        delta_x = x_predicted - img_x
+        delta_y = y_predicted - img_y
+
+        # Compute image residual and angle of the error
+        res_angle = np.arctan2(delta_y, delta_x)
+        res_distance = np.sqrt(delta_x**2 + delta_y**2)
+
+
+        # Calculate coordinates of the beginning of the residual line
+        res_x_beg = img_x + 3*match_radius*np.cos(res_angle)
+        res_y_beg = img_y + 3*match_radius*np.sin(res_angle)
+
+        # Calculate coordinates of the end of the residual line
+        res_x_end = img_x + 100*np.cos(res_angle)*res_distance
+        res_y_end = img_y + 100*np.sin(res_angle)*res_distance
+
+        # Plot the 100x residuals
+        for i in range(len(x_predicted)):
+            res_plot = plt.plot([res_x_beg[i], res_x_end[i]], [res_y_beg[i], res_y_end[i]], color='orange', \
+                lw=0.5, label='100x residuals')
+
+        legend_handles.append(res_plot[0])
+
+        ### ###
+
+    else:
+        
+        # If there are no matched stars, plot large text in the middle of the screen
+        plt.text(img_w/2, img_h/2, "NO MATCHED STARS!", color='r', alpha=0.5, fontsize=20, ha='center',
+            va='center')
 
 
     ### Plot positions of catalog stars to the limiting magnitude of the faintest matched star + 1 mag ###
 
-    faintest_mag = np.max(matched_catalog_stars[:, 2]) + 1
+    # Find the faintest magnitude among matched stars
+    if max_matched_stars > 2:
+        faintest_mag = np.max(matched_catalog_stars[:, 2]) + 1
+
+    else:
+        # If there are no matched stars, use the limiting magnitude from config
+        faintest_mag = config.catalog_mag_limit + 1
+
 
     # Estimate RA,dec of the centre of the FOV
     _, RA_c, dec_c, _ = XY2CorrectedRADecPP([jd2Date(max_jd)], [platepar.X_res/2], [platepar.Y_res/2], [1], 
@@ -233,18 +261,20 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
     cat_stars_handle = plt.scatter(x_catalog, y_catalog, c='none', marker='D', lw=1.0, alpha=0.4, \
         s=((4.0 + (faintest_mag - mag_catalog))/3.0)**(2*2.512), edgecolor='r', label='Catalog stars')
 
+    legend_handles.append(cat_stars_handle)
+
     ### ###
 
 
     # Add info text
     info_text = ff_dict[max_jd] + '\n' \
-        + "Matched stars: {:d}/{:d}\n".format(len(image_stars), len(star_dict[max_jd])) \
+        + "Matched stars: {:d}/{:d}\n".format(max_matched_stars, len(star_dict[max_jd])) \
         + "Median distance: {:.2f} px".format(np.median(distances))
 
     plt.text(10, 10, info_text, bbox=dict(facecolor='black', alpha=0.5), va='top', ha='left', fontsize=4, \
         color='w')
 
-    legend = plt.legend(handles=[circle_patch, square_patch, cat_stars_handle, res_plot[0]], prop={'size': 4})
+    legend = plt.legend(handles=legend_handles, prop={'size': 4})
     legend.get_frame().set_facecolor('k')
     legend.get_frame().set_edgecolor('k')
     for txt in legend.get_texts():
@@ -261,7 +291,7 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
     # Remove the margins
     plt.subplots_adjust(left=0, bottom=0, right=1, top=1, wspace=0, hspace=0)
 
-    plt.savefig(os.path.join(night_dir_path, night_name + '_calib_report_astrometry.png'), \
+    plt.savefig(os.path.join(night_dir_path, night_name + '_calib_report_astrometry.jpg'), \
         bbox_inches='tight', pad_inches=0, dpi=dpi)
 
 
@@ -274,67 +304,72 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
 
 
 
+    if max_matched_stars > 2:
+
+        ### Plot the photometry ###
+
+        # Take only those stars which are inside the 3/4 of the shorter image axis from the center
+        photom_selection_radius = np.min([img_h, img_w])/3
+        filter_indices = ((image_stars[:, 0] - img_h/2)**2 + (image_stars[:, 1] \
+            - img_w/2)**2) <= photom_selection_radius**2
+        star_intensities = image_stars[filter_indices, 2]
+        catalog_mags = matched_catalog_stars[filter_indices, 2]
+
+        # Plot intensities of image stars
+        #star_intensities = image_stars[:, 2]
+        plt.scatter(-2.5*np.log10(star_intensities), catalog_mags, s=5, c='r')
+
+        # Fit the photometry on automated star intensities
+        photom_offset, fit_stddev, _ = photometryFit(np.log10(star_intensities), catalog_mags)
 
 
-    ### Plot the photometry ###
+        # Plot photometric offset from the platepar
+        x_min, x_max = plt.gca().get_xlim()
+        y_min, y_max = plt.gca().get_ylim()
 
-    # Take only those stars which are inside the 3/4 of the shorter image axis from the center
-    img_h, img_w = ff.avepixel.shape
-    photom_selection_radius = np.min([img_h, img_w])/3
-    filter_indices = ((image_stars[:, 0] - img_h/2)**2 + (image_stars[:, 1] - img_w/2)**2) <= photom_selection_radius**2
-    star_intensities = image_stars[filter_indices, 2]
-    catalog_mags = matched_catalog_stars[filter_indices, 2]
+        x_min_w = x_min - 3
+        x_max_w = x_max + 3
+        y_min_w = y_min - 3
+        y_max_w = y_max + 3
 
+        photometry_info = 'Platepar: {:+.2f}LSP {:+.2f} +/- {:.2f} \nGamma = {:.2f}'.format(platepar.mag_0, \
+            platepar.mag_lev, platepar.mag_lev_stddev, platepar.gamma)
 
-    print(len(image_stars), len(star_intensities))
+        # Plot the photometry calibration from the platepar
+        logsum_arr = np.linspace(x_min_w, x_max_w, 10)
+        plt.plot(logsum_arr, logsum_arr + platepar.mag_lev, label=photometry_info, linestyle='--', \
+            color='k', alpha=0.5)
 
-    # Plot intensities of image stars
-    #star_intensities = image_stars[:, 2]
-    plt.scatter(-2.5*np.log10(star_intensities), catalog_mags, s=5, c='r')
+        # Plot the fitted photometry calibration
+        fit_info = "Fit: {:+.2f}LSP {:+.2f} +/- {:.2f}".format(-2.5, photom_offset, fit_stddev)
+        plt.plot(logsum_arr, logsum_arr + photom_offset, label=fit_info, linestyle='--', color='red', 
+            alpha=0.5)
 
+        plt.legend()
 
-    # Plot photometric offset from the platepar
-    x_min, x_max = plt.gca().get_xlim()
-    y_min, y_max = plt.gca().get_ylim()
+        plt.ylabel("Catalog magnitude ({:s})".format(mag_band_str))
+        plt.xlabel("Uncalibrated magnitude")
 
-    x_min_w = x_min - 3
-    x_max_w = x_max + 3
-    y_min_w = y_min - 3
-    y_max_w = y_max + 3
+        # Set wider axis limits
+        plt.xlim(x_min_w, x_max_w)
+        plt.ylim(y_min_w, y_max_w)
 
-    photometry_info = 'Platepar: {:+.2f}LSP {:+.2f} +/- {:.2f} \nGamma = {:.2f}'.format(platepar.mag_0, \
-        platepar.mag_lev, platepar.mag_lev_stddev, platepar.gamma)
+        plt.gca().invert_yaxis()
+        plt.gca().invert_xaxis()
 
-    logsum_arr = np.linspace(x_min_w, x_max_w, 10)
-    plt.plot(logsum_arr, logsum_arr + platepar.mag_lev, label=photometry_info, linestyle='--', color='k', \
-        alpha=0.5)
+        plt.grid()
 
-    plt.legend()
-
-    #plt.ylabel("Catalog magnitude ({:s})".format(mag_str))
-    plt.ylabel("Catalog magnitude")
-    plt.xlabel("Uncalibrated magnitude")
-
-    # Set wider axis limits
-    plt.xlim(x_min_w, x_max_w)
-    plt.ylim(y_min_w, y_max_w)
-
-    plt.gca().invert_yaxis()
-    plt.gca().invert_xaxis()
-
-    plt.grid()
-
-    plt.savefig(os.path.join(night_dir_path, night_name + '_calib_report_photometry.png'), dpi=200)
+        plt.savefig(os.path.join(night_dir_path, night_name + '_calib_report_photometry.png'), dpi=150)
 
 
-    if show_graphs:
-        plt.show()
+        if show_graphs:
+            plt.show()
 
-    else:
-        plt.clf()
-        plt.close()
+        else:
+            plt.clf()
+            plt.close()
 
-    ## ##
+        ### ###
 
 
 

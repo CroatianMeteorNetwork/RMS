@@ -136,17 +136,19 @@ def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
                 [B, V, R, I].
     
     Return:
-        star_data: [ndarray] Array of (RA, dec, mag) parameters for each star, coordinates are in degrees.
+        (star_data, mag_band_string): 
+            star_data: [ndarray] Array of (RA, dec, mag) parameters for each star, coordinates are in degrees.
+            mag_band_string: [str] Text describing the magntiude band of the catalog.
     """
 
     # Use the BSC star catalog if BSC is given
     if 'BSC' in file_name:
-        return readBSC(dir_path, file_name, lim_mag=lim_mag)
+        return readBSC(dir_path, file_name, lim_mag=lim_mag), 'BSC5 V band'
 
 
     # Use the GAIA star catalog
     if 'gaia' in file_name.lower():
-        return loadGaiaCatalog(dir_path, file_name, lim_mag=lim_mag)
+        return loadGaiaCatalog(dir_path, file_name, lim_mag=lim_mag), 'GAIA G band'
 
 
 
@@ -207,6 +209,14 @@ def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
                     mag_spectrum = rb*mag_b + rv*mag_v + rr*mag_r + ri*mag_i
 
 
+                else:
+                    mag_band_ratios = [0, 1.0, 0, 0]
+
+
+            else:
+                mag_band_ratios = [0, 1.0, 0, 0]
+
+
             # Skip the star if it fainter then the given limiting magnitude
             if lim_mag is not None:
                 if mag_spectrum > lim_mag:
@@ -222,7 +232,9 @@ def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
     star_data = star_data[star_data[:,1].argsort()[::-1]]
 
 
-    return star_data
+    mag_band_string = "Sky2000 {:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(mag_band_ratios)
+
+    return star_data, mag_band_string
 
 
 
