@@ -52,7 +52,7 @@ from RMS.Formats.Platepar import Platepar
 from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats import StarCatalog
 from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADecPP, raDec2AltAz, raDecToCorrectedXY,\
-    rotationWrtHorizon, rotationWrtHorizonToPosAngle
+    rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Routines import Image
 from RMS.Math import angularSeparation
@@ -299,7 +299,7 @@ class PlateTool(object):
             print('Platepar loaded:', self.platepar_file)
 
             # Print the field of view size
-            print("FOV: {:.2f} x {:.2f} deg".format(*self.computeFOVSize()))
+            print("FOV: {:.2f} x {:.2f} deg".format(*computeFOVSize(self.platepar)))
 
         
         # If the platepar file was not loaded, set initial values from config
@@ -951,7 +951,7 @@ class PlateTool(object):
                 self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
 
             # Save the platepar file
-            self.platepar.write(self.platepar_file, fmt=self.platepar_fmt, fov=self.computeFOVSize())
+            self.platepar.write(self.platepar_file, fmt=self.platepar_fmt, fov=computeFOVSize(self.platepar))
             print('Platepar written to:', self.platepar_file)
 
 
@@ -1553,7 +1553,7 @@ class PlateTool(object):
         ra_centre, dec_centre = self.computeCentreRADec()
 
         # Calculate the FOV radius in degrees
-        fov_y, fov_x = self.computeFOVSize()
+        fov_y, fov_x = computeFOVSize(self.platepar)
         fov_radius = np.sqrt(fov_x**2 + fov_y**2)
 
 
@@ -1780,39 +1780,6 @@ class PlateTool(object):
 
         if update_image:
             self.updateImage()
-
-
-
-    def computeFOVSize(self):
-        """ Computes the size of the FOV in deg from the given platepar. 
-        
-        Return:
-            fov_h: [float] Horizontal FOV in degrees.
-            fov_v: [float] Vertical FOV in degrees.
-        """
-
-        # Construct poinits on the middle of every side of the image
-        time_data = np.array(4*[jd2Date(self.platepar.JD)])
-        x_data = np.array([0, self.platepar.X_res, self.platepar.X_res/2, self.platepar.X_res/2])
-        y_data = np.array([self.platepar.Y_res/2, self.platepar.Y_res/2, 0, self.platepar.Y_res])
-        level_data = np.ones(4)
-
-        # Compute RA/Dec of the points
-        _, ra_data, dec_data, _ = XY2CorrectedRADecPP(time_data, x_data, y_data, level_data, self.platepar)
-
-        ra1, ra2, ra3, ra4 = ra_data
-        dec1, dec2, dec3, dec4 = dec_data
-
-        # Compute horizontal FOV
-        fov_h = np.degrees(angularSeparation(np.radians(ra1), np.radians(dec1), np.radians(ra2), \
-            np.radians(dec2)))
-
-        # Compute vertical FOV
-        fov_v = np.degrees(angularSeparation(np.radians(ra3), np.radians(dec3), np.radians(ra4), \
-            np.radians(dec4)))
-
-
-        return fov_h, fov_v
 
 
     def loadFlat(self):
@@ -2436,7 +2403,7 @@ class PlateTool(object):
             mean_angular_error, angular_error_label))
 
         # Print the field of view size
-        print("FOV: {:.2f} x {:.2f} deg".format(*self.computeFOVSize()))
+        print("FOV: {:.2f} x {:.2f} deg".format(*computeFOVSize(self.platepar)))
 
 
         ####################

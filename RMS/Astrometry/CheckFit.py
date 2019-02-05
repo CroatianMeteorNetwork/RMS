@@ -33,7 +33,7 @@ from RMS.Astrometry.CyFunctions import matchStars, subsetCatalog, cyRaDecToCorre
 
 
 def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius, ret_nmatch=False, \
-    sky_coords=False):
+    sky_coords=False, lim_mag=None):
     """ Match the image and catalog stars with the given astrometry solution and estimate the residuals 
         between them.
     
@@ -51,11 +51,16 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
             deviation. False by default.
         sky_coords: [bool] If True, sky coordinate residuals in RA, dec will be used to compute the cost,
             function, not image coordinates.
+        lim_mag: [float] Override the limiting magnitude from config. None by default.
 
     Return:
         cost: [float] The cost function which weights the number of matched stars and the average deviation.
 
     """
+
+
+    if lim_mag is None:
+        lim_mag = config.catalog_mag_limit
 
 
     # Estimate the FOV radius
@@ -85,7 +90,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
         dec_c = dec_c[0]
 
         # Get stars from the catalog around the defined center in a given radius
-        _, extracted_catalog = subsetCatalog(catalog_stars, RA_c, dec_c, fov_radius, config.catalog_mag_limit)
+        _, extracted_catalog = subsetCatalog(catalog_stars, RA_c, dec_c, fov_radius, lim_mag)
         ra_catalog, dec_catalog, mag_catalog = extracted_catalog.T
 
 

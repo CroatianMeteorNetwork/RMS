@@ -35,16 +35,52 @@ import copy
 import numpy as np
 import scipy.optimize
 
-from RMS.Astrometry.Conversions import date2JD, datetime2JD
+from RMS.Astrometry.Conversions import date2JD, datetime2JD, jd2Date
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.FFfile import filenameToDatetime
+from RMS.Math import angularSeparation
 
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import cyRaDecToCorrectedXY, cyXYToRADec
+
+
+def computeFOVSize(platepar):
+    """ Computes the size of the FOV in deg from the given platepar. 
+        
+    Arguments:
+        platepar: [Platepar instance]
+
+    Return:
+        fov_h: [float] Horizontal FOV in degrees.
+        fov_v: [float] Vertical FOV in degrees.
+    """
+
+    # Construct poinits on the middle of every side of the image
+    time_data = np.array(4*[jd2Date(platepar.JD)])
+    x_data = np.array([0, platepar.X_res, platepar.X_res/2, platepar.X_res/2])
+    y_data = np.array([platepar.Y_res/2, platepar.Y_res/2, 0, platepar.Y_res])
+    level_data = np.ones(4)
+
+    # Compute RA/Dec of the points
+    _, ra_data, dec_data, _ = XY2CorrectedRADecPP(time_data, x_data, y_data, level_data, platepar)
+
+    ra1, ra2, ra3, ra4 = ra_data
+    dec1, dec2, dec3, dec4 = dec_data
+
+    # Compute horizontal FOV
+    fov_h = np.degrees(angularSeparation(np.radians(ra1), np.radians(dec1), np.radians(ra2), \
+        np.radians(dec2)))
+
+    # Compute vertical FOV
+    fov_v = np.degrees(angularSeparation(np.radians(ra3), np.radians(dec3), np.radians(ra4), \
+        np.radians(dec4)))
+
+
+    return fov_h, fov_v
 
 
 

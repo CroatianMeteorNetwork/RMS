@@ -21,7 +21,7 @@ if __name__ == "__main__":
     ### PARSE INPUT ARGUMENTS ###
 
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description=""" Starting capture and compression.
+    arg_parser = argparse.ArgumentParser(description=""" Show threshold levels needed to detect certain meteors.
         """)
 
     arg_parser.add_argument('dir_path', type=str, help="Path to the folder with FF files.")

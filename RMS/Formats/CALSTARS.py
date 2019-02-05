@@ -88,6 +88,7 @@ def readCALSTARS(file_path, file_name):
 
     # Check if the CALSTARS file exits
     if not os.path.isfile(calstars_path):
+        print('The CALSTARS file: {:s} does not exist!'.format(calstars_path))
         return False
 
     # Open the CALSTARS file for reading
