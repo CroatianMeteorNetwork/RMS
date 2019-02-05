@@ -232,7 +232,7 @@ def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
     star_data = star_data[star_data[:,1].argsort()[::-1]]
 
 
-    mag_band_string = "Sky2000 {:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(mag_band_ratios)
+    mag_band_string = "Sky2000 {:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*mag_band_ratios)
 
     return star_data, mag_band_string
 
