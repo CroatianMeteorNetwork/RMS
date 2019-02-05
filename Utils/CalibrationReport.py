@@ -8,7 +8,8 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from RMS.Astrometry.ApplyAstrometry import computeFOVSize, XY2CorrectedRADecPP, raDecToCorrectedXYPP
+from RMS.Astrometry.ApplyAstrometry import computeFOVSize, XY2CorrectedRADecPP, raDecToCorrectedXYPP, \
+    photomLine, photometryFit
 from RMS.Astrometry.CheckFit import matchStarsResiduals
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Formats.CALSTARS import readCALSTARS
@@ -312,6 +313,9 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
         #star_intensities = image_stars[:, 2]
         plt.scatter(-2.5*np.log10(star_intensities), catalog_mags, s=5, c='r')
 
+        # Fit the photometry on automated star intensities
+        photom_offset, fit_stddev, _ = photometryFit(np.log10(star_intensities), catalog_mags)
+
 
         # Plot photometric offset from the platepar
         x_min, x_max = plt.gca().get_xlim()
@@ -325,9 +329,15 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
         photometry_info = 'Platepar: {:+.2f}LSP {:+.2f} +/- {:.2f} \nGamma = {:.2f}'.format(platepar.mag_0, \
             platepar.mag_lev, platepar.mag_lev_stddev, platepar.gamma)
 
+        # Plot the photometry calibration from the platepar
         logsum_arr = np.linspace(x_min_w, x_max_w, 10)
         plt.plot(logsum_arr, logsum_arr + platepar.mag_lev, label=photometry_info, linestyle='--', \
             color='k', alpha=0.5)
+
+        # Plot the fitted photometry calibration
+        fit_info = "Fit: {:+.2f}LSP {:+.2f} +/- {:.2f}".format(-2.5, photom_offset, fit_stddev)
+        plt.plot(logsum_arr, logsum_arr + photom_offset, label=fit_info, linestyle='--', color='red', 
+            alpha=0.5)
 
         plt.legend()
 
