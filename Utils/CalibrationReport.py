@@ -116,6 +116,24 @@ def generateCalibrationReport(config, night_dir_path, show_graphs=False):
         print('No FF files from the CALSTARS file in the directory!')
         return None
 
+    # If there are more than a set number of FF files to evaluate, choose only the ones with most stars on
+    #   the image
+    if len(star_dict) > config.calstars_files_N:
+
+        # Find JDs of FF files with most stars on them
+        print([len(x) for x in star_dict.values()])
+        print(np.argsort([len(x) for x in star_dict.values()]))
+        top_nstars_indices = np.argsort([len(x) for x in star_dict.values()])[::-1][:config.calstars_files_N \
+            - 1]
+
+        print(top_nstars_indices)
+
+        filtered_star_dict = {}
+        for i in top_nstars_indices:
+            filtered_star_dict[list(star_dict.keys())[i]] = list(star_dict.values())[i]
+
+        star_dict = filtered_star_dict
+
 
     # Match stars on the image with the stars in the catalog
     match_radius = 2.0
