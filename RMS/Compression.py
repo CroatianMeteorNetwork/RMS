@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import gc
+import os
 import time
 import logging
 
@@ -232,6 +232,13 @@ class Compressor(multiprocessing.Process):
     def run(self):
         """ Retrieve frames from list, convert, compress and save them.
         """
+
+        # Try setting the process niceness to high priority (available only on Unix systems)
+        try:
+            os.nice(-20)
+            log.debug('Set high priority for compression thread!')
+        except Exception as e:
+            log.debug('Setting niceness failed with message:\n' + repr(e))
         
         n = 0
         
