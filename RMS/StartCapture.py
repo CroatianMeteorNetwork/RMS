@@ -26,6 +26,7 @@ import signal
 import ctypes
 import logging
 import multiprocessing
+import traceback
 
 import numpy as np
 
@@ -288,6 +289,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     except Exception as e:
         log.debug('Freeing frame buffers failed with error:' + repr(e))
+        log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
     log.debug('Compression stopped')
 
