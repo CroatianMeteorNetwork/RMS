@@ -126,8 +126,6 @@ def generateCalibrationReport(config, night_dir_path, platepar=None, show_graphs
     if len(star_dict) > config.calstars_files_N:
 
         # Find JDs of FF files with most stars on them
-        print([len(x) for x in star_dict.values()])
-        print(np.argsort([len(x) for x in star_dict.values()]))
         top_nstars_indices = np.argsort([len(x) for x in star_dict.values()])[::-1][:config.calstars_files_N \
             - 1]
 
