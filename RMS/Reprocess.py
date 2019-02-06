@@ -5,6 +5,8 @@ from __future__ import print_function, division, absolute_import
 
 
 import os
+import sys
+import traceback
 import argparse
 import logging
 
@@ -138,6 +140,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
             except Exception as e:
                 log.debug('Generating calibration report failed with message:\n' + repr(e))
+                log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
             # Calculate astrometry for meteor detections
