@@ -55,7 +55,7 @@ cdef float line3DDistance_simple(int x1, int y1, int z1, int x2, int y2, int z2,
 
     
 
-    cdef int n_len = (dx1*dy2 - dx2*dy1)**2+(dx2*dz1 - dx1*dz2)**2 + (dy1*dz2 - dy2*dz1)**2
+    cdef int n_len = (dx1*dy2 - dx2*dy1)**2 + (dx2*dz1 - dx1*dz2)**2 + (dy1*dz2 - dy2*dz1)**2
 
     # Length of denominator vector
     cdef int d_len = (x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2
@@ -181,10 +181,10 @@ def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y
         max_array_size = point_list_size
 
     # Get all points belonging to the best line
-    cdef np.ndarray[UINT16_TYPE_t, ndim=2] max_line_points = np.zeros(shape=(max_array_size, 3), dtype = UINT16_TYPE)
+    cdef np.ndarray[UINT16_TYPE_t, ndim=2] max_line_points = np.zeros(shape=(max_array_size, 3), dtype=UINT16_TYPE)
 
     # Get the index of the first point
-    point1_index = np.where(np.all(point_list==np.array((x1, y1, z1)),axis=1))[0]
+    point1_index = np.where(np.all(point_list == np.array((x1, y1, z1)), axis=1))[0]
 
     # Check if the first point exists, if not start from the point closes to the given point
     if not point1_index:
@@ -379,7 +379,7 @@ def find3DLines(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, start_time, config
             results_counter += 1
 
     # Return empty if no good match was found
-    if not results_counter:
+    if results_counter == 0:
         return None
 
     # Get Line with the best quality
