@@ -274,7 +274,7 @@ def writeEv(dir_path, file_name, ev_array, platepar):
 
 
 
-def batchRecomputeMagnitudes(dir_path, photom_offset):
+def batchRecomputeMagnitudes(dir_path, photom_offset, site=None):
     """ Recompute the magnitudes in all ev files in the given directory. The files will be read in, the 
         magnitudes recomputed, and the files will be saved back.
 
@@ -282,11 +282,22 @@ def batchRecomputeMagnitudes(dir_path, photom_offset):
         dir_path: [str] Path to the directory with ev files.
         photom_offset: [float] The new photometric offset.
 
+    Keyword arguments:
+        site: [str] Recompute the magnitudes only on files from a given site, e.g. 02F. None by default,
+            in which case all ev files will be used.
+
     """
 
     for file_name in os.listdir(dir_path):
 
         if file_name.startswith('ev_') and file_name.endswith('.txt'):
+
+            if site is not None:
+                tmp_name = file_name.strip('.txt')
+                if not tmp_name.endswith(site):
+                    print('Skipping:', file_name)
+                    continue
+
 
             print('Fixing magnitudes:', file_name)
 
