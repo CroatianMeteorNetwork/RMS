@@ -209,6 +209,10 @@ class Config:
         self.longitude = 0
         self.elevation = 0
         self.cams_code = 0
+
+        self.external_script_run = False
+        self.external_script_path = None
+        self.external_function_name = "rmsExternal"
         
         ##### Capture
         self.deviceID = 0
@@ -477,6 +481,15 @@ def parseSystem(config, parser):
     if parser.has_option(section, "cams_code"):
         config.cams_code = parser.getint(section, "cams_code")
 
+    if parser.has_option(section, "external_script_run"):
+        config.external_script_run = parser.getboolean(section, "external_script_run")
+
+    if parser.has_option(section, "external_script_path"):
+        config.external_script_path = parser.get(section, "external_script_path")
+
+    if parser.has_option(section, "external_function_name"):
+        config.external_function_name = parser.get(section, "external_function_name")
+        
 
 
 def parseCapture(config, parser):

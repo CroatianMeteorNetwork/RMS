@@ -43,6 +43,7 @@ from RMS.LiveViewer import LiveViewer
 from RMS.Misc import mkdirP
 from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight
+from RMS.RunExternalScript import runExternalScript
 from RMS.UploadManager import UploadManager
 
 
@@ -363,8 +364,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # Save detection to disk and archive detection    
-    archive_name, _ = processNight(night_data_dir, config, detection_results=detection_results, \
-        nodetect=nodetect)
+    night_archive_dir, archive_name, _ = processNight(night_data_dir, config, \
+        detection_results=detection_results, nodetect=nodetect)
 
 
     # Put the archive up for upload
@@ -383,6 +384,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     if duration is not None:
         log.info('Uploading data before exiting...')
         upload_manager.uploadData()
+
+
+    # Run the external script
+    runExternalScript(night_data_dir, night_archive_dir, config)
+    
 
     # If capture was manually stopped, end program
     if STOP_CAPTURE:

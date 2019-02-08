@@ -76,7 +76,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         nodetect: [bool] True if detection should be skipped. False by default.
 
     Return:
+        night_archive_dir: [str] Path to the night directory in ArchivedFiles.
         archive_name: [str] Path to the archive.
+        detector: [QueuedPool instance] Handle to the detector.
     """
 
     # Remove final slash in the night dir
@@ -256,7 +258,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         extra_files=extra_files)
 
 
-    return archive_name, detector
+    return night_archive_dir, archive_name, detector
 
 
 
@@ -294,7 +296,7 @@ if __name__ == "__main__":
 
 
     # Process the night
-    archive_name, detector = processNight(cml_args.dir_path[0], config)
+    _, archive_name, detector = processNight(cml_args.dir_path[0], config)
 
 
     # Upload the archive, if upload is enabled
