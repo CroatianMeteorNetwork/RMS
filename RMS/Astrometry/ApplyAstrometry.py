@@ -37,7 +37,7 @@ import scipy.optimize
 
 from RMS.Astrometry.Conversions import date2JD, datetime2JD, jd2Date
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
-from RMS.Formats.Platepar import Platepar
+import RMS.Formats.Platepar
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Math import angularSeparation
@@ -823,7 +823,7 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
     if platepar is None:
 
         # Load the platepar
-        platepar = Platepar()
+        platepar = RMS.Formats.Platepar.Platepar()
         platepar.read(os.path.join(dir_path, platepar_file))
 
 
@@ -953,7 +953,7 @@ if __name__ == "__main__":
     # # TEST CONVERSION FUNCTIONS
 
     # # Load the platepar
-    # platepar = Platepar()
+    # platepar = RMS.Formats.Platepar.Platepar()
     # platepar.read("/home/dvida/Desktop/HR000A_20181214_170136_990012_detected/platepar_cmn2010.cal")
 
     # from RMS.Formats.FFfile import getMiddleTimeFF

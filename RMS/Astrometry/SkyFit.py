@@ -228,9 +228,6 @@ class PlateTool(object):
         self.catalog_x = self.catalog_y = None
         self.mag_band_string = ''
 
-        # Rotation with respect to the horizon
-        self.rotation_horizon = None
-
         # Flag indicating that the first platepar fit has to be done
         self.first_platepar_fit = True
 
@@ -690,7 +687,7 @@ class PlateTool(object):
         """ Update the reference RA and Dec from Alt/Az. """
 
         # Save the current rotation w.r.t horizon value
-        self.rotation_horizon = rotationWrtHorizon(self.platepar)
+        self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
 
         # Compute the datetime object of the reference Julian date
         time_data = [jd2Date(self.platepar.JD, dt_obj=True)]
@@ -704,7 +701,8 @@ class PlateTool(object):
         self.platepar.dec_d = dec_data[0]
 
         # Update the position angle so that the rotation wrt horizon doesn't change
-        self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, self.rotation_horizon)
+        self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, \
+            self.platepar.rotation_from_horiz)
 
 
 
@@ -913,14 +911,15 @@ class PlateTool(object):
         # Enter FOV centre
         elif event.key == 'v':
 
-            self.platepar.RA_d, self.platepar.dec_d, self.rotation_horizon = self.getFOVcentre()
+            self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz = self.getFOVcentre()
             
             # Recalculate reference alt/az
             self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.JD, \
                 self.platepar.lon, self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d)
 
             # Compute the position angle
-            self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, self.rotation_horizon)
+            self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, \
+                self.platepar.rotation_from_horiz)
             
             self.updateImage()
 
@@ -1690,7 +1689,7 @@ class PlateTool(object):
             platepar.station_code = self.config.stationID
 
             # Compute the rotation w.r.t. horizon
-            self.rotation_horizon = rotationWrtHorizon(platepar)
+            platepar.rotation_from_horiz = rotationWrtHorizon(platepar)
 
 
         self.first_platepar_fit = False
@@ -1740,7 +1739,7 @@ class PlateTool(object):
 
 
         # Get reference RA, Dec of the image centre
-        self.platepar.RA_d, self.platepar.dec_d, self.rotation_horizon = self.getFOVcentre()
+        self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz = self.getFOVcentre()
 
         # Recalculate reference alt/az
         self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.JD, \
@@ -1750,7 +1749,8 @@ class PlateTool(object):
         self.checkParamRange()
 
         # Compute the position angle
-        self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, self.rotation_horizon)
+        self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, \
+            self.platepar.rotation_from_horiz)
 
         self.platepar.auto_check_fit_refined = False
 
