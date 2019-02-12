@@ -202,6 +202,83 @@ def rotationWrtHorizonToPosAngle(platepar, rot_angle):
 
 
 
+def rotationFromStandard(jd, platepar):
+    """ Given the platepar, compute the rotation from the celestial meridian passing through the centre of 
+        the FOV.
+    
+    Arguments:
+        jd: [float] Julian date.
+        pletepar: [Platepar object] Input platepar.
+
+    Return:
+        rot_angle: [float] Rotation from the meridian.
+    """
+
+    # Image coordiantes of the center
+    img_mid_w = platepar.X_res/2
+    img_mid_h = platepar.Y_res/2
+
+    # Image coordinate slighty up of the center
+    img_up_w = img_mid_w
+    img_up_h = img_mid_h - 10
+
+    # Compute alt/az
+    _, ra, dec, _ = XY2CorrectedRADecPP(2*[jd2Date(jd)], [img_mid_w, img_up_w], [img_mid_h, img_up_h], \
+        2*[1], platepar)
+    ra_mid = ra[0]
+    dec_mid = dec[0]
+    ra_up = ra[1]
+    dec_up = dec[1]
+
+    # Compute the equatorial orientation
+    rot_angle = 270 + np.degrees(np.arctan2(np.radians(dec_up) - np.radians(dec_mid), \
+        np.radians(ra_up) - np.radians(ra_mid)))
+
+    # Wrap output to 0-360 range
+    rot_angle = rot_angle%360
+
+    return rot_angle
+
+
+
+def rotationFromStandardToPosAngle(jd, platepar, rot_angle):
+    """ Given the rotation angle w.r.t horizon, numerically compute the position angle. 
+    
+    Arguments:
+        jd: [float] Julian date.
+        pletepar: [Platepar object] Input platepar.
+        rot_angle: [float] The rotation angle w.r.t. horizon (deg)>
+
+    Return:
+        pos_angle: [float] Position angle (deg).
+
+    """
+
+    platepar = copy.deepcopy(platepar)
+    rot_angle = rot_angle%360
+
+
+    def _rotAngleResidual(params, rot_angle):
+
+        # Set the given position angle to the platepar
+        platepar.pos_angle_ref = params[0]
+
+        # Compute the rotation angle with the given guess of the position angle
+        rot_angle_computed = rotationFromStandard(jd, platepar)%360
+
+        # Compute the deviation between computed and desired angle
+        return 180 - abs(abs(rot_angle - rot_angle_computed) - 180)
+
+
+
+    # Numerically find the position angle
+    res = scipy.optimize.minimize(_rotAngleResidual, [platepar.pos_angle_ref], args=(rot_angle), \
+        method='Nelder-Mead')
+
+
+    return res.x[0]%360
+
+
 
 def raDec2AltAz(JD, lon, lat, ra, dec):
     """ Calculate the reference azimuth and altitude of the centre of the FOV from the given RA/Dec. 
