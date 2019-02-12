@@ -11,6 +11,22 @@ import os
 import sys
 import time
 import base64
+import json
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
+from email.mime.application  import MIMEApplication
+from email.encoders import encode_noop
+
+try:
+    # Python 2
+    import StringIO
+    BytesIO = StringIO.StringIO
+
+except ImportError:
+    # Python 3
+    import io
+    BytesIO = io.BytesIO
+
 
 try:
     # py3
@@ -23,14 +39,13 @@ except ImportError:
     from urllib import urlencode, quote
     from urllib2 import urlopen, Request, HTTPError
 
-#from exceptions import Exception
-from email.mime.base import MIMEBase
-from email.mime.multipart import MIMEMultipart
-from email.mime.application  import MIMEApplication
 
-from email.encoders import encode_noop
+from PIL import Image
 
-import json
+
+from RMS.Formats.FFfile import read as readFF
+
+
 
 
 # Denis' API key for nova.astrometry.net
@@ -210,9 +225,10 @@ class Client(object):
         result = self.send_request('url_upload', args)
         return result
 
-    def upload(self, fn=None, **kwargs):
+    def upload(self, fn=None, img_data=None, **kwargs):
         args = self._get_upload_args(**kwargs)
         file_args = None
+        
         if fn is not None:
             try:
                 f = open(fn, 'rb')
@@ -220,6 +236,10 @@ class Client(object):
             except IOError:
                 printDebug('File %s does not exist' % fn)
                 raise
+        
+        if img_data is not None:
+            file_args = ('image.png', img_data)
+
         return self.send_request('upload', args, file_args)
 
     def submission_images(self, subid):
@@ -298,7 +318,7 @@ class Client(object):
 
 
 
-def novaAstrometryNetSolveXY(x_data, y_data, api_key=None):
+def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None, api_key=None):
     """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the 
         nova.astrometry.net service.
 
@@ -314,6 +334,32 @@ def novaAstrometryNetSolveXY(x_data, y_data, api_key=None):
         (ra, dec, orientation, scale, fov_w, fov_h): [tuple of floats] All in degrees, scale in px/deg.
     """
 
+
+    # Read the FF file, if given
+    if ff_file_path is not None:
+        
+        # Read the FF file
+        ff = readFF(*os.path.split(cml_args.file_path[0]))
+
+        img = ff.avepixel
+
+    else:
+        file_handle = None
+
+
+    # Convert an image to a file handle
+    if img is not None:
+
+        # Save the avepixel as a memory file
+        file_handle = BytesIO()
+        pil_img = Image.fromarray(img)
+
+        # Save image to memory as JPG
+        pil_img.save(file_handle, format='JPEG')
+        img_data = file_handle.getvalue()
+
+
+
     c = Client()
 
     # Log in to nova.astrometry.net
@@ -322,8 +368,21 @@ def novaAstrometryNetSolveXY(x_data, y_data, api_key=None):
 
     c.login(api_key)
 
-    # Upload the list of stars
-    upres = c.upload(x=x_data, y=y_data)
+
+    # Upload image or the list of stars
+    if file_handle is not None:
+        upres = c.upload(img_data=img_data, publicly_visible='n')
+
+    elif x_data is not None:
+        upres = c.upload(x=x_data, y=y_data, publicly_visible='n')
+
+    else:
+        print('No input given to the funtion!')
+
+
+    if upres is None:
+        print('Upload failed!')
+        return None
 
     stat = upres['status']
     if stat != 'success':
@@ -337,7 +396,13 @@ def novaAstrometryNetSolveXY(x_data, y_data, api_key=None):
     sub_id = upres['subid']
 
     # Wait until the plate is solved
+    solution_tries = 20
+    tries = 0
     while True:
+
+        # Limit the number of checking if the fiels is solved, so the script does not get stuck
+        if tries > solution_tries:
+            return None
         
         stat = c.sub_status(sub_id, justdict=True)
         print('Got status:', stat)
@@ -356,18 +421,30 @@ def novaAstrometryNetSolveXY(x_data, y_data, api_key=None):
 
         time.sleep(5)
 
+        tries += 1
+
     # Get results
+    get_results_tries = 10
+    tries = 0
     while True:
+
+        # Limit the number of tries of getting the results, so the script does not get stuck
+        if tries > get_results_tries:
+            print('Too many tries in getting the results!')
+            return None
+
         stat = c.job_status(solved_id, justdict=True)
 
         # Get the calibration
         result = c.send_request('jobs/%s/calibration' % solved_id)
         print('Got job status:', stat)
+        print(result)
         if stat.get('status','') in ['success']:
-            print(result)
             break
 
         time.sleep(5)
+
+        tries += 1
 
 
     # RA/Dec of centre
@@ -389,6 +466,27 @@ def novaAstrometryNetSolveXY(x_data, y_data, api_key=None):
 
 if __name__ == '__main__':
 
+    import argparse
+
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Solve the FF file by uploading it to nova.astrometry.net.")
+
+    arg_parser.add_argument('file_path', nargs=1, metavar='FILE_PATH', type=str, \
+        help='Path to the FF file which will be read and uploaded to nova.astrometry.net.')
+
+    # arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+    #     help="Path to a config file which will be used instead of the default one.")
+
+    # arg_parser.add_argument('-d', '--distorsion', action="store_true", \
+    #     help="""Refine the distorsion parameters.""")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
     # Test data
     x_data = [ 317.27, 299.90, 679.93,1232.75,1214.72, 424.84, 336.80, 618.96,  82.06, 593.16, 1007.06, \
         1226.50,  68.94, 191.38, 456.25, 845.41,1173.48,1060.64, 226.13, 875.91, 334.52,   9.16, 533.94, \
@@ -399,7 +497,7 @@ if __name__ == '__main__':
         621.21, 562.74, 126.25, 372.89]
 
     # Contact nova.astrometry.net for the solution
-    novaAstrometryNetSolveXY(x_data, y_data)
+    print(novaAstrometryNetSolve(ff_file_path=cml_args.file_path[0]))#, x_data, y_data))
     
     # Returns:
     # {'parity': 1.0, 
