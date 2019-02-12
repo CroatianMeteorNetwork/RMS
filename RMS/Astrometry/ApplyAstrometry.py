@@ -262,7 +262,7 @@ def applyFieldCorrection(x_poly_fwd, y_poly_fwd, X_res, Y_res, F_scale, X_data, 
         y_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward Y axis polynomial parameters.
         X_res: [int] Image size, X dimension (px).
         Y_res: [int] Image size, Y dimenstion (px).
-        F_scale: [float] Sum of image scales per each image axis (arcsec per px).
+        F_scale: [float] Sum of image scales per each image axis (px/deg).
         X_data: [ndarray] 1D float numpy array containing X component of the detection point.
         Y_data: [ndarray] 1D float numpy array containing Y component of the detection point.
     
@@ -348,7 +348,7 @@ def XY2altAz(X_data, Y_data, lat, lon, RA_d, dec_d, Ho, X_res, Y_res, pos_angle_
         X_res: [int] Image size, X dimension (px).
         Y_res: [int] Image size, Y dimenstion (px).
         pos_angle_ref: [float] Field rotation parameter (degrees).
-        F_scale: [float] Sum of image scales per each image axis (arcsec per px).
+        F_scale: [float] Sum of image scales per each image axis (px/deg).
         x_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward X axis polynomial parameters.
         y_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward Y axis polynomial parameters.
         

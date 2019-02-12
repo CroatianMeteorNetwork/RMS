@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 
-""" Astrometry.net client script for communicating with astrometry.net servers.
-Modified from source: https://github.com/dstndstn/astrometry.net/blob/master/net/client/client.py
+""" 
+Astrometry.net client script for communicating with astrometry.net servers.
+Modified from: https://github.com/dstndstn/astrometry.net/blob/master/net/client/client.py
 """
 
 from __future__ import print_function
@@ -297,12 +298,29 @@ class Client(object):
 
 
 
-def novaAstrometryNetSolveXY(x_data, y_data):
+def novaAstrometryNetSolveXY(x_data, y_data, api_key=None):
+    """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the 
+        nova.astrometry.net service.
+
+    Arguments:
+        x_data: [list] A list of star x image coordiantes.
+        y_data: [list] A list of star y image coordiantes.
+
+    Keyword arguments:
+        api_key: [str] nova.astrometry.net user API key. None by default, in which case the default API
+            key will be used.
+
+    Return:
+        (ra, dec, orientation, scale, fov_w, fov_h): [tuple of floats] All in degrees, scale in px/deg.
+    """
 
     c = Client()
 
     # Log in to nova.astrometry.net
-    c.login(API_KEY)
+    if api_key is None:
+        api_key = API_KEY
+
+    c.login(api_key)
 
     # Upload the list of stars
     upres = c.upload(x=x_data, y=y_data)
@@ -345,13 +363,28 @@ def novaAstrometryNetSolveXY(x_data, y_data):
         # Get the calibration
         result = c.send_request('jobs/%s/calibration' % solved_id)
         print('Got job status:', stat)
-        print(result)
         if stat.get('status','') in ['success']:
+            print(result)
             break
 
         time.sleep(5)
 
-    return result
+
+    # RA/Dec of centre
+    ra = result['ra']
+    dec = result['dec']
+
+    # Orientation +E of N
+    orientation = result['orientation']
+
+    # Image scale in px/deg
+    scale = 3600/result['pixscale']
+
+    # FOV in deg
+    fov_w = result['width_arcsec']/3600
+    fov_h = result['height_arcsec']/3600
+
+    return ra, dec, orientation, scale, fov_w, fov_h
 
 
 if __name__ == '__main__':
@@ -365,4 +398,15 @@ if __name__ == '__main__':
         662.36,  92.83, 146.83, 381.14, 340.89,  34.08,   8.75, 323.30, 679.99, 692.43, 448.28,  47.88, \
         621.21, 562.74, 126.25, 372.89]
 
+    # Contact nova.astrometry.net for the solution
     novaAstrometryNetSolveXY(x_data, y_data)
+    
+    # Returns:
+    # {'parity': 1.0, 
+    #     'width_arcsec': 186857.80594735427, 
+    #     'ra': 351.38664749562014, 
+    #     'pixscale': 151.54728787295562, 
+    #     'radius': 29.77070194214109, 
+    #     'dec': 75.03531583306331, 
+    #     'height_arcsec': 105022.27049595825, 
+    #     'orientation': -75.0809053003417}
