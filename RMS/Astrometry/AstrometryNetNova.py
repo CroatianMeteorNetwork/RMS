@@ -436,7 +436,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
             return None
 
         if solution_tries > get_solution_tries:
-            print('Too long waiting for the solution!')
+            print('Waiting too long for the solution!')
             return None
 
         # Get the job status

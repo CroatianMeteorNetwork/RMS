@@ -973,6 +973,8 @@ class PlateTool(object):
 
             self.getInitialParamsAstrometryNet()
 
+            self.updateImage()
+
 
         # Toggle auto levels
         elif event.key == 'ctrl+a':
@@ -1677,8 +1679,6 @@ class PlateTool(object):
                 
                 # Save the current rotation w.r.t horizon value
                 self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
-
-                self.updateImage()
 
                 # Print estimated parameters
                 print()
