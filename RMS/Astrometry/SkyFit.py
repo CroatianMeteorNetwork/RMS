@@ -1684,6 +1684,8 @@ class PlateTool(object):
                 print()
                 print('Astrometry.net solution:')
                 print('------------------------')
+                print(' RA    = {:.2f} deg'.format(ra))
+                print(' Dec   = {:.2f} deg'.format(dec))
                 print(' Azim  = {:.2f} deg'.format(self.platepar.az_centre))
                 print(' Alt   = {:.2f} deg'.format(self.platepar.alt_centre))
                 print(' Rot horiz   = {:.2f} deg'.format(self.platepar.rotation_from_horiz))

@@ -371,10 +371,10 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
 
     # Upload image or the list of stars
     if file_handle is not None:
-        upres = c.upload(img_data=img_data, publicly_visible='n')
+        upres = c.upload(img_data=img_data, publicly_visible='n', crpix_center=True, tweak_order=3)
 
     elif x_data is not None:
-        upres = c.upload(x=x_data, y=y_data, publicly_visible='n')
+        upres = c.upload(x=x_data, y=y_data, publicly_visible='n', crpix_center=True, tweak_order=3)
 
     else:
         print('No input given to the funtion!')
