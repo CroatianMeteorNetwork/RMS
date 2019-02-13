@@ -1654,7 +1654,9 @@ class PlateTool(object):
                 # Get star coordinates
                 y_data, x_data, _, _ = np.array(star_data).T
 
-                solution = novaAstrometryNetSolve(x_data=x_data, y_data=y_data)
+                # Get astrometry.net solution, pass the FOV width estimate
+                fov_w_range = [0.75*self.config.fov_w, 1.25*self.config.fov_w]
+                solution = novaAstrometryNetSolve(x_data=x_data, y_data=y_data, fov_w_range=fov_w_range)
 
                 if solution is None:
                     messagebox.showerror(title='Astrometry.net error', \
@@ -1770,14 +1772,15 @@ class PlateTool(object):
         # Parse the platepar file
         try:
             self.platepar_fmt = platepar.read(platepar_file)
+            pp_status = True
         except:
-            platepar = None
+            pp_status = False
 
         # Check if the platepar was successfuly loaded
-        if not platepar:
+        if not pp_status:
             messagebox.showerror(title='Platepar file error', message='The file you selected could not be loaded as a platepar file!')
             
-            self.loadPlatepar()
+            platepar_file, platepar = self.loadPlatepar()
 
         
         # Set geo location and gamma from config, if they were updated
