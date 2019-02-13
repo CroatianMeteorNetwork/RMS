@@ -225,10 +225,6 @@ class Platepar(object):
             if not 'gamma' in self.__dict__:
                 self.gamma = 1.0
 
-            # Add rotation from horizontal
-            if not 'rotation_from_horiz' in self.__dict__:
-                self.rotation_from_horiz = RMS.Astrometry.ApplyAstrometry.rotationWrtHorizon(self)
-
             # Add the list of calibration stars if it was not in the platepar
             if not 'star_list' in self.__dict__:
                 self.star_list = []
@@ -248,6 +244,11 @@ class Platepar(object):
             self.x_poly_rev = np.array(self.x_poly_rev)
             self.y_poly_fwd = np.array(self.y_poly_fwd)
             self.y_poly_rev = np.array(self.y_poly_rev)
+
+
+            # Add rotation from horizontal
+            if not 'rotation_from_horiz' in self.__dict__:
+                self.rotation_from_horiz = RMS.Astrometry.ApplyAstrometry.rotationWrtHorizon(self)
 
             # Calculate the datetime
             self.time = jd2Date(self.JD, dt_obj=True)

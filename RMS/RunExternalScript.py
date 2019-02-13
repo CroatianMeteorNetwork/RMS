@@ -55,7 +55,7 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
 
     except Exception as e:
         print('Running external script failed with error:' + repr(e))
-        print(repr(traceback.format_exception(*sys.exc_info())))
+        print(*traceback.format_exception(*sys.exc_info()))
 
 
 

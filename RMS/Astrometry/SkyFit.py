@@ -31,6 +31,7 @@ import copy
 import time
 import datetime
 import argparse
+import traceback
     
 # tkinter import that works on both Python 2 and 3
 try:
@@ -1790,7 +1791,11 @@ class PlateTool(object):
         try:
             self.platepar_fmt = platepar.read(platepar_file)
             pp_status = True
-        except:
+
+        except Exception as e:
+            print('Loading platepar failed with error:' + repr(e))
+            print(*traceback.format_exception(*sys.exc_info()))
+
             pp_status = False
 
         # Check if the platepar was successfuly loaded
