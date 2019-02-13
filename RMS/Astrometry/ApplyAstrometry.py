@@ -231,8 +231,16 @@ def rotationFromStandard(jd, platepar):
     dec_up = dec[1]
 
     # Compute the equatorial orientation
-    rot_angle = 270 + np.degrees(np.arctan2(np.radians(dec_up) - np.radians(dec_mid), \
+    rot_angle = np.degrees(np.arctan2(np.radians(dec_up) - np.radians(dec_mid), \
         np.radians(ra_up) - np.radians(ra_mid)))
+
+    # Compute correct wrt to the latitude
+    if platepar.lat > 0:
+        rot_angle += 270
+
+    else:
+        rot_angle += 90
+        rot_angle = -rot_angle
 
     # Wrap output to 0-360 range
     rot_angle = rot_angle%360

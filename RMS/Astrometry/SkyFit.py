@@ -1425,7 +1425,7 @@ class PlateTool(object):
             text_str += 'Ref Az   = {:.3f}$\\degree$\n'.format(self.platepar.az_centre)
             text_str += 'Ref Alt  = {:.3f}$\\degree$\n'.format(self.platepar.alt_centre)
             text_str += 'Rotation = {:.3f}$\\degree$\n'.format(rotationWrtHorizon(self.platepar))
-            #text_str += 'Orientation = {:.3f}$\\degree$\n'.format(rotationFromStandard(date2JD(*self.img_handle.currentTime()), self.platepar))
+            text_str += 'Orientation = {:.3f}$\\degree$\n'.format(rotationFromStandard(date2JD(*self.img_handle.currentTime()), self.platepar))
             #text_str += 'Ref RA  = {:.3f}\n'.format(self.platepar.RA_d)
             #text_str += 'Ref Dec = {:.3f}\n'.format(self.platepar.dec_d)
             text_str += "F_scale  = {:.3f}'/px\n".format(60/self.platepar.F_scale)
