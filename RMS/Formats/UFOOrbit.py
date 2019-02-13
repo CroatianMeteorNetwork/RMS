@@ -36,6 +36,6 @@ def writeUFOOrbit(dir_path, file_name, data):
 
 
 			f.write('{:s},{:4d},{:2d},{:2d},{:2d},{:2d},{:4.2f},{:.2f},{:.3f},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f},{:s},{:.6f},{:.6f},{:.1f},{:.1f},\n'.format(\
-				'R90', dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second + dt.microsecond/1000000, \
+				'R91', dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second + dt.microsecond/1000000, \
 				peak_mag, duration, azim1, alt1, azim2, alt2, ra1, dec1, ra2, dec2, cam_code, lon, lat, \
 				elev, UT_corr))
