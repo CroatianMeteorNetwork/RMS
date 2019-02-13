@@ -425,26 +425,43 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
 
     # Get results
     get_results_tries = 10
-    tries = 0
+    get_solution_tries = 30
+    results_tries = 0
+    solution_tries = 0
     while True:
 
         # Limit the number of tries of getting the results, so the script does not get stuck
-        if tries > get_results_tries:
+        if results_tries > get_results_tries:
             print('Too many tries in getting the results!')
             return None
 
+        if solution_tries > get_solution_tries:
+            print('Too long waiting for the solution!')
+            return None
+
+        # Get the job status
         stat = c.job_status(solved_id, justdict=True)
 
-        # Get the calibration
-        result = c.send_request('jobs/%s/calibration' % solved_id)
-        print('Got job status:', stat)
-        print(result)
+        # Check if the solution is done
         if stat.get('status','') in ['success']:
+            
+            # Get the calibration
+            result = c.send_request('jobs/%s/calibration' % solved_id)
+            print(result)
             break
 
-        time.sleep(5)
+        # Wait until the job is solved
+        elif stat.get('status','') in ['solving']:
+            print('Solving... Try {:d}/{:d}'.format(solution_tries, get_solution_tries))
+            time.sleep(5)
+            solution_tries += 1
+            continue
 
-        tries += 1
+        # Print other error messages
+        else:
+            time.sleep(5)
+            print('Got job status:', stat)
+            results_tries += 1
 
 
     # RA/Dec of centre

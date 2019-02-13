@@ -28,6 +28,7 @@ import os
 import sys
 import math
 import copy
+import time
 import datetime
 import argparse
     
@@ -685,11 +686,14 @@ class PlateTool(object):
 
 
 
-    def updateRefRADec(self):
+    def updateRefRADec(self, skip_rot_update=False):
         """ Update the reference RA and Dec from Alt/Az. """
 
-        # Save the current rotation w.r.t horizon value
-        self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
+        if not skip_rot_update:
+            
+            # Save the current rotation w.r.t horizon value
+            self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
+
 
         # Compute the datetime object of the reference Julian date
         time_data = [jd2Date(self.platepar.JD, dt_obj=True)]
@@ -702,9 +706,12 @@ class PlateTool(object):
         self.platepar.RA_d = ra_data[0]
         self.platepar.dec_d = dec_data[0]
 
-        # Update the position angle so that the rotation wrt horizon doesn't change
-        self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, \
-            self.platepar.rotation_from_horiz)
+
+        if not skip_rot_update:
+
+            # Update the position angle so that the rotation wrt horizon doesn't change
+            self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, \
+                self.platepar.rotation_from_horiz)
 
 
 
@@ -955,6 +962,15 @@ class PlateTool(object):
 
         # Get initial parameters from astrometry.net
         elif event.key == 'ctrl+x':
+
+            # Overlay text on image indicating that astrometry.net is running
+            plt.text(self.img_data_raw.shape[1]/2, self.img_data_raw.shape[0]/2, \
+                "Solving with astrometry.net...", color='r', alpha=0.5, fontsize=16, ha='center', va='center')
+
+            plt.draw()
+            plt.gcf().canvas.draw()
+            plt.gcf().canvas.flush_events()
+
             self.getInitialParamsAstrometryNet()
 
 
@@ -1047,6 +1063,7 @@ class PlateTool(object):
             #     print('Plate fitted!')
 
             self.fitPickedStars()
+
             print('Plate fitted!')
 
 
@@ -1653,19 +1670,25 @@ class PlateTool(object):
                 # Set parameters to platepar
                 self.platepar.pos_angle_ref = pos_angle_ref
                 self.platepar.F_scale = scale
-                self.platepar.azim_centre = azim
+                self.platepar.az_centre = azim
                 self.platepar.alt_centre = alt
 
-                self.updateRefRADec()
+                self.updateRefRADec(skip_rot_update=True)
+                
+                # Save the current rotation w.r.t horizon value
+                self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
+
                 self.updateImage()
 
                 # Print estimated parameters
                 print()
                 print('Astrometry.net solution:')
                 print('------------------------')
-                print(' Azim  = {:.2f} deg'.format(self.platepar.azim_centre))
+                print(' Azim  = {:.2f} deg'.format(self.platepar.az_centre))
                 print(' Alt   = {:.2f} deg'.format(self.platepar.alt_centre))
-                print(' Rot   = {:.2f} deg'.format(self.platepar.rotation_from_horiz))
+                print(' Rot horiz   = {:.2f} deg'.format(self.platepar.rotation_from_horiz))
+                print(' Orient eq   = {:.2f} deg'.format(orientation))
+                print(' Pos angle   = {:.2f} deg'.format(pos_angle_ref))
                 print(' Scale = {:.2f} arcmin/px'.format(60/self.platepar.F_scale))
 
 
