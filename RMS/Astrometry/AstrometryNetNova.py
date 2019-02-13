@@ -44,7 +44,7 @@ from PIL import Image
 
 
 from RMS.Formats.FFfile import read as readFF
-
+from RMS.ImgurUpload import imgurUpload
 
 
 
@@ -361,6 +361,9 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
         pil_img.save(file_handle, format='JPEG')
         img_data = file_handle.getvalue()
 
+        # Upload the image to imgur
+        image_url = imgurUpload('skyfit_image.jpg', image_data=img_data)
+
 
 
     c = Client()
@@ -382,11 +385,11 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
         scale_lower, scale_upper = fov_w_range
         kwargs['scale_lower'] = scale_lower
         kwargs['scale_upper'] = scale_upper
-        
+
 
     # Upload image or the list of stars
     if file_handle is not None:
-        upres = c.upload(img_data=img_data, **kwargs)
+        upres = c.url_upload(image_url, **kwargs)
 
     elif x_data is not None:
         upres = c.upload(x=x_data, y=y_data, **kwargs)

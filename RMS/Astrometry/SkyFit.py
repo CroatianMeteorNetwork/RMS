@@ -961,7 +961,7 @@ class PlateTool(object):
 
 
         # Get initial parameters from astrometry.net
-        elif event.key == 'ctrl+x':
+        elif (event.key == 'ctrl+x') or (event.key == 'ctrl+X'):
 
             # Overlay text on image indicating that astrometry.net is running
             plt.text(self.img_data_raw.shape[1]/2, self.img_data_raw.shape[0]/2, \
@@ -971,7 +971,13 @@ class PlateTool(object):
             plt.gcf().canvas.draw()
             plt.gcf().canvas.flush_events()
 
-            self.getInitialParamsAstrometryNet()
+            # If shift was pressed, send only the list of x,y coords of extracted stars
+            upload_image = True
+            if event.key == 'ctrl+X':
+                upload_image = False
+
+            # Estimate initial parameters using astrometry.net
+            self.getInitialParamsAstrometryNet(upload_image=upload_image)
 
             self.updateImage()
 
@@ -1463,7 +1469,6 @@ class PlateTool(object):
             text_str += 'S/W - Altitude\n'
             text_str += 'Q/E - Position angle\n'
             text_str += 'Up/Down - Scale\n'
-            text_str += 'CTRL + X - astrometry.net\n'
             text_str += '1/2 - X offset\n'
             text_str += '3/4 - Y offset\n'
             text_str += '5/6 - X 1st dist. coeff.\n'
@@ -1483,6 +1488,8 @@ class PlateTool(object):
             text_str += 'CTRL + A - Auto levels\n'
             text_str += 'CTRL + D - Load dark\n'
             text_str += 'CTRL + F - Load flat\n'
+            text_str += 'CTRL + X - astrometry.net img upload\n'
+            text_str += 'CTRL + SHIFT + X - astrometry.net XY\n'
             text_str += 'CTRL + R - Pick stars\n'
             text_str += 'CTRL + N - New platepar\n'
             text_str += 'CTRL + S - Save platepar\n'
@@ -1634,19 +1641,25 @@ class PlateTool(object):
         return ra_array, dec_array
 
 
-    def getInitialParamsAstrometryNet(self):
+    def getInitialParamsAstrometryNet(self, upload_image=True):
         """ Get the estimate of the initial astrometric parameters using astromety.net. """
 
         fail = False
+        solution = None
+
+        # Construct FOV width estimate
+        fov_w_range = [0.75*self.config.fov_w, 1.25*self.config.fov_w]
+
 
         # Check if the given FF files is in the calstars list
-        if self.img_handle.name() in self.calstars:
+        if (self.img_handle.name() in self.calstars) and (not upload_image):
 
             # Get the stars detected on this FF file
             star_data = self.calstars[self.img_handle.name()]
 
             # Make sure that there are at least 10 stars
             if len(star_data) < 10:
+                print('Less than 10 stars on the image!')
                 fail = True
 
             else:
@@ -1655,59 +1668,63 @@ class PlateTool(object):
                 y_data, x_data, _, _ = np.array(star_data).T
 
                 # Get astrometry.net solution, pass the FOV width estimate
-                fov_w_range = [0.75*self.config.fov_w, 1.25*self.config.fov_w]
                 solution = novaAstrometryNetSolve(x_data=x_data, y_data=y_data, fov_w_range=fov_w_range)
-
-                if solution is None:
-                    messagebox.showerror(title='Astrometry.net error', \
-                        message='Astrometry.net failed to find a solution!')
-
-                    return None
-
-
-                # Extract the parameters
-                ra, dec, orientation, scale, fov_w, fov_h = solution
-
-                jd = date2JD(*self.img_handle.currentTime())
-
-                # Compute the position angle from the orientation
-                pos_angle_ref = rotationFromStandardToPosAngle(jd, self.platepar, orientation)
-
-                # Compute reference azimuth and altitude
-                azim, alt = raDec2AltAz(jd, self.platepar.lon, self.platepar.lat, ra, dec)
-
-                # Set parameters to platepar
-                self.platepar.pos_angle_ref = pos_angle_ref
-                self.platepar.F_scale = scale
-                self.platepar.az_centre = azim
-                self.platepar.alt_centre = alt
-
-                self.updateRefRADec(skip_rot_update=True)
-                
-                # Save the current rotation w.r.t horizon value
-                self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
-
-                # Print estimated parameters
-                print()
-                print('Astrometry.net solution:')
-                print('------------------------')
-                print(' RA    = {:.2f} deg'.format(ra))
-                print(' Dec   = {:.2f} deg'.format(dec))
-                print(' Azim  = {:.2f} deg'.format(self.platepar.az_centre))
-                print(' Alt   = {:.2f} deg'.format(self.platepar.alt_centre))
-                print(' Rot horiz   = {:.2f} deg'.format(self.platepar.rotation_from_horiz))
-                print(' Orient eq   = {:.2f} deg'.format(orientation))
-                print(' Pos angle   = {:.2f} deg'.format(pos_angle_ref))
-                print(' Scale = {:.2f} arcmin/px'.format(60/self.platepar.F_scale))
-
 
         else:
             fail = True
 
 
-        if fail:
+        # Try finding the soluting by uploading the whole image
+        if fail or upload_image:
+
+            print("Uploading the whole image to astrometry.net...")
+
+            solution = novaAstrometryNetSolve(img=self.img_data_raw, fov_w_range=fov_w_range)
+
+
+
+        if solution is None:
             messagebox.showerror(title='Astrometry.net error', \
-                message='There should be at least 10 detected stars on the image for the astrometry.net query to work!')
+                message='Astrometry.net failed to find a solution!')
+
+            return None
+            
+
+
+        # Extract the parameters
+        ra, dec, orientation, scale, fov_w, fov_h = solution
+
+        jd = date2JD(*self.img_handle.currentTime())
+
+        # Compute the position angle from the orientation
+        pos_angle_ref = rotationFromStandardToPosAngle(jd, self.platepar, orientation)
+
+        # Compute reference azimuth and altitude
+        azim, alt = raDec2AltAz(jd, self.platepar.lon, self.platepar.lat, ra, dec)
+
+        # Set parameters to platepar
+        self.platepar.pos_angle_ref = pos_angle_ref
+        self.platepar.F_scale = scale
+        self.platepar.az_centre = azim
+        self.platepar.alt_centre = alt
+
+        self.updateRefRADec(skip_rot_update=True)
+        
+        # Save the current rotation w.r.t horizon value
+        self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
+
+        # Print estimated parameters
+        print()
+        print('Astrometry.net solution:')
+        print('------------------------')
+        print(' RA    = {:.2f} deg'.format(ra))
+        print(' Dec   = {:.2f} deg'.format(dec))
+        print(' Azim  = {:.2f} deg'.format(self.platepar.az_centre))
+        print(' Alt   = {:.2f} deg'.format(self.platepar.alt_centre))
+        print(' Rot horiz   = {:.2f} deg'.format(self.platepar.rotation_from_horiz))
+        print(' Orient eq   = {:.2f} deg'.format(orientation))
+        print(' Pos angle   = {:.2f} deg'.format(pos_angle_ref))
+        print(' Scale = {:.2f} arcmin/px'.format(60/self.platepar.F_scale))
 
 
 
