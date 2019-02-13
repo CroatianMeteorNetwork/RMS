@@ -304,8 +304,10 @@ def decimalDegreesToSexHours(val):
 
     val = val/15.0
 
+    sign = np.sign(val)
+    val = abs(val)
     hh = int(val)
     mm = int((val - hh)*60)
     ss = ((val - hh)*60 - mm)*60
 
-    return hh, mm, ss
+    return sign, hh, mm, ss

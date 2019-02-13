@@ -1436,7 +1436,12 @@ class PlateTool(object):
             text_str += 'Img Gamma = {:.2f}\n'.format(self.img_gamma)
             text_str += 'Camera Gamma = {:.2f}\n'.format(self.config.gamma)
             text_str += '\n'
-            text_str += 'RA centre  = {:2d}h {:2d}m {:5.2f}s\n'.format(*decimalDegreesToSexHours(ra_centre))
+            sign, hh, mm, ss = decimalDegreesToSexHours(ra_centre)
+            if sign < 0:
+                sign_str = '-'
+            else:
+                sign_str = ' '
+            text_str += 'RA centre  = {:s}{:02d}h {:02d}m {:05.2f}s\n'.format(sign_str, hh, mm, ss)
             text_str += 'Dec centre = {:.3f}$\\degree$\n'.format(dec_centre)
             plt.gca().text(10, 10, text_str, color='w', verticalalignment='top', horizontalalignment='left', \
                 fontproperties=font)
