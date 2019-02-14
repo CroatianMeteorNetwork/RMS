@@ -215,6 +215,7 @@ class PlateTool(object):
         self.img_level_max = 2**self.bit_depth - 1
 
         self.img_data_raw = None
+        self.img_data_processed = None
 
         self.adjust_levels_mode = False
         self.auto_levels = False
@@ -1350,6 +1351,10 @@ class PlateTool(object):
         if self.adjust_levels_mode:
             self.drawLevelsAdjustmentHistogram(self.img_data_raw)
 
+
+        # Store image after levels modifications
+        self.img_data_processed = np.copy(img_data)
+
         # Show the loaded image
         plt.imshow(img_data, cmap='gray', interpolation='nearest')
 
@@ -1680,7 +1685,19 @@ class PlateTool(object):
 
             print("Uploading the whole image to astrometry.net...")
 
-            solution = novaAstrometryNetSolve(img=self.img_data_raw, fov_w_range=fov_w_range)
+            # If the image is 16bit or larger, rescale and convert it to 8 bit
+            if self.img_data_raw.itemsize*8 > 8:
+
+                # Rescale the image to 8bit
+                img_data = np.copy(self.img_data_processed)
+                img_data -= np.min(img_data)
+                img_data = 255*(img_data/np.max(img_data))
+                img_data = img_data.astype(np.uint8)
+
+            else:
+                img_data = self.img_data_raw
+
+            solution = novaAstrometryNetSolve(img=img_data, fov_w_range=fov_w_range)
 
 
 
