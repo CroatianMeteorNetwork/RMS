@@ -124,6 +124,44 @@ def computeFOVSize(platepar):
 
 
 
+# def rotationWrtHorizon(platepar):
+#     """ Given the platepar, compute the rotation of the FOV with respect to the horizon. 
+    
+#     Arguments:
+#         pletepar: [Platepar object] Input platepar.
+
+#     Return:
+#         rot_angle: [float] Rotation w.r.t. horizon (degrees).
+#     """
+
+#     # Image coordiantes of the center
+#     img_mid_w = platepar.X_res/2
+#     img_mid_h = platepar.Y_res/2
+
+#     # Image coordinate slighty up of the center
+#     img_up_w = img_mid_w
+#     img_up_h = img_mid_h - 10
+
+#     # Compute alt/az
+#     azim, alt = XY2altAz([img_mid_w, img_up_w], [img_mid_h, img_up_h], platepar.lat, platepar.lon, platepar.RA_d, \
+#         platepar.dec_d, platepar.Ho, platepar.X_res, platepar.Y_res, platepar.pos_angle_ref, \
+#         platepar.F_scale, platepar.x_poly_fwd, platepar.y_poly_fwd)
+#     azim_mid = azim[0]
+#     alt_mid = alt[0]
+#     azim_up = azim[1]
+#     alt_up = alt[1]
+
+#     # Compute the rotation wrt horizon (deg)    
+#     rot_angle = -np.degrees(np.arctan2(np.radians(alt_up) - np.radians(alt_mid), \
+#         np.radians(azim_up) - np.radians(azim_mid))) + 90
+
+#     # Wrap output to <-180, 180] range
+#     if rot_angle > 180:
+#         rot_angle -= 360
+
+#     return rot_angle
+
+
 def rotationWrtHorizon(platepar):
     """ Given the platepar, compute the rotation of the FOV with respect to the horizon. 
     
@@ -138,9 +176,9 @@ def rotationWrtHorizon(platepar):
     img_mid_w = platepar.X_res/2
     img_mid_h = platepar.Y_res/2
 
-    # Image coordinate slighty up of the center
-    img_up_w = img_mid_w
-    img_up_h = img_mid_h - 10
+    # Image coordinate slighty right of the center (horizontal)
+    img_up_w = img_mid_w + 10
+    img_up_h = img_mid_h
 
     # Compute alt/az
     azim, alt = XY2altAz([img_mid_w, img_up_w], [img_mid_h, img_up_h], platepar.lat, platepar.lon, platepar.RA_d, \
@@ -152,8 +190,8 @@ def rotationWrtHorizon(platepar):
     alt_up = alt[1]
 
     # Compute the rotation wrt horizon (deg)    
-    rot_angle = -np.degrees(np.arctan2(np.radians(alt_up) - np.radians(alt_mid), \
-        np.radians(azim_up) - np.radians(azim_mid))) + 90
+    rot_angle = np.degrees(np.arctan2(np.radians(alt_up) - np.radians(alt_mid), \
+        np.radians(azim_up) - np.radians(azim_mid)))
 
     # Wrap output to <-180, 180] range
     if rot_angle > 180:
@@ -202,28 +240,27 @@ def rotationWrtHorizonToPosAngle(platepar, rot_angle):
 
 
 
-def rotationFromStandard(jd, platepar):
+def rotationWrtStandard(platepar):
     """ Given the platepar, compute the rotation from the celestial meridian passing through the centre of 
         the FOV.
     
     Arguments:
-        jd: [float] Julian date.
         pletepar: [Platepar object] Input platepar.
 
     Return:
-        rot_angle: [float] Rotation from the meridian.
+        rot_angle: [float] Rotation from the meridian (degrees).
     """
 
     # Image coordiantes of the center
     img_mid_w = platepar.X_res/2
     img_mid_h = platepar.Y_res/2
 
-    # Image coordinate slighty up of the center
-    img_up_w = img_mid_w
-    img_up_h = img_mid_h - 10
+    # Image coordinate slighty right of the centre
+    img_up_w = img_mid_w + 10
+    img_up_h = img_mid_h
 
-    # Compute alt/az
-    _, ra, dec, _ = XY2CorrectedRADecPP(2*[jd2Date(jd)], [img_mid_w, img_up_w], [img_mid_h, img_up_h], \
+    # Compute ra/dec
+    _, ra, dec, _ = XY2CorrectedRADecPP(2*[jd2Date(platepar.JD)], [img_mid_w, img_up_w], [img_mid_h, img_up_h], \
         2*[1], platepar)
     ra_mid = ra[0]
     dec_mid = dec[0]
@@ -231,8 +268,8 @@ def rotationFromStandard(jd, platepar):
     dec_up = dec[1]
 
     # Compute the equatorial orientation
-    rot_angle = np.degrees(np.arctan2(np.radians(dec_up) - np.radians(dec_mid), \
-        np.radians(ra_up) - np.radians(ra_mid))) + 270
+    rot_angle = np.degrees(np.arctan2(np.radians(dec_mid) - np.radians(dec_up), \
+        np.radians(ra_mid) - np.radians(ra_up)))
 
     # Wrap output to 0-360 range
     rot_angle = rot_angle%360
@@ -241,11 +278,11 @@ def rotationFromStandard(jd, platepar):
 
 
 
-def rotationFromStandardToPosAngle(jd, platepar, rot_angle):
+
+def rotationWrtStandardToPosAngle(platepar, rot_angle):
     """ Given the rotation angle w.r.t horizon, numerically compute the position angle. 
     
     Arguments:
-        jd: [float] Julian date.
         pletepar: [Platepar object] Input platepar.
         rot_angle: [float] The rotation angle w.r.t. horizon (deg)>
 
@@ -264,7 +301,7 @@ def rotationFromStandardToPosAngle(jd, platepar, rot_angle):
         platepar.pos_angle_ref = params[0]
 
         # Compute the rotation angle with the given guess of the position angle
-        rot_angle_computed = rotationFromStandard(jd, platepar)%360
+        rot_angle_computed = rotationWrtStandard(platepar)%360
 
         # Compute the deviation between computed and desired angle
         return 180 - abs(abs(rot_angle - rot_angle_computed) - 180)

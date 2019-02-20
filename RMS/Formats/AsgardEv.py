@@ -319,8 +319,10 @@ def batchRecomputeMagnitudes(dir_path, photom_offset, site=None):
 
 if __name__ == "__main__":
 
-    dir_path = '/home/dvida/Desktop'
-    #file_name = "ev_20181014_051904A_02G.txt"
+    dir_path = '/mnt/bulk/2018Perseids/ev_files'
 
     print('Recomputing magnitudes...')
-    batchRecomputeMagnitudes(dir_path, 16.0)
+    batchRecomputeMagnitudes(dir_path, 16.89, site='01F')
+    batchRecomputeMagnitudes(dir_path, 16.48, site='01G')
+    batchRecomputeMagnitudes(dir_path, 16.05, site='02F')
+    batchRecomputeMagnitudes(dir_path, 16.32, site='02G')

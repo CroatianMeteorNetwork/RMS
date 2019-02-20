@@ -55,7 +55,7 @@ from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats import StarCatalog
 from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADecPP, raDec2AltAz, raDecToCorrectedXY,\
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
-    rotationFromStandard, rotationFromStandardToPosAngle
+    rotationWrtStandard, rotationWrtStandardToPosAngle
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Routines import Image
@@ -1438,8 +1438,8 @@ class PlateTool(object):
             text_str += 'UT corr  = {:.1f}h\n'.format(self.platepar.UT_corr)
             text_str += 'Ref Az   = {:.3f}$\\degree$\n'.format(self.platepar.az_centre)
             text_str += 'Ref Alt  = {:.3f}$\\degree$\n'.format(self.platepar.alt_centre)
-            text_str += 'Rotation = {:.3f}$\\degree$\n'.format(rotationWrtHorizon(self.platepar))
-            text_str += 'Orientation = {:.3f}$\\degree$\n'.format(rotationFromStandard(date2JD(*self.img_handle.currentTime()), self.platepar))
+            text_str += 'Rot horiz = {:.3f}$\\degree$\n'.format(rotationWrtHorizon(self.platepar))
+            text_str += 'Rot eq    = {:.3f}$\\degree$\n'.format(rotationWrtStandard(self.platepar))
             #text_str += 'Ref RA  = {:.3f}\n'.format(self.platepar.RA_d)
             #text_str += 'Ref Dec = {:.3f}\n'.format(self.platepar.dec_d)
             text_str += "F_scale  = {:.3f}'/px\n".format(60/self.platepar.F_scale)
@@ -1715,7 +1715,7 @@ class PlateTool(object):
         jd = date2JD(*self.img_handle.currentTime())
 
         # Compute the position angle from the orientation
-        pos_angle_ref = rotationFromStandardToPosAngle(jd, self.platepar, orientation)
+        pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, orientation)
 
         # Compute reference azimuth and altitude
         azim, alt = raDec2AltAz(jd, self.platepar.lon, self.platepar.lat, ra, dec)

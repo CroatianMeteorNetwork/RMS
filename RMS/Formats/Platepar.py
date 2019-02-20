@@ -125,7 +125,7 @@ class Platepar(object):
         self.az_centre = 0
         self.alt_centre = 0
 
-        # FOV scale
+        # FOV scale (px/deg)
         self.F_scale = 1.0
 
         # Photometry calibration

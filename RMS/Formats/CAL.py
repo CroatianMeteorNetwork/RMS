@@ -4,7 +4,12 @@ from __future__ import print_function, division, absolute_import
 
 
 import os
+import copy
+import math
+
+
 from RMS.Astrometry.Conversions import jd2Date
+from RMS.Astrometry.ApplyAstrometry import rotationWrtHorizon, rotationWrtStandard
 from RMS.Formats.Platepar import Platepar
 
 def writeCAL(night_dir, config, platepar):
@@ -37,6 +42,45 @@ def writeCAL(night_dir, config, platepar):
     if platepar is None:
         platepar = Platepar()
 
+    # Make a copy of the platepar that can be modified
+    platepar = copy.deepcopy(platepar)
+
+
+    # Compute rotations (must be done before distorsion correction)
+    rot_horiz = rotationWrtHorizon(platepar)
+    rot_std = rotationWrtStandard(platepar)
+
+
+    # Correct distorsion parameters so they are CAMS compatible
+    platepar.x_poly_fwd[ 1] = +platepar.x_poly_fwd[ 1] + 1.0
+    platepar.x_poly_fwd[ 2] = -platepar.x_poly_fwd[ 2]
+    platepar.x_poly_fwd[ 4] = -platepar.x_poly_fwd[ 4]
+    platepar.x_poly_fwd[ 7] = -platepar.x_poly_fwd[ 7]
+    platepar.x_poly_fwd[ 9] = -platepar.x_poly_fwd[ 9]
+    platepar.x_poly_fwd[11] = -platepar.x_poly_fwd[11]
+    platepar.y_poly_fwd[ 2] = -platepar.y_poly_fwd[ 2] - 1.0
+    platepar.y_poly_fwd[ 4] = -platepar.y_poly_fwd[ 4]
+    platepar.y_poly_fwd[ 7] = -platepar.y_poly_fwd[ 7]
+    platepar.y_poly_fwd[ 9] = -platepar.y_poly_fwd[ 9]
+    platepar.y_poly_fwd[11] = -platepar.y_poly_fwd[11]
+
+
+    # Compute scale in arcmin/px
+    arcminperpixel = 60/platepar.F_scale
+
+    # Correct scaling and rotation
+    for k in range(12):
+        
+        x_prime = platepar.x_poly_fwd[k]*math.radians(arcminperpixel/60.0)
+        y_prime = platepar.y_poly_fwd[k]*math.radians(arcminperpixel/60.0)
+
+        platepar.x_poly_fwd[k] = math.cos(math.radians(rot_horiz))*x_prime \
+            + math.sin(math.radians(rot_horiz))*y_prime
+
+        platepar.y_poly_fwd[k] = math.sin(math.radians(rot_horiz))*x_prime \
+            - math.cos(math.radians(rot_horiz))*y_prime
+
+
     # Open the file
     with open(os.path.join(night_dir, file_name), 'w') as f:
 
@@ -52,9 +96,9 @@ def writeCAL(night_dir, config, platepar):
         s +=" Latitude +north (deg)    = {:9.5f}\n".format(platepar.lat)
         s +=" Height above WGS84 (km)  = {:8.5f}\n".format(platepar.elev/1000)
         s +=" FOV dimension hxw (deg)  =   {:.2f} x   {:.2f}\n".format(platepar.fov_h, platepar.fov_v)
-        s +=" Plate scale (arcmin/pix) = {:8.3f}\n".format(60/platepar.F_scale)
-        s +=" Plate roll wrt Std (deg) = {:8.3f}\n".format(platepar.pos_angle_ref)
-        s +=" Cam tilt wrt Horiz (deg) =    0.000\n"
+        s +=" Plate scale (arcmin/pix) = {:8.3f}\n".format(arcminperpixel)
+        s +=" Plate roll wrt Std (deg) = {:8.3f}\n".format(rot_std)
+        s +=" Cam tilt wrt Horiz (deg) = {:8.3f}\n".format(rot_horiz)
         s +=" Frame rate (Hz)          = {:8.3f}\n".format(config.fps)
         s +=" Cal center RA (deg)      = {:8.3f}\n".format(platepar.RA_d)
         s +=" Cal center Dec (deg)     = {:8.3f}\n".format(platepar.dec_d)
