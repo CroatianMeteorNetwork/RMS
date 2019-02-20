@@ -474,8 +474,12 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
 
             # Compute the threshold limit
             avg_std = int(float(compressed[2, y, x]) + k1*float(compressed[3, y, x])) + j1
+
+            # Make sure the threshold limit is not above the maximum possible value
+            if avg_std > 255:
+                avg_std = 255
             
-            if((max_val > min_level) and (max_val >= avg_std)):
+            if ((max_val > min_level) and (max_val >= avg_std)):
 
                 # Extract frame of maximum intensity
                 n = compressed[1, y, x]
