@@ -122,7 +122,11 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
                         int(level), round(mag, 2)) + "\n")
 
                 else:
-                    frame, x, y, level = line
+                    if len(line) == 9:
+                        frame, x, y, ra, dec, azim, elev, level, mag = line
+
+                    else:
+                        frame, x, y, level = line
 
                     # If the coordinates are NaN, skip this centroid
                     if np.isnan(x) or np.isnan(y):

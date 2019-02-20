@@ -140,6 +140,9 @@ class Platepar(object):
         self.x_poly_rev = np.zeros(shape=(12,), dtype=np.float64)
         self.y_poly_rev = np.zeros(shape=(12,), dtype=np.float64)
 
+        self.x_poly = self.x_poly_fwd
+        self.y_poly = self.y_poly_fwd
+
         # Set the first coeffs to 0.5, as that is the real centre of the FOV
         self.x_poly_fwd[0] = 0.5
         self.y_poly_fwd[0] = 0.5
@@ -244,6 +247,10 @@ class Platepar(object):
             self.x_poly_rev = np.array(self.x_poly_rev)
             self.y_poly_fwd = np.array(self.y_poly_fwd)
             self.y_poly_rev = np.array(self.y_poly_rev)
+
+            # Set polynomial parameters used by the old code
+            self.x_poly = self.x_poly_fwd
+            self.y_poly = self.y_poly_fwd
 
 
             # Add rotation from horizontal

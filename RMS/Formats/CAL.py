@@ -12,6 +12,8 @@ from RMS.Astrometry.Conversions import jd2Date
 from RMS.Astrometry.ApplyAstrometry import rotationWrtHorizon, rotationWrtStandard
 from RMS.Formats.Platepar import Platepar
 
+
+
 def writeCAL(night_dir, config, platepar):
     """ Write the CAL file. 
 
@@ -74,11 +76,11 @@ def writeCAL(night_dir, config, platepar):
         x_prime = platepar.x_poly_fwd[k]*math.radians(arcminperpixel/60.0)
         y_prime = platepar.y_poly_fwd[k]*math.radians(arcminperpixel/60.0)
 
-        platepar.x_poly_fwd[k] = math.cos(math.radians(rot_horiz))*x_prime \
-            + math.sin(math.radians(rot_horiz))*y_prime
+        platepar.x_poly_fwd[k] = math.cos(math.radians(rot_std))*x_prime \
+            + math.sin(math.radians(rot_std))*y_prime
 
-        platepar.y_poly_fwd[k] = math.sin(math.radians(rot_horiz))*x_prime \
-            - math.cos(math.radians(rot_horiz))*y_prime
+        platepar.y_poly_fwd[k] = math.sin(math.radians(rot_std))*x_prime \
+            - math.cos(math.radians(rot_std))*y_prime
 
 
     # Open the file
@@ -95,7 +97,7 @@ def writeCAL(night_dir, config, platepar):
         s +=" Longitude +west (deg)    = {:9.5f}\n".format(-platepar.lon)
         s +=" Latitude +north (deg)    = {:9.5f}\n".format(platepar.lat)
         s +=" Height above WGS84 (km)  = {:8.5f}\n".format(platepar.elev/1000)
-        s +=" FOV dimension hxw (deg)  =   {:.2f} x   {:.2f}\n".format(platepar.fov_h, platepar.fov_v)
+        s +=" FOV dimension hxw (deg)  =   {:.2f} x   {:.2f}\n".format(platepar.fov_v, platepar.fov_h)
         s +=" Plate scale (arcmin/pix) = {:8.3f}\n".format(arcminperpixel)
         s +=" Plate roll wrt Std (deg) = {:8.3f}\n".format(rot_std)
         s +=" Cam tilt wrt Horiz (deg) = {:8.3f}\n".format(rot_horiz)
@@ -175,11 +177,11 @@ if __name__ == "__main__":
 
     # Load a platepar file
     pp = Platepar()
-    #pp.read("/mnt/bulk/2018Draconids/ConfirmedFiles/HR0010_20181008_170022_956418_detected/platepar_cmn2010.cal")
+    pp.read("/home/dvida/Desktop/HR0010_20190216_170146_265550_detected/platepar_cmn2010.cal")
 
 
-    #night_dir = "/mnt/bulk/2018Draconids/ConfirmedFiles/HR0010_20181008_170022_956418_detected"
-    night_dir = "D:/Dropbox/RPi_Meteor_Station/data/CA0004_20180516_040459_588816_detected"
+    night_dir = "/home/dvida/Desktop/HR0010_20190216_170146_265550_detected"
+    #night_dir = "D:/Dropbox/RPi_Meteor_Station/data/CA0004_20180516_040459_588816_detected"
 
     # Write the CAL file
     writeCAL(night_dir, config, pp)
