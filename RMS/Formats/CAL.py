@@ -76,11 +76,11 @@ def writeCAL(night_dir, config, platepar):
         x_prime = platepar.x_poly_fwd[k]*math.radians(arcminperpixel/60.0)
         y_prime = platepar.y_poly_fwd[k]*math.radians(arcminperpixel/60.0)
 
-        platepar.x_poly_fwd[k] = math.cos(math.radians(rot_std))*x_prime \
-            + math.sin(math.radians(rot_std))*y_prime
+        platepar.x_poly_fwd[k] = math.cos(math.radians(platepar.pos_angle_ref))*x_prime \
+            + math.sin(math.radians(platepar.pos_angle_ref))*y_prime
 
-        platepar.y_poly_fwd[k] = math.sin(math.radians(rot_std))*x_prime \
-            - math.cos(math.radians(rot_std))*y_prime
+        platepar.y_poly_fwd[k] = math.sin(math.radians(platepar.pos_angle_ref))*x_prime \
+            - math.cos(math.radians(platepar.pos_angle_ref))*y_prime
 
 
     # Open the file
