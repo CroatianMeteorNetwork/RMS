@@ -1275,10 +1275,14 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
             # Skip if no points were returned
             if not line_points.any():
+                logDebug('No line found in line refinement...')
                 continue
 
             # Skip if the points cover too small a frame range
-            if abs(np.max(line_points[:,2]) - np.min(line_points[:,2])) + 1 < config.line_minimum_frame_range_det:
+            frame_range = abs(np.max(line_points[:,2]) - np.min(line_points[:,2])) + 1
+            if frame_range < config.line_minimum_frame_range_det:
+                logDebug('Too small frame range! {:d} < {:d}'.format(frame_range, \
+                    config.line_minimum_frame_range_det))
                 continue
 
 
