@@ -409,15 +409,37 @@ class Config:
 
 
 def normalizeParameter(param, config, binning=1):
-    """ Normalize detection parameter to be size independent.
+    """ Normalize detection parameters for fireball detection to be size independent.
     
-    @param param: parameter to be normalized
-    
-    @return: normalized param
+    Arguments:
+        param: [float] parameter to be normalized
+        config: [Config]
+        binning: [int] Bin multiplier.
+        
+    Return:
+        normalized param
     """
 
     width_factor = config.width/binning/config.f/720
     height_factor = config.height/binning/config.f/576
+
+    return param*width_factor*height_factor
+
+
+def normalizeParameterMeteor(param, config, binning=1):
+    """ Normalize detection parameters for fireball detection to be size independent.
+    
+    Arguments:
+        param: [float] parameter to be normalized
+        config: [Config]
+        binning: [int] Bin multiplier.
+        
+    Return:
+        normalized param
+    """
+
+    width_factor = config.width/binning/720
+    height_factor = config.height/binning/576
 
     return param*width_factor*height_factor
 
@@ -844,17 +866,38 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "line_min_dist"):
         config.line_min_dist = parser.getint(section, "line_min_dist")
 
+
+    # Parse the distance threshold
     if parser.has_option(section, "distance_threshold_det"):
         config.distance_threshold_det = parser.getint(section, "distance_threshold_det")**2
 
-    config.distance_threshold_det = normalizeParameter(config.distance_threshold_det, config, \
-        binning=config.detection_binning_factor)
 
+    # If the distance is > 20 (in old configs before the scaling fix), rescale using the old function
+    if config.distance_threshold_det > 20**2:
+
+        config.distance_threshold_det = normalizeParameter(config.distance_threshold_det, config, \
+            binning=config.detection_binning_factor)
+    else:
+
+        config.distance_threshold_det = normalizeParameterMeteor(config.distance_threshold_det, config, \
+            binning=config.detection_binning_factor)
+
+
+    # Parse the gap threshold
     if parser.has_option(section, "gap_threshold_det"):
         config.gap_threshold_det = parser.getint(section, "gap_threshold_det")**2
 
-    config.gap_threshold_det = normalizeParameter(config.gap_threshold_det, config, 
-        binning=config.detection_binning_factor)
+    # If the gap is > 100px (in old configs before the scaling fix), rescale using the old function
+    if config.gap_threshold > 100**2:
+
+        config.gap_threshold_det = normalizeParameter(config.gap_threshold_det, config, \
+            binning=config.detection_binning_factor)
+
+    else:
+        config.gap_threshold_det = normalizeParameterMeteor(config.gap_threshold_det, config, \
+            binning=config.detection_binning_factor)
+
+
 
     if parser.has_option(section, "min_pixels_det"):
         config.min_pixels_det = parser.getint(section, "min_pixels_det")
