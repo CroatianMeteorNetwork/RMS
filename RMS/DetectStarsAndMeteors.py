@@ -138,7 +138,7 @@ def saveDetections(detection_results, ff_dir, config):
     # Save the detections to a file
     for ff_name, star_data, meteor_data in detection_results:
 
-        x2, y2, background, intensity = star_data
+        _, x2, y2, background, intensity, _ = star_data
 
         # Skip if no stars were found
         if not x2:
