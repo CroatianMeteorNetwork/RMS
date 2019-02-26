@@ -53,6 +53,10 @@ def writeCAL(night_dir, config, platepar):
     rot_std = rotationWrtStandard(platepar)
 
 
+    # Switch ry in Y coeffs
+    platepar.y_poly_fwd[11], platepar.y_poly_fwd[10] = platepar.y_poly_fwd[10], platepar.y_poly_fwd[11]
+
+
     # Correct distorsion parameters so they are CAMS compatible
     platepar.x_poly_fwd[ 1] = +platepar.x_poly_fwd[ 1] + 1.0
     platepar.x_poly_fwd[ 2] = -platepar.x_poly_fwd[ 2]
@@ -64,7 +68,7 @@ def writeCAL(night_dir, config, platepar):
     platepar.y_poly_fwd[ 4] = -platepar.y_poly_fwd[ 4]
     platepar.y_poly_fwd[ 7] = -platepar.y_poly_fwd[ 7]
     platepar.y_poly_fwd[ 9] = -platepar.y_poly_fwd[ 9]
-    platepar.y_poly_fwd[10] = -platepar.y_poly_fwd[10]
+    platepar.y_poly_fwd[11] = -platepar.y_poly_fwd[11]
 
 
     # Compute scale in arcmin/px
@@ -139,8 +143,8 @@ def writeCAL(night_dir, config, platepar):
         s +=" xxy   {:+.7e}    {:+.7e} \n".format(platepar.x_poly_fwd[7], platepar.y_poly_fwd[7])
         s +=" xyy   {:+.7e}    {:+.7e} \n".format(platepar.x_poly_fwd[8], platepar.y_poly_fwd[8])
         s +=" yyy   {:+.7e}    {:+.7e} \n".format(platepar.x_poly_fwd[9], platepar.y_poly_fwd[9])
-        s +=" rx    {:+.7e}    {:+.7e} \n".format(platepar.x_poly_fwd[10], platepar.y_poly_fwd[11])
-        s +=" ry    {:+.7e}    {:+.7e} \n".format(platepar.x_poly_fwd[11], platepar.y_poly_fwd[10])
+        s +=" rx    {:+.7e}    {:+.7e} \n".format(platepar.x_poly_fwd[10], platepar.y_poly_fwd[10])
+        s +=" ry    {:+.7e}    {:+.7e} \n".format(platepar.x_poly_fwd[11], platepar.y_poly_fwd[11])
         s +=" ----  ---------------  ---------------\n"
         s +="\n"
         s +=" Mean O-C =   0.000 +-   0.000 arcmin\n"
