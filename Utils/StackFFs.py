@@ -189,6 +189,9 @@ if __name__ == '__main__':
     arg_parser.add_argument('-b', '--brightfilt', action="store_true", \
         help="""Rejects images with very bright background, which are often clouds. """)
 
+    arg_parser.add_argument('-x', '--hideplot', action="store_true", \
+        help="""Don't show the stack on the screen after stacking. """)
+
     arg_parser.add_argument('-f', '--flat', nargs='?', metavar='FLAT_PATH', type=str, default='', 
         help="Apply a given flat frame. If no path to the flat is given, flat.bmp from the folder will be taken.")
 
@@ -202,10 +205,14 @@ if __name__ == '__main__':
         deinterlace=cml_args.deinterlace, subavg=cml_args.subavg, filter_bright=cml_args.brightfilt, \
         flat_path=cml_args.flat)
 
-    # Plot the blended image
-    plt.imshow(merge_img, cmap='gray', vmin=0, vmax=255)
 
-    plt.show()
+
+    if not cml_args.hideplot:
+        
+        # Plot the blended image
+        plt.imshow(merge_img, cmap='gray', vmin=0, vmax=255)
+
+        plt.show()
 
 
 
