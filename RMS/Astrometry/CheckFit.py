@@ -495,9 +495,10 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False):
     # Convert the list to a dictionary
     calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
-    # Load catalog stars
-    catalog_stars, _ = StarCatalog.readStarCatalog(config.star_catalog_path, config.star_catalog_file, \
-        lim_mag=config.catalog_mag_limit, mag_band_ratios=config.star_catalog_band_ratios)
+    # Load catalog stars (overwrite the mag band ratios if specific catalog is used)
+    catalog_stars, _, config.star_catalog_band_ratios = StarCatalog.readStarCatalog(config.star_catalog_path, \
+        config.star_catalog_file, lim_mag=config.catalog_mag_limit, \
+        mag_band_ratios=config.star_catalog_band_ratios)
 
 
     # Dictionary which will contain the JD, and a list of (X, Y, bg_intens, intens) of the stars

@@ -382,7 +382,9 @@ class Config:
 
         self.star_catalog_path = 'Catalogs'
         self.star_catalog_file = 'gaia_dr2_mag_11.5.npy'
-        self.star_catalog_band_ratios = [0.0, 1.0, 0.0, 0.0]
+
+        # BVRI band ratios for GAIA G band and Sony CMOS cameras
+        self.star_catalog_band_ratios = [0.45, 0.70, 0.72, 0.50]
 
         self.platepar_name = 'platepar_cmn2010.cal'
 

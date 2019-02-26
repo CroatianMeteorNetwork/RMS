@@ -82,8 +82,9 @@ def generateCalibrationReport(config, night_dir_path, platepar=None, show_graphs
     lim_mag = config.catalog_mag_limit + 1
 
     # Load catalog stars (load one magnitude deeper)
-    catalog_stars, mag_band_str = StarCatalog.readStarCatalog(config.star_catalog_path, \
-        config.star_catalog_file, lim_mag=lim_mag, mag_band_ratios=config.star_catalog_band_ratios)
+    catalog_stars, mag_band_str, config.star_catalog_band_ratios = StarCatalog.readStarCatalog(\
+        config.star_catalog_path, config.star_catalog_file, lim_mag=lim_mag, \
+        mag_band_ratios=config.star_catalog_band_ratios)
 
     
     ### Take only those CALSTARS entires for which FF files exist in the folder ###

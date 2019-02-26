@@ -1173,8 +1173,8 @@ class PlateTool(object):
         """
 
         # Load catalog stars
-        catalog_stars, self.mag_band_string = StarCatalog.readStarCatalog(self.config.star_catalog_path, \
-            self.config.star_catalog_file, lim_mag=lim_mag, \
+        catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios = StarCatalog.readStarCatalog(\
+            self.config.star_catalog_path, self.config.star_catalog_file, lim_mag=lim_mag, \
             mag_band_ratios=self.config.star_catalog_band_ratios)
 
         return catalog_stars

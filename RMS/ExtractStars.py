@@ -558,6 +558,9 @@ if __name__ == "__main__":
     # Show the histogram of PSF stddevs
     if cml_args.showstd:
 
+
+        print('Median:', np.median(sigma_list))
+
         # Compute the bin number
         nbins = int(np.ceil(np.sqrt(len(sigma_list))))
         if nbins < 10:
@@ -574,13 +577,26 @@ if __name__ == "__main__":
 
 
         # Plot stddev by intensity
-        plt.scatter(-2.5*np.log10(np.array(intensity_list)), sigma_list, s=1, c='k', zorder=3)
+        
+        hexbin_grid = int(1.0/np.sqrt(2)*nbins)
+        lsp_list = -2.5*np.log10(np.array(intensity_list))
+        sigma_list = np.array(sigma_list)
+
+        # Compute plot limits
+        x_min = np.percentile(lsp_list[~np.isnan(lsp_list)], 0.5)
+        x_max = np.percentile(lsp_list[~np.isnan(lsp_list)], 99.5)
+        y_min = np.percentile(sigma_list[~np.isnan(sigma_list)], 0.5)
+        y_max = np.percentile(sigma_list[~np.isnan(sigma_list)], 99.5)
+
+        plt.hexbin(lsp_list, sigma_list, gridsize=(hexbin_grid, hexbin_grid), extent=(x_min, x_max, \
+            y_min, y_max))
         plt.xlabel('Uncalibrated magnitude')
         plt.ylabel('PSF $\sigma$')
 
-        plt.gca().invert_xaxis()
+        plt.xlim(x_min, x_max)
+        plt.ylim(y_min, y_max)
 
-        plt.grid()
+        plt.gca().invert_xaxis()
 
         plt.savefig(os.path.join(ff_dir, 'PSF_stddev_vs_mag.png'), dpi=300)
 

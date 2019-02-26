@@ -138,17 +138,18 @@ def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
     Return:
         (star_data, mag_band_string): 
             star_data: [ndarray] Array of (RA, dec, mag) parameters for each star, coordinates are in degrees.
-            mag_band_string: [str] Text describing the magntiude band of the catalog.
+            mag_band_string: [str] Text describing the magnitude band of the catalog.
+            mag_band_ratios: [list] A list of BVRI magnitude band ratios for the given catalog.
     """
 
     # Use the BSC star catalog if BSC is given
     if 'BSC' in file_name:
-        return readBSC(dir_path, file_name, lim_mag=lim_mag), 'BSC5 V band'
+        return readBSC(dir_path, file_name, lim_mag=lim_mag), 'BSC5 V band', [0.0, 1.0, 0.0, 0.0]
 
 
     # Use the GAIA star catalog
     if 'gaia' in file_name.lower():
-        return loadGaiaCatalog(dir_path, file_name, lim_mag=lim_mag), 'GAIA G band'
+        return loadGaiaCatalog(dir_path, file_name, lim_mag=lim_mag), 'GAIA G band', [0.45, 0.70, 0.72, 0.50]
 
 
 
@@ -234,7 +235,7 @@ def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
 
     mag_band_string = "Sky2000 {:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*mag_band_ratios)
 
-    return star_data, mag_band_string
+    return star_data, mag_band_string, mag_band_ratios
 
 
 
