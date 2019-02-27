@@ -337,9 +337,9 @@ class QueuedPool(object):
 
                 if c%1000 == 0:
                     self.printAndLog('-----')
-                    self.printAndLog('Queue size:', self.output_queue.qsize())
-                    self.printAndLog('Total jobs:', self.total_jobs.value())
                     self.printAndLog('Active workers:', self.active_workers.value())
+                    self.printAndLog('Total jobs:', self.total_jobs.value())
+                    self.printAndLog('Finished jobs:', self.output_queue.qsize())
 
 
                 # Keep track of the changes of the output queue size
