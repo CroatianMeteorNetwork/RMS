@@ -566,12 +566,6 @@ if __name__ == "__main__":
     # Show the histogram of PSF stddevs
     if cml_args.showstd:
 
-        print(np.count_nonzero(np.isnan(sigma_list)))
-        print(np.count_nonzero(np.isinf(sigma_list)))
-        print(np.count_nonzero(np.isnan(intensity_list)))
-        print(np.count_nonzero(np.isinf(intensity_list)))
-
-
         print('Median:', np.median(sigma_list))
 
         # Compute the bin number
