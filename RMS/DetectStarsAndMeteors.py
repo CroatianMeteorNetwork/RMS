@@ -75,11 +75,11 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=
     star_list = extractStars(ff_directory, ff_name, config, flat_struct=flat_struct, dark=dark, mask=mask)
 
 
-    log.info('Detected stars: ' + str(len(star_list[0])))
+    log.info('Detected stars: ' + str(len(star_list[1])))
 
 
     # Run meteor detection if there are enough stars on the image
-    if len(star_list[0]) >= config.ff_min_stars:
+    if len(star_list[1]) >= config.ff_min_stars:
 
         log.debug('More than ' + str(config.ff_min_stars) + ' stars, detecting meteors...')
 
