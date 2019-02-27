@@ -338,6 +338,10 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
         # Subtract the background from the star segment and compute the total intensity
         intensity = np.sum(star_seg_crop - bg_corrected)
 
+        # Skip stars with zero intensity
+        if intensity <= 0:
+            continue
+
         # print(intensity)
         # plt.imshow(star_seg_crop - bg_corrected, cmap='gray', vmin=0, vmax=255)
         # plt.show()
@@ -561,6 +565,11 @@ if __name__ == "__main__":
 
     # Show the histogram of PSF stddevs
     if cml_args.showstd:
+
+        print(np.count_nonzero(np.isnan(sigma_list)))
+        print(np.count_nonzero(np.isinf(sigma_list)))
+        print(np.count_nonzero(np.isnan(intensity_list)))
+        print(np.count_nonzero(np.isinf(intensity_list)))
 
 
         print('Median:', np.median(sigma_list))
