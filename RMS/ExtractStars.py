@@ -496,6 +496,8 @@ if __name__ == "__main__":
     # Get extraction results
     sigma_list = []
     intensity_list = []
+    x_list = []
+    y_list = []
     for result in workpool.getResults():
 
         ff_name, x2, y2, amplitude, intensity, sigma_fitted = result
@@ -519,6 +521,8 @@ if __name__ == "__main__":
         # Store the star sigma to list
         sigma_list += sigma_fitted.tolist()
         intensity_list += intensity
+        x_list += x2
+        y_list += y2
 
 
         # # Show stars if there are only more then 10 of them
@@ -601,6 +605,42 @@ if __name__ == "__main__":
         plt.savefig(os.path.join(ff_dir, 'PSF_stddev_vs_mag.png'), dpi=300)
 
         plt.show()
+
+
+        # Plot stddev by X and Y
+        fig, (ax1, ax2) = plt.subplots(nrows=2)
+
+        x_min = np.min(x_list)
+        x_max = np.max(x_list)
+        ax1.hexbin(x_list, sigma_list, gridsize=(hexbin_grid, hexbin_grid), extent=(x_min, x_max, \
+            y_min, y_max))
+
+        
+        ax1.set_ylabel('PSF $\sigma$')
+        ax1.set_xlabel('X')
+
+        ax1.set_xlim(x_min, x_max)
+        ax1.set_ylim(y_min, y_max)
+
+
+        x_min = np.min(y_list)
+        x_max = np.max(y_list)
+        ax2.hexbin(y_list, sigma_list, gridsize=(hexbin_grid, hexbin_grid), extent=(x_min, x_max, \
+            y_min, y_max))
+
+        ax2.set_ylabel('PSF $\sigma$')
+        ax2.set_xlabel('Y')
+
+        ax2.set_xlim(x_min, x_max)
+        ax2.set_ylim(y_min, y_max)
+
+        plt.tight_layout()
+
+        plt.savefig(os.path.join(ff_dir, 'PSF_xy_vs_stddev.png'), dpi=300)
+
+        plt.show()
+
+
 
 
 
