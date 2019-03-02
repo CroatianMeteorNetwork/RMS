@@ -268,6 +268,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         del sharedArrayBase2
         del sharedArray2
 
+        log.debug('Collecting garbage...')
+
         # Run garbage collection
         gc.collect()
 
