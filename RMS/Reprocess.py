@@ -35,15 +35,26 @@ log = logging.getLogger("logger")
 
 
 
-def getPlatepar(config):
-    """ Downloads a new platepar from the server of uses an existing one. """
+def getPlatepar(config, night_data_dir):
+    """ Downloads a new platepar from the server of uses an existing one. 
+    
+    Arguments:
+        Config: [Config instance]
+        night_data_dir: [str] Full path to the data directory.
+
+    Return:
+        platepar, platepar_path, platepar_fmt
+    """
 
 
     # Download a new platepar from the server, if present
     downloadNewPlatepar(config)
 
 
-    # Load the default platepar if it is available
+    # Construct path to the platepar in the night directory
+    platepar_night_dir_path = os.path.join(night_data_dir, config.platepar_name)
+
+    # Load the default platepar from the RMS if it is available
     platepar = None
     platepar_fmt = None
     platepar_path = os.path.join(os.getcwd(), config.platepar_name)
@@ -51,12 +62,33 @@ def getPlatepar(config):
         platepar = Platepar()
         platepar_fmt = platepar.read(platepar_path)
 
-        log.info('Loaded platepar: ' + platepar_path)
+        log.info('Loaded platepar from RMS directory: ' + platepar_path)
+
+
+    # Otherwise, try to find the platepar in the data directory
+    elif os.path.exists(platepar_night_dir_path):
+
+        platepar_path = platepar_night_dir_path
+
+        platepar = Platepar()
+        platepar_fmt = platepar.read(platepar_path)
+
+        log.info('Loaded platepar from night directory: ' + platepar_path)
 
     else:
 
         log.info('No platepar file found!')
 
+
+    # Make sure that the station code from the config and the platepar match
+    if config.stationID != platepar.station_code:
+
+        # If they don't match, don't use this platepar
+        log.info("The station code in the platepar doesn't match the station code in config file! Not using the platepar...")
+
+        platepar = None
+        platepar_fmt = None
+        
 
     return platepar, platepar_path, platepar_fmt
 
@@ -110,7 +142,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
 
         # Get the platepar file
-        platepar, platepar_path, platepar_fmt = getPlatepar(config)
+        platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir)
 
 
         # Run calibration check and auto astrometry refinement

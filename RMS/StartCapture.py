@@ -159,7 +159,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # Get the platepar file
-    platepar, platepar_path, platepar_fmt = getPlatepar(config)
+    platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir)
 
 
     log.info('Initializing frame buffers...')

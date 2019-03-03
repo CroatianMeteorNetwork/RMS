@@ -20,8 +20,8 @@ log = logging.getLogger("logger")
 def downloadNewPlatepar(config, port=22):
     """ Connect to the central server and download a new platepar calibration file, if available. """
 
-
-    log.info('Establishing SSH connection to: ' + config.hostname + ':' + str(port) + '...')
+    log.info('Checking for new platepar on the server...')
+    log.debug('Establishing SSH connection to: ' + config.hostname + ':' + str(port) + '...')
 
     try:
         # Connect to host
