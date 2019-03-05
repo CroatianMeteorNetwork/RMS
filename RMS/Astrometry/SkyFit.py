@@ -1565,8 +1565,8 @@ class PlateTool(object):
             self.platepar.Y_res = img_data.shape[0]
 
 
-            # Scale the size of the annulus (normalize so the percieved size is the same as for 1280x720)
-            self.star_aperature_radius *= np.sqrt(img_data.shape[1]**2 + img_data.shape[0]**2)/1500
+            # # Scale the size of the annulus (normalize so the percieved size is the same as for 1280x720)
+            # self.star_aperature_radius *= np.sqrt(img_data.shape[1]**2 + img_data.shape[0]**2)/1500
 
 
 
@@ -2637,7 +2637,7 @@ class PlateTool(object):
         # res = scipy.optimize.minimize(_calcSkyResidualsAstro, p0, args=(self, catalog_stars, img_stars),
         #     method='Nelder-Mead')
 
-        print(res)
+        print(res.x)
 
         # Update fitted astrometric parameters
         self.platepar.RA_d, self.platepar.dec_d, self.platepar.pos_angle_ref, self.platepar.F_scale = res.x
@@ -2666,7 +2666,7 @@ class PlateTool(object):
             # Exctact fitted X polynomial
             self.platepar.x_poly_rev = res.x
 
-            print(res)
+            print(res.x)
 
             # Fit distorsion parameters in Y direction, reverse mapping
             res = scipy.optimize.minimize(_calcImageResidualsDistorsion, self.platepar.y_poly_rev, args=(self, 
@@ -2675,7 +2675,7 @@ class PlateTool(object):
             # Extract fitted Y polynomial
             self.platepar.y_poly_rev = res.x
 
-            print(res)
+            print(res.x)
 
             ### ###
 
@@ -2700,7 +2700,7 @@ class PlateTool(object):
             # Exctact fitted X polynomial
             self.platepar.x_poly_fwd = res.x
 
-            print(res)
+            print(res.x)
 
             # Fit distorsion parameters in Y direction, forward mapping
             res = scipy.optimize.minimize(_calcSkyResidualsDistorsion, self.platepar.y_poly_fwd, args=(self, 
@@ -2709,7 +2709,7 @@ class PlateTool(object):
             # Extract fitted Y polynomial
             self.platepar.y_poly_fwd = res.x
 
-            print(res)
+            print(res.x)
 
             ### ###
 
