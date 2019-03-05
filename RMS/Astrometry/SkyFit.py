@@ -41,12 +41,14 @@ except:
     import Tkinter as tkinter
     import tkMessageBox as messagebox
 
-
 import numpy as np
-import scipy.optimize
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.font_manager import FontProperties
+from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes
+import PIL.Image, PIL.ImageDraw
+import scipy.optimize
+import scipy.ndimage
 
 import RMS.ConfigReader as cr
 import RMS.Formats.CALSTARS as CALSTARS
@@ -187,6 +189,7 @@ class PlateTool(object):
         self.circle_aperature_outer = None
         self.star_aperature_radius = 5
         self.x_centroid = self.y_centroid = None
+        self.closest_cat_star_indx = None
         self.photom_deviatons_scat = []
 
         self.catalog_stars_visible = True
@@ -196,6 +199,7 @@ class PlateTool(object):
 
         # List of paired image and catalog stars
         self.paired_stars = []
+        self.residuals = None
 
         # Positions of the mouse cursor
         self.mouse_x = 0
@@ -231,10 +235,19 @@ class PlateTool(object):
 
         # Image coordinates of catalog stars
         self.catalog_x = self.catalog_y = None
+        self.catalog_x_filtered = self.catalog_y_filtered = None
         self.mag_band_string = ''
 
         # Flag indicating that the first platepar fit has to be done
         self.first_platepar_fit = True
+
+
+
+        # Toggle zoom window
+        self.show_zoom_window = False
+
+        # Position of the zoom window (NE, NW, SE, SW)
+        self.zoom_window_pos = ''
 
         ######################################################################################################
 
@@ -525,7 +538,198 @@ class PlateTool(object):
             plt.gca().add_patch(self.circle_aperature)
 
 
+        # Draw the zoom window
+        if self.show_zoom_window:
+            self.drawZoomWindow()
+
+
         plt.gcf().canvas.draw()
+
+
+
+    def drawZoomWindow(self):
+        """ Draw the zoom window in the corner. """
+
+        if self.star_pick_mode:
+
+            # If the mouse is outside the image, don't update anything
+            if (self.mouse_x is None) or (self.mouse_y is None):
+                return None
+
+            img_w_half = self.current_ff.ncols//2
+            img_h_half = self.current_ff.nrows//2
+
+            # # Update the location of the zoom window
+            # anchor_location = ''
+            # if self.mouse_y > img_h_half:
+            #     anchor_location += 'N'
+            # else:
+            #     anchor_location += 'S'
+
+            # if self.mouse_x > img_w_half:
+            #     anchor_location += 'W'
+            # else:
+            #     anchor_location += 'E'
+
+            # self.zoom_axis.set_anchor(anchor_location)
+
+
+            ### Extract a portion of image around the aperture ###
+
+            window_radius = int(2*self.star_aperature_radius + np.sqrt(self.star_aperature_radius))
+
+            x_min_orig = int(round(self.mouse_x - window_radius))
+            if x_min_orig < 0: x_min = 0
+            else: x_min = x_min_orig
+
+            x_max_orig = int(round(self.mouse_x + window_radius))
+            if x_max_orig > self.current_ff.ncols - 1:
+                x_max = int(self.current_ff.ncols - 1)
+            else: x_max = x_max_orig
+
+            y_min_orig = int(round(self.mouse_y - window_radius))
+            if y_min_orig < 0: y_min = 0
+            else: y_min = y_min_orig
+
+            y_max_orig = int(round(self.mouse_y + window_radius))
+            if y_max_orig > self.current_ff.nrows - 1:
+                y_max = int(self.current_ff.nrows - 1)
+            else:
+                y_max = y_max_orig
+
+
+            # Crop the image
+            img_crop = np.zeros((2*window_radius, 2*window_radius))
+            dx_min = x_min - x_min_orig
+            dx_max = x_max - x_max_orig + 2*window_radius
+            dy_min = y_min - y_min_orig
+            dy_max = y_max - y_max_orig + 2*window_radius
+            img_crop[dy_min:dy_max, dx_min:dx_max] = self.img_data_processed[y_min:y_max, x_min:x_max]
+
+
+            ### ###
+
+
+            # Zoom the image
+            zoom_factor = 8
+
+            # Make sure that the zoomed image is every larger than 1/2 of the whole image
+            if 2*zoom_factor*window_radius > np.min([plt.gcf().bbox.ymax, plt.gcf().bbox.xmax])/2:
+
+                # Compute a new zoom factor
+                zoom_factor = np.floor((np.min([plt.gcf().bbox.ymax, \
+                    plt.gcf().bbox.xmax])/2)/(2*window_radius))
+
+                # Don't apply zoom if the image will be smaller
+                if zoom_factor <= 1:
+                    return None
+
+
+            img_crop = scipy.ndimage.zoom(img_crop, zoom_factor, order=0)
+
+
+            # Compute where the zoom will be shown on the image
+            zoom_window_pos = ''
+            if self.mouse_y < img_h_half:
+                yo = 0
+                zoom_window_pos += 'N'
+            else:
+                yo = plt.gcf().bbox.ymax - zoom_factor*2*window_radius
+                zoom_window_pos += 'S'
+
+            if self.mouse_x > img_w_half:
+                xo = 0
+                zoom_window_pos += 'W'
+            else:
+                xo = plt.gcf().bbox.xmax - zoom_factor*2*window_radius
+                zoom_window_pos += 'E'
+
+            # If the position of the zoom window has changed, reset the image
+            if self.zoom_window_pos != zoom_window_pos:
+                
+                self.updateImage()
+                self.zoom_window_pos = zoom_window_pos
+
+
+
+            # Draw aperture circle to the image
+            img = PIL.Image.fromarray(img_crop)
+            img = img.convert('RGB')
+            draw = PIL.ImageDraw.Draw(img)
+
+            ul = zoom_factor*(window_radius - self.star_aperature_radius)
+            br = zoom_factor*(window_radius + self.star_aperature_radius)
+            draw.ellipse((ul, ul, br, br), outline='yellow')
+
+            ul = zoom_factor*(window_radius - 2*self.star_aperature_radius)
+            br = zoom_factor*(window_radius + 2*self.star_aperature_radius)
+            draw.ellipse((ul, ul, br, br), outline='yellow')
+
+            ### Draw centroids in the zoomed image ###
+
+            def drawMarkersOnZoom(draw, x, y, color='blue', marker='x', width=1):
+
+                # Check if the picked star is in the window, and plot it if it is
+                if (x >= x_min_orig) and (x <= x_max_orig) and (y >= y_min_orig) and (y <= y_max_orig):
+
+                    xp = zoom_factor*(x - x_min_orig)
+                    yp = zoom_factor*(y - y_min_orig)
+
+                    if marker == '+':
+                        
+                        # Draw an +
+                        draw.line((xp + zoom_factor, yp, xp - zoom_factor, yp), fill=color, width=width)
+                        draw.line((xp, yp - zoom_factor, xp, yp + zoom_factor), fill=color, width=width)
+
+                    else:
+
+                        # Draw an X
+                        draw.line((xp + zoom_factor, yp + zoom_factor, xp - zoom_factor, yp - zoom_factor), \
+                            fill=color, width=width)
+                        draw.line((xp + zoom_factor, yp - zoom_factor, xp - zoom_factor, yp + zoom_factor), \
+                            fill=color, width=width)
+
+
+    
+            # Plot centroid
+            if self.x_centroid is not None:
+                drawMarkersOnZoom(draw, self.x_centroid, self.y_centroid, color='green', marker='x', width=2)
+                
+            # Plot paired stars
+            for paired_star in self.paired_stars:
+
+                img_star, catalog_star = paired_star
+                star_x, star_y, px_intens = img_star
+
+                drawMarkersOnZoom(draw, star_x, star_y, color='blue', marker='x', width=2)
+
+
+            # Draw catalog stars
+            if self.catalog_stars_visible:
+
+                for cat_x, cat_y in zip(self.catalog_x_filtered, self.catalog_y_filtered):
+
+                    drawMarkersOnZoom(draw, cat_x, cat_y, color='red', marker='+')
+
+
+            # Plot paired catalog star
+            if self.closest_cat_star_indx is not None:
+                
+                drawMarkersOnZoom(draw, self.catalog_x[self.closest_cat_star_indx], \
+                        self.catalog_y[self.closest_cat_star_indx], color='purple', marker='x', width=2)            
+            
+
+                
+            ###
+
+
+            # Convert the PIL image object back to array
+            img_crop = np.array(img)
+
+
+            # Plot the zoomed image
+            plt.gcf().figimage(img_crop, xo=xo, yo=yo, zorder=5, cmap='gray', \
+                vmin=np.min(self.img_data_processed), vmax=np.max(self.img_data_processed))
 
 
 
@@ -1087,6 +1291,20 @@ class PlateTool(object):
                 self.enableStarPicking()
 
 
+
+        # Toggle zoom window (SHIFT + Z)
+        elif event.key == 'Z':
+            
+            if self.star_pick_mode:
+
+                self.show_zoom_window = not self.show_zoom_window
+
+                self.updateImage()
+
+                self.drawCursorCircle()
+
+
+
         # Do a fit on the selected stars while in the star picking mode
         elif event.key == 'ctrl+z':
 
@@ -1119,6 +1337,7 @@ class PlateTool(object):
 
                     # Switch back to centroiding mode
                     self.star_selection_centroid = True
+                    self.closest_cat_star_indx = None
 
                     self.updateImage()
 
@@ -1132,8 +1351,13 @@ class PlateTool(object):
                 # If the ESC is pressed when the star has been centroided, reset the centroid
                 if not self.star_selection_centroid:
                     self.star_selection_centroid = True
+                    self.x_centroid = None
+                    self.y_centroid = None
+                    self.star_intensity = None
 
                     self.updateImage()
+
+                    self.drawCursorCircle()
 
 
         elif event.key == 'p':
@@ -1177,7 +1401,9 @@ class PlateTool(object):
 
         # Change the size of the star aperature circle
         if self.star_pick_mode:
+            self.updateImage()
             self.drawCursorCircle()
+
 
 
 
@@ -1386,8 +1612,9 @@ class PlateTool(object):
         # Store image after levels modifications
         self.img_data_processed = np.copy(img_data)
 
-        # Show the loaded image
-        plt.imshow(img_data, cmap='gray', interpolation='nearest')
+        # Show the loaded image (defining the exent speeds up image drawimg)
+        plt.imshow(img_data, cmap='gray', interpolation='nearest', \
+            extent=(0, self.img_data_processed.shape[1], self.img_data_processed.shape[0], 0))
 
         # Draw stars that were paired in picking mode
         self.drawPairedStars()
@@ -1418,15 +1645,15 @@ class PlateTool(object):
             cat_stars = cat_stars[cat_stars[:, 1] > 0]
             cat_stars = cat_stars[cat_stars[:, 1] < self.current_ff.nrows]
 
-            catalog_x_filtered, catalog_y_filtered, catalog_mag_filtered = cat_stars.T
+            self.catalog_x_filtered, self.catalog_y_filtered, catalog_mag_filtered = cat_stars.T
 
             if len(catalog_mag_filtered):
 
                 cat_mag_faintest = np.max(catalog_mag_filtered)
 
                 # Plot catalog stars
-                plt.scatter(catalog_x_filtered, catalog_y_filtered, c='r', marker='+', lw=1.0, alpha=0.5, \
-                    s=((4.0 + (cat_mag_faintest - catalog_mag_filtered))/2.0)**(2*2.512))
+                plt.scatter(self.catalog_x_filtered, self.catalog_y_filtered, c='r', marker='+', lw=1.0, \
+                    alpha=0.5, s=((4.0 + (cat_mag_faintest - catalog_mag_filtered))/2.0)**(2*2.512))
 
             else:
                 print('No catalog stars visible!')
@@ -1437,6 +1664,10 @@ class PlateTool(object):
         # Draw photometry
         if len(self.paired_stars) > 2:
             self.photometry()
+
+        # Draw fit residuals
+        if self.residuals is not None:
+            self.drawFitResiduals()
 
 
         # Set plot limits
@@ -1528,6 +1759,7 @@ class PlateTool(object):
             text_str += 'CTRL + X - astrometry.net img upload\n'
             text_str += 'CTRL + SHIFT + X - astrometry.net XY\n'
             text_str += 'CTRL + R - Pick stars\n'
+            text_str += 'SHIFT + Z - Show zoomed window\n'
             text_str += 'CTRL + N - New platepar\n'
             text_str += 'CTRL + S - Save platepar\n'
             text_str += 'SHIFT + CTRL + S - Save platepar as default\n'
@@ -1942,6 +2174,7 @@ class PlateTool(object):
 
         # Reset paired stars
         self.paired_stars = []
+        self.residuals = None
 
         if update_image:
             self.updateImage()
@@ -2050,6 +2283,7 @@ class PlateTool(object):
 
         # Reset paired stars
         self.paired_stars = []
+        self.residuals = None
 
         self.updateImage()
 
@@ -2068,6 +2302,7 @@ class PlateTool(object):
 
         # Reset paired stars
         self.paired_stars = []
+        self.residuals = None
 
         self.updateImage()
 
@@ -2117,14 +2352,14 @@ class PlateTool(object):
 
         x_max = int(round(mouse_x + outer_radius))
         if x_max > self.current_ff.ncols - 1:
-            x_max > self.current_ff.ncols - 1
+            x_max = self.current_ff.ncols - 1
 
         y_min = int(round(mouse_y - outer_radius))
         if y_min < 0: y_min = 0
 
         y_max = int(round(mouse_y + outer_radius))
         if y_max > self.current_ff.nrows - 1:
-            y_max > self.current_ff.nrows - 1
+            y_max = self.current_ff.nrows - 1
 
 
         # Crop the image
@@ -2573,34 +2808,47 @@ class PlateTool(object):
 
         ####################
 
+        # Save the residuals
+        self.residuals = residuals
 
         self.updateImage()
 
-
-        # Plot the residuals
-        res_scale = 100
-        for entry in residuals:
-
-            img_x, img_y, angle, distance, angular_distance = entry
-
-            # Calculate coordinates of the end of the residual line
-            res_x = img_x + res_scale*np.cos(angle)*distance
-            res_y = img_y + res_scale*np.sin(angle)*distance
-
-            # Plot the image residuals
-            plt.plot([img_x, res_x], [img_y, res_y], color='orange', alpha=0.25)
-
-            
-            # Convert the angular distance from degrees to equivalent image pixels
-            ang_dist_img = angular_distance*self.platepar.F_scale
-            res_x = img_x + res_scale*np.cos(angle)*ang_dist_img
-            res_y = img_y + res_scale*np.sin(angle)*ang_dist_img
-            
-            # Plot the sky residuals
-            plt.plot([img_x, res_x], [img_y, res_y], color='yellow', alpha=0.25)
+        self.drawFitResiduals()
 
 
-        plt.draw()
+
+    def drawFitResiduals(self):
+        """ Draw fit residuals. """
+
+
+        if self.residuals is not None:
+
+            # Plot the residuals
+            res_scale = 100
+            for entry in self.residuals:
+
+                img_x, img_y, angle, distance, angular_distance = entry
+
+                # Calculate coordinates of the end of the residual line
+                res_x = img_x + res_scale*np.cos(angle)*distance
+                res_y = img_y + res_scale*np.sin(angle)*distance
+
+                # Plot the image residuals
+                plt.plot([img_x, res_x], [img_y, res_y], color='orange', alpha=0.25)
+
+                
+                # Convert the angular distance from degrees to equivalent image pixels
+                ang_dist_img = angular_distance*self.platepar.F_scale
+                res_x = img_x + res_scale*np.cos(angle)*ang_dist_img
+                res_y = img_y + res_scale*np.sin(angle)*ang_dist_img
+                
+                # Plot the sky residuals
+                plt.plot([img_x, res_x], [img_y, res_y], color='yellow', alpha=0.25)
+
+
+            plt.draw()
+
+
 
 
 
