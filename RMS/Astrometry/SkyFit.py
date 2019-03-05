@@ -635,12 +635,15 @@ class PlateTool(object):
                 # Show the photometry fit plot
                 if show_plot:
 
-                    # Init plot
-                    fig_p = plt.figure(facecolor=None)
-                    ax_p = fig_p.add_subplot(1, 1, 1)
+                    ### PLOT PHOTOMETRY FIT ###
+
+                    # Init plot for photometry
+                    fig_p, (ax_p, ax_r) = plt.subplots(nrows=2, facecolor=None, figsize=(6.4, 7.2), \
+                        gridspec_kw={'height_ratios':[2, 1]})
 
                     # Plot catalog magnitude vs. logsum of pixel intensities
-                    self.photom_points = ax_p.scatter(-2.5*np.array(logsum_px), catalog_mags, s=5, c='r')
+                    self.photom_points = ax_p.scatter(-2.5*np.array(logsum_px), catalog_mags, s=5, c='r', \
+                        zorder=3)
 
                     x_min, x_max = ax_p.get_xlim()
                     y_min, y_max = ax_p.get_ylim()
@@ -661,7 +664,7 @@ class PlateTool(object):
                     # Plot the line fit
                     logsum_arr = np.linspace(x_min_w, x_max_w, 10)
                     ax_p.plot(logsum_arr, photomLine(logsum_arr/(-2.5), photom_offset), label=fit_info, \
-                        linestyle='--', color='k', alpha=0.5)
+                        linestyle='--', color='k', alpha=0.5, zorder=3)
 
                     ax_p.legend()
                         
@@ -677,10 +680,36 @@ class PlateTool(object):
 
                     ax_p.grid()
 
+                    ###
+
+
+                    ### PLOT MAG DIFFERENCE BY RADIUS
+
+
+                    img_diagonal = np.hypot(self.config.width/2, self.config.height/2)
+
+                    # Compute radiuses from centre of stars used for the fit
+                    rad_list = []
+                    for star_x, star_y in zip (star_coords_x, star_coords_y):
+
+                        # Compute radius ratio to corner
+                        rad = np.hypot(star_x - self.config.width/2, star_y - self.config.height/2)
+                        rad_list.append(rad)
+
                     
+                    # Plot radius from centre vs. fit residual
+                    ax_r.scatter(rad_list, fit_resids, s=5, c='r', zorder=3)
+                    
+                    ax_r.grid()
+
+                    ax_r.set_ylabel("Fit residuals (mag)")
+                    ax_r.set_xlabel("Radius from centre (px)")
+
+                    ax_r.set_xlim(0, img_diagonal)
+
+                    
+                    fig_p.tight_layout()
                     fig_p.show()
-                    #plt.show()
-                    #fig_p.clf()
 
 
             else:
@@ -1304,6 +1333,8 @@ class PlateTool(object):
 
 
             # Set the image resolution to platepar after reading the first image
+            self.config.width = img_data.shape[1]
+            self.config.height = img_data.shape[0]
             self.platepar.X_res = img_data.shape[1]
             self.platepar.Y_res = img_data.shape[0]
 
@@ -1442,7 +1473,7 @@ class PlateTool(object):
             text_str += 'Rot eq    = {:.3f}$\\degree$\n'.format(rotationWrtStandard(self.platepar))
             #text_str += 'Ref RA  = {:.3f}\n'.format(self.platepar.RA_d)
             #text_str += 'Ref Dec = {:.3f}\n'.format(self.platepar.dec_d)
-            text_str += "F_scale  = {:.3f}'/px\n".format(60/self.platepar.F_scale)
+            text_str += "Scale  = {:.3f}'/px\n".format(60/self.platepar.F_scale)
             text_str += 'Lim mag  = {:.1f}\n'.format(self.cat_lim_mag)
             text_str += 'Increment = {:.2f}\n'.format(self.key_increment)
             text_str += 'Img Gamma = {:.2f}\n'.format(self.img_gamma)
@@ -2485,13 +2516,13 @@ class PlateTool(object):
         print()
         print('Residuals')
         print('----------')
-        print(' No,   Img X,   Img Y, RA (deg), Dec (deg),    Mag,   Cat X,   Cat Y, Err amin,  Err px, Direction')
+        print(' No,   Img X,   Img Y, RA (deg), Dec (deg),    Mag, -2.5*LSP, Cat X,   Cat Y, Err amin,  Err px, Direction')
 
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
         for star_no, (cat_x, cat_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y, catalog_stars, \
             img_stars)):
             
-            img_x, img_y, _ = img_c
+            img_x, img_y, sum_intens = img_c
             ra, dec, mag = cat_coords
 
             delta_x = cat_x - img_x
@@ -2518,8 +2549,8 @@ class PlateTool(object):
 
 
             # Print out the residuals
-            print('{:3d}, {:7.2f}, {:7.2f}, {:>8.3f}, {:>+9.3f}, {:+6.2}, {:7.2f}, {:7.2f}, {:8.2f}, {:7.2f}, {:+9.1f}'.format(star_no + 1, img_x, img_y, \
-                ra, dec, mag, cat_x, cat_y, 60*angular_distance, distance, np.degrees(angle)))
+            print('{:3d}, {:7.2f}, {:7.2f}, {:>8.3f}, {:>+9.3f}, {:+6.2f}, {:7.2f}, {:8.2f}, {:7.2f}, {:8.2f}, {:7.2f}, {:+9.1f}'.format(star_no + 1, img_x, img_y, \
+                ra, dec, mag, -2.5*np.log10(sum_intens), cat_x, cat_y, 60*angular_distance, distance, np.degrees(angle)))
 
 
         mean_angular_error = 60*np.mean([entry[4] for entry in residuals])

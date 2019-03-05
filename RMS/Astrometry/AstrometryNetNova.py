@@ -468,6 +468,10 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
             print(result)
             break
 
+        elif stat.get('status','') in ['failure']:
+            print('Failed to find a solution!')
+            return None
+
         # Wait until the job is solved
         elif stat.get('status','') in ['solving']:
             print('Solving... Try {:d}/{:d}'.format(solution_tries, get_solution_tries))
