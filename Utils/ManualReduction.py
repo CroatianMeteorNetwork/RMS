@@ -147,6 +147,13 @@ class ManualReductionTool(object):
             self.fr = None
 
 
+        # If there is only one frame, assume it's a static image, and enable adding more picks on the same 
+        #   image
+        if self.img_handle.total_frames == 1:
+            self.single_image_mode = True
+
+        else:
+            self.single_image_mode = False            
 
         ###########
 
@@ -218,6 +225,10 @@ class ManualReductionTool(object):
         if self.img_handle is not None:
             self.img_handle.current_frame = self.current_frame
 
+        # Only one image is used, start at frame 100, so some previous frames can be added
+        if self.single_image_mode:
+            self.current_frame = 100
+
 
         ### INIT IMAGE ###
 
@@ -239,6 +250,7 @@ class ManualReductionTool(object):
         plt.rcParams['keymap.all_axes'] = ''
         plt.rcParams['keymap.quit'] = ''
         plt.rcParams['keymap.pan'] = ''
+        plt.rcParams['keymap.xscale'] = ''
 
 
         # Register event handlers
@@ -531,8 +543,10 @@ class ManualReductionTool(object):
         # Subtract the average and apply the flat field for image on which processing will be done
         if self.ff is not None:
 
-            # Subtract the average without flat correction
-            process_img = Image.applyDark(process_img, self.ff.avepixel)
+            # Subtract the average without flat correction (only when more images are available)
+            if not self.single_image_mode:
+                process_img = Image.applyDark(process_img, self.ff.avepixel)
+
 
             # Apply flat
             if self.flat_struct is not None:
@@ -542,7 +556,7 @@ class ManualReductionTool(object):
         # Apply dark and flat (cannot be applied if there is no FF file) on the image for showing
         if self.ff is not None:
 
-            # Subtract average to remove background stars (don't apply dark then)
+            # Subtract average to remove background stars (don't apply the dark then)
             if self.subtract_avepixel:
 
                 img = Image.applyDark(img, self.ff.avepixel)
@@ -969,9 +983,16 @@ class ManualReductionTool(object):
         # Subtract average pixel image to remove background stars
         elif event.key == 'k':
 
-            self.subtract_avepixel = not self.subtract_avepixel
+            # Only in multiple image mode
+            if not self.single_image_mode:
 
-            self.updateImage()
+                self.subtract_avepixel = not self.subtract_avepixel
+
+                self.updateImage()
+
+            else:
+                print('The average cannot be subtracted in the single image mode!')
+
 
 
         elif event.key == 'r':
@@ -1501,7 +1522,7 @@ class ManualReductionTool(object):
         # Plot all picks
         for pick in self.pick_list:
 
-            plt.scatter(pick.x_centroid, pick.y_centroid, marker='+', c='y', s=20, lw=1)
+            plt.scatter(pick.x_centroid, pick.y_centroid, marker='+', c='r', s=40, lw=1)
 
 
         # Find the pick done on the current frame
@@ -1513,7 +1534,7 @@ class ManualReductionTool(object):
             pick = pick_found[0]
 
             # Draw the centroid on the image
-            self.centroid_handle = plt.scatter(pick.x_centroid, pick.y_centroid, marker='+', c='y', s=100, 
+            self.centroid_handle = plt.scatter(pick.x_centroid, pick.y_centroid, marker='+', c='r', s=150, 
                 lw=2)
 
 
@@ -1762,7 +1783,15 @@ class ManualReductionTool(object):
         if self.img_handle is not None:
             self.img_handle.prevFrame()
 
-            self.current_frame = self.img_handle.current_frame
+            if not self.single_image_mode:
+                self.current_frame = self.img_handle.current_frame
+
+            # In the single image mode, continously cycle through frames
+            else:
+                self.current_frame -= 1
+
+                if self.current_frame < 0:
+                    self.current_frame = 0
 
         else:
             self.current_frame = (self.current_frame - self.frame_step)%self.nframes
@@ -1793,7 +1822,13 @@ class ManualReductionTool(object):
         if self.img_handle is not None:
             self.img_handle.nextFrame()
 
-            self.current_frame = self.img_handle.current_frame
+            if not self.single_image_mode:
+                self.current_frame = self.img_handle.current_frame
+
+            # In the single image mode, continously cycle through frames
+            else:
+                self.current_frame += 1
+                
 
         else:
             self.current_frame = (self.current_frame + self.frame_step)%self.nframes
@@ -1995,6 +2030,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-b', '--begframe', metavar='FIRST_FRAME', type=int, \
         help="First frame to show.")
 
+    arg_parser.add_argument('-t', '--timebeg', nargs=1, metavar='TIME', type=str, \
+        help="The beginning time of the video file in the YYYYMMDD_hhmmss.uuuuuu format.")
+
     arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float, \
         help="Frames per second of the video. If not given, it will be read from a) the FF file if available, b) from the config file.")
 
@@ -2050,6 +2088,11 @@ if __name__ == "__main__":
         input2 = None
 
 
+    # If the second argument is None, try reading it as time
+    if cml_args.timebeg is not None:
+        input2 = cml_args.timebeg[0]
+
+
     # If the second agrument is an FR file, set it as found
     if input2 is not None:
         
@@ -2057,6 +2100,7 @@ if __name__ == "__main__":
         
         if validFRName(tail2):
             fr_name = input2
+
 
 
     ### Detect the input type ###
