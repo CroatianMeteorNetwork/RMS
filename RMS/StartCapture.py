@@ -18,7 +18,6 @@ from __future__ import print_function, absolute_import
 
 import os
 import sys
-import gc
 import argparse
 import time
 import datetime
@@ -267,11 +266,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         del sharedArray
         del sharedArrayBase2
         del sharedArray2
-
-        log.debug('Collecting garbage...')
-
-        # Run garbage collection
-        gc.collect()
 
     except Exception as e:
         log.debug('Freeing frame buffers failed with error:' + repr(e))
