@@ -90,6 +90,17 @@ def getPlatepar(config, night_data_dir):
 
             platepar = None
             platepar_fmt = None
+
+
+        # Make sure the image resolution matches
+        if (int(config.width) != int(platepar.X_res)) or (int(config.height) != int(platepar.Y_res)):
+
+            # If they don't match, don't use this platepar
+            log.info("The image resolution in config and platepar don't match! Not using the platepar...")
+
+            platepar = None
+            platepar_fmt = None
+
         
 
     return platepar, platepar_path, platepar_fmt
