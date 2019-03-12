@@ -83,13 +83,14 @@ def getPlatepar(config, night_data_dir):
     if platepar is not None:
         
         # Make sure that the station code from the config and the platepar match
-        if config.stationID != platepar.station_code:
+        if platepar.station_code is not None:
+            if config.stationID != platepar.station_code:
 
-            # If they don't match, don't use this platepar
-            log.info("The station code in the platepar doesn't match the station code in config file! Not using the platepar...")
+                # If they don't match, don't use this platepar
+                log.info("The station code in the platepar doesn't match the station code in config file! Not using the platepar...")
 
-            platepar = None
-            platepar_fmt = None
+                platepar = None
+                platepar_fmt = None
 
 
         # Make sure the image resolution matches
