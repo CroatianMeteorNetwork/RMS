@@ -78,7 +78,7 @@ if __name__ == "__main__":
     n_profiles = 20
 
     # Difference in Y coordinates between every profile
-    vertical_step_offset = 100
+    vertical_step_offset = 70
 
     # Force sigma for fitting the Gaussian PSF (disable with -1)
     force_sigma = 1.3
@@ -111,12 +111,14 @@ if __name__ == "__main__":
             x_end = meteor_meas[-1][2]
             y_end = meteor_meas[-1][3]
 
+            rot_angle = (-phi + 180)%360
+
             # Get the coordinates of the beginning and the end in the rotated image
-            y_beg_rot, x_beg_rot = mapCoordinatesToRotatedImage(img, x_beg, y_beg, -phi)
-            y_end_rot, x_end_rot = mapCoordinatesToRotatedImage(img, x_end, y_end, -phi)
+            y_beg_rot, x_beg_rot = mapCoordinatesToRotatedImage(img, x_beg, y_beg, rot_angle)
+            y_end_rot, x_end_rot = mapCoordinatesToRotatedImage(img, x_end, y_end, rot_angle)
 
             # Rotate the meteor image so it's straight
-            img = scipy.ndimage.interpolation.rotate(img, -phi)
+            img = scipy.ndimage.interpolation.rotate(img, rot_angle)
 
             # Crop the meteor from the image
             x_mid = int((x_beg_rot + x_end_rot)/2)
@@ -130,8 +132,14 @@ if __name__ == "__main__":
 
             img_crop = img[y_min:y_max, x_min + 1:x_max + 1]
 
-            plt.imshow(img_crop, cmap='gray')
-            plt.show()
+
+            #fig, (ax1, ax2) = plt.subplots(ncols=2, gridspec_kw={'width_ratios': (0.1, 0.9)})
+            ax1 = plt.subplot2grid((4,8), (1,0), rowspan=3)
+            ax2 = plt.subplot2grid((4,8), (0,1), rowspan=4, colspan=7)
+
+            ax1.imshow(img_crop, cmap='gray', vmin=0, vmax=255)
+            ax1.get_xaxis().set_visible(False)
+            ax1.get_yaxis().set_visible(False)
 
 
             # Compute which profiles to take
@@ -145,6 +153,7 @@ if __name__ == "__main__":
                 n_profiles = img_crop.shape[0]
 
             print('Step:', step)
+            print('Rot angle:', rot_angle)
 
 
 
@@ -154,7 +163,7 @@ if __name__ == "__main__":
             count = 0
             sigma_list = []
             max_row = 0
-            for i, row in enumerate(img_crop):
+            for i, row in enumerate(np.flipud(img_crop)):
 
                 if i%step == 0:
 
@@ -179,10 +188,10 @@ if __name__ == "__main__":
                     row = row.astype(np.float64)
 
                     # Plot the PSF profile
-                    plt.plot(x_arr, row + offset, color=color_list[count])
+                    ax2.plot(x_arr, row + offset, color=color_list[count])
 
 
-                    max_row = max([max_row, np.max(row + offset)])
+                    max_row = max([max_row, np.median(row + offset)])
 
 
                     # Plot the saturation region
@@ -190,12 +199,12 @@ if __name__ == "__main__":
                     row_saturation = row[np.where(row >= 250)]
 
                     if len(x_arr_saturation) > 1:
-                        plt.plot(x_arr_saturation, row_saturation + offset, color='r')
+                        ax2.plot(x_arr_saturation, row_saturation + offset, color='r')
 
 
                     # Plot the fitted Gaussian
                     x_arr_plot = np.linspace(0, len(row) - 1, 10*len(row))
-                    plt.plot(x_arr_plot, gauss1D((x_arr_plot, force_sigma), *popt, saturation=-1) + offset, color=color_list[count], linestyle='dotted')
+                    ax2.plot(x_arr_plot, gauss1D((x_arr_plot, force_sigma), *popt, saturation=-1) + offset, color=color_list[count], linestyle='dotted')
 
                     count += 1
 
@@ -203,9 +212,14 @@ if __name__ == "__main__":
                         break
 
 
+            ax2.get_yaxis().set_visible(False)
 
-            plt.xlim([0, np.max(x_arr)])
-            plt.ylim([0, 3/2*max_row])
+            ax2.set_xlim([0, np.max(x_arr)])
+            ax2.set_ylim([0, 4/3*max_row])
+
+            ax2.set_xlabel('X (px)')
+
+            plt.tight_layout()
             plt.show()
 
 
