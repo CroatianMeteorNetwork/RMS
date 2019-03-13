@@ -188,10 +188,10 @@ if __name__ == "__main__":
                     row = row.astype(np.float64)
 
                     # Plot the PSF profile
-                    ax2.plot(x_arr, row + offset, color=color_list[count], zorder=n_profiles-count)
+                    ax2.plot(x_arr, row + offset - np.min(row), color=color_list[count], zorder=n_profiles-count)
 
 
-                    max_row = max([max_row, np.median(row + offset)])
+                    max_row = max([max_row, np.median(row + offset - np.min(row))])
 
 
                     # Plot the saturation region
@@ -199,12 +199,12 @@ if __name__ == "__main__":
                     row_saturation = row[np.where(row >= 250)]
 
                     if len(x_arr_saturation) > 1:
-                        ax2.plot(x_arr_saturation, row_saturation + offset, color='r', zorder=n_profiles-count)
+                        ax2.plot(x_arr_saturation, row_saturation + offset - np.min(row), color='r', zorder=n_profiles-count)
 
 
                     # Plot the fitted Gaussian
                     x_arr_plot = np.linspace(0, len(row) - 1, 10*len(row))
-                    ax2.plot(x_arr_plot, gauss1D((x_arr_plot, force_sigma), *popt, saturation=-1) + offset, \
+                    ax2.plot(x_arr_plot, gauss1D((x_arr_plot, force_sigma), *popt, saturation=-1) + offset - np.min(row), \
                         color=color_list[count], linestyle='dotted', zorder=n_profiles-count)
 
                     count += 1
