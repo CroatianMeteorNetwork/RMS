@@ -18,19 +18,31 @@ class SafeValue(object):
     Source: http://eli.thegreenplace.net/2012/01/04/shared-counter-with-pythons-multiprocessing
     """
 
-    def __init__(self, initval=0):
+    def __init__(self, initval=0, minval=None, maxval=None):
+        
         self.val = multiprocessing.Value('i', initval)
         self.lock = multiprocessing.Lock()
+
+        self.minval = minval
+        self.maxval = maxval
 
 
     def increment(self):
         with self.lock:
             self.val.value += 1
 
+            if self.maxval is not None:
+                if self.val.value > self.maxval:
+                    self.val.value = self.maxval
+
 
     def decrement(self):
         with self.lock:
             self.val.value -= 1
+
+            if self.minval is not None:
+                if self.val.value < self.minval:
+                    self.val.value = self.minval
 
 
     def set(self, n):
@@ -101,7 +113,7 @@ class QueuedPool(object):
                 cores = multiprocessing.cpu_count()
 
 
-        self.cores = SafeValue(cores)
+        self.cores = SafeValue(cores, minval=1, maxval=multiprocessing.cpu_count())
         self.log = log
 
         self.start_time = time.time()
@@ -118,10 +130,10 @@ class QueuedPool(object):
         self.func = func
         self.pool = None
 
-        self.total_jobs = SafeValue()
-        self.results_counter = SafeValue()
-        self.active_workers = SafeValue()
-        self.available_workers = SafeValue(self.cores.value())
+        self.total_jobs = SafeValue(minval=0)
+        self.results_counter = SafeValue(minval=0)
+        self.active_workers = SafeValue(minval=0, maxval=multiprocessing.cpu_count())
+        self.available_workers = SafeValue(self.cores.value(), minval=0, maxval=multiprocessing.cpu_count())
         self.kill_workers = multiprocessing.Event()
 
 
@@ -329,15 +341,18 @@ class QueuedPool(object):
 
             prev_output_qsize = 0
             output_qsize_last_change = time.time()
+            all_workers_idle_time = None
 
             # Wait until the input queue is empty, then close the pool
             while True:
 
                 c += 1
 
-                if c%1000 == 0:
+                if c%500 == 0:
                     self.printAndLog('-----')
-                    self.printAndLog('Active workers:', self.active_workers.value())
+                    self.printAndLog('Cores in use:', self.cores.value())
+                    self.printAndLog('Active worker threads:', self.active_workers.value())
+                    self.printAndLog('Idle worker threads:', self.available_workers.value())
                     self.printAndLog('Total jobs:', self.total_jobs.value())
                     self.printAndLog('Finished jobs:', self.output_queue.qsize())
 
@@ -361,6 +376,41 @@ class QueuedPool(object):
                     self.active_workers.set(0)
 
                     break
+
+
+                
+
+                # If all workers are idle, set the last idle time
+                if all_workers_idle_time is None:
+                    if self.available_workers.value() >= self.cores.value():
+                        all_workers_idle_time = time.time()
+                        self.printAndLog('All workers are idle!')
+                else:
+                    
+                    # Check if the workers are still idle
+                    if self.available_workers.value() < self.cores.value():
+                        self.printAndLog('All workers are NOT idle anymore!')
+                        all_workers_idle_time = None
+
+
+                # If all workers have been idle for more than 100 seconds, terminate the queue
+                if all_workers_idle_time is not None:
+                    if (time.time() - all_workers_idle_time) > 100:
+
+                        self.printAndLog('All workers were idle for more than 100 seconds, killing multiprocessing...')
+
+                        self.printAndLog('Terminating pool...')
+                        self.pool.terminate()
+
+                        self.printAndLog('Joining pool...')
+                        self.pool.join()
+
+                        self.active_workers.set(0)
+
+                        break
+
+
+
 
                 
                 # If all jobs are done, close the pool
