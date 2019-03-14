@@ -327,6 +327,10 @@ def find3DLines(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, start_time, config
             y2 = point_list[i + j + 1, 1]
             z2 = point_list[i + j + 1, 2]
 
+            # Don't check point pairs on the same frame, as the velocity can't be computed then
+            if z1 == z2:
+                continue
+
             # Include 2 points that make the line in the count
             counter = 0
 
