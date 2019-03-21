@@ -60,7 +60,7 @@ class LiveViewer(multiprocessing.Process):
 
         super(LiveViewer, self).__init__()
         
-        self.img_queue = multiprocessing.Queue()
+        self.recv_conn, self.send_conn = multiprocessing.Pipe(duplex=False)
         self.window_name = window_name
         self.first_image = True
         self.run_exited = multiprocessing.Event()
@@ -86,21 +86,21 @@ class LiveViewer(multiprocessing.Process):
             
         """
 
-        self.img_queue.put([img, img_text])
+        self.send_conn.send([img, img_text])
 
         time.sleep(0.1)
 
 
 
     def run(self):
-        """ Keep updating the image on the screen from the queue. """
+        """ Keep updating the image on the screen from the pipe. """
 
 
         # Repeat until the live viewer is not stopped from the outside
         while True:
 
-            # Get the next element in the queue (blocking, until next element is available)
-            item = self.img_queue.get(block=True)
+            # Get the next element in the pipe (blocking, until next element is available)
+            item = self.recv_conn.recv()
 
             # If the 'poison pill' is received, exit the viewer
             if item is None:

@@ -213,17 +213,14 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file)
 
 
-    ### TEMPORARY DISABLED UNTIL THE LIVE VIEWER IS FIXED !!! ###
-    # # Initialize the live image viewer
-    # if config.live_view_enable:
+    # Initialize the live image viewer
+    if config.live_view_enable:
 
-    #     live_view = LiveViewer(window_name='Maxpixel')
+        live_view = LiveViewer(window_name='Maxpixel')
 
-    # else:
+    else:
     
-    live_view = None
-
-    ### ###
+        live_view = None
 
     
     # Initialize compression
