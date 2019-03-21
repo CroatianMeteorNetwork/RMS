@@ -20,6 +20,10 @@ except:
     import Tkinter as tkinter
 
 
+# Load the default font
+PIL_FONT = ImageFont.load_default()
+
+
 def drawText(ff_array, img_text):
     """ Draws text on the image represented as a numpy array.
 
@@ -30,11 +34,8 @@ def drawText(ff_array, img_text):
     im = im.convert('RGB')
     draw = ImageDraw.Draw(im)
 
-    # Load the default font
-    font = ImageFont.load_default()
-
     # Draw the text on the image, in the upper left corent
-    draw.text((0, 0), img_text, (255,255,0), font=font)
+    draw.text((0, 0), img_text, (255,255,0), font=PIL_FONT)
     draw = ImageDraw.Draw(im)
 
     # Convert the type of the image to grayscale, with one color
@@ -95,6 +96,16 @@ class LiveViewer(multiprocessing.Process):
     def run(self):
         """ Keep updating the image on the screen from the pipe. """
 
+        # Find the screen size
+        root = tkinter.Tk()
+        root.withdraw()
+
+        screen_w = root.winfo_screenwidth()
+        screen_h = root.winfo_screenheight()
+
+        root.destroy()
+        del root
+
 
         # Repeat until the live viewer is not stopped from the outside
         while True:
@@ -109,17 +120,6 @@ class LiveViewer(multiprocessing.Process):
 
 
             img, img_text = item
-
-
-            # Find the screen size
-            root = tkinter.Tk()
-            root.withdraw()
-
-            screen_w = root.winfo_screenwidth()
-            screen_h = root.winfo_screenheight()
-
-            root.destroy()
-            del root
 
             # If the screen is smaller than the image, resize the image
             if (screen_h < img.shape[0]) or (screen_w < img.shape[1]):
