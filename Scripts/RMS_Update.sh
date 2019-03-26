@@ -23,7 +23,7 @@ UPDATEINPROGRESS="0"
 if [ -f $UPDATEINPROGRESSFILE ]; then
 	echo "Reading update in progress file..."
 	UPDATEINPROGRESS=$(cat $UPDATEINPROGRESSFILE)
-	echo "Update interuption station $UPDATEINPROGRESS"
+	echo "Update interuption status: $UPDATEINPROGRESS"
 fi
 
 # If an argument (any) is given, then the config and mask won't be backed up
