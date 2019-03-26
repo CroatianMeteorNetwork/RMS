@@ -377,7 +377,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # If the capture was run for a limited time, run the upload right away
-    if duration is not None:
+    if (duration is not None) and (upload_manager is not None):
         log.info('Uploading data before exiting...')
         upload_manager.uploadData()
 
