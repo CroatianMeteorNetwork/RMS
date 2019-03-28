@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
-from RMS.Routines.Image import thickLine
+from RMS.Routines.Image import thickLine, loadFlat, applyFlat
 from Utils.SaturationSimulation import findUnsaturatedMagnitude
 
 
@@ -33,7 +33,10 @@ if __name__ == "__main__":
         help='Standard deviation of the Gaussian PSF in pixels.')
 
     arg_parser.add_argument('-s', '--satlvl', metavar='SATURATION_LEVEL', type=int, \
-        help="Saturation level. 255 by default", default=255)
+        help="Saturation level. 255 by default.", default=255)
+
+    arg_parser.add_argument('-f', '--flat', metavar='FLAT', type=str, \
+        help="Path to the flat frame.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -53,6 +56,11 @@ if __name__ == "__main__":
     # Load meteor data from FTPdetecinfo
     cam_code, fps, meteor_list = readFTPdetectinfo(dir_path, ftpdetectinfo_name, ret_input_format=True)
 
+
+    # Load the flat, if given
+    flat = None
+    if cml_args.flat:
+        flat = loadFlat(*os.path.split(cml_args.flat))
 
     corrected_meteor_list = []
 
@@ -77,6 +85,13 @@ if __name__ == "__main__":
 
             # Load the FF file
             ff = readFF(dir_path, ff_name)
+
+            # Apply the flat to avepixel
+            if flat:
+                avepixel = applyFlat(ff.avepixel, flat)
+
+            else:
+                avepixel = ff.avepixel
 
 
             # Compute angular velocity
@@ -106,10 +121,10 @@ if __name__ == "__main__":
                 ### Compute the background intensity value behind the meteor ###
 
                 # Get the mask for the background as a 3 sigma streak around the meteor, but using avepixel
-                mask = thickLine(ff.avepixel.shape[0], ff.avepixel.shape[1], x, y, px_fm, phi, \
+                mask = thickLine(avepixel.shape[0], avepixel.shape[1], x, y, px_fm, phi, \
                     3*gauss_sigma).astype(np.bool)
 
-                img = np.ma.masked_array(ff.avepixel, ~mask)
+                img = np.ma.masked_array(avepixel, ~mask)
                     
                 bg_val = np.ma.median(img)
 
