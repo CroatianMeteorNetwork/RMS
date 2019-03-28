@@ -96,15 +96,15 @@ class LiveViewer(multiprocessing.Process):
     def run(self):
         """ Keep updating the image on the screen from the pipe. """
 
-        # Find the screen size
-        root = tkinter.Tk()
-        root.withdraw()
+        # # Find the screen size
+        # root = tkinter.Tk()
+        # root.withdraw()
 
-        screen_w = root.winfo_screenwidth()
-        screen_h = root.winfo_screenheight()
+        # screen_w = root.winfo_screenwidth()
+        # screen_h = root.winfo_screenheight()
 
-        root.destroy()
-        del root
+        # root.destroy()
+        # del root
 
 
         # Repeat until the live viewer is not stopped from the outside
@@ -121,20 +121,20 @@ class LiveViewer(multiprocessing.Process):
 
             img, img_text = item
 
-            # If the screen is smaller than the image, resize the image
-            if (screen_h < img.shape[0]) or (screen_w < img.shape[1]):
+            # # If the screen is smaller than the image, resize the image
+            # if (screen_h < img.shape[0]) or (screen_w < img.shape[1]):
 
-                # Find the ratios between dimentions
-                y_ratio = screen_h/img.shape[0]
-                x_ratio = screen_w/img.shape[1]
+            #     # Find the ratios between dimentions
+            #     y_ratio = screen_h/img.shape[0]
+            #     x_ratio = screen_w/img.shape[1]
 
-                # Resize the image so that the image fits the screen
-                min_ratio = min(x_ratio, y_ratio)
+            #     # Resize the image so that the image fits the screen
+            #     min_ratio = min(x_ratio, y_ratio)
 
-                width_new = int(img.shape[1]*min_ratio)
-                height_new = int(img.shape[0]*min_ratio)
+            #     width_new = int(img.shape[1]*min_ratio)
+            #     height_new = int(img.shape[0]*min_ratio)
 
-                img = cv2.resize(img, (width_new, height_new))
+            #     img = cv2.resize(img, (width_new, height_new))
 
 
 
