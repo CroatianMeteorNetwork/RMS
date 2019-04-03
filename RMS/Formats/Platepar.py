@@ -323,8 +323,29 @@ class Platepar(object):
         return fmt
 
 
+    def jsonStr(self):
+        """ Returns the JSON representation of the platepar as a string. """
 
-    def write(self, file_path, fmt=None, fov=None):
+        # Make a copy of the platepar object, which will be modified for writing
+        self2 = copy.deepcopy(self)
+
+        # Convert numpy arrays to list, which can be serialized
+        self2.x_poly_fwd = self.x_poly_fwd.tolist()
+        self2.x_poly_rev = self.x_poly_rev.tolist()
+        self2.y_poly_fwd = self.y_poly_fwd.tolist()
+        self2.y_poly_rev = self.y_poly_rev.tolist()
+        del self2.time
+
+        # For compatibility with old procedures, write the forward distorsion parameters as x, y
+        self2.x_poly = self.x_poly_fwd.tolist()
+        self2.y_poly = self.y_poly_fwd.tolist()
+
+        out_str = json.dumps(self2, default=lambda o: o.__dict__, indent=4, sort_keys=True)
+
+        return out_str
+
+
+    def write(self, file_path, fmt=None, fov=None, ret_written=False):
         """ Write platepar to file. 
         
         Arguments:
@@ -334,9 +355,10 @@ class Platepar(object):
             fmt: [str] Format of the platepar file. 'json' for JSON format and 'txt' for the usual CMN textual
                 format. The format is JSON by default.
             fov: [tuple] Tuple of horizontal and vertical FOV size in degree. None by default.
+            ret_written: [bool] If True, the JSON string of the platepar instead of writing it to disk.
 
         Return:
-            fmt: [str]
+            fmt: [str] Platepar format.
 
         """
 
@@ -353,24 +375,13 @@ class Platepar(object):
         # If the format is JSON, write a JSON file
         if fmt == 'json':
 
-            # Make a copy of the platepar object, which will be modified for writing
-            self2 = copy.deepcopy(self)
-
-            # Convert numpy arrays to list, which can be serialized
-            self2.x_poly_fwd = self.x_poly_fwd.tolist()
-            self2.x_poly_rev = self.x_poly_rev.tolist()
-            self2.y_poly_fwd = self.y_poly_fwd.tolist()
-            self2.y_poly_rev = self.y_poly_rev.tolist()
-            del self2.time
-
-            # For compatibility with old procedures, write the forward distorsion parameters as x, y
-            self2.x_poly = self.x_poly_fwd.tolist()
-            self2.y_poly = self.y_poly_fwd.tolist()
-
-            out_str = json.dumps(self2, default=lambda o: o.__dict__, indent=4, sort_keys=True)
+            out_str = self.jsonStr()
 
             with open(file_path, 'w') as f:
                 f.write(out_str)
+
+            if ret_written:
+                return fmt, out_str
 
         else:
 
@@ -421,6 +432,12 @@ class Platepar(object):
 
                 # Write station code
                 f.write(str(self.station_code) + '\n')
+
+            if ret_written:
+                with open(file_path) as f:
+                    out_str = "\n".join(f.readlines())
+    
+                return fmt, out_str
 
 
         return fmt
