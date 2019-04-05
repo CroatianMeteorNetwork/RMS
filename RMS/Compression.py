@@ -200,7 +200,7 @@ class Compressor(multiprocessing.Process):
 
             # Do not wait more than a minute, just terminate the compression thread then
             if (time.time() - t_beg) > 60:
-                log.debug('Waitied more than 60 seconds for compression to end, killing it...')
+                log.debug('Waited more than 60 seconds for compression to end, killing it...')
                 break
 
 
