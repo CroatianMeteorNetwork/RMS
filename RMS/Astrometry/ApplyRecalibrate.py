@@ -26,7 +26,7 @@ from RMS.Formats import FTPdetectinfo
 from RMS.Formats import Platepar
 from RMS.Formats import StarCatalog
 from RMS.Math import angularSeparation
-from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
+from Utils import RMS2UFO
 
 
 def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, calstars_list, config, platepar):
@@ -380,7 +380,7 @@ if __name__ == "__main__":
 
     ### Generate the updated UFOorbit file ###
 
-    FTPdetectinfo2UFOOrbitInput(dir_path, os.path.basename(ftpdetectinfo_path), None, \
+    RMS2UFO.FTPdetectinfo2UFOOrbitInput(dir_path, os.path.basename(ftpdetectinfo_path), None, \
         platepar_dict=recalibrated_platepars)
 
     ### ###
