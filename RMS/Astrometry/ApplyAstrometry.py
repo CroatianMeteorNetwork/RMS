@@ -31,6 +31,7 @@ import math
 import datetime
 import shutil
 import copy
+import argparse
 
 import numpy as np
 import scipy.optimize
@@ -41,6 +42,7 @@ import RMS.Formats.Platepar
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Math import angularSeparation
+from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 
 # Import Cython functions
 import pyximport
@@ -1064,18 +1066,27 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
 
 if __name__ == "__main__":
 
-    # Read the path to the FTPdetectinfo file
-    if not len(sys.argv) == 2:
-        print("Usage: python -m RMS.Astrometry.ApplyAstrometry /path/to/FTPdetectinfo.txt")
-        sys.exit()
 
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Apply the platepar to the given FTPdetectinfo file.")
+
+    arg_parser.add_argument('ftpdetectinfo_path', nargs=1, metavar='FTPDETECTINFO_PATH', type=str, \
+        help='Path to the FF file.')
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+    ftpdetectinfo_path = cml_args.ftpdetectinfo_path[0]
 
     # Extract the directory path
-    dir_path, ftp_detectinfo_file = os.path.split(os.path.abspath(sys.argv[1]))
+    dir_path, ftp_detectinfo_file = os.path.split(os.path.abspath(ftpdetectinfo_path))
 
-    if not '.txt' in ftp_detectinfo_file:
-        print("Usage: python -m RMS.Astrometry.ApplyAstrometry /path/to/FTPdetectinfo.txt")
-        print("Please provide the FTPdetectinfo file!")
+    if not ftp_detectinfo_file.endswith('.txt'):
+        print("Please provide a FTPdetectinfo file! It has to end with .txt")
         sys.exit()
 
     # Find the platepar file
@@ -1092,6 +1103,10 @@ if __name__ == "__main__":
 
     # Apply the astrometry to the given FTPdetectinfo file
     applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file)
+
+
+    # Recompute the UFOOrbit file
+    FTPdetectinfo2UFOOrbitInput(dir_path, ftp_detectinfo_file, os.path.join(dir_path, platepar_file))
 
     print('Done!')
 

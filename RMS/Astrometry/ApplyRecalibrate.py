@@ -297,14 +297,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
     ### ###
 
-
-    
-    ### Generate the updated UFOorbit file ###
-
-    FTPdetectinfo2UFOOrbitInput(dir_path, os.path.basename(ftpdetectinfo_path), None, \
-        platepar_dict=recalibrated_platepars)
-
-    ### ###
+    return recalibrated_platepars
 
 
 
@@ -316,7 +309,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
 if __name__ == "__main__":
 
-        ### COMMAND LINE ARGUMENTS
+    ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Recalibrate the platepar for every FF with detections and apply it the detections, recompute the FTPdetectinfo and UFOOrbit file.")
@@ -381,4 +374,13 @@ if __name__ == "__main__":
     print('CALSTARS file: ' + calstars_file + ' loaded!')
 
     # Recalibrate and apply astrometry on every FF file with detections individually
-    recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, calstars_list, config, platepar)
+    recalibrated_platepars = recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, \
+        calstars_list, config, platepar)
+
+
+    ### Generate the updated UFOorbit file ###
+
+    FTPdetectinfo2UFOOrbitInput(dir_path, os.path.basename(ftpdetectinfo_path), None, \
+        platepar_dict=recalibrated_platepars)
+
+    ### ###
