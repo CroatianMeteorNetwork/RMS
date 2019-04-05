@@ -9,14 +9,16 @@ import sys
 import copy
 import argparse
 import json
+import datetime
+import shutil
 
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize
 
 from RMS.Astrometry import CheckFit
-from RMS.Astrometry.ApplyAstrometry import rotationWrtHorizon
-from RMS.Astrometry.Conversions import date2JD, jd2Date
+from RMS.Astrometry.ApplyAstrometry import applyPlateparToCentroids
+from RMS.Astrometry.Conversions import date2JD
 import RMS.ConfigReader as cr
 from RMS.Formats import CALSTARS
 from RMS.Formats import FFfile
@@ -59,6 +61,10 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         if ff_name in recalibrated_platepars:
             continue
 
+        print()
+        print('Processing: ', ff_name)
+        print('------------------------------------------------------------------------------')
+
         # Find extracted stars on this image
         if not ff_name in calstars:
             print('Skipped because it was not in CALSTARS:', ff_name)
@@ -88,8 +94,12 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         n_matched, avg_dist, cost, _ = CheckFit.matchStarsResiduals(config, working_platepar, catalog_stars, \
             star_dict_ff, min_radius, ret_nmatch=True)
 
+
+        print('Initally match stars with {:.1f} px: {:d}/{:d}'.format(min_radius, n_matched, \
+            len(star_dict_ff[jd])))
+
         # If at least half the stars are matched
-        if n_matched >= 0.5*len(star_dict_ff):
+        if n_matched >= 0.5*len(star_dict_ff[jd]):
 
             # Check if the average distance with the tightest radius is close
             if avg_dist < config.dist_check_quick_threshold:
@@ -98,6 +108,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
                 radius_list = [1.5, min_radius]
 
                 print('Using quick fit on:', ff_name)
+            
 
         ##########
 
@@ -125,7 +136,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
             ###
 
-            print(res)
+            #print(res)
 
 
             # If the fit was not successful, stop further fitting on this FF file
@@ -157,20 +168,25 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
             recalibrated_platepars[ff_name] = working_platepar
 
 
-        # Otherwise, indicate that the fitting failed
+        # Otherwise, store the previous successfully fitted platepar
         else:
-            recalibrated_platepars[ff_name] = None
+            recalibrated_platepars[ff_name] = prev_platepar
 
 
     # Set the previous platepar if the fit succeeded
     if recalibrated_platepars[ff_name] is not None:
         prev_platepar = working_platepar
 
+    else:
+        # If the fit failed, set the previous platepar as the one that should be used for this FF file
+        recalibrated_platepars[ff_name] = prev_platepar
+
 
     ### Store all recalibrated platepars as a JSON file ###
 
     all_pps = {}
     for ff_name in recalibrated_platepars:
+
         json_str = recalibrated_platepars[ff_name].jsonStr()
         
         all_pps[ff_name] = json.loads(json_str)
@@ -197,6 +213,10 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         
         pp_temp = recalibrated_platepars[ff_name]
 
+        # If the fitting failed, skip the platepar
+        if pp_temp is None:
+            continue
+
         # Compute the angular separation from the reference platepar
         ang_dist = np.degrees(angularSeparation(np.radians(platepar.RA_d), np.radians(platepar.dec_d), \
             np.radians(pp_temp.RA_d), np.radians(pp_temp.dec_d)))
@@ -209,14 +229,15 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
 
 
-    plt.scatter(0, 0, marker='o', edgecolor='k', label='Reference platepar', s=100, c='none')
+    plt.scatter(0, 0, marker='o', edgecolor='k', label='Reference platepar', s=100, c='none', zorder=3)
 
-    plt.scatter(ang_dists, rot_angles, c=hour_list)
+    plt.scatter(ang_dists, rot_angles, c=hour_list, zorder=3)
     plt.colorbar(label='Hours from first FF file')
     
     plt.xlabel("Angular distance from reference (arcmin)")
     plt.ylabel('Rotation from reference (arcmin)')
 
+    plt.grid()
     plt.legend()
 
     plt.tight_layout()
@@ -228,6 +249,58 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
     plt.savefig(os.path.join(dir_path, calib_plot_name), dpi=150)
 
     plt.show()
+
+    ### ###
+
+
+
+    ### Apply platepars to FTPdetectinfo ###
+
+    meteor_output_list = []
+    for meteor_entry in meteor_list:
+
+        ff_name, meteor_No, rho, phi, meteor_meas = meteor_entry
+
+        # Get the platepar that will be applied to this FF file
+        if ff_name in recalibrated_platepars:
+            working_platepar = recalibrated_platepars[ff_name]
+
+        else:
+            print('Using default platepar for:', ff_name)
+            working_platepar = platepar
+
+        # Apply the recalibrated platepar to meteor centroids
+        meteor_picks = applyPlateparToCentroids(ff_name, fps, meteor_meas, working_platepar, \
+            add_calstatus=True)
+
+        meteor_output_list.append([ff_name, meteor_No, rho, phi, meteor_picks])
+
+
+    # Calibration string to be written to the FTPdetectinfo file
+    calib_str = 'Recalibrated with RMS on: ' + str(datetime.datetime.utcnow()) + ' UTC'
+
+    # If no meteors were detected, set dummpy parameters
+    if len(meteor_list) == 0:
+        cam_code = ''
+        fps = 0
+
+
+    # Back up the old FTPdetectinfo file
+    shutil.copy(ftpdetectinfo_path, ftpdetectinfo_path.strip('.txt') \
+        + '_backup_{:s}.txt'.format(datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f')))
+
+    # Save the updated FTPdetectinfo
+    FTPdetectinfo.writeFTPdetectinfo(meteor_output_list, dir_path, os.path.basename(ftpdetectinfo_path), \
+        dir_path, cam_code, fps, calibration=calib_str, celestial_coords_given=True)
+
+
+    ### ###
+
+
+    
+    ### Generate the updated UFOorbit file ###
+
+
 
     ### ###
 
