@@ -10,7 +10,7 @@ import datetime
 
 import numpy as np
 
-from RMS.Astrometry import ApplyAstrometry
+import RMS.Astrometry.ApplyAstrometry
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats import FFfile
 from RMS.Formats import Platepar
@@ -115,10 +115,10 @@ def FTPdetectinfo2UFOOrbitInput(dir_path, file_name, platepar_path, platepar_dic
         azim2 = (90 - np.degrees(azim2))%360
 
         # Compute RA/Dec from Alt/Az
-        _, ra1, dec1 = ApplyAstrometry.altAz2RADec(pp.lat, pp.lon, pp.UT_corr, [dt1], [azim1], [alt1], \
-            dt_time=True)
-        _, ra2, dec2 = ApplyAstrometry.altAz2RADec(pp.lat, pp.lon, pp.UT_corr, [dt2], [azim2], [alt2], \
-            dt_time=True)
+        _, ra1, dec1 = RMS.Astrometry.ApplyAstrometry.altAz2RADec(pp.lat, pp.lon, pp.UT_corr, [dt1], \
+            [azim1], [alt1], dt_time=True)
+        _, ra2, dec2 = RMS.Astrometry.ApplyAstrometry.altAz2RADec(pp.lat, pp.lon, pp.UT_corr, [dt2], \
+            [azim2], [alt2], dt_time=True)
 
 
         ### ###
