@@ -10,9 +10,12 @@ import copy
 import argparse
 import json
 
+import matplotlib.pyplot as plt
+import numpy as np
 import scipy.optimize
 
 from RMS.Astrometry import CheckFit
+from RMS.Astrometry.ApplyAstrometry import rotationWrtHorizon
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 import RMS.ConfigReader as cr
 from RMS.Formats import CALSTARS
@@ -20,6 +23,7 @@ from RMS.Formats import FFfile
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats import Platepar
 from RMS.Formats import StarCatalog
+from RMS.Math import angularSeparation
 
 
 def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, calstars_list, config, platepar):
@@ -101,7 +105,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         for match_radius in radius_list:
 
             # If the platepar is good, don't recalibrate anymore
-            if CheckFit.checkFitGoodness(config, platepar, catalog_stars, star_dict_ff, match_radius):
+            if CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, star_dict_ff, match_radius):
                 break
 
             ### Recalibrate the platepar just on these stars, use the default platepar for initial params ###
@@ -129,19 +133,19 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
                 # Indicate that the recalibration failed
                 recalibrated_platepars[ff_name] = None
-                continue
+                break
 
 
             else:
                 # If the fit was successful, use the new parameters from now on
                 ra_ref, dec_ref, pos_angle_ref = res.x
-                platepar.RA_d = ra_ref
-                platepar.dec_d = dec_ref
-                platepar.pos_angle_ref = pos_angle_ref
+                working_platepar.RA_d = ra_ref
+                working_platepar.dec_d = dec_ref
+                working_platepar.pos_angle_ref = pos_angle_ref
 
 
         # If the platepar is good, store it
-        if CheckFit.checkFitGoodness(config, platepar, catalog_stars, star_dict_ff, match_radius):
+        if CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, star_dict_ff, match_radius):
 
             # Mark the platepar to indicate that it was automatically refined with CheckFit
             working_platepar.auto_check_fit_refined = True
@@ -157,6 +161,10 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         else:
             recalibrated_platepars[ff_name] = None
 
+
+    # Set the previous platepar if the fit succeeded
+    if recalibrated_platepars[ff_name] is not None:
+        prev_platepar = working_platepar
 
 
     ### Store all recalibrated platepars as a JSON file ###
@@ -175,6 +183,54 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         f.write(out_str)
 
     ### ###
+
+
+    ### Plot difference from reference platepar in angular distance from (0, 0) vs rotation ###
+
+    ang_dists = []
+    rot_angles = []
+    hour_list = []
+
+    first_jd = np.min([FFfile.filenameToDatetime(ff_name) for ff_name in recalibrated_platepars])
+
+    for ff_name in recalibrated_platepars:
+        
+        pp_temp = recalibrated_platepars[ff_name]
+
+        # Compute the angular separation from the reference platepar
+        ang_dist = np.degrees(angularSeparation(np.radians(platepar.RA_d), np.radians(platepar.dec_d), \
+            np.radians(pp_temp.RA_d), np.radians(pp_temp.dec_d)))
+        ang_dists.append(ang_dist*60)
+
+        rot_angles.append((platepar.pos_angle_ref - pp_temp.pos_angle_ref)*60)
+
+        # Compute the hour of the FF used for recalibration
+        hour_list.append((FFfile.filenameToDatetime(ff_name) - first_jd).total_seconds()/3600)
+
+
+
+    plt.scatter(0, 0, marker='o', edgecolor='k', label='Reference platepar', s=100, c='none')
+
+    plt.scatter(ang_dists, rot_angles, c=hour_list)
+    plt.colorbar(label='Hours from first FF file')
+    
+    plt.xlabel("Angular distance from reference (arcmin)")
+    plt.ylabel('Rotation from reference (arcmin)')
+
+    plt.legend()
+
+    plt.tight_layout()
+
+    # Generate the name for the plot
+    calib_plot_name = os.path.basename(ftpdetectinfo_path).replace('FTPdetectinfo_', '').replace('.txt', '') \
+        + '_calibration_variation.png'
+
+    plt.savefig(os.path.join(dir_path, calib_plot_name), dpi=150)
+
+    plt.show()
+
+    ### ###
+
 
 
         
