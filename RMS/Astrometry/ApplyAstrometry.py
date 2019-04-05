@@ -42,7 +42,7 @@ import RMS.Formats.Platepar
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Math import angularSeparation
-from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
+from Utils import RMS2UFO
 
 # Import Cython functions
 import pyximport
@@ -1106,7 +1106,7 @@ if __name__ == "__main__":
 
 
     # Recompute the UFOOrbit file
-    FTPdetectinfo2UFOOrbitInput(dir_path, ftp_detectinfo_file, os.path.join(dir_path, platepar_file))
+    RMS2UFO.FTPdetectinfo2UFOOrbitInput(dir_path, ftp_detectinfo_file, os.path.join(dir_path, platepar_file))
 
     print('Done!')
 
