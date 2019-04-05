@@ -26,6 +26,7 @@ from RMS.Formats import FTPdetectinfo
 from RMS.Formats import Platepar
 from RMS.Formats import StarCatalog
 from RMS.Math import angularSeparation
+from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 
 
 def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, calstars_list, config, platepar):
@@ -248,7 +249,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
     plt.savefig(os.path.join(dir_path, calib_plot_name), dpi=150)
 
-    plt.show()
+    # plt.show()
 
     ### ###
 
@@ -300,7 +301,8 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
     
     ### Generate the updated UFOorbit file ###
 
-
+    FTPdetectinfo2UFOOrbitInput(dir_path, os.path.basename(ftpdetectinfo_path), None, \
+        platepar_dict=recalibrated_platepars)
 
     ### ###
 
@@ -317,7 +319,7 @@ if __name__ == "__main__":
         ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Recalibrate the platepar for every FF with detections and apply it to per FF detections.")
+    arg_parser = argparse.ArgumentParser(description="Recalibrate the platepar for every FF with detections and apply it the detections, recompute the FTPdetectinfo and UFOOrbit file.")
 
     arg_parser.add_argument('ftpdetectinfo_path', nargs=1, metavar='FTPDETECTINFO_PATH', type=str, \
         help='Path to the FF file.')
