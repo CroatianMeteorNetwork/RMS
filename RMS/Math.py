@@ -42,6 +42,32 @@ def vectMag(vect):
 ##############################################################################################################
 
 
+def rotatePoint(origin, point, angle):
+    """
+    Rotate a point counterclockwise by a given angle around a given origin.
+
+    The angle should be given in radians.
+
+    Source: http://stackoverflow.com/questions/34372480/rotate-point-about-another-point-in-degrees-python
+
+    Arguments:
+        origin: [tuple of floats] (x, y) pair of Cartesian coordinates of the origin
+        point: [tuple of floats] (x, y) pair of Cartesian coordinates of the point
+        angle: [float] angle of rotation in radians
+
+    Return:
+        (qx, qy): [tuple of floats] Cartesian coordinates of the rotated point
+    """
+
+    ox, oy = origin
+    px, py = point
+
+    qx = ox + np.cos(angle)*(px - ox) - np.sin(angle)*(py - oy)
+    qy = oy + np.sin(angle)*(px - ox) + np.cos(angle)*(py - oy)
+
+    return qx, qy
+
+
 def cartesianToPolar(x, y, z):
     """ Converts 3D cartesian coordinates to polar coordinates. 
 
