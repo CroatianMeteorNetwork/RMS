@@ -50,16 +50,17 @@ import PIL.Image, PIL.ImageDraw
 import scipy.optimize
 import scipy.ndimage
 
+from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADecPP, raDec2AltAz, raDecToCorrectedXY,\
+    rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
+    rotationWrtStandard, rotationWrtStandardToPosAngle
+from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
+from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle
+from RMS.Astrometry.FFTalign import alignPlatepar
 import RMS.ConfigReader as cr
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats import StarCatalog
-from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADecPP, raDec2AltAz, raDecToCorrectedXY,\
-    rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
-    rotationWrtStandard, rotationWrtStandardToPosAngle
-from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
-from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Routines import Image
 from RMS.Math import angularSeparation
 from RMS.Misc import decimalDegreesToSexHours, openFileDialog
@@ -2009,9 +2010,6 @@ class PlateTool(object):
 
 
 
-
-
-
     def getFOVcentre(self):
         """ Asks the user to input the centre of the FOV in altitude and azimuth. """
 
@@ -2031,11 +2029,7 @@ class PlateTool(object):
         self.platepar.JD = date2JD(*img_time, UT_corr=float(self.platepar.UT_corr))
 
         # Set the reference hour angle
-        T = (self.platepar.JD - 2451545)/36525.0
-        Ho = 280.46061837 + 360.98564736629*(self.platepar.JD - 2451545.0) + 0.000387933*T**2 \
-            - (T**3)/38710000.0
-
-        self.platepar.Ho = Ho%360
+        self.platepar.Ho = JD2HourAngle(self.platepar.JD)%360
 
         
         time_data = [img_time]

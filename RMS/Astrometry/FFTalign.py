@@ -10,10 +10,29 @@ except ImportError:
     IMREG_INSTALLED = False
 
 
+import os
+import sys
+import copy
+import shutil
+import argparse
+
+
 import numpy as np
 import matplotlib.pyplot as plt
 
+from RMS.Astrometry import ApplyAstrometry
+from RMS.Astrometry.Conversions import date2JD, JD2HourAngle
+import RMS.ConfigReader as cr
+from RMS.Formats import CALSTARS
+from RMS.Formats.FFfile import getMiddleTimeFF
+from RMS.Formats import Platepar
+from RMS.Formats import StarCatalog
 from RMS.Math import rotatePoint
+
+# Import Cython functions
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+from RMS.Astrometry.CyFunctions import subsetCatalog
 
 
 
@@ -66,7 +85,7 @@ def constructImage(img_size, point_list, dot_radius):
 
 
 
-def findStarsTransform(config, reference_list, moved_list, img_size=128, dot_radius=2):
+def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_radius=2, show_plot=False):
     """ Given a list of reference and predicted star positions, return a transform (rotation, scale, \
         translation) between the two lists using FFT image registration. This is achieved by creating a 
         synthetic star image using both lists and searching for the transform using phase correlation.
@@ -80,6 +99,7 @@ def findStarsTransform(config, reference_list, moved_list, img_size=128, dot_rad
         img_size: [int] Power of 2 image size (e.g. 128, 256, etc.) which will be created and fed into the
             FFT registration algorithm.
         dot_radius: [int] The radius of the dot which will be drawn on the synthetic image.
+        show_plot: [bool] Show the comparison between the reference and image synthetic images.
 
     Return:
         angle, scale, translation_x, translation_y:
@@ -102,9 +122,8 @@ def findStarsTransform(config, reference_list, moved_list, img_size=128, dot_rad
     reference_list = np.array(reference_list).astype(np.float)
     moved_list = np.array(moved_list).astype(np.float)
 
-
-    # Rescale the image coordinates 2x, so the image fits inside the smaller window
-    rescale_factor = 8
+    # Rescale the coordinates so the whole image fits inside the square (rescale by the smaller image axis)
+    rescale_factor = min(config.width, config.height)/img_size
 
     reference_list /= rescale_factor
     moved_list /= rescale_factor
@@ -123,12 +142,6 @@ def findStarsTransform(config, reference_list, moved_list, img_size=128, dot_rad
     img_ref = constructImage(img_size, reference_list, dot_radius)
     img_mov = constructImage(img_size, moved_list, dot_radius)
 
-    # plt.imshow(img_ref, cmap='gray')
-    # plt.show()
-
-    # plt.imshow(img_mov, cmap='gray')
-    # plt.show()
-
     
     # Run the FFT registration
     res = imreg_dft.imreg.similarity(img_ref, img_mov)
@@ -141,45 +154,274 @@ def findStarsTransform(config, reference_list, moved_list, img_size=128, dot_rad
     translation_x = rescale_factor*translate[1]
     translation_y = rescale_factor*translate[0]
 
+
+    # Plot comparison
+    if show_plot:
+
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(nrows=2, ncols=2)
+
+        ax1.imshow(img_ref, cmap='gray')
+        ax1.set_title('Reference')
+
+        ax2.imshow(img_mov, cmap='gray')
+        ax2.set_title('Moved')
+
+        ax3.imshow(res['timg'], cmap='gray')
+        ax3.set_title('Transformed')
+
+        ax4.imshow(np.abs(res['timg'].astype(np.int) - img_ref.astype(np.int)).astype(np.uint8), cmap='gray')
+        ax4.set_title('Difference')
+
+        plt.tight_layout()
+
+        plt.show()
+
+
     return angle, scale, translation_x, translation_y
+
+
+
+
+def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update=False, show_plot=False):
+    """ Align the platepar using FFT registration between catalog stars and the given list of image stars.
+
+    Arguments:
+        config:
+        platepar: [Platepar instance] Initial platepar.
+        calstars_time: [list] A list of (year, month, day, hour, minute, second, millisecond) of the middle of
+            the FF file used for alignment.
+        calstars_coords: [ndarray] A 2D numpy array of (x, y) coordinates of image stars.
+
+    Keyword arguments:
+        scale_update: [bool] Update the platepar scale. False by default.
+        show_plot: [bool] Show the comparison between the reference and image synthetic images.
+
+    Return:
+        platepar_aligned: [Platepar instance] The aligned platepar.
+    """
+
+
+    # Try to optimize the catalog limiting magnitude until the number of image and catalog stars are matched
+    maxiter = 10
+    search_fainter = True
+    mag_step = 0.2
+    for inum in range(maxiter):
+
+        # Load the catalog stars
+        catalog_stars, _, _ = StarCatalog.readStarCatalog(config.star_catalog_path, config.star_catalog_file, \
+            lim_mag=config.catalog_mag_limit, mag_band_ratios=config.star_catalog_band_ratios)
+
+        # Get the RA/Dec of the image centre
+        _, ra_centre, dec_centre, _ = ApplyAstrometry.XY2CorrectedRADecPP([calstars_time], [platepar.X_res/2], \
+                [platepar.Y_res/2], [1], platepar)
+
+        ra_centre = ra_centre[0]
+        dec_centre = dec_centre[0]
+
+        # Calculate the FOV radius in degrees
+        fov_y, fov_x = ApplyAstrometry.computeFOVSize(platepar)
+        fov_radius = np.sqrt(fov_x**2 + fov_y**2)
+
+        # Take only those stars which are inside the FOV
+        filtered_indices, _ = subsetCatalog(catalog_stars, ra_centre, dec_centre, \
+            fov_radius, config.catalog_mag_limit)
+
+        # Take those catalog stars which should be inside the FOV
+        ra_catalog, dec_catalog, _ = catalog_stars[filtered_indices].T
+        jd = date2JD(*calstars_time)
+        catalog_xy = ApplyAstrometry.raDecToCorrectedXYPP(ra_catalog, dec_catalog, jd, platepar)
+
+        catalog_x, catalog_y = catalog_xy
+        catalog_xy = np.c_[catalog_x, catalog_y]
+
+        # Cut all stars that are outside image coordinates
+        catalog_xy = catalog_xy[catalog_xy[:, 0] > 0]
+        catalog_xy = catalog_xy[catalog_xy[:, 0] < config.width]
+        catalog_xy = catalog_xy[catalog_xy[:, 1] > 0]
+        catalog_xy = catalog_xy[catalog_xy[:, 1] < config.height]
+
+
+        # If there are more catalog than image stars, this means that the limiting magnitude is too faint
+        #   and that the search should go in the brighter direction
+        if len(catalog_xy) > len(calstars_coords):
+            search_fainter = False
+        else:
+            search_fainter = True
+
+        # print('Catalog stars:', len(catalog_xy), 'Image stars:', len(calstars_coords), \
+        #     'Limiting magnitude:', config.catalog_mag_limit)
+
+        # Search in mag_step magnitude steps
+        if search_fainter:
+            config.catalog_mag_limit += mag_step
+        else:
+            config.catalog_mag_limit -= mag_step
+
+    print('Final catalog limiting magnitude:', config.catalog_mag_limit)
+
+
+    # Find the transform between the image coordinates and predicted platepar coordinates
+    res = findStarsTransform(config, calstars_coords, catalog_xy, show_plot=show_plot)
+    angle, scale, translation_x, translation_y = res
+
+    print('Platepar correction:')
+    print('    Rotation:', angle, 'deg')
+    if scale_update:
+        print('    Scale:', scale)
+    print('    Translation X, Y: ({:.2f}, {:.2f}) px'.format(translation_x, translation_y))
+
+
+    ### Update the platepar ###
+
+    platepar_aligned = copy.deepcopy(platepar)
+
+    # Correct the rotation
+    platepar_aligned.pos_angle_ref -= angle
+
+    # Update the scale if needed
+    if scale_update:
+        platepar_aligned.F_scale *= scale
+
+    # Compute the new reference RA and Dec
+    _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.XY2CorrectedRADecPP([calstars_time], \
+        [platepar.X_res/2 - translation_x], [platepar.Y_res/2 - translation_y], [1], platepar_aligned)
+
+    # Correct RA/Dec
+    platepar_aligned.RA_d = ra_centre_new[0]
+    platepar_aligned.dec_d = dec_centre_new[0]
+
+    # Update the reference time and hour angle
+    platepar_aligned.JD = jd
+    platepar_aligned.Ho = JD2HourAngle(jd)
+
+    # Indicate that the platepar has been automatically updated
+    platepar_aligned.auto_check_fit_refined = True
+
+    ###
+
+    return platepar_aligned
+
 
 
 
 
 if __name__ == "__main__":
 
-    class Config(object):
-        def __init__(self):
-            self.width = 1280
-            self.height = 720
+
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Align the platepar with the extracted stars from the CALSTARS file. The FF file in CALSTARS with most detected stars will be used for alignment.")
+
+    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
+        help='Path to night folder.')
+
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+    dir_path = cml_args.dir_path[0]
+
+
+    # Load the config file
+    config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
+
+
+    # Get a list of files in the night folder
+    file_list = os.listdir(dir_path)
+
+    # Find and load the platepar file
+    if config.platepar_name in file_list:
+
+        # Load the platepar
+        platepar = Platepar.Platepar()
+        platepar_path = os.path.join(dir_path, config.platepar_name)
+        platepar.read(platepar_path)
+
+    else:
+        print('Cannot find the platepar file in the night directory: ', config.platepar_name)
+        sys.exit()
+
+
+    # Find the CALSTARS file in the given folder
+    calstars_file = None
+    for calstars_file in file_list:
+        if ('CALSTARS' in calstars_file) and ('.txt' in calstars_file):
+            break
+
+    if calstars_file is None:
+        print('CALSTARS file could not be found in the given directory!')
+        sys.exit()
+
+    # Load the calstars file
+    calstars_list = CALSTARS.readCALSTARS(dir_path, calstars_file)
+    calstars_dict = {ff_file: star_data for ff_file, star_data in calstars_list}
+
+    print('CALSTARS file: ' + calstars_file + ' loaded!')
+
+    # Extract star list from CALSTARS file from FF file with most stars
+    max_len_ff = max(calstars_dict, key=lambda k: len(calstars_dict[k]))
+    
+    # Take only X, Y (change order so X is first)
+    calstars_coords = np.array(calstars_dict[max_len_ff])[:, :2]
+    calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
+        
+    # Get the time of the FF file
+    calstars_time = getMiddleTimeFF(max_len_ff, config.fps)
 
 
 
-    config = Config()
+    # Align the platepar with stars in CALSTARS
+    platepar_aligned = alignPlatepar(config, platepar, calstars_time, calstars_coords, show_plot=False)
 
 
-    # Generate some random points as stars
-    npoints = 100
-    reference_list = np.c_[np.random.randint(-100, config.width + 100, size=npoints), 
-                           np.random.randint(-100, config.height + 100, size=npoints)]
+    # Backup the old platepar
+    shutil.copy(platepar_path, platepar_path + '.bak')
+
+    # Save the updated platepar
+    platepar_aligned.write(platepar_path)
+
+    ### Testing
+    sys.exit()
+
+
+
+    # class Config(object):
+    #     def __init__(self):
+    #         self.width = 1280
+    #         self.height = 720
+
+
+
+    # config = Config()
+
+
+    # # Generate some random points as stars
+    # npoints = 100
+    # reference_list = np.c_[np.random.randint(-100, config.width + 100, size=npoints), 
+    #                        np.random.randint(-100, config.height + 100, size=npoints)]
 
     
-    # Create a list of shifted stars
-    moved_list = np.copy(reference_list)
+    # # Create a list of shifted stars
+    # moved_list = np.copy(reference_list)
 
-    # Move the dots
-    moved_list[:, 0] += 50
-    moved_list[:, 1] += 40
+    # # Move the dots
+    # moved_list[:, 0] += 50
+    # moved_list[:, 1] += 40
 
-    # Rotate the moved points
-    rot_angle = np.radians(25)
-    origin = np.array([config.width/2, config.height/2])
-    for i, mv_pt in enumerate(moved_list):
-        moved_list[i] = rotatePoint(origin, mv_pt, rot_angle)
+    # # Rotate the moved points
+    # rot_angle = np.radians(25)
+    # origin = np.array([config.width/2, config.height/2])
+    # for i, mv_pt in enumerate(moved_list):
+    #     moved_list[i] = rotatePoint(origin, mv_pt, rot_angle)
 
-    # Choose every second star on the moved list
-    moved_list = moved_list[::2]
+    # # Choose every second star on the moved list
+    # moved_list = moved_list[::2]
 
 
-    # Find the transform between the star lists
-    print(findStarsTransform(config, reference_list, moved_list, img_size=128, dot_radius=2))
+    # # Find the transform between the star lists
+    # print(findStarsTransform(config, reference_list, moved_list, img_size=128, dot_radius=2))

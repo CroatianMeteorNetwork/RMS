@@ -296,6 +296,24 @@ def JD2LST(julian_date, lon):
     return LST, GST
 
 
+def JD2HourAngle(jd):
+    """ Convert the given Julian date to hour angle. 
+
+    Arguments:
+        jd: [float] Julian date.
+
+    Return:
+        hour_angle: [float] Hour angle (deg).
+
+    """
+
+    T = (jd - 2451545)/36525.0
+    hour_angle = 280.46061837 + 360.98564736629*(jd - 2451545.0) + 0.000387933*T**2 \
+        - (T**3)/38710000.0
+
+    return hour_angle
+
+
 ############################
 
 
