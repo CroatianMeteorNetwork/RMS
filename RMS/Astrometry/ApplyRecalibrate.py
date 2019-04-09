@@ -54,7 +54,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
     recalibrated_platepars = {}
     for meteor_entry in meteor_list:
 
-        working_platepar = copy.deepcopy(platepar)
+        working_platepar = copy.deepcopy(prev_platepar)
 
         ff_name, meteor_No, rho, phi, meteor_meas = meteor_entry
 
