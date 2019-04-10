@@ -17,8 +17,9 @@ import numpy as np
 import scipy.optimize
 
 from RMS.Astrometry import CheckFit
-from RMS.Astrometry.ApplyAstrometry import applyPlateparToCentroids
+from RMS.Astrometry.ApplyAstrometry import applyPlateparToCentroids, altAz2RADec
 from RMS.Astrometry.Conversions import date2JD
+from RMS.Astrometry.FFTalign import alignPlatepar
 import RMS.ConfigReader as cr
 from RMS.Formats import CALSTARS
 from RMS.Formats import FFfile
@@ -29,8 +30,155 @@ from RMS.Math import angularSeparation
 import Utils.RMS2UFO
 
 
+
+def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars):
+    """ Given the platepar and a list of stars on one image, try to recalibrate the platepar to achieve
+        the best match by brute force star matching.
+
+    Arguments:
+        config: [Config instance]
+        working_platepar: [Platepar instance] Platepar to recalibrate.
+        jd: [float] Julian date of the star positions.
+        star_dict_ff: [dict] A dictionary with only one entry, where the key is 'jd' and the value is the
+            list of star coordinates.
+        catalog_stars: [ndarray] A numpy array of catalog stars which should be on the image.
+
+    Return:
+        result: [?] A Platepar instance if refinement is successful, None if it failed.
+    """
+
+    working_platepar = copy.deepcopy(working_platepar)
+
+    # A list of matching radiuses to try
+    min_radius = 0.5
+    max_radius = 10
+    radius_list = [max_radius, 5, 3, 1.5, min_radius]
+
+
+    # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
+    # in the same regard as the cost function)
+    fatol, xatol_ang = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
+
+
+    ### If the initial match is good enough, do only quick recalibratoin ###
+     
+    # Match the stars and calculate the residuals
+    n_matched, avg_dist, cost, _ = CheckFit.matchStarsResiduals(config, working_platepar, catalog_stars, \
+        star_dict_ff, min_radius, ret_nmatch=True)
+
+
+    print('Initally match stars with {:.1f} px: {:d}/{:d}'.format(min_radius, n_matched, \
+        len(star_dict_ff[jd])))
+
+    # If at least half the stars are matched with the smallest radius
+    if n_matched >= 0.5*len(star_dict_ff[jd]):
+
+        # Check if the average distance with the tightest radius is close
+        if avg_dist < config.dist_check_quick_threshold:
+
+            # Use a reduced set of initial radius values
+            radius_list = [1.5, min_radius]
+
+            print('Using a quick fit...')
+        
+
+    ##########
+
+    # Go through all radiia and match the stars
+    for match_radius in radius_list:
+
+        # If the platepar is good, don't recalibrate anymore
+        if CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, star_dict_ff, match_radius, \
+            verbose=True):
+            break
+
+        # If there are no matched stars, give up
+        n_matched, _, _, _ = CheckFit.matchStarsResiduals(config, working_platepar, catalog_stars, \
+            star_dict_ff, match_radius, ret_nmatch=True, verbose=False)
+
+        if n_matched == 0:
+            result = None
+            break
+
+        ### Recalibrate the platepar just on these stars, use the default platepar for initial params ###
+        
+        # Don't fit the scale
+        p0 = [working_platepar.RA_d, working_platepar.dec_d, working_platepar.pos_angle_ref]
+        fit_distorsion = False
+
+        # Compute the minimization tolerance
+        fatol, xatol_ang = CheckFit.computeMinimizationTolerances(config, working_platepar, \
+            len(star_dict_ff))
+
+        res = scipy.optimize.minimize(CheckFit._calcImageResidualsAstro, p0, args=(config, \
+            working_platepar, catalog_stars, star_dict_ff, match_radius, fit_distorsion), \
+            method='Nelder-Mead', options={'fatol': fatol, 'xatol': xatol_ang})
+
+
+        ###
+
+        # Compute matched stars
+        temp_platepar = copy.deepcopy(working_platepar)
+
+        ra_ref, dec_ref, pos_angle_ref = res.x
+        temp_platepar.RA_d = ra_ref
+        temp_platepar.dec_d = dec_ref
+        temp_platepar.pos_angle_ref = pos_angle_ref
+
+        n_matched, _, _, _ = CheckFit.matchStarsResiduals(config, temp_platepar, catalog_stars, \
+            star_dict_ff, match_radius, ret_nmatch=True, verbose=False)
+
+
+        # If the fit was not successful, stop further fitting on this FF file
+        if (not res.success) or (n_matched < config.min_matched_stars):
+
+            # Indicate that the recalibration failed
+            result = None
+            break
+
+
+        else:
+            # If the fit was successful, use the new parameters from now on
+            working_platepar = temp_platepar
+
+
+    # If the platepar is good, store it
+    if CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, star_dict_ff, match_radius):
+
+        # Mark the platepar to indicate that it was automatically refined with CheckFit
+        working_platepar.auto_check_fit_refined = True
+
+        # Reset the star list
+        working_platepar.star_list = []
+        
+        # Store the platepar to the list of recalibrated platepars
+        result = working_platepar
+
+
+    # Otherwise, indicate that the refinement was not successful
+    else:
+        result = None
+
+
+    return result
+
+
+
+
 def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, calstars_list, config, platepar):
-    """ Recalibrate FF files with detections and apply the recalibrated platepar to those detections. """
+    """ Recalibrate FF files with detections and apply the recalibrated platepar to those detections. 
+
+    Arguments:
+        dir_path: [str] Path where the FTPdetectinfo file is.
+        ftpdetectinfo_path: [str] Name of the FTPdetectinfo file.
+        calstars_list: [list] A list of entries [[ff_name, star_coordinates], ...].
+        config: [Config instance]
+        platepar: [Platepar instance] Initial platepar.
+
+    Return:
+        recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are 
+            recalibrated platepar instances for every FF file.
+    """
 
 
     # Read the FTPdetectinfo data
@@ -71,116 +219,51 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
             print('Skipped because it was not in CALSTARS:', ff_name)
             continue
 
-        # Get stars detected on this FF file
-        dt = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
-        jd = date2JD(*dt)
+        # Get stars detected on this FF file (create a dictionaly with only one entry, the residuals function
+        #   needs this format)
+        calstars_time = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
+        jd = date2JD(*calstars_time)
         star_dict_ff = {jd: calstars[ff_name]}
 
+        # Recalibrate the platepar using star matching
+        result = recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars)
+
+        
+        # If the recalibration failed, try using FFT alignment
+        if result is None:
+
+            print()
+            print('Running FFT alignment...')
+
+            # Run FFT alignment
+            calstars_coords = np.array(star_dict_ff[jd])[:, :2]
+            calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
+            print(calstars_time)
+            working_platepar = alignPlatepar(config, prev_platepar, calstars_time, calstars_coords, \
+                show_plot=False)
+
+            # Try to recalibrate after FFT alignment
+            result = recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars)
+
+            if result is not None:
+                working_platepar = result
 
 
-        # A list of matching radiuses to try, pairs of [radius, fit_distorsion_flag]
-        #   The distorsion will be fitted only if explicity requested
-        min_radius = 0.5
-        radius_list = [10, 5, 3, 1.5, min_radius]
-
-
-        # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
-        # in the same regard as the cost function)
-        fatol, xatol_ang = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
-
-
-        ### If the initial match is good enough, do only quick recalibratoin ###
-         
-        # Match the stars and calculate the residuals
-        n_matched, avg_dist, cost, _ = CheckFit.matchStarsResiduals(config, working_platepar, catalog_stars, \
-            star_dict_ff, min_radius, ret_nmatch=True)
-
-
-        print('Initally match stars with {:.1f} px: {:d}/{:d}'.format(min_radius, n_matched, \
-            len(star_dict_ff[jd])))
-
-        # If at least half the stars are matched
-        if n_matched >= 0.5*len(star_dict_ff[jd]):
-
-            # Check if the average distance with the tightest radius is close
-            if avg_dist < config.dist_check_quick_threshold:
-
-                # Use a reduced set of initial radius values
-                radius_list = [1.5, min_radius]
-
-                print('Using quick fit on:', ff_name)
-            
-
-        ##########
-
-        # Go through all radiia and match the stars
-        for match_radius in radius_list:
-
-            # If the platepar is good, don't recalibrate anymore
-            if CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, star_dict_ff, match_radius):
-                break
-
-            ### Recalibrate the platepar just on these stars, use the default platepar for initial params ###
-            
-            # Don't fit the scale
-            p0 = [working_platepar.RA_d, working_platepar.dec_d, working_platepar.pos_angle_ref]
-            fit_distorsion = False
-
-            # Compute the minimization tolerance
-            fatol, xatol_ang = CheckFit.computeMinimizationTolerances(config, working_platepar, \
-                len(star_dict_ff))
-
-            res = scipy.optimize.minimize(CheckFit._calcImageResidualsAstro, p0, args=(config, \
-                working_platepar, catalog_stars, star_dict_ff, match_radius, fit_distorsion), \
-                method='Nelder-Mead', options={'fatol': fatol, 'xatol': xatol_ang})
-
-
-            ###
-
-            #print(res)
-
-
-            # If the fit was not successful, stop further fitting on this FF file
-            if not res.success:
-
-                # Indicate that the recalibration failed
-                recalibrated_platepars[ff_name] = None
-                break
-
-
-            else:
-                # If the fit was successful, use the new parameters from now on
-                ra_ref, dec_ref, pos_angle_ref = res.x
-                working_platepar.RA_d = ra_ref
-                working_platepar.dec_d = dec_ref
-                working_platepar.pos_angle_ref = pos_angle_ref
-
-
-        # If the platepar is good, store it
-        if CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, star_dict_ff, match_radius):
-
-            # Mark the platepar to indicate that it was automatically refined with CheckFit
-            working_platepar.auto_check_fit_refined = True
-
-            # Reset the star list
-            working_platepar.star_list = []
-            
-            # Store the platepar to the list of recalibrated platepars
-            recalibrated_platepars[ff_name] = working_platepar
-
-
-        # Otherwise, store the previous successfully fitted platepar
         else:
+            working_platepar = result
+
+
+        # Store the platepar if the fit succeeded
+        if result is not None:
+            recalibrated_platepars[ff_name] = working_platepar
+            prev_platepar = working_platepar
+
+        else:
+
+            print('Recalibration of {:s} failed, using the previous platepar...'.format(ff_name))
+
+            # If the aligning failed, set the previous platepar as the one that should be used for this FF file
             recalibrated_platepars[ff_name] = prev_platepar
-
-
-    # Set the previous platepar if the fit succeeded
-    if recalibrated_platepars[ff_name] is not None:
-        prev_platepar = working_platepar
-
-    else:
-        # If the fit failed, set the previous platepar as the one that should be used for this FF file
-        recalibrated_platepars[ff_name] = prev_platepar
 
 
     ### Store all recalibrated platepars as a JSON file ###
@@ -192,7 +275,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         
         all_pps[ff_name] = json.loads(json_str)
 
-    with open(os.path.join(dir_path, 'platepars_all_recalibrated.json'), 'w') as f:
+    with open(os.path.join(dir_path, config.platepars_recalibrated_name), 'w') as f:
         
         # Convert all platepars to a JSON file
         out_str = json.dumps(all_pps, default=lambda o: o.__dict__, indent=4, sort_keys=True)

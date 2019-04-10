@@ -387,6 +387,7 @@ class Config:
         self.star_catalog_band_ratios = [0.45, 0.70, 0.72, 0.50]
 
         self.platepar_name = 'platepar_cmn2010.cal'
+        self.platepars_recalibrated_name = 'platepars_all_recalibrated.json'
 
         # Name of the platepar file on the server
         self.platepar_remote_name = 'platepar_latest.cal'
@@ -1035,6 +1036,9 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "platepar_name"):
         config.platepar_name = parser.get(section, "platepar_name")
+
+    if parser.has_option(section, "platepars_all_recalibrated"):
+        config.platepars_all_recalibrated = parser.get(section, "platepars_all_recalibrated")
 
     if parser.has_option(section, "platepar_remote_name"):
         config.platepar_remote_name = parser.get(section, "platepar_remote_name")

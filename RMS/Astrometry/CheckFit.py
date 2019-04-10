@@ -20,8 +20,9 @@ from RMS.Formats import Platepar
 from RMS.Formats import CALSTARS
 from RMS.Formats import StarCatalog
 from RMS.Formats import FFfile
-from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Astrometry.ApplyAstrometry import raDec2AltAz, raDecToCorrectedXYPP, XY2CorrectedRADecPP
+from RMS.Astrometry.Conversions import date2JD, jd2Date
+from RMS.Astrometry.FFTalign import alignPlatepar
 from RMS.Math import angularSeparation
 
 
@@ -48,7 +49,7 @@ def computeMinimizationTolerances(config, platepar, star_dict_len):
 
 
 def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius, ret_nmatch=False, \
-    sky_coords=False, lim_mag=None, verbose=True):
+    sky_coords=False, lim_mag=None, verbose=False):
     """ Match the image and catalog stars with the given astrometry solution and estimate the residuals 
         between them.
     
@@ -235,6 +236,9 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
     n_matched = len(global_dist_list)
 
     if n_matched == 0:
+
+        if verbose:
+            print('No matched stars with radius {:.2f} px!'.format(match_radius))
         
         if ret_nmatch:
             return 0, 9999.0, 9999.0, {}
@@ -263,7 +267,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
 
 
 
-def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius):
+def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius, verbose=False):
     """ Checks if the platepar is 'good enough', given the extracted star positions. Returns True if the
         fit is deemed good, False otherwise. The goodness of fit is determined by 2 criteria: the average
         star residual (in pixels) has to be below a certain threshold, and an average number of matched stars
@@ -277,16 +281,20 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius):
             2D list of stars, each entry is (X, Y, bg_level, level).
         match_radius: [float] Maximum radius for star matching (pixels).
 
+    Keyword arguments:
+        verbose: [bool] If True, fit status will be printed on the screen. False by default.
+
     Return:
         [bool] True if the platepar is good, False otherwise.
     """
 
-    print()
-    print('CHECK FIT GOODNESS:')
+    if verbose:
+        print()
+        print('CHECK FIT GOODNESS:')
 
     # Match the stars and calculate the residuals
     n_matched, avg_dist, cost, matched_stars = matchStarsResiduals(config, platepar, catalog_stars, \
-        star_dict, match_radius, ret_nmatch=True)
+        star_dict, match_radius, ret_nmatch=True, verbose=verbose)
 
 
 
@@ -324,7 +332,8 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius):
     # Check that the average distance is within the threshold
     if avg_dist <= config.dist_check_threshold:
 
-        print('The minimum residual is satisfied!')
+        if verbose:
+            print('The minimum residual is satisfied!')
 
         # Check that the minimum number of stars is matched per every image
         if n_matched >= len(star_dict)*config.min_matched_stars:
@@ -332,7 +341,8 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius):
             return True
 
         else:
-            print('But there are not enough stars on every image, recalibrating...')
+            if verbose:
+                print('But there are not enough stars on every image, recalibrating...')
 
 
     return False
@@ -496,7 +506,7 @@ def photometryFit(config, matched_stars):
 
 
 
-def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False):
+def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _fft_refinement=False):
     """ Attempts to refine the astrometry fit with the given stars and and initial astrometry parameters.
 
     Arguments:
@@ -506,13 +516,52 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False):
             more details.
 
     Keyword arguments:
-        distorsion_refinement: [bool] Whether the distorsion should be fitted as well. False by defualt.
+        distorsion_refinement: [bool] Whether the distorsion should be fitted as well. False by default.
+        _fft_refinement: [bool] Internal flag indicating that autoCF is running the second time recursively
+            after FFT platepar adjustment.
     
     Return:
         (platepar, fit_status):
             platepar: [Platepar structure] Estimated/refined platepar.
             fit_status: [bool] True if fit was successfuly, False if not.
     """
+
+
+    def _handleFailure(config, platepar, calstars_list, distorsion_refinement, _fft_refinement):
+        """ Run FFT alignment before giving up on ACF. """
+
+        if not _fft_refinement:
+
+            print('The initial platepar is bad, trying to refine it using FFT phase correlation...')
+
+            # Prepare data for FFT image registration
+
+            calstars_dict = {ff_file: star_data for ff_file, star_data in calstars_list}
+
+            # Extract star list from CALSTARS file from FF file with most stars
+            max_len_ff = max(calstars_dict, key=lambda k: len(calstars_dict[k]))
+            
+            # Take only X, Y (change order so X is first)
+            calstars_coords = np.array(calstars_dict[max_len_ff])[:, :2]
+            calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
+                
+            # Get the time of the FF file
+            calstars_time = FFfile.getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True)
+
+            # Try aligning the platepar using FFT image registration
+            platepar_refined = alignPlatepar(config, platepar, calstars_time, calstars_coords)
+
+            # Redo autoCF
+            return autoCheckFit(config, platepar_refined, calstars_list, \
+                distorsion_refinement=distorsion_refinement, _fft_refinement=True)
+
+        else:
+            print('Auto Check Fit failed completely, please redo the plate manually!')
+            return platepar, False
+
+
+    if _fft_refinement:
+        print('Second ACF run with an updated platepar via FFT phase correlation...')
 
 
     # Convert the list to a dictionary
@@ -614,11 +663,13 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False):
         #   that the initial platepar is no good
         if n_matched < config.calstars_files_N:
             print('The total number of initially matched stars is too small! Please manually redo the plate or make sure there are enough calibration stars.')
-            return platepar, False
+            
+            # Try to refine the platepar with FFT phase correlation and redo the ACF
+            return _handleFailure(config, platepar, calstars_list, distorsion_refinement, _fft_refinement)
 
 
         # Check if the platepar is good enough and do not estimate further parameters
-        if checkFitGoodness(config, platepar, catalog_stars, star_dict, min_radius):
+        if checkFitGoodness(config, platepar, catalog_stars, star_dict, min_radius, verbose=True):
 
             # Print out notice only if the platepar is good right away
             if i == 0:
@@ -642,7 +693,9 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False):
 
         # If the fit was not successful, stop further fitting
         if not res.success:
-            return platepar, False
+
+            # Try to refine the platepar with FFT phase correlation and redo the ACF
+            return _handleFailure(config, platepar, calstars_list, distorsion_refinement, _fft_refinement)
 
 
         else:
@@ -662,7 +715,7 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False):
 
         
         # Check if the platepar is good enough and do not estimate further parameters
-        if checkFitGoodness(config, platepar, catalog_stars, star_dict, min_radius):
+        if checkFitGoodness(config, platepar, catalog_stars, star_dict, min_radius, verbose=True):
             return platepar, True
 
 
@@ -681,7 +734,8 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False):
 
             # If the fit was not successfull, stop further fitting
             if not res.success:
-                return platepar, False
+                # Try to refine the platepar with FFT phase correlation and redo the ACF
+                return _handleFailure(config, platepar, calstars_list, distorsion_refinement, _fft_refinement)
 
             else:
                 platepar.x_poly_rev = res.x
@@ -696,7 +750,9 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False):
 
             # If the fit was not successfull, stop further fitting
             if not res.success:
-                return platepar, False
+                
+                # Try to refine the platepar with FFT phase correlation and redo the ACF
+                return _handleFailure(config, platepar, calstars_list, distorsion_refinement, _fft_refinement)
 
             else:
                 platepar.y_poly_rev = res.x
@@ -716,7 +772,9 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False):
 
             # If the fit was not successfull, stop further fitting
             if not res.success:
-                return platepar, False
+                
+                # Try to refine the platepar with FFT phase correlation and redo the ACF
+                return _handleFailure(config, platepar, calstars_list, distorsion_refinement, _fft_refinement)
 
             else:
                 platepar.x_poly_fwd = res.x

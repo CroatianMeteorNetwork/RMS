@@ -21,7 +21,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from RMS.Astrometry import ApplyAstrometry
-from RMS.Astrometry.Conversions import date2JD, JD2HourAngle
+from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle
 import RMS.ConfigReader as cr
 from RMS.Formats import CALSTARS
 from RMS.Formats.FFfile import getMiddleTimeFF
@@ -155,6 +155,12 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
     translation_y = rescale_factor*translate[0]
 
 
+    print('Platepar correction:')
+    print('    Rotation:', angle, 'deg')
+    print('    Scale:', scale)
+    print('    Translation X, Y: ({:.2f}, {:.2f}) px'.format(translation_x, translation_y))
+
+
     # Plot comparison
     if show_plot:
 
@@ -264,35 +270,37 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     res = findStarsTransform(config, calstars_coords, catalog_xy, show_plot=show_plot)
     angle, scale, translation_x, translation_y = res
 
-    print('Platepar correction:')
-    print('    Rotation:', angle, 'deg')
-    if scale_update:
-        print('    Scale:', scale)
-    print('    Translation X, Y: ({:.2f}, {:.2f}) px'.format(translation_x, translation_y))
-
 
     ### Update the platepar ###
 
     platepar_aligned = copy.deepcopy(platepar)
 
     # Correct the rotation
-    platepar_aligned.pos_angle_ref -= angle
+    platepar_aligned.pos_angle_ref = (platepar_aligned.pos_angle_ref - angle)%360
 
     # Update the scale if needed
     if scale_update:
         platepar_aligned.F_scale *= scale
 
     # Compute the new reference RA and Dec
-    _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.XY2CorrectedRADecPP([calstars_time], \
-        [platepar.X_res/2 - translation_x], [platepar.Y_res/2 - translation_y], [1], platepar_aligned)
+    # _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.XY2CorrectedRADecPP([jd2Date(platepar.JD)], \
+    #     [platepar.X_res/2 - translation_x], [platepar.Y_res/2 - translation_y], [1], platepar)
+    _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.XY2CorrectedRADecPP([jd2Date(platepar.JD)], \
+        [platepar.X_res/2 - platepar.x_poly_fwd[0] - translation_x], \
+        [platepar.Y_res/2 - platepar.y_poly_fwd[0] - translation_y], [1], platepar)
 
     # Correct RA/Dec
     platepar_aligned.RA_d = ra_centre_new[0]
     platepar_aligned.dec_d = dec_centre_new[0]
 
-    # Update the reference time and hour angle
-    platepar_aligned.JD = jd
-    platepar_aligned.Ho = JD2HourAngle(jd)
+    # # Update the reference time and hour angle
+    # platepar_aligned.JD = jd
+    # platepar_aligned.Ho = JD2HourAngle(jd)
+
+    # Recompute the FOV centre in Alt/Az and update the rotation
+    platepar_aligned.az_centre, platepar_aligned.alt_centre = ApplyAstrometry.raDec2AltAz(platepar.JD, \
+                platepar.lon, platepar.lat, platepar.RA_d, platepar.dec_d)
+    platepar_aligned.rotation_from_horiz = ApplyAstrometry.rotationWrtHorizon(platepar_aligned)
 
     # Indicate that the platepar has been automatically updated
     platepar_aligned.auto_check_fit_refined = True
@@ -371,7 +379,7 @@ if __name__ == "__main__":
     calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
         
     # Get the time of the FF file
-    calstars_time = getMiddleTimeFF(max_len_ff, config.fps)
+    calstars_time = getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True)
 
 
 

@@ -4,6 +4,7 @@
 from __future__ import print_function, division, absolute_import
 
 import os
+import json
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -17,6 +18,7 @@ from RMS.Formats.FFfile import validFFName, getMiddleTimeFF
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats import StarCatalog
+from RMS.Routines import Image
 
 # Import Cython functions
 import pyximport
@@ -24,7 +26,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog
 
 
-def generateCalibrationReport(config, night_dir_path, platepar=None, show_graphs=False):
+def generateCalibrationReport(config, night_dir_path, match_radius = 2.0, platepar=None, show_graphs=False):
     """ Given the folder of the night, find the Calstars file, check the star fit and generate a report
         with the quality of the calibration. The report contains information about both the astrometry and
         the photometry calibration. Graphs will be saved in the given directory of the night.
@@ -34,6 +36,7 @@ def generateCalibrationReport(config, night_dir_path, platepar=None, show_graphs
         night_dir_path: [str] Full path to the directory of the night.
 
     Keyword arguments:
+        match_radius: [float] Match radius for star matching between image and catalog stars (px).
         platepar: [Platepar instance] Use this platepar instead of finding one in the folder.
         show_graphs: [bool] Show the graphs on the screen. False by default.
 
@@ -57,9 +60,30 @@ def generateCalibrationReport(config, night_dir_path, platepar=None, show_graphs
 
 
 
+
+    ### Load the platepar file ###
+
     # Find the platepar file in the given directory if it was not given
     if platepar is None:
 
+
+        # Find recalibrated platepars file per FF file
+        platepars_recalibrated_file = None
+        for file_name in os.listdir(night_dir_path):
+            if file_name == config.platepars_recalibrated_name:
+                platepars_recalibrated_file = file_name
+                break
+
+
+        # Load all recalibrated platepars if the file is available
+        recalibrated_platepars = None
+        if platepars_recalibrated_file:
+            with open(os.path.join(night_dir_path, platepars_recalibrated_file)) as f:
+                recalibrated_platepars = json.load(f)
+
+
+        # If there are not recalibrated platepars per FF file, load the only platepar
+        # Find the platepar file
         platepar_file = None
         for file_name in os.listdir(night_dir_path):
             if file_name == config.platepar_name:
@@ -73,6 +97,9 @@ def generateCalibrationReport(config, night_dir_path, platepar=None, show_graphs
         # Load the platepar file
         platepar = Platepar()
         platepar.read(os.path.join(night_dir_path, platepar_file))
+
+
+    ### ###
 
 
     night_name = os.path.split(night_dir_path.strip(os.sep))[1]
@@ -122,25 +149,68 @@ def generateCalibrationReport(config, night_dir_path, platepar=None, show_graphs
         print('No FF files from the CALSTARS file in the directory!')
         return None
 
-    # If there are more than a set number of FF files to evaluate, choose only the ones with most stars on
-    #   the image
-    if len(star_dict) > config.calstars_files_N:
 
-        # Find JDs of FF files with most stars on them
-        top_nstars_indices = np.argsort([len(x) for x in star_dict.values()])[::-1][:config.calstars_files_N \
-            - 1]
+    # If the recalibrated platepars file exists, take the one with the most stars
+    if recalibrated_platepars is not None:
 
-        filtered_star_dict = {}
-        for i in top_nstars_indices:
-            filtered_star_dict[list(star_dict.keys())[i]] = list(star_dict.values())[i]
+        max_jd = 0
+        max_stars = 0
+        for ff_name_temp in recalibrated_platepars:
 
-        star_dict = filtered_star_dict
+            # Compute the Julian date of the FF middle
+            dt = getMiddleTimeFF(ff_name_temp, config.fps, ret_milliseconds=True)
+            jd = date2JD(*dt)
+
+            # Check that this file exists in CALSTARS and the list of FF files
+            if (jd not in star_dict) or (jd not in ff_dict):
+                continue
+
+            # Check if the number of stars on this FF file is larger than the before
+            if len(star_dict[jd]) > max_stars:
+                max_jd = jd
+                max_stars = len(star_dict[jd])
 
 
-    # Match stars on the image with the stars in the catalog
-    match_radius = 2.0
-    n_matched, avg_dist, cost, matched_stars = matchStarsResiduals(config, platepar, catalog_stars, \
-        star_dict, match_radius, ret_nmatch=True, lim_mag=lim_mag)
+        # Set a flag to indicate if using recalibrated platepars has failed
+        if max_jd == 0:
+            using_recalib_platepars = False
+        else:
+
+            print('Using recalibrated platepars, file:', ff_dict[max_jd])
+            using_recalib_platepars = True
+
+            # Select the platepar where the FF file has the most stars
+            platepar_dict = recalibrated_platepars[ff_dict[max_jd]]
+            platepar = Platepar()
+            platepar.loadFromDict(platepar_dict)
+
+            # Match stars on the image with the stars in the catalog
+            n_matched, avg_dist, cost, matched_stars = matchStarsResiduals(config, platepar, catalog_stars, \
+                star_dict, match_radius, ret_nmatch=True, lim_mag=lim_mag)
+
+
+    # Otherwise take the optimal FF file for evaluation
+    if (recalibrated_platepars is None) or (not using_recalib_platepars):
+
+        # If there are more than a set number of FF files to evaluate, choose only the ones with most stars on
+        #   the image
+        if len(star_dict) > config.calstars_files_N:
+
+            # Find JDs of FF files with most stars on them
+            top_nstars_indices = np.argsort([len(x) for x in star_dict.values()])[::-1][:config.calstars_files_N \
+                - 1]
+
+            filtered_star_dict = {}
+            for i in top_nstars_indices:
+                filtered_star_dict[list(star_dict.keys())[i]] = list(star_dict.values())[i]
+
+            star_dict = filtered_star_dict
+
+
+        # Match stars on the image with the stars in the catalog
+        n_matched, avg_dist, cost, matched_stars = matchStarsResiduals(config, platepar, catalog_stars, \
+            star_dict, match_radius, ret_nmatch=True, lim_mag=lim_mag)
+
 
     # Find the image with the largest number of matched stars
     max_jd = 0
@@ -158,13 +228,23 @@ def generateCalibrationReport(config, night_dir_path, platepar=None, show_graphs
         distances = [np.inf]
 
 
-    # Load the FF file with the largest number of matched stars
-    ff = readFF(night_dir_path, ff_dict[max_jd])
+    # Take the FF file with the largest number of matched stars
+    ff_name = ff_dict[max_jd]
+
+    # Load the FF file
+    ff = readFF(night_dir_path, ff_name)
     img_h, img_w = ff.avepixel.shape
 
     dpi = 200
     plt.figure(figsize=(ff.avepixel.shape[1]/dpi, ff.avepixel.shape[0]/dpi), dpi=dpi)
-    plt.imshow(ff.avepixel, cmap='gray', interpolation='nearest')
+
+    # Take the average pixel
+    img = ff.avepixel
+
+    # Slightly adjust the levels
+    img = Image.adjustLevels(img, np.percentile(img, 1.0), 1.2, np.percentile(img, 99.99))
+
+    plt.imshow(img, cmap='gray', interpolation='nearest')
 
     legend_handles = []
 
@@ -289,12 +369,13 @@ def generateCalibrationReport(config, night_dir_path, platepar=None, show_graphs
     # Add info text
     info_text = ff_dict[max_jd] + '\n' \
         + "Matched stars: {:d}/{:d}\n".format(max_matched_stars, len(star_dict[max_jd])) \
-        + "Median distance: {:.2f} px".format(np.median(distances))
+        + "Median distance: {:.2f} px\n".format(np.median(distances)) \
+        + "Catalog limiting magnitude: {:.1f}".format(lim_mag)
 
     plt.text(10, 10, info_text, bbox=dict(facecolor='black', alpha=0.5), va='top', ha='left', fontsize=4, \
         color='w')
 
-    legend = plt.legend(handles=legend_handles, prop={'size': 4})
+    legend = plt.legend(handles=legend_handles, prop={'size': 4}, loc='upper right')
     legend.get_frame().set_facecolor('k')
     legend.get_frame().set_edgecolor('k')
     for txt in legend.get_texts():
@@ -410,6 +491,9 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('dir_path', type=str, help="Path to the folder of the night.")
 
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -417,8 +501,8 @@ if __name__ == "__main__":
     #############################
 
 
-    # Load the default configuration file
-    config = cr.parse(".config")
+    # Load the config file
+    config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
 
 
     generateCalibrationReport(config, cml_args.dir_path, show_graphs=True)

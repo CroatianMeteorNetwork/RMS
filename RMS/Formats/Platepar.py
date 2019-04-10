@@ -170,6 +170,58 @@ class Platepar(object):
         return map(float, f.readline().split())
 
 
+    def loadFromDict(self, platepar_dict):
+        """ Load the platepar from a dictionary. """
+
+        # Parse JSON into an object with attributes corresponding to dict keys
+        self.__dict__ = platepar_dict
+
+        # Add the version if it was not in the platepar (v1 platepars didn't have a version)
+        if not 'version' in self.__dict__:
+            self.version = 1
+
+        # Add UT correction if it was not in the platepar
+        if not 'UT_corr' in self.__dict__:
+            self.UT_corr = 0
+
+        # Add the gamma if it was not in the platepar
+        if not 'gamma' in self.__dict__:
+            self.gamma = 1.0
+
+        # Add the list of calibration stars if it was not in the platepar
+        if not 'star_list' in self.__dict__:
+            self.star_list = []
+
+        # If v1 only the backward distorsion coeffs were fitted, so use load them for both forward and
+        #   reverse if nothing else is available
+        if not 'x_poly_fwd' in self.__dict__:
+            
+            self.x_poly_fwd = np.array(self.x_poly)
+            self.x_poly_rev = np.array(self.x_poly)
+            self.y_poly_fwd = np.array(self.y_poly)
+            self.y_poly_rev = np.array(self.y_poly)
+
+
+        # Convert lists to numpy arrays
+        self.x_poly_fwd = np.array(self.x_poly_fwd)
+        self.x_poly_rev = np.array(self.x_poly_rev)
+        self.y_poly_fwd = np.array(self.y_poly_fwd)
+        self.y_poly_rev = np.array(self.y_poly_rev)
+
+        # Set polynomial parameters used by the old code
+        self.x_poly = self.x_poly_fwd
+        self.y_poly = self.y_poly_fwd
+
+
+        # Add rotation from horizontal
+        if not 'rotation_from_horiz' in self.__dict__:
+            self.rotation_from_horiz = RMS.Astrometry.ApplyAstrometry.rotationWrtHorizon(self)
+
+        # Calculate the datetime
+        self.time = jd2Date(self.JD, dt_obj=True)
+
+
+
 
     def read(self, file_name, fmt=None):
         """ Read the platepar. 
@@ -213,52 +265,10 @@ class Platepar(object):
             with open(file_name) as f:
                 data = " ".join(f.readlines())
 
-            # Parse JSON into an object with attributes corresponding to dict keys
-            self.__dict__ = json.loads(data)
-
-            # Add the version if it was not in the platepar (v1 platepars didn't have a version)
-            if not 'version' in self.__dict__:
-                self.version = 1
-
-            # Add UT correction if it was not in the platepar
-            if not 'UT_corr' in self.__dict__:
-                self.UT_corr = 0
-
-            # Add the gamma if it was not in the platepar
-            if not 'gamma' in self.__dict__:
-                self.gamma = 1.0
-
-            # Add the list of calibration stars if it was not in the platepar
-            if not 'star_list' in self.__dict__:
-                self.star_list = []
-
-            # If v1 only the backward distorsion coeffs were fitted, so use load them for both forward and
-            #   reverse if nothing else is available
-            if not 'x_poly_fwd' in self.__dict__:
-                
-                self.x_poly_fwd = np.array(self.x_poly)
-                self.x_poly_rev = np.array(self.x_poly)
-                self.y_poly_fwd = np.array(self.y_poly)
-                self.y_poly_rev = np.array(self.y_poly)
+            # Load the platepar from the JSON dictionary
+            self.loadFromDict(json.loads(data))
 
 
-            # Convert lists to numpy arrays
-            self.x_poly_fwd = np.array(self.x_poly_fwd)
-            self.x_poly_rev = np.array(self.x_poly_rev)
-            self.y_poly_fwd = np.array(self.y_poly_fwd)
-            self.y_poly_rev = np.array(self.y_poly_rev)
-
-            # Set polynomial parameters used by the old code
-            self.x_poly = self.x_poly_fwd
-            self.y_poly = self.y_poly_fwd
-
-
-            # Add rotation from horizontal
-            if not 'rotation_from_horiz' in self.__dict__:
-                self.rotation_from_horiz = RMS.Astrometry.ApplyAstrometry.rotationWrtHorizon(self)
-
-            # Calculate the datetime
-            self.time = jd2Date(self.JD, dt_obj=True)
 
 
         # Load the file as TXT
