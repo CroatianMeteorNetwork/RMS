@@ -17,7 +17,8 @@ import numpy as np
 import scipy.optimize
 
 from RMS.Astrometry import CheckFit
-from RMS.Astrometry.ApplyAstrometry import applyPlateparToCentroids, altAz2RADec
+from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo, applyPlateparToCentroids, \
+    altAz2RADec
 from RMS.Astrometry.Conversions import date2JD
 from RMS.Astrometry.FFTalign import alignPlatepar
 import RMS.ConfigReader as cr
@@ -283,6 +284,19 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         f.write(out_str)
 
     ### ###
+
+
+
+    # If no platepars were recalibrated, use the single platepar recalibration procedure
+    if len(recalibrated_platepars) == 0:
+
+        print('No FF images were used for recalibration, using the single platepar calibration function...')
+
+        # Use the initial platepar for calibration
+        applyAstrometryFTPdetectinfo(dir_path, os.path.basename(ftpdetectinfo_path), None, platepar=platepar)
+
+        return recalibrated_platepars
+
 
 
     ### Plot difference from reference platepar in angular distance from (0, 0) vs rotation ###
