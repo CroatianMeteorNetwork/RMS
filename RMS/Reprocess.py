@@ -13,7 +13,8 @@ import logging
 import scipy.misc
 
 from RMS.ArchiveDetections import archiveDetections, archiveFieldsums
-from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo
+# from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo
+from RMS.Astrometry.ApplyRecalibrate import recalibrateIndividualFFsAndApplyAstrometry
 from RMS.Astrometry.CheckFit import autoCheckFit
 import RMS.ConfigReader as cr
 from RMS.DownloadPlatepar import downloadNewPlatepar
@@ -192,8 +193,12 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
-            # Calculate astrometry for meteor detections
-            applyAstrometryFTPdetectinfo(night_data_dir, ftpdetectinfo_name, platepar_path)
+            # # Calculate astrometry for meteor detections
+            # applyAstrometryFTPdetectinfo(night_data_dir, ftpdetectinfo_name, platepar_path)
+
+            # Recalibrate astrometry on every FF file and apply the calibration to detections
+            recalibrateIndividualFFsAndApplyAstrometry(night_data_dir, os.path.join(night_data_dir, \
+                ftpdetectinfo_name), calstars_list, config, platepar)
 
 
             # Convert the FTPdetectinfo into UFOOrbit input file
