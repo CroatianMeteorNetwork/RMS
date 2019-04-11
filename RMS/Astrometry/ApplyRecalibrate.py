@@ -348,6 +348,9 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
     # plt.show()
 
+    plt.clf()
+    plt.close()
+
     ### ###
 
 
