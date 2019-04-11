@@ -183,16 +183,6 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 log.info('Astrometric calibration FAILED!, Using old platepar for calibration...')
 
 
-            # Generate a calibration report
-            try:
-                log.info('Generating a calibration report...')
-                generateCalibrationReport(config, night_data_dir, platepar=platepar)
-
-            except Exception as e:
-                log.debug('Generating calibration report failed with message:\n' + repr(e))
-                log.debug(repr(traceback.format_exception(*sys.exc_info())))
-
-
             # # Calculate astrometry for meteor detections
             # applyAstrometryFTPdetectinfo(night_data_dir, ftpdetectinfo_name, platepar_path)
 
@@ -203,6 +193,16 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
             # Convert the FTPdetectinfo into UFOOrbit input file
             FTPdetectinfo2UFOOrbitInput(night_data_dir, ftpdetectinfo_name, platepar_path)
+
+
+            # Generate a calibration report
+            try:
+                log.info('Generating a calibration report...')
+                generateCalibrationReport(config, night_data_dir, platepar=platepar)
+
+            except Exception as e:
+                log.debug('Generating calibration report failed with message:\n' + repr(e))
+                log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
     else:
