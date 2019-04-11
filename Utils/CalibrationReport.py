@@ -60,29 +60,30 @@ def generateCalibrationReport(config, night_dir_path, match_radius = 2.0, platep
 
 
 
+    ### Load recalibrated platepars, if they exist ###
+
+    # Find recalibrated platepars file per FF file
+    platepars_recalibrated_file = None
+    for file_name in os.listdir(night_dir_path):
+        if file_name == config.platepars_recalibrated_name:
+            platepars_recalibrated_file = file_name
+            break
+
+
+    # Load all recalibrated platepars if the file is available
+    recalibrated_platepars = None
+    if platepars_recalibrated_file:
+        with open(os.path.join(night_dir_path, platepars_recalibrated_file)) as f:
+            recalibrated_platepars = json.load(f)
+
+    ### ###
+
 
     ### Load the platepar file ###
 
     # Find the platepar file in the given directory if it was not given
     if platepar is None:
 
-
-        # Find recalibrated platepars file per FF file
-        platepars_recalibrated_file = None
-        for file_name in os.listdir(night_dir_path):
-            if file_name == config.platepars_recalibrated_name:
-                platepars_recalibrated_file = file_name
-                break
-
-
-        # Load all recalibrated platepars if the file is available
-        recalibrated_platepars = None
-        if platepars_recalibrated_file:
-            with open(os.path.join(night_dir_path, platepars_recalibrated_file)) as f:
-                recalibrated_platepars = json.load(f)
-
-
-        # If there are not recalibrated platepars per FF file, load the only platepar
         # Find the platepar file
         platepar_file = None
         for file_name in os.listdir(night_dir_path):
