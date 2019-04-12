@@ -186,18 +186,26 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             # # Calculate astrometry for meteor detections
             # applyAstrometryFTPdetectinfo(night_data_dir, ftpdetectinfo_name, platepar_path)
 
+            
+
+            log.info("Recalibrating astrometry on FF files with detections...")
+
             # Recalibrate astrometry on every FF file and apply the calibration to detections
             recalibrateIndividualFFsAndApplyAstrometry(night_data_dir, os.path.join(night_data_dir, \
                 ftpdetectinfo_name), calstars_list, config, platepar)
 
+            
+
+            log.info("Converting RMS format to UFOOrbit format...")
 
             # Convert the FTPdetectinfo into UFOOrbit input file
             FTPdetectinfo2UFOOrbitInput(night_data_dir, ftpdetectinfo_name, platepar_path)
 
 
+
             # Generate a calibration report
+            log.info("Generating a calibration report...")
             try:
-                log.info('Generating a calibration report...')
                 generateCalibrationReport(config, night_data_dir, platepar=platepar)
 
             except Exception as e:
@@ -255,6 +263,14 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
         if os.path.exists(platepar_path):
             extra_files.append(platepar_path)
+
+
+    # Add the json file with recalibrated platepars to the archive
+    if (not nodetect):
+
+        recalibrated_platepars_path = os.path.join(night_data_dir, config.platepars_recalibrated_name)
+        if os.path.exists(recalibrated_platepars_path):
+            extra_files.append(recalibrated_platepars_path)
 
     ### ###
 

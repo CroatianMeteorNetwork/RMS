@@ -26,7 +26,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog
 
 
-def generateCalibrationReport(config, night_dir_path, match_radius = 2.0, platepar=None, show_graphs=False):
+def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar=None, show_graphs=False):
     """ Given the folder of the night, find the Calstars file, check the star fit and generate a report
         with the quality of the calibration. The report contains information about both the astrometry and
         the photometry calibration. Graphs will be saved in the given directory of the night.
@@ -75,6 +75,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius = 2.0, platep
     if platepars_recalibrated_file:
         with open(os.path.join(night_dir_path, platepars_recalibrated_file)) as f:
             recalibrated_platepars = json.load(f)
+            print('Loaded recalibrated platepars JSON file for the calibration report...')
 
     ### ###
 
@@ -152,9 +153,8 @@ def generateCalibrationReport(config, night_dir_path, match_radius = 2.0, platep
 
 
     # If the recalibrated platepars file exists, take the one with the most stars
+    max_jd = 0
     if recalibrated_platepars is not None:
-
-        max_jd = 0
         max_stars = 0
         for ff_name_temp in recalibrated_platepars:
 
@@ -189,6 +189,8 @@ def generateCalibrationReport(config, night_dir_path, match_radius = 2.0, platep
             n_matched, avg_dist, cost, matched_stars = matchStarsResiduals(config, platepar, catalog_stars, \
                 star_dict, match_radius, ret_nmatch=True, lim_mag=lim_mag)
 
+            max_matched_stars = n_matched
+
 
     # Otherwise take the optimal FF file for evaluation
     if (recalibrated_platepars is None) or (not using_recalib_platepars):
@@ -213,20 +215,24 @@ def generateCalibrationReport(config, night_dir_path, match_radius = 2.0, platep
             star_dict, match_radius, ret_nmatch=True, lim_mag=lim_mag)
 
 
-    # Find the image with the largest number of matched stars
-    max_jd = 0
-    max_matched_stars = 0
-    for jd in matched_stars:
-        _, _, distances = matched_stars[jd]
-        if len(distances) > max_matched_stars:
-            max_jd = jd
-            max_matched_stars = len(distances)
 
-    
-    # If there are no matched stars, use the image with the largest number of detected stars
-    if max_matched_stars <= 2:
-        max_jd = max(star_dict, key=lambda x: len(star_dict[x]))
-        distances = [np.inf]
+    # If no recalibrated platepars where found, find the image with the largest number of matched stars
+    if (not using_recalib_platepars) or (max_jd == 0):
+
+        max_jd = 0
+        max_matched_stars = 0
+        for jd in matched_stars:
+            _, _, distances = matched_stars[jd]
+            if len(distances) > max_matched_stars:
+                max_jd = jd
+                max_matched_stars = len(distances)
+
+        
+        # If there are no matched stars, use the image with the largest number of detected stars
+        if max_matched_stars <= 2:
+            max_jd = max(star_dict, key=lambda x: len(star_dict[x]))
+            distances = [np.inf]
+
 
 
     # Take the FF file with the largest number of matched stars
