@@ -185,9 +185,11 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
             platepar = Platepar()
             platepar.loadFromDict(platepar_dict)
 
+            filtered_star_dict = {max_jd: star_dict[max_jd]}
+
             # Match stars on the image with the stars in the catalog
             n_matched, avg_dist, cost, matched_stars = matchStarsResiduals(config, platepar, catalog_stars, \
-                star_dict, match_radius, ret_nmatch=True, lim_mag=lim_mag)
+                filtered_star_dict, match_radius, ret_nmatch=True, lim_mag=lim_mag)
 
             max_matched_stars = n_matched
 
