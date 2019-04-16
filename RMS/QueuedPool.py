@@ -526,7 +526,7 @@ class QueuedPool(object):
         # Sometimes the pipe gets broken, so try handling it gracefully
         except broken_pipe_exception as exc:
 
-            self.printAndLog('Pipe IOError caught, trying to handle it gracefully...')
+            self.printAndLog("Pipe IOError caught, trying to handle it gracefully...")
 
             if broken_pipe_exception == IOError:
                 if exc.errno != EPIPE:
@@ -539,7 +539,8 @@ class QueuedPool(object):
                 return None
 
             else:
-                self.printAndLog('Error! Failed adding the job to processing list the second time...')
+                self.printAndLog("Error! Failed adding the job to processing list the second time...")
+                raise broken_pipe_exception("Input queue pipe broke!")
 
 
         time.sleep(wait_time)
