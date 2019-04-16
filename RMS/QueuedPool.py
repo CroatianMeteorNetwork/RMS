@@ -12,6 +12,18 @@ from RMS.Pickling import savePickle, loadPickle
 from RMS.Misc import randomCharacters, isListKeyInDict, listToTupleRecursive
 
 
+from errno import EPIPE
+
+# Python 3
+try:
+    broken_pipe_exception = BrokenPipeError
+
+# Python 2
+except NameError:
+    broken_pipe_exception = IOError
+
+
+
 class SafeValue(object):
     """ Thread safe value. Uses locks. 
     
@@ -494,19 +506,41 @@ class QueuedPool(object):
 
 
 
-    def addJob(self, job, wait_time=0.05):
+    def addJob(self, job, wait_time=0.05, repeated=False):
         """ Add a job to the input queue. Job can be a list of arguments for the worker function. If a list is
             not given, the arguments will be wrapped in the list.
 
         """
 
-        # Track the total number of jobs received
-        self.total_jobs.increment()
-
         if not isinstance(job, list):
             job = [job]
 
-        self.input_queue.put(job)
+        # Add a job to the queue
+        try:
+            
+            self.input_queue.put(job)
+
+            # Track the total number of jobs received
+            self.total_jobs.increment()
+
+        # Sometimes the pipe gets broken, so try handling it gracefully
+        except broken_pipe_exception as exc:
+
+            self.printAndLog('Pipe IOError caught, trying to handle it gracefully...')
+
+            if broken_pipe_exception == IOError:
+                if exc.errno != EPIPE:
+                    raise
+
+
+            # Try adding the job to processing queue again
+            if not repeated:
+                self.addJob(job, wait_time=wait_time, repeated=True)
+                return None
+
+            else:
+                self.printAndLog('Error! Failed adding the job to processing list the second time...')
+
 
         time.sleep(wait_time)
 
