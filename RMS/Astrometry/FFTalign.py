@@ -218,7 +218,7 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
             lim_mag=config.catalog_mag_limit, mag_band_ratios=config.star_catalog_band_ratios)
 
         # Get the RA/Dec of the image centre
-        _, ra_centre, dec_centre, _ = ApplyAstrometry.XY2CorrectedRADecPP([calstars_time], [platepar.X_res/2], \
+        _, ra_centre, dec_centre, _ = ApplyAstrometry.xyToRaDecPP([calstars_time], [platepar.X_res/2], \
                 [platepar.Y_res/2], [1], platepar)
 
         ra_centre = ra_centre[0]
@@ -235,7 +235,7 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         # Take those catalog stars which should be inside the FOV
         ra_catalog, dec_catalog, _ = catalog_stars[filtered_indices].T
         jd = date2JD(*calstars_time)
-        catalog_xy = ApplyAstrometry.raDecToCorrectedXYPP(ra_catalog, dec_catalog, jd, platepar)
+        catalog_xy = ApplyAstrometry.raDecToXYPP(ra_catalog, dec_catalog, jd, platepar)
 
         catalog_x, catalog_y = catalog_xy
         catalog_xy = np.c_[catalog_x, catalog_y]
@@ -283,9 +283,9 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         platepar_aligned.F_scale *= scale
 
     # Compute the new reference RA and Dec
-    # _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.XY2CorrectedRADecPP([jd2Date(platepar.JD)], \
+    # _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.xyToRaDecPP([jd2Date(platepar.JD)], \
     #     [platepar.X_res/2 - translation_x], [platepar.Y_res/2 - translation_y], [1], platepar)
-    _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.XY2CorrectedRADecPP([jd2Date(platepar.JD)], \
+    _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.xyToRaDecPP([jd2Date(platepar.JD)], \
         [platepar.X_res/2 - platepar.x_poly_fwd[0] - translation_x], \
         [platepar.Y_res/2 - platepar.y_poly_fwd[0] - translation_y], [1], platepar)
 

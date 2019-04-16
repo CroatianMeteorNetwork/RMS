@@ -50,7 +50,7 @@ import PIL.Image, PIL.ImageDraw
 import scipy.optimize
 import scipy.ndimage
 
-from RMS.Astrometry.ApplyAstrometry import altAz2RADec, XY2CorrectedRADecPP, raDec2AltAz, raDecToCorrectedXY,\
+from RMS.Astrometry.ApplyAstrometry import altAzToRADec, xyToRaDecPP, raDec2AltAz, raDecToXY,\
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
@@ -935,7 +935,7 @@ class PlateTool(object):
         time_data = [jd2Date(self.platepar.JD, dt_obj=True)]
 
         # Convert the reference alt/az to reference RA/Dec
-        _, ra_data, dec_data = altAz2RADec(self.platepar.lat, self.platepar.lon, self.platepar.UT_corr, 
+        _, ra_data, dec_data = altAzToRADec(self.platepar.lat, self.platepar.lon, self.platepar.UT_corr, 
             time_data, [self.platepar.az_centre], [self.platepar.alt_centre], dt_time=True)
 
         # Assign the computed RA/Dec to platepar
@@ -1823,7 +1823,7 @@ class PlateTool(object):
         img_time = self.img_handle.currentTime()
 
         # Convert the FOV centre to RA/Dec
-        _, ra_centre, dec_centre, _ = XY2CorrectedRADecPP([img_time], [self.platepar.X_res/2], 
+        _, ra_centre, dec_centre, _ = xyToRaDecPP([img_time], [self.platepar.X_res/2], 
             [self.platepar.Y_res/2], [1], self.platepar)
         
         ra_centre = ra_centre[0]
@@ -1884,7 +1884,7 @@ class PlateTool(object):
         jd = date2JD(*img_time)
 
         # Convert star RA, Dec to image coordinates
-        x_array, y_array = raDecToCorrectedXY(ra_catalog, dec_catalog, jd, lat, lon, self.platepar.X_res, \
+        x_array, y_array = raDecToXY(ra_catalog, dec_catalog, jd, lat, lon, self.platepar.X_res, \
             self.platepar.Y_res, ra_ref, dec_ref, self.platepar.JD, pos_angle_ref, F_scale, x_poly_rev, \
             y_poly_rev, UT_corr=self.platepar.UT_corr)
 
@@ -1905,7 +1905,7 @@ class PlateTool(object):
 
         # Compute RA, Dec of image stars
         img_time = self.img_handle.currentTime()
-        _, ra_array, dec_array, _ = XY2CorrectedRADecPP(len(img_x)*[img_time], img_x, img_y, len(img_x)*[1], \
+        _, ra_array, dec_array, _ = xyToRaDecPP(len(img_x)*[img_time], img_x, img_y, len(img_x)*[1], \
             platepar)
 
         return ra_array, dec_array
@@ -2035,7 +2035,7 @@ class PlateTool(object):
         time_data = [img_time]
 
         # Convert FOV centre to RA, Dec
-        _, ra_data, dec_data = altAz2RADec(self.platepar.lat, self.platepar.lon, self.platepar.UT_corr, 
+        _, ra_data, dec_data = altAzToRADec(self.platepar.lat, self.platepar.lon, self.platepar.UT_corr, 
             time_data, [self.azim_centre], [self.alt_centre])
 
 
@@ -2764,7 +2764,7 @@ class PlateTool(object):
 
             # Compute the residuals in ra/dec in angular coordiniates
             img_time = self.img_handle.currentTime()
-            _, ra_img, dec_img, _ = XY2CorrectedRADecPP([img_time], [img_x], [img_y], [1], self.platepar)
+            _, ra_img, dec_img, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar)
 
             ra_img = ra_img[0]
             dec_img = dec_img[0]

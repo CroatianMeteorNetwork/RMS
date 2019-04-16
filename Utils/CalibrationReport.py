@@ -9,7 +9,7 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 
-from RMS.Astrometry.ApplyAstrometry import computeFOVSize, XY2CorrectedRADecPP, raDecToCorrectedXYPP, \
+from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, raDecToXYPP, \
     photometryFit
 from RMS.Astrometry.CheckFit import matchStarsResiduals
 from RMS.Astrometry.Conversions import date2JD, jd2Date
@@ -294,7 +294,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         ### Plot match residuals ###
 
         # Compute preducted positions of matched image stars from the catalog
-        x_predicted, y_predicted = raDecToCorrectedXYPP(matched_catalog_stars[:, 0], \
+        x_predicted, y_predicted = raDecToXYPP(matched_catalog_stars[:, 0], \
             matched_catalog_stars[:, 1], max_jd, platepar)
 
         img_y, img_x, _, _ = image_stars.T
@@ -343,7 +343,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
 
     # Estimate RA,dec of the centre of the FOV
-    _, RA_c, dec_c, _ = XY2CorrectedRADecPP([jd2Date(max_jd)], [platepar.X_res/2], [platepar.Y_res/2], [1], 
+    _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(max_jd)], [platepar.X_res/2], [platepar.Y_res/2], [1], 
         platepar)
 
     RA_c = RA_c[0]
@@ -356,7 +356,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     ra_catalog, dec_catalog, mag_catalog = extracted_catalog.T
 
     # Compute image positions of all catalog stars that should be on the image
-    x_catalog, y_catalog = raDecToCorrectedXYPP(ra_catalog, dec_catalog, max_jd, platepar)
+    x_catalog, y_catalog = raDecToXYPP(ra_catalog, dec_catalog, max_jd, platepar)
 
     # Filter all catalog stars outside the image
     temp_arr = np.c_[x_catalog, y_catalog, mag_catalog]

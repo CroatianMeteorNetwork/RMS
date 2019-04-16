@@ -205,8 +205,40 @@ def readEv(dir_path, file_name, ev=None):
 
 
 
-def writeEv(dir_path, file_name, ev_array, platepar):
-    """ Write an UWO ASGARD style event file. """
+def writeEv(dir_path, file_name, ev_array, plate, ast_input=False):
+    """ Write an UWO ASGARD style event file. 
+    
+    Arguments:
+        dir_path: [str] Path to directory where the file will be saved to.
+        file_name: [str] Name of the ev file.
+        ev_array: [ndarray] Array where columns are: frame number, sequence number, JD, intensity, x, y, 
+            azimuth (deg), altitude (deg), magnitude
+        plate: [?] Platepar or AST plate.
+
+    Keyword arguments:
+        ast_input: [bool] True if AST plate if given, False if platepar is given (default).
+
+    """
+
+    # AST plate used for input
+    if ast_input:
+        station_code = plate.sitename
+        lat = np.degrees(plate.lat)
+        lon = np.degrees(plate.lon)
+        elev = plate.elev
+        X_res = plate.wid
+        Y_res = plate.ht
+
+    # Platepar used for input
+    else:
+        station_code = plate.station_code
+        lat = plate.lat
+        lon = plate.lon
+        elev = plate.elev
+        X_res = plate.X_res
+        Y_res = plate.Y_res
+
+
 
 
     with open(os.path.join(dir_path, file_name), 'w') as f:
@@ -225,12 +257,12 @@ def writeEv(dir_path, file_name, ev_array, platepar):
 
 
         # Extract the site number and stream
-        if len(platepar.station_code) == 3:
-            site = platepar.station_code[:2]
-            stream = platepar.station_code[2]
+        if len(station_code) == 3:
+            site = station_code[:2]
+            stream = station_code[2]
 
         else:
-            site = platepar.station_code
+            site = station_code
             stream = 'A'
 
         ### Write the header
@@ -245,11 +277,11 @@ def writeEv(dir_path, file_name, ev_array, platepar):
         f.write("#       seq : {:d}\n".format(seq_peak))
         f.write("#       mul : 0 [A]\n")
         f.write("#      site : {:s}\n".format(site))
-        f.write("#    latlon : {:.4f} {:.4f} {:.1f}\n".format(platepar.lat, platepar.lon, platepar.elev))
+        f.write("#    latlon : {:.4f} {:.4f} {:.1f}\n".format(lat, lon, elev))
         f.write("#      text : \n")
         f.write("#    stream : {:s}\n".format(stream))
         f.write("#     plate : RMS_SkyFit\n")
-        f.write("#      geom : {:d} {:d}\n".format(platepar.X_res, platepar.Y_res))
+        f.write("#      geom : {:d} {:d}\n".format(X_res, Y_res))
         f.write("#    filter : 0\n")
         f.write("#\n")
         f.write("#  fr    time        sum     seq       cx       cy      th      phi     lsp    mag  flag   bak    max\n")

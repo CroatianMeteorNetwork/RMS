@@ -47,7 +47,7 @@ import Utils.RMS2UFO
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import cyRaDecToCorrectedXY, cyXYToRADec
+from RMS.Astrometry.CyFunctions import cyraDecToXY, cyXYToRADec
 
 
 def photomLine(lsp, photom_offset):
@@ -108,7 +108,7 @@ def computeFOVSize(platepar):
     level_data = np.ones(4)
 
     # Compute RA/Dec of the points
-    _, ra_data, dec_data, _ = XY2CorrectedRADecPP(time_data, x_data, y_data, level_data, platepar)
+    _, ra_data, dec_data, _ = xyToRaDecPP(time_data, x_data, y_data, level_data, platepar)
 
     ra1, ra2, ra3, ra4 = ra_data
     dec1, dec2, dec3, dec4 = dec_data
@@ -262,7 +262,7 @@ def rotationWrtStandard(platepar):
     img_up_h = img_mid_h
 
     # Compute ra/dec
-    _, ra, dec, _ = XY2CorrectedRADecPP(2*[jd2Date(platepar.JD)], [img_mid_w, img_up_w], [img_mid_h, img_up_h], \
+    _, ra, dec, _ = xyToRaDecPP(2*[jd2Date(platepar.JD)], [img_mid_w, img_up_w], [img_mid_h, img_up_h], \
         2*[1], platepar)
     ra_mid = ra[0]
     dec_mid = dec[0]
@@ -534,7 +534,7 @@ def XY2altAz(X_data, Y_data, lat, lon, RA_d, dec_d, Ho, X_res, Y_res, pos_angle_
 
 
 
-def altAz2RADec(lat, lon, UT_corr, time_data, azimuth_data, altitude_data, dt_time=False):
+def altAzToRADec(lat, lon, UT_corr, time_data, azimuth_data, altitude_data, dt_time=False):
     """ Convert the azimuth and altitude in a given time and position on Earth to right ascension and 
         declination. 
     
@@ -641,7 +641,7 @@ def calculateMagnitudes(level_data, mag_0, mag_lev):
 
 
 
-def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, lat, lon, Ho, X_res, Y_res, RA_d, dec_d, 
+def xyToRaDec(time_data, X_data, Y_data, level_data, lat, lon, Ho, X_res, Y_res, RA_d, dec_d, 
     pos_angle_ref, F_scale, mag_0, mag_lev, x_poly_fwd, y_poly_fwd, station_ht):
     """ A function that does the complete calibration and coordinate transformations of a meteor detection.
 
@@ -704,7 +704,7 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, lat, lon, Ho, X_res
         F_scale, x_poly_fwd, y_poly_fwd)
 
     # Convert azimuth and altitude data to right ascension and declination
-    JD_data, RA_data, dec_data = altAz2RADec(lat, lon, 0, time_data, az_data, alt_data)
+    JD_data, RA_data, dec_data = altAzToRADec(lat, lon, 0, time_data, az_data, alt_data)
 
     # Calculate magnitudes
     magnitude_data = calculateMagnitudes(level_data, mag_0, mag_lev)
@@ -728,7 +728,7 @@ def XY2CorrectedRADec(time_data, X_data, Y_data, level_data, lat, lon, Ho, X_res
  
 
 
-def XY2CorrectedRADecPP(time_data, X_data, Y_data, level_data, platepar):
+def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar):
     """ Converts image XY to RA,Dec, but it takes a platepar instead of individual parameters. 
     
     Arguments:
@@ -749,7 +749,7 @@ def XY2CorrectedRADecPP(time_data, X_data, Y_data, level_data, platepar):
     """
 
 
-    return XY2CorrectedRADec(time_data, X_data, Y_data, level_data, platepar.lat, \
+    return xyToRaDec(time_data, X_data, Y_data, level_data, platepar.lat, \
         platepar.lon, platepar.Ho, platepar.X_res, platepar.Y_res, platepar.RA_d, platepar.dec_d, \
         platepar.pos_angle_ref, platepar.F_scale, platepar.mag_0, platepar.mag_lev, platepar.x_poly_fwd, \
         platepar.y_poly_fwd, platepar.elev)
@@ -757,7 +757,7 @@ def XY2CorrectedRADecPP(time_data, X_data, Y_data, level_data, platepar):
 
 
 
-def raDecToCorrectedXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_d, ref_jd, pos_angle_ref, \
+def raDecToXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_d, ref_jd, pos_angle_ref, \
     F_scale, x_poly_rev, y_poly_rev, UT_corr=0):
     """ Convert RA, Dec to distorion corrected image coordinates. 
 
@@ -791,7 +791,7 @@ def raDecToCorrectedXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_
     jd -= UT_corr/24.0
 
     # Use the cythonized funtion insted of the Python function
-    return cyRaDecToCorrectedXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, az_centre, alt_centre, 
+    return cyraDecToXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, az_centre, alt_centre, 
         pos_angle_ref, F_scale, x_poly_rev, y_poly_rev)
 
 
@@ -889,7 +889,7 @@ def raDecToCorrectedXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_
 
 
 
-def raDecToCorrectedXYPP(RA_data, dec_data, jd, platepar):
+def raDecToXYPP(RA_data, dec_data, jd, platepar):
     """ Converts RA, Dec to image coordinates, but the platepar is given instead of individual parameters.
 
     Arguments:
@@ -903,7 +903,7 @@ def raDecToCorrectedXYPP(RA_data, dec_data, jd, platepar):
 
     """
 
-    return raDecToCorrectedXY(RA_data, dec_data, jd, platepar.lat, platepar.lon, platepar.X_res, \
+    return raDecToXY(RA_data, dec_data, jd, platepar.lat, platepar.lon, platepar.X_res, \
         platepar.Y_res, platepar.RA_d, platepar.dec_d, platepar.JD, platepar.pos_angle_ref, \
         platepar.F_scale, platepar.x_poly_rev, platepar.y_poly_rev, UT_corr=platepar.UT_corr)
 
@@ -959,7 +959,7 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
 
 
     # Convert image cooredinates to RA and Dec, and do the photometry
-    JD_data, RA_data, dec_data, magnitudes = XY2CorrectedRADecPP(np.array(time_data), X_data, Y_data, \
+    JD_data, RA_data, dec_data, magnitudes = xyToRaDecPP(np.array(time_data), X_data, Y_data, \
         level_data, platepar)
 
 
@@ -1135,7 +1135,7 @@ if __name__ == "__main__":
 
     # print('Star X, Y:', star_x, star_y)
 
-    # jd, ra_array, dec_array, mag = XY2CorrectedRADecPP(np.array([time, time]), np.array([star_x, 100]), np.array([star_y, 100]), np.array([1, 1]), platepar)
+    # jd, ra_array, dec_array, mag = xyToRaDecPP(np.array([time, time]), np.array([star_x, 100]), np.array([star_y, 100]), np.array([1, 1]), platepar)
 
     # print(ra_array, dec_array)
     # ra = ra_array[0]
@@ -1159,7 +1159,7 @@ if __name__ == "__main__":
     # # dec_star = -(16 + (43 + 21/60)/60)
     # ra_star = ra
     # dec_star = dec
-    # x_star, y_star = raDecToCorrectedXYPP(np.array([ra_star]), np.array([dec_star]), \
+    # x_star, y_star = raDecToXYPP(np.array([ra_star]), np.array([dec_star]), \
     #     np.array([date2JD(*time)]), platepar)
 
     # print('Star X, Y computed:', x_star, y_star)

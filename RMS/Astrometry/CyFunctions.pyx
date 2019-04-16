@@ -208,7 +208,7 @@ def matchStars(np.ndarray[FLOAT_TYPE_t, ndim=2] stars_list, np.ndarray[FLOAT_TYP
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-def cyRaDecToCorrectedXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, \
+def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data, double jd, double lat, double lon, double x_res, \
     double y_res, double az_centre, double alt_centre, double pos_angle_ref, double F_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev):

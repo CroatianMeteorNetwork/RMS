@@ -20,7 +20,7 @@ from RMS.Formats import Platepar
 from RMS.Formats import CALSTARS
 from RMS.Formats import StarCatalog
 from RMS.Formats import FFfile
-from RMS.Astrometry.ApplyAstrometry import raDec2AltAz, raDecToCorrectedXYPP, XY2CorrectedRADecPP
+from RMS.Astrometry.ApplyAstrometry import raDec2AltAz, raDecToXYPP, xyToRaDecPP
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Astrometry.FFTalign import alignPlatepar
 from RMS.Math import angularSeparation
@@ -29,7 +29,7 @@ from RMS.Math import angularSeparation
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import matchStars, subsetCatalog, cyRaDecToCorrectedXY
+from RMS.Astrometry.CyFunctions import matchStars, subsetCatalog, cyraDecToXY
 
 
 def computeMinimizationTolerances(config, platepar, star_dict_len):
@@ -100,7 +100,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
     for jd in star_dict:
 
         # Estimate RA,dec of the centre of the FOV
-        _, RA_c, dec_c, _ = XY2CorrectedRADecPP([jd2Date(jd)], [platepar.X_res/2], [platepar.Y_res/2], [1], 
+        _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(jd)], [platepar.X_res/2], [platepar.Y_res/2], [1], 
             platepar)
 
         RA_c = RA_c[0]
@@ -116,7 +116,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
         stars_list = np.array(stars_list)
 
         # Convert all catalog stars to image coordinates
-        cat_x_array, cat_y_array = raDecToCorrectedXYPP(ra_catalog, dec_catalog, jd, platepar)
+        cat_x_array, cat_y_array = raDecToXYPP(ra_catalog, dec_catalog, jd, platepar)
 
         # Take only those stars which are within the FOV
         x_indices = np.argwhere((cat_x_array >= 0) & (cat_x_array < platepar.X_res))
@@ -220,7 +220,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
                 cat_dec = cat_star_entry[1]
 
                 # Convert image coordinates to RA/Dec
-                _, star_ra, star_dec, _ = XY2CorrectedRADecPP([jd2Date(jd)], [star_x], [star_y], [1], \
+                _, star_ra, star_dec, _ = xyToRaDecPP([jd2Date(jd)], [star_x], [star_y], [1], \
                     platepar)
 
                 # Compute angular distance between the predicted and the catalog position

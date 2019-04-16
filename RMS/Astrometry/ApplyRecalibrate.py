@@ -18,7 +18,7 @@ import scipy.optimize
 
 from RMS.Astrometry import CheckFit
 from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo, applyPlateparToCentroids, \
-    altAz2RADec
+    altAzToRADec
 from RMS.Astrometry.Conversions import date2JD
 from RMS.Astrometry.FFTalign import alignPlatepar
 import RMS.ConfigReader as cr

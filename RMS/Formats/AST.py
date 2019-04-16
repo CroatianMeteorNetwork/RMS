@@ -6,6 +6,8 @@ import os
 
 import numpy as np
 
+from RMS.Astrometry.ApplyAstrometry import calculateMagnitudes, altAzToRADec
+
 class AstPlate(object):
     """ AST type plate structure. """
 
@@ -120,7 +122,7 @@ def loadAST(dir_path, file_name):
         file_name: [str] name of the plate file
 
     Return:
-        [AstPlate object]
+        ast: [AstPlate object]
     """
 
 
@@ -128,125 +130,125 @@ def loadAST(dir_path, file_name):
     fid = open(os.path.join(dir_path, file_name), 'rb')
 
     # Init the plate struct
-    exact = AstPlate()
+    ast = AstPlate()
 
     # Load header
-    exact.magic = np.fromfile(fid, dtype=np.uint32, count = 1)
-    exact.info_len = np.fromfile(fid, dtype=np.uint32, count = 1)
+    ast.magic = np.fromfile(fid, dtype=np.uint32, count=1)
+    ast.info_len = np.fromfile(fid, dtype=np.uint32, count=1)
 
     # Star structure size in bytes
-    exact.star_len = np.fromfile(fid, dtype=np.uint32, count = 1)
+    ast.star_len = np.fromfile(fid, dtype=np.uint32, count=1)
 
     # Number of stars
-    exact.stars = np.fromfile(fid, dtype=np.int32, count = 1)
+    ast.stars = np.fromfile(fid, dtype=np.int32, count=1)
 
     # Reserved
-    exact.r0 = np.fromfile(fid, dtype=np.int32, count = 1)
-    exact.r1 = np.fromfile(fid, dtype=np.int32, count = 1)
-    exact.r2 = np.fromfile(fid, dtype=np.int32, count = 1)
-    exact.r3 = np.fromfile(fid, dtype=np.int32, count = 1)
+    ast.r0 = np.fromfile(fid, dtype=np.int32, count=1)
+    ast.r1 = np.fromfile(fid, dtype=np.int32, count=1)
+    ast.r2 = np.fromfile(fid, dtype=np.int32, count=1)
+    ast.r3 = np.fromfile(fid, dtype=np.int32, count=1)
 
     # Text description
-    exact.text = np.fromfile(fid, dtype='|S'+str(256), count = 1)[0]
+    ast.text = np.fromfile(fid, dtype='|S'+str(256), count=1)[0]
 
     # Name of catalogue
-    exact.starcat = np.fromfile(fid, dtype='|S'+str(32), count = 1)[0]
+    ast.starcat = np.fromfile(fid, dtype='|S'+str(32), count=1)[0]
 
     # Name of observing site
-    exact.sitename = np.fromfile(fid, dtype='|S'+str(32), count = 1)[0]
+    ast.sitename = np.fromfile(fid, dtype='|S'+str(32), count=1)[0]
 
     # Site geo coordinates
-    exact.lat = np.fromfile(fid, dtype=np.float64, count = 1)[0]
-    exact.lon = np.fromfile(fid, dtype=np.float64, count = 1)[0]
-    exact.elev = np.fromfile(fid, dtype=np.float64, count = 1)[0]
+    ast.lat = np.fromfile(fid, dtype=np.float64, count=1)[0]
+    ast.lon = np.fromfile(fid, dtype=np.float64, count=1)[0]
+    ast.elev = np.fromfile(fid, dtype=np.float64, count=1)[0]
 
     # UNIX time for fit
-    exact.ts = np.fromfile(fid, dtype=np.int32, count = 1)
-    exact.tu = np.fromfile(fid, dtype=np.int32, count = 1)
+    ast.ts = np.fromfile(fid, dtype=np.int32, count=1)
+    ast.tu = np.fromfile(fid, dtype=np.int32, count=1)
 
     # Centre of plate
-    exact.th0 = np.fromfile(fid, dtype=np.float64, count = 1)[0]
-    exact.phi0 = np.fromfile(fid, dtype=np.float64, count = 1)[0]
+    ast.th0 = np.fromfile(fid, dtype=np.float64, count=1)[0]
+    ast.phi0 = np.fromfile(fid, dtype=np.float64, count=1)[0]
 
     # Original image size
-    exact.wid = np.fromfile(fid, dtype=np.int32, count = 1)[0]
-    exact.ht = np.fromfile(fid, dtype=np.int32, count = 1)[0]
+    ast.wid = np.fromfile(fid, dtype=np.int32, count=1)[0]
+    ast.ht = np.fromfile(fid, dtype=np.int32, count=1)[0]
 
     ### Fit parameters
     # x/y --> th
-    exact.a = np.fromfile(fid, dtype=np.float64, count = 10)
-    exact.da = np.fromfile(fid, dtype=np.float64, count = 10)
+    ast.a = np.fromfile(fid, dtype=np.float64, count=10)
+    ast.da = np.fromfile(fid, dtype=np.float64, count=10)
 
     # x/y --> phi
-    exact.b = np.fromfile(fid, dtype=np.float64, count = 10)
-    exact.db = np.fromfile(fid, dtype=np.float64, count = 10)
+    ast.b = np.fromfile(fid, dtype=np.float64, count=10)
+    ast.db = np.fromfile(fid, dtype=np.float64, count=10)
 
     # th/phi --> x
-    exact.c = np.fromfile(fid, dtype=np.float64, count = 10)
-    exact.dc = np.fromfile(fid, dtype=np.float64, count = 10)
+    ast.c = np.fromfile(fid, dtype=np.float64, count=10)
+    ast.dc = np.fromfile(fid, dtype=np.float64, count=10)
 
     # th/phi --> y
-    exact.d = np.fromfile(fid, dtype=np.float64, count = 10)
-    exact.dd = np.fromfile(fid, dtype=np.float64, count = 10)
+    ast.d = np.fromfile(fid, dtype=np.float64, count=10)
+    ast.dd = np.fromfile(fid, dtype=np.float64, count=10)
     
     # Fit flags
-    exact.flags = np.fromfile(fid, dtype=np.uint32, count = 1)
+    ast.flags = np.fromfile(fid, dtype=np.uint32, count=1)
 
     # Calculate the conversion matrix
-    exact.initM()
+    ast.initM()
 
 
-    u = 0.5*exact.wid
-    v = 0.5*exact.ht
+    u = 0.5*ast.wid
+    v = 0.5*ast.ht
 
     ### Calculate the FOV ###
 
-    a, b = plateASTMap(exact, 0.0, v)
-    c, d = plateASTMap(exact, 2.0*u, v)
+    a, b = plateASTMap(ast, 0.0, v)
+    c, d = plateASTMap(ast, 2.0*u, v)
 
     dot  = np.sin(a)*np.cos(b)*np.sin(c)*np.cos(d)
     dot += np.sin(a)*np.sin(b)*np.sin(c)*np.sin(d)
     dot += np.cos(a)*np.cos(c)
 
     # FOV width in radians
-    exact.fov = np.arccos(dot)
+    ast.fov = np.arccos(dot)
 
     
-    a, b = plateASTMap(exact, u, 0.0)
-    c, d = plateASTMap(exact, u, 2.0*v)
+    a, b = plateASTMap(ast, u, 0.0)
+    c, d = plateASTMap(ast, u, 2.0*v)
 
     dot  = np.sin(a)*np.cos(b)*np.sin(c)*np.cos(d)
     dot += np.sin(a)*np.sin(b)*np.sin(c)*np.sin(d)
     dot += np.cos(a)*np.cos(c)
 
     # FOV ascept (width/height)
-    exact.asp = exact.fov/np.arccos(dot)
+    ast.asp = ast.fov/np.arccos(dot)
 
     ######
 
 
     ### Calculate the rotation ###
-    a, b = plateASTMap(exact, u, v)
-    x, y = plateASTMap(exact, a - np.radians(1.0), b, reverse_map=True)
+    a, b = plateASTMap(ast, u, v)
+    x, y = plateASTMap(ast, a - np.radians(1.0), b, reverse_map=True)
 
     rot = np.arctan2(v - y, x - u) - np.pi/2
     if rot < -np.pi:
         rot += 2*np.pi
 
-    exact.rot = rot
+    ast.rot = rot
 
     ######
 
 
-    return exact
+    return ast
 
 
 
 
-def plateASTconv(exact, th, phi):
+def plateASTconv(ast, th, phi):
     """ Map theta, phi to gnomonic coordinates. """
 
-    R = exact.R
+    R = ast.R
 
     # Init vector v
     v = np.zeros(3)
@@ -278,10 +280,10 @@ def plateASTconv(exact, th, phi):
 
 
 
-def plateASTundo(exact, p, q):
+def plateASTundo(ast, p, q):
     """ Map gnomonic coordinates to theta, phi. """
 
-    M = exact.M
+    M = ast.M
 
     # Calculate beta and gamma
     bet = np.arcsin(np.hypot(p, q))
@@ -312,20 +314,21 @@ def plateASTundo(exact, p, q):
 
 
 
-def plateASTMap(exact, x, y, reverse_map=False):
-    """ Map the mirror encoder coordinates (Hx, Hy) to sky coordinates (theta, phi) given an 
-        appropriate exact plate. If a reverse mapping is desired, set reverse_map=True.
+def plateASTMap(ast, x, y, reverse_map=False):
+    """ Map the cartesian (image or galvo encoder) coordinates (x, y) to sky coordinates (theta, phi) given an 
+        appropriate ast plate. If a reverse mapping is desired, set reverse_map=True.
+        Theta is the zenith angle, phi is the azimuth +N of due E.
         
     Arguments:
-        scale: [AstPlate object] AST plate structure
-        x: [float] input parameter 1 (Hx by default, theta if reverse_map=True)
-        y: [float] input parameter 2 (Hy by default, phi if reverse_map=True)
+        ast: [AstPlate object] AST plate structure.
+        x: [float] input parameter 1 (x by default, theta in radians if reverse_map=True).
+        y: [float] input parameter 2 (y by default, phi in radians if reverse_map=True).
 
     Kwargs:
-        reverse_map: [bool] default False, if True, revese mapping is performed
+        reverse_map: [bool] Default False, if True, revese mapping is performed.
 
     Return:
-        [tuple of floats]: output parameters (theta, phi) by default, (Hx, Hy) if reverse_map=True
+        [tuple of floats]: Output parameters (theta, phi in radians) by default, (x, y) if reverse_map=True.
 
     """
 
@@ -333,11 +336,11 @@ def plateASTMap(exact, x, y, reverse_map=False):
     if not reverse_map:
 
         # Normalize coordinates to 0
-        x -= exact.wid/2.0
-        y -= exact.ht/2.0
+        x -= ast.wid/2.0
+        y -= ast.ht/2.0
 
-        a = exact.a
-        b = exact.b
+        a = ast.a
+        b = ast.b
 
         # Project onto (p, q) plane
         p = a[0] + a[1]*x + a[2]*x**2 + a[3]*x**3 + a[4]*y + a[5]*y**2 + a[6]*y**3 + a[7]*x*y + a[8]*x**2*y + \
@@ -348,7 +351,7 @@ def plateASTMap(exact, x, y, reverse_map=False):
 
         
         # Map gonomnic coordinates to theta, phi
-        th, phi = plateASTundo(exact, p, q)
+        th, phi = plateASTundo(ast, p, q)
 
         return th, phi
 
@@ -358,11 +361,11 @@ def plateASTMap(exact, x, y, reverse_map=False):
 
         th, phi = x, y
             
-        c = exact.c
-        d = exact.d
+        c = ast.c
+        d = ast.d
 
         # Map theta, phi to gnomonic coordinates
-        p, q = plateASTconv(exact, th, phi)
+        p, q = plateASTconv(ast, th, phi)
 
         u = c[0] + c[1]*p + c[2]*p**2 + c[3]*p**3 + c[4]*q + c[5]*q**2 + c[6]*q**3 + c[7]*p*q + c[8]*p**2*q + \
             c[9]*p*q**2
@@ -371,7 +374,51 @@ def plateASTMap(exact, x, y, reverse_map=False):
             d[9]*p*q**2
 
         # Calculate Hx, Hy
-        x = u + exact.wid/2.0
-        y = v + exact.ht/2.0
+        x = u + ast.wid/2.0
+        y = v + ast.ht/2.0
 
         return x, y
+
+
+
+def xy2RaDecAST(time_data, X_data, Y_data, level_data, ast, photom_offset):
+    """ Converts image XY to RA,Dec, but it takes a platepar instead of individual parameters. 
+    
+    Arguments:
+        time_data: [2D ndarray] Numpy array containing time tuples of each data point (year, month, day, 
+            hour, minute, second, millisecond).
+        X_data: [ndarray] 1D numpy array containing the image X component.
+        Y_data: [ndarray] 1D numpy array containing the image Y component.
+        level_data: [ndarray] Levels of the meteor centroid.
+        ast: [AstPlate object] AST plate structure.
+        photom_offset: [float] Photometric offset used to compute the magnitude.
+
+
+    Return:
+        (JD_data, RA_data, dec_data, magnitude_data): [tuple of ndarrays]
+            JD_data: [ndarray] Julian date of each data point.
+            RA_data: [ndarray] Right ascension of each point (deg).
+            dec_data: [ndarray] Declination of each point (deg).
+            magnitude_data: [ndarray] Array of meteor's lightcurve apparent magnitudes.
+    """
+
+    X_data = np.array(X_data)
+    Y_data = np.array(Y_data)
+
+    # Compute theta and phi from X, Y
+    theta_data, phi_data = plateASTMap(ast, X_data, Y_data)
+
+    # Compute altitude and azimuth in degrees
+    azimuth_data = np.degrees(np.pi/2 - phi_data)
+    altitude_data = np.degrees(np.pi/2 - theta_data)
+
+    # Convert azimuth (+E of due N) and altitude to RA and Dec
+    JD_data, RA_data, dec_data = altAzToRADec(np.degrees(ast.lat), np.degrees(ast.lon), time_data, \
+        azimuth_data, altitude_data)
+
+    # Calculate magnitudes
+    magnitude_data = calculateMagnitudes(level_data, -2.5, photom_offset)
+
+
+    return JD_data, RA_data, dec_data, magnitude_data
+

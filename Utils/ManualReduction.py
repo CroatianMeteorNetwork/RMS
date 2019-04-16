@@ -24,7 +24,7 @@ import matplotlib.patches as mpatches
 from matplotlib.font_manager import FontProperties
 
 import RMS.ConfigReader as cr
-from RMS.Astrometry.ApplyAstrometry import XY2CorrectedRADecPP, raDec2AltAz, applyAstrometryFTPdetectinfo
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDec2AltAz, applyAstrometryFTPdetectinfo
 from RMS.Formats.FRbin import read as readFR
 from RMS.Formats.FRbin import validFRName
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
@@ -829,7 +829,7 @@ class ManualReductionTool(object):
             time_data = [self.img_handle.currentTime()]*len(intensities)
 
             # Compute the magntiudes
-            _, _, _, mag_data = XY2CorrectedRADecPP(time_data, x_centroids, y_centroids, intensities, self.platepar)
+            _, _, _, mag_data = xyToRaDecPP(time_data, x_centroids, y_centroids, intensities, self.platepar)
 
 
             # Plot the magnitudes
@@ -1247,7 +1247,7 @@ class ManualReductionTool(object):
             time_data = [self.img_handle.currentFrameTime()]
 
             # Compute RA, dec
-            jd, ra, dec, _ = XY2CorrectedRADecPP(time_data, [x], [y], [1], self.platepar)
+            jd, ra, dec, _ = xyToRaDecPP(time_data, [x], [y], [1], self.platepar)
 
             # Compute alt, az
             azim, alt = raDec2AltAz(jd[0], self.platepar.lon, self.platepar.lat, ra[0], dec[0])
