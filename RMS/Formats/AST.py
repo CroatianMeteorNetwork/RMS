@@ -278,6 +278,9 @@ def plateASTconv(ast, th, phi):
 
     return p, q
 
+# Vectorize the forward mapping function
+plateASTconv = np.vectorize(plateASTconv, excluded=['ast'])
+
 
 
 def plateASTundo(ast, p, q):
@@ -311,6 +314,9 @@ def plateASTundo(ast, p, q):
     phi = np.arctan2(u[1], u[0])
 
     return th, phi
+
+# Vectorize the reverse mapping function
+plateASTundo = np.vectorize(plateASTundo, excluded=['ast'])
 
 
 
@@ -381,7 +387,7 @@ def plateASTMap(ast, x, y, reverse_map=False):
 
 
 
-def xy2RaDecAST(time_data, X_data, Y_data, level_data, ast, photom_offset):
+def xyToRaDecAST(time_data, X_data, Y_data, level_data, ast, photom_offset):
     """ Converts image XY to RA,Dec, but it takes a platepar instead of individual parameters. 
     
     Arguments:
@@ -413,7 +419,7 @@ def xy2RaDecAST(time_data, X_data, Y_data, level_data, ast, photom_offset):
     altitude_data = np.degrees(np.pi/2 - theta_data)
 
     # Convert azimuth (+E of due N) and altitude to RA and Dec
-    JD_data, RA_data, dec_data = altAzToRADec(np.degrees(ast.lat), np.degrees(ast.lon), time_data, \
+    JD_data, RA_data, dec_data = altAzToRADec(np.degrees(ast.lat), np.degrees(ast.lon), 0.0, time_data, \
         azimuth_data, altitude_data)
 
     # Calculate magnitudes

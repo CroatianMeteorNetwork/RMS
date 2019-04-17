@@ -1569,6 +1569,7 @@ if __name__ == "__main__":
 
         # Quit if the AST file does not exist
         if not os.path.isfile(ast_path):
+            print()
             print('The AST file could not be loaded: {:s}'.format(ast_path))
             print('Exiting...')
             sys.exit()
@@ -1582,6 +1583,7 @@ if __name__ == "__main__":
         photom_offset = cml_args.photoff
 
         if photom_offset is None:
+            print()
             print('The photometric offset has to be given with argument --photoff if the AST plate is given with the --asgard argument.')
             print('Exiting...')
             sys.exit()
@@ -1661,7 +1663,7 @@ if __name__ == "__main__":
 
 
         # Set the main directory to the the given input directory
-        main_dir = dir_path_input
+        main_dir = img_handle_main.dir_path
 
 
 
