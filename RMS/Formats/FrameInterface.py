@@ -828,7 +828,7 @@ class InputTypeUWOVid(object):
 
         # Open the vid file
         self.vid = VidStruct()
-        self.vid_file = open(self.vid_path, 'rb')
+        self.vid_file = open(self.vid_path, 'rb', buffering=65536)
 
         # Read one video frame and rewind to beginning
         readVidFrame(self.vid, self.vid_file)
