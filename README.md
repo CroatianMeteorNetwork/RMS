@@ -101,7 +101,7 @@ Alternatively, if you are using Anaconda Python, you can install all libraries e
 
 ```
 conda install -y numpy scipy gitpython cython matplotlib
-conda install -y -c conda-forge pyephem Pillow
+conda install -y -c conda-forge pyephem Pillow imreg_dft
 conda install -y -c astropy astropy
 ```
 
