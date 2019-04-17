@@ -105,7 +105,7 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
         if flat_path is not None:
             
             # Load the flat
-            flat_struct = Image.loadFlat(*os.path.split(flat_path), dtype=dtype, byteswap=byteswap, dark=dark)
+            flat_struct = Image.loadFlat(*os.path.split(flat_path), dtype=dtype, byteswap=byteswap)
 
 
         if flat_struct is not None:

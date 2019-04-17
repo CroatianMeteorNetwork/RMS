@@ -2194,7 +2194,7 @@ class PlateTool(object):
         try:
             # Load the flat, byteswap the flat if vid file is used or UWO png
             flat = Image.loadFlat(*os.path.split(flat_file), dtype=self.img_data_raw.dtype, \
-                byteswap=self.img_handle.byteswap, dark=self.dark)
+                byteswap=self.img_handle.byteswap)
         except:
             messagebox.showerror(title='Flat field file error', \
                 message='Flat could not be loaded!')

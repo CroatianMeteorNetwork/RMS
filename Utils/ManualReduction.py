@@ -368,7 +368,7 @@ class ManualReductionTool(object):
         try:
             # Load the flat. Byteswap the flat if vid file is used
             flat = Image.loadFlat(*os.path.split(flat_file), dtype=self.current_image.dtype, \
-                byteswap=byteswap, dark=self.dark)
+                byteswap=byteswap)
             
         except:
             messagebox.showerror(title='Flat field file error', \
