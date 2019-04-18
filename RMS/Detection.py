@@ -582,8 +582,8 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
         """ Least squares fit.
         """
 
-        A = np.vstack([x, np.ones(len(x))]).T
-        m, c = np.linalg.lstsq(A, y, rcond=None)[0]
+        A = np.vstack([x, np.ones(len(x)).astype(np.float64)]).T
+        m, c = np.linalg.lstsq(A, y, rcond=-1)[0]
 
         return m, c
 
