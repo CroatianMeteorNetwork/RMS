@@ -662,8 +662,8 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
         log.debug('Fitting centroid X and Y progressions in time failed with message:\n' + repr(e))
         log.debug(repr(traceback.format_exception(*sys.exc_info())))
         log.debug('Filtering centroids failed at fitting X and Y progressions in time, skipping filtering...')
-        print('x_array:', x_array)
-        print('y_array:', y_array)
+        logDebug('x_array:', x_array)
+        logDebug('y_array:', y_array)
         return centroids
 
     filtered_centroids = []
@@ -1176,6 +1176,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     correct_binning=(img_handle.input_type != 'ff'))
 
                 if not ang_vel_status:
+                    logDebug(detected_line)
                     logDebug('Rejected at initial stage due to the angular velocity: {:.2f} deg/s'.format(ang_vel))
                     continue
 
