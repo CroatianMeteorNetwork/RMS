@@ -325,6 +325,8 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         ### ###
 
     else:
+
+        distances = [np.inf]
         
         # If there are no matched stars, plot large text in the middle of the screen
         plt.text(img_w/2, img_h/2, "NO MATCHED STARS!", color='r', alpha=0.5, fontsize=20, ha='center',
