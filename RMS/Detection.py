@@ -22,6 +22,7 @@ from time import time
 import datetime
 import sys, os
 import ctypes
+import traceback
 
 import numpy as np
 import numpy.ctypeslib as npct
@@ -657,7 +658,9 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
     try:
         mX, cX = _LSQfit(x_array, frame_array)
         mY, cY = _LSQfit(y_array, frame_array)
-    except:
+    except Exception as e:
+        log.debug('Fitting centroid X and Y progressions in time failed with message:\n' + repr(e))
+        log.debug(repr(traceback.format_exception(*sys.exc_info())))
         log.debug('Filtering centroids failed at fitting X and Y progressions in time, skipping filtering...')
         return centroids
 
