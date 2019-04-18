@@ -440,7 +440,7 @@ class QueuedPool(object):
 
 
                     # Wait until the pills are 'swallowed'
-                    while self.input_queue.qsize():
+                    while (self.input_queue.qsize() > 0) and (self.active_workers.value() > 0):
                         self.printAndLog('Swallowing pills...', self.input_queue.qsize())
                         time.sleep(0.1)
 
@@ -535,6 +535,7 @@ class QueuedPool(object):
 
             # Try adding the job to processing queue again
             if not repeated:
+                time.sleep(0.05)
                 self.addJob(job, wait_time=wait_time, repeated=True)
                 return None
 
