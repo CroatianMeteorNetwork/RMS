@@ -643,11 +643,11 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
 
 
 
-    # Skip centroid correction if there are not conteroids, of there's only one
+    # Skip centroid correction if there are not centroids, of there's only one
     if len(centroids) < 2:
         return centroids
 
-    centroids_array = np.array(centroids)
+    centroids_array = np.array(centroids).astype(np.float64)
 
     # Separate by individual columns of the centroid array
     frame_array = centroids_array[:,0]
