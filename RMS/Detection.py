@@ -642,12 +642,55 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
         return filtered_chains
 
 
+    def _filterFrameGaps(centroids):
+        """ Filter centroid chains with gaps in frames. All chains with a gap of more than 2 frames will be 
+            stripped at the edges. 
+        """
+
+        # Filter edge frame outliers until a stable set is achieved
+
+        prev_len = np.inf
+        while len(centroids) < prev_len:
+
+            prev_len = len(centroids)
+            frame_array = centroids[:,0]
+
+            # Compute median frame difference
+            frame_diffs = frame_array[1:] - frame_array[:-1]
+            frame_diff_med = np.median(frame_diffs)
+            
+            mask_array = np.ones_like(frame_array)
+
+            # If frame differences in the first half are larger than 2x the median frame difference, cull them
+            for i in range(len(frame_diffs)//2):
+                if frame_diffs[i] > 2*frame_diff_med:
+                    mask_array[i] = 0
+
+            # If frame differences in the last half are larger than 2x the median frame difference, cull them
+            for i in range(len(frame_diffs)//2, len(frame_diffs)):
+                if frame_diffs[i] > 2*frame_diff_med:
+                    mask_array[i + 1] = 0
+
+            # Filter centroids by mask
+            centroids = centroids[np.where(mask_array)]
+
+        return centroids
+
 
     # Skip centroid correction if there are not enough centroids
     if len(centroids) < 3:
         return centroids
 
     centroids_array = np.array(centroids).astype(np.float64)
+
+    # Filter centroids of frame gaps
+    centroids_array = _filterFrameGaps(centroids_array)
+
+    # Skip centroid correction if there are not enough centroids
+    if len(centroids) < 3:
+        return centroids
+
+        
 
     # Separate by individual columns of the centroid array
     frame_array = centroids_array[:,0]
@@ -1418,7 +1461,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         if config.detection_binning_method == 'avg':
                             intensity *= config.detection_binning_factor**2
 
-                    logDebug("centroid: fr {:.1f}, x {:.2f}, y {:.2f}, intens {:d}".format(frame_no, \
+                    logDebug("centroid: fr {:>12.3f}, x {:>7.2f}, y {:>7.2f}, intens {:d}".format(frame_no, \
                         x_centroid, y_centroid, intensity))
 
                     # Add computed centroid to the centroid list
