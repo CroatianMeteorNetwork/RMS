@@ -91,15 +91,21 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars):
         # If the platepar is good, don't recalibrate anymore
         if CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, star_dict_ff, match_radius, \
             verbose=True):
+            print('The fit is good enough!')
             break
+
+
 
         # If there are no matched stars, give up
         n_matched, _, _, _ = CheckFit.matchStarsResiduals(config, working_platepar, catalog_stars, \
             star_dict_ff, match_radius, ret_nmatch=True, verbose=False)
 
         if n_matched == 0:
+            print('No stars matched, stopping the fit!')
             result = None
             break
+
+
 
         ### Recalibrate the platepar just on these stars, use the default platepar for initial params ###
         
@@ -133,6 +139,12 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars):
         # If the fit was not successful, stop further fitting on this FF file
         if (not res.success) or (n_matched < config.min_matched_stars):
 
+            if not res.successful:
+                print('Astrometry fit failed!')
+
+            else:
+                print('Number of matched stars after the fit is smaller than necessary: {:d} < {:d}'.format(n_matched, config.min_matched_stars))
+
             # Indicate that the recalibration failed
             result = None
             break
@@ -142,9 +154,13 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars):
             # If the fit was successful, use the new parameters from now on
             working_platepar = temp_platepar
 
+            print('Astrometry fit successful!')
+
 
     # If the platepar is good, store it
     if CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, star_dict_ff, match_radius):
+
+        print('Saving improved platepar...')
 
         # Mark the platepar to indicate that it was automatically refined with CheckFit
         working_platepar.auto_check_fit_refined = True
@@ -158,6 +174,7 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars):
 
     # Otherwise, indicate that the refinement was not successful
     else:
+        print('No using the refined platepar...')
         result = None
 
 

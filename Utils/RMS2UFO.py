@@ -2,8 +2,6 @@
 
 from __future__ import print_function, division, absolute_import
 
-from __future__ import print_function, division, absolute_import
-
 import os
 import argparse
 import datetime
@@ -13,7 +11,7 @@ import numpy as np
 import RMS.Astrometry.ApplyAstrometry
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats import FFfile
-from RMS.Formats import Platepar
+import RMS.Formats.Platepar
 from RMS.Formats import UFOOrbit
 from RMS import Math
 
@@ -41,7 +39,7 @@ def FTPdetectinfo2UFOOrbitInput(dir_path, file_name, platepar_path, platepar_dic
     # Load the platepar file
     if platepar_dict is None:
 
-        pp = Platepar.Platepar()
+        pp = RMS.Formats.Platepar.Platepar()
         pp.read(platepar_path)
 
 

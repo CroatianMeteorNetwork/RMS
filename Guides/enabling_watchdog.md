@@ -51,7 +51,13 @@ sudo nano /etc/watchdog.conf
 
 Uncomment the line that starts with #watchdog-device by removing the hash (#) to enable the watchdog daemon to use the watchdog device.
 
-Uncomment the line that says #max-load-1 = 24 by removing the hash symbol to reboot the device if the load goes over 24 over 1 minute. A load of 25 of one minute means that you would have needed 25 Raspberry Pis to complete that task in 1 minute. You may tweak this value to your liking.
+Uncomment the line that says #max-load-1 = 24 by removing the hash symbol to reboot the device if the load goes over 24 over 1 minute. Change this number to 100, so it will read:
+
+```
+max-load-1 = 100
+```
+
+A load of 100 of one minute means that you would have needed 100 Raspberry Pis to complete that task in 1 minute.
 
 Finally, add this line at the end of the file:
 
