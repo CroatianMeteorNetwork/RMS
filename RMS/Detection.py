@@ -643,8 +643,8 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
 
 
 
-    # Skip centroid correction if there are not centroids, of there's only one
-    if len(centroids) < 2:
+    # Skip centroid correction if there are not enough centroids
+    if len(centroids) < 3:
         return centroids
 
     centroids_array = np.array(centroids).astype(np.float64)
@@ -662,6 +662,8 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
         log.debug('Fitting centroid X and Y progressions in time failed with message:\n' + repr(e))
         log.debug(repr(traceback.format_exception(*sys.exc_info())))
         log.debug('Filtering centroids failed at fitting X and Y progressions in time, skipping filtering...')
+        print('x_array:', x_array)
+        print('y_array:', y_array)
         return centroids
 
     filtered_centroids = []
@@ -1347,10 +1349,10 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
                     # Calculate weighted centroids
                     x_weighted = half_frame_pixels[:,0]*np.transpose(max_weights)
-                    x_centroid = np.sum(x_weighted)/float(np.sum(max_weights))
+                    x_centroid = np.sum(x_weighted.astype(np.float64))/float(np.sum(max_weights))
 
                     y_weighted = half_frame_pixels[:,1]*np.transpose(max_weights)
-                    y_centroid = np.sum(y_weighted)/float(np.sum(max_weights))
+                    y_centroid = np.sum(y_weighted.astype(np.float64))/float(np.sum(max_weights))
 
 
                     # Correct the rolling shutter effect
