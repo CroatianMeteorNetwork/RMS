@@ -10,6 +10,7 @@ import random
 import argparse
 
 import numpy as np
+import scipy.ndimage
 
 import RMS.ConfigReader as cr
 import RMS.Formats.CALSTARS as CALSTARS
@@ -19,7 +20,7 @@ from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Astrometry.Conversions import date2JD
 
 
-def makeFlat(dir_path, config, nostars=False):
+def makeFlat(dir_path, config, nostars=False, use_images=False):
     """ Makes a flat field from the files in the given folder. CALSTARS file is needed to estimate the
         quality of every image by counting the number of detected stars.
 
@@ -29,46 +30,81 @@ def makeFlat(dir_path, config, nostars=False):
 
     Keyword arguments:
         nostars: [bool] If True, all files will be taken regardless of if they have stars on them or not.
+        use_images: [bool] Use image files instead of FF files. False by default.
 
     Return:
         [2d ndarray] Flat field image as a numpy array. If the flat generation failed, None will be returned.
         
     """
 
+    # If only images are used, then don't look for a CALSTARS file
+    if use_images:
+        nostars = True
 
-    # Find the CALSTARS file in the given folder
-    calstars_file = None
-    for calstars_file in os.listdir(dir_path):
-        if ('CALSTARS' in calstars_file) and ('.txt' in calstars_file):
-            break
+    # Load the calstars file if it should be used
+    if not nostars:
 
-    if calstars_file is None:
-        print('CALSTARS file could not be found in the given directory!')
-        return None
+        # Find the CALSTARS file in the given folder
+        calstars_file = None
+        for calstars_file in os.listdir(dir_path):
+            if ('CALSTARS' in calstars_file) and ('.txt' in calstars_file):
+                break
 
-    # Load the calstars file
-    calstars_list = CALSTARS.readCALSTARS(dir_path, calstars_file)
+        if calstars_file is None:
+            print('CALSTARS file could not be found in the given directory!')
+            return None
 
-    # Convert the list to a dictionary
-    calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
+        # Load the calstars file
+        calstars_list = CALSTARS.readCALSTARS(dir_path, calstars_file)
 
-    print('CALSTARS file: ' + calstars_file + ' loaded!')
+        # Convert the list to a dictionary
+        calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
-    # A list of FF files which have any stars on them
-    calstars_ff_files = [line[0] for line in calstars_list]
+        print('CALSTARS file: ' + calstars_file + ' loaded!')
 
-    ff_list = []
+        # A list of FF files which have any stars on them
+        calstars_ff_files = [line[0] for line in calstars_list]
 
-    # Get a list of FF files in the folder
-    for file_name in os.listdir(dir_path):
-        if validFFName(file_name) and ((file_name in calstars_ff_files) or nostars):
-            ff_list.append(file_name)
+    else:
+        calstars = {}
+
+
+
+    # Use image files
+    if use_images:
+
+        # Find the file type with the highest file frequency in the given folder
+        file_extensions = []
+        for file_name in os.listdir(dir_path):
+            file_ext = file_name.split('.')[-1]
+            if file_ext.lower() in ['jpg', 'png', 'bmp']:
+                file_extensions.append(file_ext)
             
+        # Get only the most frequent file type
+        file_freqs = np.unique(file_extensions, return_counts=True)
+        most_freq_type = file_freqs[0][0]
 
-    # Check that there are any FF files in the folder
-    if not ff_list:
-        print('No valid FF files in the selected folder!')
-        return None
+        print('Using image type:', most_freq_type)
+
+        # Take only files of that file type
+        ff_list = [file_name for file_name in sorted(os.listdir(dir_path)) \
+            if file_name.lower().endswith(most_freq_type)]
+
+
+    # Use FF files
+    else:
+        ff_list = []
+
+        # Get a list of FF files in the folder
+        for file_name in os.listdir(dir_path):
+            if validFFName(file_name) and ((file_name in calstars_ff_files) or nostars):
+                ff_list.append(file_name)
+                
+
+        # Check that there are any FF files in the folder
+        if not ff_list:
+            print('No valid FF files in the selected folder!')
+            return None
 
 
 
@@ -77,9 +113,6 @@ def makeFlat(dir_path, config, nostars=False):
 
     # Take only those FF files with enough stars on them
     for ff_name in ff_list:
-
-        if not validFFName(ff_name):
-            continue
 
         if (ff_name in calstars) or nostars:
 
@@ -99,19 +132,27 @@ def makeFlat(dir_path, config, nostars=False):
                 # Add the FF file to the list of FF files to be used to make a flat
                 ff_list_good.append(ff_name)
 
-                # Calculate the time of the FF files
-                ff_time = date2JD(*getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True))
+
+                # If images are used, don't compute the time
+                if use_images:
+                    ff_time = 0
+
+                else:
+                    # Calculate the time of the FF files
+                    ff_time = date2JD(*getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True))
+
+
                 ff_times.append(ff_time)
 
 
     # Check that there are enough good FF files in the folder
-    if (len(ff_times) < config.flat_min_imgs) and not nostars:
+    if (len(ff_times) < config.flat_min_imgs) and (not nostars):
         print('Not enough FF files have enough stars on them!')
         return None
         
     
     # Make sure the files cover at least 2 hours
-    if (not (max(ff_times) - min(ff_times))*24 > 2) and not nostars:
+    if (not (max(ff_times) - min(ff_times))*24 > 2) and (not nostars):
         print('Good FF files cover less than 2 hours!')
         return None
 
@@ -126,7 +167,7 @@ def makeFlat(dir_path, config, nostars=False):
 
 
     c = 0
-    ff_avg_list = []
+    img_list = []
     median_list = []
 
     # Median combine all good FF files
@@ -135,26 +176,36 @@ def makeFlat(dir_path, config, nostars=False):
         # Load 10 files at the time and median combine them, which conserves memory
         if c < 10:
 
-            ff = readFF(dir_path, ff_list_good[i])
+            # Use images
+            if use_images:
+                img = scipy.ndimage.imread(os.path.join(dir_path, ff_list_good[i]), -1)
 
-            # Skip the file if it is corruped
-            if ff is None:
-                continue
 
-            ff_avg_list.append(ff.avepixel)
+            # Use FF files
+            else:
+                ff = readFF(dir_path, ff_list_good[i])
 
-            c += 1 
+                # Skip the file if it is corruped
+                if ff is None:
+                    continue
+
+                img = ff.avepixel
+
+            
+            img_list.append(img)
+
+            c += 1
 
 
         else:
 
-            ff_avg_list = np.array(ff_avg_list)
+            img_list = np.array(img_list)
 
             # Median combine the loaded 10 (or less) images
-            ff_median = np.median(ff_avg_list, axis=0)
+            ff_median = np.median(img_list, axis=0)
             median_list.append(ff_median)
 
-            ff_avg_list = []
+            img_list = []
             c = 0
 
 
@@ -166,7 +217,10 @@ def makeFlat(dir_path, config, nostars=False):
         ff_median = np.median(median_list, axis=0)
 
     else:
-        ff_median = median_list[0]
+        if len(median_list) > 0:
+            ff_median = median_list[0]
+        else:
+            ff_median = np.median(np.array(img_list), axis=0)
 
 
     # Stretch flat to 0-255
@@ -195,6 +249,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-n', '--nostars', action="store_true", \
         help="""Disable requiring stars on images for generating the flat field.""")
 
+    arg_parser.add_argument('-i', '--images', action="store_true", \
+        help="""Use image files (bmp, png, jpg) for flat instead of FF files. Images of the file type with the higest frequency in the directory will be taken.""")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -208,14 +265,13 @@ if __name__ == "__main__":
     config = cr.parse(".config")
 
     # Make the flat
-    ff_median = makeFlat(dir_path, config, nostars=cml_args.nostars)
-
+    ff_median = makeFlat(dir_path, config, nostars=cml_args.nostars, use_images=cml_args.images)
 
     if ff_median is not None:
 
-        # Save the flat in the root directory
-        scipy.misc.imsave(config.flat_file, ff_median)
-        print('Flat saved to:', os.path.join(os.getcwd(), config.flat_file))
+        # # Save the flat in the root directory
+        # scipy.misc.imsave(config.flat_file, ff_median)
+        # print('Flat saved to:', os.path.join(os.getcwd(), config.flat_file))
 
 
         # Save the flat in the input directory

@@ -236,7 +236,14 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     log.info('Making a flat...')
 
     # Make a new flat field image
-    flat_img = makeFlat(night_data_dir, config)
+    try:
+        flat_img = makeFlat(night_data_dir, config)
+
+    except Exception as e:
+        log.debug('Making a flat failed with message:\n' + repr(e))
+        log.debug(repr(traceback.format_exception(*sys.exc_info())))
+        flat_img = None
+        
 
     # If making flat was sucessfull, save it
     if flat_img is not None:
