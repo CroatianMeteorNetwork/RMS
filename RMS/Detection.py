@@ -642,7 +642,7 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
         return filtered_chains
 
 
-    def _filterFrameGaps(centroids):
+    def _filterFrameGaps(centroids, frame_diff_multiplier=3.5):
         """ Filter centroid chains with gaps in frames. All chains with a gap of more than 2 frames will be 
             stripped at the edges. 
         """
@@ -663,12 +663,12 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
 
             # If frame differences in the first half are larger than 2x the median frame difference, cull them
             for i in range(len(frame_diffs)//2):
-                if frame_diffs[i] > 2*frame_diff_med:
+                if frame_diffs[i] > frame_diff_multiplier*frame_diff_med:
                     mask_array[i] = 0
 
             # If frame differences in the last half are larger than 2x the median frame difference, cull them
             for i in range(len(frame_diffs)//2, len(frame_diffs)):
-                if frame_diffs[i] > 2*frame_diff_med:
+                if frame_diffs[i] > frame_diff_multiplier*frame_diff_med:
                     mask_array[i + 1] = 0
 
             # Filter centroids by mask
