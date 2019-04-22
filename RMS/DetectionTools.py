@@ -418,7 +418,7 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
                 # Get indices of the stripe that is perpendicular to the meteor, and whose thickness is the 
                 # length of the meteor on this particular frame - this is called stripe_indices_motion
 
-                # Compute the previoius, current, and the next linear model position of the meteor on the 
+                # Compute the previous, current, and the next linear model position of the meteor on the 
                 #   image
                 model_pos_prev = point1[:2] + (fr - 1 - z1)*motion_vect
                 model_pos = point1[:2] + (fr - z1)*motion_vect
