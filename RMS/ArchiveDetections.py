@@ -7,6 +7,7 @@ import logging
 
 from RMS.Formats.FFfile import validFFName
 from RMS.Misc import archiveDir
+from RMS.Routines import MaskImage
 from Utils.GenerateThumbnails import generateThumbnails
 from Utils.StackFFs import stackFFs
 
@@ -162,9 +163,17 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
     log.info('Generating a stack of detections...')
 
+
+    # Load the mask
+    mask = None
+    if os.path.exists(config.mask_file):
+        mask_path = os.path.abspath(config.mask_file)
+        mask = MaskImage.loadMask(mask_path)
+        
+
     # Make a co-added image of all detection. Filter out possible clouds
     stack_path, _ = stackFFs(captured_path, 'jpg', deinterlace=(config.deinterlace_order > 0), subavg=True, \
-        filter_bright=True, file_list=sorted(file_list))
+        filter_bright=True, file_list=sorted(file_list), mask=mask)
 
     if stack_path is not None:
 

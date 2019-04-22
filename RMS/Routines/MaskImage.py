@@ -87,7 +87,7 @@ def applyMask(input_image, mask, ff_flag=False, image=False):
     """ Apply a mask to the given image array or FF file. 
     
     Keyword arguments:
-        image: [bool] If True, the image for the mask was given, and no the MaskStructure instance.
+        image: [bool] If True, the image for the mask was given, and not the MaskStructure instance.
     """
 
     if mask is None:

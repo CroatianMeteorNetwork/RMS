@@ -12,11 +12,12 @@ import scipy.misc
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
 from RMS.Routines.Image import deinterlaceBlend, blendLighten, loadFlat, applyFlat, adjustLevels
+from RMS.Routines import MaskImage
 
 
 
 def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_bright=False, flat_path=None,
-    file_list=None):
+    file_list=None, mask=None):
     """ Stack FF files in the given folder. 
 
     Arguments:
@@ -33,6 +34,7 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
             False.
         file_list: [list] A list of file for stacking. False by default, in which case all FF files in the
             given directory will be used.
+        mask: [MaskStructure] Mask to apply to the stack. None by default.
 
     Return:
         stack_path, merge_img:
@@ -158,6 +160,11 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
     # Stretch the levels
     merge_img = adjustLevels(merge_img, np.percentile(merge_img, 0.5), 1.3, np.percentile(merge_img, 99.9))
 
+
+    # Apply the mask, if given
+    if mask is not None:
+        merge_img = MaskImage.applyMask(merge_img, mask)
+
     
     # Save the blended image
     scipy.misc.imsave(stack_path, merge_img)
@@ -195,10 +202,21 @@ if __name__ == '__main__':
     arg_parser.add_argument('-f', '--flat', nargs='?', metavar='FLAT_PATH', type=str, default='', 
         help="Apply a given flat frame. If no path to the flat is given, flat.bmp from the folder will be taken.")
 
+    arg_parser.add_argument('-m', '--mask', metavar='MASK_PATH', type=str, 
+        help="Apply a given flat frame. If no path to the flat is given, flat.bmp from the folder will be taken.")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
     #########################
+
+
+    # Load the mask
+    mask = None
+    if os.path.exists(cml_args.mask):
+        mask_path = os.path.abspath(cml_args.mask)
+        mask = MaskImage.loadMask(mask_path)
+
 
     # Run stacking
     stack_path, merge_img = stackFFs(cml_args.dir_path[0], cml_args.file_format[0], \
