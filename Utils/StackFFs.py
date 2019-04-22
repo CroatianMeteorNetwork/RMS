@@ -215,13 +215,14 @@ if __name__ == '__main__':
     mask = None
     if os.path.exists(cml_args.mask):
         mask_path = os.path.abspath(cml_args.mask)
+        print('Loading mask:', mask_path)
         mask = MaskImage.loadMask(mask_path)
 
 
     # Run stacking
     stack_path, merge_img = stackFFs(cml_args.dir_path[0], cml_args.file_format[0], \
         deinterlace=cml_args.deinterlace, subavg=cml_args.subavg, filter_bright=cml_args.brightfilt, \
-        flat_path=cml_args.flat)
+        flat_path=cml_args.flat, mask=mask)
 
 
 
