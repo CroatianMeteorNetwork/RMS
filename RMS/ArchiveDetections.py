@@ -2,7 +2,9 @@
 
 
 import os
+import sys
 import logging
+import traceback
 
 
 from RMS.Formats.FFfile import validFFName
@@ -145,44 +147,52 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
     log.info('Generating thumbnails...')
 
-    # Generate captured thumbnails
-    generateThumbnails(captured_path, config, 'CAPTURED')
+    try:
+        # Generate captured thumbnails
+        generateThumbnails(captured_path, config, 'CAPTURED')
+
+        # Get the list of files to archive
+        file_list = selectFiles(captured_path, ff_detected)
 
 
-    # Get the list of files to archive
-    file_list = selectFiles(captured_path, ff_detected)
+        # Generate detected thumbnails
+        mosaic_file = generateThumbnails(captured_path, config, 'DETECTED', file_list=sorted(file_list))
 
+        # Add the detected mosaic file to the selected list
+        file_list.append(mosaic_file)
 
-    # Generate detected thumbnails
-    mosaic_file = generateThumbnails(captured_path, config, 'DETECTED', file_list=sorted(file_list))
-
-    # Add the detected mosaic file to the selected list
-    file_list.append(mosaic_file)
+    except Exception as e:
+        log.error('Generating thumbnails failed with error:' + repr(e))
+        log.error(*traceback.format_exception(*sys.exc_info()))
 
 
 
     log.info('Generating a stack of detections...')
 
+    try:
 
-    # Load the mask
-    mask = None
-    if os.path.exists(config.mask_file):
-        mask_path = os.path.abspath(config.mask_file)
-        mask = MaskImage.loadMask(mask_path)
-        
+        # Load the mask
+        mask = None
+        if os.path.exists(config.mask_file):
+            mask_path = os.path.abspath(config.mask_file)
+            mask = MaskImage.loadMask(mask_path)
+            
 
-    # Make a co-added image of all detection. Filter out possible clouds
-    stack_path, _ = stackFFs(captured_path, 'jpg', deinterlace=(config.deinterlace_order > 0), subavg=True, \
-        filter_bright=True, file_list=sorted(file_list), mask=mask)
+        # Make a co-added image of all detection. Filter out possible clouds
+        stack_path, _ = stackFFs(captured_path, 'jpg', deinterlace=(config.deinterlace_order > 0), subavg=True, \
+            filter_bright=True, file_list=sorted(file_list), mask=mask)
 
-    if stack_path is not None:
+        if stack_path is not None:
 
-        # Extract the name of the stack image
-        stack_file = os.path.basename(stack_path)
-        
-        # Add the stack path to the list of files to put in the archive
-        file_list.append(stack_file)
+            # Extract the name of the stack image
+            stack_file = os.path.basename(stack_path)
+            
+            # Add the stack path to the list of files to put in the archive
+            file_list.append(stack_file)
 
+    except Exception as e:
+        log.error('Generating stack failed with error:' + repr(e))
+        log.error(*traceback.format_exception(*sys.exc_info()))
 
 
 
