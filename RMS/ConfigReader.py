@@ -410,6 +410,9 @@ class Config:
         self.thumb_stack   =  5
         self.thumb_n_width = 10
 
+        ##### Stack
+        self.stack_mask = False
+
 
 def normalizeParameter(param, config, binning=1):
     """ Normalize detection parameters for fireball detection to be size independent.
@@ -478,6 +481,7 @@ def parseAllSections(config, parser):
     parseStarExtraction(config, parser)
     parseCalibration(config, parser)
     parseThumbnails(config, parser)
+    parseStack(config, parser)
 
 
 
@@ -1081,3 +1085,14 @@ def parseThumbnails(config, parser):
 
     if parser.has_option(section, "thumb_n_width"):
         config.thumb_n_width = parser.getint(section, "thumb_n_width")
+
+
+
+def parseStack(config, parser):
+    section = "Stack"
+    
+    if not parser.has_section(section):
+        return
+
+    if parser.has_option(section, "stack_mask"):
+        config.stack_mask = parser.getboolean(section, "stack_mask")
