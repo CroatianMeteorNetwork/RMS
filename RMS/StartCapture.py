@@ -286,7 +286,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # If detection should be performed
     if not nodetect:
 
-        log.info('Finishing up the detection, ' + str(detector.input_queue.qsize()) + ' files to process...')
+        try:
+            log.info('Finishing up the detection, ' + str(detector.input_queue.qsize()) \
+                + ' files to process...')
+        except:
+            print('Finishing up the detection... error when getting input queue size!')
 
 
         # Reset the Ctrl+C to KeyboardInterrupt
