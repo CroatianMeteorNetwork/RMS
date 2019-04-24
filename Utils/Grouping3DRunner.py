@@ -52,6 +52,9 @@ if __name__ == "__main__":
             # Dummy frames from FF file
             frames = FFfile.reconstruct(ff)
 
+            # Add avepixel to all reconstructed frames
+            frames += ff.avepixel
+
             extract_obj = Extractor(config, bin_dir)
             extract_obj.compressed = compressed
             extract_obj.frames = frames

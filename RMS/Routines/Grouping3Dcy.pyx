@@ -21,6 +21,7 @@ ctypedef np.uint8_t UINT8_TYPE_t
 cdef extern from "math.h":
     double floor(double)
     double abs(double)
+    double sqrt(double)
 
 
 
@@ -378,7 +379,7 @@ def find3DLines(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, start_time, config
 
             # calculate a parameter for line quality
             # larger average distance = less quality
-            line_quality = <float> counter - line_distance_const * line_dist_avg
+            line_quality = <float> counter - line_distance_const*line_dist_avg
             results_list[results_counter] = Line(x1, y1, z1, x2, y2, z2, counter, line_quality)
             results_counter += 1
 
@@ -597,7 +598,7 @@ def detectionCutOut(np.ndarray[UINT8_TYPE_t, ndim=3] frames, np.ndarray[UINT8_TY
     cdef float k
     cdef int x_m, x_p, x_t, y_m, y_p, y_t, half_max_size = size_max//2, half_f = f//2
     cdef int x, y, i, x2, y2, num = 0, max_val, pixel, limit, max_width, max_height, size, half_size, \
-        num_equal, frames_ysize, frames_xsize
+        num_equal, frames_ysize, frames_xsize, prev_size, prev_size_counter
 
 
     # Init the output crops array
@@ -613,6 +614,7 @@ def detectionCutOut(np.ndarray[UINT8_TYPE_t, ndim=3] frames, np.ndarray[UINT8_TY
     frames_xsize = frames.shape[2]
 
     # Go though all frames
+    prev_size = 0
     for i in range(first_frame, last_frame):
         
         # Calculate position of the detection at current time
@@ -680,11 +682,12 @@ def detectionCutOut(np.ndarray[UINT8_TYPE_t, ndim=3] frames, np.ndarray[UINT8_TY
         max_width = 0 
         max_height = 0
         num_equal = 1
-        limit = <int> intensity_size_threshold*max_val
+        limit = <int> (intensity_size_threshold*max_val)
 
         for y in range(y_m, y_p):
             for x in range(x_m, x_p):
-    
+                
+                # If the pixel intensity above average is above the limit, increase the size
                 if (frames[i, y, x] - compressed[2, y, x]) >= limit:
 
                     max_height += <int> abs(y_t - y)
@@ -693,9 +696,9 @@ def detectionCutOut(np.ndarray[UINT8_TYPE_t, ndim=3] frames, np.ndarray[UINT8_TY
         
         # Compute size
         if max_height > max_width:
-            size = max_height//num_equal
+            size = max_height//(<int>sqrt(<float>num_equal))
         else:
-            size = max_width//num_equal
+            size = max_width//(<int>sqrt(<float>num_equal))
 
         
         if size < size_min:
@@ -703,6 +706,22 @@ def detectionCutOut(np.ndarray[UINT8_TYPE_t, ndim=3] frames, np.ndarray[UINT8_TY
 
         elif size > half_max_size:
             size = half_max_size
+
+
+
+        # If the current size is > than the previous size, use this size of larger for the next 4 frames
+        if size >= prev_size:
+            prev_size_counter = 4
+
+        else:
+            if prev_size_counter > 0:
+                prev_size_counter -= 1
+
+        if prev_size_counter > 0:
+            if prev_size > size:
+                size = prev_size
+
+
         
         # Save size
         sizepos[num, 3] = size
@@ -750,6 +769,10 @@ def detectionCutOut(np.ndarray[UINT8_TYPE_t, ndim=3] frames, np.ndarray[UINT8_TY
         
         
         num += 1
+
+
+        # Keep the previous frame size
+        prev_size = size
     
 
 
