@@ -673,8 +673,8 @@ class PlateTool(object):
                 # Check if the picked star is in the window, and plot it if it is
                 if (x >= x_min_orig) and (x <= x_max_orig) and (y >= y_min_orig) and (y <= y_max_orig):
 
-                    xp = zoom_factor*(x - x_min_orig)
-                    yp = zoom_factor*(y - y_min_orig)
+                    xp = zoom_factor*(x - x_min_orig) + 1
+                    yp = zoom_factor*(y - y_min_orig) + 1
 
                     if marker == '+':
                         
