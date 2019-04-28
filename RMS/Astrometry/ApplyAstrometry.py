@@ -937,9 +937,10 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
         meteor_meas = np.c_[np.ones((meteor_meas.shape[0], 1)), meteor_meas]
 
 
-    # Remove all entries where levels are equal to or smaller than 0
+    # Remove all entries where levels are equal to or smaller than 0, unless all are zero
     level_data = meteor_meas[:, 8]
-    meteor_meas = meteor_meas[level_data > 0, :]
+    if np.any(level_data):
+        meteor_meas = meteor_meas[level_data > 0, :]
 
     # Extract frame number, x, y, intensity
     frames = meteor_meas[:, 1]
@@ -1014,6 +1015,12 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
     Return:
         None
     """
+
+    # If the FTPdetectinfo file does not exist, skip everything
+    if not os.path.isfile(os.path.join(dir_path, ftp_detectinfo_file)):
+        print('The given FTPdetectinfo file does not exist:', os.path.join(dir_path, ftp_detectinfo_file))
+        print('The astrometry was not computed!')
+        return None
 
     # Save a copy of the uncalibrated FTPdetectinfo
     ftp_detectinfo_copy = "".join(ftp_detectinfo_file.split('.')[:-1]) + "_uncalibrated.txt"

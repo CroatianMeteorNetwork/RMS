@@ -1377,7 +1377,7 @@ class ManualReductionTool(object):
             # If there are no photometry pixels, set the intensity to 0
             if not pick.photometry_pixels:
                 
-                pick.intensity_sum = 0
+                pick.intensity_sum = 1
 
                 return None
 
@@ -1438,6 +1438,10 @@ class ManualReductionTool(object):
 
             # Compute the background subtracted intensity sum
             pick.intensity_sum = np.ma.sum(crop_img - background_lvl)
+
+            # Make sure the intensity sum is never 0
+            if pick.intensity_sum <= 0:
+                pick.intensity_sum = 1
 
 
     def recomputeAllIntensitySums(self):
