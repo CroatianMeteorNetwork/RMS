@@ -213,10 +213,11 @@ if __name__ == '__main__':
 
     # Load the mask
     mask = None
-    if os.path.exists(cml_args.mask):
-        mask_path = os.path.abspath(cml_args.mask)
-        print('Loading mask:', mask_path)
-        mask = MaskImage.loadMask(mask_path)
+    if cml_args.mask is not None:
+        if os.path.exists(cml_args.mask):
+            mask_path = os.path.abspath(cml_args.mask)
+            print('Loading mask:', mask_path)
+            mask = MaskImage.loadMask(mask_path)
 
 
     # Run stacking
