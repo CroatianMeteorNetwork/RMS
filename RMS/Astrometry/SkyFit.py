@@ -600,7 +600,7 @@ class PlateTool(object):
 
 
             # Crop the image
-            img_crop = np.zeros((2*window_radius, 2*window_radius))
+            img_crop = np.zeros((2*window_radius, 2*window_radius), dtype=self.img_data_processed.dtype)
             dx_min = x_min - x_min_orig
             dx_max = x_max - x_max_orig + 2*window_radius
             dy_min = y_min - y_min_orig
@@ -726,7 +726,6 @@ class PlateTool(object):
 
             # Convert the PIL image object back to array
             img_crop = np.array(img)
-
 
             # Plot the zoomed image
             plt.gcf().figimage(img_crop, xo=xo, yo=yo, zorder=5, cmap='gray', \
@@ -1596,12 +1595,13 @@ class PlateTool(object):
 
 
             # Adjust levels (auto)
-            img_data = Image.adjustLevels(img_data, min_lvl, self.img_gamma, max_lvl)
+            img_data = Image.adjustLevels(img_data, min_lvl, self.img_gamma, max_lvl, scaleto8bits=True)
 
         else:
             
             # Adjust levels (manual)
-            img_data = Image.adjustLevels(img_data, self.img_level_min, self.img_gamma, self.img_level_max)
+            img_data = Image.adjustLevels(img_data, self.img_level_min, self.img_gamma, self.img_level_max,
+                scaleto8bits=True)
 
 
 
@@ -1615,7 +1615,8 @@ class PlateTool(object):
 
         # Show the loaded image (defining the exent speeds up image drawimg)
         plt.imshow(img_data, cmap='gray', interpolation='nearest', \
-            extent=(0, self.img_data_processed.shape[1], self.img_data_processed.shape[0], 0))
+            extent=(0, self.img_data_processed.shape[1], self.img_data_processed.shape[0], 0),
+            vmin=0, vmax=255)
 
         # Draw stars that were paired in picking mode
         self.drawPairedStars()
