@@ -865,8 +865,21 @@ class ManualReductionTool(object):
         # If the platepar is available, compute the magnitudes, otherwise show the instrumental magnitude
         if self.platepar is not None:
             
-            # Get mean time
-            time_data = [self.img_handle.currentTime()]*len(intensities)
+
+            if self.img_handle is not None:
+                
+                # Get mean time
+                time_data = [self.img_handle.currentTime()]*len(intensities)
+
+            else:
+
+                # If there is not image handle, assume it's an FR file
+                dt = filenameToDatetime(os.path.basename(self.fr_file)) \
+                    + datetime.timedelta(seconds=self.current_frame/float(self.fps))
+
+                time_data = [(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, \
+                    dt.microsecond/1000)]*len(intensities)
+
 
             # Compute the magntiudes
             _, _, _, mag_data = xyToRaDecPP(time_data, x_centroids, y_centroids, intensities, self.platepar)
