@@ -78,6 +78,8 @@ def plotFieldsums(dir_path, config):
 
     ### Plot the raw intensity over time ###
     ##########################################################################################################
+
+    plt.figure()
     
     # Plot peak intensitites
     plt.plot(time_data, intensity_data_peak, color='r', linewidth=0.5, zorder=3, label='Peak')
@@ -122,6 +124,7 @@ def plotFieldsums(dir_path, config):
     # Calculate the difference between the peak values and the average values per every FF file
     intensity_data_noavg = intensity_data_peak - intensity_data_avg
 
+    plt.figure()
 
     plt.plot(time_data, intensity_data_noavg, color='k', linewidth=0.5, zorder=3)
 

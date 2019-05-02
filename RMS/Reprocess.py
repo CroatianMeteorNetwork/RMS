@@ -221,8 +221,15 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     log.info('Plotting field sums...')
 
-    # Plot field sums to a graph
-    plotFieldsums(night_data_dir, config)
+    # Plot field sums
+    try:
+        plotFieldsums(night_data_dir, config)
+
+    except Exception as e:
+        log.debug('Plotting field sums failed with message:\n' + repr(e))
+        log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+
 
     # Archive all fieldsums to one archive
     archiveFieldsums(night_data_dir)

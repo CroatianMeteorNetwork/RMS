@@ -420,6 +420,8 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
         ### Plot the photometry ###
 
+        plt.figure(dpi=dpi)
+
         # Take only those stars which are inside the 3/4 of the shorter image axis from the center
         photom_selection_radius = np.min([img_h, img_w])/3
         filter_indices = ((image_stars[:, 0] - img_h/2)**2 + (image_stars[:, 1] \

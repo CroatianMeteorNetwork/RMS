@@ -343,6 +343,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         hour_list.append((FFfile.filenameToDatetime(ff_name) - first_jd).total_seconds()/3600)
 
 
+    plt.figure()
 
     plt.scatter(0, 0, marker='o', edgecolor='k', label='Reference platepar', s=100, c='none', zorder=3)
 
