@@ -8,6 +8,7 @@ import math
 import argparse
 import datetime
 import pytz
+import json
 
 # tkinter import that works on both Python 2 and 3
 try:
@@ -25,6 +26,7 @@ from matplotlib.font_manager import FontProperties
 
 import RMS.ConfigReader as cr
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDec2AltAz, applyAstrometryFTPdetectinfo
+from RMS.Astrometry.Conversions import datetime2JD, jd2Date
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FRbin import read as readFR
 from RMS.Formats.FRbin import validFRName
@@ -115,6 +117,11 @@ class ManualReductionTool(object):
                 
                 # Extract the station name from the FF file
                 self.station_name = self.img_handle.current_ff_file.split("_")[1]
+
+        # Otherwise extract the station code from the FR file
+        else:
+            self.station_name = os.path.basename(self.fr_file).split("_")[1]
+
 
         if self.station_name is None:
             self.station_name = 'manual'
@@ -264,7 +271,6 @@ class ManualReductionTool(object):
         ### INIT IMAGE ###
 
         plt.figure(facecolor='black')
-        plt.gcf().canvas.set_window_title('RMS Manual Reduction')
 
         # Init the first image
         self.updateImage(first_update=True)
@@ -278,6 +284,9 @@ class ManualReductionTool(object):
 
     def registerEventHandling(self):
         """ Register mouse button and key pressess with matplotlib. """
+
+        # Set window title
+        plt.gcf().canvas.set_window_title('RMS Manual Reduction')
 
         # Set the bacground color to black
         #matplotlib.rcParams['axes.facecolor'] = 'k'
@@ -817,6 +826,36 @@ class ManualReductionTool(object):
 
 
 
+    def getCurrentFrameTime(self, frame_no=None):
+        """ Returns the time of the current frame. 
+        
+        Keyword arguments:
+            frame_no: [float] Frame for which to compute the time. None by default which returns the time
+                of the current frame.
+        """
+
+
+        if self.img_handle is not None:
+                
+            # Get mean time
+            time_data = self.img_handle.currentFrameTime(frame_no=frame_no)
+
+        else:
+
+            if frame_no is None:
+                frame_no = self.current_frame
+
+            # If there is no image handle, assume it's an FR file
+            dt = filenameToDatetime(os.path.basename(self.fr_file)) \
+                + datetime.timedelta(seconds=frame_no/float(self.fps))
+
+            time_data = (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, \
+                dt.microsecond/1000)
+
+
+        return time_data
+
+
     def showLightcurve(self):
         """ Show the meteor lightcurve. """
 
@@ -865,21 +904,7 @@ class ManualReductionTool(object):
         # If the platepar is available, compute the magnitudes, otherwise show the instrumental magnitude
         if self.platepar is not None:
             
-
-            if self.img_handle is not None:
-                
-                # Get mean time
-                time_data = [self.img_handle.currentTime()]*len(intensities)
-
-            else:
-
-                # If there is not image handle, assume it's an FR file
-                dt = filenameToDatetime(os.path.basename(self.fr_file)) \
-                    + datetime.timedelta(seconds=self.current_frame/float(self.fps))
-
-                time_data = [(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, \
-                    dt.microsecond/1000)]*len(intensities)
-
+            time_data = [self.getCurrentFrameTime()]*len(intensities)
 
             # Compute the magntiudes
             _, _, _, mag_data = xyToRaDecPP(time_data, x_centroids, y_centroids, intensities, self.platepar)
@@ -1077,6 +1102,9 @@ class ManualReductionTool(object):
 
             # Save the state of the program
             self.saveState()
+
+            # Save the JSON file with the picks
+            self.saveJSON()
 
 
         # Load the dark frame
@@ -1300,20 +1328,7 @@ class ManualReductionTool(object):
         if self.platepar is not None:
 
             # Get the current frame time
-            if self.img_handle is None:
-
-                # If there is not image handle, assume it's an FR file
-                dt = filenameToDatetime(os.path.basename(self.fr_file)) \
-                    + datetime.timedelta(seconds=self.current_frame/float(self.fps))
-
-                time_data = [(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)]
-
-
-            # Get current frame time
-            else:
-                time_data = [self.img_handle.currentFrameTime()]
-
-
+            time_data = [self.getCurrentFrameTime()]
 
             # Compute RA, dec
             jd, ra, dec, _ = xyToRaDecPP(time_data, [x], [y], [1], self.platepar)
@@ -1959,6 +1974,117 @@ class ManualReductionTool(object):
 
         print('Saved state to file:', state_file)
 
+
+
+    def saveJSON(self):
+        """ Save the picks in a JSON file. """
+
+        # Compute the intensity sum done on the previous frame
+        self.computeIntensitySum()
+
+
+        json_dict = {}
+
+
+        # If the platepar was loaded, save the station info
+        if self.platepar is not None:
+
+            station_dict = {}
+
+            station_dict['station_id'] = self.platepar.station_code
+            station_dict['lat'] = self.platepar.lat
+            station_dict['lon'] = self.platepar.lon
+            station_dict['elev'] = self.platepar.elev
+
+            station_name = self.platepar.station_code
+
+        else:
+            station_dict = None
+
+            station_name = self.station_name
+
+        # Add station data to JSON file
+        json_dict['station'] = station_dict
+
+
+
+        # Save reference time (Julian date)
+        if self.img_handle is not None:
+
+            # Get time from image handle
+            jdt_ref = datetime2JD(self.img_handle.beginning_datetime)
+
+        # FR file time
+        else:
+
+            # Get the JD of the beginning of the FR file
+            jdt_ref = datetime2JD(filenameToDatetime(os.path.basename(self.fr_file)))
+
+        # Set the reference JD
+        json_dict['jdt_ref'] = jdt_ref
+
+
+        # Set the frames per second
+        json_dict['fps'] = self.fps
+
+
+        ### Save picks to JSON file ###
+
+        # Set measurement type to RA/Dec (meastype = 1)
+        json_dict['meastype'] = 1
+
+
+        centroids = []
+        for pick in self.pick_list:
+            
+            # Make sure to centroid is picked and is not just the photometry
+            if pick.x_centroid is None:
+                continue
+
+
+            # Compute RA/Dec of the pick if the platepar is available
+            if self.platepar is not None:
+
+                time_data = [self.getCurrentFrameTime(frame_no=pick.frame)]
+
+                _, ra_data, dec_data, mag_data = xyToRaDecPP(time_data, [pick.x_centroid], \
+                    [pick.y_centroid], [pick.intensity_sum], self.platepar)
+
+                ra = ra_data[0]
+                dec = dec_data[0]
+                mag = mag_data[0]
+
+            else:
+                ra = dec = mag = None
+
+
+            # Compute the time relative to the reference JD
+            t_rel = pick.frame/self.fps
+
+            centroids.append([t_rel, pick.x_centroid, pick.y_centroid, ra, dec, pick.intensity_sum, mag])
+
+
+        # Sort centroids by relative time
+        centroids = sorted(centroids, key=lambda x: x[0])
+
+
+        json_dict['centroids_labels'] = ['Time (s)', 'X (px)', 'Y (px)', 'RA (deg)', 'Dec (deg)', \
+            'Summed intensity', 'Magnitude']
+        json_dict['centroids'] = centroids
+
+        ### ###
+
+        # Create a name for the JSON file
+        json_file_name = jd2Date(jdt_ref, dt_obj=True).strftime('%Y%m%d_%H%M%S.%f') + '_' \
+            + station_name + '_picks.json'
+
+        json_file_path = os.path.join(self.dir_path, json_file_name)
+
+        with open(json_file_path, 'w') as f:
+            json.dump(json_dict, f, indent=4, sort_keys=True)
+
+
+        print('JSON with picks saved to:', json_file_path)
 
 
 
