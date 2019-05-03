@@ -845,6 +845,10 @@ class PlateTool(object):
                     fig_p, (ax_p, ax_r) = plt.subplots(nrows=2, facecolor=None, figsize=(6.4, 7.2), \
                         gridspec_kw={'height_ratios':[2, 1]})
 
+                    # Set photometry window title
+                    fig_p.canvas.set_window_title('Photometry')
+
+
                     # Plot catalog magnitude vs. logsum of pixel intensities
                     self.photom_points = ax_p.scatter(-2.5*np.array(logsum_px), catalog_mags, s=5, c='r', \
                         zorder=3)
