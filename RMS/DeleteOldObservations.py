@@ -69,7 +69,7 @@ def deleteNightFolders(dir_path, config, delete_all=False):
 
     Arguments:
         dir_path: [str] Path to the data directory.
-        config: [COnfiguration object]
+        config: [Configuration object]
 
     Keyword arguments:
         delete_all: [bool] If True, all data folders will be deleted. False by default.
@@ -96,7 +96,57 @@ def deleteNightFolders(dir_path, config, delete_all=False):
     # Return the list of remaining night directories
     return getNightDirs(dir_path, config.stationID)
 
+def getFiles(dir_path, stationID):
+    """ Returns a sorted list of files in the given directory which conform to the captured file names.
 
+    Arguments:
+        dir_path: [str] Path to the data directory.
+        stationID: [str] Name of the station. The file name will have to contain this string
+
+    Return:
+        file_list: [list] A list of files the data directory.
+
+    """
+
+    # Get list of files in the given directory
+    file_list = [file_name for file_name in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, file_name))]
+
+    # Filter files containing station ID in its name
+    file_list = [file_name for file_name in file_list if (len(file_name.split('_')) > 3) and (stationID in file_name)]
+
+    return sorted(file_list)
+
+
+
+def deleteFiles(dir_path, config, delete_all=False):
+    """ Deletes data files free up disk space. Either only one file will be deleted
+        (the oldest one), or all files will be deleted (if delete_all = True).
+
+    Arguments:
+        dir_path: [str] Path to the data directory.
+        config: [Configuration object]
+
+    Keyword arguments:
+        delete_all: [bool] If True, all data folders will be deleted. False by default.
+
+    Return:
+        file_list: [list] A list of remaining files in the data directory.
+
+    """
+
+    # Get sorted list of files in dir_path
+    file_list = getFiles(dir_path, config.stationID)
+
+    # Delete first file or all files
+    for file_name in file_list:
+
+        os.remove(os.path.join(dir_path, file_name))
+
+        # break for loop when deleting only one file
+        if not delete_all:
+            break;
+
+    return getFiles(dir_path, config.stationID)
 
 def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration=None):
     """ Deletes old observation directories to free up space for new ones.
@@ -154,7 +204,6 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     # Always leave at least 2 GB free for archive
     next_night_bytes += 2*(1024**3)
 
-
     ######
 
 
@@ -181,11 +230,14 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
         if availableSpace(data_dir) > next_night_bytes:
             break
 
-
-        # If there's nothing left to delete, return False
+        # If no folders left to delete, try to delete archived files
         if (len(captured_dirs_remaining) == 0) and (len(archived_dirs_remaining) == 0):
-            return False
 
+            archived_files_remaining = deleteFiles(archived_dir, config)
+
+            # If there's nothing left to delete, return False
+            if len(archived_files_remaining) == 0:
+                return False
 
     return True
 
