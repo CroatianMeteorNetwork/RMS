@@ -2,10 +2,9 @@
 
 # Usage examples:
 #
-# pip install client
-# pip install onvif
+# pip install onvif_zeep
 # python -m RMS.CameraControl reboot
-# python -m RMS.CameraControl GetDeviceInformation
+# python -m RMS.CameraControl getDeviceInformation
 
 from __future__ import print_function
 
@@ -14,19 +13,62 @@ import re
 import RMS.ConfigReader as cr
 from onvif import ONVIFCamera
 
-cam = None
 
-def GetHostname():
-    resp = cam.devicemgmt.GetHostname()
-    print('GetHostname:\n' + str(resp))
+def getHostname(cam):
+    resp = cam.devicemgmt.getHostname()
+    print('getHostname:\n' + str(resp))
 
-def GetDeviceInformation():
-    resp = cam.devicemgmt.GetDeviceInformation()
-    print('GetDeviceInformation:\n' + str(resp))
+def getDeviceInformation(cam):
+    resp = cam.devicemgmt.getDeviceInformation()
+    print('getDeviceInformation:\n' + str(resp))
 
-def SystemReboot():
-    resp = cam.devicemgmt.SystemReboot()
-    print('SystemReboot: ' + str(resp))
+def systemReboot(cam):
+    resp = cam.devicemgmt.systemReboot()
+    print('systemReboot: ' + str(resp))
+
+
+
+def onvifCommand(config, cmd):
+    """ Execute ONVIF command to the IP camera.
+
+    Arguments:
+        config: [COnfiguration]
+        cmd: [str] Command:
+            - reboot
+            - GetHostname
+            - GetDeviceInformation
+    """
+
+    cam = None
+
+    # extract IP from config file
+    camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
+    camera_onvif_port = 8899
+
+    try:
+        print('Connecting to {}:{}'.format(camera_ip, camera_onvif_port))
+        cam = ONVIFCamera(camera_ip, camera_onvif_port, 'admin', '', '/home/pi/vRMS/wsdl')
+    except:
+        print('Could not connect to camera!')
+        exit(1)
+
+    print('Connected.')
+
+    # process commands
+    if cmd == 'reboot':
+        systemReboot(cam)
+
+    if cmd == 'GetHostname':
+        getHostname(cam)
+
+    if cmd == 'GetDeviceInformation':
+        getDeviceInformation(cam)
+
+    exit(0)
+
+
+
+
 
 if __name__ == '__main__':
 
@@ -49,28 +91,6 @@ if __name__ == '__main__':
         print('Error: this utility only works with IP cameras')
         exit(1)
     
-    # extract IP from config file
-    camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
-    camera_onvif_port = 8899
-
-    try:
-        print('Connecting to {}:{}'.format(camera_ip, camera_onvif_port))
-        cam = ONVIFCamera(camera_ip, camera_onvif_port, 'admin', '', '/home/pi/vRMS/wsdl')
-    except:
-        print('Could not connect to camera!')
-    	exit(1)
-
-    print('Connected.')
-
-    # process commands
-    if cmd == 'reboot':
-        SystemReboot()
-
-    if cmd == 'GetHostname':
-	GetHostname()
-
-    if cmd == 'GetDeviceInformation':
-	GetDeviceInformation()
-
-    exit(0)
-
+    
+    # Process the IP camera control command
+    onvifCommand(config, cmd)

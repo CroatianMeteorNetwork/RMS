@@ -140,11 +140,14 @@ def deleteFiles(dir_path, config, delete_all=False):
     # Delete first file or all files
     for file_name in file_list:
 
-        os.remove(os.path.join(dir_path, file_name))
+        try:
+            os.remove(os.path.join(dir_path, file_name))
+        except:
+            print('There was an error deleting the file: ', os.path.join(dir_path, file_name))
 
         # break for loop when deleting only one file
         if not delete_all:
-            break;
+            break
 
     return getFiles(dir_path, config.stationID)
 
@@ -213,6 +216,8 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
 
     # Intermittently delete captured and archived directories until there's enough free space
+    prev_available_space = availableSpace(data_dir)
+    nothing_deleted_count = 0
     while True:
 
         # Delete one captured directory
@@ -238,6 +243,27 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
             # If there's nothing left to delete, return False
             if len(archived_files_remaining) == 0:
                 return False
+
+
+        # Break the there's enough space
+        if availableSpace(data_dir) > next_night_bytes:
+            break
+
+
+        # If nothing was deleted in this loop, 
+        if availableSpace(data_dir) == prev_available_space:
+            nothing_deleted_count += 1
+
+        else:
+            nothing_deleted_count = 0
+
+
+        # If nothing was deleted for 100 loops, indicate that no more space can be freed
+        if nothing_deleted_count >= 100:
+            return False
+
+        prev_available_space = availableSpace(data_dir)
+
 
     return True
 
