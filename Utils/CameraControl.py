@@ -15,15 +15,15 @@ from onvif import ONVIFCamera
 
 
 def getHostname(cam):
-    resp = cam.devicemgmt.getHostname()
+    resp = cam.devicemgmt.GetHostname()
     print('getHostname:\n' + str(resp))
 
 def getDeviceInformation(cam):
-    resp = cam.devicemgmt.getDeviceInformation()
+    resp = cam.devicemgmt.GetDeviceInformation()
     print('getDeviceInformation:\n' + str(resp))
 
 def systemReboot(cam):
-    resp = cam.devicemgmt.systemReboot()
+    resp = cam.devicemgmt.SystemReboot()
     print('systemReboot: ' + str(resp))
 
 
