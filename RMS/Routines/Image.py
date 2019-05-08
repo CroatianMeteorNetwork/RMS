@@ -342,10 +342,18 @@ class FlatStruct(object):
 
 
     def computeAverage(self):
-        """ Compute the flat average. """
+        """ Compute the reference level. """
 
-        # Calculate the median of the flat, excluding the first 10 rows
-        self.flat_avg = np.median(self.flat_img[10:, :])
+
+        # Bin the flat by a factor of 4 using the average method
+        flat_binned = binImage(self.flat_img, 4, method='avg')
+
+        # Take the maximum average level of pixels that are in a square of 1/4*height from the centre
+        radius = flat_binned.shape[0]//4
+        img_h_half = flat_binned.shape[0]//2
+        img_w_half = flat_binned.shape[1]//2
+        self.flat_avg = np.max(flat_binned[img_h_half-radius:img_h_half+radius, \
+            img_w_half-radius:img_w_half+radius])
 
         # Make sure the self.flat_avg value is relatively high
         if self.flat_avg < 1:
