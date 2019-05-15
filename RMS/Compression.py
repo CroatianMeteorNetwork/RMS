@@ -286,14 +286,14 @@ class Compressor(multiprocessing.Process):
             # Cut out the compressed frames to the proper size
             compressed = compressed[:, :self.config.height, :self.config.width]
             
-            log.debug("compression: " + str(time.time() - t) + "s")
+            log.debug("Compression time: {:.3f} s".format(time.time() - t))
             t = time.time()
             
             # Save the compressed image
             filename = self.saveFF(compressed, startTime, n*256)
             n += 1
             
-            log.debug("saving: " + str(time.time() - t) + "s")
+            log.debug("Saving time: {:.3f} s".format(time.time() - t))
 
 
             # Save the extracted intensitites per every field
