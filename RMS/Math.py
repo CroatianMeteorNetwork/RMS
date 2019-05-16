@@ -20,6 +20,11 @@ def angularSeparation(ra1, dec1, ra2, dec2):
     return np.arccos(np.sin(dec1)*np.sin(dec2) + np.cos(dec1)*np.cos(dec2)*np.cos(ra2 - ra1))
 
 
+def angularSeparationVect(vect1, vect2):
+    """ Calculates angle between vectors. """
+
+    return np.abs(np.arccos(np.dot(vect1, vect2)))
+
 
 
 ### VECTORS ###
@@ -106,3 +111,65 @@ def polarToCartesian(theta, phi):
 
     return x, y, z
 
+
+def isAngleBetween(left, ang, right):
+    """ Checks if ang is between the angle on the left anf right. 
+    
+    Arguments:
+        left: [float] Left (counter-clockwise) angle (radians).
+        ang: [float] Angle to check (radians),
+        right: [float] Right (clockwise) angle (radiant).
+
+    Return:
+        [bool] True if the angle is in between, false otherwise.
+    """
+
+    if right - left < 0:
+        right = right - left + 2*np.pi
+    else:
+        right = right - left
+
+
+    if ang - left < 0:
+        ang = ang - left + 2*np.pi
+    else:
+        ang = ang - left
+
+
+    return ang < right
+
+
+
+@np.vectorize
+def sphericalPointFromHeadingAndDistance(ra1, dec1, heading, distance):
+    """ Given RA and Dec, a heading and angular distance, compute coordinates of the point.
+
+    Arguments:
+        ra1: [float] Right Ascension (deg).
+        dec1: [float] Declination (deg).
+        heading: [float] Heading +E of due N in degrees (deg).
+        distance: [float] Distance (deg).
+
+    Return:
+        ra, dec: [float] Coordinates of the new point (deg)
+
+    """
+
+    ra1 = np.radians(ra1)
+    dec1 = np.radians(dec1)
+    heading = np.radians(heading)
+    distance = np.radians(distance)
+
+    # Compute the new declination
+    dec = np.arcsin(np.sin(dec1)*np.cos(distance) + np.cos(dec1)*np.sin(distance)*np.cos(heading))
+
+    # Handle poles and compute right ascension
+    if np.cos(dec) == 0:
+       ra = ra1
+
+    else:
+       ra = (ra1 - np.arcsin(np.sin(heading)*np.sin(distance)/np.cos(dec)) + np.pi)% (2*np.pi) - np.pi
+
+
+    return np.degrees(ra)%360, np.degrees(dec)
+    
