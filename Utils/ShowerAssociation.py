@@ -146,6 +146,11 @@ class MeteorSingleStation(object):
         # Sample the great circle
         x_array, y_array, z_array = greatCircle(np.radians(phase_angles), self.theta0, self.phi0)
 
+        if isinstance(x_array, float):
+            x_array = [x_array]
+            y_array = [y_array]
+            z_array = [z_array]
+
         # Compute RA/Dec of every points
         ra_array = []
         dec_array = []
@@ -295,6 +300,11 @@ def estimateMeteorHeight(meteor_obj, shower):
         meteor_obj.lon)
     radiant_vector_horiz = raDec2Vector(radiant_azim, radiant_alt)
 
+
+    # Reject the pairing if the radiant is below the horizon
+    if radiant_alt < 0:
+        return -1
+
     ### ###
 
 
@@ -348,7 +358,7 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, plot_showers
 
         ff_name, cam_code, meteor_No, n_segments, fps, hnr, mle, binn, px_fm, rho, phi, meteor_meas = meteor
 
-
+        # Skip very short meteors
         if len(meteor_meas) < 4:
             continue
 
@@ -492,17 +502,8 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, plot_showers
 
 
         # Store the associated shower
-        associations[ff_name] = [meteor_obj, best_match_shower]
+        associations[(ff_name, meteor_No)] = [meteor_obj, best_match_shower]
 
-
-
-        ### TEST !!!
-        if best_match_shower is not None:
-            print(ff_name, best_match_shower.name)
-        else:
-            print(ff_name, '...')
-
-        ###
 
 
     # Create a plot of showers
@@ -513,22 +514,22 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, plot_showers
         allsky_plot = AllSkyPlot()
 
         # Plot all meteors
-        for ff_name in associations:
+        for key in associations:
 
-            meteor_obj, shower = associations[ff_name]
+            meteor_obj, shower = associations[key]
 
 
             ### Plot the observed meteor points ###
 
-            x_meteor, y_meteor = allsky_plot.raDec2XY(meteor_obj.ra_array, meteor_obj.dec_array)
-            allsky_plot.ax.plot(x_meteor, y_meteor, color='r', linewidth=1, zorder=4)
+            allsky_plot.plot(meteor_obj.ra_array, meteor_obj.dec_array, color='r', linewidth=1, zorder=4)
 
             # Plot the peak of shower meteors a different color
             peak_color = 'blue'
             if shower is not None:
                 peak_color = 'tomato'
 
-            allsky_plot.ax.scatter(x_meteor[-1], y_meteor[-1], c=peak_color, marker='+', s=5, zorder=5)
+            allsky_plot.scatter(meteor_obj.ra_array[-1], meteor_obj.dec_array[-1], c=peak_color, marker='+', \
+                s=5, zorder=5)
 
             ### ###
 
@@ -542,8 +543,9 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, plot_showers
             if shower is not None:
                 gc_end_phase = meteor_obj.findGCPhase(shower.ra, shower.dec)[0]%360
 
-                if gc_end_phase > gc_beg_phase:
-                    gc_beg_phase += 360
+                # Fix 0/360 wrap
+                if abs(gc_end_phase - gc_beg_phase) > 180:
+                    gc_beg_phase -= 360
 
                 gc_color = 'purple'
                 gc_alpha = 0.7
@@ -567,7 +569,7 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, plot_showers
 
 
             # Get phases 180 deg before the meteor
-            phase_angles = np.linspace(gc_end_phase, gc_beg_phase, 100)
+            phase_angles = np.linspace(gc_end_phase, gc_beg_phase, 100)%360
 
             # Compute RA/Dec of points on the great circle
             ra_gc, dec_gc = meteor_obj.sampleGC(phase_angles)
@@ -580,12 +582,11 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, plot_showers
             ra_gc, dec_gc = temp_arr.T
 
             # Plot the great circle fitted on the radiant
-            x_gc, y_gc = allsky_plot.raDec2XY(ra_gc, dec_gc)
-            allsky_plot.ax.plot(x_gc, y_gc, linestyle='dotted', color=gc_color, alpha=gc_alpha, linewidth=1)
+            allsky_plot.plot(ra_gc, dec_gc, linestyle='dotted', color=gc_color, alpha=gc_alpha, linewidth=1)
 
             # Plot the point closest to the shower radiant
             if shower is not None:
-                allsky_plot.ax.plot(x_gc[0], y_gc[0], color='r', marker='+', ms=5, mew=1)
+                allsky_plot.plot(ra_gc[0], dec_gc[0], color='r', marker='+', ms=5, mew=1)
 
 
             ### ###
@@ -596,8 +597,8 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, plot_showers
         # Find unique showers and their apparent radiants computed at highest radiant elevation
         # (otherwise the apparent radiants can be quite off)
         shower_dict = {}
-        for ff_name in associations:
-            meteor_obj, shower = associations[ff_name]
+        for key in associations:
+            meteor_obj, shower = associations[key]
 
             if shower is None:
                 continue
@@ -626,17 +627,14 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, plot_showers
                 heading_arr, config.shower_max_radiant_separation)
 
 
-            # Convert RA/Dec to plot coordinates
-            x_circle, y_circle = allsky_plot.raDec2XY(ra_circle, dec_circle)
-
             # Plot the shower circle
-            allsky_plot.ax.plot(x_circle, y_circle)
+            allsky_plot.plot(ra_circle, dec_circle)
 
 
             # Plot the shower name
             x_text, y_text = allsky_plot.raDec2XY(shower.ra, shower.dec)
-            allsky_plot.ax.text(x_text, y_text, shower.name, color='w', size=7, va='center', \
-                ha='center')
+            allsky_plot.ax.text(x_text, y_text, shower.name, color='w', size=8, va='center', \
+                ha='center', zorder=6)
 
         ### ###
                 
@@ -646,18 +644,7 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, plot_showers
 
 
 
-
-
-
-
-        
-
-
-
-
-
-
-
+    return associations
 
 
 
@@ -705,7 +692,28 @@ if __name__ == "__main__":
 
 
     # Perform shower association
-    showerAssociation(config, ftpdetectinfo_path, plot_showers=True)
+    associations = showerAssociation(config, ftpdetectinfo_path, plot_showers=True)
+
+
+    # Find shower frequency and sort by count
+    shower_list = []
+    for key in associations:
+        _, shower = associations[key]
+
+        if shower is None:
+            shower_name = '...'
+        else:
+            shower_name = shower.name
+
+        shower_list.append(shower_name)
+
+    unique_showers = set(shower_list)
+    shower_counts = [[name, shower_list.count(name)] for name in unique_showers]
+    shower_counts = sorted(shower_counts, key=lambda x: x[1], reverse=True)
+
+    print('Shower ranking:')
+    for shower_name, count in shower_counts:
+        print(shower_name, count)
 
 
 
