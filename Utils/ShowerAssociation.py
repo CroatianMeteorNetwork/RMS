@@ -339,7 +339,7 @@ def estimateMeteorHeight(meteor_obj, shower):
 
 
 
-def showerAssociation(config, ftpdetectinfo_path, shower_code=None, plot_showers=False):
+def showerAssociation(config, ftpdetectinfo_path, shower_code=None, show_plot=False, save_plot=False):
     """ """
 
 
@@ -507,7 +507,7 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, plot_showers
 
 
     # Create a plot of showers
-    if plot_showers:
+    if show_plot or save_plot:
 
 
         # Init the all-sky plot
@@ -637,10 +637,29 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, plot_showers
                 ha='center', zorder=6)
 
         ### ###
-                
+        
+
+        # Save plot
+        if save_plot:
+
+            dir_path, ftpdetectinfo_name = os.path.split(ftpdetectinfo_path)
+            plot_name = ftpdetectinfo_name.replace('FTPdetectinfo_', '').replace('.txt', '')
+            plot_name += '_radiants.png'
+
+            # Increase figure size
+            allsky_plot.fig.set_size_inches(18, 9, forward=True)
+
+            allsky_plot.beautify()
+
+            plt.savefig(os.path.join(dir_path, plot_name), dpi=100, facecolor='k')
 
 
-        allsky_plot.show()
+        if show_plot:
+            allsky_plot.show()
+
+        else:
+            plt.clf()
+            plt.close()
 
 
 
@@ -692,7 +711,7 @@ if __name__ == "__main__":
 
 
     # Perform shower association
-    associations = showerAssociation(config, ftpdetectinfo_path, plot_showers=True)
+    associations = showerAssociation(config, ftpdetectinfo_path, show_plot=True, save_plot=True)
 
 
     # Find shower frequency and sort by count

@@ -7,9 +7,9 @@ import matplotlib.pyplot as plt
 
 
 class AllSkyPlot(object):
-	def __init__(self, ra0=180.0):
+	def __init__(self):
 
-		self.ra0 = ra0
+		self.ra0 = 180.0
 
 		self.fig = plt.figure()
 
