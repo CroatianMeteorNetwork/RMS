@@ -15,7 +15,7 @@ from matplotlib.collections import LineCollection
 import matplotlib.pyplot as plt
 
 from RMS.Astrometry.Conversions import raDec2Vector, vector2RaDec, datetime2JD, \
-    geocentricToApparentRadiantAndVelocity, raDec2AltAz, raDec2AltAz_vect
+    geocentricToApparentRadiantAndVelocity, raDec2AltAz, raDec2AltAz_vect, EARTH_CONSTANTS
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
 from RMS.Formats.Showers import loadShowers
@@ -26,11 +26,22 @@ from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
 from RMS.Routines.AllskyPlot import AllSkyPlot
 
 
+EARTH = EARTH_CONSTANTS()
+
 
 class MeteorSingleStation(object):
-    def __init__(self, station_id):
+    def __init__(self, station_id, lat, lon):
+        """ Container for single station observations which enables great circle fitting. 
+
+        Arguments:
+            station_id: [str]
+            lat: [float] +N latitude (deg).
+            lon: [float] +E longitude (deg).
+        """
 
         self.station_id = station_id
+        self.lat = lat
+        self.lon = lon
 
         self.jd_array = []
         self.ra_array = []
@@ -71,12 +82,23 @@ class MeteorSingleStation(object):
 
         for ra, dec in zip(self.ra_array, self.dec_array):
 
-            vect = raDec2Vector(ra, dec)
+            vect = vectNorm(raDec2Vector(ra, dec))
 
             self.cartesian_points.append(vect)
 
 
         self.cartesian_points = np.array(self.cartesian_points)
+
+        # Set begin and end pointing vectors
+        self.beg_vect = self.cartesian_points[0]
+        self.end_vect = self.cartesian_points[-1]
+
+        # Compute alt of the begining and the last point
+        self.beg_azim, self.beg_alt = raDec2AltAz(self.ra_array[0], self.dec_array[0], self.jd_array[0], \
+            self.lat, self.lon)
+        self.end_azim, self.end_alt = raDec2AltAz(self.ra_array[-1], self.dec_array[-1], self.jd_array[-1], \
+            self.lat, self.lon)
+
 
         # Fit a great circle through observations
         x_arr, y_arr, z_arr = self.cartesian_points.T
@@ -96,6 +118,8 @@ class MeteorSingleStation(object):
         self.meteor_begin_cartesian = vectNorm(self.cartesian_points[0])
         self.meteor_end_cartesian = vectNorm(self.cartesian_points[-1])
 
+        # Compute angular distance between begin and end (radians)
+        self.ang_be = angularSeparationVect(self.beg_vect, self.end_vect)
 
         # Compute meteor duration in seconds
         self.duration = (self.jd_array[-1] - self.jd_array[0])*86400.0
@@ -157,9 +181,6 @@ class MeteorSingleStation(object):
 
 
 
-
-
-
     def angularSeparationFromGC(self, ra, dec):
         """ Compute the angular separation from the given coordinaes to the great circle. 
     
@@ -179,25 +200,131 @@ class MeteorSingleStation(object):
 
 
 
-class Shower(object):
 
+class Shower(object):
     def __init__(self, shower_entry):
 
         self.name = shower_entry[1]
-        self.lasun_beg = shower_entry[3]
-        self.lasun_max = shower_entry[4]
-        self.lasun_end = shower_entry[5]
-        self.ra_g = shower_entry[6]
-        self.dec_g = shower_entry[7]
-        self.dra = shower_entry[8]
-        self.ddec = shower_entry[9]
-        self.vg = shower_entry[10]
+        self.lasun_beg = shower_entry[3] # deg
+        self.lasun_max = shower_entry[4] # deg
+        self.lasun_end = shower_entry[5] # deg
+        self.ra_g = shower_entry[6] # deg
+        self.dec_g = shower_entry[7] # deg
+        self.dra = shower_entry[8] # deg
+        self.ddec = shower_entry[9] # deg
+        self.vg = shower_entry[10] # km/s
 
         # Apparent radiant
-        self.ra = None
-        self.dec = None
-        self.azim = None
-        self.elev = None
+        self.ra = None # deg
+        self.dec = None # deg
+        self.v_init = None # m/s
+        self.azim = None # deg
+        self.elev = None # deg
+        self.shower_vector = None
+
+
+
+
+def heightModel(v_init, ht_type='beg'):
+    """ Function that takes a velocity and returns an extreme begin/end meteor height that was fit on CAMS
+        data.
+
+    Arguments:
+        v_init: [float] Meteor initial velocity (m/s).
+
+    Keyword arguments:
+        ht_type: [str] 'beg' or 'end'
+
+    """
+
+    def _htVsVelModel(v_init, c, a, b):
+        return c + a*v_init + b/(v_init**3)
+
+
+    # Convert velocity to km/s
+    v_init /= 1000
+
+    if ht_type.lower() == 'beg':
+
+        # Begin height fit
+        fit_params = [97.8411, 0.4081, -20919.3867]
+
+    else:
+        # End height fit
+        fit_params = [59.4751, 0.3743, -11193.7365]
+
+
+    # Compute the height in meters
+    ht = 1000*_htVsVelModel(v_init, *fit_params)
+
+    return ht
+
+
+
+
+def estimateMeteorHeight(meteor_obj, shower):
+    """ Estimate the height of a meteor from single station give a candidate shower. 
+
+    Arguments:
+        meteor_obj: [MeteorSingleStation instance]
+        shower: [Shower instance]
+
+    Return:
+        ht: [float] Estimated height in meters.
+    """
+
+    ### Compute all needed values in alt/az coordinates ###
+    
+    # Compute beginning point vector in alt/az
+    beg_ra, beg_dec = vector2RaDec(meteor_obj.beg_vect)
+    beg_azim, beg_alt = raDec2AltAz(beg_ra, beg_dec, meteor_obj.jdt_ref, meteor_obj.lat, meteor_obj.lon)
+    beg_vect_horiz = raDec2Vector(beg_azim, beg_alt)
+
+    # Compute end point vector in alt/az
+    end_ra, end_dec = vector2RaDec(meteor_obj.end_vect)
+    end_azim, end_alt = raDec2AltAz(end_ra, end_dec, meteor_obj.jdt_ref, meteor_obj.lat, meteor_obj.lon)
+    end_vect_horiz = raDec2Vector(end_azim, end_alt)
+
+    # Compute normal vector in alt/az
+    normal_azim, normal_alt = raDec2AltAz(meteor_obj.normal_ra, meteor_obj.normal_dec, meteor_obj.jdt_ref, \
+        meteor_obj.lat, meteor_obj.lon)
+    normal_horiz = raDec2Vector(normal_azim, normal_alt)
+
+    # Compute radiant vector in alt/az
+    radiant_azim, radiant_alt = raDec2AltAz(shower.ra, shower.dec, meteor_obj.jdt_ref, meteor_obj.lat, \
+        meteor_obj.lon)
+    radiant_vector_horiz = raDec2Vector(radiant_azim, radiant_alt)
+
+    ### ###
+
+
+    # Compute cartesian coordinates of the pointing at the beginning of the meteor
+    pt = vectNorm(beg_vect_horiz)
+
+    # Compute reference vector perpendicular to the plane normal and the radiant
+    vec = vectNorm(np.cross(normal_horiz, radiant_vector_horiz))
+
+    # Compute angles between the reference vector and the pointing
+    dot_vb = np.dot(vec, beg_vect_horiz)
+    dot_ve = np.dot(vec, end_vect_horiz)
+    dot_vp = np.dot(vec, pt)
+
+    # Compute distance to the radiant intersection line
+    r_mag  = 1.0/(dot_vb**2)
+    r_mag += 1.0/(dot_ve**2)
+    r_mag += -2*np.cos(meteor_obj.ang_be)/(dot_vb*dot_ve)
+    r_mag  = np.sqrt(r_mag)
+    r_mag  = shower.v_init*meteor_obj.duration/r_mag
+    pt_mag = r_mag/dot_vp
+
+    # Compute the height
+    ht  = pt_mag**2 + EARTH.EQUATORIAL_RADIUS**2 \
+        - 2*pt_mag*EARTH.EQUATORIAL_RADIUS*np.cos(np.radians(90 - meteor_obj.beg_alt))
+    ht  = np.sqrt(ht)
+    ht -= EARTH.EQUATORIAL_RADIUS
+    ht  = abs(ht)
+
+    return ht
 
 
 
@@ -232,7 +359,7 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, plot_showers
 
 
         # Init container for meteor observation
-        meteor_obj = MeteorSingleStation(cam_code)
+        meteor_obj = MeteorSingleStation(cam_code, config.latitude, config.longitude)
 
         # Infill the meteor structure
         for entry in meteor_meas:
@@ -301,7 +428,7 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, plot_showers
 
             # Compute the apparent radiant - assume that the meteor is directly above the station
             meteor_fixed_ht = 100000 # 100 km
-            shower.ra, shower.dec, v_init = geocentricToApparentRadiantAndVelocity(shower.ra_g, \
+            shower.ra, shower.dec, shower.v_init = geocentricToApparentRadiantAndVelocity(shower.ra_g, \
                 shower.dec_g, 1000*shower.vg, config.latitude, config.longitude, meteor_fixed_ht, \
                 meteor_obj.jdt_ref, include_rotation=True)
 
@@ -315,10 +442,10 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, plot_showers
 
 
             # Compute angle between the meteor's beginning and end, and the shower radiant
-            shower_vector = raDec2Vector(shower.ra, shower.dec)
-            begin_separation = np.degrees(angularSeparationVect(shower_vector, \
+            shower.radiant_vector = vectNorm(raDec2Vector(shower.ra, shower.dec))
+            begin_separation = np.degrees(angularSeparationVect(shower.radiant_vector, \
                 meteor_obj.meteor_begin_cartesian))
-            end_separation = np.degrees(angularSeparationVect(shower_vector, \
+            end_separation = np.degrees(angularSeparationVect(shower.radiant_vector, \
                 meteor_obj.meteor_end_cartesian))
 
 
@@ -331,20 +458,25 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, plot_showers
 
             ### Height filter ###
 
-            # # Estimate the meteor height from the velocity (meters)
-            # meteor_ht = ???
+            # Estimate the limiting meteor height from the velocity (meters)
+            filter_beg_ht = heightModel(shower.v_init, ht_type='beg')
+            filter_end_ht = heightModel(shower.v_init, ht_type='end')
 
 
+            # Estimate the meteor beginning height
+            meteor_beg_ht = estimateMeteorHeight(meteor_obj, shower)
+
+            # print('Height filter:')
+            # print('    Max: {:.2f} km'.format(filter_beg_ht/1000))
+            # print('    Met: {:.2f} km'.format(meteor_beg_ht/1000))
+            # print('    Min: {:.2f} km'.format(filter_end_ht/1000))
+
+            
+            # If the height is outside the height range, reject the meteor
+            if (meteor_beg_ht < filter_end_ht) or (meteor_beg_ht > filter_beg_ht):
+                continue
 
             ### ###
-
-
-
-            # print('Shower: ', shower.name)
-            # print('RA_g:', shower.ra_g)
-            # print('Dec_g:', shower.dec_g)
-            # print('RA_a', shower.ra)
-            # print('Dec:', shower.dec)
 
 
             # Compute the radiant elevation above the horizon
