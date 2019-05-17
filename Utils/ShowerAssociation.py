@@ -389,20 +389,14 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, plot_showers
             ### Plot the observed meteor points ###
 
             x_meteor, y_meteor = allsky_plot.raDec2XY(meteor_obj.ra_array, meteor_obj.dec_array)
+            allsky_plot.ax.plot(x_meteor, y_meteor, color='r', linewidth=1, zorder=4)
 
-            points = np.array([x_meteor, y_meteor]).T.reshape(-1, 1, 2)
-            segments = np.concatenate([points[:-1], points[1:]], axis=1)
+            # Plot the peak of shower meteors a different color
+            peak_color = 'blue'
+            if shower is not None:
+                peak_color = 'tomato'
 
-            lc = LineCollection(segments, cmap=plt.get_cmap('viridis'), norm=plt.Normalize(0, 1), zorder=4)
-
-            # Normalize meteor time from 0 to 1 and use it for coloring
-            time_meteor = meteor_obj.jd_array - np.min(meteor_obj.jd_array)
-            time_meteor /= np.max(time_meteor)
-
-            lc.set_array(time_meteor)
-            lc.set_linewidth(2)
-
-            allsky_plot.ax.add_collection(lc)
+            allsky_plot.ax.scatter(x_meteor[-1], y_meteor[-1], c=peak_color, marker='+', s=5, zorder=5)
 
             ### ###
 
@@ -410,25 +404,34 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, plot_showers
             ### Plot fitted great circle points ###
 
             # Find the GC phase angle of the beginning of the meteor
-            gc_beg_phase = meteor_obj.findGCPhase(meteor_obj.ra_array[0], meteor_obj.dec_array[0])%360
+            gc_beg_phase = meteor_obj.findGCPhase(meteor_obj.ra_array[0], meteor_obj.dec_array[0])[0]%360
 
             # If the meteor belongs to a shower, find the GC phase which ends at the shower
             if shower is not None:
-                gc_end_phase = meteor_obj.findGCPhase(shower.ra, shower.dec)%360
+                gc_end_phase = meteor_obj.findGCPhase(shower.ra, shower.dec)[0]%360
 
-                # Make sure the phases have the correct direction
-                if (gc_beg_phase - gc_end_phase)%360 > (gc_end_phase - gc_beg_phase)%360:
-                    #gc_beg_phase, gc_end_phase = gc_end_phase, gc_beg_phase
-                    gc_end_phase += 360
+                if gc_end_phase > gc_beg_phase:
+                    gc_beg_phase += 360
+
+                gc_color = 'purple'
+                gc_alpha = 0.7
 
 
             else:
 
-                ### TEST !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-                ### ONLY PLOT TRACES FOR SHOWER METEORS!!!
-                continue
+                # If it's a sporadic, find the direction to which the meteor should extend
+                gc_end_phase = meteor_obj.findGCPhase(meteor_obj.ra_array[-1], \
+                    meteor_obj.dec_array[-1])[0]%360
 
-                gc_end_phase = gc_beg_phase - 180
+                # Find the correct direction
+                if (gc_beg_phase - gc_end_phase)%360 > (gc_end_phase - gc_beg_phase)%360:
+                    gc_end_phase = gc_beg_phase - 170
+
+                else:
+                    gc_end_phase = gc_beg_phase + 170
+
+                gc_color = 'green'
+                gc_alpha = 0.5
 
 
             # Get phases 180 deg before the meteor
@@ -444,9 +447,13 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, plot_showers
             temp_arr = temp_arr[elev_gc > 0]
             ra_gc, dec_gc = temp_arr.T
 
-
+            # Plot the great circle fitted on the radiant
             x_gc, y_gc = allsky_plot.raDec2XY(ra_gc, dec_gc)
-            allsky_plot.ax.plot(x_gc, y_gc, linestyle='dotted', color='red', alpha=0.5, linewidth=1)
+            allsky_plot.ax.plot(x_gc, y_gc, linestyle='dotted', color=gc_color, alpha=gc_alpha, linewidth=1)
+
+            # Plot the point closest to the shower radiant
+            if shower is not None:
+                allsky_plot.ax.plot(x_gc[0], y_gc[0], color='r', marker='+', ms=5, mew=1)
 
 
             ### ###
