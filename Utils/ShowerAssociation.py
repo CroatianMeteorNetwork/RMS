@@ -505,6 +505,22 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, show_plot=Fa
         associations[(ff_name, meteor_No)] = [meteor_obj, best_match_shower]
 
 
+    # Find shower frequency and sort by count
+    shower_list = []
+    for key in associations:
+        _, shower = associations[key]
+
+        if shower is None:
+            shower_name = '...'
+        else:
+            shower_name = shower.name
+
+        shower_list.append(shower_name)
+
+    unique_showers = set(shower_list)
+    shower_counts = [[name, shower_list.count(name)] for name in unique_showers]
+    shower_counts = sorted(shower_counts, key=lambda x: x[1], reverse=True)
+
 
     # Create a plot of showers
     if show_plot or save_plot:
@@ -612,9 +628,6 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, show_plot=Fa
                 shower_dict[shower.name] = shower
 
 
-
-
-
         # Plot the location of shower radiants
         for shower_name in shower_dict:
             
@@ -635,6 +648,12 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, show_plot=Fa
             x_text, y_text = allsky_plot.raDec2XY(shower.ra, shower.dec)
             allsky_plot.ax.text(x_text, y_text, shower.name, color='w', size=8, va='center', \
                 ha='center', zorder=6)
+
+
+        # Plot shower counts
+        for i, (shower_name, count) in enumerate(shower_counts):
+            allsky_plot.ax.text(-180, 89 - i*4, '{:s}: {:d}'.format(shower_name, count), color='w', family='monospace')
+
 
         ### ###
         
@@ -663,7 +682,7 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, show_plot=Fa
 
 
 
-    return associations
+    return associations, shower_counts
 
 
 
@@ -711,24 +730,8 @@ if __name__ == "__main__":
 
 
     # Perform shower association
-    associations = showerAssociation(config, ftpdetectinfo_path, show_plot=True, save_plot=True)
-
-
-    # Find shower frequency and sort by count
-    shower_list = []
-    for key in associations:
-        _, shower = associations[key]
-
-        if shower is None:
-            shower_name = '...'
-        else:
-            shower_name = shower.name
-
-        shower_list.append(shower_name)
-
-    unique_showers = set(shower_list)
-    shower_counts = [[name, shower_list.count(name)] for name in unique_showers]
-    shower_counts = sorted(shower_counts, key=lambda x: x[1], reverse=True)
+    associations, shower_counts = showerAssociation(config, ftpdetectinfo_path, show_plot=True, \
+        save_plot=True)
 
     print('Shower ranking:')
     for shower_name, count in shower_counts:
