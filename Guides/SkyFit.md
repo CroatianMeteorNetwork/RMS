@@ -54,10 +54,10 @@ In this example, the image files are located in ```~/RMS_data/ArchivedFiles/CA00
 Use the terminal to navigate to your root RMS directory (most probably ```~/source/RMS```) and from there run:
 
 ```
-python -m RMS.Astrometry.SkyFit path/to/night/directory
+python -m RMS.Astrometry.SkyFit path/to/night/directory --config .
 ```
 
-where ```path/to/night/directory``` is the location of the image files determined in the previous step, in this case ```~/RMS_data/ArchivedFiles/CA0001_20171015_230959_225995_detected```
+where ```path/to/night/directory``` is the location of the image files determined in the previous step, in this case ```~/RMS_data/ArchivedFiles/CA0001_20171015_230959_225995_detected```. The ```--config .``` option will use the config file that's in the directory instead of the default config file. This is very important because you want to use the correct geo coordinates for the calibration.
 
 A file dialog will pop out, asking you to open an exiting platepar file. As we don't have a platepar yet, press 'Cancel'.
 
@@ -80,24 +80,18 @@ Next, a dialog asking you to input an approximate azimuth and altitude of the ca
 
 Use arrow keys **<-- Left** and **Right -->** to cycle through images. Find an image which has clearly visible stars and has no clouds. **Green circles** are stars detected on the image using an automatci algorithm, but there might be some which were not automatically detected. You will also notice **red plusses** on the image, those are projected positions of catalog stars, and the projection is done by using the current astrometric parameters. The size of the catalog star marker is proportional to the brightness of the star, which can help you with identifying which star is which. You will notice that the stars on the image and the catalog stars do not match at all. Our goal is to tweak the astrometric parameters until they do match.
 
-If the image is dark, **use U and J keys to change the image gamma.**
+If the image is dark, **use U and J keys to change the image gamma.** You can press **CTRL + A** to automatically adjust the image levels.
 
-First, cycle through images and see if the catalog stars follow the general direction of the movement of the image stars. For example, if your camera is rotated in any way, the movement of catalog stars will not match the movement of the image stars. This can be corrected for by changing the ***position angle*** using keys **Q** and **E**. Rotate the catalog stars until the stars start moving in approximately the same direction. If the stars are going in the opposite direction, the position angle should be 180 degrees.
+First, cycle through images and see if the catalog stars follow the general direction of the movement of the image stars. For example, if your camera is rotated in any way, the movement of catalog stars will not match the movement of the image stars. This can be corrected for by changing the ***rotation*** using keys **Q** and **E**. Rotate the catalog stars until the stars start moving in approximately the same direction. If the stars are going in the opposite direction, the position angle should be 180 degrees.
 
 If the position angle is large, you might find it tedious to change it by only 1 degree. You can use keys **+** and **-** to change the increment size. By default it is 1 degree, but change this according to your needs.
 
-The next step is very important and can sometimes be quite difficult - you need to recognize the stars on the image, and match the stars. Use software like [Stellarium](http://stellarium.org/) to help you with that task. **Make sure the location in Stellarium is set to the location of the camera, and the time is set to the time of the image. Please note that the image time is in the UTC timezone.**
+The next step is very important and can sometimes be quite difficult - you need to recognize the stars on the image, and match the stars. Use software like [Stellarium](http://stellarium.org/) to help you with that task. **Make sure the location in Stellarium is set to the location of the camera, and the time is set to the time of the image. Please note that the image time is in the UTC timezone.** Alternatively, you can press **CTRL + X** use the inbuilt feature that sends the image to astrometry.net and tries to get an approximate pointing. This might not always work.
 
 In this example, the great dipper and the star Arcturus was visible on the image, telling us where the camera was pointing at the time:
 ![Sky fit constallations](media/skyfit_constellations.png)
 
-**VERY IMPORTANT**: Once you have decided which image to use for the fit, and are confident that you know which stars and constellations are on the image, you **MUST** press **CTRL + N** and enter the azimuth and altitude again. This will signal the software that the time when that image was taken will be the reference point in time for the calibration.
-
-**DO NOT CHANGE THE IMAGE AFTER THIS POINT**
-
-If you do, make sure to press **CTRL + N** again.
-
-If you have done everything right by this point, the catalog and the image stars should be close, hopefully within a few degrees. Use keys **A** and **D** to change the right ascension, and **W** and **S** to change the declination of the centre of the field of view until the image and the catalog stars are approximately matching. You might need to adjust the position angle as well. Adjust the step size (**+** and **-**) to fine tune the parameters.
+Use keys **A** and **D** to change the azimuth, and **W** and **S** to change the elevation of the centre of the field of view until the image and the catalog stars are approximately matching. You might need to adjust the rotation as well. Adjust the step size (**+** and **-**) to fine tune the parameters.
 
 You might notice that the scaling between the stars is off, as if the difference between the stars becomes larger with the distance from the centre. Then, you will need to adjust the scale using arrow keys **Up** and **Down**. You can adjust the step size (**+** and **-**) to fine tune the scale.
 
