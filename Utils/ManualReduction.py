@@ -96,6 +96,8 @@ class ManualReductionTool(object):
 
         self.deinterlace_mode = deinterlace_mode
 
+        self.fr_file = fr_file
+
 
         # Compute the frame step
         if self.deinterlace_mode > -1:
@@ -133,9 +135,6 @@ class ManualReductionTool(object):
             self.nframes = self.ff.nframes
 
             self.dir_path = self.img_handle.dir_path    
-
-
-        self.fr_file = fr_file
 
         # Each FR bin can have multiple detections, the first one is by default
         self.current_line = 0
