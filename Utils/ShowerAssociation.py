@@ -5,7 +5,7 @@ from __future__ import print_function, division, absolute_import
 
 
 import os
-import sys
+import glob
 import datetime
 import copy
 
@@ -338,16 +338,25 @@ def estimateMeteorHeight(meteor_obj, shower):
 
 
 
-def showerAssociation(config, ftpdetectinfo_path, shower_code=None, show_plot=False, save_plot=False):
+def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=False, save_plot=False):
     """ """
-
-
-    # Load FTPdetectinfo
-    meteor_data = readFTPdetectinfo(*os.path.split(ftpdetectinfo_path))
-
 
     # Load the list of meteor showers
     shower_list = loadShowers(config.shower_path, config.shower_file_name)
+
+
+    # Load FTPdetectinfos
+    meteor_data = []
+    for ftpdetectinfo_path in ftpdetectinfo_list:
+
+        if not os.path.isfile(ftpdetectinfo_path):
+            print('No such file:', ftpdetectinfo_path)
+            continue
+
+        meteor_data += readFTPdetectinfo(*os.path.split(ftpdetectinfo_path))
+
+    if not len(meteor_data):
+        return {}
 
 
     # Dictionary which holds FF names as keys and meteor measurements + associated showers as values
@@ -701,10 +710,10 @@ if __name__ == "__main__":
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Perform single-station shower association on the FTPdetectinfo file.")
+    arg_parser = argparse.ArgumentParser(description="Perform single-station shower association on FTPdetectinfo files.")
 
-    arg_parser.add_argument('ftpdetectinfo_path', nargs=1, metavar='FTPDETECTINFO_PATH', type=str, \
-        help='Path to the FF file.')
+    arg_parser.add_argument('ftpdetectinfo_path', nargs='+', metavar='FTPDETECTINFO_PATH', type=str, \
+        help='Path to one or more FTPdetectinfo files.')
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
@@ -714,25 +723,23 @@ if __name__ == "__main__":
 
     #########################
 
-    ftpdetectinfo_path = cml_args.ftpdetectinfo_path[0]
+    ftpdetectinfo_path = cml_args.ftpdetectinfo_path
 
-    # Check if the given FTPdetectinfo file exists
-    if not os.path.isfile(ftpdetectinfo_path):
-        print('No such file:', ftpdetectinfo_path)
-        sys.exit()
-
+    # Apply wildcards to input
+    ftpdetectinfo_path_list = []
+    for entry in ftpdetectinfo_path:
+        ftpdetectinfo_path_list += glob.glob(entry)
 
     # Extract parent directory
-    dir_path = os.path.dirname(ftpdetectinfo_path)
-
+    dir_path = os.path.dirname(ftpdetectinfo_path_list[0])
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
-
+    print(ftpdetectinfo_path_list)
 
     # Perform shower association
-    associations, shower_counts = showerAssociation(config, ftpdetectinfo_path, show_plot=True, \
+    associations, shower_counts = showerAssociation(config, ftpdetectinfo_path_list, show_plot=True, \
         save_plot=True)
 
     print('Shower ranking:')
