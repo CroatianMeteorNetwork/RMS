@@ -339,7 +339,24 @@ def estimateMeteorHeight(meteor_obj, shower):
 
 
 def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=False, save_plot=False):
-    """ """
+    """ Do single station shower association based on radiant direction and height. 
+    
+    Arguments:
+        config: [Config instance]
+        ftpdetectinfo_list: [list] A list of paths to FTPdetectinfo files.
+
+    Keyword arguments:
+        shower_code: [str] Only use this one shower for association (e.g. ETA, PER, SDA). None by default,
+            in which case all active showers will be associated.
+        show_plot: [bool] Show the plot on the screen. False by default.
+        save_plot: [bool] Save the plot in the folder with FTPdetectinfos. False by default.
+
+    Return:
+        associations, shower_counts: [tuple]
+            - associations: [dict] A dictionary where the FF name and the meteor ordinal number on the FF
+                file are keys, and the associated Shower object are values.
+            - shower_counts: [list] A list of shower code and shower count pairs.
+    """
 
     # Load the list of meteor showers
     shower_list = loadShowers(config.shower_path, config.shower_file_name)
@@ -484,11 +501,6 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             # Estimate the meteor beginning height
             meteor_beg_ht = estimateMeteorHeight(meteor_obj, shower)
 
-            # print('Height filter:')
-            # print('    Max: {:.2f} km'.format(filter_beg_ht/1000))
-            # print('    Met: {:.2f} km'.format(meteor_beg_ht/1000))
-            # print('    Min: {:.2f} km'.format(filter_end_ht/1000))
-
             
             # If the height is outside the height range, reject the meteor
             if (meteor_beg_ht < filter_end_ht) or (meteor_beg_ht > filter_beg_ht):
@@ -508,9 +520,12 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                 best_match_shower = copy.deepcopy(shower)
 
 
+        # If a shower is given and the match is not this shower, skip adding the meteor to the list
+        # If no specific shower is give for association, add all meteors
+        if ((shower_code is not None) and (best_match_shower is not None)) or (shower_code is None):
 
-        # Store the associated shower
-        associations[(ff_name, meteor_No)] = [meteor_obj, best_match_shower]
+            # Store the associated shower
+            associations[(ff_name, meteor_No)] = [meteor_obj, best_match_shower]
 
 
     # Find shower frequency and sort by count
@@ -710,13 +725,19 @@ if __name__ == "__main__":
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Perform single-station shower association on FTPdetectinfo files.")
+    arg_parser = argparse.ArgumentParser(description="Perform single-station established shower association on FTPdetectinfo files.")
 
     arg_parser.add_argument('ftpdetectinfo_path', nargs='+', metavar='FTPDETECTINFO_PATH', type=str, \
         help='Path to one or more FTPdetectinfo files.')
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
+
+    arg_parser.add_argument('-s', '--shower', metavar='SHOWER', type=str, \
+        help="Associate just this single shower given its code (e.g. PER, ORI, ETA).")
+
+    arg_parser.add_argument('-x', '--hideplot', action="store_true", \
+        help="""Do not show the plot on the screen.""")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -736,11 +757,9 @@ if __name__ == "__main__":
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
-    print(ftpdetectinfo_path_list)
-
     # Perform shower association
-    associations, shower_counts = showerAssociation(config, ftpdetectinfo_path_list, show_plot=True, \
-        save_plot=True)
+    associations, shower_counts = showerAssociation(config, ftpdetectinfo_path_list, \
+        shower_code=cml_args.shower, show_plot=(not cml_args.hideplot), save_plot=True)
 
     print('Shower ranking:')
     for shower_name, count in shower_counts:
