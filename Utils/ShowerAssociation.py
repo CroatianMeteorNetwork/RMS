@@ -11,7 +11,6 @@ import copy
 
 import numpy as np
 
-from matplotlib.collections import LineCollection
 import matplotlib.pyplot as plt
 
 from RMS.Astrometry.Conversions import raDec2Vector, vector2RaDec, datetime2JD, \
