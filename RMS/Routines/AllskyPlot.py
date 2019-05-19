@@ -44,7 +44,8 @@ class AllSkyPlot(object):
 		# If there are more than one point, check for 0/360 wraparounds in RA
 		if isinstance(ra_array, list) or isinstance(ra_array, np.ndarray):
 
-			ra_array = np.array(180 - ra_array)%360
+			ra_array = np.array(ra_array)
+			ra_array = (180 - ra_array)%360
 			dec_array = np.array(dec_array)
 
 			coord_list = []
@@ -178,10 +179,9 @@ if __name__ == "__main__":
 	allsky_plot = AllSkyPlot()
 
 
-	ra_array = [357, 358, 359, 0, 1, 2, 3, 2, 1, 0, 359, 358, 357]
-	#ra_array = [1, 2, 3, 4, 5, 6, 7]
-	dec_arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+	ra_array = np.arange(0, 2000, 1)
+	dec_array = np.linspace(-90, 90, len(ra_array))
 
-	allsky_plot.plot(ra_array, dec_arr, color='green', linestyle='dashed')
+	allsky_plot.plot(ra_array, dec_array, color='green', linestyle='dashed')
 
 	allsky_plot.show()

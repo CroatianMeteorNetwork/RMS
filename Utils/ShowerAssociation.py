@@ -560,7 +560,7 @@ def showerAssociation(config, ftpdetectinfo_path, shower_code=None, show_plot=Fa
 
                 # Fix 0/360 wrap
                 if abs(gc_end_phase - gc_beg_phase) > 180:
-                    gc_beg_phase -= 360
+                    gc_end_phase -= 360
 
                 gc_color = 'purple'
                 gc_alpha = 0.7
