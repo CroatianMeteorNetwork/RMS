@@ -373,7 +373,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
         meteor_data += readFTPdetectinfo(*os.path.split(ftpdetectinfo_path))
 
     if not len(meteor_data):
-        return {}
+        return {}, []
 
 
     # Dictionary which holds FF names as keys and meteor measurements + associated showers as values
@@ -756,14 +756,21 @@ if __name__ == "__main__":
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
+    
 
     # Perform shower association
     associations, shower_counts = showerAssociation(config, ftpdetectinfo_path_list, \
         shower_code=cml_args.shower, show_plot=(not cml_args.hideplot), save_plot=True)
 
-    print('Shower ranking:')
-    for shower_name, count in shower_counts:
-        print(shower_name, count)
+
+    # Print results to screen
+    if shower_counts:
+        print('Shower ranking:')
+        for shower_name, count in shower_counts:
+            print(shower_name, count)
+
+    else:
+        print("No meteors!")
 
 
 
