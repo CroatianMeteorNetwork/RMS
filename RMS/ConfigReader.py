@@ -215,6 +215,7 @@ class Config:
         self.external_function_name = "rmsExternal"
 
         self.reboot_after_processing = False
+        self.reboot_lock_file = ".reboot_lock"
         
         ##### Capture
         self.deviceID = 0
@@ -524,6 +525,9 @@ def parseSystem(config, parser):
 
     if parser.has_option(section, "reboot_after_processing"):
         config.reboot_after_processing = parser.getboolean(section, "reboot_after_processing")
+
+    if parser.has_option(section, "reboot_lock_file"):
+        config.reboot_lock_file = parser.get(section, "reboot_lock_file")
         
 
 

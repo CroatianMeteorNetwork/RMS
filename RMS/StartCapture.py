@@ -540,23 +540,32 @@ if __name__ == "__main__":
         # Reboot the computer after processing is done for the previous night
         if ran_once and config.reboot_after_processing:
 
-            # Try rebooting for an hour, stop if capture should run
-            for reboot_try in range(60):
+            log.info("Trying to reboot after processing...")
+
+            # Try rebooting for 4 hours, stop if capture should run
+            for reboot_try in range(4*60):
 
                 reboot_go = True
 
-                log.info("Trying to reboot...")
-
-                # Check if the upload manager is done
+                # Check if the upload manager is uploading
                 if upload_manager is not None:
 
                     # Prevent rebooting if the upload manager is uploading
-                    if (upload_manager.file_queue.qsize() > 0) and (upload_manager.upload_in_progress.value):
+                    if upload_manager.upload_in_progress.value:
+                        log.info("Reboot delayed for 1 minute due to upload...")
                         reboot_go = False
+
+                # Check if the reboot lock file exists
+                reboot_lock_file_path = os.path.join(config.data_dir, config.reboot_lock_file)
+                if os.path.exists(reboot_lock_file_path):
+                    log.info("Reboot delayed for 1 minute becase the lock file exists: {:s}".format(reboot_lock_file_path))
+                    reboot_go = False
 
 
                 # Reboot the computer
                 if reboot_go:
+
+                    log.info('Rebooting now!')
                     
                     # Reboot the computer (script needs sudo priviledges, works only on Linux)
                     try:
