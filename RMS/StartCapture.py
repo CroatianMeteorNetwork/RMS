@@ -404,6 +404,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
 
+
 if __name__ == "__main__":
 
     ### COMMAND LINE ARGUMENTS
@@ -527,6 +528,7 @@ if __name__ == "__main__":
 
 
     # Automatic running and stopping the capture at sunrise and sunset
+    ran_once = False
     while True:
             
         # Calculate when and how should the capture run
@@ -534,10 +536,54 @@ if __name__ == "__main__":
 
         log.info('Next start time: ' + str(start_time) + ' UTC')
 
+
+        # Reboot the computer after processing is done for the previous night
+        if ran_once and config.reboot_after_processing:
+
+            # Try rebooting for an hour, stop if capture should run
+            for reboot_try in range(60):
+
+                reboot_go = True
+
+                log.info("Trying to reboot...")
+
+                # Check if the upload manager is done
+                if upload_manager is not None:
+
+                    # Prevent rebooting if the upload manager is uploading
+                    if (upload_manager.file_queue.qsize() > 0) and (upload_manager.upload_in_progress.value):
+                        reboot_go = False
+
+
+                # Reboot the computer
+                if reboot_go:
+                    
+                    # Reboot the computer (script needs sudo priviledges, works only on Linux)
+                    try:
+                        os.system('sudo shutdown -r now')
+
+                    except Exception as e:
+                        log.debug('Rebooting failed with message:\n' + repr(e))
+                        log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+                else:
+                    
+                    # Wait one more minute and try again to reboot
+                    time.sleep(60)
+
+
+                # Stop reboot tries if it's time to capture
+                time_now = datetime.datetime.utcnow()
+                waiting_time = start_time - time_now
+                if waiting_time.total_seconds() <= 0:
+                    break
+
+
+
         # Don't start the capture if there's less than 15 minutes left
         if duration < 15*60:
             
-            log.debug('Less than 15 minues left to record, waiting new recording session...')
+            log.debug('Less than 15 minues left to record, waiting for a new recording session tonight...')
             
             # Reset the Ctrl+C to KeyboardInterrupt
             resetSIGINT()
@@ -573,8 +619,8 @@ if __name__ == "__main__":
             time_now = datetime.datetime.utcnow()
             waiting_time = start_time - time_now
 
-            log.info('Waiting ' + str(waiting_time) + ' to start recording for ' + str(duration/60/60) \
-                + ' hours')
+            log.info('Waiting {:s} to start recording for {:.2f} hrs'.format(str(waiting_time), \
+                duration/60/60))
 
             # Reset the Ctrl+C to KeyboardInterrupt
             resetSIGINT()
@@ -617,11 +663,16 @@ if __name__ == "__main__":
             break
 
 
-        log.info('Starting capturing for ' + str(duration/60/60) + ' hours')
+        log.info('Starting capture for {:.2f} hours'.format(duration/60/60))
 
         # Run capture and compression
         runCapture(config, duration=duration, nodetect=cml_args.nodetect, upload_manager=upload_manager, 
             detect_end=cml_args.detectend)
+
+        # Indicate that the capture was done once
+        ran_once = True
+
+
 
 
     if upload_manager is not None:

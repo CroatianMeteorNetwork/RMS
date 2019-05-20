@@ -213,6 +213,8 @@ class Config:
         self.external_script_run = False
         self.external_script_path = None
         self.external_function_name = "rmsExternal"
+
+        self.reboot_after_processing = False
         
         ##### Capture
         self.deviceID = 0
@@ -518,6 +520,10 @@ def parseSystem(config, parser):
 
     if parser.has_option(section, "external_function_name"):
         config.external_function_name = parser.get(section, "external_function_name")
+
+
+    if parser.has_option(section, "reboot_after_processing"):
+        config.reboot_after_processing = parser.getboolean(section, "reboot_after_processing")
         
 
 
