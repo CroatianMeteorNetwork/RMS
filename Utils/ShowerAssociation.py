@@ -590,7 +590,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                         gc_beg_phase -= 360
 
                 gc_color = 'purple'
-                gc_alpha = 0.7
+                gc_alpha = 1.0
 
 
             else:
