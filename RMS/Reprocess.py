@@ -28,7 +28,7 @@ from Utils.CalibrationReport import generateCalibrationReport
 from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
-
+from Utils.ShowerAssociation import showerAssociation
 
 
 # Get the logger from the main module
@@ -209,7 +209,17 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 generateCalibrationReport(config, night_data_dir, platepar=platepar)
 
             except Exception as e:
-                log.debug('Generating calibration report failed with message:\n' + repr(e))
+                log.debug('Generating calibration report failed with the message:\n' + repr(e))
+                log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+
+            # Perform single station shower association
+            log.info("Performing single station shower association...")
+            try:
+                showerAssociation(config, [os.path.join(night_data_dir, ftpdetectinfo_name)], save_plot=True)
+
+            except Exception as e:
+                log.debug('Shower association failed with the message:\n' + repr(e))
                 log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 

@@ -414,6 +414,20 @@ class Config:
         self.stack_mask = False
 
 
+        #### Shower association
+
+        # Path to the shower file
+        self.shower_path = 'share'
+        self.shower_file_name = 'established_showers.csv'
+
+        # How many degrees in solar longitude to check from the shower peak for showers that don't have
+        # a specified beginning and end
+        self.shower_lasun_threshold = 2.0
+
+        # Maximum distance from shower radiant (degrees)
+        self.shower_max_radiant_separation = 5.0
+
+
 def normalizeParameter(param, config, binning=1):
     """ Normalize detection parameters for fireball detection to be size independent.
     

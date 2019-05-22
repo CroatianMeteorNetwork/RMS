@@ -136,6 +136,7 @@ class ManualReductionTool(object):
 
             self.dir_path = self.img_handle.dir_path    
 
+
         # Each FR bin can have multiple detections, the first one is by default
         self.current_line = 0
 
