@@ -3,7 +3,7 @@
 from __future__ import print_function, division, absolute_import
 
 
-
+import sys
 import os
 import glob
 import datetime
@@ -750,6 +750,13 @@ if __name__ == "__main__":
     ftpdetectinfo_path_list = []
     for entry in ftpdetectinfo_path:
         ftpdetectinfo_path_list += glob.glob(entry)
+
+
+    # If therea are files given, notify the user
+    if len(ftpdetectinfo_path_list) == 0:
+        print('No valid FTPdetectinfo files given!')
+        sys.exit()
+        
 
     # Extract parent directory
     dir_path = os.path.dirname(ftpdetectinfo_path_list[0])
