@@ -154,6 +154,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
     # If the recalibrated platepars file exists, take the one with the most stars
     max_jd = 0
+    using_recalib_platepars = False
     if recalibrated_platepars is not None:
         max_stars = 0
         for ff_name_temp in recalibrated_platepars:

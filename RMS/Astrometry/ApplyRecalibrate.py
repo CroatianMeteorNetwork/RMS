@@ -337,7 +337,9 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
             np.radians(pp_temp.RA_d), np.radians(pp_temp.dec_d)))
         ang_dists.append(ang_dist*60)
 
-        rot_angles.append((platepar.pos_angle_ref - pp_temp.pos_angle_ref)*60)
+        # Compute rotation difference
+        rot_diff = (platepar.pos_angle_ref - pp_temp.pos_angle_ref + 180)%360 - 180
+        rot_angles.append(rot_diff*60)
 
         # Compute the hour of the FF used for recalibration
         hour_list.append((FFfile.filenameToDatetime(ff_name) - first_jd).total_seconds()/3600)

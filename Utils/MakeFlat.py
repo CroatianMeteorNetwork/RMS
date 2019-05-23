@@ -67,6 +67,7 @@ def makeFlat(dir_path, config, nostars=False, use_images=False):
 
     else:
         calstars = {}
+        calstars_ff_files = []
 
 
 
