@@ -11,13 +11,17 @@ import numpy as np
 
 
 def loadShowers(dir_path, file_name):
-	""" Loads the given shower CSV file. """
+    """ Loads the given shower CSV file. """
 
+    # Older versions of numpy don't have the encoding parameter
+    try:
+        shower_data = np.genfromtxt(os.path.join(dir_path, file_name), delimiter='|', dtype=None, \
+            autostrip=True, encoding=None)
+    except:
+        shower_data = np.genfromtxt(os.path.join(dir_path, file_name), delimiter='|', dtype=None, \
+            autostrip=True)
 
-	shower_data = np.genfromtxt(os.path.join(dir_path, file_name), delimiter='|', dtype=None, autostrip=True,
-		encoding=None)
-
-	return shower_data
+    return shower_data
 
 
 
@@ -26,6 +30,6 @@ def loadShowers(dir_path, file_name):
 if __name__ == "__main__":
 
 
-	shower_data = loadShowers("share", "established_showers.csv")
+    shower_data = loadShowers("share", "established_showers.csv")
 
-	print(shower_data)
+    print(shower_data)
