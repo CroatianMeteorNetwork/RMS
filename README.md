@@ -3,7 +3,7 @@
 Open source powered meteor station. We are currently using the Raspberry Pi 3 as the main development platform and use digital IP cameras. **The code also works on Linux PCs.** We are slowly phasing out the support for analog cameras, but they should work well regardless.
 The software is still in the development phase, but here are the current features:
 
-1. Automated video capture - start at dusk, stop at dawn. Analog cameras supported through EasyCap, **IP cameras up to 720p resolution - CONTACT US FOR MORE DETAILS.**
+1. Automated video capture - start at dusk, stop at dawn. Analog cameras supported through EasyCap, **IP cameras up to 720p supported as well!**
 1. Compressing 256-frame blocks into the Four-frame Temporal Pixel (FTP) format (see [Jenniskens et al., 2011 CAMS](http://cams.seti.org/CAMSoverviewpaper.pdf) paper for more info).
 1. Detecting bright fireballs in real time
 1. Detecting meteors on FTP compressed files
@@ -24,8 +24,8 @@ This guide will assume basic knowledge of electronics, the Unix environment, and
 
 #### RPi control box
 
-1. **Raspberry Pi 3 single-board computer.**
-The first version of the system was developed on the Raspberry Pi 2, while the system is now being tested on the RPi3, which is what we recommend you use, as it provides much more computing power. The code will NOT work on Raspberry Pi 1.
+1. **Raspberry Pi 3 B+ single-board computer.**
+The first version of the system was developed on the Raspberry Pi 2, while the system is now being tested on the RPi3B+, which is what we recommend you use, as it provides much more computing power. The code will NOT work on Raspberry Pi 1.
 
 1. **Class 10 microSD card, 64GB or higher.** 
 The recorded data takes up a lot of space, as much as several gigabytes per night. To be able to store at least one week of data on the system, a 64GB SD card is the minimum.
