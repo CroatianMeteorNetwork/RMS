@@ -436,13 +436,22 @@ class QueuedPool(object):
                         self.input_queue.put(None)
 
 
-                    time.sleep(0.1)
+                    time.sleep(0.5)
 
 
-                    # Wait until the pills are 'swallowed'
+                    # Wait until the poison pills are 'swallowed' (do this until timeout)
+                    timeout = 60 # seconds
+                    timeout_count = 0
                     while (self.input_queue.qsize() > 0) and (self.active_workers.value() > 0):
                         self.printAndLog('Swallowing pills...', self.input_queue.qsize())
-                        time.sleep(0.1)
+                        time.sleep(1)
+
+                        timeout_count += 1
+
+                        # If all workers are idle after timeout, break the swallowing loop
+                        if timeout_count > timeout:
+                            if self.available_workers.value() >= self.cores.value():
+                                break
 
 
                     # Close the pool and wait for all threads to terminate
