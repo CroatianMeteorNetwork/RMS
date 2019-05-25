@@ -825,7 +825,7 @@ class PlateTool(object):
                             fontsize=photom_resid_size, color='w')
 
                         # Plot the star magnitude
-                        star_mag_lbl = plt.text(star_x, star_y - 10, "{:+.2}".format(star_mag), \
+                        star_mag_lbl = plt.text(star_x, star_y - 10, "{:+6.2f}".format(star_mag), \
                             verticalalignment='bottom', horizontalalignment='center', \
                             fontsize=10, color='r')
 

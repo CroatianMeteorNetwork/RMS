@@ -124,14 +124,14 @@ class FrameAnalyser():
       if img_type is None:
          
          # Get all FF files in the given folder
-         self.filenames = [os.path.abspath(os.path.join(dir_path, filename)) for filename \
-            in os.listdir(dir_path) if validFFName(filename)]
+         self.filenames = sorted([os.path.abspath(os.path.join(dir_path, filename)) for filename \
+            in os.listdir(dir_path) if validFFName(filename)])
 
       else:
 
          # Get all images of the given extension
-         self.filenames = [os.path.abspath(os.path.join(dir_path, filename)) for filename \
-            in os.listdir(dir_path) if filename.lower().endswith(img_type.lower())]
+         self.filenames = sorted([os.path.abspath(os.path.join(dir_path, filename)) for filename \
+            in os.listdir(dir_path) if filename.lower().endswith(img_type.lower())])
 
 
       # If no files were given, take 

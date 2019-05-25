@@ -23,6 +23,11 @@ import sys
 import numpy as np
 
 import matplotlib.pyplot as plt
+try:
+    # Fix Tcl_AsyncDelete error
+    plt.switch_backend('Agg')
+except:
+    print("Couldn't load the Agg backend for matplotib!")
 
 import RMS.ConfigReader as cr
 from RMS.Formats.FieldIntensities import readFieldIntensitiesBin
