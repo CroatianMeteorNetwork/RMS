@@ -549,9 +549,15 @@ if __name__ == "__main__":
             break
 
 
+
+    dir_name = os.path.basename(os.path.abspath(ff_dir))
+    if dir_name.startswith(config.stationID):
+        prefix = dir_name
+    else:
+        prefix = "{:s}_{:s}".format(config.stationID, dir_name)
+
     # Generate the name for the CALSTARS file
-    calstars_name = 'CALSTARS_' + "{:s}".format(str(config.stationID)) + '_' \
-        + os.path.basename(ff_dir) + '.txt'
+    calstars_name = 'CALSTARS_' + prefix + '.txt'
 
 
     # Write detected stars to the CALSTARS file

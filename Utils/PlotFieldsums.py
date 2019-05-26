@@ -111,8 +111,16 @@ def plotFieldsums(dir_path, config):
 
     plt.legend()
 
-    plt.savefig(os.path.join(dir_path, str(config.stationID) + '_' + os.path.basename(dir_path) \
-        + '_fieldsums.png'), dpi=300)
+    # Only add the station ID if the dir name already doesn't start with it
+    dir_name = os.path.basename(os.path.abspath(dir_path))
+    if dir_name.startswith(config.stationID):
+        prefix = dir_name
+    else:
+        prefix = "{:s}_{:s}".format(config.stationID, dir_name)
+
+    img_name = "{:s}_fieldsums.png".format(prefix)
+
+    plt.savefig(os.path.join(dir_path, img_name), dpi=300)
 
     plt.clf()
     plt.close()
@@ -150,9 +158,9 @@ def plotFieldsums(dir_path, config):
 
     plt.tight_layout()
 
+    img_name = "{:s}_fieldsums_noavg.png".format(prefix)
 
-    plt.savefig(os.path.join(dir_path, str(config.stationID) + '_' + os.path.basename(dir_path) \
-        + '_fieldsums_noavg.png'), dpi=300)
+    plt.savefig(os.path.join(dir_path, img_name), dpi=300)
 
     plt.clf()
     plt.close()

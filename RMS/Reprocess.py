@@ -134,7 +134,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         night_data_dir = night_data_dir[:-1]
 
     # Extract the name of the night
-    night_data_dir_name = os.path.basename(night_data_dir)
+    night_data_dir_name = os.path.basename(os.path.abspath(night_data_dir))
     
     # If the detection should be run
     if (not nodetect):

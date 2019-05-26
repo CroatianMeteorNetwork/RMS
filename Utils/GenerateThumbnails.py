@@ -183,8 +183,14 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None):
 
     ##########################################################################################################
 
-    thumb_name = "{:s}_{:s}_{:s}_thumbs.jpg".format(str(config.stationID), os.path.basename(dir_path), \
-        mosaic_type)
+    # Only add the station ID if the dir name already doesn't start with it
+    dir_name = os.path.basename(os.path.abspath(dir_path))
+    if dir_name.startswith(config.stationID):
+        prefix = dir_name
+    else:
+        prefix = "{:s}_{:s}".format(config.stationID, dir_name)
+
+    thumb_name = "{:s}_{:s}_thumbs.jpg".format(prefix, mosaic_type)
 
     # Save the mosaic
     cv2.imwrite(os.path.join(dir_path, thumb_name), mosaic_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
@@ -201,9 +207,6 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None):
 
 if __name__ == "__main__":
 
-    # Load config file
-    config = cr.parse(".config")
-
 
     ### COMMAND LINE ARGUMENTS
 
@@ -213,10 +216,16 @@ if __name__ == "__main__":
     arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
         help='Path to directory with FF files.')
 
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
     #########################
+
+    # Load the config file
+    config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
 
 
     # Read the argument as a path to the night directory
