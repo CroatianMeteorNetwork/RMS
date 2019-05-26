@@ -43,8 +43,8 @@ reqs_stripped = [req.split('<=')[0] for req in reqs_stripped]
 if onvif_str in reqs_stripped:
     onvif_index = reqs_stripped.index(onvif_str)
 
-# Replace the onvif module with the correct module for this version
-requirements[onvif_index] = onvif_proper
+    # Replace the onvif module with the correct module for this version
+    requirements[onvif_index] = onvif_proper
 
 ### ###
 
