@@ -540,7 +540,8 @@ if __name__ == "__main__":
         # Reboot the computer after processing is done for the previous night
         if ran_once and config.reboot_after_processing:
 
-            log.info("Trying to reboot after processing...")
+            log.info("Trying to reboot after processing in 30 seconds...")
+            time.sleep(30)
 
             # Try rebooting for 4 hours, stop if capture should run
             for reboot_try in range(4*60):
