@@ -24,9 +24,9 @@ sudo apt-get install -y libatlas-base-dev gfortran
 
 cd ${HOME_DIR}
 wget -O opencv.zip https://github.com/Itseez/opencv/archive/${VERSION}.zip
-unzip opencv.zip
+unzip -o opencv.zip
 wget -O opencv_contrib.zip https://github.com/Itseez/opencv_contrib/archive/${VERSION}.zip
-unzip opencv_contrib.zip
+unzip -o opencv_contrib.zip
 
 cd ${HOME_DIR}/opencv-${VERSION}/
 mkdir build
