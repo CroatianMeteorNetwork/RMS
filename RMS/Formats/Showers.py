@@ -26,7 +26,7 @@ def loadShowers(dir_path, file_name):
 
 
 
-def generateActivityDiagram(config, shower_data):
+def generateActivityDiagram(config, shower_data, ax_handle=None, sol_marker=None):
     """ Generates a plot of shower activity across all solar longitudes. """
 
     shower_data = np.array(shower_data)
@@ -104,7 +104,8 @@ def generateActivityDiagram(config, shower_data):
                     if (sol_plot >= sol_min) or (sol_plot <= sol_max):
 
                         # Check if the solar longitue range is free of other showers
-                        if (not np.any(activity_stack[i, 0:sol_max])) and (not np.any(activity_stack[i, sol_min:])):
+                        if (not np.any(activity_stack[i, 0:sol_max])) and \
+                            (not np.any(activity_stack[i, sol_min:])):
 
                             # Assign shower code to activity stack
                             activity_stack[i, 0:sol_max] = code
@@ -124,10 +125,32 @@ def generateActivityDiagram(config, shower_data):
                     code_name_dict[code] = [name, sol_min, sol_peak, sol_max, color]
 
     
+    # If no axis was given, crate one
+    if ax_handle is None:
+        ax_handle = plt.subplot(111, facecolor='black')
+
+    # Set background color
+    plt.gcf().patch.set_facecolor('black')
+
+    # Change axis color
+    ax_handle.spines['bottom'].set_color('w')
+    ax_handle.spines['top'].set_color('w') 
+    ax_handle.spines['right'].set_color('w')
+    ax_handle.spines['left'].set_color('w')
+
+    # Change tick color
+    ax_handle.tick_params(axis='x', colors='w')
+    ax_handle.tick_params(axis='y', colors='w')
+
+    # Change axis label color
+    ax_handle.yaxis.label.set_color('w')
+    ax_handle.xaxis.label.set_color('w')
+    
     # Plot the activity graph
     active_shower = 0
-    vertical_scale_line = 0.1
+    vertical_scale_line = 0.5
     vertical_shift_text = 0.01
+    text_size = 8
     for i, line in enumerate(activity_stack):
 
         for shower_block in line:
@@ -141,50 +164,65 @@ def generateActivityDiagram(config, shower_data):
                 # Plot the shower activity period
                 if (sol_max - sol_min) < 180:
                     x_arr = np.arange(sol_min, sol_max + 1, 1)
-                    plt.plot(x_arr, np.zeros_like(x_arr) + i*vertical_scale_line, linewidth=5, color=color)
+                    ax_handle.plot(x_arr, np.zeros_like(x_arr) + i*vertical_scale_line, linewidth=3, \
+                        color=color, zorder=3)
 
-                    plt.text(round((sol_max + sol_min)/2), i*vertical_scale_line + vertical_shift_text, name, ha='center', va='bottom')
+                    ax_handle.text(round((sol_max + sol_min)/2), i*vertical_scale_line + vertical_shift_text, \
+                        name, ha='center', va='bottom', color='w', size=text_size, zorder=3)
 
                 else:
 
                     x_arr = np.arange(0, sol_max + 1, 1)
-                    plt.plot(x_arr, np.zeros_like(x_arr) + i*vertical_scale_line, linewidth=5, color=color)
+                    ax_handle.plot(x_arr, np.zeros_like(x_arr) + i*vertical_scale_line, linewidth=3, \
+                        color=color, zorder=3)
 
                     x_arr = np.arange(sol_min, 361, 1)
-                    plt.plot(x_arr, np.zeros_like(x_arr) + i*vertical_scale_line, linewidth=5, color=color)
+                    ax_handle.plot(x_arr, np.zeros_like(x_arr) + i*vertical_scale_line, linewidth=3, \
+                        color=color, zorder=3)
 
-                    plt.text(0, i*vertical_scale_line + vertical_shift_text, name, ha='center', va='bottom')
+                    ax_handle.text(0, i*vertical_scale_line + vertical_shift_text, name, ha='center', \
+                        va='bottom', color='w', size=text_size, zorder=2)
 
                 # Plot peak location
-                plt.scatter(sol_peak, i*vertical_scale_line, marker='+', c="w", zorder=4)
+                ax_handle.scatter(sol_peak, i*vertical_scale_line, marker='+', c="w", zorder=4)
 
                 active_shower = shower_block
 
-
-    plt.xlabel('Solar longitude (deg)')
-    
-    plt.show()
-
+    # Hide y axis
+    ax_handle.get_yaxis().set_visible(False)
+    ax_handle.set_xlabel('Solar longitude (deg)')
 
 
-        
+    # Plot a line with given solver longitude
+    if sol_marker is not None:
+
+        # Get the plot limits
+        y_min, y_max = ax_handle.get_ylim()
+
+        # Plot the solar longitude line behind everything else
+        y_arr = np.linspace(y_min, y_max, 5)
+
+        if not isinstance(sol_marker, list):
+            sol_marker = [sol_marker]
+
+        for sol_value in sol_marker:
+            ax_handle.plot(np.zeros_like(y_arr) + sol_value, y_arr, color='r', linestyle='dashed', zorder=2)
+
+        # Force Y limits to previous ones
+        ax_handle.set_ylim([y_min, y_max])
 
 
-
-
-
-
-
-
-
-
-
+    ax_handle.set_xlim([0, 360])
 
 
 
 if __name__ == "__main__":
 
+    import datetime
+
     import RMS.ConfigReader as cr
+    from RMS.Astrometry.Conversions import datetime2JD
+    from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
 
 
     shower_data = loadShowers("share", "established_showers.csv")
@@ -192,4 +230,7 @@ if __name__ == "__main__":
 
     # Generate activity diagram
     config = cr.parse('.config')
-    generateActivityDiagram(config, shower_data)
+    generateActivityDiagram(config, shower_data, \
+        sol_marker=np.degrees(jd2SolLonSteyaert(datetime2JD(datetime.datetime.now()))))
+
+    plt.show()

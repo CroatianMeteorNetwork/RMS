@@ -7,15 +7,22 @@ import matplotlib.pyplot as plt
 
 
 class AllSkyPlot(object):
-	def __init__(self):
+	def __init__(self, ax_handle=None):
 
 		self.ra0 = 180.0
 
-		self.fig = plt.figure()
+
+		if ax_handle is None:
+			
+			self.fig = plt.figure()
+			self.ax = self.fig.add_subplot(1, 1, 1, facecolor='black')
+
+		else:
+			self.ax = ax_handle
+			self.fig = plt.gcf()
 
 		# Set background color
 		self.fig.patch.set_facecolor('black')
-		self.ax = self.fig.add_subplot(1, 1, 1, facecolor='black')
 
 		# Set equal aspect ratio
 		self.ax.set_aspect('equal')
@@ -86,14 +93,14 @@ class AllSkyPlot(object):
 					kwargs['color'] = color
 			
 
-			plt_handle = plt.plot(x, y, **kwargs)
+			plt_handle = self.ax.plot(x, y, **kwargs)
 
 
 
 	def scatter(self, ra_array, dec_array, **kwargs):
 
 		x, y = self.raDec2XY(ra_array, dec_array)
-		plt.scatter(x, y, **kwargs)
+		self.ax.scatter(x, y, **kwargs)
 
 
 

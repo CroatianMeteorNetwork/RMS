@@ -10,14 +10,14 @@ import datetime
 import copy
 
 import numpy as np
-
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 
 from RMS.Astrometry.Conversions import raDec2Vector, vector2RaDec, datetime2JD, \
     geocentricToApparentRadiantAndVelocity, raDec2AltAz, raDec2AltAz_vect, EARTH_CONSTANTS
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
-from RMS.Formats.Showers import loadShowers
+from RMS.Formats.Showers import loadShowers, generateActivityDiagram
 from RMS.Math import vectNorm, angularSeparation, angularSeparationVect, isAngleBetween, \
     sphericalPointFromHeadingAndDistance, cartesianToPolar
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePhase
@@ -338,7 +338,8 @@ def estimateMeteorHeight(meteor_obj, shower):
 
 
 
-def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=False, save_plot=False):
+def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=False, save_plot=False, \
+    plot_activity=False):
     """ Do single station shower association based on radiant direction and height. 
     
     Arguments:
@@ -350,6 +351,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             in which case all active showers will be associated.
         show_plot: [bool] Show the plot on the screen. False by default.
         save_plot: [bool] Save the plot in the folder with FTPdetectinfos. False by default.
+        plot_activity: [bool] Whether to plot the shower activity plot of not. False by default.
 
     Return:
         associations, shower_counts: [tuple]
@@ -529,7 +531,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
 
     # Find shower frequency and sort by count
-    shower_list = []
+    shower_list_temp = []
     for key in associations:
         _, shower = associations[key]
 
@@ -538,19 +540,30 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
         else:
             shower_name = shower.name
 
-        shower_list.append(shower_name)
+        shower_list_temp.append(shower_name)
 
-    unique_showers = set(shower_list)
-    shower_counts = [[name, shower_list.count(name)] for name in unique_showers]
+    unique_showers = set(shower_list_temp)
+    shower_counts = [[name, shower_list_temp.count(name)] for name in unique_showers]
     shower_counts = sorted(shower_counts, key=lambda x: x[1], reverse=True)
 
 
     # Create a plot of showers
     if show_plot or save_plot:
 
+        # Init the figure
+        plt.figure()
+
+        # Init subplots depending on if the activity plot is done as well
+        if plot_activity:
+            gs = gridspec.GridSpec(2, 1, height_ratios=[4, 1])
+            ax_allsky = plt.subplot(gs[0], facecolor='black')
+            ax_activity = plt.subplot(gs[1], facecolor='black')
+        else:
+            ax_allsky = plt.subplot(111, facecolor='black')
+
 
         # Init the all-sky plot
-        allsky_plot = AllSkyPlot()
+        allsky_plot = AllSkyPlot(ax_handle=ax_allsky)
 
         # Plot all meteors
         for key in associations:
@@ -682,6 +695,21 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
 
         ### ###
+
+        # Plot yearly meteor shower activity
+        if plot_activity:
+
+            # Get the JD range of all events
+
+            jd_list = [associations[key][0].jdt_ref for key in associations]
+            jd_min = min(jd_list)
+            jd_max = max(jd_list)
+
+            # Plot the activity diagram
+            generateActivityDiagram(config, shower_list, ax_handle=ax_activity, \
+                sol_marker=[np.degrees(jd2SolLonSteyaert(jd_min)), np.degrees(jd2SolLonSteyaert(jd_max))])
+
+
         
 
         # Save plot
@@ -767,7 +795,7 @@ if __name__ == "__main__":
 
     # Perform shower association
     associations, shower_counts = showerAssociation(config, ftpdetectinfo_path_list, \
-        shower_code=cml_args.shower, show_plot=(not cml_args.hideplot), save_plot=True)
+        shower_code=cml_args.shower, show_plot=(not cml_args.hideplot), save_plot=True, plot_activity=True)
 
 
     # Print results to screen
