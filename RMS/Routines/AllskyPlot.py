@@ -124,7 +124,7 @@ class AllSkyPlot(object):
 
 			x_grid, y_grid = self.raDec2XY(ra_temp, dec_arr)
 
-			self.ax.plot(x_grid, y_grid, linestyle='dotted', alpha=0.5, color='gray')
+			self.ax.plot(x_grid, y_grid, linestyle='dotted', alpha=0.5, color='silver')
 
 
 		# Plot parallels
@@ -132,7 +132,7 @@ class AllSkyPlot(object):
 
 			dec_temp = np.zeros_like(ra_grid) + dec
 
-			self.plot(ra_grid, dec_temp, linestyle='dotted', alpha=0.5, color='gray')
+			self.plot(ra_grid, dec_temp, linestyle='dotted', alpha=0.5, color='silver')
 
 
 		# Plot dec ticks

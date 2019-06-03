@@ -428,7 +428,7 @@ class Config:
         self.shower_lasun_threshold = 2.0
 
         # Maximum distance from shower radiant (degrees)
-        self.shower_max_radiant_separation = 5.0
+        self.shower_max_radiant_separation = 7.5
 
 
 def normalizeParameter(param, config, binning=1):

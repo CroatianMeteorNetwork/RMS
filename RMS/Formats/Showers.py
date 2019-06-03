@@ -206,7 +206,8 @@ def generateActivityDiagram(config, shower_data, ax_handle=None, sol_marker=None
             sol_marker = [sol_marker]
 
         for sol_value in sol_marker:
-            ax_handle.plot(np.zeros_like(y_arr) + sol_value, y_arr, color='r', linestyle='dashed', zorder=2)
+            ax_handle.plot(np.zeros_like(y_arr) + sol_value, y_arr, color='r', linestyle='dashed', zorder=2, \
+                linewidth=1)
 
         # Force Y limits to previous ones
         ax_handle.set_ylim([y_min, y_max])

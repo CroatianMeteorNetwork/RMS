@@ -555,7 +555,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
         # Init subplots depending on if the activity plot is done as well
         if plot_activity:
-            gs = gridspec.GridSpec(2, 1, height_ratios=[4, 1])
+            gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1])
             ax_allsky = plt.subplot(gs[0], facecolor='black')
             ax_activity = plt.subplot(gs[1], facecolor='black')
         else:
@@ -620,7 +620,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                     gc_end_phase = gc_beg_phase + 170
 
                 gc_color = 'green'
-                gc_alpha = 0.5
+                gc_alpha = 0.7
 
 
             # Get phases 180 deg before the meteor
