@@ -211,6 +211,9 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         platepar_aligned: [Platepar instance] The aligned platepar.
     """
 
+    # Create a copy of the config not to mess with the original config parameters
+    config = copy.deepcopy(config)
+
 
     # Try to optimize the catalog limiting magnitude until the number of image and catalog stars are matched
     maxiter = 10
