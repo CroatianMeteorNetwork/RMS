@@ -5,10 +5,14 @@ from __future__ import print_function, division, absolute_import
 
 
 import os
+import datetime
 
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+
+from RMS.Astrometry.Conversions import datetime2JD
+from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
 
 
 def loadShowers(dir_path, file_name):
@@ -192,12 +196,11 @@ def generateActivityDiagram(config, shower_data, ax_handle=None, sol_marker=None
     ax_handle.get_yaxis().set_visible(False)
     ax_handle.set_xlabel('Solar longitude (deg)')
 
+    # Get the plot Y limits
+    y_min, y_max = ax_handle.get_ylim()
 
     # Plot a line with given solver longitude
     if sol_marker is not None:
-
-        # Get the plot limits
-        y_min, y_max = ax_handle.get_ylim()
 
         # Plot the solar longitude line behind everything else
         y_arr = np.linspace(y_min, y_max, 5)
@@ -209,21 +212,49 @@ def generateActivityDiagram(config, shower_data, ax_handle=None, sol_marker=None
             ax_handle.plot(np.zeros_like(y_arr) + sol_value, y_arr, color='r', linestyle='dashed', zorder=2, \
                 linewidth=1)
 
-        # Force Y limits to previous ones
-        ax_handle.set_ylim([y_min, y_max])
 
+    # Plot month names at the 1st of that month (start in April of this year)
+    for month_no, year_modifier in [[ 4, 0],
+                                    [ 5, 0],
+                                    [ 6, 0],
+                                    [ 7, 0],
+                                    [ 8, 0],
+                                    [ 9, 0],
+                                    [10, 0],
+                                    [11, 0],
+                                    [12, 0],
+                                    [ 1, 1],
+                                    [ 2, 1],
+                                    [ 3, 1]]:
 
+        # Get the solar longitude of the 15th date of the month
+        curr_year = datetime.datetime.now().year
+        dt = datetime.datetime(curr_year + year_modifier, month_no, 15, 0, 0, 0)
+        sol = np.degrees(jd2SolLonSteyaert(datetime2JD(dt)))%360
+
+        # Plot the month name in the background of the plot
+        plt.text(sol, y_max, dt.strftime("%b").upper(), alpha=0.3, rotation=90, size=20, \
+            zorder=1, color='w', va='top', ha='center')
+
+        # Get the solar longitude of the 1st date of the month
+        curr_year = datetime.datetime.now().year
+        dt = datetime.datetime(curr_year + year_modifier, month_no, 1, 0, 0, 0)
+        sol = np.degrees(jd2SolLonSteyaert(datetime2JD(dt)))%360
+
+        # Plot the manth beginning line
+        y_arr = np.linspace(y_min, y_max, 5)
+        plt.plot(np.zeros_like(y_arr) + sol, y_arr, linestyle='dotted', alpha=0.3, zorder=3, color='w')
+    
+
+    # Force Y limits
+    ax_handle.set_ylim([y_min, y_max])
     ax_handle.set_xlim([0, 360])
 
 
 
 if __name__ == "__main__":
 
-    import datetime
-
     import RMS.ConfigReader as cr
-    from RMS.Astrometry.Conversions import datetime2JD
-    from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
 
 
     shower_data = loadShowers("share", "established_showers.csv")

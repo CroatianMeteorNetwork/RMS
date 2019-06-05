@@ -351,8 +351,7 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius, v
 
 
 
-def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict, match_radius, \
-    fit_distorsion):
+def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict, match_radius):
     """ Calculates the differences between the stars on the image and catalog stars in image coordinates with 
         the given astrometrical solution. 
     """
@@ -361,12 +360,8 @@ def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict,
     # Make a copy of the platepar
     pp = copy.deepcopy(platepar)
 
-    # Extract fitting parameters (if the distorsion is fit as well, fit the scale, otherwise keep it fixed)
-    if fit_distorsion:
-        ra_ref, dec_ref, pos_angle_ref, F_scale = params
-    else:
-        ra_ref, dec_ref, pos_angle_ref = params
-        F_scale = pp.F_scale
+    # Extract fitting parameters
+    ra_ref, dec_ref, pos_angle_ref, F_scale = params
 
     # Set the fitting parameters to the platepar clone
     pp.RA_d = ra_ref
@@ -712,15 +707,12 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _
             return platepar, True
 
 
-        # Initial parameters for the astrometric fit (don't fit the scale if the distorsion is not being fit)
-        if fit_distorsion:
-            p0 = [platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale]
-        else:
-            p0 = [platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref]
+        # Initial parameters for the astrometric fit
+        p0 = [platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale]
 
         # Fit the astrometric parameters
         res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, args=(config, platepar, catalog_stars, \
-            star_dict, match_radius, fit_distorsion), method='Nelder-Mead', \
+            star_dict, match_radius), method='Nelder-Mead', \
             options={'fatol': fatol, 'xatol': xatol_ang})
 
         print(res)
@@ -735,12 +727,7 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _
 
         else:
             # If the fit was successful, use the new parameters from now on
-            if fit_distorsion:
-                ra_ref, dec_ref, pos_angle_ref, F_scale = res.x
-
-            else:
-                ra_ref, dec_ref, pos_angle_ref = res.x
-                F_scale = platepar.F_scale
+            ra_ref, dec_ref, pos_angle_ref, F_scale = res.x
 
             platepar.RA_d = ra_ref
             platepar.dec_d = dec_ref

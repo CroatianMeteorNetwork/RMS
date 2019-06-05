@@ -109,16 +109,16 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars):
 
         ### Recalibrate the platepar just on these stars, use the default platepar for initial params ###
         
-        # Don't fit the scale
-        p0 = [working_platepar.RA_d, working_platepar.dec_d, working_platepar.pos_angle_ref]
-        fit_distorsion = False
+        # Init initial parameters
+        p0 = [working_platepar.RA_d, working_platepar.dec_d, working_platepar.pos_angle_ref, \
+            working_platepar.F_scale]
 
         # Compute the minimization tolerance
         fatol, xatol_ang = CheckFit.computeMinimizationTolerances(config, working_platepar, \
             len(star_dict_ff))
 
         res = scipy.optimize.minimize(CheckFit._calcImageResidualsAstro, p0, args=(config, \
-            working_platepar, catalog_stars, star_dict_ff, match_radius, fit_distorsion), \
+            working_platepar, catalog_stars, star_dict_ff, match_radius), \
             method='Nelder-Mead', options={'fatol': fatol, 'xatol': xatol_ang})
 
 
@@ -127,10 +127,11 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars):
         # Compute matched stars
         temp_platepar = copy.deepcopy(working_platepar)
 
-        ra_ref, dec_ref, pos_angle_ref = res.x
+        ra_ref, dec_ref, pos_angle_ref, F_scale_ref = res.x
         temp_platepar.RA_d = ra_ref
         temp_platepar.dec_d = dec_ref
         temp_platepar.pos_angle_ref = pos_angle_ref
+        temp_platepar.F_scale = F_scale_ref
 
         n_matched, _, _, _ = CheckFit.matchStarsResiduals(config, temp_platepar, catalog_stars, \
             star_dict_ff, match_radius, ret_nmatch=True, verbose=False)
