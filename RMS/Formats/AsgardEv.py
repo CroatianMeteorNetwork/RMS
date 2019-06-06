@@ -205,7 +205,7 @@ def readEv(dir_path, file_name, ev=None):
 
 
 
-def writeEv(dir_path, file_name, ev_array, plate, ast_input=False):
+def writeEv(dir_path, file_name, ev_array, plate, multi, ast_input=False, vidinfo=None):
     """ Write an UWO ASGARD style event file. 
     
     Arguments:
@@ -214,20 +214,29 @@ def writeEv(dir_path, file_name, ev_array, plate, ast_input=False):
         ev_array: [ndarray] Array where columns are: frame number, sequence number, JD, intensity, x, y, 
             azimuth (deg), altitude (deg), magnitude
         plate: [?] Platepar or AST plate.
+        multi: identifier for simultaneous detections, 0 = 'A', 1 = 'B', etc.
 
     Keyword arguments:
         ast_input: [bool] True if AST plate if given, False if platepar is given (default).
+        vidinfo:   [?] metadata from a UWO .vid file, if available
 
     """
 
+    # ASGARD default site if we can't get a matching site number from another source
+    site = 0
+    stream = 'Z'
+
     # AST plate used for input
     if ast_input:
-        station_code = plate.sitename
+        # AST files don't populate the 'st' field so we can't get site info from here
+        # station_code = plate.sitename
         lat = np.degrees(plate.lat)
         lon = np.degrees(plate.lon)
         elev = plate.elev
         X_res = plate.wid
         Y_res = plate.ht
+        text = plate.sitename
+        plate_text = plate.text
 
     # Platepar used for input
     else:
@@ -237,9 +246,30 @@ def writeEv(dir_path, file_name, ev_array, plate, ast_input=False):
         elev = plate.elev
         X_res = plate.X_res
         Y_res = plate.Y_res
+        text = ''
+        plate_text = 'RMS_SkyFit'
+
+        # valid  ASGARD site ids can only be exactly two digits followed by one letter (ex. 02A)
+        # if the first two characters are digits, use that as the site number
+        # if the third character is a letter, use that as the stream, otherwise fall back on 'A'
+        # if the station code doesn't match at all, use the defaults
+        if len(station_code) == 3:
+            if station_code[:2].isdigit() and station_code[2].isalpha():
+                site = station_code[:2]
+                stream = station_code[2].upper()
+
+        elif len(station_code) == 2:
+            if station_code[:2].isdigit():
+                site = station_code[:2]
+                stream = 'A'
 
 
-
+    # If a .vid file was used and we have vidinfo, prefer site info and descriptive text from
+    # the .vid file itself
+    if vidinfo is not None:
+        site = vidinfo.station_id
+        stream = chr(ord('A') + vidinfo.str_num)
+        text = vidinfo.text
 
     with open(os.path.join(dir_path, file_name), 'w') as f:
 
@@ -256,31 +286,22 @@ def writeEv(dir_path, file_name, ev_array, plate, ast_input=False):
         seq_peak = int(seq_array[mag_array.argmin()])
 
 
-        # Extract the site number and stream
-        if len(station_code) == 3:
-            site = station_code[:2]
-            stream = station_code[2]
-
-        else:
-            site = station_code
-            stream = 'A'
-
         ### Write the header
 
         f.write('#\n')
-        f.write('#   version : RMS Detection\n')
+        f.write('#   version : RMS_Detection\n')
         f.write("#    num_fr : {:d}\n".format(len(ev_array)))
         f.write("#    num_tr : 0\n")
         f.write("#      time : {:s} UTC\n".format(jd2Date(jd_peak, dt_obj=True).strftime('%Y%m%d %H:%M:%S.%f')[:-3]))
         f.write("#      unix : {:.6f}\n".format(jd2UnixTime(jd_peak)))
         f.write("#       ntp : LOCK 0 0 0\n")
         f.write("#       seq : {:d}\n".format(seq_peak))
-        f.write("#       mul : 0 [A]\n")
-        f.write("#      site : {:s}\n".format(site))
+        f.write("#       mul : {:d} [{:c}]\n".format(multi, 65 + multi))
+        f.write("#      site : {:02d}\n".format(site))
         f.write("#    latlon : {:.4f} {:.4f} {:.1f}\n".format(lat, lon, elev))
-        f.write("#      text : \n")
+        f.write("#      text : {:s}\n".format(text))
         f.write("#    stream : {:s}\n".format(stream))
-        f.write("#     plate : RMS_SkyFit\n")
+        f.write("#     plate : {:s}\n".format(plate_text))
         f.write("#      geom : {:d} {:d}\n".format(X_res, Y_res))
         f.write("#    filter : 0\n")
         f.write("#\n")

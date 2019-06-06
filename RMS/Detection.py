@@ -1869,8 +1869,12 @@ if __name__ == "__main__":
                 ###
 
 
-                # Write the ev file
-                writeEv(results_path, file_name, ev_array, ast, ast_input=True)
+                # Write the ev file - use .vid file vidinfo for metadata if available
+                if hasattr(img_handle, "vidinfo"):
+                    writeEv(results_path, file_name, ev_array, ast, multi_event, \
+                        ast_input=True, vidinfo=img_handle.vidinfo)
+                else:
+                    writeEv(results_path, file_name, ev_array, ast, multi_event, ast_input=True)
 
 
     if cml_args.debug:
