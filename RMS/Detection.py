@@ -1795,8 +1795,8 @@ if __name__ == "__main__":
         # Write output as ASGARD event file
         if cml_args.asgard is not None:
 
-            # Letter of event for simultaneous event (65 = A, 66 = B, etc.)
-            current_letter = 65
+            # count of multiple simultaneous detections (within the same second)
+            multi_event = 0
             prev_fn_time = 0
 
             # Go through all centroids
@@ -1851,17 +1851,20 @@ if __name__ == "__main__":
                 fn_time = jd2Date(jd_peak, dt_obj=True)
                 fn_time = fn_time.strftime('%Y%m%d_%H%M%S')
 
-                # If the previous file name was the same, increment the file name letter
+                # If the previous file name was the same, increment the multi detect count
                 if fn_time == prev_fn_time:
-                    current_letter += 1
+                    multi_event += 1
                 else:
-                    # Reset to 'A'
-                    current_letter = 65
+                    # Reset when at least one second ticks over
+                    multi_event = 0
 
                 prev_fn_time = fn_time
 
                 # Construct a file name for the event
-                file_name = 'ev_' + fn_time + chr(current_letter) + "_" + config.stationID + '.txt'
+                # multi_event is used to assign a letter to multiple detections
+                # first 0 = 'A', 1 = 'B', 2 = 'C', etc.
+                # ex. ev_20190604_010203A_01A.txt
+                file_name = 'ev_' + fn_time + chr(ord('A') + multi_event) + "_" + config.stationID + '.txt'
 
                 ###
 
