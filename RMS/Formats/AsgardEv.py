@@ -296,7 +296,7 @@ def writeEv(dir_path, file_name, ev_array, plate, multi, ast_input=False, vidinf
         f.write("#      unix : {:.6f}\n".format(jd2UnixTime(jd_peak)))
         f.write("#       ntp : LOCK 0 0 0\n")
         f.write("#       seq : {:d}\n".format(seq_peak))
-        f.write("#       mul : {:d} [{:c}]\n".format(multi, 65 + multi))
+        f.write("#       mul : {:d} [{:c}]\n".format(multi, ord('A') + multi))
         f.write("#      site : {:02d}\n".format(site))
         f.write("#    latlon : {:.4f} {:.4f} {:.1f}\n".format(lat, lon, elev))
         f.write("#      text : {:s}\n".format(text))
