@@ -140,7 +140,7 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars):
         # If the fit was not successful, stop further fitting on this FF file
         if (not res.success) or (n_matched < config.min_matched_stars):
 
-            if not res.successful:
+            if not res.success:
                 print('Astrometry fit failed!')
 
             else:
