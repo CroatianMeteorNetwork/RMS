@@ -279,11 +279,12 @@ class QueuedPool(object):
                 self.printAndLog('Failed retrieving inputs for processing...')
                 self.printAndLog(tb)
 
-                if input_ret_failures > 1000:
+                if input_ret_failures > 5:
+                    self.printAndLog("Too many failures to get inputs, stopping processing...")
                     break
 
                 input_ret_failures += 1
-                time.sleep(0.1)
+                time.sleep(1.0)
                 continue
 
 
