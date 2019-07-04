@@ -257,6 +257,9 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
         if x_max > ff.ncols:
             x_max = ff.ncols
 
+        # Check if any of these values is NaN and skip the star
+        if np.any(np.isnan([x_min, x_max, y_min, y_max])):
+            continue
 
         x_min = int(x_min)
         x_max = int(x_max)
