@@ -199,6 +199,13 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
             recalibrated platepar instances for every FF file.
     """
 
+    # If the given file does not exits, return nothing
+    if not os.path.isfile(ftpdetectinfo_path):
+        print('ERROR! The FTPdetectinfo file does not exist: {:s}'.format(ftpdetectinfo_path))
+        print('    The recalibration on every file was not done!')
+
+        return {}
+
 
     # Read the FTPdetectinfo data
     cam_code, fps, meteor_list = FTPdetectinfo.readFTPdetectinfo(*os.path.split(ftpdetectinfo_path), \
@@ -408,8 +415,11 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
 
     # Back up the old FTPdetectinfo file
-    shutil.copy(ftpdetectinfo_path, ftpdetectinfo_path.strip('.txt') \
-        + '_backup_{:s}.txt'.format(datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f')))
+    try:
+        shutil.copy(ftpdetectinfo_path, ftpdetectinfo_path.strip('.txt') \
+            + '_backup_{:s}.txt'.format(datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f')))
+    except:
+        print('ERROR! The FTPdetectinfo file could not be backed up: {:s}'.format(ftpdetectinfo_path))
 
     # Save the updated FTPdetectinfo
     FTPdetectinfo.writeFTPdetectinfo(meteor_output_list, dir_path, os.path.basename(ftpdetectinfo_path), \
