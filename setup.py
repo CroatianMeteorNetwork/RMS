@@ -1,4 +1,5 @@
-from setuptools import setup, Extension
+from setuptools import setup, Extension, find_packages
+
 import os
 import sys
 
@@ -55,5 +56,7 @@ setup (name = "RMS",
         description = "Raspberry Pi Meteor Station",
         setup_requires=["numpy"],
         install_requires=requirements,
-        ext_modules = [kht_module]
+        ext_modules = [kht_module],
+        packages=find_packages(),
+        include_package_data=True
         )
