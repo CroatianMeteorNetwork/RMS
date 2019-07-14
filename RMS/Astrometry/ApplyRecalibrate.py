@@ -222,6 +222,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
     if not star_catalog_status:
         print("Could not load the star catalog!")
+        print(os.path.join(config.star_catalog_path, config.star_catalog_file))
         return {}
 
     catalog_stars, _, config.star_catalog_band_ratios = star_catalog_status
