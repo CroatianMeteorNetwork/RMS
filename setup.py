@@ -5,8 +5,6 @@ from setuptools import setup, Extension, find_packages
 
 from Cython.Build import cythonize
 
-import numpy as np
-
 
 kht_module = Extension("kht_module",
                     sources = ["Native/Hough/kht.cpp",
@@ -66,6 +64,10 @@ cython_modules = [
     ]
 
 
+# Get all data files
+dir_path = os.path.split(os.path.abspath(__file__))[0]
+catalog_files = [os.path.join('RMS', 'Catalogs', file_name) for file_name in os.listdir(os.path.join(dir_path, 'RMS', 'Catalogs'))]
+
 setup (name = "RMS",
         version = "0.1",
         description = "Raspberry Pi Meteor Station",
@@ -74,6 +76,7 @@ setup (name = "RMS",
             'setuptools>=18.0',
             'cython'],
         install_requires=requirements,
+        data_files=[(os.path.join('RMS', 'Catalogs'), catalog_files)],
         ext_modules = [kht_module] + cythonize(cython_modules),
         packages=find_packages(),
         include_package_data=True
