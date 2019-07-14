@@ -20,6 +20,8 @@ import os
 import sys
 import math
 
+import RMS
+
 try:
     # Python 3
     from ConfigParser import RawConfigParser, NoOptionError
@@ -203,6 +205,9 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
 class Config:
     def __init__(self):
 
+        # Get the package root directory
+        self.rms_root_dir = os.path.dirname(RMS.__file__)
+
         ##### System
         self.stationID = "XX0001"
         self.latitude = 0
@@ -383,7 +388,7 @@ class Config:
         self.use_dark = False
         self.dark_file = 'dark.bmp'
 
-        self.star_catalog_path = 'Catalogs'
+        self.star_catalog_path = os.path.join(rms_root_dir, 'Catalogs')
         self.star_catalog_file = 'gaia_dr2_mag_11.5.npy'
 
         # BVRI band ratios for GAIA G band and Sony CMOS cameras
@@ -1050,6 +1055,7 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "star_catalog_path"):
         config.star_catalog_path = parser.get(section, "star_catalog_path")
+        config.star_catalog_path = os.path.join(config.rms_root_dir, config.star_catalog_path)
 
     if parser.has_option(section, "star_catalog_file"):
         config.star_catalog_file = parser.get(section, "star_catalog_file")
