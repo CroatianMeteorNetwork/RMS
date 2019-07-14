@@ -66,7 +66,7 @@ cython_modules = [
 
 # Get all data files
 dir_path = os.path.split(os.path.abspath(__file__))[0]
-catalog_files = [os.path.join('RMS', 'Catalogs', file_name) for file_name in os.listdir(os.path.join(dir_path, 'RMS', 'Catalogs'))]
+catalog_files = [os.path.join('Catalogs', file_name) for file_name in os.listdir(os.path.join(dir_path, 'Catalogs'))]
 
 setup (name = "RMS",
         version = "0.1",
@@ -76,7 +76,7 @@ setup (name = "RMS",
             'setuptools>=18.0',
             'cython'],
         install_requires=requirements,
-        data_files=[(os.path.join('RMS', 'Catalogs'), catalog_files)],
+        data_files=[(os.path.join('Catalogs'), catalog_files)],
         ext_modules = [kht_module] + cythonize(cython_modules),
         packages=find_packages(),
         include_package_data=True
