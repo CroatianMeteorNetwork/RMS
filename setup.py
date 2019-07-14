@@ -1,7 +1,12 @@
-from setuptools import setup, Extension, find_packages
-
 import os
 import sys
+
+from setuptools import setup, Extension, find_packages
+
+from Cython.Build import cythonize
+
+import numpy as np
+
 
 kht_module = Extension("kht_module",
                     sources = ["Native/Hough/kht.cpp",
@@ -50,13 +55,26 @@ if onvif_str in reqs_stripped:
 ### ###
 
 
+# Cython modules which will be compiled on setup
+cython_modules = [
+    Extension('RMS.Astrometry.CyFunctions', sources=['RMS/Astrometry/CyFunctions.pyx']),
+    Extension('RMS.Routines.BinImageCy', sources=['RMS/Routines/BinImageCy.pyx']),
+    Extension('RMS.Routines.DynamicFTPCompressionCy', sources=['RMS/Routines/DynamicFTPCompressionCy.pyx']),
+    Extension('RMS.Routines.Grouping3Dcy', sources=['RMS/Routines/Grouping3Dcy.pyx']),
+    Extension('RMS.Routines.MorphCy', sources=['RMS/Routines/MorphCy.pyx']),
+    Extension('RMS.CompressionCy', sources=['RMS/CompressionCy.pyx'])
+    ]
+
 
 setup (name = "RMS",
         version = "0.1",
         description = "Raspberry Pi Meteor Station",
-        setup_requires=["numpy"],
+        setup_requires=["numpy", 
+        # Setuptools 18.0 properly handles Cython extensions.
+            'setuptools>=18.0',
+            'cython'],
         install_requires=requirements,
-        ext_modules = [kht_module],
+        ext_modules = [kht_module] + cythonize(cython_modules),
         packages=find_packages(),
         include_package_data=True
         )
