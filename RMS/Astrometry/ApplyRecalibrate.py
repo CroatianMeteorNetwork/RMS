@@ -216,11 +216,15 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
 
     # Load catalog stars (overwrite the mag band ratios if specific catalog is used)
-    catalog_stars, _, config.star_catalog_band_ratios = StarCatalog.readStarCatalog(config.star_catalog_path,\
+    star_catalog_status = StarCatalog.readStarCatalog(config.star_catalog_path,\
         config.star_catalog_file, lim_mag=config.catalog_mag_limit, \
         mag_band_ratios=config.star_catalog_band_ratios)
 
+    if not star_catalog_status:
+        print("Could not load the star catalog!")
+        return {}
 
+    catalog_stars, _, config.star_catalog_band_ratios = star_catalog_status
 
     prev_platepar = copy.deepcopy(platepar)
 
