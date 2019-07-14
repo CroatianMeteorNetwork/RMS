@@ -206,7 +206,7 @@ class Config:
     def __init__(self):
 
         # Get the package root directory
-        self.rms_root_dir = os.path.dirname(RMS.__file__)
+        self.rms_root_dir = os.path.join(os.path.dirname(RMS.__file__), os.pardir)
 
         ##### System
         self.stationID = "XX0001"
