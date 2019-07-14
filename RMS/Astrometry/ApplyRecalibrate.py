@@ -184,7 +184,8 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars):
 
 
 
-def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, calstars_list, config, platepar):
+def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, calstars_list, config, platepar,
+    generate_plot=True):
     """ Recalibrate FF files with detections and apply the recalibrated platepar to those detections. 
 
     Arguments:
@@ -193,6 +194,9 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         calstars_list: [list] A list of entries [[ff_name, star_coordinates], ...].
         config: [Config instance]
         platepar: [Platepar instance] Initial platepar.
+
+    Keyword arguments:
+        generate_plot: [bool] Generate the calibration variation plot. True by default.
 
     Return:
         recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are 
@@ -358,33 +362,35 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         hour_list.append((FFfile.filenameToDatetime(ff_name) - first_jd).total_seconds()/3600)
 
 
-    plt.figure()
+    if generate_plot:
+        
+        plt.figure()
 
-    plt.scatter(0, 0, marker='o', edgecolor='k', label='Reference platepar', s=100, c='none', zorder=3)
+        plt.scatter(0, 0, marker='o', edgecolor='k', label='Reference platepar', s=100, c='none', zorder=3)
 
-    plt.scatter(ang_dists, rot_angles, c=hour_list, zorder=3)
-    plt.colorbar(label='Hours from first FF file')
-    
-    plt.xlabel("Angular distance from reference (arcmin)")
-    plt.ylabel('Rotation from reference (arcmin)')
+        plt.scatter(ang_dists, rot_angles, c=hour_list, zorder=3)
+        plt.colorbar(label='Hours from first FF file')
+        
+        plt.xlabel("Angular distance from reference (arcmin)")
+        plt.ylabel('Rotation from reference (arcmin)')
 
-    plt.grid()
-    plt.legend()
+        plt.grid()
+        plt.legend()
 
-    plt.tight_layout()
+        plt.tight_layout()
 
-    # Generate the name for the plot
-    calib_plot_name = os.path.basename(ftpdetectinfo_path).replace('FTPdetectinfo_', '').replace('.txt', '') \
-        + '_calibration_variation.png'
+        # Generate the name for the plot
+        calib_plot_name = os.path.basename(ftpdetectinfo_path).replace('FTPdetectinfo_', '').replace('.txt', '') \
+            + '_calibration_variation.png'
 
-    plt.savefig(os.path.join(dir_path, calib_plot_name), dpi=150)
+        plt.savefig(os.path.join(dir_path, calib_plot_name), dpi=150)
 
-    # plt.show()
+        # plt.show()
 
-    plt.clf()
-    plt.close()
+        plt.clf()
+        plt.close()
 
-    ### ###
+        ### ###
 
 
 
