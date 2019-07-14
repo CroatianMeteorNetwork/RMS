@@ -388,7 +388,7 @@ class Config:
         self.use_dark = False
         self.dark_file = 'dark.bmp'
 
-        self.star_catalog_path = os.path.join(rms_root_dir, 'Catalogs')
+        self.star_catalog_path = os.path.join(self.rms_root_dir, 'Catalogs')
         self.star_catalog_file = 'gaia_dr2_mag_11.5.npy'
 
         # BVRI band ratios for GAIA G band and Sony CMOS cameras
