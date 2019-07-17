@@ -570,6 +570,9 @@ class InputTypeVideo(object):
 
         self.cache = {}
 
+        # Load the initial chunk
+        self.loadChunk()
+
 
     def nextChunk(self):
         """ Go to the next frame chunk. """
