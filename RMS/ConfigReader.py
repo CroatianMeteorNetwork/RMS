@@ -473,11 +473,11 @@ def normalizeParameterMeteor(param, config, binning=1):
     return param*width_factor*height_factor
 
 
-def parse(filename):
+def parse(filename, strict=True):
 
     try:
         # Python 3
-        parser = RawConfigParser(inline_comment_prefixes=(";"))
+        parser = RawConfigParser(inline_comment_prefixes=(";"), strict=strict)
 
     except:
         # Python 2
