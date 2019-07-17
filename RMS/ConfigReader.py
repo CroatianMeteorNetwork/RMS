@@ -24,11 +24,12 @@ import RMS
 
 try:
     # Python 3
-    from ConfigParser import RawConfigParser, NoOptionError
+    from configparser import RawConfigParser, NoOptionError 
 
 except:
-    # Python 3
-    from configparser import RawConfigParser, NoOptionError 
+    # Python 2
+    from ConfigParser import RawConfigParser, NoOptionError
+    
 
 
 
