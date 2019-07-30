@@ -1,9 +1,12 @@
 """ Generate an MP4 movie from FF files. """
 
+from __future__ import print_function, division, absolute_import
+
 import os
 import os.path
 import argparse
 import subprocess
+import datetime
 
 import scipy.misc
 
@@ -22,6 +25,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
         help='Path to directory with FF files.')
 
+    arg_parser.add_argument('-x', '--norm', action="store_true", \
+        help="""Do not delete generated JPG file.""")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -29,6 +35,8 @@ if __name__ == "__main__":
 
     dir_path = cml_args.dir_path[0] + '/'
 
+
+    t1 = datetime.datetime.utcnow()
 
     # Load the font for labeling
     font = ImageFont.load_default()
@@ -66,12 +74,19 @@ if __name__ == "__main__":
 
             c = c + 1
 
+            # Print elapsed time
+            print("Elapsed:", datetime.datetime.utcnow() - t1, end="\r")
+
 
     # Construct the ecommand for avconv            
     com = "cd " + dir_path + ";avconv -v quiet -r 30 -y -i temp_%04d.jpg -flags:0 gray -vcodec libx264 -vsync passthrough -pix_fmt yuv420p -crf 25 -r 30 " + dir_path + os.path.basename(os.path.dirname(dir_path)) + ".mp4"
     print ("Creating timelapse by avconv...")
+    print(com)
     subprocess.call([com], shell=True)
 
     # Remove temporary jpg files from the SD card to save space
     print ("Removing temporary JPG files...")
     subprocess.call(['rm -f ' + dir_path + 'temp_*.jpg'], shell=True)
+
+
+    print("Total time:", datetime.datetime.utcnow() - t1)
