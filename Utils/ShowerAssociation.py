@@ -691,7 +691,8 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
         # Plot shower counts
         for i, (shower_name, count) in enumerate(shower_counts):
-            allsky_plot.ax.text(-180, 89 - i*4, '{:s}: {:d}'.format(shower_name, count), color='w', family='monospace')
+            allsky_plot.ax.text(-180, 89 - i*4, '{:s}: {:d}'.format(shower_name, count), color='w', \
+                family='monospace')
 
 
         ### ###
