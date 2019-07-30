@@ -41,7 +41,7 @@ if __name__ == "__main__":
 
     # Load the font for labeling
     try:
-        font = ImageFont.truetype("/usr/share/fonts/dejavu/DejaVuSans.ttf", 16)
+        font = ImageFont.truetype("/usr/share/fonts/dejavu/DejaVuSans.ttf", 18)
     except:
         font = ImageFont.load_default()
 
@@ -72,7 +72,7 @@ if __name__ == "__main__":
             # convert scipy object to an image
             jpg = scipy.misc.toimage(img)
             draw = ImageDraw.Draw(jpg)
-            draw.text((0, 0), timestamp, 'rgb(255,255,255)', font=font)
+            draw.text((10, img.shape[0] - 5), timestamp, 'rgb(255,255,255)', font=font, anchor='sw')
 
             # draw text onto the image
             draw = ImageDraw.Draw(jpg)
