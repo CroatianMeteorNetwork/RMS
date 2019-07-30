@@ -75,7 +75,8 @@ if __name__ == "__main__":
             c = c + 1
 
             # Print elapsed time
-            print("Elapsed:", datetime.datetime.utcnow() - t1, end="\r")
+            if c % 10 == 0:
+                print("Elapsed:", datetime.datetime.utcnow() - t1, end="\r")
 
 
     # Construct the ecommand for avconv            
