@@ -2,8 +2,8 @@
 
 from __future__ import print_function, division, absolute_import
 
+import sys
 import os
-import os.path
 import argparse
 import subprocess
 import datetime
@@ -12,6 +12,7 @@ import scipy.misc
 
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
+from RMS.Routines.Image import adjustLevels
 from PIL import ImageFont, ImageDraw
 
 
@@ -39,7 +40,11 @@ if __name__ == "__main__":
     t1 = datetime.datetime.utcnow()
 
     # Load the font for labeling
-    font = ImageFont.load_default()
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/dejavu/DejaVuSans.ttf", 10)
+    except:
+        font = ImageFont.load_default()
+
 
     print ("Preparing files for the timelapse...")
     c = 0
@@ -61,8 +66,11 @@ if __name__ == "__main__":
             # Make a filename for the image, continuous count %04d
             img_file_name = 'temp_' + '%04d'%c + '.jpg'
 
+            # Adjust image gamma to pretty up the image
+            img = adjustLevels(ff.maxpixel, 0, 1.3, 245)
+
             # convert scipy object to an image
-            jpg = scipy.misc.toimage(ff.maxpixel)
+            jpg = scipy.misc.toimage(img)
             draw = ImageDraw.Draw(jpg)
             draw.text((0, 0), timestamp, 'rgb(255,255,255)', font=font)
 
@@ -75,8 +83,9 @@ if __name__ == "__main__":
             c = c + 1
 
             # Print elapsed time
-            if c % 10 == 0:
+            if c % 30 == 0:
                 print("Elapsed:", datetime.datetime.utcnow() - t1, end="\r")
+                sys.stdout.flush()
 
 
     # Construct the ecommand for avconv            
