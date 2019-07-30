@@ -72,7 +72,7 @@ if __name__ == "__main__":
             # convert scipy object to an image
             jpg = scipy.misc.toimage(img)
             draw = ImageDraw.Draw(jpg)
-            draw.text((10, img.shape[0] - 5), timestamp, 'rgb(255,255,255)', font=font, anchor='sw')
+            draw.text((0, 0), timestamp, 'rgb(255,255,255)', font=font)
 
             # draw text onto the image
             draw = ImageDraw.Draw(jpg)
