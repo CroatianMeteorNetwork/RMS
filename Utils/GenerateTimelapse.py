@@ -64,7 +64,7 @@ if __name__ == "__main__":
             timestamp = filenameToDatetime(file_name).strftime("%Y-%m-%d %H:%M:%S")
 
             # Make a filename for the image, continuous count %04d
-            img_file_name = 'temp_' + '%04d'%c + '.jpg'
+            img_file_name = 'temp_{:04d}.jpg'.format(c)
 
             # Adjust image gamma to pretty up the image
             img = adjustLevels(ff.maxpixel, 0, 1.3, 245)
@@ -78,7 +78,7 @@ if __name__ == "__main__":
             draw = ImageDraw.Draw(jpg)
 
             # Save the labelled image to disk
-            scipy.misc.imsave(os.path.join(dir_path, img_file_name),jpg)
+            scipy.misc.imsave(os.path.join(dir_path, img_file_name), jpg)
 
             c = c + 1
 
