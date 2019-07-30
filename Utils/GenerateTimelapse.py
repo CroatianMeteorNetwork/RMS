@@ -1,4 +1,4 @@
-""" Batch convert FF files to MP4 movie """
+""" Generate an MP4 movie from FF files. """
 
 import os
 import os.path
@@ -8,9 +8,8 @@ import subprocess
 import scipy.misc
 
 from RMS.Formats.FFfile import read as readFF
-from RMS.Formats.FFfile import validFFName
-from PIL import Image, ImageFont, ImageDraw
-from datetime import datetime
+from RMS.Formats.FFfile import validFFName, filenameToDatetime
+from PIL import ImageFont, ImageDraw
 
 
 if __name__ == "__main__":
@@ -30,19 +29,13 @@ if __name__ == "__main__":
 
     dir_path = cml_args.dir_path[0] + '/'
 
-    myimages = [] #list of image filenames
-    dirFiles = os.listdir(dir_path) #list of directory files
-    dirFiles.sort() #good initial sort but doesnt sort numerically very well
-    sorted(dirFiles) #sort numerically in ascending order 
 
-
-    # Go through all files in the given folder
-    c = 0 #image count
-    # setting font for labelling
-    font = ImageFont.truetype("/usr/share/fonts/dejavu/DejaVuSans.ttf", 10)
+    # Load the font for labeling
+    font = ImageFont.load_default()
 
     print ("Preparing files for the timelapse...")
-    for file_name in dirFiles:
+    c = 0
+    for file_name in sorted(os.listdir(dir_path)):
 
         # Check if the file is an FF file
         if validFFName(file_name):
@@ -50,20 +43,20 @@ if __name__ == "__main__":
             # Read the FF file
             ff = readFF(dir_path, file_name)
 
-            # get the timestamp from the FITS file name
-            label = file_name[16:18] + "-" + file_name[14:16] + "-" + file_name[10:14] + "  " + file_name[19:21] + ":" + file_name[21:23] + ":" + file_name[23:25]
-
             # Skip the file if it could not be read
             if ff is None:
                 continue
 
+            # Get the timestamp from the FF name
+            timestamp = filenameToDatetime(file_name).strftime("%Y-%m-%d %H:%M:%S")
+
             # Make a filename for the image, continuous count %04d
-            img_file_name = 'temp_' + '%04d' % c + '.jpg'
+            img_file_name = 'temp_' + '%04d'%c + '.jpg'
 
             # convert scipy object to an image
             jpg = scipy.misc.toimage(ff.maxpixel)
             draw = ImageDraw.Draw(jpg)
-            draw.text((0,0), label, 'rgb(255,255,255)', font=font)
+            draw.text((0, 0), timestamp, 'rgb(255,255,255)', font=font)
 
             # draw text onto the image
             draw = ImageDraw.Draw(jpg)
@@ -73,11 +66,12 @@ if __name__ == "__main__":
 
             c = c + 1
 
-    # construct the ecommand for avconv            
+
+    # Construct the ecommand for avconv            
     com = "cd " + dir_path + ";avconv -v quiet -r 30 -y -i temp_%04d.jpg -flags:0 gray -vcodec libx264 -vsync passthrough -pix_fmt yuv420p -crf 25 -r 30 " + dir_path + os.path.basename(os.path.dirname(dir_path)) + ".mp4"
     print ("Creating timelapse by avconv...")
-    subprocess.call([com],shell=True)
+    subprocess.call([com], shell=True)
 
-    #remove temporary jpg files from the SD card to save space
-    print ("Removing temporary files...")
-    subprocess.call(['rm -f ' + dir_path + 'temp_*.jpg'],shell=True)
+    # Remove temporary jpg files from the SD card to save space
+    print ("Removing temporary JPG files...")
+    subprocess.call(['rm -f ' + dir_path + 'temp_*.jpg'], shell=True)
