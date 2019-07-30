@@ -26,7 +26,7 @@ if __name__ == "__main__":
     arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
         help='Path to directory with FF files.')
 
-    arg_parser.add_argument('-x', '--norm', action="store_true", \
+    arg_parser.add_argument('-x', '--nodel', action="store_true", \
         help="""Do not delete generated JPG file.""")
 
     # Parse the command line arguments
@@ -95,8 +95,9 @@ if __name__ == "__main__":
     subprocess.call([com], shell=True)
 
     # Remove temporary jpg files from the SD card to save space
-    print ("Removing temporary JPG files...")
-    subprocess.call(['rm -f ' + dir_path + 'temp_*.jpg'], shell=True)
+    if not cml_args.nodel:
+        print ("Removing temporary JPG files...")
+        subprocess.call(['rm -f ' + dir_path + 'temp_*.jpg'], shell=True)
 
 
     print("Total time:", datetime.datetime.utcnow() - t1)
