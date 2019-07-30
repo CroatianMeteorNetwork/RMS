@@ -41,7 +41,7 @@ if __name__ == "__main__":
 
     # Load the font for labeling
     try:
-        font = ImageFont.truetype("/usr/share/fonts/dejavu/DejaVuSans.ttf", 10)
+        font = ImageFont.truetype("/usr/share/fonts/dejavu/DejaVuSans.ttf", 16)
     except:
         font = ImageFont.load_default()
 
