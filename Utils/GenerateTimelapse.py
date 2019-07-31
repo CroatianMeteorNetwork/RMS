@@ -48,46 +48,47 @@ if __name__ == "__main__":
 
     print ("Preparing files for the timelapse...")
     c = 0
-    for file_name in sorted(os.listdir(dir_path)):
 
-        # Check if the file is an FF file
-        if validFFName(file_name):
+    ff_list = [ff_name for ff_name in sorted(os.listdir(dir_path)) if validFFName(ff_name)]
 
-            # Read the FF file
-            ff = readFF(dir_path, file_name)
+    for file_name in ff_list:
 
-            # Skip the file if it could not be read
-            if ff is None:
-                continue
+        # Read the FF file
+        ff = readFF(dir_path, file_name)
 
-            # Get the timestamp from the FF name
-            timestamp = filenameToDatetime(file_name).strftime("%Y-%m-%d %H:%M:%S")
+        # Skip the file if it could not be read
+        if ff is None:
+            continue
 
-            # Make a filename for the image, continuous count %04d
-            img_file_name = 'temp_{:04d}.jpg'.format(c)
+        # Get the timestamp from the FF name
+        timestamp = filenameToDatetime(file_name).strftime("%Y-%m-%d %H:%M:%S")
 
-            img = ff.maxpixel
+        # Make a filename for the image, continuous count %04d
+        img_file_name = 'temp_{:04d}.jpg'.format(c)
 
-            # # Adjust image gamma to pretty up the image
-            # img = adjustLevels(ff.maxpixel, 0, 1.3, 245)
+        img = ff.maxpixel
 
-            # convert scipy object to an image
-            jpg = scipy.misc.toimage(img)
-            draw = ImageDraw.Draw(jpg)
-            draw.text((0, 0), timestamp, 'rgb(255,255,255)', font=font)
+        # # Adjust image gamma to pretty up the image
+        # img = adjustLevels(ff.maxpixel, 0, 1.3, 245)
 
-            # draw text onto the image
-            draw = ImageDraw.Draw(jpg)
+        # convert scipy object to an image
+        jpg = scipy.misc.toimage(img)
+        draw = ImageDraw.Draw(jpg)
+        draw.text((0, 0), timestamp, 'rgb(255,255,255)', font=font)
 
-            # Save the labelled image to disk
-            scipy.misc.imsave(os.path.join(dir_path, img_file_name), jpg)
+        # draw text onto the image
+        draw = ImageDraw.Draw(jpg)
 
-            c = c + 1
+        # Save the labelled image to disk
+        scipy.misc.imsave(os.path.join(dir_path, img_file_name), jpg)
 
-            # Print elapsed time
-            if c % 30 == 0:
-                print("Elapsed:", datetime.datetime.utcnow() - t1, end="\r")
-                sys.stdout.flush()
+        c = c + 1
+
+        # Print elapsed time
+        if c % 30 == 0:
+            print("{:>5d}/{:>5d}, Elapsed: {:s}".format(c + 1, len(ff_list), \
+                str(datetime.datetime.utcnow() - t1)), end="\r")
+            sys.stdout.flush()
 
 
     # Construct the ecommand for avconv            
