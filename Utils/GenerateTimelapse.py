@@ -66,8 +66,10 @@ if __name__ == "__main__":
             # Make a filename for the image, continuous count %04d
             img_file_name = 'temp_{:04d}.jpg'.format(c)
 
-            # Adjust image gamma to pretty up the image
-            img = adjustLevels(ff.maxpixel, 0, 1.3, 245)
+            img = ff.maxpixel
+
+            # # Adjust image gamma to pretty up the image
+            # img = adjustLevels(ff.maxpixel, 0, 1.3, 245)
 
             # convert scipy object to an image
             jpg = scipy.misc.toimage(img)
@@ -89,7 +91,7 @@ if __name__ == "__main__":
 
 
     # Construct the ecommand for avconv            
-    com = "cd " + dir_path + ";avconv -v quiet -r 30 -y -i temp_%04d.jpg -flags:0 gray -vcodec libx264 -vsync passthrough -pix_fmt yuv420p -crf 25 -r 30 " + dir_path + os.path.basename(os.path.dirname(dir_path)) + ".mp4"
+    com = "cd " + dir_path + ";avconv -v quiet -r 30 -y -i temp_%04d.jpg -flags:0 gray -vcodec libx264 -vsync passthrough -pix_fmt yuv420p -crf 25 -r 30 -vf lutyuv=\"y=gammaval=(1.3)\"" + dir_path + os.path.basename(os.path.dirname(dir_path)) + ".mp4"
     print ("Creating timelapse by avconv...")
     print(com)
     subprocess.call([com], shell=True)
