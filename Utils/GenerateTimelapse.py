@@ -23,7 +23,7 @@ if __name__ == "__main__":
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Convert all FF files in a folder to a movie")
 
-    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
+    arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
         help='Path to directory with FF files.')
 
     arg_parser.add_argument('-x', '--nodel', action="store_true", \
@@ -34,7 +34,7 @@ if __name__ == "__main__":
 
     #########################
 
-    dir_path = cml_args.dir_path[0] + '/'
+    dir_path = cml_args.dir_path
 
 
     t1 = datetime.datetime.utcnow()
