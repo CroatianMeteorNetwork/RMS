@@ -34,7 +34,7 @@ if __name__ == "__main__":
 
     #########################
 
-    dir_path = cml_args.dir_path
+    dir_path = os.path.normpath(cml_args.dir_path)
 
 
     t1 = datetime.datetime.utcnow()
@@ -92,7 +92,7 @@ if __name__ == "__main__":
 
 
     # Construct the ecommand for avconv            
-    mp4_path = os.path.join(dir_path, os.path.basename(os.path.dirname(dir_path)) + ".mp4")
+    mp4_path = os.path.join(dir_path, os.path.basename(dir_path) + ".mp4")
     com = "cd " + dir_path + ";" \
         + "avconv -v quiet -r 30 -y -i temp_%04d.jpg -flags:0 gray -vcodec libx264 -vsync passthrough -pix_fmt yuv420p -crf 25 -r 30 -vf lutyuv=\"y=gammaval=(0.77)\" " \
         + mp4_path
@@ -104,7 +104,7 @@ if __name__ == "__main__":
     # Remove temporary jpg files from the SD card to save space
     if not cml_args.nodel:
         print ("Removing temporary JPG files...")
-        subprocess.call(['rm -f ' + dir_path + 'temp_*.jpg'], shell=True)
+        subprocess.call(['rm -f ' + dir_path + os.sep + 'temp_*.jpg'], shell=True)
 
 
     print("Total time:", datetime.datetime.utcnow() - t1)
