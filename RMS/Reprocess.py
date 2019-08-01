@@ -332,9 +332,6 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                     ff_name = ff_name.replace(config.stationID, cams_code_formatted)
                     met[0] = ff_name
 
-                    # Replace the station name
-                    met[1] = cams_code_formatted
-
 
                 # Write the CAMS compatible FTPdetectinfo file
                 writeFTPdetectinfo(meteor_list, night_data_dir, \

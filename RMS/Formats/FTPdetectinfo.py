@@ -63,7 +63,7 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
 
         # Write the number of meteors on the beginning fo the file
         total_meteors = len(meteor_list)
-        ftpdetect_file.write("Meteor Count = "+str(total_meteors).zfill(6)+ "\n")
+        ftpdetect_file.write("Meteor Count = " + str(total_meteors).zfill(6) + "\n")
         ftpdetect_file.write("-----------------------------------------------------\n")
         ftpdetect_file.write("Processed with RMS 1.0 " + commit_time + " " + str(sha) + " on " \
             + str(datetime.datetime.utcnow()) + " UTC\n")
@@ -85,6 +85,7 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
 
             ftpdetect_file.write("-------------------------------------------------------\n")
             ftpdetect_file.write(ff_name + "\n")
+            
             if calibration is not None:
                 ftpdetect_file.write(calibration + "\n")
             else:
