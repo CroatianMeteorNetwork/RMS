@@ -92,7 +92,7 @@ if __name__ == "__main__":
 
 
     # Construct the ecommand for avconv            
-    mp4_path = os.path.join(dir_path, os.path.basename(dir_path).replace(os.sep, "") + ".mp4")
+    mp4_path = os.path.join(dir_path, os.path.basename(os.path.dirname(dir_path)) + ".mp4")
     com = "cd " + dir_path + ";" \
         + "avconv -v quiet -r 30 -y -i temp_%04d.jpg -flags:0 gray -vcodec libx264 -vsync passthrough -pix_fmt yuv420p -crf 25 -r 30 -vf lutyuv=\"y=gammaval=(0.77)\" " \
         + mp4_path
