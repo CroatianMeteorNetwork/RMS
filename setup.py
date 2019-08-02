@@ -1,6 +1,8 @@
 import os
 import sys
 
+import numpy
+
 from setuptools import setup, Extension, find_packages
 
 from Cython.Build import cythonize
@@ -55,12 +57,18 @@ if onvif_str in reqs_stripped:
 
 # Cython modules which will be compiled on setup
 cython_modules = [
-    Extension('RMS.Astrometry.CyFunctions', sources=['RMS/Astrometry/CyFunctions.pyx']),
-    Extension('RMS.Routines.BinImageCy', sources=['RMS/Routines/BinImageCy.pyx']),
-    Extension('RMS.Routines.DynamicFTPCompressionCy', sources=['RMS/Routines/DynamicFTPCompressionCy.pyx']),
-    Extension('RMS.Routines.Grouping3Dcy', sources=['RMS/Routines/Grouping3Dcy.pyx']),
-    Extension('RMS.Routines.MorphCy', sources=['RMS/Routines/MorphCy.pyx']),
-    Extension('RMS.CompressionCy', sources=['RMS/CompressionCy.pyx'])
+    Extension('RMS.Astrometry.CyFunctions', sources=['RMS/Astrometry/CyFunctions.pyx'], \
+        include_dirs=[numpy.get_include()]),
+    Extension('RMS.Routines.BinImageCy', sources=['RMS/Routines/BinImageCy.pyx'], \
+        include_dirs=[numpy.get_include()]),
+    Extension('RMS.Routines.DynamicFTPCompressionCy', sources=['RMS/Routines/DynamicFTPCompressionCy.pyx'], \
+        include_dirs=[numpy.get_include()]),
+    Extension('RMS.Routines.Grouping3Dcy', sources=['RMS/Routines/Grouping3Dcy.pyx'], \
+        include_dirs=[numpy.get_include()]),
+    Extension('RMS.Routines.MorphCy', sources=['RMS/Routines/MorphCy.pyx'], \
+        include_dirs=[numpy.get_include()]),
+    Extension('RMS.CompressionCy', sources=['RMS/CompressionCy.pyx'], \
+        include_dirs=[numpy.get_include()])
     ]
 
 
@@ -79,5 +87,6 @@ setup (name = "RMS",
         data_files=[(os.path.join('Catalogs'), catalog_files)],
         ext_modules = [kht_module] + cythonize(cython_modules),
         packages=find_packages(),
-        include_package_data=True
+        include_package_data=True,
+        include_dirs=[numpy.get_include()]
         )
