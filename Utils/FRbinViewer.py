@@ -29,7 +29,7 @@ import RMS.ConfigReader as cr
 from RMS.Formats import FFfile, FRbin
 
 
-def view(dir_path, ff_path, fr_path, config, save_frames=False):
+def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='png'):
     """ Shows the detected fireball stored in the FR file. 
     
     Arguments:
@@ -37,6 +37,10 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False):
         ff: [str] path to the FF bin file
         fr: [str] path to the FR bin file
         config: [conf object] configuration structure
+
+    Keyword arguments:
+        save_frames: [bool] Save FR frames to disk. False by defualt.
+        extract_format: [str] Format of saved images. png by default.
 
     """
     
@@ -105,7 +109,8 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False):
 
             # Save frame to disk
             if save_frames:
-                frame_file_name = fr_path.replace('.bin', '') + "_line_{:02d}_frame_{:03d}.png".format(current_line, t)
+                frame_file_name = fr_path.replace('.bin', '') \
+                    + "_line_{:02d}_frame_{:03d}.{:s}".format(current_line, t, extract_format)
                 cv2.imwrite(os.path.join(dir_path, frame_file_name), img)
 
 
@@ -167,6 +172,8 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-e', '--extract', action="store_true", \
         help="Save frames from FR files to disk.")
+    
+    arg_parser.add_argument('-f', '--extractformat', metavar='EXTRACT_FORMAT', help="""Image format for extracted files. png by default. """)
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -221,7 +228,8 @@ if __name__ == "__main__":
                 break
         
         # View the fireball detection
-        retval = view(dir_path, ff_match, fr, config, save_frames=cml_args.extract)
+        retval = view(dir_path, ff_match, fr, config, save_frames=cml_args.extract, \
+            extract_format=cml_args.extractformat)
 
         # Return to previous file
         if retval == -1:
