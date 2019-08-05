@@ -454,10 +454,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             if not np.any(np.isnan([shower.dra, shower.ddec])):
                 
                 # Solar longitude difference form the peak
-                lasun_diff = abs(meteor_obj.lasun - shower.lasun_max)%360
-                if lasun_diff > 180:
-                    lasun_diff = 360 - lasun_diff
-
+                lasun_diff = (meteor_obj.lasun - shower.lasun_max + 180)%360 - 180
 
                 shower.ra_g = shower.ra_g + lasun_diff*shower.dra
                 shower.dec_g = shower.dec_g + lasun_diff*shower.ddec
