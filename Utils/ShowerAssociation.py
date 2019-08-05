@@ -216,7 +216,10 @@ class MeteorSingleStation(object):
 class Shower(object):
     def __init__(self, shower_entry):
 
+        self.iau_code = shower_entry[0]
         self.name = shower_entry[1]
+        self.name_full = shower_entry[2]
+
         self.lasun_beg = shower_entry[3] # deg
         self.lasun_max = shower_entry[4] # deg
         self.lasun_end = shower_entry[5] # deg
@@ -536,6 +539,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
 
     # Find shower frequency and sort by count
+    shower_name_list_temp = []
     shower_list_temp = []
     for key in associations:
         _, shower = associations[key]
@@ -545,10 +549,14 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
         else:
             shower_name = shower.name
 
-        shower_list_temp.append(shower_name)
+        shower_name_list_temp.append(shower_name)
+        shower_list_temp.append(shower)
 
-    unique_showers = set(shower_list_temp)
-    shower_counts = [[name, shower_list_temp.count(name)] for name in unique_showers]
+    _, unique_showers_indices = np.unique(shower_name_list_temp, return_index=True)
+    unique_shower_names = np.array(shower_name_list_temp)[unique_showers_indices]
+    unique_showers = np.array(shower_list_temp)[unique_showers_indices]
+    shower_counts = [[shower_obj, shower_name_list_temp.count(shower_name)] for shower_obj, \
+        shower_name in zip(unique_showers, unique_shower_names)]
     shower_counts = sorted(shower_counts, key=lambda x: x[1], reverse=True)
 
 
@@ -726,7 +734,13 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             allsky_plot.ax.text(-180, 77, "-"*len(date_sol_end), color='w', family='monospace')
 
             # Plot shower counts
-            for i, (shower_name, count) in enumerate(shower_counts):
+            for i, (shower, count) in enumerate(shower_counts):
+
+                if shower is not None:
+                    shower_name = shower.name
+                else:
+                    shower_name = "..."
+
                 allsky_plot.ax.text(-180, 73 - i*4, "{:s}: {:d}".format(shower_name, count), color='w', \
                     family='monospace')
 
@@ -758,21 +772,45 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             plt.savefig(os.path.join(dir_path, plot_name), dpi=100, facecolor='k')
 
 
+
             # Save the text file with shower info
-            with open(os.path.join(dir_path, ftpdetectinfo_base_name + "_radiants.txt"), 'w') as f:
+            if len(jd_list):
+                with open(os.path.join(dir_path, ftpdetectinfo_base_name + "_radiants.txt"), 'w') as f:
 
-                # Print station code
-                f.write("# RMS single station association\n")
-                f.write("# Station: {:s}\n".format(cam_code))
+                    # Print station code
+                    f.write("# RMS single station association\n")
+                    f.write("# \n")
+                    f.write("# Station: {:s}\n".format(cam_code))
 
-                # Print date range
-                if len(jd_list):
+                    # Print date range
                     f.write("#                    Beg          |            End            \n")
                     f.write("#      -----------------------------------------------------\n")
                     f.write("# Date | {:24s} | {:24s} \n".format(jd2Date(jd_min, \
                         dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f"), jd2Date(jd_max, \
                         dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f")))
                     f.write("# Sol  | {:>24.2f} | {:>24.2f} \n".format(sol_min, sol_max))
+
+                    # Write shower counts
+                    f.write("# \n")
+                    f.write("# Shower counts:\n")
+                    f.write("# --------------\n")
+                    f.write("# Code, Count, IAU link\n")
+
+                    for i, (shower, count) in enumerate(shower_counts):
+
+                        if shower is not None:
+                            shower_name = shower.name
+
+                            # Create link to the IAU database of showers
+                            iau_link = "https://www.ta3.sk/IAUC22DB/MDC2007/Roje/pojedynczy_obiekt.php?kodstrumienia={:05d}".format(shower.iau_code)
+
+                        else:
+                            shower_name = "..."
+                            iau_link = "None"
+
+                        f.write("# {:>4s}, {:>5d}, {:s}\n".format(shower_name, count, iau_link))
+
+
 
                     f.write("# \n")
                     f.write("# Meteor parameters:\n")
@@ -784,11 +822,13 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                         meteor_obj, shower = associations[key]
 
                         if shower is not None:
+
                             f.write("{:24s}, {:20.12f}, {:>10.6f}, {:>6s}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:9.3f}, {:8.3f}, {:12.3f}, {:12.3f}\n".format(jd2Date(meteor_obj.jdt_ref, dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f"), \
                                 meteor_obj.jdt_ref, meteor_obj.lasun, shower.name, meteor_obj.ra_array[0], \
                                 meteor_obj.dec_array[0], meteor_obj.ra_array[-1], meteor_obj.dec_array[-1], \
                                 meteor_obj.radiant_ra, meteor_obj.radiant_dec, np.degrees(meteor_obj.theta0),\
-                                np.degrees(meteor_obj.phi0), meteor_obj.gc_beg_phase, meteor_obj.gc_end_phase))
+                                np.degrees(meteor_obj.phi0), meteor_obj.gc_beg_phase, \
+                                meteor_obj.gc_end_phase, iau_link))
 
                         else:
                             f.write("{:24s}, {:20.12f}, {:>10.6f}, {:>6s}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:>6s}, {:>7s}, {:9.3f}, {:8.3f}, {:12.3f}, {:12.3f}\n".format(jd2Date(meteor_obj.jdt_ref, dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f"), \
@@ -874,8 +914,15 @@ if __name__ == "__main__":
 
     # Print results to screen
     if shower_counts:
+        print()
         print('Shower ranking:')
-        for shower_name, count in shower_counts:
+        for shower, count in shower_counts:
+
+            if shower is None:
+                shower_name = '...'
+            else:
+                shower_name = shower.name
+
             print(shower_name, count)
 
     else:
