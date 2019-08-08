@@ -837,10 +837,11 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
                         else:
                             f.write("{:24s}, {:20.12f}, {:>10.6f}, {:>6s}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:>6s}, {:>7s}, {:9.3f}, {:8.3f}, {:12.3f}, {:12.3f}\n".format(jd2Date(meteor_obj.jdt_ref, dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f"), \
-                                meteor_obj.jdt_ref, meteor_obj.lasun, '...', meteor_obj.ra_array[0], \
-                                meteor_obj.dec_array[0], meteor_obj.ra_array[-1], meteor_obj.dec_array[-1], \
-                                "None", "None", np.degrees(meteor_obj.theta0), np.degrees(meteor_obj.phi0), \
-                                meteor_obj.gc_beg_phase, meteor_obj.gc_end_phase))
+                                meteor_obj.jdt_ref, meteor_obj.lasun, '...', meteor_obj.ra_array[0]%360, \
+                                meteor_obj.dec_array[0], meteor_obj.ra_array[-1]%360, \
+                                meteor_obj.dec_array[-1], "None", "None", np.degrees(meteor_obj.theta0), \
+                                np.degrees(meteor_obj.phi0), meteor_obj.gc_beg_phase, \
+                                meteor_obj.gc_end_phase))
 
 
 
