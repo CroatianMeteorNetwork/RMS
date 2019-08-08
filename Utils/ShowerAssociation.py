@@ -817,18 +817,23 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                     f.write("# ------------------\n")
                     f.write("#          Date And Time,      Beg Julian date,     La Sun, Shower, RA beg, Dec beg, RA end, Dec end, RA rad, Dec rad, GC theta0,  GC phi0, GC beg phase, GC end phase\n")
 
+
+                    # Create a sorted list of meteor associations by time
+                    associations_list = [associations[key] for key in associations]
+                    associations_list = sorted(associations_list, key=lambda x: x[0].jdt_ref)
+
                     # Write out meteor parameters
-                    for key in associations:
-                        meteor_obj, shower = associations[key]
+                    for meteor_obj, shower in associations_list:
 
                         if shower is not None:
 
                             f.write("{:24s}, {:20.12f}, {:>10.6f}, {:>6s}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:9.3f}, {:8.3f}, {:12.3f}, {:12.3f}\n".format(jd2Date(meteor_obj.jdt_ref, dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f"), \
-                                meteor_obj.jdt_ref, meteor_obj.lasun, shower.name, meteor_obj.ra_array[0], \
-                                meteor_obj.dec_array[0], meteor_obj.ra_array[-1], meteor_obj.dec_array[-1], \
-                                meteor_obj.radiant_ra, meteor_obj.radiant_dec, np.degrees(meteor_obj.theta0),\
-                                np.degrees(meteor_obj.phi0), meteor_obj.gc_beg_phase, \
-                                meteor_obj.gc_end_phase, iau_link))
+                                meteor_obj.jdt_ref, meteor_obj.lasun, shower.name, \
+                                meteor_obj.ra_array[0]%360, meteor_obj.dec_array[0], \
+                                meteor_obj.ra_array[-1]%360, meteor_obj.dec_array[-1], \
+                                meteor_obj.radiant_ra%360, meteor_obj.radiant_dec, \
+                                np.degrees(meteor_obj.theta0), np.degrees(meteor_obj.phi0), \
+                                meteor_obj.gc_beg_phase, meteor_obj.gc_end_phase, iau_link))
 
                         else:
                             f.write("{:24s}, {:20.12f}, {:>10.6f}, {:>6s}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:>6s}, {:>7s}, {:9.3f}, {:8.3f}, {:12.3f}, {:12.3f}\n".format(jd2Date(meteor_obj.jdt_ref, dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f"), \
