@@ -371,7 +371,8 @@ class InputTypeFF(object):
 
 
         # Set the fixed dtype of uint8 to the FF
-        self.ff.dtype = np.uint8
+        if self.ff is not None:
+            self.ff.dtype = np.uint8
                 
         # Store the loaded file to cache for faster loading
         self.cache = {}
