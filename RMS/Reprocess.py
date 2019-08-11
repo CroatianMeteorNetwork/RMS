@@ -10,8 +10,6 @@ import traceback
 import argparse
 import logging
 
-import scipy.misc
-
 from RMS.ArchiveDetections import archiveDetections, archiveFieldsums
 # from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo
 from RMS.Astrometry.ApplyRecalibrate import recalibrateIndividualFFsAndApplyAstrometry
@@ -24,6 +22,7 @@ from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats import CALSTARS
 from RMS.UploadManager import UploadManager
+from RMS.Routines.Image import saveImage
 from Utils.CalibrationReport import generateCalibrationReport
 from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
@@ -270,7 +269,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
         # Save the flat in the night directory, to keep the operational flat updated
         flat_path = os.path.join(night_data_dir, os.path.basename(config.flat_file))
-        scipy.misc.imsave(flat_path, flat_img)
+        saveImage(flat_path, flat_img)
         log.info('Flat saved to: ' + flat_path)
 
         # Copy the flat to the night's directory as well

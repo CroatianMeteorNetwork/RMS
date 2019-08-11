@@ -93,6 +93,7 @@ Furthermore, you will need the following software and libraries to run the code:
 	- cython (0.25.2 or later)
 	- pyephem (3.7.6.0 or later)
 	- paramiko
+	- imageio
 
 	
 All python libraries will be installed when you run the setup.py script (instructions below). If you want use IP cameras, you need to install a special compilation of OpenCV that supports gstreamer. Run the opencv3_install.sh script that is provided in this repository to install this.
@@ -101,7 +102,7 @@ Alternatively, if you are using Anaconda Python, you can install all libraries e
 
 ```
 conda install -y numpy scipy gitpython cython matplotlib
-conda install -y -c conda-forge pyephem Pillow imreg_dft
+conda install -y -c conda-forge pyephem Pillow imreg_dft imageio
 conda install -y -c astropy astropy
 ```
 

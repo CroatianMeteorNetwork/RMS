@@ -20,7 +20,8 @@ import os
 import logging
 
 import numpy as np
-from scipy import misc
+
+from RMS.Routines.Image import loadImage
 
 
 # Get the logger from the main module
@@ -45,7 +46,7 @@ def loadMask(mask_file):
         return None
 
     # Load the mask file
-    mask = misc.imread(mask_file, flatten=0)
+    mask = loadImage(mask_file, flatten=0)
 
     # Convert the RGB image to one channel image (if not already one channel)
     try:
