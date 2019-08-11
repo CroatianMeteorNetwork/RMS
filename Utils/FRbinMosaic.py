@@ -6,10 +6,9 @@ import argparse
 
 import numpy as np
 import matplotlib.pyplot as plt
-import scipy.misc
 
 from RMS.Formats.FRbin import read as readFR
-
+from RMS.Routines.Image import saveImage
 
 
 def makeFRmosaic(dir_path, border=5):
@@ -95,7 +94,7 @@ def makeFRmosaic(dir_path, border=5):
 
         # Save the image to disk
         img_file_name = ".".join(file_name.split('.')[:-1]) + '_mosaic.png'
-        scipy.misc.imsave(os.path.join(dir_path, img_file_name), mosaic_img)
+        saveImage(os.path.join(dir_path, img_file_name), mosaic_img)
 
         # Plot the image
         plt.imshow(mosaic_img, cmap='gray', vmin=0, vmax=255)

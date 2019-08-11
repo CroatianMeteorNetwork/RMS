@@ -8,12 +8,12 @@ import argparse
 import subprocess
 import datetime
 
-import scipy.misc
+from PIL.Image import fromarray
+from PIL import ImageFont, ImageDraw
 
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
-from RMS.Routines.Image import adjustLevels
-from PIL import ImageFont, ImageDraw
+from RMS.Routines.Image import saveImage
 
 
 if __name__ == "__main__":
@@ -72,7 +72,7 @@ if __name__ == "__main__":
         # img = adjustLevels(ff.maxpixel, 0, 1.3, 245)
 
         # convert scipy object to an image
-        jpg = scipy.misc.toimage(img)
+        jpg = fromarray(img)
         draw = ImageDraw.Draw(jpg)
         draw.text((0, 0), timestamp, 'rgb(255,255,255)', font=font)
 
@@ -80,7 +80,7 @@ if __name__ == "__main__":
         draw = ImageDraw.Draw(jpg)
 
         # Save the labelled image to disk
-        scipy.misc.imsave(os.path.join(dir_path, img_file_name), jpg)
+        saveImage(os.path.join(dir_path, img_file_name), jpg)
 
         c = c + 1
 

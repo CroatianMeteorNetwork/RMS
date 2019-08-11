@@ -18,7 +18,6 @@ except:
 
 
 import numpy as np
-import scipy.misc
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -2200,7 +2199,7 @@ class ManualReductionTool(object):
         frame_file_path = os.path.join(dir_path, frame_file_name)
 
         # Save the frame to disk
-        scipy.misc.imsave(frame_file_path, self.current_image)
+        Image.saveImage(frame_file_path, self.current_image)
 
         print('Frame {:.1f} saved to: {:s}'.format(self.current_frame, frame_file_path))
 

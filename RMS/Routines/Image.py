@@ -8,6 +8,17 @@ import math
 import numpy as np
 import scipy.misc
 
+# Check which imread funtion to use
+try:
+    imread = scipy.misc.imread
+    imsave = scipy.misc.imsave
+    USING_SCIPY_IMREAD = True
+except AttributeError:
+    import imageio
+    imread = imageio.imread
+    imsave = imageio.imwrite
+    USING_SCIPY_IMREAD = False
+
 from RMS.Decorators import memoizeSingle
 
 # Cython init
@@ -15,6 +26,40 @@ import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 import RMS.Routines.MorphCy as morph
 from RMS.Routines.BinImageCy import binImage as binImageCy
+
+
+
+def loadImage(img_path, flatten=-1):
+    """ Load the given image. Handle loading it using different libraries. 
+    
+    Arguments:
+        img_path: [str] Path to the image.
+
+    Keyword arguments:
+        flatten: [int] Convert color image to grayscale if -1. -1 by default.
+    """
+
+    if USING_SCIPY_IMREAD:
+        img = imread(img_path, flatten)
+
+    else:
+        img = imread(img_path, as_gray=bool(flatten))
+
+    return img
+
+
+def saveImage(img_path, img):
+    """ Save image to disk.
+
+    Arguments:
+        img_path: [str] Image path.
+        img: [ndarray] Image as numpy array.
+
+    """
+
+    imsave(img_path, img)
+
+
 
 
 def binImage(img, bin_factor, method='avg'):
@@ -394,7 +439,7 @@ def loadFlat(dir_path, file_name, dtype=None, byteswap=False, dark=None):
     """
 
     # Load the flat image
-    flat_img = scipy.misc.imread(os.path.join(dir_path, file_name), -1)
+    flat_img = loadImage(os.path.join(dir_path, file_name), -1)
 
     # Change the file type if given
     if dtype is not None:
@@ -469,7 +514,7 @@ def loadDark(dir_path, file_name, dtype=None, byteswap=False):
 
     try:
         # Load the dark
-        dark = scipy.misc.imread(os.path.join(dir_path, file_name), -1)
+        dark = loadImage(os.path.join(dir_path, file_name), -1)
 
     except OSError as e:
         print('Dark could not be loaded:', e)
