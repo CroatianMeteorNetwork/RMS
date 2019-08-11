@@ -1104,6 +1104,11 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
     # Otherwise, the image processing will be done on every frame chunk that is extracted
     if img_handle.input_type == 'ff':
 
+        # If the FF file could not be loaded, skip it
+        if img_handle.ff is None:
+            logDebug("FF file cound not be loaded, skipping it...")
+            return []
+
         # Apply mask and flat to FF
         img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
 
