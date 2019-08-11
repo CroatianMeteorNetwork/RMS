@@ -40,9 +40,10 @@ def writeCAL(night_dir, config, platepar):
     file_name = "CAL_{:06d}_{:s}.txt".format(config.cams_code, night_time)
 
 
-    # If there was no platepar, init an empty one
+    # If there was no platepar, don't create a CAL file
     if platepar is None:
-        platepar = Platepar()
+        print("No Platepar available to create a CAL file!")
+        return None
 
     # Make a copy of the platepar that can be modified
     platepar = copy.deepcopy(platepar)

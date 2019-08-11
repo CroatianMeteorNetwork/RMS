@@ -18,7 +18,7 @@ import scipy.optimize
 
 from RMS.Astrometry import CheckFit
 from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo, applyPlateparToCentroids, \
-    altAzToRADec
+    raDec2AltAz, rotationWrtHorizon
 from RMS.Astrometry.Conversions import date2JD
 from RMS.Astrometry.FFTalign import alignPlatepar
 import RMS.ConfigReader as cr
@@ -140,7 +140,7 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars):
         # If the fit was not successful, stop further fitting on this FF file
         if (not res.success) or (n_matched < config.min_matched_stars):
 
-            if not res.successful:
+            if not res.success:
                 print('Astrometry fit failed!')
 
             else:
@@ -184,7 +184,8 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars):
 
 
 
-def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, calstars_list, config, platepar):
+def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, calstars_list, config, platepar,
+    generate_plot=True):
     """ Recalibrate FF files with detections and apply the recalibrated platepar to those detections. 
 
     Arguments:
@@ -194,10 +195,20 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         config: [Config instance]
         platepar: [Platepar instance] Initial platepar.
 
+    Keyword arguments:
+        generate_plot: [bool] Generate the calibration variation plot. True by default.
+
     Return:
         recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are 
             recalibrated platepar instances for every FF file.
     """
+
+    # If the given file does not exits, return nothing
+    if not os.path.isfile(ftpdetectinfo_path):
+        print('ERROR! The FTPdetectinfo file does not exist: {:s}'.format(ftpdetectinfo_path))
+        print('    The recalibration on every file was not done!')
+
+        return {}
 
 
     # Read the FTPdetectinfo data
@@ -209,11 +220,16 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
 
     # Load catalog stars (overwrite the mag band ratios if specific catalog is used)
-    catalog_stars, _, config.star_catalog_band_ratios = StarCatalog.readStarCatalog(config.star_catalog_path,\
+    star_catalog_status = StarCatalog.readStarCatalog(config.star_catalog_path,\
         config.star_catalog_file, lim_mag=config.catalog_mag_limit, \
         mag_band_ratios=config.star_catalog_band_ratios)
 
+    if not star_catalog_status:
+        print("Could not load the star catalog!")
+        print(os.path.join(config.star_catalog_path, config.star_catalog_file))
+        return {}
 
+    catalog_stars, _, config.star_catalog_band_ratios = star_catalog_status
 
     prev_platepar = copy.deepcopy(platepar)
 
@@ -274,6 +290,14 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
         # Store the platepar if the fit succeeded
         if result is not None:
+
+            # Recompute alt/az of the FOV centre
+            working_platepar.az_centre, working_platepar.alt_centre = raDec2AltAz(working_platepar.JD, \
+                working_platepar.lon, working_platepar.lat, working_platepar.RA_d, working_platepar.dec_d)
+
+            # Recompute the rotation wrt horizon
+            working_platepar.rotation_from_horiz = rotationWrtHorizon(working_platepar)
+
             recalibrated_platepars[ff_name] = working_platepar
             prev_platepar = working_platepar
 
@@ -346,33 +370,35 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         hour_list.append((FFfile.filenameToDatetime(ff_name) - first_jd).total_seconds()/3600)
 
 
-    plt.figure()
+    if generate_plot:
+        
+        plt.figure()
 
-    plt.scatter(0, 0, marker='o', edgecolor='k', label='Reference platepar', s=100, c='none', zorder=3)
+        plt.scatter(0, 0, marker='o', edgecolor='k', label='Reference platepar', s=100, c='none', zorder=3)
 
-    plt.scatter(ang_dists, rot_angles, c=hour_list, zorder=3)
-    plt.colorbar(label='Hours from first FF file')
-    
-    plt.xlabel("Angular distance from reference (arcmin)")
-    plt.ylabel('Rotation from reference (arcmin)')
+        plt.scatter(ang_dists, rot_angles, c=hour_list, zorder=3)
+        plt.colorbar(label='Hours from first FF file')
+        
+        plt.xlabel("Angular distance from reference (arcmin)")
+        plt.ylabel('Rotation from reference (arcmin)')
 
-    plt.grid()
-    plt.legend()
+        plt.grid()
+        plt.legend()
 
-    plt.tight_layout()
+        plt.tight_layout()
 
-    # Generate the name for the plot
-    calib_plot_name = os.path.basename(ftpdetectinfo_path).replace('FTPdetectinfo_', '').replace('.txt', '') \
-        + '_calibration_variation.png'
+        # Generate the name for the plot
+        calib_plot_name = os.path.basename(ftpdetectinfo_path).replace('FTPdetectinfo_', '').replace('.txt', '') \
+            + '_calibration_variation.png'
 
-    plt.savefig(os.path.join(dir_path, calib_plot_name), dpi=150)
+        plt.savefig(os.path.join(dir_path, calib_plot_name), dpi=150)
 
-    # plt.show()
+        # plt.show()
 
-    plt.clf()
-    plt.close()
+        plt.clf()
+        plt.close()
 
-    ### ###
+        ### ###
 
 
 
@@ -408,8 +434,11 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
 
     # Back up the old FTPdetectinfo file
-    shutil.copy(ftpdetectinfo_path, ftpdetectinfo_path.strip('.txt') \
-        + '_backup_{:s}.txt'.format(datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f')))
+    try:
+        shutil.copy(ftpdetectinfo_path, ftpdetectinfo_path.strip('.txt') \
+            + '_backup_{:s}.txt'.format(datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f')))
+    except:
+        print('ERROR! The FTPdetectinfo file could not be backed up: {:s}'.format(ftpdetectinfo_path))
 
     # Save the updated FTPdetectinfo
     FTPdetectinfo.writeFTPdetectinfo(meteor_output_list, dir_path, os.path.basename(ftpdetectinfo_path), \

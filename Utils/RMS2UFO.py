@@ -59,6 +59,7 @@ def FTPdetectinfo2UFOOrbitInput(dir_path, file_name, platepar_path, platepar_dic
 
             else:
                 print('Skipping {:s} becuase no platepar was found for this FF file!'.format(ff_name))
+                continue
 
         # Convert the FF file name into time
         dt = FFfile.filenameToDatetime(ff_name)

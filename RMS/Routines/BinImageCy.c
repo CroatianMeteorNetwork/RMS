@@ -4,13 +4,13 @@
 {
     "distutils": {
         "depends": [],
-        "name": "RMS.Routines.MorphCy",
+        "name": "RMS.Routines.BinImageCy",
         "sources": [
-            "RMS/Routines/MorphCy.pyx",
-            "RMS/Routines/MorphCy.c"
+            "RMS/Routines/BinImageCy.pyx",
+            "RMS/Routines/BinImageCy.c"
         ]
     },
-    "module_name": "RMS.Routines.MorphCy"
+    "module_name": "RMS.Routines.BinImageCy"
 }
 END: Cython Metadata */
 
@@ -607,8 +607,8 @@ static CYTHON_INLINE float __PYX_NAN() {
   #endif
 #endif
 
-#define __PYX_HAVE__RMS__Routines__MorphCy
-#define __PYX_HAVE_API__RMS__Routines__MorphCy
+#define __PYX_HAVE__RMS__Routines__BinImageCy
+#define __PYX_HAVE_API__RMS__Routines__BinImageCy
 /* Early includes */
 #include <string.h>
 #include <stdio.h>
@@ -844,7 +844,7 @@ static const char *__pyx_filename;
 
 
 static const char *__pyx_f[] = {
-  "RMS/Routines/MorphCy.pyx",
+  "RMS/Routines/BinImageCy.pyx",
   "__init__.pxd",
   "type.pxd",
 };
@@ -1074,14 +1074,23 @@ typedef npy_double __pyx_t_5numpy_double_t;
  */
 typedef npy_longdouble __pyx_t_5numpy_longdouble_t;
 
-/* "RMS/Routines/MorphCy.pyx":11
+/* "RMS/Routines/BinImageCy.pyx":10
  * # Define numpy types
- * INT_TYPE = np.uint8
- * ctypedef np.uint8_t INT_TYPE_t             # <<<<<<<<<<<<<<
+ * INT16_TYPE = np.uint16
+ * ctypedef np.uint16_t INT16_TYPE_t             # <<<<<<<<<<<<<<
+ * 
+ * INT32_TYPE = np.uint32
+ */
+typedef __pyx_t_5numpy_uint16_t __pyx_t_3RMS_8Routines_10BinImageCy_INT16_TYPE_t;
+
+/* "RMS/Routines/BinImageCy.pyx":13
+ * 
+ * INT32_TYPE = np.uint32
+ * ctypedef np.uint32_t INT32_TYPE_t             # <<<<<<<<<<<<<<
  * 
  * 
  */
-typedef __pyx_t_5numpy_uint8_t __pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t;
+typedef __pyx_t_5numpy_uint32_t __pyx_t_3RMS_8Routines_10BinImageCy_INT32_TYPE_t;
 /* Declarations.proto */
 #if CYTHON_CCOMPLEX
   #ifdef __cplusplus
@@ -1258,6 +1267,9 @@ static CYTHON_INLINE void __Pyx_SafeReleaseBuffer(Py_buffer* info);
 static Py_ssize_t __Pyx_minusones[] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 static Py_ssize_t __Pyx_zeros[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 
+/* PyIntCompare.proto */
+static CYTHON_INLINE PyObject* __Pyx_PyInt_NeObjC(PyObject *op1, PyObject *op2, long intval, long inplace);
+
 /* PyDictVersioning.proto */
 #if CYTHON_USE_DICT_VERSIONS && CYTHON_USE_TYPE_SLOTS
 #define __PYX_DICT_VERSION_INIT  ((PY_UINT64_T) -1)
@@ -1356,6 +1368,23 @@ static CYTHON_INLINE PyObject* __Pyx_PyObject_CallOneArg(PyObject *func, PyObjec
 /* ExtTypeTest.proto */
 static CYTHON_INLINE int __Pyx_TypeTest(PyObject *obj, PyTypeObject *type);
 
+#define __Pyx_BufPtrStrided2d(type, buf, i0, s0, i1, s1) (type)((char*)buf + i0 * s0 + i1 * s1)
+/* IncludeStringH.proto */
+#include <string.h>
+
+/* BytesEquals.proto */
+static CYTHON_INLINE int __Pyx_PyBytes_Equals(PyObject* s1, PyObject* s2, int equals);
+
+/* UnicodeEquals.proto */
+static CYTHON_INLINE int __Pyx_PyUnicode_Equals(PyObject* s1, PyObject* s2, int equals);
+
+/* StrEquals.proto */
+#if PY_MAJOR_VERSION >= 3
+#define __Pyx_PyString_Equals __Pyx_PyUnicode_Equals
+#else
+#define __Pyx_PyString_Equals __Pyx_PyBytes_Equals
+#endif
+
 /* BufferFallbackError.proto */
 static void __Pyx_RaiseBufferFallbackError(void);
 
@@ -1394,10 +1423,6 @@ static CYTHON_INLINE void __Pyx_ErrFetchInState(PyThreadState *tstate, PyObject 
 #define __Pyx_ErrRestore(type, value, tb)  PyErr_Restore(type, value, tb)
 #define __Pyx_ErrFetch(type, value, tb)  PyErr_Fetch(type, value, tb)
 #endif
-
-#define __Pyx_BufPtrStrided2d(type, buf, i0, s0, i1, s1) (type)((char*)buf + i0 * s0 + i1 * s1)
-/* PyIntCompare.proto */
-static CYTHON_INLINE PyObject* __Pyx_PyInt_EqObjC(PyObject *op1, PyObject *op2, long intval, long inplace);
 
 /* RaiseException.proto */
 static void __Pyx_Raise(PyObject *type, PyObject *value, PyObject *tb, PyObject *cause);
@@ -1518,10 +1543,17 @@ typedef struct {
 
 
 /* CIntToPy.proto */
-static CYTHON_INLINE PyObject* __Pyx_PyInt_From_Py_intptr_t(Py_intptr_t value);
-
-/* CIntToPy.proto */
 static CYTHON_INLINE PyObject* __Pyx_PyInt_From_int(int value);
+
+/* Print.proto */
+static int __Pyx_Print(PyObject*, PyObject *, int);
+#if CYTHON_COMPILING_IN_PYPY || PY_MAJOR_VERSION >= 3
+static PyObject* __pyx_print = 0;
+static PyObject* __pyx_print_kwargs = 0;
+#endif
+
+/* None.proto */
+static CYTHON_INLINE long __Pyx_pow_long(long, long);
 
 /* CIntToPy.proto */
 static CYTHON_INLINE PyObject* __Pyx_PyInt_From_long(long value);
@@ -1630,6 +1662,9 @@ static CYTHON_INLINE PyObject* __Pyx_PyInt_From_enum__NPY_TYPES(enum NPY_TYPES v
 /* CIntFromPy.proto */
 static CYTHON_INLINE int __Pyx_PyInt_As_int(PyObject *);
 
+/* PrintOne.proto */
+static int __Pyx_PrintOne(PyObject* stream, PyObject *o);
+
 /* CIntFromPy.proto */
 static CYTHON_INLINE long __Pyx_PyInt_As_long(PyObject *);
 
@@ -1684,79 +1719,53 @@ static CYTHON_INLINE char *__pyx_f_5numpy__util_dtypestring(PyArray_Descr *, cha
 
 /* Module declarations from 'cython' */
 
-/* Module declarations from 'RMS.Routines.MorphCy' */
-static __Pyx_TypeInfo __Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t = { "INT_TYPE_t", NULL, sizeof(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t), { 0 }, 0, IS_UNSIGNED(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t) ? 'U' : 'I', IS_UNSIGNED(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t), 0 };
-#define __Pyx_MODULE_NAME "RMS.Routines.MorphCy"
-extern int __pyx_module_is_main_RMS__Routines__MorphCy;
-int __pyx_module_is_main_RMS__Routines__MorphCy = 0;
+/* Module declarations from 'RMS.Routines.BinImageCy' */
+static __Pyx_TypeInfo __Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_10BinImageCy_INT16_TYPE_t = { "INT16_TYPE_t", NULL, sizeof(__pyx_t_3RMS_8Routines_10BinImageCy_INT16_TYPE_t), { 0 }, 0, IS_UNSIGNED(__pyx_t_3RMS_8Routines_10BinImageCy_INT16_TYPE_t) ? 'U' : 'I', IS_UNSIGNED(__pyx_t_3RMS_8Routines_10BinImageCy_INT16_TYPE_t), 0 };
+static __Pyx_TypeInfo __Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_10BinImageCy_INT32_TYPE_t = { "INT32_TYPE_t", NULL, sizeof(__pyx_t_3RMS_8Routines_10BinImageCy_INT32_TYPE_t), { 0 }, 0, IS_UNSIGNED(__pyx_t_3RMS_8Routines_10BinImageCy_INT32_TYPE_t) ? 'U' : 'I', IS_UNSIGNED(__pyx_t_3RMS_8Routines_10BinImageCy_INT32_TYPE_t), 0 };
+#define __Pyx_MODULE_NAME "RMS.Routines.BinImageCy"
+extern int __pyx_module_is_main_RMS__Routines__BinImageCy;
+int __pyx_module_is_main_RMS__Routines__BinImageCy = 0;
 
-/* Implementation of 'RMS.Routines.MorphCy' */
+/* Implementation of 'RMS.Routines.BinImageCy' */
 static PyObject *__pyx_builtin_range;
 static PyObject *__pyx_builtin_ValueError;
 static PyObject *__pyx_builtin_RuntimeError;
 static PyObject *__pyx_builtin_ImportError;
-static const char __pyx_k_A[] = "A";
-static const char __pyx_k_B[] = "B";
-static const char __pyx_k_x[] = "x";
-static const char __pyx_k_y[] = "y";
-static const char __pyx_k_m1[] = "m1";
-static const char __pyx_k_m2[] = "m2";
+static const char __pyx_k_i[] = "i";
+static const char __pyx_k_j[] = "j";
 static const char __pyx_k_np[] = "np";
-static const char __pyx_k_p2[] = "p2";
-static const char __pyx_k_p3[] = "p3";
-static const char __pyx_k_p4[] = "p4";
-static const char __pyx_k_p5[] = "p5";
-static const char __pyx_k_p6[] = "p6";
-static const char __pyx_k_p7[] = "p7";
-static const char __pyx_k_p8[] = "p8";
-static const char __pyx_k_p9[] = "p9";
-static const char __pyx_k_xm[] = "xm";
-static const char __pyx_k_ym[] = "ym";
-static const char __pyx_k_cv2[] = "cv2";
+static const char __pyx_k_avg[] = "avg";
+static const char __pyx_k_end[] = "end";
 static const char __pyx_k_img[] = "img";
-static const char __pyx_k_sum[] = "sum";
-static const char __pyx_k_copy[] = "copy";
-static const char __pyx_k_diff[] = "diff";
-static const char __pyx_k_fill[] = "fill";
+static const char __pyx_k_file[] = "file";
+static const char __pyx_k_log2[] = "log2";
 static const char __pyx_k_main[] = "__main__";
-static const char __pyx_k_mask[] = "mask";
 static const char __pyx_k_name[] = "__name__";
-static const char __pyx_k_ones[] = "ones";
 static const char __pyx_k_test[] = "__test__";
-static const char __pyx_k_thin[] = "thin";
-static const char __pyx_k_clean[] = "clean";
-static const char __pyx_k_close[] = "close";
 static const char __pyx_k_dtype[] = "dtype";
+static const char __pyx_k_img_h[] = "img_h";
+static const char __pyx_k_img_w[] = "img_w";
 static const char __pyx_k_numpy[] = "numpy";
+static const char __pyx_k_print[] = "print";
 static const char __pyx_k_range[] = "range";
-static const char __pyx_k_shape[] = "shape";
-static const char __pyx_k_uint8[] = "uint8";
 static const char __pyx_k_zeros[] = "zeros";
-static const char __pyx_k_bridge[] = "bridge";
-static const char __pyx_k_dilate[] = "dilate";
 static const char __pyx_k_import[] = "__import__";
-static const char __pyx_k_kernel[] = "kernel";
-static const char __pyx_k_x_size[] = "x_size";
-static const char __pyx_k_y_size[] = "y_size";
-static const char __pyx_k_INT_TYPE[] = "INT_TYPE";
-static const char __pyx_k_absolute[] = "absolute";
-static const char __pyx_k_close_cy[] = "close_cy";
-static const char __pyx_k_previous[] = "previous";
-static const char __pyx_k_iteration[] = "iteration";
-static const char __pyx_k_operation[] = "operation";
+static const char __pyx_k_method[] = "method";
+static const char __pyx_k_uint16[] = "uint16";
+static const char __pyx_k_uint32[] = "uint32";
+static const char __pyx_k_out_img[] = "out_img";
+static const char __pyx_k_binImage[] = "binImage";
+static const char __pyx_k_INT16_TYPE[] = "INT16_TYPE";
+static const char __pyx_k_INT32_TYPE[] = "INT32_TYPE";
 static const char __pyx_k_ValueError[] = "ValueError";
-static const char __pyx_k_bitwise_or[] = "bitwise_or";
-static const char __pyx_k_morphApply[] = "morphApply";
-static const char __pyx_k_operations[] = "operations";
+static const char __pyx_k_bin_factor[] = "bin_factor";
 static const char __pyx_k_ImportError[] = "ImportError";
-static const char __pyx_k_MORPH_CLOSE[] = "MORPH_CLOSE";
-static const char __pyx_k_bitwise_and[] = "bitwise_and";
 static const char __pyx_k_RuntimeError[] = "RuntimeError";
-static const char __pyx_k_morphologyEx[] = "morphologyEx";
 static const char __pyx_k_cline_in_traceback[] = "cline_in_traceback";
-static const char __pyx_k_RMS_Routines_MorphCy[] = "RMS.Routines.MorphCy";
-static const char __pyx_k_RMS_Routines_MorphCy_pyx[] = "RMS/Routines/MorphCy.pyx";
+static const char __pyx_k_RMS_Routines_BinImageCy[] = "RMS.Routines.BinImageCy";
+static const char __pyx_k_RMS_Routines_BinImageCy_pyx[] = "RMS/Routines/BinImageCy.pyx";
 static const char __pyx_k_ndarray_is_not_C_contiguous[] = "ndarray is not C contiguous";
+static const char __pyx_k_The_given_binning_factor_is_not[] = "The given binning factor is not a factor of 2!";
 static const char __pyx_k_numpy_core_multiarray_failed_to[] = "numpy.core.multiarray failed to import";
 static const char __pyx_k_unknown_dtype_code_in_numpy_pxd[] = "unknown dtype code in numpy.pxd (%d)";
 static const char __pyx_k_Format_string_allocated_too_shor[] = "Format string allocated too short, see comment in numpy.pxd";
@@ -1764,42 +1773,33 @@ static const char __pyx_k_Non_native_byte_order_not_suppor[] = "Non-native byte 
 static const char __pyx_k_ndarray_is_not_Fortran_contiguou[] = "ndarray is not Fortran contiguous";
 static const char __pyx_k_numpy_core_umath_failed_to_impor[] = "numpy.core.umath failed to import";
 static const char __pyx_k_Format_string_allocated_too_shor_2[] = "Format string allocated too short.";
-static PyObject *__pyx_n_s_A;
-static PyObject *__pyx_n_s_B;
 static PyObject *__pyx_kp_u_Format_string_allocated_too_shor;
 static PyObject *__pyx_kp_u_Format_string_allocated_too_shor_2;
-static PyObject *__pyx_n_s_INT_TYPE;
+static PyObject *__pyx_n_s_INT16_TYPE;
+static PyObject *__pyx_n_s_INT32_TYPE;
 static PyObject *__pyx_n_s_ImportError;
-static PyObject *__pyx_n_s_MORPH_CLOSE;
 static PyObject *__pyx_kp_u_Non_native_byte_order_not_suppor;
-static PyObject *__pyx_n_s_RMS_Routines_MorphCy;
-static PyObject *__pyx_kp_s_RMS_Routines_MorphCy_pyx;
+static PyObject *__pyx_n_s_RMS_Routines_BinImageCy;
+static PyObject *__pyx_kp_s_RMS_Routines_BinImageCy_pyx;
 static PyObject *__pyx_n_s_RuntimeError;
+static PyObject *__pyx_kp_s_The_given_binning_factor_is_not;
 static PyObject *__pyx_n_s_ValueError;
-static PyObject *__pyx_n_s_absolute;
-static PyObject *__pyx_n_s_bitwise_and;
-static PyObject *__pyx_n_s_bitwise_or;
-static PyObject *__pyx_n_s_bridge;
-static PyObject *__pyx_n_s_clean;
+static PyObject *__pyx_n_s_avg;
+static PyObject *__pyx_n_s_binImage;
+static PyObject *__pyx_n_s_bin_factor;
 static PyObject *__pyx_n_s_cline_in_traceback;
-static PyObject *__pyx_n_s_close;
-static PyObject *__pyx_n_s_close_cy;
-static PyObject *__pyx_n_s_copy;
-static PyObject *__pyx_n_s_cv2;
-static PyObject *__pyx_n_s_diff;
-static PyObject *__pyx_n_s_dilate;
 static PyObject *__pyx_n_s_dtype;
-static PyObject *__pyx_n_s_fill;
+static PyObject *__pyx_n_s_end;
+static PyObject *__pyx_n_s_file;
+static PyObject *__pyx_n_s_i;
 static PyObject *__pyx_n_s_img;
+static PyObject *__pyx_n_s_img_h;
+static PyObject *__pyx_n_s_img_w;
 static PyObject *__pyx_n_s_import;
-static PyObject *__pyx_n_s_iteration;
-static PyObject *__pyx_n_s_kernel;
-static PyObject *__pyx_n_s_m1;
-static PyObject *__pyx_n_s_m2;
+static PyObject *__pyx_n_s_j;
+static PyObject *__pyx_n_s_log2;
 static PyObject *__pyx_n_s_main;
-static PyObject *__pyx_n_s_mask;
-static PyObject *__pyx_n_s_morphApply;
-static PyObject *__pyx_n_s_morphologyEx;
+static PyObject *__pyx_n_s_method;
 static PyObject *__pyx_n_s_name;
 static PyObject *__pyx_kp_u_ndarray_is_not_C_contiguous;
 static PyObject *__pyx_kp_u_ndarray_is_not_Fortran_contiguou;
@@ -1807,44 +1807,18 @@ static PyObject *__pyx_n_s_np;
 static PyObject *__pyx_n_s_numpy;
 static PyObject *__pyx_kp_s_numpy_core_multiarray_failed_to;
 static PyObject *__pyx_kp_s_numpy_core_umath_failed_to_impor;
-static PyObject *__pyx_n_s_ones;
-static PyObject *__pyx_n_s_operation;
-static PyObject *__pyx_n_s_operations;
-static PyObject *__pyx_n_s_p2;
-static PyObject *__pyx_n_s_p3;
-static PyObject *__pyx_n_s_p4;
-static PyObject *__pyx_n_s_p5;
-static PyObject *__pyx_n_s_p6;
-static PyObject *__pyx_n_s_p7;
-static PyObject *__pyx_n_s_p8;
-static PyObject *__pyx_n_s_p9;
-static PyObject *__pyx_n_s_previous;
+static PyObject *__pyx_n_s_out_img;
+static PyObject *__pyx_n_s_print;
 static PyObject *__pyx_n_s_range;
-static PyObject *__pyx_n_s_shape;
-static PyObject *__pyx_n_s_sum;
 static PyObject *__pyx_n_s_test;
-static PyObject *__pyx_n_s_thin;
-static PyObject *__pyx_n_s_uint8;
+static PyObject *__pyx_n_s_uint16;
+static PyObject *__pyx_n_s_uint32;
 static PyObject *__pyx_kp_u_unknown_dtype_code_in_numpy_pxd;
-static PyObject *__pyx_n_s_x;
-static PyObject *__pyx_n_s_x_size;
-static PyObject *__pyx_n_s_xm;
-static PyObject *__pyx_n_s_y;
-static PyObject *__pyx_n_s_y_size;
-static PyObject *__pyx_n_s_ym;
 static PyObject *__pyx_n_s_zeros;
-static PyObject *__pyx_pf_3RMS_8Routines_7MorphCy_morphApply(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_img, PyObject *__pyx_v_operations); /* proto */
-static PyObject *__pyx_pf_3RMS_8Routines_7MorphCy_2clean(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_img); /* proto */
-static PyObject *__pyx_pf_3RMS_8Routines_7MorphCy_4bridge(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_img); /* proto */
-static PyObject *__pyx_pf_3RMS_8Routines_7MorphCy_6close_cy(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_img); /* proto */
-static PyObject *__pyx_pf_3RMS_8Routines_7MorphCy_8close(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_img); /* proto */
-static PyObject *__pyx_pf_3RMS_8Routines_7MorphCy_10dilate(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_img); /* proto */
-static PyObject *__pyx_pf_3RMS_8Routines_7MorphCy_12thin(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_img); /* proto */
+static PyObject *__pyx_pf_3RMS_8Routines_10BinImageCy_binImage(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_img, int __pyx_v_bin_factor, PyObject *__pyx_v_method); /* proto */
 static int __pyx_pf_5numpy_7ndarray___getbuffer__(PyArrayObject *__pyx_v_self, Py_buffer *__pyx_v_info, int __pyx_v_flags); /* proto */
 static void __pyx_pf_5numpy_7ndarray_2__releasebuffer__(PyArrayObject *__pyx_v_self, Py_buffer *__pyx_v_info); /* proto */
-static PyObject *__pyx_int_0;
 static PyObject *__pyx_int_1;
-static PyObject *__pyx_int_3;
 static PyObject *__pyx_tuple_;
 static PyObject *__pyx_tuple__2;
 static PyObject *__pyx_tuple__3;
@@ -1853,47 +1827,38 @@ static PyObject *__pyx_tuple__5;
 static PyObject *__pyx_tuple__6;
 static PyObject *__pyx_tuple__7;
 static PyObject *__pyx_tuple__8;
-static PyObject *__pyx_tuple__9;
-static PyObject *__pyx_tuple__11;
-static PyObject *__pyx_tuple__13;
-static PyObject *__pyx_tuple__15;
-static PyObject *__pyx_tuple__17;
-static PyObject *__pyx_tuple__19;
-static PyObject *__pyx_tuple__21;
-static PyObject *__pyx_codeobj__10;
-static PyObject *__pyx_codeobj__12;
-static PyObject *__pyx_codeobj__14;
-static PyObject *__pyx_codeobj__16;
-static PyObject *__pyx_codeobj__18;
-static PyObject *__pyx_codeobj__20;
-static PyObject *__pyx_codeobj__22;
+static PyObject *__pyx_codeobj__9;
 /* Late includes */
 
-/* "RMS/Routines/MorphCy.pyx":17
- * @cython.boundscheck(False)
+/* "RMS/Routines/BinImageCy.pyx":19
  * @cython.wraparound(False)
- * def morphApply(np.ndarray[INT_TYPE_t, ndim=2] img, operations):             # <<<<<<<<<<<<<<
- *     """ Apply morphological operations on the given image.
+ * @cython.cdivision(True)
+ * def binImage(np.ndarray[INT16_TYPE_t, ndim=2] img, int bin_factor, method='avg'):             # <<<<<<<<<<<<<<
+ *     """ Bin the given image. The binning has to be a factor of 2, e.g. 2, 4, 8, etc.
  * 
  */
 
 /* Python wrapper */
-static PyObject *__pyx_pw_3RMS_8Routines_7MorphCy_1morphApply(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
-static char __pyx_doc_3RMS_8Routines_7MorphCy_morphApply[] = " Apply morphological operations on the given image.\n\n    1 - clean\n    2 - brigde\n    3 - close\n    4 - thin\n    5 - dilate\n\n    ";
-static PyMethodDef __pyx_mdef_3RMS_8Routines_7MorphCy_1morphApply = {"morphApply", (PyCFunction)(void*)(PyCFunctionWithKeywords)__pyx_pw_3RMS_8Routines_7MorphCy_1morphApply, METH_VARARGS|METH_KEYWORDS, __pyx_doc_3RMS_8Routines_7MorphCy_morphApply};
-static PyObject *__pyx_pw_3RMS_8Routines_7MorphCy_1morphApply(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
+static PyObject *__pyx_pw_3RMS_8Routines_10BinImageCy_1binImage(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
+static char __pyx_doc_3RMS_8Routines_10BinImageCy_binImage[] = " Bin the given image. The binning has to be a factor of 2, e.g. 2, 4, 8, etc.\n    \n    Arguments:\n        img: [ndarray] Numpy array representing an image.\n        bin_factor: [int] The binning factor. Has to be a factor of 2 (e.g. 2, 4, 8).\n\n    Keyword arguments:\n        method: [str] Binning method.  'avg' by default.\n            - 'sum' will sum all values in the binning window and assign it to the new pixel.\n            - 'avg' will take the average.\n\n    Return:\n        out_img: [ndarray] Binned image.\n    ";
+static PyMethodDef __pyx_mdef_3RMS_8Routines_10BinImageCy_1binImage = {"binImage", (PyCFunction)(void*)(PyCFunctionWithKeywords)__pyx_pw_3RMS_8Routines_10BinImageCy_1binImage, METH_VARARGS|METH_KEYWORDS, __pyx_doc_3RMS_8Routines_10BinImageCy_binImage};
+static PyObject *__pyx_pw_3RMS_8Routines_10BinImageCy_1binImage(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
   PyArrayObject *__pyx_v_img = 0;
-  PyObject *__pyx_v_operations = 0;
+  int __pyx_v_bin_factor;
+  PyObject *__pyx_v_method = 0;
   PyObject *__pyx_r = 0;
   __Pyx_RefNannyDeclarations
-  __Pyx_RefNannySetupContext("morphApply (wrapper)", 0);
+  __Pyx_RefNannySetupContext("binImage (wrapper)", 0);
   {
-    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_img,&__pyx_n_s_operations,0};
-    PyObject* values[2] = {0,0};
+    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_img,&__pyx_n_s_bin_factor,&__pyx_n_s_method,0};
+    PyObject* values[3] = {0,0,0};
+    values[2] = ((PyObject *)__pyx_n_s_avg);
     if (unlikely(__pyx_kwds)) {
       Py_ssize_t kw_args;
       const Py_ssize_t pos_args = PyTuple_GET_SIZE(__pyx_args);
       switch (pos_args) {
+        case  3: values[2] = PyTuple_GET_ITEM(__pyx_args, 2);
+        CYTHON_FALLTHROUGH;
         case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
         CYTHON_FALLTHROUGH;
         case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
@@ -1908,33 +1873,44 @@ static PyObject *__pyx_pw_3RMS_8Routines_7MorphCy_1morphApply(PyObject *__pyx_se
         else goto __pyx_L5_argtuple_error;
         CYTHON_FALLTHROUGH;
         case  1:
-        if (likely((values[1] = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_operations)) != 0)) kw_args--;
+        if (likely((values[1] = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_bin_factor)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("morphApply", 1, 2, 2, 1); __PYX_ERR(0, 17, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("binImage", 0, 2, 3, 1); __PYX_ERR(0, 19, __pyx_L3_error)
+        }
+        CYTHON_FALLTHROUGH;
+        case  2:
+        if (kw_args > 0) {
+          PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_method);
+          if (value) { values[2] = value; kw_args--; }
         }
       }
       if (unlikely(kw_args > 0)) {
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "morphApply") < 0)) __PYX_ERR(0, 17, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "binImage") < 0)) __PYX_ERR(0, 19, __pyx_L3_error)
       }
-    } else if (PyTuple_GET_SIZE(__pyx_args) != 2) {
-      goto __pyx_L5_argtuple_error;
     } else {
-      values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
-      values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+      switch (PyTuple_GET_SIZE(__pyx_args)) {
+        case  3: values[2] = PyTuple_GET_ITEM(__pyx_args, 2);
+        CYTHON_FALLTHROUGH;
+        case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+        values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
+        break;
+        default: goto __pyx_L5_argtuple_error;
+      }
     }
     __pyx_v_img = ((PyArrayObject *)values[0]);
-    __pyx_v_operations = values[1];
+    __pyx_v_bin_factor = __Pyx_PyInt_As_int(values[1]); if (unlikely((__pyx_v_bin_factor == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 19, __pyx_L3_error)
+    __pyx_v_method = values[2];
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("morphApply", 1, 2, 2, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 17, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("binImage", 0, 2, 3, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 19, __pyx_L3_error)
   __pyx_L3_error:;
-  __Pyx_AddTraceback("RMS.Routines.MorphCy.morphApply", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("RMS.Routines.BinImageCy.binImage", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_img), __pyx_ptype_5numpy_ndarray, 1, "img", 0))) __PYX_ERR(0, 17, __pyx_L1_error)
-  __pyx_r = __pyx_pf_3RMS_8Routines_7MorphCy_morphApply(__pyx_self, __pyx_v_img, __pyx_v_operations);
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_img), __pyx_ptype_5numpy_ndarray, 1, "img", 0))) __PYX_ERR(0, 19, __pyx_L1_error)
+  __pyx_r = __pyx_pf_3RMS_8Routines_10BinImageCy_binImage(__pyx_self, __pyx_v_img, __pyx_v_bin_factor, __pyx_v_method);
 
   /* function exit code */
   goto __pyx_L0;
@@ -1945,3758 +1921,402 @@ static PyObject *__pyx_pw_3RMS_8Routines_7MorphCy_1morphApply(PyObject *__pyx_se
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_3RMS_8Routines_7MorphCy_morphApply(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_img, PyObject *__pyx_v_operations) {
-  int __pyx_v_operation;
+static PyObject *__pyx_pf_3RMS_8Routines_10BinImageCy_binImage(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_img, int __pyx_v_bin_factor, PyObject *__pyx_v_method) {
+  int __pyx_v_i;
+  int __pyx_v_j;
+  int __pyx_v_img_h;
+  int __pyx_v_img_w;
+  PyArrayObject *__pyx_v_out_img = 0;
   __Pyx_LocalBuf_ND __pyx_pybuffernd_img;
   __Pyx_Buffer __pyx_pybuffer_img;
+  __Pyx_LocalBuf_ND __pyx_pybuffernd_out_img;
+  __Pyx_Buffer __pyx_pybuffer_out_img;
   PyObject *__pyx_r = NULL;
   __Pyx_RefNannyDeclarations
-  PyObject *__pyx_t_1 = NULL;
-  Py_ssize_t __pyx_t_2;
-  PyObject *(*__pyx_t_3)(PyObject *);
-  PyObject *__pyx_t_4 = NULL;
-  int __pyx_t_5;
-  PyObject *__pyx_t_6 = NULL;
-  PyObject *__pyx_t_7 = NULL;
-  PyArrayObject *__pyx_t_8 = NULL;
-  PyObject *__pyx_t_9 = NULL;
-  PyObject *__pyx_t_10 = NULL;
-  PyObject *__pyx_t_11 = NULL;
-  __Pyx_RefNannySetupContext("morphApply", 0);
-  __Pyx_INCREF((PyObject *)__pyx_v_img);
-  __pyx_pybuffer_img.pybuffer.buf = NULL;
-  __pyx_pybuffer_img.refcount = 0;
-  __pyx_pybuffernd_img.data = NULL;
-  __pyx_pybuffernd_img.rcbuffer = &__pyx_pybuffer_img;
-  {
-    __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_v_img, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) __PYX_ERR(0, 17, __pyx_L1_error)
-  }
-  __pyx_pybuffernd_img.diminfo[0].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_img.diminfo[0].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_img.diminfo[1].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_img.diminfo[1].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[1];
-
-  /* "RMS/Routines/MorphCy.pyx":30
- *     cdef int operation
- * 
- *     for operation in operations:             # <<<<<<<<<<<<<<
- * 
- *         if (operation == 1):
- */
-  if (likely(PyList_CheckExact(__pyx_v_operations)) || PyTuple_CheckExact(__pyx_v_operations)) {
-    __pyx_t_1 = __pyx_v_operations; __Pyx_INCREF(__pyx_t_1); __pyx_t_2 = 0;
-    __pyx_t_3 = NULL;
-  } else {
-    __pyx_t_2 = -1; __pyx_t_1 = PyObject_GetIter(__pyx_v_operations); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 30, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
-    __pyx_t_3 = Py_TYPE(__pyx_t_1)->tp_iternext; if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 30, __pyx_L1_error)
-  }
-  for (;;) {
-    if (likely(!__pyx_t_3)) {
-      if (likely(PyList_CheckExact(__pyx_t_1))) {
-        if (__pyx_t_2 >= PyList_GET_SIZE(__pyx_t_1)) break;
-        #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
-        __pyx_t_4 = PyList_GET_ITEM(__pyx_t_1, __pyx_t_2); __Pyx_INCREF(__pyx_t_4); __pyx_t_2++; if (unlikely(0 < 0)) __PYX_ERR(0, 30, __pyx_L1_error)
-        #else
-        __pyx_t_4 = PySequence_ITEM(__pyx_t_1, __pyx_t_2); __pyx_t_2++; if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 30, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_4);
-        #endif
-      } else {
-        if (__pyx_t_2 >= PyTuple_GET_SIZE(__pyx_t_1)) break;
-        #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
-        __pyx_t_4 = PyTuple_GET_ITEM(__pyx_t_1, __pyx_t_2); __Pyx_INCREF(__pyx_t_4); __pyx_t_2++; if (unlikely(0 < 0)) __PYX_ERR(0, 30, __pyx_L1_error)
-        #else
-        __pyx_t_4 = PySequence_ITEM(__pyx_t_1, __pyx_t_2); __pyx_t_2++; if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 30, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_4);
-        #endif
-      }
-    } else {
-      __pyx_t_4 = __pyx_t_3(__pyx_t_1);
-      if (unlikely(!__pyx_t_4)) {
-        PyObject* exc_type = PyErr_Occurred();
-        if (exc_type) {
-          if (likely(__Pyx_PyErr_GivenExceptionMatches(exc_type, PyExc_StopIteration))) PyErr_Clear();
-          else __PYX_ERR(0, 30, __pyx_L1_error)
-        }
-        break;
-      }
-      __Pyx_GOTREF(__pyx_t_4);
-    }
-    __pyx_t_5 = __Pyx_PyInt_As_int(__pyx_t_4); if (unlikely((__pyx_t_5 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 30, __pyx_L1_error)
-    __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-    __pyx_v_operation = __pyx_t_5;
-
-    /* "RMS/Routines/MorphCy.pyx":32
- *     for operation in operations:
- * 
- *         if (operation == 1):             # <<<<<<<<<<<<<<
- *             img = clean(img)
- * 
- */
-    switch (__pyx_v_operation) {
-      case 1:
-
-      /* "RMS/Routines/MorphCy.pyx":33
- * 
- *         if (operation == 1):
- *             img = clean(img)             # <<<<<<<<<<<<<<
- * 
- *         elif (operation == 2):
- */
-      __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_clean); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 33, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_6);
-      __pyx_t_7 = NULL;
-      if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_6))) {
-        __pyx_t_7 = PyMethod_GET_SELF(__pyx_t_6);
-        if (likely(__pyx_t_7)) {
-          PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_6);
-          __Pyx_INCREF(__pyx_t_7);
-          __Pyx_INCREF(function);
-          __Pyx_DECREF_SET(__pyx_t_6, function);
-        }
-      }
-      __pyx_t_4 = (__pyx_t_7) ? __Pyx_PyObject_Call2Args(__pyx_t_6, __pyx_t_7, ((PyObject *)__pyx_v_img)) : __Pyx_PyObject_CallOneArg(__pyx_t_6, ((PyObject *)__pyx_v_img));
-      __Pyx_XDECREF(__pyx_t_7); __pyx_t_7 = 0;
-      if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 33, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_4);
-      __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-      if (!(likely(((__pyx_t_4) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_4, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 33, __pyx_L1_error)
-      __pyx_t_8 = ((PyArrayObject *)__pyx_t_4);
-      {
-        __Pyx_BufFmt_StackElem __pyx_stack[1];
-        __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-        __pyx_t_5 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_t_8, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack);
-        if (unlikely(__pyx_t_5 < 0)) {
-          PyErr_Fetch(&__pyx_t_9, &__pyx_t_10, &__pyx_t_11);
-          if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_v_img, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
-            Py_XDECREF(__pyx_t_9); Py_XDECREF(__pyx_t_10); Py_XDECREF(__pyx_t_11);
-            __Pyx_RaiseBufferFallbackError();
-          } else {
-            PyErr_Restore(__pyx_t_9, __pyx_t_10, __pyx_t_11);
-          }
-          __pyx_t_9 = __pyx_t_10 = __pyx_t_11 = 0;
-        }
-        __pyx_pybuffernd_img.diminfo[0].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_img.diminfo[0].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_img.diminfo[1].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_img.diminfo[1].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[1];
-        if (unlikely(__pyx_t_5 < 0)) __PYX_ERR(0, 33, __pyx_L1_error)
-      }
-      __pyx_t_8 = 0;
-      __Pyx_DECREF_SET(__pyx_v_img, ((PyArrayObject *)__pyx_t_4));
-      __pyx_t_4 = 0;
-
-      /* "RMS/Routines/MorphCy.pyx":32
- *     for operation in operations:
- * 
- *         if (operation == 1):             # <<<<<<<<<<<<<<
- *             img = clean(img)
- * 
- */
-      break;
-      case 2:
-
-      /* "RMS/Routines/MorphCy.pyx":36
- * 
- *         elif (operation == 2):
- *             img = bridge(img)             # <<<<<<<<<<<<<<
- * 
- *         elif (operation == 3):
- */
-      __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_bridge); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 36, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_6);
-      __pyx_t_7 = NULL;
-      if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_6))) {
-        __pyx_t_7 = PyMethod_GET_SELF(__pyx_t_6);
-        if (likely(__pyx_t_7)) {
-          PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_6);
-          __Pyx_INCREF(__pyx_t_7);
-          __Pyx_INCREF(function);
-          __Pyx_DECREF_SET(__pyx_t_6, function);
-        }
-      }
-      __pyx_t_4 = (__pyx_t_7) ? __Pyx_PyObject_Call2Args(__pyx_t_6, __pyx_t_7, ((PyObject *)__pyx_v_img)) : __Pyx_PyObject_CallOneArg(__pyx_t_6, ((PyObject *)__pyx_v_img));
-      __Pyx_XDECREF(__pyx_t_7); __pyx_t_7 = 0;
-      if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 36, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_4);
-      __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-      if (!(likely(((__pyx_t_4) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_4, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 36, __pyx_L1_error)
-      __pyx_t_8 = ((PyArrayObject *)__pyx_t_4);
-      {
-        __Pyx_BufFmt_StackElem __pyx_stack[1];
-        __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-        __pyx_t_5 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_t_8, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack);
-        if (unlikely(__pyx_t_5 < 0)) {
-          PyErr_Fetch(&__pyx_t_11, &__pyx_t_10, &__pyx_t_9);
-          if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_v_img, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
-            Py_XDECREF(__pyx_t_11); Py_XDECREF(__pyx_t_10); Py_XDECREF(__pyx_t_9);
-            __Pyx_RaiseBufferFallbackError();
-          } else {
-            PyErr_Restore(__pyx_t_11, __pyx_t_10, __pyx_t_9);
-          }
-          __pyx_t_11 = __pyx_t_10 = __pyx_t_9 = 0;
-        }
-        __pyx_pybuffernd_img.diminfo[0].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_img.diminfo[0].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_img.diminfo[1].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_img.diminfo[1].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[1];
-        if (unlikely(__pyx_t_5 < 0)) __PYX_ERR(0, 36, __pyx_L1_error)
-      }
-      __pyx_t_8 = 0;
-      __Pyx_DECREF_SET(__pyx_v_img, ((PyArrayObject *)__pyx_t_4));
-      __pyx_t_4 = 0;
-
-      /* "RMS/Routines/MorphCy.pyx":35
- *             img = clean(img)
- * 
- *         elif (operation == 2):             # <<<<<<<<<<<<<<
- *             img = bridge(img)
- * 
- */
-      break;
-      case 3:
-
-      /* "RMS/Routines/MorphCy.pyx":39
- * 
- *         elif (operation == 3):
- *             img = close(img)             # <<<<<<<<<<<<<<
- * 
- *         elif (operation == 4):
- */
-      __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_close); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 39, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_6);
-      __pyx_t_7 = NULL;
-      if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_6))) {
-        __pyx_t_7 = PyMethod_GET_SELF(__pyx_t_6);
-        if (likely(__pyx_t_7)) {
-          PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_6);
-          __Pyx_INCREF(__pyx_t_7);
-          __Pyx_INCREF(function);
-          __Pyx_DECREF_SET(__pyx_t_6, function);
-        }
-      }
-      __pyx_t_4 = (__pyx_t_7) ? __Pyx_PyObject_Call2Args(__pyx_t_6, __pyx_t_7, ((PyObject *)__pyx_v_img)) : __Pyx_PyObject_CallOneArg(__pyx_t_6, ((PyObject *)__pyx_v_img));
-      __Pyx_XDECREF(__pyx_t_7); __pyx_t_7 = 0;
-      if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 39, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_4);
-      __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-      if (!(likely(((__pyx_t_4) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_4, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 39, __pyx_L1_error)
-      __pyx_t_8 = ((PyArrayObject *)__pyx_t_4);
-      {
-        __Pyx_BufFmt_StackElem __pyx_stack[1];
-        __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-        __pyx_t_5 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_t_8, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack);
-        if (unlikely(__pyx_t_5 < 0)) {
-          PyErr_Fetch(&__pyx_t_9, &__pyx_t_10, &__pyx_t_11);
-          if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_v_img, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
-            Py_XDECREF(__pyx_t_9); Py_XDECREF(__pyx_t_10); Py_XDECREF(__pyx_t_11);
-            __Pyx_RaiseBufferFallbackError();
-          } else {
-            PyErr_Restore(__pyx_t_9, __pyx_t_10, __pyx_t_11);
-          }
-          __pyx_t_9 = __pyx_t_10 = __pyx_t_11 = 0;
-        }
-        __pyx_pybuffernd_img.diminfo[0].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_img.diminfo[0].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_img.diminfo[1].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_img.diminfo[1].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[1];
-        if (unlikely(__pyx_t_5 < 0)) __PYX_ERR(0, 39, __pyx_L1_error)
-      }
-      __pyx_t_8 = 0;
-      __Pyx_DECREF_SET(__pyx_v_img, ((PyArrayObject *)__pyx_t_4));
-      __pyx_t_4 = 0;
-
-      /* "RMS/Routines/MorphCy.pyx":38
- *             img = bridge(img)
- * 
- *         elif (operation == 3):             # <<<<<<<<<<<<<<
- *             img = close(img)
- * 
- */
-      break;
-      case 4:
-
-      /* "RMS/Routines/MorphCy.pyx":42
- * 
- *         elif (operation == 4):
- *             img = thin(img)             # <<<<<<<<<<<<<<
- * 
- *         elif (operation == 5):
- */
-      __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_thin); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 42, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_6);
-      __pyx_t_7 = NULL;
-      if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_6))) {
-        __pyx_t_7 = PyMethod_GET_SELF(__pyx_t_6);
-        if (likely(__pyx_t_7)) {
-          PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_6);
-          __Pyx_INCREF(__pyx_t_7);
-          __Pyx_INCREF(function);
-          __Pyx_DECREF_SET(__pyx_t_6, function);
-        }
-      }
-      __pyx_t_4 = (__pyx_t_7) ? __Pyx_PyObject_Call2Args(__pyx_t_6, __pyx_t_7, ((PyObject *)__pyx_v_img)) : __Pyx_PyObject_CallOneArg(__pyx_t_6, ((PyObject *)__pyx_v_img));
-      __Pyx_XDECREF(__pyx_t_7); __pyx_t_7 = 0;
-      if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 42, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_4);
-      __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-      if (!(likely(((__pyx_t_4) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_4, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 42, __pyx_L1_error)
-      __pyx_t_8 = ((PyArrayObject *)__pyx_t_4);
-      {
-        __Pyx_BufFmt_StackElem __pyx_stack[1];
-        __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-        __pyx_t_5 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_t_8, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack);
-        if (unlikely(__pyx_t_5 < 0)) {
-          PyErr_Fetch(&__pyx_t_11, &__pyx_t_10, &__pyx_t_9);
-          if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_v_img, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
-            Py_XDECREF(__pyx_t_11); Py_XDECREF(__pyx_t_10); Py_XDECREF(__pyx_t_9);
-            __Pyx_RaiseBufferFallbackError();
-          } else {
-            PyErr_Restore(__pyx_t_11, __pyx_t_10, __pyx_t_9);
-          }
-          __pyx_t_11 = __pyx_t_10 = __pyx_t_9 = 0;
-        }
-        __pyx_pybuffernd_img.diminfo[0].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_img.diminfo[0].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_img.diminfo[1].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_img.diminfo[1].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[1];
-        if (unlikely(__pyx_t_5 < 0)) __PYX_ERR(0, 42, __pyx_L1_error)
-      }
-      __pyx_t_8 = 0;
-      __Pyx_DECREF_SET(__pyx_v_img, ((PyArrayObject *)__pyx_t_4));
-      __pyx_t_4 = 0;
-
-      /* "RMS/Routines/MorphCy.pyx":41
- *             img = close(img)
- * 
- *         elif (operation == 4):             # <<<<<<<<<<<<<<
- *             img = thin(img)
- * 
- */
-      break;
-      case 5:
-
-      /* "RMS/Routines/MorphCy.pyx":45
- * 
- *         elif (operation == 5):
- *             img = dilate(img)             # <<<<<<<<<<<<<<
- * 
- * 
- */
-      __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_dilate); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 45, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_6);
-      __pyx_t_7 = NULL;
-      if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_6))) {
-        __pyx_t_7 = PyMethod_GET_SELF(__pyx_t_6);
-        if (likely(__pyx_t_7)) {
-          PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_6);
-          __Pyx_INCREF(__pyx_t_7);
-          __Pyx_INCREF(function);
-          __Pyx_DECREF_SET(__pyx_t_6, function);
-        }
-      }
-      __pyx_t_4 = (__pyx_t_7) ? __Pyx_PyObject_Call2Args(__pyx_t_6, __pyx_t_7, ((PyObject *)__pyx_v_img)) : __Pyx_PyObject_CallOneArg(__pyx_t_6, ((PyObject *)__pyx_v_img));
-      __Pyx_XDECREF(__pyx_t_7); __pyx_t_7 = 0;
-      if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 45, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_4);
-      __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-      if (!(likely(((__pyx_t_4) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_4, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 45, __pyx_L1_error)
-      __pyx_t_8 = ((PyArrayObject *)__pyx_t_4);
-      {
-        __Pyx_BufFmt_StackElem __pyx_stack[1];
-        __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-        __pyx_t_5 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_t_8, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack);
-        if (unlikely(__pyx_t_5 < 0)) {
-          PyErr_Fetch(&__pyx_t_9, &__pyx_t_10, &__pyx_t_11);
-          if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_v_img, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
-            Py_XDECREF(__pyx_t_9); Py_XDECREF(__pyx_t_10); Py_XDECREF(__pyx_t_11);
-            __Pyx_RaiseBufferFallbackError();
-          } else {
-            PyErr_Restore(__pyx_t_9, __pyx_t_10, __pyx_t_11);
-          }
-          __pyx_t_9 = __pyx_t_10 = __pyx_t_11 = 0;
-        }
-        __pyx_pybuffernd_img.diminfo[0].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_img.diminfo[0].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_img.diminfo[1].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_img.diminfo[1].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[1];
-        if (unlikely(__pyx_t_5 < 0)) __PYX_ERR(0, 45, __pyx_L1_error)
-      }
-      __pyx_t_8 = 0;
-      __Pyx_DECREF_SET(__pyx_v_img, ((PyArrayObject *)__pyx_t_4));
-      __pyx_t_4 = 0;
-
-      /* "RMS/Routines/MorphCy.pyx":44
- *             img = thin(img)
- * 
- *         elif (operation == 5):             # <<<<<<<<<<<<<<
- *             img = dilate(img)
- * 
- */
-      break;
-      default: break;
-    }
-
-    /* "RMS/Routines/MorphCy.pyx":30
- *     cdef int operation
- * 
- *     for operation in operations:             # <<<<<<<<<<<<<<
- * 
- *         if (operation == 1):
- */
-  }
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-
-  /* "RMS/Routines/MorphCy.pyx":48
- * 
- * 
- *     return img             # <<<<<<<<<<<<<<
- * 
- * 
- */
-  __Pyx_XDECREF(__pyx_r);
-  __Pyx_INCREF(((PyObject *)__pyx_v_img));
-  __pyx_r = ((PyObject *)__pyx_v_img);
-  goto __pyx_L0;
-
-  /* "RMS/Routines/MorphCy.pyx":17
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def morphApply(np.ndarray[INT_TYPE_t, ndim=2] img, operations):             # <<<<<<<<<<<<<<
- *     """ Apply morphological operations on the given image.
- * 
- */
-
-  /* function exit code */
-  __pyx_L1_error:;
-  __Pyx_XDECREF(__pyx_t_1);
-  __Pyx_XDECREF(__pyx_t_4);
-  __Pyx_XDECREF(__pyx_t_6);
-  __Pyx_XDECREF(__pyx_t_7);
-  { PyObject *__pyx_type, *__pyx_value, *__pyx_tb;
-    __Pyx_PyThreadState_declare
-    __Pyx_PyThreadState_assign
-    __Pyx_ErrFetch(&__pyx_type, &__pyx_value, &__pyx_tb);
-    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-  __Pyx_ErrRestore(__pyx_type, __pyx_value, __pyx_tb);}
-  __Pyx_AddTraceback("RMS.Routines.MorphCy.morphApply", __pyx_clineno, __pyx_lineno, __pyx_filename);
-  __pyx_r = NULL;
-  goto __pyx_L2;
-  __pyx_L0:;
-  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-  __pyx_L2:;
-  __Pyx_XDECREF((PyObject *)__pyx_v_img);
-  __Pyx_XGIVEREF(__pyx_r);
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-/* "RMS/Routines/MorphCy.pyx":54
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def clean(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Clean isolated pixels, as in:
- *      0  0  0      0  0  0
- */
-
-/* Python wrapper */
-static PyObject *__pyx_pw_3RMS_8Routines_7MorphCy_3clean(PyObject *__pyx_self, PyObject *__pyx_v_img); /*proto*/
-static char __pyx_doc_3RMS_8Routines_7MorphCy_2clean[] = " Clean isolated pixels, as in:\n     0  0  0      0  0  0\n     0  1  0  =>  0  0  0\n     0  0  0      0  0  0\n    \n    @param img: input image\n    \n    @return cleaned image\n    ";
-static PyMethodDef __pyx_mdef_3RMS_8Routines_7MorphCy_3clean = {"clean", (PyCFunction)__pyx_pw_3RMS_8Routines_7MorphCy_3clean, METH_O, __pyx_doc_3RMS_8Routines_7MorphCy_2clean};
-static PyObject *__pyx_pw_3RMS_8Routines_7MorphCy_3clean(PyObject *__pyx_self, PyObject *__pyx_v_img) {
-  PyObject *__pyx_r = 0;
-  __Pyx_RefNannyDeclarations
-  __Pyx_RefNannySetupContext("clean (wrapper)", 0);
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_img), __pyx_ptype_5numpy_ndarray, 1, "img", 0))) __PYX_ERR(0, 54, __pyx_L1_error)
-  __pyx_r = __pyx_pf_3RMS_8Routines_7MorphCy_2clean(__pyx_self, ((PyArrayObject *)__pyx_v_img));
-
-  /* function exit code */
-  goto __pyx_L0;
-  __pyx_L1_error:;
-  __pyx_r = NULL;
-  __pyx_L0:;
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-static PyObject *__pyx_pf_3RMS_8Routines_7MorphCy_2clean(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_img) {
-  int __pyx_v_y;
-  int __pyx_v_x;
-  int __pyx_v_p2;
-  int __pyx_v_p3;
-  int __pyx_v_p4;
-  int __pyx_v_p5;
-  int __pyx_v_p6;
-  int __pyx_v_p7;
-  int __pyx_v_p8;
-  int __pyx_v_p9;
-  int __pyx_v_y_size;
-  int __pyx_v_x_size;
-  int __pyx_v_ym;
-  int __pyx_v_xm;
-  __Pyx_LocalBuf_ND __pyx_pybuffernd_img;
-  __Pyx_Buffer __pyx_pybuffer_img;
-  PyObject *__pyx_r = NULL;
-  __Pyx_RefNannyDeclarations
-  npy_intp __pyx_t_1;
-  npy_intp __pyx_t_2;
-  int __pyx_t_3;
-  npy_intp __pyx_t_4;
-  npy_intp __pyx_t_5;
-  int __pyx_t_6;
-  Py_ssize_t __pyx_t_7;
-  Py_ssize_t __pyx_t_8;
-  int __pyx_t_9;
-  PyObject *__pyx_t_10 = NULL;
-  Py_ssize_t __pyx_t_11;
-  Py_ssize_t __pyx_t_12;
-  int __pyx_t_13;
-  Py_ssize_t __pyx_t_14;
-  Py_ssize_t __pyx_t_15;
-  Py_ssize_t __pyx_t_16;
-  Py_ssize_t __pyx_t_17;
-  Py_ssize_t __pyx_t_18;
-  Py_ssize_t __pyx_t_19;
-  Py_ssize_t __pyx_t_20;
-  Py_ssize_t __pyx_t_21;
-  Py_ssize_t __pyx_t_22;
-  Py_ssize_t __pyx_t_23;
-  Py_ssize_t __pyx_t_24;
-  Py_ssize_t __pyx_t_25;
-  Py_ssize_t __pyx_t_26;
-  Py_ssize_t __pyx_t_27;
-  Py_ssize_t __pyx_t_28;
-  Py_ssize_t __pyx_t_29;
-  __Pyx_RefNannySetupContext("clean", 0);
-  __pyx_pybuffer_img.pybuffer.buf = NULL;
-  __pyx_pybuffer_img.refcount = 0;
-  __pyx_pybuffernd_img.data = NULL;
-  __pyx_pybuffernd_img.rcbuffer = &__pyx_pybuffer_img;
-  {
-    __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_v_img, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES| PyBUF_WRITABLE, 2, 0, __pyx_stack) == -1)) __PYX_ERR(0, 54, __pyx_L1_error)
-  }
-  __pyx_pybuffernd_img.diminfo[0].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_img.diminfo[0].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_img.diminfo[1].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_img.diminfo[1].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[1];
-
-  /* "RMS/Routines/MorphCy.pyx":68
- *     cdef bint p2, p3, p4, p5, p6, p7, p8, p9
- * 
- *     cdef int y_size = img.shape[0]             # <<<<<<<<<<<<<<
- *     cdef int x_size = img.shape[1]
- * 
- */
-  __pyx_v_y_size = (__pyx_v_img->dimensions[0]);
-
-  /* "RMS/Routines/MorphCy.pyx":69
- * 
- *     cdef int y_size = img.shape[0]
- *     cdef int x_size = img.shape[1]             # <<<<<<<<<<<<<<
- * 
- *     cdef int ym = y_size - 1
- */
-  __pyx_v_x_size = (__pyx_v_img->dimensions[1]);
-
-  /* "RMS/Routines/MorphCy.pyx":71
- *     cdef int x_size = img.shape[1]
- * 
- *     cdef int ym = y_size - 1             # <<<<<<<<<<<<<<
- *     cdef int xm = x_size - 1
- * 
- */
-  __pyx_v_ym = (__pyx_v_y_size - 1);
-
-  /* "RMS/Routines/MorphCy.pyx":72
- * 
- *     cdef int ym = y_size - 1
- *     cdef int xm = x_size - 1             # <<<<<<<<<<<<<<
- * 
- *     for y in range(1, img.shape[0]):
- */
-  __pyx_v_xm = (__pyx_v_x_size - 1);
-
-  /* "RMS/Routines/MorphCy.pyx":74
- *     cdef int xm = x_size - 1
- * 
- *     for y in range(1, img.shape[0]):             # <<<<<<<<<<<<<<
- *         for x in range(1, img.shape[1]):
- * 
- */
-  __pyx_t_1 = (__pyx_v_img->dimensions[0]);
-  __pyx_t_2 = __pyx_t_1;
-  for (__pyx_t_3 = 1; __pyx_t_3 < __pyx_t_2; __pyx_t_3+=1) {
-    __pyx_v_y = __pyx_t_3;
-
-    /* "RMS/Routines/MorphCy.pyx":75
- * 
- *     for y in range(1, img.shape[0]):
- *         for x in range(1, img.shape[1]):             # <<<<<<<<<<<<<<
- * 
- *             # Skip if it is not a bright pixel
- */
-    __pyx_t_4 = (__pyx_v_img->dimensions[1]);
-    __pyx_t_5 = __pyx_t_4;
-    for (__pyx_t_6 = 1; __pyx_t_6 < __pyx_t_5; __pyx_t_6+=1) {
-      __pyx_v_x = __pyx_t_6;
-
-      /* "RMS/Routines/MorphCy.pyx":78
- * 
- *             # Skip if it is not a bright pixel
- *             if not img[y, x]:             # <<<<<<<<<<<<<<
- *                 continue
- * 
- */
-      __pyx_t_7 = __pyx_v_y;
-      __pyx_t_8 = __pyx_v_x;
-      __pyx_t_9 = ((!((*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_7, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_8, __pyx_pybuffernd_img.diminfo[1].strides)) != 0)) != 0);
-      if (__pyx_t_9) {
-
-        /* "RMS/Routines/MorphCy.pyx":79
- *             # Skip if it is not a bright pixel
- *             if not img[y, x]:
- *                 continue             # <<<<<<<<<<<<<<
- * 
- *             # Get neighbouring pixels
- */
-        goto __pyx_L5_continue;
-
-        /* "RMS/Routines/MorphCy.pyx":78
- * 
- *             # Skip if it is not a bright pixel
- *             if not img[y, x]:             # <<<<<<<<<<<<<<
- *                 continue
- * 
- */
-      }
-
-      /* "RMS/Routines/MorphCy.pyx":82
- * 
- *             # Get neighbouring pixels
- *             p2 = 0 if (y == 0)             else img[y-1, x]             # <<<<<<<<<<<<<<
- *             p3 = 0 if (y == 0  or x == xm) else img[y-1, x+1]
- *             p4 = 0 if (x == xm)            else img[y,   x+1]
- */
-      if (((__pyx_v_y == 0) != 0)) {
-        __pyx_t_10 = ((PyObject *)0);
-      } else {
-        __pyx_t_11 = (__pyx_v_y - 1);
-        __pyx_t_12 = __pyx_v_x;
-        __pyx_t_10 = ((PyObject *)(*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_11, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_12, __pyx_pybuffernd_img.diminfo[1].strides)));
-      }
-      __pyx_v_p2 = ((int)__pyx_t_10);
-      __pyx_t_10 = 0;
-
-      /* "RMS/Routines/MorphCy.pyx":83
- *             # Get neighbouring pixels
- *             p2 = 0 if (y == 0)             else img[y-1, x]
- *             p3 = 0 if (y == 0  or x == xm) else img[y-1, x+1]             # <<<<<<<<<<<<<<
- *             p4 = 0 if (x == xm)            else img[y,   x+1]
- *             p5 = 0 if (y == ym or x == xm) else img[y+1, x+1]
- */
-      __pyx_t_13 = ((__pyx_v_y == 0) != 0);
-      if (!__pyx_t_13) {
-      } else {
-        __pyx_t_9 = __pyx_t_13;
-        goto __pyx_L8_bool_binop_done;
-      }
-      __pyx_t_13 = ((__pyx_v_x == __pyx_v_xm) != 0);
-      __pyx_t_9 = __pyx_t_13;
-      __pyx_L8_bool_binop_done:;
-      if (__pyx_t_9) {
-        __pyx_t_10 = ((PyObject *)0);
-      } else {
-        __pyx_t_14 = (__pyx_v_y - 1);
-        __pyx_t_15 = (__pyx_v_x + 1);
-        __pyx_t_10 = ((PyObject *)(*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_14, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_15, __pyx_pybuffernd_img.diminfo[1].strides)));
-      }
-      __pyx_v_p3 = ((int)__pyx_t_10);
-      __pyx_t_10 = 0;
-
-      /* "RMS/Routines/MorphCy.pyx":84
- *             p2 = 0 if (y == 0)             else img[y-1, x]
- *             p3 = 0 if (y == 0  or x == xm) else img[y-1, x+1]
- *             p4 = 0 if (x == xm)            else img[y,   x+1]             # <<<<<<<<<<<<<<
- *             p5 = 0 if (y == ym or x == xm) else img[y+1, x+1]
- *             p6 = 0 if (y == ym)            else img[y+1, x]
- */
-      if (((__pyx_v_x == __pyx_v_xm) != 0)) {
-        __pyx_t_10 = ((PyObject *)0);
-      } else {
-        __pyx_t_16 = __pyx_v_y;
-        __pyx_t_17 = (__pyx_v_x + 1);
-        __pyx_t_10 = ((PyObject *)(*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_16, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_17, __pyx_pybuffernd_img.diminfo[1].strides)));
-      }
-      __pyx_v_p4 = ((int)__pyx_t_10);
-      __pyx_t_10 = 0;
-
-      /* "RMS/Routines/MorphCy.pyx":85
- *             p3 = 0 if (y == 0  or x == xm) else img[y-1, x+1]
- *             p4 = 0 if (x == xm)            else img[y,   x+1]
- *             p5 = 0 if (y == ym or x == xm) else img[y+1, x+1]             # <<<<<<<<<<<<<<
- *             p6 = 0 if (y == ym)            else img[y+1, x]
- *             p7 = 0 if (y == ym or x == 0)  else img[y+1, x-1]
- */
-      __pyx_t_13 = ((__pyx_v_y == __pyx_v_ym) != 0);
-      if (!__pyx_t_13) {
-      } else {
-        __pyx_t_9 = __pyx_t_13;
-        goto __pyx_L10_bool_binop_done;
-      }
-      __pyx_t_13 = ((__pyx_v_x == __pyx_v_xm) != 0);
-      __pyx_t_9 = __pyx_t_13;
-      __pyx_L10_bool_binop_done:;
-      if (__pyx_t_9) {
-        __pyx_t_10 = ((PyObject *)0);
-      } else {
-        __pyx_t_18 = (__pyx_v_y + 1);
-        __pyx_t_19 = (__pyx_v_x + 1);
-        __pyx_t_10 = ((PyObject *)(*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_18, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_19, __pyx_pybuffernd_img.diminfo[1].strides)));
-      }
-      __pyx_v_p5 = ((int)__pyx_t_10);
-      __pyx_t_10 = 0;
-
-      /* "RMS/Routines/MorphCy.pyx":86
- *             p4 = 0 if (x == xm)            else img[y,   x+1]
- *             p5 = 0 if (y == ym or x == xm) else img[y+1, x+1]
- *             p6 = 0 if (y == ym)            else img[y+1, x]             # <<<<<<<<<<<<<<
- *             p7 = 0 if (y == ym or x == 0)  else img[y+1, x-1]
- *             p8 = 0 if (x == 0)             else img[y,   x-1]
- */
-      if (((__pyx_v_y == __pyx_v_ym) != 0)) {
-        __pyx_t_10 = ((PyObject *)0);
-      } else {
-        __pyx_t_20 = (__pyx_v_y + 1);
-        __pyx_t_21 = __pyx_v_x;
-        __pyx_t_10 = ((PyObject *)(*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_20, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_21, __pyx_pybuffernd_img.diminfo[1].strides)));
-      }
-      __pyx_v_p6 = ((int)__pyx_t_10);
-      __pyx_t_10 = 0;
-
-      /* "RMS/Routines/MorphCy.pyx":87
- *             p5 = 0 if (y == ym or x == xm) else img[y+1, x+1]
- *             p6 = 0 if (y == ym)            else img[y+1, x]
- *             p7 = 0 if (y == ym or x == 0)  else img[y+1, x-1]             # <<<<<<<<<<<<<<
- *             p8 = 0 if (x == 0)             else img[y,   x-1]
- *             p9 = 0 if (y == 0  or x == 0)  else img[y-1, x-1]
- */
-      __pyx_t_13 = ((__pyx_v_y == __pyx_v_ym) != 0);
-      if (!__pyx_t_13) {
-      } else {
-        __pyx_t_9 = __pyx_t_13;
-        goto __pyx_L12_bool_binop_done;
-      }
-      __pyx_t_13 = ((__pyx_v_x == 0) != 0);
-      __pyx_t_9 = __pyx_t_13;
-      __pyx_L12_bool_binop_done:;
-      if (__pyx_t_9) {
-        __pyx_t_10 = ((PyObject *)0);
-      } else {
-        __pyx_t_22 = (__pyx_v_y + 1);
-        __pyx_t_23 = (__pyx_v_x - 1);
-        __pyx_t_10 = ((PyObject *)(*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_22, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_23, __pyx_pybuffernd_img.diminfo[1].strides)));
-      }
-      __pyx_v_p7 = ((int)__pyx_t_10);
-      __pyx_t_10 = 0;
-
-      /* "RMS/Routines/MorphCy.pyx":88
- *             p6 = 0 if (y == ym)            else img[y+1, x]
- *             p7 = 0 if (y == ym or x == 0)  else img[y+1, x-1]
- *             p8 = 0 if (x == 0)             else img[y,   x-1]             # <<<<<<<<<<<<<<
- *             p9 = 0 if (y == 0  or x == 0)  else img[y-1, x-1]
- * 
- */
-      if (((__pyx_v_x == 0) != 0)) {
-        __pyx_t_10 = ((PyObject *)0);
-      } else {
-        __pyx_t_24 = __pyx_v_y;
-        __pyx_t_25 = (__pyx_v_x - 1);
-        __pyx_t_10 = ((PyObject *)(*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_24, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_25, __pyx_pybuffernd_img.diminfo[1].strides)));
-      }
-      __pyx_v_p8 = ((int)__pyx_t_10);
-      __pyx_t_10 = 0;
-
-      /* "RMS/Routines/MorphCy.pyx":89
- *             p7 = 0 if (y == ym or x == 0)  else img[y+1, x-1]
- *             p8 = 0 if (x == 0)             else img[y,   x-1]
- *             p9 = 0 if (y == 0  or x == 0)  else img[y-1, x-1]             # <<<<<<<<<<<<<<
- * 
- *             if not (p2 or p3 or p4 or p5 or p6 or p7 or p8 or p9):
- */
-      __pyx_t_13 = ((__pyx_v_y == 0) != 0);
-      if (!__pyx_t_13) {
-      } else {
-        __pyx_t_9 = __pyx_t_13;
-        goto __pyx_L14_bool_binop_done;
-      }
-      __pyx_t_13 = ((__pyx_v_x == 0) != 0);
-      __pyx_t_9 = __pyx_t_13;
-      __pyx_L14_bool_binop_done:;
-      if (__pyx_t_9) {
-        __pyx_t_10 = ((PyObject *)0);
-      } else {
-        __pyx_t_26 = (__pyx_v_y - 1);
-        __pyx_t_27 = (__pyx_v_x - 1);
-        __pyx_t_10 = ((PyObject *)(*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_26, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_27, __pyx_pybuffernd_img.diminfo[1].strides)));
-      }
-      __pyx_v_p9 = ((int)__pyx_t_10);
-      __pyx_t_10 = 0;
-
-      /* "RMS/Routines/MorphCy.pyx":91
- *             p9 = 0 if (y == 0  or x == 0)  else img[y-1, x-1]
- * 
- *             if not (p2 or p3 or p4 or p5 or p6 or p7 or p8 or p9):             # <<<<<<<<<<<<<<
- *                 img[y, x] = 0
- * 
- */
-      __pyx_t_13 = (__pyx_v_p2 != 0);
-      if (!__pyx_t_13) {
-      } else {
-        __pyx_t_9 = __pyx_t_13;
-        goto __pyx_L17_bool_binop_done;
-      }
-      __pyx_t_13 = (__pyx_v_p3 != 0);
-      if (!__pyx_t_13) {
-      } else {
-        __pyx_t_9 = __pyx_t_13;
-        goto __pyx_L17_bool_binop_done;
-      }
-      __pyx_t_13 = (__pyx_v_p4 != 0);
-      if (!__pyx_t_13) {
-      } else {
-        __pyx_t_9 = __pyx_t_13;
-        goto __pyx_L17_bool_binop_done;
-      }
-      __pyx_t_13 = (__pyx_v_p5 != 0);
-      if (!__pyx_t_13) {
-      } else {
-        __pyx_t_9 = __pyx_t_13;
-        goto __pyx_L17_bool_binop_done;
-      }
-      __pyx_t_13 = (__pyx_v_p6 != 0);
-      if (!__pyx_t_13) {
-      } else {
-        __pyx_t_9 = __pyx_t_13;
-        goto __pyx_L17_bool_binop_done;
-      }
-      __pyx_t_13 = (__pyx_v_p7 != 0);
-      if (!__pyx_t_13) {
-      } else {
-        __pyx_t_9 = __pyx_t_13;
-        goto __pyx_L17_bool_binop_done;
-      }
-      __pyx_t_13 = (__pyx_v_p8 != 0);
-      if (!__pyx_t_13) {
-      } else {
-        __pyx_t_9 = __pyx_t_13;
-        goto __pyx_L17_bool_binop_done;
-      }
-      __pyx_t_13 = (__pyx_v_p9 != 0);
-      __pyx_t_9 = __pyx_t_13;
-      __pyx_L17_bool_binop_done:;
-      __pyx_t_13 = ((!__pyx_t_9) != 0);
-      if (__pyx_t_13) {
-
-        /* "RMS/Routines/MorphCy.pyx":92
- * 
- *             if not (p2 or p3 or p4 or p5 or p6 or p7 or p8 or p9):
- *                 img[y, x] = 0             # <<<<<<<<<<<<<<
- * 
- *     return img
- */
-        __pyx_t_28 = __pyx_v_y;
-        __pyx_t_29 = __pyx_v_x;
-        *__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_28, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_29, __pyx_pybuffernd_img.diminfo[1].strides) = 0;
-
-        /* "RMS/Routines/MorphCy.pyx":91
- *             p9 = 0 if (y == 0  or x == 0)  else img[y-1, x-1]
- * 
- *             if not (p2 or p3 or p4 or p5 or p6 or p7 or p8 or p9):             # <<<<<<<<<<<<<<
- *                 img[y, x] = 0
- * 
- */
-      }
-      __pyx_L5_continue:;
-    }
-  }
-
-  /* "RMS/Routines/MorphCy.pyx":94
- *                 img[y, x] = 0
- * 
- *     return img             # <<<<<<<<<<<<<<
- * 
- * 
- */
-  __Pyx_XDECREF(__pyx_r);
-  __Pyx_INCREF(((PyObject *)__pyx_v_img));
-  __pyx_r = ((PyObject *)__pyx_v_img);
-  goto __pyx_L0;
-
-  /* "RMS/Routines/MorphCy.pyx":54
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def clean(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Clean isolated pixels, as in:
- *      0  0  0      0  0  0
- */
-
-  /* function exit code */
-  __pyx_L1_error:;
-  __Pyx_XDECREF(__pyx_t_10);
-  { PyObject *__pyx_type, *__pyx_value, *__pyx_tb;
-    __Pyx_PyThreadState_declare
-    __Pyx_PyThreadState_assign
-    __Pyx_ErrFetch(&__pyx_type, &__pyx_value, &__pyx_tb);
-    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-  __Pyx_ErrRestore(__pyx_type, __pyx_value, __pyx_tb);}
-  __Pyx_AddTraceback("RMS.Routines.MorphCy.clean", __pyx_clineno, __pyx_lineno, __pyx_filename);
-  __pyx_r = NULL;
-  goto __pyx_L2;
-  __pyx_L0:;
-  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-  __pyx_L2:;
-  __Pyx_XGIVEREF(__pyx_r);
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-/* "RMS/Routines/MorphCy.pyx":100
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def bridge(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Connect pixels on opposite sides, if other pixels are 0, as in:
- *      0  0  1      0  0  1
- */
-
-/* Python wrapper */
-static PyObject *__pyx_pw_3RMS_8Routines_7MorphCy_5bridge(PyObject *__pyx_self, PyObject *__pyx_v_img); /*proto*/
-static char __pyx_doc_3RMS_8Routines_7MorphCy_4bridge[] = " Connect pixels on opposite sides, if other pixels are 0, as in:\n     0  0  1      0  0  1\n     0  0  0  =>  0  1  0\n     1  0  0      1  0  0\n    \n    @param img: input image\n    \n    @return bridged image\n    ";
-static PyMethodDef __pyx_mdef_3RMS_8Routines_7MorphCy_5bridge = {"bridge", (PyCFunction)__pyx_pw_3RMS_8Routines_7MorphCy_5bridge, METH_O, __pyx_doc_3RMS_8Routines_7MorphCy_4bridge};
-static PyObject *__pyx_pw_3RMS_8Routines_7MorphCy_5bridge(PyObject *__pyx_self, PyObject *__pyx_v_img) {
-  PyObject *__pyx_r = 0;
-  __Pyx_RefNannyDeclarations
-  __Pyx_RefNannySetupContext("bridge (wrapper)", 0);
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_img), __pyx_ptype_5numpy_ndarray, 1, "img", 0))) __PYX_ERR(0, 100, __pyx_L1_error)
-  __pyx_r = __pyx_pf_3RMS_8Routines_7MorphCy_4bridge(__pyx_self, ((PyArrayObject *)__pyx_v_img));
-
-  /* function exit code */
-  goto __pyx_L0;
-  __pyx_L1_error:;
-  __pyx_r = NULL;
-  __pyx_L0:;
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-static PyObject *__pyx_pf_3RMS_8Routines_7MorphCy_4bridge(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_img) {
-  int __pyx_v_y;
-  int __pyx_v_x;
-  int __pyx_v_p2;
-  int __pyx_v_p3;
-  int __pyx_v_p4;
-  int __pyx_v_p5;
-  int __pyx_v_p6;
-  int __pyx_v_p7;
-  int __pyx_v_p8;
-  int __pyx_v_p9;
-  int __pyx_v_y_size;
-  int __pyx_v_x_size;
-  PyArrayObject *__pyx_v_mask = 0;
-  __Pyx_LocalBuf_ND __pyx_pybuffernd_img;
-  __Pyx_Buffer __pyx_pybuffer_img;
-  __Pyx_LocalBuf_ND __pyx_pybuffernd_mask;
-  __Pyx_Buffer __pyx_pybuffer_mask;
-  PyObject *__pyx_r = NULL;
-  __Pyx_RefNannyDeclarations
-  PyObject *__pyx_t_1 = NULL;
+  int __pyx_t_1;
   PyObject *__pyx_t_2 = NULL;
   PyObject *__pyx_t_3 = NULL;
   PyObject *__pyx_t_4 = NULL;
   PyObject *__pyx_t_5 = NULL;
-  PyArrayObject *__pyx_t_6 = NULL;
-  long __pyx_t_7;
-  long __pyx_t_8;
-  int __pyx_t_9;
-  long __pyx_t_10;
-  long __pyx_t_11;
-  int __pyx_t_12;
-  int __pyx_t_13;
-  Py_ssize_t __pyx_t_14;
-  Py_ssize_t __pyx_t_15;
-  int __pyx_t_16;
-  Py_ssize_t __pyx_t_17;
-  Py_ssize_t __pyx_t_18;
-  Py_ssize_t __pyx_t_19;
-  Py_ssize_t __pyx_t_20;
-  Py_ssize_t __pyx_t_21;
-  Py_ssize_t __pyx_t_22;
-  Py_ssize_t __pyx_t_23;
-  Py_ssize_t __pyx_t_24;
-  Py_ssize_t __pyx_t_25;
-  Py_ssize_t __pyx_t_26;
-  Py_ssize_t __pyx_t_27;
-  Py_ssize_t __pyx_t_28;
-  Py_ssize_t __pyx_t_29;
-  Py_ssize_t __pyx_t_30;
-  Py_ssize_t __pyx_t_31;
-  Py_ssize_t __pyx_t_32;
-  Py_ssize_t __pyx_t_33;
-  Py_ssize_t __pyx_t_34;
-  Py_ssize_t __pyx_t_35;
-  Py_ssize_t __pyx_t_36;
-  __Pyx_RefNannySetupContext("bridge", 0);
-  __pyx_pybuffer_mask.pybuffer.buf = NULL;
-  __pyx_pybuffer_mask.refcount = 0;
-  __pyx_pybuffernd_mask.data = NULL;
-  __pyx_pybuffernd_mask.rcbuffer = &__pyx_pybuffer_mask;
-  __pyx_pybuffer_img.pybuffer.buf = NULL;
-  __pyx_pybuffer_img.refcount = 0;
-  __pyx_pybuffernd_img.data = NULL;
-  __pyx_pybuffernd_img.rcbuffer = &__pyx_pybuffer_img;
-  {
-    __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_v_img, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) __PYX_ERR(0, 100, __pyx_L1_error)
-  }
-  __pyx_pybuffernd_img.diminfo[0].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_img.diminfo[0].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_img.diminfo[1].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_img.diminfo[1].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[1];
-
-  /* "RMS/Routines/MorphCy.pyx":114
- *     cdef bint p2, p3, p4, p5, p6, p7, p8, p9
- * 
- *     cdef int y_size = img.shape[0]             # <<<<<<<<<<<<<<
- *     cdef int x_size = img.shape[1]
- * 
- */
-  __pyx_v_y_size = (__pyx_v_img->dimensions[0]);
-
-  /* "RMS/Routines/MorphCy.pyx":115
- * 
- *     cdef int y_size = img.shape[0]
- *     cdef int x_size = img.shape[1]             # <<<<<<<<<<<<<<
- * 
- *     # Init mask array
- */
-  __pyx_v_x_size = (__pyx_v_img->dimensions[1]);
-
-  /* "RMS/Routines/MorphCy.pyx":118
- * 
- *     # Init mask array
- *     cdef np.ndarray[INT_TYPE_t, ndim=2] mask = np.zeros(shape=(y_size, x_size), dtype=INT_TYPE)             # <<<<<<<<<<<<<<
- * 
- * 
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 118, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_zeros); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 118, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyDict_NewPresized(2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 118, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_3 = __Pyx_PyInt_From_int(__pyx_v_y_size); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 118, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_4 = __Pyx_PyInt_From_int(__pyx_v_x_size); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 118, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_5 = PyTuple_New(2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 118, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_GIVEREF(__pyx_t_3);
-  PyTuple_SET_ITEM(__pyx_t_5, 0, __pyx_t_3);
-  __Pyx_GIVEREF(__pyx_t_4);
-  PyTuple_SET_ITEM(__pyx_t_5, 1, __pyx_t_4);
-  __pyx_t_3 = 0;
-  __pyx_t_4 = 0;
-  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_shape, __pyx_t_5) < 0) __PYX_ERR(0, 118, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_INT_TYPE); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 118, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 118, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_empty_tuple, __pyx_t_1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 118, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  if (!(likely(((__pyx_t_5) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_5, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 118, __pyx_L1_error)
-  __pyx_t_6 = ((PyArrayObject *)__pyx_t_5);
-  {
-    __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_mask.rcbuffer->pybuffer, (PyObject*)__pyx_t_6, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES| PyBUF_WRITABLE, 2, 0, __pyx_stack) == -1)) {
-      __pyx_v_mask = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_mask.rcbuffer->pybuffer.buf = NULL;
-      __PYX_ERR(0, 118, __pyx_L1_error)
-    } else {__pyx_pybuffernd_mask.diminfo[0].strides = __pyx_pybuffernd_mask.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_mask.diminfo[0].shape = __pyx_pybuffernd_mask.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_mask.diminfo[1].strides = __pyx_pybuffernd_mask.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_mask.diminfo[1].shape = __pyx_pybuffernd_mask.rcbuffer->pybuffer.shape[1];
-    }
-  }
-  __pyx_t_6 = 0;
-  __pyx_v_mask = ((PyArrayObject *)__pyx_t_5);
-  __pyx_t_5 = 0;
-
-  /* "RMS/Routines/MorphCy.pyx":121
- * 
- * 
- *     for y in range(1, img.shape[0]-1):             # <<<<<<<<<<<<<<
- *         for x in range(1, img.shape[1]-1):
- * 
- */
-  __pyx_t_7 = ((__pyx_v_img->dimensions[0]) - 1);
-  __pyx_t_8 = __pyx_t_7;
-  for (__pyx_t_9 = 1; __pyx_t_9 < __pyx_t_8; __pyx_t_9+=1) {
-    __pyx_v_y = __pyx_t_9;
-
-    /* "RMS/Routines/MorphCy.pyx":122
- * 
- *     for y in range(1, img.shape[0]-1):
- *         for x in range(1, img.shape[1]-1):             # <<<<<<<<<<<<<<
- * 
- *             # Continue if both the image and the mask pixels are bright
- */
-    __pyx_t_10 = ((__pyx_v_img->dimensions[1]) - 1);
-    __pyx_t_11 = __pyx_t_10;
-    for (__pyx_t_12 = 1; __pyx_t_12 < __pyx_t_11; __pyx_t_12+=1) {
-      __pyx_v_x = __pyx_t_12;
-
-      /* "RMS/Routines/MorphCy.pyx":125
- * 
- *             # Continue if both the image and the mask pixels are bright
- *             if (img[y, x] and mask[y, x]):             # <<<<<<<<<<<<<<
- *                 continue
- * 
- */
-      __pyx_t_14 = __pyx_v_y;
-      __pyx_t_15 = __pyx_v_x;
-      __pyx_t_16 = ((*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_14, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_15, __pyx_pybuffernd_img.diminfo[1].strides)) != 0);
-      if (__pyx_t_16) {
-      } else {
-        __pyx_t_13 = __pyx_t_16;
-        goto __pyx_L8_bool_binop_done;
-      }
-      __pyx_t_17 = __pyx_v_y;
-      __pyx_t_18 = __pyx_v_x;
-      __pyx_t_16 = ((*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_mask.rcbuffer->pybuffer.buf, __pyx_t_17, __pyx_pybuffernd_mask.diminfo[0].strides, __pyx_t_18, __pyx_pybuffernd_mask.diminfo[1].strides)) != 0);
-      __pyx_t_13 = __pyx_t_16;
-      __pyx_L8_bool_binop_done:;
-      if (__pyx_t_13) {
-
-        /* "RMS/Routines/MorphCy.pyx":126
- *             # Continue if both the image and the mask pixels are bright
- *             if (img[y, x] and mask[y, x]):
- *                 continue             # <<<<<<<<<<<<<<
- * 
- *             # Get neighbouring pixels
- */
-        goto __pyx_L5_continue;
-
-        /* "RMS/Routines/MorphCy.pyx":125
- * 
- *             # Continue if both the image and the mask pixels are bright
- *             if (img[y, x] and mask[y, x]):             # <<<<<<<<<<<<<<
- *                 continue
- * 
- */
-      }
-
-      /* "RMS/Routines/MorphCy.pyx":129
- * 
- *             # Get neighbouring pixels
- *             p2 = img[y-1, x]             # <<<<<<<<<<<<<<
- *             p3 = img[y-1, x+1]
- *             p4 = img[y,   x+1]
- */
-      __pyx_t_19 = (__pyx_v_y - 1);
-      __pyx_t_20 = __pyx_v_x;
-      __pyx_v_p2 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_19, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_20, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":130
- *             # Get neighbouring pixels
- *             p2 = img[y-1, x]
- *             p3 = img[y-1, x+1]             # <<<<<<<<<<<<<<
- *             p4 = img[y,   x+1]
- *             p5 = img[y+1, x+1]
- */
-      __pyx_t_21 = (__pyx_v_y - 1);
-      __pyx_t_22 = (__pyx_v_x + 1);
-      __pyx_v_p3 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_21, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_22, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":131
- *             p2 = img[y-1, x]
- *             p3 = img[y-1, x+1]
- *             p4 = img[y,   x+1]             # <<<<<<<<<<<<<<
- *             p5 = img[y+1, x+1]
- *             p6 = img[y+1, x]
- */
-      __pyx_t_23 = __pyx_v_y;
-      __pyx_t_24 = (__pyx_v_x + 1);
-      __pyx_v_p4 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_23, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_24, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":132
- *             p3 = img[y-1, x+1]
- *             p4 = img[y,   x+1]
- *             p5 = img[y+1, x+1]             # <<<<<<<<<<<<<<
- *             p6 = img[y+1, x]
- *             p7 = img[y+1, x-1]
- */
-      __pyx_t_25 = (__pyx_v_y + 1);
-      __pyx_t_26 = (__pyx_v_x + 1);
-      __pyx_v_p5 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_25, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_26, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":133
- *             p4 = img[y,   x+1]
- *             p5 = img[y+1, x+1]
- *             p6 = img[y+1, x]             # <<<<<<<<<<<<<<
- *             p7 = img[y+1, x-1]
- *             p8 = img[y,   x-1]
- */
-      __pyx_t_27 = (__pyx_v_y + 1);
-      __pyx_t_28 = __pyx_v_x;
-      __pyx_v_p6 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_27, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_28, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":134
- *             p5 = img[y+1, x+1]
- *             p6 = img[y+1, x]
- *             p7 = img[y+1, x-1]             # <<<<<<<<<<<<<<
- *             p8 = img[y,   x-1]
- *             p9 = img[y-1, x-1]
- */
-      __pyx_t_29 = (__pyx_v_y + 1);
-      __pyx_t_30 = (__pyx_v_x - 1);
-      __pyx_v_p7 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_29, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_30, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":135
- *             p6 = img[y+1, x]
- *             p7 = img[y+1, x-1]
- *             p8 = img[y,   x-1]             # <<<<<<<<<<<<<<
- *             p9 = img[y-1, x-1]
- * 
- */
-      __pyx_t_31 = __pyx_v_y;
-      __pyx_t_32 = (__pyx_v_x - 1);
-      __pyx_v_p8 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_31, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_32, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":136
- *             p7 = img[y+1, x-1]
- *             p8 = img[y,   x-1]
- *             p9 = img[y-1, x-1]             # <<<<<<<<<<<<<<
- * 
- *             if((p2 and not p3 and not p4 and not p5 and p6 and not p7 and not p8 and not p9) or
- */
-      __pyx_t_33 = (__pyx_v_y - 1);
-      __pyx_t_34 = (__pyx_v_x - 1);
-      __pyx_v_p9 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_33, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_34, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":138
- *             p9 = img[y-1, x-1]
- * 
- *             if((p2 and not p3 and not p4 and not p5 and p6 and not p7 and not p8 and not p9) or             # <<<<<<<<<<<<<<
- *                (not p2 and not p3 and not p4 and p5 and not p6 and not p7 and not p8 and p9) or
- *                (not p2 and not p3 and p4 and not p5 and not p6 and not p7 and p8 and not p9) or
- */
-      __pyx_t_16 = (__pyx_v_p2 != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L12_next_or;
-      } else {
-      }
-      __pyx_t_16 = ((!(__pyx_v_p3 != 0)) != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L12_next_or;
-      } else {
-      }
-      __pyx_t_16 = ((!(__pyx_v_p4 != 0)) != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L12_next_or;
-      } else {
-      }
-      __pyx_t_16 = ((!(__pyx_v_p5 != 0)) != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L12_next_or;
-      } else {
-      }
-      __pyx_t_16 = (__pyx_v_p6 != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L12_next_or;
-      } else {
-      }
-      __pyx_t_16 = ((!(__pyx_v_p7 != 0)) != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L12_next_or;
-      } else {
-      }
-      __pyx_t_16 = ((!(__pyx_v_p8 != 0)) != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L12_next_or;
-      } else {
-      }
-      __pyx_t_16 = ((!(__pyx_v_p9 != 0)) != 0);
-      if (!__pyx_t_16) {
-      } else {
-        __pyx_t_13 = __pyx_t_16;
-        goto __pyx_L11_bool_binop_done;
-      }
-      __pyx_L12_next_or:;
-
-      /* "RMS/Routines/MorphCy.pyx":139
- * 
- *             if((p2 and not p3 and not p4 and not p5 and p6 and not p7 and not p8 and not p9) or
- *                (not p2 and not p3 and not p4 and p5 and not p6 and not p7 and not p8 and p9) or             # <<<<<<<<<<<<<<
- *                (not p2 and not p3 and p4 and not p5 and not p6 and not p7 and p8 and not p9) or
- *                (not p2 and p3 and not p4 and not p5 and not p6 and p7 and not p8 and not p9)):
- */
-      __pyx_t_16 = ((!(__pyx_v_p2 != 0)) != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L20_next_or;
-      } else {
-      }
-      __pyx_t_16 = ((!(__pyx_v_p3 != 0)) != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L20_next_or;
-      } else {
-      }
-      __pyx_t_16 = ((!(__pyx_v_p4 != 0)) != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L20_next_or;
-      } else {
-      }
-      __pyx_t_16 = (__pyx_v_p5 != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L20_next_or;
-      } else {
-      }
-      __pyx_t_16 = ((!(__pyx_v_p6 != 0)) != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L20_next_or;
-      } else {
-      }
-      __pyx_t_16 = ((!(__pyx_v_p7 != 0)) != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L20_next_or;
-      } else {
-      }
-      __pyx_t_16 = ((!(__pyx_v_p8 != 0)) != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L20_next_or;
-      } else {
-      }
-      __pyx_t_16 = (__pyx_v_p9 != 0);
-      if (!__pyx_t_16) {
-      } else {
-        __pyx_t_13 = __pyx_t_16;
-        goto __pyx_L11_bool_binop_done;
-      }
-      __pyx_L20_next_or:;
-
-      /* "RMS/Routines/MorphCy.pyx":140
- *             if((p2 and not p3 and not p4 and not p5 and p6 and not p7 and not p8 and not p9) or
- *                (not p2 and not p3 and not p4 and p5 and not p6 and not p7 and not p8 and p9) or
- *                (not p2 and not p3 and p4 and not p5 and not p6 and not p7 and p8 and not p9) or             # <<<<<<<<<<<<<<
- *                (not p2 and p3 and not p4 and not p5 and not p6 and p7 and not p8 and not p9)):
- *                 mask[y, x] = 1;
- */
-      __pyx_t_16 = ((!(__pyx_v_p2 != 0)) != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L28_next_or;
-      } else {
-      }
-      __pyx_t_16 = ((!(__pyx_v_p3 != 0)) != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L28_next_or;
-      } else {
-      }
-      __pyx_t_16 = (__pyx_v_p4 != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L28_next_or;
-      } else {
-      }
-      __pyx_t_16 = ((!(__pyx_v_p5 != 0)) != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L28_next_or;
-      } else {
-      }
-      __pyx_t_16 = ((!(__pyx_v_p6 != 0)) != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L28_next_or;
-      } else {
-      }
-      __pyx_t_16 = ((!(__pyx_v_p7 != 0)) != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L28_next_or;
-      } else {
-      }
-      __pyx_t_16 = (__pyx_v_p8 != 0);
-      if (!__pyx_t_16) {
-        goto __pyx_L28_next_or;
-      } else {
-      }
-      __pyx_t_16 = ((!(__pyx_v_p9 != 0)) != 0);
-      if (!__pyx_t_16) {
-      } else {
-        __pyx_t_13 = __pyx_t_16;
-        goto __pyx_L11_bool_binop_done;
-      }
-      __pyx_L28_next_or:;
-
-      /* "RMS/Routines/MorphCy.pyx":141
- *                (not p2 and not p3 and not p4 and p5 and not p6 and not p7 and not p8 and p9) or
- *                (not p2 and not p3 and p4 and not p5 and not p6 and not p7 and p8 and not p9) or
- *                (not p2 and p3 and not p4 and not p5 and not p6 and p7 and not p8 and not p9)):             # <<<<<<<<<<<<<<
- *                 mask[y, x] = 1;
- * 
- */
-      __pyx_t_16 = ((!(__pyx_v_p2 != 0)) != 0);
-      if (__pyx_t_16) {
-      } else {
-        __pyx_t_13 = __pyx_t_16;
-        goto __pyx_L11_bool_binop_done;
-      }
-      __pyx_t_16 = (__pyx_v_p3 != 0);
-      if (__pyx_t_16) {
-      } else {
-        __pyx_t_13 = __pyx_t_16;
-        goto __pyx_L11_bool_binop_done;
-      }
-      __pyx_t_16 = ((!(__pyx_v_p4 != 0)) != 0);
-      if (__pyx_t_16) {
-      } else {
-        __pyx_t_13 = __pyx_t_16;
-        goto __pyx_L11_bool_binop_done;
-      }
-      __pyx_t_16 = ((!(__pyx_v_p5 != 0)) != 0);
-      if (__pyx_t_16) {
-      } else {
-        __pyx_t_13 = __pyx_t_16;
-        goto __pyx_L11_bool_binop_done;
-      }
-      __pyx_t_16 = ((!(__pyx_v_p6 != 0)) != 0);
-      if (__pyx_t_16) {
-      } else {
-        __pyx_t_13 = __pyx_t_16;
-        goto __pyx_L11_bool_binop_done;
-      }
-      __pyx_t_16 = (__pyx_v_p7 != 0);
-      if (__pyx_t_16) {
-      } else {
-        __pyx_t_13 = __pyx_t_16;
-        goto __pyx_L11_bool_binop_done;
-      }
-      __pyx_t_16 = ((!(__pyx_v_p8 != 0)) != 0);
-      if (__pyx_t_16) {
-      } else {
-        __pyx_t_13 = __pyx_t_16;
-        goto __pyx_L11_bool_binop_done;
-      }
-      __pyx_t_16 = ((!(__pyx_v_p9 != 0)) != 0);
-      __pyx_t_13 = __pyx_t_16;
-      __pyx_L11_bool_binop_done:;
-
-      /* "RMS/Routines/MorphCy.pyx":138
- *             p9 = img[y-1, x-1]
- * 
- *             if((p2 and not p3 and not p4 and not p5 and p6 and not p7 and not p8 and not p9) or             # <<<<<<<<<<<<<<
- *                (not p2 and not p3 and not p4 and p5 and not p6 and not p7 and not p8 and p9) or
- *                (not p2 and not p3 and p4 and not p5 and not p6 and not p7 and p8 and not p9) or
- */
-      if (__pyx_t_13) {
-
-        /* "RMS/Routines/MorphCy.pyx":142
- *                (not p2 and not p3 and p4 and not p5 and not p6 and not p7 and p8 and not p9) or
- *                (not p2 and p3 and not p4 and not p5 and not p6 and p7 and not p8 and not p9)):
- *                 mask[y, x] = 1;             # <<<<<<<<<<<<<<
- * 
- * 
- */
-        __pyx_t_35 = __pyx_v_y;
-        __pyx_t_36 = __pyx_v_x;
-        *__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_mask.rcbuffer->pybuffer.buf, __pyx_t_35, __pyx_pybuffernd_mask.diminfo[0].strides, __pyx_t_36, __pyx_pybuffernd_mask.diminfo[1].strides) = 1;
-
-        /* "RMS/Routines/MorphCy.pyx":138
- *             p9 = img[y-1, x-1]
- * 
- *             if((p2 and not p3 and not p4 and not p5 and p6 and not p7 and not p8 and not p9) or             # <<<<<<<<<<<<<<
- *                (not p2 and not p3 and not p4 and p5 and not p6 and not p7 and not p8 and p9) or
- *                (not p2 and not p3 and p4 and not p5 and not p6 and not p7 and p8 and not p9) or
- */
-      }
-      __pyx_L5_continue:;
-    }
-  }
-
-  /* "RMS/Routines/MorphCy.pyx":146
- * 
- *     # Perform a bitwise OR on the image and the mask (i.e. "stack" the images)
- *     np.bitwise_or(img, mask, img)             # <<<<<<<<<<<<<<
- * 
- *     return img
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 146, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_bitwise_or); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 146, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = NULL;
-  __pyx_t_9 = 0;
-  if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_2))) {
-    __pyx_t_1 = PyMethod_GET_SELF(__pyx_t_2);
-    if (likely(__pyx_t_1)) {
-      PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_2);
-      __Pyx_INCREF(__pyx_t_1);
-      __Pyx_INCREF(function);
-      __Pyx_DECREF_SET(__pyx_t_2, function);
-      __pyx_t_9 = 1;
-    }
-  }
-  #if CYTHON_FAST_PYCALL
-  if (PyFunction_Check(__pyx_t_2)) {
-    PyObject *__pyx_temp[4] = {__pyx_t_1, ((PyObject *)__pyx_v_img), ((PyObject *)__pyx_v_mask), ((PyObject *)__pyx_v_img)};
-    __pyx_t_5 = __Pyx_PyFunction_FastCall(__pyx_t_2, __pyx_temp+1-__pyx_t_9, 3+__pyx_t_9); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 146, __pyx_L1_error)
-    __Pyx_XDECREF(__pyx_t_1); __pyx_t_1 = 0;
-    __Pyx_GOTREF(__pyx_t_5);
-  } else
-  #endif
-  #if CYTHON_FAST_PYCCALL
-  if (__Pyx_PyFastCFunction_Check(__pyx_t_2)) {
-    PyObject *__pyx_temp[4] = {__pyx_t_1, ((PyObject *)__pyx_v_img), ((PyObject *)__pyx_v_mask), ((PyObject *)__pyx_v_img)};
-    __pyx_t_5 = __Pyx_PyCFunction_FastCall(__pyx_t_2, __pyx_temp+1-__pyx_t_9, 3+__pyx_t_9); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 146, __pyx_L1_error)
-    __Pyx_XDECREF(__pyx_t_1); __pyx_t_1 = 0;
-    __Pyx_GOTREF(__pyx_t_5);
-  } else
-  #endif
-  {
-    __pyx_t_4 = PyTuple_New(3+__pyx_t_9); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 146, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_4);
-    if (__pyx_t_1) {
-      __Pyx_GIVEREF(__pyx_t_1); PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_1); __pyx_t_1 = NULL;
-    }
-    __Pyx_INCREF(((PyObject *)__pyx_v_img));
-    __Pyx_GIVEREF(((PyObject *)__pyx_v_img));
-    PyTuple_SET_ITEM(__pyx_t_4, 0+__pyx_t_9, ((PyObject *)__pyx_v_img));
-    __Pyx_INCREF(((PyObject *)__pyx_v_mask));
-    __Pyx_GIVEREF(((PyObject *)__pyx_v_mask));
-    PyTuple_SET_ITEM(__pyx_t_4, 1+__pyx_t_9, ((PyObject *)__pyx_v_mask));
-    __Pyx_INCREF(((PyObject *)__pyx_v_img));
-    __Pyx_GIVEREF(((PyObject *)__pyx_v_img));
-    PyTuple_SET_ITEM(__pyx_t_4, 2+__pyx_t_9, ((PyObject *)__pyx_v_img));
-    __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_4, NULL); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 146, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_5);
-    __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  }
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-
-  /* "RMS/Routines/MorphCy.pyx":148
- *     np.bitwise_or(img, mask, img)
- * 
- *     return img             # <<<<<<<<<<<<<<
- * 
- * 
- */
-  __Pyx_XDECREF(__pyx_r);
-  __Pyx_INCREF(((PyObject *)__pyx_v_img));
-  __pyx_r = ((PyObject *)__pyx_v_img);
-  goto __pyx_L0;
-
-  /* "RMS/Routines/MorphCy.pyx":100
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def bridge(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Connect pixels on opposite sides, if other pixels are 0, as in:
- *      0  0  1      0  0  1
- */
-
-  /* function exit code */
-  __pyx_L1_error:;
-  __Pyx_XDECREF(__pyx_t_1);
-  __Pyx_XDECREF(__pyx_t_2);
-  __Pyx_XDECREF(__pyx_t_3);
-  __Pyx_XDECREF(__pyx_t_4);
-  __Pyx_XDECREF(__pyx_t_5);
-  { PyObject *__pyx_type, *__pyx_value, *__pyx_tb;
-    __Pyx_PyThreadState_declare
-    __Pyx_PyThreadState_assign
-    __Pyx_ErrFetch(&__pyx_type, &__pyx_value, &__pyx_tb);
-    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_mask.rcbuffer->pybuffer);
-  __Pyx_ErrRestore(__pyx_type, __pyx_value, __pyx_tb);}
-  __Pyx_AddTraceback("RMS.Routines.MorphCy.bridge", __pyx_clineno, __pyx_lineno, __pyx_filename);
-  __pyx_r = NULL;
-  goto __pyx_L2;
-  __pyx_L0:;
-  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_mask.rcbuffer->pybuffer);
-  __pyx_L2:;
-  __Pyx_XDECREF((PyObject *)__pyx_v_mask);
-  __Pyx_XGIVEREF(__pyx_r);
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-/* "RMS/Routines/MorphCy.pyx":154
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def close_cy(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Morphological closing (dilation followed by erosion) with a 3x3 kernel.
- * 
- */
-
-/* Python wrapper */
-static PyObject *__pyx_pw_3RMS_8Routines_7MorphCy_7close_cy(PyObject *__pyx_self, PyObject *__pyx_v_img); /*proto*/
-static char __pyx_doc_3RMS_8Routines_7MorphCy_6close_cy[] = " Morphological closing (dilation followed by erosion) with a 3x3 kernel.\n\n        NOTE: Slower than the OpenCV implementation! See the other closing function for a faster \n        implementation.\n    \n    @param img: input image\n    \n    @return cleaned image\n    ";
-static PyMethodDef __pyx_mdef_3RMS_8Routines_7MorphCy_7close_cy = {"close_cy", (PyCFunction)__pyx_pw_3RMS_8Routines_7MorphCy_7close_cy, METH_O, __pyx_doc_3RMS_8Routines_7MorphCy_6close_cy};
-static PyObject *__pyx_pw_3RMS_8Routines_7MorphCy_7close_cy(PyObject *__pyx_self, PyObject *__pyx_v_img) {
-  PyObject *__pyx_r = 0;
-  __Pyx_RefNannyDeclarations
-  __Pyx_RefNannySetupContext("close_cy (wrapper)", 0);
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_img), __pyx_ptype_5numpy_ndarray, 1, "img", 0))) __PYX_ERR(0, 154, __pyx_L1_error)
-  __pyx_r = __pyx_pf_3RMS_8Routines_7MorphCy_6close_cy(__pyx_self, ((PyArrayObject *)__pyx_v_img));
-
-  /* function exit code */
-  goto __pyx_L0;
-  __pyx_L1_error:;
-  __pyx_r = NULL;
-  __pyx_L0:;
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-static PyObject *__pyx_pf_3RMS_8Routines_7MorphCy_6close_cy(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_img) {
-  int __pyx_v_y;
-  int __pyx_v_x;
-  int __pyx_v_p2;
-  int __pyx_v_p3;
-  int __pyx_v_p4;
-  int __pyx_v_p5;
-  int __pyx_v_p6;
-  int __pyx_v_p7;
-  int __pyx_v_p8;
-  int __pyx_v_p9;
-  int __pyx_v_y_size;
-  int __pyx_v_x_size;
-  PyArrayObject *__pyx_v_mask = 0;
-  __Pyx_LocalBuf_ND __pyx_pybuffernd_img;
-  __Pyx_Buffer __pyx_pybuffer_img;
-  __Pyx_LocalBuf_ND __pyx_pybuffernd_mask;
-  __Pyx_Buffer __pyx_pybuffer_mask;
-  PyObject *__pyx_r = NULL;
-  __Pyx_RefNannyDeclarations
-  PyObject *__pyx_t_1 = NULL;
-  PyObject *__pyx_t_2 = NULL;
-  PyObject *__pyx_t_3 = NULL;
-  PyObject *__pyx_t_4 = NULL;
-  PyObject *__pyx_t_5 = NULL;
-  PyArrayObject *__pyx_t_6 = NULL;
-  long __pyx_t_7;
-  long __pyx_t_8;
-  int __pyx_t_9;
-  long __pyx_t_10;
-  long __pyx_t_11;
-  int __pyx_t_12;
-  Py_ssize_t __pyx_t_13;
-  Py_ssize_t __pyx_t_14;
-  int __pyx_t_15;
-  Py_ssize_t __pyx_t_16;
-  Py_ssize_t __pyx_t_17;
-  Py_ssize_t __pyx_t_18;
-  Py_ssize_t __pyx_t_19;
-  Py_ssize_t __pyx_t_20;
-  Py_ssize_t __pyx_t_21;
-  Py_ssize_t __pyx_t_22;
-  Py_ssize_t __pyx_t_23;
-  Py_ssize_t __pyx_t_24;
-  Py_ssize_t __pyx_t_25;
-  Py_ssize_t __pyx_t_26;
-  Py_ssize_t __pyx_t_27;
-  Py_ssize_t __pyx_t_28;
-  Py_ssize_t __pyx_t_29;
-  Py_ssize_t __pyx_t_30;
-  Py_ssize_t __pyx_t_31;
-  int __pyx_t_32;
-  Py_ssize_t __pyx_t_33;
-  Py_ssize_t __pyx_t_34;
-  Py_ssize_t __pyx_t_35;
-  Py_ssize_t __pyx_t_36;
-  Py_ssize_t __pyx_t_37;
-  Py_ssize_t __pyx_t_38;
-  Py_ssize_t __pyx_t_39;
-  Py_ssize_t __pyx_t_40;
-  Py_ssize_t __pyx_t_41;
-  Py_ssize_t __pyx_t_42;
-  Py_ssize_t __pyx_t_43;
-  Py_ssize_t __pyx_t_44;
-  Py_ssize_t __pyx_t_45;
-  Py_ssize_t __pyx_t_46;
-  Py_ssize_t __pyx_t_47;
-  Py_ssize_t __pyx_t_48;
-  Py_ssize_t __pyx_t_49;
-  Py_ssize_t __pyx_t_50;
-  Py_ssize_t __pyx_t_51;
-  Py_ssize_t __pyx_t_52;
-  Py_ssize_t __pyx_t_53;
-  Py_ssize_t __pyx_t_54;
-  __Pyx_RefNannySetupContext("close_cy", 0);
-  __pyx_pybuffer_mask.pybuffer.buf = NULL;
-  __pyx_pybuffer_mask.refcount = 0;
-  __pyx_pybuffernd_mask.data = NULL;
-  __pyx_pybuffernd_mask.rcbuffer = &__pyx_pybuffer_mask;
-  __pyx_pybuffer_img.pybuffer.buf = NULL;
-  __pyx_pybuffer_img.refcount = 0;
-  __pyx_pybuffernd_img.data = NULL;
-  __pyx_pybuffernd_img.rcbuffer = &__pyx_pybuffer_img;
-  {
-    __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_v_img, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) __PYX_ERR(0, 154, __pyx_L1_error)
-  }
-  __pyx_pybuffernd_img.diminfo[0].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_img.diminfo[0].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_img.diminfo[1].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_img.diminfo[1].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[1];
-
-  /* "RMS/Routines/MorphCy.pyx":168
- *     cdef int p2, p3, p4, p5, p6, p7, p8, p9
- * 
- *     cdef int y_size = img.shape[0]             # <<<<<<<<<<<<<<
- *     cdef int x_size = img.shape[1]
- * 
- */
-  __pyx_v_y_size = (__pyx_v_img->dimensions[0]);
-
-  /* "RMS/Routines/MorphCy.pyx":169
- * 
- *     cdef int y_size = img.shape[0]
- *     cdef int x_size = img.shape[1]             # <<<<<<<<<<<<<<
- * 
- *     # Init mask array
- */
-  __pyx_v_x_size = (__pyx_v_img->dimensions[1]);
-
-  /* "RMS/Routines/MorphCy.pyx":172
- * 
- *     # Init mask array
- *     cdef np.ndarray[INT_TYPE_t, ndim=2] mask = np.zeros(shape=(y_size, x_size), dtype=INT_TYPE)             # <<<<<<<<<<<<<<
- * 
- *     # Apply morphological dilation
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 172, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_zeros); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 172, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyDict_NewPresized(2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 172, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_3 = __Pyx_PyInt_From_int(__pyx_v_y_size); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 172, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_4 = __Pyx_PyInt_From_int(__pyx_v_x_size); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 172, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_5 = PyTuple_New(2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 172, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_GIVEREF(__pyx_t_3);
-  PyTuple_SET_ITEM(__pyx_t_5, 0, __pyx_t_3);
-  __Pyx_GIVEREF(__pyx_t_4);
-  PyTuple_SET_ITEM(__pyx_t_5, 1, __pyx_t_4);
-  __pyx_t_3 = 0;
-  __pyx_t_4 = 0;
-  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_shape, __pyx_t_5) < 0) __PYX_ERR(0, 172, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_INT_TYPE); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 172, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 172, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_empty_tuple, __pyx_t_1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 172, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  if (!(likely(((__pyx_t_5) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_5, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 172, __pyx_L1_error)
-  __pyx_t_6 = ((PyArrayObject *)__pyx_t_5);
-  {
-    __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_mask.rcbuffer->pybuffer, (PyObject*)__pyx_t_6, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES| PyBUF_WRITABLE, 2, 0, __pyx_stack) == -1)) {
-      __pyx_v_mask = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_mask.rcbuffer->pybuffer.buf = NULL;
-      __PYX_ERR(0, 172, __pyx_L1_error)
-    } else {__pyx_pybuffernd_mask.diminfo[0].strides = __pyx_pybuffernd_mask.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_mask.diminfo[0].shape = __pyx_pybuffernd_mask.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_mask.diminfo[1].strides = __pyx_pybuffernd_mask.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_mask.diminfo[1].shape = __pyx_pybuffernd_mask.rcbuffer->pybuffer.shape[1];
-    }
-  }
-  __pyx_t_6 = 0;
-  __pyx_v_mask = ((PyArrayObject *)__pyx_t_5);
-  __pyx_t_5 = 0;
-
-  /* "RMS/Routines/MorphCy.pyx":175
- * 
- *     # Apply morphological dilation
- *     for y in range(1, img.shape[0]-1):             # <<<<<<<<<<<<<<
- *         for x in range(1, img.shape[1]-1):
- * 
- */
-  __pyx_t_7 = ((__pyx_v_img->dimensions[0]) - 1);
-  __pyx_t_8 = __pyx_t_7;
-  for (__pyx_t_9 = 1; __pyx_t_9 < __pyx_t_8; __pyx_t_9+=1) {
-    __pyx_v_y = __pyx_t_9;
-
-    /* "RMS/Routines/MorphCy.pyx":176
- *     # Apply morphological dilation
- *     for y in range(1, img.shape[0]-1):
- *         for x in range(1, img.shape[1]-1):             # <<<<<<<<<<<<<<
- * 
- *             # Continue if the pixel is bright
- */
-    __pyx_t_10 = ((__pyx_v_img->dimensions[1]) - 1);
-    __pyx_t_11 = __pyx_t_10;
-    for (__pyx_t_12 = 1; __pyx_t_12 < __pyx_t_11; __pyx_t_12+=1) {
-      __pyx_v_x = __pyx_t_12;
-
-      /* "RMS/Routines/MorphCy.pyx":179
- * 
- *             # Continue if the pixel is bright
- *             if img[y, x]:             # <<<<<<<<<<<<<<
- *                 continue
- * 
- */
-      __pyx_t_13 = __pyx_v_y;
-      __pyx_t_14 = __pyx_v_x;
-      __pyx_t_15 = ((*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_13, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_14, __pyx_pybuffernd_img.diminfo[1].strides)) != 0);
-      if (__pyx_t_15) {
-
-        /* "RMS/Routines/MorphCy.pyx":180
- *             # Continue if the pixel is bright
- *             if img[y, x]:
- *                 continue             # <<<<<<<<<<<<<<
- * 
- *             # Get neighbouring pixels
- */
-        goto __pyx_L5_continue;
-
-        /* "RMS/Routines/MorphCy.pyx":179
- * 
- *             # Continue if the pixel is bright
- *             if img[y, x]:             # <<<<<<<<<<<<<<
- *                 continue
- * 
- */
-      }
-
-      /* "RMS/Routines/MorphCy.pyx":183
- * 
- *             # Get neighbouring pixels
- *             p2 = img[y-1, x]             # <<<<<<<<<<<<<<
- *             p3 = img[y-1, x+1]
- *             p4 = img[y,   x+1]
- */
-      __pyx_t_16 = (__pyx_v_y - 1);
-      __pyx_t_17 = __pyx_v_x;
-      __pyx_v_p2 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_16, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_17, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":184
- *             # Get neighbouring pixels
- *             p2 = img[y-1, x]
- *             p3 = img[y-1, x+1]             # <<<<<<<<<<<<<<
- *             p4 = img[y,   x+1]
- *             p5 = img[y+1, x+1]
- */
-      __pyx_t_18 = (__pyx_v_y - 1);
-      __pyx_t_19 = (__pyx_v_x + 1);
-      __pyx_v_p3 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_18, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_19, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":185
- *             p2 = img[y-1, x]
- *             p3 = img[y-1, x+1]
- *             p4 = img[y,   x+1]             # <<<<<<<<<<<<<<
- *             p5 = img[y+1, x+1]
- *             p6 = img[y+1, x]
- */
-      __pyx_t_20 = __pyx_v_y;
-      __pyx_t_21 = (__pyx_v_x + 1);
-      __pyx_v_p4 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_20, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_21, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":186
- *             p3 = img[y-1, x+1]
- *             p4 = img[y,   x+1]
- *             p5 = img[y+1, x+1]             # <<<<<<<<<<<<<<
- *             p6 = img[y+1, x]
- *             p7 = img[y+1, x-1]
- */
-      __pyx_t_22 = (__pyx_v_y + 1);
-      __pyx_t_23 = (__pyx_v_x + 1);
-      __pyx_v_p5 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_22, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_23, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":187
- *             p4 = img[y,   x+1]
- *             p5 = img[y+1, x+1]
- *             p6 = img[y+1, x]             # <<<<<<<<<<<<<<
- *             p7 = img[y+1, x-1]
- *             p8 = img[y,   x-1]
- */
-      __pyx_t_24 = (__pyx_v_y + 1);
-      __pyx_t_25 = __pyx_v_x;
-      __pyx_v_p6 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_24, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_25, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":188
- *             p5 = img[y+1, x+1]
- *             p6 = img[y+1, x]
- *             p7 = img[y+1, x-1]             # <<<<<<<<<<<<<<
- *             p8 = img[y,   x-1]
- *             p9 = img[y-1, x-1]
- */
-      __pyx_t_26 = (__pyx_v_y + 1);
-      __pyx_t_27 = (__pyx_v_x - 1);
-      __pyx_v_p7 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_26, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_27, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":189
- *             p6 = img[y+1, x]
- *             p7 = img[y+1, x-1]
- *             p8 = img[y,   x-1]             # <<<<<<<<<<<<<<
- *             p9 = img[y-1, x-1]
- * 
- */
-      __pyx_t_28 = __pyx_v_y;
-      __pyx_t_29 = (__pyx_v_x - 1);
-      __pyx_v_p8 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_28, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_29, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":190
- *             p7 = img[y+1, x-1]
- *             p8 = img[y,   x-1]
- *             p9 = img[y-1, x-1]             # <<<<<<<<<<<<<<
- * 
- *             # If any of the neighbours are bright, also make the current px bright
- */
-      __pyx_t_30 = (__pyx_v_y - 1);
-      __pyx_t_31 = (__pyx_v_x - 1);
-      __pyx_v_p9 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_30, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_31, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":193
- * 
- *             # If any of the neighbours are bright, also make the current px bright
- *             if (p2 or p3 or p4 or p5 or p6 or p7 or p8 or p9):             # <<<<<<<<<<<<<<
- *                 mask[y, x] = 1
- * 
- */
-      __pyx_t_32 = (__pyx_v_p2 != 0);
-      if (!__pyx_t_32) {
-      } else {
-        __pyx_t_15 = __pyx_t_32;
-        goto __pyx_L9_bool_binop_done;
-      }
-      __pyx_t_32 = (__pyx_v_p3 != 0);
-      if (!__pyx_t_32) {
-      } else {
-        __pyx_t_15 = __pyx_t_32;
-        goto __pyx_L9_bool_binop_done;
-      }
-      __pyx_t_32 = (__pyx_v_p4 != 0);
-      if (!__pyx_t_32) {
-      } else {
-        __pyx_t_15 = __pyx_t_32;
-        goto __pyx_L9_bool_binop_done;
-      }
-      __pyx_t_32 = (__pyx_v_p5 != 0);
-      if (!__pyx_t_32) {
-      } else {
-        __pyx_t_15 = __pyx_t_32;
-        goto __pyx_L9_bool_binop_done;
-      }
-      __pyx_t_32 = (__pyx_v_p6 != 0);
-      if (!__pyx_t_32) {
-      } else {
-        __pyx_t_15 = __pyx_t_32;
-        goto __pyx_L9_bool_binop_done;
-      }
-      __pyx_t_32 = (__pyx_v_p7 != 0);
-      if (!__pyx_t_32) {
-      } else {
-        __pyx_t_15 = __pyx_t_32;
-        goto __pyx_L9_bool_binop_done;
-      }
-      __pyx_t_32 = (__pyx_v_p8 != 0);
-      if (!__pyx_t_32) {
-      } else {
-        __pyx_t_15 = __pyx_t_32;
-        goto __pyx_L9_bool_binop_done;
-      }
-      __pyx_t_32 = (__pyx_v_p9 != 0);
-      __pyx_t_15 = __pyx_t_32;
-      __pyx_L9_bool_binop_done:;
-      if (__pyx_t_15) {
-
-        /* "RMS/Routines/MorphCy.pyx":194
- *             # If any of the neighbours are bright, also make the current px bright
- *             if (p2 or p3 or p4 or p5 or p6 or p7 or p8 or p9):
- *                 mask[y, x] = 1             # <<<<<<<<<<<<<<
- * 
- *     # Apply the mask
- */
-        __pyx_t_33 = __pyx_v_y;
-        __pyx_t_34 = __pyx_v_x;
-        *__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_mask.rcbuffer->pybuffer.buf, __pyx_t_33, __pyx_pybuffernd_mask.diminfo[0].strides, __pyx_t_34, __pyx_pybuffernd_mask.diminfo[1].strides) = 1;
-
-        /* "RMS/Routines/MorphCy.pyx":193
- * 
- *             # If any of the neighbours are bright, also make the current px bright
- *             if (p2 or p3 or p4 or p5 or p6 or p7 or p8 or p9):             # <<<<<<<<<<<<<<
- *                 mask[y, x] = 1
- * 
- */
-      }
-      __pyx_L5_continue:;
-    }
-  }
-
-  /* "RMS/Routines/MorphCy.pyx":197
- * 
- *     # Apply the mask
- *     np.bitwise_or(img, mask, img)             # <<<<<<<<<<<<<<
- * 
- *     # Set all values in mask to 1
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 197, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_bitwise_or); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 197, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = NULL;
-  __pyx_t_9 = 0;
-  if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_2))) {
-    __pyx_t_1 = PyMethod_GET_SELF(__pyx_t_2);
-    if (likely(__pyx_t_1)) {
-      PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_2);
-      __Pyx_INCREF(__pyx_t_1);
-      __Pyx_INCREF(function);
-      __Pyx_DECREF_SET(__pyx_t_2, function);
-      __pyx_t_9 = 1;
-    }
-  }
-  #if CYTHON_FAST_PYCALL
-  if (PyFunction_Check(__pyx_t_2)) {
-    PyObject *__pyx_temp[4] = {__pyx_t_1, ((PyObject *)__pyx_v_img), ((PyObject *)__pyx_v_mask), ((PyObject *)__pyx_v_img)};
-    __pyx_t_5 = __Pyx_PyFunction_FastCall(__pyx_t_2, __pyx_temp+1-__pyx_t_9, 3+__pyx_t_9); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 197, __pyx_L1_error)
-    __Pyx_XDECREF(__pyx_t_1); __pyx_t_1 = 0;
-    __Pyx_GOTREF(__pyx_t_5);
-  } else
-  #endif
-  #if CYTHON_FAST_PYCCALL
-  if (__Pyx_PyFastCFunction_Check(__pyx_t_2)) {
-    PyObject *__pyx_temp[4] = {__pyx_t_1, ((PyObject *)__pyx_v_img), ((PyObject *)__pyx_v_mask), ((PyObject *)__pyx_v_img)};
-    __pyx_t_5 = __Pyx_PyCFunction_FastCall(__pyx_t_2, __pyx_temp+1-__pyx_t_9, 3+__pyx_t_9); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 197, __pyx_L1_error)
-    __Pyx_XDECREF(__pyx_t_1); __pyx_t_1 = 0;
-    __Pyx_GOTREF(__pyx_t_5);
-  } else
-  #endif
-  {
-    __pyx_t_4 = PyTuple_New(3+__pyx_t_9); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 197, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_4);
-    if (__pyx_t_1) {
-      __Pyx_GIVEREF(__pyx_t_1); PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_1); __pyx_t_1 = NULL;
-    }
-    __Pyx_INCREF(((PyObject *)__pyx_v_img));
-    __Pyx_GIVEREF(((PyObject *)__pyx_v_img));
-    PyTuple_SET_ITEM(__pyx_t_4, 0+__pyx_t_9, ((PyObject *)__pyx_v_img));
-    __Pyx_INCREF(((PyObject *)__pyx_v_mask));
-    __Pyx_GIVEREF(((PyObject *)__pyx_v_mask));
-    PyTuple_SET_ITEM(__pyx_t_4, 1+__pyx_t_9, ((PyObject *)__pyx_v_mask));
-    __Pyx_INCREF(((PyObject *)__pyx_v_img));
-    __Pyx_GIVEREF(((PyObject *)__pyx_v_img));
-    PyTuple_SET_ITEM(__pyx_t_4, 2+__pyx_t_9, ((PyObject *)__pyx_v_img));
-    __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_4, NULL); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 197, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_5);
-    __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  }
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-
-  /* "RMS/Routines/MorphCy.pyx":200
- * 
- *     # Set all values in mask to 1
- *     mask.fill(1)             # <<<<<<<<<<<<<<
- * 
- *     # Apply morphological erosion
- */
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_mask), __pyx_n_s_fill); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 200, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_4 = NULL;
-  if (CYTHON_UNPACK_METHODS && likely(PyMethod_Check(__pyx_t_2))) {
-    __pyx_t_4 = PyMethod_GET_SELF(__pyx_t_2);
-    if (likely(__pyx_t_4)) {
-      PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_2);
-      __Pyx_INCREF(__pyx_t_4);
-      __Pyx_INCREF(function);
-      __Pyx_DECREF_SET(__pyx_t_2, function);
-    }
-  }
-  __pyx_t_5 = (__pyx_t_4) ? __Pyx_PyObject_Call2Args(__pyx_t_2, __pyx_t_4, __pyx_int_1) : __Pyx_PyObject_CallOneArg(__pyx_t_2, __pyx_int_1);
-  __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
-  if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 200, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-
-  /* "RMS/Routines/MorphCy.pyx":203
- * 
- *     # Apply morphological erosion
- *     for y in range(1, img.shape[0]-1):             # <<<<<<<<<<<<<<
- *         for x in range(1, img.shape[1]-1):
- * 
- */
-  __pyx_t_7 = ((__pyx_v_img->dimensions[0]) - 1);
-  __pyx_t_8 = __pyx_t_7;
-  for (__pyx_t_9 = 1; __pyx_t_9 < __pyx_t_8; __pyx_t_9+=1) {
-    __pyx_v_y = __pyx_t_9;
-
-    /* "RMS/Routines/MorphCy.pyx":204
- *     # Apply morphological erosion
- *     for y in range(1, img.shape[0]-1):
- *         for x in range(1, img.shape[1]-1):             # <<<<<<<<<<<<<<
- * 
- *             # Continue if the pixel is not bright
- */
-    __pyx_t_10 = ((__pyx_v_img->dimensions[1]) - 1);
-    __pyx_t_11 = __pyx_t_10;
-    for (__pyx_t_12 = 1; __pyx_t_12 < __pyx_t_11; __pyx_t_12+=1) {
-      __pyx_v_x = __pyx_t_12;
-
-      /* "RMS/Routines/MorphCy.pyx":207
- * 
- *             # Continue if the pixel is not bright
- *             if not img[y, x]:             # <<<<<<<<<<<<<<
- *                 continue
- * 
- */
-      __pyx_t_35 = __pyx_v_y;
-      __pyx_t_36 = __pyx_v_x;
-      __pyx_t_15 = ((!((*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_35, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_36, __pyx_pybuffernd_img.diminfo[1].strides)) != 0)) != 0);
-      if (__pyx_t_15) {
-
-        /* "RMS/Routines/MorphCy.pyx":208
- *             # Continue if the pixel is not bright
- *             if not img[y, x]:
- *                 continue             # <<<<<<<<<<<<<<
- * 
- *             # Get neighbouring pixels
- */
-        goto __pyx_L19_continue;
-
-        /* "RMS/Routines/MorphCy.pyx":207
- * 
- *             # Continue if the pixel is not bright
- *             if not img[y, x]:             # <<<<<<<<<<<<<<
- *                 continue
- * 
- */
-      }
-
-      /* "RMS/Routines/MorphCy.pyx":211
- * 
- *             # Get neighbouring pixels
- *             p2 = img[y-1, x]             # <<<<<<<<<<<<<<
- *             p3 = img[y-1, x+1]
- *             p4 = img[y,   x+1]
- */
-      __pyx_t_37 = (__pyx_v_y - 1);
-      __pyx_t_38 = __pyx_v_x;
-      __pyx_v_p2 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_37, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_38, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":212
- *             # Get neighbouring pixels
- *             p2 = img[y-1, x]
- *             p3 = img[y-1, x+1]             # <<<<<<<<<<<<<<
- *             p4 = img[y,   x+1]
- *             p5 = img[y+1, x+1]
- */
-      __pyx_t_39 = (__pyx_v_y - 1);
-      __pyx_t_40 = (__pyx_v_x + 1);
-      __pyx_v_p3 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_39, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_40, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":213
- *             p2 = img[y-1, x]
- *             p3 = img[y-1, x+1]
- *             p4 = img[y,   x+1]             # <<<<<<<<<<<<<<
- *             p5 = img[y+1, x+1]
- *             p6 = img[y+1, x]
- */
-      __pyx_t_41 = __pyx_v_y;
-      __pyx_t_42 = (__pyx_v_x + 1);
-      __pyx_v_p4 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_41, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_42, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":214
- *             p3 = img[y-1, x+1]
- *             p4 = img[y,   x+1]
- *             p5 = img[y+1, x+1]             # <<<<<<<<<<<<<<
- *             p6 = img[y+1, x]
- *             p7 = img[y+1, x-1]
- */
-      __pyx_t_43 = (__pyx_v_y + 1);
-      __pyx_t_44 = (__pyx_v_x + 1);
-      __pyx_v_p5 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_43, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_44, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":215
- *             p4 = img[y,   x+1]
- *             p5 = img[y+1, x+1]
- *             p6 = img[y+1, x]             # <<<<<<<<<<<<<<
- *             p7 = img[y+1, x-1]
- *             p8 = img[y,   x-1]
- */
-      __pyx_t_45 = (__pyx_v_y + 1);
-      __pyx_t_46 = __pyx_v_x;
-      __pyx_v_p6 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_45, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_46, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":216
- *             p5 = img[y+1, x+1]
- *             p6 = img[y+1, x]
- *             p7 = img[y+1, x-1]             # <<<<<<<<<<<<<<
- *             p8 = img[y,   x-1]
- *             p9 = img[y-1, x-1]
- */
-      __pyx_t_47 = (__pyx_v_y + 1);
-      __pyx_t_48 = (__pyx_v_x - 1);
-      __pyx_v_p7 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_47, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_48, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":217
- *             p6 = img[y+1, x]
- *             p7 = img[y+1, x-1]
- *             p8 = img[y,   x-1]             # <<<<<<<<<<<<<<
- *             p9 = img[y-1, x-1]
- * 
- */
-      __pyx_t_49 = __pyx_v_y;
-      __pyx_t_50 = (__pyx_v_x - 1);
-      __pyx_v_p8 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_49, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_50, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":218
- *             p7 = img[y+1, x-1]
- *             p8 = img[y,   x-1]
- *             p9 = img[y-1, x-1]             # <<<<<<<<<<<<<<
- * 
- *             # If any of the neighbours are dark, also make the current px dark
- */
-      __pyx_t_51 = (__pyx_v_y - 1);
-      __pyx_t_52 = (__pyx_v_x - 1);
-      __pyx_v_p9 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_51, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_52, __pyx_pybuffernd_img.diminfo[1].strides));
-
-      /* "RMS/Routines/MorphCy.pyx":221
- * 
- *             # If any of the neighbours are dark, also make the current px dark
- *             if not (p2 and p3 and p4 and p5 and p6 and p7 and p8 and p9):             # <<<<<<<<<<<<<<
- *                 mask[y, x] = 0
- * 
- */
-      __pyx_t_32 = (__pyx_v_p2 != 0);
-      if (__pyx_t_32) {
-      } else {
-        __pyx_t_15 = __pyx_t_32;
-        goto __pyx_L23_bool_binop_done;
-      }
-      __pyx_t_32 = (__pyx_v_p3 != 0);
-      if (__pyx_t_32) {
-      } else {
-        __pyx_t_15 = __pyx_t_32;
-        goto __pyx_L23_bool_binop_done;
-      }
-      __pyx_t_32 = (__pyx_v_p4 != 0);
-      if (__pyx_t_32) {
-      } else {
-        __pyx_t_15 = __pyx_t_32;
-        goto __pyx_L23_bool_binop_done;
-      }
-      __pyx_t_32 = (__pyx_v_p5 != 0);
-      if (__pyx_t_32) {
-      } else {
-        __pyx_t_15 = __pyx_t_32;
-        goto __pyx_L23_bool_binop_done;
-      }
-      __pyx_t_32 = (__pyx_v_p6 != 0);
-      if (__pyx_t_32) {
-      } else {
-        __pyx_t_15 = __pyx_t_32;
-        goto __pyx_L23_bool_binop_done;
-      }
-      __pyx_t_32 = (__pyx_v_p7 != 0);
-      if (__pyx_t_32) {
-      } else {
-        __pyx_t_15 = __pyx_t_32;
-        goto __pyx_L23_bool_binop_done;
-      }
-      __pyx_t_32 = (__pyx_v_p8 != 0);
-      if (__pyx_t_32) {
-      } else {
-        __pyx_t_15 = __pyx_t_32;
-        goto __pyx_L23_bool_binop_done;
-      }
-      __pyx_t_32 = (__pyx_v_p9 != 0);
-      __pyx_t_15 = __pyx_t_32;
-      __pyx_L23_bool_binop_done:;
-      __pyx_t_32 = ((!__pyx_t_15) != 0);
-      if (__pyx_t_32) {
-
-        /* "RMS/Routines/MorphCy.pyx":222
- *             # If any of the neighbours are dark, also make the current px dark
- *             if not (p2 and p3 and p4 and p5 and p6 and p7 and p8 and p9):
- *                 mask[y, x] = 0             # <<<<<<<<<<<<<<
- * 
- *     # Apply the mask
- */
-        __pyx_t_53 = __pyx_v_y;
-        __pyx_t_54 = __pyx_v_x;
-        *__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_mask.rcbuffer->pybuffer.buf, __pyx_t_53, __pyx_pybuffernd_mask.diminfo[0].strides, __pyx_t_54, __pyx_pybuffernd_mask.diminfo[1].strides) = 0;
-
-        /* "RMS/Routines/MorphCy.pyx":221
- * 
- *             # If any of the neighbours are dark, also make the current px dark
- *             if not (p2 and p3 and p4 and p5 and p6 and p7 and p8 and p9):             # <<<<<<<<<<<<<<
- *                 mask[y, x] = 0
- * 
- */
-      }
-      __pyx_L19_continue:;
-    }
-  }
-
-  /* "RMS/Routines/MorphCy.pyx":225
- * 
- *     # Apply the mask
- *     np.bitwise_and(img, mask, img)             # <<<<<<<<<<<<<<
- * 
- *     return img
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 225, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_bitwise_and); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 225, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = NULL;
-  __pyx_t_9 = 0;
-  if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_4))) {
-    __pyx_t_2 = PyMethod_GET_SELF(__pyx_t_4);
-    if (likely(__pyx_t_2)) {
-      PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_4);
-      __Pyx_INCREF(__pyx_t_2);
-      __Pyx_INCREF(function);
-      __Pyx_DECREF_SET(__pyx_t_4, function);
-      __pyx_t_9 = 1;
-    }
-  }
-  #if CYTHON_FAST_PYCALL
-  if (PyFunction_Check(__pyx_t_4)) {
-    PyObject *__pyx_temp[4] = {__pyx_t_2, ((PyObject *)__pyx_v_img), ((PyObject *)__pyx_v_mask), ((PyObject *)__pyx_v_img)};
-    __pyx_t_5 = __Pyx_PyFunction_FastCall(__pyx_t_4, __pyx_temp+1-__pyx_t_9, 3+__pyx_t_9); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 225, __pyx_L1_error)
-    __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-    __Pyx_GOTREF(__pyx_t_5);
-  } else
-  #endif
-  #if CYTHON_FAST_PYCCALL
-  if (__Pyx_PyFastCFunction_Check(__pyx_t_4)) {
-    PyObject *__pyx_temp[4] = {__pyx_t_2, ((PyObject *)__pyx_v_img), ((PyObject *)__pyx_v_mask), ((PyObject *)__pyx_v_img)};
-    __pyx_t_5 = __Pyx_PyCFunction_FastCall(__pyx_t_4, __pyx_temp+1-__pyx_t_9, 3+__pyx_t_9); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 225, __pyx_L1_error)
-    __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-    __Pyx_GOTREF(__pyx_t_5);
-  } else
-  #endif
-  {
-    __pyx_t_1 = PyTuple_New(3+__pyx_t_9); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 225, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
-    if (__pyx_t_2) {
-      __Pyx_GIVEREF(__pyx_t_2); PyTuple_SET_ITEM(__pyx_t_1, 0, __pyx_t_2); __pyx_t_2 = NULL;
-    }
-    __Pyx_INCREF(((PyObject *)__pyx_v_img));
-    __Pyx_GIVEREF(((PyObject *)__pyx_v_img));
-    PyTuple_SET_ITEM(__pyx_t_1, 0+__pyx_t_9, ((PyObject *)__pyx_v_img));
-    __Pyx_INCREF(((PyObject *)__pyx_v_mask));
-    __Pyx_GIVEREF(((PyObject *)__pyx_v_mask));
-    PyTuple_SET_ITEM(__pyx_t_1, 1+__pyx_t_9, ((PyObject *)__pyx_v_mask));
-    __Pyx_INCREF(((PyObject *)__pyx_v_img));
-    __Pyx_GIVEREF(((PyObject *)__pyx_v_img));
-    PyTuple_SET_ITEM(__pyx_t_1, 2+__pyx_t_9, ((PyObject *)__pyx_v_img));
-    __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_1, NULL); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 225, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_5);
-    __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  }
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-
-  /* "RMS/Routines/MorphCy.pyx":227
- *     np.bitwise_and(img, mask, img)
- * 
- *     return img             # <<<<<<<<<<<<<<
- * 
- * 
- */
-  __Pyx_XDECREF(__pyx_r);
-  __Pyx_INCREF(((PyObject *)__pyx_v_img));
-  __pyx_r = ((PyObject *)__pyx_v_img);
-  goto __pyx_L0;
-
-  /* "RMS/Routines/MorphCy.pyx":154
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def close_cy(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Morphological closing (dilation followed by erosion) with a 3x3 kernel.
- * 
- */
-
-  /* function exit code */
-  __pyx_L1_error:;
-  __Pyx_XDECREF(__pyx_t_1);
-  __Pyx_XDECREF(__pyx_t_2);
-  __Pyx_XDECREF(__pyx_t_3);
-  __Pyx_XDECREF(__pyx_t_4);
-  __Pyx_XDECREF(__pyx_t_5);
-  { PyObject *__pyx_type, *__pyx_value, *__pyx_tb;
-    __Pyx_PyThreadState_declare
-    __Pyx_PyThreadState_assign
-    __Pyx_ErrFetch(&__pyx_type, &__pyx_value, &__pyx_tb);
-    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_mask.rcbuffer->pybuffer);
-  __Pyx_ErrRestore(__pyx_type, __pyx_value, __pyx_tb);}
-  __Pyx_AddTraceback("RMS.Routines.MorphCy.close_cy", __pyx_clineno, __pyx_lineno, __pyx_filename);
-  __pyx_r = NULL;
-  goto __pyx_L2;
-  __pyx_L0:;
-  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_mask.rcbuffer->pybuffer);
-  __pyx_L2:;
-  __Pyx_XDECREF((PyObject *)__pyx_v_mask);
-  __Pyx_XGIVEREF(__pyx_r);
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-/* "RMS/Routines/MorphCy.pyx":233
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def close(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Morphological closing (dilation followed by erosion) with OpenCV.
- * 
- */
-
-/* Python wrapper */
-static PyObject *__pyx_pw_3RMS_8Routines_7MorphCy_9close(PyObject *__pyx_self, PyObject *__pyx_v_img); /*proto*/
-static char __pyx_doc_3RMS_8Routines_7MorphCy_8close[] = " Morphological closing (dilation followed by erosion) with OpenCV.\n    \n    @param image: input image\n    \n    @return closed image\n    ";
-static PyMethodDef __pyx_mdef_3RMS_8Routines_7MorphCy_9close = {"close", (PyCFunction)__pyx_pw_3RMS_8Routines_7MorphCy_9close, METH_O, __pyx_doc_3RMS_8Routines_7MorphCy_8close};
-static PyObject *__pyx_pw_3RMS_8Routines_7MorphCy_9close(PyObject *__pyx_self, PyObject *__pyx_v_img) {
-  PyObject *__pyx_r = 0;
-  __Pyx_RefNannyDeclarations
-  __Pyx_RefNannySetupContext("close (wrapper)", 0);
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_img), __pyx_ptype_5numpy_ndarray, 1, "img", 0))) __PYX_ERR(0, 233, __pyx_L1_error)
-  __pyx_r = __pyx_pf_3RMS_8Routines_7MorphCy_8close(__pyx_self, ((PyArrayObject *)__pyx_v_img));
-
-  /* function exit code */
-  goto __pyx_L0;
-  __pyx_L1_error:;
-  __pyx_r = NULL;
-  __pyx_L0:;
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-static PyObject *__pyx_pf_3RMS_8Routines_7MorphCy_8close(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_img) {
-  PyObject *__pyx_v_kernel = NULL;
-  __Pyx_LocalBuf_ND __pyx_pybuffernd_img;
-  __Pyx_Buffer __pyx_pybuffer_img;
-  PyObject *__pyx_r = NULL;
-  __Pyx_RefNannyDeclarations
-  PyObject *__pyx_t_1 = NULL;
-  PyObject *__pyx_t_2 = NULL;
-  PyObject *__pyx_t_3 = NULL;
-  PyObject *__pyx_t_4 = NULL;
-  int __pyx_t_5;
   PyObject *__pyx_t_6 = NULL;
-  PyArrayObject *__pyx_t_7 = NULL;
-  PyObject *__pyx_t_8 = NULL;
-  PyObject *__pyx_t_9 = NULL;
-  PyObject *__pyx_t_10 = NULL;
-  __Pyx_RefNannySetupContext("close", 0);
-  __Pyx_INCREF((PyObject *)__pyx_v_img);
-  __pyx_pybuffer_img.pybuffer.buf = NULL;
-  __pyx_pybuffer_img.refcount = 0;
-  __pyx_pybuffernd_img.data = NULL;
-  __pyx_pybuffernd_img.rcbuffer = &__pyx_pybuffer_img;
-  {
-    __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_v_img, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) __PYX_ERR(0, 233, __pyx_L1_error)
-  }
-  __pyx_pybuffernd_img.diminfo[0].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_img.diminfo[0].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_img.diminfo[1].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_img.diminfo[1].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[1];
-
-  /* "RMS/Routines/MorphCy.pyx":241
- *     """
- * 
- *     kernel = np.ones((3, 3), np.uint8)             # <<<<<<<<<<<<<<
- * 
- *     img = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 241, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_ones); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 241, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 241, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_uint8); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 241, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = NULL;
-  __pyx_t_5 = 0;
-  if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_3))) {
-    __pyx_t_2 = PyMethod_GET_SELF(__pyx_t_3);
-    if (likely(__pyx_t_2)) {
-      PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_3);
-      __Pyx_INCREF(__pyx_t_2);
-      __Pyx_INCREF(function);
-      __Pyx_DECREF_SET(__pyx_t_3, function);
-      __pyx_t_5 = 1;
-    }
-  }
-  #if CYTHON_FAST_PYCALL
-  if (PyFunction_Check(__pyx_t_3)) {
-    PyObject *__pyx_temp[3] = {__pyx_t_2, __pyx_tuple_, __pyx_t_4};
-    __pyx_t_1 = __Pyx_PyFunction_FastCall(__pyx_t_3, __pyx_temp+1-__pyx_t_5, 2+__pyx_t_5); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 241, __pyx_L1_error)
-    __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-    __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  } else
-  #endif
-  #if CYTHON_FAST_PYCCALL
-  if (__Pyx_PyFastCFunction_Check(__pyx_t_3)) {
-    PyObject *__pyx_temp[3] = {__pyx_t_2, __pyx_tuple_, __pyx_t_4};
-    __pyx_t_1 = __Pyx_PyCFunction_FastCall(__pyx_t_3, __pyx_temp+1-__pyx_t_5, 2+__pyx_t_5); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 241, __pyx_L1_error)
-    __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-    __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  } else
-  #endif
-  {
-    __pyx_t_6 = PyTuple_New(2+__pyx_t_5); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 241, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_6);
-    if (__pyx_t_2) {
-      __Pyx_GIVEREF(__pyx_t_2); PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_2); __pyx_t_2 = NULL;
-    }
-    __Pyx_INCREF(__pyx_tuple_);
-    __Pyx_GIVEREF(__pyx_tuple_);
-    PyTuple_SET_ITEM(__pyx_t_6, 0+__pyx_t_5, __pyx_tuple_);
-    __Pyx_GIVEREF(__pyx_t_4);
-    PyTuple_SET_ITEM(__pyx_t_6, 1+__pyx_t_5, __pyx_t_4);
-    __pyx_t_4 = 0;
-    __pyx_t_1 = __Pyx_PyObject_Call(__pyx_t_3, __pyx_t_6, NULL); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 241, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  }
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_v_kernel = __pyx_t_1;
-  __pyx_t_1 = 0;
-
-  /* "RMS/Routines/MorphCy.pyx":243
- *     kernel = np.ones((3, 3), np.uint8)
- * 
- *     img = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)             # <<<<<<<<<<<<<<
- * 
- *     return img
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_cv2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 243, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_morphologyEx); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 243, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_cv2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 243, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_MORPH_CLOSE); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 243, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_t_3 = NULL;
-  __pyx_t_5 = 0;
-  if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_6))) {
-    __pyx_t_3 = PyMethod_GET_SELF(__pyx_t_6);
-    if (likely(__pyx_t_3)) {
-      PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_6);
-      __Pyx_INCREF(__pyx_t_3);
-      __Pyx_INCREF(function);
-      __Pyx_DECREF_SET(__pyx_t_6, function);
-      __pyx_t_5 = 1;
-    }
-  }
-  #if CYTHON_FAST_PYCALL
-  if (PyFunction_Check(__pyx_t_6)) {
-    PyObject *__pyx_temp[4] = {__pyx_t_3, ((PyObject *)__pyx_v_img), __pyx_t_4, __pyx_v_kernel};
-    __pyx_t_1 = __Pyx_PyFunction_FastCall(__pyx_t_6, __pyx_temp+1-__pyx_t_5, 3+__pyx_t_5); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 243, __pyx_L1_error)
-    __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
-    __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  } else
-  #endif
-  #if CYTHON_FAST_PYCCALL
-  if (__Pyx_PyFastCFunction_Check(__pyx_t_6)) {
-    PyObject *__pyx_temp[4] = {__pyx_t_3, ((PyObject *)__pyx_v_img), __pyx_t_4, __pyx_v_kernel};
-    __pyx_t_1 = __Pyx_PyCFunction_FastCall(__pyx_t_6, __pyx_temp+1-__pyx_t_5, 3+__pyx_t_5); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 243, __pyx_L1_error)
-    __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
-    __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  } else
-  #endif
-  {
-    __pyx_t_2 = PyTuple_New(3+__pyx_t_5); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 243, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_2);
-    if (__pyx_t_3) {
-      __Pyx_GIVEREF(__pyx_t_3); PyTuple_SET_ITEM(__pyx_t_2, 0, __pyx_t_3); __pyx_t_3 = NULL;
-    }
-    __Pyx_INCREF(((PyObject *)__pyx_v_img));
-    __Pyx_GIVEREF(((PyObject *)__pyx_v_img));
-    PyTuple_SET_ITEM(__pyx_t_2, 0+__pyx_t_5, ((PyObject *)__pyx_v_img));
-    __Pyx_GIVEREF(__pyx_t_4);
-    PyTuple_SET_ITEM(__pyx_t_2, 1+__pyx_t_5, __pyx_t_4);
-    __Pyx_INCREF(__pyx_v_kernel);
-    __Pyx_GIVEREF(__pyx_v_kernel);
-    PyTuple_SET_ITEM(__pyx_t_2, 2+__pyx_t_5, __pyx_v_kernel);
-    __pyx_t_4 = 0;
-    __pyx_t_1 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_t_2, NULL); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 243, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  }
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  if (!(likely(((__pyx_t_1) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_1, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 243, __pyx_L1_error)
-  __pyx_t_7 = ((PyArrayObject *)__pyx_t_1);
-  {
-    __Pyx_BufFmt_StackElem __pyx_stack[1];
-    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-    __pyx_t_5 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_t_7, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack);
-    if (unlikely(__pyx_t_5 < 0)) {
-      PyErr_Fetch(&__pyx_t_8, &__pyx_t_9, &__pyx_t_10);
-      if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_v_img, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
-        Py_XDECREF(__pyx_t_8); Py_XDECREF(__pyx_t_9); Py_XDECREF(__pyx_t_10);
-        __Pyx_RaiseBufferFallbackError();
-      } else {
-        PyErr_Restore(__pyx_t_8, __pyx_t_9, __pyx_t_10);
-      }
-      __pyx_t_8 = __pyx_t_9 = __pyx_t_10 = 0;
-    }
-    __pyx_pybuffernd_img.diminfo[0].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_img.diminfo[0].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_img.diminfo[1].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_img.diminfo[1].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[1];
-    if (unlikely(__pyx_t_5 < 0)) __PYX_ERR(0, 243, __pyx_L1_error)
-  }
-  __pyx_t_7 = 0;
-  __Pyx_DECREF_SET(__pyx_v_img, ((PyArrayObject *)__pyx_t_1));
-  __pyx_t_1 = 0;
-
-  /* "RMS/Routines/MorphCy.pyx":245
- *     img = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
- * 
- *     return img             # <<<<<<<<<<<<<<
- * 
- * 
- */
-  __Pyx_XDECREF(__pyx_r);
-  __Pyx_INCREF(((PyObject *)__pyx_v_img));
-  __pyx_r = ((PyObject *)__pyx_v_img);
-  goto __pyx_L0;
-
-  /* "RMS/Routines/MorphCy.pyx":233
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def close(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Morphological closing (dilation followed by erosion) with OpenCV.
- * 
- */
-
-  /* function exit code */
-  __pyx_L1_error:;
-  __Pyx_XDECREF(__pyx_t_1);
-  __Pyx_XDECREF(__pyx_t_2);
-  __Pyx_XDECREF(__pyx_t_3);
-  __Pyx_XDECREF(__pyx_t_4);
-  __Pyx_XDECREF(__pyx_t_6);
-  { PyObject *__pyx_type, *__pyx_value, *__pyx_tb;
-    __Pyx_PyThreadState_declare
-    __Pyx_PyThreadState_assign
-    __Pyx_ErrFetch(&__pyx_type, &__pyx_value, &__pyx_tb);
-    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-  __Pyx_ErrRestore(__pyx_type, __pyx_value, __pyx_tb);}
-  __Pyx_AddTraceback("RMS.Routines.MorphCy.close", __pyx_clineno, __pyx_lineno, __pyx_filename);
-  __pyx_r = NULL;
-  goto __pyx_L2;
-  __pyx_L0:;
-  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-  __pyx_L2:;
-  __Pyx_XDECREF(__pyx_v_kernel);
-  __Pyx_XDECREF((PyObject *)__pyx_v_img);
-  __Pyx_XGIVEREF(__pyx_r);
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-/* "RMS/Routines/MorphCy.pyx":250
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def dilate(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Morphological dilation with OpenCV.
- * 
- */
-
-/* Python wrapper */
-static PyObject *__pyx_pw_3RMS_8Routines_7MorphCy_11dilate(PyObject *__pyx_self, PyObject *__pyx_v_img); /*proto*/
-static char __pyx_doc_3RMS_8Routines_7MorphCy_10dilate[] = " Morphological dilation with OpenCV.\n    \n    @param image: input image\n    \n    @return dilated image\n    ";
-static PyMethodDef __pyx_mdef_3RMS_8Routines_7MorphCy_11dilate = {"dilate", (PyCFunction)__pyx_pw_3RMS_8Routines_7MorphCy_11dilate, METH_O, __pyx_doc_3RMS_8Routines_7MorphCy_10dilate};
-static PyObject *__pyx_pw_3RMS_8Routines_7MorphCy_11dilate(PyObject *__pyx_self, PyObject *__pyx_v_img) {
-  PyObject *__pyx_r = 0;
-  __Pyx_RefNannyDeclarations
-  __Pyx_RefNannySetupContext("dilate (wrapper)", 0);
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_img), __pyx_ptype_5numpy_ndarray, 1, "img", 0))) __PYX_ERR(0, 250, __pyx_L1_error)
-  __pyx_r = __pyx_pf_3RMS_8Routines_7MorphCy_10dilate(__pyx_self, ((PyArrayObject *)__pyx_v_img));
-
-  /* function exit code */
-  goto __pyx_L0;
-  __pyx_L1_error:;
-  __pyx_r = NULL;
-  __pyx_L0:;
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-static PyObject *__pyx_pf_3RMS_8Routines_7MorphCy_10dilate(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_img) {
-  PyObject *__pyx_v_kernel = NULL;
-  __Pyx_LocalBuf_ND __pyx_pybuffernd_img;
-  __Pyx_Buffer __pyx_pybuffer_img;
-  PyObject *__pyx_r = NULL;
-  __Pyx_RefNannyDeclarations
-  PyObject *__pyx_t_1 = NULL;
-  PyObject *__pyx_t_2 = NULL;
-  PyObject *__pyx_t_3 = NULL;
-  PyObject *__pyx_t_4 = NULL;
-  int __pyx_t_5;
-  PyObject *__pyx_t_6 = NULL;
-  PyArrayObject *__pyx_t_7 = NULL;
-  PyObject *__pyx_t_8 = NULL;
-  PyObject *__pyx_t_9 = NULL;
-  PyObject *__pyx_t_10 = NULL;
-  __Pyx_RefNannySetupContext("dilate", 0);
-  __Pyx_INCREF((PyObject *)__pyx_v_img);
-  __pyx_pybuffer_img.pybuffer.buf = NULL;
-  __pyx_pybuffer_img.refcount = 0;
-  __pyx_pybuffernd_img.data = NULL;
-  __pyx_pybuffernd_img.rcbuffer = &__pyx_pybuffer_img;
-  {
-    __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_v_img, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) __PYX_ERR(0, 250, __pyx_L1_error)
-  }
-  __pyx_pybuffernd_img.diminfo[0].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_img.diminfo[0].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_img.diminfo[1].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_img.diminfo[1].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[1];
-
-  /* "RMS/Routines/MorphCy.pyx":258
- *     """
- * 
- *     kernel = np.ones((3, 3), np.uint8)             # <<<<<<<<<<<<<<
- * 
- *     img = cv2.dilate(img, kernel)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 258, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_ones); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 258, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 258, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_uint8); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 258, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = NULL;
-  __pyx_t_5 = 0;
-  if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_3))) {
-    __pyx_t_2 = PyMethod_GET_SELF(__pyx_t_3);
-    if (likely(__pyx_t_2)) {
-      PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_3);
-      __Pyx_INCREF(__pyx_t_2);
-      __Pyx_INCREF(function);
-      __Pyx_DECREF_SET(__pyx_t_3, function);
-      __pyx_t_5 = 1;
-    }
-  }
-  #if CYTHON_FAST_PYCALL
-  if (PyFunction_Check(__pyx_t_3)) {
-    PyObject *__pyx_temp[3] = {__pyx_t_2, __pyx_tuple_, __pyx_t_4};
-    __pyx_t_1 = __Pyx_PyFunction_FastCall(__pyx_t_3, __pyx_temp+1-__pyx_t_5, 2+__pyx_t_5); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 258, __pyx_L1_error)
-    __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-    __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  } else
-  #endif
-  #if CYTHON_FAST_PYCCALL
-  if (__Pyx_PyFastCFunction_Check(__pyx_t_3)) {
-    PyObject *__pyx_temp[3] = {__pyx_t_2, __pyx_tuple_, __pyx_t_4};
-    __pyx_t_1 = __Pyx_PyCFunction_FastCall(__pyx_t_3, __pyx_temp+1-__pyx_t_5, 2+__pyx_t_5); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 258, __pyx_L1_error)
-    __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-    __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  } else
-  #endif
-  {
-    __pyx_t_6 = PyTuple_New(2+__pyx_t_5); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 258, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_6);
-    if (__pyx_t_2) {
-      __Pyx_GIVEREF(__pyx_t_2); PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_2); __pyx_t_2 = NULL;
-    }
-    __Pyx_INCREF(__pyx_tuple_);
-    __Pyx_GIVEREF(__pyx_tuple_);
-    PyTuple_SET_ITEM(__pyx_t_6, 0+__pyx_t_5, __pyx_tuple_);
-    __Pyx_GIVEREF(__pyx_t_4);
-    PyTuple_SET_ITEM(__pyx_t_6, 1+__pyx_t_5, __pyx_t_4);
-    __pyx_t_4 = 0;
-    __pyx_t_1 = __Pyx_PyObject_Call(__pyx_t_3, __pyx_t_6, NULL); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 258, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  }
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_v_kernel = __pyx_t_1;
-  __pyx_t_1 = 0;
-
-  /* "RMS/Routines/MorphCy.pyx":260
- *     kernel = np.ones((3, 3), np.uint8)
- * 
- *     img = cv2.dilate(img, kernel)             # <<<<<<<<<<<<<<
- * 
- *     return img
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_cv2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 260, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_dilate); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 260, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_t_3 = NULL;
-  __pyx_t_5 = 0;
-  if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_6))) {
-    __pyx_t_3 = PyMethod_GET_SELF(__pyx_t_6);
-    if (likely(__pyx_t_3)) {
-      PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_6);
-      __Pyx_INCREF(__pyx_t_3);
-      __Pyx_INCREF(function);
-      __Pyx_DECREF_SET(__pyx_t_6, function);
-      __pyx_t_5 = 1;
-    }
-  }
-  #if CYTHON_FAST_PYCALL
-  if (PyFunction_Check(__pyx_t_6)) {
-    PyObject *__pyx_temp[3] = {__pyx_t_3, ((PyObject *)__pyx_v_img), __pyx_v_kernel};
-    __pyx_t_1 = __Pyx_PyFunction_FastCall(__pyx_t_6, __pyx_temp+1-__pyx_t_5, 2+__pyx_t_5); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 260, __pyx_L1_error)
-    __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
-    __Pyx_GOTREF(__pyx_t_1);
-  } else
-  #endif
-  #if CYTHON_FAST_PYCCALL
-  if (__Pyx_PyFastCFunction_Check(__pyx_t_6)) {
-    PyObject *__pyx_temp[3] = {__pyx_t_3, ((PyObject *)__pyx_v_img), __pyx_v_kernel};
-    __pyx_t_1 = __Pyx_PyCFunction_FastCall(__pyx_t_6, __pyx_temp+1-__pyx_t_5, 2+__pyx_t_5); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 260, __pyx_L1_error)
-    __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
-    __Pyx_GOTREF(__pyx_t_1);
-  } else
-  #endif
-  {
-    __pyx_t_4 = PyTuple_New(2+__pyx_t_5); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 260, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_4);
-    if (__pyx_t_3) {
-      __Pyx_GIVEREF(__pyx_t_3); PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_3); __pyx_t_3 = NULL;
-    }
-    __Pyx_INCREF(((PyObject *)__pyx_v_img));
-    __Pyx_GIVEREF(((PyObject *)__pyx_v_img));
-    PyTuple_SET_ITEM(__pyx_t_4, 0+__pyx_t_5, ((PyObject *)__pyx_v_img));
-    __Pyx_INCREF(__pyx_v_kernel);
-    __Pyx_GIVEREF(__pyx_v_kernel);
-    PyTuple_SET_ITEM(__pyx_t_4, 1+__pyx_t_5, __pyx_v_kernel);
-    __pyx_t_1 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_t_4, NULL); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 260, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  }
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  if (!(likely(((__pyx_t_1) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_1, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 260, __pyx_L1_error)
-  __pyx_t_7 = ((PyArrayObject *)__pyx_t_1);
-  {
-    __Pyx_BufFmt_StackElem __pyx_stack[1];
-    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-    __pyx_t_5 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_t_7, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack);
-    if (unlikely(__pyx_t_5 < 0)) {
-      PyErr_Fetch(&__pyx_t_8, &__pyx_t_9, &__pyx_t_10);
-      if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_v_img, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
-        Py_XDECREF(__pyx_t_8); Py_XDECREF(__pyx_t_9); Py_XDECREF(__pyx_t_10);
-        __Pyx_RaiseBufferFallbackError();
-      } else {
-        PyErr_Restore(__pyx_t_8, __pyx_t_9, __pyx_t_10);
-      }
-      __pyx_t_8 = __pyx_t_9 = __pyx_t_10 = 0;
-    }
-    __pyx_pybuffernd_img.diminfo[0].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_img.diminfo[0].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_img.diminfo[1].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_img.diminfo[1].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[1];
-    if (unlikely(__pyx_t_5 < 0)) __PYX_ERR(0, 260, __pyx_L1_error)
-  }
-  __pyx_t_7 = 0;
-  __Pyx_DECREF_SET(__pyx_v_img, ((PyArrayObject *)__pyx_t_1));
-  __pyx_t_1 = 0;
-
-  /* "RMS/Routines/MorphCy.pyx":262
- *     img = cv2.dilate(img, kernel)
- * 
- *     return img             # <<<<<<<<<<<<<<
- * 
- * 
- */
-  __Pyx_XDECREF(__pyx_r);
-  __Pyx_INCREF(((PyObject *)__pyx_v_img));
-  __pyx_r = ((PyObject *)__pyx_v_img);
-  goto __pyx_L0;
-
-  /* "RMS/Routines/MorphCy.pyx":250
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def dilate(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Morphological dilation with OpenCV.
- * 
- */
-
-  /* function exit code */
-  __pyx_L1_error:;
-  __Pyx_XDECREF(__pyx_t_1);
-  __Pyx_XDECREF(__pyx_t_2);
-  __Pyx_XDECREF(__pyx_t_3);
-  __Pyx_XDECREF(__pyx_t_4);
-  __Pyx_XDECREF(__pyx_t_6);
-  { PyObject *__pyx_type, *__pyx_value, *__pyx_tb;
-    __Pyx_PyThreadState_declare
-    __Pyx_PyThreadState_assign
-    __Pyx_ErrFetch(&__pyx_type, &__pyx_value, &__pyx_tb);
-    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-  __Pyx_ErrRestore(__pyx_type, __pyx_value, __pyx_tb);}
-  __Pyx_AddTraceback("RMS.Routines.MorphCy.dilate", __pyx_clineno, __pyx_lineno, __pyx_filename);
-  __pyx_r = NULL;
-  goto __pyx_L2;
-  __pyx_L0:;
-  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-  __pyx_L2:;
-  __Pyx_XDECREF(__pyx_v_kernel);
-  __Pyx_XDECREF((PyObject *)__pyx_v_img);
-  __Pyx_XGIVEREF(__pyx_r);
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-/* "RMS/Routines/MorphCy.pyx":267
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def thin(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Zhang-Suen fast thinning algorithm. """
- * 
- */
-
-/* Python wrapper */
-static PyObject *__pyx_pw_3RMS_8Routines_7MorphCy_13thin(PyObject *__pyx_self, PyObject *__pyx_v_img); /*proto*/
-static char __pyx_doc_3RMS_8Routines_7MorphCy_12thin[] = " Zhang-Suen fast thinning algorithm. ";
-static PyMethodDef __pyx_mdef_3RMS_8Routines_7MorphCy_13thin = {"thin", (PyCFunction)__pyx_pw_3RMS_8Routines_7MorphCy_13thin, METH_O, __pyx_doc_3RMS_8Routines_7MorphCy_12thin};
-static PyObject *__pyx_pw_3RMS_8Routines_7MorphCy_13thin(PyObject *__pyx_self, PyObject *__pyx_v_img) {
-  PyObject *__pyx_r = 0;
-  __Pyx_RefNannyDeclarations
-  __Pyx_RefNannySetupContext("thin (wrapper)", 0);
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_img), __pyx_ptype_5numpy_ndarray, 1, "img", 0))) __PYX_ERR(0, 267, __pyx_L1_error)
-  __pyx_r = __pyx_pf_3RMS_8Routines_7MorphCy_12thin(__pyx_self, ((PyArrayObject *)__pyx_v_img));
-
-  /* function exit code */
-  goto __pyx_L0;
-  __pyx_L1_error:;
-  __pyx_r = NULL;
-  __pyx_L0:;
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-static PyObject *__pyx_pf_3RMS_8Routines_7MorphCy_12thin(CYTHON_UNUSED PyObject *__pyx_self, PyArrayObject *__pyx_v_img) {
-  int __pyx_v_y;
-  int __pyx_v_x;
-  int __pyx_v_p2;
-  int __pyx_v_p3;
-  int __pyx_v_p4;
-  int __pyx_v_p5;
-  int __pyx_v_p6;
-  int __pyx_v_p7;
-  int __pyx_v_p8;
-  int __pyx_v_p9;
-  int __pyx_v_A;
-  int __pyx_v_B;
-  int __pyx_v_m1;
-  int __pyx_v_m2;
-  int __pyx_v_iteration;
-  int __pyx_v_y_size;
-  int __pyx_v_x_size;
-  PyArrayObject *__pyx_v_mask = 0;
-  PyArrayObject *__pyx_v_previous = 0;
-  PyObject *__pyx_v_diff = NULL;
-  __Pyx_LocalBuf_ND __pyx_pybuffernd_img;
-  __Pyx_Buffer __pyx_pybuffer_img;
-  __Pyx_LocalBuf_ND __pyx_pybuffernd_mask;
-  __Pyx_Buffer __pyx_pybuffer_mask;
-  __Pyx_LocalBuf_ND __pyx_pybuffernd_previous;
-  __Pyx_Buffer __pyx_pybuffer_previous;
-  PyObject *__pyx_r = NULL;
-  __Pyx_RefNannyDeclarations
-  PyObject *__pyx_t_1 = NULL;
-  PyObject *__pyx_t_2 = NULL;
-  PyObject *__pyx_t_3 = NULL;
-  PyObject *__pyx_t_4 = NULL;
-  PyObject *__pyx_t_5 = NULL;
-  PyArrayObject *__pyx_t_6 = NULL;
   PyArrayObject *__pyx_t_7 = NULL;
   int __pyx_t_8;
-  long __pyx_t_9;
-  long __pyx_t_10;
+  int __pyx_t_9;
+  int __pyx_t_10;
   int __pyx_t_11;
-  long __pyx_t_12;
-  long __pyx_t_13;
-  int __pyx_t_14;
+  int __pyx_t_12;
+  int __pyx_t_13;
+  Py_ssize_t __pyx_t_14;
   Py_ssize_t __pyx_t_15;
   Py_ssize_t __pyx_t_16;
   Py_ssize_t __pyx_t_17;
-  Py_ssize_t __pyx_t_18;
-  Py_ssize_t __pyx_t_19;
-  Py_ssize_t __pyx_t_20;
-  Py_ssize_t __pyx_t_21;
-  Py_ssize_t __pyx_t_22;
-  Py_ssize_t __pyx_t_23;
-  Py_ssize_t __pyx_t_24;
-  Py_ssize_t __pyx_t_25;
-  Py_ssize_t __pyx_t_26;
-  Py_ssize_t __pyx_t_27;
-  Py_ssize_t __pyx_t_28;
-  Py_ssize_t __pyx_t_29;
-  Py_ssize_t __pyx_t_30;
-  int __pyx_t_31;
-  int __pyx_t_32;
-  int __pyx_t_33;
-  int __pyx_t_34;
-  int __pyx_t_35;
-  int __pyx_t_36;
-  int __pyx_t_37;
-  int __pyx_t_38;
-  int __pyx_t_39;
-  int __pyx_t_40;
-  Py_ssize_t __pyx_t_41;
-  Py_ssize_t __pyx_t_42;
-  PyArrayObject *__pyx_t_43 = NULL;
-  PyObject *__pyx_t_44 = NULL;
-  PyObject *__pyx_t_45 = NULL;
-  PyObject *__pyx_t_46 = NULL;
-  __Pyx_RefNannySetupContext("thin", 0);
-  __Pyx_INCREF((PyObject *)__pyx_v_img);
-  __pyx_pybuffer_mask.pybuffer.buf = NULL;
-  __pyx_pybuffer_mask.refcount = 0;
-  __pyx_pybuffernd_mask.data = NULL;
-  __pyx_pybuffernd_mask.rcbuffer = &__pyx_pybuffer_mask;
-  __pyx_pybuffer_previous.pybuffer.buf = NULL;
-  __pyx_pybuffer_previous.refcount = 0;
-  __pyx_pybuffernd_previous.data = NULL;
-  __pyx_pybuffernd_previous.rcbuffer = &__pyx_pybuffer_previous;
+  PyObject *__pyx_t_18 = NULL;
+  PyObject *__pyx_t_19 = NULL;
+  PyObject *__pyx_t_20 = NULL;
+  __Pyx_RefNannySetupContext("binImage", 0);
+  __pyx_pybuffer_out_img.pybuffer.buf = NULL;
+  __pyx_pybuffer_out_img.refcount = 0;
+  __pyx_pybuffernd_out_img.data = NULL;
+  __pyx_pybuffernd_out_img.rcbuffer = &__pyx_pybuffer_out_img;
   __pyx_pybuffer_img.pybuffer.buf = NULL;
   __pyx_pybuffer_img.refcount = 0;
   __pyx_pybuffernd_img.data = NULL;
   __pyx_pybuffernd_img.rcbuffer = &__pyx_pybuffer_img;
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_v_img, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) __PYX_ERR(0, 267, __pyx_L1_error)
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_v_img, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_10BinImageCy_INT16_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) __PYX_ERR(0, 19, __pyx_L1_error)
   }
   __pyx_pybuffernd_img.diminfo[0].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_img.diminfo[0].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_img.diminfo[1].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_img.diminfo[1].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[1];
 
-  /* "RMS/Routines/MorphCy.pyx":276
- *     cdef int iteration
+  /* "RMS/Routines/BinImageCy.pyx":36
  * 
- *     cdef int y_size = img.shape[0]             # <<<<<<<<<<<<<<
- *     cdef int x_size = img.shape[1]
+ *     cdef int i, j
+ *     cdef int img_h = img.shape[0]             # <<<<<<<<<<<<<<
+ *     cdef int img_w = img.shape[1]
  * 
  */
-  __pyx_v_y_size = (__pyx_v_img->dimensions[0]);
+  __pyx_v_img_h = (__pyx_v_img->dimensions[0]);
 
-  /* "RMS/Routines/MorphCy.pyx":277
+  /* "RMS/Routines/BinImageCy.pyx":37
+ *     cdef int i, j
+ *     cdef int img_h = img.shape[0]
+ *     cdef int img_w = img.shape[1]             # <<<<<<<<<<<<<<
  * 
- *     cdef int y_size = img.shape[0]
- *     cdef int x_size = img.shape[1]             # <<<<<<<<<<<<<<
  * 
- *     # Init mask array
  */
-  __pyx_v_x_size = (__pyx_v_img->dimensions[1]);
+  __pyx_v_img_w = (__pyx_v_img->dimensions[1]);
 
-  /* "RMS/Routines/MorphCy.pyx":280
+  /* "RMS/Routines/BinImageCy.pyx":42
  * 
- *     # Init mask array
- *     cdef np.ndarray[INT_TYPE_t, ndim=2] mask = np.zeros(shape=(y_size, x_size), dtype=INT_TYPE)             # <<<<<<<<<<<<<<
+ *     # If the bin factor is 1, do nothing
+ *     if bin_factor == 1:             # <<<<<<<<<<<<<<
+ *         return img
  * 
- *     # Previous thinning solution
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 280, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_zeros); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 280, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyDict_NewPresized(2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 280, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_3 = __Pyx_PyInt_From_int(__pyx_v_y_size); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 280, __pyx_L1_error)
+  __pyx_t_1 = ((__pyx_v_bin_factor == 1) != 0);
+  if (__pyx_t_1) {
+
+    /* "RMS/Routines/BinImageCy.pyx":43
+ *     # If the bin factor is 1, do nothing
+ *     if bin_factor == 1:
+ *         return img             # <<<<<<<<<<<<<<
+ * 
+ *     # Check that the given bin size is a factor of 2
+ */
+    __Pyx_XDECREF(__pyx_r);
+    __Pyx_INCREF(((PyObject *)__pyx_v_img));
+    __pyx_r = ((PyObject *)__pyx_v_img);
+    goto __pyx_L0;
+
+    /* "RMS/Routines/BinImageCy.pyx":42
+ * 
+ *     # If the bin factor is 1, do nothing
+ *     if bin_factor == 1:             # <<<<<<<<<<<<<<
+ *         return img
+ * 
+ */
+  }
+
+  /* "RMS/Routines/BinImageCy.pyx":46
+ * 
+ *     # Check that the given bin size is a factor of 2
+ *     if np.log2(bin_factor)/int(np.log2(bin_factor)) != 1:             # <<<<<<<<<<<<<<
+ *         print('The given binning factor is not a factor of 2!')
+ *         return img
+ */
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 46, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_4 = __Pyx_PyInt_From_int(__pyx_v_x_size); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 280, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_log2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 46, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_5 = PyTuple_New(2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 280, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_GIVEREF(__pyx_t_3);
-  PyTuple_SET_ITEM(__pyx_t_5, 0, __pyx_t_3);
-  __Pyx_GIVEREF(__pyx_t_4);
-  PyTuple_SET_ITEM(__pyx_t_5, 1, __pyx_t_4);
-  __pyx_t_3 = 0;
-  __pyx_t_4 = 0;
-  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_shape, __pyx_t_5) < 0) __PYX_ERR(0, 280, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_INT_TYPE); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 280, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 280, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_empty_tuple, __pyx_t_1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 280, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  if (!(likely(((__pyx_t_5) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_5, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 280, __pyx_L1_error)
-  __pyx_t_6 = ((PyArrayObject *)__pyx_t_5);
-  {
-    __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_mask.rcbuffer->pybuffer, (PyObject*)__pyx_t_6, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES| PyBUF_WRITABLE, 2, 0, __pyx_stack) == -1)) {
-      __pyx_v_mask = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_mask.rcbuffer->pybuffer.buf = NULL;
-      __PYX_ERR(0, 280, __pyx_L1_error)
-    } else {__pyx_pybuffernd_mask.diminfo[0].strides = __pyx_pybuffernd_mask.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_mask.diminfo[0].shape = __pyx_pybuffernd_mask.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_mask.diminfo[1].strides = __pyx_pybuffernd_mask.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_mask.diminfo[1].shape = __pyx_pybuffernd_mask.rcbuffer->pybuffer.shape[1];
+  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+  __pyx_t_3 = __Pyx_PyInt_From_int(__pyx_v_bin_factor); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 46, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __pyx_t_5 = NULL;
+  if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_4))) {
+    __pyx_t_5 = PyMethod_GET_SELF(__pyx_t_4);
+    if (likely(__pyx_t_5)) {
+      PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_4);
+      __Pyx_INCREF(__pyx_t_5);
+      __Pyx_INCREF(function);
+      __Pyx_DECREF_SET(__pyx_t_4, function);
     }
   }
-  __pyx_t_6 = 0;
-  __pyx_v_mask = ((PyArrayObject *)__pyx_t_5);
-  __pyx_t_5 = 0;
-
-  /* "RMS/Routines/MorphCy.pyx":283
- * 
- *     # Previous thinning solution
- *     cdef np.ndarray[INT_TYPE_t, ndim=2] previous = np.zeros(shape=(y_size, x_size), dtype=INT_TYPE)             # <<<<<<<<<<<<<<
- * 
- *     while True:
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 283, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_zeros); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 283, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyDict_NewPresized(2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 283, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_2 = __Pyx_PyInt_From_int(__pyx_v_y_size); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 283, __pyx_L1_error)
+  __pyx_t_2 = (__pyx_t_5) ? __Pyx_PyObject_Call2Args(__pyx_t_4, __pyx_t_5, __pyx_t_3) : __Pyx_PyObject_CallOneArg(__pyx_t_4, __pyx_t_3);
+  __Pyx_XDECREF(__pyx_t_5); __pyx_t_5 = 0;
+  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+  if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 46, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_4 = __Pyx_PyInt_From_int(__pyx_v_x_size); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 283, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 46, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_log2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 46, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+  __pyx_t_3 = __Pyx_PyInt_From_int(__pyx_v_bin_factor); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 46, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __pyx_t_6 = NULL;
+  if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_5))) {
+    __pyx_t_6 = PyMethod_GET_SELF(__pyx_t_5);
+    if (likely(__pyx_t_6)) {
+      PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_5);
+      __Pyx_INCREF(__pyx_t_6);
+      __Pyx_INCREF(function);
+      __Pyx_DECREF_SET(__pyx_t_5, function);
+    }
+  }
+  __pyx_t_4 = (__pyx_t_6) ? __Pyx_PyObject_Call2Args(__pyx_t_5, __pyx_t_6, __pyx_t_3) : __Pyx_PyObject_CallOneArg(__pyx_t_5, __pyx_t_3);
+  __Pyx_XDECREF(__pyx_t_6); __pyx_t_6 = 0;
+  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+  if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 46, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_3 = PyTuple_New(2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 283, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_GIVEREF(__pyx_t_2);
-  PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_2);
-  __Pyx_GIVEREF(__pyx_t_4);
-  PyTuple_SET_ITEM(__pyx_t_3, 1, __pyx_t_4);
-  __pyx_t_2 = 0;
-  __pyx_t_4 = 0;
-  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_shape, __pyx_t_3) < 0) __PYX_ERR(0, 283, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_INT_TYPE); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 283, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_dtype, __pyx_t_3) < 0) __PYX_ERR(0, 283, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_empty_tuple, __pyx_t_5); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 283, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  if (!(likely(((__pyx_t_3) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_3, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 283, __pyx_L1_error)
-  __pyx_t_7 = ((PyArrayObject *)__pyx_t_3);
+  __pyx_t_5 = __Pyx_PyNumber_Int(__pyx_t_4); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 46, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  __pyx_t_4 = __Pyx_PyNumber_Divide(__pyx_t_2, __pyx_t_5); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 46, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+  __pyx_t_5 = __Pyx_PyInt_NeObjC(__pyx_t_4, __pyx_int_1, 1, 0); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 46, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  __pyx_t_1 = __Pyx_PyObject_IsTrue(__pyx_t_5); if (unlikely(__pyx_t_1 < 0)) __PYX_ERR(0, 46, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+  if (__pyx_t_1) {
+
+    /* "RMS/Routines/BinImageCy.pyx":47
+ *     # Check that the given bin size is a factor of 2
+ *     if np.log2(bin_factor)/int(np.log2(bin_factor)) != 1:
+ *         print('The given binning factor is not a factor of 2!')             # <<<<<<<<<<<<<<
+ *         return img
+ * 
+ */
+    if (__Pyx_PrintOne(0, __pyx_kp_s_The_given_binning_factor_is_not) < 0) __PYX_ERR(0, 47, __pyx_L1_error)
+
+    /* "RMS/Routines/BinImageCy.pyx":48
+ *     if np.log2(bin_factor)/int(np.log2(bin_factor)) != 1:
+ *         print('The given binning factor is not a factor of 2!')
+ *         return img             # <<<<<<<<<<<<<<
+ * 
+ *     # Init the new image size
+ */
+    __Pyx_XDECREF(__pyx_r);
+    __Pyx_INCREF(((PyObject *)__pyx_v_img));
+    __pyx_r = ((PyObject *)__pyx_v_img);
+    goto __pyx_L0;
+
+    /* "RMS/Routines/BinImageCy.pyx":46
+ * 
+ *     # Check that the given bin size is a factor of 2
+ *     if np.log2(bin_factor)/int(np.log2(bin_factor)) != 1:             # <<<<<<<<<<<<<<
+ *         print('The given binning factor is not a factor of 2!')
+ *         return img
+ */
+  }
+
+  /* "RMS/Routines/BinImageCy.pyx":51
+ * 
+ *     # Init the new image size
+ *     cdef np.ndarray[INT32_TYPE_t, ndim=2] out_img = np.zeros((img_h//bin_factor, img_w//bin_factor), \             # <<<<<<<<<<<<<<
+ *         dtype=INT32_TYPE)
+ * 
+ */
+  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 51, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_zeros); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 51, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+  __pyx_t_5 = __Pyx_PyInt_From_int((__pyx_v_img_h / __pyx_v_bin_factor)); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 51, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __pyx_t_2 = __Pyx_PyInt_From_int((__pyx_v_img_w / __pyx_v_bin_factor)); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 51, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __pyx_t_3 = PyTuple_New(2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 51, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __Pyx_GIVEREF(__pyx_t_5);
+  PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_5);
+  __Pyx_GIVEREF(__pyx_t_2);
+  PyTuple_SET_ITEM(__pyx_t_3, 1, __pyx_t_2);
+  __pyx_t_5 = 0;
+  __pyx_t_2 = 0;
+  __pyx_t_2 = PyTuple_New(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 51, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __Pyx_GIVEREF(__pyx_t_3);
+  PyTuple_SET_ITEM(__pyx_t_2, 0, __pyx_t_3);
+  __pyx_t_3 = 0;
+
+  /* "RMS/Routines/BinImageCy.pyx":52
+ *     # Init the new image size
+ *     cdef np.ndarray[INT32_TYPE_t, ndim=2] out_img = np.zeros((img_h//bin_factor, img_w//bin_factor), \
+ *         dtype=INT32_TYPE)             # <<<<<<<<<<<<<<
+ * 
+ * 
+ */
+  __pyx_t_3 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 52, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_INT32_TYPE); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 52, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  if (PyDict_SetItem(__pyx_t_3, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 52, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+
+  /* "RMS/Routines/BinImageCy.pyx":51
+ * 
+ *     # Init the new image size
+ *     cdef np.ndarray[INT32_TYPE_t, ndim=2] out_img = np.zeros((img_h//bin_factor, img_w//bin_factor), \             # <<<<<<<<<<<<<<
+ *         dtype=INT32_TYPE)
+ * 
+ */
+  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_2, __pyx_t_3); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 51, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+  if (!(likely(((__pyx_t_5) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_5, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 51, __pyx_L1_error)
+  __pyx_t_7 = ((PyArrayObject *)__pyx_t_5);
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_previous.rcbuffer->pybuffer, (PyObject*)__pyx_t_7, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
-      __pyx_v_previous = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_previous.rcbuffer->pybuffer.buf = NULL;
-      __PYX_ERR(0, 283, __pyx_L1_error)
-    } else {__pyx_pybuffernd_previous.diminfo[0].strides = __pyx_pybuffernd_previous.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_previous.diminfo[0].shape = __pyx_pybuffernd_previous.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_previous.diminfo[1].strides = __pyx_pybuffernd_previous.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_previous.diminfo[1].shape = __pyx_pybuffernd_previous.rcbuffer->pybuffer.shape[1];
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_out_img.rcbuffer->pybuffer, (PyObject*)__pyx_t_7, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_10BinImageCy_INT32_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES| PyBUF_WRITABLE, 2, 0, __pyx_stack) == -1)) {
+      __pyx_v_out_img = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_out_img.rcbuffer->pybuffer.buf = NULL;
+      __PYX_ERR(0, 51, __pyx_L1_error)
+    } else {__pyx_pybuffernd_out_img.diminfo[0].strides = __pyx_pybuffernd_out_img.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_out_img.diminfo[0].shape = __pyx_pybuffernd_out_img.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_out_img.diminfo[1].strides = __pyx_pybuffernd_out_img.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_out_img.diminfo[1].shape = __pyx_pybuffernd_out_img.rcbuffer->pybuffer.shape[1];
     }
   }
   __pyx_t_7 = 0;
-  __pyx_v_previous = ((PyArrayObject *)__pyx_t_3);
-  __pyx_t_3 = 0;
+  __pyx_v_out_img = ((PyArrayObject *)__pyx_t_5);
+  __pyx_t_5 = 0;
 
-  /* "RMS/Routines/MorphCy.pyx":285
- *     cdef np.ndarray[INT_TYPE_t, ndim=2] previous = np.zeros(shape=(y_size, x_size), dtype=INT_TYPE)
+  /* "RMS/Routines/BinImageCy.pyx":56
  * 
- *     while True:             # <<<<<<<<<<<<<<
- * 
- *         for iteration in range(2):
+ *     # Go through all pixels and perform the binning
+ *     for i in range(img_h):             # <<<<<<<<<<<<<<
+ *         for j in range(img_w):
+ *             out_img[i//bin_factor, j//bin_factor] += img[i, j]
  */
-  while (1) {
+  __pyx_t_8 = __pyx_v_img_h;
+  __pyx_t_9 = __pyx_t_8;
+  for (__pyx_t_10 = 0; __pyx_t_10 < __pyx_t_9; __pyx_t_10+=1) {
+    __pyx_v_i = __pyx_t_10;
 
-    /* "RMS/Routines/MorphCy.pyx":287
- *     while True:
- * 
- *         for iteration in range(2):             # <<<<<<<<<<<<<<
- * 
- *             for y in range(1, img.shape[0]-1):
- */
-    for (__pyx_t_8 = 0; __pyx_t_8 < 2; __pyx_t_8+=1) {
-      __pyx_v_iteration = __pyx_t_8;
-
-      /* "RMS/Routines/MorphCy.pyx":289
- *         for iteration in range(2):
- * 
- *             for y in range(1, img.shape[0]-1):             # <<<<<<<<<<<<<<
- *                 for x in range(1, img.shape[1]-1):
+    /* "RMS/Routines/BinImageCy.pyx":57
+ *     # Go through all pixels and perform the binning
+ *     for i in range(img_h):
+ *         for j in range(img_w):             # <<<<<<<<<<<<<<
+ *             out_img[i//bin_factor, j//bin_factor] += img[i, j]
  * 
  */
-      __pyx_t_9 = ((__pyx_v_img->dimensions[0]) - 1);
-      __pyx_t_10 = __pyx_t_9;
-      for (__pyx_t_11 = 1; __pyx_t_11 < __pyx_t_10; __pyx_t_11+=1) {
-        __pyx_v_y = __pyx_t_11;
+    __pyx_t_11 = __pyx_v_img_w;
+    __pyx_t_12 = __pyx_t_11;
+    for (__pyx_t_13 = 0; __pyx_t_13 < __pyx_t_12; __pyx_t_13+=1) {
+      __pyx_v_j = __pyx_t_13;
 
-        /* "RMS/Routines/MorphCy.pyx":290
- * 
- *             for y in range(1, img.shape[0]-1):
- *                 for x in range(1, img.shape[1]-1):             # <<<<<<<<<<<<<<
- * 
- *                     # Get neighbouring pixels
- */
-        __pyx_t_12 = ((__pyx_v_img->dimensions[1]) - 1);
-        __pyx_t_13 = __pyx_t_12;
-        for (__pyx_t_14 = 1; __pyx_t_14 < __pyx_t_13; __pyx_t_14+=1) {
-          __pyx_v_x = __pyx_t_14;
-
-          /* "RMS/Routines/MorphCy.pyx":293
- * 
- *                     # Get neighbouring pixels
- *                     p2 = img[y-1, x]             # <<<<<<<<<<<<<<
- *                     p3 = img[y-1, x+1]
- *                     p4 = img[y,   x+1]
- */
-          __pyx_t_15 = (__pyx_v_y - 1);
-          __pyx_t_16 = __pyx_v_x;
-          __pyx_v_p2 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_15, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_16, __pyx_pybuffernd_img.diminfo[1].strides));
-
-          /* "RMS/Routines/MorphCy.pyx":294
- *                     # Get neighbouring pixels
- *                     p2 = img[y-1, x]
- *                     p3 = img[y-1, x+1]             # <<<<<<<<<<<<<<
- *                     p4 = img[y,   x+1]
- *                     p5 = img[y+1, x+1]
- */
-          __pyx_t_17 = (__pyx_v_y - 1);
-          __pyx_t_18 = (__pyx_v_x + 1);
-          __pyx_v_p3 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_17, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_18, __pyx_pybuffernd_img.diminfo[1].strides));
-
-          /* "RMS/Routines/MorphCy.pyx":295
- *                     p2 = img[y-1, x]
- *                     p3 = img[y-1, x+1]
- *                     p4 = img[y,   x+1]             # <<<<<<<<<<<<<<
- *                     p5 = img[y+1, x+1]
- *                     p6 = img[y+1, x]
- */
-          __pyx_t_19 = __pyx_v_y;
-          __pyx_t_20 = (__pyx_v_x + 1);
-          __pyx_v_p4 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_19, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_20, __pyx_pybuffernd_img.diminfo[1].strides));
-
-          /* "RMS/Routines/MorphCy.pyx":296
- *                     p3 = img[y-1, x+1]
- *                     p4 = img[y,   x+1]
- *                     p5 = img[y+1, x+1]             # <<<<<<<<<<<<<<
- *                     p6 = img[y+1, x]
- *                     p7 = img[y+1, x-1]
- */
-          __pyx_t_21 = (__pyx_v_y + 1);
-          __pyx_t_22 = (__pyx_v_x + 1);
-          __pyx_v_p5 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_21, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_22, __pyx_pybuffernd_img.diminfo[1].strides));
-
-          /* "RMS/Routines/MorphCy.pyx":297
- *                     p4 = img[y,   x+1]
- *                     p5 = img[y+1, x+1]
- *                     p6 = img[y+1, x]             # <<<<<<<<<<<<<<
- *                     p7 = img[y+1, x-1]
- *                     p8 = img[y,   x-1]
- */
-          __pyx_t_23 = (__pyx_v_y + 1);
-          __pyx_t_24 = __pyx_v_x;
-          __pyx_v_p6 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_23, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_24, __pyx_pybuffernd_img.diminfo[1].strides));
-
-          /* "RMS/Routines/MorphCy.pyx":298
- *                     p5 = img[y+1, x+1]
- *                     p6 = img[y+1, x]
- *                     p7 = img[y+1, x-1]             # <<<<<<<<<<<<<<
- *                     p8 = img[y,   x-1]
- *                     p9 = img[y-1, x-1]
- */
-          __pyx_t_25 = (__pyx_v_y + 1);
-          __pyx_t_26 = (__pyx_v_x - 1);
-          __pyx_v_p7 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_25, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_26, __pyx_pybuffernd_img.diminfo[1].strides));
-
-          /* "RMS/Routines/MorphCy.pyx":299
- *                     p6 = img[y+1, x]
- *                     p7 = img[y+1, x-1]
- *                     p8 = img[y,   x-1]             # <<<<<<<<<<<<<<
- *                     p9 = img[y-1, x-1]
- * 
- */
-          __pyx_t_27 = __pyx_v_y;
-          __pyx_t_28 = (__pyx_v_x - 1);
-          __pyx_v_p8 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_27, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_28, __pyx_pybuffernd_img.diminfo[1].strides));
-
-          /* "RMS/Routines/MorphCy.pyx":300
- *                     p7 = img[y+1, x-1]
- *                     p8 = img[y,   x-1]
- *                     p9 = img[y-1, x-1]             # <<<<<<<<<<<<<<
- * 
- *                     A = ((p2 == 0 and p3 == 1) + (p3 == 0 and p4 == 1) +
- */
-          __pyx_t_29 = (__pyx_v_y - 1);
-          __pyx_t_30 = (__pyx_v_x - 1);
-          __pyx_v_p9 = (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_29, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_30, __pyx_pybuffernd_img.diminfo[1].strides));
-
-          /* "RMS/Routines/MorphCy.pyx":302
- *                     p9 = img[y-1, x-1]
- * 
- *                     A = ((p2 == 0 and p3 == 1) + (p3 == 0 and p4 == 1) +             # <<<<<<<<<<<<<<
- *                         (p4 == 0 and p5 == 1) + (p5 == 0 and p6 == 1) +
- *                         (p6 == 0 and p7 == 1) + (p7 == 0 and p8 == 1) +
- */
-          __pyx_t_32 = (__pyx_v_p2 == 0);
-          if (__pyx_t_32) {
-          } else {
-            __pyx_t_31 = __pyx_t_32;
-            goto __pyx_L11_bool_binop_done;
-          }
-          __pyx_t_32 = (__pyx_v_p3 == 1);
-          __pyx_t_31 = __pyx_t_32;
-          __pyx_L11_bool_binop_done:;
-          __pyx_t_32 = (__pyx_v_p3 == 0);
-          if (__pyx_t_32) {
-          } else {
-            __pyx_t_33 = __pyx_t_32;
-            goto __pyx_L13_bool_binop_done;
-          }
-          __pyx_t_32 = (__pyx_v_p4 == 1);
-          __pyx_t_33 = __pyx_t_32;
-          __pyx_L13_bool_binop_done:;
-
-          /* "RMS/Routines/MorphCy.pyx":303
- * 
- *                     A = ((p2 == 0 and p3 == 1) + (p3 == 0 and p4 == 1) +
- *                         (p4 == 0 and p5 == 1) + (p5 == 0 and p6 == 1) +             # <<<<<<<<<<<<<<
- *                         (p6 == 0 and p7 == 1) + (p7 == 0 and p8 == 1) +
- *                         (p8 == 0 and p9 == 1) + (p9 == 0 and p2 == 1))
- */
-          __pyx_t_32 = (__pyx_v_p4 == 0);
-          if (__pyx_t_32) {
-          } else {
-            __pyx_t_34 = __pyx_t_32;
-            goto __pyx_L15_bool_binop_done;
-          }
-          __pyx_t_32 = (__pyx_v_p5 == 1);
-          __pyx_t_34 = __pyx_t_32;
-          __pyx_L15_bool_binop_done:;
-
-          /* "RMS/Routines/MorphCy.pyx":302
- *                     p9 = img[y-1, x-1]
- * 
- *                     A = ((p2 == 0 and p3 == 1) + (p3 == 0 and p4 == 1) +             # <<<<<<<<<<<<<<
- *                         (p4 == 0 and p5 == 1) + (p5 == 0 and p6 == 1) +
- *                         (p6 == 0 and p7 == 1) + (p7 == 0 and p8 == 1) +
- */
-          __pyx_t_32 = (__pyx_v_p5 == 0);
-          if (__pyx_t_32) {
-          } else {
-            __pyx_t_35 = __pyx_t_32;
-            goto __pyx_L17_bool_binop_done;
-          }
-
-          /* "RMS/Routines/MorphCy.pyx":303
- * 
- *                     A = ((p2 == 0 and p3 == 1) + (p3 == 0 and p4 == 1) +
- *                         (p4 == 0 and p5 == 1) + (p5 == 0 and p6 == 1) +             # <<<<<<<<<<<<<<
- *                         (p6 == 0 and p7 == 1) + (p7 == 0 and p8 == 1) +
- *                         (p8 == 0 and p9 == 1) + (p9 == 0 and p2 == 1))
- */
-          __pyx_t_32 = (__pyx_v_p6 == 1);
-          __pyx_t_35 = __pyx_t_32;
-          __pyx_L17_bool_binop_done:;
-
-          /* "RMS/Routines/MorphCy.pyx":304
- *                     A = ((p2 == 0 and p3 == 1) + (p3 == 0 and p4 == 1) +
- *                         (p4 == 0 and p5 == 1) + (p5 == 0 and p6 == 1) +
- *                         (p6 == 0 and p7 == 1) + (p7 == 0 and p8 == 1) +             # <<<<<<<<<<<<<<
- *                         (p8 == 0 and p9 == 1) + (p9 == 0 and p2 == 1))
- * 
- */
-          __pyx_t_32 = (__pyx_v_p6 == 0);
-          if (__pyx_t_32) {
-          } else {
-            __pyx_t_36 = __pyx_t_32;
-            goto __pyx_L19_bool_binop_done;
-          }
-          __pyx_t_32 = (__pyx_v_p7 == 1);
-          __pyx_t_36 = __pyx_t_32;
-          __pyx_L19_bool_binop_done:;
-
-          /* "RMS/Routines/MorphCy.pyx":303
- * 
- *                     A = ((p2 == 0 and p3 == 1) + (p3 == 0 and p4 == 1) +
- *                         (p4 == 0 and p5 == 1) + (p5 == 0 and p6 == 1) +             # <<<<<<<<<<<<<<
- *                         (p6 == 0 and p7 == 1) + (p7 == 0 and p8 == 1) +
- *                         (p8 == 0 and p9 == 1) + (p9 == 0 and p2 == 1))
- */
-          __pyx_t_32 = (__pyx_v_p7 == 0);
-          if (__pyx_t_32) {
-          } else {
-            __pyx_t_37 = __pyx_t_32;
-            goto __pyx_L21_bool_binop_done;
-          }
-
-          /* "RMS/Routines/MorphCy.pyx":304
- *                     A = ((p2 == 0 and p3 == 1) + (p3 == 0 and p4 == 1) +
- *                         (p4 == 0 and p5 == 1) + (p5 == 0 and p6 == 1) +
- *                         (p6 == 0 and p7 == 1) + (p7 == 0 and p8 == 1) +             # <<<<<<<<<<<<<<
- *                         (p8 == 0 and p9 == 1) + (p9 == 0 and p2 == 1))
- * 
- */
-          __pyx_t_32 = (__pyx_v_p8 == 1);
-          __pyx_t_37 = __pyx_t_32;
-          __pyx_L21_bool_binop_done:;
-
-          /* "RMS/Routines/MorphCy.pyx":305
- *                         (p4 == 0 and p5 == 1) + (p5 == 0 and p6 == 1) +
- *                         (p6 == 0 and p7 == 1) + (p7 == 0 and p8 == 1) +
- *                         (p8 == 0 and p9 == 1) + (p9 == 0 and p2 == 1))             # <<<<<<<<<<<<<<
- * 
- *                     B  = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9
- */
-          __pyx_t_32 = (__pyx_v_p8 == 0);
-          if (__pyx_t_32) {
-          } else {
-            __pyx_t_38 = __pyx_t_32;
-            goto __pyx_L23_bool_binop_done;
-          }
-          __pyx_t_32 = (__pyx_v_p9 == 1);
-          __pyx_t_38 = __pyx_t_32;
-          __pyx_L23_bool_binop_done:;
-
-          /* "RMS/Routines/MorphCy.pyx":304
- *                     A = ((p2 == 0 and p3 == 1) + (p3 == 0 and p4 == 1) +
- *                         (p4 == 0 and p5 == 1) + (p5 == 0 and p6 == 1) +
- *                         (p6 == 0 and p7 == 1) + (p7 == 0 and p8 == 1) +             # <<<<<<<<<<<<<<
- *                         (p8 == 0 and p9 == 1) + (p9 == 0 and p2 == 1))
- * 
- */
-          __pyx_t_32 = (__pyx_v_p9 == 0);
-          if (__pyx_t_32) {
-          } else {
-            __pyx_t_39 = __pyx_t_32;
-            goto __pyx_L25_bool_binop_done;
-          }
-
-          /* "RMS/Routines/MorphCy.pyx":305
- *                         (p4 == 0 and p5 == 1) + (p5 == 0 and p6 == 1) +
- *                         (p6 == 0 and p7 == 1) + (p7 == 0 and p8 == 1) +
- *                         (p8 == 0 and p9 == 1) + (p9 == 0 and p2 == 1))             # <<<<<<<<<<<<<<
- * 
- *                     B  = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9
- */
-          __pyx_t_32 = (__pyx_v_p2 == 1);
-          __pyx_t_39 = __pyx_t_32;
-          __pyx_L25_bool_binop_done:;
-          __pyx_v_A = (((((((__pyx_t_31 + __pyx_t_33) + __pyx_t_34) + __pyx_t_35) + __pyx_t_36) + __pyx_t_37) + __pyx_t_38) + __pyx_t_39);
-
-          /* "RMS/Routines/MorphCy.pyx":307
- *                         (p8 == 0 and p9 == 1) + (p9 == 0 and p2 == 1))
- * 
- *                     B  = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9             # <<<<<<<<<<<<<<
- * 
- *                     m1 = (p2*p4*p6) if (iteration == 0) else (p2*p4*p8)
- */
-          __pyx_v_B = (((((((__pyx_v_p2 + __pyx_v_p3) + __pyx_v_p4) + __pyx_v_p5) + __pyx_v_p6) + __pyx_v_p7) + __pyx_v_p8) + __pyx_v_p9);
-
-          /* "RMS/Routines/MorphCy.pyx":309
- *                     B  = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9
- * 
- *                     m1 = (p2*p4*p6) if (iteration == 0) else (p2*p4*p8)             # <<<<<<<<<<<<<<
- *                     m2 = (p4*p6*p8) if (iteration == 0) else (p2*p6*p8)
- * 
- */
-          if (((__pyx_v_iteration == 0) != 0)) {
-            __pyx_t_39 = ((__pyx_v_p2 * __pyx_v_p4) * __pyx_v_p6);
-          } else {
-            __pyx_t_39 = ((__pyx_v_p2 * __pyx_v_p4) * __pyx_v_p8);
-          }
-          __pyx_v_m1 = __pyx_t_39;
-
-          /* "RMS/Routines/MorphCy.pyx":310
- * 
- *                     m1 = (p2*p4*p6) if (iteration == 0) else (p2*p4*p8)
- *                     m2 = (p4*p6*p8) if (iteration == 0) else (p2*p6*p8)             # <<<<<<<<<<<<<<
- * 
- *                     if (A == 1 and B >= 2 and B <= 6 and m1 == 0 and m2 == 0):
- */
-          if (((__pyx_v_iteration == 0) != 0)) {
-            __pyx_t_39 = ((__pyx_v_p4 * __pyx_v_p6) * __pyx_v_p8);
-          } else {
-            __pyx_t_39 = ((__pyx_v_p2 * __pyx_v_p6) * __pyx_v_p8);
-          }
-          __pyx_v_m2 = __pyx_t_39;
-
-          /* "RMS/Routines/MorphCy.pyx":312
- *                     m2 = (p4*p6*p8) if (iteration == 0) else (p2*p6*p8)
- * 
- *                     if (A == 1 and B >= 2 and B <= 6 and m1 == 0 and m2 == 0):             # <<<<<<<<<<<<<<
- *                         mask[y, x] = 1
- * 
- */
-          __pyx_t_40 = ((__pyx_v_A == 1) != 0);
-          if (__pyx_t_40) {
-          } else {
-            __pyx_t_32 = __pyx_t_40;
-            goto __pyx_L28_bool_binop_done;
-          }
-          __pyx_t_40 = ((__pyx_v_B >= 2) != 0);
-          if (__pyx_t_40) {
-          } else {
-            __pyx_t_32 = __pyx_t_40;
-            goto __pyx_L28_bool_binop_done;
-          }
-          __pyx_t_40 = ((__pyx_v_B <= 6) != 0);
-          if (__pyx_t_40) {
-          } else {
-            __pyx_t_32 = __pyx_t_40;
-            goto __pyx_L28_bool_binop_done;
-          }
-          __pyx_t_40 = ((__pyx_v_m1 == 0) != 0);
-          if (__pyx_t_40) {
-          } else {
-            __pyx_t_32 = __pyx_t_40;
-            goto __pyx_L28_bool_binop_done;
-          }
-          __pyx_t_40 = ((__pyx_v_m2 == 0) != 0);
-          __pyx_t_32 = __pyx_t_40;
-          __pyx_L28_bool_binop_done:;
-          if (__pyx_t_32) {
-
-            /* "RMS/Routines/MorphCy.pyx":313
- * 
- *                     if (A == 1 and B >= 2 and B <= 6 and m1 == 0 and m2 == 0):
- *                         mask[y, x] = 1             # <<<<<<<<<<<<<<
+      /* "RMS/Routines/BinImageCy.pyx":58
+ *     for i in range(img_h):
+ *         for j in range(img_w):
+ *             out_img[i//bin_factor, j//bin_factor] += img[i, j]             # <<<<<<<<<<<<<<
  * 
  * 
  */
-            __pyx_t_41 = __pyx_v_y;
-            __pyx_t_42 = __pyx_v_x;
-            *__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t *, __pyx_pybuffernd_mask.rcbuffer->pybuffer.buf, __pyx_t_41, __pyx_pybuffernd_mask.diminfo[0].strides, __pyx_t_42, __pyx_pybuffernd_mask.diminfo[1].strides) = 1;
-
-            /* "RMS/Routines/MorphCy.pyx":312
- *                     m2 = (p4*p6*p8) if (iteration == 0) else (p2*p6*p8)
- * 
- *                     if (A == 1 and B >= 2 and B <= 6 and m1 == 0 and m2 == 0):             # <<<<<<<<<<<<<<
- *                         mask[y, x] = 1
- * 
- */
-          }
-        }
-      }
-
-      /* "RMS/Routines/MorphCy.pyx":317
- * 
- *             # Bitwise AND image with inverted mask
- *             img = (img & ~mask)             # <<<<<<<<<<<<<<
- * 
- *             # Reset mask to 0
- */
-      __pyx_t_3 = PyNumber_Invert(((PyObject *)__pyx_v_mask)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 317, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_3);
-      __pyx_t_5 = PyNumber_And(((PyObject *)__pyx_v_img), __pyx_t_3); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 317, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_5);
-      __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-      if (!(likely(((__pyx_t_5) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_5, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 317, __pyx_L1_error)
-      __pyx_t_43 = ((PyArrayObject *)__pyx_t_5);
-      {
-        __Pyx_BufFmt_StackElem __pyx_stack[1];
-        __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-        __pyx_t_11 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_t_43, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack);
-        if (unlikely(__pyx_t_11 < 0)) {
-          PyErr_Fetch(&__pyx_t_44, &__pyx_t_45, &__pyx_t_46);
-          if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_img.rcbuffer->pybuffer, (PyObject*)__pyx_v_img, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
-            Py_XDECREF(__pyx_t_44); Py_XDECREF(__pyx_t_45); Py_XDECREF(__pyx_t_46);
-            __Pyx_RaiseBufferFallbackError();
-          } else {
-            PyErr_Restore(__pyx_t_44, __pyx_t_45, __pyx_t_46);
-          }
-          __pyx_t_44 = __pyx_t_45 = __pyx_t_46 = 0;
-        }
-        __pyx_pybuffernd_img.diminfo[0].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_img.diminfo[0].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_img.diminfo[1].strides = __pyx_pybuffernd_img.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_img.diminfo[1].shape = __pyx_pybuffernd_img.rcbuffer->pybuffer.shape[1];
-        if (unlikely(__pyx_t_11 < 0)) __PYX_ERR(0, 317, __pyx_L1_error)
-      }
-      __pyx_t_43 = 0;
-      __Pyx_DECREF_SET(__pyx_v_img, ((PyArrayObject *)__pyx_t_5));
-      __pyx_t_5 = 0;
-
-      /* "RMS/Routines/MorphCy.pyx":320
- * 
- *             # Reset mask to 0
- *             mask.fill(0)             # <<<<<<<<<<<<<<
- * 
- *         # Check the difference with the previous thinning solution
- */
-      __pyx_t_3 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_mask), __pyx_n_s_fill); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 320, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_3);
-      __pyx_t_1 = NULL;
-      if (CYTHON_UNPACK_METHODS && likely(PyMethod_Check(__pyx_t_3))) {
-        __pyx_t_1 = PyMethod_GET_SELF(__pyx_t_3);
-        if (likely(__pyx_t_1)) {
-          PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_3);
-          __Pyx_INCREF(__pyx_t_1);
-          __Pyx_INCREF(function);
-          __Pyx_DECREF_SET(__pyx_t_3, function);
-        }
-      }
-      __pyx_t_5 = (__pyx_t_1) ? __Pyx_PyObject_Call2Args(__pyx_t_3, __pyx_t_1, __pyx_int_0) : __Pyx_PyObject_CallOneArg(__pyx_t_3, __pyx_int_0);
-      __Pyx_XDECREF(__pyx_t_1); __pyx_t_1 = 0;
-      if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 320, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_5);
-      __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-      __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+      __pyx_t_14 = __pyx_v_i;
+      __pyx_t_15 = __pyx_v_j;
+      __pyx_t_16 = (__pyx_v_i / __pyx_v_bin_factor);
+      __pyx_t_17 = (__pyx_v_j / __pyx_v_bin_factor);
+      *__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_10BinImageCy_INT32_TYPE_t *, __pyx_pybuffernd_out_img.rcbuffer->pybuffer.buf, __pyx_t_16, __pyx_pybuffernd_out_img.diminfo[0].strides, __pyx_t_17, __pyx_pybuffernd_out_img.diminfo[1].strides) += (*__Pyx_BufPtrStrided2d(__pyx_t_3RMS_8Routines_10BinImageCy_INT16_TYPE_t *, __pyx_pybuffernd_img.rcbuffer->pybuffer.buf, __pyx_t_14, __pyx_pybuffernd_img.diminfo[0].strides, __pyx_t_15, __pyx_pybuffernd_img.diminfo[1].strides));
     }
+  }
 
-    /* "RMS/Routines/MorphCy.pyx":323
+  /* "RMS/Routines/BinImageCy.pyx":61
  * 
- *         # Check the difference with the previous thinning solution
- *         diff = np.absolute(img - previous)             # <<<<<<<<<<<<<<
- *         if np.sum(diff) == 0:
- *             break
+ * 
+ *     if method == 'avg':             # <<<<<<<<<<<<<<
+ * 
+ *         # If the average is needed, divide the whole image by the bin factor^2
  */
-    __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 323, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_3);
-    __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_absolute); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 323, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-    __pyx_t_3 = PyNumber_Subtract(((PyObject *)__pyx_v_img), ((PyObject *)__pyx_v_previous)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 323, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_3);
-    __pyx_t_4 = NULL;
-    if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_1))) {
-      __pyx_t_4 = PyMethod_GET_SELF(__pyx_t_1);
-      if (likely(__pyx_t_4)) {
-        PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_1);
-        __Pyx_INCREF(__pyx_t_4);
-        __Pyx_INCREF(function);
-        __Pyx_DECREF_SET(__pyx_t_1, function);
-      }
-    }
-    __pyx_t_5 = (__pyx_t_4) ? __Pyx_PyObject_Call2Args(__pyx_t_1, __pyx_t_4, __pyx_t_3) : __Pyx_PyObject_CallOneArg(__pyx_t_1, __pyx_t_3);
-    __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
-    __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-    if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 323, __pyx_L1_error)
+  __pyx_t_1 = (__Pyx_PyString_Equals(__pyx_v_method, __pyx_n_s_avg, Py_EQ)); if (unlikely(__pyx_t_1 < 0)) __PYX_ERR(0, 61, __pyx_L1_error)
+  if (__pyx_t_1) {
+
+    /* "RMS/Routines/BinImageCy.pyx":64
+ * 
+ *         # If the average is needed, divide the whole image by the bin factor^2
+ *         out_img = out_img//(bin_factor**2)             # <<<<<<<<<<<<<<
+ * 
+ * 
+ */
+    __pyx_t_5 = __Pyx_PyInt_From_long(__Pyx_pow_long(((long)__pyx_v_bin_factor), 2)); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 64, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_5);
-    __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-    __Pyx_XDECREF_SET(__pyx_v_diff, __pyx_t_5);
-    __pyx_t_5 = 0;
-
-    /* "RMS/Routines/MorphCy.pyx":324
- *         # Check the difference with the previous thinning solution
- *         diff = np.absolute(img - previous)
- *         if np.sum(diff) == 0:             # <<<<<<<<<<<<<<
- *             break
- * 
- */
-    __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 324, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
-    __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_sum); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 324, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_3);
-    __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-    __pyx_t_1 = NULL;
-    if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_3))) {
-      __pyx_t_1 = PyMethod_GET_SELF(__pyx_t_3);
-      if (likely(__pyx_t_1)) {
-        PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_3);
-        __Pyx_INCREF(__pyx_t_1);
-        __Pyx_INCREF(function);
-        __Pyx_DECREF_SET(__pyx_t_3, function);
-      }
-    }
-    __pyx_t_5 = (__pyx_t_1) ? __Pyx_PyObject_Call2Args(__pyx_t_3, __pyx_t_1, __pyx_v_diff) : __Pyx_PyObject_CallOneArg(__pyx_t_3, __pyx_v_diff);
-    __Pyx_XDECREF(__pyx_t_1); __pyx_t_1 = 0;
-    if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 324, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_5);
-    __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-    __pyx_t_3 = __Pyx_PyInt_EqObjC(__pyx_t_5, __pyx_int_0, 0, 0); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 324, __pyx_L1_error)
+    __pyx_t_3 = PyNumber_FloorDivide(((PyObject *)__pyx_v_out_img), __pyx_t_5); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 64, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_3);
     __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-    __pyx_t_32 = __Pyx_PyObject_IsTrue(__pyx_t_3); if (unlikely(__pyx_t_32 < 0)) __PYX_ERR(0, 324, __pyx_L1_error)
-    __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-    if (__pyx_t_32) {
-
-      /* "RMS/Routines/MorphCy.pyx":325
- *         diff = np.absolute(img - previous)
- *         if np.sum(diff) == 0:
- *             break             # <<<<<<<<<<<<<<
- * 
- *         # Set previous
- */
-      goto __pyx_L4_break;
-
-      /* "RMS/Routines/MorphCy.pyx":324
- *         # Check the difference with the previous thinning solution
- *         diff = np.absolute(img - previous)
- *         if np.sum(diff) == 0:             # <<<<<<<<<<<<<<
- *             break
- * 
- */
-    }
-
-    /* "RMS/Routines/MorphCy.pyx":328
- * 
- *         # Set previous
- *         previous = np.copy(img)             # <<<<<<<<<<<<<<
- * 
- *     return img
- */
-    __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 328, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_5);
-    __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_copy); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 328, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-    __pyx_t_5 = NULL;
-    if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_1))) {
-      __pyx_t_5 = PyMethod_GET_SELF(__pyx_t_1);
-      if (likely(__pyx_t_5)) {
-        PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_1);
-        __Pyx_INCREF(__pyx_t_5);
-        __Pyx_INCREF(function);
-        __Pyx_DECREF_SET(__pyx_t_1, function);
-      }
-    }
-    __pyx_t_3 = (__pyx_t_5) ? __Pyx_PyObject_Call2Args(__pyx_t_1, __pyx_t_5, ((PyObject *)__pyx_v_img)) : __Pyx_PyObject_CallOneArg(__pyx_t_1, ((PyObject *)__pyx_v_img));
-    __Pyx_XDECREF(__pyx_t_5); __pyx_t_5 = 0;
-    if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 328, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_3);
-    __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-    if (!(likely(((__pyx_t_3) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_3, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 328, __pyx_L1_error)
+    if (!(likely(((__pyx_t_3) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_3, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 64, __pyx_L1_error)
     __pyx_t_7 = ((PyArrayObject *)__pyx_t_3);
     {
       __Pyx_BufFmt_StackElem __pyx_stack[1];
-      __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_previous.rcbuffer->pybuffer);
-      __pyx_t_8 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_previous.rcbuffer->pybuffer, (PyObject*)__pyx_t_7, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack);
+      __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_out_img.rcbuffer->pybuffer);
+      __pyx_t_8 = __Pyx_GetBufferAndValidate(&__pyx_pybuffernd_out_img.rcbuffer->pybuffer, (PyObject*)__pyx_t_7, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_10BinImageCy_INT32_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES| PyBUF_WRITABLE, 2, 0, __pyx_stack);
       if (unlikely(__pyx_t_8 < 0)) {
-        PyErr_Fetch(&__pyx_t_46, &__pyx_t_45, &__pyx_t_44);
-        if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_previous.rcbuffer->pybuffer, (PyObject*)__pyx_v_previous, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_7MorphCy_INT_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
-          Py_XDECREF(__pyx_t_46); Py_XDECREF(__pyx_t_45); Py_XDECREF(__pyx_t_44);
+        PyErr_Fetch(&__pyx_t_18, &__pyx_t_19, &__pyx_t_20);
+        if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_out_img.rcbuffer->pybuffer, (PyObject*)__pyx_v_out_img, &__Pyx_TypeInfo_nn___pyx_t_3RMS_8Routines_10BinImageCy_INT32_TYPE_t, PyBUF_FORMAT| PyBUF_STRIDES| PyBUF_WRITABLE, 2, 0, __pyx_stack) == -1)) {
+          Py_XDECREF(__pyx_t_18); Py_XDECREF(__pyx_t_19); Py_XDECREF(__pyx_t_20);
           __Pyx_RaiseBufferFallbackError();
         } else {
-          PyErr_Restore(__pyx_t_46, __pyx_t_45, __pyx_t_44);
+          PyErr_Restore(__pyx_t_18, __pyx_t_19, __pyx_t_20);
         }
-        __pyx_t_46 = __pyx_t_45 = __pyx_t_44 = 0;
+        __pyx_t_18 = __pyx_t_19 = __pyx_t_20 = 0;
       }
-      __pyx_pybuffernd_previous.diminfo[0].strides = __pyx_pybuffernd_previous.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_previous.diminfo[0].shape = __pyx_pybuffernd_previous.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_previous.diminfo[1].strides = __pyx_pybuffernd_previous.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_previous.diminfo[1].shape = __pyx_pybuffernd_previous.rcbuffer->pybuffer.shape[1];
-      if (unlikely(__pyx_t_8 < 0)) __PYX_ERR(0, 328, __pyx_L1_error)
+      __pyx_pybuffernd_out_img.diminfo[0].strides = __pyx_pybuffernd_out_img.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_out_img.diminfo[0].shape = __pyx_pybuffernd_out_img.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_out_img.diminfo[1].strides = __pyx_pybuffernd_out_img.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_out_img.diminfo[1].shape = __pyx_pybuffernd_out_img.rcbuffer->pybuffer.shape[1];
+      if (unlikely(__pyx_t_8 < 0)) __PYX_ERR(0, 64, __pyx_L1_error)
     }
     __pyx_t_7 = 0;
-    __Pyx_DECREF_SET(__pyx_v_previous, ((PyArrayObject *)__pyx_t_3));
+    __Pyx_DECREF_SET(__pyx_v_out_img, ((PyArrayObject *)__pyx_t_3));
     __pyx_t_3 = 0;
-  }
-  __pyx_L4_break:;
 
-  /* "RMS/Routines/MorphCy.pyx":330
- *         previous = np.copy(img)
+    /* "RMS/Routines/BinImageCy.pyx":61
  * 
- *     return img             # <<<<<<<<<<<<<<
+ * 
+ *     if method == 'avg':             # <<<<<<<<<<<<<<
+ * 
+ *         # If the average is needed, divide the whole image by the bin factor^2
+ */
+  }
+
+  /* "RMS/Routines/BinImageCy.pyx":67
+ * 
+ * 
+ *     return out_img             # <<<<<<<<<<<<<<
  */
   __Pyx_XDECREF(__pyx_r);
-  __Pyx_INCREF(((PyObject *)__pyx_v_img));
-  __pyx_r = ((PyObject *)__pyx_v_img);
+  __Pyx_INCREF(((PyObject *)__pyx_v_out_img));
+  __pyx_r = ((PyObject *)__pyx_v_out_img);
   goto __pyx_L0;
 
-  /* "RMS/Routines/MorphCy.pyx":267
- * @cython.boundscheck(False)
+  /* "RMS/Routines/BinImageCy.pyx":19
  * @cython.wraparound(False)
- * def thin(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Zhang-Suen fast thinning algorithm. """
+ * @cython.cdivision(True)
+ * def binImage(np.ndarray[INT16_TYPE_t, ndim=2] img, int bin_factor, method='avg'):             # <<<<<<<<<<<<<<
+ *     """ Bin the given image. The binning has to be a factor of 2, e.g. 2, 4, 8, etc.
  * 
  */
 
   /* function exit code */
   __pyx_L1_error:;
-  __Pyx_XDECREF(__pyx_t_1);
   __Pyx_XDECREF(__pyx_t_2);
   __Pyx_XDECREF(__pyx_t_3);
   __Pyx_XDECREF(__pyx_t_4);
   __Pyx_XDECREF(__pyx_t_5);
+  __Pyx_XDECREF(__pyx_t_6);
   { PyObject *__pyx_type, *__pyx_value, *__pyx_tb;
     __Pyx_PyThreadState_declare
     __Pyx_PyThreadState_assign
     __Pyx_ErrFetch(&__pyx_type, &__pyx_value, &__pyx_tb);
     __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_mask.rcbuffer->pybuffer);
-    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_previous.rcbuffer->pybuffer);
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_out_img.rcbuffer->pybuffer);
   __Pyx_ErrRestore(__pyx_type, __pyx_value, __pyx_tb);}
-  __Pyx_AddTraceback("RMS.Routines.MorphCy.thin", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("RMS.Routines.BinImageCy.binImage", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = NULL;
   goto __pyx_L2;
   __pyx_L0:;
   __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_img.rcbuffer->pybuffer);
-  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_mask.rcbuffer->pybuffer);
-  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_previous.rcbuffer->pybuffer);
+  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_out_img.rcbuffer->pybuffer);
   __pyx_L2:;
-  __Pyx_XDECREF((PyObject *)__pyx_v_mask);
-  __Pyx_XDECREF((PyObject *)__pyx_v_previous);
-  __Pyx_XDECREF(__pyx_v_diff);
-  __Pyx_XDECREF((PyObject *)__pyx_v_img);
+  __Pyx_XDECREF((PyObject *)__pyx_v_out_img);
   __Pyx_XGIVEREF(__pyx_r);
   __Pyx_RefNannyFinishContext();
   return __pyx_r;
@@ -5819,7 +2439,7 @@ static int __pyx_pf_5numpy_7ndarray___getbuffer__(PyArrayObject *__pyx_v_self, P
  * 
  *             if ((flags & pybuf.PyBUF_F_CONTIGUOUS == pybuf.PyBUF_F_CONTIGUOUS)
  */
-    __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__2, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(1, 272, __pyx_L1_error)
+    __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple_, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(1, 272, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_3);
     __Pyx_Raise(__pyx_t_3, 0, 0, 0);
     __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
@@ -5875,7 +2495,7 @@ static int __pyx_pf_5numpy_7ndarray___getbuffer__(PyArrayObject *__pyx_v_self, P
  * 
  *             info.buf = PyArray_DATA(self)
  */
-    __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__3, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(1, 276, __pyx_L1_error)
+    __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__2, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(1, 276, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_3);
     __Pyx_Raise(__pyx_t_3, 0, 0, 0);
     __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
@@ -6133,7 +2753,7 @@ static int __pyx_pf_5numpy_7ndarray___getbuffer__(PyArrayObject *__pyx_v_self, P
  *                 if   t == NPY_BYTE:        f = "b"
  *                 elif t == NPY_UBYTE:       f = "B"
  */
-      __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__4, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(1, 306, __pyx_L1_error)
+      __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__3, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(1, 306, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_3);
       __Pyx_Raise(__pyx_t_3, 0, 0, 0);
       __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
@@ -7013,7 +3633,7 @@ static CYTHON_INLINE char *__pyx_f_5numpy__util_dtypestring(PyArray_Descr *__pyx
  * 
  *         if ((child.byteorder == c'>' and little_endian) or
  */
-      __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_RuntimeError, __pyx_tuple__5, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(1, 856, __pyx_L1_error)
+      __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_RuntimeError, __pyx_tuple__4, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(1, 856, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_3);
       __Pyx_Raise(__pyx_t_3, 0, 0, 0);
       __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
@@ -7081,7 +3701,7 @@ static CYTHON_INLINE char *__pyx_f_5numpy__util_dtypestring(PyArray_Descr *__pyx
  *             # One could encode it in the format string and have Cython
  *             # complain instead, BUT: < and > in format strings also imply
  */
-      __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__4, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(1, 860, __pyx_L1_error)
+      __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__3, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(1, 860, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_3);
       __Pyx_Raise(__pyx_t_3, 0, 0, 0);
       __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
@@ -7190,7 +3810,7 @@ static CYTHON_INLINE char *__pyx_f_5numpy__util_dtypestring(PyArray_Descr *__pyx
  * 
  *             # Until ticket #99 is fixed, use integers to avoid warnings
  */
-        __pyx_t_4 = __Pyx_PyObject_Call(__pyx_builtin_RuntimeError, __pyx_tuple__6, NULL); if (unlikely(!__pyx_t_4)) __PYX_ERR(1, 880, __pyx_L1_error)
+        __pyx_t_4 = __Pyx_PyObject_Call(__pyx_builtin_RuntimeError, __pyx_tuple__5, NULL); if (unlikely(!__pyx_t_4)) __PYX_ERR(1, 880, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_4);
         __Pyx_Raise(__pyx_t_4, 0, 0, 0);
         __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
@@ -7818,7 +4438,7 @@ static CYTHON_INLINE int __pyx_f_5numpy_import_array(void) {
  * 
  * cdef inline int import_umath() except -1:
  */
-      __pyx_t_8 = __Pyx_PyObject_Call(__pyx_builtin_ImportError, __pyx_tuple__7, NULL); if (unlikely(!__pyx_t_8)) __PYX_ERR(1, 1038, __pyx_L5_except_error)
+      __pyx_t_8 = __Pyx_PyObject_Call(__pyx_builtin_ImportError, __pyx_tuple__6, NULL); if (unlikely(!__pyx_t_8)) __PYX_ERR(1, 1038, __pyx_L5_except_error)
       __Pyx_GOTREF(__pyx_t_8);
       __Pyx_Raise(__pyx_t_8, 0, 0, 0);
       __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
@@ -7947,7 +4567,7 @@ static CYTHON_INLINE int __pyx_f_5numpy_import_umath(void) {
  * 
  * cdef inline int import_ufunc() except -1:
  */
-      __pyx_t_8 = __Pyx_PyObject_Call(__pyx_builtin_ImportError, __pyx_tuple__8, NULL); if (unlikely(!__pyx_t_8)) __PYX_ERR(1, 1044, __pyx_L5_except_error)
+      __pyx_t_8 = __Pyx_PyObject_Call(__pyx_builtin_ImportError, __pyx_tuple__7, NULL); if (unlikely(!__pyx_t_8)) __PYX_ERR(1, 1044, __pyx_L5_except_error)
       __Pyx_GOTREF(__pyx_t_8);
       __Pyx_Raise(__pyx_t_8, 0, 0, 0);
       __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
@@ -8073,7 +4693,7 @@ static CYTHON_INLINE int __pyx_f_5numpy_import_ufunc(void) {
  *     except Exception:
  *         raise ImportError("numpy.core.umath failed to import")             # <<<<<<<<<<<<<<
  */
-      __pyx_t_8 = __Pyx_PyObject_Call(__pyx_builtin_ImportError, __pyx_tuple__8, NULL); if (unlikely(!__pyx_t_8)) __PYX_ERR(1, 1050, __pyx_L5_except_error)
+      __pyx_t_8 = __Pyx_PyObject_Call(__pyx_builtin_ImportError, __pyx_tuple__7, NULL); if (unlikely(!__pyx_t_8)) __PYX_ERR(1, 1050, __pyx_L5_except_error)
       __Pyx_GOTREF(__pyx_t_8);
       __Pyx_Raise(__pyx_t_8, 0, 0, 0);
       __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
@@ -8127,17 +4747,17 @@ static PyMethodDef __pyx_methods[] = {
 #if PY_MAJOR_VERSION >= 3
 #if CYTHON_PEP489_MULTI_PHASE_INIT
 static PyObject* __pyx_pymod_create(PyObject *spec, PyModuleDef *def); /*proto*/
-static int __pyx_pymod_exec_MorphCy(PyObject* module); /*proto*/
+static int __pyx_pymod_exec_BinImageCy(PyObject* module); /*proto*/
 static PyModuleDef_Slot __pyx_moduledef_slots[] = {
   {Py_mod_create, (void*)__pyx_pymod_create},
-  {Py_mod_exec, (void*)__pyx_pymod_exec_MorphCy},
+  {Py_mod_exec, (void*)__pyx_pymod_exec_BinImageCy},
   {0, NULL}
 };
 #endif
 
 static struct PyModuleDef __pyx_moduledef = {
     PyModuleDef_HEAD_INIT,
-    "MorphCy",
+    "BinImageCy",
     0, /* m_doc */
   #if CYTHON_PEP489_MULTI_PHASE_INIT
     0, /* m_size */
@@ -8166,42 +4786,33 @@ static struct PyModuleDef __pyx_moduledef = {
 #endif
 
 static __Pyx_StringTabEntry __pyx_string_tab[] = {
-  {&__pyx_n_s_A, __pyx_k_A, sizeof(__pyx_k_A), 0, 0, 1, 1},
-  {&__pyx_n_s_B, __pyx_k_B, sizeof(__pyx_k_B), 0, 0, 1, 1},
   {&__pyx_kp_u_Format_string_allocated_too_shor, __pyx_k_Format_string_allocated_too_shor, sizeof(__pyx_k_Format_string_allocated_too_shor), 0, 1, 0, 0},
   {&__pyx_kp_u_Format_string_allocated_too_shor_2, __pyx_k_Format_string_allocated_too_shor_2, sizeof(__pyx_k_Format_string_allocated_too_shor_2), 0, 1, 0, 0},
-  {&__pyx_n_s_INT_TYPE, __pyx_k_INT_TYPE, sizeof(__pyx_k_INT_TYPE), 0, 0, 1, 1},
+  {&__pyx_n_s_INT16_TYPE, __pyx_k_INT16_TYPE, sizeof(__pyx_k_INT16_TYPE), 0, 0, 1, 1},
+  {&__pyx_n_s_INT32_TYPE, __pyx_k_INT32_TYPE, sizeof(__pyx_k_INT32_TYPE), 0, 0, 1, 1},
   {&__pyx_n_s_ImportError, __pyx_k_ImportError, sizeof(__pyx_k_ImportError), 0, 0, 1, 1},
-  {&__pyx_n_s_MORPH_CLOSE, __pyx_k_MORPH_CLOSE, sizeof(__pyx_k_MORPH_CLOSE), 0, 0, 1, 1},
   {&__pyx_kp_u_Non_native_byte_order_not_suppor, __pyx_k_Non_native_byte_order_not_suppor, sizeof(__pyx_k_Non_native_byte_order_not_suppor), 0, 1, 0, 0},
-  {&__pyx_n_s_RMS_Routines_MorphCy, __pyx_k_RMS_Routines_MorphCy, sizeof(__pyx_k_RMS_Routines_MorphCy), 0, 0, 1, 1},
-  {&__pyx_kp_s_RMS_Routines_MorphCy_pyx, __pyx_k_RMS_Routines_MorphCy_pyx, sizeof(__pyx_k_RMS_Routines_MorphCy_pyx), 0, 0, 1, 0},
+  {&__pyx_n_s_RMS_Routines_BinImageCy, __pyx_k_RMS_Routines_BinImageCy, sizeof(__pyx_k_RMS_Routines_BinImageCy), 0, 0, 1, 1},
+  {&__pyx_kp_s_RMS_Routines_BinImageCy_pyx, __pyx_k_RMS_Routines_BinImageCy_pyx, sizeof(__pyx_k_RMS_Routines_BinImageCy_pyx), 0, 0, 1, 0},
   {&__pyx_n_s_RuntimeError, __pyx_k_RuntimeError, sizeof(__pyx_k_RuntimeError), 0, 0, 1, 1},
+  {&__pyx_kp_s_The_given_binning_factor_is_not, __pyx_k_The_given_binning_factor_is_not, sizeof(__pyx_k_The_given_binning_factor_is_not), 0, 0, 1, 0},
   {&__pyx_n_s_ValueError, __pyx_k_ValueError, sizeof(__pyx_k_ValueError), 0, 0, 1, 1},
-  {&__pyx_n_s_absolute, __pyx_k_absolute, sizeof(__pyx_k_absolute), 0, 0, 1, 1},
-  {&__pyx_n_s_bitwise_and, __pyx_k_bitwise_and, sizeof(__pyx_k_bitwise_and), 0, 0, 1, 1},
-  {&__pyx_n_s_bitwise_or, __pyx_k_bitwise_or, sizeof(__pyx_k_bitwise_or), 0, 0, 1, 1},
-  {&__pyx_n_s_bridge, __pyx_k_bridge, sizeof(__pyx_k_bridge), 0, 0, 1, 1},
-  {&__pyx_n_s_clean, __pyx_k_clean, sizeof(__pyx_k_clean), 0, 0, 1, 1},
+  {&__pyx_n_s_avg, __pyx_k_avg, sizeof(__pyx_k_avg), 0, 0, 1, 1},
+  {&__pyx_n_s_binImage, __pyx_k_binImage, sizeof(__pyx_k_binImage), 0, 0, 1, 1},
+  {&__pyx_n_s_bin_factor, __pyx_k_bin_factor, sizeof(__pyx_k_bin_factor), 0, 0, 1, 1},
   {&__pyx_n_s_cline_in_traceback, __pyx_k_cline_in_traceback, sizeof(__pyx_k_cline_in_traceback), 0, 0, 1, 1},
-  {&__pyx_n_s_close, __pyx_k_close, sizeof(__pyx_k_close), 0, 0, 1, 1},
-  {&__pyx_n_s_close_cy, __pyx_k_close_cy, sizeof(__pyx_k_close_cy), 0, 0, 1, 1},
-  {&__pyx_n_s_copy, __pyx_k_copy, sizeof(__pyx_k_copy), 0, 0, 1, 1},
-  {&__pyx_n_s_cv2, __pyx_k_cv2, sizeof(__pyx_k_cv2), 0, 0, 1, 1},
-  {&__pyx_n_s_diff, __pyx_k_diff, sizeof(__pyx_k_diff), 0, 0, 1, 1},
-  {&__pyx_n_s_dilate, __pyx_k_dilate, sizeof(__pyx_k_dilate), 0, 0, 1, 1},
   {&__pyx_n_s_dtype, __pyx_k_dtype, sizeof(__pyx_k_dtype), 0, 0, 1, 1},
-  {&__pyx_n_s_fill, __pyx_k_fill, sizeof(__pyx_k_fill), 0, 0, 1, 1},
+  {&__pyx_n_s_end, __pyx_k_end, sizeof(__pyx_k_end), 0, 0, 1, 1},
+  {&__pyx_n_s_file, __pyx_k_file, sizeof(__pyx_k_file), 0, 0, 1, 1},
+  {&__pyx_n_s_i, __pyx_k_i, sizeof(__pyx_k_i), 0, 0, 1, 1},
   {&__pyx_n_s_img, __pyx_k_img, sizeof(__pyx_k_img), 0, 0, 1, 1},
+  {&__pyx_n_s_img_h, __pyx_k_img_h, sizeof(__pyx_k_img_h), 0, 0, 1, 1},
+  {&__pyx_n_s_img_w, __pyx_k_img_w, sizeof(__pyx_k_img_w), 0, 0, 1, 1},
   {&__pyx_n_s_import, __pyx_k_import, sizeof(__pyx_k_import), 0, 0, 1, 1},
-  {&__pyx_n_s_iteration, __pyx_k_iteration, sizeof(__pyx_k_iteration), 0, 0, 1, 1},
-  {&__pyx_n_s_kernel, __pyx_k_kernel, sizeof(__pyx_k_kernel), 0, 0, 1, 1},
-  {&__pyx_n_s_m1, __pyx_k_m1, sizeof(__pyx_k_m1), 0, 0, 1, 1},
-  {&__pyx_n_s_m2, __pyx_k_m2, sizeof(__pyx_k_m2), 0, 0, 1, 1},
+  {&__pyx_n_s_j, __pyx_k_j, sizeof(__pyx_k_j), 0, 0, 1, 1},
+  {&__pyx_n_s_log2, __pyx_k_log2, sizeof(__pyx_k_log2), 0, 0, 1, 1},
   {&__pyx_n_s_main, __pyx_k_main, sizeof(__pyx_k_main), 0, 0, 1, 1},
-  {&__pyx_n_s_mask, __pyx_k_mask, sizeof(__pyx_k_mask), 0, 0, 1, 1},
-  {&__pyx_n_s_morphApply, __pyx_k_morphApply, sizeof(__pyx_k_morphApply), 0, 0, 1, 1},
-  {&__pyx_n_s_morphologyEx, __pyx_k_morphologyEx, sizeof(__pyx_k_morphologyEx), 0, 0, 1, 1},
+  {&__pyx_n_s_method, __pyx_k_method, sizeof(__pyx_k_method), 0, 0, 1, 1},
   {&__pyx_n_s_name, __pyx_k_name, sizeof(__pyx_k_name), 0, 0, 1, 1},
   {&__pyx_kp_u_ndarray_is_not_C_contiguous, __pyx_k_ndarray_is_not_C_contiguous, sizeof(__pyx_k_ndarray_is_not_C_contiguous), 0, 1, 0, 0},
   {&__pyx_kp_u_ndarray_is_not_Fortran_contiguou, __pyx_k_ndarray_is_not_Fortran_contiguou, sizeof(__pyx_k_ndarray_is_not_Fortran_contiguou), 0, 1, 0, 0},
@@ -8209,36 +4820,18 @@ static __Pyx_StringTabEntry __pyx_string_tab[] = {
   {&__pyx_n_s_numpy, __pyx_k_numpy, sizeof(__pyx_k_numpy), 0, 0, 1, 1},
   {&__pyx_kp_s_numpy_core_multiarray_failed_to, __pyx_k_numpy_core_multiarray_failed_to, sizeof(__pyx_k_numpy_core_multiarray_failed_to), 0, 0, 1, 0},
   {&__pyx_kp_s_numpy_core_umath_failed_to_impor, __pyx_k_numpy_core_umath_failed_to_impor, sizeof(__pyx_k_numpy_core_umath_failed_to_impor), 0, 0, 1, 0},
-  {&__pyx_n_s_ones, __pyx_k_ones, sizeof(__pyx_k_ones), 0, 0, 1, 1},
-  {&__pyx_n_s_operation, __pyx_k_operation, sizeof(__pyx_k_operation), 0, 0, 1, 1},
-  {&__pyx_n_s_operations, __pyx_k_operations, sizeof(__pyx_k_operations), 0, 0, 1, 1},
-  {&__pyx_n_s_p2, __pyx_k_p2, sizeof(__pyx_k_p2), 0, 0, 1, 1},
-  {&__pyx_n_s_p3, __pyx_k_p3, sizeof(__pyx_k_p3), 0, 0, 1, 1},
-  {&__pyx_n_s_p4, __pyx_k_p4, sizeof(__pyx_k_p4), 0, 0, 1, 1},
-  {&__pyx_n_s_p5, __pyx_k_p5, sizeof(__pyx_k_p5), 0, 0, 1, 1},
-  {&__pyx_n_s_p6, __pyx_k_p6, sizeof(__pyx_k_p6), 0, 0, 1, 1},
-  {&__pyx_n_s_p7, __pyx_k_p7, sizeof(__pyx_k_p7), 0, 0, 1, 1},
-  {&__pyx_n_s_p8, __pyx_k_p8, sizeof(__pyx_k_p8), 0, 0, 1, 1},
-  {&__pyx_n_s_p9, __pyx_k_p9, sizeof(__pyx_k_p9), 0, 0, 1, 1},
-  {&__pyx_n_s_previous, __pyx_k_previous, sizeof(__pyx_k_previous), 0, 0, 1, 1},
+  {&__pyx_n_s_out_img, __pyx_k_out_img, sizeof(__pyx_k_out_img), 0, 0, 1, 1},
+  {&__pyx_n_s_print, __pyx_k_print, sizeof(__pyx_k_print), 0, 0, 1, 1},
   {&__pyx_n_s_range, __pyx_k_range, sizeof(__pyx_k_range), 0, 0, 1, 1},
-  {&__pyx_n_s_shape, __pyx_k_shape, sizeof(__pyx_k_shape), 0, 0, 1, 1},
-  {&__pyx_n_s_sum, __pyx_k_sum, sizeof(__pyx_k_sum), 0, 0, 1, 1},
   {&__pyx_n_s_test, __pyx_k_test, sizeof(__pyx_k_test), 0, 0, 1, 1},
-  {&__pyx_n_s_thin, __pyx_k_thin, sizeof(__pyx_k_thin), 0, 0, 1, 1},
-  {&__pyx_n_s_uint8, __pyx_k_uint8, sizeof(__pyx_k_uint8), 0, 0, 1, 1},
+  {&__pyx_n_s_uint16, __pyx_k_uint16, sizeof(__pyx_k_uint16), 0, 0, 1, 1},
+  {&__pyx_n_s_uint32, __pyx_k_uint32, sizeof(__pyx_k_uint32), 0, 0, 1, 1},
   {&__pyx_kp_u_unknown_dtype_code_in_numpy_pxd, __pyx_k_unknown_dtype_code_in_numpy_pxd, sizeof(__pyx_k_unknown_dtype_code_in_numpy_pxd), 0, 1, 0, 0},
-  {&__pyx_n_s_x, __pyx_k_x, sizeof(__pyx_k_x), 0, 0, 1, 1},
-  {&__pyx_n_s_x_size, __pyx_k_x_size, sizeof(__pyx_k_x_size), 0, 0, 1, 1},
-  {&__pyx_n_s_xm, __pyx_k_xm, sizeof(__pyx_k_xm), 0, 0, 1, 1},
-  {&__pyx_n_s_y, __pyx_k_y, sizeof(__pyx_k_y), 0, 0, 1, 1},
-  {&__pyx_n_s_y_size, __pyx_k_y_size, sizeof(__pyx_k_y_size), 0, 0, 1, 1},
-  {&__pyx_n_s_ym, __pyx_k_ym, sizeof(__pyx_k_ym), 0, 0, 1, 1},
   {&__pyx_n_s_zeros, __pyx_k_zeros, sizeof(__pyx_k_zeros), 0, 0, 1, 1},
   {0, 0, 0, 0, 0, 0, 0}
 };
 static CYTHON_SMALL_CODE int __Pyx_InitCachedBuiltins(void) {
-  __pyx_builtin_range = __Pyx_GetBuiltinName(__pyx_n_s_range); if (!__pyx_builtin_range) __PYX_ERR(0, 74, __pyx_L1_error)
+  __pyx_builtin_range = __Pyx_GetBuiltinName(__pyx_n_s_range); if (!__pyx_builtin_range) __PYX_ERR(0, 56, __pyx_L1_error)
   __pyx_builtin_ValueError = __Pyx_GetBuiltinName(__pyx_n_s_ValueError); if (!__pyx_builtin_ValueError) __PYX_ERR(1, 272, __pyx_L1_error)
   __pyx_builtin_RuntimeError = __Pyx_GetBuiltinName(__pyx_n_s_RuntimeError); if (!__pyx_builtin_RuntimeError) __PYX_ERR(1, 856, __pyx_L1_error)
   __pyx_builtin_ImportError = __Pyx_GetBuiltinName(__pyx_n_s_ImportError); if (!__pyx_builtin_ImportError) __PYX_ERR(1, 1038, __pyx_L1_error)
@@ -8251,17 +4844,6 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
   __Pyx_RefNannyDeclarations
   __Pyx_RefNannySetupContext("__Pyx_InitCachedConstants", 0);
 
-  /* "RMS/Routines/MorphCy.pyx":241
- *     """
- * 
- *     kernel = np.ones((3, 3), np.uint8)             # <<<<<<<<<<<<<<
- * 
- *     img = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
- */
-  __pyx_tuple_ = PyTuple_Pack(2, __pyx_int_3, __pyx_int_3); if (unlikely(!__pyx_tuple_)) __PYX_ERR(0, 241, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple_);
-  __Pyx_GIVEREF(__pyx_tuple_);
-
   /* "../../anaconda3/envs/wmpl/lib/python3.7/site-packages/Cython/Includes/numpy/__init__.pxd":272
  *             if ((flags & pybuf.PyBUF_C_CONTIGUOUS == pybuf.PyBUF_C_CONTIGUOUS)
  *                 and not PyArray_CHKFLAGS(self, NPY_ARRAY_C_CONTIGUOUS)):
@@ -8269,9 +4851,9 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  * 
  *             if ((flags & pybuf.PyBUF_F_CONTIGUOUS == pybuf.PyBUF_F_CONTIGUOUS)
  */
-  __pyx_tuple__2 = PyTuple_Pack(1, __pyx_kp_u_ndarray_is_not_C_contiguous); if (unlikely(!__pyx_tuple__2)) __PYX_ERR(1, 272, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__2);
-  __Pyx_GIVEREF(__pyx_tuple__2);
+  __pyx_tuple_ = PyTuple_Pack(1, __pyx_kp_u_ndarray_is_not_C_contiguous); if (unlikely(!__pyx_tuple_)) __PYX_ERR(1, 272, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple_);
+  __Pyx_GIVEREF(__pyx_tuple_);
 
   /* "../../anaconda3/envs/wmpl/lib/python3.7/site-packages/Cython/Includes/numpy/__init__.pxd":276
  *             if ((flags & pybuf.PyBUF_F_CONTIGUOUS == pybuf.PyBUF_F_CONTIGUOUS)
@@ -8280,9 +4862,9 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  * 
  *             info.buf = PyArray_DATA(self)
  */
-  __pyx_tuple__3 = PyTuple_Pack(1, __pyx_kp_u_ndarray_is_not_Fortran_contiguou); if (unlikely(!__pyx_tuple__3)) __PYX_ERR(1, 276, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__3);
-  __Pyx_GIVEREF(__pyx_tuple__3);
+  __pyx_tuple__2 = PyTuple_Pack(1, __pyx_kp_u_ndarray_is_not_Fortran_contiguou); if (unlikely(!__pyx_tuple__2)) __PYX_ERR(1, 276, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__2);
+  __Pyx_GIVEREF(__pyx_tuple__2);
 
   /* "../../anaconda3/envs/wmpl/lib/python3.7/site-packages/Cython/Includes/numpy/__init__.pxd":306
  *                 if ((descr.byteorder == c'>' and little_endian) or
@@ -8291,9 +4873,9 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  *                 if   t == NPY_BYTE:        f = "b"
  *                 elif t == NPY_UBYTE:       f = "B"
  */
-  __pyx_tuple__4 = PyTuple_Pack(1, __pyx_kp_u_Non_native_byte_order_not_suppor); if (unlikely(!__pyx_tuple__4)) __PYX_ERR(1, 306, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__4);
-  __Pyx_GIVEREF(__pyx_tuple__4);
+  __pyx_tuple__3 = PyTuple_Pack(1, __pyx_kp_u_Non_native_byte_order_not_suppor); if (unlikely(!__pyx_tuple__3)) __PYX_ERR(1, 306, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__3);
+  __Pyx_GIVEREF(__pyx_tuple__3);
 
   /* "../../anaconda3/envs/wmpl/lib/python3.7/site-packages/Cython/Includes/numpy/__init__.pxd":856
  * 
@@ -8302,9 +4884,9 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  * 
  *         if ((child.byteorder == c'>' and little_endian) or
  */
-  __pyx_tuple__5 = PyTuple_Pack(1, __pyx_kp_u_Format_string_allocated_too_shor); if (unlikely(!__pyx_tuple__5)) __PYX_ERR(1, 856, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__5);
-  __Pyx_GIVEREF(__pyx_tuple__5);
+  __pyx_tuple__4 = PyTuple_Pack(1, __pyx_kp_u_Format_string_allocated_too_shor); if (unlikely(!__pyx_tuple__4)) __PYX_ERR(1, 856, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__4);
+  __Pyx_GIVEREF(__pyx_tuple__4);
 
   /* "../../anaconda3/envs/wmpl/lib/python3.7/site-packages/Cython/Includes/numpy/__init__.pxd":880
  *             t = child.type_num
@@ -8313,9 +4895,9 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  * 
  *             # Until ticket #99 is fixed, use integers to avoid warnings
  */
-  __pyx_tuple__6 = PyTuple_Pack(1, __pyx_kp_u_Format_string_allocated_too_shor_2); if (unlikely(!__pyx_tuple__6)) __PYX_ERR(1, 880, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__6);
-  __Pyx_GIVEREF(__pyx_tuple__6);
+  __pyx_tuple__5 = PyTuple_Pack(1, __pyx_kp_u_Format_string_allocated_too_shor_2); if (unlikely(!__pyx_tuple__5)) __PYX_ERR(1, 880, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__5);
+  __Pyx_GIVEREF(__pyx_tuple__5);
 
   /* "../../anaconda3/envs/wmpl/lib/python3.7/site-packages/Cython/Includes/numpy/__init__.pxd":1038
  *         _import_array()
@@ -8324,9 +4906,9 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  * 
  * cdef inline int import_umath() except -1:
  */
-  __pyx_tuple__7 = PyTuple_Pack(1, __pyx_kp_s_numpy_core_multiarray_failed_to); if (unlikely(!__pyx_tuple__7)) __PYX_ERR(1, 1038, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__7);
-  __Pyx_GIVEREF(__pyx_tuple__7);
+  __pyx_tuple__6 = PyTuple_Pack(1, __pyx_kp_s_numpy_core_multiarray_failed_to); if (unlikely(!__pyx_tuple__6)) __PYX_ERR(1, 1038, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__6);
+  __Pyx_GIVEREF(__pyx_tuple__6);
 
   /* "../../anaconda3/envs/wmpl/lib/python3.7/site-packages/Cython/Includes/numpy/__init__.pxd":1044
  *         _import_umath()
@@ -8335,93 +4917,21 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  * 
  * cdef inline int import_ufunc() except -1:
  */
-  __pyx_tuple__8 = PyTuple_Pack(1, __pyx_kp_s_numpy_core_umath_failed_to_impor); if (unlikely(!__pyx_tuple__8)) __PYX_ERR(1, 1044, __pyx_L1_error)
+  __pyx_tuple__7 = PyTuple_Pack(1, __pyx_kp_s_numpy_core_umath_failed_to_impor); if (unlikely(!__pyx_tuple__7)) __PYX_ERR(1, 1044, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__7);
+  __Pyx_GIVEREF(__pyx_tuple__7);
+
+  /* "RMS/Routines/BinImageCy.pyx":19
+ * @cython.wraparound(False)
+ * @cython.cdivision(True)
+ * def binImage(np.ndarray[INT16_TYPE_t, ndim=2] img, int bin_factor, method='avg'):             # <<<<<<<<<<<<<<
+ *     """ Bin the given image. The binning has to be a factor of 2, e.g. 2, 4, 8, etc.
+ * 
+ */
+  __pyx_tuple__8 = PyTuple_Pack(8, __pyx_n_s_img, __pyx_n_s_bin_factor, __pyx_n_s_method, __pyx_n_s_i, __pyx_n_s_j, __pyx_n_s_img_h, __pyx_n_s_img_w, __pyx_n_s_out_img); if (unlikely(!__pyx_tuple__8)) __PYX_ERR(0, 19, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__8);
   __Pyx_GIVEREF(__pyx_tuple__8);
-
-  /* "RMS/Routines/MorphCy.pyx":17
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def morphApply(np.ndarray[INT_TYPE_t, ndim=2] img, operations):             # <<<<<<<<<<<<<<
- *     """ Apply morphological operations on the given image.
- * 
- */
-  __pyx_tuple__9 = PyTuple_Pack(3, __pyx_n_s_img, __pyx_n_s_operations, __pyx_n_s_operation); if (unlikely(!__pyx_tuple__9)) __PYX_ERR(0, 17, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__9);
-  __Pyx_GIVEREF(__pyx_tuple__9);
-  __pyx_codeobj__10 = (PyObject*)__Pyx_PyCode_New(2, 0, 3, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__9, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_RMS_Routines_MorphCy_pyx, __pyx_n_s_morphApply, 17, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__10)) __PYX_ERR(0, 17, __pyx_L1_error)
-
-  /* "RMS/Routines/MorphCy.pyx":54
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def clean(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Clean isolated pixels, as in:
- *      0  0  0      0  0  0
- */
-  __pyx_tuple__11 = PyTuple_Pack(15, __pyx_n_s_img, __pyx_n_s_y, __pyx_n_s_x, __pyx_n_s_p2, __pyx_n_s_p3, __pyx_n_s_p4, __pyx_n_s_p5, __pyx_n_s_p6, __pyx_n_s_p7, __pyx_n_s_p8, __pyx_n_s_p9, __pyx_n_s_y_size, __pyx_n_s_x_size, __pyx_n_s_ym, __pyx_n_s_xm); if (unlikely(!__pyx_tuple__11)) __PYX_ERR(0, 54, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__11);
-  __Pyx_GIVEREF(__pyx_tuple__11);
-  __pyx_codeobj__12 = (PyObject*)__Pyx_PyCode_New(1, 0, 15, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__11, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_RMS_Routines_MorphCy_pyx, __pyx_n_s_clean, 54, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__12)) __PYX_ERR(0, 54, __pyx_L1_error)
-
-  /* "RMS/Routines/MorphCy.pyx":100
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def bridge(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Connect pixels on opposite sides, if other pixels are 0, as in:
- *      0  0  1      0  0  1
- */
-  __pyx_tuple__13 = PyTuple_Pack(14, __pyx_n_s_img, __pyx_n_s_y, __pyx_n_s_x, __pyx_n_s_p2, __pyx_n_s_p3, __pyx_n_s_p4, __pyx_n_s_p5, __pyx_n_s_p6, __pyx_n_s_p7, __pyx_n_s_p8, __pyx_n_s_p9, __pyx_n_s_y_size, __pyx_n_s_x_size, __pyx_n_s_mask); if (unlikely(!__pyx_tuple__13)) __PYX_ERR(0, 100, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__13);
-  __Pyx_GIVEREF(__pyx_tuple__13);
-  __pyx_codeobj__14 = (PyObject*)__Pyx_PyCode_New(1, 0, 14, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__13, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_RMS_Routines_MorphCy_pyx, __pyx_n_s_bridge, 100, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__14)) __PYX_ERR(0, 100, __pyx_L1_error)
-
-  /* "RMS/Routines/MorphCy.pyx":154
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def close_cy(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Morphological closing (dilation followed by erosion) with a 3x3 kernel.
- * 
- */
-  __pyx_tuple__15 = PyTuple_Pack(14, __pyx_n_s_img, __pyx_n_s_y, __pyx_n_s_x, __pyx_n_s_p2, __pyx_n_s_p3, __pyx_n_s_p4, __pyx_n_s_p5, __pyx_n_s_p6, __pyx_n_s_p7, __pyx_n_s_p8, __pyx_n_s_p9, __pyx_n_s_y_size, __pyx_n_s_x_size, __pyx_n_s_mask); if (unlikely(!__pyx_tuple__15)) __PYX_ERR(0, 154, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__15);
-  __Pyx_GIVEREF(__pyx_tuple__15);
-  __pyx_codeobj__16 = (PyObject*)__Pyx_PyCode_New(1, 0, 14, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__15, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_RMS_Routines_MorphCy_pyx, __pyx_n_s_close_cy, 154, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__16)) __PYX_ERR(0, 154, __pyx_L1_error)
-
-  /* "RMS/Routines/MorphCy.pyx":233
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def close(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Morphological closing (dilation followed by erosion) with OpenCV.
- * 
- */
-  __pyx_tuple__17 = PyTuple_Pack(2, __pyx_n_s_img, __pyx_n_s_kernel); if (unlikely(!__pyx_tuple__17)) __PYX_ERR(0, 233, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__17);
-  __Pyx_GIVEREF(__pyx_tuple__17);
-  __pyx_codeobj__18 = (PyObject*)__Pyx_PyCode_New(1, 0, 2, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__17, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_RMS_Routines_MorphCy_pyx, __pyx_n_s_close, 233, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__18)) __PYX_ERR(0, 233, __pyx_L1_error)
-
-  /* "RMS/Routines/MorphCy.pyx":250
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def dilate(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Morphological dilation with OpenCV.
- * 
- */
-  __pyx_tuple__19 = PyTuple_Pack(2, __pyx_n_s_img, __pyx_n_s_kernel); if (unlikely(!__pyx_tuple__19)) __PYX_ERR(0, 250, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__19);
-  __Pyx_GIVEREF(__pyx_tuple__19);
-  __pyx_codeobj__20 = (PyObject*)__Pyx_PyCode_New(1, 0, 2, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__19, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_RMS_Routines_MorphCy_pyx, __pyx_n_s_dilate, 250, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__20)) __PYX_ERR(0, 250, __pyx_L1_error)
-
-  /* "RMS/Routines/MorphCy.pyx":267
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def thin(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Zhang-Suen fast thinning algorithm. """
- * 
- */
-  __pyx_tuple__21 = PyTuple_Pack(21, __pyx_n_s_img, __pyx_n_s_y, __pyx_n_s_x, __pyx_n_s_p2, __pyx_n_s_p3, __pyx_n_s_p4, __pyx_n_s_p5, __pyx_n_s_p6, __pyx_n_s_p7, __pyx_n_s_p8, __pyx_n_s_p9, __pyx_n_s_A, __pyx_n_s_B, __pyx_n_s_m1, __pyx_n_s_m2, __pyx_n_s_iteration, __pyx_n_s_y_size, __pyx_n_s_x_size, __pyx_n_s_mask, __pyx_n_s_previous, __pyx_n_s_diff); if (unlikely(!__pyx_tuple__21)) __PYX_ERR(0, 267, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__21);
-  __Pyx_GIVEREF(__pyx_tuple__21);
-  __pyx_codeobj__22 = (PyObject*)__Pyx_PyCode_New(1, 0, 21, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__21, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_RMS_Routines_MorphCy_pyx, __pyx_n_s_thin, 267, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__22)) __PYX_ERR(0, 267, __pyx_L1_error)
+  __pyx_codeobj__9 = (PyObject*)__Pyx_PyCode_New(3, 0, 8, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__8, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_RMS_Routines_BinImageCy_pyx, __pyx_n_s_binImage, 19, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__9)) __PYX_ERR(0, 19, __pyx_L1_error)
   __Pyx_RefNannyFinishContext();
   return 0;
   __pyx_L1_error:;
@@ -8430,10 +4940,8 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
 }
 
 static CYTHON_SMALL_CODE int __Pyx_InitGlobals(void) {
-  if (__Pyx_InitStrings(__pyx_string_tab) < 0) __PYX_ERR(0, 2, __pyx_L1_error);
-  __pyx_int_0 = PyInt_FromLong(0); if (unlikely(!__pyx_int_0)) __PYX_ERR(0, 2, __pyx_L1_error)
-  __pyx_int_1 = PyInt_FromLong(1); if (unlikely(!__pyx_int_1)) __PYX_ERR(0, 2, __pyx_L1_error)
-  __pyx_int_3 = PyInt_FromLong(3); if (unlikely(!__pyx_int_3)) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__Pyx_InitStrings(__pyx_string_tab) < 0) __PYX_ERR(0, 1, __pyx_L1_error);
+  __pyx_int_1 = PyInt_FromLong(1); if (unlikely(!__pyx_int_1)) __PYX_ERR(0, 1, __pyx_L1_error)
   return 0;
   __pyx_L1_error:;
   return -1;
@@ -8549,11 +5057,11 @@ static int __Pyx_modinit_function_import_code(void) {
 
 
 #if PY_MAJOR_VERSION < 3
-__Pyx_PyMODINIT_FUNC initMorphCy(void) CYTHON_SMALL_CODE; /*proto*/
-__Pyx_PyMODINIT_FUNC initMorphCy(void)
+__Pyx_PyMODINIT_FUNC initBinImageCy(void) CYTHON_SMALL_CODE; /*proto*/
+__Pyx_PyMODINIT_FUNC initBinImageCy(void)
 #else
-__Pyx_PyMODINIT_FUNC PyInit_MorphCy(void) CYTHON_SMALL_CODE; /*proto*/
-__Pyx_PyMODINIT_FUNC PyInit_MorphCy(void)
+__Pyx_PyMODINIT_FUNC PyInit_BinImageCy(void) CYTHON_SMALL_CODE; /*proto*/
+__Pyx_PyMODINIT_FUNC PyInit_BinImageCy(void)
 #if CYTHON_PEP489_MULTI_PHASE_INIT
 {
   return PyModuleDef_Init(&__pyx_moduledef);
@@ -8620,7 +5128,7 @@ bad:
 }
 
 
-static CYTHON_SMALL_CODE int __pyx_pymod_exec_MorphCy(PyObject *__pyx_pyinit_module)
+static CYTHON_SMALL_CODE int __pyx_pymod_exec_BinImageCy(PyObject *__pyx_pyinit_module)
 #endif
 #endif
 {
@@ -8630,7 +5138,7 @@ static CYTHON_SMALL_CODE int __pyx_pymod_exec_MorphCy(PyObject *__pyx_pyinit_mod
   #if CYTHON_PEP489_MULTI_PHASE_INIT
   if (__pyx_m) {
     if (__pyx_m == __pyx_pyinit_module) return 0;
-    PyErr_SetString(PyExc_RuntimeError, "Module 'MorphCy' has already been imported. Re-initialisation is not supported.");
+    PyErr_SetString(PyExc_RuntimeError, "Module 'BinImageCy' has already been imported. Re-initialisation is not supported.");
     return -1;
   }
   #elif PY_MAJOR_VERSION >= 3
@@ -8645,31 +5153,31 @@ if (!__Pyx_RefNanny) {
       Py_FatalError("failed to import 'refnanny' module");
 }
 #endif
-  __Pyx_RefNannySetupContext("__Pyx_PyMODINIT_FUNC PyInit_MorphCy(void)", 0);
-  if (__Pyx_check_binary_version() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  __Pyx_RefNannySetupContext("__Pyx_PyMODINIT_FUNC PyInit_BinImageCy(void)", 0);
+  if (__Pyx_check_binary_version() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #ifdef __Pxy_PyFrame_Initialize_Offsets
   __Pxy_PyFrame_Initialize_Offsets();
   #endif
-  __pyx_empty_tuple = PyTuple_New(0); if (unlikely(!__pyx_empty_tuple)) __PYX_ERR(0, 2, __pyx_L1_error)
-  __pyx_empty_bytes = PyBytes_FromStringAndSize("", 0); if (unlikely(!__pyx_empty_bytes)) __PYX_ERR(0, 2, __pyx_L1_error)
-  __pyx_empty_unicode = PyUnicode_FromStringAndSize("", 0); if (unlikely(!__pyx_empty_unicode)) __PYX_ERR(0, 2, __pyx_L1_error)
+  __pyx_empty_tuple = PyTuple_New(0); if (unlikely(!__pyx_empty_tuple)) __PYX_ERR(0, 1, __pyx_L1_error)
+  __pyx_empty_bytes = PyBytes_FromStringAndSize("", 0); if (unlikely(!__pyx_empty_bytes)) __PYX_ERR(0, 1, __pyx_L1_error)
+  __pyx_empty_unicode = PyUnicode_FromStringAndSize("", 0); if (unlikely(!__pyx_empty_unicode)) __PYX_ERR(0, 1, __pyx_L1_error)
   #ifdef __Pyx_CyFunction_USED
-  if (__pyx_CyFunction_init() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__pyx_CyFunction_init() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #endif
   #ifdef __Pyx_FusedFunction_USED
-  if (__pyx_FusedFunction_init() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__pyx_FusedFunction_init() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #endif
   #ifdef __Pyx_Coroutine_USED
-  if (__pyx_Coroutine_init() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__pyx_Coroutine_init() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #endif
   #ifdef __Pyx_Generator_USED
-  if (__pyx_Generator_init() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__pyx_Generator_init() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #endif
   #ifdef __Pyx_AsyncGen_USED
-  if (__pyx_AsyncGen_init() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__pyx_AsyncGen_init() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #endif
   #ifdef __Pyx_StopAsyncIteration_USED
-  if (__pyx_StopAsyncIteration_init() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__pyx_StopAsyncIteration_init() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #endif
   /*--- Library function declarations ---*/
   /*--- Threads initialization code ---*/
@@ -8684,39 +5192,39 @@ if (!__Pyx_RefNanny) {
   Py_INCREF(__pyx_m);
   #else
   #if PY_MAJOR_VERSION < 3
-  __pyx_m = Py_InitModule4("MorphCy", __pyx_methods, 0, 0, PYTHON_API_VERSION); Py_XINCREF(__pyx_m);
+  __pyx_m = Py_InitModule4("BinImageCy", __pyx_methods, 0, 0, PYTHON_API_VERSION); Py_XINCREF(__pyx_m);
   #else
   __pyx_m = PyModule_Create(&__pyx_moduledef);
   #endif
-  if (unlikely(!__pyx_m)) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (unlikely(!__pyx_m)) __PYX_ERR(0, 1, __pyx_L1_error)
   #endif
-  __pyx_d = PyModule_GetDict(__pyx_m); if (unlikely(!__pyx_d)) __PYX_ERR(0, 2, __pyx_L1_error)
+  __pyx_d = PyModule_GetDict(__pyx_m); if (unlikely(!__pyx_d)) __PYX_ERR(0, 1, __pyx_L1_error)
   Py_INCREF(__pyx_d);
-  __pyx_b = PyImport_AddModule(__Pyx_BUILTIN_MODULE_NAME); if (unlikely(!__pyx_b)) __PYX_ERR(0, 2, __pyx_L1_error)
+  __pyx_b = PyImport_AddModule(__Pyx_BUILTIN_MODULE_NAME); if (unlikely(!__pyx_b)) __PYX_ERR(0, 1, __pyx_L1_error)
   Py_INCREF(__pyx_b);
-  __pyx_cython_runtime = PyImport_AddModule((char *) "cython_runtime"); if (unlikely(!__pyx_cython_runtime)) __PYX_ERR(0, 2, __pyx_L1_error)
+  __pyx_cython_runtime = PyImport_AddModule((char *) "cython_runtime"); if (unlikely(!__pyx_cython_runtime)) __PYX_ERR(0, 1, __pyx_L1_error)
   Py_INCREF(__pyx_cython_runtime);
-  if (PyObject_SetAttrString(__pyx_m, "__builtins__", __pyx_b) < 0) __PYX_ERR(0, 2, __pyx_L1_error);
+  if (PyObject_SetAttrString(__pyx_m, "__builtins__", __pyx_b) < 0) __PYX_ERR(0, 1, __pyx_L1_error);
   /*--- Initialize various global constants etc. ---*/
-  if (__Pyx_InitGlobals() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__Pyx_InitGlobals() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #if PY_MAJOR_VERSION < 3 && (__PYX_DEFAULT_STRING_ENCODING_IS_ASCII || __PYX_DEFAULT_STRING_ENCODING_IS_DEFAULT)
-  if (__Pyx_init_sys_getdefaultencoding_params() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__Pyx_init_sys_getdefaultencoding_params() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #endif
-  if (__pyx_module_is_main_RMS__Routines__MorphCy) {
-    if (PyObject_SetAttr(__pyx_m, __pyx_n_s_name, __pyx_n_s_main) < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__pyx_module_is_main_RMS__Routines__BinImageCy) {
+    if (PyObject_SetAttr(__pyx_m, __pyx_n_s_name, __pyx_n_s_main) < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   }
   #if PY_MAJOR_VERSION >= 3
   {
-    PyObject *modules = PyImport_GetModuleDict(); if (unlikely(!modules)) __PYX_ERR(0, 2, __pyx_L1_error)
-    if (!PyDict_GetItemString(modules, "RMS.Routines.MorphCy")) {
-      if (unlikely(PyDict_SetItemString(modules, "RMS.Routines.MorphCy", __pyx_m) < 0)) __PYX_ERR(0, 2, __pyx_L1_error)
+    PyObject *modules = PyImport_GetModuleDict(); if (unlikely(!modules)) __PYX_ERR(0, 1, __pyx_L1_error)
+    if (!PyDict_GetItemString(modules, "RMS.Routines.BinImageCy")) {
+      if (unlikely(PyDict_SetItemString(modules, "RMS.Routines.BinImageCy", __pyx_m) < 0)) __PYX_ERR(0, 1, __pyx_L1_error)
     }
   }
   #endif
   /*--- Builtin init code ---*/
-  if (__Pyx_InitCachedBuiltins() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__Pyx_InitCachedBuiltins() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   /*--- Constants init code ---*/
-  if (__Pyx_InitCachedConstants() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__Pyx_InitCachedConstants() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   /*--- Global type/function init code ---*/
   (void)__Pyx_modinit_global_init_code();
   (void)__Pyx_modinit_variable_export_code();
@@ -8727,141 +5235,70 @@ if (!__Pyx_RefNanny) {
   (void)__Pyx_modinit_function_import_code();
   /*--- Execution code ---*/
   #if defined(__Pyx_Generator_USED) || defined(__Pyx_Coroutine_USED)
-  if (__Pyx_patch_abc() < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (__Pyx_patch_abc() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #endif
 
-  /* "RMS/Routines/MorphCy.pyx":2
- * 
+  /* "RMS/Routines/BinImageCy.pyx":1
  * import numpy as np             # <<<<<<<<<<<<<<
- * import cv2
+ * # import cv2
  * 
  */
-  __pyx_t_1 = __Pyx_Import(__pyx_n_s_numpy, 0, -1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 2, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_Import(__pyx_n_s_numpy, 0, -1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 1, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_np, __pyx_t_1) < 0) __PYX_ERR(0, 2, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_np, __pyx_t_1) < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
 
-  /* "RMS/Routines/MorphCy.pyx":3
- * 
- * import numpy as np
- * import cv2             # <<<<<<<<<<<<<<
- * 
- * # Cython import
- */
-  __pyx_t_1 = __Pyx_Import(__pyx_n_s_cv2, 0, -1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 3, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_cv2, __pyx_t_1) < 0) __PYX_ERR(0, 3, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-
-  /* "RMS/Routines/MorphCy.pyx":10
+  /* "RMS/Routines/BinImageCy.pyx":9
  * 
  * # Define numpy types
- * INT_TYPE = np.uint8             # <<<<<<<<<<<<<<
- * ctypedef np.uint8_t INT_TYPE_t
+ * INT16_TYPE = np.uint16             # <<<<<<<<<<<<<<
+ * ctypedef np.uint16_t INT16_TYPE_t
  * 
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 10, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 9, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_uint8); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 10, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_uint16); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 9, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_INT_TYPE, __pyx_t_2) < 0) __PYX_ERR(0, 10, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_INT16_TYPE, __pyx_t_2) < 0) __PYX_ERR(0, 9, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
 
-  /* "RMS/Routines/MorphCy.pyx":17
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def morphApply(np.ndarray[INT_TYPE_t, ndim=2] img, operations):             # <<<<<<<<<<<<<<
- *     """ Apply morphological operations on the given image.
+  /* "RMS/Routines/BinImageCy.pyx":12
+ * ctypedef np.uint16_t INT16_TYPE_t
+ * 
+ * INT32_TYPE = np.uint32             # <<<<<<<<<<<<<<
+ * ctypedef np.uint32_t INT32_TYPE_t
  * 
  */
-  __pyx_t_2 = PyCFunction_NewEx(&__pyx_mdef_3RMS_8Routines_7MorphCy_1morphApply, NULL, __pyx_n_s_RMS_Routines_MorphCy); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 17, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 12, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_morphApply, __pyx_t_2) < 0) __PYX_ERR(0, 17, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_uint32); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 12, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_INT32_TYPE, __pyx_t_1) < 0) __PYX_ERR(0, 12, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
 
-  /* "RMS/Routines/MorphCy.pyx":54
- * @cython.boundscheck(False)
+  /* "RMS/Routines/BinImageCy.pyx":19
  * @cython.wraparound(False)
- * def clean(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Clean isolated pixels, as in:
- *      0  0  0      0  0  0
- */
-  __pyx_t_2 = PyCFunction_NewEx(&__pyx_mdef_3RMS_8Routines_7MorphCy_3clean, NULL, __pyx_n_s_RMS_Routines_MorphCy); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 54, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_clean, __pyx_t_2) < 0) __PYX_ERR(0, 54, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-
-  /* "RMS/Routines/MorphCy.pyx":100
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def bridge(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Connect pixels on opposite sides, if other pixels are 0, as in:
- *      0  0  1      0  0  1
- */
-  __pyx_t_2 = PyCFunction_NewEx(&__pyx_mdef_3RMS_8Routines_7MorphCy_5bridge, NULL, __pyx_n_s_RMS_Routines_MorphCy); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 100, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_bridge, __pyx_t_2) < 0) __PYX_ERR(0, 100, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-
-  /* "RMS/Routines/MorphCy.pyx":154
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def close_cy(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Morphological closing (dilation followed by erosion) with a 3x3 kernel.
+ * @cython.cdivision(True)
+ * def binImage(np.ndarray[INT16_TYPE_t, ndim=2] img, int bin_factor, method='avg'):             # <<<<<<<<<<<<<<
+ *     """ Bin the given image. The binning has to be a factor of 2, e.g. 2, 4, 8, etc.
  * 
  */
-  __pyx_t_2 = PyCFunction_NewEx(&__pyx_mdef_3RMS_8Routines_7MorphCy_7close_cy, NULL, __pyx_n_s_RMS_Routines_MorphCy); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 154, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_close_cy, __pyx_t_2) < 0) __PYX_ERR(0, 154, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+  __pyx_t_1 = PyCFunction_NewEx(&__pyx_mdef_3RMS_8Routines_10BinImageCy_1binImage, NULL, __pyx_n_s_RMS_Routines_BinImageCy); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 19, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_1);
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_binImage, __pyx_t_1) < 0) __PYX_ERR(0, 19, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
 
-  /* "RMS/Routines/MorphCy.pyx":233
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def close(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Morphological closing (dilation followed by erosion) with OpenCV.
- * 
- */
-  __pyx_t_2 = PyCFunction_NewEx(&__pyx_mdef_3RMS_8Routines_7MorphCy_9close, NULL, __pyx_n_s_RMS_Routines_MorphCy); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 233, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_close, __pyx_t_2) < 0) __PYX_ERR(0, 233, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-
-  /* "RMS/Routines/MorphCy.pyx":250
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def dilate(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Morphological dilation with OpenCV.
- * 
- */
-  __pyx_t_2 = PyCFunction_NewEx(&__pyx_mdef_3RMS_8Routines_7MorphCy_11dilate, NULL, __pyx_n_s_RMS_Routines_MorphCy); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 250, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_dilate, __pyx_t_2) < 0) __PYX_ERR(0, 250, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-
-  /* "RMS/Routines/MorphCy.pyx":267
- * @cython.boundscheck(False)
- * @cython.wraparound(False)
- * def thin(np.ndarray[INT_TYPE_t, ndim=2] img):             # <<<<<<<<<<<<<<
- *     """ Zhang-Suen fast thinning algorithm. """
- * 
- */
-  __pyx_t_2 = PyCFunction_NewEx(&__pyx_mdef_3RMS_8Routines_7MorphCy_13thin, NULL, __pyx_n_s_RMS_Routines_MorphCy); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 267, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_thin, __pyx_t_2) < 0) __PYX_ERR(0, 267, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-
-  /* "RMS/Routines/MorphCy.pyx":2
- * 
+  /* "RMS/Routines/BinImageCy.pyx":1
  * import numpy as np             # <<<<<<<<<<<<<<
- * import cv2
+ * # import cv2
  * 
  */
-  __pyx_t_2 = __Pyx_PyDict_NewPresized(0); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 2, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_test, __pyx_t_2) < 0) __PYX_ERR(0, 2, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+  __pyx_t_1 = __Pyx_PyDict_NewPresized(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 1, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_1);
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_test, __pyx_t_1) < 0) __PYX_ERR(0, 1, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
 
   /* "../../anaconda3/envs/wmpl/lib/python3.7/site-packages/Cython/Includes/numpy/__init__.pxd":1046
  *         raise ImportError("numpy.core.umath failed to import")
@@ -8879,11 +5316,11 @@ if (!__Pyx_RefNanny) {
   __Pyx_XDECREF(__pyx_t_2);
   if (__pyx_m) {
     if (__pyx_d) {
-      __Pyx_AddTraceback("init RMS.Routines.MorphCy", __pyx_clineno, __pyx_lineno, __pyx_filename);
+      __Pyx_AddTraceback("init RMS.Routines.BinImageCy", __pyx_clineno, __pyx_lineno, __pyx_filename);
     }
     Py_CLEAR(__pyx_m);
   } else if (!PyErr_Occurred()) {
-    PyErr_SetString(PyExc_ImportError, "init RMS.Routines.MorphCy");
+    PyErr_SetString(PyExc_ImportError, "init RMS.Routines.BinImageCy");
   }
   __pyx_L0:;
   __Pyx_RefNannyFinishContext();
@@ -9665,6 +6102,73 @@ fail:;
   return -1;
 }
 
+/* PyIntCompare */
+  static CYTHON_INLINE PyObject* __Pyx_PyInt_NeObjC(PyObject *op1, PyObject *op2, CYTHON_UNUSED long intval, CYTHON_UNUSED long inplace) {
+    if (op1 == op2) {
+        Py_RETURN_FALSE;
+    }
+    #if PY_MAJOR_VERSION < 3
+    if (likely(PyInt_CheckExact(op1))) {
+        const long b = intval;
+        long a = PyInt_AS_LONG(op1);
+        if (a != b) Py_RETURN_TRUE; else Py_RETURN_FALSE;
+    }
+    #endif
+    #if CYTHON_USE_PYLONG_INTERNALS
+    if (likely(PyLong_CheckExact(op1))) {
+        int unequal;
+        unsigned long uintval;
+        Py_ssize_t size = Py_SIZE(op1);
+        const digit* digits = ((PyLongObject*)op1)->ob_digit;
+        if (intval == 0) {
+            if (size != 0) Py_RETURN_TRUE; else Py_RETURN_FALSE;
+        } else if (intval < 0) {
+            if (size >= 0)
+                Py_RETURN_TRUE;
+            intval = -intval;
+            size = -size;
+        } else {
+            if (size <= 0)
+                Py_RETURN_TRUE;
+        }
+        uintval = (unsigned long) intval;
+#if PyLong_SHIFT * 4 < SIZEOF_LONG*8
+        if (uintval >> (PyLong_SHIFT * 4)) {
+            unequal = (size != 5) || (digits[0] != (uintval & (unsigned long) PyLong_MASK))
+                 | (digits[1] != ((uintval >> (1 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK)) | (digits[2] != ((uintval >> (2 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK)) | (digits[3] != ((uintval >> (3 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK)) | (digits[4] != ((uintval >> (4 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK));
+        } else
+#endif
+#if PyLong_SHIFT * 3 < SIZEOF_LONG*8
+        if (uintval >> (PyLong_SHIFT * 3)) {
+            unequal = (size != 4) || (digits[0] != (uintval & (unsigned long) PyLong_MASK))
+                 | (digits[1] != ((uintval >> (1 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK)) | (digits[2] != ((uintval >> (2 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK)) | (digits[3] != ((uintval >> (3 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK));
+        } else
+#endif
+#if PyLong_SHIFT * 2 < SIZEOF_LONG*8
+        if (uintval >> (PyLong_SHIFT * 2)) {
+            unequal = (size != 3) || (digits[0] != (uintval & (unsigned long) PyLong_MASK))
+                 | (digits[1] != ((uintval >> (1 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK)) | (digits[2] != ((uintval >> (2 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK));
+        } else
+#endif
+#if PyLong_SHIFT * 1 < SIZEOF_LONG*8
+        if (uintval >> (PyLong_SHIFT * 1)) {
+            unequal = (size != 2) || (digits[0] != (uintval & (unsigned long) PyLong_MASK))
+                 | (digits[1] != ((uintval >> (1 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK));
+        } else
+#endif
+            unequal = (size != 1) || (((unsigned long) digits[0]) != (uintval & (unsigned long) PyLong_MASK));
+        if (unequal != 0) Py_RETURN_TRUE; else Py_RETURN_FALSE;
+    }
+    #endif
+    if (PyFloat_CheckExact(op1)) {
+        const long b = intval;
+        double a = PyFloat_AS_DOUBLE(op1);
+        if ((double)a != (double)b) Py_RETURN_TRUE; else Py_RETURN_FALSE;
+    }
+    return (
+        PyObject_RichCompare(op1, op2, Py_NE));
+}
+
 /* PyDictVersioning */
   #if CYTHON_USE_DICT_VERSIONS && CYTHON_USE_TYPE_SLOTS
 static CYTHON_INLINE PY_UINT64_T __Pyx_get_tp_dict_version(PyObject *obj) {
@@ -9990,6 +6494,155 @@ static CYTHON_INLINE PyObject* __Pyx_PyObject_CallOneArg(PyObject *func, PyObjec
     return 0;
 }
 
+/* BytesEquals */
+  static CYTHON_INLINE int __Pyx_PyBytes_Equals(PyObject* s1, PyObject* s2, int equals) {
+#if CYTHON_COMPILING_IN_PYPY
+    return PyObject_RichCompareBool(s1, s2, equals);
+#else
+    if (s1 == s2) {
+        return (equals == Py_EQ);
+    } else if (PyBytes_CheckExact(s1) & PyBytes_CheckExact(s2)) {
+        const char *ps1, *ps2;
+        Py_ssize_t length = PyBytes_GET_SIZE(s1);
+        if (length != PyBytes_GET_SIZE(s2))
+            return (equals == Py_NE);
+        ps1 = PyBytes_AS_STRING(s1);
+        ps2 = PyBytes_AS_STRING(s2);
+        if (ps1[0] != ps2[0]) {
+            return (equals == Py_NE);
+        } else if (length == 1) {
+            return (equals == Py_EQ);
+        } else {
+            int result;
+#if CYTHON_USE_UNICODE_INTERNALS
+            Py_hash_t hash1, hash2;
+            hash1 = ((PyBytesObject*)s1)->ob_shash;
+            hash2 = ((PyBytesObject*)s2)->ob_shash;
+            if (hash1 != hash2 && hash1 != -1 && hash2 != -1) {
+                return (equals == Py_NE);
+            }
+#endif
+            result = memcmp(ps1, ps2, (size_t)length);
+            return (equals == Py_EQ) ? (result == 0) : (result != 0);
+        }
+    } else if ((s1 == Py_None) & PyBytes_CheckExact(s2)) {
+        return (equals == Py_NE);
+    } else if ((s2 == Py_None) & PyBytes_CheckExact(s1)) {
+        return (equals == Py_NE);
+    } else {
+        int result;
+        PyObject* py_result = PyObject_RichCompare(s1, s2, equals);
+        if (!py_result)
+            return -1;
+        result = __Pyx_PyObject_IsTrue(py_result);
+        Py_DECREF(py_result);
+        return result;
+    }
+#endif
+}
+
+/* UnicodeEquals */
+  static CYTHON_INLINE int __Pyx_PyUnicode_Equals(PyObject* s1, PyObject* s2, int equals) {
+#if CYTHON_COMPILING_IN_PYPY
+    return PyObject_RichCompareBool(s1, s2, equals);
+#else
+#if PY_MAJOR_VERSION < 3
+    PyObject* owned_ref = NULL;
+#endif
+    int s1_is_unicode, s2_is_unicode;
+    if (s1 == s2) {
+        goto return_eq;
+    }
+    s1_is_unicode = PyUnicode_CheckExact(s1);
+    s2_is_unicode = PyUnicode_CheckExact(s2);
+#if PY_MAJOR_VERSION < 3
+    if ((s1_is_unicode & (!s2_is_unicode)) && PyString_CheckExact(s2)) {
+        owned_ref = PyUnicode_FromObject(s2);
+        if (unlikely(!owned_ref))
+            return -1;
+        s2 = owned_ref;
+        s2_is_unicode = 1;
+    } else if ((s2_is_unicode & (!s1_is_unicode)) && PyString_CheckExact(s1)) {
+        owned_ref = PyUnicode_FromObject(s1);
+        if (unlikely(!owned_ref))
+            return -1;
+        s1 = owned_ref;
+        s1_is_unicode = 1;
+    } else if (((!s2_is_unicode) & (!s1_is_unicode))) {
+        return __Pyx_PyBytes_Equals(s1, s2, equals);
+    }
+#endif
+    if (s1_is_unicode & s2_is_unicode) {
+        Py_ssize_t length;
+        int kind;
+        void *data1, *data2;
+        if (unlikely(__Pyx_PyUnicode_READY(s1) < 0) || unlikely(__Pyx_PyUnicode_READY(s2) < 0))
+            return -1;
+        length = __Pyx_PyUnicode_GET_LENGTH(s1);
+        if (length != __Pyx_PyUnicode_GET_LENGTH(s2)) {
+            goto return_ne;
+        }
+#if CYTHON_USE_UNICODE_INTERNALS
+        {
+            Py_hash_t hash1, hash2;
+        #if CYTHON_PEP393_ENABLED
+            hash1 = ((PyASCIIObject*)s1)->hash;
+            hash2 = ((PyASCIIObject*)s2)->hash;
+        #else
+            hash1 = ((PyUnicodeObject*)s1)->hash;
+            hash2 = ((PyUnicodeObject*)s2)->hash;
+        #endif
+            if (hash1 != hash2 && hash1 != -1 && hash2 != -1) {
+                goto return_ne;
+            }
+        }
+#endif
+        kind = __Pyx_PyUnicode_KIND(s1);
+        if (kind != __Pyx_PyUnicode_KIND(s2)) {
+            goto return_ne;
+        }
+        data1 = __Pyx_PyUnicode_DATA(s1);
+        data2 = __Pyx_PyUnicode_DATA(s2);
+        if (__Pyx_PyUnicode_READ(kind, data1, 0) != __Pyx_PyUnicode_READ(kind, data2, 0)) {
+            goto return_ne;
+        } else if (length == 1) {
+            goto return_eq;
+        } else {
+            int result = memcmp(data1, data2, (size_t)(length * kind));
+            #if PY_MAJOR_VERSION < 3
+            Py_XDECREF(owned_ref);
+            #endif
+            return (equals == Py_EQ) ? (result == 0) : (result != 0);
+        }
+    } else if ((s1 == Py_None) & s2_is_unicode) {
+        goto return_ne;
+    } else if ((s2 == Py_None) & s1_is_unicode) {
+        goto return_ne;
+    } else {
+        int result;
+        PyObject* py_result = PyObject_RichCompare(s1, s2, equals);
+        #if PY_MAJOR_VERSION < 3
+        Py_XDECREF(owned_ref);
+        #endif
+        if (!py_result)
+            return -1;
+        result = __Pyx_PyObject_IsTrue(py_result);
+        Py_DECREF(py_result);
+        return result;
+    }
+return_eq:
+    #if PY_MAJOR_VERSION < 3
+    Py_XDECREF(owned_ref);
+    #endif
+    return (equals == Py_EQ);
+return_ne:
+    #if PY_MAJOR_VERSION < 3
+    Py_XDECREF(owned_ref);
+    #endif
+    return (equals == Py_NE);
+#endif
+}
+
 /* BufferFallbackError */
   static void __Pyx_RaiseBufferFallbackError(void) {
   PyErr_SetString(PyExc_ValueError,
@@ -10019,73 +6672,6 @@ static CYTHON_INLINE void __Pyx_ErrFetchInState(PyThreadState *tstate, PyObject 
     tstate->curexc_traceback = 0;
 }
 #endif
-
-/* PyIntCompare */
-  static CYTHON_INLINE PyObject* __Pyx_PyInt_EqObjC(PyObject *op1, PyObject *op2, CYTHON_UNUSED long intval, CYTHON_UNUSED long inplace) {
-    if (op1 == op2) {
-        Py_RETURN_TRUE;
-    }
-    #if PY_MAJOR_VERSION < 3
-    if (likely(PyInt_CheckExact(op1))) {
-        const long b = intval;
-        long a = PyInt_AS_LONG(op1);
-        if (a == b) Py_RETURN_TRUE; else Py_RETURN_FALSE;
-    }
-    #endif
-    #if CYTHON_USE_PYLONG_INTERNALS
-    if (likely(PyLong_CheckExact(op1))) {
-        int unequal;
-        unsigned long uintval;
-        Py_ssize_t size = Py_SIZE(op1);
-        const digit* digits = ((PyLongObject*)op1)->ob_digit;
-        if (intval == 0) {
-            if (size == 0) Py_RETURN_TRUE; else Py_RETURN_FALSE;
-        } else if (intval < 0) {
-            if (size >= 0)
-                Py_RETURN_FALSE;
-            intval = -intval;
-            size = -size;
-        } else {
-            if (size <= 0)
-                Py_RETURN_FALSE;
-        }
-        uintval = (unsigned long) intval;
-#if PyLong_SHIFT * 4 < SIZEOF_LONG*8
-        if (uintval >> (PyLong_SHIFT * 4)) {
-            unequal = (size != 5) || (digits[0] != (uintval & (unsigned long) PyLong_MASK))
-                 | (digits[1] != ((uintval >> (1 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK)) | (digits[2] != ((uintval >> (2 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK)) | (digits[3] != ((uintval >> (3 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK)) | (digits[4] != ((uintval >> (4 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK));
-        } else
-#endif
-#if PyLong_SHIFT * 3 < SIZEOF_LONG*8
-        if (uintval >> (PyLong_SHIFT * 3)) {
-            unequal = (size != 4) || (digits[0] != (uintval & (unsigned long) PyLong_MASK))
-                 | (digits[1] != ((uintval >> (1 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK)) | (digits[2] != ((uintval >> (2 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK)) | (digits[3] != ((uintval >> (3 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK));
-        } else
-#endif
-#if PyLong_SHIFT * 2 < SIZEOF_LONG*8
-        if (uintval >> (PyLong_SHIFT * 2)) {
-            unequal = (size != 3) || (digits[0] != (uintval & (unsigned long) PyLong_MASK))
-                 | (digits[1] != ((uintval >> (1 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK)) | (digits[2] != ((uintval >> (2 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK));
-        } else
-#endif
-#if PyLong_SHIFT * 1 < SIZEOF_LONG*8
-        if (uintval >> (PyLong_SHIFT * 1)) {
-            unequal = (size != 2) || (digits[0] != (uintval & (unsigned long) PyLong_MASK))
-                 | (digits[1] != ((uintval >> (1 * PyLong_SHIFT)) & (unsigned long) PyLong_MASK));
-        } else
-#endif
-            unequal = (size != 1) || (((unsigned long) digits[0]) != (uintval & (unsigned long) PyLong_MASK));
-        if (unequal == 0) Py_RETURN_TRUE; else Py_RETURN_FALSE;
-    }
-    #endif
-    if (PyFloat_CheckExact(op1)) {
-        const long b = intval;
-        double a = PyFloat_AS_DOUBLE(op1);
-        if ((double)a == (double)b) Py_RETURN_TRUE; else Py_RETURN_FALSE;
-    }
-    return (
-        PyObject_RichCompare(op1, op2, Py_EQ));
-}
 
 /* RaiseException */
   #if PY_MAJOR_VERSION < 3
@@ -10821,37 +7407,6 @@ static void __Pyx_ReleaseBuffer(Py_buffer *view) {
     }
 
 /* CIntToPy */
-  static CYTHON_INLINE PyObject* __Pyx_PyInt_From_Py_intptr_t(Py_intptr_t value) {
-    const Py_intptr_t neg_one = (Py_intptr_t) ((Py_intptr_t) 0 - (Py_intptr_t) 1), const_zero = (Py_intptr_t) 0;
-    const int is_unsigned = neg_one > const_zero;
-    if (is_unsigned) {
-        if (sizeof(Py_intptr_t) < sizeof(long)) {
-            return PyInt_FromLong((long) value);
-        } else if (sizeof(Py_intptr_t) <= sizeof(unsigned long)) {
-            return PyLong_FromUnsignedLong((unsigned long) value);
-#ifdef HAVE_LONG_LONG
-        } else if (sizeof(Py_intptr_t) <= sizeof(unsigned PY_LONG_LONG)) {
-            return PyLong_FromUnsignedLongLong((unsigned PY_LONG_LONG) value);
-#endif
-        }
-    } else {
-        if (sizeof(Py_intptr_t) <= sizeof(long)) {
-            return PyInt_FromLong((long) value);
-#ifdef HAVE_LONG_LONG
-        } else if (sizeof(Py_intptr_t) <= sizeof(PY_LONG_LONG)) {
-            return PyLong_FromLongLong((PY_LONG_LONG) value);
-#endif
-        }
-    }
-    {
-        int one = 1; int little = (int)*(unsigned char *)&one;
-        unsigned char *bytes = (unsigned char *)&value;
-        return _PyLong_FromByteArray(bytes, sizeof(Py_intptr_t),
-                                     little, !is_unsigned);
-    }
-}
-
-/* CIntToPy */
   static CYTHON_INLINE PyObject* __Pyx_PyInt_From_int(int value) {
     const int neg_one = (int) ((int) 0 - (int) 1), const_zero = (int) 0;
     const int is_unsigned = neg_one > const_zero;
@@ -10880,6 +7435,139 @@ static void __Pyx_ReleaseBuffer(Py_buffer *view) {
         return _PyLong_FromByteArray(bytes, sizeof(int),
                                      little, !is_unsigned);
     }
+}
+
+/* Print */
+  #if !CYTHON_COMPILING_IN_PYPY && PY_MAJOR_VERSION < 3
+static PyObject *__Pyx_GetStdout(void) {
+    PyObject *f = PySys_GetObject((char *)"stdout");
+    if (!f) {
+        PyErr_SetString(PyExc_RuntimeError, "lost sys.stdout");
+    }
+    return f;
+}
+static int __Pyx_Print(PyObject* f, PyObject *arg_tuple, int newline) {
+    int i;
+    if (!f) {
+        if (!(f = __Pyx_GetStdout()))
+            return -1;
+    }
+    Py_INCREF(f);
+    for (i=0; i < PyTuple_GET_SIZE(arg_tuple); i++) {
+        PyObject* v;
+        if (PyFile_SoftSpace(f, 1)) {
+            if (PyFile_WriteString(" ", f) < 0)
+                goto error;
+        }
+        v = PyTuple_GET_ITEM(arg_tuple, i);
+        if (PyFile_WriteObject(v, f, Py_PRINT_RAW) < 0)
+            goto error;
+        if (PyString_Check(v)) {
+            char *s = PyString_AsString(v);
+            Py_ssize_t len = PyString_Size(v);
+            if (len > 0) {
+                switch (s[len-1]) {
+                    case ' ': break;
+                    case '\f': case '\r': case '\n': case '\t': case '\v':
+                        PyFile_SoftSpace(f, 0);
+                        break;
+                    default:  break;
+                }
+            }
+        }
+    }
+    if (newline) {
+        if (PyFile_WriteString("\n", f) < 0)
+            goto error;
+        PyFile_SoftSpace(f, 0);
+    }
+    Py_DECREF(f);
+    return 0;
+error:
+    Py_DECREF(f);
+    return -1;
+}
+#else
+static int __Pyx_Print(PyObject* stream, PyObject *arg_tuple, int newline) {
+    PyObject* kwargs = 0;
+    PyObject* result = 0;
+    PyObject* end_string;
+    if (unlikely(!__pyx_print)) {
+        __pyx_print = PyObject_GetAttr(__pyx_b, __pyx_n_s_print);
+        if (!__pyx_print)
+            return -1;
+    }
+    if (stream) {
+        kwargs = PyDict_New();
+        if (unlikely(!kwargs))
+            return -1;
+        if (unlikely(PyDict_SetItem(kwargs, __pyx_n_s_file, stream) < 0))
+            goto bad;
+        if (!newline) {
+            end_string = PyUnicode_FromStringAndSize(" ", 1);
+            if (unlikely(!end_string))
+                goto bad;
+            if (PyDict_SetItem(kwargs, __pyx_n_s_end, end_string) < 0) {
+                Py_DECREF(end_string);
+                goto bad;
+            }
+            Py_DECREF(end_string);
+        }
+    } else if (!newline) {
+        if (unlikely(!__pyx_print_kwargs)) {
+            __pyx_print_kwargs = PyDict_New();
+            if (unlikely(!__pyx_print_kwargs))
+                return -1;
+            end_string = PyUnicode_FromStringAndSize(" ", 1);
+            if (unlikely(!end_string))
+                return -1;
+            if (PyDict_SetItem(__pyx_print_kwargs, __pyx_n_s_end, end_string) < 0) {
+                Py_DECREF(end_string);
+                return -1;
+            }
+            Py_DECREF(end_string);
+        }
+        kwargs = __pyx_print_kwargs;
+    }
+    result = PyObject_Call(__pyx_print, arg_tuple, kwargs);
+    if (unlikely(kwargs) && (kwargs != __pyx_print_kwargs))
+        Py_DECREF(kwargs);
+    if (!result)
+        return -1;
+    Py_DECREF(result);
+    return 0;
+bad:
+    if (kwargs != __pyx_print_kwargs)
+        Py_XDECREF(kwargs);
+    return -1;
+}
+#endif
+
+/* None */
+  static CYTHON_INLINE long __Pyx_pow_long(long b, long e) {
+    long t = b;
+    switch (e) {
+        case 3:
+            t *= b;
+        CYTHON_FALLTHROUGH;
+        case 2:
+            t *= b;
+        CYTHON_FALLTHROUGH;
+        case 1:
+            return t;
+        case 0:
+            return 1;
+    }
+    #if 1
+    if (unlikely(e<0)) return 0;
+    #endif
+    t = 1;
+    while (likely(e)) {
+        t *= (b * (e&1)) | ((~e)&1);
+        b *= b;
+        e >>= 1;
+    }
+    return t;
 }
 
 /* CIntToPy */
@@ -11442,6 +8130,43 @@ raise_neg_overflow:
         "can't convert negative value to int");
     return (int) -1;
 }
+
+/* PrintOne */
+  #if !CYTHON_COMPILING_IN_PYPY && PY_MAJOR_VERSION < 3
+static int __Pyx_PrintOne(PyObject* f, PyObject *o) {
+    if (!f) {
+        if (!(f = __Pyx_GetStdout()))
+            return -1;
+    }
+    Py_INCREF(f);
+    if (PyFile_SoftSpace(f, 0)) {
+        if (PyFile_WriteString(" ", f) < 0)
+            goto error;
+    }
+    if (PyFile_WriteObject(o, f, Py_PRINT_RAW) < 0)
+        goto error;
+    if (PyFile_WriteString("\n", f) < 0)
+        goto error;
+    Py_DECREF(f);
+    return 0;
+error:
+    Py_DECREF(f);
+    return -1;
+    /* the line below is just to avoid C compiler
+     * warnings about unused functions */
+    return __Pyx_Print(f, NULL, 0);
+}
+#else
+static int __Pyx_PrintOne(PyObject* stream, PyObject *o) {
+    int res;
+    PyObject* arg_tuple = PyTuple_Pack(1, o);
+    if (unlikely(!arg_tuple))
+        return -1;
+    res = __Pyx_Print(stream, arg_tuple, 1);
+    Py_DECREF(arg_tuple);
+    return res;
+}
+#endif
 
 /* CIntFromPy */
   static CYTHON_INLINE long __Pyx_PyInt_As_long(PyObject *x) {

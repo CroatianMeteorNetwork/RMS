@@ -1,5 +1,5 @@
 # IAU No|IAU Code|Shower Name|Sol begin|Sol max|Sol end|RA|Dec|dRA|dDec|Vg|Reference
-1|CAP|alpha Capricornids                      |108|127|140|306.5|-9.2|0.97|0.24|23|Jenniskens et al., 2016, Icarus, 266, 331 
+1|CAP|alpha Capricornids                      |108|123.1|140|306.5|-9.2|0.66|0.28|23|Jenniskens et al., 2016, Icarus, 266, 331 
 2|STA|Southern Taurids                        |173|216|230|47.9|12.8|0.99|0.26|26.6|Jenniskens et al., 2016, Icarus, 266, 331 
 3|SIA|Southern iota Aquariids|133|140|144|340.2|-11.4|0.87|0.41|29.1|Brown et al., 2010
 4|GEM|Geminids                                |240|262|273|113.5|32.3|1.15|-0.16|33.8|Jenniskens et al., 2016, Icarus, 266, 331 
@@ -101,3 +101,4 @@
 533|JXA|July xi Arietids                        ||119||40.1|10.6|0.66|0.25|69.4|Segon et al., 2014
 549|FAN|49 Andromedids                          ||114||20.9|46.7|0.9|0.32|60.1|Andreic et al., 2014
 569|OHY|omicron Hydrids                         ||309||176.3|-34.1|0.8|-0.38|59.1|Andreic et al., 2014
+680|JEA|June epsilon Arietids                   |80.0|83.8|87.0|47.6|27.6|0|0|39.1|Jenniskens et al., 2018 sub. to PSS

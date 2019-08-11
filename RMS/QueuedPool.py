@@ -265,10 +265,28 @@ class QueuedPool(object):
 
         self.active_workers.increment()
 
+        
+        input_ret_failures = 0
+
         while True:
 
-            # Get the function arguments (block until available)
-            args = self.input_queue.get(True)
+            # Get the function arguments (block until available, handle possible errors)
+            try:
+                args = self.input_queue.get(True)
+            
+            except:
+                tb = traceback.format_exc()
+                self.printAndLog('Failed retrieving inputs for processing...')
+                self.printAndLog(tb)
+
+                if input_ret_failures > 5:
+                    self.printAndLog("Too many failures to get inputs, stopping processing...")
+                    break
+
+                input_ret_failures += 1
+                time.sleep(1.0)
+                continue
+
 
             # The 'poison pill' for killing the worker when closing is requested
             if args is None:

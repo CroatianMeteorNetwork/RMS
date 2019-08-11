@@ -2842,7 +2842,7 @@ class PlateTool(object):
                 res_y = img_y + res_scale*np.sin(angle)*ang_dist_img
                 
                 # Plot the sky residuals
-                plt.plot([img_x, res_x], [img_y, res_y], color='yellow', alpha=0.25)
+                plt.plot([img_x, res_x], [img_y, res_y], color='yellow', alpha=0.25, linestyle='dashed')
 
 
             plt.draw()

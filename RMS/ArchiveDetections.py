@@ -145,21 +145,24 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
     """
 
+    # Get the list of files to archive
+    file_list = selectFiles(captured_path, ff_detected)
+
+    
     log.info('Generating thumbnails...')
 
     try:
+
         # Generate captured thumbnails
-        generateThumbnails(captured_path, config, 'CAPTURED')
-
-        # Get the list of files to archive
-        file_list = selectFiles(captured_path, ff_detected)
-
+        captured_mosaic_file = generateThumbnails(captured_path, config, 'CAPTURED')
 
         # Generate detected thumbnails
-        mosaic_file = generateThumbnails(captured_path, config, 'DETECTED', file_list=sorted(file_list))
+        detected_mosaic_file = generateThumbnails(captured_path, config, 'DETECTED', \
+            file_list=sorted(file_list))
 
         # Add the detected mosaic file to the selected list
-        file_list.append(mosaic_file)
+        file_list.append(captured_mosaic_file)
+        file_list.append(detected_mosaic_file)
 
     except Exception as e:
         log.error('Generating thumbnails failed with error:' + repr(e))
