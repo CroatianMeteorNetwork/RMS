@@ -189,6 +189,9 @@ def twoDGaussian(params, amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
     """
 
     x, y, saturation = params
+
+    if isinstance(saturation, np.ndarray):
+        saturation = saturation[0, 0]
     
     xo = float(xo)
     yo = float(yo)
@@ -273,7 +276,7 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
         y_ind, x_ind = np.indices(star_seg.shape)
 
         # Estimate saturation level from image type
-        saturation = 2**(8*star_seg.itemsize) - 1
+        saturation = (2**(8*star_seg.itemsize) - 1)*np.ones_like(y_ind)
 
         # Fit a PSF to the star
         try:
