@@ -71,7 +71,7 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=
 
         # If the FF file could not be loaded, skip it
         if img_handle.ff is None:
-            return ff_name, [], []
+            return ff_name, [[], [], [], []], []
 
 
 
