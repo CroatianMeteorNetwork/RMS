@@ -164,12 +164,15 @@ class InputTypeFF(object):
         else:
             self.fps = self.config.fps
 
-        # Get the image size
-        self.nrows = self.ff.nrows
-        self.ncols = self.ff.ncols
 
-        # Compute the total number of frames in all video files
-        self.total_frames = len(self.ff_list)*self.ff.nframes
+        if self.ff is not None:
+
+            # Get the image size
+            self.nrows = self.ff.nrows
+            self.ncols = self.ff.ncols
+
+            # Compute the total number of frames in all video files
+            self.total_frames = len(self.ff_list)*self.ff.nframes
 
 
 
