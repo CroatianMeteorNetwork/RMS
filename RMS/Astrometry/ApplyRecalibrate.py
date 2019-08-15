@@ -231,6 +231,13 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
     catalog_stars, _, config.star_catalog_band_ratios = star_catalog_status
 
+
+    # Update the platepar coordinates from the config file
+    platepar.lat = config.latitude
+    platepar.lon = config.longitude
+    platepar.elev = config.elevation
+
+
     prev_platepar = copy.deepcopy(platepar)
 
     # Go through all FF files with detections, recalibrate and apply astrometry
