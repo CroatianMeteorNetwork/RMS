@@ -334,8 +334,8 @@ class PlateTool(object):
 
         ### INIT IMAGE ###
 
-        plt.figure(facecolor='black')
-        plt.gcf().canvas.set_window_title('SkyFit')
+        self.fig = plt.figure(facecolor='black')
+        self.fig.canvas.set_window_title('SkyFit')
 
         # Get the figure manager
         self.figure_manager = plt.get_current_fig_manager()
@@ -444,7 +444,7 @@ class PlateTool(object):
                         self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=100, lw=3)
 
                     # Update canvas
-                    plt.gcf().canvas.draw()
+                    self.fig.canvas.draw()
 
                     # Switch to the mode where the catalog star is selected
                     self.star_selection_centroid = False
@@ -467,7 +467,7 @@ class PlateTool(object):
                         self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=50, lw=2)
 
                     # Update canvas
-                    plt.gcf().canvas.draw()
+                    self.fig.canvas.draw()
 
 
             # Right mouse button, deselect stars
@@ -544,7 +544,7 @@ class PlateTool(object):
             self.drawZoomWindow()
 
 
-        plt.gcf().canvas.draw()
+        self.fig.canvas.draw()
 
 
 
@@ -615,11 +615,11 @@ class PlateTool(object):
             zoom_factor = 8
 
             # Make sure that the zoomed image is every larger than 1/2 of the whole image
-            if 2*zoom_factor*window_radius > np.min([plt.gcf().bbox.ymax, plt.gcf().bbox.xmax])/2:
+            if 2*zoom_factor*window_radius > np.min([self.fig.bbox.ymax, self.fig.bbox.xmax])/2:
 
                 # Compute a new zoom factor
-                zoom_factor = np.floor((np.min([plt.gcf().bbox.ymax, \
-                    plt.gcf().bbox.xmax])/2)/(2*window_radius))
+                zoom_factor = np.floor((np.min([self.fig.bbox.ymax, \
+                    self.fig.bbox.xmax])/2)/(2*window_radius))
 
                 # Don't apply zoom if the image will be smaller
                 if zoom_factor <= 1:
@@ -635,14 +635,14 @@ class PlateTool(object):
                 yo = 0
                 zoom_window_pos += 'N'
             else:
-                yo = plt.gcf().bbox.ymax - zoom_factor*2*window_radius
+                yo = self.fig.bbox.ymax - zoom_factor*2*window_radius
                 zoom_window_pos += 'S'
 
             if self.mouse_x > img_w_half:
                 xo = 0
                 zoom_window_pos += 'W'
             else:
-                xo = plt.gcf().bbox.xmax - zoom_factor*2*window_radius
+                xo = self.fig.bbox.xmax - zoom_factor*2*window_radius
                 zoom_window_pos += 'E'
 
             # If the position of the zoom window has changed, reset the image
@@ -728,7 +728,7 @@ class PlateTool(object):
             img_crop = np.array(img)
 
             # Plot the zoomed image
-            plt.gcf().figimage(img_crop, xo=xo, yo=yo, zorder=5, cmap='gray', \
+            self.fig.figimage(img_crop, xo=xo, yo=yo, zorder=5, cmap='gray', \
                 vmin=np.min(self.img_data_processed), vmax=np.max(self.img_data_processed))
 
 
@@ -1207,8 +1207,8 @@ class PlateTool(object):
                 "Solving with astrometry.net...", color='r', alpha=0.5, fontsize=16, ha='center', va='center')
 
             plt.draw()
-            plt.gcf().canvas.draw()
-            plt.gcf().canvas.flush_events()
+            self.fig.canvas.draw()
+            self.fig.canvas.flush_events()
 
             # If shift was pressed, send only the list of x,y coords of extracted stars
             upload_image = True
@@ -1789,7 +1789,7 @@ class PlateTool(object):
                 verticalalignment='top', horizontalalignment='center', fontproperties=font)
 
 
-        plt.gcf().canvas.draw()
+        self.fig.canvas.draw()
 
 
 
