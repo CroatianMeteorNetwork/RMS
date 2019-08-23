@@ -258,6 +258,11 @@ class Config:
         self.captured_dir = "CapturedFiles"
         self.archived_dir = "ArchivedFiles"
 
+        # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
+        #   into account
+        self.extra_space_gb = 3
+
+
         # Enable/disable showing maxpixel on the screen
         self.live_view_enable = True
 
@@ -687,6 +692,10 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "mask"):
         config.mask_file = parser.get(section, "mask")
+
+
+    if parser.has_option(section, "extra_space_gb"):
+        config.extra_space_gb = parser.getfloat(section, "extra_space_gb")
 
 
     # Enable/disable showing maxpixel on the screen
