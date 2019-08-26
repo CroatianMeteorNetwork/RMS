@@ -151,6 +151,25 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
             log.info('Copying ' + local_file + ' to ' + remote_file)
             sftp.put(local_file, remote_file)
 
+
+            # Check that the size of the remote file is correct, indicating a successful upload
+            try:
+                remote_info = sftp.lstat(remote_file)
+                
+                # If the remote and the local file are of the same size, skip it
+                if local_file_size != remote_info.st_size:
+                    log.info('The file upload did not finish, aborting and trying again...')
+                    return False
+
+                else:
+                    log.info("File upload verified: {:s}".format(remote_file))
+            
+
+            except IOError as e:
+                return False
+
+
+
         t.close()
 
         return True
@@ -379,7 +398,7 @@ if __name__ == "__main__":
             self.username = 'dvida'
 
             # remote hostname where SSH server is running
-            self.hostname = '129.100.40.167'
+            self.hostname = 'gmn.uwo.ca'
             self.host_port = 22
             self.remote_dir = 'files'
             self.stationID = 'dvida'
@@ -393,7 +412,7 @@ if __name__ == "__main__":
 
     config = FakeConf()
 
-    dir_local='/home/dvida/Desktop'
+    dir_local = '/home/dvida/Desktop'
 
 
     #uploadSFTP(config.hostname, config.stationID, dir_local, dir_remote, file_list, rsa_private_key=config.rsa_private_key)
@@ -406,12 +425,13 @@ if __name__ == "__main__":
 
     time.sleep(2)
 
-    #up.addFiles([os.path.join(dir_local, 'test.txt')])
+    up.addFiles([os.path.join(dir_local, 'test.txt')])
 
     time.sleep(1)
 
-    #up.addFiles([os.path.join(dir_local, 'test2.txt')])
-    #up.addFiles([os.path.join(dir_local, 'test3.txt')])
+    up.addFiles([os.path.join(dir_local, 'test2.txt')])
+    up.addFiles([os.path.join(dir_local, 'test3.txt')])
 
+    up.uploadData()
 
     up.stop()
