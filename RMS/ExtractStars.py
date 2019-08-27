@@ -252,13 +252,13 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
         x_max = x + segment_radius
 
         if y_min < 0:
-            y_min = 0
+            y_min = np.array([0])
         if y_max > ff.nrows:
-            y_max = ff.nrows
+            y_max = np.array([ff.nrows])
         if x_min < 0:
-            x_min = 0
+            x_min = np.array([0])
         if x_max > ff.ncols:
-            x_max = ff.ncols
+            x_max = np.array([ff.ncols])
 
         # Check if any of these values is NaN and skip the star
         if np.any(np.isnan([x_min, x_max, y_min, y_max])):
