@@ -714,8 +714,8 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
     # Distances between points and fitted line
     point_deviations = _pointDistance(x_array, y_array, mX*frame_array + cX, mY*frame_array + cY)
 
-    # Calculate average deviation
-    mean_deviation = np.mean(point_deviations)
+    # Calculate median deviation
+    mean_deviation = np.median(point_deviations)
 
     # Take points with satisfactory deviation
     good_centroid_indices = np.where(np.logical_not(point_deviations > mean_deviation*centroid_max_deviation + 1))
