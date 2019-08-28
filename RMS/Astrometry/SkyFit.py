@@ -1312,18 +1312,16 @@ class PlateTool(object):
         # Do a fit on the selected stars while in the star picking mode
         elif event.key == 'ctrl+z':
 
-            # if self.star_pick_mode:
+            # If the first platepar is being made, do the fit twice
+            if self.first_platepar_fit:
+                self.fitPickedStars()
+                self.fitPickedStars()
+                self.first_platepar_fit = False
 
-            #     # Do 3 fit iterations
-            #     for i in range(3):
+            else:
+                # Otherwise, only fit the once
+                self.fitPickedStars()
 
-            #         print('Fitting iteration {:d}/3'.format(i + 1))
-
-            #         self.fitPickedStars()
-
-            #     print('Plate fitted!')
-
-            self.fitPickedStars()
 
             print('Plate fitted!')
 
@@ -2174,6 +2172,9 @@ class PlateTool(object):
         # Reset paired stars
         self.paired_stars = []
         self.residuals = None
+
+        # Indicate that a new platepar is being made
+        self.new_platepar = True
 
         if update_image:
             self.updateImage()
