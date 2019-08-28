@@ -32,6 +32,7 @@ import scipy.ndimage.filters as filters
 import RMS.ConfigReader as cr
 from RMS.Formats import FFfile
 from RMS.Formats import CALSTARS
+from RMS.DetectionTools import loadImageCalibration
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
 from RMS.QueuedPool import QueuedPool
@@ -68,7 +69,7 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     """
 
     # This will be returned if there was an error
-    error_return = [[], [], [], []]
+    error_return = [[], [], [], [], [], []]
 
     # Load parameters from config if given
     if config:
@@ -450,20 +451,22 @@ if __name__ == "__main__":
 
 
 
-    # Try loading a flat field image
-    flat_struct = None
+    # # Try loading a flat field image
+    # flat_struct = None
 
-    if config.use_flat:
+    # if config.use_flat:
         
-        # Check if there is flat in the data directory
-        if os.path.exists(os.path.join(ff_dir, config.flat_file)):
-            flat_struct = Image.loadFlat(ff_dir, config.flat_file)
+    #     # Check if there is flat in the data directory
+    #     if os.path.exists(os.path.join(ff_dir, config.flat_file)):
+    #         flat_struct = Image.loadFlat(ff_dir, config.flat_file)
 
-        # Try loading the default flat
-        elif os.path.exists(config.flat_file):
-            flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
+    #     # Try loading the default flat
+    #     elif os.path.exists(config.flat_file):
+    #         flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
 
 
+    # Load mask, dark, flat
+    mask, dark, flat_struct = loadImageCalibration(ff_dir, config)
     
 
     extraction_list = []
@@ -488,7 +491,7 @@ if __name__ == "__main__":
     # Add jobs for the pool
     for ff_name in extraction_list:
         print('Adding for extraction:', ff_name)
-        workpool.addJob([ff_dir, ff_name, config, flat_struct])
+        workpool.addJob([ff_dir, ff_name, config, None, None, None, None, flat_struct, dark, mask])
 
 
     print('Starting pool...')
