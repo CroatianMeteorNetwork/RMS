@@ -118,12 +118,9 @@ class BufferedCapture(Process):
         else:
 
             # If an analog camera is used, skip the ping
-            ip_cam = True
-            try:
-                int(self.config.deviceID)
-                ip_cam = False
-            except:
-                pass
+            ip_cam = False
+            if "rtsp" in str(self.config.deviceID):
+                ip_cam = True
 
 
             if ip_cam:
