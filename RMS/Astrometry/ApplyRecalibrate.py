@@ -32,7 +32,8 @@ import Utils.RMS2UFO
 
 
 
-def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars):
+def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max_match_radius=None,
+        force_platepar_save=False):
     """ Given the platepar and a list of stars on one image, try to recalibrate the platepar to achieve
         the best match by brute force star matching.
 
@@ -44,8 +45,14 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars):
             list of star coordinates.
         catalog_stars: [ndarray] A numpy array of catalog stars which should be on the image.
 
+    Keyword argumnets:
+        max_radius: [float] Maximum radius used for star matching. None by default, which uses all hardcoded
+            values.
+        force_platepar_save: [bool] Skip the goodness of fit check and save the platepar.
+
     Return:
         result: [?] A Platepar instance if refinement is successful, None if it failed.
+        min_match_radius: [float] Minimum radius that successfuly matched the stars (pixels).
     """
 
     working_platepar = copy.deepcopy(working_platepar)
@@ -86,7 +93,16 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars):
     ##########
 
     # Go through all radiia and match the stars
+    min_match_radius = None
     for match_radius in radius_list:
+
+        # Skip radiuses that are too small if the radius filter is on
+        if max_radius is not None:
+            if match_radius < max_match_radius:
+                print("Stopping radius decrements because {:.2f} < {:.2f}".format(match_radius, \
+                    max_match_radius))
+                break
+
 
         # If the platepar is good, don't recalibrate anymore
         if CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, star_dict_ff, match_radius, \
@@ -155,11 +171,23 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars):
             # If the fit was successful, use the new parameters from now on
             working_platepar = temp_platepar
 
+            # Keep track of the minimum match radius
+            min_match_radius = match_radius
+
             print('Astrometry fit successful!')
 
 
+    # Choose which radius will be chosen for the goodness of fit check
+    if max_match_radius is None:
+        goodnes_check_radius = match_radius
+
+    else:
+        goodnes_check_radius = max_match_radius
+
+
     # If the platepar is good, store it
-    if CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, star_dict_ff, match_radius):
+    if CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, star_dict_ff, \
+        goodnes_check_radius) or force_platepar_save:
 
         print('Saving improved platepar...')
 
@@ -175,11 +203,11 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars):
 
     # Otherwise, indicate that the refinement was not successful
     else:
-        print('No using the refined platepar...')
+        print('Not using the refined platepar...')
         result = None
 
 
-    return result
+    return result, min_match_radius
 
 
 
@@ -268,7 +296,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         star_dict_ff = {jd: calstars[ff_name]}
 
         # Recalibrate the platepar using star matching
-        result = recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars)
+        result, min_match_radius = recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars)
 
         
         # If the recalibration failed, try using FFT alignment
@@ -281,13 +309,27 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
             calstars_coords = np.array(star_dict_ff[jd])[:, :2]
             calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
             print(calstars_time)
-            working_platepar = alignPlatepar(config, prev_platepar, calstars_time, calstars_coords, \
+            test_platepar = alignPlatepar(config, prev_platepar, calstars_time, calstars_coords, \
                 show_plot=False)
 
             # Try to recalibrate after FFT alignment
-            result = recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars)
+            result, _ = recalibrateFF(config, test_platepar, jd, star_dict_ff, catalog_stars)
 
-            if result is not None:
+
+            # If the FFT alignment failed, align the original platepar using the smallest radius that matched
+            #   and force save the the platepar
+            if (result is None) and (min_match_radius is not None):
+                print()
+                print("Using the old platepar with the minimum match radius of: {:.2f}".format(min_match_radius))
+                result, _ = recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, 
+                    max_match_radius=min_match_radius, force_platepar_save=True)
+
+                if result is not None:
+                    working_platepar = result
+
+
+            # If the alignment succeeded, save the result
+            else:
                 working_platepar = result
 
 
