@@ -22,6 +22,9 @@ except:
 
 
 
+from RMS.Misc import mkdirP
+
+
 # Get the logger from the main module
 log = logging.getLogger("logger")
 
@@ -204,6 +207,9 @@ class UploadManager(multiprocessing.Process):
         self.last_runtime = None
         self.last_runtime_lock = multiprocessing.Lock()
 
+        # Construct the path to the queue backup file
+        self.upload_queue_file_path = os.path.join(self.config.data_dir, self.config.upload_queue_file)
+
         # Load the list of files to upload, and have not yet been uploaded
         self.loadQueue()
 
@@ -246,13 +252,13 @@ class UploadManager(multiprocessing.Process):
         """ Load a list of files to be uploaded from a file. """
 
         # Check if the queue file exists, if not, create it
-        if not os.path.exists(self.config.upload_queue_file):
+        if not os.path.exists(self.upload_queue_file_path):
             self.saveQueue(overwrite=True)
             return None
 
 
         # Read the queue file
-        with open(self.config.upload_queue_file) as f:
+        with open(self.upload_queue_file_path) as f:
             
             for file_name in f:
 
@@ -278,7 +284,11 @@ class UploadManager(multiprocessing.Process):
         # If overwrite is true, save the queue to the holding file completely
         if overwrite:
 
-            with open(self.config.upload_queue_file, 'w') as f:
+            # Make the data directory if it doesn't exist
+            mkdirP(self.config.data_dir)
+
+            # Create the queue file
+            with open(self.upload_queue_file_path, 'w') as f:
                 for file_name in file_list:
                     f.write(file_name + '\n')
 
@@ -288,13 +298,13 @@ class UploadManager(multiprocessing.Process):
 
             # Get a list of entries in the holding file
             existing_list = []
-            with open(self.config.upload_queue_file) as f:
+            with open(self.upload_queue_file_path) as f:
                 for file_name in f:
                     file_name = file_name.replace('\n', '').replace('\r', '')
                     existing_list.append(file_name)
 
             # Save to disk only those entires which are not already there
-            with open(self.config.upload_queue_file, 'a') as f:
+            with open(self.upload_queue_file_path, 'a') as f:
                 for file_name in file_list:
                     if file_name not in existing_list:
                         f.write(file_name + '\n')
