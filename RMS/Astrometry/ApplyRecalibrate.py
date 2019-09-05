@@ -97,7 +97,7 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
     for match_radius in radius_list:
 
         # Skip radiuses that are too small if the radius filter is on
-        if max_radius is not None:
+        if max_match_radius is not None:
             if match_radius < max_match_radius:
                 print("Stopping radius decrements because {:.2f} < {:.2f}".format(match_radius, \
                     max_match_radius))
