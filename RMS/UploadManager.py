@@ -142,7 +142,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                 
                 # If the remote and the local file are of the same size, skip it
                 if local_file_size == remote_info.st_size:
-                    log.info('The file already exist on the server!')
+                    log.info('The file already exists on the server!')
                     continue
             
             except IOError as e:
