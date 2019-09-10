@@ -166,7 +166,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
     except Exception as e:
         log.error('Generating thumbnails failed with error:' + repr(e))
-        log.error(*traceback.format_exception(*sys.exc_info()))
+        log.error("".join(traceback.format_exception(*sys.exc_info())))
 
 
 
@@ -201,7 +201,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
     except Exception as e:
         log.error('Generating stack failed with error:' + repr(e))
-        log.error(*traceback.format_exception(*sys.exc_info()))
+        log.error("".join(traceback.format_exception(*sys.exc_info())))
 
 
 
