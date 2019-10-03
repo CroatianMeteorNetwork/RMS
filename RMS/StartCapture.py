@@ -582,11 +582,17 @@ if __name__ == "__main__":
                     time.sleep(60)
 
 
-                # Stop reboot tries if it's time to capture
+                ### Stop reboot tries if it's time to capture ###
+                if isinstance(start_time, bool):
+                    if start_time:
+                        break
+
                 time_now = datetime.datetime.utcnow()
                 waiting_time = start_time - time_now
                 if waiting_time.total_seconds() <= 0:
                     break
+
+                ### ###
 
 
 
