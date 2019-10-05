@@ -134,6 +134,20 @@ class Platepar(object):
         self.mag_lev_stddev = 0.0
         self.gamma = 1.0
 
+        self.station_code = None
+
+        self.star_list = None
+
+        # Flag to indicate that the platepar was refined with CheckFit
+        self.auto_check_fit_refined = False
+
+        # Init the distorsion parameters
+        self.resetDistorsionParameters()
+
+
+    def resetDistorsionParameters(self):
+        """ Set the distorsion parameters to zero. """
+
         # Distortion fit (forward and reverse)
         self.x_poly_fwd = np.zeros(shape=(12,), dtype=np.float64)
         self.y_poly_fwd = np.zeros(shape=(12,), dtype=np.float64)
@@ -148,15 +162,6 @@ class Platepar(object):
         self.y_poly_fwd[0] = 0.5
         self.x_poly_rev[0] = 0.5
         self.y_poly_rev[0] = 0.5
-
-        self.station_code = None
-
-        self.star_list = None
-
-        # Flag to indicate that the platepar was refined with CheckFit
-        self.auto_check_fit_refined = False
-
-
 
 
     def parseLine(self, f):

@@ -1310,7 +1310,11 @@ class PlateTool(object):
 
 
         # Do a fit on the selected stars while in the star picking mode
-        elif event.key == 'ctrl+z':
+        elif (event.key == 'ctrl+z') or (event.key == "ctrl+Z"):
+
+            # If shift was pressed, reset distorsion parameters to zero
+            if event.key == "ctrl+Z":
+                self.platepar.resetDistorsionParameters()
 
             # If the first platepar is being made, do the fit twice
             if self.first_platepar_fit:
@@ -1731,7 +1735,7 @@ class PlateTool(object):
                 plt.gca().text(10, self.current_ff.nrows, text_str, color='w', verticalalignment='bottom', 
                     horizontalalignment='left', fontproperties=font)
 
-        # Show keyboard shortcurs
+        # Show keyboard shortcuts
         if self.show_key_help > 1:
 
             # Show text on image with instructions
@@ -1779,12 +1783,15 @@ class PlateTool(object):
 
         # Show fitting instructions
         if self.star_pick_mode:
-            text_str  = "STAR PICKING MODE\n"
-            text_str += "PRESS 'CTRL + Z' FOR STAR FITTING\n"
-            text_str += "PRESS 'P' FOR PHOTOMETRY FIT"
+            text_str  = "STAR PICKING MODE"
 
-            plt.gca().text(self.current_ff.ncols/2, self.current_ff.nrows - 10, text_str, color='r', 
-                verticalalignment='top', horizontalalignment='center', fontproperties=font)
+            if self.show_key_help > 0:
+                text_str += "\nPRESS 'CTRL + Z' FOR STAR FITTING\n"
+                text_str += "PRESS 'CTRL + SHIFT + Z' FOR STAR FITTING WITH INITIAL DISTORSION PARAMETES SET TO 0\n"
+                text_str += "PRESS 'P' FOR PHOTOMETRY FIT"
+
+            plt.gca().text(self.current_ff.ncols/2, self.current_ff.nrows, text_str, color='r', 
+                verticalalignment='bottom', horizontalalignment='center', fontproperties=font)
 
 
         self.fig.canvas.draw()
