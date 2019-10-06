@@ -163,7 +163,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
 
         # Run calibration check and auto astrometry refinement
-        if platepar is not None:
+        if (platepar is not None) and (calstars_name is not None):
 
             # Read in the CALSTARS file
             calstars_list = CALSTARS.readCALSTARS(night_data_dir, calstars_name)

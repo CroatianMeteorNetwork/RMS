@@ -83,7 +83,7 @@ def selectFiles(dir_path, ff_detected):
 
 
         # Add FF file which contain detections to the list
-        if file_name in ff_detected:
+        if (ff_detected is not None) and (file_name in ff_detected):
             selected_list.append(file_name)
 
 
@@ -244,3 +244,4 @@ if __name__ == "__main__":
     archive_name = archiveDetections(captured_path, archived_path, ff_detected, config)
 
     print(archive_name)
+
