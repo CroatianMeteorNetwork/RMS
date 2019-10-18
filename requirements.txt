@@ -6,7 +6,8 @@ pyephem>=3.7.6.0
 cython>=0.27.3
 scipy>=1.0.0
 Pillow>=4.3.0
-astropy>=2.0.3
+astropy~=2.0.3;python_version=='2.7'
+astropy~=3.0;python_version>='3.5'
 imreg_dft
 onvif_zeep
 configparser
