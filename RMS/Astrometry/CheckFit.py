@@ -247,7 +247,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
             return 9999.0
 
     # Calculate the average distance
-    avg_dist = np.mean(global_dist_list)
+    avg_dist = np.median(global_dist_list)
 
     cost = (avg_dist**2)*(1.0/np.sqrt(n_matched + 1))
 
