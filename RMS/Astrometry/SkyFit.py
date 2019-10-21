@@ -61,6 +61,7 @@ import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats import StarCatalog
+from RMS.Pickling import loadPickle, savePickle
 from RMS.Routines import Image
 from RMS.Math import angularSeparation
 from RMS.Misc import decimalDegreesToSexHours, openFileDialog
@@ -75,7 +76,7 @@ from RMS.Astrometry.CyFunctions import subsetCatalog
 # TkAgg has issues when opening an external file prompt, so other backends are forced if available
 if matplotlib.get_backend() == 'TkAgg':
 
-    backends = ['Qt5Agg', 'Qt4Agg']
+    backends = ['Qt5Agg', 'Qt4Agg', 'WXAgg']
 
     for bk in backends:
         
@@ -334,16 +335,24 @@ class PlateTool(object):
 
         ### INIT IMAGE ###
 
-        self.fig = plt.figure(facecolor='black')
-        self.fig.canvas.set_window_title('SkyFit')
-
-        # Get the figure manager
-        self.figure_manager = plt.get_current_fig_manager()
+        plt.figure(facecolor='black')
 
         # Init the first image
         self.updateImage(first_update=True)
 
         self.ax = plt.gca()
+
+
+        # Register keys with matplotlib
+        self.registerEventHandling()
+
+
+
+    def registerEventHandling(self):
+        """ Register mouse button and key pressess with matplotlib. """
+
+
+        plt.gcf().canvas.set_window_title('SkyFit')
 
         # Set the bacground color to black
         #matplotlib.rcParams['axes.facecolor'] = 'k'
@@ -369,6 +378,23 @@ class PlateTool(object):
         self.ax.figure.canvas.mpl_connect('key_press_event', self.onKeyPress)
 
 
+
+    def saveState(self):
+        """ Save the current state of the program to a file, so it can be reloaded. """
+
+        # state_date_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S.%f")[:-3]
+        # state_file = 'skyFit_{:s}.state'.format(state_date_str)
+
+        # # Save the state to a pickle file
+        # savePickle(self, self.dir_path, state_file)
+
+        # Write the latest pickle fine
+        savePickle(self, self.dir_path, 'skyFit_latest.state')
+
+        print("Saved state to file")
+
+
+
     def onMousePress(self, event):
         """ Called when the mouse click is pressed. """
 
@@ -381,7 +407,7 @@ class PlateTool(object):
         """ Called when the mouse click is released. """
 
         # Do nothing if some button on the toolbar is active (e.g. zoom, move)
-        if self.figure_manager.toolbar.mode:
+        if plt.get_current_fig_manager().toolbar.mode:
             return None
 
         # Call the same function for mouse movements to update the variables in the background
@@ -444,7 +470,7 @@ class PlateTool(object):
                         self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=100, lw=3)
 
                     # Update canvas
-                    self.fig.canvas.draw()
+                    plt.gcf().canvas.draw()
 
                     # Switch to the mode where the catalog star is selected
                     self.star_selection_centroid = False
@@ -467,7 +493,7 @@ class PlateTool(object):
                         self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=50, lw=2)
 
                     # Update canvas
-                    self.fig.canvas.draw()
+                    plt.gcf().canvas.draw()
 
 
             # Right mouse button, deselect stars
@@ -544,7 +570,7 @@ class PlateTool(object):
             self.drawZoomWindow()
 
 
-        self.fig.canvas.draw()
+        plt.gcf().canvas.draw()
 
 
 
@@ -615,11 +641,11 @@ class PlateTool(object):
             zoom_factor = 8
 
             # Make sure that the zoomed image is every larger than 1/2 of the whole image
-            if 2*zoom_factor*window_radius > np.min([self.fig.bbox.ymax, self.fig.bbox.xmax])/2:
+            if 2*zoom_factor*window_radius > np.min([plt.gcf().bbox.ymax, plt.gcf().bbox.xmax])/2:
 
                 # Compute a new zoom factor
-                zoom_factor = np.floor((np.min([self.fig.bbox.ymax, \
-                    self.fig.bbox.xmax])/2)/(2*window_radius))
+                zoom_factor = np.floor((np.min([plt.gcf().bbox.ymax, \
+                    plt.gcf().bbox.xmax])/2)/(2*window_radius))
 
                 # Don't apply zoom if the image will be smaller
                 if zoom_factor <= 1:
@@ -635,14 +661,14 @@ class PlateTool(object):
                 yo = 0
                 zoom_window_pos += 'N'
             else:
-                yo = self.fig.bbox.ymax - zoom_factor*2*window_radius
+                yo = plt.gcf().bbox.ymax - zoom_factor*2*window_radius
                 zoom_window_pos += 'S'
 
             if self.mouse_x > img_w_half:
                 xo = 0
                 zoom_window_pos += 'W'
             else:
-                xo = self.fig.bbox.xmax - zoom_factor*2*window_radius
+                xo = plt.gcf().bbox.xmax - zoom_factor*2*window_radius
                 zoom_window_pos += 'E'
 
             # If the position of the zoom window has changed, reset the image
@@ -728,7 +754,7 @@ class PlateTool(object):
             img_crop = np.array(img)
 
             # Plot the zoomed image
-            self.fig.figimage(img_crop, xo=xo, yo=yo, zorder=5, cmap='gray', \
+            plt.gcf().figimage(img_crop, xo=xo, yo=yo, zorder=5, cmap='gray', \
                 vmin=np.min(self.img_data_processed), vmax=np.max(self.img_data_processed))
 
 
@@ -1183,6 +1209,9 @@ class PlateTool(object):
             self.platepar.write(self.platepar_file, fmt=self.platepar_fmt, fov=computeFOVSize(self.platepar))
             print('Platepar written to:', self.platepar_file)
 
+            # Save the state
+            self.saveState()
+
 
         # Save the platepar as default (SHIFT+CTRL+S)
         elif event.key == 'ctrl+S':
@@ -1207,8 +1236,8 @@ class PlateTool(object):
                 "Solving with astrometry.net...", color='r', alpha=0.5, fontsize=16, ha='center', va='center')
 
             plt.draw()
-            self.fig.canvas.draw()
-            self.fig.canvas.flush_events()
+            plt.gcf().canvas.draw()
+            plt.gcf().canvas.flush_events()
 
             # If shift was pressed, send only the list of x,y coords of extracted stars
             upload_image = True
@@ -1794,7 +1823,7 @@ class PlateTool(object):
                 verticalalignment='bottom', horizontalalignment='center', fontproperties=font)
 
 
-        self.fig.canvas.draw()
+        plt.gcf().canvas.draw()
 
 
 
@@ -2868,7 +2897,7 @@ if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description="Tool for fitting astrometry plates and photometric calibration.")
 
     arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
-        help='Path to the folder with FF or image files, or path to a video file. If images or videos are given, their names must be in the format: YYYYMMDD_hhmmss.uuuuuu')
+        help='Path to the folder with FF or image files, path to a video file, or to a state file. If images or videos are given, their names must be in the format: YYYYMMDD_hhmmss.uuuuuu')
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one. To load the .config file in the given data directory, write '.' (dot).")
@@ -2887,25 +2916,46 @@ if __name__ == '__main__':
 
     #########################
 
-    # Extract the data directory path
-    dir_path = cml_args.dir_path[0].replace('"', '')
 
+    # If the state file was given, load the state
+    if cml_args.dir_path[0].endswith('.state'):
 
-    # Load the config file
-    config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
+        dir_path, state_name = os.path.split(cml_args.dir_path[0])
 
+        # Load the manual redicution tool object from a state file
+        plate_tool = loadPickle(dir_path, state_name)
 
-    # Parse the beginning time into a datetime object
-    if cml_args.timebeg is not None:
+        # Set the dir path in case it changed
+        plate_tool.dir_path = dir_path
 
-        beginning_time = datetime.datetime.strptime(cml_args.timebeg[0], "%Y%m%d_%H%M%S.%f")
+        # Init SkyFit
+        plate_tool.updateImage(first_update=True)
+        plate_tool.registerEventHandling()
+
 
     else:
-        beginning_time = None
 
-    # Init the plate tool instance
-    plate_tool = PlateTool(dir_path, config, beginning_time=beginning_time, 
-        fps=cml_args.fps, gamma=cml_args.gamma)
+        # Extract the data directory path
+        dir_path = cml_args.dir_path[0].replace('"', '')
+
+
+        # Load the config file
+        config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
+
+
+        # Parse the beginning time into a datetime object
+        if cml_args.timebeg is not None:
+
+            beginning_time = datetime.datetime.strptime(cml_args.timebeg[0], "%Y%m%d_%H%M%S.%f")
+
+        else:
+            beginning_time = None
+
+        # Init the plate tool instance
+        plate_tool = PlateTool(dir_path, config, beginning_time=beginning_time, 
+            fps=cml_args.fps, gamma=cml_args.gamma)
+
+
 
     plt.tight_layout()
     plt.show()
