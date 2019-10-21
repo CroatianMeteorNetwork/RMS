@@ -118,7 +118,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     
     ### Take only those CALSTARS entires for which FF files exist in the folder ###
 
-    # Get a list of FF files in the folder\
+    # Get a list of FF files in the folder
     ff_list = []
     for file_name in os.listdir(night_dir_path):
         if validFFName(file_name):
@@ -380,7 +380,8 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
     # Add info text
     info_text = ff_dict[max_jd] + '\n' \
-        + "Matched stars: {:d}/{:d}\n".format(max_matched_stars, len(star_dict[max_jd])) \
+        + "Matched stars within {:.1f} px radius: {:d}/{:d} \n".format(match_radius, max_matched_stars, \
+            len(star_dict[max_jd])) \
         + "Median distance: {:.2f} px\n".format(np.median(distances)) \
         + "Catalog limiting magnitude: {:.1f}".format(lim_mag)
 

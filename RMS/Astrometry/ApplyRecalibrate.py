@@ -104,9 +104,9 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
                 break
 
 
-        # If the platepar is good, don't recalibrate anymore
-        if CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, star_dict_ff, match_radius, \
-            verbose=True):
+        # If the platepar is good and the radius is below a pixel, don't recalibrate anymore
+        if (match_radius < 1.0) and CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, \
+            star_dict_ff, match_radius, verbose=True):
             print('The fit is good enough!')
             break
 
@@ -160,7 +160,8 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
                 print('Astrometry fit failed!')
 
             else:
-                print('Number of matched stars after the fit is smaller than necessary: {:d} < {:d}'.format(n_matched, config.min_matched_stars))
+                print('Number of matched stars after the fit is smaller than necessary: {:d} < {:d}'.format(n_matched, \
+                    config.min_matched_stars))
 
             # Indicate that the recalibration failed
             result = None
@@ -188,6 +189,9 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
     # If the platepar is good, store it
     if CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, star_dict_ff, \
         goodnes_check_radius) or force_platepar_save:
+
+        print("Platepar minimum error of {:.2f} with radius {:.1f} px PASSED!".format(config.dist_check_threshold, \
+            goodnes_check_radius))
 
         print('Saving improved platepar...')
 
@@ -247,6 +251,10 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
     calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
 
+    # Globally increase catalog limiting magnitude
+    config.catalog_mag_limit += 1
+
+
     # Load catalog stars (overwrite the mag band ratios if specific catalog is used)
     star_catalog_status = StarCatalog.readStarCatalog(config.star_catalog_path,\
         config.star_catalog_file, lim_mag=config.catalog_mag_limit, \
@@ -276,7 +284,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
         ff_name, meteor_No, rho, phi, meteor_meas = meteor_entry
 
-        # Skip this meteors if its FF file was already recalibrated
+        # Skip this meteor if its FF file was already recalibrated
         if ff_name in recalibrated_platepars:
             continue
 

@@ -111,6 +111,7 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
 
     # If the image registration library is not installed, return nothing
     if not IMREG_INSTALLED:
+        print("WARNING:")
         print('The imreg_dft library is not installed! Install it by running either:')
         print(' a) pip install imreg_dft')
         print(' b) conda install -c conda-forge imreg_dft')
