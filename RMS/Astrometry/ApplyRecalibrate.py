@@ -175,7 +175,7 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
             # Keep track of the minimum match radius
             min_match_radius = match_radius
 
-            print('Astrometry fit successful!')
+            print('Astrometry fit successful with radius {:.1f} px!'.format(match_radius))
 
 
     # Choose which radius will be chosen for the goodness of fit check

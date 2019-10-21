@@ -35,7 +35,7 @@ from RMS.Astrometry.CyFunctions import matchStars, subsetCatalog, cyraDecToXY
 def computeMinimizationTolerances(config, platepar, star_dict_len):
     """ Compute tolerances for minimization. """
 
-        # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
+    # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
     # in the same regard as the cost function)
     fatol = (config.dist_check_threshold**2)/np.sqrt(star_dict_len*config.min_matched_stars + 1)
 
