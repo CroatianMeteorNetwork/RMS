@@ -70,7 +70,8 @@ def meteorSimulate(img_w, img_h, frame_num, psf_sigma, speed=1):
                     #print(x, y, intens)
 
                     # Generate a Gaussian PSF
-                    gauss_values = twoDGaussian((x_indices, y_indices), intens, x, y, psf_sigma, psf_sigma, 0.0, 0.0)
+                    gauss_values = twoDGaussian((x_indices, y_indices, 255), intens, x, y, psf_sigma, \
+                        psf_sigma, 0.0, 0.0)
 
                     # Construct an image from the Gaussian values
                     gauss_values = gauss_values.reshape(img_h, img_w)
@@ -134,8 +135,8 @@ if __name__ == "__main__":
     pickle_file = 'compress_test_frames.pickle'
 
     ## SAVE the frames to disk
-    with open(os.path.join(dir_path, pickle_file), 'w') as f:
-        pickle.dump(frames, f)
+    with open(os.path.join(dir_path, pickle_file), 'wb') as f:
+        pickle.dump(frames, f, protocol=2)
     ###
 
     # ## Load the frames from disk
