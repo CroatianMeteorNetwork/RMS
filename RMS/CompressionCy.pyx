@@ -100,34 +100,36 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
 
                     max_frame = n
                     num_equal = 1
-                
 
-                # Randomize taken frame number for max_val pixel if there are several frames with the maximum
-                # value
-                elif max_val == pixel:
-                
-                    num_equal += 1
+
+                else:
+
+                    # Randomize taken frame number for max_val pixel if there are several frames with the 
+                    # maximum value
+                    if max_val == pixel:
                     
-                    # rand_count is unsigned short, which means it will overflow back to 0 after 65535
-                    rand_count = (rand_count + 1)%65536
+                        num_equal += 1
+                        
+                        # rand_count is unsigned short, which means it will overflow back to 0 after 65535
+                        rand_count = (rand_count + 1)%65536
 
-                    # Select the frame by random
-                    if num_equal <= randomN[rand_count]:
-                        max_frame = n
+                        # Select the frame by random
+                        if num_equal <= randomN[rand_count]:
+                            max_frame = n
 
 
-                # Track the top 4 maximum values, which is used to remove wakes from mean and stddev
-                elif pixel > max_val_2:
-                    max_val_4 = max_val_3
-                    max_val_3 = max_val_2
-                    max_val_2 = pixel
+                    # Track the top 4 maximum values, which is used to remove wakes from mean and stddev
+                    if pixel > max_val_2:
+                        max_val_4 = max_val_3
+                        max_val_3 = max_val_2
+                        max_val_2 = pixel
 
-                elif pixel > max_val_3:
-                    max_val_4 = max_val_3
-                    max_val_3 = pixel
+                    elif pixel > max_val_3:
+                        max_val_4 = max_val_3
+                        max_val_3 = pixel
 
-                elif pixel > max_val_4:
-                    max_val_4 = pixel
+                    elif pixel > max_val_4:
+                        max_val_4 = pixel
 
 
                 # Calculate the index for fieldsum, dependent on the deinterlace order (and if there's any

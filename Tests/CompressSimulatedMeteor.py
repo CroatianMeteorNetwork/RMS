@@ -130,6 +130,9 @@ if __name__ == "__main__":
     # Slow bright fireball
     frames = meteorSimulate(720, 576, 256, 5.0, speed=1)
 
+    # # All white
+    # frames = np.zeros((256, 576, 720), np.uint8) + 255
+
 
 
     pickle_file = 'compress_test_frames.pickle'
@@ -178,8 +181,12 @@ if __name__ == "__main__":
     half_frames, field_intensities = FieldIntensities.readFieldIntensitiesBin(dir_path, filename)
 
 
-    # Show compressed images
+    # Show maxpixel
     plt.imshow(compressed[0], vmin=0, vmax=255, cmap='gray')
+    plt.show()
+
+    # Show avepixel
+    plt.imshow(compressed[2], vmin=0, vmax=255, cmap='gray')
     plt.show()
 
     # Show field intensitites
