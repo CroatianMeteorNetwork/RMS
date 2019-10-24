@@ -169,7 +169,7 @@ mplayer tv:// -tv driver=v4l2:device=/dev/video0:input=0:norm=PAL -vo x11
 ```
 
 ### Editing the configuration file
-This is a very important step as all settings are read from the configuration file. The file in question is the [.config](.config) file. Once you download this repository, start editing the file with your favorite editor.
+This is a very important step as all settings are read from the configuration file. The file in question is the [.config](.config) file. Once you download this repository, first thing to do is copy `.config.example` to `.config`, after it, start editing the file with your favorite editor.
 
 #### [System]
 ##### Station ID

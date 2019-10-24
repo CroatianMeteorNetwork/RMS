@@ -88,3 +88,7 @@ target/
 
 #VS Code files
 .vscode
+
+#Jetbrains code files
+.idea
+
