@@ -2,7 +2,7 @@
 
 [System]
 
-stationID: CA0001
+stationID: XX0001
 latitude: 43.19301 ; WGS84 +N  (degrees )
 longitude: -81.315555 ; WGS84 +E (degrees)
 elevation: 327 ; mean sea level EGM96 geoidal datum, not WGS84 ellipsoidal (meters)
