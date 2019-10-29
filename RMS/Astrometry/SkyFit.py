@@ -454,28 +454,31 @@ class PlateTool(object):
 
                     x_cent_tmp, y_cent_tmp, _ = self.centroidStar()
 
-                    # Centroid the star around the pressed coordinates
-                    self.x_centroid, self.y_centroid, \
-                        self.star_intensity = self.centroidStar(prev_x_cent=x_cent_tmp, \
-                            prev_y_cent=y_cent_tmp)
+                    # Check that the centroiding was successful
+                    if x_cent_tmp is not None:
 
-                    # Draw the centroid on the image
-                    plt.scatter(self.x_centroid, self.y_centroid, marker='+', c='y', s=100, lw=3, alpha=0.5)
+                        # Centroid the star around the pressed coordinates
+                        self.x_centroid, self.y_centroid, \
+                            self.star_intensity = self.centroidStar(prev_x_cent=x_cent_tmp, \
+                                prev_y_cent=y_cent_tmp)
 
-                    # Select the closest catalog star to the centroid as the first guess
-                    self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.x_centroid, self.y_centroid)
+                        # Draw the centroid on the image
+                        plt.scatter(self.x_centroid, self.y_centroid, marker='+', c='y', s=100, lw=3, alpha=0.5)
 
-                    # Plot the closest star as a purple cross
-                    self.selected_cat_star_scatter = plt.scatter(self.catalog_x[self.closest_cat_star_indx], 
-                        self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=100, lw=3)
+                        # Select the closest catalog star to the centroid as the first guess
+                        self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.x_centroid, self.y_centroid)
 
-                    # Update canvas
-                    plt.gcf().canvas.draw()
+                        # Plot the closest star as a purple cross
+                        self.selected_cat_star_scatter = plt.scatter(self.catalog_x[self.closest_cat_star_indx], 
+                            self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=100, lw=3)
 
-                    # Switch to the mode where the catalog star is selected
-                    self.star_selection_centroid = False
+                        # Update canvas
+                        plt.gcf().canvas.draw()
 
-                    self.drawCursorCircle()
+                        # Switch to the mode where the catalog star is selected
+                        self.star_selection_centroid = False
+
+                        self.drawCursorCircle()
 
 
                 # If the catalog star has to be picked
@@ -2376,6 +2379,11 @@ class PlateTool(object):
         else:
             mouse_x = self.mouse_x_press
             mouse_y = self.mouse_y_press
+
+
+        # Check if the mouse was pressed outside the FOV
+        if mouse_x is None:
+            return None, None, None
 
         ### Extract part of image around the mouse cursor ###
         ######################################################################################################
