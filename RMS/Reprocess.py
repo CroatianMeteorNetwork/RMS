@@ -284,16 +284,21 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     # Add the config file to the archive too
     extra_files.append(os.path.join(os.getcwd(), '.config'))
 
+    # Add the mask
+    if (not nodetect):
+        if os.path.exists(config.mask_file):
+            mask_path = os.path.abspath(config.mask_file)
+            extra_files.append(mask_path)
+
+
     # Add the platepar to the archive if it exists
     if (not nodetect):
-
         if os.path.exists(platepar_path):
             extra_files.append(platepar_path)
 
 
     # Add the json file with recalibrated platepars to the archive
     if (not nodetect):
-
         recalibrated_platepars_path = os.path.join(night_data_dir, config.platepars_recalibrated_name)
         if os.path.exists(recalibrated_platepars_path):
             extra_files.append(recalibrated_platepars_path)
