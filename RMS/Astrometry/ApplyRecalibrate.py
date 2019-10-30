@@ -235,6 +235,9 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
             recalibrated platepar instances for every FF file.
     """
 
+    # Use a copy of the config file
+    config = copy.deepcopy(config)
+
     # If the given file does not exits, return nothing
     if not os.path.isfile(ftpdetectinfo_path):
         print('ERROR! The FTPdetectinfo file does not exist: {:s}'.format(ftpdetectinfo_path))
