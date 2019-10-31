@@ -1,4 +1,7 @@
-UTV007
+# Devices
+
+
+## UTV007
 kernel driver
 USB ID: 2002
 usage:
@@ -11,7 +14,7 @@ restrictions:
 Brightness/contrast/saturation/hue of usbtv kernel module can be controlled by v4l2-ctl (from v4l-utils) with 
 e.g. v4l2-ctl --set-ctrl=brightness=512. Default values in Ubuntu 16.04 are too dark by default.
 
-Somagic
+## Somagic
 userspace module
 USB ID(non-initized): 1c88:0007
 USB ID(initized): 1c88:003f
@@ -27,7 +30,7 @@ restrictions:
  - has to use binary-blob (firmware)... can be extracted over USB, extracted from CD or downloaded illegally (propertary)
  - no V4L2 driver, unless kernel is recompiled (no way!)
 
-Arkmicro UVC
+## Arkmicro UVC
 UVC-compatible (ie. kernel driver)
 USB ID: 18ec:5850
 usage:
