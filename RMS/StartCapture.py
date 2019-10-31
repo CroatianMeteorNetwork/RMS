@@ -212,15 +212,23 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Initialize buffered capture
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file)
 
+    live_view_enable = config.live_view_enable
 
-    # # Initialize the live image viewer
-    # if config.live_view_enable:
+    # Check if platform is ARM/RPi
+    platform = os.uname()[4]
 
-    #     live_view = LiveViewer(window_name='Maxpixel')
+    if platform.startswith('arm'):
+        live_view_enable = False
 
-    # else:
-    
-    live_view = None
+    # Initialize the live image viewer
+    if live_view_enable:
+        window_name = str(config.stationID) + '_Maxpixel'
+
+        live_view = LiveViewer(window_name=window_name)
+
+    else:
+
+        live_view = None
 
     
     # Initialize compression
