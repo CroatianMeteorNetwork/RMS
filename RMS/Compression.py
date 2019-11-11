@@ -323,6 +323,7 @@ class Compressor(multiprocessing.Process):
 
 
         log.debug('Compression run exit')
+        time.sleep(1.0)
         self.run_exited.set()
 
 
