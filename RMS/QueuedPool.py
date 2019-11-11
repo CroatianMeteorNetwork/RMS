@@ -276,11 +276,11 @@ class QueuedPool(object):
             
             except:
                 tb = traceback.format_exc()
-                self.printAndLog('Failed retrieving inputs for processing...')
+                self.printAndLog('Failed retrieving inputs...')
                 self.printAndLog(tb)
 
                 if input_ret_failures > 5:
-                    self.printAndLog("Too many failures to get inputs, stopping processing...")
+                    self.printAndLog("Too many failures to get inputs for QueuedPool, assuming all inputs were processed...")
                     break
 
                 input_ret_failures += 1
