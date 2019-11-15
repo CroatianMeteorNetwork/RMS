@@ -25,7 +25,7 @@ if __name__ == "__main__":
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Copy .config file from directory closest in time to the reference time to all older data directories.")
+    arg_parser = argparse.ArgumentParser(description="Copy .config file from directory closest in time to the reference time to all older data directories and recalibrate the data.")
 
     arg_parser.add_argument('station_path', metavar='DIR_PATH', type=str, \
         help="Path to the station directory.")
