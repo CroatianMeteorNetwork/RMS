@@ -533,7 +533,7 @@ class QueuedPool(object):
 
 
 
-    def addJob(self, job, wait_time=0.05, repeated=False):
+    def addJob(self, job, wait_time=0.1, repeated=False):
         """ Add a job to the input queue. Job can be a list of arguments for the worker function. If a list is
             not given, the arguments will be wrapped in the list.
 
@@ -546,6 +546,7 @@ class QueuedPool(object):
         try:
             
             self.input_queue.put(job)
+            time.sleep(wait_time/2.0)
 
             # Track the total number of jobs received
             self.total_jobs.increment()
@@ -562,8 +563,9 @@ class QueuedPool(object):
 
             # Try adding the job to processing queue again
             if not repeated:
-                time.sleep(0.05)
+                time.sleep(0.1)
                 self.addJob(job, wait_time=wait_time, repeated=True)
+                time.sleep(0.1)
                 return None
 
             else:
