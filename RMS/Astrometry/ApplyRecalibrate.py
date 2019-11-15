@@ -513,47 +513,24 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
         
 
+def applyRecalibrate(ftpdetectinfo_path, config):
+    """ Recalibrate FF files with detections and apply the recalibrated platepar to those detections. 
 
+    Arguments:
+        ftpdetectinfo_path: [str] Name of the FTPdetectinfo file.
+        config: [Config instance]
 
-
-
-if __name__ == "__main__":
-
-    ### COMMAND LINE ARGUMENTS
-
-    # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Recalibrate the platepar for every FF with detections and apply it the detections, recompute the FTPdetectinfo and UFOOrbit file.")
-
-    arg_parser.add_argument('ftpdetectinfo_path', nargs=1, metavar='FTPDETECTINFO_PATH', type=str, \
-        help='Path to the FF file.')
-
-    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
-        help="Path to a config file which will be used instead of the default one.")
-
-    # Parse the command line arguments
-    cml_args = arg_parser.parse_args()
-
-    #########################
-
-    ftpdetectinfo_path = cml_args.ftpdetectinfo_path[0]
-
-    # Check if the given FTPdetectinfo file exists
-    if not os.path.isfile(ftpdetectinfo_path):
-        print('No such file:', ftpdetectinfo_path)
-        sys.exit()
-
+    Return:
+        recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are 
+            recalibrated platepar instances for every FF file.
+    """
 
     # Extract parent directory
     dir_path = os.path.dirname(ftpdetectinfo_path)
 
 
-    # Load the config file
-    config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
-
-
     # Get a list of files in the night folder
-    file_list = os.listdir(dir_path)
-
+    file_list = sorted(os.listdir(dir_path))
 
 
     # Find and load the platepar file
@@ -594,3 +571,45 @@ if __name__ == "__main__":
         platepar_dict=recalibrated_platepars)
 
     ### ###
+
+    return recalibrated_platepars
+
+
+
+if __name__ == "__main__":
+
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Recalibrate the platepar for every FF with detections and apply it the detections, recompute the FTPdetectinfo and UFOOrbit file.")
+
+    arg_parser.add_argument('ftpdetectinfo_path', nargs=1, metavar='FTPDETECTINFO_PATH', type=str, \
+        help='Path to the FF file.')
+
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+    ftpdetectinfo_path = cml_args.ftpdetectinfo_path[0]
+
+    # Check if the given FTPdetectinfo file exists
+    if not os.path.isfile(ftpdetectinfo_path):
+        print('No such file:', ftpdetectinfo_path)
+        sys.exit()
+
+
+    # Extract parent directory
+    dir_path = os.path.dirname(ftpdetectinfo_path)
+
+
+    # Load the config file
+    config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
+
+
+    # Run the recalibration and recomputation
+    applyRecalibrate(ftpdetectinfo_path, config)
+    
