@@ -9,51 +9,36 @@ import matplotlib.pyplot as plt
 import scipy.optimize
 
 
-def addGaussian(frame, x, y, amp, sigma):
-
-    # Compute the window size as 3 sigma
-    window = 3*sigma
-
-
-    # Compute the limits of the window for adding the Gaussian to the frame
-
-    x_min = np.floor(x - window)
-    if x_min < 0:
-        x_min = 0
-
-    x_max = np.ceil(x + window)
-    if x_max > frame.shape[1] - 1:
-        x_max = frame.shape[1] - 1
-
-    y_min = np.floor(y - window)
-    if y_min < 0:
-        y_min = 0
-
-    y_max = np.ceil(y + window)
-    if y_max > frame.shape[0] - 1:
-        y_max = frame.shape[0] - 1
-
-
-    for xp in range(int(y_min), int(y_max)):
-        for yp in range(int(x_min), int(x_max)):
-
-            # Compute the squared radius from the centre of the gaussian
-            r_sq = (xp - x)**2 + (yp - y)**2
-
-            # Compute the value of the Gaussian
-            val = amp*np.exp(-0.5*r_sq/(sigma**2))
-
-            frame[yp, xp] += val
-
-    return frame
+# Import Cython functions
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+from Utils.SaturationTools import addGaussian
 
 
 
-def simulateSaturation(app_mag, photom_offset, bg_val, fps, ang_vel, gauss_sigma, steps, saturation_point):
+def simulateSaturation(app_mag, mag_app_saturated_input, photom_offset, bg_val, fps, ang_vel, gauss_sigma, \
+    steps, saturation_point, show_plot=False):
 
+
+    # Compute the log sum pixel
+    lsp = app_mag - photom_offset
+
+    # Compute the intensity sum from the magnitude
+    intens_sum = 10**(-lsp/2.5)
 
     # Compute the border as 3 sigma + padding
     border = 3*gauss_sigma + 10
+
+    # If the intensity sum is larger than the sum of half the windows saturating, scale it up
+    intens_sum_saturated = 10**(-(mag_app_saturated_input - photom_offset)/2.5)
+    if intens_sum_saturated > ((border/2.0)**2)*saturation_point:
+        border = 4*np.sqrt(intens_sum_saturated/saturation_point)
+
+
+    # Limit the border to 50 px
+    if border > 50:
+        border = 50
+
 
     # Estimate the image size
     track_length = int(ang_vel/fps + 2*border)
@@ -73,12 +58,6 @@ def simulateSaturation(app_mag, photom_offset, bg_val, fps, ang_vel, gauss_sigma
     pos[:, :, 1] = Y
 
 
-    # Compute the log sum pixel
-    lsp = app_mag - photom_offset
-
-    # Compute the intensity sum from the magnitude
-    intens_sum = 10**(-lsp/2.5)
-
     # Compute the Gaussian amplitude
     A = intens_sum/(2*np.pi*gauss_sigma**2)
 
@@ -90,9 +69,9 @@ def simulateSaturation(app_mag, photom_offset, bg_val, fps, ang_vel, gauss_sigma
     for n in range(steps):
 
         # Compute the location of the Gaussian
-        x = y = n/steps*ang_vel/fps + border
+        x = y = (n/steps)*(ang_vel/fps) + border
 
-        frame = addGaussian(frame, x, y, A, gauss_sigma)
+        frame = addGaussian(frame, x, y, A, gauss_sigma, 3*border)
 
 
     # Compute the real magnitude
@@ -116,9 +95,9 @@ def simulateSaturation(app_mag, photom_offset, bg_val, fps, ang_vel, gauss_sigma
 
     #print('Modelled saturated magnitude:', mag_app_saturated)
 
-
-    # plt.imshow(frame, cmap='gray', vmin=0, vmax=255)
-    # plt.show()
+    if show_plot:
+        plt.imshow(frame, cmap='gray', vmin=0, vmax=255)
+        plt.show()
 
 
     return mag_app_unsaturated, mag_app_saturated
@@ -133,7 +112,6 @@ def findUnsaturatedMagnitude(app_mag, photom_offset, bg_val, fps, ang_vel, gauss
     def _costFunc(mag_app_unsaturated, params):
 
         mag_app = params[0]
-        params = params[1:]
 
         # Compute the unsatured magnitude
         _, mag_app_saturated = simulateSaturation(mag_app_unsaturated, *params)
@@ -147,6 +125,10 @@ def findUnsaturatedMagnitude(app_mag, photom_offset, bg_val, fps, ang_vel, gauss
     res = scipy.optimize.minimize(_costFunc, [-1], args=([app_mag, photom_offset, bg_val, fps, ang_vel, \
         gauss_sigma, steps, saturation_point]), method='Nelder-Mead')
 
+
+    # ## TEST
+    # simulateSaturation(res.x[0], app_mag, photom_offset, bg_val, fps, ang_vel, \
+    #     gauss_sigma, steps, saturation_point, show_plot=True)
 
     return res.x[0]
 
