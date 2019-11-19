@@ -2312,6 +2312,7 @@ if __name__ == "__main__":
 
         # Load the manual redicution tool object from a state file
         manual_tool = loadPickle(head1, tail1)
+        manual_tool.dir_path = head1
         manual_tool.updateImage()
         manual_tool.registerEventHandling()
 
