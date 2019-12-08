@@ -76,7 +76,7 @@ from RMS.Astrometry.CyFunctions import subsetCatalog
 # TkAgg has issues when opening an external file prompt, so other backends are forced if available
 if matplotlib.get_backend() == 'TkAgg':
 
-    backends = ['Qt5Agg', 'Qt4Agg', 'WXAgg']
+    backends = ['Qt5Agg', 'Qt4Agg']
 
     for bk in backends:
         
@@ -363,6 +363,8 @@ class PlateTool(object):
         plt.rcParams['keymap.all_axes'] = ''
         plt.rcParams['keymap.quit'] = ''
         plt.rcParams['keymap.pan'] = ''
+        plt.rcParams['keymap.forward'] = ''
+        plt.rcParams['keymap.back'] = ''
 
 
         

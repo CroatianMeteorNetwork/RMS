@@ -164,8 +164,9 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
         #   loaded only if there's one file with '.config' in the directory
         if cml_args_config[0] == '.':
 
-            # Locate all files in the data directory that have '.config' in them
-            config_files = [file_name for file_name in os.listdir(dir_path) if '.config' in file_name]
+            # Locate all files in the data directory that start with '.config'
+            config_files = [file_name for file_name in os.listdir(dir_path) \
+                if file_name.startswith('.config')]
 
             # If there is exactly one config file, use it
             if len(config_files) == 1:
