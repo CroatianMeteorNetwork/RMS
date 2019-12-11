@@ -264,6 +264,17 @@ class UploadManager(multiprocessing.Process):
 
                 file_name = file_name.replace('\n', '').replace('\r', '')
 
+                # Skip empty names
+                if len(file_name) == 0:
+                    continue
+
+                # Make sure the file for upload exists
+                if not os.path.isfile(file_name):
+                    log.warning("Local file not found: {:s}".format(file_name))
+                    log.warning("Skipping it...")
+                    continue
+
+
                 # Add the file if it was not already in the queue
                 if not file_name in self.file_queue.queue:
                     self.file_queue.put(file_name)
