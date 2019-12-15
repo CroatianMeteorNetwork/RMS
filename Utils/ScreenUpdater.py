@@ -92,7 +92,7 @@ class LiveViewer(multiprocessing.Process):
                 text = new_ff
 
                 # Load the new FF
-                ff = readFF(self.dir_path, new_ff)
+                ff = readFF(self.dir_path, new_ff, verbose=False)
 
                 if ff is not None:
                     img = ff.maxpixel
