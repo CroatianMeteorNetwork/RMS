@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import time
+import platform
 import multiprocessing
 import numpy as np
 
@@ -54,7 +55,10 @@ class LiveViewer(multiprocessing.Process):
 
         # Open the window full screen
         mng = plt.get_current_fig_manager()
-        mng.window.state('zoomed')
+        if platform.system() == "Windows":
+            mng.window.state('zoomed')
+        else:
+            mng.resize(*mng.window.maxsize())
 
 
         #plt.axis([-50,50,0,10000])
