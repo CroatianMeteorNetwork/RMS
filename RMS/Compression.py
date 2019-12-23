@@ -41,7 +41,7 @@ log = logging.getLogger("logger")
 
 # class CompressorHandler(object):
 #     def __init__(self, data_dir, array1, startTime1, array2, startTime2, config, detector=None, 
-#         live_view=None, flat_struct=None):
+#         flat_struct=None):
 #         """ Handles starting and restarting compressor objects. See the Compressor class for details. 
             
 #             This object had a 'compressor' property which is the Compressor class instance once it has been
@@ -56,7 +56,6 @@ log = logging.getLogger("logger")
 #         self.config = config
 
 #         self.detector = detector
-#         self.live_view = live_view
 #         self.flat_struct = flat_struct
 
 #         self.compressor = None
@@ -66,7 +65,7 @@ log = logging.getLogger("logger")
 #         """ Starts a compressor instance with the inited parameters. """
 
 #         self.compressor = Compressor(self.data_dir, self.array1, self.startTime1, self.array2, \
-#             self.startTime2, self.config, detector=self.detector, live_view=self.live_view, \
+#             self.startTime2, self.config, detector=self.detector, \
 #             flat_struct=self.flat_struct)
 
 #         return self.compressor
@@ -84,8 +83,7 @@ class Compressor(multiprocessing.Process):
 
     running = False
     
-    def __init__(self, data_dir, array1, startTime1, array2, startTime2, config, detector=None, 
-        live_view=None):
+    def __init__(self, data_dir, array1, startTime1, array2, startTime2, config, detector=None):
         """
 
         Arguments:
@@ -98,8 +96,6 @@ class Compressor(multiprocessing.Process):
         Keyword arguments:
             detector: [Detector object] Handle to Detector object used for running star extraction and
                 meteor detection.
-            live_view: [LiveViewer object] Handle to the LiveViewer object which will show in real time 
-                the latest maxpixel on the screen.
 
         """
         
@@ -113,7 +109,6 @@ class Compressor(multiprocessing.Process):
         self.config = config
 
         self.detector = detector
-        self.live_view = live_view
 
         self.exit = multiprocessing.Event()
 
@@ -210,7 +205,7 @@ class Compressor(multiprocessing.Process):
         self.join()
 
         # Return the detector and live viewer objects because they were updated in this namespace
-        return self.detector, self.live_view
+        return self.detector
     
 
 
@@ -311,14 +306,6 @@ class Compressor(multiprocessing.Process):
                 # Add the file to the detector queue
                 self.detector.addJob([self.data_dir, filename, self.config])
                 log.info('Added file for detection: {:s}'.format(filename))
-
-
-            # Refresh the maxpixel currently shown on the screen
-            if self.live_view is not None:
-
-                # Add the image to the image queue
-                self.live_view.updateImage(compressed[0], filename + " maxpixel")
-                log.debug('Updated maxpixel on the screen: {:s}'.format(filename))
 
 
 

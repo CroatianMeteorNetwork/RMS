@@ -36,7 +36,8 @@ def myPause(interval):
 
 
 class LiveViewer(multiprocessing.Process):
-    def __init__(self, dir_path, slideshow=False, slideshow_pause=2.0, update_interval=1.0):
+    def __init__(self, dir_path, slideshow=False, slideshow_pause=2.0, banner_text="", \
+        update_interval=1.0):
         """ Monitors a given directory for FF files, and shows them on the screen as new ones get created. It can
             also do slideshows. 
 
@@ -46,6 +47,7 @@ class LiveViewer(multiprocessing.Process):
         Keyword arguments:
             slideshow: [bool] Start a slide show instead of monitoring the folder for new files.
             slideshow_pause: [float] Number of seconds between slideshow updated. 2 by default.
+            banner_text: [str] Banner text that will be shown on the screen.
             update_interval: [float] Number of seconds for checking the given directory for new files.
         """
 
@@ -53,6 +55,7 @@ class LiveViewer(multiprocessing.Process):
 
         self.slideshow = slideshow
         self.slideshow_pause = slideshow_pause
+        self.banner_text = banner_text
         self.update_interval = update_interval
 
         self.exit = multiprocessing.Event()
@@ -97,7 +100,7 @@ class LiveViewer(multiprocessing.Process):
         plt.show()
 
 
-    def updateImage(self, img, text):
+    def updateImage(self, img, text, banner_text=""):
         """ Update the image on the screen. 
         
         Arguments:
@@ -105,8 +108,14 @@ class LiveViewer(multiprocessing.Process):
             text: [str] Text that will be printed on the image.
         """
 
+        # Show the image
         plt.imshow(img, cmap='gray', vmin=0, vmax=255)
+
+        # Plot the text (i.e. FF file name)
         plt.text(0, 0, text, color='g')
+
+        # Plot the banner
+        plt.text(img.shape[1]//2, 0, banner_text, ha='center', va='top', color='r', size=20)
 
         plt.tight_layout()
 
@@ -129,8 +138,12 @@ class LiveViewer(multiprocessing.Process):
 
         # Go through the list of FF files and show them on the screen
         first_run = True
-        while True:
+        while not self.exit.is_set():
             for ff_name in ff_list:
+
+                # Stop the loop if the slideshow should stop
+                if self.exit.is_set():
+                    break
 
                 # Load the FF file
                 ff = readFF(self.dir_path, ff_name, verbose=False)
@@ -157,7 +170,7 @@ class LiveViewer(multiprocessing.Process):
                 plt.clf()
 
                 # Update the image on the screen
-                self.updateImage(img, text)
+                self.updateImage(img, text, banner_text=self.banner_text)
 
                 first_run = False
 

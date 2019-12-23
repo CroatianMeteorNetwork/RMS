@@ -267,6 +267,9 @@ class Config:
         # Enable/disable showing maxpixel on the screen
         self.live_view_enable = True
 
+        # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
+        self.slideshow_enable = True
+
         ##### Upload
 
         # Flag determining if uploading is enabled or not
@@ -702,6 +705,10 @@ def parseCapture(config, parser):
     # Enable/disable showing maxpixel on the screen
     if parser.has_option(section, "live_view_enable"):
         config.live_view_enable = parser.getboolean(section, "live_view_enable")
+
+    # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
+    if parser.has_option(section, "slideshow_enable"):
+        config.slideshow_enable = parser.getboolean(section, "slideshow_enable")
 
 
 
