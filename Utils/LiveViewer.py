@@ -62,6 +62,9 @@ class LiveViewer(multiprocessing.Process):
 
         self.exit = multiprocessing.Event()
 
+        # Switch backend to TkAgg
+        matplotlib.use("TkAgg")
+
 
 
     def initPlot(self):
