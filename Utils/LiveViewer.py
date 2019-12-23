@@ -51,6 +51,8 @@ class LiveViewer(multiprocessing.Process):
             update_interval: [float] Number of seconds for checking the given directory for new files.
         """
 
+        super(LiveViewer, self).__init__()
+
         self.dir_path = dir_path
 
         self.slideshow = slideshow
@@ -59,17 +61,6 @@ class LiveViewer(multiprocessing.Process):
         self.update_interval = update_interval
 
         self.exit = multiprocessing.Event()
-
-
-        # Init the plot
-        self.initPlot()
-
-
-        if self.slideshow:
-            self.startSlideshow()
-
-        else:
-            self.monitorDir()
 
 
 
@@ -242,15 +233,18 @@ class LiveViewer(multiprocessing.Process):
 
 
     def run(self):
-        """ Start the live viewer. """
+        """ Main processing loop. """
 
-        try:
-            # Spawn the process
-            self.start()
 
-        # If it can't be started, handle it gracefully
-        except AttributeError:
-            print("The live viewer cannot be started!")
+        # Init the plot
+        self.initPlot()
+
+
+        if self.slideshow:
+            self.startSlideshow()
+
+        else:
+            self.monitorDir()
 
 
 
@@ -284,4 +278,4 @@ if __name__ == "__main__":
     #########################
 
     lv = LiveViewer(cml_args.dir_path, slideshow=cml_args.slideshow, slideshow_pause=cml_args.pause)
-    lv.run()
+    lv.start()
