@@ -6,7 +6,6 @@ from __future__ import print_function, division, absolute_import
 
 
 import os
-import sys
 import time
 import platform
 import multiprocessing
@@ -61,9 +60,6 @@ class LiveViewer(multiprocessing.Process):
         self.update_interval = update_interval
 
         self.exit = multiprocessing.Event()
-
-        # Switch backend to TkAgg
-        matplotlib.use("TkAgg")
 
 
 

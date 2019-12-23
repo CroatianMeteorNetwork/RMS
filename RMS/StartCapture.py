@@ -29,16 +29,16 @@ import traceback
 
 import numpy as np
 
+# This needs to be first to set the proper matplotlib backend it needs
+from Utils.LiveViewer import LiveViewer
+
 import RMS.ConfigReader as cr
 from RMS.Logger import initLogging
-
-
 from RMS.BufferedCapture import BufferedCapture
 from RMS.CaptureDuration import captureDuration
 from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
-from Utils.LiveViewer import LiveViewer
 from RMS.Misc import mkdirP
 from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight
