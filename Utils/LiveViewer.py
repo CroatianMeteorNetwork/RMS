@@ -36,7 +36,7 @@ def myPause(interval):
 
 class LiveViewer(multiprocessing.Process):
     def __init__(self, dir_path, slideshow=False, slideshow_pause=2.0, banner_text="", \
-        update_interval=4.0):
+        update_interval=5.0):
         """ Monitors a given directory for FF files, and shows them on the screen as new ones get created. It can
             also do slideshows. 
 
