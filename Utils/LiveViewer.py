@@ -134,7 +134,8 @@ class LiveViewer(multiprocessing.Process):
         # Exit if no FF files were found
         if not ff_list:
             print("No FF files in the given directory to use for a slideshow!")
-            sys.exit()
+            self.exit.set()
+            return None
 
         # Go through the list of FF files and show them on the screen
         first_run = True
@@ -240,6 +241,18 @@ class LiveViewer(multiprocessing.Process):
 
 
 
+    def run(self):
+        """ Start the live viewer. """
+
+        try:
+            # Spawn the process
+            self.start()
+
+        # If it can't be started, handle it gracefully
+        except AttributeError:
+            print("The live viewer cannot be started!")
+
+
 
     def stop(self):
         self.exit.set()
@@ -271,4 +284,4 @@ if __name__ == "__main__":
     #########################
 
     lv = LiveViewer(cml_args.dir_path, slideshow=cml_args.slideshow, slideshow_pause=cml_args.pause)
-    lv.start()
+    lv.run()

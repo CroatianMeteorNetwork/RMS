@@ -219,6 +219,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Initialize the live image viewer
     if config.live_view_enable:
         live_view = LiveViewer(night_data_dir, slideshow=False, banner_text="Live")
+        live_view.run()
 
     else:
         live_view = None
@@ -708,6 +709,7 @@ if __name__ == "__main__":
         if config.slideshow_enable:
             slideshow_view = LiveViewer(night_archive_dir, slideshow=True, \
                 banner_text="Last night's detections")
+            slideshow_view.run()
             
 
 
