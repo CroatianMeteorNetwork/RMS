@@ -66,6 +66,9 @@ class LiveViewer(multiprocessing.Process):
     def initPlot(self):
         """ Init the plot. """
 
+        # Force backend
+        plt.switch_backend("TkAgg")
+
         ### PLOTTING
 
         # Disable navbar
