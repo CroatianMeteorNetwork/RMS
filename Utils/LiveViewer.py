@@ -225,7 +225,7 @@ class LiveViewer(multiprocessing.Process):
 
 
             if showing_empty is not True:
-                self.updateImage(img, text)
+                self.updateImage(img, text, banner_text=self.banner_text)
 
 
             # Set the proper flag if not showing any FF files
