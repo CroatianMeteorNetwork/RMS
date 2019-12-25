@@ -706,6 +706,15 @@ if __name__ == "__main__":
                         upload_manager.stop()
                         del upload_manager
 
+
+                    # Stop the slideshow if it was on
+                    if slideshow_view is not None:
+                        log.info("Stopping slideshow...")
+                        slideshow_view.stop()
+                        slideshow_view.join()
+                        del slideshow_view
+                        slideshow_view = None
+
                 sys.exit()
 
             # Change the Ctrl+C action to the special handle
