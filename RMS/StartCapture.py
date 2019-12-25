@@ -644,9 +644,18 @@ if __name__ == "__main__":
             # Initialize the slideshow of last night's detections
             if config.slideshow_enable:
 
-                archive_dir_list = [archive_dir_name for archive_dir_name \
-                    in sorted(os.listdir(os.path.join(config.data_dir, config.archived_dir))) \
-                    if archive_dir_name.startswith(config.stationID)]
+                # Make a list of all archived directories previously generated
+                archive_dir_list = []
+                for archive_dir_name in sorted(os.listdir(os.path.join(config.data_dir, 
+                    config.archived_dir))):
+
+                    if archive_dir_name.startswith(config.stationID):
+                        if os.path.isdir(os.path.join(config.data_dir, config.archived_dir, \
+                            archive_dir_name)):
+
+                            archive_dir_list.append(archive_dir_name)
+
+
 
                 # If there are any archived dirs, choose the last one
                 if archive_dir_list:
