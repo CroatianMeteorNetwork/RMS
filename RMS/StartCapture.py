@@ -39,6 +39,7 @@ from RMS.CaptureDuration import captureDuration
 from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
+from RMS.Formats.FFfile import validFFName
 from RMS.Misc import mkdirP
 from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight
@@ -638,6 +639,37 @@ if __name__ == "__main__":
 
         # Wait to start capturing
         if start_time != True:
+
+
+            # Initialize the slideshow of last night's detections
+            if config.slideshow_enable:
+
+                archive_dir_list = [archive_dir_name for archive_dir_name \
+                    in sorted(os.listdir(os.path.join(config.data_dir, config.archived_dir))) \
+                    if archive_dir_name.startswith(config.stationID)]
+
+                # If there are any archived dirs, choose the last one
+                if archive_dir_list:
+
+                    latest_night_archive_dir = archive_dir_list[-1]
+
+                    # Make sure that there are any FF files in the chosen archived dir
+                    ffs_latest_night_archive = [ff_name for ff_name \
+                        in os.listdir(os.path.join(config.data_dir, config.archived_dir, \
+                        latest_night_archive_dir)) if validFFName(ff_name)]
+
+                    if len(ffs_latest_night_archive):
+
+                        log.info("Starting a slideshow of {:d} detections from the previous night.".format(len(ffs_latest_night_archive)))
+
+                        # Start the slide show
+                        slideshow_view = LiveViewer(latest_night_archive_dir, slideshow=True, \
+                            banner_text="Last night's detections")
+                        slideshow_view.start()
+
+                    else:
+                        log.info("No detections from the previous night to show as a slideshow!")
+
             
             # Calculate how many seconds to wait until capture starts, and with for that time
             time_now = datetime.datetime.utcnow()
@@ -703,13 +735,6 @@ if __name__ == "__main__":
 
         # Indicate that the capture was done once
         ran_once = True
-
-
-        # Initialize the slideshow
-        if config.slideshow_enable:
-            slideshow_view = LiveViewer(night_archive_dir, slideshow=True, \
-                banner_text="Last night's detections")
-            slideshow_view.start()
             
 
 
