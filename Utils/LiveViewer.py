@@ -9,29 +9,48 @@ import os
 import time
 import platform
 import multiprocessing
-import numpy as np
 
-import matplotlib
-matplotlib.use("TkAgg")
-from matplotlib import pyplot as plt
+import cv2
+import numpy as np
+from PIL import Image
+from PIL import ImageFont
+from PIL import ImageDraw
+# tkinter import that works on both Python 2 and 3
+try:
+    import tkinter
+except:
+    import Tkinter as tkinter
 
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
 
 
+# Load the default font
+PIL_FONT = ImageFont.load_default()
 
-def myPause(interval):
-    """ Modify the pause function so that it doesn't re-focus the plot on update. """
 
-    backend = plt.rcParams['backend']
-    if backend in matplotlib.rcsetup.interactive_bk:
-        figManager = matplotlib._pylab_helpers.Gcf.get_active()
-        if figManager is not None:
-            canvas = figManager.canvas
-            if canvas.figure.stale:
-                canvas.draw()
-            canvas.start_event_loop(interval)
-            return None
+
+def drawText(img_arr, img_text):
+    """ Draws text on the image represented as a numpy array.
+    """
+
+    # Convert the array to PIL image
+    im = Image.fromarray(np.uint8(img_arr))
+    im = im.convert('RGB')
+    draw = ImageDraw.Draw(im)
+
+    # Draw the text on the image, in the upper left corent
+    draw.text((0, 0), img_text, (255,255,0), font=PIL_FONT)
+    draw = ImageDraw.Draw(im)
+
+    # Convert the type of the image to grayscale, with one color
+    try:
+        if len(img_arr[0][0]) != 3:
+            im = im.convert('L')
+    except:
+        im = im.convert('L')
+
+    return np.array(im)
 
 
 class LiveViewer(multiprocessing.Process):
@@ -61,36 +80,8 @@ class LiveViewer(multiprocessing.Process):
 
         self.exit = multiprocessing.Event()
 
+        self.first_image = True
 
-
-    def initPlot(self):
-        """ Init the plot. """
-
-        # Force backend
-        plt.switch_backend("TkAgg")
-
-        ### PLOTTING
-
-        # Disable navbar
-        matplotlib.rcParams['toolbar'] = 'None'
-
-        # Remove bells and whistles
-        plt.gca().set_axis_off()
-        plt.gcf().patch.set_facecolor('k')
-        plt.gcf().canvas.set_window_title('LiveViewer')
-
-        # Open the window full screen
-        mng = plt.get_current_fig_manager()
-        if platform.system() == "Windows":
-            mng.window.state('zoomed')
-        else:
-            mng.resize(*mng.window.maxsize())
-
-
-        # Enable interactive plotting
-        plt.ion()
-
-        plt.show()
 
 
     def updateImage(self, img, text, banner_text=""):
@@ -101,20 +92,23 @@ class LiveViewer(multiprocessing.Process):
             text: [str] Text that will be printed on the image.
         """
 
-        # Show the image
-        plt.imshow(img, cmap='gray', vmin=0, vmax=255)
+        img = drawText(img, text)
 
-        # Plot the text (i.e. FF file name)
-        plt.text(0, 0, text, color='g')
+        if not banner_text:
+            banner_text = "LiveViewer"
 
-        # Plot the banner
-        plt.text(img.shape[1]//2, 0, banner_text, ha='center', va='top', color='r', size=20)
+        # Update the image on the screen
+        cv2.imshow(banner_text, img)
 
-        plt.tight_layout()
+        # If this is the first image, move it to the upper left corner
+        if self.first_image:
+            
+            cv2.moveWindow(banner_text, 0, 0)
 
-        plt.draw()
+            self.first_image = False
 
-        myPause(self.update_interval)
+
+        cv2.waitKey(100)
 
 
     def startSlideshow(self):
@@ -159,9 +153,6 @@ class LiveViewer(multiprocessing.Process):
                         time.sleep(self.slideshow_pause)
                         continue
 
-
-                # Clear the plot
-                plt.clf()
 
                 # Update the image on the screen
                 self.updateImage(img, text, banner_text=self.banner_text)
@@ -210,8 +201,6 @@ class LiveViewer(multiprocessing.Process):
                     time.sleep(self.update_interval)
                     continue
 
-                # Clear the plot
-                plt.clf()
                 showing_empty = False
 
                 # Add new FF files to the list
@@ -243,10 +232,6 @@ class LiveViewer(multiprocessing.Process):
             print('Set low priority for the LiveViewer thread!')
         except Exception as e:
             print('Setting niceness failed with message:\n' + repr(e))
-
-
-        # Init the plot
-        self.initPlot()
 
 
         if self.slideshow:
