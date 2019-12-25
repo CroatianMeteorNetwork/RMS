@@ -237,6 +237,13 @@ class LiveViewer(multiprocessing.Process):
     def run(self):
         """ Main processing loop. """
 
+        # Try setting the process niceness (available only on Unix systems)
+        try:
+            os.nice(20)
+            print('Set low priority for processing thread!')
+        except Exception as e:
+            print('Setting niceness failed with message:\n' + repr(e))
+
 
         # Init the plot
         self.initPlot()
