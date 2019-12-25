@@ -660,12 +660,12 @@ if __name__ == "__main__":
                 # If there are any archived dirs, choose the last one
                 if archive_dir_list:
 
-                    latest_night_archive_dir = archive_dir_list[-1]
+                    latest_night_archive_dir = os.path.join(config.data_dir, config.archived_dir, \
+                        archive_dir_list[-1])
 
                     # Make sure that there are any FF files in the chosen archived dir
                     ffs_latest_night_archive = [ff_name for ff_name \
-                        in os.listdir(os.path.join(config.data_dir, config.archived_dir, \
-                        latest_night_archive_dir)) if validFFName(ff_name)]
+                        in os.listdir(latest_night_archive_dir) if validFFName(ff_name)]
 
                     if len(ffs_latest_night_archive):
 
