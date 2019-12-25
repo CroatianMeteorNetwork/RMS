@@ -84,7 +84,7 @@ class LiveViewer(multiprocessing.Process):
 
 
 
-    def updateImage(self, img, text, banner_text=""):
+    def updateImage(self, img, text, pause_time, banner_text=""):
         """ Update the image on the screen. 
         
         Arguments:
@@ -108,7 +108,7 @@ class LiveViewer(multiprocessing.Process):
             self.first_image = False
 
 
-        cv2.waitKey(100)
+        cv2.waitKey(int(1000*pause_time))
 
 
     def startSlideshow(self):
@@ -155,7 +155,7 @@ class LiveViewer(multiprocessing.Process):
 
 
                 # Update the image on the screen
-                self.updateImage(img, text, banner_text=self.banner_text)
+                self.updateImage(img, text, self.slideshow_pause, banner_text=self.banner_text)
 
                 first_run = False
 
@@ -214,7 +214,7 @@ class LiveViewer(multiprocessing.Process):
 
 
             if showing_empty is not True:
-                self.updateImage(img, text, banner_text=self.banner_text)
+                self.updateImage(img, text, self.update_interval, banner_text=self.banner_text)
 
 
             # Set the proper flag if not showing any FF files
