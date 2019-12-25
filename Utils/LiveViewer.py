@@ -240,7 +240,7 @@ class LiveViewer(multiprocessing.Process):
         # Try setting the process niceness (available only on Unix systems)
         try:
             os.nice(20)
-            print('Set low priority for processing thread!')
+            print('Set low priority for the LiveViewer thread!')
         except Exception as e:
             print('Setting niceness failed with message:\n' + repr(e))
 
