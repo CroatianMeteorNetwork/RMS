@@ -264,11 +264,11 @@ class Config:
         self.extra_space_gb = 3
 
 
-        # Enable/disable showing maxpixel on the screen
-        self.live_maxpixel_enable = True
+        # Enable/disable showing maxpixel on the screen (off by default)
+        self.live_maxpixel_enable = False
 
         # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
-        self.slideshow_enable = True
+        self.slideshow_enable = False
 
         ##### Upload
 
