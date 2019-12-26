@@ -218,7 +218,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # Initialize the live image viewer
-    if config.live_view_enable:
+    if config.live_maxpixel_enable:
         live_view = LiveViewer(night_data_dir, slideshow=False, banner_text="Live")
         live_view.start()
 
