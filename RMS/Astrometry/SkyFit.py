@@ -335,12 +335,10 @@ class PlateTool(object):
 
         ### INIT IMAGE ###
 
-        plt.figure(facecolor='black')
+        self.fig, self.ax = plt.subplots(facecolor='black')
 
         # Init the first image
         self.updateImage(first_update=True)
-
-        self.ax = plt.gca()
 
 
         # Register keys with matplotlib
@@ -352,7 +350,7 @@ class PlateTool(object):
         """ Register mouse button and key pressess with matplotlib. """
 
 
-        plt.gcf().canvas.set_window_title('SkyFit')
+        self.fig.canvas.set_window_title('SkyFit')
 
         # Set the bacground color to black
         #matplotlib.rcParams['axes.facecolor'] = 'k'
@@ -465,17 +463,19 @@ class PlateTool(object):
                                 prev_y_cent=y_cent_tmp)
 
                         # Draw the centroid on the image
-                        plt.scatter(self.x_centroid, self.y_centroid, marker='+', c='y', s=100, lw=3, alpha=0.5)
+                        self.ax.scatter(self.x_centroid, self.y_centroid, marker='+', c='y', s=100, lw=3, \
+                            alpha=0.5)
 
                         # Select the closest catalog star to the centroid as the first guess
-                        self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.x_centroid, self.y_centroid)
+                        self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.x_centroid, \
+                            self.y_centroid)
 
                         # Plot the closest star as a purple cross
-                        self.selected_cat_star_scatter = plt.scatter(self.catalog_x[self.closest_cat_star_indx], 
+                        self.selected_cat_star_scatter = self.ax.scatter(self.catalog_x[self.closest_cat_star_indx], 
                             self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=100, lw=3)
 
                         # Update canvas
-                        plt.gcf().canvas.draw()
+                        self.fig.canvas.draw()
 
                         # Switch to the mode where the catalog star is selected
                         self.star_selection_centroid = False
@@ -494,11 +494,11 @@ class PlateTool(object):
                         self.selected_cat_star_scatter.remove()
 
                     # Plot the closest star as a purple cross
-                    self.selected_cat_star_scatter = plt.scatter(self.catalog_x[self.closest_cat_star_indx], 
+                    self.selected_cat_star_scatter = self.ax.scatter(self.catalog_x[self.closest_cat_star_indx], \
                         self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=50, lw=2)
 
                     # Update canvas
-                    plt.gcf().canvas.draw()
+                    self.fig.canvas.draw()
 
 
             # Right mouse button, deselect stars
@@ -557,8 +557,8 @@ class PlateTool(object):
             self.circle_aperature_outer = matplotlib.patches.Circle((self.mouse_x, self.mouse_y),
                 self.star_aperature_radius*2, edgecolor='yellow', fc='none', linestyle='dotted')
 
-            plt.gca().add_patch(self.circle_aperature)
-            plt.gca().add_patch(self.circle_aperature_outer)
+            self.ax.add_patch(self.circle_aperature)
+            self.ax.add_patch(self.circle_aperature_outer)
 
         # If the catalog star selection mode is on, show a purple circle
         else:
@@ -567,7 +567,7 @@ class PlateTool(object):
             self.circle_aperature = matplotlib.patches.Circle((self.mouse_x, self.mouse_y), 10, 
                 edgecolor='purple', fc='none')
 
-            plt.gca().add_patch(self.circle_aperature)
+            self.ax.add_patch(self.circle_aperature)
 
 
         # Draw the zoom window
@@ -575,7 +575,7 @@ class PlateTool(object):
             self.drawZoomWindow()
 
 
-        plt.gcf().canvas.draw()
+        self.fig.canvas.draw()
 
 
 
@@ -646,11 +646,11 @@ class PlateTool(object):
             zoom_factor = 8
 
             # Make sure that the zoomed image is every larger than 1/2 of the whole image
-            if 2*zoom_factor*window_radius > np.min([plt.gcf().bbox.ymax, plt.gcf().bbox.xmax])/2:
+            if 2*zoom_factor*window_radius > np.min([self.fig.bbox.ymax, self.fig.bbox.xmax])/2:
 
                 # Compute a new zoom factor
-                zoom_factor = np.floor((np.min([plt.gcf().bbox.ymax, \
-                    plt.gcf().bbox.xmax])/2)/(2*window_radius))
+                zoom_factor = np.floor((np.min([self.fig.bbox.ymax, \
+                    self.fig.bbox.xmax])/2)/(2*window_radius))
 
                 # Don't apply zoom if the image will be smaller
                 if zoom_factor <= 1:
@@ -666,14 +666,14 @@ class PlateTool(object):
                 yo = 0
                 zoom_window_pos += 'N'
             else:
-                yo = plt.gcf().bbox.ymax - zoom_factor*2*window_radius
+                yo = self.fig.bbox.ymax - zoom_factor*2*window_radius
                 zoom_window_pos += 'S'
 
             if self.mouse_x > img_w_half:
                 xo = 0
                 zoom_window_pos += 'W'
             else:
-                xo = plt.gcf().bbox.xmax - zoom_factor*2*window_radius
+                xo = self.fig.bbox.xmax - zoom_factor*2*window_radius
                 zoom_window_pos += 'E'
 
             # If the position of the zoom window has changed, reset the image
@@ -759,7 +759,7 @@ class PlateTool(object):
             img_crop = np.array(img)
 
             # Plot the zoomed image
-            plt.gcf().figimage(img_crop, xo=xo, yo=yo, zorder=5, cmap='gray', \
+            self.fig.figimage(img_crop, xo=xo, yo=yo, zorder=5, cmap='gray', \
                 vmin=np.min(self.img_data_processed), vmax=np.max(self.img_data_processed))
 
 
@@ -816,13 +816,9 @@ class PlateTool(object):
 
                 # Fit the photometric offset (disable vignetting fit if a flat is used)
                 photom_params, fit_stddev, fit_resids = photometryFit(px_intens_list, radius_list, \
-                    catalog_mags, no_vignetting=(self.flat_struct is not None))
+                    catalog_mags, fixed_vignetting=(0.0 if self.flat_struct is not None else None))
 
                 photom_offset, vignetting_coeff = photom_params
-
-                # If a flat was used, force the vignetting coefficient to 0
-                if self.flat_struct is not None:
-                    vignetting_coeff = 0.0
 
                 # Set photometry parameters
                 self.platepar.mag_0 = -2.5
@@ -860,12 +856,12 @@ class PlateTool(object):
                         photom_resid_size = 8 + np.abs(fit_diff)/(np.max(np.abs(fit_resids))/5.0)
 
                         # Plot the residual as text under the star
-                        photom_resid_lbl = plt.text(star_x, star_y + 10, photom_resid_txt, \
+                        photom_resid_lbl = self.ax.text(star_x, star_y + 10, photom_resid_txt, \
                             verticalalignment='top', horizontalalignment='center', \
                             fontsize=photom_resid_size, color='w')
 
                         # Plot the star magnitude
-                        star_mag_lbl = plt.text(star_x, star_y - 10, "{:+6.2f}".format(star_mag), \
+                        star_mag_lbl = self.ax.text(star_x, star_y - 10, "{:+6.2f}".format(star_mag), \
                             verticalalignment='bottom', horizontalalignment='center', \
                             fontsize=10, color='r')
 
@@ -873,7 +869,7 @@ class PlateTool(object):
                         self.photom_deviatons_scat.append([photom_resid_lbl, star_mag_lbl])
 
 
-                    plt.draw()
+                    self.fig.canvas.draw_idle()
 
 
                 # Show the photometry fit plot
@@ -1276,12 +1272,12 @@ class PlateTool(object):
         elif (event.key == 'ctrl+x') or (event.key == 'ctrl+X'):
 
             # Overlay text on image indicating that astrometry.net is running
-            plt.text(self.img_data_raw.shape[1]/2, self.img_data_raw.shape[0]/2, \
+            self.ax.text(self.img_data_raw.shape[1]/2, self.img_data_raw.shape[0]/2, \
                 "Solving with astrometry.net...", color='r', alpha=0.5, fontsize=16, ha='center', va='center')
 
-            plt.draw()
-            plt.gcf().canvas.draw()
-            plt.gcf().canvas.flush_events()
+            self.ax.draw()
+            self.fig.canvas.draw()
+            self.fig.canvas.flush_events()
 
             # If shift was pressed, send only the list of x,y coords of extracted stars
             upload_image = True
@@ -1527,7 +1523,7 @@ class PlateTool(object):
                 x, y, _ = img_star
 
                 # Plot all paired stars
-                plt.scatter(x, y, marker='x', c='b', s=100, lw=3, alpha=0.5)
+                self.ax.scatter(x, y, marker='x', c='b', s=100, lw=3, alpha=0.5)
 
 
 
@@ -1547,7 +1543,7 @@ class PlateTool(object):
         image_to_level_scale = img.shape[1]/np.max(bin_edges)
         bin_edges *= image_to_level_scale
 
-        ax1 = plt.gca()
+        ax1 = self.ax
         ax2 = ax1.twinx().twiny()
 
         # Plot the histogram
@@ -1574,7 +1570,7 @@ class PlateTool(object):
             rel_i = i/8
             ax2.text(rel_i*img.shape[1], 0, str(int(rel_i*2**self.bit_depth)), color='red')
 
-        plt.sca(ax1)
+        self.fig.sca(ax1)
 
 
 
@@ -1599,7 +1595,8 @@ class PlateTool(object):
 
 
         if clear_plot:
-            plt.clf()
+            self.fig.clf()
+            self.ax = self.fig.add_subplot(111)
 
 
         # Check that the calibration parameters are within the nominal range
@@ -1693,7 +1690,7 @@ class PlateTool(object):
         self.img_data_processed = np.copy(img_data)
 
         # Show the loaded image (defining the exent speeds up image drawimg)
-        plt.imshow(img_data, cmap='gray', interpolation='nearest', \
+        self.ax.imshow(img_data, cmap='gray', interpolation='nearest', \
             extent=(0, self.img_data_processed.shape[1], self.img_data_processed.shape[0], 0),
             vmin=0, vmax=255)
 
@@ -1733,7 +1730,7 @@ class PlateTool(object):
                 cat_mag_faintest = np.max(catalog_mag_filtered)
 
                 # Plot catalog stars
-                plt.scatter(self.catalog_x_filtered, self.catalog_y_filtered, c='r', marker='+', lw=1.0, \
+                self.ax.scatter(self.catalog_x_filtered, self.catalog_y_filtered, c='r', marker='+', lw=1.0, \
                     alpha=0.5, s=((4.0 + (cat_mag_faintest - catalog_mag_filtered))/2.0)**(2*2.512))
 
             else:
@@ -1752,8 +1749,8 @@ class PlateTool(object):
 
 
         # Set plot limits
-        plt.xlim([0, self.current_ff.ncols])
-        plt.ylim([self.current_ff.nrows, 0])
+        self.ax.set_xlim([0, self.current_ff.ncols])
+        self.ax.set_ylim([self.current_ff.nrows, 0])
 
 
         # Compute RA/Dec of the FOV centre
@@ -1769,7 +1766,7 @@ class PlateTool(object):
         if self.show_key_help == 0:
             text_str = 'Show fit parameters - F1'
 
-            plt.gca().text(10, self.current_ff.nrows, text_str, color='w', verticalalignment='bottom', 
+            self.ax.text(10, self.current_ff.nrows, text_str, color='w', verticalalignment='bottom', \
                 horizontalalignment='left', fontproperties=font)
 
 
@@ -1798,14 +1795,14 @@ class PlateTool(object):
                 sign_str = ' '
             text_str += 'RA centre  = {:s}{:02d}h {:02d}m {:05.2f}s\n'.format(sign_str, hh, mm, ss)
             text_str += 'Dec centre = {:.3f}$\\degree$\n'.format(dec_centre)
-            plt.gca().text(10, 10, text_str, color='w', verticalalignment='top', horizontalalignment='left', \
+            self.ax.text(10, 10, text_str, color='w', verticalalignment='top', horizontalalignment='left', \
                 fontproperties=font)
 
 
             if self.show_key_help == 1:
                 text_str = 'Show keyboard shortcuts - F1'
 
-                plt.gca().text(10, self.current_ff.nrows, text_str, color='w', verticalalignment='bottom', 
+                self.ax.text(10, self.current_ff.nrows, text_str, color='w', verticalalignment='bottom', 
                     horizontalalignment='left', fontproperties=font)
 
         # Show keyboard shortcuts
@@ -1850,7 +1847,7 @@ class PlateTool(object):
             text_str += 'Hide on-screen text - F1\n'
 
 
-            plt.gca().text(10, self.current_ff.nrows - 5, text_str, color='w', verticalalignment='bottom', 
+            self.ax.text(10, self.current_ff.nrows - 5, text_str, color='w', verticalalignment='bottom', \
                 horizontalalignment='left', fontproperties=font)
 
 
@@ -1863,11 +1860,11 @@ class PlateTool(object):
                 text_str += "PRESS 'CTRL + SHIFT + Z' FOR STAR FITTING WITH INITIAL DISTORSION PARAMETES SET TO 0\n"
                 text_str += "PRESS 'P' FOR PHOTOMETRY FIT"
 
-            plt.gca().text(self.current_ff.ncols/2, self.current_ff.nrows, text_str, color='r', 
+            self.ax.text(self.current_ff.ncols/2, self.current_ff.nrows, text_str, color='r', \
                 verticalalignment='bottom', horizontalalignment='center', fontproperties=font)
 
 
-        plt.gcf().canvas.draw()
+        self.fig.canvas.draw()
 
 
 
@@ -1883,7 +1880,8 @@ class PlateTool(object):
             # Get star coordinates
             y, x, _, _ = np.array(star_data).T
 
-            plt.scatter(x, y, edgecolors='g', marker='o', facecolors='none', alpha=0.8, linestyle='dotted')
+            self.ax.scatter(x, y, edgecolors='g', marker='o', facecolors='none', alpha=0.8, \
+                linestyle='dotted')
 
 
 
@@ -2919,7 +2917,7 @@ class PlateTool(object):
                 res_y = img_y + res_scale*np.sin(angle)*distance
 
                 # Plot the image residuals
-                plt.plot([img_x, res_x], [img_y, res_y], color='orange', alpha=0.25)
+                self.ax.plot([img_x, res_x], [img_y, res_y], color='orange', alpha=0.25)
 
                 
                 # Convert the angular distance from degrees to equivalent image pixels
@@ -2928,10 +2926,10 @@ class PlateTool(object):
                 res_y = img_y + res_scale*np.sin(angle)*ang_dist_img
                 
                 # Plot the sky residuals
-                plt.plot([img_x, res_x], [img_y, res_y], color='yellow', alpha=0.25, linestyle='dashed')
+                self.ax.plot([img_x, res_x], [img_y, res_y], color='yellow', alpha=0.25, linestyle='dashed')
 
 
-            plt.draw()
+            self.fig.canvas.draw_idle()
 
 
 

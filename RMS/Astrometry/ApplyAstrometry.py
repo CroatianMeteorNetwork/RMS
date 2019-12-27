@@ -90,19 +90,19 @@ def photomLine(input_params, photom_offset, vignetting_coeff):
     return -2.5*lsp + photom_offset
 
 
-def photomLineMinimize(params, px_sum, radius, catalog_mags, no_vignetting):
+def photomLineMinimize(params, px_sum, radius, catalog_mags, fixed_vignetting):
     """ Modified photomLine function used for minimization. """
 
     photom_offset, vignetting_coeff = params
 
-    if no_vignetting:
-        vignetting_coeff = 0.0
+    if fixed_vignetting is not None:
+        vignetting_coeff = fixed_vignetting
 
     # Compute the sum of squred residuals
     return np.sum((catalog_mags - photomLine((px_sum, radius), photom_offset, vignetting_coeff))**2)
 
 
-def photometryFit(px_intens_list, radius_list, catalog_mags, no_vignetting=False):
+def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=None):
     """ Fit the photometry on given data. 
     
     Arguments:
@@ -111,7 +111,8 @@ def photometryFit(px_intens_list, radius_list, catalog_mags, no_vignetting=False
         catalog_mags: [list] A list of corresponding catalog magnitudes of stars.
 
     Keyword arguments:
-        no_vignetting: [bool] Disable the vignetting fit (vignetting_coeff = 0). False by default.
+        fixed_vignetting: [float] Fixed vignetting coefficient. None by default, in which case it will be
+            computed.
 
     Return:
         (photom_offset, fit_stddev, fit_resid):
@@ -125,8 +126,15 @@ def photometryFit(px_intens_list, radius_list, catalog_mags, no_vignetting=False
     # Fit a line to the star data, where only the intercept has to be estimated
     p0 = [10.0, 0.0]
     res = scipy.optimize.minimize(photomLineMinimize, p0, args=(np.array(px_intens_list), \
-        np.array(radius_list), np.array(catalog_mags), no_vignetting), method='Nelder-Mead')
-    photom_params = np.abs(res.x)
+        np.array(radius_list), np.array(catalog_mags), fixed_vignetting), method='Nelder-Mead')
+    photom_offset, vignetting_coeff = res.x
+
+    # Handle the vignetting coeff
+    vignetting_coeff = np.abs(vignetting_coeff)
+    if fixed_vignetting is not None:
+        vignetting_coeff = fixed_vignetting
+
+    photom_params = (photom_offset, vignetting_coeff)
 
     # Calculate the standard deviation
     fit_resids = np.array(catalog_mags) - photomLine((np.array(px_intens_list), np.array(radius_list)), \
