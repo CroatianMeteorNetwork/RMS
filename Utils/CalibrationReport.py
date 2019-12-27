@@ -479,7 +479,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         y_min_w = y_min - 3
         y_max_w = y_max + 3
 
-        photometry_info = "Platepar: {:+.2f}LSP {:+.2f} +/- {:.2f}".format(platepar.mag_0, platepar.mag_lev, \
+        photometry_info = "Platepar: {:+.1f}*LSP + {:.2f} +/- {:.2f}".format(platepar.mag_0, platepar.mag_lev, \
             platepar.mag_lev_stddev) \
             + "\nVignetting coeff = {:.5f}".format(platepar.vignetting_coeff) \
             + "\nGamma = {:.2f}".format(platepar.gamma)
@@ -490,7 +490,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
             color='k', alpha=0.5)
 
         # Plot the fitted photometry calibration
-        fit_info = "Fit: {:+.2f}LSP {:+.2f} +/- {:.2f}".format(-2.5, photom_offset, fit_stddev)
+        fit_info = "Fit: {:+.1f}*LSP + {:.2f} +/- {:.2f}".format(-2.5, photom_offset, fit_stddev)
         plt.plot(logsum_arr, logsum_arr + photom_offset, label=fit_info, linestyle='--', color='b',
             alpha=0.75)
 
