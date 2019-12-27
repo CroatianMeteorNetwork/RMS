@@ -91,7 +91,8 @@ def photomLine(input_params, photom_offset, vignetting_coeff):
 
 
 def photomLineMinimize(params, px_sum, radius, catalog_mags, fixed_vignetting):
-    """ Modified photomLine function used for minimization. """
+    """ Modified photomLine function used for minimization. The function uses the L1 norm for minimization. 
+    """
 
     photom_offset, vignetting_coeff = params
 
@@ -99,7 +100,7 @@ def photomLineMinimize(params, px_sum, radius, catalog_mags, fixed_vignetting):
         vignetting_coeff = fixed_vignetting
 
     # Compute the sum of squred residuals
-    return np.sum((catalog_mags - photomLine((px_sum, radius), photom_offset, vignetting_coeff))**2)
+    return np.sum(np.abs(catalog_mags - photomLine((px_sum, radius), photom_offset, vignetting_coeff)))
 
 
 def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=None):

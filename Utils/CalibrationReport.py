@@ -10,7 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, raDecToXYPP, \
-    photometryFit
+    photometryFit, correctVignetting
 from RMS.Astrometry.CheckFit import matchStarsResiduals
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Formats.CALSTARS import readCALSTARS
@@ -420,23 +420,54 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
     if max_matched_stars > 2:
 
-        ### Plot the photometry ###
+
+        ### PHOTOMETRY FIT ###
+
+        # # Take only those stars which are inside the 3/4 of the shorter image axis from the center
+        # photom_selection_radius = np.min([img_h, img_w])/3
+        # filter_indices = ((image_stars[:, 0] - img_h/2)**2 + (image_stars[:, 1] \
+        #     - img_w/2)**2) <= photom_selection_radius**2
+
+        #star_intensities = image_stars[filter_indices, 2]
+        #catalog_mags = matched_catalog_stars[filter_indices, 2]
+
+        # Extact intensities and mangitudes
+        star_intensities = image_stars[:, 2]
+        catalog_mags = matched_catalog_stars[:, 2]
+
+        # Compute radius from centre
+        radius_arr = np.hypot(image_stars[:, 0] - img_h/2, image_stars[:, 1] - img_w/2)
+
+
+        # Reject outliers and re-fit the photometry several times
+        for _ in range(3):
+
+            # Fit the photometry on automated star intensities (use the fixed vignetting coeff)
+            photom_params, fit_stddev, fit_resid = photometryFit(star_intensities, radius_arr, catalog_mags, \
+                fixed_vignetting=platepar.vignetting_coeff)
+
+            # Reject all 2 sigma residuals and re-fit the photometry
+            filter_indices = fit_resid < 2*fit_stddev
+            star_intensities = star_intensities[filter_indices]
+            radius_arr = radius_arr[filter_indices]
+            catalog_mags = catalog_mags[filter_indices]
+
+
+        photom_offset, _ = photom_params
+
+        ### ###
+
+
+        ### PLOT PHOTOMETRY ###
 
         plt.figure(dpi=dpi)
 
-        # Take only those stars which are inside the 3/4 of the shorter image axis from the center
-        photom_selection_radius = np.min([img_h, img_w])/3
-        filter_indices = ((image_stars[:, 0] - img_h/2)**2 + (image_stars[:, 1] \
-            - img_w/2)**2) <= photom_selection_radius**2
-        star_intensities = image_stars[filter_indices, 2]
-        catalog_mags = matched_catalog_stars[filter_indices, 2]
+        # Plot raw star intensities
+        plt.scatter(-2.5*np.log10(star_intensities), catalog_mags, s=5, c='r', alpha=0.25, label="Raw")
 
-        # Plot intensities of image stars
-        #star_intensities = image_stars[:, 2]
-        plt.scatter(-2.5*np.log10(star_intensities), catalog_mags, s=5, c='r')
-
-        # Fit the photometry on automated star intensities
-        photom_offset, fit_stddev, _ = photometryFit(np.log10(star_intensities), catalog_mags)
+        # Plot intensities of image stars corrected for vignetting
+        lsp_corr_arr = np.log10(correctVignetting(star_intensities, radius_arr, platepar.vignetting_coeff))
+        plt.scatter(-2.5*lsp_corr_arr, catalog_mags, s=5, c='b', alpha=0.75, label="Corrected for vignetting")
 
 
         # Plot photometric offset from the platepar
@@ -448,8 +479,10 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         y_min_w = y_min - 3
         y_max_w = y_max + 3
 
-        photometry_info = 'Platepar: {:+.2f}LSP {:+.2f} +/- {:.2f} \nGamma = {:.2f}'.format(platepar.mag_0, \
-            platepar.mag_lev, platepar.mag_lev_stddev, platepar.gamma)
+        photometry_info = "Platepar: {:+.2f}LSP {:+.2f} +/- {:.2f}".format(platepar.mag_0, platepar.mag_lev, \
+            platepar.mag_lev_stddev) \
+            + "\nVignetting coeff = {:.5f}".format(platepar.vignetting_coeff) \
+            + "\nGamma = {:.2f}".format(platepar.gamma)
 
         # Plot the photometry calibration from the platepar
         logsum_arr = np.linspace(x_min_w, x_max_w, 10)
@@ -458,8 +491,8 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
         # Plot the fitted photometry calibration
         fit_info = "Fit: {:+.2f}LSP {:+.2f} +/- {:.2f}".format(-2.5, photom_offset, fit_stddev)
-        plt.plot(logsum_arr, logsum_arr + photom_offset, label=fit_info, linestyle='--', color='red', 
-            alpha=0.5)
+        plt.plot(logsum_arr, logsum_arr + photom_offset, label=fit_info, linestyle='--', color='b',
+            alpha=0.75)
 
         plt.legend()
 
