@@ -52,7 +52,7 @@ import scipy.ndimage
 
 from RMS.Astrometry.ApplyAstrometry import altAzToRADec, xyToRaDecPP, raDec2AltAz, raDecToXY,\
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
-    rotationWrtStandard, rotationWrtStandardToPosAngle
+    rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
 from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle
 from RMS.Astrometry.FFTalign import alignPlatepar
@@ -788,7 +788,8 @@ class PlateTool(object):
 
             # Extract star intensities and star magnitudes
             star_coords = []
-            logsum_px = []
+            radius_list = []
+            px_intens_list = []
             catalog_mags = []
             for paired_star in self.paired_stars:
 
@@ -797,29 +798,37 @@ class PlateTool(object):
                 star_x, star_y, px_intens = img_star
                 _, _, star_mag = catalog_star
 
-                lsp = np.log10(px_intens)
 
                 # Skip intensities which were not properly calculated
+                lsp = np.log10(px_intens)
                 if np.isnan(lsp) or np.isinf(lsp):
                     continue
 
                 star_coords.append([star_x, star_y])
-                logsum_px.append(lsp)
+                radius_list.append(np.hypot(star_x - self.platepar.X_res/2, star_y - self.platepar.Y_res/2))
+                px_intens_list.append(px_intens)
                 catalog_mags.append(star_mag)
 
 
 
-            # Make sure there are more than 2 stars picked
-            if len(logsum_px) > 2:
+            # Make sure there are more than 3 stars picked
+            if len(px_intens_list) > 3:
 
-                # Fit the photometric offset
-                photom_offset, fit_stddev, fit_resids = photometryFit(logsum_px, catalog_mags)
+                # Fit the photometric offset (disable vignetting fit if a flat is used)
+                photom_params, fit_stddev, fit_resids = photometryFit(px_intens_list, radius_list, \
+                    catalog_mags, no_vignetting=(self.flat_struct is not None))
 
+                photom_offset, vignetting_coeff = photom_params
+
+                # If a flat was used, force the vignetting coefficient to 0
+                if self.flat_struct is not None:
+                    vignetting_coeff = 0.0
 
                 # Set photometry parameters
                 self.platepar.mag_0 = -2.5
                 self.platepar.mag_lev = photom_offset
                 self.platepar.mag_lev_stddev = fit_stddev
+                self.platepar.vignetting_coeff = vignetting_coeff
 
 
                 # Remove previous photometry deviation labels 
@@ -880,9 +889,20 @@ class PlateTool(object):
                     fig_p.canvas.set_window_title('Photometry')
 
 
-                    # Plot catalog magnitude vs. logsum of pixel intensities
-                    self.photom_points = ax_p.scatter(-2.5*np.array(logsum_px), catalog_mags, s=5, c='r', \
-                        zorder=3)
+                    # Plot catalog magnitude vs. raw logsum of pixel intensities
+                    lsp_arr = np.log10(np.array(px_intens_list))
+                    ax_p.scatter(-2.5*lsp_arr, catalog_mags, s=5, c='r', zorder=3, alpha=0.5, \
+                        label="Raw")
+
+                    # Plot catalog magnitude vs. raw logsum of pixel intensities (only when no flat is used)
+                    if self.flat_struct is None:
+
+                        lsp_corr_arr = np.log10(correctVignetting(np.array(px_intens_list), \
+                            np.array(radius_list), self.platepar.vignetting_coeff))
+
+                        ax_p.scatter(-2.5*lsp_corr_arr, catalog_mags, s=5, c='b', zorder=3, alpha=0.5, \
+                            label="Corrected for vignetting")
+
 
                     x_min, x_max = ax_p.get_xlim()
                     y_min, y_max = ax_p.get_ylim()
@@ -894,15 +914,17 @@ class PlateTool(object):
 
                     
                     # Plot fit info
-                    fit_info = 'Fit: {:+.2f}LSP {:+.2f} +/- {:.2f} \nGamma = {:.2f}'.format(self.platepar.mag_0, \
-                        self.platepar.mag_lev, fit_stddev, self.platepar.gamma)
+                    fit_info = "Fit: {:+.2f}LSP {:+.2f} +/- {:.2f} ".format(self.platepar.mag_0, \
+                        self.platepar.mag_lev, fit_stddev) \
+                        + "\nVignetting coeff = {:.5f}".format(self.platepar.vignetting_coeff) \
+                        + "\nGamma = {:.2f}".format(self.platepar.gamma)
 
                     print(fit_info)
-                    #ax_p.text(x_min, y_min, fit_info, color='r', verticalalignment='top', horizontalalignment='left', fontsize=10)
 
                     # Plot the line fit
                     logsum_arr = np.linspace(x_min_w, x_max_w, 10)
-                    ax_p.plot(logsum_arr, photomLine(logsum_arr/(-2.5), photom_offset), label=fit_info, \
+                    ax_p.plot(logsum_arr, photomLine((10**(logsum_arr/(-2.5)), np.zeros_like(logsum_arr)), \
+                        photom_offset, self.platepar.vignetting_coeff), label=fit_info, \
                         linestyle='--', color='k', alpha=0.5, zorder=3)
 
                     ax_p.legend()
@@ -924,21 +946,38 @@ class PlateTool(object):
 
                     ### PLOT MAG DIFFERENCE BY RADIUS
 
+                    img_diagonal = np.hypot(self.platepar.X_res/2, self.platepar.Y_res/2)
 
-                    img_diagonal = np.hypot(self.config.width/2, self.config.height/2)
 
-                    # Compute radiuses from centre of stars used for the fit
-                    rad_list = []
-                    for star_x, star_y in zip (star_coords_x, star_coords_y):
-
-                        # Compute radius ratio to corner
-                        rad = np.hypot(star_x - self.config.width/2, star_y - self.config.height/2)
-                        rad_list.append(rad)
-
+                    # Plot radius from centre vs. fit residual (excluding vignetting, only when no flat is 
+                    #    used)
+                    if self.flat_struct is None:
+                        fit_resids_novignetting = catalog_mags - photomLine((np.array(px_intens_list), \
+                            np.array(radius_list)), photom_offset, 0.0)
+                        ax_r.scatter(radius_list, fit_resids_novignetting, s=5, c='r', alpha=0.5, zorder=3)
                     
-                    # Plot radius from centre vs. fit residual
-                    ax_r.scatter(rad_list, fit_resids, s=5, c='r', zorder=3)
+
+                    # Plot radius from centre vs. fit residual (including vignetting)
+                    ax_r.scatter(radius_list, fit_resids, s=5, c='b', alpha=0.5, zorder=3)
+
+
+                    # Plot a zero line
+                    ax_r.plot(np.linspace(0, img_diagonal, 10), np.zeros(10), linestyle='dashed', alpha=0.5, \
+                        color='k')
+
+                    # Plot the vignetting curve
+                    if self.flat_struct is None:
+
+                        px_sum_tmp = 1000
+                        radius_arr_tmp = np.linspace(0, img_diagonal, 50)
+
+                        vignetting_loss = 2.5*np.log10(px_sum_tmp) \
+                            - 2.5*np.log10(correctVignetting(px_sum_tmp, radius_arr_tmp, \
+                                self.platepar.vignetting_coeff))
+
+                        ax_r.plot(radius_arr_tmp, vignetting_loss, linestyle='dotted', alpha=0.5, color='k')
                     
+
                     ax_r.grid()
 
                     ax_r.set_ylabel("Fit residuals (mag)")

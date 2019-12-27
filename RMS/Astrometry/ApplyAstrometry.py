@@ -50,44 +50,90 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import cyraDecToXY, cyXYToRADec
 
 
-def photomLine(lsp, photom_offset):
+
+def correctVignetting(px_sum, radius, vignetting_coeff):
+    """ Given a pixel sum, radius from focal plane centre and the vignetting coefficient, correct the pixel
+        sum for the vignetting effect.
+
+    Arguments:
+        px_sum: [float] Pixel sum.
+        radius: [float] Radius (px) from focal plane centre.
+        vignetting_coeff: [float] Vignetting ceofficient (deg/px).
+
+    Return:
+        px_sum_corr: [float] Corrected pixel sum.
+    """
+
+    return px_sum/(np.cos(vignetting_coeff*radius)**4)
+
+
+def photomLine(input_params, photom_offset, vignetting_coeff):
     """ Line used for photometry, the slope is fixed to -2.5, only the photometric offset is given. 
     
     Arguments:
-        lsp: [float] LogSum Pixel - logarith of the sum of pixel intensities.
+        input_params: [tuple]
+            - px_sum: [float] sum of pixel intensities.
+            - radius: [float] Radius from the centre of the focal plane to the centroid.
         photom_offset: [float] The photometric offet.
+        vignetting_coeff: [float] Vignetting coefficient.
 
     Return: 
         [float] Magnitude.
     """
+
+    px_sum, radius = input_params
+
+    # Apply the vignetting correction and compute the LSP
+    lsp = np.log10(correctVignetting(px_sum, radius, vignetting_coeff))
     
-    # The slope is fixed to -2.5, coming from the definition of magnitude
+    # The slope is fixed to -2.5, this comes from the definition of magnitude
     return -2.5*lsp + photom_offset
 
 
-def photometryFit(logsum_px, catalog_mags):
+def photomLineMinimize(params, px_sum, radius, catalog_mags, no_vignetting):
+    """ Modified photomLine function used for minimization. """
+
+    photom_offset, vignetting_coeff = params
+
+    if no_vignetting:
+        vignetting_coeff = 0.0
+
+    # Compute the sum of squred residuals
+    return np.sum((catalog_mags - photomLine((px_sum, radius), photom_offset, vignetting_coeff))**2)
+
+
+def photometryFit(px_intens_list, radius_list, catalog_mags, no_vignetting=False):
     """ Fit the photometry on given data. 
     
     Arguments:
-        logsum_px: [list] A list of log sum pixel values (logarithms of sums of pixel intensities).
+        px_intens_list: [list] A list of sums of pixel intensities.
+        radius_list: [list] A list of raddia from the focal plane centre (px).
         catalog_mags: [list] A list of corresponding catalog magnitudes of stars.
+
+    Keyword arguments:
+        no_vignetting: [bool] Disable the vignetting fit (vignetting_coeff = 0). False by default.
 
     Return:
         (photom_offset, fit_stddev, fit_resid):
-            photom_offset: [float] The photometric offset.
+            photom_params: [list]
+                - photom_offset: [float] The photometric offset.
+                - vignetting_coeff: [float] Vignetting coefficient.
             fit_stddev: [float] The standard deviation of the fit.
             fit_resid: [float] Magnitude fit residuals.
     """
 
     # Fit a line to the star data, where only the intercept has to be estimated
-    photom_params, _ = scipy.optimize.curve_fit(photomLine, logsum_px, catalog_mags, \
-        method='trf', loss='soft_l1')
+    p0 = [10.0, 0.0]
+    res = scipy.optimize.minimize(photomLineMinimize, p0, args=(np.array(px_intens_list), \
+        np.array(radius_list), np.array(catalog_mags), no_vignetting), method='Nelder-Mead')
+    photom_params = np.abs(res.x)
 
     # Calculate the standard deviation
-    fit_resids = np.array(catalog_mags) - photomLine(np.array(logsum_px), *photom_params)
+    fit_resids = np.array(catalog_mags) - photomLine((np.array(px_intens_list), np.array(radius_list)), \
+        *photom_params)
     fit_stddev = np.std(fit_resids)
 
-    return photom_params[0], fit_stddev, fit_resids
+    return photom_params, fit_stddev, fit_resids
 
 
 def computeFOVSize(platepar):

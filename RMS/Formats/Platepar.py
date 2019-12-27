@@ -133,6 +133,7 @@ class Platepar(object):
         self.mag_lev = 1.0
         self.mag_lev_stddev = 0.0
         self.gamma = 1.0
+        self.vignetting_coeff = 0.0
 
         self.station_code = None
 
@@ -192,6 +193,10 @@ class Platepar(object):
         # Add the gamma if it was not in the platepar
         if not 'gamma' in self.__dict__:
             self.gamma = 1.0
+
+        # Add the vignetting coefficient if it was not in the platepar
+        if not 'vignetting_coeff' in self.__dict__:
+            self.vignetting_coeff = 0.0
 
         # Add the list of calibration stars if it was not in the platepar
         if not 'star_list' in self.__dict__:
@@ -478,4 +483,4 @@ if __name__ == "__main__":
 
     #txt = json.dumps(pp, default=lambda o: o.__dict__)
 
-    pp.write(pp_file+'.json')
+    pp.write(pp_file + '.json')
