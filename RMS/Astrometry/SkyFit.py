@@ -217,8 +217,8 @@ class PlateTool(object):
         # Image gamma and levels
         self.bit_depth = self.config.bit_depth
         self.img_gamma = 1.0
-        self.img_level_min = 0
-        self.img_level_max = 2**self.bit_depth - 1
+        self.img_level_min = self.img_level_min_auto = 0
+        self.img_level_max = self.img_level_max_auto = 2**self.bit_depth - 1
 
         self.img_data_raw = None
         self.img_data_processed = None
@@ -1531,6 +1531,15 @@ class PlateTool(object):
     def drawLevelsAdjustmentHistogram(self, img):
         """ Draw a levels histogram over the image, so the levels can be adjusted. """
 
+        # If auto levels are used, show those levels
+        if self.auto_levels:
+            level_min = self.img_level_min_auto
+            level_max = self.img_level_max_auto
+
+        else:
+            level_min = self.img_level_min
+            level_max = self.img_level_max
+
         nbins = int((2**self.config.bit_depth)/2)
 
         # Compute the intensity histogram
@@ -1554,8 +1563,8 @@ class PlateTool(object):
         y_range = np.linspace(0, img.shape[0], 3)
         x_arr = np.zeros_like(y_range)
 
-        ax2.plot(x_arr + self.img_level_min*image_to_level_scale, y_range, color='w')
-        ax2.plot(x_arr + self.img_level_max*image_to_level_scale, y_range, color='w')
+        ax2.plot(x_arr + level_min*image_to_level_scale, y_range, color='w')
+        ax2.plot(x_arr + level_max*image_to_level_scale, y_range, color='w')
 
         ax2.invert_yaxis()
 
@@ -1659,20 +1668,19 @@ class PlateTool(object):
 
         # Store image before levels modifications
         self.img_data_raw = np.copy(img_data)
-
-
             
 
         # Do auto levels
         if self.auto_levels:
 
             # Compute the edge percentiles
-            min_lvl = np.percentile(img_data, 1)
-            max_lvl = np.percentile(img_data, 99.9)
+            self.img_level_min_auto = np.percentile(img_data, 0.1)
+            self.img_level_max_auto = np.percentile(img_data, 99.95)
 
 
             # Adjust levels (auto)
-            img_data = Image.adjustLevels(img_data, min_lvl, self.img_gamma, max_lvl, scaleto8bits=True)
+            img_data = Image.adjustLevels(img_data, self.img_level_min_auto, self.img_gamma, \
+                self.img_level_max_auto, scaleto8bits=True)
 
         else:
             

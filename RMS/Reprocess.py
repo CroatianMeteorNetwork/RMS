@@ -187,7 +187,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             # # Calculate astrometry for meteor detections
             # applyAstrometryFTPdetectinfo(night_data_dir, ftpdetectinfo_name, platepar_path)
 
-            
+            # If a flat is used, disable vignetting correction
+            if config.use_flat:
+                platepar.vignetting_coeff = 0.0
 
             log.info("Recalibrating astrometry on FF files with detections...")
 

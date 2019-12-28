@@ -422,8 +422,9 @@ def xyToRaDecAST(time_data, X_data, Y_data, level_data, ast, photom_offset):
     JD_data, RA_data, dec_data = altAzToRADec(np.degrees(ast.lat), np.degrees(ast.lon), 0.0, time_data, \
         azimuth_data, altitude_data)
 
-    # Calculate magnitudes
-    magnitude_data = calculateMagnitudes(level_data, -2.5, photom_offset)
+
+    # Calculate magnitudes (ignore vignetting)
+    magnitude_data = calculateMagnitudes(level_data, np.zeros_like(level_data), photom_offset, 0.0)
 
 
     return JD_data, RA_data, dec_data, magnitude_data
