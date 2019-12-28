@@ -431,7 +431,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         star_intensities = image_stars[:, 2]
         catalog_mags = matched_catalog_stars[:, 2]
 
-        # Compute radius from centre
+        # Compute radius of every star from image centre
         radius_arr = np.hypot(image_stars[:, 0] - img_h/2, image_stars[:, 1] - img_w/2)
 
 
@@ -458,10 +458,13 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         ### ###
 
 
+
         ### PLOT PHOTOMETRY ###
+        # Note: An almost identical code exists in RMS.Astrometry.SkyFit in the PlateTool.photometry function
+
         dpi = 130
         fig_p, (ax_p, ax_r) = plt.subplots(nrows=2, facecolor=None, figsize=(6.0, 7.0), dpi=dpi, \
-                        gridspec_kw={'height_ratios':[2, 1]})
+            gridspec_kw={'height_ratios':[2, 1]})
 
         # Plot raw star intensities
         ax_p.scatter(-2.5*np.log10(star_intensities), catalog_mags, s=5, c='r', alpha=0.5, label="Raw")

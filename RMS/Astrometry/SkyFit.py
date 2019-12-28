@@ -876,6 +876,7 @@ class PlateTool(object):
                 if show_plot:
 
                     ### PLOT PHOTOMETRY FIT ###
+                    # Note: An almost identical code exists in Utils.CalibrationReport
 
                     # Init plot for photometry
                     fig_p, (ax_p, ax_r) = plt.subplots(nrows=2, facecolor=None, figsize=(6.4, 7.2), \
@@ -910,7 +911,7 @@ class PlateTool(object):
 
                     
                     # Plot fit info
-                    fit_info = "Fit: {:+.2f}LSP {:+.2f} +/- {:.2f} ".format(self.platepar.mag_0, \
+                    fit_info = "Fit: {:+.1f}*LSP + {:.2f} +/- {:.2f} ".format(self.platepar.mag_0, \
                         self.platepar.mag_lev, fit_stddev) \
                         + "\nVignetting coeff = {:.5f}".format(self.platepar.vignetting_coeff) \
                         + "\nGamma = {:.2f}".format(self.platepar.gamma)
@@ -942,15 +943,7 @@ class PlateTool(object):
 
                     ### PLOT MAG DIFFERENCE BY RADIUS
 
-                    img_diagonal = np.hypot(self.platepar.X_res/2, self.platepar.Y_res/2)
-
-
-                    # Plot radius from centre vs. fit residual (excluding vignetting, only when no flat is 
-                    #    used)
-                    if self.flat_struct is None:
-                        fit_resids_novignetting = catalog_mags - photomLine((np.array(px_intens_list), \
-                            np.array(radius_list)), photom_offset, 0.0)
-                        ax_r.scatter(radius_list, fit_resids_novignetting, s=5, c='r', alpha=0.5, zorder=3)
+                    img_diagonal = np.hypot(self.platepar.X_res/2, self.platepar.Y_res/2)                        
                     
 
                     # Plot radius from centre vs. fit residual (including vignetting)
@@ -961,12 +954,20 @@ class PlateTool(object):
                     ax_r.plot(np.linspace(0, img_diagonal, 10), np.zeros(10), linestyle='dashed', alpha=0.5, \
                         color='k')
 
-                    # Plot the vignetting curve
+
+
+                    # Plot the vignetting curve (only when no flat is used)
                     if self.flat_struct is None:
+
+                        # Plot radius from centre vs. fit residual (excluding vignetting
+                        fit_resids_novignetting = catalog_mags - photomLine((np.array(px_intens_list), \
+                            np.array(radius_list)), photom_offset, 0.0)
+                        ax_r.scatter(radius_list, fit_resids_novignetting, s=5, c='r', alpha=0.5, zorder=3)
 
                         px_sum_tmp = 1000
                         radius_arr_tmp = np.linspace(0, img_diagonal, 50)
 
+                        # Plot the vignetting curve
                         vignetting_loss = 2.5*np.log10(px_sum_tmp) \
                             - 2.5*np.log10(correctVignetting(px_sum_tmp, radius_arr_tmp, \
                                 self.platepar.vignetting_coeff))
