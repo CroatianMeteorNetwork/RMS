@@ -64,6 +64,10 @@ def correctVignetting(px_sum, radius, vignetting_coeff):
         px_sum_corr: [float] Corrected pixel sum.
     """
 
+    # Make sure the vignetting coefficient is a number
+    if vignetting_coeff is None:
+        vignetting_coeff = 0.0
+
     return px_sum/(np.cos(vignetting_coeff*radius)**4)
 
 
@@ -945,7 +949,7 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
 
         # Load the platepar
         platepar = RMS.Formats.Platepar.Platepar()
-        platepar.read(os.path.join(dir_path, platepar_file))
+        platepar.read(os.path.join(dir_path, platepar_file), use_flat=None)
 
 
     # Load the FTPdetectinfo file

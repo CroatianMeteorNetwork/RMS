@@ -34,6 +34,8 @@ import numpy as np
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 import RMS.Astrometry.ApplyAstrometry
 
+
+
 class stationData(object):
     """ Holds information about one meteor station (location) and observed points.
     """
@@ -78,6 +80,7 @@ def parseInf(file_name):
 
 
     return station_data_obj
+
 
 
 
@@ -165,6 +168,28 @@ class Platepar(object):
         self.y_poly_rev[0] = 0.5
 
 
+    def addVignettingCoeff(self, use_flat):
+        """ Add a vignetting coeff to the platepar if it doesn't have one. 
+        
+        Arguments:
+            use_flat: [bool] Is the flat used or not.
+        """
+
+        # Add a vignetting coefficient if it's not set
+        if self.vignetting_coeff is None:
+
+            # Only add it if a flat is not used
+            if use_flat:
+                self.vignetting_coeff = 0.0
+
+            else:
+
+                # Use 0.001 deg/px as the default coefficeint, as that's the one for 3.6 mm f/0.95 and 16 mm
+                #   f/1.0 lenses. The vignetting coeff is dependent on the resolution, the default value of 
+                #   0.001 deg/px is for 720p.
+                self.vignetting_coeff = 0.001*np.hypot(1280, 720)/np.hypot(self.X_res, self.Y_res)
+
+
     def parseLine(self, f):
         """ Read next line, split the line and convert parameters to float.
 
@@ -176,7 +201,7 @@ class Platepar(object):
         return map(float, f.readline().split())
 
 
-    def loadFromDict(self, platepar_dict):
+    def loadFromDict(self, platepar_dict, use_flat=None):
         """ Load the platepar from a dictionary. """
 
         # Parse JSON into an object with attributes corresponding to dict keys
@@ -196,7 +221,11 @@ class Platepar(object):
 
         # Add the vignetting coefficient if it was not in the platepar
         if not 'vignetting_coeff' in self.__dict__:
-            self.vignetting_coeff = 0.0
+            self.vignetting_coeff = None
+
+            # Add the default vignetting coeff
+            self.addVignettingCoeff(use_flat=use_flat)
+
 
         # Add the list of calibration stars if it was not in the platepar
         if not 'star_list' in self.__dict__:
@@ -233,7 +262,7 @@ class Platepar(object):
 
 
 
-    def read(self, file_name, fmt=None):
+    def read(self, file_name, fmt=None, use_flat=None):
         """ Read the platepar. 
             
         Arguments:
@@ -242,6 +271,7 @@ class Platepar(object):
         Keyword arguments:
             fmt: [str] Format of the platepar file. 'json' for JSON format and 'txt' for the usual CMN textual
                 format.
+            use_flat: [bool] Indicates wheter a flat is used or not. None by default.
 
         Return:
             fmt: [str]
@@ -276,12 +306,12 @@ class Platepar(object):
                 data = " ".join(f.readlines())
 
             # Load the platepar from the JSON dictionary
-            self.loadFromDict(json.loads(data))
+            self.loadFromDict(json.loads(data), use_flat=use_flat)
 
 
 
 
-        # Load the file as TXT
+        # Load the file as TXT (old CMN format)
         else:
 
             with open(file_name) as f:
@@ -339,6 +369,9 @@ class Platepar(object):
                 # Read station code
                 self.station_code = f.readline().replace('\r', '').replace('\n', '')
 
+
+        # Add a default vignetting coefficient if it already doesn't exist
+        self.addVignettingCoeff(use_flat)
 
         return fmt
 
@@ -403,6 +436,8 @@ class Platepar(object):
             if ret_written:
                 return fmt, out_str
 
+
+        # Old CMN format
         else:
 
             with open(file_path, 'w') as f:
@@ -465,7 +500,6 @@ class Platepar(object):
 
     def __repr__(self):
         return str(self.__dict__)
-
 
 
 

@@ -60,7 +60,7 @@ def getPlatepar(config, night_data_dir):
     platepar_path = os.path.join(os.getcwd(), config.platepar_name)
     if os.path.exists(platepar_path):
         platepar = Platepar()
-        platepar_fmt = platepar.read(platepar_path)
+        platepar_fmt = platepar.read(platepar_path, use_flat=config.use_flat)
 
         log.info('Loaded platepar from RMS directory: ' + platepar_path)
 
@@ -71,7 +71,7 @@ def getPlatepar(config, night_data_dir):
         platepar_path = platepar_night_dir_path
 
         platepar = Platepar()
-        platepar_fmt = platepar.read(platepar_path)
+        platepar_fmt = platepar.read(platepar_path, use_flat=config.use_flat)
 
         log.info('Loaded platepar from night directory: ' + platepar_path)
 

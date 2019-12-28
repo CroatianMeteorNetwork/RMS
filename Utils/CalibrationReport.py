@@ -98,7 +98,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
         # Load the platepar file
         platepar = Platepar()
-        platepar.read(os.path.join(night_dir_path, platepar_file))
+        platepar.read(os.path.join(night_dir_path, platepar_file), use_flat=config.use_flat)
 
 
     ### ###
@@ -184,7 +184,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
             # Select the platepar where the FF file has the most stars
             platepar_dict = recalibrated_platepars[ff_dict[max_jd]]
             platepar = Platepar()
-            platepar.loadFromDict(platepar_dict)
+            platepar.loadFromDict(platepar_dict, use_flat=config.use_flat)
 
             filtered_star_dict = {max_jd: star_dict[max_jd]}
 

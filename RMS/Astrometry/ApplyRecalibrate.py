@@ -538,7 +538,7 @@ def applyRecalibrate(ftpdetectinfo_path, config):
 
         # Load the platepar
         platepar = Platepar.Platepar()
-        platepar.read(os.path.join(dir_path, config.platepar_name))
+        platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
 
     else:
         print('Cannot find the platepar file in the night directory: ', config.platepar_name)
