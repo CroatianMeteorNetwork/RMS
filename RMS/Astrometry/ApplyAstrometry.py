@@ -153,6 +153,59 @@ def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=No
 
 
 
+def photometryFitRobust(px_intens_list, radius_list, catalog_mags, fixed_vignetting=None):
+    """ Fit the photometry on given data robustly by rejecting 2 sigma residuals several times. 
+    
+    Arguments:
+        px_intens_list: [list] A list of sums of pixel intensities.
+        radius_list: [list] A list of raddia from the focal plane centre (px).
+        catalog_mags: [list] A list of corresponding catalog magnitudes of stars.
+
+    Keyword arguments:
+        fixed_vignetting: [float] Fixed vignetting coefficient. None by default, in which case it will be
+            computed.
+
+    Return:
+        (photom_offset, fit_stddev, fit_resid, px_intens_list, radius_list, catalog_mags):
+            photom_params: [list]
+                - photom_offset: [float] The photometric offset.
+                - vignetting_coeff: [float] Vignetting coefficient.
+            fit_stddev: [float] The standard deviation of the fit.
+            fit_resid: [float] Magnitude fit residuals.
+            px_intens_list: [ndarray] A list of filtered pixel intensities.
+            radius_list: [ndarray] A list of filtered radiia.
+            catalog_mags: [ndarray] A list of filtered catalog magnitudes.
+    """
+
+    # Convert everything to numpy arrays
+    px_intens_list = np.array(px_intens_list)
+    radius_list = np.array(radius_list)
+    catalog_mags = np.array(catalog_mags)
+
+
+    # Reject outliers and re-fit the photometry several times
+    reject_iters = 5
+    for i in range(reject_iters):
+
+        # Fit the photometry on automated star intensities (use the fixed vignetting coeff)
+        photom_params, fit_stddev, fit_resid = photometryFit(px_intens_list, radius_list, catalog_mags, \
+            fixed_vignetting=fixed_vignetting)
+
+        # Skip the rejection in the last iteration
+        if i < reject_iters - 1:
+
+            # Reject all 2 sigma residuals and re-fit the photometry
+            filter_indices = fit_resid < 2*fit_stddev
+            px_intens_list = px_intens_list[filter_indices]
+            radius_list = radius_list[filter_indices]
+            catalog_mags = catalog_mags[filter_indices]
+
+
+    return photom_params, fit_stddev, fit_resid, px_intens_list, radius_list, catalog_mags
+
+
+
+
 def computeFOVSize(platepar):
     """ Computes the size of the FOV in deg from the given platepar. 
         

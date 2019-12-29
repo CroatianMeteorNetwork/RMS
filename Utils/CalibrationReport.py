@@ -10,7 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, raDecToXYPP, \
-    photometryFit, correctVignetting, photomLine
+    photometryFitRobust, correctVignetting, photomLine
 from RMS.Astrometry.CheckFit import matchStarsResiduals
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Formats.CALSTARS import readCALSTARS
@@ -435,22 +435,10 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         radius_arr = np.hypot(image_stars[:, 0] - img_h/2, image_stars[:, 1] - img_w/2)
 
 
-        # Reject outliers and re-fit the photometry several times
-        reject_iters = 5
-        for i in range(reject_iters):
-
-            # Fit the photometry on automated star intensities (use the fixed vignetting coeff)
-            photom_params, fit_stddev, fit_resid = photometryFit(star_intensities, radius_arr, catalog_mags, \
-                fixed_vignetting=platepar.vignetting_coeff)
-
-            # Skip the rejection in the last iteration
-            if i < reject_iters - 1:
-
-                # Reject all 2 sigma residuals and re-fit the photometry
-                filter_indices = fit_resid < 2*fit_stddev
-                star_intensities = star_intensities[filter_indices]
-                radius_arr = radius_arr[filter_indices]
-                catalog_mags = catalog_mags[filter_indices]
+        # Fit the photometry on automated star intensities (use the fixed vignetting coeff, use robust fit)
+        photom_params, fit_stddev, fit_resid, star_intensities, radius_arr, catalog_mags = \
+            photometryFitRobust(star_intensities, radius_arr, catalog_mags, \
+            fixed_vignetting=platepar.vignetting_coeff)
 
 
         photom_offset, _ = photom_params
