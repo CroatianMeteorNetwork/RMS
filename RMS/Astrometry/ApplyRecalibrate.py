@@ -610,7 +610,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         # rotate and align the tick labels so they look better
         plt.gcf().autofmt_xdate()
 
-        plt.xlabel("Time")
+        plt.xlabel("UTC time")
         plt.ylabel("Photometric offset")
 
         plt.title("Photometric offset variation")

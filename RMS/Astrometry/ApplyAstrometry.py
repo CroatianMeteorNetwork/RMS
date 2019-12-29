@@ -194,8 +194,8 @@ def photometryFitRobust(px_intens_list, radius_list, catalog_mags, fixed_vignett
         # Skip the rejection in the last iteration
         if i < reject_iters - 1:
 
-            # Reject all 2 sigma residuals and re-fit the photometry
-            filter_indices = fit_resid < 2*fit_stddev
+            # Reject all 2 sigma residuals and all larger than 1.0 mag, and re-fit the photometry
+            filter_indices = (np.abs(fit_resid) < 2*fit_stddev) & (np.abs(fit_resid) < 1.0)
             px_intens_list = px_intens_list[filter_indices]
             radius_list = radius_list[filter_indices]
             catalog_mags = catalog_mags[filter_indices]
