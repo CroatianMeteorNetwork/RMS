@@ -209,7 +209,7 @@ while true; do
 # Check if the config file was changed
 statID=$(grep stationID $RMSCONFIG | cut -d ":" -f 2 | xargs)
 
-if [ "$statID" = "CA0001" ]; then
+if [ "$statID" = "XX0001" ]; then
   echo "The config file was not changed!"
   echo "Please change the station ID and the geo coordinates in the config file!"
 
