@@ -40,7 +40,7 @@ def FTPdetectinfo2UFOOrbitInput(dir_path, file_name, platepar_path, platepar_dic
     if platepar_dict is None:
 
         pp = RMS.Formats.Platepar.Platepar()
-        pp.read(platepar_path)
+        pp.read(platepar_path, use_flat=None)
 
 
     # Init the UFO format list

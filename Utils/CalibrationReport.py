@@ -10,7 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, raDecToXYPP, \
-    photometryFit
+    photometryFitRobust, correctVignetting, photomLine
 from RMS.Astrometry.CheckFit import matchStarsResiduals
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Formats.CALSTARS import readCALSTARS
@@ -98,7 +98,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
         # Load the platepar file
         platepar = Platepar()
-        platepar.read(os.path.join(night_dir_path, platepar_file))
+        platepar.read(os.path.join(night_dir_path, platepar_file), use_flat=config.use_flat)
 
 
     ### ###
@@ -184,7 +184,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
             # Select the platepar where the FF file has the most stars
             platepar_dict = recalibrated_platepars[ff_dict[max_jd]]
             platepar = Platepar()
-            platepar.loadFromDict(platepar_dict)
+            platepar.loadFromDict(platepar_dict, use_flat=config.use_flat)
 
             filtered_star_dict = {max_jd: star_dict[max_jd]}
 
@@ -420,60 +420,135 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
     if max_matched_stars > 2:
 
-        ### Plot the photometry ###
 
-        plt.figure(dpi=dpi)
+        ### PHOTOMETRY FIT ###
 
-        # Take only those stars which are inside the 3/4 of the shorter image axis from the center
-        photom_selection_radius = np.min([img_h, img_w])/3
-        filter_indices = ((image_stars[:, 0] - img_h/2)**2 + (image_stars[:, 1] \
-            - img_w/2)**2) <= photom_selection_radius**2
-        star_intensities = image_stars[filter_indices, 2]
-        catalog_mags = matched_catalog_stars[filter_indices, 2]
+        # If a flat is used, set the vignetting coeff to 0
+        if config.use_flat:
+            platepar.vignetting_coeff = 0.0
 
-        # Plot intensities of image stars
-        #star_intensities = image_stars[:, 2]
-        plt.scatter(-2.5*np.log10(star_intensities), catalog_mags, s=5, c='r')
+        # Extact intensities and mangitudes
+        star_intensities = image_stars[:, 2]
+        catalog_mags = matched_catalog_stars[:, 2]
 
-        # Fit the photometry on automated star intensities
-        photom_offset, fit_stddev, _ = photometryFit(np.log10(star_intensities), catalog_mags)
+        # Compute radius of every star from image centre
+        radius_arr = np.hypot(image_stars[:, 0] - img_h/2, image_stars[:, 1] - img_w/2)
+
+
+        # Fit the photometry on automated star intensities (use the fixed vignetting coeff, use robust fit)
+        photom_params, fit_stddev, fit_resid, star_intensities, radius_arr, catalog_mags = \
+            photometryFitRobust(star_intensities, radius_arr, catalog_mags, \
+            fixed_vignetting=platepar.vignetting_coeff)
+
+
+        photom_offset, _ = photom_params
+
+        ### ###
+
+
+
+        ### PLOT PHOTOMETRY ###
+        # Note: An almost identical code exists in RMS.Astrometry.SkyFit in the PlateTool.photometry function
+
+        dpi = 130
+        fig_p, (ax_p, ax_r) = plt.subplots(nrows=2, facecolor=None, figsize=(6.0, 7.0), dpi=dpi, \
+            gridspec_kw={'height_ratios':[2, 1]})
+
+        # Plot raw star intensities
+        ax_p.scatter(-2.5*np.log10(star_intensities), catalog_mags, s=5, c='r', alpha=0.5, label="Raw")
+
+        # If a flat is used, disregard the vignetting
+        if not config.use_flat:
+            
+            # Plot intensities of image stars corrected for vignetting
+            lsp_corr_arr = np.log10(correctVignetting(star_intensities, radius_arr, \
+                platepar.vignetting_coeff))
+            ax_p.scatter(-2.5*lsp_corr_arr, catalog_mags, s=5, c='b', alpha=0.5, \
+                label="Corrected for vignetting")
 
 
         # Plot photometric offset from the platepar
-        x_min, x_max = plt.gca().get_xlim()
-        y_min, y_max = plt.gca().get_ylim()
+        x_min, x_max = ax_p.get_xlim()
+        y_min, y_max = ax_p.get_ylim()
 
         x_min_w = x_min - 3
         x_max_w = x_max + 3
         y_min_w = y_min - 3
         y_max_w = y_max + 3
 
-        photometry_info = 'Platepar: {:+.2f}LSP {:+.2f} +/- {:.2f} \nGamma = {:.2f}'.format(platepar.mag_0, \
-            platepar.mag_lev, platepar.mag_lev_stddev, platepar.gamma)
+        photometry_info = "Platepar: {:+.1f}*LSP + {:.2f} +/- {:.2f}".format(platepar.mag_0, \
+            platepar.mag_lev, platepar.mag_lev_stddev) \
+            + "\nVignetting coeff = {:.5f}".format(platepar.vignetting_coeff) \
+            + "\nGamma = {:.2f}".format(platepar.gamma)
 
         # Plot the photometry calibration from the platepar
         logsum_arr = np.linspace(x_min_w, x_max_w, 10)
-        plt.plot(logsum_arr, logsum_arr + platepar.mag_lev, label=photometry_info, linestyle='--', \
+        ax_p.plot(logsum_arr, logsum_arr + platepar.mag_lev, label=photometry_info, linestyle='--', \
             color='k', alpha=0.5)
 
         # Plot the fitted photometry calibration
-        fit_info = "Fit: {:+.2f}LSP {:+.2f} +/- {:.2f}".format(-2.5, photom_offset, fit_stddev)
-        plt.plot(logsum_arr, logsum_arr + photom_offset, label=fit_info, linestyle='--', color='red', 
-            alpha=0.5)
+        fit_info = "Fit: {:+.1f}*LSP + {:.2f} +/- {:.2f}".format(-2.5, photom_offset, fit_stddev)
+        ax_p.plot(logsum_arr, logsum_arr + photom_offset, label=fit_info, linestyle='--', color='b',
+            alpha=0.75)
 
-        plt.legend()
+        ax_p.legend()
 
-        plt.ylabel("Catalog magnitude ({:s})".format(mag_band_str))
-        plt.xlabel("Uncalibrated magnitude")
+        ax_p.set_ylabel("Catalog magnitude ({:s})".format(mag_band_str))
+        ax_p.set_xlabel("Uncalibrated magnitude")
 
         # Set wider axis limits
-        plt.xlim(x_min_w, x_max_w)
-        plt.ylim(y_min_w, y_max_w)
+        ax_p.set_xlim(x_min_w, x_max_w)
+        ax_p.set_ylim(y_min_w, y_max_w)
 
-        plt.gca().invert_yaxis()
-        plt.gca().invert_xaxis()
+        ax_p.invert_yaxis()
+        ax_p.invert_xaxis()
 
-        plt.grid()
+        ax_p.grid()
+
+
+        ### Plot photometry vs radius ###
+
+        img_diagonal = np.hypot(img_h/2, img_w/2)
+
+        # Plot photometry residuals (including vignetting)
+        ax_r.scatter(radius_arr, fit_resid, c='b', alpha=0.75, s=5, zorder=3)
+
+        # Plot a zero line
+        ax_r.plot(np.linspace(0, img_diagonal, 10), np.zeros(10), linestyle='dashed', alpha=0.5, \
+            color='k')
+
+
+
+        # Plot only when no flat is used
+        if not config.use_flat:
+
+            #  Plot radius from centre vs. fit residual 
+            fit_resids_novignetting = catalog_mags - photomLine((np.array(star_intensities), \
+                np.array(radius_arr)), photom_offset, 0.0)
+            ax_r.scatter(radius_arr, fit_resids_novignetting, s=5, c='r', alpha=0.5, zorder=3)
+
+
+            px_sum_tmp = 1000
+            radius_arr_tmp = np.linspace(0, img_diagonal, 50)
+
+            # Plot vignetting loss curve
+            vignetting_loss = 2.5*np.log10(px_sum_tmp) \
+                - 2.5*np.log10(correctVignetting(px_sum_tmp, radius_arr_tmp, \
+                    platepar.vignetting_coeff))
+
+            ax_r.plot(radius_arr_tmp, vignetting_loss, linestyle='dotted', alpha=0.5, color='k')
+
+
+        ax_r.grid()
+
+        ax_r.set_ylabel("Fit residuals (mag)")
+        ax_r.set_xlabel("Radius from centre (px)")
+
+        ax_r.set_xlim(0, img_diagonal)
+
+        ### ###
+
+        plt.tight_layout()
 
         plt.savefig(os.path.join(night_dir_path, night_name + '_calib_report_photometry.png'), dpi=150)
 

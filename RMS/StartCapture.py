@@ -29,16 +29,17 @@ import traceback
 
 import numpy as np
 
+# This needs to be first to set the proper matplotlib backend it needs
+from Utils.LiveViewer import LiveViewer
+
 import RMS.ConfigReader as cr
 from RMS.Logger import initLogging
-
-
 from RMS.BufferedCapture import BufferedCapture
 from RMS.CaptureDuration import captureDuration
 from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
-from RMS.LiveViewer import LiveViewer
+from RMS.Formats.FFfile import validFFName
 from RMS.Misc import mkdirP
 from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight
@@ -139,6 +140,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         upload_manager: [UploadManager object] A handle to the UploadManager, which handles uploading files to
             the central server. None by default.
 
+    Return:
+        night_archive_dir: [str] Path to the archive folder of the processed night.
+
     """
 
     global STOP_CAPTURE
@@ -213,19 +217,18 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file)
 
 
-    # # Initialize the live image viewer
-    # if config.live_view_enable:
+    # Initialize the live image viewer
+    if config.live_maxpixel_enable:
+        live_view = LiveViewer(night_data_dir, slideshow=False, banner_text="Live")
+        live_view.start()
 
-    #     live_view = LiveViewer(window_name='Maxpixel')
-
-    # else:
-    
-    live_view = None
+    else:
+        live_view = None
 
     
     # Initialize compression
     compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config, 
-        detector=detector, live_view=live_view)
+        detector=detector)
 
     
     # Start buffered capture
@@ -254,7 +257,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Stop the compressor
     log.debug('Stopping compression...')
-    detector, live_view = compressor.stop()
+    detector = compressor.stop()
 
     # Free shared memory after the compressor is done
     try:
@@ -277,7 +280,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         log.debug('Stopping live viewer...')
 
         live_view.stop()
+        live_view.join()
         del live_view
+        live_view = None
 
         log.debug('Live view stopped')
 
@@ -399,6 +404,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 log.info('Closing upload manager...')
 
         sys.exit()
+
+
+    return night_archive_dir
 
 
 
@@ -529,6 +537,7 @@ if __name__ == "__main__":
 
     # Automatic running and stopping the capture at sunrise and sunset
     ran_once = False
+    slideshow_view = None
     while True:
             
         # Calculate when and how should the capture run
@@ -630,6 +639,46 @@ if __name__ == "__main__":
 
         # Wait to start capturing
         if start_time != True:
+
+
+            # Initialize the slideshow of last night's detections
+            if config.slideshow_enable:
+
+                # Make a list of all archived directories previously generated
+                archive_dir_list = []
+                for archive_dir_name in sorted(os.listdir(os.path.join(config.data_dir, 
+                    config.archived_dir))):
+
+                    if archive_dir_name.startswith(config.stationID):
+                        if os.path.isdir(os.path.join(config.data_dir, config.archived_dir, \
+                            archive_dir_name)):
+
+                            archive_dir_list.append(archive_dir_name)
+
+
+
+                # If there are any archived dirs, choose the last one
+                if archive_dir_list:
+
+                    latest_night_archive_dir = os.path.join(config.data_dir, config.archived_dir, \
+                        archive_dir_list[-1])
+
+                    # Make sure that there are any FF files in the chosen archived dir
+                    ffs_latest_night_archive = [ff_name for ff_name \
+                        in os.listdir(latest_night_archive_dir) if validFFName(ff_name)]
+
+                    if len(ffs_latest_night_archive):
+
+                        log.info("Starting a slideshow of {:d} detections from the previous night.".format(len(ffs_latest_night_archive)))
+
+                        # Start the slide show
+                        slideshow_view = LiveViewer(latest_night_archive_dir, slideshow=True, \
+                            banner_text="Last night's detections")
+                        slideshow_view.start()
+
+                    else:
+                        log.info("No detections from the previous night to show as a slideshow!")
+
             
             # Calculate how many seconds to wait until capture starts, and with for that time
             time_now = datetime.datetime.utcnow()
@@ -657,6 +706,15 @@ if __name__ == "__main__":
                         upload_manager.stop()
                         del upload_manager
 
+
+                    # Stop the slideshow if it was on
+                    if slideshow_view is not None:
+                        log.info("Stopping slideshow...")
+                        slideshow_view.stop()
+                        slideshow_view.join()
+                        del slideshow_view
+                        slideshow_view = None
+
                 sys.exit()
 
             # Change the Ctrl+C action to the special handle
@@ -667,6 +725,14 @@ if __name__ == "__main__":
         if STOP_CAPTURE:
             break
 
+
+        # Stop the slideshow if it was on
+        if slideshow_view is not None:
+            log.info("Stopping slideshow...")
+            slideshow_view.stop()
+            slideshow_view.join()
+            del slideshow_view
+            slideshow_view = None
 
 
         log.info('Freeing up disk space...')
@@ -682,13 +748,12 @@ if __name__ == "__main__":
         log.info('Starting capture for {:.2f} hours'.format(duration/60/60))
 
         # Run capture and compression
-        runCapture(config, duration=duration, nodetect=cml_args.nodetect, upload_manager=upload_manager, 
-            detect_end=cml_args.detectend)
+        night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect, 
+            upload_manager=upload_manager, detect_end=cml_args.detectend)
 
         # Indicate that the capture was done once
         ran_once = True
-
-
+            
 
 
     if upload_manager is not None:

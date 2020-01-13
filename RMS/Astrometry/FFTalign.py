@@ -357,7 +357,7 @@ if __name__ == "__main__":
         # Load the platepar
         platepar = Platepar.Platepar()
         platepar_path = os.path.join(dir_path, config.platepar_name)
-        platepar.read(platepar_path)
+        platepar.read(platepar_path, use_flat=config.use_flat)
 
     else:
         print('Cannot find the platepar file in the night directory: ', config.platepar_name)

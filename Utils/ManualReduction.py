@@ -465,7 +465,7 @@ class ManualReductionTool(object):
 
         # Parse the platepar file
         try:
-            self.platepar_fmt = platepar.read(platepar_file)
+            self.platepar_fmt = platepar.read(platepar_file, use_flat=self.config.use_flat)
         except:
             platepar = None
 

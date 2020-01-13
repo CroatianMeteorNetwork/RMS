@@ -13,12 +13,13 @@ import datetime
 import shutil
 
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import numpy as np
 import scipy.optimize
 
 from RMS.Astrometry import CheckFit
 from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo, applyPlateparToCentroids, \
-    raDec2AltAz, rotationWrtHorizon
+    raDec2AltAz, rotationWrtHorizon, photometryFitRobust
 from RMS.Astrometry.Conversions import date2JD
 from RMS.Astrometry.FFTalign import alignPlatepar
 import RMS.ConfigReader as cr
@@ -29,7 +30,11 @@ from RMS.Formats import Platepar
 from RMS.Formats import StarCatalog
 from RMS.Math import angularSeparation
 import Utils.RMS2UFO
+    
 
+# Neighbourhood size around individual FFs with detections which will be takes for recalibration
+#   A size of e.g. 3 means that an FF before, the FF with the detection, an an FF after will be taken
+RECALIBRATE_NEIGHBOURHOOD_SIZE = 3
 
 
 def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max_match_radius=None,
@@ -149,7 +154,7 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
         temp_platepar.pos_angle_ref = pos_angle_ref
         temp_platepar.F_scale = F_scale_ref
 
-        n_matched, _, _, _ = CheckFit.matchStarsResiduals(config, temp_platepar, catalog_stars, \
+        n_matched, _, _, matched_stars = CheckFit.matchStarsResiduals(config, temp_platepar, catalog_stars, \
             star_dict_ff, match_radius, ret_nmatch=True, verbose=False)
 
 
@@ -189,6 +194,33 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
     # If the platepar is good, store it
     if CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, star_dict_ff, \
         goodnes_check_radius) or force_platepar_save:
+
+
+        ### PHOTOMETRY FIT ###
+
+        # Get a list of matched image and catalog stars
+        image_stars, matched_catalog_stars, _ = matched_stars[jd]
+        star_intensities = image_stars[:, 2]
+        catalog_mags = matched_catalog_stars[:, 2]
+
+        # Compute radius of every star from image centre
+        radius_arr = np.hypot(image_stars[:, 0] - working_platepar.Y_res/2, \
+            image_stars[:, 1] - working_platepar.X_res/2)
+
+        # Fit the photometry on automated star intensities (use the fixed vignetting coeff, use robust fit)
+        photom_params, fit_stddev, _, _, _, _ = photometryFitRobust(star_intensities, radius_arr, \
+            catalog_mags, fixed_vignetting=working_platepar.vignetting_coeff)
+        photom_offset = photom_params[0]
+
+        # Store the fitted photometric offset and error
+        working_platepar.mag_lev = photom_offset
+        working_platepar.mag_lev_stddev = fit_stddev
+
+        # Print photometry info
+        print("Fit: {:+.1f}*LSP + {:.2f} +/- {:.2f}".format(-2.5, photom_offset, fit_stddev))
+
+        ### ###
+
 
         print("Platepar minimum error of {:.2f} with radius {:.1f} px PASSED!".format(config.dist_check_threshold, \
             goodnes_check_radius))
@@ -254,9 +286,44 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
     calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
 
+    ### Add neighboring FF files for more robust photometry estimation ###
+
+    ff_processing_list = []
+
+    # Make a list of sorted FF files in CALSTARS
+    calstars_ffs = sorted([ff_file for ff_file in calstars])
+
+    # Go through the list of FF files with detections and add neighboring FFs
+    for meteor_entry in meteor_list:
+
+        ff_name = meteor_entry[0]
+
+        if ff_name in calstars_ffs:
+
+            # Find the index of the given FF file in the list of calstars
+            ff_indx = calstars_ffs.index(ff_name)
+
+            # Add neighbours to the processing list
+            for k in range(-(RECALIBRATE_NEIGHBOURHOOD_SIZE//2), RECALIBRATE_NEIGHBOURHOOD_SIZE//2 + 1):
+
+                k_indx = ff_indx + k
+
+                if (k_indx > 0) and (k_indx < len(calstars_ffs)):
+
+                    ff_name_tmp = calstars_ffs[k_indx]
+                    if ff_name_tmp not in ff_processing_list:
+                        ff_processing_list.append(ff_name_tmp)
+
+
+    # Sort the processing list of FF files
+    ff_processing_list = sorted(ff_processing_list)
+
+
+    ### ###
+
+
     # Globally increase catalog limiting magnitude
     config.catalog_mag_limit += 1
-
 
     # Load catalog stars (overwrite the mag band ratios if specific catalog is used)
     star_catalog_status = StarCatalog.readStarCatalog(config.star_catalog_path,\
@@ -281,11 +348,9 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
     # Go through all FF files with detections, recalibrate and apply astrometry
     recalibrated_platepars = {}
-    for meteor_entry in meteor_list:
+    for ff_name in ff_processing_list:
 
         working_platepar = copy.deepcopy(prev_platepar)
-
-        ff_name, meteor_No, rho, phi, meteor_meas = meteor_entry
 
         # Skip this meteor if its FF file was already recalibrated
         if ff_name in recalibrated_platepars:
@@ -369,6 +434,60 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
             recalibrated_platepars[ff_name] = prev_platepar
 
 
+
+    ### Average out photometric offsets within the given neighbourhood size ###
+
+    # Go through the list of FF files with detections
+    for meteor_entry in meteor_list:
+
+        ff_name = meteor_entry[0]
+
+        # Make sure the FF was successfuly recalibrated
+        if ff_name in recalibrated_platepars:
+
+            # Find the index of the given FF file in the list of calstars
+            ff_indx = calstars_ffs.index(ff_name)
+
+            # Compute the average photometric offset and the improved standard deviation using all
+            #   neighbors
+            photom_offset_tmp_list = []
+            photom_offset_std_tmp_list = []
+            neighboring_ffs = []
+            for k in range(-(RECALIBRATE_NEIGHBOURHOOD_SIZE//2), RECALIBRATE_NEIGHBOURHOOD_SIZE//2 + 1):
+
+                k_indx = ff_indx + k
+
+                if (k_indx > 0) and (k_indx < len(calstars_ffs)):
+
+                    # Get the name of the FF file
+                    ff_name_tmp = calstars_ffs[k_indx]
+
+                    # Check that the neighboring FF was successfuly recalibrated
+                    if ff_name_tmp in recalibrated_platepars:
+                        
+                        # Get the computed photometric offset and stddev
+                        photom_offset_tmp_list.append(recalibrated_platepars[ff_name_tmp].mag_lev)
+                        photom_offset_std_tmp_list.append(recalibrated_platepars[ff_name_tmp].mag_lev_stddev)
+                        neighboring_ffs.append(ff_name_tmp)
+
+
+            # Compute the new photometric offset and improved standard deviation (assume equal sample size)
+            #   Source: https://stats.stackexchange.com/questions/55999/is-it-possible-to-find-the-combined-standard-deviation
+            photom_offset_new = np.mean(photom_offset_tmp_list)
+            photom_offset_std_new = np.sqrt(\
+                np.sum([st**2 + (mt - photom_offset_new)**2 \
+                for mt, st in zip(photom_offset_tmp_list, photom_offset_std_tmp_list)]) \
+                / len(photom_offset_tmp_list)
+                )
+
+            # Assign the new photometric offset and standard deviation to all FFs used for computation
+            for ff_name_tmp in neighboring_ffs:
+                recalibrated_platepars[ff_name_tmp].mag_lev = photom_offset_new
+                recalibrated_platepars[ff_name_tmp].mag_lev_stddev = photom_offset_std_new
+
+    ### ###
+
+
     ### Store all recalibrated platepars as a JSON file ###
 
     all_pps = {}
@@ -401,13 +520,16 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
 
 
-    ### Plot difference from reference platepar in angular distance from (0, 0) vs rotation ###
+    ### GENERATE PLOTS ###
 
+    dt_list = []
     ang_dists = []
     rot_angles = []
     hour_list = []
+    photom_offset_list = []
+    photom_offset_std_list = []
 
-    first_jd = np.min([FFfile.filenameToDatetime(ff_name) for ff_name in recalibrated_platepars])
+    first_dt = np.min([FFfile.filenameToDatetime(ff_name) for ff_name in recalibrated_platepars])
 
     for ff_name in recalibrated_platepars:
         
@@ -416,6 +538,11 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         # If the fitting failed, skip the platepar
         if pp_temp is None:
             continue
+
+        # Add the datetime of the FF file to the list
+        ff_dt = FFfile.filenameToDatetime(ff_name)
+        dt_list.append(ff_dt)
+
 
         # Compute the angular separation from the reference platepar
         ang_dist = np.degrees(angularSeparation(np.radians(platepar.RA_d), np.radians(platepar.dec_d), \
@@ -427,31 +554,40 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         rot_angles.append(rot_diff*60)
 
         # Compute the hour of the FF used for recalibration
-        hour_list.append((FFfile.filenameToDatetime(ff_name) - first_jd).total_seconds()/3600)
+        hour_list.append((ff_dt - first_dt).total_seconds()/3600)
+
+        # Add the photometric offset to the list
+        photom_offset_list.append(pp_temp.mag_lev)
+        photom_offset_std_list.append(pp_temp.mag_lev_stddev)
+
 
 
     if generate_plot:
+
+        # Generate the name the plots
+        plot_name = os.path.basename(ftpdetectinfo_path).replace('FTPdetectinfo_', '').replace('.txt', '')
+
         
+        ### Plot difference from reference platepar in angular distance from (0, 0) vs rotation ###    
+
         plt.figure()
 
         plt.scatter(0, 0, marker='o', edgecolor='k', label='Reference platepar', s=100, c='none', zorder=3)
 
         plt.scatter(ang_dists, rot_angles, c=hour_list, zorder=3)
-        plt.colorbar(label='Hours from first FF file')
+        plt.colorbar(label="Hours from first FF file")
         
         plt.xlabel("Angular distance from reference (arcmin)")
-        plt.ylabel('Rotation from reference (arcmin)')
+        plt.ylabel("Rotation from reference (arcmin)")
+
+        plt.title("FOV centre drift starting at {:s}".format(first_dt.strftime("%Y/%m/%d %H:%M:%S")))
 
         plt.grid()
         plt.legend()
 
-        plt.tight_layout()
+        plt.tight_layout()            
 
-        # Generate the name for the plot
-        calib_plot_name = os.path.basename(ftpdetectinfo_path).replace('FTPdetectinfo_', '').replace('.txt', '') \
-            + '_calibration_variation.png'
-
-        plt.savefig(os.path.join(dir_path, calib_plot_name), dpi=150)
+        plt.savefig(os.path.join(dir_path, plot_name + '_calibration_variation.png'), dpi=150)
 
         # plt.show()
 
@@ -459,6 +595,33 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         plt.close()
 
         ### ###
+
+
+        ### Plot the photometric offset variation ###
+
+        plt.figure()
+
+        plt.errorbar(dt_list, photom_offset_list, yerr=photom_offset_std_list, fmt="o", \
+            ecolor='lightgray', elinewidth=2, capsize=0, ms=2)
+
+        # Format datetimes
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+
+        # rotate and align the tick labels so they look better
+        plt.gcf().autofmt_xdate()
+
+        plt.xlabel("UTC time")
+        plt.ylabel("Photometric offset")
+
+        plt.title("Photometric offset variation")
+
+        plt.grid()
+
+        plt.tight_layout()
+
+        plt.savefig(os.path.join(dir_path, plot_name + '_photometry_variation.png'), dpi=150)
+
+    ### ###
 
 
 
@@ -538,7 +701,7 @@ def applyRecalibrate(ftpdetectinfo_path, config):
 
         # Load the platepar
         platepar = Platepar.Platepar()
-        platepar.read(os.path.join(dir_path, config.platepar_name))
+        platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
 
     else:
         print('Cannot find the platepar file in the night directory: ', config.platepar_name)

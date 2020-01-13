@@ -10,7 +10,6 @@ import math
 
 from RMS.Astrometry.Conversions import jd2Date
 from RMS.Astrometry.ApplyAstrometry import rotationWrtHorizon, rotationWrtStandard
-from RMS.Formats.Platepar import Platepar
 
 
 
@@ -176,13 +175,15 @@ def writeCAL(night_dir, config, platepar):
 if __name__ == "__main__":
 
     import RMS.ConfigReader as cr
+    from RMS.Formats.Platepar import Platepar
 
     # Load the default configuration file
     config = cr.parse(".config")
 
     # Load a platepar file
     pp = Platepar()
-    pp.read("/home/dvida/Desktop/HR0010_20190216_170146_265550_detected/platepar_cmn2010.cal")
+    pp.read("/home/dvida/Desktop/HR0010_20190216_170146_265550_detected/platepar_cmn2010.cal", \
+        use_flat=config.use_flat)
 
 
     night_dir = "/home/dvida/Desktop/HR0010_20190216_170146_265550_detected"
