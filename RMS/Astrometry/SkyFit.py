@@ -1276,7 +1276,7 @@ class PlateTool(object):
             self.ax.text(self.img_data_raw.shape[1]/2, self.img_data_raw.shape[0]/2, \
                 "Solving with astrometry.net...", color='r', alpha=0.5, fontsize=16, ha='center', va='center')
 
-            self.ax.draw()
+            #self.ax.draw()
             self.fig.canvas.draw()
             self.fig.canvas.flush_events()
 
