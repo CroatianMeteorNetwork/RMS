@@ -1,5 +1,5 @@
-""" Gives a path to the station directory and a date, copy a config file from the night folder closest to the
-given date to all previous night folders. 
+""" Given a path to the station directory and a date, recalibrate all data older than the given date. 
+Optionally, copy a config file from the night folder closest to the given date to all previous night folders.
 """
 
 from __future__ import print_function, division, absolute_import
@@ -25,13 +25,16 @@ if __name__ == "__main__":
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Copy .config file from directory closest in time to the reference time to all older data directories and recalibrate the data.")
+    arg_parser = argparse.ArgumentParser(description="Recalibrate the data older than the given date. Optionally, copy the config from the night closest to the date to all older data directories.")
 
     arg_parser.add_argument('station_path', metavar='DIR_PATH', type=str, \
         help="Path to the station directory.")
 
     arg_parser.add_argument('date', metavar='DATE', type=str, \
         help="Reference date in the YYYYMMDD format.")
+
+    arg_parser.add_argument('-c', '--copyconfig', action="store_true", \
+        help="""Copy the config from the data dir closest to the given date to older data directories. """)
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -68,7 +71,7 @@ if __name__ == "__main__":
 
 
     # Find the directory closest to the reference date
-    dt_diff_list = [abs((dt - dt_ref).total_seconds()) for _, dt in dir_dt_list]
+    dt_diff_list = [abs((dt_tmp - dt_ref).total_seconds()) for _, dt_tmp in dir_dt_list]
     ref_dir = dir_dt_list[dt_diff_list.index(min(dt_diff_list))][0]
 
 
@@ -99,15 +102,19 @@ if __name__ == "__main__":
             print("No config file in {:s}, skipping...".format(dir_name))
             continue
 
-        # Back up the config file unless it already exists
-        config_bak_path = os.path.join(dir_path, CONFIG_BAK)
-        if not os.path.exists(config_bak_path):
-            shutil.copy2(config_path, config_bak_path)
 
-        # Copy the refernce config file in the place of the existing config file
-        shutil.copy2(ref_config_path, config_path)
+        # Copy the config from the reference directory to all previous dirs
+        if cml_args.copyconfig:
 
-        print("Replaced config in:", dir_name)
+            # Back up the config file unless it already exists
+            config_bak_path = os.path.join(dir_path, CONFIG_BAK)
+            if not os.path.exists(config_bak_path):
+                shutil.copy2(config_path, config_bak_path)
+
+            # Copy the refernce config file in the place of the existing config file
+            shutil.copy2(ref_config_path, config_path)
+
+            print("Replaced config in:", dir_name)
 
 
 
