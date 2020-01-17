@@ -146,7 +146,7 @@ if __name__ == "__main__":
             print("Failed to load the config file, skipping...")
 
         # Run the recalibration
-        applyRecalibrate(os.path.join(dir_path, ftpdetectinfo_name), config)
+        applyRecalibrate(os.path.join(dir_path, ftpdetectinfo_name), config, generate_plot=False)
 
         ### ###
 
