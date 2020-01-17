@@ -139,7 +139,11 @@ if __name__ == "__main__":
 
 
         # Load the config file
-        config = parseConfig(config_path)
+        try:
+            config = parseConfig(config_path)
+
+        except:
+            print("Failed to load the config file, skipping...")
 
         # Run the recalibration
         applyRecalibrate(os.path.join(dir_path, ftpdetectinfo_name), config)
