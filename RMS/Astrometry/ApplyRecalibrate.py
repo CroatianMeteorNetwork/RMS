@@ -621,6 +621,9 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
         plt.savefig(os.path.join(dir_path, plot_name + '_photometry_variation.png'), dpi=150)
 
+        plt.clf()
+        plt.close()
+
     ### ###
 
 
