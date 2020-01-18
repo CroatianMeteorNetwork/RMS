@@ -679,12 +679,15 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
         
 
-def applyRecalibrate(ftpdetectinfo_path, config):
+def applyRecalibrate(ftpdetectinfo_path, config, generate_plot=True):
     """ Recalibrate FF files with detections and apply the recalibrated platepar to those detections. 
 
     Arguments:
         ftpdetectinfo_path: [str] Name of the FTPdetectinfo file.
         config: [Config instance]
+
+    Keyword arguments:
+        generate_plot: [bool] Generate the calibration variation plot. True by default.
 
     Return:
         recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are 
@@ -728,7 +731,7 @@ def applyRecalibrate(ftpdetectinfo_path, config):
 
     # Recalibrate and apply astrometry on every FF file with detections individually
     recalibrated_platepars = recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, \
-        calstars_list, config, platepar)
+        calstars_list, config, platepar, generate_plot=generate_plot)
 
 
     ### Generate the updated UFOorbit file ###
