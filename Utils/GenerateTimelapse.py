@@ -96,7 +96,7 @@ if __name__ == "__main__":
         # Draw text to image
         font = cv2.FONT_HERSHEY_SIMPLEX
         text = camid + " " + timestamp + " UTC"
-        cv2.putText(img, text, (10, 714), font, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(img, text, (10, ff.nrows - 6), font, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
 
         # Save the labelled image to disk
         cv2.imwrite(os.path.join(dir_tmp_path, img_file_name), img, [cv2.IMWRITE_JPEG_QUALITY, 100])
