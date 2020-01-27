@@ -23,7 +23,7 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
 		remaining_seconds = int(waitingtime.total_seconds())		
 
 	# Run the Istrastream shell script
-	script_path = os.path.abspath(os.path.join(os.sep, "home", user, "iStream.sh"))
+	script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "iStream.sh")
 	os.system(script_path + " {:s} {:s} {:s} {:.6f} {:.6f} {:.1f} {:d} {:d} {:d}".format(config.stationID, \
 		captured_night_dir, archived_night_dir, config.latitude, config.longitude, config.elevation, \
 		config.width, config.height, remaining_seconds))
