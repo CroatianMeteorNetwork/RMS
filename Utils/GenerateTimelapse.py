@@ -57,7 +57,7 @@ if __name__ == "__main__":
         print("Deleted directory : " + dir_tmp_path)
 		
     mkdirP(dir_tmp_path)
-    print("Creat directory : " + dir_tmp_path)
+    print("Created directory : " + dir_tmp_path)
     
     print("Preparing files for the timelapse...")
     c = 0
