@@ -11,6 +11,17 @@ if [[ -z "$1" || -z "$2" || -z "$3" || -z "$4" || -z "$5" || -z "$6" || -z "$7" 
 	exit
 fi
 
+
+echo "CHECKING DEPENDENCIES"
+if [[ $( command -v avconv ) && $( command -v convert ) ]]; then
+        echo "ALL DEPENDENCIES ALREADY INSTALLED!"
+else
+        echo "INSTALLING DEPENDENCIES..."
+        sudo apt-get update
+        sudo apt-get -y install imagemagick libav-tools
+fi
+
+
 ###SETUP###
 SYSTEM="rms"
 STATION_ID=$1
