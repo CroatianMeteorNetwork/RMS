@@ -16,9 +16,13 @@ echo "CHECKING DEPENDENCIES"
 if [[ $( command -v avconv ) && $( command -v convert ) ]]; then
         echo "ALL DEPENDENCIES ALREADY INSTALLED!"
 else
+	if $( sudo -n true) ; then
         echo "INSTALLING DEPENDENCIES..."
         sudo apt-get update
         sudo apt-get -y install imagemagick libav-tools
+    else
+    	echo "NO SUDO PRIVILEDGES TO INSTALL DEPENDENCIES..."
+    fi
 fi
 
 
