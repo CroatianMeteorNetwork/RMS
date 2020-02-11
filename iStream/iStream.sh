@@ -13,16 +13,24 @@ fi
 
 
 echo "CHECKING DEPENDENCIES"
-if [[ $( command -v avconv ) && $( command -v convert ) ]]; then
+if [[ ( $( command -v avconv ) || $( command -v ffmpeg ) ) && $( command -v convert ) ]]; then
         echo "ALL DEPENDENCIES ALREADY INSTALLED!"
 else
 	if $( sudo -n true ) ; then
         echo "INSTALLING DEPENDENCIES..."
         sudo apt-get update
-        sudo apt-get -y install imagemagick libav-tools
+        sudo apt-get -y install imagemagick 
+        sudo apt-get -y libav-tools
+        sudo apt-get -y ffmpeg
     else
     	echo "NO SUDO PRIVILEDGES TO INSTALL DEPENDENCIES..."
     fi
+fi
+
+
+# If avconv is not available, set up an alias for ffmpeg
+if [ ! $( command -v avconv ) ]; then
+	alias avconv="ffmpeg"
 fi
 
 
