@@ -55,14 +55,12 @@ if __name__ == "__main__":
                 counter = 0
 
 
-                if not cml_args.novideo:
-
-                    # If the FPS is lower than the onfigured value, this means that the video buffer is full and needs
-                    # to be emptied
-                    if fps < config.fps:
-                        for i in range(int(config.fps - fps) + 1):
-                            ret = vcap.grab()
-                            counter += 1
+                # If the FPS is lower than the onfigured value, this means that the video buffer is full and needs
+                # to be emptied
+                if fps < config.fps:
+                    for i in range(int(config.fps - fps) + 1):
+                        ret = vcap.grab()
+                        counter += 1
                     
 
             # Get the video frame
