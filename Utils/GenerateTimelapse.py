@@ -126,7 +126,7 @@ if __name__ == "__main__":
             + " -vcodec libx264 -pix_fmt yuv420p -crf 25 -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" " \
             + mp4_path
 
-        print("Creating timelapse using avconv...")
+        print("Creating timelapse using {:s}...".format(software_name))
         print(com)
         subprocess.call([com], shell=True)
 
@@ -143,7 +143,7 @@ if __name__ == "__main__":
         temp_img_path = os.path.join(os.path.basename(dir_tmp_path), "temp_%04d.jpg")
         com = ffmpeg_path + " -v quiet -r 30 -i " + temp_img_path + " -c:v libx264 -pix_fmt yuv420p -an -crf 25 -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" -movflags faststart -y " + mp4_path
 		
-        print("Creating timelapse by ffmpeg wait for tens minutes...")
+        print("Creating timelapse using ffmpeg...")
         print(com)
         subprocess.call(com, shell=True, cwd=dir_path)
 		
