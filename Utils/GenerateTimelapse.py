@@ -115,7 +115,8 @@ if __name__ == "__main__":
 
         # If avconv is not found, try using ffmpeg
         software_name = "avconv"
-        if os.system(software_name + " --help"):
+        print("Checking if avconv is available...")
+        if os.system(software_name + " --help > /dev/null"):
             software_name = "ffmpeg"
         
         # Construct the command for avconv            
