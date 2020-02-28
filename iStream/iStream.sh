@@ -121,7 +121,7 @@ function upload_captured_stack {
 }
 
 function upload_stack {	
-	STACK_FILE="$(ls $CAPTURED_DIR_NAME/*.jpg | grep 'stack')"	
+	STACK_FILE="$(ls $CAPTURED_DIR_NAME/*.jpg | grep '_stack_')"
 	if [ -f "$STACK_FILE" ]; then			
 		curl --user-agent $AGENT -F"operation=upload" -F"file=@$STACK_FILE" "$SERVER/$SYSTEM/?station_id=$STATION_ID&type=stack&meteor_count=$METEOR_COUNT&action=upload&level=$ACTIVE_LEVEL"
 	else

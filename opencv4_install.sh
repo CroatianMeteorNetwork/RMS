@@ -32,7 +32,7 @@ cd ${HOME_DIR}/opencv-${VERSION}/
 mkdir build
 cd build
 cmake -D CMAKE_BUILD_TYPE=DEBUG \
-    -D CMAKE_INSTALL_PREFIX=${1}/local \
+    -D CMAKE_INSTALL_PREFIX=${1} \
     -D INSTALL_C_EXAMPLES=OFF \
     -D OPENCV_EXTRA_MODULES_PATH=${HOME_DIR}/opencv_contrib-${VERSION}/modules \
     -D PYTHON_DEFAULT_EXECUTABLE=$HOME_DIR/vRMS/bin/python3.7 \
