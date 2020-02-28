@@ -9,8 +9,8 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 
-from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, raDecToXYPP, \
-    photometryFitRobust, correctVignetting, photomLine
+from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, raDecToXYPP, raDec2AltAz, \
+    photometryFitRobust, correctVignetting, photomLine, rotationWrtHorizon
 from RMS.Astrometry.CheckFit import matchStarsResiduals
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Formats.CALSTARS import readCALSTARS
@@ -252,7 +252,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     img = ff.avepixel
 
     # Slightly adjust the levels
-    img = Image.adjustLevels(img, np.percentile(img, 1.0), 1.2, np.percentile(img, 99.99))
+    img = Image.adjustLevels(img, np.percentile(img, 1.0), 1.3, np.percentile(img, 99.99))
 
     plt.imshow(img, cmap='gray', interpolation='nearest')
 
@@ -378,21 +378,51 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     ### ###
 
 
-    # Add info text
+    # Add info text in the corner
     info_text = ff_dict[max_jd] + '\n' \
         + "Matched stars within {:.1f} px radius: {:d}/{:d} \n".format(match_radius, max_matched_stars, \
             len(star_dict[max_jd])) \
-        + "Median distance: {:.2f} px\n".format(np.median(distances)) \
-        + "Catalog limiting magnitude: {:.1f}".format(lim_mag)
+        + "Median distance = {:.2f} px\n".format(np.median(distances)) \
+        + "Catalog lim mag = {:.1f}".format(lim_mag)
 
     plt.text(10, 10, info_text, bbox=dict(facecolor='black', alpha=0.5), va='top', ha='left', fontsize=4, \
-        color='w')
+        color='w', family='monospace')
 
     legend = plt.legend(handles=legend_handles, prop={'size': 4}, loc='upper right')
     legend.get_frame().set_facecolor('k')
     legend.get_frame().set_edgecolor('k')
     for txt in legend.get_texts():
         txt.set_color('w')
+
+
+
+    ### Add FOV info (centre, size) ###
+
+    # Mark FOV centre
+    plt.scatter(platepar.X_res/2, platepar.Y_res/2, marker='+', s=20, c='r', zorder=4)
+
+    # Compute FOV centre alt/az
+    azim_centre, alt_centre = raDec2AltAz(max_jd, platepar.lon, platepar.lat, RA_c, dec_c)
+
+    # Compute FOV size
+    fov_h, fov_v = computeFOVSize(platepar)
+
+    # Compute the rotation wrt. horizon
+    rot_horizon = rotationWrtHorizon(platepar)
+    
+    fov_centre_text = "Azim  = {:6.2f}$\\degree$\n".format(azim_centre) \
+                    + "Alt   = {:6.2f}$\\degree$\n".format(alt_centre) \
+                    + "Rot h = {:6.2f}$\\degree$\n".format(rot_horizon) \
+                    + "FOV h = {:6.2f}$\\degree$\n".format(fov_h) \
+                    + "FOV v = {:6.2f}$\\degree$".format(fov_v) \
+
+    plt.text(10, platepar.Y_res - 10, fov_centre_text, bbox=dict(facecolor='black', alpha=0.5), \
+        va='bottom', ha='left', fontsize=4, color='w', family='monospace')
+
+
+
+    ### ###
+
 
 
     plt.axis('off')
