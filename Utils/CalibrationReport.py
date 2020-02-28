@@ -424,6 +424,105 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     ### ###
 
 
+    ### Plot RA/Dec gridlines ###
+
+    # Determine gridline frequency
+    grid_freq = 10**np.floor(np.log10(fov_radius))
+    if 10**(np.log10(fov_radius) - np.floor(np.log10(fov_radius))) < 4:
+        grid_freq /= 2
+
+    if grid_freq > 15:
+        grid_freq = 15
+
+    # Grid plot density
+    plot_dens = grid_freq/100
+
+    # Compute the range of declinations to consider
+    dec_min = platepar.dec_d - fov_radius/2
+    if dec_min < -90:
+        dec_min = -90
+
+    dec_max = platepar.dec_d + fov_radius/2
+    if dec_max > 90:
+        dec_max = 90
+
+    ra_grid_arr = np.arange(0, 360, grid_freq)
+    dec_grid_arr = np.arange(-90, 90, grid_freq)
+
+    # Filter out the dec grid
+    dec_grid_arr = dec_grid_arr[(dec_grid_arr >= dec_min) & (dec_grid_arr <= dec_max)]
+
+    # Plot the celestial parallel grid
+    for dec_grid in dec_grid_arr:
+
+        ra_grid_plot = np.arange(0, 360, plot_dens)
+        dec_grid_plot = np.zeros_like(ra_grid_plot) + dec_grid
+
+        # Compute alt/az
+        az_grid_lot, alt_grid_plot = raDec2AltAz(max_jd, platepar.lon, platepar.lat, ra_grid_plot, \
+            dec_grid_plot)
+
+        # Filter out points below the horizon
+        filter_arr = alt_grid_plot > 0
+        ra_grid_plot = ra_grid_plot[filter_arr]
+        dec_grid_plot = dec_grid_plot[filter_arr]
+
+
+        # Skip gridlines with large gaps
+        gap_size_max = np.max(np.abs(ra_grid_plot[1:] - ra_grid_plot[:-1]))
+        if gap_size_max > fov_radius:
+            continue
+
+        # Compute image coordinates for every grid celestial parallel
+        x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, max_jd, platepar)
+
+        # # Filter out everything outside the FOV
+        # filter_arr = (x_grid >= 0) & (x_grid <= platepar.X_res) & (y_grid >= 0) & (y_grid <= platepar.Y_res)
+        # x_grid = x_grid[filter_arr]
+        # y_grid = y_grid[filter_arr]
+
+
+        # Plot the grid
+        plt.plot(x_grid, y_grid, color='w', alpha=0.2, zorder=2, linewidth=0.5, linestyle='dotted')
+
+
+    # Plot the celestial meridian grid
+    for ra_grid in ra_grid_arr:
+
+        dec_grid_plot = np.arange(-90, 90, plot_dens)
+        ra_grid_plot = np.zeros_like(dec_grid_plot) + ra_grid
+
+        # Filter out the dec grid
+        filter_arr = (dec_grid_plot >= dec_min) & (dec_grid_plot <= dec_max)
+        ra_grid_plot = ra_grid_plot[filter_arr]
+        dec_grid_plot = dec_grid_plot[filter_arr]
+
+
+        # Compute alt/az
+        az_grid_lot, alt_grid_plot = raDec2AltAz(max_jd, platepar.lon, platepar.lat, ra_grid_plot, \
+            dec_grid_plot)
+
+        # Filter out points below the horizon
+        filter_arr = alt_grid_plot > 0
+        ra_grid_plot = ra_grid_plot[filter_arr]
+        dec_grid_plot = dec_grid_plot[filter_arr]
+
+        # Compute image coordinates for every grid celestial parallel
+        x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, max_jd, platepar)
+
+        # # Filter out everything outside the FOV
+        # filter_arr = (x_grid >= 0) & (x_grid <= platepar.X_res) & (y_grid >= 0) & (y_grid <= platepar.Y_res)
+        # x_grid = x_grid[filter_arr]
+        # y_grid = y_grid[filter_arr]
+
+
+        # Plot the grid
+        plt.plot(x_grid, y_grid, color='w', alpha=0.2, zorder=2, linewidth=0.5, linestyle='dotted')
+
+
+    ###
+
+
 
     plt.axis('off')
     plt.gca().get_xaxis().set_visible(False)
