@@ -99,6 +99,11 @@ def addEquatorialGrid(plt_handle, platepar, jd):
 
                 prev_gap_indx = gap_indx
 
+            # Add the last segment
+            ra_grid_plot_list.append(ra_grid_plot[prev_gap_indx + 1:-1])
+            dec_grid_plot_list.append(dec_grid_plot[prev_gap_indx + 1:-1])
+
+
 
         else:
             ra_grid_plot_list = [ra_grid_plot]
