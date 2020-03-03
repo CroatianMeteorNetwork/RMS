@@ -1,5 +1,7 @@
 """ Functions for adding equatorial grids to images, given the calibration. """
 
+from __future__ import print_function, division, absolute_import
+
 import numpy as np
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, raDec2AltAz, computeFOVSize
