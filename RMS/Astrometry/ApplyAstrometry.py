@@ -766,12 +766,12 @@ def xyToRaDec(time_data, X_data, Y_data, level_data, lat, lon, Ho, X_res, Y_res,
 
 
     # Convert time to Julian date
-    JD_data = np.array([date2JD(*time_data_entry) for time_data_entry in time_data])
+    JD_data = np.array([date2JD(*time_data_entry) for time_data_entry in time_data], dtype=np.float64)
 
     # Convert x,y to RA/Dec using a fast cython function
-    RA_data, dec_data = cyXYToRADec(JD_data, np.array(X_data), np.array(Y_data), float(lat), float(lon), \
-        float(Ho), float(X_res), float(Y_res), float(RA_d), float(dec_d), float(pos_angle_ref), \
-        float(F_scale), x_poly_fwd, y_poly_fwd)
+    RA_data, dec_data = cyXYToRADec(JD_data, np.array(X_data, dtype=np.float64), np.array(Y_data, \
+        dtype=np.float64), float(lat), float(lon), float(Ho), float(X_res), float(Y_res), float(RA_d), \
+        float(dec_d), float(pos_angle_ref), float(F_scale), x_poly_fwd, y_poly_fwd)
 
     # Compute radiia from image centre
     radius_arr = np.hypot(np.array(X_data) - X_res/2, np.array(Y_data) - Y_res/2)
