@@ -160,8 +160,8 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     # Unpack star coordinates
     y, x = np.hsplit(xy, 2)
 
-    # Plot stars before the PSF fit
-    plotStars(ff, x, y)
+    # # Plot stars before the PSF fit
+    # plotStars(ff, x, y)
 
     # Fit a PSF to each star
     x2, y2, amplitude, intensity, sigma_y_fitted, sigma_x_fitted = fitPSF(ff, global_mean, x, y, config)
