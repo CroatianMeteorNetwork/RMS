@@ -43,6 +43,9 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='
         extract_format: [str] Format of saved images. png by default.
 
     """
+
+    if extract_format is None:
+        extract_format = 'png'
     
     name = fr_path
     fr = FRbin.read(dir_path, fr_path)

@@ -19,6 +19,27 @@ RMSAUTORUNFILE=~/.rmsautorunflag
 RMSSTARTCAPTURE=~/Desktop/RMS_StartCapture.sh
 RMSUPDATESCRIPT=~/Desktop/RMS_Update.sh
 
+
+# Function for editing the RMS config
+editRMSConfig () {
+
+  # If leafpad is not available (Raspbian Jessie), use mousepad (Raspbian Buster)
+  if [ $( command -v leafpad ) ]; then
+
+    # Open the config file
+    leafpad $RMSCONFIG  
+
+  else
+
+    # Open the config file
+    mousepad $RMSCONFIG  
+    
+  fi
+
+}
+
+
+
 # If the autorun file does not exist, create it and run the configuration
 if [ ! -f $RMSAUTORUNFILE ]; then
   echo "0" > $RMSAUTORUNFILE
@@ -164,7 +185,7 @@ if [[ "$key" = "" ]]; then
   echo "Generating a new SSH key..."
 
   # Generate an SSH key wihtout a passphrase
-  yes y | ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa >/dev/null
+  yes y | ssh-keygen -t rsa -m PEM -N "" -f ~/.ssh/id_rsa >/dev/null
 
   # Copy the public SSH key to desktop
   cp ~/.ssh/id_rsa.pub ~/Desktop/.
@@ -197,8 +218,9 @@ $RMSCONFIG.
 
 read -p "The configuration file will open for editing after you press ENTER..."
 
-# Open the config file
-leafpad $RMSCONFIG
+
+editRMSConfig
+
 
 echo ""
 
@@ -209,12 +231,14 @@ while true; do
 # Check if the config file was changed
 statID=$(grep stationID $RMSCONFIG | cut -d ":" -f 2 | xargs)
 
+
 if [ "$statID" = "XX0001" ]; then
+  
   echo "The config file was not changed!"
   echo "Please change the station ID and the geo coordinates in the config file!"
 
- # Open the config file
-  leafpad $RMSCONFIG
+  editRMSConfig
+
 else
   break
 fi

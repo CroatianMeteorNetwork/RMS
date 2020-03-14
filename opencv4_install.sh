@@ -8,7 +8,7 @@ fi
 
 # Configuration
 HOME_DIR=$HOME
-VERSION=3.4.1
+VERSION=4.1.2
 
 # Installation
 sudo apt-get update
@@ -31,14 +31,32 @@ unzip -o opencv_contrib.zip
 cd ${HOME_DIR}/opencv-${VERSION}/
 mkdir build
 cd build
-cmake -D CMAKE_BUILD_TYPE=RELEASE \
+cmake -D CMAKE_BUILD_TYPE=DEBUG \
     -D CMAKE_INSTALL_PREFIX=${1} \
-    -D INSTALL_PYTHON_EXAMPLES=ON \
     -D INSTALL_C_EXAMPLES=OFF \
     -D OPENCV_EXTRA_MODULES_PATH=${HOME_DIR}/opencv_contrib-${VERSION}/modules \
-    -D PYTHON_EXECUTABLE=${1}/bin/python \
-    -D BUILD_EXAMPLES=ON \
-    -D WITH_GSTREAMER=ON ..
+    -D PYTHON_DEFAULT_EXECUTABLE=$HOME_DIR/vRMS/bin/python3.7 \
+    -D PYTHON_INCLUDE_DIR=/usr/include/python3.7 \
+    -D WITH_opencv_python3=ON \
+    -D HAVE_opencv_python2=OFF \
+    -D ENABLE_NEON=ON \
+    -D ENABLE_VFPV3=ON \
+    -D WITH_OPENMP=ON \
+    -D BUILD_TIFF=ON \
+    -D WITH_TBB=ON \
+    -D BUILD_TBB=ON \
+    -D BUILD_TESTS=OFF \
+    -D WITH_EIGEN=OFF \
+    -D WITH_V4L=ON \
+    -D WITH_LIBV4L=ON \
+    -D WITH_VTK=OFF \
+    -D OPENCV_EXTRA_EXE_LINKER_FLAGS=-latomic \
+    -D OPENCV_ENABLE_NONFREE=ON \
+    -D INSTALL_PYTHON_EXAMPLES=OFF \
+    -D BUILD_NEW_PYTHON_SUPPORT=ON \
+    -D BUILD_opencv_python3=TRUE \
+    -D WITH_GSTREAMER=ON \
+    -D WITH_FFMPEG=OFF ..
 
 # Check output cmake, it should include python 2
 # For more information check: http://www.pyimagesearch.com/2016/10/24/ubuntu-16-04-how-to-install-opencv/

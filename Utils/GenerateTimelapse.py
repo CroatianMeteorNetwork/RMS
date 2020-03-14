@@ -57,7 +57,7 @@ if __name__ == "__main__":
         print("Deleted directory : " + dir_tmp_path)
 		
     mkdirP(dir_tmp_path)
-    print("Creat directory : " + dir_tmp_path)
+    print("Created directory : " + dir_tmp_path)
     
     print("Preparing files for the timelapse...")
     c = 0
@@ -96,7 +96,7 @@ if __name__ == "__main__":
         # Draw text to image
         font = cv2.FONT_HERSHEY_SIMPLEX
         text = camid + " " + timestamp + " UTC"
-        cv2.putText(img, text, (10, 714), font, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(img, text, (10, ff.nrows - 6), font, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
 
         # Save the labelled image to disk
         cv2.imwrite(os.path.join(dir_tmp_path, img_file_name), img, [cv2.IMWRITE_JPEG_QUALITY, 100])
@@ -112,15 +112,22 @@ if __name__ == "__main__":
 
     # If running on Linux, use avconv
     if platform.system() == 'Linux':
+
+        # If avconv is not found, try using ffmpeg
+        software_name = "avconv"
+        print("Checking if avconv is available...")
+        if os.system(software_name + " --help > /dev/null"):
+            software_name = "ffmpeg"
         
         # Construct the command for avconv            
         mp4_path = os.path.join(dir_path, os.path.basename(dir_path) + ".mp4")
         temp_img_path = os.path.basename(dir_tmp_path) + os.sep + "temp_%04d.jpg"
         com = "cd " + dir_path + ";" \
-            + "avconv -v quiet -r 30 -y -i " + temp_img_path + " -vcodec libx264 -pix_fmt yuv420p -crf 25 -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" " \
+            + software_name + " -v quiet -r 30 -y -i " + temp_img_path \
+            + " -vcodec libx264 -pix_fmt yuv420p -crf 25 -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" " \
             + mp4_path
 
-        print("Creating timelapse using avconv...")
+        print("Creating timelapse using {:s}...".format(software_name))
         print(com)
         subprocess.call([com], shell=True)
 
@@ -137,7 +144,7 @@ if __name__ == "__main__":
         temp_img_path = os.path.join(os.path.basename(dir_tmp_path), "temp_%04d.jpg")
         com = ffmpeg_path + " -v quiet -r 30 -i " + temp_img_path + " -c:v libx264 -pix_fmt yuv420p -an -crf 25 -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" -movflags faststart -y " + mp4_path
 		
-        print("Creating timelapse by ffmpeg wait for tens minutes...")
+        print("Creating timelapse using ffmpeg...")
         print(com)
         subprocess.call(com, shell=True, cwd=dir_path)
 		
