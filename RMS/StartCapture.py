@@ -18,6 +18,7 @@ from __future__ import print_function, absolute_import
 
 import os
 import sys
+import glob
 import argparse
 import time
 import datetime
@@ -45,7 +46,6 @@ from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight
 from RMS.RunExternalScript import runExternalScript
 from RMS.UploadManager import UploadManager
-
 
 # Flag indicating that capturing should be stopped
 STOP_CAPTURE = False
@@ -410,7 +410,46 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
 
+def processIncompleteCaptures(config):
+    # This tries to reprocess and conclude a broken capture folder
 
+    log.debug("Checking for folders containing partially-processed data")
+
+    captured_dir_list = []
+    for captured_dir_name in sorted(os.listdir(os.path.join(config.data_dir, config.captured_dir))):
+        if captured_dir_name.startswith(config.stationID):
+            if os.path.isdir(os.path.join(config.data_dir, config.captured_dir, captured_dir_name)):
+                captured_dir_list.append(captured_dir_name)
+
+    for captured_subdir in captured_dir_list:
+	captured_dir = os.path.join(config.data_dir, config.captured_dir, captured_subdir)
+        log.debug("Checking folder: {}".format(captured_dir))
+        pickle_files = glob.glob("{}/*.pickle".format(captured_dir))
+        if len(pickle_files) == 0:
+            continue
+
+        log.info("Found partially-processed data in {}".format(captured_dir))
+        try:
+            _, archive_name, detector = processNight(captured_dir, config)
+            # Upload the archive, if upload is enabled
+            if config.upload_enabled:
+                log.info('Starting the upload manager...')
+                upload_manager = UploadManager(config)
+                upload_manager.start()
+
+                log.info('Adding file to upload list: ' + archive_name)
+                upload_manager.addFiles([archive_name])
+
+                if upload_manager.is_alive():
+                    upload_manager.stop()
+                    log.info('Closing upload manager...')
+                # Delete detection backup files
+                if detector is not None:
+                    detector.deleteBackupFiles()
+            log.info("Folder {} reprocessed with success".format(captured_dir))
+
+        except:
+            log.error("An error occured when trying to reprocess partially-processed data")
 
 
 if __name__ == "__main__":
@@ -545,7 +584,6 @@ if __name__ == "__main__":
 
         log.info('Next start time: ' + str(start_time) + ' UTC')
 
-
         # Reboot the computer after processing is done for the previous night
         if ran_once and config.reboot_after_processing:
 
@@ -639,6 +677,10 @@ if __name__ == "__main__":
 
         # Wait to start capturing
         if start_time != True:
+
+            # check if there's a folder containing unprocessed data
+            # this may happen if system crashed during processing
+            processIncompleteCaptures(config)
 
 
             # Initialize the slideshow of last night's detections
