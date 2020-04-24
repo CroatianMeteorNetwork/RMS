@@ -413,7 +413,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 def processIncompleteCaptures(config):
     # This tries to reprocess and conclude a broken capture folder
 
-    log.debug("Checking for folders containing partially-processed data")
+    log.debug('Checking for folders containing partially-processed data')
 
     captured_dir_list = []
     for captured_dir_name in sorted(os.listdir(os.path.join(config.data_dir, config.captured_dir))):
@@ -422,13 +422,20 @@ def processIncompleteCaptures(config):
                 captured_dir_list.append(captured_dir_name)
 
     for captured_subdir in captured_dir_list:
-	captured_dir = os.path.join(config.data_dir, config.captured_dir, captured_subdir)
-        log.debug("Checking folder: {}".format(captured_dir))
-        pickle_files = glob.glob("{}/rms_queue_bkup*.pickle".format(captured_dir))
+        captured_dir = os.path.join(config.data_dir, config.captured_dir, captured_subdir)
+        log.debug('Checking folder: {}'.format(captured_dir))
+        pickle_files = glob.glob('{}/rms_queue_bkup*.pickle'.format(captured_dir))
         if len(pickle_files) == 0:
             continue
 
-        log.info("Found partially-processed data in {}".format(captured_dir))
+        # make sure same folder wasn't fully processed yet
+        archived_dir = os.path.join(config.data_dir, config.archived_dir, captured_subdir)
+        FTPdetectinfo_files = glob.glob('{}/FTPdetectinfo_*.txt'.format(archived_dir))
+        if len(FTPdetectinfo_files) > 0:
+            log.debug('Skipping {}. Same folder was found processed in {}'.format(captured_dir, archived_dir))
+            continue
+
+        log.info('Found partially-processed data in {}'.format(captured_dir))
         try:
             _, archive_name, detector = processNight(captured_dir, config)
             # Upload the archive, if upload is enabled
