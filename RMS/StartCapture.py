@@ -424,7 +424,7 @@ def processIncompleteCaptures(config):
     for captured_subdir in captured_dir_list:
 	captured_dir = os.path.join(config.data_dir, config.captured_dir, captured_subdir)
         log.debug("Checking folder: {}".format(captured_dir))
-        pickle_files = glob.glob("{}/*.pickle".format(captured_dir))
+        pickle_files = glob.glob("{}/rms_queue_bkup*.pickle".format(captured_dir))
         if len(pickle_files) == 0:
             continue
 
