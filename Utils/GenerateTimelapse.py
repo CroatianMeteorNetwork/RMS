@@ -142,7 +142,7 @@ if __name__ == "__main__":
         # Construct the ecommand for ffmpeg           
         mp4_path = os.path.basename(dir_path) + ".mp4"
         temp_img_path = os.path.join(os.path.basename(dir_tmp_path), "temp_%04d.jpg")
-        com = ffmpeg_path + " -v quiet -r 30 -i " + temp_img_path + " -c:v libx264 -pix_fmt yuv420p -an -crf 25 -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" -movflags faststart -y " + mp4_path
+        com = ffmpeg_path + " -v quiet -r 10 -i " + temp_img_path + " -c:v libx264 -pix_fmt yuv420p -an -crf 25 -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" -movflags faststart -y " + mp4_path
 		
         print("Creating timelapse using ffmpeg...")
         print(com)
