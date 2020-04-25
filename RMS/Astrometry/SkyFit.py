@@ -450,37 +450,53 @@ class PlateTool(object):
                 # If the centroid of the star has to be picked
                 if self.star_selection_centroid:
 
-                    # Perform centroiding with 2 iterations
+                    # If CTRL is pressed, place the pick manually - NOTE: the intensity might be off then!!!
+                    if event.key == 'control':
 
-                    x_cent_tmp, y_cent_tmp, _ = self.centroidStar()
+                        self.x_centroid = self.mouse_x_press
+                        self.y_centroid = self.mouse_y_press
 
-                    # Check that the centroiding was successful
-                    if x_cent_tmp is not None:
+                        # Compute the star intensity
+                        _, _, self.star_intensity = self.centroidStar(prev_x_cent=self.x_centroid, \
+                                    prev_y_cent=self.y_centroid)
 
-                        # Centroid the star around the pressed coordinates
-                        self.x_centroid, self.y_centroid, \
-                            self.star_intensity = self.centroidStar(prev_x_cent=x_cent_tmp, \
-                                prev_y_cent=y_cent_tmp)
 
-                        # Draw the centroid on the image
-                        self.ax.scatter(self.x_centroid, self.y_centroid, marker='+', c='y', s=100, lw=3, \
-                            alpha=0.5)
+                    # Centroid the star around the pick
+                    else:
 
-                        # Select the closest catalog star to the centroid as the first guess
-                        self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.x_centroid, \
-                            self.y_centroid)
+                        # Perform centroiding with 2 iterations
+                        x_cent_tmp, y_cent_tmp, _ = self.centroidStar()
 
-                        # Plot the closest star as a purple cross
-                        self.selected_cat_star_scatter = self.ax.scatter(self.catalog_x[self.closest_cat_star_indx], 
-                            self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=100, lw=3)
+                        # Check that the centroiding was successful
+                        if x_cent_tmp is not None:
 
-                        # Update canvas
-                        self.fig.canvas.draw()
+                            # Centroid the star around the pressed coordinates
+                            self.x_centroid, self.y_centroid, \
+                                self.star_intensity = self.centroidStar(prev_x_cent=x_cent_tmp, \
+                                    prev_y_cent=y_cent_tmp)
 
-                        # Switch to the mode where the catalog star is selected
-                        self.star_selection_centroid = False
+                        else:
+                            return None
 
-                        self.drawCursorCircle()
+                    # Draw the centroid on the image
+                    self.ax.scatter(self.x_centroid, self.y_centroid, marker='+', c='y', s=100, lw=3, \
+                        alpha=0.5)
+
+                    # Select the closest catalog star to the centroid as the first guess
+                    self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.x_centroid, \
+                        self.y_centroid)
+
+                    # Plot the closest star as a purple cross
+                    self.selected_cat_star_scatter = self.ax.scatter(self.catalog_x[self.closest_cat_star_indx], 
+                        self.catalog_y[self.closest_cat_star_indx], marker='+', c='purple', s=100, lw=3)
+
+                    # Update canvas
+                    self.fig.canvas.draw()
+
+                    # Switch to the mode where the catalog star is selected
+                    self.star_selection_centroid = False
+
+                    self.drawCursorCircle()
 
 
                 # If the catalog star has to be picked
@@ -1865,9 +1881,11 @@ class PlateTool(object):
             text_str  = "STAR PICKING MODE"
 
             if self.show_key_help > 0:
-                text_str += "\nPRESS 'CTRL + Z' FOR STAR FITTING\n"
-                text_str += "PRESS 'CTRL + SHIFT + Z' FOR STAR FITTING WITH INITIAL DISTORSION PARAMETES SET TO 0\n"
-                text_str += "PRESS 'P' FOR PHOTOMETRY FIT"
+                text_str += "\n'LEFT CLICK' - Centroid star\n"
+                text_str += "'CTRL + LEFT CLICK' - Manual star position\n"
+                text_str += "'CTRL + Z' - Fit stars\n"
+                text_str += "'CTRL + SHIFT + Z' - Fit with initial distorsion params set to 0\n"
+                text_str += "'P' - Photometry fit"
 
             self.ax.text(self.current_ff.ncols/2, self.current_ff.nrows, text_str, color='r', \
                 verticalalignment='bottom', horizontalalignment='center', fontproperties=font)

@@ -20,8 +20,8 @@ else
         echo "INSTALLING DEPENDENCIES..."
         sudo apt-get update
         sudo apt-get -y install imagemagick 
-        sudo apt-get -y libav-tools
-        sudo apt-get -y ffmpeg
+        sudo apt-get -y install libav-tools
+        sudo apt-get -y install ffmpeg
     else
     	echo "NO SUDO PRIVILEDGES TO INSTALL DEPENDENCIES..."
     fi
