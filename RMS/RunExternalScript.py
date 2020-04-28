@@ -8,8 +8,12 @@ import sys
 import importlib
 import multiprocessing
 import traceback
+import logging
 
 import RMS.ConfigReader as cr
+
+# Get the logger from the main module
+log = logging.getLogger("logger")
 
 
 def runExternalScript(captured_night_dir, archived_night_dir, config):
@@ -32,7 +36,7 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
 
     # Check if the script path exists
     if not os.path.isfile(config.external_script_path):
-        print('The script {:s} does not exist!'.format(config.external_script_path))
+        log.error('The script {:s} does not exist!'.format(config.external_script_path))
         return None
 
 
@@ -48,14 +52,18 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
         module = importlib.import_module(external_script_file.strip('.py').strip('.PY'))
         externalFunction = getattr(module, config.external_function_name)
 
+        log.info('Starting function "{}" from external script "{}"'.format(externalFunction, module))
+
         # Call the external function in a separate process, protecting the main process from potential crashes
         p = multiprocessing.Process(target=externalFunction, args=(captured_night_dir, archived_night_dir, config))
         p.start()
 
+        log.info('External script stopped')
+
 
     except Exception as e:
-        print('Running external script failed with error:' + repr(e))
-        print(*traceback.format_exception(*sys.exc_info()))
+        log.error('Running external script failed with error:' + repr(e))
+        log.error(*traceback.format_exception(*sys.exc_info()))
 
 
 
@@ -80,10 +88,13 @@ if __name__ == "__main__":
     cml_args = arg_parser.parse_args()
 
     ######
+    # Start log to stdout
+    log = logging.getLogger("logger")
+    out_hdlr = logging.StreamHandler(sys.stdout)
+    log.addHandler(out_hdlr)
 
     # Load config file
     config = cr.parse(".config")
-
 
     # Run the external script
     runExternalScript(cml_args.captured_path[0], cml_args.archived_path[0], config)
