@@ -50,7 +50,7 @@ import PIL.Image, PIL.ImageDraw
 import scipy.optimize
 import scipy.ndimage
 
-from RMS.Astrometry.ApplyAstrometry import altAzToRADec, xyToRaDecPP, raDec2AltAz, raDecToXY,\
+from RMS.Astrometry.ApplyAstrometry import altAzToRADec, xyToRaDecPP, raDec2AltAz, raDecToXY, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
@@ -196,6 +196,8 @@ class PlateTool(object):
 
         self.catalog_stars_visible = True
         self.draw_calstars = True
+
+        self.draw_distorsion = False
 
         self.show_key_help = 1
 
@@ -1348,6 +1350,14 @@ class PlateTool(object):
             self.updateImage()
 
 
+        # Show/hide distorsion guides
+        elif event.key == 'ctrl+i':
+
+            self.draw_distorsion = not self.draw_distorsion
+
+            self.updateImage()
+
+
         # Increase image gamma
         elif event.key == 'u':
 
@@ -1541,6 +1551,48 @@ class PlateTool(object):
 
                 # Plot all paired stars
                 self.ax.scatter(x, y, marker='x', c='b', s=100, lw=3, alpha=0.5)
+
+
+    def drawDistorsion(self):
+        """ Draw distorsion guides. """
+
+        # Only draw the distorsion if we have a platepar
+        if self.platepar:
+
+            # Sample 20 points on every image axis (start/end 5% from image corners)
+            samples = 20
+            corner_frac = 0.05
+            x_samples = np.linspace(corner_frac*self.platepar.X_res, (1 - corner_frac)*self.platepar.X_res, \
+                samples)
+            y_samples = np.linspace(corner_frac*self.platepar.Y_res, (1 - corner_frac)*self.platepar.Y_res, \
+                samples)
+
+            # Create a platepar with no distorsion
+            platepar_nodist = copy.deepcopy(self.platepar)
+            platepar_nodist.resetDistorsionParameters()
+
+            # Make X, Y pairs
+            xx, yy = np.meshgrid(x_samples, y_samples)
+            x_arr, y_arr = np.stack([np.ravel(xx), np.ravel(yy)], axis=-1).T
+
+            # Compute RA/Dec using the normal platepar for all pairs
+            level_data = np.ones_like(x_arr)
+            time_data = [self.img_handle.currentTime()]*len(x_arr)
+            _, ra_data, dec_data, _ = xyToRaDecPP(time_data, x_arr, y_arr, level_data, self.platepar)
+
+            # Compute X, Y back without the distorsion
+            jd = date2JD(*self.img_handle.currentTime())
+            x_nodist, y_nodist = raDecToXYPP(ra_data, dec_data, jd, platepar_nodist)
+
+            # Plot the differences in X, Y
+            data = []
+            color = 'r'
+            for x0, y0, xnd, ynd in zip(x_arr, y_arr, x_nodist, y_nodist):
+                data.append([x0, xnd])
+                data.append([y0, ynd])
+                data.append(color)
+
+            plt.plot(*data, alpha=0.5)
 
 
 
@@ -1764,6 +1816,11 @@ class PlateTool(object):
         ######################################################################################################
 
 
+        # Draw distorsion guides
+        if self.draw_distorsion:
+            self.drawDistorsion()
+
+
         # Draw photometry
         if len(self.paired_stars) > 2:
             self.photometry()
@@ -1852,6 +1909,7 @@ class PlateTool(object):
             text_str += 'M - Toggle maxpixel/avepixel\n'
             text_str += 'H - Hide/show catalog stars\n'
             text_str += 'C - Hide/show detected stars\n'
+            text_str += 'CTRL + I - Show/hide distorsion\n'
             text_str += 'U/J - Img Gamma\n'
             text_str += 'CTRL + H - Adjust levels\n'
             text_str += 'V - FOV centre\n'
