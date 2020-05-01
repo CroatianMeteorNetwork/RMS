@@ -311,9 +311,6 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
                 platepar.lon, platepar.lat, platepar.RA_d, platepar.dec_d)
     platepar_aligned.rotation_from_horiz = ApplyAstrometry.rotationWrtHorizon(platepar_aligned)
 
-    # Indicate that the platepar has been automatically updated
-    platepar_aligned.auto_check_fit_refined = True
-
     ###
 
     return platepar_aligned

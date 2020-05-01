@@ -1037,8 +1037,6 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
 
 
 
-
-
 if __name__ == "__main__":
 
 
