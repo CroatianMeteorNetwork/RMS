@@ -60,7 +60,7 @@ class AsgardEv(object):
             out_str += "# {:>9s} : {:s}\n".format(key, value)
 
         out_str += "#\n"
-        out_str += "#  fr    time    sum     seq       cx       cy      th      phi     lsp    mag  flag   bak    max\n"
+        out_str += "#  fr       time    sum     seq          cx          cy         th         phi     lsp    mag  flag   bak    max\n"
         
         fr_arr, time_arr, sum_arr, seq_arr, cx_arr, cy_arr, th_arr, phi_arr, lsp_arr, mag_arr, flag_arr, \
             bak_arr, max_arr = self.data.T
@@ -71,7 +71,7 @@ class AsgardEv(object):
         flag_arr = flag_arr.astype(np.int)
 
         for i in range(len(self.data)):
-            out_str += "{:5d} {:7.3f} {:6d} {:7d} {:8.3f} {:8.3f} {:7.3f} {:8.3f} {:7.3f} {:6.2f}  {:04d} {:5.1f} {:6.1f}\n".format(\
+            out_str += "{:5d} {:10.6f} {:6d} {:7d} {:11.6f} {:11.6f} {:10.6f} {:11.6f} {:7.3f} {:6.2f}  {:04d} {:5.1f} {:6.1f}\n".format(\
                 fr_arr[i], time_arr[i], sum_arr[i], seq_arr[i], cx_arr[i], cy_arr[i], th_arr[i], \
                 phi_arr[i], lsp_arr[i], mag_arr[i], flag_arr[i], bak_arr[i], max_arr[i])
 
@@ -305,7 +305,7 @@ def writeEv(dir_path, file_name, ev_array, plate, multi, ast_input=False, vidinf
         f.write("#      geom : {:d} {:d}\n".format(X_res, Y_res))
         f.write("#    filter : 0\n")
         f.write("#\n")
-        f.write("#  fr    time        sum     seq       cx       cy      th      phi     lsp    mag  flag   bak    max\n")
+        f.write("#  fr       time    sum     seq          cx          cy         th         phi     lsp    mag  flag   bak    max\n")
 
 
         ###
@@ -322,7 +322,7 @@ def writeEv(dir_path, file_name, ev_array, plate, multi, ast_input=False, vidinf
             theta = 90 - alt
             phi = (90 - azim)%360
 
-            f.write("{:5d} {:7.3f} {:10d} {:7d} {:8.3f} {:8.3f} {:7.3f} {:8.3f} {:7.3f} {:6.2f}  0000   0.0    0.0\n".format(int(31 + int(seq_num) - seq_array[0]), \
+            f.write("{:5d} {:10.6f} {:6d} {:7d} {:11.6f} {:11.6f} {:10.6f} {:11.6f} {:7.3f} {:6.2f}  0000   0.0    0.0\n".format(int(31 + int(seq_num) - seq_array[0]), \
                 t_rel, int(intensity), int(seq_num), x, y, theta, phi, -2.5*np.log10(intensity), mag))
 
 
