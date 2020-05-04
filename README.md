@@ -16,6 +16,7 @@ The software is still in the development phase, but here are the current feature
 Please see our website for more info: https://globalmeteornetwork.org/
 We are also selling Plug And Play meteor systems which run this code!
 
+Finally, if you decide to build one system from scratch, we strongly encourage you to look at our [Wiki page](https://globalmeteornetwork.org/wiki/index.php?title=Main_Page).
 
 ## Requirements
 This guide will assume basic knowledge of electronics, the Unix environment, and some minor experience with the Raspberry Pi platform itself.
