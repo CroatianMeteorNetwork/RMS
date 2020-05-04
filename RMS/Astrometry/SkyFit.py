@@ -50,14 +50,14 @@ import PIL.Image, PIL.ImageDraw
 import scipy.optimize
 import scipy.ndimage
 
-from RMS.Astrometry.ApplyAstrometry import altAzToRADec, xyToRaDecPP, raDec2AltAz, raDecToXY, raDecToXYPP, \
+from RMS.Astrometry.ApplyAstrometry import altAzToRADec, xyToRaDecPP, raDec2AltAz, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
 from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle
 import RMS.ConfigReader as cr
 import RMS.Formats.CALSTARS as CALSTARS
-from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions, getPairedStarsSkyPositions
+from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
 from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats import StarCatalog
 from RMS.Pickling import loadPickle, savePickle
@@ -332,6 +332,12 @@ class PlateTool(object):
         # Set the given gamma value to platepar
         if gamma is not None:
             self.platepar.gamma = gamma
+
+
+
+        # Load distorion type index
+        self.dist_type_count = len(self.platepar.distorsion_type_list)
+        self.dist_type_index = self.platepar.dist_name_list.index(self.platepar.dist_type)
 
 
         ### INIT IMAGE ###
@@ -1208,6 +1214,25 @@ class PlateTool(object):
             self.updateImage()
 
 
+        # Set distorsion types
+        elif event.key == 'ctrl+1':
+
+            self.dist_type_index = 0
+            self.changeDistorsionType()
+
+
+        elif event.key == 'ctrl+2':
+
+            self.dist_type_index = 1
+            self.changeDistorsionType()
+
+
+        elif event.key == 'ctrl+3':
+
+            self.dist_type_index = 2
+            self.changeDistorsionType()
+
+
         # Key increment
         elif event.key == '+':
 
@@ -1223,6 +1248,7 @@ class PlateTool(object):
                 self.key_increment = 20
 
             self.updateImage()
+
 
         elif event.key == '-':
             
@@ -1410,6 +1436,7 @@ class PlateTool(object):
             # If shift was pressed, reset distorsion parameters to zero
             if event.key == "ctrl+Z":
                 self.platepar.resetDistorsionParameters()
+                self.first_platepar_fit = True
 
             # If the first platepar is being made, do the fit twice
             if self.first_platepar_fit:
@@ -1592,6 +1619,16 @@ class PlateTool(object):
                 data.append(color)
 
             plt.plot(*data, alpha=0.5)
+
+
+    def changeDistorsionType(self):
+        """ Change the distorsion type. """
+
+        dist_type = self.platepar.dist_name_list[self.dist_type_index]
+        self.platepar.setDistorsionType(dist_type)
+        self.updateImage()
+
+        print("Distortion model changed to: {:s}".format(dist_type))
 
 
 
@@ -1901,6 +1938,9 @@ class PlateTool(object):
             text_str += '3/4 - Y offset\n'
             text_str += '5/6 - X 1st dist. coeff.\n'
             text_str += '7/8 - Y 1st dist. coeff.\n'
+            text_str += 'CTRL + 1 - poly3+radial distorsion\n'
+            text_str += 'CTRL + 2 - radial3 distorsion\n'
+            text_str += 'CTRL + 3 - radial5 distorsion\n'
             text_str += '\n'
             text_str += ',/. - UT correction\n'
             text_str += 'R/F - Lim mag\n'
@@ -1930,7 +1970,7 @@ class PlateTool(object):
             text_str += 'Hide on-screen text - F1\n'
 
 
-            self.ax.text(10, self.current_ff.nrows - 5, text_str, color='w', verticalalignment='bottom', \
+            self.ax.text(8, self.current_ff.nrows - 5, text_str, color='w', verticalalignment='bottom', \
                 horizontalalignment='left', fontproperties=font)
 
 
@@ -1939,7 +1979,8 @@ class PlateTool(object):
             text_str  = "STAR PICKING MODE"
 
             if self.show_key_help > 0:
-                text_str += "\n'LEFT CLICK' - Centroid star\n"
+                text_str += "\nDistorsion type: {:s}\n".format(self.platepar.dist_name_list[self.dist_type_index])
+                text_str += "'LEFT CLICK' - Centroid star\n"
                 text_str += "'CTRL + LEFT CLICK' - Manual star position\n"
                 text_str += "'CTRL + Z' - Fit stars\n"
                 text_str += "'CTRL + SHIFT + Z' - Fit with initial distorsion params set to 0\n"
@@ -2590,6 +2631,8 @@ class PlateTool(object):
             return self.platepar
 
 
+        print()
+        print("----------------------------------------")
         print("Fitting platepar...")
 
 

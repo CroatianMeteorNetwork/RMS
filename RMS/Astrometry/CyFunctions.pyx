@@ -211,7 +211,7 @@ def matchStars(np.ndarray[FLOAT_TYPE_t, ndim=2] stars_list, np.ndarray[FLOAT_TYP
 def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data, double jd, double lat, double lon, double x_res, \
     double y_res, double az_centre, double alt_centre, double pos_angle_ref, double F_scale, \
-    np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev):
+    np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, str dist_type):
     """ Convert RA, Dec to distorion corrected image coordinates. 
 
     Arguments:
@@ -228,6 +228,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, \
         F_scale: [float] Image scale (px/deg).
         x_poly_rev: [ndarray float] Distorsion polynomial in X direction for reverse mapping.
         y_poly_rev: [ndarray float] Distorsion polynomail in Y direction for reverse mapping.
+        dist_type: [str] Distorsion type. Can be: poly3+radial, radial3, or radial5.
     
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
@@ -289,36 +290,45 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, \
         X1 = radius*cos(radians(theta))*F_scale
         Y1 = radius*sin(radians(theta))*F_scale
 
-        # Calculate distortion in X direction
-        dX = (x_poly_rev[0]
-            + x_poly_rev[1]*X1
-            + x_poly_rev[2]*Y1
-            + x_poly_rev[3]*X1**2
-            + x_poly_rev[4]*X1*Y1
-            + x_poly_rev[5]*Y1**2
-            + x_poly_rev[6]*X1**3
-            + x_poly_rev[7]*X1**2*Y1
-            + x_poly_rev[8]*X1*Y1**2
-            + x_poly_rev[9]*Y1**3
-            + x_poly_rev[10]*X1*sqrt(X1**2 + Y1**2)
-            + x_poly_rev[11]*Y1*sqrt(X1**2 + Y1**2))
+
+        # Apply 3rd order polynomial + one radial term distorsion
+        if dist_type == "poly3+radial":
+
+            # Calculate distortion in X direction
+            dX = (x_poly_rev[0]
+                + x_poly_rev[1]*X1
+                + x_poly_rev[2]*Y1
+                + x_poly_rev[3]*X1**2
+                + x_poly_rev[4]*X1*Y1
+                + x_poly_rev[5]*Y1**2
+                + x_poly_rev[6]*X1**3
+                + x_poly_rev[7]*X1**2*Y1
+                + x_poly_rev[8]*X1*Y1**2
+                + x_poly_rev[9]*Y1**3
+                + x_poly_rev[10]*X1*sqrt(X1**2 + Y1**2)
+                + x_poly_rev[11]*Y1*sqrt(X1**2 + Y1**2))
+
+            # Calculate distortion in Y direction
+            dY = (y_poly_rev[0]
+                + y_poly_rev[1]*X1
+                + y_poly_rev[2]*Y1
+                + y_poly_rev[3]*X1**2
+                + y_poly_rev[4]*X1*Y1
+                + y_poly_rev[5]*Y1**2
+                + y_poly_rev[6]*X1**3
+                + y_poly_rev[7]*X1**2*Y1
+                + y_poly_rev[8]*X1*Y1**2
+                + y_poly_rev[9]*Y1**3
+                + y_poly_rev[10]*Y1*sqrt(X1**2 + Y1**2)
+                + y_poly_rev[11]*X1*sqrt(X1**2 + Y1**2))
+
+        else:
+            dX = 0
+            dY = 0
+
 
         # Add the distortion correction and calculate X image coordinates
         x_array[i] = X1 - dX + x_res/2.0
-
-        # Calculate distortion in Y direction
-        dY = (y_poly_rev[0]
-            + y_poly_rev[1]*X1
-            + y_poly_rev[2]*Y1
-            + y_poly_rev[3]*X1**2
-            + y_poly_rev[4]*X1*Y1
-            + y_poly_rev[5]*Y1**2
-            + y_poly_rev[6]*X1**3
-            + y_poly_rev[7]*X1**2*Y1
-            + y_poly_rev[8]*X1*Y1**2
-            + y_poly_rev[9]*Y1**3
-            + y_poly_rev[10]*Y1*sqrt(X1**2 + Y1**2)
-            + y_poly_rev[11]*X1*sqrt(X1**2 + Y1**2))
 
         # Add the distortion correction and calculate Y image coordinates
         y_array[i] = Y1 - dY + y_res/2.0
@@ -334,7 +344,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, \
 def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_t, ndim=1] X_data, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] Y_data, double lat, double lon, double Ho, double X_res, double Y_res, \
     double RA_d, double dec_d, double pos_angle_ref, double F_scale, \
-    np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd):
+    np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, str dist_type):
     """
     Arguments:
         jd_data: [ndarray] Julian date of each data point.
@@ -351,6 +361,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         F_scale: [float] Sum of image scales per each image axis (arcsec per px).
         x_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward X axis polynomial parameters.
         y_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward Y axis polynomial parameters.
+        dist_type: [str] Distorsion type. Can be: poly3+radial, radial3, or radial5.
     
     Return:
         (RA_data, dec_data): [tuple of ndarrays]
@@ -389,37 +400,45 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         x_det = x_det - X_res/2.0
         y_det = y_det - Y_res/2.0
 
-        dx = (x_poly_fwd[0]
-            + x_poly_fwd[1]*x_det
-            + x_poly_fwd[2]*y_det
-            + x_poly_fwd[3]*x_det**2
-            + x_poly_fwd[4]*x_det*y_det
-            + x_poly_fwd[5]*y_det**2
-            + x_poly_fwd[6]*x_det**3
-            + x_poly_fwd[7]*x_det**2*y_det
-            + x_poly_fwd[8]*x_det*y_det**2
-            + x_poly_fwd[9]*y_det**3
-            + x_poly_fwd[10]*x_det*sqrt(x_det**2 + y_det**2)
-            + x_poly_fwd[11]*y_det*sqrt(x_det**2 + y_det**2))
 
-        # Add the distortion correction
-        x_pix = x_det + dx
+        # Apply 3rd order polynomial + one radial term distorsion
+        if dist_type == "poly3+radial":
 
-        dy = (y_poly_fwd[0]
-            + y_poly_fwd[1]*x_det
-            + y_poly_fwd[2]*y_det
-            + y_poly_fwd[3]*x_det**2
-            + y_poly_fwd[4]*x_det*y_det
-            + y_poly_fwd[5]*y_det**2
-            + y_poly_fwd[6]*x_det**3
-            + y_poly_fwd[7]*x_det**2*y_det
-            + y_poly_fwd[8]*x_det*y_det**2
-            + y_poly_fwd[9]*y_det**3
-            + y_poly_fwd[10]*y_det*sqrt(x_det**2 + y_det**2)
-            + y_poly_fwd[11]*x_det*sqrt(x_det**2 + y_det**2))
+            dx = (x_poly_fwd[0]
+                + x_poly_fwd[1]*x_det
+                + x_poly_fwd[2]*y_det
+                + x_poly_fwd[3]*x_det**2
+                + x_poly_fwd[4]*x_det*y_det
+                + x_poly_fwd[5]*y_det**2
+                + x_poly_fwd[6]*x_det**3
+                + x_poly_fwd[7]*x_det**2*y_det
+                + x_poly_fwd[8]*x_det*y_det**2
+                + x_poly_fwd[9]*y_det**3
+                + x_poly_fwd[10]*x_det*sqrt(x_det**2 + y_det**2)
+                + x_poly_fwd[11]*y_det*sqrt(x_det**2 + y_det**2))
 
-        # Add the distortion correction
-        y_pix = y_det + dy
+            # Add the distortion correction
+            x_pix = x_det + dx
+
+            dy = (y_poly_fwd[0]
+                + y_poly_fwd[1]*x_det
+                + y_poly_fwd[2]*y_det
+                + y_poly_fwd[3]*x_det**2
+                + y_poly_fwd[4]*x_det*y_det
+                + y_poly_fwd[5]*y_det**2
+                + y_poly_fwd[6]*x_det**3
+                + y_poly_fwd[7]*x_det**2*y_det
+                + y_poly_fwd[8]*x_det*y_det**2
+                + y_poly_fwd[9]*y_det**3
+                + y_poly_fwd[10]*y_det*sqrt(x_det**2 + y_det**2)
+                + y_poly_fwd[11]*x_det*sqrt(x_det**2 + y_det**2))
+
+            # Add the distortion correction
+            y_pix = y_det + dy
+
+        else:
+            x_pix = x_det
+            y_pix = y_det
 
         # Scale back image coordinates
         x_pix = x_pix/F_scale

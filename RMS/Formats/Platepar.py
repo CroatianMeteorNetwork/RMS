@@ -150,22 +150,9 @@ class Platepar(object):
 
         self.version = 2
 
-
-
+        # Set the distorsion type
         self.dist_type = dist_type
-
-        # Set the length of the distorsion polynomial depending on the distorsion type
-        if self.dist_type == "poly3+radial":
-            self.dist_param_len = 12
-
-        elif self.dist_type == "radial3":
-            self.dist_param_len = 4
-
-        elif self.dist_type == "radial5":
-            self.dist_param_len = 6
-
-        else:
-            raise ValueError("The distorsion type is not recognized: {:s}".format(self.dist_type))
+        self.setDistorsionType(self.dist_type)
 
 
 
@@ -237,6 +224,34 @@ class Platepar(object):
         self.y_poly_fwd[0] = 0.5
         self.x_poly_rev[0] = 0.5
         self.y_poly_rev[0] = 0.5
+
+
+
+    def setDistorsionType(self, dist_type):
+        """ Sets the distorsion type. """
+
+        # List of distorsion types an number of parameters for each
+        self.distorsion_type_list = [
+            ["poly3+radial", 12],
+                  ["radial3", 4],
+                  ["radial5", 6]
+            ]
+
+        # Extract the list of distorsion types
+        self.dist_name_list = [entry[0] for entry in self.distorsion_type_list]
+        self.dist_param_len_list = [entry[1] for entry in self.distorsion_type_list]
+
+        # Set the length of the distorsion polynomial depending on the distorsion type
+        if dist_type in self.dist_name_list:
+            self.dist_type = dist_type
+            self.dist_param_len = self.dist_param_len_list[self.dist_name_list.index(dist_type)]
+
+        else:
+            raise ValueError("The distorsion type is not recognized: {:s}".format(self.dist_type))
+
+
+        # Reset distorsion parameters
+        self.resetDistorsionParameters()
 
 
     def addVignettingCoeff(self, use_flat):
@@ -455,7 +470,7 @@ class Platepar(object):
             # Fit distorsion parameters in X direction, reverse mapping
             res = scipy.optimize.minimize(_calcImageResidualsDistorsion, self.x_poly_rev, \
                 args=(self, jd, catalog_stars, img_stars, 'x'), method='Nelder-Mead', \
-                options={'maxiter': 10000})
+                options={'maxiter': 10000, 'adaptive': True})
 
             # Exctact fitted X polynomial
             self.x_poly_rev = res.x
@@ -463,7 +478,7 @@ class Platepar(object):
             # Fit distorsion parameters in Y direction, reverse mapping
             res = scipy.optimize.minimize(_calcImageResidualsDistorsion, self.y_poly_rev, \
                 args=(self, jd, catalog_stars, img_stars, 'y'), method='Nelder-Mead', \
-                options={'maxiter': 10000})
+                options={'maxiter': 10000, 'adaptive': True})
 
             # Extract fitted Y polynomial
             self.y_poly_rev = res.x
@@ -478,6 +493,10 @@ class Platepar(object):
                 self.x_poly_fwd = np.array(self.x_poly_rev)
                 self.y_poly_fwd = np.array(self.y_poly_rev)
 
+                # Invert the first parameters
+                self.x_poly_fwd[0] *= -1
+                self.y_poly_fwd[0] *= -1
+
 
 
             ### FORWARD MAPPING FIT ###
@@ -485,7 +504,7 @@ class Platepar(object):
             # Fit distorsion parameters in X direction, forward mapping
             res = scipy.optimize.minimize(_calcSkyResidualsDistorsion, self.x_poly_fwd, \
                 args=(self, jd, catalog_stars, img_stars, 'x'), method='Nelder-Mead', \
-                options={'maxiter': 10000})
+                options={'maxiter': 10000, 'adaptive': True})
 
             # Exctact fitted X polynomial
             self.x_poly_fwd = res.x
@@ -493,7 +512,7 @@ class Platepar(object):
             # Fit distorsion parameters in Y direction, forward mapping
             res = scipy.optimize.minimize(_calcSkyResidualsDistorsion, self.y_poly_fwd, \
                 args=(self, jd, catalog_stars, img_stars, 'y'), method='Nelder-Mead', \
-                options={'maxiter': 10000})
+                options={'maxiter': 10000, 'adaptive': True})
 
             # Extract fitted Y polynomial
             self.y_poly_fwd = res.x
@@ -543,9 +562,10 @@ class Platepar(object):
         if not 'version' in self.__dict__:
             self.version = 1
 
-        # Add the distorsion type if not present (assume it's the polynomal type)
+        # Add the distorsion type if not present (assume it's the polynomal type with the radial term)
         if not 'dist_type' in self.__dict__:
             self.dist_type = "poly3+radial"
+            self.setDistorsionType(self.dist_type)
 
         # Add UT correction if it was not in the platepar
         if not 'UT_corr' in self.__dict__:
