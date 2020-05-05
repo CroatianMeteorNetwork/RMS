@@ -1267,7 +1267,8 @@ class ManualReductionTool(object):
             self.x_centroid, self.y_centroid, _ = self.centroid()
 
             # If CTRL is pressed, place the pick manually - NOTE: the intensity might be off then!!!
-            if event.key == 'control':
+            # 'control' is for Windows, 'ctrl+control' is for Linux
+            if (event.key == 'control') or (event.key == 'ctrl+control'):
                 self.x_centroid = self.mouse_x_press
                 self.y_centroid = self.mouse_y_press
 
