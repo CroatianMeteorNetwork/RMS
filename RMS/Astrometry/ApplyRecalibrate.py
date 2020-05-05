@@ -227,8 +227,8 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
 
         print('Saving improved platepar...')
 
-        # Mark the platepar to indicate that it was automatically refined with CheckFit
-        working_platepar.auto_check_fit_refined = True
+        # Mark the platepar to indicate that it was automatically recalibrated on an individual FF file
+        working_platepar.auto_recalibrated = True
 
         # Reset the star list
         working_platepar.star_list = []
@@ -423,6 +423,9 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
             # Recompute the rotation wrt horizon
             working_platepar.rotation_from_horiz = rotationWrtHorizon(working_platepar)
 
+            # Mark the platepar to indicate that it was automatically recalibrated on an individual FF file
+            working_platepar.auto_recalibrated = True
+
             recalibrated_platepars[ff_name] = working_platepar
             prev_platepar = working_platepar
 
@@ -430,8 +433,12 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
             print('Recalibration of {:s} failed, using the previous platepar...'.format(ff_name))
 
+            # Mark the platepar to indicate that autorecalib failed
+            prev_platepar_tmp = copy.deepcopy(prev_platepar)
+            prev_platepar_tmp.auto_recalibrated = False
+
             # If the aligning failed, set the previous platepar as the one that should be used for this FF file
-            recalibrated_platepars[ff_name] = prev_platepar
+            recalibrated_platepars[ff_name] = prev_platepar_tmp
 
 
 
