@@ -727,7 +727,7 @@ def calculateMagnitudes(px_sum_arr, radius_arr, photom_offset, vignetting_coeff)
 
 
 def xyToRaDec(time_data, X_data, Y_data, level_data, lat, lon, elev, Ho, X_res, Y_res, RA_d, dec_d, \
-    pos_angle_ref, F_scale, mag_lev, vignetting_coeff, x_poly_fwd, y_poly_fwd, dist_type):
+    pos_angle_ref, F_scale, mag_lev, vignetting_coeff, x_poly_fwd, y_poly_fwd, distorsion_type):
     """ A function that does the complete calibration and coordinate transformations of a meteor detection.
 
     First, it applies field distortion on the data, then converts the XY coordinates
@@ -754,7 +754,7 @@ def xyToRaDec(time_data, X_data, Y_data, level_data, lat, lon, elev, Ho, X_res, 
         vignetting_coeff: [float] Vignetting ceofficient (deg/px).
         x_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward X axis polynomial parameters.
         y_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward Y axis polynomial parameters.
-        dist_type: [str] Distorsion type.
+        distorsion_type: [str] Distorsion type.
     
     Return:
         (JD_data, RA_data, dec_data, magnitude_data): [tuple of ndarrays]
@@ -772,7 +772,7 @@ def xyToRaDec(time_data, X_data, Y_data, level_data, lat, lon, elev, Ho, X_res, 
     # Convert x,y to RA/Dec using a fast cython function
     RA_data, dec_data = cyXYToRADec(JD_data, np.array(X_data, dtype=np.float64), np.array(Y_data, \
         dtype=np.float64), float(lat), float(lon), float(Ho), float(X_res), float(Y_res), float(RA_d), \
-        float(dec_d), float(pos_angle_ref), float(F_scale), x_poly_fwd, y_poly_fwd, dist_type)
+        float(dec_d), float(pos_angle_ref), float(F_scale), x_poly_fwd, y_poly_fwd, distorsion_type)
 
     # Compute radiia from image centre
     radius_arr = np.hypot(np.array(X_data) - X_res/2, np.array(Y_data) - Y_res/2)
@@ -814,13 +814,13 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar):
     return xyToRaDec(time_data, X_data, Y_data, level_data, platepar.lat, \
         platepar.lon, platepar.elev, platepar.Ho, platepar.X_res, platepar.Y_res, platepar.RA_d, \
         platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale, platepar.mag_lev, \
-        platepar.vignetting_coeff, platepar.x_poly_fwd, platepar.y_poly_fwd, platepar.dist_type)
+        platepar.vignetting_coeff, platepar.x_poly_fwd, platepar.y_poly_fwd, platepar.distorsion_type)
 
 
 
 
 def raDecToXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_d, ref_jd, pos_angle_ref, \
-    F_scale, x_poly_rev, y_poly_rev, dist_type, UT_corr=0):
+    F_scale, x_poly_rev, y_poly_rev, distorsion_type, UT_corr=0):
     """ Convert RA, Dec to distorion corrected image coordinates. 
 
     Arguments:
@@ -838,7 +838,7 @@ def raDecToXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_d, ref_jd
         F_scale: [float] Image scale (px/deg).
         x_poly_rev: [ndarray float] Distorsion polynomial in X direction for reverse mapping.
         y_poly_rev: [ndarray float] Distorsion polynomail in Y direction for reverse mapping.
-        dist_type: [str] Distorsion type.
+        distorsion_type: [str] Distorsion type.
 
     Keyword arguments:
         UT_corr: [float] UT correction (hours).
@@ -855,7 +855,7 @@ def raDecToXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, RA_d, dec_d, ref_jd
 
     # Use the cythonized funtion insted of the Python function
     return cyraDecToXY(RA_data, dec_data, jd, lat, lon, x_res, y_res, az_centre, alt_centre, 
-        pos_angle_ref, F_scale, x_poly_rev, y_poly_rev, dist_type)
+        pos_angle_ref, F_scale, x_poly_rev, y_poly_rev, distorsion_type)
 
 
 
@@ -875,7 +875,7 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar):
 
     return raDecToXY(RA_data, dec_data, jd, platepar.lat, platepar.lon, platepar.X_res, \
         platepar.Y_res, platepar.RA_d, platepar.dec_d, platepar.JD, platepar.pos_angle_ref, \
-        platepar.F_scale, platepar.x_poly_rev, platepar.y_poly_rev, platepar.dist_type, \
+        platepar.F_scale, platepar.x_poly_rev, platepar.y_poly_rev, platepar.distorsion_type, \
         UT_corr=platepar.UT_corr)
 
 

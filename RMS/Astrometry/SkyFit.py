@@ -337,7 +337,7 @@ class PlateTool(object):
 
         # Load distorion type index
         self.dist_type_count = len(self.platepar.distorsion_type_list)
-        self.dist_type_index = self.platepar.dist_name_list.index(self.platepar.dist_type)
+        self.dist_type_index = self.platepar.distorsion_type_list.index(self.platepar.distorsion_type)
 
 
         ### INIT IMAGE ###
@@ -1232,6 +1232,11 @@ class PlateTool(object):
             self.dist_type_index = 2
             self.changeDistorsionType()
 
+        elif event.key == 'ctrl+4':
+
+            self.dist_type_index = 3
+            self.changeDistorsionType()
+
 
         # Key increment
         elif event.key == '+':
@@ -1624,7 +1629,7 @@ class PlateTool(object):
     def changeDistorsionType(self):
         """ Change the distorsion type. """
 
-        dist_type = self.platepar.dist_name_list[self.dist_type_index]
+        dist_type = self.platepar.distorsion_type_list[self.dist_type_index]
         self.platepar.setDistorsionType(dist_type)
         self.updateImage()
 
@@ -1941,6 +1946,7 @@ class PlateTool(object):
             text_str += 'CTRL + 1 - poly3+radial distorsion\n'
             text_str += 'CTRL + 2 - radial3 distorsion\n'
             text_str += 'CTRL + 3 - radial5 distorsion\n'
+            text_str += 'CTRL + 4 - radial7 distorsion\n'
             text_str += '\n'
             text_str += ',/. - UT correction\n'
             text_str += 'R/F - Lim mag\n'
@@ -1979,7 +1985,7 @@ class PlateTool(object):
             text_str  = "STAR PICKING MODE"
 
             if self.show_key_help > 0:
-                text_str += "\nDistorsion type: {:s}\n".format(self.platepar.dist_name_list[self.dist_type_index])
+                text_str += "\nDistorsion type: {:s}\n".format(self.platepar.distorsion_type_list[self.dist_type_index])
                 text_str += "'LEFT CLICK' - Centroid star\n"
                 text_str += "'CTRL + LEFT CLICK' - Manual star position\n"
                 text_str += "'CTRL + Z' - Fit stars\n"
@@ -2804,6 +2810,15 @@ if __name__ == '__main__':
         # Init SkyFit
         plate_tool.updateImage(first_update=True)
         plate_tool.registerEventHandling()
+
+        # Update image handle path
+        if plate_tool.img_handle is not None:
+            plate_tool.img_handle.dir_path = dir_path
+
+        # Update platepar path
+        if plate_tool.platepar_file is not None:
+            plate_tool.platepar_file = os.path.join(dir_path, os.path.basename(plate_tool.platepar_file))
+
 
 
     else:
