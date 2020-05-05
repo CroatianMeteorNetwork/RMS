@@ -223,7 +223,9 @@ class ManualReductionTool(object):
         self.scroll_counter = 0
 
         self.mouse_x = None
+        self.mouse_x_press = None
         self.mouse_y = None
+        self.mouse_y_press = None
 
         self.centroid_handle = None
 
@@ -1266,8 +1268,8 @@ class ManualReductionTool(object):
 
             # If CTRL is pressed, place the pick manually - NOTE: the intensity might be off then!!!
             if event.key == 'control':
-                self.x_centroid = self.mouse_x
-                self.y_centroid = self.mouse_y
+                self.x_centroid = self.mouse_x_press
+                self.y_centroid = self.mouse_y_press
 
 
             # Add the centroid to the list
@@ -1286,6 +1288,14 @@ class ManualReductionTool(object):
 
     def onMousePress(self, event):
         """ Called on mouse click press. """
+
+        # Check if the mouse is within bounds
+        if (event.xdata is not None) and (event.ydata is not None):
+            
+            # Store the mouse press location
+            self.mouse_x_press = event.xdata
+            self.mouse_y_press = event.ydata
+
 
         # Photometry coloring - on
         if ((event.button == 1) or (event.button == 3)) and (event.key == 'shift'):
