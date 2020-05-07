@@ -444,7 +444,7 @@ def processIncompleteCaptures(config, upload_manager):
     # Check if there is a processed archived dir for every captured dir
     for captured_subdir in captured_dir_list:
 
-        captured_dir_path = os.path.join(config.data_dir, config.captured_dir_path, captured_subdir)
+        captured_dir_path = os.path.join(config.data_dir, config.captured_dir, captured_subdir)
         log.debug("Checking folder: {:s}".format(captured_subdir))
 
         # Check if there are any backup pickle files in the capture directory
