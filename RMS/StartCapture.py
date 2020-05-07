@@ -129,7 +129,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     """ Run capture and compression for the given time.given
 
     Arguments:
-        config: [config object] Configuration read from the .config file
+        config: [config object] Configuration read from the .config file.
 
     Keyword arguments:
         duration: [float] Time in seconds to capture. None by default.
@@ -410,53 +410,92 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
 
-def processIncompleteCaptures(config):
-    # This tries to reprocess and conclude a broken capture folder
+def processIncompleteCaptures(config, upload_manager):
+    """ Reprocess broken capture folders.
+
+    Arguments:
+        config: [config object] Configuration read from the .config file.
+        upload_manager: [UploadManager object] A handle to the UploadManager, which handles uploading files to
+            the central server.
+
+    """
 
     log.debug('Checking for folders containing partially-processed data')
 
+    # Create a list of capture directories
     captured_dir_list = []
-    for captured_dir_name in sorted(os.listdir(os.path.join(config.data_dir, config.captured_dir))):
+    captured_data_path = os.path.join(config.data_dir, config.captured_dir)
+    for captured_dir_name in sorted(os.listdir(captured_data_path)):
+
+        captured_dir_path = os.path.join(captured_data_path, captured_dir_name)
+
+        # Check that the dir stars with the correct station code, that it really is a directory, and that
+        #   there are some FF files inside
         if captured_dir_name.startswith(config.stationID):
-            if os.path.isdir(os.path.join(config.data_dir, config.captured_dir, captured_dir_name)):
-                captured_dir_list.append(captured_dir_name)
 
+            if os.path.isdir(captured_dir_path):
+
+                if any([file_name.startswith("FF_{:s}".format(config.stationID)) \
+                    for file_name in os.listdir(captured_dir_path)]):
+
+                        captured_dir_list.append(captured_dir_name)
+
+
+    # Check if there is a processed archived dir for every captured dir
     for captured_subdir in captured_dir_list:
-        captured_dir = os.path.join(config.data_dir, config.captured_dir, captured_subdir)
-        log.debug('Checking folder: {}'.format(captured_dir))
-        pickle_files = glob.glob('{}/rms_queue_bkup*.pickle'.format(captured_dir))
-        if len(pickle_files) == 0:
-            continue
 
-        # make sure same folder wasn't fully processed yet
-        archived_dir = os.path.join(config.data_dir, config.archived_dir, captured_subdir)
-        FTPdetectinfo_files = glob.glob('{}/FTPdetectinfo_*.txt'.format(archived_dir))
+        captured_dir_path = os.path.join(config.data_dir, config.captured_dir_path, captured_subdir)
+        log.debug("Checking folder: {:s}".format(captured_subdir))
+
+        # Check if there are any backup pickle files in the capture directory
+        pickle_files = glob.glob("{:s}/rms_queue_bkup_*.pickle".format(captured_dir_path))
+        any_pickle_files = False
+        if len(pickle_files) > 0:
+            any_pickle_files = True
+
+        # Check if there is an FTPdetectinfo file in the directory, indicating the the folder was fully 
+        #   processed
+        FTPdetectinfo_files = glob.glob('{:s}/FTPdetectinfo_*.txt'.format(captured_dir_path))
+        any_ftpdetectinfo_files = False
         if len(FTPdetectinfo_files) > 0:
-            log.debug('Skipping {}. Same folder was found processed in {}'.format(captured_dir, archived_dir))
+            any_ftpdetectinfo_files = True
+
+        # Auto reprocess criteria:
+        #   - Any backup pickle files
+        #   - No pickle and no FTPdetectinfo files
+        run_reprocess = False
+        if any_pickle_files:
+            run_reprocess = True
+        else:
+            if not any_ftpdetectinfo_files:
+                run_reprocess = True
+
+        # Skip the folder if it doesn't need to be reprocessed
+        if not run_reprocess:
+            log.debug("    ... fully processed!")
             continue
 
-        log.info('Found partially-processed data in {}'.format(captured_dir))
+
+        log.info("Found partially-processed data in {:s}".format(captured_dir_path))
         try:
-            _, archive_name, detector = processNight(captured_dir, config)
+
+            # Reprocess the night
+            _, archive_name, detector = processNight(captured_dir_path, config)
+
             # Upload the archive, if upload is enabled
-            if config.upload_enabled:
-                log.info('Starting the upload manager...')
-                upload_manager = UploadManager(config)
-                upload_manager.start()
-
-                log.info('Adding file to upload list: ' + archive_name)
+            if upload_manager is not None:
+                log.info("Adding file to upload list: {:s}".format(archive_name))
                 upload_manager.addFiles([archive_name])
+                log.info("File added...")
 
-                if upload_manager.is_alive():
-                    upload_manager.stop()
-                    log.info('Closing upload manager...')
-                # Delete detection backup files
-                if detector is not None:
-                    detector.deleteBackupFiles()
-            log.info("Folder {} reprocessed with success".format(captured_dir))
+            # Delete detection backup files
+            if detector is not None:
+                detector.deleteBackupFiles()
+
+            log.info("Folder {:s} reprocessed with success!".format(captured_dir_path))
 
         except:
-            log.error("An error occured when trying to reprocess partially-processed data")
+            log.error("An error occured when trying to reprocess partially-processed data!")
 
 
 if __name__ == "__main__":
@@ -685,9 +724,9 @@ if __name__ == "__main__":
         # Wait to start capturing
         if start_time != True:
 
-            # check if there's a folder containing unprocessed data
-            # this may happen if system crashed during processing
-            processIncompleteCaptures(config)
+            # Check if there's a folder containing unprocessed data.
+            # This may happen if the system crashed during processing.
+            processIncompleteCaptures(config, upload_manager)
 
 
             # Initialize the slideshow of last night's detections
