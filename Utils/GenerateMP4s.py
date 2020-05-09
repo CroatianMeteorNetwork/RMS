@@ -14,13 +14,15 @@ import datetime
 import cv2
 import Utils.FFtoFrames as f2f
 
+from RMS.Formats import FTPdetectinfo
+
 from PIL import ImageFont
 
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
 from RMS.Misc import mkdirP
 
-def GenerateMP4s(dir_path):
+def GenerateMP4s(dir_path, ftpfile_name):
     t1 = datetime.datetime.utcnow()
 
     # Load the font for labeling
@@ -30,12 +32,30 @@ def GenerateMP4s(dir_path):
         font = ImageFont.load_default()
     
     print("Preparing files for the timelapse...")
+    # load the ftpfile so we know which frames we want
+    meteor_list = FTPdetectinfo.readFTPdetectinfo(dir_path, ftpfile_name)  
+    for meteor in meteor_list:
+        ff_name, cam_code, meteor_No, n_segments, fps, hnr, mle, binn, px_fm, rho, phi, \
+            meteor_meas = meteor
+        #print(ff_name, cam_code, meteor_No, n_segments, hnr, mle)
+        # determine which frames we want
 
-    ff_list = [ff_name for ff_name in sorted(os.listdir(dir_path)) if validFFName(ff_name)]
-    for file_name in ff_list:
-
+        first_frame=int(meteor_meas[0][1])-30
+        last_frame=first_frame + 60
+        if first_frame < 0:
+            first_frame = 0
+        if (n_segments > 1 ):
+            lastseg=int(n_segments)-1
+            last_frame = int(meteor_meas[lastseg][1])+10
+            if last_frame > 255 :
+                last_frame = 255
+        if last_frame < first_frame+60:
+            last_frame = first_frame+60
+            
+        print(ff_name, ' frames ', first_frame, last_frame)
+        
         # Read the FF file
-        ff = readFF(dir_path, file_name)
+        ff = readFF(dir_path, ff_name)
 
         # Skip the file if it could not be read
         if ff is None:
@@ -52,17 +72,16 @@ def GenerateMP4s(dir_path):
         print("Created directory : " + dir_tmp_path)
 
         # extract the individual frames
-        print(file_name)
-        f2f.FFtoFrames(dir_path+'/'+file_name, dir_tmp_path, 'jpg', -1)
+        f2f.FFtoFrames(dir_path+'/'+ff_name, dir_tmp_path, 'jpg', -1, first_frame, last_frame)
         
         # Get the timestamp from the FF name
-        timestamp = filenameToDatetime(file_name).strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = filenameToDatetime(ff_name).strftime("%Y-%m-%d %H:%M:%S")
 		
         # Get id cam from the file name
             # e.g.  FF499_20170626_020520_353_0005120.bin
             # or FF_CA0001_20170626_020520_353_0005120.fits
 
-        file_split = file_name.split('_')
+        file_split = ff_name.split('_')
 
         # Check the number of list elements, and the new fits format has one more underscore
         i = 0
@@ -83,7 +102,7 @@ def GenerateMP4s(dir_path):
             # Save the labelled image to disk
             cv2.imwrite(os.path.join(dir_tmp_path, img_file_name), img, [cv2.IMWRITE_JPEG_QUALITY, 100])
     
-        ffbasename = os.path.splitext(file_name)[0]
+        ffbasename = os.path.splitext(ff_name)[0]
 
         # If running on Windows, use ffmpeg.exe
         if platform.system() == 'Windows':
@@ -120,6 +139,8 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
         help='Path to directory with FF files.')
+    arg_parser.add_argument('ftpfile_name', metavar='FTPFILE_NAME', type=str, \
+        help='name of FTPdetect file.')
 
 #    arg_parser.add_argument('-x', '--nodel', action="store_true", \
 #        help="""Do not delete generated JPG file.""")
@@ -130,5 +151,6 @@ if __name__ == "__main__":
     #########################
 
     dir_path = os.path.normpath(cml_args.dir_path)
+    ftpfile_name = cml_args.ftpfile_name
 
-    GenerateMP4s(dir_path)
+    GenerateMP4s(dir_path, ftpfile_name)
