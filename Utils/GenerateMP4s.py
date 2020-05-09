@@ -46,12 +46,12 @@ def GenerateMP4s(dir_path, ftpfile_name):
             first_frame = 0
         if (n_segments > 1 ):
             lastseg=int(n_segments)-1
-            last_frame = int(meteor_meas[lastseg][1])+10
-            if last_frame > 255 :
-                last_frame = 255
+            last_frame = int(meteor_meas[lastseg][1])+30
+        #if last_frame > 255 :
+        #    last_frame = 255     
         if last_frame < first_frame+60:
             last_frame = first_frame+60
-            
+
         print(ff_name, ' frames ', first_frame, last_frame)
         
         # Read the FF file
@@ -139,11 +139,8 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
         help='Path to directory with FF files.')
-    arg_parser.add_argument('ftpfile_name', metavar='FTPFILE_NAME', type=str, \
-        help='name of FTPdetect file.')
-
-#    arg_parser.add_argument('-x', '--nodel', action="store_true", \
-#        help="""Do not delete generated JPG file.""")
+    #arg_parser.add_argument('ftpfile_name', metavar='FTPFILE_NAME', type=str, \
+    #    help='name of FTPdetect file.')
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -151,6 +148,13 @@ if __name__ == "__main__":
     #########################
 
     dir_path = os.path.normpath(cml_args.dir_path)
-    ftpfile_name = cml_args.ftpfile_name
+    ftpdate=''
+    if os.path.split(dir_path)[1] == '' :
+        ftpdate=os.path.split(os.path.split(dir_path)[0])[1]
+    else:
+        ftpdate=os.path.split(dir_path)[1]
+    ftpfile_name="FTPdetectinfo_"+ftpdate+'.txt'
+    print(ftpfile_name)
+    #ftpfile_name = cml_args.ftpfile_name
 
     GenerateMP4s(dir_path, ftpfile_name)
