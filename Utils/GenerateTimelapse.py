@@ -19,27 +19,7 @@ from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
 from RMS.Misc import mkdirP
 
-
-if __name__ == "__main__":
-
-    ### COMMAND LINE ARGUMENTS
-
-    # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Convert all FF files in a folder to a movie")
-
-    arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
-        help='Path to directory with FF files.')
-
-    arg_parser.add_argument('-x', '--nodel', action="store_true", \
-        help="""Do not delete generated JPG file.""")
-
-    # Parse the command line arguments
-    cml_args = arg_parser.parse_args()
-
-    #########################
-
-    dir_path = os.path.normpath(cml_args.dir_path)
-
+def GenerateTimelapse(dir_path, nodel) :   
 
     t1 = datetime.datetime.utcnow()
 
@@ -152,8 +132,31 @@ if __name__ == "__main__":
         print ("GenerateTimelapse only works on Linux or Windows the video could not be encoded")
 
     #Delete temporary directory and files inside
-    if os.path.exists(dir_tmp_path) and not cml_args.nodel:
+    if os.path.exists(dir_tmp_path) and not nodel:
         shutil.rmtree(dir_tmp_path)
         print("Deleted temporary directory : " + dir_tmp_path)
 		
     print("Total time:", datetime.datetime.utcnow() - t1)
+
+
+if __name__ == "__main__":
+
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Convert all FF files in a folder to a movie")
+
+    arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
+        help='Path to directory with FF files.')
+
+    arg_parser.add_argument('-x', '--nodel', action="store_true", \
+        help="""Do not delete generated JPG file.""")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+    dir_path = os.path.normpath(cml_args.dir_path)
+
+    GenerateTimelapse(dir_path, cml_args.nodel)
