@@ -374,7 +374,7 @@ def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict,
 
 
 
-def _calcImageResidualsDistorsion(params, config, platepar, catalog_stars, star_dict, match_radius, \
+def _calcImageResidualsDistortion(params, config, platepar, catalog_stars, star_dict, match_radius, \
         dimension):
     """ Calculates the differences between the stars on the image and catalog stars in image coordinates with 
         the given astrometrical solution. 
@@ -395,7 +395,7 @@ def _calcImageResidualsDistorsion(params, config, platepar, catalog_stars, star_
     return matchStarsResiduals(config, pp, catalog_stars, star_dict, match_radius, verbose=False)
 
 
-def _calcSkyResidualsDistorsion(params, config, platepar, catalog_stars, star_dict, match_radius, \
+def _calcSkyResidualsDistortion(params, config, platepar, catalog_stars, star_dict, match_radius, \
         dimension):
     """ Calculates the differences between the stars on the image and catalog stars in image coordinates with 
         the given astrometrical solution. 
@@ -543,7 +543,7 @@ def starListToDict(config, calstars_list, max_ffs=None):
 
 
 
-def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _fft_refinement=False):
+def autoCheckFit(config, platepar, calstars_list, distortion_refinement=False, _fft_refinement=False):
     """ Attempts to refine the astrometry fit with the given stars and and initial astrometry parameters.
 
     Arguments:
@@ -553,7 +553,7 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _
             more details.
 
     Keyword arguments:
-        distorsion_refinement: [bool] Whether the distorsion should be fitted as well. False by default.
+        distortion_refinement: [bool] Whether the distortion should be fitted as well. False by default.
         _fft_refinement: [bool] Internal flag indicating that autoCF is running the second time recursively
             after FFT platepar adjustment.
     
@@ -564,7 +564,7 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _
     """
 
 
-    def _handleFailure(config, platepar, calstars_list, catalog_stars, distorsion_refinement, \
+    def _handleFailure(config, platepar, calstars_list, catalog_stars, distortion_refinement, \
         _fft_refinement):
         """ Run FFT alignment before giving up on ACF. """
 
@@ -623,7 +623,7 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _
 
             # Redo autoCF
             return autoCheckFit(config, platepar_refined, calstars_list, \
-                distorsion_refinement=distorsion_refinement, _fft_refinement=True)
+                distortion_refinement=distortion_refinement, _fft_refinement=True)
 
         else:
             print('Auto Check Fit failed completely, please redo the plate manually!')
@@ -658,14 +658,14 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _
         return platepar, False
 
 
-    # A list of matching radiuses to try, pairs of [radius, fit_distorsion_flag]
-    #   The distorsion will be fitted only if explicity requested
+    # A list of matching radiuses to try, pairs of [radius, fit_distortion_flag]
+    #   The distortion will be fitted only if explicity requested
     min_radius = 0.5
     radius_list = [[10, False], 
                     [5, False], 
                     [3, False],
-                    [1.5, True and distorsion_refinement], 
-                    [min_radius, True and distorsion_refinement]]
+                    [1.5, True and distortion_refinement], 
+                    [min_radius, True and distortion_refinement]]
 
 
     # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
@@ -685,14 +685,14 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _
         if avg_dist < config.dist_check_quick_threshold:
 
             # Use a reduced set of initial radius values
-            radius_list = [[1.5, True and distorsion_refinement], 
-                           [min_radius, True and distorsion_refinement]]
+            radius_list = [[1.5, True and distortion_refinement], 
+                           [min_radius, True and distortion_refinement]]
 
     ##########
 
 
     # Match increasingly smaller search radiia around image stars
-    for i, (match_radius, fit_distorsion) in enumerate(radius_list):
+    for i, (match_radius, fit_distortion) in enumerate(radius_list):
 
         # Match the stars and calculate the residuals
         n_matched, avg_dist, cost, _ = matchStarsResiduals(config, platepar, catalog_stars, star_dict, \
@@ -710,7 +710,7 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _
             print('The total number of initially matched stars is too small! Please manually redo the plate or make sure there are enough calibration stars.')
             
             # Try to refine the platepar with FFT phase correlation and redo the ACF
-            return _handleFailure(config, platepar, calstars_list, catalog_stars, distorsion_refinement, \
+            return _handleFailure(config, platepar, calstars_list, catalog_stars, distortion_refinement, \
                 _fft_refinement)
 
 
@@ -738,7 +738,7 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _
         if not res.success:
 
             # Try to refine the platepar with FFT phase correlation and redo the ACF
-            return _handleFailure(config, platepar, calstars_list, catalog_stars, distorsion_refinement, \
+            return _handleFailure(config, platepar, calstars_list, catalog_stars, distortion_refinement, \
                 _fft_refinement)
 
 
@@ -758,14 +758,14 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _
             return platepar, True
 
 
-        # Fit the lens distorsion parameters
-        if fit_distorsion:
+        # Fit the lens distortion parameters
+        if fit_distortion:
 
 
-            ### REVERSE DISTORSION POLYNOMIALS FIT ###
+            ### REVERSE DISTORTION POLYNOMIALS FIT ###
 
             # Fit the distortion parameters (X axis)
-            res = scipy.optimize.minimize(_calcImageResidualsDistorsion, platepar.x_poly_rev, args=(config, \
+            res = scipy.optimize.minimize(_calcImageResidualsDistortion, platepar.x_poly_rev, args=(config, \
                 platepar, catalog_stars, star_dict, match_radius, 'x'), method='Nelder-Mead', \
                 options={'fatol': fatol, 'xatol': 0.1})
 
@@ -774,7 +774,7 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _
             # If the fit was not successfull, stop further fitting
             if not res.success:
                 # Try to refine the platepar with FFT phase correlation and redo the ACF
-                return _handleFailure(config, platepar, calstars_list, catalog_stars, distorsion_refinement, \
+                return _handleFailure(config, platepar, calstars_list, catalog_stars, distortion_refinement, \
                     _fft_refinement)
 
             else:
@@ -782,7 +782,7 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _
 
 
             # Fit the distortion parameters (Y axis)
-            res = scipy.optimize.minimize(_calcImageResidualsDistorsion, platepar.y_poly_rev, args=(config, \
+            res = scipy.optimize.minimize(_calcImageResidualsDistortion, platepar.y_poly_rev, args=(config, \
                 platepar,catalog_stars, star_dict, match_radius, 'y'), method='Nelder-Mead', \
                 options={'fatol': fatol, 'xatol': 0.1})
 
@@ -792,7 +792,7 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _
             if not res.success:
                 
                 # Try to refine the platepar with FFT phase correlation and redo the ACF
-                return _handleFailure(config, platepar, calstars_list, catalog_stars, distorsion_refinement, \
+                return _handleFailure(config, platepar, calstars_list, catalog_stars, distortion_refinement, \
                     _fft_refinement)
 
             else:
@@ -802,10 +802,10 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _
             ### ###
 
 
-            ### FORWARD DISTORSION POLYNOMIALS FIT ###
+            ### FORWARD DISTORTION POLYNOMIALS FIT ###
 
             # Fit the distortion parameters (X axis)
-            res = scipy.optimize.minimize(_calcSkyResidualsDistorsion, platepar.x_poly_fwd, args=(config, \
+            res = scipy.optimize.minimize(_calcSkyResidualsDistortion, platepar.x_poly_fwd, args=(config, \
                 platepar, catalog_stars, star_dict, match_radius, 'x'), method='Nelder-Mead', \
                 options={'fatol': fatol, 'xatol': 0.1})
 
@@ -815,7 +815,7 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _
             if not res.success:
                 
                 # Try to refine the platepar with FFT phase correlation and redo the ACF
-                return _handleFailure(config, platepar, calstars_list, catalog_stars, distorsion_refinement, \
+                return _handleFailure(config, platepar, calstars_list, catalog_stars, distortion_refinement, \
                     _fft_refinement)
 
             else:
@@ -823,7 +823,7 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _
 
 
             # Fit the distortion parameters (Y axis)
-            res = scipy.optimize.minimize(_calcSkyResidualsDistorsion, platepar.y_poly_fwd, args=(config, \
+            res = scipy.optimize.minimize(_calcSkyResidualsDistortion, platepar.y_poly_fwd, args=(config, \
                 platepar,catalog_stars, star_dict, match_radius, 'y'), method='Nelder-Mead', \
                 options={'fatol': fatol, 'xatol': 0.1})
 
@@ -880,8 +880,8 @@ if __name__ == "__main__":
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
 
-    arg_parser.add_argument('-d', '--distorsion', action="store_true", \
-        help="""Refine the distorsion parameters.""")
+    arg_parser.add_argument('-d', '--distortion', action="store_true", \
+        help="""Refine the distortion parameters.""")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -936,7 +936,7 @@ if __name__ == "__main__":
 
 
     # Run the automatic astrometry fit
-    pp, fit_status = autoCheckFit(config, platepar, calstars_list, distorsion_refinement=cml_args.distorsion)
+    pp, fit_status = autoCheckFit(config, platepar, calstars_list, distortion_refinement=cml_args.distortion)
 
 
     # If the fit suceeded, save the platepar

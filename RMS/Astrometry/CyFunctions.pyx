@@ -1,3 +1,6 @@
+#!python
+#cython: language_level=3
+
 import numpy as np
 # import cv2
 
@@ -22,6 +25,7 @@ cdef extern from "math.h":
     double asin(double)
     double cos(double)
     double acos(double)
+    double tan(double)
     double atan2(double, double)
     double sqrt(double)
 
@@ -205,18 +209,132 @@ def matchStars(np.ndarray[FLOAT_TYPE_t, ndim=2] stars_list, np.ndarray[FLOAT_TYP
 
 
 
+@cython.cdivision(True)
+cdef double cyjd2LST(double jd, double lon):
+    """ Convert Julian date to apparent Local Sidereal Time. The times is apparent, not mean!
+
+    Source: J. Meeus: Astronomical Algorithms
+
+    Arguments:
+        jd: [float] Decimal julian date, epoch J2000.0.
+        lon: [float] Longitude of the observer in degrees.
+    
+    Return:
+        lst [float] Apparent Local Sidereal Time (deg).
+    """
+
+    cdef double gst
+
+    # Define the Julian date at the J2000 epoch
+    cdef double J2000_days = 2451545.0
+
+
+
+    cdef double t = (jd - J2000_days)/36525.0
+
+    # Calculate the Mean sidereal rotation of the Earth in radians (Greenwich Sidereal Time)
+    gst = 280.46061837 + 360.98564736629*(jd - J2000_days) + 0.000387933*t**2 - (t**3)/38710000.0
+    gst = (gst + 360)%360
+
+
+    # Compute the apparent Local Sidereal Time (LST)
+    return (gst + lon + 360)%360
+
+
+
+@cython.cdivision(True)
+cpdef tuple cyraDec2AltAz(double ra, double dec, double jd, double lat, double lon):
+    """ Convert right ascension and declination to azimuth (+east of sue north) and altitude. 
+
+    Arguments:
+        ra: [float] Right ascension in radians.
+        dec: [float] Declination in radians.
+        jd: [float] Julian date.
+        lat: [float] latitude in radians.
+        lon: [float] longitude in radians.
+
+    Return:
+        (azim, elev): [tuple]
+            azim: [float] Azimuth (+east of due north) in radians.
+            elev: [float] Elevation above horizon in radians.
+
+        """
+
+    cdef double lst, ha, azim, sin_elev, elev
+
+    # Calculate Local Sidereal Time
+    lst = radians(cyjd2LST(jd, degrees(lon)))
+
+    # Calculate the hour angle
+    ha = lst - ra
+
+    # Constrain the hour angle to [-pi, pi] range
+    ha = (ha + pi)%(2*pi) - pi
+
+    # Calculate the azimuth
+    azim = pi + atan2(sin(ha), cos(ha)*sin(lat) - tan(dec)*cos(lat))
+
+    # Calculate the sine of elevation
+    sin_elev = sin(lat)*sin(dec) + cos(lat)*cos(dec)*cos(ha)
+
+    # Wrap the sine of elevation in the [-1, +1] range
+    sin_elev = (sin_elev + 1)%2 - 1
+
+    elev = asin(sin_elev)
+
+    return (azim, elev)
+
+
+@cython.cdivision(True)
+cpdef tuple cyaltAz2RADec(double azim, double elev, double jd, double lat, double lon):
+    """ Convert azimuth and altitude in a given time and position on Earth to right ascension and 
+        declination. 
+
+    Arguments:
+        azim: [float] Azimuth (+east of due north) in radians.
+        elev: [float] Elevation above horizon in radians.
+        jd: [float] Julian date.
+        lat: [float] Latitude of the observer in radians.
+        lon: [float] Longitde of the observer in radians.
+
+    Return:
+        (RA, dec): [tuple]
+            RA: [float] Right ascension (radians).
+            dec: [float] Declination (radians).
+    """
+
+
+    cdef double lst, ha, ra, dec
+
+    # Calculate Local Sidereal Time
+    lst = radians(cyjd2LST(jd, degrees(lon)))
+    
+    # Calculate hour angle
+    ha = atan2(-sin(azim), tan(elev)*cos(lat) - cos(azim)*sin(lat))
+    
+    # Calculate right ascension
+    ra = (lst - ha)%(2*pi)
+
+    # Calculate declination
+    dec = asin(sin(lat)*sin(elev) + cos(lat)*cos(elev)*cos(azim))
+
+    return (ra, dec)
+
+
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, \
+def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data, double jd, double lat, double lon, double x_res, \
-    double y_res, double az_centre, double alt_centre, double pos_angle_ref, double F_scale, \
+    double y_res, double az_centre, double alt_centre, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, str dist_type):
     """ Convert RA, Dec to distorion corrected image coordinates. 
 
     Arguments:
-        RA: [ndarray] Array of right ascensions (degrees).
-        dec: [ndarray] Array of declinations (degrees).
+        RA_data: [ndarray] Array of right ascensions (degrees).
+        dec_data: [ndarray] Array of declinations (degrees).
         jd: [float] Julian date.
         lat: [float] Latitude of station in degrees.
         lon: [float] Longitude of station in degrees.
@@ -225,146 +343,135 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, \
         az_centre: [float] Azimuth of the FOV centre (degrees).
         alt_centre: [float] Altitude of the FOV centre (degrees).
         pos_angle_ref: [float] Rotation from the celestial meridial (degrees).
-        F_scale: [float] Image scale (px/deg).
-        x_poly_rev: [ndarray float] Distorsion polynomial in X direction for reverse mapping.
-        y_poly_rev: [ndarray float] Distorsion polynomail in Y direction for reverse mapping.
-        dist_type: [str] Distorsion type. Can be: poly3+radial, radial3, or radial5.
+        pix_scale: [float] Image scale (px/deg).
+        x_poly_rev: [ndarray float] Distortion polynomial in X direction for reverse mapping.
+        y_poly_rev: [ndarray float] Distortion polynomail in Y direction for reverse mapping.
+        dist_type: [str] Distortion type. Can be: poly3+radial, radial3, or radial5.
     
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
     """
 
     cdef int i
-    cdef double ra_star, dec_star
-    cdef double ra1, dec1, ra2, dec2, ad, radius, sinA, cosA, theta, X1, Y1, R1, dX, dY, dRadius
+    cdef double ra_star, dec_star, ra_centre, dec_centre
+    cdef double ra, dec, ad, radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, dradius
 
-    # print('jd:', jd)
+    # Init output arrays
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] x_array = np.zeros_like(ra_data)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] y_array = np.zeros_like(ra_data)
 
-    # Calculate the reference hour angle
-    cdef double T = (jd - 2451545.0)/36525.0
-    cdef double Ho = (280.46061837 + 360.98564736629*(jd - 2451545.0) + 0.000387933*T**2 \
-        - (T**3)/38710000.0)%360
-
+    # Precalculate some parameters
     cdef double sl = sin(radians(lat))
     cdef double cl = cos(radians(lat))
 
-    # Calculate the hour angle
-    cdef double salt = sin(radians(alt_centre))
-    cdef double saz = sin(radians(az_centre))
-    cdef double calt = cos(radians(alt_centre))
-    cdef double caz = cos(radians(az_centre))
-    cdef double x = -saz*calt
-    cdef double y = -caz*sl*calt + salt*cl
-    cdef double HA = degrees(atan2(x, y))
 
-    # Centre of FOV
-    cdef double RA_centre = (Ho + lon - HA)%360
-    cdef double dec_centre = degrees(asin(sl*salt + cl*calt*caz))
+    # Convert FOV centre to RA/Dec
+    ra_centre, dec_centre = cyaltAz2RADec(radians(az_centre), radians(alt_centre), jd, radians(lat), \
+        radians(lon))
 
-    # print('RA centre:', RA_centre)
-    # print('Dec centre:', dec_centre)
 
-    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] x_array = np.zeros_like(RA_data)
-    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] y_array = np.zeros_like(RA_data)
+    # Convert all equatorial coordinates to image coordinates
+    for i in range(ra_data.shape[0]):
 
-    for i in range(RA_data.shape[0]):
-
-        ra_star = RA_data[i]
+        ra_star = ra_data[i]
         dec_star = dec_data[i]
 
-        # Gnomonization of star coordinates to image coordinates
-        ra1 = radians(RA_centre)
-        dec1 = radians(dec_centre)
-        ra2 = radians(ra_star)
-        dec2 = radians(dec_star)
-        ad = acos(sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra2 - ra1))
-        radius = degrees(ad)
-        sinA = cos(dec2)*sin(ra2 - ra1)/sin(ad)
-        cosA = (sin(dec2) - sin(dec1)*cos(ad))/(cos(dec1)*sin(ad))
-        theta = -degrees(atan2(sinA, cosA))
-        theta = theta + pos_angle_ref - 90.0
+        ### Gnomonization of star coordinates to image coordinates ###
+        
+        ra = radians(ra_star)
+        dec = radians(dec_star)
 
-        #dist = np.degrees(acos(sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra1 - ra2)))
+        # Compute the distance from the FOV centre to the sky coordinate
+        radius = angularSeparation(ra_star, dec_star, degrees(ra_centre), degrees(dec_centre))
+        ad = radians(radius)
 
-        # Calculate the image coordinates
-        X1 = radius*cos(radians(theta))*F_scale
-        Y1 = radius*sin(radians(theta))*F_scale
-        R1 = sqrt(X1**2 + Y1**2)
+        # Compute theta - the direction angle between the FOV centre, sky coordinate, and the image vertical
+        sin_ang = cos(dec)*sin(ra - ra_centre)/sin(ad)
+        cos_ang = (sin(dec) - sin(dec_centre)*cos(ad))/(cos(dec_centre)*sin(ad))
+        theta = -degrees(atan2(sin_ang, cos_ang)) + pos_angle_ref - 90.0
 
-        # Apply 3rd order polynomial + one radial term distorsion
+        # Calculate the uncorrected image coordinates
+        x = radius*cos(radians(theta))*pix_scale
+        y = radius*sin(radians(theta))*pix_scale
+        r = sqrt(x**2 + y**2)
+
+        ### ###
+
+
+        # Apply 3rd order polynomial + one radial term distortion
         if dist_type == "poly3+radial":
 
             # Calculate the distortion in X direction
-            dX = (x_poly_rev[0]
-                + x_poly_rev[1]*X1
-                + x_poly_rev[2]*Y1
-                + x_poly_rev[3]*X1**2
-                + x_poly_rev[4]*X1*Y1
-                + x_poly_rev[5]*Y1**2
-                + x_poly_rev[6]*X1**3
-                + x_poly_rev[7]*X1**2*Y1
-                + x_poly_rev[8]*X1*Y1**2
-                + x_poly_rev[9]*Y1**3
-                + x_poly_rev[10]*X1*R1
-                + x_poly_rev[11]*Y1*R1)
+            dx = (x_poly_rev[0]
+                + x_poly_rev[1]*x
+                + x_poly_rev[2]*y
+                + x_poly_rev[3]*x**2
+                + x_poly_rev[4]*x*y
+                + x_poly_rev[5]*y**2
+                + x_poly_rev[6]*x**3
+                + x_poly_rev[7]*x**2*y
+                + x_poly_rev[8]*x*y**2
+                + x_poly_rev[9]*y**3
+                + x_poly_rev[10]*x*r
+                + x_poly_rev[11]*y*r)
 
             # Calculate the distortion in Y direction
-            dY = (y_poly_rev[0]
-                + y_poly_rev[1]*X1
-                + y_poly_rev[2]*Y1
-                + y_poly_rev[3]*X1**2
-                + y_poly_rev[4]*X1*Y1
-                + y_poly_rev[5]*Y1**2
-                + y_poly_rev[6]*X1**3
-                + y_poly_rev[7]*X1**2*Y1
-                + y_poly_rev[8]*X1*Y1**2
-                + y_poly_rev[9]*Y1**3
-                + y_poly_rev[10]*Y1*R1
-                + y_poly_rev[11]*X1*R1)
+            dy = (y_poly_rev[0]
+                + y_poly_rev[1]*x
+                + y_poly_rev[2]*y
+                + y_poly_rev[3]*x**2
+                + y_poly_rev[4]*x*y
+                + y_poly_rev[5]*y**2
+                + y_poly_rev[6]*x**3
+                + y_poly_rev[7]*x**2*y
+                + y_poly_rev[8]*x*y**2
+                + y_poly_rev[9]*y**3
+                + y_poly_rev[10]*y*r
+                + y_poly_rev[11]*x*r)
 
 
-        # Apply the 3rd order radial distorsion
+        # Apply the 3rd order radial distortion
         elif dist_type == "radial3":
 
             # Compute the radial shift
-            dRadius = R1*(x_poly_rev[2] + x_poly_rev[3]*R1 + x_poly_rev[4]*R1**2)
+            dradius = r*(x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2)
 
-            # Use the X array for storing the distorsion parameters (index 0 for X offset, 1 for Y offset)
-            dX = x_poly_rev[0] + X1*dRadius
-            dY = x_poly_rev[1] + Y1*dRadius
+            # Use the X array for storing the distortion parameters (index 0 for X offset, 1 for Y offset)
+            dx = x_poly_rev[0] + x*dradius
+            dy = x_poly_rev[1] + y*dradius
 
-        # Apply the 5th order radial distorsion
+        # Apply the 5th order radial distortion
         elif dist_type == "radial5":
 
             # Compute the radial shift
-            dRadius = R1*(x_poly_rev[2] + x_poly_rev[3]*R1 + x_poly_rev[4]*R1**2 + x_poly_rev[5]*R1**3 \
-                + x_poly_rev[6]*R1**4)
+            dradius = r*(x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2 + x_poly_rev[5]*r**3 \
+                + x_poly_rev[6]*r**4)
 
-            # Use the X array for storing the distorsion parameters (index 0 for X offset, 1 for Y offset)
-            dX = x_poly_rev[0] + X1*dRadius
-            dY = x_poly_rev[1] + Y1*dRadius
+            # Use the X array for storing the distortion parameters (index 0 for X offset, 1 for Y offset)
+            dx = x_poly_rev[0] + x*dradius
+            dy = x_poly_rev[1] + y*dradius
 
-        # Apply the 5th order radial distorsion
+        # Apply the 5th order radial distortion
         elif dist_type == "radial7":
 
             # Compute the radial shift
-            dRadius = R1*(x_poly_rev[2] + x_poly_rev[3]*R1 + x_poly_rev[4]*R1**2 + x_poly_rev[5]*R1**3 \
-                + x_poly_rev[6]*R1**4 + x_poly_rev[7]*R1**5 + x_poly_rev[8]*R1**6)
+            dradius = r*(x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2 + x_poly_rev[5]*r**3 \
+                + x_poly_rev[6]*r**4 + x_poly_rev[7]*r**5 + x_poly_rev[8]*r**6)
 
-            # Use the X array for storing the distorsion parameters (index 0 for X offset, 1 for Y offset)
-            dX = x_poly_rev[0] + X1*dRadius
-            dY = x_poly_rev[1] + Y1*dRadius
+            # Use the X array for storing the distortion parameters (index 0 for X offset, 1 for Y offset)
+            dx = x_poly_rev[0] + x*dradius
+            dy = x_poly_rev[1] + y*dradius
 
         else:
-            dX = 0
-            dY = 0
+            dx = 0
+            dy = 0
 
 
         # Add the distortion correction and calculate X image coordinates
-        x_array[i] = X1 - dX + x_res/2.0
+        x_array[i] = x - dx + x_res/2.0
 
         # Add the distortion correction and calculate Y image coordinates
-        y_array[i] = Y1 - dY + y_res/2.0
+        y_array[i] = y - dy + y_res/2.0
 
 
     return x_array, y_array
@@ -374,210 +481,177 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data, \
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_t, ndim=1] X_data, \
-    np.ndarray[FLOAT_TYPE_t, ndim=1] Y_data, double lat, double lon, double Ho, double X_res, double Y_res, \
-    double RA_d, double dec_d, double pos_angle_ref, double F_scale, \
+def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] y_data, double lat, double lon, double h0, double x_res, double y_res, \
+    double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, str dist_type):
     """
     Arguments:
         jd_data: [ndarray] Julian date of each data point.
-        X_data: [ndarray] 1D numpy array containing the image column.
-        Y_data: [ndarray] 1D numpy array containing the image row.
+        x_data: [ndarray] 1D numpy array containing the image column.
+        y_data: [ndarray] 1D numpy array containing the image row.
         lat: [float] Latitude of the observer in degrees.
         lon: [float] Longitde of the observer in degress.
-        Ho: [float] Reference hour angle (deg).
-        X_res: [int] Image size, X dimension (px).
-        Y_res: [int] Image size, Y dimenstion (px).
-        RA_d: [float] Reference right ascension of the image centre (degrees).
-        dec_d: [float] Reference declination of the image centre (degrees).
+        h0: [float] Reference hour angle (deg).
+        x_res: [int] Image size, X dimension (px).
+        y_res: [int] Image size, Y dimenstion (px).
+        ra_ref: [float] Reference right ascension of the image centre (degrees).
+        dec_ref: [float] Reference declination of the image centre (degrees).
         pos_angle_ref: [float] Field rotation parameter (degrees).
-        F_scale: [float] Sum of image scales per each image axis (arcsec per px).
+        pix_scale: [float] Plate scale (px/deg).
         x_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward X axis polynomial parameters.
         y_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward Y axis polynomial parameters.
-        dist_type: [str] Distorsion type. Can be: poly3+radial, radial3, or radial5.
+        dist_type: [str] Distortion type. Can be: poly3+radial, radial3, or radial5.
     
     Return:
-        (RA_data, dec_data): [tuple of ndarrays]
+        (ra_data, dec_data): [tuple of ndarrays]
             
-            RA_data: [ndarray] Right ascension of each point (deg).
+            ra_data: [ndarray] Right ascension of each point (deg).
             dec_data: [ndarray] Declination of each point (deg).
             magnitude_data: [ndarray] Array of meteor's lightcurve apparent magnitudes.
     """
 
     cdef int i
-    cdef double jd, x_det, y_det, r_det, dx, x_pix, dy, y_pix, dradius
-    cdef double dec_rad, sl, cl
-    cdef double radius, theta, sin_t, Dec0det, cos_t, RA0det, h, sh, sd, ch, cd, x, y, z, r, azimuth, altitude
-    cdef double az_rad, alt_rad, saz, salt, caz, calt, HA, T, RA, dec, hour_angle
+    cdef double jd, x_img, y_img, r_img, dx, x_corr, dy, y_corr, dradius
+    cdef double dec_rad, sin_lat, cos_lat
+    cdef double radius, theta, sin_t, dec0, cos_t, ra0, h, x, y, z, r, azimuth, altitude
+    cdef double ha, ra, dec
 
-    # Convert declination to radians
-    dec_rad = radians(dec_d)
+    # Convert the reference declination to radians
+    dec_rad = radians(dec_ref)
 
     # Precalculate some parameters
-    sl = sin(radians(lat))
-    cl = cos(radians(lat))
+    sin_lat = sin(radians(lat))
+    cos_lat = cos(radians(lat))
 
-    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] RA_data = np.zeros_like(jd_data)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data = np.zeros_like(jd_data)
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data = np.zeros_like(jd_data)
 
-    # Go through all given data points
+    # Go through all given data points and convert them from X, Y to RA, Dec
     for i in range(jd_data.shape[0]):
 
+        # Choose time and image coordiantes
         jd = jd_data[i]
-        x_det = X_data[i]
-        y_det = Y_data[i]
+        x_img = x_data[i]
+        y_img = y_data[i]
 
 
-        ### APPLY DISTORSION CORRECTION ###
+        ### APPLY DISTORTION CORRECTION ###
 
-        x_det = x_det - X_res/2.0
-        y_det = y_det - Y_res/2.0
-        r_det = sqrt(x_det**2 + y_det**2)
+        # Normalize image coordinates to the image centre and compute the radius from image centre
+        x_img = x_img - x_res/2.0
+        y_img = y_img - y_res/2.0
+        r_img = sqrt(x_img**2 + y_img**2)
 
 
-        # Apply 3rd order polynomial + one radial term distorsion
+        # Apply 3rd order polynomial + one radial term distortion
         if dist_type == "poly3+radial":
 
+            # Compute offset in X direction
             dx = (x_poly_fwd[0]
-                + x_poly_fwd[1]*x_det
-                + x_poly_fwd[2]*y_det
-                + x_poly_fwd[3]*x_det**2
-                + x_poly_fwd[4]*x_det*y_det
-                + x_poly_fwd[5]*y_det**2
-                + x_poly_fwd[6]*x_det**3
-                + x_poly_fwd[7]*x_det**2*y_det
-                + x_poly_fwd[8]*x_det*y_det**2
-                + x_poly_fwd[9]*y_det**3
-                + x_poly_fwd[10]*x_det*r_det
-                + x_poly_fwd[11]*y_det*r_det)
+                + x_poly_fwd[1]*x_img
+                + x_poly_fwd[2]*y_img
+                + x_poly_fwd[3]*x_img**2
+                + x_poly_fwd[4]*x_img*y_img
+                + x_poly_fwd[5]*y_img**2
+                + x_poly_fwd[6]*x_img**3
+                + x_poly_fwd[7]*x_img**2*y_img
+                + x_poly_fwd[8]*x_img*y_img**2
+                + x_poly_fwd[9]*y_img**3
+                + x_poly_fwd[10]*x_img*r_img
+                + x_poly_fwd[11]*y_img*r_img)
 
+            # Compute offset in Y direction
             dy = (y_poly_fwd[0]
-                + y_poly_fwd[1]*x_det
-                + y_poly_fwd[2]*y_det
-                + y_poly_fwd[3]*x_det**2
-                + y_poly_fwd[4]*x_det*y_det
-                + y_poly_fwd[5]*y_det**2
-                + y_poly_fwd[6]*x_det**3
-                + y_poly_fwd[7]*x_det**2*y_det
-                + y_poly_fwd[8]*x_det*y_det**2
-                + y_poly_fwd[9]*y_det**3
-                + y_poly_fwd[10]*y_det*r_det
-                + y_poly_fwd[11]*x_det*r_det)
+                + y_poly_fwd[1]*x_img
+                + y_poly_fwd[2]*y_img
+                + y_poly_fwd[3]*x_img**2
+                + y_poly_fwd[4]*x_img*y_img
+                + y_poly_fwd[5]*y_img**2
+                + y_poly_fwd[6]*x_img**3
+                + y_poly_fwd[7]*x_img**2*y_img
+                + y_poly_fwd[8]*x_img*y_img**2
+                + y_poly_fwd[9]*y_img**3
+                + y_poly_fwd[10]*y_img*r_img
+                + y_poly_fwd[11]*x_img*r_img)
 
 
-        # Apply the 3rd order radial distorsion
+        # Apply the 3rd order radial distortion
         elif dist_type == "radial3":
 
             # Compute the radial shift
-            dradius = r_det*(x_poly_fwd[2] + x_poly_fwd[3]*r_det + x_poly_fwd[4]*r_det**2)
+            dradius = r_img*(x_poly_fwd[2] + x_poly_fwd[3]*r_img + x_poly_fwd[4]*r_img**2)
 
-            # Use the X array for storing the distorsion parameters (index 0 for X offset, 1 for Y offset)
-            dx = x_poly_fwd[0] + x_det*dradius
-            dy = x_poly_fwd[1] + y_det*dradius
+            # Use the X array for storing the distortion parameters (index 0 for X offset, 1 for Y offset)
+            dx = x_poly_fwd[0] + x_img*dradius
+            dy = x_poly_fwd[1] + y_img*dradius
 
 
-        # Apply the 5th order radial distorsion
+        # Apply the 5th order radial distortion
         elif dist_type == "radial5":
 
             # Compute the radial shift
-            dradius = r_det*(x_poly_fwd[2] + x_poly_fwd[3]*r_det + x_poly_fwd[4]*r_det**2 \
-                + x_poly_fwd[5]*r_det**3 + x_poly_fwd[6]*r_det**4)
+            dradius = r_img*(x_poly_fwd[2] + x_poly_fwd[3]*r_img + x_poly_fwd[4]*r_img**2 \
+                + x_poly_fwd[5]*r_img**3 + x_poly_fwd[6]*r_img**4)
 
-            # Use the X array for storing the distorsion parameters (index 0 for X offset, 1 for Y offset)
-            dx = x_poly_fwd[0] + x_det*dradius
-            dy = x_poly_fwd[1] + y_det*dradius
+            # Use the X array for storing the distortion parameters (index 0 for X offset, 1 for Y offset)
+            dx = x_poly_fwd[0] + x_img*dradius
+            dy = x_poly_fwd[1] + y_img*dradius
 
-        # Apply the 5th order radial distorsion
+        # Apply the 5th order radial distortion
         elif dist_type == "radial7":
 
             # Compute the radial shift
-            dradius = r_det*(x_poly_fwd[2] + x_poly_fwd[3]*r_det + x_poly_fwd[4]*r_det**2 \
-                + x_poly_fwd[5]*r_det**3 + x_poly_fwd[6]*r_det**4 + x_poly_fwd[7]*r_det**5 \
-                + x_poly_fwd[8]*r_det**6)
+            dradius = r_img*(x_poly_fwd[2] + x_poly_fwd[3]*r_img + x_poly_fwd[4]*r_img**2 \
+                + x_poly_fwd[5]*r_img**3 + x_poly_fwd[6]*r_img**4 + x_poly_fwd[7]*r_img**5 \
+                + x_poly_fwd[8]*r_img**6)
 
-            # Use the X array for storing the distorsion parameters (index 0 for X offset, 1 for Y offset)
-            dx = x_poly_fwd[0] + x_det*dradius
-            dy = x_poly_fwd[1] + y_det*dradius
+            # Use the X array for storing the distortion parameters (index 0 for X offset, 1 for Y offset)
+            dx = x_poly_fwd[0] + x_img*dradius
+            dy = x_poly_fwd[1] + y_img*dradius
 
         else:
             dx = 0
             dy = 0
 
 
-        # Add the distortion correction
-        y_pix = y_det + dy
-        x_pix = x_det + dx
+        # Correct image coordinates for distortion
+        y_corr = y_img + dy
+        x_corr = x_img + dx
 
-        # Scale back image coordinates
-        x_pix = x_pix/F_scale
-        y_pix = y_pix/F_scale
+        # Gnomonize coordinates
+        x_corr = x_corr/pix_scale
+        y_corr = y_corr/pix_scale
 
         ### ###
 
 
         ### Convert gnomonic X, Y to alt, az ###
 
-        # Compute the needed parameters
-        radius = radians(sqrt(x_pix**2 + y_pix**2))
-        theta = radians((90 - pos_angle_ref + degrees(atan2(y_pix, x_pix)))%360)
+        # Radius from FOV centre to sky coordinate
+        radius = radians(sqrt(x_corr**2 + y_corr**2))
 
+        # Compute theta - the direction angle between the FOV centre, sky coordinate, and the image vertical
+        theta = (pi/2 - radians(pos_angle_ref) + atan2(y_corr, x_corr))%(2*pi)
+
+        # Transform the radius and direction to coordinates on the sky
         sin_t = sin(dec_rad)*cos(radius) + cos(dec_rad)*sin(radius)*cos(theta)
-        Dec0det = atan2(sin_t, sqrt(1 - sin_t**2))
+        dec0 = atan2(sin_t, sqrt(1 - sin_t**2))
 
-        sin_t = sin(theta)*sin(radius)/cos(Dec0det)
-        cos_t = (cos(radius) - sin(Dec0det)*sin(dec_rad))/(cos(Dec0det)*cos(dec_rad))
-        RA0det = (RA_d - degrees(atan2(sin_t, cos_t)))%360
+        sin_t = sin(theta)*sin(radius)/cos(dec0)
+        cos_t = (cos(radius) - sin(dec0)*sin(dec_rad))/(cos(dec0)*cos(dec_rad))
+        ra0 = (ra_ref - degrees(atan2(sin_t, cos_t)))%360
 
-        h = radians(Ho + lon - RA0det)
-        sh = sin(h)
-        sd = sin(Dec0det)
-        ch = cos(h)
-        cd = cos(Dec0det)
+        # Add the hour angle difference to the right ascension
+        ra = (ra0 + cyjd2LST(jd, 0) - h0)%360
 
-        x = -ch*cd*sl + sd*cl
-        y = -sh*cd
-        z = ch*cd*cl + sd*sl
-
-        r = sqrt(x**2 + y**2)
-
-        # Calculate azimuth and altitude
-        azimuth = degrees(atan2(y, x))%360
-        altitude = degrees(atan2(z, r))
-
-        ### ###
+        # Convert declination to degrees
+        dec = degrees(dec0)
 
 
-        ### Convert alt, az to RA, Dec ###
-
-        # Never allow the altitude to be exactly 90 deg due to numerical issues
-        if altitude == 90:
-            altitude = 89.9999
-
-        # Convert altitude and azimuth to radians
-        az_rad = radians(azimuth)
-        alt_rad = radians(altitude)
-
-        saz = sin(az_rad)
-        salt = sin(alt_rad)
-        caz = cos(az_rad)
-        calt = cos(alt_rad)
-
-        x = -saz*calt
-        y = -caz*sl*calt + salt*cl
-        HA = degrees(atan2(x, y))
-
-        # Calculate the hour angle
-        T = (jd - 2451545.0)/36525.0
-        hour_angle = (280.46061837 + 360.98564736629*(jd - 2451545.0) + 0.000387933*T**2 - T**3/38710000.0)%360
-
-        RA = (hour_angle + lon - HA)%360
-        dec = degrees(asin(sl*salt + cl*calt*caz))
-
-        ### ###
-
-
-        RA_data[i] = RA
+        # Assign values to output list
+        ra_data[i] = ra
         dec_data[i] = dec
 
 
-    return RA_data, dec_data
+    return ra_data, dec_data

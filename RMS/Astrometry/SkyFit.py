@@ -196,7 +196,7 @@ class PlateTool(object):
         self.catalog_stars_visible = True
         self.draw_calstars = True
 
-        self.draw_distorsion = False
+        self.draw_distortion = False
 
         self.show_key_help = 1
 
@@ -336,8 +336,8 @@ class PlateTool(object):
 
 
         # Load distorion type index
-        self.dist_type_count = len(self.platepar.distorsion_type_list)
-        self.dist_type_index = self.platepar.distorsion_type_list.index(self.platepar.distorsion_type)
+        self.dist_type_count = len(self.platepar.distortion_type_list)
+        self.dist_type_index = self.platepar.distortion_type_list.index(self.platepar.distortion_type)
 
 
         ### INIT IMAGE ###
@@ -1215,28 +1215,28 @@ class PlateTool(object):
             self.updateImage()
 
 
-        # Set distorsion types
+        # Set distortion types
         elif event.key == 'ctrl+1':
 
             self.dist_type_index = 0
-            self.changeDistorsionType()
+            self.changeDistortionType()
 
 
         elif event.key == 'ctrl+2':
 
             self.dist_type_index = 1
-            self.changeDistorsionType()
+            self.changeDistortionType()
 
 
         elif event.key == 'ctrl+3':
 
             self.dist_type_index = 2
-            self.changeDistorsionType()
+            self.changeDistortionType()
 
         elif event.key == 'ctrl+4':
 
             self.dist_type_index = 3
-            self.changeDistorsionType()
+            self.changeDistortionType()
 
 
         # Key increment
@@ -1381,10 +1381,10 @@ class PlateTool(object):
             self.updateImage()
 
 
-        # Show/hide distorsion guides
+        # Show/hide distortion guides
         elif event.key == 'ctrl+i':
 
-            self.draw_distorsion = not self.draw_distorsion
+            self.draw_distortion = not self.draw_distortion
 
             self.updateImage()
 
@@ -1439,9 +1439,9 @@ class PlateTool(object):
         # Do a fit on the selected stars while in the star picking mode
         elif (event.key == 'ctrl+z') or (event.key == "ctrl+Z"):
 
-            # If shift was pressed, reset distorsion parameters to zero
+            # If shift was pressed, reset distortion parameters to zero
             if event.key == "ctrl+Z":
-                self.platepar.resetDistorsionParameters()
+                self.platepar.resetDistortionParameters()
                 self.first_platepar_fit = True
 
             # If the first platepar is being made, do the fit twice
@@ -1585,10 +1585,10 @@ class PlateTool(object):
                 self.ax.scatter(x, y, marker='x', c='b', s=100, lw=3, alpha=0.5)
 
 
-    def drawDistorsion(self):
-        """ Draw distorsion guides. """
+    def drawDistortion(self):
+        """ Draw distortion guides. """
 
-        # Only draw the distorsion if we have a platepar
+        # Only draw the distortion if we have a platepar
         if self.platepar:
 
             # Sample 20 points on every image axis (start/end 5% from image corners)
@@ -1599,9 +1599,9 @@ class PlateTool(object):
             y_samples = np.linspace(corner_frac*self.platepar.Y_res, (1 - corner_frac)*self.platepar.Y_res, \
                 samples)
 
-            # Create a platepar with no distorsion
+            # Create a platepar with no distortion
             platepar_nodist = copy.deepcopy(self.platepar)
-            platepar_nodist.resetDistorsionParameters()
+            platepar_nodist.resetDistortionParameters()
 
             # Make X, Y pairs
             xx, yy = np.meshgrid(x_samples, y_samples)
@@ -1612,7 +1612,7 @@ class PlateTool(object):
             time_data = [self.img_handle.currentTime()]*len(x_arr)
             _, ra_data, dec_data, _ = xyToRaDecPP(time_data, x_arr, y_arr, level_data, self.platepar)
 
-            # Compute X, Y back without the distorsion
+            # Compute X, Y back without the distortion
             jd = date2JD(*self.img_handle.currentTime())
             x_nodist, y_nodist = raDecToXYPP(ra_data, dec_data, jd, platepar_nodist)
 
@@ -1627,11 +1627,11 @@ class PlateTool(object):
             plt.plot(*data, alpha=0.5)
 
 
-    def changeDistorsionType(self):
-        """ Change the distorsion type. """
+    def changeDistortionType(self):
+        """ Change the distortion type. """
 
-        dist_type = self.platepar.distorsion_type_list[self.dist_type_index]
-        self.platepar.setDistorsionType(dist_type)
+        dist_type = self.platepar.distortion_type_list[self.dist_type_index]
+        self.platepar.setDistortionType(dist_type)
         self.updateImage()
 
         print("Distortion model changed to: {:s}".format(dist_type))
@@ -1859,9 +1859,9 @@ class PlateTool(object):
         ######################################################################################################
 
 
-        # Draw distorsion guides
-        if self.draw_distorsion:
-            self.drawDistorsion()
+        # Draw distortion guides
+        if self.draw_distortion:
+            self.drawDistortion()
 
 
         # Draw photometry
@@ -1944,10 +1944,10 @@ class PlateTool(object):
             text_str += '3/4 - Y offset\n'
             text_str += '5/6 - X 1st dist. coeff.\n'
             text_str += '7/8 - Y 1st dist. coeff.\n'
-            text_str += 'CTRL + 1 - poly3+radial distorsion\n'
-            text_str += 'CTRL + 2 - radial3 distorsion\n'
-            text_str += 'CTRL + 3 - radial5 distorsion\n'
-            text_str += 'CTRL + 4 - radial7 distorsion\n'
+            text_str += 'CTRL + 1 - poly3+radial distortion\n'
+            text_str += 'CTRL + 2 - radial3 distortion\n'
+            text_str += 'CTRL + 3 - radial5 distortion\n'
+            text_str += 'CTRL + 4 - radial7 distortion\n'
             text_str += '\n'
             text_str += ',/. - UT correction\n'
             text_str += 'R/F - Lim mag\n'
@@ -1956,7 +1956,7 @@ class PlateTool(object):
             text_str += 'M - Toggle maxpixel/avepixel\n'
             text_str += 'H - Hide/show catalog stars\n'
             text_str += 'C - Hide/show detected stars\n'
-            text_str += 'CTRL + I - Show/hide distorsion\n'
+            text_str += 'CTRL + I - Show/hide distortion\n'
             text_str += 'U/J - Img Gamma\n'
             text_str += 'CTRL + H - Adjust levels\n'
             text_str += 'V - FOV centre\n'
@@ -1986,11 +1986,11 @@ class PlateTool(object):
             text_str  = "STAR PICKING MODE"
 
             if self.show_key_help > 0:
-                text_str += "\nDistorsion type: {:s}\n".format(self.platepar.distorsion_type_list[self.dist_type_index])
+                text_str += "\nDistortion type: {:s}\n".format(self.platepar.distortion_type_list[self.dist_type_index])
                 text_str += "'LEFT CLICK' - Centroid star\n"
                 text_str += "'CTRL + LEFT CLICK' - Manual star position\n"
                 text_str += "'CTRL + Z' - Fit stars\n"
-                text_str += "'CTRL + SHIFT + Z' - Fit with initial distorsion params set to 0\n"
+                text_str += "'CTRL + SHIFT + Z' - Fit with initial distortion params set to 0\n"
                 text_str += "'P' - Photometry fit"
 
             self.ax.text(self.current_ff.ncols/2, self.current_ff.nrows, text_str, color='r', \
@@ -2285,7 +2285,7 @@ class PlateTool(object):
         scale_y = self.config.fov_h/self.config.height
         self.platepar.F_scale = 1/((scale_x + scale_y)/2)
 
-        # Set distorsion polynomials to zero
+        # Set distortion polynomials to zero
         self.platepar.x_poly_fwd *= 0
         self.platepar.x_poly_rev *= 0
         self.platepar.y_poly_fwd *= 0

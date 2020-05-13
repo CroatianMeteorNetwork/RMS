@@ -518,8 +518,8 @@ if __name__ == '__main__':
     # arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
     #     help="Path to a config file which will be used instead of the default one.")
 
-    # arg_parser.add_argument('-d', '--distorsion', action="store_true", \
-    #     help="""Refine the distorsion parameters.""")
+    # arg_parser.add_argument('-d', '--distortion', action="store_true", \
+    #     help="""Refine the distortion parameters.""")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
