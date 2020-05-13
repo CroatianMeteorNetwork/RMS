@@ -8,6 +8,9 @@ import numpy as np
 cimport numpy as np
 cimport cython
 
+# Import the Python bool type
+from cpython cimport bool
+
 # Define numpy types
 INT_TYPE = np.uint32
 ctypedef np.uint32_t INT_TYPE_t
@@ -243,7 +246,56 @@ cdef double cyjd2LST(double jd, double lon):
 
 
 @cython.cdivision(True)
-cpdef tuple cyraDec2AltAz(double ra, double dec, double jd, double lat, double lon):
+cdef double refractionApparentToTrue(double elev):
+    """ Correct the apparent elevation of a star for refraction to true elevation. The temperature and air
+        pressure are assumed to be unknown. 
+
+        Source: Explanatory Supplement to the Astronomical Almanac (1992), p. 144.
+
+    Arguments:
+        elev: [float] Apparent elevation (radians).
+
+    Return:
+        [float] True elevation (radians).
+
+    """
+
+    cdef double refraction
+
+    # Refraction in radians
+    refraction = radians(1.0/(60*tan(radians(degrees(elev) + 7.31/(degrees(elev) + 4.4)))))
+
+    # Correct the elevation
+    return elev - refraction
+
+
+@cython.cdivision(True)
+cdef double refractionTrueToApparent(double elev):
+    """ Correct the true elevation of a star for refraction to apparent elevation. The temperature and air
+        pressure are assumed to be unknown. 
+
+        Source: https://en.wikipedia.org/wiki/Atmospheric_refraction
+
+    Arguments:
+        elev: [float] Apparent elevation (radians).
+
+    Return:
+        [float] True elevation (radians).
+
+    """
+
+    cdef double refraction
+
+    # Refraction in radians
+    refraction = radians(1.02/(60*tan(radians(degrees(elev) + 10.3/(degrees(elev) + 5.11)))))
+
+    # Apply the refraction
+    return elev + refraction
+
+
+
+@cython.cdivision(True)
+cpdef (double, double) cyraDec2AltAz(double ra, double dec, double jd, double lat, double lon):
     """ Convert right ascension and declination to azimuth (+east of sue north) and altitude. 
 
     Arguments:
@@ -285,8 +337,9 @@ cpdef tuple cyraDec2AltAz(double ra, double dec, double jd, double lat, double l
     return (azim, elev)
 
 
+
 @cython.cdivision(True)
-cpdef tuple cyaltAz2RADec(double azim, double elev, double jd, double lat, double lon):
+cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double lat, double lon):
     """ Convert azimuth and altitude in a given time and position on Earth to right ascension and 
         declination. 
 
@@ -329,7 +382,8 @@ cpdef tuple cyaltAz2RADec(double azim, double elev, double jd, double lat, doubl
 def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data, double jd, double lat, double lon, double x_res, \
     double y_res, double h0, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
-    np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, str dist_type):
+    np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, \
+    str dist_type, bool refraction=True):
     """ Convert RA, Dec to distorion corrected image coordinates. 
 
     Arguments:
@@ -347,14 +401,15 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
         pix_scale: [float] Image scale (px/deg).
         x_poly_rev: [ndarray float] Distortion polynomial in X direction for reverse mapping.
         y_poly_rev: [ndarray float] Distortion polynomail in Y direction for reverse mapping.
-        dist_type: [str] Distortion type. Can be: poly3+radial, radial3, or radial5.
+        dist_type: [str] Distortion type. Can be: poly3+radial, radial3, radial5, or radial 7.
+        refraction: [bool] Apply refraction correction. True by default.
     
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
     """
 
     cdef int i
-    cdef double ra_star, dec_star, ra_centre, dec_centre
+    cdef double ra_star, dec_star, ra_centre, dec_centre, azim, alt
     cdef double ra, dec, ad, radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, dradius
 
     # Init output arrays
@@ -382,6 +437,20 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
         
         ra = radians(ra_star)
         dec = radians(dec_star)
+
+
+        # Apply refraction
+        if refraction:
+
+            # Convert coordinates to alt/az
+            azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
+
+            # Correct the elevation
+            alt = refractionTrueToApparent(alt)
+
+            # Convert back to equatorial
+            ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
+
 
         # Compute the distance from the FOV centre to the sky coordinate
         radius = angularSeparation(ra_star, dec_star, degrees(ra_centre), degrees(dec_centre))
@@ -486,7 +555,8 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
 def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_data, double lat, double lon, double x_res, double y_res, \
     double h0, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
-    np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, str dist_type):
+    np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
+    str dist_type, bool refraction=True):
     """
     Arguments:
         jd_data: [ndarray] Julian date of each data point.
@@ -503,7 +573,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         pix_scale: [float] Plate scale (px/deg).
         x_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward X axis polynomial parameters.
         y_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward Y axis polynomial parameters.
-        dist_type: [str] Distortion type. Can be: poly3+radial, radial3, or radial5.
+        dist_type: [str] Distortion type. Can be: poly3+radial, radial3, radial5, or radial7.
+        refraction: [bool] Apply refraction correction. True by default.
     
     Return:
         (ra_data, dec_data): [tuple of ndarrays]
@@ -514,17 +585,13 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     """
 
     cdef int i
+    cdef double dec_rad
     cdef double jd, x_img, y_img, r_img, dx, x_corr, dy, y_corr, dradius
-    cdef double dec_rad, sin_lat, cos_lat
-    cdef double radius, theta, sin_t, dec0, cos_t, ra0, h, x, y, z, r, azimuth, altitude
-    cdef double ha, ra, dec
+    cdef double radius, theta, sin_t, dec0, cos_t, ra0
+    cdef double ha, ra, dec, alt, az
 
     # Convert the reference declination to radians
     dec_rad = radians(dec_ref)
-
-    # Precalculate some parameters
-    sin_lat = sin(radians(lat))
-    cos_lat = cos(radians(lat))
 
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data = np.zeros_like(jd_data)
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data = np.zeros_like(jd_data)
@@ -645,9 +712,26 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         ra0 = (ra_ref - degrees(atan2(sin_t, cos_t)))%360
 
         # Add the hour angle difference to the right ascension
-        ra = (ra0 + cyjd2LST(jd, 0) - h0)%360
+        ra = radians((ra0 + cyjd2LST(jd, 0) - h0)%360)
+        dec = dec0
 
-        # Convert declination to degrees
+
+        # Apply refraction correction
+        if refraction:
+
+            # Convert coordinates to alt/az
+            azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
+
+            # Correct the elevation
+            alt = refractionApparentToTrue(alt)
+
+            # Convert back to equatorial
+            ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
+
+
+
+        # Convert coordinates to degrees
+        ra = degrees(ra)
         dec = degrees(dec0)
 
 
