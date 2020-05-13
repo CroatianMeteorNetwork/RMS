@@ -24,8 +24,8 @@ import matplotlib.patches as mpatches
 from matplotlib.font_manager import FontProperties
 
 import RMS.ConfigReader as cr
-from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDec2AltAz, applyAstrometryFTPdetectinfo
-from RMS.Astrometry.Conversions import datetime2JD, jd2Date
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, applyAstrometryFTPdetectinfo
+from RMS.Astrometry.Conversions import datetime2JD, jd2Date, raDec2AltAz
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FRbin import read as readFR
 from RMS.Formats.FRbin import validFRName
@@ -1345,7 +1345,7 @@ class ManualReductionTool(object):
             jd, ra, dec, _ = xyToRaDecPP(time_data, [x], [y], [1], self.platepar)
 
             # Compute alt, az
-            azim, alt = raDec2AltAz(jd[0], self.platepar.lon, self.platepar.lat, ra[0], dec[0])
+            azim, alt = raDec2AltAz(ra[0], dec[0], jd[0], self.platepar.lat, self.platepar.lon)
 
 
             status_str += ",  Azim={:6.2f}  Alt={:6.2f},  RA={:6.2f}  Dec={:+6.2f}".format(azim, alt, \

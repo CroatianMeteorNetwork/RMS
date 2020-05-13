@@ -19,8 +19,8 @@ import scipy.optimize
 
 from RMS.Astrometry import CheckFit
 from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo, applyPlateparToCentroids, \
-    raDec2AltAz, rotationWrtHorizon, photometryFitRobust
-from RMS.Astrometry.Conversions import date2JD
+    rotationWrtHorizon, photometryFitRobust
+from RMS.Astrometry.Conversions import date2JD, raDec2AltAz
 from RMS.Astrometry.FFTalign import alignPlatepar
 import RMS.ConfigReader as cr
 from RMS.Formats import CALSTARS
@@ -417,8 +417,8 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         if result is not None:
 
             # Recompute alt/az of the FOV centre
-            working_platepar.az_centre, working_platepar.alt_centre = raDec2AltAz(working_platepar.JD, \
-                working_platepar.lon, working_platepar.lat, working_platepar.RA_d, working_platepar.dec_d)
+            working_platepar.az_centre, working_platepar.alt_centre = raDec2AltAz(working_platepar.RA_d, \
+                working_platepar.dec_d, working_platepar.JD, working_platepar.lat, working_platepar.lon)
 
             # Recompute the rotation wrt horizon
             working_platepar.rotation_from_horiz = rotationWrtHorizon(working_platepar)

@@ -34,7 +34,7 @@ import datetime
 import numpy as np
 import scipy.optimize
 
-from RMS.Astrometry.Conversions import date2JD, jd2Date
+from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 import RMS.Astrometry.ApplyAstrometry
 from RMS.Math import angularSeparation
 
@@ -452,8 +452,7 @@ class Platepar(object):
         self.RA_d, self.dec_d, self.pos_angle_ref, self.F_scale = res.x
 
         # Recalculate centre
-        self.az_centre, self.alt_centre = RMS.Astrometry.ApplyAstrometry.raDec2AltAz(self.JD, self.lon, 
-            self.lat, self.RA_d, self.dec_d)
+        self.az_centre, self.alt_centre = raDec2AltAz(self.RA_d, self.dec_d, self.JD, self.lat, self.lon)
 
         ### ###
 

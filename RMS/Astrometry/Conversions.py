@@ -41,6 +41,12 @@ import numpy as np
 from RMS.Math import vectMag, vectNorm
 
 
+# Import Cython functions
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+from RMS.Astrometry.CyFunctions import cyraDec2AltAz
+
+
 ### CONSTANTS ###
 
 # Define Julian epoch
@@ -338,7 +344,6 @@ def geo2Cartesian(lat, lon, h, julian_date):
     @return (x, y, z): [tuple of floats] a tuple of X, Y, Z Cartesian coordinates
     """
 
-    lon_rad = math.radians(lon)
     lat_rad = math.radians(lat)
 
     # Get Local Sidreal Time
@@ -458,51 +463,33 @@ def altAz2RADec(azim, elev, jd, lat, lon):
 
     return np.degrees(ra), np.degrees(dec)
 
+# Vectorize the raDec2AltAz function so it can take numpy arrays for: ra, dec, jd
+altAz2RADec_vect = np.vectorize(altAz2RADec, excluded=['lat', 'lon'])
 
 
 def raDec2AltAz(ra, dec, jd, lat, lon):
-    """ Convert right ascension and declination to azimuth (+east of sue north) and altitude. 
+    """ Calculate the reference azimuth and altitude of the centre of the FOV from the given RA/Dec. 
 
     Arguments:
-        ra: [float] right ascension in degrees
-        dec: [float] declination in degrees
-        jd: [float] Julian date
-        lat: [float] latitude in degrees
-        lon: [float] longitude in degrees
+        ra:  [float] Right ascension in degrees.
+        dec: [float] Declination in degrees.
+        jd: [float] Reference Julian date.
+        lat: [float] Latitude +N in degrees.
+        lon: [float] Longitude +E in degrees.
 
     Return:
-        (azim, elev): [tuple]
-            azim: [float] azimuth (+east of due north) in degrees
-            elev: [float] elevation above horizon in degrees
+        (azim, elev): [tuple of float]: Azimuth and elevation (degrees).
+    """
 
-        """
+    # Compute azim and elev using a fast cython function
+    azim, elev = cyraDec2AltAz(np.radians(ra), np.radians(dec), jd, np.radians(lat), np.radians(lon))
+    
 
-    ra = np.radians(ra)
-    dec = np.radians(dec)
-    lat = np.radians(lat)
-    lon = np.radians(lon)
+    # Convert alt/az to degrees
+    azim = np.degrees(azim)
+    elev = np.degrees(elev)
 
-    # Calculate Local Sidereal Time
-    lst = np.radians(JD2LST(jd, np.degrees(lon))[0])
-
-    # Calculate the hour angle
-    ha = lst - ra
-
-    # Constrain the hour angle to [-pi, pi] range
-    ha = (ha + np.pi)%(2*np.pi) - np.pi
-
-    # Calculate the azimuth
-    azim = np.pi + np.arctan2(np.sin(ha), np.cos(ha)*np.sin(lat) - np.tan(dec)*np.cos(lat))
-
-    # Calculate the sine of elevation
-    sin_elev = np.sin(lat)*np.sin(dec) + np.cos(lat)*np.cos(dec)*np.cos(ha)
-
-    # Wrap the sine of elevation in the [-1, +1] range
-    sin_elev = (sin_elev + 1)%2 - 1
-
-    elev = np.arcsin(sin_elev)
-
-    return np.degrees(azim), np.degrees(elev)
+    return azim, elev
 
 
 # Vectorize the raDec2AltAz function so it can take numpy arrays for: ra, dec, jd
@@ -554,7 +541,6 @@ def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, 
     ### Uncorrect for zenith attraction ###
 
     # Compute the radiant in the local coordinates
-    #eta, rho = raDec2EtaRho(ra_g, dec_g, lat_geocentric, lon, jd)
     azim, elev = raDec2AltAz(ra_g, dec_g, jd, lat_geocentric, lon)
 
     # Compute the zenith angle

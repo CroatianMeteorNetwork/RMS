@@ -21,7 +21,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from RMS.Astrometry import ApplyAstrometry
-from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle
+from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, raDec2AltAz
 import RMS.ConfigReader as cr
 from RMS.Formats import CALSTARS
 from RMS.Formats.FFfile import getMiddleTimeFF
@@ -307,8 +307,8 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     # platepar_aligned.Ho = JD2HourAngle(jd)
 
     # Recompute the FOV centre in Alt/Az and update the rotation
-    platepar_aligned.az_centre, platepar_aligned.alt_centre = ApplyAstrometry.raDec2AltAz(platepar.JD, \
-                platepar.lon, platepar.lat, platepar.RA_d, platepar.dec_d)
+    platepar_aligned.az_centre, platepar_aligned.alt_centre = raDec2AltAz(platepar.RA_d, \
+        platepar.dec_d, platepar.JD, platepar.lat, platepar.lon)
     platepar_aligned.rotation_from_horiz = ApplyAstrometry.rotationWrtHorizon(platepar_aligned)
 
     ###

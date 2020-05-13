@@ -4,8 +4,8 @@ from __future__ import print_function, division, absolute_import
 
 import numpy as np
 
-from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, raDec2AltAz, computeFOVSize
-from RMS.Astrometry.Conversions import jd2Date
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, computeFOVSize
+from RMS.Astrometry.Conversions import jd2Date, raDec2AltAz, raDec2AltAz_vect
 from RMS.Math import angularSeparation
 
 
@@ -32,7 +32,7 @@ def addEquatorialGrid(plt_handle, platepar, jd):
     dec_c = dec_c[0]
 
     # Compute FOV centre alt/az
-    azim_centre, alt_centre = raDec2AltAz(jd, platepar.lon, platepar.lat, RA_c, dec_c)
+    azim_centre, alt_centre = raDec2AltAz(RA_c, dec_c, jd, platepar.lat, platepar.lon)
 
     # Compute FOV size
     fov_h, fov_v = computeFOVSize(platepar)
@@ -73,8 +73,8 @@ def addEquatorialGrid(plt_handle, platepar, jd):
         dec_grid_plot = np.zeros_like(ra_grid_plot) + dec_grid
 
         # Compute alt/az
-        az_grid_plot, alt_grid_plot = raDec2AltAz(jd, platepar.lon, platepar.lat, ra_grid_plot, \
-            dec_grid_plot)
+        az_grid_plot, alt_grid_plot = raDec2AltAz_vect(ra_grid_plot, dec_grid_plot, jd, platepar.lat, \
+            platepar.lon)
 
         # Filter out points below the horizon  and outside the FOV
         filter_arr = (alt_grid_plot > 0) & (np.degrees(angularSeparation(np.radians(alt_centre), \
@@ -135,8 +135,8 @@ def addEquatorialGrid(plt_handle, platepar, jd):
 
 
         # Compute alt/az
-        az_grid_plot, alt_grid_plot = raDec2AltAz(jd, platepar.lon, platepar.lat, ra_grid_plot, \
-            dec_grid_plot)
+        az_grid_plot, alt_grid_plot = raDec2AltAz_vect(ra_grid_plot, dec_grid_plot, jd, platepar.lat, \
+            platepar.lon)
 
         # Filter out points below the horizon
         filter_arr = (alt_grid_plot > 0) & (np.degrees(angularSeparation(np.radians(alt_centre), \

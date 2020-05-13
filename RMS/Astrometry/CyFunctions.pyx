@@ -328,7 +328,7 @@ cpdef tuple cyaltAz2RADec(double azim, double elev, double jd, double lat, doubl
 @cython.cdivision(True)
 def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data, double jd, double lat, double lon, double x_res, \
-    double y_res, double az_centre, double alt_centre, double pos_angle_ref, double pix_scale, \
+    double y_res, double h0, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, str dist_type):
     """ Convert RA, Dec to distorion corrected image coordinates. 
 
@@ -340,8 +340,9 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
         lon: [float] Longitude of station in degrees.
         x_res: [int] X resolution of the camera.
         y_res: [int] Y resolution of the camera.
-        az_centre: [float] Azimuth of the FOV centre (degrees).
-        alt_centre: [float] Altitude of the FOV centre (degrees).
+        h0: [float] Reference hour angle (deg).
+        ra_ref: [float] Reference right ascension of the image centre (degrees).
+        dec_ref: [float] Reference declination of the image centre (degrees).
         pos_angle_ref: [float] Rotation from the celestial meridial (degrees).
         pix_scale: [float] Image scale (px/deg).
         x_poly_rev: [ndarray float] Distortion polynomial in X direction for reverse mapping.
@@ -365,9 +366,10 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     cdef double cl = cos(radians(lat))
 
 
-    # Convert FOV centre to RA/Dec
-    ra_centre, dec_centre = cyaltAz2RADec(radians(az_centre), radians(alt_centre), jd, radians(lat), \
-        radians(lon))
+    # Compute the current RA of the FOV centre by adding the difference in between the current and the 
+    #   reference hour angle
+    ra_centre = radians((ra_ref + cyjd2LST(jd, 0) - h0)%360)
+    dec_centre = radians(dec_ref)
 
 
     # Convert all equatorial coordinates to image coordinates
@@ -482,8 +484,8 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
 @cython.wraparound(False)
 @cython.cdivision(True)
 def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
-    np.ndarray[FLOAT_TYPE_t, ndim=1] y_data, double lat, double lon, double h0, double x_res, double y_res, \
-    double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] y_data, double lat, double lon, double x_res, double y_res, \
+    double h0, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, str dist_type):
     """
     Arguments:
@@ -492,9 +494,9 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         y_data: [ndarray] 1D numpy array containing the image row.
         lat: [float] Latitude of the observer in degrees.
         lon: [float] Longitde of the observer in degress.
-        h0: [float] Reference hour angle (deg).
         x_res: [int] Image size, X dimension (px).
         y_res: [int] Image size, Y dimenstion (px).
+        h0: [float] Reference hour angle (deg).
         ra_ref: [float] Reference right ascension of the image centre (degrees).
         dec_ref: [float] Reference declination of the image centre (degrees).
         pos_angle_ref: [float] Field rotation parameter (degrees).
@@ -626,7 +628,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         ### ###
 
 
-        ### Convert gnomonic X, Y to alt, az ###
+        ### Convert gnomonic X, Y to RA, Dec ###
 
         # Radius from FOV centre to sky coordinate
         radius = radians(sqrt(x_corr**2 + y_corr**2))

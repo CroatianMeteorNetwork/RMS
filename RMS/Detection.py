@@ -34,8 +34,7 @@ import matplotlib.gridspec as gridspec
 from mpl_toolkits.mplot3d import Axes3D
 
 # RMS imports
-from RMS.Astrometry.Conversions import jd2Date
-from RMS.Astrometry.ApplyAstrometry import raDec2AltAz
+from RMS.Astrometry.Conversions import jd2Date, raDec2AltAz
 import RMS.ConfigReader as cr
 from RMS.DetectionTools import getThresholdedStripe3DPoints, loadImageCalibration
 from RMS.Formats.AsgardEv import writeEv
@@ -1834,7 +1833,7 @@ if __name__ == "__main__":
                 alt_array = []
                 for jd, ra, dec in zip(jd_array, ra_array, dec_array):
 
-                    azim, alt = raDec2AltAz(jd, np.degrees(ast.lon), np.degrees(ast.lat), ra, dec)
+                    azim, alt = raDec2AltAz(ra, dec, jd, np.degrees(ast.lat), np.degrees(ast.lon))
 
                     azim_array.append(azim)
                     alt_array.append(alt)

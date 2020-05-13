@@ -20,8 +20,8 @@ from RMS.Formats import Platepar
 from RMS.Formats import CALSTARS
 from RMS.Formats import StarCatalog
 from RMS.Formats import FFfile
-from RMS.Astrometry.ApplyAstrometry import raDec2AltAz, raDecToXYPP, xyToRaDecPP, rotationWrtHorizon
-from RMS.Astrometry.Conversions import date2JD, jd2Date
+from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP, rotationWrtHorizon
+from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 from RMS.Astrometry.FFTalign import alignPlatepar
 from RMS.Math import angularSeparation
 
@@ -311,7 +311,7 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius, v
     #     for ra_t, dec_t in zip(ra, dec):
             
     #         # Compute zenith distance
-    #         azim, elev = raDec2AltAz(jd, platepar.lon, platepar.lat, ra_t, dec_t)
+    #         azim, elev = raDec2AltAz(ra_t, dec_t, jd, platepar.lat, platepar.lon)
 
     #         zangle = 90 - elev
 
@@ -853,8 +853,8 @@ def autoCheckFit(config, platepar, calstars_list, distortion_refinement=False, _
     platepar.auto_check_fit_refined = True
 
     # Recompute alt/az of the FOV centre
-    platepar.az_centre, platepar.alt_centre = raDec2AltAz(platepar.JD, platepar.lon, platepar.lat, \
-        platepar.RA_d, platepar.dec_d)
+    platepar.az_centre, platepar.alt_centre = raDec2AltAz(platepar.RA_d, platepar.dec_d, platepar.JD, \
+        platepar.lat, platepar.lon)
 
     # Recompute the rotation wrt horizon
     platepar.rotation_from_horiz = rotationWrtHorizon(platepar)

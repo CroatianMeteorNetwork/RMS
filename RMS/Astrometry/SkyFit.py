@@ -50,11 +50,11 @@ import PIL.Image, PIL.ImageDraw
 import scipy.optimize
 import scipy.ndimage
 
-from RMS.Astrometry.ApplyAstrometry import altAzToRADec, xyToRaDecPP, raDec2AltAz, raDecToXYPP, \
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
-from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle
+from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, raDec2AltAz, altAz2RADec
 import RMS.ConfigReader as cr
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
@@ -1025,16 +1025,13 @@ class PlateTool(object):
             self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
 
 
-        # Compute the datetime object of the reference Julian date
-        time_data = [jd2Date(self.platepar.JD, dt_obj=True)]
-
         # Convert the reference alt/az to reference RA/Dec
-        _, ra_data, dec_data = altAzToRADec(self.platepar.lat, self.platepar.lon, self.platepar.UT_corr, 
-            time_data, [self.platepar.az_centre], [self.platepar.alt_centre], dt_time=True)
+        ra, dec = altAz2RADec(self.platepar.az_centre, self.platepar.alt_centre, self.platepar.JD, \
+            self.platepar.lat, self.platepar.lon)
 
         # Assign the computed RA/Dec to platepar
-        self.platepar.RA_d = ra_data[0]
-        self.platepar.dec_d = dec_data[0]
+        self.platepar.RA_d = ra
+        self.platepar.dec_d = dec
 
 
         if not skip_rot_update:
@@ -1278,8 +1275,8 @@ class PlateTool(object):
             self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz = self.getFOVcentre()
             
             # Recalculate reference alt/az
-            self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.JD, \
-                self.platepar.lon, self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d)
+            self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.RA_d, \
+                self.platepar.dec_d, self.platepar.JD, self.platepar.lat, self.platepar.lon)
 
             # Compute the position angle
             self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, \
@@ -1821,8 +1818,8 @@ class PlateTool(object):
             self.drawCalstars()
 
         # Update centre of FOV in horizontal coordinates
-        self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.JD, self.platepar.lon, 
-            self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d)
+        self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.RA_d, \
+            self.platepar.dec_d, self.platepar.JD, self.platepar.lat, self.platepar.lon)
 
         ### Draw catalog stars on the image using the current platepar ###
         ######################################################################################################
@@ -2140,7 +2137,7 @@ class PlateTool(object):
         pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, orientation)
 
         # Compute reference azimuth and altitude
-        azim, alt = raDec2AltAz(jd, self.platepar.lon, self.platepar.lat, ra, dec)
+        azim, alt = raDec2AltAz(ra, dec, jd, self.platepar.lat, self.platepar.lon)
 
         # Set parameters to platepar
         self.platepar.pos_angle_ref = pos_angle_ref
@@ -2189,15 +2186,12 @@ class PlateTool(object):
         # Set the reference hour angle
         self.platepar.Ho = JD2HourAngle(self.platepar.JD)%360
 
-        
-        time_data = [img_time]
-
         # Convert FOV centre to RA, Dec
-        _, ra_data, dec_data = altAzToRADec(self.platepar.lat, self.platepar.lon, self.platepar.UT_corr, 
-            time_data, [self.azim_centre], [self.alt_centre])
+        ra, dec = altAz2RADec(self.azim_centre, self.alt_centre, date2JD(*img_time), \
+            self.platepar.lat, self.platepar.lon)
 
 
-        return ra_data[0], dec_data[0], rot_horizontal
+        return ra, dec, rot_horizontal
 
 
 
