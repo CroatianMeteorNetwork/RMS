@@ -262,11 +262,52 @@ cdef double refractionApparentToTrue(double elev):
 
     cdef double refraction
 
-    # Refraction in radians
-    refraction = radians(1.0/(60*tan(radians(degrees(elev) + 7.31/(degrees(elev) + 4.4)))))
+    # Don't apply refraction for elevation below -0.5 deg
+    if elev > radians(-0.5):
+
+        # Refraction in radians
+        refraction = radians(1.0/(60*tan(radians(degrees(elev) + 7.31/(degrees(elev) + 4.4)))))
+
+    else:
+        refraction = 0.0
 
     # Correct the elevation
     return elev - refraction
+
+
+
+cdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double jd, double lat, double lon):
+    """ Correct the equatorial coordinates for refraction. The correction is done from apparent to true
+        coordinates.
+    
+    Arguments:
+        ra: [float] Right ascension in radians.
+        dec: [float] Declination in radians.
+        jd: [float] Julian date.
+        lat: [float] latitude in radians.
+        lon: [float] longitude in radians.
+
+    Return:
+        (ra, dec):
+            - ra: [float] Refraction corrected (true) right ascension in radians.
+            - dec: [float] Refraction corrected (true) declination in radians.
+
+    """
+
+    cdef double azim, alt
+
+    # Convert coordinates to alt/az
+    azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
+
+    # Correct the elevation
+    alt = refractionApparentToTrue(alt)
+
+    # Convert back to equatorial
+    ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
+
+
+    return (ra, dec)
+
 
 
 @cython.cdivision(True)
@@ -286,11 +327,51 @@ cdef double refractionTrueToApparent(double elev):
 
     cdef double refraction
 
-    # Refraction in radians
-    refraction = radians(1.02/(60*tan(radians(degrees(elev) + 10.3/(degrees(elev) + 5.11)))))
+    # Don't apply refraction for elevation below -0.5 deg
+    if elev > radians(-0.5):
+
+        # Refraction in radians
+        refraction = radians(1.02/(60*tan(radians(degrees(elev) + 10.3/(degrees(elev) + 5.11)))))
+
+    else:
+        refraction = 0.0
 
     # Apply the refraction
     return elev + refraction
+
+
+
+cdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double jd, double lat, double lon):
+    """ Correct the equatorial coordinates for refraction. The correction is done from true to apparent
+        coordinates.
+    
+    Arguments:
+        ra: [float] Right ascension in radians.
+        dec: [float] Declination in radians.
+        jd: [float] Julian date.
+        lat: [float] Latitude in radians.
+        lon: [float] Longitude in radians.
+
+    Return:
+        (ra, dec):
+            - ra: [float] Apparent right ascension in radians.
+            - dec: [float] Apparent declination in radians.
+
+    """
+
+    cdef double azim, alt
+
+    # Convert coordinates to alt/az
+    azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
+
+    # Correct the elevation
+    alt = refractionTrueToApparent(alt)
+
+    # Convert back to equatorial
+    ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
+
+
+    return (ra, dec)
 
 
 
@@ -302,8 +383,8 @@ cpdef (double, double) cyraDec2AltAz(double ra, double dec, double jd, double la
         ra: [float] Right ascension in radians.
         dec: [float] Declination in radians.
         jd: [float] Julian date.
-        lat: [float] latitude in radians.
-        lon: [float] longitude in radians.
+        lat: [float] Latitude in radians.
+        lon: [float] Longitude in radians.
 
     Return:
         (azim, elev): [tuple]
@@ -409,8 +490,8 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     """
 
     cdef int i
-    cdef double ra_star, dec_star, ra_centre, dec_centre, azim, alt
-    cdef double ra, dec, ad, radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, dradius
+    cdef double ra_centre, dec_centre, ra, dec
+    cdef double radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, dradius
 
     # Init output arrays
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] x_array = np.zeros_like(ra_data)
@@ -426,44 +507,36 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     ra_centre = radians((ra_ref + cyjd2LST(jd, 0) - h0)%360)
     dec_centre = radians(dec_ref)
 
+    # # Correct the reference FOV centre for refraction
+    # if refraction:
+    #     ra_centre, dec_centre = eqRefractionTrueToApparent(ra_centre, dec_centre, jd, lat, lon)
+
 
     # Convert all equatorial coordinates to image coordinates
     for i in range(ra_data.shape[0]):
 
-        ra_star = ra_data[i]
-        dec_star = dec_data[i]
+        ra = radians(ra_data[i])
+        dec = radians(dec_data[i])
 
         ### Gnomonization of star coordinates to image coordinates ###
-        
-        ra = radians(ra_star)
-        dec = radians(dec_star)
 
-
-        # Apply refraction
-        if refraction:
-
-            # Convert coordinates to alt/az
-            azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
-
-            # Correct the elevation
-            alt = refractionTrueToApparent(alt)
-
-            # Convert back to equatorial
-            ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
+        # # Apply refraction
+        # if refraction:
+        #     ra, dec = eqRefractionTrueToApparent(ra, dec, jd, lat, lon)
 
 
         # Compute the distance from the FOV centre to the sky coordinate
-        radius = angularSeparation(ra_star, dec_star, degrees(ra_centre), degrees(dec_centre))
-        ad = radians(radius)
+        radius = radians(angularSeparation(degrees(ra), degrees(dec), degrees(ra_centre), \
+            degrees(dec_centre)))
 
         # Compute theta - the direction angle between the FOV centre, sky coordinate, and the image vertical
-        sin_ang = cos(dec)*sin(ra - ra_centre)/sin(ad)
-        cos_ang = (sin(dec) - sin(dec_centre)*cos(ad))/(cos(dec_centre)*sin(ad))
-        theta = -degrees(atan2(sin_ang, cos_ang)) + pos_angle_ref - 90.0
+        sin_ang = cos(dec)*sin(ra - ra_centre)/sin(radius)
+        cos_ang = (sin(dec) - sin(dec_centre)*cos(radius))/(cos(dec_centre)*sin(radius))
+        theta   = -atan2(sin_ang, cos_ang) + radians(pos_angle_ref) - pi/2.0
 
         # Calculate the uncorrected image coordinates
-        x = radius*cos(radians(theta))*pix_scale
-        y = radius*sin(radians(theta))*pix_scale
+        x = degrees(radius)*cos(theta)*pix_scale
+        y = degrees(radius)*sin(theta)*pix_scale
         r = sqrt(x**2 + y**2)
 
         ### ###
@@ -585,13 +658,13 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     """
 
     cdef int i
-    cdef double dec_rad
     cdef double jd, x_img, y_img, r_img, dx, x_corr, dy, y_corr, dradius
-    cdef double radius, theta, sin_t, dec0, cos_t, ra0
-    cdef double ha, ra, dec, alt, az
+    cdef double radius, theta, sin_t, cos_t
+    cdef double ha, ra_ref_now, ra, dec
 
-    # Convert the reference declination to radians
-    dec_rad = radians(dec_ref)
+    # Convert the reference pointing direction to radians
+    ra_ref  = radians(ra_ref)
+    dec_ref = radians(dec_ref)
 
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data = np.zeros_like(jd_data)
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data = np.zeros_like(jd_data)
@@ -703,36 +776,37 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         # Compute theta - the direction angle between the FOV centre, sky coordinate, and the image vertical
         theta = (pi/2 - radians(pos_angle_ref) + atan2(y_corr, x_corr))%(2*pi)
 
-        # Transform the radius and direction to coordinates on the sky
-        sin_t = sin(dec_rad)*cos(radius) + cos(dec_rad)*sin(radius)*cos(theta)
-        dec0 = atan2(sin_t, sqrt(1 - sin_t**2))
-
-        sin_t = sin(theta)*sin(radius)/cos(dec0)
-        cos_t = (cos(radius) - sin(dec0)*sin(dec_rad))/(cos(dec0)*cos(dec_rad))
-        ra0 = (ra_ref - degrees(atan2(sin_t, cos_t)))%360
-
-        # Add the hour angle difference to the right ascension
-        ra = radians((ra0 + cyjd2LST(jd, 0) - h0)%360)
-        dec = dec0
+        ### Transform the radius and direction to coordinates on the sky ###
 
 
-        # Apply refraction correction
-        if refraction:
+        # Compute the reference RA centre at the given JD by adding the hour angle difference
+        ra_ref_now = (ra_ref + radians(cyjd2LST(jd, 0)) - radians(h0))%(2*pi)
 
-            # Convert coordinates to alt/az
-            azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
 
-            # Correct the elevation
-            alt = refractionApparentToTrue(alt)
+        # # Correct the FOV centre for refraction
+        # if refraction:
+        #     ra_ref_now, dec_ref = eqRefractionApparentToTrue(ra_ref_now, dec_ref, jd, lat, lon)
 
-            # Convert back to equatorial
-            ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
+
+        # Compute declination
+        sin_t = sin(dec_ref)*cos(radius) + cos(dec_ref)*sin(radius)*cos(theta)
+        dec = atan2(sin_t, sqrt(1 - sin_t**2))
+
+        # Compute right ascension
+        sin_t = sin(theta)*sin(radius)/cos(dec)
+        cos_t = (cos(radius) - sin(dec)*sin(dec_ref))/(cos(dec)*cos(dec_ref))
+        ra = (ra_ref_now - atan2(sin_t, cos_t))%(2*pi)
+
+
+        # # Apply refraction correction
+        # if refraction:
+        #     ra, dec = eqRefractionApparentToTrue(ra, dec, jd, lat, lon)
 
 
 
         # Convert coordinates to degrees
         ra = degrees(ra)
-        dec = degrees(dec0)
+        dec = degrees(dec)
 
 
         # Assign values to output list

@@ -384,6 +384,9 @@ class PlateTool(object):
 
         self.ax.figure.canvas.mpl_connect('key_press_event', self.onKeyPress)
 
+        # Set the status updater
+        self.ax.format_coord = self.mouseOverStatus
+
 
 
     def saveState(self):
@@ -554,6 +557,42 @@ class PlateTool(object):
         # Change the position of the star aperature circle
         if self.star_pick_mode:
             self.drawCursorCircle()
+
+
+
+    def mouseOverStatus(self, x, y):
+        """ Format the status message which will be printed in the status bar below the plot. 
+
+        Arguments:
+            x: [float] Plot X coordiante.
+            y: [float] Plot Y coordinate.
+
+        Return:
+            [str]: formatted output string to be written in the status bar
+        """
+
+
+        # Write image X, Y coordinates and image intensity
+        status_str = "x={:7.2f}  y={:7.2f}  Intens={:d}".format(x, y, self.img_data_raw[int(y), int(x)])
+
+        # Add coordinate info if platepar is present
+        if self.platepar is not None:
+
+            # Get the current frame time
+            time_data = [self.img_handle.currentTime()]
+
+            # Compute RA, dec
+            jd, ra, dec, _ = xyToRaDecPP(time_data, [x], [y], [1], self.platepar)
+
+            # Compute alt, az
+            azim, alt = raDec2AltAz(ra[0], dec[0], jd[0], self.platepar.lat, self.platepar.lon)
+
+
+            status_str += ",  Azim={:6.2f}  Alt={:6.2f},  RA={:6.2f}  Dec={:+6.2f}".format(azim, alt, \
+                ra[0], dec[0])
+
+
+        return status_str
 
         
 
@@ -1714,6 +1753,9 @@ class PlateTool(object):
         if clear_plot:
             self.fig.clf()
             self.ax = self.fig.add_subplot(111)
+
+            # Set the status update formatter
+            self.ax.format_coord = self.mouseOverStatus
 
 
         # Check that the calibration parameters are within the nominal range
