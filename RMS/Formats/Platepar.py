@@ -225,6 +225,12 @@ class Platepar(object):
         self.x_poly_rev[0] = 0.5
         self.y_poly_rev[0] = 0.5
 
+        # If the distortion is radial, set the second X parameter to 0.5, as x_poly[1] is used for the Y
+        #   offset in the radial models
+        if self.distortion_type.startswith("radial"):
+            self.x_poly_fwd[1] = 0.5
+            self.x_poly_rev[1] = 0.5
+
 
 
     def setDistortionType(self, distortion_type, reset_params=True):
