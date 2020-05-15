@@ -51,6 +51,11 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import cyraDecToXY, cyXYToRADec
 
 
+# Handle Python 2/3 compability
+if sys.version_info.major == 3:
+    unicode = str
+
+
 def correctVignetting(px_sum, radius, vignetting_coeff):
     """ Given a pixel sum, radius from focal plane centre and the vignetting coefficient, correct the pixel
         sum for the vignetting effect.
@@ -457,7 +462,7 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar):
         np.array(Y_data, dtype=np.float64), float(platepar.lat), float(platepar.lon), float(platepar.X_res), \
         float(platepar.Y_res), float(platepar.Ho), float(platepar.RA_d), float(platepar.dec_d), \
         float(platepar.pos_angle_ref), float(platepar.F_scale), platepar.x_poly_fwd, platepar.y_poly_fwd, \
-        str(platepar.distortion_type))
+        unicode(platepar.distortion_type))
 
     # Compute radiia from image centre
     radius_arr = np.hypot(np.array(X_data) - platepar.X_res/2, np.array(Y_data) - platepar.Y_res/2)
@@ -495,7 +500,7 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar):
     X_data, Y_data = cyraDecToXY(RA_data, dec_data, float(jd), float(platepar.lat), float(platepar.lon), 
         float(platepar.X_res), float(platepar.Y_res), float(platepar.Ho), float(platepar.RA_d), \
         float(platepar.dec_d), float(platepar.pos_angle_ref), platepar.F_scale, platepar.x_poly_rev, \
-        platepar.y_poly_rev, str(platepar.distortion_type))
+        platepar.y_poly_rev, unicode(platepar.distortion_type))
     
     return X_data, Y_data
 
