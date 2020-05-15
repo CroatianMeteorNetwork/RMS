@@ -507,9 +507,9 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     ra_centre = radians((ra_ref + cyjd2LST(jd, 0) - h0)%360)
     dec_centre = radians(dec_ref)
 
-    # # Correct the reference FOV centre for refraction
-    # if refraction:
-    #     ra_centre, dec_centre = eqRefractionTrueToApparent(ra_centre, dec_centre, jd, lat, lon)
+    # Correct the reference FOV centre for refraction
+    if refraction:
+        ra_centre, dec_centre = eqRefractionTrueToApparent(ra_centre, dec_centre, jd, radians(lat), radians(lon))
 
 
     # Convert all equatorial coordinates to image coordinates
@@ -520,9 +520,9 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
 
         ### Gnomonization of star coordinates to image coordinates ###
 
-        # # Apply refraction
-        # if refraction:
-        #     ra, dec = eqRefractionTrueToApparent(ra, dec, jd, lat, lon)
+        # Apply refraction
+        if refraction:
+            ra, dec = eqRefractionTrueToApparent(ra, dec, jd, radians(lat), radians(lon))
 
 
         # Compute the distance from the FOV centre to the sky coordinate
@@ -785,7 +785,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
         # # Correct the FOV centre for refraction
         # if refraction:
-        #     ra_ref_now, dec_ref = eqRefractionApparentToTrue(ra_ref_now, dec_ref, jd, lat, lon)
+        #     ra_ref_now, dec_ref = eqRefractionApparentToTrue(ra_ref_now, dec_ref, jd, radians(lat), radians(lon))
 
 
         # Compute declination
@@ -798,9 +798,9 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         ra = (ra_ref_now - atan2(sin_t, cos_t))%(2*pi)
 
 
-        # # Apply refraction correction
-        # if refraction:
-        #     ra, dec = eqRefractionApparentToTrue(ra, dec, jd, lat, lon)
+        # Apply refraction correction
+        if refraction:
+            ra, dec = eqRefractionApparentToTrue(ra, dec, jd, radians(lat), radians(lon))
 
 
 
