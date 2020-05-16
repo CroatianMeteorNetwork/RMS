@@ -368,7 +368,7 @@ class Platepar(object):
             # Set distortion parameters
             pp_copy = copy.deepcopy(platepar)
 
-            if dimension == 'x':
+            if (dimension == 'x') or (dimension == 'radial'):
                 pp_copy.x_poly_rev = params
                 pp_copy.y_poly_rev = np.zeros(12)
 
@@ -389,8 +389,13 @@ class Platepar(object):
             if dimension == 'x':
                 dist_sum = np.sum((catalog_x - img_x)**2)
 
-            else:
+            elif dimension == 'y':
                 dist_sum = np.sum((catalog_y - img_y)**2)
+
+            # Minimization for the radial distortion
+            else:
+                dist_sum = np.sum((catalog_x - img_x)**2 + (catalog_y - img_y)**2)
+
 
 
             return dist_sum
@@ -408,7 +413,7 @@ class Platepar(object):
 
             pp_copy = copy.deepcopy(platepar)
 
-            if dimension == 'x':
+            if (dimension == 'x') or (dimension == 'radial'):
                 pp_copy.x_poly_fwd = params
 
             else:
@@ -457,7 +462,7 @@ class Platepar(object):
         # Update fitted astrometric parameters
         self.RA_d, self.dec_d, self.pos_angle_ref, self.F_scale = res.x
 
-        # Recalculate centre
+        # Recalculate FOV centre
         self.az_centre, self.alt_centre = raDec2AltAz(self.RA_d, self.dec_d, self.JD, self.lat, self.lon)
 
         ### ###
@@ -469,18 +474,17 @@ class Platepar(object):
         if len(img_stars) > 12:
 
             ### REVERSE MAPPING FIT ###
-            # Fit distortion parameters in X direction, reverse mapping
-            res = scipy.optimize.minimize(_calcImageResidualsDistortion, self.x_poly_rev, \
-                args=(self, jd, catalog_stars, img_stars, 'x'), method='Nelder-Mead', \
-                options={'maxiter': 10000, 'adaptive': True})
 
-            # Exctact fitted X polynomial
-            self.x_poly_rev = res.x
+            # Fit the polynomial distortion
+            if self.distortion_type.startswith("poly"):
 
+                # Fit distortion parameters in X direction, reverse mapping
+                res = scipy.optimize.minimize(_calcImageResidualsDistortion, self.x_poly_rev, \
+                    args=(self, jd, catalog_stars, img_stars, 'x'), method='Nelder-Mead', \
+                    options={'maxiter': 10000, 'adaptive': True})
 
-            # Only fit the Y polynomial if a polynomial fit is used, as in the radial fit all parameters
-            #   are stored in the x_poly variable
-            if "poly" in self.distortion_type:
+                # Exctact fitted X polynomial
+                self.x_poly_rev = res.x
 
                 # Fit distortion parameters in Y direction, reverse mapping
                 res = scipy.optimize.minimize(_calcImageResidualsDistortion, self.y_poly_rev, \
@@ -489,6 +493,19 @@ class Platepar(object):
 
                 # Extract fitted Y polynomial
                 self.y_poly_rev = res.x
+
+
+            # Fit radial distortion
+            else:
+
+                # Fit the radial distortion - the X polynomial is used to store the fit paramters
+                res = scipy.optimize.minimize(_calcImageResidualsDistortion, self.x_poly_rev, \
+                    args=(self, jd, catalog_stars, img_stars, 'radial'), method='Nelder-Mead', \
+                    options={'maxiter': 10000, 'adaptive': True})
+
+                # IMPORTANT NOTE - the X polynomial is used to store the fit paramters
+                self.x_poly_rev = res.x
+
 
             ### ###
 
@@ -500,34 +517,40 @@ class Platepar(object):
                 self.x_poly_fwd = np.array(self.x_poly_rev)
                 self.y_poly_fwd = np.array(self.y_poly_rev)
 
-                # Invert the first parameters
-                self.x_poly_fwd[0] *= -1
-                self.y_poly_fwd[0] *= -1
-
-
 
             ### FORWARD MAPPING FIT ###
+            
+            # Fit the polynomial distortion
+            if self.distortion_type.startswith("poly"):
 
-            # Fit distortion parameters in X direction, forward mapping
-            res = scipy.optimize.minimize(_calcSkyResidualsDistortion, self.x_poly_fwd, \
-                args=(self, jd, catalog_stars, img_stars, 'x'), method='Nelder-Mead', \
-                options={'maxiter': 10000, 'adaptive': True})
+                # Fit distortion parameters in X direction, forward mapping
+                res = scipy.optimize.minimize(_calcSkyResidualsDistortion, self.x_poly_fwd, \
+                    args=(self, jd, catalog_stars, img_stars, 'x'), method='Nelder-Mead', \
+                    options={'maxiter': 10000, 'adaptive': True})
 
-            # Exctact fitted X polynomial
-            self.x_poly_fwd = res.x
+                # Extract fitted X polynomial
+                self.x_poly_fwd = res.x
 
-
-            # Only fit the Y polynomial if a polynomial fit is used, as in the radial fit all parameters
-            #   are stored in the x_poly variable
-            if "poly" in self.distortion_type:
 
                 # Fit distortion parameters in Y direction, forward mapping
                 res = scipy.optimize.minimize(_calcSkyResidualsDistortion, self.y_poly_fwd, \
                     args=(self, jd, catalog_stars, img_stars, 'y'), method='Nelder-Mead', \
                     options={'maxiter': 10000, 'adaptive': True})
 
-                # Extract fitted Y polynomial
+                # IMPORTANT NOTE - the X polynomial is used to store the fit paramters
                 self.y_poly_fwd = res.x
+
+
+            # Fit the radial distortion
+            else:
+
+                # Fit the radial distortion - the X polynomial is used to store the fit paramters
+                res = scipy.optimize.minimize(_calcSkyResidualsDistortion, self.x_poly_fwd, \
+                    args=(self, jd, catalog_stars, img_stars, 'radial'), method='Nelder-Mead', \
+                    options={'maxiter': 10000, 'adaptive': True})
+
+                # Extract fitted X polynomial
+                self.x_poly_fwd = res.x
 
             ### ###
 
