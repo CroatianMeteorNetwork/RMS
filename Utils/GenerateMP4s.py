@@ -128,7 +128,7 @@ def GenerateMP4s(dir_path, ftpfile_name):
                 print("Creating timelapse using avconv...")
                 com = "cd " + dir_path + ";" \
                     + software_name + " -v quiet -r 30 -y -i " + temp_img_path \
-                    + " -vcodec libx264 -pix_fmt yuv420p -crf 25 -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" " \
+                    + " -vcodec libx264 -pix_fmt yuv420p -crf 25 -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.97)\" " \
                     + mp4_path
 
         print(com)
