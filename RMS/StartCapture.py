@@ -480,7 +480,7 @@ def processIncompleteCaptures(config, upload_manager):
         try:
 
             # Reprocess the night
-            _, archive_name, detector = processNight(captured_dir_path, config)
+            night_archive_dir, archive_name, detector = processNight(captured_dir_path, config)
 
             # Upload the archive, if upload is enabled
             if upload_manager is not None:
@@ -491,6 +491,11 @@ def processIncompleteCaptures(config, upload_manager):
             # Delete detection backup files
             if detector is not None:
                 detector.deleteBackupFiles()
+
+
+            # Run the external script if running after autoreprocess is enabled
+            if config.external_script_run and config.auto_reprocess_external_script_run:
+                runExternalScript(captured_dir_path, night_archive_dir, config)
 
             log.info("Folder {:s} reprocessed with success!".format(captured_dir_path))
 
@@ -724,9 +729,12 @@ if __name__ == "__main__":
         # Wait to start capturing
         if start_time != True:
 
-            # Check if there's a folder containing unprocessed data.
-            # This may happen if the system crashed during processing.
-            processIncompleteCaptures(config, upload_manager)
+            # Run auto-reprocessing
+            if config.auto_reprocess:
+                
+                # Check if there's a folder containing unprocessed data.
+                # This may happen if the system crashed during processing.
+                processIncompleteCaptures(config, upload_manager)
 
 
             # Initialize the slideshow of last night's detections
