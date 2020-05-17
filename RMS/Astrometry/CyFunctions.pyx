@@ -803,6 +803,10 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
             ra_ref_now_corr, dec_ref_corr = eqRefractionTrueToApparent(ra_ref_now, dec_ref, jd, \
                 radians(lat), radians(lon))
 
+        else:
+            ra_ref_now_corr = ra_ref_now
+            dec_ref_corr = dec_ref
+
 
         # Compute declination
         sin_t = sin(dec_ref_corr)*cos(radius) + cos(dec_ref_corr)*sin(radius)*cos(theta)

@@ -1437,6 +1437,16 @@ class PlateTool(object):
             self.updateGamma(0.9)
 
 
+        # Toggle refraction
+        elif event.key == 't':
+
+            if self.platepar is not None:
+                
+                self.platepar.refraction = not self.platepar.refraction
+
+                self.updateImage()
+
+
         elif event.key == 'ctrl+h':
 
             # Toggle levels adustment mode
@@ -1627,17 +1637,18 @@ class PlateTool(object):
         # Only draw the distortion if we have a platepar
         if self.platepar:
 
-            # Sample 20 points on every image axis (start/end 5% from image corners)
-            samples = 20
+            # Sample points on every image axis (start/end 5% from image corners)
+            x_samples = 30
+            y_samples = int(x_samples*(self.platepar.Y_res/self.platepar.X_res))
             corner_frac = 0.05
             x_samples = np.linspace(corner_frac*self.platepar.X_res, (1 - corner_frac)*self.platepar.X_res, \
-                samples)
+                x_samples)
             y_samples = np.linspace(corner_frac*self.platepar.Y_res, (1 - corner_frac)*self.platepar.Y_res, \
-                samples)
+                y_samples)
 
             # Create a platepar with no distortion
             platepar_nodist = copy.deepcopy(self.platepar)
-            platepar_nodist.resetDistortionParameters()
+            platepar_nodist.resetDistortionParameters(preserve_centre=True)
 
             # Make X, Y pairs
             xx, yy = np.meshgrid(x_samples, y_samples)
@@ -1946,8 +1957,9 @@ class PlateTool(object):
             text_str += 'Rot eq    = {:.3f}$\\degree$\n'.format(rotationWrtStandard(self.platepar))
             #text_str += 'Ref RA  = {:.3f}\n'.format(self.platepar.RA_d)
             #text_str += 'Ref Dec = {:.3f}\n'.format(self.platepar.dec_d)
-            text_str += "Scale  = {:.3f}'/px\n".format(60/self.platepar.F_scale)
-            text_str += 'Lim mag  = {:.1f}\n'.format(self.cat_lim_mag)
+            text_str += "Pix scale = {:.3f}'/px\n".format(60/self.platepar.F_scale)
+            text_str += "Refraction corr = {:s}\n".format(str(self.platepar.refraction))
+            text_str += 'Lim mag   = {:.1f}\n'.format(self.cat_lim_mag)
             text_str += 'Increment = {:.2f}\n'.format(self.key_increment)
             text_str += 'Img Gamma = {:.2f}\n'.format(self.img_gamma)
             text_str += 'Camera Gamma = {:.2f}\n'.format(self.config.gamma)
@@ -1979,6 +1991,7 @@ class PlateTool(object):
             text_str += 'S/W - Altitude\n'
             text_str += 'Q/E - Position angle\n'
             text_str += 'Up/Down - Scale\n'
+            text_str += 'T - Toggle refraction correction\n'
             text_str += '1/2 - X offset\n'
             text_str += '3/4 - Y offset\n'
             text_str += '5/6 - X 1st dist. coeff.\n'
