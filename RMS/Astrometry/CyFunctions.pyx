@@ -482,7 +482,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
         pix_scale: [float] Image scale (px/deg).
         x_poly_rev: [ndarray float] Distortion polynomial in X direction for reverse mapping.
         y_poly_rev: [ndarray float] Distortion polynomail in Y direction for reverse mapping.
-        dist_type: [str] Distortion type. Can be: poly3+radial, radial3, radial5, or radial7.
+        dist_type: [str] Distortion type. Can be: poly3+radial, radial3, radial4, or radial5.
         refraction: [bool] Apply refraction correction. True by default.
     
     Return:
@@ -594,20 +594,19 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
                 # Compute the new radius
                 r_corr = r*(1 + x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2)
 
+            # Apply the 4th order radial distortion
+            elif dist_type == "radial4":
+
+                # Compute the new radius
+                r_corr = r*(1 + x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2 + x_poly_rev[5]*r**3)
+
+
             # Apply the 5th order radial distortion
             elif dist_type == "radial5":
 
                 # Compute the new radius
                 r_corr = r*(1 + x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2 + x_poly_rev[5]*r**3 \
                     + x_poly_rev[6]*r**4)
-
-
-            # Apply the 5th order radial distortion
-            elif dist_type == "radial7":
-
-                # Compute the new radius
-                r_corr = r*(1 + x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2 + x_poly_rev[5]*r**3 \
-                    + x_poly_rev[6]*r**4 + x_poly_rev[7]*r**5 + x_poly_rev[8]*r**6)
 
 
             # Compute the scaling term
@@ -656,7 +655,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         pix_scale: [float] Plate scale (px/deg).
         x_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward X axis polynomial parameters.
         y_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward Y axis polynomial parameters.
-        dist_type: [str] Distortion type. Can be: poly3+radial, radial3, radial5, or radial7.
+        dist_type: [str] Distortion type. Can be: poly3+radial, radial3, radial4, or radial5.
         refraction: [bool] Apply refraction correction. True by default.
     
     Return:
@@ -747,21 +746,19 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
                 # Compute the new radius
                 r_corr = r_img*(1 + x_poly_fwd[2] + x_poly_fwd[3]*r_img + x_poly_fwd[4]*r_img**2)
 
+            # Apply the 4th order radial distortion
+            elif dist_type == "radial4":
+
+                # Compute the new radius
+                r_corr = r_img*(1 + x_poly_fwd[2] + x_poly_fwd[3]*r_img + x_poly_fwd[4]*r_img**2 \
+                    + x_poly_fwd[5]*r_img**3)
+
             # Apply the 5th order radial distortion
             elif dist_type == "radial5":
 
                 # Compute the new radius
                 r_corr = r_img*(1 + x_poly_fwd[2] + x_poly_fwd[3]*r_img + x_poly_fwd[4]*r_img**2 \
                     + x_poly_fwd[5]*r_img**3 + x_poly_fwd[6]*r_img**4)
-
-            # Apply the 5th order radial distortion
-            elif dist_type == "radial7":
-
-                # Compute the new radius
-                r_corr = r_img*(1 + x_poly_fwd[2] + x_poly_fwd[3]*r_img + x_poly_fwd[4]*r_img**2 \
-                    + x_poly_fwd[5]*r_img**3 + x_poly_fwd[6]*r_img**4 + x_poly_fwd[7]*r_img**5 \
-                    + x_poly_fwd[8]*r_img**6)
-
 
 
             # Compute the scaling term

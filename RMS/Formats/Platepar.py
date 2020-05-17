@@ -141,6 +141,7 @@ class Platepar(object):
             distortion_type: [str] Distortion type. It can be one of the following:
                 - "poly3+radial" - 3rd order polynomial fit including a single radial term
                 - "radial3" - 3rd order radial distortion
+                - "radial4" - 4th order radial distortion
                 - "radial5" - 5th order radial distortion
     
         Return:
@@ -240,8 +241,8 @@ class Platepar(object):
         self.distortion_type_list = [
              "poly3+radial",
                   "radial3",
-                  "radial5",
-                  "radial7"
+                  "radial4",
+                  "radial5"
             ]
 
         # Set the length of the distortion polynomial depending on the distortion type
