@@ -1441,7 +1441,7 @@ class PlateTool(object):
         elif event.key == 't':
 
             if self.platepar is not None:
-                
+
                 self.platepar.refraction = not self.platepar.refraction
 
                 self.updateImage()
@@ -1607,10 +1607,17 @@ class PlateTool(object):
 
         """
 
-        # Load catalog stars
-        catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios = StarCatalog.readStarCatalog(\
-            self.config.star_catalog_path, self.config.star_catalog_file, lim_mag=lim_mag, \
+        # Load the star catalog
+        catalog_status = StarCatalog.readStarCatalog(self.config.star_catalog_path, \
+            self.config.star_catalog_file, lim_mag=lim_mag, \
             mag_band_ratios=self.config.star_catalog_band_ratios)
+
+        if catalog_status is False:
+            raise FileNotFoundError("The star catalog file could not be loaded: {:s}".format(\
+                os.path.join(self.config.star_catalog_path, self.config.star_catalog_file)))
+
+        
+        catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios = catalog_status
 
         return catalog_stars
 
