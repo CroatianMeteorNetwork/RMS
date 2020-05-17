@@ -187,6 +187,9 @@ class Platepar(object):
         # FOV scale (px/deg)
         self.F_scale = 1.0
 
+        # Refraction on/off
+        self.refraction = True
+
         # Photometry calibration
         self.mag_0 = -2.5
         self.mag_lev = 1.0
@@ -208,29 +211,74 @@ class Platepar(object):
         self.resetDistortionParameters()
 
 
-    def resetDistortionParameters(self):
-        """ Set the distortion parameters to zero. """
+    def resetDistortionParameters(self, preserve_centre=False):
+        """ Set the distortion parameters to zero. 
+    
+        Keyword arguments:
+            preserve_centre: [bool] Don't reset the distortion centre. False by default, in which case it will
+                be reset.
+        """
 
-        # Distortion fit (forward and reverse)
+        # Store the distortion centre if it needs to be preserved
+        if preserve_centre:
+
+            # Preserve centre for the radial distortion
+            if self.distortion_type.startswith("radial"):
+
+                # Note that the radial distortion parameters are kept in the X poly array
+                x_centre_fwd, y_centre_fwd = self.x_poly_fwd[0], self.x_poly_fwd[1]
+                x_centre_rev, y_centre_rev = self.x_poly_rev[0], self.x_poly_rev[1]
+
+            else:
+
+                # Preserve centre for the polynomial distortion
+                x_centre_fwd, x_centre_rev = self.x_poly_fwd[0], self.x_poly_rev[0]
+                y_centre_fwd, y_centre_rev = self.y_poly_fwd[0], self.y_poly_rev[0]
+
+
+        # Reset distortion fit (forward and reverse)
         self.x_poly_fwd = np.zeros(shape=(12,), dtype=np.float64)
         self.y_poly_fwd = np.zeros(shape=(12,), dtype=np.float64)
         self.x_poly_rev = np.zeros(shape=(12,), dtype=np.float64)
         self.y_poly_rev = np.zeros(shape=(12,), dtype=np.float64)
 
+
+
+        # Preserve the image centre
+        if preserve_centre:
+
+            # Preserve centre for the radial distortion
+            if self.distortion_type.startswith("radial"):
+
+                # Note that the radial distortion parameters are kept in the X poly array
+                self.x_poly_fwd[0], self.x_poly_fwd[1] = x_centre_fwd, y_centre_fwd
+                self.x_poly_rev[0], self.x_poly_rev[1] = x_centre_rev, y_centre_rev
+
+            else:
+
+                # Preserve centre for the polynomial distortion
+                self.x_poly_fwd[0], self.x_poly_rev[0] = x_centre_fwd, x_centre_rev
+                self.y_poly_fwd[0], self.y_poly_rev[0] = y_centre_fwd, y_centre_rev
+
+
+        # Reset the image centre
+        else:
+            # Set the first coeffs to 0.5, as that is the real centre of the FOV
+            self.x_poly_fwd[0] = 0.5
+            self.y_poly_fwd[0] = 0.5
+            self.x_poly_rev[0] = 0.5
+            self.y_poly_rev[0] = 0.5
+
+            # If the distortion is radial, set the second X parameter to 0.5, as x_poly[1] is used for the Y
+            #   offset in the radial models
+            if self.distortion_type.startswith("radial"):
+                self.x_poly_fwd[1] = 0.5
+                self.x_poly_rev[1] = 0.5
+
+
+
         self.x_poly = self.x_poly_fwd
         self.y_poly = self.y_poly_fwd
-
-        # Set the first coeffs to 0.5, as that is the real centre of the FOV
-        self.x_poly_fwd[0] = 0.5
-        self.y_poly_fwd[0] = 0.5
-        self.x_poly_rev[0] = 0.5
-        self.y_poly_rev[0] = 0.5
-
-        # If the distortion is radial, set the second X parameter to 0.5, as x_poly[1] is used for the Y
-        #   offset in the radial models
-        if self.distortion_type.startswith("radial"):
-            self.x_poly_fwd[1] = 0.5
-            self.x_poly_rev[1] = 0.5
 
 
 
@@ -597,6 +645,12 @@ class Platepar(object):
         # Add the version if it was not in the platepar (v1 platepars didn't have a version)
         if not 'version' in self.__dict__:
             self.version = 1
+
+
+        # If the refraction was not used for the fit, assume it is disabled
+        if not 'refraction' in self.__dict__:
+            self.refraction = False
+
 
         # Add the distortion type if not present (assume it's the polynomal type with the radial term)
         if not 'distortion_type' in self.__dict__:
