@@ -190,7 +190,10 @@ class ManualReductionTool(object):
         self.flat_struct = None
         self.dark = None
 
-        self.platepar = None
+
+        # Load platepar
+        _, self.platepar = self.loadPlatepar()
+
 
         # Image gamma and levels
         self.auto_levels = False
@@ -478,7 +481,11 @@ class ManualReductionTool(object):
             
             self.loadPlatepar()
 
-        
+            
+        # Always turn refraction on in platepar that is being used
+        if not platepar.refraction:
+            platepar.refraction = True
+            print("Refraction compensation turned ON!")
 
         return platepar_file, platepar
 
