@@ -25,7 +25,7 @@ from matplotlib.font_manager import FontProperties
 
 import RMS.ConfigReader as cr
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, applyAstrometryFTPdetectinfo
-from RMS.Astrometry.Conversions import datetime2JD, jd2Date, raDec2AltAz
+from RMS.Astrometry.Conversions import J2000_JD, datetime2JD, jd2Date, raDec2AltAz, equatorialCoordPrecession
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FRbin import read as readFR
 from RMS.Formats.FRbin import validFRName
@@ -1351,12 +1351,16 @@ class ManualReductionTool(object):
             # Compute RA, dec
             jd, ra, dec, _ = xyToRaDecPP(time_data, [x], [y], [1], self.platepar)
 
+
+            # Precess RA/Dec to epoch of date for alt/az computation
+            ra_date, dec_date = equatorialCoordPrecession(J2000_JD.days, jd[0], ra[0], dec[0])
+
             # Compute alt, az
-            azim, alt = raDec2AltAz(ra[0], dec[0], jd[0], self.platepar.lat, self.platepar.lon)
+            azim, alt = raDec2AltAz(ra_date, dec_date, jd[0], self.platepar.lat, self.platepar.lon)
 
 
-            status_str += ",  Azim={:6.2f}  Alt={:6.2f},  RA={:6.2f}  Dec={:+6.2f}".format(azim, alt, \
-                ra[0], dec[0])
+            status_str += ",  Azim={:6.2f}  Alt={:6.2f} (date),  RA={:6.2f}  Dec={:+6.2f} (J2000)".format(\
+                azim, alt, ra[0], dec[0])
 
 
         return status_str
