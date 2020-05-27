@@ -592,21 +592,24 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
             if dist_type == "radial3":
 
                 # Compute the new radius
-                r_corr = r*(1 + x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2)
+                #r_corr = r*(1 + x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2)
+                r_corr = r - x_poly_rev[2]*r**2 - x_poly_rev[3]*r**3
 
             # Apply the 4th order radial distortion
             elif dist_type == "radial4":
 
                 # Compute the new radius
-                r_corr = r*(1 + x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2 + x_poly_rev[5]*r**3)
+                #r_corr = r*(1 + x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2 + x_poly_rev[5]*r**3)
+                r_corr = r - x_poly_rev[2]*r**2 - x_poly_rev[3]*r**3 - x_poly_rev[4]*r**4
 
 
             # Apply the 5th order radial distortion
             elif dist_type == "radial5":
 
                 # Compute the new radius
-                r_corr = r*(1 + x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2 + x_poly_rev[5]*r**3 \
-                    + x_poly_rev[6]*r**4)
+                # r_corr = r*(1 + x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2 + x_poly_rev[5]*r**3 \
+                #     + x_poly_rev[6]*r**4)
+                r_corr = r - x_poly_rev[2]*r**2 - x_poly_rev[3]*r**3 - x_poly_rev[4]*r**4 - x_poly_rev[5]*r**5
 
 
             # Compute the scaling term
