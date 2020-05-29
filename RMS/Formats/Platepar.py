@@ -170,14 +170,13 @@ class Platepar(object):
         self.Ho = 0
         self.X_res = 0
         self.Y_res = 0
-        self.focal_length = 0
 
         self.fov_h = 0
         self.fov_v = 0
 
         # FOV centre
-        self.RA_d = self.RA_H = self.RA_M = self.RA_S = 0
-        self.dec_d = self.dec_D = self.dec_M = self.dec_S = 0
+        self.RA_d = 0
+        self.dec_d = 0
         self.pos_angle_ref = 0
         self.rotation_from_horiz = 0
 
@@ -499,9 +498,8 @@ class Platepar(object):
         p0 = [self.RA_d, self.dec_d, self.pos_angle_ref, self.F_scale]
 
         # Fit the astrometric parameters using the reverse transform for reference        
-        res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, args=(self, jd, \
-            catalog_stars, img_stars),
-            method='Nelder-Mead')
+        res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, \
+            args=(self, jd, catalog_stars, img_stars), method='Nelder-Mead')
 
         # # Fit the astrometric parameters using the forward transform for reference
         #   WARNING: USING THIS MAKES THE FIT UNSTABLE
