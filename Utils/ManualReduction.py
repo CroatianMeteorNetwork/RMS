@@ -758,6 +758,9 @@ class ManualReductionTool(object):
             text_str += "Image gamma  = {:.2f}\n".format(self.img_gamma)
             text_str += "Camera gamma = {:.2f}\n".format(self.config.gamma)
 
+            if self.platepar is not None:
+                text_str += "Refraction   = {:s}\n".format(str(self.platepar.refraction))
+
 
             # Add info about applied image corrections
             if self.subtract_avepixel:
@@ -803,6 +806,7 @@ class ManualReductionTool(object):
             text_str += 'R - Reset view\n'
             text_str += 'M - Show maxpixel\n'
             text_str += 'K - Subtract average\n'
+            text_str += 'T - Toggle refraction correction\n'
             text_str += 'U/J - Img Gamma\n'
             text_str += 'P - Show lightcurve\n'
             text_str += 'CTRL + A - Auto levels\n'
@@ -1057,6 +1061,16 @@ class ManualReductionTool(object):
 
             # Decrease image gamma by a factor of 0.9x
             self.updateGamma(0.9)
+
+
+        # Toggle refraction
+        elif event.key == 't':
+
+            if self.platepar is not None:
+
+                self.platepar.refraction = not self.platepar.refraction
+
+                self.updateImage()
 
 
         # Show maxpixel instead of individual frames
