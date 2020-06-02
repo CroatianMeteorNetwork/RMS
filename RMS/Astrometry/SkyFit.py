@@ -68,7 +68,7 @@ from RMS.Misc import decimalDegreesToSexHours, openFileDialog
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
+from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession, eqRefractionTrueToApparent
 
 
 
@@ -370,6 +370,7 @@ class PlateTool(object):
         plt.rcParams['keymap.pan'] = ''
         plt.rcParams['keymap.forward'] = ''
         plt.rcParams['keymap.back'] = ''
+        plt.rcParams['keymap.yscale'] = ''
 
 
         
@@ -1552,6 +1553,14 @@ class PlateTool(object):
             self.photometry(show_plot=True)
 
 
+        elif event.key == 'l':
+
+            if self.star_pick_mode:
+
+                # Show astrometry residuals plot
+                self.showAstrometryFitPlots()
+
+
         # Limit values of RA and Dec
         self.platepar.RA_d = self.platepar.RA_d%360
 
@@ -2056,6 +2065,7 @@ class PlateTool(object):
                 text_str += "'CTRL + LEFT CLICK' - Manual star position\n"
                 text_str += "'CTRL + Z' - Fit stars\n"
                 text_str += "'CTRL + SHIFT + Z' - Fit with initial distortion params set to 0\n"
+                text_str += "'L' - Astrometry fit details\n"
                 text_str += "'P' - Photometry fit"
 
             self.ax.text(self.current_ff.ncols/2, self.current_ff.nrows, text_str, color='r', \
@@ -2825,6 +2835,156 @@ class PlateTool(object):
 
 
             self.fig.canvas.draw_idle()
+
+
+
+    def showAstrometryFitPlots(self):
+        """ Show window with astrometry fit details. """
+
+
+        # Extract paired catalog stars and image coordinates separately
+        catalog_stars = np.array([cat_coords for img_coords, cat_coords in self.paired_stars])
+        img_stars = np.array([img_coords for img_coords, cat_coords in self.paired_stars])
+
+        # Get the Julian date of the image that's being fit
+        jd = date2JD(*self.img_handle.currentTime())
+
+
+        ### Calculate the fit residuals for every fitted star ###
+        
+        # Get image coordinates of catalog stars
+        catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, self.platepar)
+
+        # Azimuth and elevation residuals
+        x_list = []
+        y_list = []
+        azim_list = []
+        elev_list = []
+        azim_residuals = []
+        elev_residuals = []
+        x_residuals = []
+        y_residuals = []
+
+
+        # Get image time and Julian date
+        img_time = self.img_handle.currentTime()
+        jd = date2JD(*img_time)
+
+        # Calculate the distance and the angle between each pair of image positions and catalog predictions
+        for star_no, (cat_x, cat_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y, catalog_stars, \
+            img_stars)):
+            
+            img_x, img_y, _ = img_c
+            ra_cat, dec_cat, _ = cat_coords
+
+
+            # Compute image residuals
+            x_list.append(cat_x)
+            y_list.append(cat_y)
+            x_residuals.append(cat_x - img_x) 
+            y_residuals.append(cat_y - img_y)
+
+
+            # # Correct the catalog RA/Dec for refraction
+            # if self.platepar.refraction:
+            #     ra_cat, dec_cat = eqRefractionTrueToApparent(np.radians(ra_cat), np.radians(dec_cat), jd, \
+            #         np.radians(self.platepar.lat), np.radians(self.platepar.lon))
+            #     ra_cat, dec_cat = np.degrees(ra_cat), np.degrees(dec_cat)
+
+
+            # Compute azim/elev from the catalog
+            azim_cat, elev_cat = raDec2AltAz(ra_cat, dec_cat, jd, self.platepar.lat, self.platepar.lon)
+
+            azim_list.append(azim_cat)
+            elev_list.append(elev_cat)
+
+
+            # Compute RA/Dec from image
+            _, ra_img, dec_img, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar)
+            ra_img = ra_img[0]
+            dec_img = dec_img[0]
+
+
+            # Compute azim/elev from image coordinates
+            azim_img, elev_img = raDec2AltAz(ra_img, dec_img, jd, self.platepar.lat, self.platepar.lon)
+
+            # Compute azim/elev residuals
+            azim_residuals.append(((azim_cat - azim_img + 180)%360 - 180)*np.cos(np.radians(elev_cat)))
+            elev_residuals.append(elev_cat - elev_img)
+
+
+        
+        # Init astrometry fit window
+        fig_a, ((ax_azim, ax_elev), (ax_x, ax_y)) = plt.subplots(ncols=2, nrows=2, facecolor=None, \
+            figsize=(10, 8))
+
+        # Set figure title
+        fig_a.canvas.set_window_title("Astrometry fit")
+
+
+        # Plot azimuth vs azimuth error
+        ax_azim.scatter(azim_list, 60*np.array(azim_residuals), s=2, c='k', zorder=3)
+
+        ax_azim.grid()
+        ax_azim.set_xlabel("Azimuth (deg, +E of due N)")
+        ax_azim.set_ylabel("Azimuth error (arcmin)")
+
+
+        # Plot elevation vs elevation error
+        ax_elev.scatter(elev_list, 60*np.array(elev_residuals), s=2, c='k', zorder=3)
+
+        ax_elev.grid()
+        ax_elev.set_xlabel("Elevation (deg)")
+        ax_elev.set_ylabel("Elevation error (arcmin)")
+
+        # If the FOV is larger than 45 deg, set maximum limits on azimuth and elevation
+        if np.hypot(*computeFOVSize(self.platepar)) > 45:
+            ax_azim.set_xlim([0, 360])
+            ax_elev.set_xlim([0, 90])
+
+
+        # Equalize Y limits, make them multiples of 5 arcmin, and set a minimum range of 5 arcmin
+        azim_max_xlim = np.max(np.abs(ax_azim.get_ylim()))
+        elev_max_xlim = np.max(np.abs(ax_elev.get_ylim()))
+        max_xlim = np.ceil(np.max([azim_max_xlim, elev_max_xlim])/5)*5
+        if max_xlim < 5.0:
+            max_xlim = 5.0
+        ax_azim.set_ylim([-max_xlim, max_xlim])
+        ax_elev.set_ylim([-max_xlim, max_xlim])
+
+
+
+        # Plot X vs X error
+        ax_x.scatter(x_list, x_residuals, s=2, c='k', zorder=3)
+
+        ax_x.grid()
+        ax_x.set_xlabel("X (px)")
+        ax_x.set_ylabel("X error (px)")
+        ax_x.set_xlim([0, self.img_data_raw.shape[1]])
+
+
+        # Plot Y vs Y error
+        ax_y.scatter(y_list, y_residuals, s=2, c='k', zorder=3)
+
+        ax_y.grid()
+        ax_y.set_xlabel("Y (px)")
+        ax_y.set_ylabel("Y error (px)")
+        ax_y.set_xlim([0, self.img_data_raw.shape[0]])
+
+        # Equalize Y limits, make them integers, and set a minimum range of 1 px
+        x_max_xlim = np.max(np.abs(ax_x.get_ylim()))
+        y_max_xlim = np.max(np.abs(ax_y.get_ylim()))
+        max_xlim = np.ceil(np.max([x_max_xlim, y_max_xlim]))
+        if max_xlim < 1:
+            max_xlim = 1.0
+        ax_x.set_ylim([-max_xlim, max_xlim])
+        ax_y.set_ylim([-max_xlim, max_xlim])
+
+
+
+        
+        fig_a.tight_layout()
+        fig_a.show()
 
 
 
