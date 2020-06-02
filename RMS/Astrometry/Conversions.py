@@ -611,57 +611,6 @@ def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, 
 ###########################################
 
 
-### Precession ###
-
-def equatorialCoordPrecession(start_epoch, final_epoch, ra, dec):
-    """ Corrects Right Ascension and Declination from one epoch to another, taking only precession into 
-        account.
-
-        Implemented from: Jean Meeus - Astronomical Algorithms, 2nd edition, pages 134-135
-
-    @param start_epoch: [float] Julian date of the starting epoch
-    @param final_epoch: [float] Julian date of the final epoch
-    @param ra: [float] non-corrected right ascension in degrees
-    @param dec: [float] non-corrected declination in degrees
-
-    @return (ra, dec): [tuple of floats] precessed equatorial coordinates in degrees
-    """
-
-    ra = math.radians(ra)
-    dec = math.radians(dec)
-
-    T = (start_epoch - 2451545) / 36525.0
-    t = (final_epoch - start_epoch) / 36525.0
-
-    # Calculate correction parameters
-    zeta  = ((2306.2181 + 1.39656*T - 0.000139*T**2)*t + (0.30188 - 0.000344*T)*t**2 + 0.017998*t**3)/3600
-    z     = ((2306.2181 + 1.39656*T - 0.000139*T**2)*t + (1.09468 + 0.000066*T)*t**2 + 0.018203*t**3)/3600
-    theta = ((2004.3109 - 0.85330*T - 0.000217*T**2)*t - (0.42665 + 0.000217*T)*t**2 - 0.041833*t**3)/3600
-
-    # Convert parameters to radians
-    zeta, z, theta = map(math.radians, (zeta, z, theta))
-
-    # Calculate the next set of parameters
-    A = math.cos(dec) * math.sin(ra + zeta)
-    B = math.cos(theta)*math.cos(dec)*math.cos(ra + zeta) - math.sin(theta)*math.sin(dec)
-    C = math.sin(theta)*math.cos(dec)*math.cos(ra + zeta) + math.cos(theta)*math.sin(dec)
-
-    # Calculate right ascension
-    ra_corr = math.atan2(A, B) + z
-
-    # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
-    if (math.pi/2 - abs(dec)) < math.radians(0.5):
-        dec_corr = math.acos(math.sqrt(A**2 + B**2))
-    else:
-        dec_corr = math.asin(C)
-
-
-    return math.degrees(ra_corr), math.degrees(dec_corr)
-
-
-##################
-
-
 
 if __name__ == "__main__":
 

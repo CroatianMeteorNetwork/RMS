@@ -40,12 +40,16 @@ cdef double radians(double deg):
     
     return deg/180.0*(pi)
 
+
+
 @cython.cdivision(True)
 cdef double degrees(double deg):
     """Converts radians to degrees.
     """
     
     return deg*180.0/pi
+
+
 
 @cython.boundscheck(False)
 @cython.wraparound(False) 
@@ -246,6 +250,59 @@ cdef double cyjd2LST(double jd, double lon):
 
 
 @cython.cdivision(True)
+cpdef (double, double) equatorialCoordPrecession(double start_epoch, double final_epoch, double ra, \
+    double dec):
+    """ Corrects Right Ascension and Declination from one epoch to another, taking only precession into 
+        account.
+
+        Implemented from: Jean Meeus - Astronomical Algorithms, 2nd edition, pages 134-135
+    
+    Arguments:
+        start_epoch: [float] Julian date of the starting epoch.
+        final_epoch: [float] Julian date of the final epoch.
+        ra: [float] Input right ascension (radians).
+        dec: [float] Input declination (radians).
+    
+    Return:
+        (ra, dec): [tuple of floats] Precessed equatorial coordinates (radians).
+    """
+
+    cdef double T, t, zeta, z, theta, A, B, C, ra_corr, dec_corr
+
+
+    T = (start_epoch - 2451545    )/36525.0
+    t = (final_epoch - start_epoch)/36525.0
+
+    # Calculate correction parameters in degrees
+    zeta  = ((2306.2181 + 1.39656*T - 0.000139*T**2)*t + (0.30188 - 0.000344*T)*t**2 + 0.017998*t**3)/3600
+    z     = ((2306.2181 + 1.39656*T - 0.000139*T**2)*t + (1.09468 + 0.000066*T)*t**2 + 0.018203*t**3)/3600
+    theta = ((2004.3109 - 0.85330*T - 0.000217*T**2)*t - (0.42665 + 0.000217*T)*t**2 - 0.041833*t**3)/3600
+
+    # Convert parameters to radians
+    zeta  = radians(zeta)
+    z     = radians(z)
+    theta = radians(theta)
+
+    # Calculate the next set of parameters
+    A = cos(dec  )*sin(ra + zeta)
+    B = cos(theta)*cos(dec)*cos(ra + zeta) - sin(theta)*sin(dec)
+    C = sin(theta)*cos(dec)*cos(ra + zeta) + cos(theta)*sin(dec)
+
+    # Calculate right ascension
+    ra_corr = (atan2(A, B) + z + 2*pi)%(2*pi)
+
+    # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
+    if (pi/2 - abs(dec)) < radians(0.5):
+        dec_corr = acos(sqrt(A**2 + B**2))
+    else:
+        dec_corr = asin(C)
+
+
+    return ra_corr, dec_corr
+
+
+
+@cython.cdivision(True)
 cdef double refractionApparentToTrue(double elev):
     """ Correct the apparent elevation of a star for refraction to true elevation. The temperature and air
         pressure are assumed to be unknown. 
@@ -281,8 +338,8 @@ cdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double j
         coordinates.
     
     Arguments:
-        ra: [float] Right ascension in radians.
-        dec: [float] Declination in radians.
+        ra: [float] J2000 right ascension in radians.
+        dec: [float] J2000 declination in radians.
         jd: [float] Julian date.
         lat: [float] latitude in radians.
         lon: [float] longitude in radians.
@@ -296,6 +353,9 @@ cdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double j
 
     cdef double azim, alt
 
+    # Precess RA/Dec from J2000 to the epoch of date
+    ra, dec = equatorialCoordPrecession(2451545.0, jd, ra, dec)
+
     # Convert coordinates to alt/az
     azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
 
@@ -304,6 +364,9 @@ cdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double j
 
     # Convert back to equatorial
     ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
+
+    # Precess RA/Dec from the epoch of date to J2000
+    ra, dec = equatorialCoordPrecession(jd, 2451545.0, ra, dec)
 
 
     return (ra, dec)
@@ -346,8 +409,8 @@ cdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double j
         coordinates.
     
     Arguments:
-        ra: [float] Right ascension in radians.
-        dec: [float] Declination in radians.
+        ra: [float] J2000 Right ascension in radians.
+        dec: [float] J2000 Declination in radians.
         jd: [float] Julian date.
         lat: [float] Latitude in radians.
         lon: [float] Longitude in radians.
@@ -361,6 +424,9 @@ cdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double j
 
     cdef double azim, alt
 
+    # Precess RA/Dec from J2000 to the epoch of date
+    ra, dec = equatorialCoordPrecession(2451545.0, jd, ra, dec)
+
     # Convert coordinates to alt/az
     azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
 
@@ -369,6 +435,9 @@ cdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double j
 
     # Convert back to equatorial
     ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
+
+    # Precess RA/Dec from the epoch of date to J2000
+    ra, dec = equatorialCoordPrecession(jd, 2451545.0, ra, dec)
 
 
     return (ra, dec)
@@ -447,7 +516,7 @@ cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double
     ha = atan2(-sin(azim), tan(elev)*cos(lat) - cos(azim)*sin(lat))
     
     # Calculate right ascension
-    ra = (lst - ha)%(2*pi)
+    ra = (lst - ha + 2*pi)%(2*pi)
 
     # Calculate declination
     dec = asin(sin(lat)*sin(elev) + cos(lat)*cos(elev)*cos(azim))
@@ -791,7 +860,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         # Radius from FOV centre to sky coordinate
         radius = radians(sqrt(x_corr**2 + y_corr**2))
 
-        # Compute theta - the direction angle between the FOV centre, sky coordinate, and the image vertical
+        # Compute theta - the direction angle between the FOV centre, sky coordinate, and the north 
+        #   celestial pole
         theta = (pi/2 - radians(pos_angle_ref) + atan2(y_corr, x_corr))%(2*pi)
 
         ### Transform the radius and direction to coordinates on the sky ###
@@ -818,7 +888,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         # Compute right ascension
         sin_t = sin(theta)*sin(radius)/cos(dec)
         cos_t = (cos(radius) - sin(dec)*sin(dec_ref_corr))/(cos(dec)*cos(dec_ref_corr))
-        ra = (ra_ref_now_corr - atan2(sin_t, cos_t))%(2*pi)
+        ra = (ra_ref_now_corr - atan2(sin_t, cos_t) + 2*pi)%(2*pi)
 
 
         # Apply refraction correction

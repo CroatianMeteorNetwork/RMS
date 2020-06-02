@@ -54,8 +54,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
-from RMS.Astrometry.Conversions import J2000_JD, date2JD, JD2HourAngle, raDec2AltAz, altAz2RADec, \
-    equatorialCoordPrecession
+from RMS.Astrometry.Conversions import J2000_JD, date2JD, JD2HourAngle, raDec2AltAz, altAz2RADec
 import RMS.ConfigReader as cr
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
@@ -69,7 +68,7 @@ from RMS.Misc import decimalDegreesToSexHours, openFileDialog
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import subsetCatalog
+from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
 
 
 
@@ -587,7 +586,9 @@ class PlateTool(object):
 
 
             # Precess RA/Dec to epoch of date for alt/az computation
-            ra_date, dec_date = equatorialCoordPrecession(J2000_JD.days, jd[0], ra[0], dec[0])
+            ra_date, dec_date = equatorialCoordPrecession(J2000_JD.days, jd[0], np.radians(ra[0]), 
+                np.radians(dec[0]))
+            ra_date, dec_date = np.degrees(ra_date), np.degrees(dec_date)
 
             # Compute alt, az
             azim, alt = raDec2AltAz(ra_date, dec_date, jd[0], self.platepar.lat, self.platepar.lon)
@@ -836,7 +837,7 @@ class PlateTool(object):
         """ Checks that the astrometry parameters are within the allowed range. """
 
         # Right ascension should be within 0-360
-        self.platepar.RA_d = self.platepar.RA_d%360
+        self.platepar.RA_d = (self.platepar.RA_d + 360)%360
 
         # Keep the declination in the allowed range
         if self.platepar.dec_d >= 90:

@@ -25,7 +25,7 @@ from matplotlib.font_manager import FontProperties
 
 import RMS.ConfigReader as cr
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, applyAstrometryFTPdetectinfo
-from RMS.Astrometry.Conversions import J2000_JD, datetime2JD, jd2Date, raDec2AltAz, equatorialCoordPrecession
+from RMS.Astrometry.Conversions import J2000_JD, datetime2JD, jd2Date, raDec2AltAz
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FRbin import read as readFR
 from RMS.Formats.FRbin import validFRName
@@ -36,6 +36,11 @@ from RMS.Misc import openFileDialog
 from RMS.Pickling import loadPickle, savePickle
 from RMS.Routines import Image
 from RMS.Routines import RollingShutterCorrection
+
+# Import Cython functions
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+from RMS.Astrometry.CyFunctions import equatorialCoordPrecession
 
 
 # TkAgg has issues when opening an external file prompt, so other backends are forced if available
@@ -1367,7 +1372,9 @@ class ManualReductionTool(object):
 
 
             # Precess RA/Dec to epoch of date for alt/az computation
-            ra_date, dec_date = equatorialCoordPrecession(J2000_JD.days, jd[0], ra[0], dec[0])
+            ra_date, dec_date = equatorialCoordPrecession(J2000_JD.days, jd[0], np.radians(ra[0]), \
+                np.radians(dec[0]))
+            ra_date, dec_date = np.degrees(ra_date), np.degrees(dec_date)
 
             # Compute alt, az
             azim, alt = raDec2AltAz(ra_date, dec_date, jd[0], self.platepar.lat, self.platepar.lon)

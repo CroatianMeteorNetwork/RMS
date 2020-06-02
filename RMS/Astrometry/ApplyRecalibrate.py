@@ -217,11 +217,13 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
         working_platepar.mag_lev_stddev = fit_stddev
 
         # Print photometry info
-        print("Fit: {:+.1f}*LSP + {:.2f} +/- {:.2f}".format(-2.5, photom_offset, fit_stddev))
+        print()
+        print("Photometry")
+        print("    Fit: {:+.1f}*LSP + {:.2f} +/- {:.2f}".format(-2.5, photom_offset, fit_stddev))
 
         ### ###
 
-
+        print()
         print("Platepar minimum error of {:.2f} with radius {:.1f} px PASSED!".format(config.dist_check_threshold, \
             goodnes_check_radius))
 
