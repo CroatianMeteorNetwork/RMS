@@ -404,7 +404,7 @@ cdef double refractionTrueToApparent(double elev):
 
 
 
-cdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double jd, double lat, double lon):
+cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double jd, double lat, double lon):
     """ Correct the equatorial coordinates for refraction. The correction is done from true to apparent
         coordinates.
     
