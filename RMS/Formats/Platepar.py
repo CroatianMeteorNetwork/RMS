@@ -29,10 +29,14 @@ import os
 import json
 import copy
 import datetime
-import numpy as np
 
-from RMS.Astrometry.Conversions import date2JD, jd2Date
+
+import numpy as np
+import scipy.optimize
+
+from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 import RMS.Astrometry.ApplyAstrometry
+from RMS.Math import angularSeparation
 
 
 
@@ -60,7 +64,7 @@ def parseInf(file_name):
 
     with open(file_name) as f:
         for line in f.readlines()[2:]:
-            
+
             line = line.split()
 
             if 'Station_Code' in line[0]:
@@ -83,23 +87,75 @@ def parseInf(file_name):
 
 
 
+def getCatalogStarsImagePositions(catalog_stars, jd, platepar):
+    """ Get image positions of catalog stars using the current platepar values.
 
-class Platepar(object):
-    """ Load calibration parameters from a platepar file.
+    Arguments:
+        catalog_stars: [2D list] A list of (ra, dec, mag) pairs of catalog stars.
+        jd: [float] Julian date for transformation.
+        platepar: [Platepar]
+
+    Return:
+        (x_array, y_array mag_catalog): [tuple of ndarrays] X, Y positons and magnitudes of stars on the
+            image.
     """
 
-    def __init__(self):
-        """ Read platepar and return object to access the data externally. 
-    
+    ra_catalog, dec_catalog, mag_catalog = catalog_stars.T
+
+    # Convert star RA, Dec to image coordinates
+    x_array, y_array = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(ra_catalog, dec_catalog, jd, platepar)
+
+    return x_array, y_array, mag_catalog
+
+
+
+def getPairedStarsSkyPositions(img_x, img_y, jd, platepar):
+    """ Compute RA, Dec of all paired stars on the image given the platepar.
+
+    Arguments:
+        img_x: [ndarray] Array of column values of the stars.
+        img_y: [ndarray] Array of row values of the stars.
+        jd: [float] Julian date for transformation.
+        platepar: [Platepar instance] Platepar object.
+
+    Return:
+        (ra_array, dec_array): [tuple of ndarrays] Arrays of RA and Dec of stars on the image.
+    """
+
+    # Compute RA, Dec of image stars
+    img_time = jd2Date(jd)
+    _, ra_array, dec_array, _ = RMS.Astrometry.ApplyAstrometry.xyToRaDecPP(len(img_x)*[img_time], img_x,
+        img_y, len(img_x)*[1], platepar)
+
+    return ra_array, dec_array
+
+
+class Platepar(object):
+    def __init__(self, distortion_type="poly3+radial"):
+        """ Astrometric and photometric calibration plate parameters. Several distortion types are supported.
+
         Arguments:
             file_name: [string] Path to the platepar file.
-    
+
+        Keyword arguments:
+            distortion_type: [str] Distortion type. It can be one of the following:
+                - "poly3+radial" - 3rd order polynomial fit including a single radial term
+                - "radial3" - 3rd order radial distortion
+                - "radial4" - 4th order radial distortion
+                - "radial5" - 5th order radial distortion
+
         Return:
             self: [object] Instance of this class with loaded platepar parameters.
 
         """
 
         self.version = 2
+
+        # Set the distortion type
+        self.distortion_type = distortion_type
+        self.setDistortionType(self.distortion_type)
+
+
 
         # Station coordinates
         self.lat = self.lon = self.elev = 0
@@ -114,14 +170,13 @@ class Platepar(object):
         self.Ho = 0
         self.X_res = 0
         self.Y_res = 0
-        self.focal_length = 0
 
         self.fov_h = 0
         self.fov_v = 0
 
         # FOV centre
-        self.RA_d = self.RA_H = self.RA_M = self.RA_S = 0
-        self.dec_d = self.dec_D = self.dec_M = self.dec_S = 0
+        self.RA_d = 0
+        self.dec_d = 0
         self.pos_angle_ref = 0
         self.rotation_from_horiz = 0
 
@@ -130,6 +185,9 @@ class Platepar(object):
 
         # FOV scale (px/deg)
         self.F_scale = 1.0
+
+        # Refraction on/off
+        self.refraction = True
 
         # Photometry calibration
         self.mag_0 = -2.5
@@ -145,32 +203,111 @@ class Platepar(object):
         # Flag to indicate that the platepar was refined with CheckFit
         self.auto_check_fit_refined = False
 
-        # Init the distorsion parameters
-        self.resetDistorsionParameters()
+        # Flag to indicate that the platepar was successfuly auto recalibrated on an individual FF files
+        self.auto_recalibrated = False
+
+        # Init the distortion parameters
+        self.resetDistortionParameters()
 
 
-    def resetDistorsionParameters(self):
-        """ Set the distorsion parameters to zero. """
+    def resetDistortionParameters(self, preserve_centre=False):
+        """ Set the distortion parameters to zero.
 
-        # Distortion fit (forward and reverse)
+        Keyword arguments:
+            preserve_centre: [bool] Don't reset the distortion centre. False by default, in which case it will
+                be reset.
+        """
+
+        # Store the distortion centre if it needs to be preserved
+        if preserve_centre:
+
+            # Preserve centre for the radial distortion
+            if self.distortion_type.startswith("radial"):
+
+                # Note that the radial distortion parameters are kept in the X poly array
+                x_centre_fwd, y_centre_fwd = self.x_poly_fwd[0], self.x_poly_fwd[1]
+                x_centre_rev, y_centre_rev = self.x_poly_rev[0], self.x_poly_rev[1]
+
+            else:
+
+                # Preserve centre for the polynomial distortion
+                x_centre_fwd, x_centre_rev = self.x_poly_fwd[0], self.x_poly_rev[0]
+                y_centre_fwd, y_centre_rev = self.y_poly_fwd[0], self.y_poly_rev[0]
+
+
+        # Reset distortion fit (forward and reverse)
         self.x_poly_fwd = np.zeros(shape=(12,), dtype=np.float64)
         self.y_poly_fwd = np.zeros(shape=(12,), dtype=np.float64)
         self.x_poly_rev = np.zeros(shape=(12,), dtype=np.float64)
         self.y_poly_rev = np.zeros(shape=(12,), dtype=np.float64)
 
+
+
+        # Preserve the image centre
+        if preserve_centre:
+
+            # Preserve centre for the radial distortion
+            if self.distortion_type.startswith("radial"):
+
+                # Note that the radial distortion parameters are kept in the X poly array
+                self.x_poly_fwd[0], self.x_poly_fwd[1] = x_centre_fwd, y_centre_fwd
+                self.x_poly_rev[0], self.x_poly_rev[1] = x_centre_rev, y_centre_rev
+
+            else:
+
+                # Preserve centre for the polynomial distortion
+                self.x_poly_fwd[0], self.x_poly_rev[0] = x_centre_fwd, x_centre_rev
+                self.y_poly_fwd[0], self.y_poly_rev[0] = y_centre_fwd, y_centre_rev
+
+
+        # Reset the image centre
+        else:
+            # Set the first coeffs to 0.5, as that is the real centre of the FOV
+            self.x_poly_fwd[0] = 0.5
+            self.y_poly_fwd[0] = 0.5
+            self.x_poly_rev[0] = 0.5
+            self.y_poly_rev[0] = 0.5
+
+            # If the distortion is radial, set the second X parameter to 0.5, as x_poly[1] is used for the Y
+            #   offset in the radial models
+            if self.distortion_type.startswith("radial"):
+                self.x_poly_fwd[1] = 0.5
+                self.x_poly_rev[1] = 0.5
+
+
+
         self.x_poly = self.x_poly_fwd
         self.y_poly = self.y_poly_fwd
 
-        # Set the first coeffs to 0.5, as that is the real centre of the FOV
-        self.x_poly_fwd[0] = 0.5
-        self.y_poly_fwd[0] = 0.5
-        self.x_poly_rev[0] = 0.5
-        self.y_poly_rev[0] = 0.5
+
+
+    def setDistortionType(self, distortion_type, reset_params=True):
+        """ Sets the distortion type. """
+
+        # List of distortion types an number of parameters for each
+        self.distortion_type_list = [
+             "poly3+radial",
+                  "radial3",
+                  "radial4",
+                  "radial5"
+            ]
+
+        # Set the length of the distortion polynomial depending on the distortion type
+        if distortion_type in self.distortion_type_list:
+            self.distortion_type = distortion_type
+
+        else:
+            raise ValueError("The distortion type is not recognized: {:s}".format(self.distortion_type))
+
+
+        # Reset distortion parameters
+        if reset_params:
+            self.resetDistortionParameters()
 
 
     def addVignettingCoeff(self, use_flat):
-        """ Add a vignetting coeff to the platepar if it doesn't have one. 
-        
+        """ Add a vignetting coeff to the platepar if it doesn't have one.
+
         Arguments:
             use_flat: [bool] Is the flat used or not.
         """
@@ -185,9 +322,305 @@ class Platepar(object):
             else:
 
                 # Use 0.001 deg/px as the default coefficeint, as that's the one for 3.6 mm f/0.95 and 16 mm
-                #   f/1.0 lenses. The vignetting coeff is dependent on the resolution, the default value of 
+                #   f/1.0 lenses. The vignetting coeff is dependent on the resolution, the default value of
                 #   0.001 deg/px is for 720p.
                 self.vignetting_coeff = 0.001*np.hypot(1280, 720)/np.hypot(self.X_res, self.Y_res)
+
+
+
+    def fitAstrometry(self, jd, img_stars, catalog_stars, first_platepar_fit=False):
+        """ Fit astrometric parameters to the list of star image and celectial catalog coordinates.
+        At least 4 stars are needed to fit the rigid body parameters, and 12 to fit the distortion.
+        New parameters are saved to the given object.
+
+        Arguments:
+            jd: [float] Julian date of the image.
+            img_stars: [list] A list of (x, y, intensity_sum) entires for every star.
+            catalog_stars: [list] A list of (ra, dec, mag) entries for every star (degrees).
+
+        Keyword arguments:
+            first_platepar_fit: [bool] Fit a platepar from scratch. False by default.
+
+        """
+
+
+        def _calcImageResidualsAstro(params, platepar, jd, catalog_stars, img_stars):
+            """ Calculates the differences between the stars on the image and catalog stars in image
+                coordinates with the given astrometrical solution.
+
+            """
+
+            # Extract fitting parameters
+            ra_ref, dec_ref, pos_angle_ref, F_scale = params
+
+            img_x, img_y, _ = img_stars.T
+
+            pp_copy = copy.deepcopy(platepar)
+
+            pp_copy.RA_d = ra_ref
+            pp_copy.dec_d = dec_ref
+            pp_copy.pos_angle_ref = pos_angle_ref
+            pp_copy.F_scale = F_scale
+
+            # Get image coordinates of catalog stars
+            catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy)
+
+            # Calculate the sum of squared distances between image stars and catalog stars
+            dist_sum = np.sum((catalog_x - img_x)**2 + (catalog_y - img_y)**2)
+
+            return dist_sum
+
+
+        def _calcSkyResidualsAstro(params, platepar, jd, catalog_stars, img_stars):
+            """ Calculates the differences between the stars on the image and catalog stars in sky
+                coordinates with the given astrometrical solution.
+
+            """
+
+            # Extract fitting parameters
+            ra_ref, dec_ref, pos_angle_ref, F_scale = params
+
+            pp_copy = copy.deepcopy(platepar)
+
+            pp_copy.RA_d = ra_ref
+            pp_copy.dec_d = dec_ref
+            pp_copy.pos_angle_ref = pos_angle_ref
+            pp_copy.F_scale = F_scale
+
+            img_x, img_y, _ = img_stars.T
+
+            # Get image coordinates of catalog stars
+            ra_array, dec_array = getPairedStarsSkyPositions(img_x, img_y, jd, pp_copy)
+
+            ra_catalog, dec_catalog, _ = catalog_stars.T
+
+            # Compute the sum of the angular separation
+            separation_sum = np.sum(angularSeparation(np.radians(ra_array), np.radians(dec_array), \
+                np.radians(ra_catalog), np.radians(dec_catalog))**2)
+
+
+            return separation_sum
+
+
+
+        def _calcImageResidualsDistortion(params, platepar, jd, catalog_stars, img_stars, dimension):
+            """ Calculates the differences between the stars on the image and catalog stars in image
+                coordinates with the given astrometrical solution.
+
+            Arguments:
+                ...
+                dimension: [str] 'x' for X polynomial fit, 'y' for Y polynomial fit
+
+            """
+
+            # Set distortion parameters
+            pp_copy = copy.deepcopy(platepar)
+
+            if (dimension == 'x') or (dimension == 'radial'):
+                pp_copy.x_poly_rev = params
+                pp_copy.y_poly_rev = np.zeros(12)
+
+            else:
+                pp_copy.x_poly_rev = np.zeros(12)
+                pp_copy.y_poly_rev = params
+
+
+            img_x, img_y, _ = img_stars.T
+
+
+            # Get image coordinates of catalog stars
+            catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy)
+
+
+            # Calculate the sum of squared distances between image stars and catalog stars, per every
+            #   dimension
+            if dimension == 'x':
+                dist_sum = np.sum((catalog_x - img_x)**2)
+
+            elif dimension == 'y':
+                dist_sum = np.sum((catalog_y - img_y)**2)
+
+            # Minimization for the radial distortion
+            else:
+                dist_sum = np.sum((catalog_x - img_x)**2 + (catalog_y - img_y)**2)
+
+
+
+            return dist_sum
+
+
+        def _calcSkyResidualsDistortion(params, platepar, jd, catalog_stars, img_stars, dimension):
+            """ Calculates the differences between the stars on the image and catalog stars in sky
+                coordinates with the given astrometrical solution.
+
+            Arguments:
+                ...
+                dimension: [str] 'x' for X polynomial fit, 'y' for Y polynomial fit
+
+            """
+
+            pp_copy = copy.deepcopy(platepar)
+
+            if (dimension == 'x') or (dimension == 'radial'):
+                pp_copy.x_poly_fwd = params
+
+            else:
+                pp_copy.y_poly_fwd = params
+
+
+            img_x, img_y, _ = img_stars.T
+
+            # Get image coordinates of catalog stars
+            ra_array, dec_array = getPairedStarsSkyPositions(img_x, img_y, jd, pp_copy)
+
+            ra_catalog, dec_catalog, _ = catalog_stars.T
+
+            # Compute the sum of the angular separation
+            separation_sum = np.sum(angularSeparation(np.radians(ra_array), np.radians(dec_array), \
+                np.radians(ra_catalog), np.radians(dec_catalog))**2)
+
+            return separation_sum
+
+
+        # print('ASTRO', _calcImageResidualsAstro([self.RA_d, self.dec_d,
+        #     self.pos_angle_ref, self.F_scale],  catalog_stars, img_stars))
+
+        # print('DIS_X', _calcImageResidualsDistortion(self.x_poly_rev,  catalog_stars, \
+        #     img_stars, 'x'))
+
+        # print('DIS_Y', _calcImageResidualsDistortion(self.y_poly_rev,  catalog_stars, \
+        #     img_stars, 'y'))
+
+
+        ### ASTROMETRIC PARAMETERS FIT ###
+
+        # Initial parameters for the astrometric fit
+        p0 = [self.RA_d, self.dec_d, self.pos_angle_ref, self.F_scale]
+
+        # Fit the astrometric parameters using the reverse transform for reference
+        res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, \
+            args=(self, jd, catalog_stars, img_stars), method='Nelder-Mead')
+
+        # # Fit the astrometric parameters using the forward transform for reference
+        #   WARNING: USING THIS MAKES THE FIT UNSTABLE
+        # res = scipy.optimize.minimize(_calcSkyResidualsAstro, p0, args=(self, jd, \
+        #     catalog_stars, img_stars), method='Nelder-Mead')
+
+        # Update fitted astrometric parameters
+        self.RA_d, self.dec_d, self.pos_angle_ref, self.F_scale = res.x
+
+        # Recalculate FOV centre
+        self.az_centre, self.alt_centre = raDec2AltAz(self.RA_d, self.dec_d, self.JD, self.lat, self.lon)
+
+        ### ###
+
+
+        ### DISTORTION FIT ###
+
+        # If there are more than 12 paired stars, fit the distortion parameters
+        if len(img_stars) > 12:
+
+            ### REVERSE MAPPING FIT ###
+
+            # Fit the polynomial distortion
+            if self.distortion_type.startswith("poly"):
+
+                # Fit distortion parameters in X direction, reverse mapping
+                res = scipy.optimize.minimize(_calcImageResidualsDistortion, self.x_poly_rev, \
+                    args=(self, jd, catalog_stars, img_stars, 'x'), method='Nelder-Mead', \
+                    options={'maxiter': 10000, 'adaptive': True})
+
+                # Exctact fitted X polynomial
+                self.x_poly_rev = res.x
+
+                # Fit distortion parameters in Y direction, reverse mapping
+                res = scipy.optimize.minimize(_calcImageResidualsDistortion, self.y_poly_rev, \
+                    args=(self, jd, catalog_stars, img_stars, 'y'), method='Nelder-Mead', \
+                    options={'maxiter': 10000, 'adaptive': True})
+
+                # Extract fitted Y polynomial
+                self.y_poly_rev = res.x
+
+
+            # Fit radial distortion
+            else:
+
+                # Fit the radial distortion - the X polynomial is used to store the fit paramters
+                res = scipy.optimize.minimize(_calcImageResidualsDistortion, self.x_poly_rev, \
+                    args=(self, jd, catalog_stars, img_stars, 'radial'), method='Nelder-Mead', \
+                    options={'maxiter': 10000, 'adaptive': True})
+
+                # IMPORTANT NOTE - the X polynomial is used to store the fit paramters
+                self.x_poly_rev = res.x
+
+
+            ### ###
+
+
+
+            # If this is the first fit of the distortion, set the forward parametrs to be equal to the reverse
+            if first_platepar_fit:
+
+                self.x_poly_fwd = np.array(self.x_poly_rev)
+                self.y_poly_fwd = np.array(self.y_poly_rev)
+
+
+            ### FORWARD MAPPING FIT ###
+
+            # Fit the polynomial distortion
+            if self.distortion_type.startswith("poly"):
+
+                # Fit distortion parameters in X direction, forward mapping
+                res = scipy.optimize.minimize(_calcSkyResidualsDistortion, self.x_poly_fwd, \
+                    args=(self, jd, catalog_stars, img_stars, 'x'), method='Nelder-Mead', \
+                    options={'maxiter': 10000, 'adaptive': True})
+
+                # Extract fitted X polynomial
+                self.x_poly_fwd = res.x
+
+
+                # Fit distortion parameters in Y direction, forward mapping
+                res = scipy.optimize.minimize(_calcSkyResidualsDistortion, self.y_poly_fwd, \
+                    args=(self, jd, catalog_stars, img_stars, 'y'), method='Nelder-Mead', \
+                    options={'maxiter': 10000, 'adaptive': True})
+
+                # IMPORTANT NOTE - the X polynomial is used to store the fit paramters
+                self.y_poly_fwd = res.x
+
+
+            # Fit the radial distortion
+            else:
+
+                # Fit the radial distortion - the X polynomial is used to store the fit paramters
+                res = scipy.optimize.minimize(_calcSkyResidualsDistortion, self.x_poly_fwd, \
+                    args=(self, jd, catalog_stars, img_stars, 'radial'), method='Nelder-Mead', \
+                    options={'maxiter': 10000, 'adaptive': True})
+
+                # Extract fitted X polynomial
+                self.x_poly_fwd = res.x
+
+            ### ###
+
+        else:
+            print('Too few stars to fit the distortion, only the astrometric parameters where fitted!')
+
+
+        # Set the list of stars used for the fit to the platepar
+        fit_star_list = []
+        for img_coords, cat_coords in zip(img_stars, catalog_stars):
+
+            # Store time, image coordinate x, y, intensity, catalog ra, dec, mag
+            fit_star_list.append([jd] + img_coords.tolist() + cat_coords.tolist())
+
+
+        self.star_list = fit_star_list
+
+
+        # Set the flag to indicate that the platepar was manually fitted
+        self.auto_check_fit_refined = False
+        self.auto_recalibrated = False
+
+        ### ###
 
 
     def parseLine(self, f):
@@ -211,6 +644,26 @@ class Platepar(object):
         if not 'version' in self.__dict__:
             self.version = 1
 
+
+        # If the refraction was not used for the fit, assume it is disabled
+        if not 'refraction' in self.__dict__:
+            self.refraction = False
+
+
+        # Add the distortion type if not present (assume it's the polynomal type with the radial term)
+        if not 'distortion_type' in self.__dict__:
+
+            # Check if the variable with the typo was used and correct it
+            if 'distortion_type' in self.__dict__:
+                self.distortion_type = self.distortion_type
+                del self.distortion_type
+
+            # Otherwise, assume the polynomial type
+            else:
+                self.distortion_type = "poly3+radial"
+
+        self.setDistortionType(self.distortion_type, reset_params=False)
+
         # Add UT correction if it was not in the platepar
         if not 'UT_corr' in self.__dict__:
             self.UT_corr = 0
@@ -231,10 +684,10 @@ class Platepar(object):
         if not 'star_list' in self.__dict__:
             self.star_list = []
 
-        # If v1 only the backward distorsion coeffs were fitted, so use load them for both forward and
+        # If v1 only the backward distortion coeffs were fitted, so use load them for both forward and
         #   reverse if nothing else is available
         if not 'x_poly_fwd' in self.__dict__:
-            
+
             self.x_poly_fwd = np.array(self.x_poly)
             self.x_poly_rev = np.array(self.x_poly)
             self.y_poly_fwd = np.array(self.y_poly)
@@ -263,8 +716,8 @@ class Platepar(object):
 
 
     def read(self, file_name, fmt=None, use_flat=None):
-        """ Read the platepar. 
-            
+        """ Read the platepar.
+
         Arguments:
             file_name: [str] Path and the name of the platepar to read.
 
@@ -334,7 +787,7 @@ class Platepar(object):
 
                 # Calculate the reference hour angle
                 T = (self.JD - 2451545.0)/36525.0
-                self.Ho = (280.46061837 + 360.98564736629*(self.JD - 2451545.0) + 0.000387933*T**2 - 
+                self.Ho = (280.46061837 + 360.98564736629*(self.JD - 2451545.0) + 0.000387933*T**2 -
                     T**3/38710000.0)%360
 
                 # Parse camera parameters
@@ -389,7 +842,7 @@ class Platepar(object):
         self2.y_poly_rev = self.y_poly_rev.tolist()
         del self2.time
 
-        # For compatibility with old procedures, write the forward distorsion parameters as x, y
+        # For compatibility with old procedures, write the forward distortion parameters as x, y
         self2.x_poly = self.x_poly_fwd.tolist()
         self2.y_poly = self.y_poly_fwd.tolist()
 
@@ -399,8 +852,8 @@ class Platepar(object):
 
 
     def write(self, file_path, fmt=None, fov=None, ret_written=False):
-        """ Write platepar to file. 
-        
+        """ Write platepar to file.
+
         Arguments:
             file_path: [str] Path and the name of the platepar to write.
 
@@ -441,7 +894,7 @@ class Platepar(object):
         else:
 
             with open(file_path, 'w') as f:
-                
+
                 # Write geo coords
                 f.write('{:9.6f} {:9.6f} {:04d}\n'.format(self.lon, self.lat, int(self.elev)))
 
@@ -477,11 +930,11 @@ class Platepar(object):
                 # Write magnitude fit
                 f.write("{:.3f} {:.3f}\n".format(self.mag_0, self.mag_lev))
 
-                # Write X distorsion polynomial
+                # Write X distortion polynomial
                 for x_elem in self.x_poly_fwd:
                     f.write('{:+E}\n'.format(x_elem))
 
-                # Write y distorsion polynomial
+                # Write y distortion polynomial
                 for y_elem in self.y_poly_fwd:
                     f.write('{:+E}\n'.format(y_elem))
 
