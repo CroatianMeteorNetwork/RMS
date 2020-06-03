@@ -356,7 +356,8 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     fov_radius = np.hypot(*computeFOVSize(platepar))
 
     # Get stars from the catalog around the defined center in a given radius
-    _, extracted_catalog = subsetCatalog(catalog_stars, RA_c, dec_c, fov_radius, faintest_mag)
+    _, extracted_catalog = subsetCatalog(catalog_stars, RA_c, dec_c, max_jd, platepar.lat, platepar.lon, \
+        fov_radius, faintest_mag)
     ra_catalog, dec_catalog, mag_catalog = extracted_catalog.T
 
     # Compute image positions of all catalog stars that should be on the image

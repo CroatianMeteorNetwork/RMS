@@ -107,7 +107,8 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
         dec_c = dec_c[0]
 
         # Get stars from the catalog around the defined center in a given radius
-        _, extracted_catalog = subsetCatalog(catalog_stars, RA_c, dec_c, fov_radius, lim_mag)
+        _, extracted_catalog = subsetCatalog(catalog_stars, RA_c, dec_c, jd, platepar.lat, platepar.lon, \
+            fov_radius, lim_mag)
         ra_catalog, dec_catalog, mag_catalog = extracted_catalog.T
 
 

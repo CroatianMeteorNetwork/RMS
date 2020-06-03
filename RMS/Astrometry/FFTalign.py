@@ -233,17 +233,19 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         ra_centre = ra_centre[0]
         dec_centre = dec_centre[0]
 
+        # Compute Julian date
+        jd = date2JD(*calstars_time)
+
         # Calculate the FOV radius in degrees
         fov_y, fov_x = ApplyAstrometry.computeFOVSize(platepar)
         fov_radius = np.sqrt(fov_x**2 + fov_y**2)
 
         # Take only those stars which are inside the FOV
-        filtered_indices, _ = subsetCatalog(catalog_stars, ra_centre, dec_centre, \
-            fov_radius, config.catalog_mag_limit)
+        filtered_indices, _ = subsetCatalog(catalog_stars, ra_centre, dec_centre, jd, platepar.lat, \
+            platepar.lon, fov_radius, config.catalog_mag_limit)
 
         # Take those catalog stars which should be inside the FOV
         ra_catalog, dec_catalog, _ = catalog_stars[filtered_indices].T
-        jd = date2JD(*calstars_time)
         catalog_xy = ApplyAstrometry.raDecToXYPP(ra_catalog, dec_catalog, jd, platepar)
 
         catalog_x, catalog_y = catalog_xy

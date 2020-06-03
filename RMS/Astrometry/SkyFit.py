@@ -2135,10 +2135,13 @@ class PlateTool(object):
         fov_y, fov_x = computeFOVSize(self.platepar)
         fov_radius = np.sqrt(fov_x**2 + fov_y**2)
 
+        # Compute the current Julian date
+        jd = date2JD(*self.img_handle.currentTime())
+        
 
         # Take only those stars which are inside the FOV
         filtered_indices, filtered_catalog_stars = subsetCatalog(catalog_stars, ra_centre, dec_centre, \
-            fov_radius, self.cat_lim_mag)
+            jd, self.platepar.lat, self.platepar.lon, fov_radius, self.cat_lim_mag)
 
 
         return filtered_indices, np.array(filtered_catalog_stars)

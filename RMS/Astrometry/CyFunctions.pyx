@@ -78,15 +78,24 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
 
 @cython.boundscheck(False)
 @cython.wraparound(False) 
-def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, double dec_c, double radius, \
-        double mag_limit):
+def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, double dec_c, double jd,
+        double lat, double lon, double radius, double mag_limit):
     """ Make a subset of stars from the given star catalog around the given coordinates with a given radius.
     
     Arguments:
-        ...
+        catalog_list: [ndarray] An array of (ra, dec, mag) pairs for stars (J2000, degrees).
         ra_c: [float] Centre of extraction RA (degrees).
         dec_c: [float] Centre of extraction dec (degrees).
+        jd: [float] Julian date of observations.
+        lat: [float] Observer latitude (deg).
+        lon: [float] Observer longitude (deg).
         radius: [float] Extraction radius (degrees).
+        mag_limit: [float] Limiting magnitude.
+
+    Return:
+        filtered_indices, filtered_list: (ndarray, ndarray)
+            - filtered_indices - Indices of catalog_list entries which satifly the filters.
+            - filtered_list - catalog_list entires that satifly the filters.
         ...
 
     """
@@ -95,7 +104,7 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
     # Define variables
     cdef int i, k
     cdef double dec_min, dec_max
-    cdef double ra, dec, mag
+    cdef double ra, dec, mag, elev
     cdef np.ndarray[FLOAT_TYPE_t, ndim=2] filtered_list = np.zeros(shape=(catalog_list.shape[0], \
         catalog_list.shape[1]), dtype=FLOAT_TYPE)
 
@@ -128,16 +137,23 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
 
         # Add star to the list if it is within a given radius and has a certain brightness
         if (angularSeparation(ra, dec, ra_c, dec_c) <= radius) and (mag <= mag_limit):
+
+            # Compute the local star elevation
+            _, elev = cyraDec2AltAz(radians(ra), radians(dec), jd, radians(lat), radians(lon))
+
+
+            # Only take stars above 0 degrees
+            if degrees(elev) > 0:
             
-            filtered_list[k,0] = ra
-            filtered_list[k,1] = dec
-            filtered_list[k,2] = mag
+                filtered_list[k,0] = ra
+                filtered_list[k,1] = dec
+                filtered_list[k,2] = mag
 
-            # Add index to the list of indices which passed the filter
-            filtered_indices[k] = i;
+                # Add index to the list of indices which passed the filter
+                filtered_indices[k] = i;
 
-            # Increment filtered list counter
-            k += 1
+                # Increment filtered list counter
+                k += 1
 
 
     return filtered_indices[:k], filtered_list[:k]
