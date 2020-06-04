@@ -221,6 +221,9 @@ class PlateTool(object):
         self.img_level_min = self.img_level_min_auto = 0
         self.img_level_max = self.img_level_max_auto = 2**self.bit_depth - 1
 
+        # Invert image colors
+        self.invert_levels = False
+
         self.img_data_raw = None
         self.img_data_processed = None
 
@@ -1462,6 +1465,14 @@ class PlateTool(object):
             self.updateImage()
 
 
+        elif event.key == 'i':
+
+            # Invert image levels
+            self.invert_levels = not self.invert_levels
+
+            self.updateImage()
+
+
         # Change modes from astrometry parameter changing to star picking
         elif event.key == 'ctrl+r':
 
@@ -1877,6 +1888,11 @@ class PlateTool(object):
             self.drawLevelsAdjustmentHistogram(self.img_data_raw)
 
 
+        # Invert the image (assume 8 bit image)
+        if self.invert_levels:
+            img_data = 255 - img_data
+
+
         # Store image after levels modifications
         self.img_data_processed = np.copy(img_data)
 
@@ -1954,16 +1970,23 @@ class PlateTool(object):
         ra_centre, dec_centre = self.computeCentreRADec()
 
 
-        # Setup a monospace font
+        ### Setup a monospace font ###
         font = FontProperties()
         font.set_family('monospace')
         font.set_size(8)
+
+        if self.invert_levels:
+            font_color = 'k'
+        else:
+            font_color = 'w'
+
+        ### ###
 
         
         if self.show_key_help == 0:
             text_str = 'Show fit parameters - F1'
 
-            self.ax.text(10, self.current_ff.nrows, text_str, color='w', verticalalignment='bottom', \
+            self.ax.text(10, self.current_ff.nrows, text_str, color=font_color, verticalalignment='bottom', \
                 horizontalalignment='left', fontproperties=font)
 
 
@@ -1993,15 +2016,15 @@ class PlateTool(object):
                 sign_str = ' '
             text_str += 'RA centre  = {:s}{:02d}h {:02d}m {:05.2f}s\n'.format(sign_str, hh, mm, ss)
             text_str += 'Dec centre = {:.3f}$\\degree$\n'.format(dec_centre)
-            self.ax.text(10, 10, text_str, color='w', verticalalignment='top', horizontalalignment='left', \
-                fontproperties=font)
+            self.ax.text(10, 10, text_str, color=font_color, verticalalignment='top', \
+                horizontalalignment='left', fontproperties=font)
 
 
             if self.show_key_help == 1:
                 text_str = 'Show keyboard shortcuts - F1'
 
-                self.ax.text(10, self.current_ff.nrows, text_str, color='w', verticalalignment='bottom', 
-                    horizontalalignment='left', fontproperties=font)
+                self.ax.text(10, self.current_ff.nrows, text_str, color=font_color, \
+                    verticalalignment='bottom', horizontalalignment='left', fontproperties=font)
 
         # Show keyboard shortcuts
         if self.show_key_help > 1:
@@ -2032,6 +2055,7 @@ class PlateTool(object):
             text_str += 'C - Hide/show detected stars\n'
             text_str += 'CTRL + I - Show/hide distortion\n'
             text_str += 'U/J - Img Gamma\n'
+            text_str += 'I - Invert colors\n'
             text_str += 'CTRL + H - Adjust levels\n'
             text_str += 'V - FOV centre\n'
             text_str += '\n'
@@ -2051,8 +2075,8 @@ class PlateTool(object):
             text_str += 'Hide on-screen text - F1\n'
 
 
-            self.ax.text(8, self.current_ff.nrows - 5, text_str, color='w', verticalalignment='bottom', \
-                horizontalalignment='left', fontproperties=font)
+            self.ax.text(8, self.current_ff.nrows - 5, text_str, color=font_color, \
+                verticalalignment='bottom', horizontalalignment='left', fontproperties=font)
 
 
         # Show fitting instructions
