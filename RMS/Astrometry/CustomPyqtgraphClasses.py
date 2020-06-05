@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import QApplication
 class Plus(QPainterPath):
     def __init__(self):
         QPainterPath.__init__(self)
-        plus_points = np.asarray([
+        self.plus_points = np.asarray([
             (-0.5, 0),
             (0, 0),
             (0, 0.5),
@@ -19,11 +19,17 @@ class Plus(QPainterPath):
             (0, 0)
         ])
 
-        self.moveTo(*plus_points[0])
-        for x, y in plus_points[1:]:
+        self.moveTo(*self.plus_points[0])
+        for x, y in self.plus_points[1:]:
             self.lineTo(x, y)
         self.closeSubpath()
     # plus = pg.arrayToQPath(plus_points[:, 0], plus_points[:, 1], connect='pairs')
+
+    def __hash__(self):
+        return hash((tuple(x) for x in self.plus_points))
+
+    def __lt__(self, other):
+        return False
 
 
 # custom pyqtgraph items
