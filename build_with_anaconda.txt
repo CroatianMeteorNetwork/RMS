@@ -1,2 +1,0 @@
-Navigate to the RMS directory and run:
-conda-build . -c conda-forge

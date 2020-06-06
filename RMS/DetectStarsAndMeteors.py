@@ -65,6 +65,15 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=
     img_handle = detectInputType(os.path.join(ff_directory, ff_name), config, skip_ff_dir=True, \
         detection=True)
 
+    
+    # If the FF file could not be loaded, skip processing
+    if img_handle.input_type == 'ff':
+
+        # If the FF file could not be loaded, skip it
+        if img_handle.ff is None:
+            return ff_name, [[], [], [], []], []
+
+
 
     # Load mask, dark, flat
     mask, dark, flat_struct = loadImageCalibration(ff_directory, config, dtype=img_handle.ff.dtype, \

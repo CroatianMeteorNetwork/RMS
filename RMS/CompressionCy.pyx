@@ -50,14 +50,14 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
     
     cdef unsigned short rand_count = 1
 
-    cdef unsigned int var, max_val, max_frame, mean, pixel, n, num_equal
+    cdef unsigned int var, max_val, max_val_2, max_val_3, max_val_4, max_frame, mean, pixel, n, num_equal
     
     cdef unsigned int x, y, acc
     cdef unsigned int height = frames.shape[1]
     cdef unsigned int width = frames.shape[2]
     cdef unsigned int frames_num = frames.shape[0]
-    cdef unsigned int frames_num_minus_one = frames_num - 1
-    cdef unsigned int frames_num_minus_two = frames_num - 2
+    cdef unsigned int frames_num_minus_four = frames_num - 4
+    cdef unsigned int frames_num_minus_five = frames_num - 5
 
     cdef unsigned int fieldsum_indx
     
@@ -77,6 +77,9 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
             acc = 0
             var = 0
             max_val = 0
+            max_val_2 = 0
+            max_val_3 = 0
+            max_val_4 = 0
             num_equal = 0
             
             # Calculate mean, stddev, max_val, and max_val frame
@@ -84,30 +87,50 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
             
                 pixel = frames[n, y, x]
                 acc += pixel
-                var += pixel*pixel
+                var += pixel**2
                 
                 # Assign the maximum value
                 if pixel > max_val:
-                
+                    
+                    # Track the top 4 maximum values
+                    max_val_4 = max_val_3
+                    max_val_3 = max_val_2
+                    max_val_2 = max_val
                     max_val = pixel
+
                     max_frame = n
                     num_equal = 1
-                
 
-                # Randomize taken frame number for max_val pixel if there are several frames with the maximum
-                # value
-                elif max_val == pixel:
-                
-                    num_equal += 1
-                    
-                    # rand_count is unsigned short, which means it will overflow back to 0 after 65535
-                    rand_count = (rand_count + 1)%65536
 
-                    # Select the frame by random
-                    if num_equal <= randomN[rand_count]:
-                        max_frame = n
+                else:
+
+                    # Randomize taken frame number for max_val pixel if there are several frames with the 
+                    # maximum value
+                    if max_val == pixel:
                     
-                
+                        num_equal += 1
+                        
+                        # rand_count is unsigned short, which means it will overflow back to 0 after 65535
+                        rand_count = (rand_count + 1)%65536
+
+                        # Select the frame by random
+                        if num_equal <= randomN[rand_count]:
+                            max_frame = n
+
+
+                    # Track the top 4 maximum values, which is used to remove wakes from mean and stddev
+                    if pixel > max_val_2:
+                        max_val_4 = max_val_3
+                        max_val_3 = max_val_2
+                        max_val_2 = pixel
+
+                    elif pixel > max_val_3:
+                        max_val_4 = max_val_3
+                        max_val_3 = pixel
+
+                    elif pixel > max_val_4:
+                        max_val_4 = pixel
+
 
                 # Calculate the index for fieldsum, dependent on the deinterlace order (and if there's any
                 # detinerlacing at all)
@@ -119,18 +142,29 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
 
             
             
-            # Calculate mean
-            acc -= max_val    # remove max_val pixel from average
-            mean = acc/frames_num_minus_one
+            # Calculate mean without top 4 max values
+            acc -= max_val + max_val_2 + max_val_3 + max_val_4
+            mean = acc/frames_num_minus_four
             
-            # Calculate stddev
-            var -= max_val*max_val;     # remove max_val pixel
-            var -= acc*mean;    # subtract average squared sum of all values (acc*mean = acc*acc/frames_num_minus_one)
-            var = <unsigned int> sqrt(var/frames_num_minus_two)
+
+
+            
+            ### Calculate stddev without top 4 max values ##
+            
+            # Remove top 4 max values
+            var -= max_val**2 + max_val_2**2 + max_val_3**2 + max_val_4**2
+            
+            # Subtract average squared sum of all values (acc*mean = acc*acc/frames_num_minus_four)
+            var -= acc*mean    
+
+            # Compute the standard deviation
+            var = <unsigned int> sqrt(var/frames_num_minus_five)
 
             # Make sure that the stddev is not 0, to prevent divide by zero afterwards
             if var == 0:
                 var = 1
+
+            ###
             
             
             # Output results

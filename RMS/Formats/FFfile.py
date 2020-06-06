@@ -16,7 +16,7 @@ from RMS.Decorators import memoizeSingle
 
 
 #@memoizeSingle
-def read(directory, filename, fmt=None, array=False, full_filename=False):
+def read(directory, filename, fmt=None, array=False, full_filename=False, verbose=True):
     """ Read FF file from the specified directory and choose the proper format for reading.
     
     Arguments:
@@ -29,6 +29,7 @@ def read(directory, filename, fmt=None, array=False, full_filename=False):
         array: [ndarray] True in order to populate structure's array element (default is False)
         full_filename: [bool] True if full file name is given explicitly, a name which may differ from the
             usual FF*.fits format. False by default.
+        verbose: [bool] Print error verbose. True by default.
     
     Return:
         [ff structure]
@@ -77,12 +78,15 @@ def read(directory, filename, fmt=None, array=False, full_filename=False):
             ff = readFFfits(directory, filename, array=array, full_filename=full_filename)
 
         except IOError:
-            print('File {:s} is corrupted!'.format(filename))
+            if verbose:
+                print('File {:s} is corrupted!'.format(filename))
 
             return None
 
         except TypeError:
-            print('File {:s} is corrupted!'.format(filename))
+            if verbose:
+                print('File {:s} is corrupted!'.format(filename))
+                
             return None
 
     else:

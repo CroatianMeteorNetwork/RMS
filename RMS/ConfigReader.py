@@ -164,8 +164,9 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
         #   loaded only if there's one file with '.config' in the directory
         if cml_args_config[0] == '.':
 
-            # Locate all files in the data directory that have '.config' in them
-            config_files = [file_name for file_name in os.listdir(dir_path) if '.config' in file_name]
+            # Locate all files in the data directory that start with '.config'
+            config_files = [file_name for file_name in os.listdir(dir_path) \
+                if file_name.startswith('.config')]
 
             # If there is exactly one config file, use it
             if len(config_files) == 1:
@@ -258,8 +259,16 @@ class Config:
         self.captured_dir = "CapturedFiles"
         self.archived_dir = "ArchivedFiles"
 
-        # Enable/disable showing maxpixel on the screen
-        self.live_view_enable = True
+        # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
+        #   into account
+        self.extra_space_gb = 3
+
+
+        # Enable/disable showing maxpixel on the screen (off by default)
+        self.live_maxpixel_enable = False
+
+        # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
+        self.slideshow_enable = False
 
         ##### Upload
 
@@ -689,9 +698,17 @@ def parseCapture(config, parser):
         config.mask_file = parser.get(section, "mask")
 
 
+    if parser.has_option(section, "extra_space_gb"):
+        config.extra_space_gb = parser.getfloat(section, "extra_space_gb")
+
+
     # Enable/disable showing maxpixel on the screen
-    if parser.has_option(section, "live_view_enable"):
-        config.live_view_enable = parser.getboolean(section, "live_view_enable")
+    if parser.has_option(section, "live_maxpixel_enable"):
+        config.live_maxpixel_enable = parser.getboolean(section, "live_maxpixel_enable")
+
+    # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
+    if parser.has_option(section, "slideshow_enable"):
+        config.slideshow_enable = parser.getboolean(section, "slideshow_enable")
 
 
 

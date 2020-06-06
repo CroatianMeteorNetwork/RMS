@@ -35,7 +35,7 @@ from RMS.Astrometry.CyFunctions import matchStars, subsetCatalog, cyraDecToXY
 def computeMinimizationTolerances(config, platepar, star_dict_len):
     """ Compute tolerances for minimization. """
 
-        # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
+    # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
     # in the same regard as the cost function)
     fatol = (config.dist_check_threshold**2)/np.sqrt(star_dict_len*config.min_matched_stars + 1)
 
@@ -247,7 +247,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
             return 9999.0
 
     # Calculate the average distance
-    avg_dist = np.mean(global_dist_list)
+    avg_dist = np.median(global_dist_list)
 
     cost = (avg_dist**2)*(1.0/np.sqrt(n_matched + 1))
 
@@ -500,6 +500,48 @@ def photometryFit(config, matched_stars):
 
 
 
+def starListToDict(config, calstars_list, max_ffs=None):
+    """ Converts the list of calstars into dictionary where the keys are FF file JD and the values is
+        a list of (X, Y, bg_intens, intens) of stars. 
+
+    """
+
+    # Convert the list to a dictionary
+    calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
+
+    # Dictionary which will contain the JD, and a list of (X, Y, bg_intens, intens) of the stars
+    star_dict = {}
+
+    # Take only those files with enough stars on them
+    for ff_name in calstars:
+
+        stars_list = calstars[ff_name]
+
+        # Check if there are enough stars on the image
+        if len(stars_list) >= config.ff_min_stars:
+            
+            # Calculate the JD time of the FF file
+            dt = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
+            jd = date2JD(*dt)
+
+            # Add the time and the stars to the dict
+            star_dict[jd] = stars_list
+
+
+    if max_ffs is not None:
+
+        # Limit the number of FF files used
+        if len(star_dict) > max_ffs:
+
+            # Randomly choose calstars_files_N image files from the whole list
+            rand_keys = random.sample(list(star_dict), max_ffs)
+            star_dict = {key: star_dict[key] for key in rand_keys}
+
+
+    return star_dict
+
+
+
 
 def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _fft_refinement=False):
     """ Attempts to refine the astrometry fit with the given stars and and initial astrometry parameters.
@@ -592,9 +634,6 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _
         print('Second ACF run with an updated platepar via FFT phase correlation...')
 
 
-    # Convert the list to a dictionary
-    calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
-
     # Load catalog stars (overwrite the mag band ratios if specific catalog is used)
     catalog_stars, _, config.star_catalog_band_ratios = StarCatalog.readStarCatalog(config.star_catalog_path, \
         config.star_catalog_file, lim_mag=config.catalog_mag_limit, \
@@ -602,34 +641,12 @@ def autoCheckFit(config, platepar, calstars_list, distorsion_refinement=False, _
 
 
     # Dictionary which will contain the JD, and a list of (X, Y, bg_intens, intens) of the stars
-    star_dict = {}
+    star_dict = starListToDict(config, calstars_list, max_ffs=config.calstars_files_N)
 
-    # Take only those files with enough stars on them
-    for ff_name in calstars:
-
-        stars_list = calstars[ff_name]
-
-        # Check if there are enough stars on the image
-        if len(stars_list) >= config.ff_min_stars:
-            
-            # Calculate the JD time of the FF file
-            dt = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
-            jd = date2JD(*dt)
-
-            # Add the time and the stars to the dict
-            star_dict[jd] = stars_list
-
-
-    # There has to be a minimum of 200 FF files for star fitting, and only 100 will be subset if there are more
+    # There has to be a minimum of 200 FF files for star fitting
     if len(star_dict) < config.calstars_files_N:
         print('Not enough FF files in CALSTARS for ACF!')
         return platepar, False
-
-    else:
-
-        # Randomly choose calstars_files_N image files from the whole list
-        rand_keys = random.sample(list(star_dict), config.calstars_files_N)
-        star_dict = {key: star_dict[key] for key in rand_keys}
 
 
     # Calculate the total number of calibration stars used
@@ -893,7 +910,7 @@ if __name__ == "__main__":
 
         # Load the platepar
         platepar = Platepar.Platepar()
-        platepar.read(os.path.join(dir_path, config.platepar_name))
+        platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
 
     else:
         print('Cannot find the platepar file in the night directory: ', config.platepar_name)

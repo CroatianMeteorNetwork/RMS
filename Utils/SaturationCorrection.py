@@ -107,7 +107,7 @@ if __name__ == "__main__":
             corrected_meteor_meas = []
 
 
-            print('App mag, Corr mag, Background')
+            print('Frame, App mag, Corr mag, Background')
 
             # Go though all meteor centroids
             for line in meteor_meas:
@@ -121,7 +121,7 @@ if __name__ == "__main__":
                 ### Compute the background intensity value behind the meteor ###
 
                 # Get the mask for the background as a 3 sigma streak around the meteor, but using avepixel
-                mask = thickLine(avepixel.shape[0], avepixel.shape[1], x, y, px_fm, phi, \
+                mask = thickLine(avepixel.shape[0], avepixel.shape[1], x, y, px_fm, phi - 90, \
                     3*gauss_sigma).astype(np.bool)
 
                 img = np.ma.masked_array(avepixel, ~mask)
@@ -136,7 +136,7 @@ if __name__ == "__main__":
                     gauss_sigma, saturation_point=saturation_lvl)
 
 
-                print("{:7.2f}, {:8.2f}, {:10.1f}".format(mag, unsaturated_mag, bg_val))
+                print("{:5.1f}, {:7.2f}, {:8.2f}, {:10.1f}".format(frame_n, mag, unsaturated_mag, bg_val))
 
 
                 # Compute the intensity from unsaturated magnitude

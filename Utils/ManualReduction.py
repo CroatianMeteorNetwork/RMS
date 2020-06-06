@@ -18,7 +18,6 @@ except:
 
 
 import numpy as np
-import scipy.misc
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -36,6 +35,7 @@ from RMS.Formats.Platepar import Platepar
 from RMS.Misc import openFileDialog
 from RMS.Pickling import loadPickle, savePickle
 from RMS.Routines import Image
+from RMS.Routines import RollingShutterCorrection
 
 
 # TkAgg has issues when opening an external file prompt, so other backends are forced if available
@@ -465,7 +465,7 @@ class ManualReductionTool(object):
 
         # Parse the platepar file
         try:
-            self.platepar_fmt = platepar.read(platepar_file)
+            self.platepar_fmt = platepar.read(platepar_file, use_flat=self.config.use_flat)
         except:
             platepar = None
 
@@ -1959,6 +1959,32 @@ class ManualReductionTool(object):
             self.printStatus()
 
 
+    def getRollingShutterCorrectedFrameNo(self, pick):
+        """ Given a pick object, return rolling shutter corrected (or not, depending on the config) frame
+            number.
+        """
+
+        # Correct the rolling shutter effect
+        if self.config.deinterlace_order == -1:
+
+            # Get image height
+            if self.img_handle is None:
+                img_h = self.config.height
+
+            else:
+                img_h = self.img_handle.ff.maxpixel.shape[0]
+
+            # Compute the corrected frame time
+            frame_no = RollingShutterCorrection.correctRollingShutterTemporal(pick.frame, \
+                pick.y_centroid, img_h)
+
+        # If global shutter, do no correction
+        else:
+            frame_no = pick.frame
+
+
+        return frame_no
+
 
     def saveState(self):
         """ Save the current state of the program to a file, so it can be reloaded. """
@@ -1987,9 +2013,8 @@ class ManualReductionTool(object):
 
 
         # If the platepar was loaded, save the station info
+        station_dict = {}
         if self.platepar is not None:
-
-            station_dict = {}
 
             station_dict['station_id'] = self.platepar.station_code
             station_dict['lat'] = self.platepar.lat
@@ -1999,7 +2024,11 @@ class ManualReductionTool(object):
             station_name = self.platepar.station_code
 
         else:
-            station_dict = None
+
+            station_dict['station_id'] = self.config.stationID
+            station_dict['lat'] = self.config.latitude
+            station_dict['lon'] = self.config.longitude
+            station_dict['elev'] = self.config.elevation
 
             station_name = self.station_name
 
@@ -2057,9 +2086,13 @@ class ManualReductionTool(object):
             else:
                 ra = dec = mag = None
 
+            
+            # Get the rolling shutter corrected (or not, depending on the config) frame number
+            frame_no = self.getRollingShutterCorrectedFrameNo(pick)
 
             # Compute the time relative to the reference JD
-            t_rel = pick.frame/self.fps
+            t_rel = frame_no/self.fps
+
 
             centroids.append([t_rel, pick.x_centroid, pick.y_centroid, ra, dec, pick.intensity_sum, mag])
 
@@ -2125,7 +2158,10 @@ class ManualReductionTool(object):
             if pick.x_centroid is None:
                 continue
 
-            centroids.append([pick.frame, pick.x_centroid, pick.y_centroid, pick.intensity_sum])
+            # Get the rolling shutter corrected (or not, depending on the config) frame number
+            frame_no = self.getRollingShutterCorrectedFrameNo(pick)
+
+            centroids.append([frame_no, pick.x_centroid, pick.y_centroid, pick.intensity_sum])
 
 
         # If there are no centroids, don't save anything
@@ -2200,7 +2236,7 @@ class ManualReductionTool(object):
         frame_file_path = os.path.join(dir_path, frame_file_name)
 
         # Save the frame to disk
-        scipy.misc.imsave(frame_file_path, self.current_image)
+        Image.saveImage(frame_file_path, self.current_image)
 
         print('Frame {:.1f} saved to: {:s}'.format(self.current_frame, frame_file_path))
 
@@ -2313,6 +2349,7 @@ if __name__ == "__main__":
 
         # Load the manual redicution tool object from a state file
         manual_tool = loadPickle(head1, tail1)
+        manual_tool.dir_path = head1
         manual_tool.updateImage()
         manual_tool.registerEventHandling()
 

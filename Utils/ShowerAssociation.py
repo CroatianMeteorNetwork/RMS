@@ -13,7 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
-from RMS.Astrometry.Conversions import raDec2Vector, vector2RaDec, datetime2JD, \
+from RMS.Astrometry.Conversions import raDec2Vector, vector2RaDec, datetime2JD, jd2Date, \
     geocentricToApparentRadiantAndVelocity, raDec2AltAz, raDec2AltAz_vect, EARTH_CONSTANTS
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
@@ -45,6 +45,7 @@ class MeteorSingleStation(object):
         self.jd_array = []
         self.ra_array = []
         self.dec_array = []
+        self.mag_array = []
 
         self.cartesian_points = None
 
@@ -60,13 +61,22 @@ class MeteorSingleStation(object):
         # Solar longitude of the beginning (degrees)
         self.lasun = None
 
+        # Phases on the great circle of the beginning and the end
+        self.gc_beg_phase = None
+        self.gc_end_phase = None
+
+        # Approx apparent shower radiant (only for associated meteors)
+        self.radiant_ra = None
+        self.radiant_dec = None
 
 
-    def addPoint(self, jd, ra, dec):
+
+    def addPoint(self, jd, ra, dec, mag):
 
         self.jd_array.append(jd)
         self.ra_array.append(ra)
         self.dec_array.append(dec)
+        self.mag_array.append(mag)
 
 
 
@@ -208,7 +218,10 @@ class MeteorSingleStation(object):
 class Shower(object):
     def __init__(self, shower_entry):
 
+        self.iau_code = shower_entry[0]
         self.name = shower_entry[1]
+        self.name_full = shower_entry[2]
+
         self.lasun_beg = shower_entry[3] # deg
         self.lasun_max = shower_entry[4] # deg
         self.lasun_end = shower_entry[5] # deg
@@ -406,7 +419,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             # Compute the Julian data of every point
             jd = datetime2JD(filenameToDatetime(ff_name) + datetime.timedelta(seconds=float(frame_n)/fps))
 
-            meteor_obj.addPoint(jd, ra, dec)
+            meteor_obj.addPoint(jd, ra, dec, mag)
 
             
         # Fit the great circle and compute the geometrical parameters
@@ -454,10 +467,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             if not np.any(np.isnan([shower.dra, shower.ddec])):
                 
                 # Solar longitude difference form the peak
-                lasun_diff = abs(meteor_obj.lasun - shower.lasun_max)%360
-                if lasun_diff > 180:
-                    lasun_diff = 360 - lasun_diff
-
+                lasun_diff = (meteor_obj.lasun - shower.lasun_max + 180)%360 - 180
 
                 shower.ra_g = shower.ra_g + lasun_diff*shower.dra
                 shower.dec_g = shower.dec_g + lasun_diff*shower.ddec
@@ -531,6 +541,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
 
     # Find shower frequency and sort by count
+    shower_name_list_temp = []
     shower_list_temp = []
     for key in associations:
         _, shower = associations[key]
@@ -540,10 +551,14 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
         else:
             shower_name = shower.name
 
-        shower_list_temp.append(shower_name)
+        shower_name_list_temp.append(shower_name)
+        shower_list_temp.append(shower)
 
-    unique_showers = set(shower_list_temp)
-    shower_counts = [[name, shower_list_temp.count(name)] for name in unique_showers]
+    _, unique_showers_indices = np.unique(shower_name_list_temp, return_index=True)
+    unique_shower_names = np.array(shower_name_list_temp)[unique_showers_indices]
+    unique_showers = np.array(shower_list_temp)[unique_showers_indices]
+    shower_counts = [[shower_obj, shower_name_list_temp.count(shower_name)] for shower_obj, \
+        shower_name in zip(unique_showers, unique_shower_names)]
     shower_counts = sorted(shower_counts, key=lambda x: x[1], reverse=True)
 
 
@@ -623,6 +638,10 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                 gc_alpha = 0.7
 
 
+            # Store great circle beginning and end phase
+            meteor_obj.gc_beg_phase = gc_beg_phase
+            meteor_obj.gc_end_phase = gc_end_phase
+
             # Get phases 180 deg before the meteor
             phase_angles = np.linspace(gc_end_phase, gc_beg_phase, 100)%360
 
@@ -642,6 +661,10 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             # Plot the point closest to the shower radiant
             if shower is not None:
                 allsky_plot.plot(ra_gc[0], dec_gc[0], color='r', marker='+', ms=5, mew=1)
+
+                # Store shower radiant point
+                meteor_obj.radiant_ra = ra_gc[0]
+                meteor_obj.radiant_dec = dec_gc[0]
 
 
             ### ###
@@ -689,36 +712,59 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                 ha='center', zorder=6)
 
 
-        # Plot shower counts
-        for i, (shower_name, count) in enumerate(shower_counts):
-            allsky_plot.ax.text(-180, 89 - i*4, '{:s}: {:d}'.format(shower_name, count), color='w', \
-                family='monospace')
 
+        # Plot station name and solar longiutde range
+        allsky_plot.ax.text(-180, 89, "{:s}".format(cam_code), color='w', family='monospace')
 
-        ### ###
+        # Get a list of JDs of meteors
+        jd_list = [associations[key][0].jdt_ref for key in associations]
 
-        # Plot yearly meteor shower activity
-        if plot_activity:
+        if len(jd_list):
 
-            # Get the JD range of all events
-
-            jd_list = [associations[key][0].jdt_ref for key in associations]
+            # Get the range of solar longitudes
             jd_min = min(jd_list)
+            sol_min = np.degrees(jd2SolLonSteyaert(jd_min))
             jd_max = max(jd_list)
+            sol_max = np.degrees(jd2SolLonSteyaert(jd_max))
 
-            # Plot the activity diagram
-            generateActivityDiagram(config, shower_list, ax_handle=ax_activity, \
-                sol_marker=[np.degrees(jd2SolLonSteyaert(jd_min)), np.degrees(jd2SolLonSteyaert(jd_max))])
+            # Plot the date and solar longitude range
+            date_sol_beg = u"Beg: {:s} (sol = {:.2f}\u00b0)".format(jd2Date(jd_min, dt_obj=True).strftime("%Y%m%d %H:%M:%S"), sol_min)
+            date_sol_end = u"End: {:s} (sol = {:.2f}\u00b0)".format(jd2Date(jd_max, dt_obj=True).strftime("%Y%m%d %H:%M:%S"), sol_max)
+            
+            allsky_plot.ax.text(-180, 85, date_sol_beg, color='w', family='monospace')
+            allsky_plot.ax.text(-180, 81, date_sol_end, color='w', family='monospace')
+            allsky_plot.ax.text(-180, 77, "-"*len(date_sol_end), color='w', family='monospace')
+
+            # Plot shower counts
+            for i, (shower, count) in enumerate(shower_counts):
+
+                if shower is not None:
+                    shower_name = shower.name
+                else:
+                    shower_name = "..."
+
+                allsky_plot.ax.text(-180, 73 - i*4, "{:s}: {:d}".format(shower_name, count), color='w', \
+                    family='monospace')
+
+
+            ### ###
+
+            # Plot yearly meteor shower activity
+            if plot_activity:
+
+                # Plot the activity diagram
+                generateActivityDiagram(config, shower_list, ax_handle=ax_activity, \
+                    sol_marker=[sol_min, sol_max])
 
 
         
 
-        # Save plot
+        # Save plot and text file
         if save_plot:
 
             dir_path, ftpdetectinfo_name = os.path.split(ftpdetectinfo_path)
-            plot_name = ftpdetectinfo_name.replace('FTPdetectinfo_', '').replace('.txt', '')
-            plot_name += '_radiants.png'
+            ftpdetectinfo_base_name = ftpdetectinfo_name.replace('FTPdetectinfo_', '').replace('.txt', '')
+            plot_name = ftpdetectinfo_base_name + '_radiants.png'
 
             # Increase figure size
             allsky_plot.fig.set_size_inches(18, 9, forward=True)
@@ -726,6 +772,89 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             allsky_plot.beautify()
 
             plt.savefig(os.path.join(dir_path, plot_name), dpi=100, facecolor='k')
+
+
+
+            # Save the text file with shower info
+            if len(jd_list):
+                with open(os.path.join(dir_path, ftpdetectinfo_base_name + "_radiants.txt"), 'w') as f:
+
+                    # Print station code
+                    f.write("# RMS single station association\n")
+                    f.write("# \n")
+                    f.write("# Station: {:s}\n".format(cam_code))
+
+                    # Print date range
+                    f.write("#                    Beg          |            End            \n")
+                    f.write("#      -----------------------------------------------------\n")
+                    f.write("# Date | {:24s} | {:24s} \n".format(jd2Date(jd_min, \
+                        dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f"), jd2Date(jd_max, \
+                        dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f")))
+                    f.write("# Sol  | {:>24.2f} | {:>24.2f} \n".format(sol_min, sol_max))
+
+                    # Write shower counts
+                    f.write("# \n")
+                    f.write("# Shower counts:\n")
+                    f.write("# --------------\n")
+                    f.write("# Code, Count, IAU link\n")
+
+                    for i, (shower, count) in enumerate(shower_counts):
+
+                        if shower is not None:
+                            shower_name = shower.name
+
+                            # Create link to the IAU database of showers
+                            iau_link = "https://www.ta3.sk/IAUC22DB/MDC2007/Roje/pojedynczy_obiekt.php?kodstrumienia={:05d}".format(shower.iau_code)
+
+                        else:
+                            shower_name = "..."
+                            iau_link = "None"
+
+                        f.write("# {:>4s}, {:>5d}, {:s}\n".format(shower_name, count, iau_link))
+
+
+
+                    f.write("# \n")
+                    f.write("# Meteor parameters:\n")
+                    f.write("# ------------------\n")
+                    f.write("#          Date And Time,      Beg Julian date,     La Sun, Shower, RA beg, Dec beg, RA end, Dec end, RA rad, Dec rad, GC theta0,  GC phi0, GC beg phase, GC end phase,  Mag\n")
+
+
+                    # Create a sorted list of meteor associations by time
+                    associations_list = [associations[key] for key in associations]
+                    associations_list = sorted(associations_list, key=lambda x: x[0].jdt_ref)
+
+                    # Write out meteor parameters
+                    for meteor_obj, shower in associations_list:
+
+                        # Find peak magnitude
+                        if np.any(meteor_obj.mag_array):
+                            peak_mag = "{:+.1f}".format(np.min(meteor_obj.mag_array))
+
+                        else:
+                            peak_mag = "None"
+
+
+                        if shower is not None:
+
+                            f.write("{:24s}, {:20.12f}, {:>10.6f}, {:>6s}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:9.3f}, {:8.3f}, {:12.3f}, {:12.3f}, {:4s}\n".format(jd2Date(meteor_obj.jdt_ref, dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f"), \
+                                meteor_obj.jdt_ref, meteor_obj.lasun, shower.name, \
+                                meteor_obj.ra_array[0]%360, meteor_obj.dec_array[0], \
+                                meteor_obj.ra_array[-1]%360, meteor_obj.dec_array[-1], \
+                                meteor_obj.radiant_ra%360, meteor_obj.radiant_dec, \
+                                np.degrees(meteor_obj.theta0), np.degrees(meteor_obj.phi0), \
+                                meteor_obj.gc_beg_phase, meteor_obj.gc_end_phase, peak_mag))
+
+                        else:
+                            f.write("{:24s}, {:20.12f}, {:>10.6f}, {:>6s}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:>6s}, {:>7s}, {:9.3f}, {:8.3f}, {:12.3f}, {:12.3f}, {:4s}\n".format(jd2Date(meteor_obj.jdt_ref, dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f"), \
+                                meteor_obj.jdt_ref, meteor_obj.lasun, '...', meteor_obj.ra_array[0]%360, \
+                                meteor_obj.dec_array[0], meteor_obj.ra_array[-1]%360, \
+                                meteor_obj.dec_array[-1], "None", "None", np.degrees(meteor_obj.theta0), \
+                                np.degrees(meteor_obj.phi0), meteor_obj.gc_beg_phase, \
+                                meteor_obj.gc_end_phase, peak_mag))
+
+
+
 
 
         if show_plot:
@@ -801,8 +930,15 @@ if __name__ == "__main__":
 
     # Print results to screen
     if shower_counts:
+        print()
         print('Shower ranking:')
-        for shower_name, count in shower_counts:
+        for shower, count in shower_counts:
+
+            if shower is None:
+                shower_name = '...'
+            else:
+                shower_name = shower.name
+
             print(shower_name, count)
 
     else:

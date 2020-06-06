@@ -3,10 +3,9 @@
 import os
 import argparse
 
-import scipy.misc
-
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
+from RMS.Routines.Image import saveImage
 
 
 
@@ -51,5 +50,5 @@ if __name__ == "__main__":
             print('Saving: ', img_file_name)
 
             # Save the maxpixel to disk
-            scipy.misc.imsave(os.path.join(dir_path, img_file_name), ff.maxpixel)
+            saveImage(os.path.join(dir_path, img_file_name), ff.maxpixel)
 

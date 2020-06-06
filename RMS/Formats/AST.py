@@ -149,13 +149,13 @@ def loadAST(dir_path, file_name):
     ast.r3 = np.fromfile(fid, dtype=np.int32, count=1)
 
     # Text description
-    ast.text = np.fromfile(fid, dtype='|S'+str(256), count=1)[0]
+    ast.text = np.fromfile(fid, dtype='|S'+str(256), count=1)[0].tostring().decode()
 
     # Name of catalogue
-    ast.starcat = np.fromfile(fid, dtype='|S'+str(32), count=1)[0]
+    ast.starcat = np.fromfile(fid, dtype='|S'+str(32), count=1)[0].tostring().decode()
 
     # Name of observing site
-    ast.sitename = np.fromfile(fid, dtype='|S'+str(32), count=1)[0]
+    ast.sitename = np.fromfile(fid, dtype='|S'+str(32), count=1)[0].tostring().decode()
 
     # Site geo coordinates
     ast.lat = np.fromfile(fid, dtype=np.float64, count=1)[0]
@@ -422,8 +422,9 @@ def xyToRaDecAST(time_data, X_data, Y_data, level_data, ast, photom_offset):
     JD_data, RA_data, dec_data = altAzToRADec(np.degrees(ast.lat), np.degrees(ast.lon), 0.0, time_data, \
         azimuth_data, altitude_data)
 
-    # Calculate magnitudes
-    magnitude_data = calculateMagnitudes(level_data, -2.5, photom_offset)
+
+    # Calculate magnitudes (ignore vignetting)
+    magnitude_data = calculateMagnitudes(level_data, np.zeros_like(level_data), photom_offset, 0.0)
 
 
     return JD_data, RA_data, dec_data, magnitude_data

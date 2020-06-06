@@ -18,6 +18,7 @@ from __future__ import print_function, absolute_import
 
 import os
 import sys
+import glob
 import argparse
 import time
 import datetime
@@ -29,22 +30,22 @@ import traceback
 
 import numpy as np
 
+# This needs to be first to set the proper matplotlib backend it needs
+from Utils.LiveViewer import LiveViewer
+
 import RMS.ConfigReader as cr
 from RMS.Logger import initLogging
-
-
 from RMS.BufferedCapture import BufferedCapture
 from RMS.CaptureDuration import captureDuration
 from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
-from RMS.LiveViewer import LiveViewer
+from RMS.Formats.FFfile import validFFName
 from RMS.Misc import mkdirP
 from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight
 from RMS.RunExternalScript import runExternalScript
 from RMS.UploadManager import UploadManager
-
 
 # Flag indicating that capturing should be stopped
 STOP_CAPTURE = False
@@ -139,6 +140,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         upload_manager: [UploadManager object] A handle to the UploadManager, which handles uploading files to
             the central server. None by default.
 
+    Return:
+        night_archive_dir: [str] Path to the archive folder of the processed night.
+
     """
 
     global STOP_CAPTURE
@@ -213,19 +217,18 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file)
 
 
-    # # Initialize the live image viewer
-    # if config.live_view_enable:
+    # Initialize the live image viewer
+    if config.live_maxpixel_enable:
+        live_view = LiveViewer(night_data_dir, slideshow=False, banner_text="Live")
+        live_view.start()
 
-    #     live_view = LiveViewer(window_name='Maxpixel')
-
-    # else:
-    
-    live_view = None
+    else:
+        live_view = None
 
     
     # Initialize compression
     compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config, 
-        detector=detector, live_view=live_view)
+        detector=detector)
 
     
     # Start buffered capture
@@ -254,7 +257,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Stop the compressor
     log.debug('Stopping compression...')
-    detector, live_view = compressor.stop()
+    detector = compressor.stop()
 
     # Free shared memory after the compressor is done
     try:
@@ -277,7 +280,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         log.debug('Stopping live viewer...')
 
         live_view.stop()
+        live_view.join()
         del live_view
+        live_view = None
 
         log.debug('Live view stopped')
 
@@ -401,8 +406,57 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         sys.exit()
 
 
+    return night_archive_dir
 
 
+
+def processIncompleteCaptures(config):
+    # This tries to reprocess and conclude a broken capture folder
+
+    log.debug('Checking for folders containing partially-processed data')
+
+    captured_dir_list = []
+    for captured_dir_name in sorted(os.listdir(os.path.join(config.data_dir, config.captured_dir))):
+        if captured_dir_name.startswith(config.stationID):
+            if os.path.isdir(os.path.join(config.data_dir, config.captured_dir, captured_dir_name)):
+                captured_dir_list.append(captured_dir_name)
+
+    for captured_subdir in captured_dir_list:
+        captured_dir = os.path.join(config.data_dir, config.captured_dir, captured_subdir)
+        log.debug('Checking folder: {}'.format(captured_dir))
+        pickle_files = glob.glob('{}/rms_queue_bkup*.pickle'.format(captured_dir))
+        if len(pickle_files) == 0:
+            continue
+
+        # make sure same folder wasn't fully processed yet
+        archived_dir = os.path.join(config.data_dir, config.archived_dir, captured_subdir)
+        FTPdetectinfo_files = glob.glob('{}/FTPdetectinfo_*.txt'.format(archived_dir))
+        if len(FTPdetectinfo_files) > 0:
+            log.debug('Skipping {}. Same folder was found processed in {}'.format(captured_dir, archived_dir))
+            continue
+
+        log.info('Found partially-processed data in {}'.format(captured_dir))
+        try:
+            _, archive_name, detector = processNight(captured_dir, config)
+            # Upload the archive, if upload is enabled
+            if config.upload_enabled:
+                log.info('Starting the upload manager...')
+                upload_manager = UploadManager(config)
+                upload_manager.start()
+
+                log.info('Adding file to upload list: ' + archive_name)
+                upload_manager.addFiles([archive_name])
+
+                if upload_manager.is_alive():
+                    upload_manager.stop()
+                    log.info('Closing upload manager...')
+                # Delete detection backup files
+                if detector is not None:
+                    detector.deleteBackupFiles()
+            log.info("Folder {} reprocessed with success".format(captured_dir))
+
+        except:
+            log.error("An error occured when trying to reprocess partially-processed data")
 
 
 if __name__ == "__main__":
@@ -529,13 +583,13 @@ if __name__ == "__main__":
 
     # Automatic running and stopping the capture at sunrise and sunset
     ran_once = False
+    slideshow_view = None
     while True:
             
         # Calculate when and how should the capture run
         start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
 
         log.info('Next start time: ' + str(start_time) + ' UTC')
-
 
         # Reboot the computer after processing is done for the previous night
         if ran_once and config.reboot_after_processing:
@@ -582,11 +636,17 @@ if __name__ == "__main__":
                     time.sleep(60)
 
 
-                # Stop reboot tries if it's time to capture
+                ### Stop reboot tries if it's time to capture ###
+                if isinstance(start_time, bool):
+                    if start_time:
+                        break
+
                 time_now = datetime.datetime.utcnow()
                 waiting_time = start_time - time_now
                 if waiting_time.total_seconds() <= 0:
                     break
+
+                ### ###
 
 
 
@@ -624,6 +684,50 @@ if __name__ == "__main__":
 
         # Wait to start capturing
         if start_time != True:
+
+            # check if there's a folder containing unprocessed data
+            # this may happen if system crashed during processing
+            processIncompleteCaptures(config)
+
+
+            # Initialize the slideshow of last night's detections
+            if config.slideshow_enable:
+
+                # Make a list of all archived directories previously generated
+                archive_dir_list = []
+                for archive_dir_name in sorted(os.listdir(os.path.join(config.data_dir, 
+                    config.archived_dir))):
+
+                    if archive_dir_name.startswith(config.stationID):
+                        if os.path.isdir(os.path.join(config.data_dir, config.archived_dir, \
+                            archive_dir_name)):
+
+                            archive_dir_list.append(archive_dir_name)
+
+
+
+                # If there are any archived dirs, choose the last one
+                if archive_dir_list:
+
+                    latest_night_archive_dir = os.path.join(config.data_dir, config.archived_dir, \
+                        archive_dir_list[-1])
+
+                    # Make sure that there are any FF files in the chosen archived dir
+                    ffs_latest_night_archive = [ff_name for ff_name \
+                        in os.listdir(latest_night_archive_dir) if validFFName(ff_name)]
+
+                    if len(ffs_latest_night_archive):
+
+                        log.info("Starting a slideshow of {:d} detections from the previous night.".format(len(ffs_latest_night_archive)))
+
+                        # Start the slide show
+                        slideshow_view = LiveViewer(latest_night_archive_dir, slideshow=True, \
+                            banner_text="Last night's detections")
+                        slideshow_view.start()
+
+                    else:
+                        log.info("No detections from the previous night to show as a slideshow!")
+
             
             # Calculate how many seconds to wait until capture starts, and with for that time
             time_now = datetime.datetime.utcnow()
@@ -651,6 +755,15 @@ if __name__ == "__main__":
                         upload_manager.stop()
                         del upload_manager
 
+
+                    # Stop the slideshow if it was on
+                    if slideshow_view is not None:
+                        log.info("Stopping slideshow...")
+                        slideshow_view.stop()
+                        slideshow_view.join()
+                        del slideshow_view
+                        slideshow_view = None
+
                 sys.exit()
 
             # Change the Ctrl+C action to the special handle
@@ -661,6 +774,14 @@ if __name__ == "__main__":
         if STOP_CAPTURE:
             break
 
+
+        # Stop the slideshow if it was on
+        if slideshow_view is not None:
+            log.info("Stopping slideshow...")
+            slideshow_view.stop()
+            slideshow_view.join()
+            del slideshow_view
+            slideshow_view = None
 
 
         log.info('Freeing up disk space...')
@@ -676,13 +797,12 @@ if __name__ == "__main__":
         log.info('Starting capture for {:.2f} hours'.format(duration/60/60))
 
         # Run capture and compression
-        runCapture(config, duration=duration, nodetect=cml_args.nodetect, upload_manager=upload_manager, 
-            detect_end=cml_args.detectend)
+        night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect, 
+            upload_manager=upload_manager, detect_end=cml_args.detectend)
 
         # Indicate that the capture was done once
         ran_once = True
-
-
+            
 
 
     if upload_manager is not None:

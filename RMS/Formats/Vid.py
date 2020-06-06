@@ -114,7 +114,9 @@ def readFrame(st, fid, metadata_only=False):
     st.hx = int(np.fromfile(fid, dtype=np.uint16, count=1))
     st.hy = int(np.fromfile(fid, dtype=np.uint16, count=1))
 
+    # Camera stream identifier, where 0 = 'A', 1 = 'B', etc
     st.str_num = int(np.fromfile(fid, dtype=np.uint16, count=1))
+
     st.reserved0 = int(np.fromfile(fid, dtype=np.uint16, count=1))
     st.exposure = int(np.fromfile(fid, dtype=np.uint32, count=1))
     st.reserved2 = int(np.fromfile(fid, dtype=np.uint32, count=1))

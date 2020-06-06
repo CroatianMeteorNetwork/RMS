@@ -10,8 +10,6 @@ import traceback
 import argparse
 import logging
 
-import scipy.misc
-
 from RMS.ArchiveDetections import archiveDetections, archiveFieldsums
 # from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo
 from RMS.Astrometry.ApplyRecalibrate import recalibrateIndividualFFsAndApplyAstrometry
@@ -24,6 +22,7 @@ from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats import CALSTARS
 from RMS.UploadManager import UploadManager
+from RMS.Routines.Image import saveImage
 from Utils.CalibrationReport import generateCalibrationReport
 from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
@@ -61,7 +60,7 @@ def getPlatepar(config, night_data_dir):
     platepar_path = os.path.join(os.getcwd(), config.platepar_name)
     if os.path.exists(platepar_path):
         platepar = Platepar()
-        platepar_fmt = platepar.read(platepar_path)
+        platepar_fmt = platepar.read(platepar_path, use_flat=config.use_flat)
 
         log.info('Loaded platepar from RMS directory: ' + platepar_path)
 
@@ -72,7 +71,7 @@ def getPlatepar(config, night_data_dir):
         platepar_path = platepar_night_dir_path
 
         platepar = Platepar()
-        platepar_fmt = platepar.read(platepar_path)
+        platepar_fmt = platepar.read(platepar_path, use_flat=config.use_flat)
 
         log.info('Loaded platepar from night directory: ' + platepar_path)
 
@@ -164,7 +163,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
 
         # Run calibration check and auto astrometry refinement
-        if platepar is not None:
+        if (platepar is not None) and (calstars_name is not None):
 
             # Read in the CALSTARS file
             calstars_list = CALSTARS.readCALSTARS(night_data_dir, calstars_name)
@@ -188,7 +187,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             # # Calculate astrometry for meteor detections
             # applyAstrometryFTPdetectinfo(night_data_dir, ftpdetectinfo_name, platepar_path)
 
-            
+            # If a flat is used, disable vignetting correction
+            if config.use_flat:
+                platepar.vignetting_coeff = 0.0
 
             log.info("Recalibrating astrometry on FF files with detections...")
 
@@ -270,7 +271,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
         # Save the flat in the night directory, to keep the operational flat updated
         flat_path = os.path.join(night_data_dir, os.path.basename(config.flat_file))
-        scipy.misc.imsave(flat_path, flat_img)
+        saveImage(flat_path, flat_img)
         log.info('Flat saved to: ' + flat_path)
 
         # Copy the flat to the night's directory as well
@@ -285,16 +286,21 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     # Add the config file to the archive too
     extra_files.append(os.path.join(os.getcwd(), '.config'))
 
+    # Add the mask
+    if (not nodetect):
+        if os.path.exists(config.mask_file):
+            mask_path = os.path.abspath(config.mask_file)
+            extra_files.append(mask_path)
+
+
     # Add the platepar to the archive if it exists
     if (not nodetect):
-
         if os.path.exists(platepar_path):
             extra_files.append(platepar_path)
 
 
     # Add the json file with recalibrated platepars to the archive
     if (not nodetect):
-
         recalibrated_platepars_path = os.path.join(night_data_dir, config.platepars_recalibrated_name)
         if os.path.exists(recalibrated_platepars_path):
             extra_files.append(recalibrated_platepars_path)

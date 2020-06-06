@@ -111,6 +111,7 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
 
     # If the image registration library is not installed, return nothing
     if not IMREG_INSTALLED:
+        print("WARNING:")
         print('The imreg_dft library is not installed! Install it by running either:')
         print(' a) pip install imreg_dft')
         print(' b) conda install -c conda-forge imreg_dft')
@@ -356,7 +357,7 @@ if __name__ == "__main__":
         # Load the platepar
         platepar = Platepar.Platepar()
         platepar_path = os.path.join(dir_path, config.platepar_name)
-        platepar.read(platepar_path)
+        platepar.read(platepar_path, use_flat=config.use_flat)
 
     else:
         print('Cannot find the platepar file in the night directory: ', config.platepar_name)

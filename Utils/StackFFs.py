@@ -7,11 +7,10 @@ import argparse
 
 import numpy as np
 import matplotlib.pyplot as plt
-import scipy.misc
 
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
-from RMS.Routines.Image import deinterlaceBlend, blendLighten, loadFlat, applyFlat, adjustLevels
+from RMS.Routines.Image import deinterlaceBlend, blendLighten, loadFlat, applyFlat, adjustLevels, saveImage
 from RMS.Routines import MaskImage
 
 
@@ -167,7 +166,7 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
 
     
     # Save the blended image
-    scipy.misc.imsave(stack_path, merge_img)
+    saveImage(stack_path, merge_img)
 
 
     return stack_path, merge_img
