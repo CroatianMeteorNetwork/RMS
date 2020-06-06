@@ -154,6 +154,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Full path to the data directory
     night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, night_data_dir_name)
 
+    if cml_args.resume:
+        log.info('Crash detected, resuming capture directory...')
+        night_data_dir = max(glob.glob(os.path.join('/home/pi/RMS_data/CapturedFiles', '*/')), key=os.path.getmtime)
+        night_data_dir_name = os.path.basename(night_data_dir)
 
     # Make a directory for the night
     mkdirP(night_data_dir)
@@ -484,6 +488,8 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-e', '--detectend', action="store_true", help="""Detect stars and meteors at the
         end of the night, after capture finishes. """)
+
+    arg_parser.add_argument('-r', '--resume', action="store_true", help="""Resume last night capture dir after restart by kernel log watchdog. """)
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
