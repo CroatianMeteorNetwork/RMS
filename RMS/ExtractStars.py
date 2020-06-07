@@ -22,6 +22,7 @@ import sys
 import os
 import argparse
 
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize as opt
@@ -32,9 +33,15 @@ import scipy.ndimage.filters as filters
 import RMS.ConfigReader as cr
 from RMS.Formats import FFfile
 from RMS.Formats import CALSTARS
+from RMS.DetectionTools import loadImageCalibration
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
 from RMS.QueuedPool import QueuedPool
+
+# Morphology - Cython init
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+import RMS.Routines.MorphCy as morph
 
 
 
@@ -68,7 +75,7 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     """
 
     # This will be returned if there was an error
-    error_return = [[], [], [], []]
+    error_return = [[], [], [], [], [], []]
 
     # Load parameters from config if given
     if config:
@@ -127,6 +134,13 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     border_mask[:,:border] = 0
     border_mask[:,-border:] = 0
     maxima = MaskImage.applyMask(maxima, border_mask, image=True)
+
+    # Remove all detections close to the mask image
+    if mask is not None:
+        erosion_kernel = np.ones((5, 5), mask.img.dtype)
+        mask_eroded = cv2.erode(mask.img, erosion_kernel, iterations=1)
+
+        maxima = MaskImage.applyMask(maxima, mask_eroded, image=True)
 
 
     # Find and label the maxima
@@ -189,6 +203,9 @@ def twoDGaussian(params, amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
     """
 
     x, y, saturation = params
+
+    if isinstance(saturation, np.ndarray):
+        saturation = saturation[0, 0]
     
     xo = float(xo)
     yo = float(yo)
@@ -249,14 +266,17 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
         x_max = x + segment_radius
 
         if y_min < 0:
-            y_min = 0
+            y_min = np.array([0])
         if y_max > ff.nrows:
-            y_max = ff.nrows
+            y_max = np.array([ff.nrows])
         if x_min < 0:
-            x_min = 0
+            x_min = np.array([0])
         if x_max > ff.ncols:
-            x_max = ff.ncols
+            x_max = np.array([ff.ncols])
 
+        # Check if any of these values is NaN and skip the star
+        if np.any(np.isnan([x_min, x_max, y_min, y_max])):
+            continue
 
         x_min = int(x_min)
         x_max = int(x_max)
@@ -270,7 +290,7 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
         y_ind, x_ind = np.indices(star_seg.shape)
 
         # Estimate saturation level from image type
-        saturation = 2**(8*star_seg.itemsize) - 1
+        saturation = (2**(8*star_seg.itemsize) - 1)*np.ones_like(y_ind)
 
         # Fit a PSF to the star
         try:
@@ -409,7 +429,7 @@ def plotStars(ff, x2, y2):
 
 if __name__ == "__main__":
 
-    time_start = time.clock()
+    time_start = time.time()
 
     ### COMMAND LINE ARGUMENTS
 
@@ -444,20 +464,22 @@ if __name__ == "__main__":
 
 
 
-    # Try loading a flat field image
-    flat_struct = None
+    # # Try loading a flat field image
+    # flat_struct = None
 
-    if config.use_flat:
+    # if config.use_flat:
         
-        # Check if there is flat in the data directory
-        if os.path.exists(os.path.join(ff_dir, config.flat_file)):
-            flat_struct = Image.loadFlat(ff_dir, config.flat_file)
+    #     # Check if there is flat in the data directory
+    #     if os.path.exists(os.path.join(ff_dir, config.flat_file)):
+    #         flat_struct = Image.loadFlat(ff_dir, config.flat_file)
 
-        # Try loading the default flat
-        elif os.path.exists(config.flat_file):
-            flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
+    #     # Try loading the default flat
+    #     elif os.path.exists(config.flat_file):
+    #         flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
 
 
+    # Load mask, dark, flat
+    mask, dark, flat_struct = loadImageCalibration(ff_dir, config)
     
 
     extraction_list = []
@@ -482,7 +504,7 @@ if __name__ == "__main__":
     # Add jobs for the pool
     for ff_name in extraction_list:
         print('Adding for extraction:', ff_name)
-        workpool.addJob([ff_dir, ff_name, config, flat_struct])
+        workpool.addJob([ff_dir, ff_name, config, None, None, None, None, flat_struct, dark, mask])
 
 
     print('Starting pool...')
@@ -566,7 +588,7 @@ if __name__ == "__main__":
     # Delete QueudPool backed up files
     workpool.deleteBackupFiles()
 
-    print('Total time taken: ', time.clock() - time_start)
+    print('Total time taken: {:.2f} s'.format(time.time() - time_start))
 
 
     # Show the histogram of PSF stddevs

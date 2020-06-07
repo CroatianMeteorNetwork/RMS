@@ -34,8 +34,7 @@ import matplotlib.gridspec as gridspec
 from mpl_toolkits.mplot3d import Axes3D
 
 # RMS imports
-from RMS.Astrometry.Conversions import jd2Date
-from RMS.Astrometry.ApplyAstrometry import raDec2AltAz
+from RMS.Astrometry.Conversions import jd2Date, raDec2AltAz
 import RMS.ConfigReader as cr
 from RMS.DetectionTools import getThresholdedStripe3DPoints, loadImageCalibration
 from RMS.Formats.AsgardEv import writeEv
@@ -714,8 +713,8 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
     # Distances between points and fitted line
     point_deviations = _pointDistance(x_array, y_array, mX*frame_array + cX, mY*frame_array + cY)
 
-    # Calculate average deviation
-    mean_deviation = np.mean(point_deviations)
+    # Calculate median deviation
+    mean_deviation = np.median(point_deviations)
 
     # Take points with satisfactory deviation
     good_centroid_indices = np.where(np.logical_not(point_deviations > mean_deviation*centroid_max_deviation + 1))
@@ -1103,6 +1102,11 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
     # Do all image processing on single FF file, if given
     # Otherwise, the image processing will be done on every frame chunk that is extracted
     if img_handle.input_type == 'ff':
+
+        # If the FF file could not be loaded, skip it
+        if img_handle.ff is None:
+            logDebug("FF file cound not be loaded, skipping it...")
+            return []
 
         # Apply mask and flat to FF
         img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
@@ -1829,7 +1833,7 @@ if __name__ == "__main__":
                 alt_array = []
                 for jd, ra, dec in zip(jd_array, ra_array, dec_array):
 
-                    azim, alt = raDec2AltAz(jd, np.degrees(ast.lon), np.degrees(ast.lat), ra, dec)
+                    azim, alt = raDec2AltAz(ra, dec, jd, np.degrees(ast.lat), np.degrees(ast.lon))
 
                     azim_array.append(azim)
                     alt_array.append(alt)

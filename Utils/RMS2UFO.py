@@ -9,6 +9,7 @@ import datetime
 import numpy as np
 
 import RMS.Astrometry.ApplyAstrometry
+from RMS.Astrometry.Conversions import datetime2JD, altAz2RADec
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats import FFfile
 import RMS.Formats.Platepar
@@ -40,7 +41,7 @@ def FTPdetectinfo2UFOOrbitInput(dir_path, file_name, platepar_path, platepar_dic
     if platepar_dict is None:
 
         pp = RMS.Formats.Platepar.Platepar()
-        pp.read(platepar_path)
+        pp.read(platepar_path, use_flat=None)
 
 
     # Init the UFO format list
@@ -59,6 +60,7 @@ def FTPdetectinfo2UFOOrbitInput(dir_path, file_name, platepar_path, platepar_dic
 
             else:
                 print('Skipping {:s} becuase no platepar was found for this FF file!'.format(ff_name))
+                continue
 
         # Convert the FF file name into time
         dt = FFfile.filenameToDatetime(ff_name)
@@ -113,17 +115,15 @@ def FTPdetectinfo2UFOOrbitInput(dir_path, file_name, platepar_path, platepar_dic
         azim2 = (90 - np.degrees(azim2))%360
 
         # Compute RA/Dec from Alt/Az
-        _, ra1, dec1 = RMS.Astrometry.ApplyAstrometry.altAzToRADec(pp.lat, pp.lon, pp.UT_corr, [dt1], \
-            [azim1], [alt1], dt_time=True)
-        _, ra2, dec2 = RMS.Astrometry.ApplyAstrometry.altAzToRADec(pp.lat, pp.lon, pp.UT_corr, [dt2], \
-            [azim2], [alt2], dt_time=True)
+        ra1, dec1 = altAz2RADec(azim1, alt1, datetime2JD(dt1), pp.lat, pp.lon)
+        ra2, dec2 = altAz2RADec(azim2, alt2, datetime2JD(dt2), pp.lat, pp.lon)
 
 
         ### ###
 
 
         ufo_meteor_list.append([dt1, peak_mag, duration, azim1[0], alt1[0], azim2[0], alt2[0], \
-            ra1[0][0], dec1[0][0], ra2[0][0], dec2[0][0], cam_code, pp.lon, pp.lat, pp.elev, pp.UT_corr])
+            ra1[0], dec1[0], ra2[0], dec2[0], cam_code, pp.lon, pp.lat, pp.elev, pp.UT_corr])
 
 
     # Construct a file name for the UFO file, which is the FTPdetectinfo file without the FTPdetectinfo 

@@ -164,12 +164,15 @@ class InputTypeFF(object):
         else:
             self.fps = self.config.fps
 
-        # Get the image size
-        self.nrows = self.ff.nrows
-        self.ncols = self.ff.ncols
 
-        # Compute the total number of frames in all video files
-        self.total_frames = len(self.ff_list)*self.ff.nframes
+        if self.ff is not None:
+
+            # Get the image size
+            self.nrows = self.ff.nrows
+            self.ncols = self.ff.ncols
+
+            # Compute the total number of frames in all video files
+            self.total_frames = len(self.ff_list)*self.ff.nframes
 
 
 
@@ -371,7 +374,8 @@ class InputTypeFF(object):
 
 
         # Set the fixed dtype of uint8 to the FF
-        self.ff.dtype = np.uint8
+        if self.ff is not None:
+            self.ff.dtype = np.uint8
                 
         # Store the loaded file to cache for faster loading
         self.cache = {}
@@ -569,6 +573,9 @@ class InputTypeVideo(object):
 
 
         self.cache = {}
+
+        # Load the initial chunk
+        self.loadChunk()
 
 
     def nextChunk(self):
@@ -1646,7 +1653,8 @@ def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_d
 
 
         # Check if the given file is a video file
-        elif file_name.endswith('.mp4') or file_name.endswith('.avi') or file_name.endswith('.mkv'):
+        elif file_name.lower().endswith('.mp4') or file_name.lower().endswith('.avi') \
+            or file_name.lower().endswith('.mkv'):
 
             # Init the image hadle for video files
             img_handle = InputTypeVideo(input_path, config, beginning_time=beginning_time, \

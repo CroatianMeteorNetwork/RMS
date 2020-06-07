@@ -265,10 +265,28 @@ class QueuedPool(object):
 
         self.active_workers.increment()
 
+        
+        input_ret_failures = 0
+
         while True:
 
-            # Get the function arguments (block until available)
-            args = self.input_queue.get(True)
+            # Get the function arguments (block until available, handle possible errors)
+            try:
+                args = self.input_queue.get(True)
+            
+            except:
+                tb = traceback.format_exc()
+                self.printAndLog('Failed retrieving inputs...')
+                self.printAndLog(tb)
+
+                if input_ret_failures > 5:
+                    self.printAndLog("Too many failures to get inputs for QueuedPool, assuming all inputs were processed...")
+                    break
+
+                input_ret_failures += 1
+                time.sleep(1.0)
+                continue
+
 
             # The 'poison pill' for killing the worker when closing is requested
             if args is None:
@@ -515,7 +533,7 @@ class QueuedPool(object):
 
 
 
-    def addJob(self, job, wait_time=0.05, repeated=False):
+    def addJob(self, job, wait_time=0.1, repeated=False):
         """ Add a job to the input queue. Job can be a list of arguments for the worker function. If a list is
             not given, the arguments will be wrapped in the list.
 
@@ -528,6 +546,7 @@ class QueuedPool(object):
         try:
             
             self.input_queue.put(job)
+            time.sleep(wait_time/2.0)
 
             # Track the total number of jobs received
             self.total_jobs.increment()
@@ -544,8 +563,9 @@ class QueuedPool(object):
 
             # Try adding the job to processing queue again
             if not repeated:
-                time.sleep(0.05)
+                time.sleep(0.1)
                 self.addJob(job, wait_time=wait_time, repeated=True)
+                time.sleep(0.1)
                 return None
 
             else:

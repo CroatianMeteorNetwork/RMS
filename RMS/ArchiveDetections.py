@@ -83,7 +83,7 @@ def selectFiles(dir_path, ff_detected):
 
 
         # Add FF file which contain detections to the list
-        if file_name in ff_detected:
+        if (ff_detected is not None) and (file_name in ff_detected):
             selected_list.append(file_name)
 
 
@@ -145,25 +145,28 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
     """
 
+    # Get the list of files to archive
+    file_list = selectFiles(captured_path, ff_detected)
+
+    
     log.info('Generating thumbnails...')
 
     try:
+
         # Generate captured thumbnails
-        generateThumbnails(captured_path, config, 'CAPTURED')
-
-        # Get the list of files to archive
-        file_list = selectFiles(captured_path, ff_detected)
-
+        captured_mosaic_file = generateThumbnails(captured_path, config, 'CAPTURED')
 
         # Generate detected thumbnails
-        mosaic_file = generateThumbnails(captured_path, config, 'DETECTED', file_list=sorted(file_list))
+        detected_mosaic_file = generateThumbnails(captured_path, config, 'DETECTED', \
+            file_list=sorted(file_list))
 
         # Add the detected mosaic file to the selected list
-        file_list.append(mosaic_file)
+        file_list.append(captured_mosaic_file)
+        file_list.append(detected_mosaic_file)
 
     except Exception as e:
         log.error('Generating thumbnails failed with error:' + repr(e))
-        log.error(*traceback.format_exception(*sys.exc_info()))
+        log.error("".join(traceback.format_exception(*sys.exc_info())))
 
 
 
@@ -184,15 +187,21 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
         if stack_path is not None:
 
+            log.info("Stack saved to: {:s}".format(stack_path))
+
             # Extract the name of the stack image
             stack_file = os.path.basename(stack_path)
             
             # Add the stack path to the list of files to put in the archive
             file_list.append(stack_file)
 
+        else:
+            log.info("Stack could not be saved!")
+
+
     except Exception as e:
         log.error('Generating stack failed with error:' + repr(e))
-        log.error(*traceback.format_exception(*sys.exc_info()))
+        log.error("".join(traceback.format_exception(*sys.exc_info())))
 
 
 
@@ -235,3 +244,4 @@ if __name__ == "__main__":
     archive_name = archiveDetections(captured_path, archived_path, ff_detected, config)
 
     print(archive_name)
+

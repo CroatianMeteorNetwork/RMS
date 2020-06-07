@@ -8,7 +8,7 @@ import numpy as np
 import scipy.optimize
 
 
-from RMS.Astrometry.Conversions import date2JD
+from RMS.Astrometry.Conversions import date2JD, datetime2JD
 
 
 
@@ -154,29 +154,34 @@ def solLon2jdSteyaert(*args):
 
 if __name__ == "__main__":
 
-    ### Test all solar longitude functions and see the difference between the solar longitudes they return
+    # ### Test all solar longitude functions and see the difference between the solar longitudes they return
 
-    year = 2012
+    # year = 2012
 
-    for month in range(1, 13):
+    # for month in range(1, 13):
 
-        for day in [1, 10, 20]:
+    #     for day in [1, 10, 20]:
 
-            jd = date2JD(year, month, day, np.random.uniform(0, 24), np.random.uniform(0, 60), np.random.uniform(0, 60))
+    #         jd = date2JD(year, month, day, np.random.uniform(0, 24), np.random.uniform(0, 60), np.random.uniform(0, 60))
 
-            #jd = date2JD(2011, 2, 4, 23, 20, 42.16)
-            #jd = date2JD(2012, 12, 13, 8, 20, 33.07)
-            #jd = date2JD(2012, 12, 13, 8, 21, 34.51)
-            #jd = date2JD(2012, 12, 13, 8, 22, 20.10)
-            #jd = date2JD(2012, 12, 13, 8, 24, 01.63)
+    #         #jd = date2JD(2011, 2, 4, 23, 20, 42.16)
+    #         #jd = date2JD(2012, 12, 13, 8, 20, 33.07)
+    #         #jd = date2JD(2012, 12, 13, 8, 21, 34.51)
+    #         #jd = date2JD(2012, 12, 13, 8, 22, 20.10)
+    #         #jd = date2JD(2012, 12, 13, 8, 24, 01.63)
 
-            print('------------------------------------')
-            print('JD: {:.12f}'.format(jd))
+    #         print('------------------------------------')
+    #         print('JD: {:.12f}'.format(jd))
 
-            print('Steyaert:', np.degrees(jd2SolLonSteyaert(jd)))
+    #         print('Steyaert:', np.degrees(jd2SolLonSteyaert(jd)))
 
 
-            # Solar longitude to Julian date
+    #         # Solar longitude to Julian date
 
-            jd_steyaert = solLon2jdSteyaert(year, month, jd2SolLonSteyaert(jd))
-            print('JD inverse Steyaert: {:.12f} +/- {:.6f} s'.format(jd_steyaert, 24*60*60*abs(jd - jd_steyaert)))
+    #         jd_steyaert = solLon2jdSteyaert(year, month, jd2SolLonSteyaert(jd))
+    #         print('JD inverse Steyaert: {:.12f} +/- {:.6f} s'.format(jd_steyaert, 24*60*60*abs(jd - jd_steyaert)))
+
+    # ### ###
+
+
+    print("Current solar longitude: {:.6f} deg".format(np.degrees(jd2SolLonSteyaert(datetime2JD(datetime.datetime.utcnow())))))

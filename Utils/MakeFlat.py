@@ -10,14 +10,14 @@ import random
 import argparse
 
 import numpy as np
-import scipy.ndimage
 
+from RMS.Astrometry.Conversions import date2JD
 import RMS.ConfigReader as cr
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FFfile import getMiddleTimeFF
-from RMS.Astrometry.Conversions import date2JD
+from RMS.Routines.Image import loadImage, saveImage
 
 
 def makeFlat(dir_path, config, nostars=False, use_images=False):
@@ -179,7 +179,7 @@ def makeFlat(dir_path, config, nostars=False, use_images=False):
 
             # Use images
             if use_images:
-                img = scipy.ndimage.imread(os.path.join(dir_path, ff_list_good[i]), -1)
+                img = loadImage(os.path.join(dir_path, ff_list_good[i]), -1)
 
 
             # Use FF files
@@ -237,8 +237,6 @@ def makeFlat(dir_path, config, nostars=False, use_images=False):
 
 if __name__ == "__main__":
 
-    import scipy.misc
-
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
@@ -270,14 +268,9 @@ if __name__ == "__main__":
 
     if ff_median is not None:
 
-        # # Save the flat in the root directory
-        # scipy.misc.imsave(config.flat_file, ff_median)
-        # print('Flat saved to:', os.path.join(os.getcwd(), config.flat_file))
-
-
         # Save the flat in the input directory
         input_dir_flat = os.path.join(dir_path, config.flat_file)
-        scipy.misc.imsave(input_dir_flat, ff_median)
+        saveImage(input_dir_flat, ff_median)
         print('Flat saved to:', input_dir_flat)
 
         import matplotlib.pyplot as plt

@@ -7,8 +7,8 @@ import argparse
 
 import numpy as np
 import matplotlib.pyplot as plt
-import scipy.misc
 
+from RMS.Routines.Image import loadImage, saveImage
 from Utils.StackFFs import deinterlaceBlend, blendLighten
 
 
@@ -51,7 +51,7 @@ if __name__ == '__main__':
             print('Stacking: ', ff_name)
 
             # Load the image
-            img = scipy.misc.imread(os.path.join(dir_path, ff_name), -1)
+            img = loadImage(os.path.join(dir_path, ff_name), -1)
 
 
             # Deinterlace the image
@@ -73,7 +73,7 @@ if __name__ == '__main__':
     print("Saving to:", stack_path)
     
     # Save the blended image
-    scipy.misc.imsave(stack_path, merge_img)
+    saveImage(stack_path, merge_img)
 
     # Plot the blended image
     plt.imshow(merge_img, cmap='gray')

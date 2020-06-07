@@ -104,7 +104,7 @@ def loadGaiaCatalog(dir_path, file_name, lim_mag=None):
     file_path = os.path.join(dir_path, file_name)
 
     # Read the catalog
-    results = np.load(file_path, allow_pickle=False)
+    results = np.load(str(file_path), allow_pickle=False)
 
 
     # Filter by limiting magnitude

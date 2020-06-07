@@ -10,7 +10,6 @@ import math
 
 from RMS.Astrometry.Conversions import jd2Date
 from RMS.Astrometry.ApplyAstrometry import rotationWrtHorizon, rotationWrtStandard
-from RMS.Formats.Platepar import Platepar
 
 
 
@@ -40,15 +39,16 @@ def writeCAL(night_dir, config, platepar):
     file_name = "CAL_{:06d}_{:s}.txt".format(config.cams_code, night_time)
 
 
-    # If there was no platepar, init an empty one
+    # If there was no platepar, don't create a CAL file
     if platepar is None:
-        platepar = Platepar()
+        print("No Platepar available to create a CAL file!")
+        return None
 
     # Make a copy of the platepar that can be modified
     platepar = copy.deepcopy(platepar)
 
 
-    # Compute rotations (must be done before distorsion correction)
+    # Compute rotations (must be done before distortion correction)
     rot_horiz = rotationWrtHorizon(platepar)
     rot_std = rotationWrtStandard(platepar)
 
@@ -57,7 +57,7 @@ def writeCAL(night_dir, config, platepar):
     platepar.y_poly_fwd[11], platepar.y_poly_fwd[10] = platepar.y_poly_fwd[10], platepar.y_poly_fwd[11]
 
 
-    # Correct distorsion parameters so they are CAMS compatible
+    # Correct distortion parameters so they are CAMS compatible
     platepar.x_poly_fwd[ 1] = +platepar.x_poly_fwd[ 1] + 1.0
     platepar.x_poly_fwd[ 2] = -platepar.x_poly_fwd[ 2]
     platepar.x_poly_fwd[ 4] = -platepar.x_poly_fwd[ 4]
@@ -175,13 +175,15 @@ def writeCAL(night_dir, config, platepar):
 if __name__ == "__main__":
 
     import RMS.ConfigReader as cr
+    from RMS.Formats.Platepar import Platepar
 
     # Load the default configuration file
     config = cr.parse(".config")
 
     # Load a platepar file
     pp = Platepar()
-    pp.read("/home/dvida/Desktop/HR0010_20190216_170146_265550_detected/platepar_cmn2010.cal")
+    pp.read("/home/dvida/Desktop/HR0010_20190216_170146_265550_detected/platepar_cmn2010.cal", \
+        use_flat=config.use_flat)
 
 
     night_dir = "/home/dvida/Desktop/HR0010_20190216_170146_265550_detected"

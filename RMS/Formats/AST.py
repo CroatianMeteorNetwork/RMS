@@ -6,7 +6,8 @@ import os
 
 import numpy as np
 
-from RMS.Astrometry.ApplyAstrometry import calculateMagnitudes, altAzToRADec
+from RMS.Astrometry.ApplyAstrometry import calculateMagnitudes
+from RMS.Astrometry.Conversions import date2JD, altAz2RADec_vect
 
 class AstPlate(object):
     """ AST type plate structure. """
@@ -419,11 +420,13 @@ def xyToRaDecAST(time_data, X_data, Y_data, level_data, ast, photom_offset):
     altitude_data = np.degrees(np.pi/2 - theta_data)
 
     # Convert azimuth (+E of due N) and altitude to RA and Dec
-    JD_data, RA_data, dec_data = altAzToRADec(np.degrees(ast.lat), np.degrees(ast.lon), 0.0, time_data, \
-        azimuth_data, altitude_data)
+    JD_data = [date2JD(*t) for t in time_data]
+    RA_data, dec_data = altAz2RADec_vect(azimuth_data, altitude_data, JD_data, np.degrees(ast.lat), \
+        np.degrees(ast.lon))
 
-    # Calculate magnitudes
-    magnitude_data = calculateMagnitudes(level_data, -2.5, photom_offset)
+
+    # Calculate magnitudes (ignore vignetting)
+    magnitude_data = calculateMagnitudes(level_data, np.zeros_like(level_data), photom_offset, 0.0)
 
 
     return JD_data, RA_data, dec_data, magnitude_data

@@ -86,7 +86,10 @@ def deleteNightFolders(dir_path, config, delete_all=False):
     for dir_name in dir_list:
         
         # Delete the next directory in the list, i.e. the oldes one
-        shutil.rmtree(os.path.join(dir_path, dir_name))
+        try:
+            shutil.rmtree(os.path.join(dir_path, dir_name))
+        except OSError:
+            continue
 
         # If only one (first) directory should be deleted, break the loop
         if not delete_all:
@@ -95,6 +98,8 @@ def deleteNightFolders(dir_path, config, delete_all=False):
 
     # Return the list of remaining night directories
     return getNightDirs(dir_path, config.stationID)
+
+
 
 def getFiles(dir_path, stationID):
     """ Returns a sorted list of files in the given directory which conform to the captured file names.
@@ -151,6 +156,9 @@ def deleteFiles(dir_path, config, delete_all=False):
 
     return getFiles(dir_path, config.stationID)
 
+
+
+
 def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration=None):
     """ Deletes old observation directories to free up space for new ones.
 
@@ -205,7 +213,7 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     next_night_bytes = (duration*config.fps)/256*config.width*config.height*4
 
     # Always leave at least 2 GB free for archive
-    next_night_bytes += 2*(1024**3)
+    next_night_bytes += config.extra_space_gb*(1024**3)
 
     ######
 

@@ -9,3 +9,5 @@ Pillow>=4.3.0
 astropy>=2.0.3
 imreg_dft
 onvif_zeep
+configparser
+imageio

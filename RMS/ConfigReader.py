@@ -20,13 +20,16 @@ import os
 import sys
 import math
 
+import RMS
+
 try:
     # Python 3
-    from ConfigParser import RawConfigParser, NoOptionError
+    from configparser import RawConfigParser, NoOptionError 
 
 except:
-    # Python 3
-    from configparser import RawConfigParser, NoOptionError 
+    # Python 2
+    from ConfigParser import RawConfigParser, NoOptionError
+    
 
 
 
@@ -161,8 +164,9 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
         #   loaded only if there's one file with '.config' in the directory
         if cml_args_config[0] == '.':
 
-            # Locate all files in the data directory that have '.config' in them
-            config_files = [file_name for file_name in os.listdir(dir_path) if '.config' in file_name]
+            # Locate all files in the data directory that start with '.config'
+            config_files = [file_name for file_name in os.listdir(dir_path) \
+                if file_name.startswith('.config')]
 
             # If there is exactly one config file, use it
             if len(config_files) == 1:
@@ -203,6 +207,9 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
 class Config:
     def __init__(self):
 
+        # Get the package root directory
+        self.rms_root_dir = os.path.join(os.path.dirname(RMS.__file__), os.pardir)
+
         ##### System
         self.stationID = "XX0001"
         self.latitude = 0
@@ -211,6 +218,7 @@ class Config:
         self.cams_code = 0
 
         self.external_script_run = False
+        self.auto_reprocess_external_script_run = False
         self.external_script_path = None
         self.external_function_name = "rmsExternal"
 
@@ -252,8 +260,19 @@ class Config:
         self.captured_dir = "CapturedFiles"
         self.archived_dir = "ArchivedFiles"
 
-        # Enable/disable showing maxpixel on the screen
-        self.live_view_enable = True
+        # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
+        #   into account
+        self.extra_space_gb = 3
+
+
+        # Enable/disable showing maxpixel on the screen (off by default)
+        self.live_maxpixel_enable = False
+
+        # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
+        self.slideshow_enable = False
+
+        # Automatically reprocess broken capture directories
+        self.auto_reprocess = True
 
         ##### Upload
 
@@ -383,7 +402,7 @@ class Config:
         self.use_dark = False
         self.dark_file = 'dark.bmp'
 
-        self.star_catalog_path = 'Catalogs'
+        self.star_catalog_path = os.path.join(self.rms_root_dir, 'Catalogs')
         self.star_catalog_file = 'gaia_dr2_mag_11.5.npy'
 
         # BVRI band ratios for GAIA G band and Sony CMOS cameras
@@ -467,11 +486,11 @@ def normalizeParameterMeteor(param, config, binning=1):
     return param*width_factor*height_factor
 
 
-def parse(filename):
+def parse(filename, strict=True):
 
     try:
         # Python 3
-        parser = RawConfigParser(inline_comment_prefixes=(";"))
+        parser = RawConfigParser(inline_comment_prefixes=(";"), strict=strict)
 
     except:
         # Python 2
@@ -529,6 +548,12 @@ def parseSystem(config, parser):
 
     if parser.has_option(section, "external_script_run"):
         config.external_script_run = parser.getboolean(section, "external_script_run")
+
+
+    if parser.has_option(section, "auto_reprocess_external_script_run"):
+        config.auto_reprocess_external_script_run = parser.getboolean(section, \
+            "auto_reprocess_external_script_run")
+
 
     if parser.has_option(section, "external_script_path"):
         config.external_script_path = parser.get(section, "external_script_path")
@@ -683,9 +708,17 @@ def parseCapture(config, parser):
         config.mask_file = parser.get(section, "mask")
 
 
+    if parser.has_option(section, "extra_space_gb"):
+        config.extra_space_gb = parser.getfloat(section, "extra_space_gb")
+
+
     # Enable/disable showing maxpixel on the screen
-    if parser.has_option(section, "live_view_enable"):
-        config.live_view_enable = parser.getboolean(section, "live_view_enable")
+    if parser.has_option(section, "live_maxpixel_enable"):
+        config.live_maxpixel_enable = parser.getboolean(section, "live_maxpixel_enable")
+
+    # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
+    if parser.has_option(section, "slideshow_enable"):
+        config.slideshow_enable = parser.getboolean(section, "slideshow_enable")
 
 
 
@@ -1050,6 +1083,7 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "star_catalog_path"):
         config.star_catalog_path = parser.get(section, "star_catalog_path")
+        config.star_catalog_path = os.path.join(config.rms_root_dir, config.star_catalog_path)
 
     if parser.has_option(section, "star_catalog_file"):
         config.star_catalog_file = parser.get(section, "star_catalog_file")
