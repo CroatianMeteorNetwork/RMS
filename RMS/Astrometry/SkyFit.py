@@ -3054,6 +3054,12 @@ if __name__ == '__main__':
         # Load the manual redicution tool object from a state file
         plate_tool = loadPickle(dir_path, state_name)
 
+
+        # Check if there are missing attributes
+        if not hasattr(plate_tool, "invert_levels"):
+            plate_tool.invert_levels = False
+            
+
         # Set the dir path in case it changed
         plate_tool.dir_path = dir_path
 
