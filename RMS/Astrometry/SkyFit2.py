@@ -291,8 +291,6 @@ class PlateTool(QMainWindow):
         self.central = QWidget()
         self.setWindowTitle('SkyFit')
         self.setCentralWidget(self.central)
-        self.setMinimumSize(640, 480)
-        self.show()
 
         layout = QGridLayout()
         self.central.setLayout(layout)
@@ -324,6 +322,7 @@ class PlateTool(QMainWindow):
         self.v_zoom.hide()
         self.v_zoom.setCentralItem(self.zoom_window)
         self.v_zoom.move(QPoint(0, 0))
+        self.v_zoom_left = True
         self.zoom_window.invertY()
 
         # histogram
@@ -332,16 +331,23 @@ class PlateTool(QMainWindow):
         self.hist.hide()
 
         # top left label
-        self.label1 = QLabel(v)
-        self.label1.setFixedWidth(200)
-        self.label1.setStyleSheet("background-color: rgba(255,255,255,100)")
-        self.label1.setMargin(10)
+        # self.label1 = QLabel(v)
+        # self.label1.setFixedWidth(200)
+        # self.label1.setStyleSheet("background-color: rgba(255,255,255,100)")
+        # self.label1.setMargin(10)
+        self.labels = TextItemList()
+        self.labels.setZValue(1000)
+        self.labels.addTextItem(0, 0, 200, 230, '',
+                                margin=10, pxmode=3, background_brush=QColor(255, 255, 255, 100))
+        self.labels.addTextItem(0, 0, 200, 540, '',
+                                margin=10, pxmode=3, background_brush=QColor(255, 255, 255, 100))
+        self.img_frame.addItem(self.labels)
 
         # bottom left label
-        self.label2 = QLabel(v)
-        self.label2.setFixedWidth(200)
-        self.label2.setStyleSheet("background-color: rgba(255,255,255,100)")
-        self.label2.setMargin(10)
+        # self.label2 = QLabel(v)
+        # self.label2.setFixedWidth(200)
+        # self.label2.setStyleSheet("background-color: rgba(255,255,255,100)")
+        # self.label2.setMargin(10)
 
         # bottom information
         self.label3 = QLabel()
@@ -352,7 +358,7 @@ class PlateTool(QMainWindow):
         self.img_frame.addItem(self.cat_star_markers)
         self.cat_star_markers.setPen('r')
         self.cat_star_markers.setBrush(QColor(0, 0, 0, 0))
-        self.cat_star_markers.setSymbol('o')
+        self.cat_star_markers.setSymbol(CircleLine())
         self.cat_star_markers.setZValue(4)
 
         # selected catalog star markers (main window)
@@ -360,7 +366,7 @@ class PlateTool(QMainWindow):
         self.img_frame.addItem(self.sel_cat_star_markers)
         self.sel_cat_star_markers.setPen('b')
         self.sel_cat_star_markers.setSize(10)
-        self.sel_cat_star_markers.setSymbol('x')
+        self.sel_cat_star_markers.setSymbol(Cross())
         self.sel_cat_star_markers.setZValue(4)
 
         # selected catalog star markers (zoom window)
@@ -368,7 +374,7 @@ class PlateTool(QMainWindow):
         self.zoom_window.addItem(self.sel_cat_star_markers2)
         self.sel_cat_star_markers2.setPen('b')
         self.sel_cat_star_markers2.setSize(10)
-        self.sel_cat_star_markers2.setSymbol('x')
+        self.sel_cat_star_markers2.setSymbol(Cross())
         self.sel_cat_star_markers2.setZValue(4)
 
         # centroid star markers (main window)
@@ -377,7 +383,7 @@ class PlateTool(QMainWindow):
         self.centroid_star_markers.setPen('y')
         # self.centroid_star_markers.setBrush(QColor(0, 0, 0, 0))
         self.centroid_star_markers.setSize(10)
-        self.centroid_star_markers.setSymbol('+')
+        self.centroid_star_markers.setSymbol(Plus())
         self.centroid_star_markers.setZValue(4)
 
         # centroid star markers (zoom window)
@@ -386,7 +392,7 @@ class PlateTool(QMainWindow):
         self.centroid_star_markers2.setPen('y')
         # self.centroid_star_markers2.setBrush(QColor(0, 0, 0, 0))
         self.centroid_star_markers2.setSize(10)
-        self.centroid_star_markers2.setSymbol('+')
+        self.centroid_star_markers2.setSymbol(Plus())
         self.centroid_star_markers2.setZValue(4)
 
         # calstar markers (main window)
@@ -423,7 +429,7 @@ class PlateTool(QMainWindow):
         self.cursor.setZValue(20)
 
         # cursor (window)
-        self.cursor2 = CursorItem(self.star_aperature_radius)
+        self.cursor2 = CursorItem(self.star_aperature_radius, pxmode=True, thickness=2)
         self.zoom_window.addItem(self.cursor2, ignoreBounds=True)
         self.cursor2.hide()
         self.cursor2.setZValue(20)
@@ -453,6 +459,9 @@ class PlateTool(QMainWindow):
 
         self.updateImage(first_update=True)
         self.updateLeftLabels()
+
+        self.setMinimumSize(1200, 800)
+        self.show()
 
     def pixelsToDistance(self, x, y):
         r = self.img_frame.viewRange()
@@ -534,7 +543,7 @@ class PlateTool(QMainWindow):
         text_str += 'RA centre  = {:s}{:02d}h {:02d}m {:05.2f}s\n'.format(sign_str, hh, mm, ss)
         text_str += 'Dec centre = {:.3f}°\n'.format(dec_centre)
 
-        self.label1.setText(text_str)
+        self.labels.getTextItem(0).setText(text_str)
 
         text_str = 'Keys:\n'
         text_str += '-----\n'
@@ -577,8 +586,8 @@ class PlateTool(QMainWindow):
         text_str += '\n'
         text_str += 'Hide on-screen text - F1\n'
 
-        self.label2.setText(text_str)
-        self.label2.move(QPoint(0, self.img_frame.size().height() - self.label2.size().height()))
+        self.labels.getTextItem(1).setText(text_str)
+        self.labels.moveText(1, 0, self.img_frame.height() - self.labels.getTextItem(1).size()[1])
 
     def updateStars(self):
         """ Updates only the stars """
@@ -729,6 +738,10 @@ class PlateTool(QMainWindow):
             self.centroid_star_markers.clear()
             self.centroid_star_markers2.clear()
 
+            # Draw photometry
+            if len(self.paired_stars) > 2:
+                self.photometry()
+
     def drawCalstars(self):
         """ Draw extracted stars on the current image. """
 
@@ -800,12 +813,9 @@ class PlateTool(QMainWindow):
     def resizeEvent(self, event):
         QMainWindow.resizeEvent(self, event)
         try:
-            self.label2.move(QPoint(0, self.img_frame.size().height() - self.label2.size().height()))
+            self.labels.moveText(1, 0, self.img_frame.height() - self.labels.getTextItem(1).size()[1])
         except:
             pass
-
-    def registerEventHandling(self):
-        raise NotImplementedError
 
     def saveState(self):
         raise NotImplementedError
@@ -817,7 +827,7 @@ class PlateTool(QMainWindow):
             self.mouse_press_x = self.mouse_x  # pos.x()# why is this wrong when clicking on a marker?
             self.mouse_press_y = self.mouse_y  # pos.y()
 
-            if event.button() == 1:
+            if event.button() == Qt.LeftButton:
                 if self.star_selection_centroid:
                     # If CTRL is pressed, place the pick manually - NOTE: the intensity might be off then!!!
                     # 'control' is for Windows
@@ -871,11 +881,8 @@ class PlateTool(QMainWindow):
                                                         y=[self.catalog_y[self.closest_cat_star_indx]])
                     self.sel_cat_star_markers2.addPoints(x=[self.catalog_x[self.closest_cat_star_indx]],
                                                          y=[self.catalog_y[self.closest_cat_star_indx]])
-                # Draw photometry
-                if len(self.paired_stars) > 2:
-                    self.photometry()
 
-            elif event.button() == 2:
+            elif event.button() == Qt.RightButton:
                 if self.star_selection_centroid:
                     # Find the closest picked star
                     picked_indx = self.findClosestPickedStarIndex(self.mouse_press_x, self.mouse_press_y)
@@ -897,13 +904,18 @@ class PlateTool(QMainWindow):
             self.zoom()
             range_ = self.img_frame.getState()['viewRange'][0]
             if mp.x() > (range_[1] - range_[0]) / 2 + range_[0]:
-                self.v_zoom.move(QPoint(0, 0))
+                self.v_zoom_left = True
+                if self.show_key_help != 2:
+                    self.v_zoom.move(QPoint(self.labels.getTextItem(0).size()[0], 0))
+                else:
+                    self.v_zoom.move(QPoint(0, 0))
             else:
+                self.v_zoom_left = False
                 self.v_zoom.move(QPoint(self.img_frame.size().width() - self.show_zoom_window_size, 0))
 
             self.residual_text.update()  # text will disappear for some reason otherwise
             self.updateBottomLabel()
-        # self.printFrameRate()
+        self.printFrameRate()
 
     def printFrameRate(self):
         try:
@@ -999,11 +1011,11 @@ class PlateTool(QMainWindow):
                         # Determine the size of the residual text, larger the residual, larger the text
                         photom_resid_size = 8 + np.abs(fit_diff) / (np.max(np.abs(fit_resids)) / 5.0)
 
-                        self.residual_text.addTextItem(star_x, star_y - y, 100, 100, photom_resid_txt,
+                        self.residual_text.addTextItem(star_x, star_y + y, 100, 100, photom_resid_txt,
                                                        align=Qt.AlignCenter, font=QFont('times', photom_resid_size),
                                                        pxmode=1)
 
-                        self.residual_text.addTextItem(star_x, star_y + y, 100, 100, "{:+6.2f}".format(star_mag),
+                        self.residual_text.addTextItem(star_x, star_y - y, 100, 100, "{:+6.2f}".format(star_mag),
                                                        align=Qt.AlignCenter, font=QFont('times', 10), pen=QPen(Qt.red),
                                                        pxmode=1)
                     self.residual_text.update()
@@ -1136,10 +1148,11 @@ class PlateTool(QMainWindow):
 
     def keyPressEvent(self, event):
         modifiers = QApplication.keyboardModifiers()
-        if event.key() == Qt.LeftArrow:
+
+        if event.key() == Qt.Key_Left:
             self.prevImg()
 
-        elif event.key() == Qt.RightArrow:
+        elif event.key() == Qt.Key_Right:
             self.nextImg()
 
         elif event.key() == Qt.Key_M:
@@ -1267,14 +1280,20 @@ class PlateTool(QMainWindow):
                 self.show_key_help = 0
 
             if self.show_key_help == 0:
-                self.label1.show()
-                self.label2.hide()
+                self.labels.getTextItem(0).show()
+                self.labels.getTextItem(1).hide()
             elif self.show_key_help == 1:
-                self.label1.show()
-                self.label2.show()
+                self.labels.getTextItem(0).show()
+                self.labels.getTextItem(1).show()
             else:
-                self.label1.hide()
-                self.label2.hide()
+                self.labels.getTextItem(0).hide()
+                self.labels.getTextItem(1).hide()
+
+            if self.v_zoom_left:
+                if self.show_key_help != 2:
+                    self.v_zoom.move(QPoint(self.labels.getTextItem(0).size()[0], 0))
+                else:
+                    self.v_zoom.move(QPoint(0, 0))
 
             # Change image scale
         elif event.key() == Qt.Key_Up:
@@ -1557,14 +1576,21 @@ class PlateTool(QMainWindow):
     def wheelEvent(self, event):
         """ Change star selector aperature on scroll. """
         delta = event.angleDelta().y()
-        if delta < 0:
-            # self.star_aperature_radius += 1
-            # self.cursor.setRadius(self.star_aperature_radius)
-            self.img_frame.autoRange(padding=0)
-        elif delta > 0:  # and self.star_aperature_radius > 4:
-            # self.star_aperature_radius -= 1
-            # self.cursor.setRadius(self.star_aperature_radius)
-            self.img_frame.scaleBy(0.95, QPoint(self.mouse_x, self.mouse_y))
+        modifier = QApplication.keyboardModifiers()
+        if modifier == Qt.ControlModifier:
+            if delta < 0:
+                self.star_aperature_radius += 1
+                self.cursor.setRadius(self.star_aperature_radius)
+                self.cursor2.setRadius(self.star_aperature_radius)
+            elif delta > 0 and self.star_aperature_radius > 1:
+                self.star_aperature_radius -= 1
+                self.cursor.setRadius(self.star_aperature_radius)
+                self.cursor2.setRadius(self.star_aperature_radius)
+        else:
+            if delta < 0:
+                self.img_frame.autoRange(padding=0)
+            elif delta > 0:
+                self.img_frame.scaleBy([0.95, 0.95], QPoint(self.mouse_x, self.mouse_y))
 
     def toggleImageType(self):
         """ Toggle between the maxpixel and avepixel. """
@@ -2045,11 +2071,11 @@ class PlateTool(QMainWindow):
             y_max = self.current_ff.nrows - 1
 
         # Crop the image
-
         img_crop = self.img.data[x_min:x_max, y_min:y_max]
+
         # Perform gamma correction
-        # img_crop = Image.gammaCorrection(img_crop, self.config.gamma)
-        img_crop = Image.adjustLevels(img_crop, self.hist.getLevels()[0], self.config.gamma, self.hist.getLevels()[1])
+        img_crop = Image.gammaCorrection(img_crop, self.config.gamma)
+        # img_crop = Image.adjustLevels(img_crop, self.hist.getLevels()[0], self.config.gamma, self.hist.getLevels()[1])
 
         ######################################################################################################
 

@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import QApplication
 class Plus(QPainterPath):
     def __init__(self):
         QPainterPath.__init__(self)
-        self.plus_points = np.asarray([
+        points = np.asarray([
             (-0.5, 0),
             (0, 0),
             (0, 0.5),
@@ -19,17 +19,41 @@ class Plus(QPainterPath):
             (0, 0)
         ])
 
-        self.moveTo(*self.plus_points[0])
-        for x, y in self.plus_points[1:]:
+        self.moveTo(*points[0])
+        for x, y in points[1:]:
             self.lineTo(x, y)
         self.closeSubpath()
-    # plus = pg.arrayToQPath(plus_points[:, 0], plus_points[:, 1], connect='pairs')
 
-    def __hash__(self):
-        return hash((tuple(x) for x in self.plus_points))
 
-    def __lt__(self, other):
-        return False
+class Cross(QPainterPath):
+    def __init__(self):
+        QPainterPath.__init__(self)
+        points = np.asarray([
+            (-0.5, -0.5),
+            (0, 0),
+            (-0.5, 0.5),
+            (0, 0),
+            (0.5, 0.5),
+            (0, 0),
+            (0.5, -0.5),
+            (0, 0)
+        ])
+
+        self.moveTo(*points[0])
+        for x, y in points[1:]:
+            self.lineTo(x, y)
+        self.closeSubpath()
+
+
+class CircleLine(QPainterPath):
+    def __init__(self):
+        QPainterPath.__init__(self)
+        points = np.asarray([(0, -0.5), (0, 0)])
+        self.moveTo(*points[0])
+        for x, y in points[1:]:
+            self.lineTo(x, y)
+        self.closeSubpath()
+        self.addEllipse(QPoint(0, 0), 0.5, 0.5)
 
 
 # custom pyqtgraph items
@@ -71,35 +95,39 @@ class TextItemList(pg.GraphicsObject):
     def __init__(self):
         pg.GraphicsObject.__init__(self)
         self.text_list = []
-        # self.picture = QPicture()
+        self.z = 0
 
-        # self.xmin = None
-        # self.ymin = None
-        # self.xmax = 0
-        # self.ymax = 0
+    def getTextItem(self, i):
+        return self.text_list[i]
 
     def addTextItem(self, *args, **kwargs):
         new = TextItem(*args, **kwargs)
         new.setParentItem(self.parentItem())
+        new.setZValue(self.z)
         self.text_list.append(new)
-        # if args[0] + args[2] > self.xmax:
-        #     self.xmax = args[0] + args[2]
-        # if args[1] + args[3] > self.ymax:
-        #     self.ymax = args[1] + args[3]
-        #
-        # if self.xmin is None or args[0] < self.xmin:
-        #     self.xmin = args[0]
-        # if self.ymin is None or args[1] < self.ymin:
-        #     self.ymin = args[1]
 
     def setZValue(self, z):
+        self.z = z
         for text in self.text_list:
             text.setZValue(z)
+
+    def moveText(self, i, x, y):
+        text = self.getTextItem(i)
+        visible = text.isVisible()
+        self.setTextItem(i, x, y, *text.wh, text.text,
+                         pen=text.pen, font=text.font, align=text.align, pxmode=text.pxmode,
+                         background_brush=text.background_brush, background_pen=text.background_pen,
+                         margin=text.margin)
+        if visible:
+            self.getTextItem(i).show()
+        else:
+            self.getTextItem(i).hide()
 
     def setTextItem(self, i, *args, **kwargs):
         self.text_list[i].setParentItem(None)
         self.text_list[i] = TextItem(*args, **kwargs)
         self.text_list[i].setParentItem(self.parentItem())
+        self.text_list[i].setZValue(self.z)
 
     def clear(self):
         while self.text_list:
@@ -119,15 +147,13 @@ class TextItemList(pg.GraphicsObject):
             text.update()
 
     def boundingRect(self):
-        # if len(self.text_list) > 0:
-        #     return QRectF(self.xmin, self.ymin, self.xmax - self.xmin, self.ymax - self.ymin)
-        # else:
-        #     return QRectF(self.picture.boundingRect())
         return QRectF()
 
 
 class TextItem(pg.GraphicsObject):
-    def __init__(self, x, y, w, h, text, pen=None, font=None, align=None, pxmode=0):
+    def __init__(self, x, y, w, h, text,
+                 pen=None, font=None, align=None, pxmode=0,
+                 background_brush=None, background_pen=None, margin=None):
         pg.GraphicsObject.__init__(self)
         self.xy = (x, y)
         self.wh = (w, h)
@@ -136,17 +162,32 @@ class TextItem(pg.GraphicsObject):
         self.font = font
         self.pen = pen
         self.align = align
+        self.margin = margin
+        self.background_brush = background_brush
+        self.background_pen = background_pen
+
         if pen is None:
             self.pen = QPen(QColor(Qt.white))
         if font is None:
             self.font = QFont()
         if align is None:
             self.align = Qt.AlignLeft
+        if margin is None:
+            self.margin = 0  # margin does nothing if align is Qt.AlignCenter
 
         self.pxmode = pxmode
         self.setFlag(self.ItemIgnoresTransformations, self.pxmode != 0)
 
         self.picture = QPicture()
+
+    def size(self):
+        return self.wh
+
+    def setBackgroundBrush(self, brush):
+        self.background_brush = brush
+
+    def setBackgroundPen(self, pen):
+        self.background_pen = pen
 
     def setPen(self, pen):
         self.pen = pen
@@ -162,11 +203,30 @@ class TextItem(pg.GraphicsObject):
 
     def generatePicture(self):
         painter = QPainter(self.picture)
-        # painter.setBrush(QColor(100,0,0))
-        # painter.drawRect(0, 0, *self.wh)
+        background = (self.background_pen is not None) or (self.background_brush is not None)
+        if background:
+            if self.background_pen:
+                painter.setPen(self.background_pen)
+                painter.setBrush(Qt.NoBrush)
+            elif self.background_brush:
+                painter.setBrush(self.background_brush)
+                painter.setPen(Qt.NoPen)
+
+            if self.background_brush:
+                painter.setBrush(self.background_brush)
+
+            painter.drawRect(0, 0, *self.wh)
+
         painter.setPen(self.pen)
         painter.setFont(self.font)
-        painter.drawText(0, 0, *self.wh, self.align, self.text)
+        if self.align == Qt.AlignLeft or self.align == Qt.AlignRight:
+            painter.drawText(self.margin, self.margin,
+                             self.wh[0] - 2 * self.margin, self.wh[1] - 2 * self.margin,
+                             self.align, self.text)
+        elif self.align == Qt.AlignCenter:
+            painter.drawText(0, 0, *self.wh, self.align, self.text)
+        else:
+            raise KeyError
         painter.end()
 
     def paint(self, painter, option, widget=None):
@@ -209,9 +269,10 @@ class TextItem(pg.GraphicsObject):
             pos = self.parentItem().mapToDevice(pg.Point(self.xy[0], self.xy[1]))
             rect.translate(pos.x() - origin.x(), pos.y() - origin.y())
         elif self.pxmode == 2:
-            pass
+            rect.translate(self.xy[0], self.xy[1])
         elif self.pxmode == 3:
-            pass
+            origin = self.parentItem().mapToDevice(pg.Point(0, 0))
+            rect.translate(self.xy[0] - origin.x(), self.xy[1] - origin.y())
 
         if self.align == Qt.AlignCenter:
             rect.translate(-self.wh[0] / 2, -self.wh[0] / 2)
@@ -337,12 +398,13 @@ class ImageItem2(pg.ImageItem):
 
 
 class CursorItem(pg.GraphicsObject):
-    def __init__(self, r, pxmode=False):
+    def __init__(self, r, pxmode=False, thickness=1):
         super().__init__()
         self._center = QPoint(0, 0)
         self.last_center = QPoint(0, 0)
         self._r = r
         self.mode = True
+        self.thickness = thickness
 
         self.pxmode = pxmode
         self.picture = QPicture()
@@ -370,23 +432,30 @@ class CursorItem(pg.GraphicsObject):
         self.update()
 
     def generatePicture(self):
+        if self.pxmode and self.parentItem() is not None:
+            origin = self.parentItem().mapToDevice(pg.Point(0, 0))
+            pos = self.parentItem().mapToDevice(pg.Point(self.r, self.r))
+            r = pos.x() - origin.x()
+        else:
+            r = self.r
+
         painter = QPainter(self.picture)
         if self.mode:
-            pen = QPen(Qt.yellow, 1, Qt.SolidLine)
+            pen = QPen(Qt.yellow, self.thickness, Qt.SolidLine)
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
-            painter.drawEllipse(QPoint(0, 0), self._r, self._r)
+            painter.drawEllipse(QPoint(0, 0), r, r)
 
             # pen.setStyle(Qt.DotLine)
             painter.setPen(pen)
-            painter.drawEllipse(QPoint(0, 0), 2 * self._r, 2 * self._r)
-            painter.setPen(QPen(Qt.blue, 1))
+            painter.drawEllipse(QPoint(0, 0), 2 * r, 2 * r)
+            painter.setPen(QPen(Qt.blue, self.thickness))
             painter.drawPoint(QPoint(0, 0))
         else:
-            pen = QPen(QPen(QColor(128, 0, 128), 1, Qt.SolidLine))
+            pen = QPen(QPen(QColor(128, 0, 128), self.thickness, Qt.SolidLine))
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
-            painter.drawEllipse(QPoint(0, 0), 2 * self._r, 2 * self._r)
+            painter.drawEllipse(QPoint(0, 0), 2 * r, 2 * r)
         painter.end()
 
     def paint(self, painter, option, widget=None):
@@ -401,8 +470,15 @@ class CursorItem(pg.GraphicsObject):
         painter.drawPicture(0, 0, self.picture)
 
     def boundingRect(self):
+        if self.pxmode and self.parentItem() is not None:
+            origin = self.parentItem().mapToDevice(pg.Point(0, 0))
+            pos = self.parentItem().mapToDevice(pg.Point(self.r, self.r))
+            r = pos.x() - origin.x()
+        else:
+            r = self.r
+
         size = 10
-        rect = QRectF(0, 0, size * 2 * self.r, size * 2 * self.r)
+        rect = QRectF(0, 0, size * 2 * r, size * 2 * r)
 
         if self.pxmode:
             origin = self.parentItem().mapToDevice(pg.Point(0, 0))

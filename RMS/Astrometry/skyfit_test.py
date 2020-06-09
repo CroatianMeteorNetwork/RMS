@@ -74,18 +74,19 @@ class GUI(QMainWindow):
         self.hist.hide()
 
         # label
-        self.label = QLabel(self.v)
-        self.label_visible = 0
-        self.label.setFixedWidth(150)
-        self.label.setStyleSheet("background-color: rgba(255,255,255,100)")
-        self.label.setMargin(10)
+        # self.label = QLabel(self.v)
+        # self.label_visible = 0
+        # self.label.setFixedWidth(150)
+        # self.label.setStyleSheet("background-color: rgba(255,255,255,100)")
+        # self.label.setMargin(10)
 
         # markers
         self.markers = pg.ScatterPlotItem()
         self.vb.addItem(self.markers)
         self.markers.setPen('b')
         self.markers.setSize(10)
-        self.markers.setSymbol(Plus())
+        self.markers.setSymbol(CircleLine())
+        self.markers.setBrush(QColor(0, 0, 0, 0))
         self.markers.setZValue(2)
 
         # markers
@@ -113,12 +114,15 @@ class GUI(QMainWindow):
         # text
         self.text = TextItemList()
         self.vb.addItem(self.text)
-        self.text.addTextItem(30, 30, 100, 100, 'hello', pxmode=1)
+        self.text.addTextItem(0, 0, 150, 150, '',
+                              pxmode=3,
+                              background_brush=QColor(255, 255, 255, 100),
+                              margin=10)
         self.text.setZValue(1000)
 
         self.text2 = TextItem(50, 50, 100, 100, 'hey', pxmode=1)
         self.text2.setZValue(2)
-        self.vb.addItem(self.text2)
+        # self.vb.addItem(self.text2)
 
         # key binding
         self.vb.scene().sigMouseMoved.connect(self.mouseMove)
@@ -129,7 +133,7 @@ class GUI(QMainWindow):
 
     def updateLabel(self):
         """ Update text """
-        self.label.setText("Position: ({:.2f},{:.2f})\n"
+        self.text.getTextItem(0).setText("Position: ({:.2f},{:.2f})\n"
                            "Gamma: {:.2f}\n"
                            "MORE TEXT".format(*self.mouse, self.img.gamma))
 
@@ -182,7 +186,7 @@ class GUI(QMainWindow):
             if ad < 0:
                 self.vb.autoRange(padding=0)
             elif ad > 0:
-                self.vb.scaleBy(0.95, QPoint(*self.mouse))
+                self.vb.scaleBy([0.95, 0.95], QPoint(*self.mouse))
                 # xrange = self.vb.viewRange()[0]
                 # self.vb.setXRange(xrange[0] + 10, xrange[1] - 10, padding=0)
 
