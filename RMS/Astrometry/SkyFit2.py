@@ -329,25 +329,26 @@ class PlateTool(QMainWindow):
         self.hist = HistogramLUTWidget2()
         layout.addWidget(self.hist, 0, 2)
         self.hist.hide()
+        #
+        # self.labels = TextItemList()
+        # self.labels.setZValue(1000)
+        # self.labels.addTextItem(0, 0, 200, 230, '',
+        #                         margin=10, pxmode=3, background_brush=QColor(255, 255, 255, 100))
+        # self.labels.addTextItem(0, 0, 200, 540, '',
+        #                         margin=10, pxmode=3, background_brush=QColor(255, 255, 255, 100))
+        # self.img_frame.addItem(self.labels)
 
         # top left label
-        # self.label1 = QLabel(v)
-        # self.label1.setFixedWidth(200)
-        # self.label1.setStyleSheet("background-color: rgba(255,255,255,100)")
-        # self.label1.setMargin(10)
-        self.labels = TextItemList()
-        self.labels.setZValue(1000)
-        self.labels.addTextItem(0, 0, 200, 230, '',
-                                margin=10, pxmode=3, background_brush=QColor(255, 255, 255, 100))
-        self.labels.addTextItem(0, 0, 200, 540, '',
-                                margin=10, pxmode=3, background_brush=QColor(255, 255, 255, 100))
-        self.img_frame.addItem(self.labels)
+        self.label1 = QLabel(v)
+        self.label1.setFixedWidth(200)
+        self.label1.setStyleSheet("background-color: rgba(255,255,255,100)")
+        self.label1.setMargin(10)
 
         # bottom left label
-        # self.label2 = QLabel(v)
-        # self.label2.setFixedWidth(200)
-        # self.label2.setStyleSheet("background-color: rgba(255,255,255,100)")
-        # self.label2.setMargin(10)
+        self.label2 = QLabel(v)
+        self.label2.setFixedWidth(200)
+        self.label2.setStyleSheet("background-color: rgba(255,255,255,100)")
+        self.label2.setMargin(10)
 
         # bottom information
         self.label3 = QLabel()
@@ -360,6 +361,15 @@ class PlateTool(QMainWindow):
         self.cat_star_markers.setBrush(QColor(0, 0, 0, 0))
         self.cat_star_markers.setSymbol(CircleLine())
         self.cat_star_markers.setZValue(4)
+
+        # catalog star markers (zoom window)
+        self.cat_star_markers2 = pg.ScatterPlotItem()
+        self.zoom_window.addItem(self.cat_star_markers2)
+        self.cat_star_markers2.setPen('r')
+        self.cat_star_markers2.setBrush(QColor(0, 0, 0, 0))
+        self.cat_star_markers2.setSize(10)
+        self.cat_star_markers2.setSymbol(CircleLine())
+        self.cat_star_markers2.setZValue(4)
 
         # selected catalog star markers (main window)
         self.sel_cat_star_markers = pg.ScatterPlotItem()
@@ -403,15 +413,6 @@ class PlateTool(QMainWindow):
         self.calstar_markers.setSize(10)
         self.calstar_markers.setSymbol('o')
         self.calstar_markers.setZValue(2)
-
-        # catalog star markers (zoom window)
-        self.cat_star_markers2 = pg.ScatterPlotItem()
-        self.zoom_window.addItem(self.cat_star_markers2)
-        self.cat_star_markers2.setPen('r')
-        self.cat_star_markers2.setBrush(QColor(0, 0, 0, 0))
-        self.cat_star_markers2.setSize(10)
-        self.cat_star_markers2.setSymbol('o')
-        self.cat_star_markers2.setZValue(4)
 
         # calstar markers (zoom window)
         self.calstar_markers2 = pg.ScatterPlotItem()
@@ -543,7 +544,8 @@ class PlateTool(QMainWindow):
         text_str += 'RA centre  = {:s}{:02d}h {:02d}m {:05.2f}s\n'.format(sign_str, hh, mm, ss)
         text_str += 'Dec centre = {:.3f}°\n'.format(dec_centre)
 
-        self.labels.getTextItem(0).setText(text_str)
+        # self.labels.getTextItem(0).setText(text_str)
+        self.label1.setText(text_str)
 
         text_str = 'Keys:\n'
         text_str += '-----\n'
@@ -586,8 +588,10 @@ class PlateTool(QMainWindow):
         text_str += '\n'
         text_str += 'Hide on-screen text - F1\n'
 
-        self.labels.getTextItem(1).setText(text_str)
-        self.labels.moveText(1, 0, self.img_frame.height() - self.labels.getTextItem(1).size()[1])
+        # self.labels.getTextItem(1).setText(text_str)
+        # self.labels.moveText(1, 0, self.img_frame.height() - self.labels.getTextItem(1).size()[1])
+        self.label2.setText(text_str)
+        self.label2.move(QPoint(0, self.img_frame.height() - self.label2.height()))
 
     def updateStars(self):
         """ Updates only the stars """
@@ -813,12 +817,15 @@ class PlateTool(QMainWindow):
     def resizeEvent(self, event):
         QMainWindow.resizeEvent(self, event)
         try:
-            self.labels.moveText(1, 0, self.img_frame.height() - self.labels.getTextItem(1).size()[1])
+            # self.labels.moveText(1, 0, self.img_frame.height() - self.labels.getTextItem(1).size()[1])
+            self.label2.move(QPoint(0, self.img_frame.height() - self.label2.height()))
         except:
             pass
 
     def saveState(self):
-        raise NotImplementedError
+        savePickle(self, self.dir_path, 'skyFit_latest.state')
+
+        print("Saved state to file")
 
     def mouseClick(self, event):
         modifiers = QApplication.keyboardModifiers()
@@ -906,14 +913,14 @@ class PlateTool(QMainWindow):
             if mp.x() > (range_[1] - range_[0]) / 2 + range_[0]:
                 self.v_zoom_left = True
                 if self.show_key_help != 2:
-                    self.v_zoom.move(QPoint(self.labels.getTextItem(0).size()[0], 0))
+                    # self.v_zoom.move(QPoint(self.labels.getTextItem(0).size()[0], 0))
+                    self.v_zoom.move(QPoint(self.label1.width(), 0))
                 else:
                     self.v_zoom.move(QPoint(0, 0))
             else:
                 self.v_zoom_left = False
                 self.v_zoom.move(QPoint(self.img_frame.size().width() - self.show_zoom_window_size, 0))
 
-            self.residual_text.update()  # text will disappear for some reason otherwise
             self.updateBottomLabel()
         self.printFrameRate()
 
@@ -1280,18 +1287,25 @@ class PlateTool(QMainWindow):
                 self.show_key_help = 0
 
             if self.show_key_help == 0:
-                self.labels.getTextItem(0).show()
-                self.labels.getTextItem(1).hide()
+                # self.labels.getTextItem(0).show()
+                # self.labels.getTextItem(1).hide()
+                self.label1.show()
+                self.label2.hide()
             elif self.show_key_help == 1:
-                self.labels.getTextItem(0).show()
-                self.labels.getTextItem(1).show()
+                # self.labels.getTextItem(0).show()
+                # self.labels.getTextItem(1).show()
+                self.label1.show()
+                self.label2.show()
             else:
-                self.labels.getTextItem(0).hide()
-                self.labels.getTextItem(1).hide()
+                # self.labels.getTextItem(0).hide()
+                # self.labels.getTextItem(1).hide()
+                self.label1.hide()
+                self.label2.hide()
 
             if self.v_zoom_left:
                 if self.show_key_help != 2:
-                    self.v_zoom.move(QPoint(self.labels.getTextItem(0).size()[0], 0))
+                    # self.v_zoom.move(QPoint(self.labels.getTextItem(0).size()[0], 0))
+                    self.v_zoom.move(QPoint(self.label1.width(), 0))
                 else:
                     self.v_zoom.move(QPoint(0, 0))
 

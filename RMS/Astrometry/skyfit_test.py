@@ -116,13 +116,13 @@ class GUI(QMainWindow):
         self.vb.addItem(self.text)
         self.text.addTextItem(0, 0, 150, 150, '',
                               pxmode=3,
-                              background_brush=QColor(255, 255, 255, 100),
+                              background_brush=QColor(255, 255, 255, 1),
                               margin=10)
         self.text.setZValue(1000)
 
         self.text2 = TextItem(50, 50, 100, 100, 'hey', pxmode=1)
         self.text2.setZValue(2)
-        # self.vb.addItem(self.text2)
+        self.vb.addItem(self.text2)
 
         # key binding
         self.vb.scene().sigMouseMoved.connect(self.mouseMove)
@@ -168,7 +168,7 @@ class GUI(QMainWindow):
                 self.v_zoom.move(QPoint(0, 0))
             else:
                 self.v_zoom.move(QPoint(self.vb.size().width() - self.zoom_window_width, 0))
-            self.text.update()
+            # self.text.update()
             self.text2.update()
             self.updateLabel()
 
