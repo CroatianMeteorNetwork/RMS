@@ -90,3 +90,7 @@ target/
 .idea
 
 .config.inuse
+config.inuse
+config.orig
+platepar_cmn2010.orig
+.config.curr

@@ -521,7 +521,7 @@ class InputTypeVideo(object):
                 self.beginning_datetime = datetime.datetime.strptime(file_name_noext, "%Y%m%d_%H%M%S.%f")
 
             except:
-                messagebox.showerror('Input error', 'The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.')
+                messagebox.showerror('Video Input error', 'The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.')
                 sys.exit()
 
         else:
@@ -656,7 +656,7 @@ class InputTypeVideo(object):
         # Load the chunk of frames
         for i in range(frames_to_read):
 
-            ret, frame = self.cap.read()
+            _, frame = self.cap.read()
 
             # If the end of the video files was reached, stop the loop
             if frame is None:
@@ -753,7 +753,7 @@ class InputTypeVideo(object):
         self.cap.set(1, self.current_frame)
 
         # Read the frame
-        ret, frame = self.cap.read()
+        _, frame = self.cap.read()
 
         # Convert frame to grayscale
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -815,7 +815,7 @@ class InputTypeUWOVid(object):
 
         # Separate directory path and file name
         self.vid_path = dir_path
-        self.dir_path, vid_file = os.path.split(dir_path)
+        self.dir_path, _ = os.path.split(dir_path)
 
         self.config = config
 
@@ -1231,16 +1231,26 @@ class InputTypeImages(object):
 
         # Check if the beginning time was given (it will be read from the PNG if the UWO format is given)
         if beginning_time is None:
-            
-            try:
-                # Try reading the beginning time of the video from the name if time is not given
-                self.beginning_datetime = datetime.datetime.strptime(os.path.basename(self.dir_path), \
-                    "%Y%m%d_%H%M%S.%f")
+            fname = self.img_list[0]
+            if fname[:1] == 'M':
+                try:
+                    # try reading the beginning time from the UFO style filename
+                    fname = fname[1:16]
+                    self.beginning_datetime = datetime.datetime.strptime(fname, "%Y%m%d_%H%M%S")
+                except:
+                    print(os.path.basename(self.dir_path))
+                    messagebox.showerror('Input error', 'The time of the beginning cannot be read from the file name! Either change the name of the file to be in the UFO MYYYYMMDD_hhmmss format, or specify the beginning time using command line options.')
+                    sys.exit()
+            else:                
+                try:
+                    # Try reading the beginning time of the video from the name if time is not given
+                    self.beginning_datetime = datetime.datetime.strptime(os.path.basename(self.dir_path), \
+                        "%Y%m%d_%H%M%S.%f")
 
-            except:
-                messagebox.showerror('Input error', 'The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.')
-                sys.exit()
-
+                except:
+                    print(os.path.basename(self.dir_path))
+                    messagebox.showerror('Input error', 'The time of the beginning cannot be read from the file name! Either change the name of the folder to be in the YYYYMMDD_hhmmss.f format, or specify the beginning time using command line options.')
+                    sys.exit()
         else:
             self.beginning_datetime = beginning_time
 
@@ -1256,6 +1266,8 @@ class InputTypeImages(object):
 
         self.current_frame = 0
         self.current_img_file = self.img_list[self.current_frame]
+
+        print('using image ', self.current_img_file)
 
         # Load the first image
         img = self.loadFrame()
@@ -1643,7 +1655,7 @@ def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_d
     # If the given path is a file, look for a single FF file, video files, or vid files
     else:
 
-        dir_path, file_name = os.path.split(input_path)
+        _, file_name = os.path.split(input_path)
 
         # Check if a single FF file was given
         if validFFName(file_name):

@@ -35,9 +35,8 @@ def GenerateMP4s(dir_path, ftpfile_name):
     # load the ftpfile so we know which frames we want
     meteor_list = FTPdetectinfo.readFTPdetectinfo(dir_path, ftpfile_name)  
     for meteor in meteor_list:
-        ff_name, cam_code, meteor_No, n_segments, fps, hnr, mle, binn, px_fm, rho, phi, \
+        ff_name, _, _, n_segments, _, _, _, _, _, _, _, \
             meteor_meas = meteor
-        #print(ff_name, cam_code, meteor_No, n_segments, hnr, mle)
         # determine which frames we want
 
         first_frame=int(meteor_meas[0][1])-30
@@ -150,8 +149,6 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
         help='Path to directory with FF files.')
-    #arg_parser.add_argument('ftpfile_name', metavar='FTPFILE_NAME', type=str, \
-    #    help='name of FTPdetect file.')
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -165,7 +162,6 @@ if __name__ == "__main__":
     else:
         ftpdate=os.path.split(dir_path)[1]
     ftpfile_name="FTPdetectinfo_"+ftpdate+'.txt'
-    print(ftpfile_name)
-    #ftpfile_name = cml_args.ftpfile_name
+    # print(ftpfile_name)
 
     GenerateMP4s(dir_path, ftpfile_name)
