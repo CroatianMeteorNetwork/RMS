@@ -40,10 +40,9 @@ from RMS.Pickling import loadPickle, savePickle
 from RMS.Routines import Image
 from RMS.Math import angularSeparation
 from RMS.Misc import decimalDegreesToSexHours, openFileDialog
-from RMS.Astrometry.Conversions import J2000_JD, date2JD, JD2HourAngle, raDec2AltAz, altAz2RADec, \
-    equatorialCoordPrecession
+from RMS.Astrometry.Conversions import J2000_JD, date2JD, JD2HourAngle, raDec2AltAz, altAz2RADec
 
-from RMS.Astrometry.CyFunctions import subsetCatalog
+from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession, eqRefractionTrueToApparent
 
 from RMS.Astrometry.CustomPyqtgraphClasses import *
 
@@ -91,9 +90,9 @@ class FOVinputDialog(object):
 
         try:
             # Read values
-            self.azim = float(self.azimuth.get()) % 360
+            self.azim = float(self.azimuth.get())%360
             self.alt = float(self.altitude.get())
-            self.rot = float(self.rotation.get()) % 360
+            self.rot = float(self.rotation.get())%360
 
             # Check that the values are within the bounds
             if (self.alt < 0) or (self.alt > 90):
@@ -180,7 +179,7 @@ class PlateTool(QMainWindow):
         self.img_level_max = self.img_level_max_auto = 0  # these will be changed when the image is loaded
 
         self.img = None
-        self.img_copy = None
+        self.img_zoom = None
 
         self.adjust_levels_mode = False
         self.auto_levels = False
@@ -288,6 +287,7 @@ class PlateTool(QMainWindow):
         self.setupUI()
 
     def setupUI(self):
+        """ Setup pyqt UI with widgets """
         self.central = QWidget()
         self.setWindowTitle('SkyFit')
         self.setCentralWidget(self.central)
@@ -322,7 +322,7 @@ class PlateTool(QMainWindow):
         self.v_zoom.hide()
         self.v_zoom.setCentralItem(self.zoom_window)
         self.v_zoom.move(QPoint(0, 0))
-        self.v_zoom_left = True
+        self.v_zoom_left = True  # whether to draw zoom window on left or right
         self.zoom_window.invertY()
 
         # histogram
@@ -359,7 +359,7 @@ class PlateTool(QMainWindow):
         self.img_frame.addItem(self.cat_star_markers)
         self.cat_star_markers.setPen('r')
         self.cat_star_markers.setBrush(QColor(0, 0, 0, 0))
-        self.cat_star_markers.setSymbol(CircleLine())
+        self.cat_star_markers.setSymbol(Crosshair())
         self.cat_star_markers.setZValue(4)
 
         # catalog star markers (zoom window)
@@ -368,7 +368,7 @@ class PlateTool(QMainWindow):
         self.cat_star_markers2.setPen('r')
         self.cat_star_markers2.setBrush(QColor(0, 0, 0, 0))
         self.cat_star_markers2.setSize(10)
-        self.cat_star_markers2.setSymbol(CircleLine())
+        self.cat_star_markers2.setSymbol(Crosshair())
         self.cat_star_markers2.setZValue(4)
 
         # selected catalog star markers (main window)
@@ -400,7 +400,6 @@ class PlateTool(QMainWindow):
         self.centroid_star_markers2 = pg.ScatterPlotItem()
         self.zoom_window.addItem(self.centroid_star_markers2)
         self.centroid_star_markers2.setPen('y')
-        # self.centroid_star_markers2.setBrush(QColor(0, 0, 0, 0))
         self.centroid_star_markers2.setSize(10)
         self.centroid_star_markers2.setSymbol(Plus())
         self.centroid_star_markers2.setZValue(4)
@@ -456,7 +455,7 @@ class PlateTool(QMainWindow):
         self.img_frame.scene().sigMouseClicked.connect(self.mouseClick)  # NOTE: clicking event doesnt trigger if moving
 
         self.img = None
-        self.img_copy = None
+        self.img_zoom = None
 
         self.updateImage(first_update=True)
         self.updateLeftLabels()
@@ -465,6 +464,16 @@ class PlateTool(QMainWindow):
         self.show()
 
     def pixelsToDistance(self, x, y):
+        """ Converts between x pixels horizontally and y pixels vertically to distance
+            on self.img_frame (x,y)
+
+        Arguments
+            x: [float] number of pixels horizontally
+            y: [float] number of pixels vertically
+
+        Return:
+            [(float, float)]: distance horizontally and distance vertically
+        """
         r = self.img_frame.viewRange()
         self.img_frame.autoRange(padding=0)
         origin = self.img_frame.mapToDevice(self.img_frame.mapFromView(pg.Point(0, 0)))
@@ -509,6 +518,7 @@ class PlateTool(QMainWindow):
         return status_str
 
     def updateBottomLabel(self):
+        """ Update bottom label with current mouse position """
         self.label3.setText(self.mouseOverStatus(self.mouse_x, self.mouse_y))
 
     def zoom(self):
@@ -520,8 +530,11 @@ class PlateTool(QMainWindow):
         self.zoom_window.setYRange(self.mouse_y - 20, self.mouse_y + 20)
 
     def updateLeftLabels(self):
+        """ Update the two labels on the left with their information """
+
         ra_centre, dec_centre = self.computeCentreRADec()
 
+        # Show text on image with platepar parameters
         text_str = self.img_handle.name() + '\n' + self.img_type_flag + '\n\n'
         text_str += 'UT corr  = {:.1f}h\n'.format(self.platepar.UT_corr)
         text_str += 'Ref Az   = {:.3f}°\n'.format(self.platepar.az_centre)
@@ -530,8 +543,9 @@ class PlateTool(QMainWindow):
         text_str += 'Rot eq    = {:.3f}°\n'.format(rotationWrtStandard(self.platepar))
         # text_str += 'Ref RA  = {:.3f}\n'.format(self.platepar.RA_d)
         # text_str += 'Ref Dec = {:.3f}\n'.format(self.platepar.dec_d)
-        text_str += "Scale  = {:.3f}'/px\n".format(60 / self.platepar.F_scale)
-        text_str += 'Lim mag  = {:.1f}\n'.format(self.cat_lim_mag)
+        text_str += "Pix scale = {:.3f}'/px\n".format(60/self.platepar.F_scale)
+        text_str += "Refraction corr = {:s}\n".format(str(self.platepar.refraction))
+        text_str += 'Lim mag   = {:.1f}\n'.format(self.cat_lim_mag)
         text_str += 'Increment = {:.2f}\n'.format(self.key_increment)
         text_str += 'Img Gamma = {:.2f}\n'.format(self.img.gamma)
         text_str += 'Camera Gamma = {:.2f}\n'.format(self.config.gamma)
@@ -572,6 +586,7 @@ class PlateTool(QMainWindow):
         text_str += 'C - Hide/show detected stars\n'
         text_str += 'CTRL + I - Show/hide distortion\n'
         text_str += 'U/J - Img Gamma\n'
+        text_str += 'I - Invert colors\n'
         text_str += 'CTRL + H - Adjust levels\n'
         text_str += 'V - FOV centre\n'
         text_str += '\n'
@@ -632,11 +647,9 @@ class PlateTool(QMainWindow):
                 cat_mag_faintest = np.max(catalog_mag_filtered)
 
                 # Plot catalog stars
-                # self.ax.scatter(self.catalog_x_filtered, self.catalog_y_filtered, c='r', marker='+', lw=1.0,
-                #                 alpha=0.5, s=((4.0 + (cat_mag_faintest - catalog_mag_filtered)) / 2.0) ** (2 * 2.512))
-                size = ((4.0 + (cat_mag_faintest - catalog_mag_filtered)) / 2.0) ** (2 * 2.512 * 0.5)
+                size = ((4.0 + (cat_mag_faintest - catalog_mag_filtered))/2.0)**(2*2.512*0.5)
+
                 self.cat_star_markers.setPoints(x=self.catalog_x_filtered, y=self.catalog_y_filtered, size=size)
-                # self.cat_star_markers.addPoints(x=self.catalog_x_filtered, y=self.catalog_y_filtered, size=2)
                 self.cat_star_markers2.setPoints(x=self.catalog_x_filtered, y=self.catalog_y_filtered, size=size)
             else:
                 print('No catalog stars visible!')
@@ -653,19 +666,21 @@ class PlateTool(QMainWindow):
             self.updateFitResiduals()
 
     def updateImage(self, first_update=False):
-        """ Update self.img with the img_handle at the current chunck
-            and then update the stars according to the platepar
-        """
+        """ Update self.img with the img_handle at the current chunk """
+
         # Limit key increment so it cant be lower than 0.01
         if self.key_increment < 0.01:
             self.key_increment = 0.01
 
+        # remove old image
         if not first_update:
             self.img_frame.removeItem(self.img)
-            self.zoom_window.removeItem(self.img_copy)
+            self.zoom_window.removeItem(self.img_zoom)
             gamma = self.img.gamma
+            invert = self.img.invert_img
         else:
             gamma = 1
+            invert = False
 
         self.current_ff = self.img_handle.loadChunk()
 
@@ -696,23 +711,23 @@ class PlateTool(QMainWindow):
         ave_data = np.flip(ave_data, axis=1)
 
         data_dict = {'maxpixel': max_data, 'avepixel': ave_data}
+
         # update display with image
-        self.img_copy = ImageItem2(image=data_dict, default_key=self.img_type_flag, gamma=gamma)
-        self.img = ImageItem2(image=data_dict, default_key=self.img_type_flag, gamma=gamma)
-        self.zoom_window.addItem(self.img_copy)
+        self.img = ImageItem2(image=data_dict, default_key=self.img_type_flag, gamma=gamma, invert=invert)
+        self.img_zoom = ImageItem2(image=data_dict, default_key=self.img_type_flag, gamma=gamma, invert=invert)
 
         # add new images to viewboxes
         self.img_frame.addItem(self.img)
         self.img_frame.autoRange(padding=0)
-        self.zoom_window.addItem(self.img_copy)
+        self.zoom_window.addItem(self.img_zoom)
 
         self.img_level_min_auto = np.percentile(data_dict[self.img_type_flag], 0.1)
         self.img_level_max_auto = np.percentile(data_dict[self.img_type_flag], 99.95)
 
-        self.bit_depth = 8 * ave_data.itemsize
+        self.bit_depth = 8*ave_data.itemsize
         # first update
         if first_update:
-            self.img_level_max = 2 ** self.bit_depth - 1
+            self.img_level_max = 2**self.bit_depth - 1
 
             # Set the image resolution to platepar after reading the first image
             self.config.width = data_dict[self.img_type_flag].shape[0]
@@ -725,8 +740,9 @@ class PlateTool(QMainWindow):
 
         # update histogram and its levels
         self.hist.setImageItem(self.img)
-        self.hist.setImages(self.img_copy)
+        self.hist.setImages(self.img_zoom)
 
+        # set levels for image
         if self.auto_levels:
             self.hist.setLevels(self.img_level_min_auto, self.img_level_max_auto)
         else:
@@ -735,7 +751,10 @@ class PlateTool(QMainWindow):
         self.updateStars()
 
     def updatePairedStars(self):
-        """ Draws the stars that were picked for calibration. """
+        """
+            Draws the stars that were picked for calibration as well as draw the
+            residuals and star magnitude
+        """
         if self.star_pick_mode:
             self.sel_cat_star_markers.setData(pos=[pair[0][:2] for pair in self.paired_stars])
             self.sel_cat_star_markers2.setData(pos=[pair[0][:2] for pair in self.paired_stars])
@@ -771,6 +790,7 @@ class PlateTool(QMainWindow):
 
     def nextImg(self):
         """ Shows the next FF file in the list. """
+
         # Don't allow image change while in star picking mode
         if self.star_pick_mode:
             messagebox.showwarning(title='Star picking mode',
@@ -779,13 +799,13 @@ class PlateTool(QMainWindow):
 
         self.img_handle.nextChunk()
 
-        # Reset paired stars
-        # REMOVE MARKERS
+        # remove markers
         self.calstar_markers.clear()
         self.calstar_markers2.clear()
         self.cat_star_markers.clear()
         self.cat_star_markers2.clear()
 
+        # Reset paired stars
         self.paired_stars = []
         self.residuals = None
 
@@ -802,19 +822,21 @@ class PlateTool(QMainWindow):
 
         self.img_handle.prevChunk()
 
-        # Reset paired stars
-        # REMOVE MARKERS
+        # remove markers
         self.calstar_markers.clear()
         self.calstar_markers2.clear()
         self.cat_star_markers.clear()
         self.cat_star_markers2.clear()
 
+        # Reset paired stars
         self.paired_stars = []
         self.residuals = None
 
         self.updateImage()
 
     def resizeEvent(self, event):
+        """ When the window is resized, move the bottom label to the correct position """
+
         QMainWindow.resizeEvent(self, event)
         try:
             # self.labels.moveText(1, 0, self.img_frame.height() - self.labels.getTextItem(1).size()[1])
@@ -823,8 +845,8 @@ class PlateTool(QMainWindow):
             pass
 
     def saveState(self):
+        # TODO: fix bug
         savePickle(self, self.dir_path, 'skyFit_latest.state')
-
         print("Saved state to file")
 
     def mouseClick(self, event):
@@ -837,7 +859,6 @@ class PlateTool(QMainWindow):
             if event.button() == Qt.LeftButton:
                 if self.star_selection_centroid:
                     # If CTRL is pressed, place the pick manually - NOTE: the intensity might be off then!!!
-                    # 'control' is for Windows
                     if modifiers == Qt.ControlModifier:
                         self.x_centroid = self.mouse_press_x
                         self.y_centroid = self.mouse_press_y
@@ -904,13 +925,16 @@ class PlateTool(QMainWindow):
         pos = event
         if self.img_frame.sceneBoundingRect().contains(pos):
             mp = self.img_frame.mapSceneToView(pos)
+
             self.cursor.setCenter(mp)
             self.cursor2.setCenter(mp)
             self.mouse_x, self.mouse_y = mp.x(), mp.y()
 
             self.zoom()
+
+            # move zoom window to correct location
             range_ = self.img_frame.getState()['viewRange'][0]
-            if mp.x() > (range_[1] - range_[0]) / 2 + range_[0]:
+            if mp.x() > (range_[1] - range_[0])/2 + range_[0]:
                 self.v_zoom_left = True
                 if self.show_key_help != 2:
                     # self.v_zoom.move(QPoint(self.labels.getTextItem(0).size()[0], 0))
@@ -922,13 +946,13 @@ class PlateTool(QMainWindow):
                 self.v_zoom.move(QPoint(self.img_frame.size().width() - self.show_zoom_window_size, 0))
 
             self.updateBottomLabel()
-        self.printFrameRate()
+        # self.printFrameRate()
 
     def printFrameRate(self):
         try:
             print('FPS: {}'.format(np.average(self.frames)))
-            self.frames[self.i] = 1 / (time.time() - self.time)
-            self.i = (self.i + 1) % self.n
+            self.frames[self.i] = 1/(time.time() - self.time)
+            self.i = (self.i + 1)%self.n
         except ZeroDivisionError:
             pass
         self.time = time.time()
@@ -937,7 +961,7 @@ class PlateTool(QMainWindow):
         """ Checks that the astrometry parameters are within the allowed range. """
 
         # Right ascension should be within 0-360
-        self.platepar.RA_d = self.platepar.RA_d % 360
+        self.platepar.RA_d = (self.platepar.RA_d + 360)%360
 
         # Keep the declination in the allowed range
         if self.platepar.dec_d >= 90:
@@ -950,7 +974,6 @@ class PlateTool(QMainWindow):
         """ Perform the photometry on selectes stars. """
 
         if self.star_pick_mode:
-
             ### Make a photometry plot
 
             # Extract star intensities and star magnitudes
@@ -971,7 +994,7 @@ class PlateTool(QMainWindow):
                     continue
 
                 star_coords.append([star_x, star_y])
-                radius_list.append(np.hypot(star_x - self.platepar.X_res / 2, star_y - self.platepar.Y_res / 2))
+                radius_list.append(np.hypot(star_x - self.platepar.X_res/2, star_y - self.platepar.Y_res/2))
                 px_intens_list.append(px_intens)
                 catalog_mags.append(star_mag)
 
@@ -1016,7 +1039,7 @@ class PlateTool(QMainWindow):
                         photom_resid_txt = "{:.2f}".format(fit_diff)
 
                         # Determine the size of the residual text, larger the residual, larger the text
-                        photom_resid_size = 8 + np.abs(fit_diff) / (np.max(np.abs(fit_resids)) / 5.0)
+                        photom_resid_size = 8 + np.abs(fit_diff)/(np.max(np.abs(fit_resids))/5.0)
 
                         self.residual_text.addTextItem(star_x, star_y + y, 100, 100, photom_resid_txt,
                                                        align=Qt.AlignCenter, font=QFont('times', photom_resid_size),
@@ -1042,7 +1065,7 @@ class PlateTool(QMainWindow):
 
                     # Plot catalog magnitude vs. raw logsum of pixel intensities
                     lsp_arr = np.log10(np.array(px_intens_list))
-                    ax_p.scatter(-2.5 * lsp_arr, catalog_mags, s=5, c='r', zorder=3, alpha=0.5, \
+                    ax_p.scatter(-2.5*lsp_arr, catalog_mags, s=5, c='r', zorder=3, alpha=0.5, \
                                  label="Raw")
 
                     # Plot catalog magnitude vs. raw logsum of pixel intensities (only when no flat is used)
@@ -1051,7 +1074,7 @@ class PlateTool(QMainWindow):
                                                                   np.array(radius_list),
                                                                   self.platepar.vignetting_coeff))
 
-                        ax_p.scatter(-2.5 * lsp_corr_arr, catalog_mags, s=5, c='b', zorder=3, alpha=0.5,
+                        ax_p.scatter(-2.5*lsp_corr_arr, catalog_mags, s=5, c='b', zorder=3, alpha=0.5,
                                      label="Corrected for vignetting")
 
                     x_min, x_max = ax_p.get_xlim()
@@ -1072,7 +1095,7 @@ class PlateTool(QMainWindow):
 
                     # Plot the line fit
                     logsum_arr = np.linspace(x_min_w, x_max_w, 10)
-                    ax_p.plot(logsum_arr, photomLine((10 ** (logsum_arr / (-2.5)), np.zeros_like(logsum_arr)),
+                    ax_p.plot(logsum_arr, photomLine((10**(logsum_arr/(-2.5)), np.zeros_like(logsum_arr)),
                                                      photom_offset, self.platepar.vignetting_coeff), label=fit_info,
                               linestyle='--', color='k', alpha=0.5, zorder=3)
 
@@ -1094,7 +1117,7 @@ class PlateTool(QMainWindow):
 
                     ### PLOT MAG DIFFERENCE BY RADIUS
 
-                    img_diagonal = np.hypot(self.platepar.X_res / 2, self.platepar.Y_res / 2)
+                    img_diagonal = np.hypot(self.platepar.X_res/2, self.platepar.Y_res/2)
 
                     # Plot radius from centre vs. fit residual (including vignetting)
                     ax_r.scatter(radius_list, fit_resids, s=5, c='b', alpha=0.5, zorder=3)
@@ -1114,9 +1137,9 @@ class PlateTool(QMainWindow):
                         radius_arr_tmp = np.linspace(0, img_diagonal, 50)
 
                         # Plot the vignetting curve
-                        vignetting_loss = 2.5 * np.log10(px_sum_tmp) \
-                                          - 2.5 * np.log10(correctVignetting(px_sum_tmp, radius_arr_tmp,
-                                                                             self.platepar.vignetting_coeff))
+                        vignetting_loss = 2.5*np.log10(px_sum_tmp) \
+                                          - 2.5*np.log10(correctVignetting(px_sum_tmp, radius_arr_tmp,
+                                                                           self.platepar.vignetting_coeff))
 
                         ax_r.plot(radius_arr_tmp, vignetting_loss, linestyle='dotted', alpha=0.5, color='k')
 
@@ -1170,7 +1193,7 @@ class PlateTool(QMainWindow):
             self.platepar.UT_corr -= 0.5
 
             # Update platepar JD
-            self.platepar.JD += 0.5 / 24
+            self.platepar.JD += 0.5/24
 
             self.updateStars()
 
@@ -1179,7 +1202,7 @@ class PlateTool(QMainWindow):
             self.platepar.UT_corr += 0.5
 
             # Update platepar JD
-            self.platepar.JD -= 0.5 / 24
+            self.platepar.JD -= 0.5/24
 
             self.updateStars()
 
@@ -1312,11 +1335,11 @@ class PlateTool(QMainWindow):
             # Change image scale
         elif event.key() == Qt.Key_Up:
 
-            self.platepar.F_scale *= 1.0 + self.key_increment / 100.0
+            self.platepar.F_scale *= 1.0 + self.key_increment/100.0
             self.updateStars()
 
         elif event.key() == Qt.Key_Down:
-            self.platepar.F_scale *= 1.0 - self.key_increment / 100.0
+            self.platepar.F_scale *= 1.0 - self.key_increment/100.0
             self.updateStars()
 
         # Set distortion types
@@ -1495,15 +1518,25 @@ class PlateTool(QMainWindow):
         # Increase image gamma
         elif event.key() == Qt.Key_U:
             # Increase image gamma by a factor of 1.1x
-            self.img.updateGamma(1 / 0.9)
-            self.img_copy.updateGamma(1 / 0.9)
+            self.img.updateGamma(1/0.9)
+            if self.img_zoom:
+                self.img_zoom.updateGamma(1/0.9)
             self.updateLeftLabels()
 
         elif event.key() == Qt.Key_J:
             # Decrease image gamma by a factor of 0.9x
             self.img.updateGamma(0.9)
-            self.img_copy.updateGamma(0.9)
+            if self.img_zoom:
+                self.img_zoom.updateGamma(0.9)
+
             self.updateLeftLabels()
+
+        elif event.key() == Qt.Key_T:
+            if self.platepar is not None:
+                self.platepar.refraction = not self.platepar.refraction
+
+                self.updateImage()
+
 
         elif event.key() == Qt.Key_H and modifiers == Qt.ControlModifier:
             self.adjust_levels_mode = not self.adjust_levels_mode
@@ -1521,6 +1554,13 @@ class PlateTool(QMainWindow):
                 self.cat_star_markers.hide()
                 self.cat_star_markers2.hide()
             # updates image automatically
+
+        elif event.key() == Qt.Key_I:
+
+            # Invert image levels
+            self.img.invert()
+            self.img_zoom.invert()
+
 
         elif event.key() == Qt.Key_Z and modifiers == Qt.ShiftModifier:
             if self.star_pick_mode:
@@ -1578,8 +1618,13 @@ class PlateTool(QMainWindow):
             # Show the photometry plot
             self.photometry(show_plot=True)
 
+        elif event.key() == Qt.Key_L:
+            if self.star_pick_mode:
+                # Show astrometry residuals plot
+                self.showAstrometryFitPlots()
+
         # Limit values of RA and Dec
-        self.platepar.RA_d = self.platepar.RA_d % 360
+        self.platepar.RA_d = self.platepar.RA_d%360
 
         if self.platepar.dec_d > 90:
             self.platepar.dec_d = 90
@@ -1617,7 +1662,7 @@ class PlateTool(QMainWindow):
 
         ### UPDATE IMAGE ###
         self.img.selectImage(self.img_type_flag)
-        self.img_copy.selectImage(self.img_type_flag)
+        self.img_zoom.selectImage(self.img_type_flag)
 
     def loadCatalogStars(self, lim_mag):
         """ Loads stars from the BSC star catalog.
@@ -1641,11 +1686,11 @@ class PlateTool(QMainWindow):
 
             # Sample points on every image axis (start/end 5% from image corners)
             x_samples = 30
-            y_samples = int(x_samples * (self.platepar.Y_res / self.platepar.X_res))
+            y_samples = int(x_samples*(self.platepar.Y_res/self.platepar.X_res))
             corner_frac = 0.05
-            x_samples = np.linspace(corner_frac * self.platepar.X_res, (1 - corner_frac) * self.platepar.X_res,
+            x_samples = np.linspace(corner_frac*self.platepar.X_res, (1 - corner_frac)*self.platepar.X_res,
                                     x_samples)
-            y_samples = np.linspace(corner_frac * self.platepar.Y_res, (1 - corner_frac) * self.platepar.Y_res,
+            y_samples = np.linspace(corner_frac*self.platepar.Y_res, (1 - corner_frac)*self.platepar.Y_res,
                                     y_samples)
 
             # Create a platepar with no distortion
@@ -1658,7 +1703,7 @@ class PlateTool(QMainWindow):
 
             # Compute RA/Dec using the normal platepar for all pairs
             level_data = np.ones_like(x_arr)
-            time_data = [self.img_handle.currentTime()] * len(x_arr)
+            time_data = [self.img_handle.currentTime()]*len(x_arr)
             _, ra_data, dec_data, _ = xyToRaDecPP(time_data, x_arr, y_arr, level_data, self.platepar)
 
             # Compute X, Y back without the distortion
@@ -1680,8 +1725,8 @@ class PlateTool(QMainWindow):
         img_time = self.img_handle.currentTime()
 
         # Convert the FOV centre to RA/Dec
-        _, ra_centre, dec_centre, _ = xyToRaDecPP([img_time], [self.platepar.X_res / 2],
-                                                  [self.platepar.Y_res / 2], [1], self.platepar)
+        _, ra_centre, dec_centre, _ = xyToRaDecPP([img_time], [self.platepar.X_res/2],
+                                                  [self.platepar.Y_res/2], [1], self.platepar)
 
         ra_centre = ra_centre[0]
         dec_centre = dec_centre[0]
@@ -1700,11 +1745,16 @@ class PlateTool(QMainWindow):
 
         # Calculate the FOV radius in degrees
         fov_y, fov_x = computeFOVSize(self.platepar)
-        fov_radius = np.sqrt(fov_x ** 2 + fov_y ** 2)
+        fov_radius = np.sqrt(fov_x**2 + fov_y**2)
+
+        # Compute the current Julian date
+        jd = date2JD(*self.img_handle.currentTime())
 
         # Take only those stars which are inside the FOV
         filtered_indices, filtered_catalog_stars = subsetCatalog(catalog_stars, ra_centre, dec_centre,
-                                                                 fov_radius, self.cat_lim_mag)
+                                                                 jd, self.platepar.lat, self.platepar.lon, fov_radius,
+                                                                 self.cat_lim_mag)
+
         return filtered_indices, np.array(filtered_catalog_stars)
 
     def getInitialParamsAstrometryNet(self, upload_image=True):
@@ -1714,7 +1764,7 @@ class PlateTool(QMainWindow):
         solution = None
 
         # Construct FOV width estimate
-        fov_w_range = [0.75 * self.config.fov_w, 1.25 * self.config.fov_w]
+        fov_w_range = [0.75*self.config.fov_w, 1.25*self.config.fov_w]
 
         # Check if the given FF files is in the calstars list
         if (self.img_handle.name() in self.calstars) and (not upload_image):
@@ -1744,13 +1794,13 @@ class PlateTool(QMainWindow):
             print("Uploading the whole image to astrometry.net...")
 
             # If the image is 16bit or larger, rescale and convert it to 8 bit
-            if self.img.data.itemsize * 8 > 8:
+            if self.img.data.itemsize*8 > 8:
 
                 # Rescale the image to 8bit
                 minv, maxv = self.hist.getLevels()
                 img_data = Image.adjustLevels(self.self.img.data, minv, self.img.gamma, maxv)
                 img_data -= np.min(img_data)
-                img_data = 255 * (img_data / np.max(img_data))
+                img_data = 255*(img_data/np.max(img_data))
                 img_data = img_data.astype(np.uint8)
 
             else:
@@ -1797,7 +1847,7 @@ class PlateTool(QMainWindow):
         print(' Rot horiz   = {:.2f} deg'.format(self.platepar.rotation_from_horiz))
         print(' Orient eq   = {:.2f} deg'.format(orientation))
         print(' Pos angle   = {:.2f} deg'.format(pos_angle_ref))
-        print(' Scale = {:.2f} arcmin/px'.format(60 / self.platepar.F_scale))
+        print(' Scale = {:.2f} arcmin/px'.format(60/self.platepar.F_scale))
 
     def getFOVcentre(self):
         """ Asks the user to input the centre of the FOV in altitude and azimuth. """
@@ -1818,7 +1868,7 @@ class PlateTool(QMainWindow):
         self.platepar.JD = date2JD(*img_time, UT_corr=float(self.platepar.UT_corr))
 
         # Set the reference hour angle
-        self.platepar.Ho = JD2HourAngle(self.platepar.JD) % 360
+        self.platepar.Ho = JD2HourAngle(self.platepar.JD)%360
 
         # Convert FOV centre to RA, Dec
         ra, dec = altAz2RADec(self.azim_centre, self.alt_centre, date2JD(*img_time), \
@@ -1901,9 +1951,9 @@ class PlateTool(QMainWindow):
         self.platepar.gamma = self.config.gamma
 
         # Estimate the scale
-        scale_x = self.config.fov_w / self.config.width
-        scale_y = self.config.fov_h / self.config.height
-        self.platepar.F_scale = 1 / ((scale_x + scale_y) / 2)
+        scale_x = self.config.fov_w/self.config.width
+        scale_y = self.config.fov_h/self.config.height
+        self.platepar.F_scale = 1/((scale_x + scale_y)/2)
 
         # Set distortion polynomials to zero
         self.platepar.x_poly_fwd *= 0
@@ -2040,7 +2090,7 @@ class PlateTool(QMainWindow):
         # Find the index of the closest catalog star to the given image coordinates
         for i, (x, y) in enumerate(zip(picked_x, picked_y)):
 
-            dist = (pos_x - x) ** 2 + (pos_y - y) ** 2
+            dist = (pos_x - x)**2 + (pos_y - y)**2
 
             if dist < min_dist:
                 min_dist = dist
@@ -2068,7 +2118,7 @@ class PlateTool(QMainWindow):
         ######################################################################################################
 
         # Outer circle radius
-        outer_radius = self.star_aperature_radius * 2
+        outer_radius = self.star_aperature_radius*2
 
         x_min = int(round(mouse_x - outer_radius))
         if x_min < 0: x_min = 0
@@ -2101,9 +2151,9 @@ class PlateTool(QMainWindow):
             for j in range(img_crop.shape[1]):
 
                 # Calculate distance of pixel from centre of the cropped image
-                i_rel = i - img_crop.shape[0] / 2
-                j_rel = j - img_crop.shape[1] / 2
-                pix_dist = math.sqrt(i_rel ** 2 + j_rel ** 2)
+                i_rel = i - img_crop.shape[0]/2
+                j_rel = j - img_crop.shape[1]/2
+                pix_dist = math.sqrt(i_rel**2 + j_rel**2)
 
                 # Take only those pixels between the inner and the outer circle
                 if (pix_dist <= outer_radius) and (pix_dist > self.star_aperature_radius):
@@ -2114,7 +2164,7 @@ class PlateTool(QMainWindow):
         if bg_counter == 0:
             print('Zero division error')
             raise NotImplementedError
-        bg_intensity = bg_acc / bg_counter
+        bg_intensity = bg_acc/bg_counter
 
         ######################################################################################################
 
@@ -2128,18 +2178,18 @@ class PlateTool(QMainWindow):
             for j in range(img_crop.shape[1]):
 
                 # Calculate distance of pixel from centre of the cropped image
-                i_rel = i - img_crop.shape[0] / 2
-                j_rel = j - img_crop.shape[1] / 2
-                pix_dist = math.sqrt(i_rel ** 2 + j_rel ** 2)
+                i_rel = i - img_crop.shape[0]/2
+                j_rel = j - img_crop.shape[1]/2
+                pix_dist = math.sqrt(i_rel**2 + j_rel**2)
 
                 # Take only those pixels between the inner and the outer circle
                 if pix_dist <= self.star_aperature_radius:
-                    x_acc += i * (img_crop[i, j] - bg_intensity)
-                    y_acc += j * (img_crop[i, j] - bg_intensity)
+                    x_acc += i*(img_crop[i, j] - bg_intensity)
+                    y_acc += j*(img_crop[i, j] - bg_intensity)
                     intens_acc += img_crop[i, j] - bg_intensity
 
-        x_centroid = x_acc / intens_acc + x_min
-        y_centroid = y_acc / intens_acc + y_min
+        x_centroid = x_acc/intens_acc + x_min
+        y_centroid = y_acc/intens_acc + y_min
 
         ######################################################################################################
 
@@ -2154,7 +2204,7 @@ class PlateTool(QMainWindow):
         # Find the index of the closest catalog star to the given image coordinates
         for i, (x, y) in enumerate(zip(self.catalog_x, self.catalog_y)):
 
-            dist = (pos_x - x) ** 2 + (pos_y - y) ** 2
+            dist = (pos_x - x)**2 + (pos_y - y)**2
 
             if dist < min_dist:
                 min_dist = dist
@@ -2215,7 +2265,7 @@ class PlateTool(QMainWindow):
 
             # Compute image residual and angle of the error
             angle = np.arctan2(delta_y, delta_x)
-            distance = np.sqrt(delta_x ** 2 + delta_y ** 2)
+            distance = np.sqrt(delta_x**2 + delta_y**2)
 
             # Compute the residuals in ra/dec in angular coordiniates
             img_time = self.img_handle.currentTime()
@@ -2234,10 +2284,10 @@ class PlateTool(QMainWindow):
             print(
                 '{:3d}, {:7.2f}, {:7.2f}, {:>8.3f}, {:>+9.3f}, {:+6.2f},  {:7.2f}, {:8.2f}, {:7.2f}, {:8.2f}, {:7.2f}, {:+9.1f}'.format(
                     star_no + 1, img_x, img_y,
-                    ra, dec, mag, -2.5 * np.log10(sum_intens), cat_x, cat_y, 60 * angular_distance, distance,
+                    ra, dec, mag, -2.5*np.log10(sum_intens), cat_x, cat_y, 60*angular_distance, distance,
                     np.degrees(angle)))
 
-        mean_angular_error = 60 * np.mean([entry[4] for entry in residuals])
+        mean_angular_error = 60*np.mean([entry[4] for entry in residuals])
 
         # If the average angular error is larger than 60 arc minutes, report it in degrees
         if mean_angular_error > 60:
@@ -2277,16 +2327,16 @@ class PlateTool(QMainWindow):
                 img_x, img_y, angle, distance, angular_distance = entry
 
                 # Calculate coordinates of the end of the residual line
-                res_x = img_x + res_scale * np.cos(angle) * distance
-                res_y = img_y + res_scale * np.sin(angle) * distance
+                res_x = img_x + res_scale*np.cos(angle)*distance
+                res_y = img_y + res_scale*np.sin(angle)*distance
 
                 # Plot the image residuals
                 data.append([img_x, img_y, res_x, res_y, pen1])
 
                 # Convert the angular distance from degrees to equivalent image pixels
-                ang_dist_img = angular_distance * self.platepar.F_scale
-                res_x = img_x + res_scale * np.cos(angle) * ang_dist_img
-                res_y = img_y + res_scale * np.sin(angle) * ang_dist_img
+                ang_dist_img = angular_distance*self.platepar.F_scale
+                res_x = img_x + res_scale*np.cos(angle)*ang_dist_img
+                res_y = img_y + res_scale*np.sin(angle)*ang_dist_img
 
                 # Plot the sky residuals
                 data.append([img_x, img_y, res_x, res_y, pen2])
@@ -2294,6 +2344,134 @@ class PlateTool(QMainWindow):
             self.residual_lines.setData(data)
         else:
             self.residual_lines.setData([])
+
+    def showAstrometryFitPlots(self):
+        """ Show window with astrometry fit details. """
+
+        # Extract paired catalog stars and image coordinates separately
+        catalog_stars = np.array([cat_coords for img_coords, cat_coords in self.paired_stars])
+        img_stars = np.array([img_coords for img_coords, cat_coords in self.paired_stars])
+
+        # Get the Julian date of the image that's being fit
+        jd = date2JD(*self.img_handle.currentTime())
+
+        ### Calculate the fit residuals for every fitted star ###
+
+        # Get image coordinates of catalog stars
+        catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, self.platepar)
+
+        # Azimuth and elevation residuals
+        x_list = []
+        y_list = []
+        azim_list = []
+        elev_list = []
+        azim_residuals = []
+        elev_residuals = []
+        x_residuals = []
+        y_residuals = []
+
+        # Get image time and Julian date
+        img_time = self.img_handle.currentTime()
+        jd = date2JD(*img_time)
+
+        # Calculate the distance and the angle between each pair of image positions and catalog predictions
+        for star_no, (cat_x, cat_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y, catalog_stars,
+                                                                        img_stars)):
+            img_x, img_y, _ = img_c
+            ra_cat, dec_cat, _ = cat_coords
+
+            # Compute image residuals
+            x_list.append(cat_x)
+            y_list.append(cat_y)
+            x_residuals.append(cat_x - img_x)
+            y_residuals.append(cat_y - img_y)
+
+            # # Correct the catalog RA/Dec for refraction
+            # if self.platepar.refraction:
+            #     ra_cat, dec_cat = eqRefractionTrueToApparent(np.radians(ra_cat), np.radians(dec_cat), jd, \
+            #         np.radians(self.platepar.lat), np.radians(self.platepar.lon))
+            #     ra_cat, dec_cat = np.degrees(ra_cat), np.degrees(dec_cat)
+
+            # Compute azim/elev from the catalog
+            azim_cat, elev_cat = raDec2AltAz(ra_cat, dec_cat, jd, self.platepar.lat, self.platepar.lon)
+
+            azim_list.append(azim_cat)
+            elev_list.append(elev_cat)
+
+            # Compute RA/Dec from image
+            _, ra_img, dec_img, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar)
+            ra_img = ra_img[0]
+            dec_img = dec_img[0]
+
+            # Compute azim/elev from image coordinates
+            azim_img, elev_img = raDec2AltAz(ra_img, dec_img, jd, self.platepar.lat, self.platepar.lon)
+
+            # Compute azim/elev residuals
+            azim_residuals.append(((azim_cat - azim_img + 180)%360 - 180)*np.cos(np.radians(elev_cat)))
+            elev_residuals.append(elev_cat - elev_img)
+
+        # Init astrometry fit window
+        fig_a, ((ax_azim, ax_elev), (ax_x, ax_y)) = plt.subplots(ncols=2, nrows=2, facecolor=None,
+                                                                 figsize=(10, 8))
+
+        # Set figure title
+        fig_a.canvas.set_window_title("Astrometry fit")
+
+        # Plot azimuth vs azimuth error
+        ax_azim.scatter(azim_list, 60*np.array(azim_residuals), s=2, c='k', zorder=3)
+
+        ax_azim.grid()
+        ax_azim.set_xlabel("Azimuth (deg, +E of due N)")
+        ax_azim.set_ylabel("Azimuth error (arcmin)")
+
+        # Plot elevation vs elevation error
+        ax_elev.scatter(elev_list, 60*np.array(elev_residuals), s=2, c='k', zorder=3)
+
+        ax_elev.grid()
+        ax_elev.set_xlabel("Elevation (deg)")
+        ax_elev.set_ylabel("Elevation error (arcmin)")
+
+        # If the FOV is larger than 45 deg, set maximum limits on azimuth and elevation
+        if np.hypot(*computeFOVSize(self.platepar)) > 45:
+            ax_azim.set_xlim([0, 360])
+            ax_elev.set_xlim([0, 90])
+
+        # Equalize Y limits, make them multiples of 5 arcmin, and set a minimum range of 5 arcmin
+        azim_max_xlim = np.max(np.abs(ax_azim.get_ylim()))
+        elev_max_xlim = np.max(np.abs(ax_elev.get_ylim()))
+        max_xlim = np.ceil(np.max([azim_max_xlim, elev_max_xlim])/5)*5
+        if max_xlim < 5.0:
+            max_xlim = 5.0
+        ax_azim.set_ylim([-max_xlim, max_xlim])
+        ax_elev.set_ylim([-max_xlim, max_xlim])
+
+        # Plot X vs X error
+        ax_x.scatter(x_list, x_residuals, s=2, c='k', zorder=3)
+
+        ax_x.grid()
+        ax_x.set_xlabel("X (px)")
+        ax_x.set_ylabel("X error (px)")
+        ax_x.set_xlim([0, self.img.data.shape[1]])
+
+        # Plot Y vs Y error
+        ax_y.scatter(y_list, y_residuals, s=2, c='k', zorder=3)
+
+        ax_y.grid()
+        ax_y.set_xlabel("Y (px)")
+        ax_y.set_ylabel("Y error (px)")
+        ax_y.set_xlim([0, self.img.data.shape[0]])
+
+        # Equalize Y limits, make them integers, and set a minimum range of 1 px
+        x_max_xlim = np.max(np.abs(ax_x.get_ylim()))
+        y_max_xlim = np.max(np.abs(ax_y.get_ylim()))
+        max_xlim = np.ceil(np.max([x_max_xlim, y_max_xlim]))
+        if max_xlim < 1:
+            max_xlim = 1.0
+        ax_x.set_ylim([-max_xlim, max_xlim])
+        ax_y.set_ylim([-max_xlim, max_xlim])
+
+        fig_a.tight_layout()
+        fig_a.show()
 
 
 if __name__ == '__main__':

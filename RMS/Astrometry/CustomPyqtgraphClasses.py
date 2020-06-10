@@ -56,6 +56,22 @@ class CircleLine(QPainterPath):
         self.addEllipse(QPoint(0, 0), 0.5, 0.5)
 
 
+class Crosshair(QPainterPath):
+    def __init__(self):
+        QPainterPath.__init__(self)
+        points = np.asarray([(0, -0.5), (0, -0.2),
+                             (0, 0.5), (0, 0.2),
+                             (0.5, 0), (0.2, 0),
+                             (-0.5, 0), (-0.2, 0)])
+
+        for i in range(0, len(points), 2):
+            self.moveTo(*points[i])
+            self.lineTo(*points[i + 1])
+        self.closeSubpath()
+
+        self.addEllipse(QPoint(0, 0), 0.5, 0.5)
+
+
 # custom pyqtgraph items
 class PlotLines(pg.GraphicsObject):
     def __init__(self, data=None):
@@ -221,7 +237,7 @@ class TextItem(pg.GraphicsObject):
         painter.setFont(self.font)
         if self.align == Qt.AlignLeft or self.align == Qt.AlignRight:
             painter.drawText(self.margin, self.margin,
-                             self.wh[0] - 2 * self.margin, self.wh[1] - 2 * self.margin,
+                             self.wh[0] - 2*self.margin, self.wh[1] - 2*self.margin,
                              self.align, self.text)
         elif self.align == Qt.AlignCenter:
             painter.drawText(0, 0, *self.wh, self.align, self.text)
@@ -254,7 +270,7 @@ class TextItem(pg.GraphicsObject):
 
         # transform where the center is for convenience
         if self.align == Qt.AlignCenter:
-            painter.translate(-self.wh[0] / 2, -self.wh[1] / 2)
+            painter.translate(-self.wh[0]/2, -self.wh[1]/2)
         elif self.align == Qt.AlignRight:
             painter.translate(-self.wh[0], 0)
 
@@ -275,7 +291,7 @@ class TextItem(pg.GraphicsObject):
             rect.translate(self.xy[0] - origin.x(), self.xy[1] - origin.y())
 
         if self.align == Qt.AlignCenter:
-            rect.translate(-self.wh[0] / 2, -self.wh[0] / 2)
+            rect.translate(-self.wh[0]/2, -self.wh[0]/2)
         elif self.align == Qt.AlignRight:
             rect.translate(-self.wh[0], 0)
 
@@ -284,7 +300,7 @@ class TextItem(pg.GraphicsObject):
 
 class ImageItem2(pg.ImageItem):
     # ImageItem that allows for a change in gamma
-    def __init__(self, image=None, default_key=None, **kwargs):
+    def __init__(self, image=None, default_key=None, invert=False, **kwargs):
         """ example usage
         ImageItem2({'maxpixel':data1,'avepixel':data2},'avepixel'})
         selectImage('maxpixel')
@@ -300,6 +316,8 @@ class ImageItem2(pg.ImageItem):
             self._gamma = kwargs['gamma']
         else:
             self._gamma = 1
+
+        self.invert_img = invert
 
     def selectImage(self, key):
         self.image = self.data_dict[key]
@@ -326,7 +344,11 @@ class ImageItem2(pg.ImageItem):
         self.updateImage()
 
     def updateGamma(self, factor):
-        self.setGamma(self.gamma * factor)
+        self.setGamma(self.gamma*factor)
+
+    def invert(self):
+        self.invert_img = not self.invert_img
+        self.updateImage()
 
     def render(self):
         # THIS WAS COPY PASTED FROM SOURCE CODE AND WAS SLIGHTLY
@@ -352,8 +374,8 @@ class ImageItem2(pg.ImageItem):
             if w == 0 or h == 0:
                 self.qimage = None
                 return
-            xds = max(1, int(1.0 / w))
-            yds = max(1, int(1.0 / h))
+            xds = max(1, int(1.0/w))
+            yds = max(1, int(1.0/h))
             axes = [1, 0] if self.axisOrder == 'row-major' else [0, 1]
             image = pg.fn.downsample(self.image, xds, axis=axes[0])
             image = pg.fn.downsample(image, yds, axis=axes[1])
@@ -366,17 +388,17 @@ class ImageItem2(pg.ImageItem):
         levels = self.levels
         if levels is not None and levels.ndim == 1 and image.dtype in (np.ubyte, np.uint16):
             if self._effectiveLut is None:
-                eflsize = 2 ** (image.itemsize * 8)
+                eflsize = 2**(image.itemsize*8)
                 ind = np.arange(eflsize)
                 minlev, maxlev = levels
                 levdiff = maxlev - minlev
                 levdiff = 1 if levdiff == 0 else levdiff  # don't allow division by 0
                 if lut is None:
-                    efflut = pg.fn.rescaleData(ind, scale=255. / levdiff,
+                    efflut = pg.fn.rescaleData(ind, scale=255./levdiff,
                                                offset=minlev, dtype=np.ubyte)
                 else:
                     lutdtype = np.min_scalar_type(lut.shape[0] - 1)
-                    efflut = pg.fn.rescaleData(ind, scale=(lut.shape[0] - 1) / levdiff,
+                    efflut = pg.fn.rescaleData(ind, scale=(lut.shape[0] - 1)/levdiff,
                                                offset=minlev, dtype=lutdtype, clip=(0, lut.shape[0] - 1))
                     efflut = lut[efflut]
 
@@ -392,8 +414,9 @@ class ImageItem2(pg.ImageItem):
 
         argb, alpha = pg.fn.makeARGB(image, lut=lut, levels=levels)
         # LINE THAT WAS CHANGED
-        argb[:, :, :3] = np.clip(np.power(argb[:, :, :3] / 255, 1 / self._gamma) * 255, 0, 255)
-
+        argb[:, :, :3] = np.clip(np.power(argb[:, :, :3]/255, 1/self._gamma)*255, 0, 255)
+        if self.invert_img:
+            argb[:, :, :3] = 255 - argb[:, :, :3]
         self.qimage = pg.fn.makeQImage(argb, alpha, transpose=False)
 
 
@@ -448,14 +471,14 @@ class CursorItem(pg.GraphicsObject):
 
             # pen.setStyle(Qt.DotLine)
             painter.setPen(pen)
-            painter.drawEllipse(QPoint(0, 0), 2 * r, 2 * r)
+            painter.drawEllipse(QPoint(0, 0), 2*r, 2*r)
             painter.setPen(QPen(Qt.blue, self.thickness))
             painter.drawPoint(QPoint(0, 0))
         else:
             pen = QPen(QPen(QColor(128, 0, 128), self.thickness, Qt.SolidLine))
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
-            painter.drawEllipse(QPoint(0, 0), 2 * r, 2 * r)
+            painter.drawEllipse(QPoint(0, 0), 2*r, 2*r)
         painter.end()
 
     def paint(self, painter, option, widget=None):
@@ -478,7 +501,7 @@ class CursorItem(pg.GraphicsObject):
             r = self.r
 
         size = 10
-        rect = QRectF(0, 0, size * 2 * r, size * 2 * r)
+        rect = QRectF(0, 0, size*2*r, size*2*r)
 
         if self.pxmode:
             origin = self.parentItem().mapToDevice(pg.Point(0, 0))
