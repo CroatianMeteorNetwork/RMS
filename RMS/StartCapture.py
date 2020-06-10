@@ -125,11 +125,12 @@ def wait(duration, compressor):
 
 
 
-def runCapture(config, duration=None, video_file=None, nodetect=False, detect_end=False, upload_manager=None):
+def runCapture(config, duration=None, video_file=None, nodetect=False, detect_end=False, \
+    upload_manager=None, resume_capture=False):
     """ Run capture and compression for the given time.given
 
     Arguments:
-        config: [config object] Configuration read from the .config file
+        config: [config object] Configuration read from the .config file.
 
     Keyword arguments:
         duration: [float] Time in seconds to capture. None by default.
@@ -139,6 +140,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             finishes. False by default.
         upload_manager: [UploadManager object] A handle to the UploadManager, which handles uploading files to
             the central server. None by default.
+        resume_capture: [bool] Resume capture in the last data directory in CapturedFiles.
 
     Return:
         night_archive_dir: [str] Path to the archive folder of the processed night.
@@ -148,11 +150,53 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     global STOP_CAPTURE
 
 
-    # Create a directory for captured files
-    night_data_dir_name = str(config.stationID) + '_' + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
+    # Check if resuming capture to the last capture directory
+    night_data_dir_name = None
+    if resume_capture:
+        
+        log.info("Resuming capture in the last capture directory...")
 
-    # Full path to the data directory
-    night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, night_data_dir_name)
+        # Find the latest capture directory
+        capturedfiles_path = os.path.join(os.path.abspath(config.data_dir), config.captured_dir)
+        most_recent_dir_time = 0
+        for dir_name in sorted(os.listdir(capturedfiles_path)):
+
+            dir_path_check = os.path.join(capturedfiles_path, dir_name)
+
+            # Check it's a directory
+            if os.path.isdir(dir_path_check):
+
+                # Check if it starts with the correct station code
+                if dir_name.startswith(str(config.stationID)):
+
+                    dir_mod_time = os.path.getmtime(dir_path_check)
+
+                    # Check that it is the most recent directory
+                    if (night_data_dir_name is None) or (dir_mod_time > most_recent_dir_time):
+                        night_data_dir_name = dir_name
+                        night_data_dir = dir_path_check
+                        most_recent_dir_time = dir_mod_time
+
+
+        if night_data_dir_name is None:
+            log.info("Previous capture directory could not be found! Creating a new one...")
+
+        else:
+            log.info("Previous capture directory found: {:s}".format(night_data_dir))
+
+
+
+    # Make a name for the capture data directory
+    if night_data_dir_name is None:
+
+        # Create a directory for captured files
+        night_data_dir_name = str(config.stationID) + '_' \
+            + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
+
+        # Full path to the data directory
+        night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, \
+            night_data_dir_name)
+
 
 
     # Make a directory for the night
@@ -211,6 +255,20 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log, delay_start=delay_detection, \
             backup_dir=night_data_dir)
         detector.startPool()
+
+
+        # If the capture is being resumed into the directory, load all previously saved FF files
+        if resume_capture:
+
+            for ff_name in sorted(os.listdir(night_data_dir)):
+
+                # Check if the file is a valid FF files
+                ff_path = os.path.join(night_data_dir, ff_name)
+                if os.path.isfile(ff_path) and (str(config.stationID) in ff_name) and validFFName(ff_name):
+
+                    # Add the FF file to the detector
+                    detector.addJob([night_data_dir, ff_name, config])
+                    log.info("Added existing FF files for detection: {:s}".format(ff_name))
 
     
     # Initialize buffered capture
@@ -410,53 +468,97 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
 
-def processIncompleteCaptures(config):
-    # This tries to reprocess and conclude a broken capture folder
+def processIncompleteCaptures(config, upload_manager):
+    """ Reprocess broken capture folders.
+
+    Arguments:
+        config: [config object] Configuration read from the .config file.
+        upload_manager: [UploadManager object] A handle to the UploadManager, which handles uploading files to
+            the central server.
+
+    """
 
     log.debug('Checking for folders containing partially-processed data')
 
+    # Create a list of capture directories
     captured_dir_list = []
-    for captured_dir_name in sorted(os.listdir(os.path.join(config.data_dir, config.captured_dir))):
+    captured_data_path = os.path.join(config.data_dir, config.captured_dir)
+    for captured_dir_name in sorted(os.listdir(captured_data_path)):
+
+        captured_dir_path = os.path.join(captured_data_path, captured_dir_name)
+
+        # Check that the dir stars with the correct station code, that it really is a directory, and that
+        #   there are some FF files inside
         if captured_dir_name.startswith(config.stationID):
-            if os.path.isdir(os.path.join(config.data_dir, config.captured_dir, captured_dir_name)):
-                captured_dir_list.append(captured_dir_name)
 
+            if os.path.isdir(captured_dir_path):
+
+                if any([file_name.startswith("FF_{:s}".format(config.stationID)) \
+                    for file_name in os.listdir(captured_dir_path)]):
+
+                        captured_dir_list.append(captured_dir_name)
+
+
+    # Check if there is a processed archived dir for every captured dir
     for captured_subdir in captured_dir_list:
-        captured_dir = os.path.join(config.data_dir, config.captured_dir, captured_subdir)
-        log.debug('Checking folder: {}'.format(captured_dir))
-        pickle_files = glob.glob('{}/rms_queue_bkup*.pickle'.format(captured_dir))
-        if len(pickle_files) == 0:
-            continue
 
-        # make sure same folder wasn't fully processed yet
-        archived_dir = os.path.join(config.data_dir, config.archived_dir, captured_subdir)
-        FTPdetectinfo_files = glob.glob('{}/FTPdetectinfo_*.txt'.format(archived_dir))
+        captured_dir_path = os.path.join(config.data_dir, config.captured_dir, captured_subdir)
+        log.debug("Checking folder: {:s}".format(captured_subdir))
+
+        # Check if there are any backup pickle files in the capture directory
+        pickle_files = glob.glob("{:s}/rms_queue_bkup_*.pickle".format(captured_dir_path))
+        any_pickle_files = False
+        if len(pickle_files) > 0:
+            any_pickle_files = True
+
+        # Check if there is an FTPdetectinfo file in the directory, indicating the the folder was fully 
+        #   processed
+        FTPdetectinfo_files = glob.glob('{:s}/FTPdetectinfo_*.txt'.format(captured_dir_path))
+        any_ftpdetectinfo_files = False
         if len(FTPdetectinfo_files) > 0:
-            log.debug('Skipping {}. Same folder was found processed in {}'.format(captured_dir, archived_dir))
+            any_ftpdetectinfo_files = True
+
+        # Auto reprocess criteria:
+        #   - Any backup pickle files
+        #   - No pickle and no FTPdetectinfo files
+        run_reprocess = False
+        if any_pickle_files:
+            run_reprocess = True
+        else:
+            if not any_ftpdetectinfo_files:
+                run_reprocess = True
+
+        # Skip the folder if it doesn't need to be reprocessed
+        if not run_reprocess:
+            log.debug("    ... fully processed!")
             continue
 
-        log.info('Found partially-processed data in {}'.format(captured_dir))
+
+        log.info("Found partially-processed data in {:s}".format(captured_dir_path))
         try:
-            _, archive_name, detector = processNight(captured_dir, config)
+
+            # Reprocess the night
+            night_archive_dir, archive_name, detector = processNight(captured_dir_path, config)
+
             # Upload the archive, if upload is enabled
-            if config.upload_enabled:
-                log.info('Starting the upload manager...')
-                upload_manager = UploadManager(config)
-                upload_manager.start()
-
-                log.info('Adding file to upload list: ' + archive_name)
+            if upload_manager is not None:
+                log.info("Adding file to upload list: {:s}".format(archive_name))
                 upload_manager.addFiles([archive_name])
+                log.info("File added...")
 
-                if upload_manager.is_alive():
-                    upload_manager.stop()
-                    log.info('Closing upload manager...')
-                # Delete detection backup files
-                if detector is not None:
-                    detector.deleteBackupFiles()
-            log.info("Folder {} reprocessed with success".format(captured_dir))
+            # Delete detection backup files
+            if detector is not None:
+                detector.deleteBackupFiles()
+
+
+            # Run the external script if running after autoreprocess is enabled
+            if config.external_script_run and config.auto_reprocess_external_script_run:
+                runExternalScript(captured_dir_path, night_archive_dir, config)
+
+            log.info("Folder {:s} reprocessed with success!".format(captured_dir_path))
 
         except:
-            log.error("An error occured when trying to reprocess partially-processed data")
+            log.error("An error occured when trying to reprocess partially-processed data!")
 
 
 if __name__ == "__main__":
@@ -485,10 +587,15 @@ if __name__ == "__main__":
     arg_parser.add_argument('-e', '--detectend', action="store_true", help="""Detect stars and meteors at the
         end of the night, after capture finishes. """)
 
+    arg_parser.add_argument('-r', '--resume', action="store_true", \
+        help="""Resume capture into the last night directory in CapturedFiles. """)
+
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
     ######
+
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
@@ -548,7 +655,7 @@ if __name__ == "__main__":
 
         # Run the capture for the given number of hours
         runCapture(config, duration=duration, nodetect=cml_args.nodetect, upload_manager=upload_manager, \
-            detect_end=cml_args.detectend)
+            detect_end=cml_args.detectend, resume_capture=cml_args.resume)
 
         if upload_manager is not None:
             # Stop the upload manager
@@ -569,7 +676,8 @@ if __name__ == "__main__":
         log.info('Video source: ' + cml_args.input)
 
         # Capture the video frames from the video file
-        runCapture(config, video_file=cml_args.input, nodetect=cml_args.nodetect)
+        runCapture(config, video_file=cml_args.input, nodetect=cml_args.nodetect,
+            resume_capture=cml_args.resume)
 
 
     upload_manager = None
@@ -685,9 +793,12 @@ if __name__ == "__main__":
         # Wait to start capturing
         if start_time != True:
 
-            # check if there's a folder containing unprocessed data
-            # this may happen if system crashed during processing
-            processIncompleteCaptures(config)
+            # Run auto-reprocessing
+            if config.auto_reprocess:
+                
+                # Check if there's a folder containing unprocessed data.
+                # This may happen if the system crashed during processing.
+                processIncompleteCaptures(config, upload_manager)
 
 
             # Initialize the slideshow of last night's detections
@@ -798,7 +909,7 @@ if __name__ == "__main__":
 
         # Run capture and compression
         night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect, 
-            upload_manager=upload_manager, detect_end=cml_args.detectend)
+            upload_manager=upload_manager, detect_end=cml_args.detectend, resume_capture=cml_args.resume)
 
         # Indicate that the capture was done once
         ran_once = True

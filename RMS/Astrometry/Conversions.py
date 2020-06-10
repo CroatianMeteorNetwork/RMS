@@ -41,6 +41,12 @@ import numpy as np
 from RMS.Math import vectMag, vectNorm
 
 
+# Import Cython functions
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+from RMS.Astrometry.CyFunctions import cyraDec2AltAz
+
+
 ### CONSTANTS ###
 
 # Define Julian epoch
@@ -338,7 +344,6 @@ def geo2Cartesian(lat, lon, h, julian_date):
     @return (x, y, z): [tuple of floats] a tuple of X, Y, Z Cartesian coordinates
     """
 
-    lon_rad = math.radians(lon)
     lat_rad = math.radians(lat)
 
     # Get Local Sidreal Time
@@ -458,51 +463,33 @@ def altAz2RADec(azim, elev, jd, lat, lon):
 
     return np.degrees(ra), np.degrees(dec)
 
+# Vectorize the raDec2AltAz function so it can take numpy arrays for: ra, dec, jd
+altAz2RADec_vect = np.vectorize(altAz2RADec, excluded=['lat', 'lon'])
 
 
 def raDec2AltAz(ra, dec, jd, lat, lon):
-    """ Convert right ascension and declination to azimuth (+east of sue north) and altitude. 
+    """ Calculate the reference azimuth and altitude of the centre of the FOV from the given RA/Dec. 
 
     Arguments:
-        ra: [float] right ascension in degrees
-        dec: [float] declination in degrees
-        jd: [float] Julian date
-        lat: [float] latitude in degrees
-        lon: [float] longitude in degrees
+        ra:  [float] Right ascension in degrees.
+        dec: [float] Declination in degrees.
+        jd: [float] Reference Julian date.
+        lat: [float] Latitude +N in degrees.
+        lon: [float] Longitude +E in degrees.
 
     Return:
-        (azim, elev): [tuple]
-            azim: [float] azimuth (+east of due north) in degrees
-            elev: [float] elevation above horizon in degrees
+        (azim, elev): [tuple of float]: Azimuth and elevation (degrees).
+    """
 
-        """
+    # Compute azim and elev using a fast cython function
+    azim, elev = cyraDec2AltAz(np.radians(ra), np.radians(dec), jd, np.radians(lat), np.radians(lon))
+    
 
-    ra = np.radians(ra)
-    dec = np.radians(dec)
-    lat = np.radians(lat)
-    lon = np.radians(lon)
+    # Convert alt/az to degrees
+    azim = np.degrees(azim)
+    elev = np.degrees(elev)
 
-    # Calculate Local Sidereal Time
-    lst = np.radians(JD2LST(jd, np.degrees(lon))[0])
-
-    # Calculate the hour angle
-    ha = lst - ra
-
-    # Constrain the hour angle to [-pi, pi] range
-    ha = (ha + np.pi)%(2*np.pi) - np.pi
-
-    # Calculate the azimuth
-    azim = np.pi + np.arctan2(np.sin(ha), np.cos(ha)*np.sin(lat) - np.tan(dec)*np.cos(lat))
-
-    # Calculate the sine of elevation
-    sin_elev = np.sin(lat)*np.sin(dec) + np.cos(lat)*np.cos(dec)*np.cos(ha)
-
-    # Wrap the sine of elevation in the [-1, +1] range
-    sin_elev = (sin_elev + 1)%2 - 1
-
-    elev = np.arcsin(sin_elev)
-
-    return np.degrees(azim), np.degrees(elev)
+    return azim, elev
 
 
 # Vectorize the raDec2AltAz function so it can take numpy arrays for: ra, dec, jd
@@ -554,7 +541,6 @@ def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, 
     ### Uncorrect for zenith attraction ###
 
     # Compute the radiant in the local coordinates
-    #eta, rho = raDec2EtaRho(ra_g, dec_g, lat_geocentric, lon, jd)
     azim, elev = raDec2AltAz(ra_g, dec_g, jd, lat_geocentric, lon)
 
     # Compute the zenith angle
@@ -623,57 +609,6 @@ def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, 
 
 
 ###########################################
-
-
-### Precession ###
-
-def equatorialCoordPrecession(start_epoch, final_epoch, ra, dec):
-    """ Corrects Right Ascension and Declination from one epoch to another, taking only precession into 
-        account.
-
-        Implemented from: Jean Meeus - Astronomical Algorithms, 2nd edition, pages 134-135
-
-    @param start_epoch: [float] Julian date of the starting epoch
-    @param final_epoch: [float] Julian date of the final epoch
-    @param ra: [float] non-corrected right ascension in degrees
-    @param dec: [float] non-corrected declination in degrees
-
-    @return (ra, dec): [tuple of floats] precessed equatorial coordinates in degrees
-    """
-
-    ra = math.radians(ra)
-    dec = math.radians(dec)
-
-    T = (start_epoch - 2451545) / 36525.0
-    t = (final_epoch - start_epoch) / 36525.0
-
-    # Calculate correction parameters
-    zeta  = ((2306.2181 + 1.39656*T - 0.000139*T**2)*t + (0.30188 - 0.000344*T)*t**2 + 0.017998*t**3)/3600
-    z     = ((2306.2181 + 1.39656*T - 0.000139*T**2)*t + (1.09468 + 0.000066*T)*t**2 + 0.018203*t**3)/3600
-    theta = ((2004.3109 - 0.85330*T - 0.000217*T**2)*t - (0.42665 + 0.000217*T)*t**2 - 0.041833*t**3)/3600
-
-    # Convert parameters to radians
-    zeta, z, theta = map(math.radians, (zeta, z, theta))
-
-    # Calculate the next set of parameters
-    A = math.cos(dec) * math.sin(ra + zeta)
-    B = math.cos(theta)*math.cos(dec)*math.cos(ra + zeta) - math.sin(theta)*math.sin(dec)
-    C = math.sin(theta)*math.cos(dec)*math.cos(ra + zeta) + math.cos(theta)*math.sin(dec)
-
-    # Calculate right ascension
-    ra_corr = math.atan2(A, B) + z
-
-    # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
-    if (math.pi/2 - abs(dec)) < math.radians(0.5):
-        dec_corr = math.acos(math.sqrt(A**2 + B**2))
-    else:
-        dec_corr = math.asin(C)
-
-
-    return math.degrees(ra_corr), math.degrees(dec_corr)
-
-
-##################
 
 
 

@@ -218,6 +218,7 @@ class Config:
         self.cams_code = 0
 
         self.external_script_run = False
+        self.auto_reprocess_external_script_run = False
         self.external_script_path = None
         self.external_function_name = "rmsExternal"
 
@@ -269,6 +270,9 @@ class Config:
 
         # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
         self.slideshow_enable = False
+
+        # Automatically reprocess broken capture directories
+        self.auto_reprocess = True
 
         ##### Upload
 
@@ -544,6 +548,12 @@ def parseSystem(config, parser):
 
     if parser.has_option(section, "external_script_run"):
         config.external_script_run = parser.getboolean(section, "external_script_run")
+
+
+    if parser.has_option(section, "auto_reprocess_external_script_run"):
+        config.auto_reprocess_external_script_run = parser.getboolean(section, \
+            "auto_reprocess_external_script_run")
+
 
     if parser.has_option(section, "external_script_path"):
         config.external_script_path = parser.get(section, "external_script_path")

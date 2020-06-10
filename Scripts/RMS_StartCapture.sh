@@ -15,7 +15,7 @@ mkdir $LOGPATH
 # Log the output to a file (warning: this breaks Ctrl+C passing to StartCapture)
 #python -m RMS.StartCapture 2>&1 | tee $LOGFILE
 
-python -m RMS.StartCapture
+python -m RMS.StartCapture "$@"
 
 read -p "Press any key to continue... "
 
