@@ -22,6 +22,7 @@ import sys
 import os
 import argparse
 
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize as opt
@@ -36,6 +37,11 @@ from RMS.DetectionTools import loadImageCalibration
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
 from RMS.QueuedPool import QueuedPool
+
+# Morphology - Cython init
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+import RMS.Routines.MorphCy as morph
 
 
 
@@ -128,6 +134,13 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     border_mask[:,:border] = 0
     border_mask[:,-border:] = 0
     maxima = MaskImage.applyMask(maxima, border_mask, image=True)
+
+    # Remove all detections close to the mask image
+    if mask is not None:
+        erosion_kernel = np.ones((5, 5), mask.img.dtype)
+        mask_eroded = cv2.erode(mask.img, erosion_kernel, iterations=1)
+
+        maxima = MaskImage.applyMask(maxima, mask_eroded, image=True)
 
 
     # Find and label the maxima
@@ -416,7 +429,7 @@ def plotStars(ff, x2, y2):
 
 if __name__ == "__main__":
 
-    time_start = time.clock()
+    time_start = time.time()
 
     ### COMMAND LINE ARGUMENTS
 
@@ -575,7 +588,7 @@ if __name__ == "__main__":
     # Delete QueudPool backed up files
     workpool.deleteBackupFiles()
 
-    print('Total time taken: ', time.clock() - time_start)
+    print('Total time taken: {:.2f} s'.format(time.time() - time_start))
 
 
     # Show the histogram of PSF stddevs

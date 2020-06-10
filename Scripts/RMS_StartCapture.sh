@@ -5,7 +5,7 @@ source ~/vRMS/bin/activate
 cd ~/source/RMS
 
 # Init log file
-LOGPATH="/home/pi/RMS_data/logs/"
+LOGPATH="~/RMS_data/logs/"
 LOGDATE=$(date +"%Y%m%d_%H%M%S")
 LOGSUFFIX="_log.txt"
 LOGFILE=$LOGPATH$LOGDATE$LOGSUFFIX

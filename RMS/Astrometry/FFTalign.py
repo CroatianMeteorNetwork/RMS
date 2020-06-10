@@ -147,8 +147,13 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
     # Run the FFT registration
     try:
         res = imreg_dft.imreg.similarity(img_ref, img_mov)
+
     except ValueError:
         print('imreg_dft error: The scale correction is too high!')
+        return 0.0, 1.0, 0.0, 0.0
+
+    except IndexError:
+        print('imreg_dft error: Index out of bounds!')
         return 0.0, 1.0, 0.0, 0.0
 
 

@@ -46,7 +46,12 @@ def loadMask(mask_file):
         return None
 
     # Load the mask file
-    mask = loadImage(mask_file, flatten=0)
+    try:
+        mask = loadImage(mask_file, flatten=0)
+        
+    except:
+        print("WARNING! The mask file could not be loaded! File path: {:s}".format(mask_file))
+        return None
 
     # Convert the RGB image to one channel image (if not already one channel)
     try:

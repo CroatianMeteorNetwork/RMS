@@ -1,9 +1,9 @@
 # RPi Meteor Station
 
-Open source powered meteor station. We are currently using the Raspberry Pi 3 as the main development platform and use digital IP cameras. **The code also works on Linux PCs.** We are slowly phasing out the support for analog cameras, but they should work well regardless.
+Open source powered meteor station. We are currently using the Raspberry Pi 3 (and 4!) as the main development platform and use digital IP cameras. **The code also works on Linux PCs, and everything but the detection works under Windows.** We are slowly phasing out the support for analog cameras, but they should work well regardless.
 The software is still in the development phase, but here are the current features:
 
-1. Automated video capture - start at dusk, stop at dawn. Analog cameras supported through EasyCap, **IP cameras up to 720p supported as well!**
+1. Automated video capture - start at dusk, stop at dawn. **IP cameras with resolution of up to 720p supported on the Pi 3 and 4, and up to 1080p on Linux PCs.**
 1. Compressing 256-frame blocks into the Four-frame Temporal Pixel (FTP) format (see [Jenniskens et al., 2011 CAMS](http://cams.seti.org/CAMSoverviewpaper.pdf) paper for more info).
 1. Detecting bright fireballs in real time
 1. Detecting meteors on FTP compressed files
@@ -16,6 +16,7 @@ The software is still in the development phase, but here are the current feature
 Please see our website for more info: https://globalmeteornetwork.org/
 We are also selling Plug And Play meteor systems which run this code!
 
+Finally, if you decide to build one system from scratch, we strongly encourage you to look at our [Wiki page](https://globalmeteornetwork.org/wiki/index.php?title=Main_Page).
 
 ## Requirements
 This guide will assume basic knowledge of electronics, the Unix environment, and some minor experience with the Raspberry Pi platform itself.
@@ -24,8 +25,8 @@ This guide will assume basic knowledge of electronics, the Unix environment, and
 
 #### RPi control box
 
-1. **Raspberry Pi 3 B+ single-board computer.**
-The first version of the system was developed on the Raspberry Pi 2, while the system is now being tested on the RPi3B+, which is what we recommend you use, as it provides much more computing power. The code will NOT work on Raspberry Pi 1.
+1. **Raspberry Pi 3 B+ or 4 single-board computer.**
+The code will NOT work on Raspberry Pi 1.
 
 1. **Class 10 microSD card, 64GB or higher.** 
 The recorded data takes up a lot of space, as much as several gigabytes per night. To be able to store at least one week of data on the system, a 64GB SD card is the minimum.
@@ -59,8 +60,7 @@ You will probably need some cables and connectors to connect your camera to the 
 
 ### Software
 
-**NOTE:** We have an SD card image for the Pi with everything installed on it. We don't want to distribute it publically just yet as it
-s not 100% tested, but contact us if you want a copy and more details. Then you'll just have to flash it to an SD card and that's it!
+**NOTE:** We have an SD card image for the Pi with everything installed on it. See our Wiki page.
 
 ---------
 
@@ -70,16 +70,16 @@ The recording **will not** run on Windows, but most of other submodules will (as
 
 Here we provide installation instructions for the RPi, but the procedure should be the same for any Debian-based Linux distribution.
 
-Set up your Raspberry Pi with Raspbian Jessie operating system (gstreamer does not really work on Stretch, and it's necessary if you want to run an IP camera). Here's the guide which explains how to do just that: [Installing Raspbian](https://www.raspberrypi.org/documentation/installation/installing-images/)
+Set up your Raspberry Pi 3B+ with Raspbian Jessie operating system (gstreamer does not really work on Stretch, and it's necessary if you want to run an IP camera). For the Pi 4, you need to install Raspbian Buster. Here's the guide which explains how to do just that: [Installing Raspbian](https://www.raspberrypi.org/documentation/installation/installing-images/).
 
-**We are currently stuck on Python 2 because for some reason memory assignment to numpy arrays is slow when running the code under multiprocessing. When a frame is feched from the camera and is stored to a numpy array, this takes a lot of time and naturally leads to frame drops. The issue was apparently solved in Python 3.7, but we have not yet extensively tested it. You will need to run Raspbian Stretch to get Python 3.7 running.**
+**RPi3/Jessie is stuck using Python 2 because of some memory assignment issues in Python 3.6. We were not able to install newer version of Python under Jessie. NOTE that Raspbian Buster can run Python 3.7 and everything works fine there.**
 
 Furthermore, you will need the following software and libraries to run the code:
 
 - git
 - mplayer
-- Python2.7
-- python2.7-dev
+- Python2.7 (or 3.7)
+- python2.7-dev (or 3.7)
 - libblas-dev liblapack-dev
 - libffi-dev libssl-dev
 - Python libraries:
@@ -96,7 +96,7 @@ Furthermore, you will need the following software and libraries to run the code:
 	- imageio
 
 	
-All python libraries will be installed when you run the setup.py script (instructions below). If you want use IP cameras, you need to install a special compilation of OpenCV that supports gstreamer. Run the opencv3_install.sh script that is provided in this repository to install this.
+All python libraries will be installed when you run the setup.py script (instructions below). If you want use IP cameras, you need to install a special compilation of OpenCV that supports gstreamer. Run the opencv4_install.sh script that is provided in this repository to install this.
 
 Alternatively, if you are using Anaconda Python, you can install all libraries except OpenCV by running:
 
@@ -106,7 +106,7 @@ conda install -y -c conda-forge pyephem Pillow imreg_dft imageio
 conda install -y -c astropy astropy
 ```
 
-To install OpenCV, use the ```opencv3_install.sh``` script. This will build OpenCV with gstreamer support.
+To install OpenCV, use the ```opencv4_install.sh``` script. This will build OpenCV with gstreamer support.
 
 
 ## Setting up
@@ -139,18 +139,18 @@ This will download the code in this repository in the RMS directory.
 Navigate with terminal to base git directory (e.g. /home/pi/RMS/), and run:
 
 ```
-sudo python setup.py install
+python setup.py install
 ```
 
 This will compile the code in C++ which we are using as one of the processing steps in meteor detection. The method in question is called Kernel-based Hough Transform, and you can read more about it here: [KHT](http://www2.ic.uff.br/~laffernandes/projects/kht/)
 
-This will also install all Python libraries that you might need, except OpenCV. If you are using a Linux device for video capture, you can install OpenCV this way:
+This will also install all Python libraries that you might need, except OpenCV. If you are on Windows, you can install OpenCV this way:
 
 ```
 sudo apt-get install libopencv-dev python-opencv
 ```
 
-If you are using an IP camera, you will need gstreamer support and then use the ```opencv3_install.sh``` script.
+If you are using an IP camera, you will need gstreamer support and then use the ```opencv4_install.sh``` script.
 
 
 ### Checking video device and initializing proper settings - ANALOG CAMERAS ONLY!
@@ -189,7 +189,7 @@ device: 0
 ```
 
 ##### IP cameras
-Althernatively, if you are using IP cameras and use gstreamer for capture, you need to give it the full gstreamer string and the IP camera address (gstreamer should be installed during OpenCV installation with the provided script). Let's say that you're on the RPi, the RTSP protocol is used to read the video and the camera is at 192.168.42.10, then the device setting should look something like this:
+Alternatively, if you are using IP cameras and use gstreamer for capture, you need to give it the full gstreamer string and the IP camera address (gstreamer should be installed during OpenCV installation with the provided script). Let's say that you're on the RPi, the RTSP protocol is used to read the video and the camera is at 192.168.42.10, then the device setting should look something like this (IMX291 camera specific):
 
 ```
 device: rtspsrc location=rtsp://192.168.42.10:554/user=admin&password=&channel=1&stream=0.sdp ! rtph264depay ! queue ! h264parse ! omxh264dec ! queue ! videoconvert ! appsink sync=1
@@ -243,7 +243,7 @@ If you want to start capture right away, for a specified duration, run this comm
 python -m RMS.StartCapture -d 1.5
 ```
 
-The data will be saved in /home/pi/RMS_data/YYYYMMDD_hhmmss_uuuuuu, where YYYYMMDD_hhmmss_uuuuuu is the timestamp of the time when the recording was started, which is used as a name for the directory where the data for the night will be stored. 
+The data will be saved in /home/pi/RMS_data/CapturedFiles/YYYYMMDD_hhmmss_uuuuuu, where YYYYMMDD_hhmmss_uuuuuu is the timestamp of the time when the recording was started, which is used as a name for the directory where the data for the night will be stored. Once the automated detection and calibration is done, data will be extracted and archived to /home/pi/RMS_data/ArchivedFiles/YYYYMMDD_hhmmss_uuuuuu.
 
 #### Live Stream
 To test your camera with RMS configuration without a real capture - after certify it your camera is working properly - you can run the Live Stream module.
@@ -252,6 +252,9 @@ Navigate with terminal to base project directory and run:
 ```
 python -m Utils.ShowLiveStream
 ```
+
+Don't trust the FPS it's reporting too much, the Pi is too slow to display a video on screen in real time, but it works well when the capture is done in the background.
+
 
 #### Viewing FF bin files (compressed video data)
 You can view the recorded data using the [CMN_binViewer](https://github.com/CroatianMeteorNetwork/cmn_binviewer) software. You can either run it off the Pi, or you can install it on Windows (builds are provided).

@@ -59,16 +59,18 @@ def _agentAuth(transport, username, rsa_private_key):
 
     # Try a key until finding the one which works
     for key in agent_keys:
-        log.info('Trying ssh-agent key ' + str(binascii.hexlify(key.get_fingerprint())))
 
-        # Try the key to authenticate
-        try:
-            transport.auth_publickey(username, key)
-            log.info('... success!')
-            return True
+        if key is not None:
+            log.info('Trying ssh-agent key ' + str(binascii.hexlify(key.get_fingerprint())))
 
-        except paramiko.SSHException as e:
-            log.warning('... failed! - %s', e)
+            # Try the key to authenticate
+            try:
+                transport.auth_publickey(username, key)
+                log.info('... success!')
+                return True
+
+            except paramiko.SSHException as e:
+                log.warning('... failed! - %s', e)
 
     return False
 
