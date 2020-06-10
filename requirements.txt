@@ -10,4 +10,4 @@ astropy>=2.0.3
 imreg_dft
 onvif_zeep
 configparser
-imageio
+imageio==2.6.1
