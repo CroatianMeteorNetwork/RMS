@@ -89,3 +89,4 @@ target/
 #Jetbrains code files
 .idea
 
+.config.inuse
