@@ -24,8 +24,8 @@ import matplotlib.patches as mpatches
 from matplotlib.font_manager import FontProperties
 
 import RMS.ConfigReader as cr
-from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDec2AltAz, applyAstrometryFTPdetectinfo
-from RMS.Astrometry.Conversions import datetime2JD, jd2Date
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, applyAstrometryFTPdetectinfo
+from RMS.Astrometry.Conversions import J2000_JD, datetime2JD, jd2Date, raDec2AltAz
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FRbin import read as readFR
 from RMS.Formats.FRbin import validFRName
@@ -36,6 +36,11 @@ from RMS.Misc import openFileDialog
 from RMS.Pickling import loadPickle, savePickle
 from RMS.Routines import Image
 from RMS.Routines import RollingShutterCorrection
+
+# Import Cython functions
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+from RMS.Astrometry.CyFunctions import equatorialCoordPrecession
 
 
 # TkAgg has issues when opening an external file prompt, so other backends are forced if available
@@ -190,7 +195,10 @@ class ManualReductionTool(object):
         self.flat_struct = None
         self.dark = None
 
-        self.platepar = None
+
+        # Load platepar
+        _, self.platepar = self.loadPlatepar()
+
 
         # Image gamma and levels
         self.auto_levels = False
@@ -223,7 +231,9 @@ class ManualReductionTool(object):
         self.scroll_counter = 0
 
         self.mouse_x = None
+        self.mouse_x_press = None
         self.mouse_y = None
+        self.mouse_y_press = None
 
         self.centroid_handle = None
 
@@ -476,7 +486,11 @@ class ManualReductionTool(object):
             
             self.loadPlatepar()
 
-        
+            
+        # Always turn refraction on in platepar that is being used
+        if not platepar.refraction:
+            platepar.refraction = True
+            print("Refraction compensation turned ON!")
 
         return platepar_file, platepar
 
@@ -749,6 +763,9 @@ class ManualReductionTool(object):
             text_str += "Image gamma  = {:.2f}\n".format(self.img_gamma)
             text_str += "Camera gamma = {:.2f}\n".format(self.config.gamma)
 
+            if self.platepar is not None:
+                text_str += "Refraction   = {:s}\n".format(str(self.platepar.refraction))
+
 
             # Add info about applied image corrections
             if self.subtract_avepixel:
@@ -794,6 +811,7 @@ class ManualReductionTool(object):
             text_str += 'R - Reset view\n'
             text_str += 'M - Show maxpixel\n'
             text_str += 'K - Subtract average\n'
+            text_str += 'T - Toggle refraction correction\n'
             text_str += 'U/J - Img Gamma\n'
             text_str += 'P - Show lightcurve\n'
             text_str += 'CTRL + A - Auto levels\n'
@@ -1050,6 +1068,16 @@ class ManualReductionTool(object):
             self.updateGamma(0.9)
 
 
+        # Toggle refraction
+        elif event.key == 't':
+
+            if self.platepar is not None:
+
+                self.platepar.refraction = not self.platepar.refraction
+
+                self.updateImage()
+
+
         # Show maxpixel instead of individual frames
         elif event.key == 'm':
 
@@ -1265,9 +1293,10 @@ class ManualReductionTool(object):
             self.x_centroid, self.y_centroid, _ = self.centroid()
 
             # If CTRL is pressed, place the pick manually - NOTE: the intensity might be off then!!!
-            if event.key == 'control':
-                self.x_centroid = self.mouse_x
-                self.y_centroid = self.mouse_y
+            # 'control' is for Windows, 'ctrl+control' is for Linux
+            if (event.key == 'control') or (event.key == 'ctrl+control'):
+                self.x_centroid = self.mouse_x_press
+                self.y_centroid = self.mouse_y_press
 
 
             # Add the centroid to the list
@@ -1286,6 +1315,14 @@ class ManualReductionTool(object):
 
     def onMousePress(self, event):
         """ Called on mouse click press. """
+
+        # Check if the mouse is within bounds
+        if (event.xdata is not None) and (event.ydata is not None):
+            
+            # Store the mouse press location
+            self.mouse_x_press = event.xdata
+            self.mouse_y_press = event.ydata
+
 
         # Photometry coloring - on
         if ((event.button == 1) or (event.button == 3)) and (event.key == 'shift'):
@@ -1333,12 +1370,18 @@ class ManualReductionTool(object):
             # Compute RA, dec
             jd, ra, dec, _ = xyToRaDecPP(time_data, [x], [y], [1], self.platepar)
 
+
+            # Precess RA/Dec to epoch of date for alt/az computation
+            ra_date, dec_date = equatorialCoordPrecession(J2000_JD.days, jd[0], np.radians(ra[0]), \
+                np.radians(dec[0]))
+            ra_date, dec_date = np.degrees(ra_date), np.degrees(dec_date)
+
             # Compute alt, az
-            azim, alt = raDec2AltAz(jd[0], self.platepar.lon, self.platepar.lat, ra[0], dec[0])
+            azim, alt = raDec2AltAz(ra_date, dec_date, jd[0], self.platepar.lat, self.platepar.lon)
 
 
-            status_str += ",  Azim={:6.2f}  Alt={:6.2f},  RA={:6.2f}  Dec={:+6.2f}".format(azim, alt, \
-                ra[0], dec[0])
+            status_str += ",  Azim={:6.2f}  Alt={:6.2f} (date),  RA={:6.2f}  Dec={:+6.2f} (J2000)".format(\
+                azim, alt, ra[0], dec[0])
 
 
         return status_str
