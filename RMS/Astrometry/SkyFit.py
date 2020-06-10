@@ -1714,6 +1714,9 @@ class PlateTool(object):
         self.platepar.setDistortionType(dist_type)
         self.updateImage()
 
+        # Indicate that the platepar has been reset
+        self.first_platepar_fit = True
+
         print("Distortion model changed to: {:s}".format(dist_type))
 
 
@@ -2761,16 +2764,30 @@ class PlateTool(object):
         catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, self.platepar)
 
 
+        ## Compute standard coordinates ##
+        
+        # Platepar with no distortion
+        pp_nodist = copy.deepcopy(self.platepar)
+        pp_nodist.x_poly_rev *= 0
+        pp_nodist.y_poly_rev *= 0
+
+        standard_x, standard_y, _ = getCatalogStarsImagePositions(catalog_stars, jd, pp_nodist)
+
+        ## ##
+
+
+
+
         residuals = []
 
         print()
         print('Residuals')
         print('----------')
-        print(' No,   Img X,   Img Y, RA (deg), Dec (deg),    Mag, -2.5*LSP,    Cat X,   Cat Y, Err amin,  Err px, Direction')
+        print(' No,   Img X,   Img Y, RA (deg), Dec (deg),    Mag, -2.5*LSP,    Cat X,   Cat Y,    Std X,   Std Y, Err amin,  Err px, Direction')
 
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
-        for star_no, (cat_x, cat_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y, catalog_stars, \
-            img_stars)):
+        for star_no, (cat_x, cat_y, std_x, std_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y, \
+            standard_x, standard_y, catalog_stars, img_stars)):
             
             img_x, img_y, sum_intens = img_c
             ra, dec, mag = cat_coords
@@ -2799,8 +2816,9 @@ class PlateTool(object):
 
 
             # Print out the residuals
-            print('{:3d}, {:7.2f}, {:7.2f}, {:>8.3f}, {:>+9.3f}, {:+6.2f},  {:7.2f}, {:8.2f}, {:7.2f}, {:8.2f}, {:7.2f}, {:+9.1f}'.format(star_no + 1, img_x, img_y, \
-                ra, dec, mag, -2.5*np.log10(sum_intens), cat_x, cat_y, 60*angular_distance, distance, np.degrees(angle)))
+            print('{:3d}, {:7.2f}, {:7.2f}, {:>8.3f}, {:>+9.3f}, {:+6.2f},  {:7.2f}, {:8.2f}, {:7.2f}, {:8.2f}, {:7.2f}, {:8.2f}, {:7.2f}, {:+9.1f}'.format(star_no + 1, img_x, img_y, \
+                ra, dec, mag, -2.5*np.log10(sum_intens), cat_x, cat_y, std_x, std_y, 60*angular_distance, \
+                distance, np.degrees(angle)))
 
 
         mean_angular_error = 60*np.mean([entry[4] for entry in residuals])
@@ -2885,55 +2903,81 @@ class PlateTool(object):
         # Azimuth and elevation residuals
         x_list = []
         y_list = []
+        radius_list = []
+        skyradius_list = []
         azim_list = []
         elev_list = []
         azim_residuals = []
         elev_residuals = []
         x_residuals = []
         y_residuals = []
+        radius_residuals = []
+        skyradius_residuals = []
 
 
         # Get image time and Julian date
         img_time = self.img_handle.currentTime()
         jd = date2JD(*img_time)
 
+        # Get RA/Dec of the FOV centre
+        ra_centre, dec_centre = self.computeCentreRADec()
+
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
         for star_no, (cat_x, cat_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y, catalog_stars, \
             img_stars)):
-            
+                
+            # Compute image coordinates
             img_x, img_y, _ = img_c
-            ra_cat, dec_cat, _ = cat_coords
+            img_radius = np.hypot(img_x - self.platepar.X_res/2, img_y - self.platepar.Y_res/2)
+
+            # Compute sky coordinates
+            cat_ra, cat_dec, _ = cat_coords
+            cat_ang_separation = np.degrees(angularSeparation(np.radians(cat_ra), np.radians(cat_dec), \
+                np.radians(ra_centre), np.radians(dec_centre)))
+
+
+            # Compute RA/Dec from image
+            _, img_ra, img_dec, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar)
+            img_ra = img_ra[0]
+            img_dec = img_dec[0]
+
+
+
+            x_list.append(img_x)
+            y_list.append(img_y)
+            radius_list.append(img_radius)
+            skyradius_list.append(cat_ang_separation)
 
 
             # Compute image residuals
-            x_list.append(cat_x)
-            y_list.append(cat_y)
             x_residuals.append(cat_x - img_x) 
             y_residuals.append(cat_y - img_y)
+            radius_residuals.append(np.hypot(cat_x - self.platepar.X_res/2, cat_y - self.platepar.Y_res/2) \
+                - img_radius)
+
+
+            # Compute sky residuals
+            img_ang_separation = np.degrees(angularSeparation(np.radians(img_ra), np.radians(img_dec), \
+                np.radians(ra_centre), np.radians(dec_centre)))
+            skyradius_residuals.append(cat_ang_separation - img_ang_separation)
 
 
             # # Correct the catalog RA/Dec for refraction
             # if self.platepar.refraction:
-            #     ra_cat, dec_cat = eqRefractionTrueToApparent(np.radians(ra_cat), np.radians(dec_cat), jd, \
+            #     cat_ra, cat_dec = eqRefractionTrueToApparent(np.radians(cat_ra), np.radians(cat_dec), jd, \
             #         np.radians(self.platepar.lat), np.radians(self.platepar.lon))
-            #     ra_cat, dec_cat = np.degrees(ra_cat), np.degrees(dec_cat)
+            #     cat_ra, cat_dec = np.degrees(cat_ra), np.degrees(cat_dec)
 
 
             # Compute azim/elev from the catalog
-            azim_cat, elev_cat = raDec2AltAz(ra_cat, dec_cat, jd, self.platepar.lat, self.platepar.lon)
+            azim_cat, elev_cat = raDec2AltAz(cat_ra, cat_dec, jd, self.platepar.lat, self.platepar.lon)
 
             azim_list.append(azim_cat)
             elev_list.append(elev_cat)
 
 
-            # Compute RA/Dec from image
-            _, ra_img, dec_img, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar)
-            ra_img = ra_img[0]
-            dec_img = dec_img[0]
-
-
             # Compute azim/elev from image coordinates
-            azim_img, elev_img = raDec2AltAz(ra_img, dec_img, jd, self.platepar.lat, self.platepar.lon)
+            azim_img, elev_img = raDec2AltAz(img_ra, img_dec, jd, self.platepar.lat, self.platepar.lon)
 
             # Compute azim/elev residuals
             azim_residuals.append(((azim_cat - azim_img + 180)%360 - 180)*np.cos(np.radians(elev_cat)))
@@ -2942,8 +2986,10 @@ class PlateTool(object):
 
         
         # Init astrometry fit window
-        fig_a, ((ax_azim, ax_elev), (ax_x, ax_y)) = plt.subplots(ncols=2, nrows=2, facecolor=None, \
-            figsize=(10, 8))
+        fig_a, ( \
+            (ax_azim, ax_elev, ax_skyradius), \
+            (ax_x, ax_y, ax_radius) \
+            ) = plt.subplots(ncols=3, nrows=2, facecolor=None, figsize=(12, 6))
 
         # Set figure title
         fig_a.canvas.set_window_title("Astrometry fit")
@@ -2970,14 +3016,25 @@ class PlateTool(object):
             ax_elev.set_xlim([0, 90])
 
 
+        # Plot sky radius vs radius error
+        ax_skyradius.scatter(skyradius_list, 60*np.array(skyradius_residuals), s=2, c='k', zorder=3)
+
+        ax_skyradius.grid()
+        ax_skyradius.set_xlabel("Radius from centre (deg)")
+        ax_skyradius.set_ylabel("Radius error (arcmin)")
+        ax_skyradius.set_xlim([0, np.hypot(*computeFOVSize(self.platepar))/2])
+
+
         # Equalize Y limits, make them multiples of 5 arcmin, and set a minimum range of 5 arcmin
-        azim_max_xlim = np.max(np.abs(ax_azim.get_ylim()))
-        elev_max_xlim = np.max(np.abs(ax_elev.get_ylim()))
-        max_xlim = np.ceil(np.max([azim_max_xlim, elev_max_xlim])/5)*5
-        if max_xlim < 5.0:
-            max_xlim = 5.0
-        ax_azim.set_ylim([-max_xlim, max_xlim])
-        ax_elev.set_ylim([-max_xlim, max_xlim])
+        azim_max_ylim = np.max(np.abs(ax_azim.get_ylim()))
+        elev_max_ylim = np.max(np.abs(ax_elev.get_ylim()))
+        skyradius_max_ylim = np.max(np.abs(ax_skyradius.get_ylim()))
+        max_ylim = np.ceil(np.max([azim_max_ylim, elev_max_ylim, skyradius_max_ylim])/5)*5
+        if max_ylim < 5.0:
+            max_ylim = 5.0
+        ax_azim.set_ylim([-max_ylim, max_ylim])
+        ax_elev.set_ylim([-max_ylim, max_ylim])
+        ax_skyradius.set_ylim([-max_ylim, max_ylim])
 
 
 
@@ -2998,16 +3055,27 @@ class PlateTool(object):
         ax_y.set_ylabel("Y error (px)")
         ax_y.set_xlim([0, self.img_data_raw.shape[0]])
 
+
+        # Plot radius vs radius error
+        ax_radius.scatter(radius_list, radius_residuals, s=2, c='k', zorder=3)
+
+        ax_radius.grid()
+        ax_radius.set_xlabel("Radius (px)")
+        ax_radius.set_ylabel("Radius error (px)")
+        ax_radius.set_xlim([0, np.hypot(self.img_data_raw.shape[0]/2, self.img_data_raw.shape[1]/2)])
+
+
+
         # Equalize Y limits, make them integers, and set a minimum range of 1 px
-        x_max_xlim = np.max(np.abs(ax_x.get_ylim()))
-        y_max_xlim = np.max(np.abs(ax_y.get_ylim()))
-        max_xlim = np.ceil(np.max([x_max_xlim, y_max_xlim]))
-        if max_xlim < 1:
-            max_xlim = 1.0
-        ax_x.set_ylim([-max_xlim, max_xlim])
-        ax_y.set_ylim([-max_xlim, max_xlim])
-
-
+        x_max_ylim = np.max(np.abs(ax_x.get_ylim()))
+        y_max_ylim = np.max(np.abs(ax_y.get_ylim()))
+        radius_max_ylim = np.max(np.abs(ax_radius.get_ylim()))
+        max_ylim = np.ceil(np.max([x_max_ylim, y_max_ylim, radius_max_ylim]))
+        if max_ylim < 1:
+            max_ylim = 1.0
+        ax_x.set_ylim([-max_ylim, max_ylim])
+        ax_y.set_ylim([-max_ylim, max_ylim])
+        ax_radius.set_ylim([-max_ylim, max_ylim])
 
         
         fig_a.tight_layout()
