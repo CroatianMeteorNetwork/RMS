@@ -19,8 +19,8 @@ import scipy.optimize
 
 from RMS.Astrometry import CheckFit
 from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo, applyPlateparToCentroids, \
-    raDec2AltAz, rotationWrtHorizon, photometryFitRobust
-from RMS.Astrometry.Conversions import date2JD
+    rotationWrtHorizon, photometryFitRobust
+from RMS.Astrometry.Conversions import date2JD, raDec2AltAz
 from RMS.Astrometry.FFTalign import alignPlatepar
 import RMS.ConfigReader as cr
 from RMS.Formats import CALSTARS
@@ -217,18 +217,20 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
         working_platepar.mag_lev_stddev = fit_stddev
 
         # Print photometry info
-        print("Fit: {:+.1f}*LSP + {:.2f} +/- {:.2f}".format(-2.5, photom_offset, fit_stddev))
+        print()
+        print("Photometry")
+        print("    Fit: {:+.1f}*LSP + {:.2f} +/- {:.2f}".format(-2.5, photom_offset, fit_stddev))
 
         ### ###
 
-
+        print()
         print("Platepar minimum error of {:.2f} with radius {:.1f} px PASSED!".format(config.dist_check_threshold, \
             goodnes_check_radius))
 
         print('Saving improved platepar...')
 
-        # Mark the platepar to indicate that it was automatically refined with CheckFit
-        working_platepar.auto_check_fit_refined = True
+        # Mark the platepar to indicate that it was automatically recalibrated on an individual FF file
+        working_platepar.auto_recalibrated = True
 
         # Reset the star list
         working_platepar.star_list = []
@@ -417,11 +419,14 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         if result is not None:
 
             # Recompute alt/az of the FOV centre
-            working_platepar.az_centre, working_platepar.alt_centre = raDec2AltAz(working_platepar.JD, \
-                working_platepar.lon, working_platepar.lat, working_platepar.RA_d, working_platepar.dec_d)
+            working_platepar.az_centre, working_platepar.alt_centre = raDec2AltAz(working_platepar.RA_d, \
+                working_platepar.dec_d, working_platepar.JD, working_platepar.lat, working_platepar.lon)
 
             # Recompute the rotation wrt horizon
             working_platepar.rotation_from_horiz = rotationWrtHorizon(working_platepar)
+
+            # Mark the platepar to indicate that it was automatically recalibrated on an individual FF file
+            working_platepar.auto_recalibrated = True
 
             recalibrated_platepars[ff_name] = working_platepar
             prev_platepar = working_platepar
@@ -430,8 +435,12 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
             print('Recalibration of {:s} failed, using the previous platepar...'.format(ff_name))
 
+            # Mark the platepar to indicate that autorecalib failed
+            prev_platepar_tmp = copy.deepcopy(prev_platepar)
+            prev_platepar_tmp.auto_recalibrated = False
+
             # If the aligning failed, set the previous platepar as the one that should be used for this FF file
-            recalibrated_platepars[ff_name] = prev_platepar
+            recalibrated_platepars[ff_name] = prev_platepar_tmp
 
 
 
