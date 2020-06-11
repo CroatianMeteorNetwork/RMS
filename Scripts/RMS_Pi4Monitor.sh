@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # monitor the logfile and if the capture process stops, restart it
+sudo logger 'RMS pi4 watchdog process starting'
 hn=`hostname`
 MAILRECIP=markmcintyre99@googlemail.com
 
@@ -15,11 +16,11 @@ do
     done=`grep Archiving $logf`
     if [ "$done" == "" ] 
     then
-        sudo logger 'process finished cleanly'
+        sudo logger 'RMS Pi4 watchdog process finished cleanly'
         exit 0
     fi
     touch /home/pi/source/RMS/.crash
-    sudo loggger 'RMS stopped acquisition'
+    sudo loggger 'RMS Pi4 watchdog RMS stopped acquisition'
     killall python
     sleep 2
     cd ~/source/RMS
@@ -31,7 +32,7 @@ do
     echo stopped at `date +%Y%m%d-%H%M%S` >> ./stopped.txt
     echo $logf >>  ./stopped.txt
     /usr/bin/msmtp -t < ./stopped.txt
-    sudo logger 'watchdog continuing...'
+    sudo logger 'RMS Pi4 watchdog continuing...'
   fi
   echo sleeping
   sleep 20
