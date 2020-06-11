@@ -2066,7 +2066,7 @@ class PlateTool(object):
             text_str += 'CTRL + D - Load dark\n'
             text_str += 'CTRL + F - Load flat\n'
             text_str += 'CTRL + X - astrometry.net img upload\n'
-            text_str += 'CTRL + SHIFT + X - astrometry.net XY\n'
+            text_str += 'CTRL + SHIFT + X - astrometry.net XY only\n'
             text_str += 'CTRL + R - Pick stars\n'
             text_str += 'SHIFT + Z - Show zoomed window\n'
             text_str += 'CTRL + N - New platepar\n'
@@ -2756,6 +2756,11 @@ class PlateTool(object):
 
         # Fit the platepar to paired stars
         self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=first_platepar_fit)
+
+
+        # Show platepar parameters
+        print()
+        print(self.platepar)
 
 
         ### Calculate the fit residuals for every fitted star ###
