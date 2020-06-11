@@ -33,8 +33,12 @@ do
     /usr/bin/msmtp -t < ./stopped.txt
     logger 'RMS Pi4 watchdog continuing...'
   fi
-  echo sleeping
-  sleep 20
+  sleepint=20
+  if [ $dayt -lt 11 ] ; then
+    sleepint=600
+  fi
+  echo sleeping for $sleepint secs
+  sleep $sleepint
 done
 logger 'watchdog exiting...'
 
