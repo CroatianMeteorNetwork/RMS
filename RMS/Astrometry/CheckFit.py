@@ -29,7 +29,7 @@ from RMS.Math import angularSeparation
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import matchStars, subsetCatalog, cyraDecToXY
+from RMS.Astrometry.CyFunctions import matchStars, subsetCatalog
 
 
 def computeMinimizationTolerances(config, platepar, star_dict_len):
@@ -50,9 +50,9 @@ def computeMinimizationTolerances(config, platepar, star_dict_len):
 
 def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius, ret_nmatch=False, \
     sky_coords=False, lim_mag=None, verbose=False):
-    """ Match the image and catalog stars with the given astrometry solution and estimate the residuals 
+    """ Match the image and catalog stars with the given astrometry solution and estimate the residuals
         between them.
-    
+
     Arguments:
         config: [Config structure]
         platepar: [Platepar structure] Astrometry parameters.
@@ -61,18 +61,15 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
             2D list of stars, each entry is (X, Y, bg_level, level).
         match_radius: [float] Maximum radius for star matching (pixels).
         min_matched_stars: [int] Minimum number of matched stars on the image for the image to be accepted.
-
     Keyword arguments:
-        ret_nmatch: [bool] If True, the function returns the number of matched stars and the average 
+        ret_nmatch: [bool] If True, the function returns the number of matched stars and the average
             deviation. False by default.
         sky_coords: [bool] If True, sky coordinate residuals in RA, dec will be used to compute the cost,
             function, not image coordinates.
         lim_mag: [float] Override the limiting magnitude from config. None by default.
         verbose: [bool] Print results. True by default.
-
     Return:
         cost: [float] The cost function which weights the number of matched stars and the average deviation.
-
     """
 
 
@@ -100,14 +97,15 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
     for jd in star_dict:
 
         # Estimate RA,dec of the centre of the FOV
-        _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(jd)], [platepar.X_res/2], [platepar.Y_res/2], [1], 
+        _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(jd)], [platepar.X_res/2], [platepar.Y_res/2], [1],
             platepar)
 
         RA_c = RA_c[0]
         dec_c = dec_c[0]
 
         # Get stars from the catalog around the defined center in a given radius
-        _, extracted_catalog = subsetCatalog(catalog_stars, RA_c, dec_c, fov_radius, lim_mag)
+        _, extracted_catalog = subsetCatalog(catalog_stars, RA_c, dec_c, jd, platepar.lat, platepar.lon, \
+            fov_radius, lim_mag)
         ra_catalog, dec_catalog, mag_catalog = extracted_catalog.T
 
 
@@ -183,7 +181,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
             # matched_img_stars, matched_cat_stars, dist_list = matched_stars[jd]
 
             _, _, dist_list = matched_stars[jd]
-            
+
             global_dist_list += dist_list.tolist()
 
             # # TEST
@@ -238,8 +236,8 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
     if n_matched == 0:
 
         if verbose:
-            print('No matched stars with radius {:.2f} px!'.format(match_radius))
-        
+            print('No matched stars with radius {:.1f} px!'.format(match_radius))
+
         if ret_nmatch:
             return 0, 9999.0, 9999.0, {}
 
@@ -253,10 +251,10 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
 
     if verbose:
 
-        print('Matched {:d} stars with radius of {:.2f} px'.format(n_matched, match_radius))
-        print('Avg dist', avg_dist, unit_label)
-        print('Cost:', cost)
-        print('-----')
+        print()
+        print("Matched {:d} stars with radius of {:.1f} px".format(n_matched, match_radius))
+        print("    Average distance = {:.3f} {:s}".format(avg_dist, unit_label))
+        print("    Cost function    = {:.5f}".format(cost))
 
 
     if ret_nmatch:
@@ -272,7 +270,7 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius, v
         fit is deemed good, False otherwise. The goodness of fit is determined by 2 criteria: the average
         star residual (in pixels) has to be below a certain threshold, and an average number of matched stars
         per image has to be above a predefined threshold as well.
-    
+
     Arguments:
         config: [Config structure]
         platepar: [Platepar structure] Initial astrometry parameters.
@@ -280,17 +278,15 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius, v
         star_dict: [ndarray] A dictionary where the keys are JDs when the stars were recorded and values are
             2D list of stars, each entry is (X, Y, bg_level, level).
         match_radius: [float] Maximum radius for star matching (pixels).
-
     Keyword arguments:
         verbose: [bool] If True, fit status will be printed on the screen. False by default.
-
     Return:
         [bool] True if the platepar is good, False otherwise.
     """
 
     if verbose:
         print()
-        print('CHECK FIT GOODNESS:')
+        print("CHECK FIT GOODNESS:")
 
     # Match the stars and calculate the residuals
     n_matched, avg_dist, cost, matched_stars = matchStarsResiduals(config, platepar, catalog_stars, \
@@ -299,7 +295,7 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius, v
 
 
     # ### Plot zenith distance vs. residual
-    
+
     # # Go through all images
     # for jd in matched_stars:
     #     _, cat_stars, dists = matched_stars[jd]
@@ -309,7 +305,7 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius, v
 
     #     zangle_list = []
     #     for ra_t, dec_t in zip(ra, dec):
-            
+
     #         # Compute zenith distance
     #         azim, elev = raDec2AltAz(ra_t, dec_t, jd, platepar.lat, platepar.lon)
 
@@ -333,6 +329,7 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius, v
     if avg_dist <= config.dist_check_threshold:
 
         if verbose:
+            print()
             print('The minimum residual is satisfied!')
 
         # Check that the minimum number of stars is matched per every image
@@ -352,8 +349,19 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius, v
 
 
 def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict, match_radius):
-    """ Calculates the differences between the stars on the image and catalog stars in image coordinates with 
-        the given astrometrical solution. 
+    """ Calculates the differences between the stars on the image and catalog stars in image coordinates with
+        the given astrometrical solution.
+    Arguments:
+        params: [list] Fit parameters - reference RA, Dec, position angle, and scale.
+        config: [Config]
+        platepar: [Platepar]
+        catalog_stars: [list] List of (ra, dec, mag) entries (angles in degrees).
+        star_dict: [dict] Dictionary which contains the JD, and a list of (X, Y, bg_intens, intens) of the
+            stars on the image.
+        match_radius: [float] Star match radius (px).
+    Return:
+        [float] The average pixel residual (difference between image and catalog positions) normalized
+            by the square root of the total number of matched stars.
     """
 
 
@@ -374,136 +382,10 @@ def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict,
 
 
 
-def _calcImageResidualsDistortion(params, config, platepar, catalog_stars, star_dict, match_radius, \
-        dimension):
-    """ Calculates the differences between the stars on the image and catalog stars in image coordinates with 
-        the given astrometrical solution. 
-    """
-
-    # Make a copy of the platepar
-    pp = copy.deepcopy(platepar)
-
-    if dimension == 'x':
-        pp.x_poly_rev = params
-
-    else:
-        pp.y_poly_rev = params
-
-    print('{:s} reverse distortion params:'.format(dimension))
-
-    # Match stars and calculate the cost function using image coordinates
-    return matchStarsResiduals(config, pp, catalog_stars, star_dict, match_radius, verbose=False)
-
-
-def _calcSkyResidualsDistortion(params, config, platepar, catalog_stars, star_dict, match_radius, \
-        dimension):
-    """ Calculates the differences between the stars on the image and catalog stars in image coordinates with 
-        the given astrometrical solution. 
-    """
-
-    # Make a copy of the platepar
-    pp = copy.deepcopy(platepar)
-
-    if dimension == 'x':
-        pp.x_poly_fwd = params
-
-    else:
-        pp.y_poly_fwd = params
-
-    print('{:s} forward distortion params:'.format(dimension))
-
-    # Match stars and calculate the cost function using sky coordinates
-    return matchStarsResiduals(config, pp, catalog_stars, star_dict, match_radius, sky_coords=True)
-
-
-
-def photometryFit(config, matched_stars):
-    """ Perform the photometry fit on matched stars. To avoid saturation effects, all stars which have their
-        peak intensity close to saturation are rejected.
-
-    Arguments:
-        config: [Config structure]
-        matched_stars: [dict] Dictonary where key are FF file JDs, while values are lists of image stars, 
-            catalog stars, and their distances in pixels.
-
-    Return:
-        (photom_slope, photom_intercept): [tuple of floats] Photometric fit on magnitudes and log of sum of 
-            pixel intensities for each star.
-
-    """
-
-    # If the amplitde (the peak of the star) is higher than this threshold, it will be rejected due to 
-    # concerns about saturation and CMOS non-linearity
-    photom_amplitude_thresh = 200
-
-    # Take only stars which are within the radius of the half the size of the image, to avoid vignetitng 
-    # effects
-    hf_r = np.sqrt((config.width/2)**2 + (config.height/2)**2)
-
-
-    matched_mags = []
-    matched_logsum = []
-
-    # Go through all images
-    for jd_entry in matched_stars:
-
-        matched_img_stars, matched_cat_stars, dist_list = matched_stars[jd_entry]
-
-        # Go through all stars
-        for i in range(len(matched_img_stars)):
-
-            # Unpack image star data
-            x, y, intens_sum, ampl = matched_img_stars[i]
-
-            # Check if the coordinates are close to the centre of the image
-            if np.sqrt((x - config.width/2)**2 + (y - config.height/2)**2) <= hf_r:
-
-                # Check that the peak intensity is within the saturation threshold
-                if (ampl <= photom_amplitude_thresh) and (ampl > 10) and (intens_sum > 0):
-
-                    # Unpack catalog star data
-                    ra, dec, mag = matched_cat_stars[i]
-
-                    # Add the star for fitting
-                    matched_logsum.append(np.log10(intens_sum))
-                    matched_mags.append(mag)
-
-
-    
-
-    def _line(x, k):
-        # Slope is fixed to -2.5, as per magnitude definition
-        return -2.5*x + k
-
-    # Fit a line to the star data, where only the intercept has to be estimated
-    photom_params, _ = scipy.optimize.curve_fit(_line, matched_logsum, matched_mags, method='trf', \
-        loss='soft_l1')
-
-    mag_lev = photom_params[0]
-
-    # Plot catalog magnitude vs. logsum of pixel intensities
-    plt.scatter(matched_logsum, matched_mags)
-
-    # Plot the line fit
-    logsum_arr = np.linspace(np.max(matched_logsum), np.min(matched_logsum), 10)
-    plt.plot(logsum_arr, _line(logsum_arr, *photom_params))
-
-    plt.xlabel("Logsum pixel")
-    plt.ylabel("Catalog magnitude (V)")
-
-    plt.gca().invert_yaxis()
-
-    plt.show()
-
-
-    return mag_lev
-
-
 
 def starListToDict(config, calstars_list, max_ffs=None):
     """ Converts the list of calstars into dictionary where the keys are FF file JD and the values is
-        a list of (X, Y, bg_intens, intens) of stars. 
-
+        a list of (X, Y, bg_intens, intens) of stars.
     """
 
     # Convert the list to a dictionary
@@ -519,7 +401,7 @@ def starListToDict(config, calstars_list, max_ffs=None):
 
         # Check if there are enough stars on the image
         if len(stars_list) >= config.ff_min_stars:
-            
+
             # Calculate the JD time of the FF file
             dt = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
             jd = date2JD(*dt)
@@ -543,20 +425,17 @@ def starListToDict(config, calstars_list, max_ffs=None):
 
 
 
-def autoCheckFit(config, platepar, calstars_list, distortion_refinement=False, _fft_refinement=False):
+def autoCheckFit(config, platepar, calstars_list, _fft_refinement=False):
     """ Attempts to refine the astrometry fit with the given stars and and initial astrometry parameters.
-
     Arguments:
         config: [Config structure]
         platepar: [Platepar structure] Initial astrometry parameters.
         calstars_list: [list] A list containing stars extracted from FF files. See RMS.Formats.CALSTARS for
             more details.
-
     Keyword arguments:
-        distortion_refinement: [bool] Whether the distortion should be fitted as well. False by default.
         _fft_refinement: [bool] Internal flag indicating that autoCF is running the second time recursively
             after FFT platepar adjustment.
-    
+
     Return:
         (platepar, fit_status):
             platepar: [Platepar structure] Estimated/refined platepar.
@@ -564,8 +443,7 @@ def autoCheckFit(config, platepar, calstars_list, distortion_refinement=False, _
     """
 
 
-    def _handleFailure(config, platepar, calstars_list, catalog_stars, distortion_refinement, \
-        _fft_refinement):
+    def _handleFailure(config, platepar, calstars_list, catalog_stars, _fft_refinement):
         """ Run FFT alignment before giving up on ACF. """
 
         if not _fft_refinement:
@@ -581,11 +459,11 @@ def autoCheckFit(config, platepar, calstars_list, distortion_refinement=False, _
 
             # Extract star list from CALSTARS file from FF file with most stars
             max_len_ff = max(calstars_dict, key=lambda k: len(calstars_dict[k]))
-            
+
             # Take only X, Y (change order so X is first)
             calstars_coords = np.array(calstars_dict[max_len_ff])[:, :2]
             calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
-                
+
             # Get the time of the FF file
             calstars_time = FFfile.getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True)
 
@@ -622,8 +500,7 @@ def autoCheckFit(config, platepar, calstars_list, distortion_refinement=False, _
 
 
             # Redo autoCF
-            return autoCheckFit(config, platepar_refined, calstars_list, \
-                distortion_refinement=distortion_refinement, _fft_refinement=True)
+            return autoCheckFit(config, platepar_refined, calstars_list, _fft_refinement=True)
 
         else:
             print('Auto Check Fit failed completely, please redo the plate manually!')
@@ -658,14 +535,12 @@ def autoCheckFit(config, platepar, calstars_list, distortion_refinement=False, _
         return platepar, False
 
 
-    # A list of matching radiuses to try, pairs of [radius, fit_distortion_flag]
-    #   The distortion will be fitted only if explicity requested
+    print()
+
+
+    # A list of matching radiuses to try
     min_radius = 0.5
-    radius_list = [[10, False], 
-                    [5, False], 
-                    [3, False],
-                    [1.5, True and distortion_refinement], 
-                    [min_radius, True and distortion_refinement]]
+    radius_list = [10, 5, 3, 1.5, min_radius]
 
 
     # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
@@ -674,7 +549,7 @@ def autoCheckFit(config, platepar, calstars_list, distortion_refinement=False, _
 
 
     ### If the initial match is good enough, do only quick recalibratoin ###
-     
+
     # Match the stars and calculate the residuals
     n_matched, avg_dist, cost, _ = matchStarsResiduals(config, platepar, catalog_stars, star_dict, \
         min_radius, ret_nmatch=True)
@@ -684,34 +559,36 @@ def autoCheckFit(config, platepar, calstars_list, distortion_refinement=False, _
         # Check if the average distance with the tightest radius is close
         if avg_dist < config.dist_check_quick_threshold:
 
+            print("Using quick fit with smaller radiia...")
+
             # Use a reduced set of initial radius values
-            radius_list = [[1.5, True and distortion_refinement], 
-                           [min_radius, True and distortion_refinement]]
+            radius_list = [1.5, min_radius]
 
     ##########
 
 
     # Match increasingly smaller search radiia around image stars
-    for i, (match_radius, fit_distortion) in enumerate(radius_list):
+    for i, match_radius in enumerate(radius_list):
 
         # Match the stars and calculate the residuals
         n_matched, avg_dist, cost, _ = matchStarsResiduals(config, platepar, catalog_stars, star_dict, \
             match_radius, ret_nmatch=True)
 
-        print('Max radius:', match_radius)
-        print('Initial values:')
-        print(' Matched stars:', n_matched)
-        print(' Average deviation:', avg_dist)
+        print()
+        print("-------------------------------------------------------------")
+        print("Refining camera pointing with max pixel deviation = {:.1f} px".format(match_radius))
+        print("Initial values:")
+        print("    Matched stars     = {:>6d}".format(n_matched))
+        print("    Average deviation = {:>6.2f} px".format(avg_dist))
 
 
         # The initial number of matched stars has to be at least the number of FF imaages, otherwise it means
         #   that the initial platepar is no good
         if n_matched < config.calstars_files_N:
-            print('The total number of initially matched stars is too small! Please manually redo the plate or make sure there are enough calibration stars.')
-            
+            print("The total number of initially matched stars is too small! Please manually redo the plate or make sure there are enough calibration stars.")
+
             # Try to refine the platepar with FFT phase correlation and redo the ACF
-            return _handleFailure(config, platepar, calstars_list, catalog_stars, distortion_refinement, \
-                _fft_refinement)
+            return _handleFailure(config, platepar, calstars_list, catalog_stars, _fft_refinement)
 
 
         # Check if the platepar is good enough and do not estimate further parameters
@@ -738,8 +615,7 @@ def autoCheckFit(config, platepar, calstars_list, distortion_refinement=False, _
         if not res.success:
 
             # Try to refine the platepar with FFT phase correlation and redo the ACF
-            return _handleFailure(config, platepar, calstars_list, catalog_stars, distortion_refinement, \
-                _fft_refinement)
+            return _handleFailure(config, platepar, calstars_list, catalog_stars, _fft_refinement)
 
 
         else:
@@ -752,91 +628,10 @@ def autoCheckFit(config, platepar, calstars_list, distortion_refinement=False, _
             platepar.F_scale = F_scale
 
 
-        
+
         # Check if the platepar is good enough and do not estimate further parameters
         if checkFitGoodness(config, platepar, catalog_stars, star_dict, min_radius, verbose=True):
             return platepar, True
-
-
-        # Fit the lens distortion parameters
-        if fit_distortion:
-
-
-            ### REVERSE DISTORTION POLYNOMIALS FIT ###
-
-            # Fit the distortion parameters (X axis)
-            res = scipy.optimize.minimize(_calcImageResidualsDistortion, platepar.x_poly_rev, args=(config, \
-                platepar, catalog_stars, star_dict, match_radius, 'x'), method='Nelder-Mead', \
-                options={'fatol': fatol, 'xatol': 0.1})
-
-            print(res)
-
-            # If the fit was not successfull, stop further fitting
-            if not res.success:
-                # Try to refine the platepar with FFT phase correlation and redo the ACF
-                return _handleFailure(config, platepar, calstars_list, catalog_stars, distortion_refinement, \
-                    _fft_refinement)
-
-            else:
-                platepar.x_poly_rev = res.x
-
-
-            # Fit the distortion parameters (Y axis)
-            res = scipy.optimize.minimize(_calcImageResidualsDistortion, platepar.y_poly_rev, args=(config, \
-                platepar,catalog_stars, star_dict, match_radius, 'y'), method='Nelder-Mead', \
-                options={'fatol': fatol, 'xatol': 0.1})
-
-            print(res)
-
-            # If the fit was not successfull, stop further fitting
-            if not res.success:
-                
-                # Try to refine the platepar with FFT phase correlation and redo the ACF
-                return _handleFailure(config, platepar, calstars_list, catalog_stars, distortion_refinement, \
-                    _fft_refinement)
-
-            else:
-                platepar.y_poly_rev = res.x
-
-
-            ### ###
-
-
-            ### FORWARD DISTORTION POLYNOMIALS FIT ###
-
-            # Fit the distortion parameters (X axis)
-            res = scipy.optimize.minimize(_calcSkyResidualsDistortion, platepar.x_poly_fwd, args=(config, \
-                platepar, catalog_stars, star_dict, match_radius, 'x'), method='Nelder-Mead', \
-                options={'fatol': fatol, 'xatol': 0.1})
-
-            print(res)
-
-            # If the fit was not successfull, stop further fitting
-            if not res.success:
-                
-                # Try to refine the platepar with FFT phase correlation and redo the ACF
-                return _handleFailure(config, platepar, calstars_list, catalog_stars, distortion_refinement, \
-                    _fft_refinement)
-
-            else:
-                platepar.x_poly_fwd = res.x
-
-
-            # Fit the distortion parameters (Y axis)
-            res = scipy.optimize.minimize(_calcSkyResidualsDistortion, platepar.y_poly_fwd, args=(config, \
-                platepar,catalog_stars, star_dict, match_radius, 'y'), method='Nelder-Mead', \
-                options={'fatol': fatol, 'xatol': 0.1})
-
-            print(res)
-
-            # If the fit was not successfull, stop further fitting
-            if not res.success:
-                return platepar, False
-
-            else:
-                platepar.y_poly_fwd = res.x
-
-            ### ###
 
 
 
@@ -844,9 +639,9 @@ def autoCheckFit(config, platepar, calstars_list, distortion_refinement=False, _
     n_matched, avg_dist, cost, matched_stars = matchStarsResiduals(config, platepar, catalog_stars, \
         star_dict, min_radius, ret_nmatch=True)
 
-    print('FINAL SOLUTION with {:f} px:'.format(min_radius))
-    print('Matched stars:', n_matched)
-    print('Average deviation:', avg_dist)
+    print("FINAL SOLUTION with radius {:.1} px:".format(min_radius))
+    print("    Matched stars     = {:>6d}".format(n_matched))
+    print("    Average deviation = {:>6.2f} px".format(avg_dist))
 
 
     # Mark the platepar to indicate that it was automatically refined with CheckFit
@@ -862,7 +657,7 @@ def autoCheckFit(config, platepar, calstars_list, distortion_refinement=False, _
 
 
     return platepar, True
-    
+
 
 
 
@@ -879,9 +674,6 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
-
-    arg_parser.add_argument('-d', '--distortion', action="store_true", \
-        help="""Refine the distortion parameters.""")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -936,7 +728,7 @@ if __name__ == "__main__":
 
 
     # Run the automatic astrometry fit
-    pp, fit_status = autoCheckFit(config, platepar, calstars_list, distortion_refinement=cml_args.distortion)
+    pp, fit_status = autoCheckFit(config, platepar, calstars_list)
 
 
     # If the fit suceeded, save the platepar

@@ -94,13 +94,11 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
         config: [Config instance]
         reference_list: [2D list] A list of reference (x, y) star coordinates.
         moved_list: [2D list] A list of moved (x, y) star coordinates.
-
     Keyword arguments:
         img_size: [int] Power of 2 image size (e.g. 128, 256, etc.) which will be created and fed into the
             FFT registration algorithm.
         dot_radius: [int] The radius of the dot which will be drawn on the synthetic image.
         show_plot: [bool] Show the comparison between the reference and image synthetic images.
-
     Return:
         angle, scale, translation_x, translation_y:
             - angle: [float] Angle of rotation (deg).
@@ -143,7 +141,7 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
     img_ref = constructImage(img_size, reference_list, dot_radius)
     img_mov = constructImage(img_size, moved_list, dot_radius)
 
-    
+
     # Run the FFT registration
     try:
         res = imreg_dft.imreg.similarity(img_ref, img_mov)
@@ -196,18 +194,15 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
 
 def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update=False, show_plot=False):
     """ Align the platepar using FFT registration between catalog stars and the given list of image stars.
-
     Arguments:
         config:
         platepar: [Platepar instance] Initial platepar.
         calstars_time: [list] A list of (year, month, day, hour, minute, second, millisecond) of the middle of
             the FF file used for alignment.
         calstars_coords: [ndarray] A 2D numpy array of (x, y) coordinates of image stars.
-
     Keyword arguments:
         scale_update: [bool] Update the platepar scale. False by default.
         show_plot: [bool] Show the comparison between the reference and image synthetic images.
-
     Return:
         platepar_aligned: [Platepar instance] The aligned platepar.
     """
@@ -233,17 +228,19 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         ra_centre = ra_centre[0]
         dec_centre = dec_centre[0]
 
+        # Compute Julian date
+        jd = date2JD(*calstars_time)
+
         # Calculate the FOV radius in degrees
         fov_y, fov_x = ApplyAstrometry.computeFOVSize(platepar)
         fov_radius = np.sqrt(fov_x**2 + fov_y**2)
 
         # Take only those stars which are inside the FOV
-        filtered_indices, _ = subsetCatalog(catalog_stars, ra_centre, dec_centre, \
-            fov_radius, config.catalog_mag_limit)
+        filtered_indices, _ = subsetCatalog(catalog_stars, ra_centre, dec_centre, jd, platepar.lat, \
+            platepar.lon, fov_radius, config.catalog_mag_limit)
 
         # Take those catalog stars which should be inside the FOV
         ra_catalog, dec_catalog, _ = catalog_stars[filtered_indices].T
-        jd = date2JD(*calstars_time)
         catalog_xy = ApplyAstrometry.raDecToXYPP(ra_catalog, dec_catalog, jd, platepar)
 
         catalog_x, catalog_y = catalog_xy

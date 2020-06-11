@@ -6,46 +6,57 @@ from PyQt5.QtWidgets import QApplication
 
 
 class Plus(QPainterPath):
+    """
+    Used as a symbol for ScatterPlotItem
+    ex. item.setSymbol(Plus())
+
+    Consists of two lines with no fill making a plus sign
+    """
     def __init__(self):
         QPainterPath.__init__(self)
         points = np.asarray([
             (-0.5, 0),
-            (0, 0),
-            (0, 0.5),
-            (0, 0),
             (0.5, 0),
-            (0, 0),
+            (0, 0.5),
             (0, -0.5),
-            (0, 0)
         ])
 
-        self.moveTo(*points[0])
-        for x, y in points[1:]:
-            self.lineTo(x, y)
+        for i in range(0, len(points), 2):
+            self.moveTo(*points[i])
+            self.lineTo(*points[i + 1])
         self.closeSubpath()
 
 
 class Cross(QPainterPath):
+    """
+    Used as a symbol for ScatterPlotItem
+    ex. item.setSymbol(Plus())
+
+    Consists of two lines with no fill making a cross
+    """
     def __init__(self):
         QPainterPath.__init__(self)
         points = np.asarray([
             (-0.5, -0.5),
-            (0, 0),
-            (-0.5, 0.5),
-            (0, 0),
             (0.5, 0.5),
-            (0, 0),
+            (-0.5, 0.5),
             (0.5, -0.5),
-            (0, 0)
         ])
 
-        self.moveTo(*points[0])
-        for x, y in points[1:]:
-            self.lineTo(x, y)
+        for i in range(0, len(points), 2):
+            self.moveTo(*points[i])
+            self.lineTo(*points[i + 1])
         self.closeSubpath()
 
 
 class CircleLine(QPainterPath):
+    """
+    Used as a symbol for ScatterPlotItem
+    ex. item.setSymbol(Plus())
+
+    Consists of a circle with fill that can be removed (with setBrush(QColor(0,0,0,0))),
+    with a line going from the top to the center
+    """
     def __init__(self):
         QPainterPath.__init__(self)
         points = np.asarray([(0, -0.5), (0, 0)])
@@ -57,6 +68,13 @@ class CircleLine(QPainterPath):
 
 
 class Crosshair(QPainterPath):
+    """
+    Used as a symbol for ScatterPlotItem
+    ex. item.setSymbol(Plus())
+
+    Consists of a circle with fill that can be removed (with setBrush(QColor(0,0,0,0))),
+    with four lines going from the top, bottom, left and right to near the center
+    """
     def __init__(self):
         QPainterPath.__init__(self)
         points = np.asarray([(0, -0.5), (0, -0.2),
@@ -74,6 +92,12 @@ class Crosshair(QPainterPath):
 
 # custom pyqtgraph items
 class PlotLines(pg.GraphicsObject):
+    """
+    Used to add to a pyqt widget (such as ViewBox), which allows for the plotting of lines
+    ex.
+    lines = PlotLines()
+    widget.addItem(lines)
+    """
     def __init__(self, data=None):
         pg.GraphicsObject.__init__(self)
         self.data = data
@@ -85,6 +109,14 @@ class PlotLines(pg.GraphicsObject):
         self.generatePicture()
 
     def setData(self, data):
+        """
+        Arguments:
+            data [list of (float, float, float, float, QPen)]:
+                First two floats are x0 and y0, the initial coordinates of the line to draw
+                Second two floats are xf and yf, the final coordinates of the line to draw
+                QPen argmument is the pen to draw the line with
+                A list of these five arguments in a tuple will allow for drawing any number of lines
+        """
         self.data = data
         self.update()
 
@@ -106,6 +138,11 @@ class PlotLines(pg.GraphicsObject):
 class TextItemList(pg.GraphicsObject):
     """
     Allows for a list of TextItems without having to constantly add items to a widget
+    ex.
+    text_list = TextItemList()
+    text_list.addTextItem(0,0,100,100,'hello')
+    text_list.addTextItem(10,10,100,100,'you')
+    widget.addItem(text_list)
     """
 
     def __init__(self):
@@ -114,20 +151,45 @@ class TextItemList(pg.GraphicsObject):
         self.z = 0
 
     def getTextItem(self, i):
+        """
+        Return the TextItem at index i. Can only be used for getting information, changing
+        values will not change any values in the list
+
+        Arguments:
+            i [int]: index
+        """
         return self.text_list[i]
 
     def addTextItem(self, *args, **kwargs):
+        """
+        Has the same arguments as __init__ in TextItem
+        """
         new = TextItem(*args, **kwargs)
         new.setParentItem(self.parentItem())
         new.setZValue(self.z)
         self.text_list.append(new)
 
     def setZValue(self, z):
+        """
+        Sets all TextItem's in list to have Z value (affects when it is drawn) and
+        new TextItem's will have this Z value
+
+        Arguments:
+            z [float]: z value to set all TextItem's to
+        """
         self.z = z
         for text in self.text_list:
             text.setZValue(z)
 
     def moveText(self, i, x, y):
+        """
+        Moves the TextItem at index i to coordinates (x,y) while maintaining all of its properties
+
+        Arguments:
+            i [int]: index of TextItem
+            x [float]: x coordinate to move TextItem to (depends on pxmode)
+            y [float]: y coordinate to move TextItem to (depends on pxmode)
+        """
         text = self.getTextItem(i)
         visible = text.isVisible()
         self.setTextItem(i, x, y, *text.wh, text.text,
@@ -140,23 +202,40 @@ class TextItemList(pg.GraphicsObject):
             self.getTextItem(i).hide()
 
     def setTextItem(self, i, *args, **kwargs):
+        """
+        Replace the TextItem at index i to a TextItem initialized with args and kwargs
+
+        Arguments:
+            i [int]: index of TextItem to replace
+            args, kwargs: same arguments as __init__ in TextItem
+        """
         self.text_list[i].setParentItem(None)
         self.text_list[i] = TextItem(*args, **kwargs)
         self.text_list[i].setParentItem(self.parentItem())
         self.text_list[i].setZValue(self.z)
 
     def clear(self):
+        """
+        Remove all TextItem's in list
+        """
         while self.text_list:
             self.removeTextItem(0)
+
+    def removeTextItem(self, i):
+        """
+        Remove TextItem at index i
+
+        Arguments:
+            i [int]: index
+        """
+        item = self.text_list.pop(i)
+        item.setParentItem(None)
 
     def setParentItem(self, parent):
         super().setParentItem(parent)
         for text in self.text_list:
             text.setParentItem(parent)
 
-    def removeTextItem(self, i):
-        item = self.text_list.pop(i)
-        item.setParentItem(None)
 
     def paint(self, painter, option, widget=None):
         for text in self.text_list:
@@ -170,6 +249,29 @@ class TextItem(pg.GraphicsObject):
     def __init__(self, x, y, w, h, text,
                  pen=None, font=None, align=None, pxmode=0,
                  background_brush=None, background_pen=None, margin=None):
+        """
+        Adds a TextItem
+
+        Arguments:
+            x [float]: x coordinate of TextItem (depends on pxmode)
+            y [float]: y coordinate of TextItem (depends on pxmode)
+            w [float]: width of area to write in (depends on pxmode)
+            h [float]: height of area to write in (depends on pxmode)
+            text [str]: text to show
+            pen [QPen]: pen to write text in
+            font [QFont]: font to write text in
+            align: Qt.AlignLeft, Qt.AlignRight or Qt.AlignCenter
+            pxmode:
+                0: x, y, w, and h represent distance and text has a fixed length in distance
+                1: x and y respresent distance distance, w and h represent pixels and text has
+                    fixed length in pixels
+                2: x, y, w and h represent pixels and text has a fixed length in pixels
+                3: same as 2 except x any y represent pixels from corner of parent not its axis
+            background_brush [QBrush]: Brush used for background (fill)
+            background_pen [QPen]: Pen used for background (outline)
+            margin [float]: amount of space between sides of background to text
+        """
+
         pg.GraphicsObject.__init__(self)
         self.xy = (x, y)
         self.wh = (w, h)
@@ -197,6 +299,10 @@ class TextItem(pg.GraphicsObject):
         self.picture = QPicture()
 
     def size(self):
+        """
+        Returns:
+             (float, float): width and height of the background
+        """
         return self.wh
 
     def setBackgroundBrush(self, brush):
@@ -301,9 +407,17 @@ class TextItem(pg.GraphicsObject):
 class ImageItem2(pg.ImageItem):
     # ImageItem that allows for a change in gamma
     def __init__(self, image=None, default_key=None, invert=False, **kwargs):
-        """ example usage
-        ImageItem2({'maxpixel':data1,'avepixel':data2},'avepixel'})
+        """
+        ex
+        ImageItem2({'maxpixel':data1,'avepixel':data2}, 'avepixel')
         selectImage('maxpixel')
+
+        Arguments:
+            image [2D np.array or dict with 2D np.array]:
+                data to store and show
+            default_key: if image is a dict, use to pick which data to use first
+            invert [boolean]: whether to invert image when displaying
+            kwargs: other __init__ arguments of pg.ImageItem
         """
         if type(image) == dict:
             self.data_dict = image
@@ -352,7 +466,7 @@ class ImageItem2(pg.ImageItem):
 
     def render(self):
         # THIS WAS COPY PASTED FROM SOURCE CODE AND WAS SLIGHTLY
-        # CHANGED TO IMPLEMENT GAMMA
+        # CHANGED TO IMPLEMENT GAMMA AND INVERT
 
         # Convert data to QImage for display.
 
@@ -422,6 +536,14 @@ class ImageItem2(pg.ImageItem):
 
 class CursorItem(pg.GraphicsObject):
     def __init__(self, r, pxmode=False, thickness=1):
+        """
+        Adds a CursorItem to the point (0,0).
+
+        Arguments:
+            r [float]: radius of cursor inner circle
+            pxmode [boolean]: whether or not the width of cursor is invariant
+            thickness [float]: width of the circles and center dot
+        """
         super().__init__()
         self._center = QPoint(0, 0)
         self.last_center = QPoint(0, 0)
@@ -431,9 +553,15 @@ class CursorItem(pg.GraphicsObject):
 
         self.pxmode = pxmode
         self.picture = QPicture()
-        self.generatePicture()
 
     def setMode(self, mode):
+        """
+        Change the mode of the cursor which changes its appearance
+
+        Arguments:
+            mode [boolean]: True is two yellow circles with blue point
+                            False is a single purple circle
+        """
         self.mode = mode
         self.update()
 
@@ -450,6 +578,12 @@ class CursorItem(pg.GraphicsObject):
         self.update()
 
     def setCenter(self, new_center):
+        """
+        Use QPoint(x,y)
+
+        Arguments:
+            new_center [QPoint]: Center of the new circle
+        """
         self.last_center = self.center
         self._center = new_center
         self.update()
@@ -472,7 +606,7 @@ class CursorItem(pg.GraphicsObject):
             # pen.setStyle(Qt.DotLine)
             painter.setPen(pen)
             painter.drawEllipse(QPoint(0, 0), 2*r, 2*r)
-            painter.setPen(QPen(Qt.blue, self.thickness))
+            painter.setPen(QPen(Qt.blue, 2*self.thickness))
             painter.drawPoint(QPoint(0, 0))
         else:
             pen = QPen(QPen(QColor(128, 0, 128), self.thickness, Qt.SolidLine))

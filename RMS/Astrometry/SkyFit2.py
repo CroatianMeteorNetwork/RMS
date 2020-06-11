@@ -30,7 +30,6 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
-from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, raDec2AltAz, altAz2RADec
 import RMS.ConfigReader as cr
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
@@ -42,6 +41,9 @@ from RMS.Math import angularSeparation
 from RMS.Misc import decimalDegreesToSexHours, openFileDialog
 from RMS.Astrometry.Conversions import J2000_JD, date2JD, JD2HourAngle, raDec2AltAz, altAz2RADec
 
+import pyximport
+
+pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession, eqRefractionTrueToApparent
 
 from RMS.Astrometry.CustomPyqtgraphClasses import *
@@ -390,17 +392,17 @@ class PlateTool(QMainWindow):
         # centroid star markers (main window)
         self.centroid_star_markers = pg.ScatterPlotItem()
         self.img_frame.addItem(self.centroid_star_markers)
-        self.centroid_star_markers.setPen('y')
+        self.centroid_star_markers.setPen(QColor(255, 165, 0))
         # self.centroid_star_markers.setBrush(QColor(0, 0, 0, 0))
-        self.centroid_star_markers.setSize(10)
+        self.centroid_star_markers.setSize(15)
         self.centroid_star_markers.setSymbol(Plus())
         self.centroid_star_markers.setZValue(4)
 
         # centroid star markers (zoom window)
         self.centroid_star_markers2 = pg.ScatterPlotItem()
         self.zoom_window.addItem(self.centroid_star_markers2)
-        self.centroid_star_markers2.setPen('y')
-        self.centroid_star_markers2.setSize(10)
+        self.centroid_star_markers2.setPen(QColor(255, 165,0))
+        self.centroid_star_markers2.setSize(15)
         self.centroid_star_markers2.setSymbol(Plus())
         self.centroid_star_markers2.setZValue(4)
 
@@ -453,6 +455,9 @@ class PlateTool(QMainWindow):
         # mouse binding
         self.img_frame.scene().sigMouseMoved.connect(self.mouseMove)
         self.img_frame.scene().sigMouseClicked.connect(self.mouseClick)  # NOTE: clicking event doesnt trigger if moving
+
+
+        self.scrolls_back = 0
 
         self.img = None
         self.img_zoom = None
@@ -1003,8 +1008,7 @@ class PlateTool(QMainWindow):
 
                 # Fit the photometric offset (disable vignetting fit if a flat is used)
                 photom_params, fit_stddev, fit_resids = photometryFit(px_intens_list, radius_list,
-                                                                      catalog_mags, fixed_vignetting=(
-                        0.0 if self.flat_struct is not None else None))
+                    catalog_mags, fixed_vignetting=(0.0 if self.flat_struct is not None else None))
 
                 photom_offset, vignetting_coeff = photom_params
 
@@ -1015,14 +1019,14 @@ class PlateTool(QMainWindow):
                 self.platepar.vignetting_coeff = vignetting_coeff
 
                 # Remove previous photometry deviation labels
-                if len(self.photom_deviatons_scat) > 0:
-                    for entry in self.photom_deviatons_scat:
-                        resid_lbl, mag_lbl = entry
-                        try:
-                            resid_lbl.remove()
-                            mag_lbl.remove()
-                        except:
-                            pass
+                # if len(self.photom_deviatons_scat) > 0:
+                #     for entry in self.photom_deviatons_scat:
+                #         resid_lbl, mag_lbl = entry
+                #         try:
+                #             resid_lbl.remove()
+                #             mag_lbl.remove()
+                #         except:
+                #             pass
 
                 # self.photom_deviatons_scat = []
 
@@ -1296,6 +1300,7 @@ class PlateTool(QMainWindow):
         # Change catalog limiting magnitude
         elif event.key() == Qt.Key_R:
             self.cat_lim_mag += 0.1
+            self.time = time.time()
             self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
             self.updateStars()
 
@@ -1482,7 +1487,7 @@ class PlateTool(QMainWindow):
             print("Solving with astrometry.net")
 
             upload_image = True
-            if Qt.ShiftModifier:
+            if modifiers == Qt.ShiftModifier:
                 upload_image = False
 
             # Estimate initial parameters using astrometry.net
@@ -1535,7 +1540,7 @@ class PlateTool(QMainWindow):
             if self.platepar is not None:
                 self.platepar.refraction = not self.platepar.refraction
 
-                self.updateImage()
+                self.updateStars()
 
 
         elif event.key() == Qt.Key_H and modifiers == Qt.ControlModifier:
@@ -1574,7 +1579,7 @@ class PlateTool(QMainWindow):
         elif event.key() == Qt.Key_Z and modifiers == Qt.ControlModifier:
 
             # If shift was pressed, reset distortion parameters to zero
-            if Qt.ShiftModifier:
+            if modifiers == Qt.ShiftModifier:
                 self.platepar.resetDistortionParameters()
 
             # If the first platepar is being made, do the fit twice
@@ -1638,17 +1643,22 @@ class PlateTool(QMainWindow):
         modifier = QApplication.keyboardModifiers()
         if modifier == Qt.ControlModifier:
             if delta < 0:
+                self.scrolls_back = 0
                 self.star_aperature_radius += 1
                 self.cursor.setRadius(self.star_aperature_radius)
                 self.cursor2.setRadius(self.star_aperature_radius)
             elif delta > 0 and self.star_aperature_radius > 1:
+                self.scrolls_back = 0
                 self.star_aperature_radius -= 1
                 self.cursor.setRadius(self.star_aperature_radius)
                 self.cursor2.setRadius(self.star_aperature_radius)
         else:
             if delta < 0:
-                self.img_frame.autoRange(padding=0)
+                self.scrolls_back += 1
+                if self.scrolls_back > 2:
+                    self.img_frame.autoRange(padding=0)
             elif delta > 0:
+                self.scrolls_back = 0
                 self.img_frame.scaleBy([0.95, 0.95], QPoint(self.mouse_x, self.mouse_y))
 
     def toggleImageType(self):
@@ -1933,7 +1943,6 @@ class PlateTool(QMainWindow):
 
     def makeNewPlatepar(self, update_image=True):
         """ Make a new platepar from the loaded one, but set the parameters from the config file. """
-
         # Update the reference time
         img_time = self.img_handle.currentTime()
         self.platepar.JD = date2JD(*img_time)
@@ -2232,8 +2241,8 @@ class PlateTool(QMainWindow):
         print("Fitting platepar...")
 
         # Extract paired catalog stars and image coordinates separately
-        catalog_stars = np.array([cat_coords for img_coords, cat_coords in self.paired_stars])
-        img_stars = np.array([img_coords for img_coords, cat_coords in self.paired_stars])
+        img_stars = np.array(self.paired_stars)[:, 0]
+        catalog_stars = np.array(self.paired_stars)[:, 1]
 
         # Get the Julian date of the image that's being fit
         jd = date2JD(*self.img_handle.currentTime())
@@ -2267,7 +2276,7 @@ class PlateTool(QMainWindow):
             angle = np.arctan2(delta_y, delta_x)
             distance = np.sqrt(delta_x**2 + delta_y**2)
 
-            # Compute the residuals in ra/dec in angular coordiniates
+            # Compute the residuals in ra/dec in angular coordinates
             img_time = self.img_handle.currentTime()
             _, ra_img, dec_img, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar)
 
@@ -2349,8 +2358,8 @@ class PlateTool(QMainWindow):
         """ Show window with astrometry fit details. """
 
         # Extract paired catalog stars and image coordinates separately
-        catalog_stars = np.array([cat_coords for img_coords, cat_coords in self.paired_stars])
-        img_stars = np.array([img_coords for img_coords, cat_coords in self.paired_stars])
+        img_stars = np.array(self.paired_stars)[:, 0]
+        catalog_stars = np.array(self.paired_stars)[:, 1]
 
         # Get the Julian date of the image that's being fit
         jd = date2JD(*self.img_handle.currentTime())

@@ -15,7 +15,7 @@ from cpython cimport bool
 INT_TYPE = np.uint32
 ctypedef np.uint32_t INT_TYPE_t
 
-FLOAT_TYPE = np.float64 
+FLOAT_TYPE = np.float64
 ctypedef np.float64_t FLOAT_TYPE_t
 
 
@@ -37,28 +37,29 @@ cdef extern from "math.h":
 cdef double radians(double deg):
     """Converts degrees to radians.
     """
-    
+
     return deg/180.0*(pi)
+
+
 
 @cython.cdivision(True)
 cdef double degrees(double deg):
     """Converts radians to degrees.
     """
-    
+
     return deg*180.0/pi
 
+
+
 @cython.boundscheck(False)
-@cython.wraparound(False) 
+@cython.wraparound(False)
 cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2):
     """ Calculate the angular separation between 2 stars in equatorial celestial coordinates. 
-
     Source of the equation: http://www.astronomycafe.net/qadir/q1890.html (May 1, 2016)
-
     @param ra1: [float] right ascension of the first stars (in degrees)
     @param dec1: [float] decliantion of the first star (in degrees)
     @param ra2: [float] right ascension of the decons stars (in degrees)
     @param dec2: [float] decliantion of the decons star (in degrees)
-
     @return angular_separation: [float] angular separation (in degrees)
     """
 
@@ -73,25 +74,32 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
 
 
 @cython.boundscheck(False)
-@cython.wraparound(False) 
-def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, double dec_c, double radius, \
-        double mag_limit):
+@cython.wraparound(False)
+def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, double dec_c, double jd,
+        double lat, double lon, double radius, double mag_limit):
     """ Make a subset of stars from the given star catalog around the given coordinates with a given radius.
-    
+
     Arguments:
-        ...
+        catalog_list: [ndarray] An array of (ra, dec, mag) pairs for stars (J2000, degrees).
         ra_c: [float] Centre of extraction RA (degrees).
         dec_c: [float] Centre of extraction dec (degrees).
+        jd: [float] Julian date of observations.
+        lat: [float] Observer latitude (deg).
+        lon: [float] Observer longitude (deg).
         radius: [float] Extraction radius (degrees).
+        mag_limit: [float] Limiting magnitude.
+    Return:
+        filtered_indices, filtered_list: (ndarray, ndarray)
+            - filtered_indices - Indices of catalog_list entries which satifly the filters.
+            - filtered_list - catalog_list entires that satifly the filters.
         ...
-
     """
 
 
     # Define variables
     cdef int i, k
     cdef double dec_min, dec_max
-    cdef double ra, dec, mag
+    cdef double ra, dec, mag, elev
     cdef np.ndarray[FLOAT_TYPE_t, ndim=2] filtered_list = np.zeros(shape=(catalog_list.shape[0], \
         catalog_list.shape[1]), dtype=FLOAT_TYPE)
 
@@ -124,16 +132,23 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
 
         # Add star to the list if it is within a given radius and has a certain brightness
         if (angularSeparation(ra, dec, ra_c, dec_c) <= radius) and (mag <= mag_limit):
-            
-            filtered_list[k,0] = ra
-            filtered_list[k,1] = dec
-            filtered_list[k,2] = mag
 
-            # Add index to the list of indices which passed the filter
-            filtered_indices[k] = i;
+            # Compute the local star elevation
+            _, elev = cyraDec2AltAz(radians(ra), radians(dec), jd, radians(lat), radians(lon))
 
-            # Increment filtered list counter
-            k += 1
+
+            # Only take stars above 0 degrees
+            if degrees(elev) > 0:
+
+                filtered_list[k,0] = ra
+                filtered_list[k,1] = dec
+                filtered_list[k,2] = mag
+
+                # Add index to the list of indices which passed the filter
+                filtered_indices[k] = i;
+
+                # Increment filtered list counter
+                k += 1
 
 
     return filtered_indices[:k], filtered_list[:k]
@@ -145,7 +160,7 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
 def matchStars(np.ndarray[FLOAT_TYPE_t, ndim=2] stars_list, np.ndarray[FLOAT_TYPE_t, ndim=1] cat_x_array, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] cat_y_array, np.ndarray[INT_TYPE_t, ndim=1] cat_good_indices, \
     double max_radius):
-        
+
 
     cdef int i, j
     cdef unsigned int cat_idx
@@ -156,12 +171,12 @@ def matchStars(np.ndarray[FLOAT_TYPE_t, ndim=2] stars_list, np.ndarray[FLOAT_TYP
     # Get the lenghts of input arrays
     cdef int stars_len = stars_list.shape[0]
     cdef int cat_len = cat_good_indices.shape[0]
-    
+
     # List for matched indices
     cdef np.ndarray[FLOAT_TYPE_t, ndim=2] matched_indices = np.zeros(shape=(stars_list.shape[0], 3), \
         dtype=FLOAT_TYPE)
 
-    
+
     ### Match image and catalog stars ###
 
     # Go through all image stars
@@ -195,7 +210,7 @@ def matchStars(np.ndarray[FLOAT_TYPE_t, ndim=2] stars_list, np.ndarray[FLOAT_TYP
 
         # Take the best matched star if the distance was within the maximum radius
         if min_dist < max_radius:
-            
+
             # Add the matched indices to the output list
             matched_indices[k, 0] = i
             matched_indices[k, 1] = cat_match_indx
@@ -204,7 +219,7 @@ def matchStars(np.ndarray[FLOAT_TYPE_t, ndim=2] stars_list, np.ndarray[FLOAT_TYP
             k += 1
 
 
-    
+
     # Cut the output list to the number of matched stars
     matched_indices = matched_indices[:k]
 
@@ -215,9 +230,7 @@ def matchStars(np.ndarray[FLOAT_TYPE_t, ndim=2] stars_list, np.ndarray[FLOAT_TYP
 @cython.cdivision(True)
 cdef double cyjd2LST(double jd, double lon):
     """ Convert Julian date to apparent Local Sidereal Time. The times is apparent, not mean!
-
     Source: J. Meeus: Astronomical Algorithms
-
     Arguments:
         jd: [float] Decimal julian date, epoch J2000.0.
         lon: [float] Longitude of the observer in degrees.
@@ -246,18 +259,66 @@ cdef double cyjd2LST(double jd, double lon):
 
 
 @cython.cdivision(True)
+cpdef (double, double) equatorialCoordPrecession(double start_epoch, double final_epoch, double ra, \
+    double dec):
+    """ Corrects Right Ascension and Declination from one epoch to another, taking only precession into 
+        account.
+        Implemented from: Jean Meeus - Astronomical Algorithms, 2nd edition, pages 134-135
+    
+    Arguments:
+        start_epoch: [float] Julian date of the starting epoch.
+        final_epoch: [float] Julian date of the final epoch.
+        ra: [float] Input right ascension (radians).
+        dec: [float] Input declination (radians).
+    
+    Return:
+        (ra, dec): [tuple of floats] Precessed equatorial coordinates (radians).
+    """
+
+    cdef double T, t, zeta, z, theta, A, B, C, ra_corr, dec_corr
+
+
+    T = (start_epoch - 2451545    )/36525.0
+    t = (final_epoch - start_epoch)/36525.0
+
+    # Calculate correction parameters in degrees
+    zeta  = ((2306.2181 + 1.39656*T - 0.000139*T**2)*t + (0.30188 - 0.000344*T)*t**2 + 0.017998*t**3)/3600
+    z     = ((2306.2181 + 1.39656*T - 0.000139*T**2)*t + (1.09468 + 0.000066*T)*t**2 + 0.018203*t**3)/3600
+    theta = ((2004.3109 - 0.85330*T - 0.000217*T**2)*t - (0.42665 + 0.000217*T)*t**2 - 0.041833*t**3)/3600
+
+    # Convert parameters to radians
+    zeta  = radians(zeta)
+    z     = radians(z)
+    theta = radians(theta)
+
+    # Calculate the next set of parameters
+    A = cos(dec  )*sin(ra + zeta)
+    B = cos(theta)*cos(dec)*cos(ra + zeta) - sin(theta)*sin(dec)
+    C = sin(theta)*cos(dec)*cos(ra + zeta) + cos(theta)*sin(dec)
+
+    # Calculate right ascension
+    ra_corr = (atan2(A, B) + z + 2*pi)%(2*pi)
+
+    # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
+    if (pi/2 - abs(dec)) < radians(0.5):
+        dec_corr = acos(sqrt(A**2 + B**2))
+    else:
+        dec_corr = asin(C)
+
+
+    return ra_corr, dec_corr
+
+
+
+@cython.cdivision(True)
 cdef double refractionApparentToTrue(double elev):
     """ Correct the apparent elevation of a star for refraction to true elevation. The temperature and air
         pressure are assumed to be unknown. 
-
         Source: Explanatory Supplement to the Astronomical Almanac (1992), p. 144.
-
     Arguments:
         elev: [float] Apparent elevation (radians).
-
     Return:
         [float] True elevation (radians).
-
     """
 
     cdef double refraction
@@ -281,20 +342,21 @@ cdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double j
         coordinates.
     
     Arguments:
-        ra: [float] Right ascension in radians.
-        dec: [float] Declination in radians.
+        ra: [float] J2000 right ascension in radians.
+        dec: [float] J2000 declination in radians.
         jd: [float] Julian date.
         lat: [float] latitude in radians.
         lon: [float] longitude in radians.
-
     Return:
         (ra, dec):
             - ra: [float] Refraction corrected (true) right ascension in radians.
             - dec: [float] Refraction corrected (true) declination in radians.
-
     """
 
     cdef double azim, alt
+
+    # Precess RA/Dec from J2000 to the epoch of date
+    ra, dec = equatorialCoordPrecession(2451545.0, jd, ra, dec)
 
     # Convert coordinates to alt/az
     azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
@@ -305,6 +367,9 @@ cdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double j
     # Convert back to equatorial
     ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
 
+    # Precess RA/Dec from the epoch of date to J2000
+    ra, dec = equatorialCoordPrecession(jd, 2451545.0, ra, dec)
+
 
     return (ra, dec)
 
@@ -314,15 +379,11 @@ cdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double j
 cdef double refractionTrueToApparent(double elev):
     """ Correct the true elevation of a star for refraction to apparent elevation. The temperature and air
         pressure are assumed to be unknown. 
-
         Source: https://en.wikipedia.org/wiki/Atmospheric_refraction
-
     Arguments:
         elev: [float] Apparent elevation (radians).
-
     Return:
         [float] True elevation (radians).
-
     """
 
     cdef double refraction
@@ -341,25 +402,26 @@ cdef double refractionTrueToApparent(double elev):
 
 
 
-cdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double jd, double lat, double lon):
+cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double jd, double lat, double lon):
     """ Correct the equatorial coordinates for refraction. The correction is done from true to apparent
         coordinates.
     
     Arguments:
-        ra: [float] Right ascension in radians.
-        dec: [float] Declination in radians.
+        ra: [float] J2000 Right ascension in radians.
+        dec: [float] J2000 Declination in radians.
         jd: [float] Julian date.
         lat: [float] Latitude in radians.
         lon: [float] Longitude in radians.
-
     Return:
         (ra, dec):
             - ra: [float] Apparent right ascension in radians.
             - dec: [float] Apparent declination in radians.
-
     """
 
     cdef double azim, alt
+
+    # Precess RA/Dec from J2000 to the epoch of date
+    ra, dec = equatorialCoordPrecession(2451545.0, jd, ra, dec)
 
     # Convert coordinates to alt/az
     azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
@@ -370,6 +432,9 @@ cdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double j
     # Convert back to equatorial
     ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
 
+    # Precess RA/Dec from the epoch of date to J2000
+    ra, dec = equatorialCoordPrecession(jd, 2451545.0, ra, dec)
+
 
     return (ra, dec)
 
@@ -378,19 +443,16 @@ cdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double j
 @cython.cdivision(True)
 cpdef (double, double) cyraDec2AltAz(double ra, double dec, double jd, double lat, double lon):
     """ Convert right ascension and declination to azimuth (+east of sue north) and altitude. 
-
     Arguments:
         ra: [float] Right ascension in radians.
         dec: [float] Declination in radians.
         jd: [float] Julian date.
         lat: [float] Latitude in radians.
         lon: [float] Longitude in radians.
-
     Return:
         (azim, elev): [tuple]
             azim: [float] Azimuth (+east of due north) in radians.
             elev: [float] Elevation above horizon in radians.
-
         """
 
     cdef double lst, ha, azim, sin_elev, elev
@@ -423,14 +485,12 @@ cpdef (double, double) cyraDec2AltAz(double ra, double dec, double jd, double la
 cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double lat, double lon):
     """ Convert azimuth and altitude in a given time and position on Earth to right ascension and 
         declination. 
-
     Arguments:
         azim: [float] Azimuth (+east of due north) in radians.
         elev: [float] Elevation above horizon in radians.
         jd: [float] Julian date.
         lat: [float] Latitude of the observer in radians.
         lon: [float] Longitde of the observer in radians.
-
     Return:
         (RA, dec): [tuple]
             RA: [float] Right ascension (radians).
@@ -442,12 +502,12 @@ cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double
 
     # Calculate Local Sidereal Time
     lst = radians(cyjd2LST(jd, degrees(lon)))
-    
+
     # Calculate hour angle
     ha = atan2(-sin(azim), tan(elev)*cos(lat) - cos(azim)*sin(lat))
-    
+
     # Calculate right ascension
-    ra = (lst - ha)%(2*pi)
+    ra = (lst - ha + 2*pi)%(2*pi)
 
     # Calculate declination
     dec = asin(sin(lat)*sin(elev) + cos(lat)*cos(elev)*cos(azim))
@@ -465,8 +525,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     double y_res, double h0, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, \
     str dist_type, bool refraction=True):
-    """ Convert RA, Dec to distorion corrected image coordinates. 
-
+    """ Convert RA, Dec to distorion corrected image coordinates.
     Arguments:
         RA_data: [ndarray] Array of right ascensions (degrees).
         dec_data: [ndarray] Array of declinations (degrees).
@@ -484,7 +543,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
         y_poly_rev: [ndarray float] Distortion polynomail in Y direction for reverse mapping.
         dist_type: [str] Distortion type. Can be: poly3+radial, radial3, radial4, or radial5.
         refraction: [bool] Apply refraction correction. True by default.
-    
+
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
     """
@@ -502,7 +561,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     cdef double cl = cos(radians(lat))
 
 
-    # Compute the current RA of the FOV centre by adding the difference in between the current and the 
+    # Compute the current RA of the FOV centre by adding the difference in between the current and the
     #   reference hour angle
     ra_centre = radians((ra_ref + cyjd2LST(jd, 0) - h0 + 360)%360)
     dec_centre = radians(dec_ref)
@@ -592,21 +651,24 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
             if dist_type == "radial3":
 
                 # Compute the new radius
-                r_corr = r*(1 + x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2)
+                #r_corr = r*(1 + x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2)
+                r_corr = r - x_poly_rev[2]*r**2 - x_poly_rev[3]*r**3
 
             # Apply the 4th order radial distortion
             elif dist_type == "radial4":
 
                 # Compute the new radius
-                r_corr = r*(1 + x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2 + x_poly_rev[5]*r**3)
+                #r_corr = r*(1 + x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2 + x_poly_rev[5]*r**3)
+                r_corr = r - x_poly_rev[2]*r**2 - x_poly_rev[3]*r**3 - x_poly_rev[4]*r**4
 
 
             # Apply the 5th order radial distortion
             elif dist_type == "radial5":
 
                 # Compute the new radius
-                r_corr = r*(1 + x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2 + x_poly_rev[5]*r**3 \
-                    + x_poly_rev[6]*r**4)
+                # r_corr = r*(1 + x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2 + x_poly_rev[5]*r**3 \
+                #     + x_poly_rev[6]*r**4)
+                r_corr = r - x_poly_rev[2]*r**2 - x_poly_rev[3]*r**3 - x_poly_rev[4]*r**4 - x_poly_rev[5]*r**5
 
 
             # Compute the scaling term
@@ -657,10 +719,10 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         y_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward Y axis polynomial parameters.
         dist_type: [str] Distortion type. Can be: poly3+radial, radial3, radial4, or radial5.
         refraction: [bool] Apply refraction correction. True by default.
-    
+
     Return:
         (ra_data, dec_data): [tuple of ndarrays]
-            
+
             ra_data: [ndarray] Right ascension of each point (deg).
             dec_data: [ndarray] Declination of each point (deg).
             magnitude_data: [ndarray] Array of meteor's lightcurve apparent magnitudes.
@@ -788,7 +850,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         # Radius from FOV centre to sky coordinate
         radius = radians(sqrt(x_corr**2 + y_corr**2))
 
-        # Compute theta - the direction angle between the FOV centre, sky coordinate, and the image vertical
+        # Compute theta - the direction angle between the FOV centre, sky coordinate, and the north
+        #   celestial pole
         theta = (pi/2 - radians(pos_angle_ref) + atan2(y_corr, x_corr))%(2*pi)
 
         ### Transform the radius and direction to coordinates on the sky ###
@@ -815,7 +878,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         # Compute right ascension
         sin_t = sin(theta)*sin(radius)/cos(dec)
         cos_t = (cos(radius) - sin(dec)*sin(dec_ref_corr))/(cos(dec)*cos(dec_ref_corr))
-        ra = (ra_ref_now_corr - atan2(sin_t, cos_t))%(2*pi)
+        ra = (ra_ref_now_corr - atan2(sin_t, cos_t) + 2*pi)%(2*pi)
 
 
         # Apply refraction correction

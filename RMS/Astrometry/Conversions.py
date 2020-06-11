@@ -1,13 +1,12 @@
 """ 
 A set of tools of working with meteor data. 
-
 Includes:
     - Julian date conversion
     - LST calculation
     - Coordinate transformations
     - RA and Dec precession correction
     - ...
-    
+
 """
 
 # The MIT License
@@ -74,10 +73,9 @@ EARTH = EARTH_CONSTANTS()
 ### DECORATORS ###
 
 def floatArguments(func):
-    """ A decorator that converts all function arguments to float. 
-    
-    @param func: a function to be decorated
+    """ A decorator that converts all function arguments to float.
 
+    @param func: a function to be decorated
     @return :[funtion object] the decorated function
     """
 
@@ -95,19 +93,16 @@ def floatArguments(func):
 
 
 def unixTime2Date(ts, tu, dt_obj=False):
-    """ Convert UNIX time given in ts and tu to date and time. 
-    
+    """ Convert UNIX time given in ts and tu to date and time.
+
     Arguments:
         ts: [int] UNIX time, seconds part
         tu: [int] UNIX time, microsecond part
-
     Kwargs:
         dt_obj: [bool] default False, function returns a datetime object if True
-
     Return:
         if dt_obj == False (default): [tuple] (year, month, day, hours, minutes, seconds, milliseconds)
         else: [datetime object]
-
     """
 
     # Convert the UNIX timestamp to datetime object
@@ -124,11 +119,10 @@ def unixTime2Date(ts, tu, dt_obj=False):
 
 
 def datetime2UnixTime(dt):
-    """ Convert the given datetime to UNIX time. 
-    
+    """ Convert the given datetime to UNIX time.
+
     Arguments:
         dt: [datetime]
-
     Return:
         [float] Unix time.
     """
@@ -150,14 +144,12 @@ def date2UnixTime(year, month, day, hour, minute, second, millisecond=0, UT_corr
         hour: [int] hours
         minute: [int] minutes
         second: [int] seconds
-
     Kwargs:
         millisecond: [int] milliseconds (optional)
         UT_corr: [float] UT correction in hours (difference from local time to UT)
     
     Return:
         [float] Unix time
-
     """# Convert all input arguments to integer (except milliseconds)
     year, month, day, hour, minute, second = map(int, (year, month, day, hour, minute, second))
 
@@ -170,8 +162,7 @@ def date2UnixTime(year, month, day, hour, minute, second, millisecond=0, UT_corr
 
 
 def date2JD(year, month, day, hour, minute, second, millisecond=0, UT_corr=0.0):
-    """ Convert date and time to Julian Date with epoch J2000.0. 
-
+    """ Convert date and time to Julian Date with epoch J2000.0.
     @param year: [int] year
     @param month: [int] month
     @param day: [int] day of the date
@@ -180,7 +171,6 @@ def date2JD(year, month, day, hour, minute, second, millisecond=0, UT_corr=0.0):
     @param second: [int] seconds
     @param millisecond: [int] milliseconds (optional)
     @param UT_corr: [float] UT correction in hours (difference from local time to UT)
-
     @return :[float] julian date, epoch 2000.0
     """
 
@@ -192,50 +182,43 @@ def date2JD(year, month, day, hour, minute, second, millisecond=0, UT_corr=0.0):
 
     # Calculate Julian date
     julian = dt - JULIAN_EPOCH + J2000_JD - timedelta(hours=UT_corr)
-    
+
     # Convert seconds to day fractions
     return julian.days + (julian.seconds + julian.microseconds/1000000.0)/86400.0
 
 
 
 def datetime2JD(dt, UT_corr=0.0):
-    """ Converts a datetime object to Julian date. 
-
+    """ Converts a datetime object to Julian date.
     Arguments:
         dt: [datetime object]
-
     Keyword arguments:
         UT_corr: [float] UT correction in hours (difference from local time to UT)
-
     Return:
         jd: [float] Julian date
     """
 
-    return date2JD(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000.0, 
+    return date2JD(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000.0,
         UT_corr=UT_corr)
 
 
 
 def jd2Date(jd, UT_corr=0, dt_obj=False):
-    """ Converts the given Julian date to (year, month, day, hour, minute, second, millisecond) tuple. 
-
+    """ Converts the given Julian date to (year, month, day, hour, minute, second, millisecond) tuple.
     Arguments:
         jd: [float] Julian date
-
     Keyword arguments:
         UT_corr: [float] UT correction in hours (difference from local time to UT)
         dt_obj: [bool] returns a datetime object if True. False by default.
-
     Return:
         (year, month, day, hour, minute, second, millisecond)
-
     """
 
-    
+
     dt = timedelta(days=jd)
 
     try:
-        date = dt + JULIAN_EPOCH - J2000_JD + timedelta(hours=UT_corr) 
+        date = dt + JULIAN_EPOCH - J2000_JD + timedelta(hours=UT_corr)
 
     # If the date is out of range (i.e. before year 1) use year 1. This is the limitation in the datetime
     # library. Time handling should be switched to astropy.time
@@ -251,15 +234,13 @@ def jd2Date(jd, UT_corr=0, dt_obj=False):
 
 
 def unixTime2JD(ts, tu):
-    """ Converts UNIX time to Julian date. 
-    
+    """ Converts UNIX time to Julian date.
+
     Arguments:
         ts: [int] UNIX time, seconds part
         tu: [int] UNIX time, microsecond part
-
     Return:
         [float] julian date, epoch 2000.0
-
     """
 
     return date2JD(*unixTime2Date(ts, tu))
@@ -267,32 +248,28 @@ def unixTime2JD(ts, tu):
 
 
 def jd2UnixTime(jd, UT_corr=0):
-    """ Converts the given Julian date to Unix timestamp. 
-
+    """ Converts the given Julian date to Unix timestamp.
     Arguments:
         jd: [float] Julian date
-
     Keyword arguments:
         UT_corr: [float] UT correction in hours (difference from local time to UT)
-
     Return:
         [float] Unix timestamp.
-
     """
 
     return date2UnixTime(*jd2Date(jd, UT_corr=UT_corr))
-    
+
 
 
 def JD2LST(julian_date, lon):
-    """ Convert Julian date to Local Sidreal Time and Greenwich Sidreal Time. 
-    
+    """ Convert Julian date to Local Sidreal Time and Greenwich Sidreal Time.
+
     Arguments;
         julian_date: [float] decimal julian date, epoch J2000.0
         lon: [float] longitude of the observer in degrees
-    
+
     Return:
-        [tuple]: (LST, GST): [tuple of floats] a tuple of Local Sidreal Time and Greenwich Sidreal Time 
+        [tuple]: (LST, GST): [tuple of floats] a tuple of Local Sidreal Time and Greenwich Sidreal Time
             (degrees)
     """
 
@@ -304,19 +281,16 @@ def JD2LST(julian_date, lon):
 
     # Local Sidreal Time
     LST = (GST + lon + 360) % 360
-    
+
     return LST, GST
 
 
 def JD2HourAngle(jd):
-    """ Convert the given Julian date to hour angle. 
-
+    """ Convert the given Julian date to hour angle.
     Arguments:
         jd: [float] Julian date.
-
     Return:
         hour_angle: [float] Hour angle (deg).
-
     """
 
     T = (jd - 2451545)/36525.0
@@ -335,12 +309,10 @@ def JD2HourAngle(jd):
 def geo2Cartesian(lat, lon, h, julian_date):
     """ Convert geographical Earth coordinates to Cartesian coordinate system (Earth center as origin).
         The Earth is considered as an elipsoid.
-
     @param lat: [float] latitude of the observer in degrees
     @param lon: [float] longitde of the observer in degress
     @param h: [int or float] elevation of the observer in meters
     @param julian_date: [float] decimal julian date, epoch J2000.0
-
     @return (x, y, z): [tuple of floats] a tuple of X, Y, Z Cartesian coordinates
     """
 
@@ -350,7 +322,7 @@ def geo2Cartesian(lat, lon, h, julian_date):
     LST_rad = math.radians(JD2LST(julian_date, lon)[0])
 
     # Get distance from Earth centre to the position given by geographical coordinates
-    Rh = h + math.sqrt(EARTH.POLAR_RADIUS**2 + (EARTH.SQR_DIFF/((EARTH.RATIO * math.tan(lat_rad)) * 
+    Rh = h + math.sqrt(EARTH.POLAR_RADIUS**2 + (EARTH.SQR_DIFF/((EARTH.RATIO * math.tan(lat_rad)) *
         (EARTH.RATIO * math.tan(lat_rad)) + 1)))
 
     # Calculate Cartesian coordinates (in meters)
@@ -362,14 +334,12 @@ def geo2Cartesian(lat, lon, h, julian_date):
 
 
 def cartesian2Geographical(julian_date, lon, Xi, Yi, Zi):
-    """ Convert Cartesian coordinates of a point (origin in Earth's centre) to geographical coordinates. 
-
+    """ Convert Cartesian coordinates of a point (origin in Earth's centre) to geographical coordinates.
     @param julian_date: [float] decimal julian date, epoch J2000.0
     @param lon: [float] longitde of the observer in degress
     @param Xi: [float] X coordinate of a point in space (meters)
     @param Yi: [float] Y coordinate of a point in space (meters)
     @param Zi: [float] Z coordinate of a point in space (meters)
-
     @return (lon_p, lat_p): [tuple of floats]
         lon_p: longitude of the point in degrees
         lat_p: latitude of the point in degrees
@@ -386,14 +356,12 @@ def cartesian2Geographical(julian_date, lon, Xi, Yi, Zi):
 
 
 def raDec2Vector(ra, dec):
-    """ Convert stellar equatorial coordinates to a vector with X, Y and Z components. 
-
+    """ Convert stellar equatorial coordinates to a vector with X, Y and Z components.
     @param ra: [float] right ascension in degrees
     @param dec: [float] declination in degrees
-
     @return (x, y, z): [tuple of floats]
     """
-    
+
     ra_rad = math.radians(ra)
     dec_rad = math.radians(dec)
 
@@ -405,11 +373,9 @@ def raDec2Vector(ra, dec):
 
 
 def vector2RaDec(eci):
-    """ Convert Earth-centered intertial vector to right ascension and declination. 
-
+    """ Convert Earth-centered intertial vector to right ascension and declination.
     Arguments:
         eci: [3 element ndarray] Vector coordinates in Earth-centered inertial system
-
     Return:
         (ra, dec): [tuple of floats] right ascension and declinaton (degrees)
     """
@@ -428,16 +394,14 @@ def vector2RaDec(eci):
 
 
 def altAz2RADec(azim, elev, jd, lat, lon):
-    """ Convert azimuth and altitude in a given time and position on Earth to right ascension and 
-        declination. 
-
+    """ Convert azimuth and altitude in a given time and position on Earth to right ascension and
+        declination.
     Arguments:
         azim: [float] azimuth (+east of due north) in degrees
         elev: [float] elevation above horizon in degrees
         jd: [float] Julian date
         lat: [float] latitude of the observer in degrees
         lon: [float] longitde of the observer in degrees
-
     Return:
         (RA, dec): [tuple]
             RA: [float] right ascension (degrees)
@@ -448,13 +412,13 @@ def altAz2RADec(azim, elev, jd, lat, lon):
     elev = np.radians(elev)
     lat = np.radians(lat)
     lon = np.radians(lon)
-    
+
     # Calculate hour angle
     ha = np.arctan2(-np.sin(azim), np.tan(elev)*np.cos(lat) - np.cos(azim)*np.sin(lat))
 
     # Calculate Local Sidereal Time
     lst = np.radians(JD2LST(jd, np.degrees(lon))[0])
-    
+
     # Calculate right ascension
     ra = (lst - ha)%(2*np.pi)
 
@@ -468,22 +432,20 @@ altAz2RADec_vect = np.vectorize(altAz2RADec, excluded=['lat', 'lon'])
 
 
 def raDec2AltAz(ra, dec, jd, lat, lon):
-    """ Calculate the reference azimuth and altitude of the centre of the FOV from the given RA/Dec. 
-
+    """ Calculate the reference azimuth and altitude of the centre of the FOV from the given RA/Dec.
     Arguments:
         ra:  [float] Right ascension in degrees.
         dec: [float] Declination in degrees.
         jd: [float] Reference Julian date.
         lat: [float] Latitude +N in degrees.
         lon: [float] Longitude +E in degrees.
-
     Return:
         (azim, elev): [tuple of float]: Azimuth and elevation (degrees).
     """
 
     # Compute azim and elev using a fast cython function
     azim, elev = cyraDec2AltAz(np.radians(ra), np.radians(dec), jd, np.radians(lat), np.radians(lon))
-    
+
 
     # Convert alt/az to degrees
     azim = np.degrees(azim)
@@ -501,7 +463,7 @@ def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, 
     """ Converts the geocentric into apparent meteor radiant and velocity. The conversion is not perfect
         as the zenith attraction correction should be done after the radiant has been derotated for Earth's
         velocity, but it's precise to about 0.1 deg.
-    
+
     Arguments:
         ra_g: [float] Geocentric right ascension (deg).
         dec_g: [float] Declination (deg).
@@ -510,14 +472,11 @@ def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, 
         lon: [float] State vector longitude (deg).
         ele: [float] State vector elevation (meters).
         jd: [float] Julian date.
-
     Keyword arguments:
         include_rotation: [bool] Whether the velocity should be corrected for Earth's rotation.
             True by default.
-
     Return:
         (ra, dec, v_init): Apparent radiant (deg) and velocity (m/s).
-
     """
 
 
@@ -531,7 +490,7 @@ def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, 
     v_init = np.sqrt(vg**2 + (2*6.67408*5.9722)*1e13/vectMag(state_vector))
 
 
-    # Calculate the geocentric latitude (latitude which considers the Earth as an elipsoid) of the reference 
+    # Calculate the geocentric latitude (latitude which considers the Earth as an elipsoid) of the reference
     # trajectory point
     lat_geocentric = np.degrees(math.atan2(eci_z, math.sqrt(eci_x**2 + eci_y**2)))
 
@@ -550,7 +509,7 @@ def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, 
     diff = 10e-5
     zc = eta
     while diff > 10e-6:
-        
+
         # Update the zenith distance
         zc -= diff
 
@@ -609,57 +568,6 @@ def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, 
 
 
 ###########################################
-
-
-### Precession ###
-
-def equatorialCoordPrecession(start_epoch, final_epoch, ra, dec):
-    """ Corrects Right Ascension and Declination from one epoch to another, taking only precession into 
-        account.
-
-        Implemented from: Jean Meeus - Astronomical Algorithms, 2nd edition, pages 134-135
-
-    @param start_epoch: [float] Julian date of the starting epoch
-    @param final_epoch: [float] Julian date of the final epoch
-    @param ra: [float] non-corrected right ascension in degrees
-    @param dec: [float] non-corrected declination in degrees
-
-    @return (ra, dec): [tuple of floats] precessed equatorial coordinates in degrees
-    """
-
-    ra = math.radians(ra)
-    dec = math.radians(dec)
-
-    T = (start_epoch - 2451545) / 36525.0
-    t = (final_epoch - start_epoch) / 36525.0
-
-    # Calculate correction parameters
-    zeta  = ((2306.2181 + 1.39656*T - 0.000139*T**2)*t + (0.30188 - 0.000344*T)*t**2 + 0.017998*t**3)/3600
-    z     = ((2306.2181 + 1.39656*T - 0.000139*T**2)*t + (1.09468 + 0.000066*T)*t**2 + 0.018203*t**3)/3600
-    theta = ((2004.3109 - 0.85330*T - 0.000217*T**2)*t - (0.42665 + 0.000217*T)*t**2 - 0.041833*t**3)/3600
-
-    # Convert parameters to radians
-    zeta, z, theta = map(math.radians, (zeta, z, theta))
-
-    # Calculate the next set of parameters
-    A = math.cos(dec) * math.sin(ra + zeta)
-    B = math.cos(theta)*math.cos(dec)*math.cos(ra + zeta) - math.sin(theta)*math.sin(dec)
-    C = math.sin(theta)*math.cos(dec)*math.cos(ra + zeta) + math.cos(theta)*math.sin(dec)
-
-    # Calculate right ascension
-    ra_corr = math.atan2(A, B) + z
-
-    # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
-    if (math.pi/2 - abs(dec)) < math.radians(0.5):
-        dec_corr = math.acos(math.sqrt(A**2 + B**2))
-    else:
-        dec_corr = math.asin(C)
-
-
-    return math.degrees(ra_corr), math.degrees(dec_corr)
-
-
-##################
 
 
 
