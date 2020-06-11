@@ -13,9 +13,8 @@ while [ "$dead" != "yes" ]
 do
   logf=`find . -name $fn -mmin +1 -ls`
   if [ "$logf" !=  "" ] ; then
-    done=`grep Archiving $logf`
-    if [ "$done" == "" ] 
-    then
+    done=`grep Archiving $fn`
+    if [ "$done" != "" ] ; then
         sudo logger 'RMS Pi4 watchdog process finished cleanly'
         exit 0
     fi
