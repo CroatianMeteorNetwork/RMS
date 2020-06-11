@@ -7,19 +7,19 @@ MAILRECIP=markmcintyre99@googlemail.com
 
 cd /home/pi/RMS_data/logs
 fn=`ls -1 log* | tail -1`
-
 dead="no"
 while [ "$dead" != "yes" ]
 do
   logf=`find . -name $fn -mmin +1 -ls`
-  if [ "$logf" !=  "" ] ; then
+  dayt=`wc -l $fn | awk '{print $1}'`
+  if [[ "$logf" !=  "" && $dayt -gt 10 ]] ; then
     done=`grep Archiving $fn`
     if [ "$done" != "" ] ; then
         sudo logger 'RMS Pi4 watchdog process finished cleanly'
         exit 0
     fi
     touch /home/pi/source/RMS/.crash
-    sudo loggger 'RMS Pi4 watchdog RMS stopped acquisition'
+    sudo logger 'RMS Pi4 watchdog RMS stopped acquisition'
     killall python
     sleep 2
     cd ~/source/RMS
