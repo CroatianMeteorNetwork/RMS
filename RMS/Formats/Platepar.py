@@ -986,30 +986,27 @@ class Platepar(object):
         out_str += "    Pos ang = {:.6f}\n".format(self.pos_angle_ref)
         out_str += "Distortion:\n"
         out_str += "    Type = {:s}\n".format(self.distortion_type)
-        out_str += "    Distortion coeffs:\n"
 
         # If the polynomial is used, the X axis parameters are stored in x_poly, otherwise radials paramters
         #   are used
         if self.distortion_type.startswith("poly"):
-            dist_string = "X-axis"
+            out_str += "    Distortion coeffs (polynomial):\n"
+            dist_string = "X"
         else:
-            dist_string = "radial"
-            out_str += "              x0,       y0, aspect-1,       k1,       k2,       k3,       k4\n"
+            out_str += "    Distortion coeffs (radial):\n"
+            out_str += "                 x0,       y0, aspect-1,       k1,       k2,       k3,       k4\n"
+            dist_string = ""
 
-        out_str += "        - image to sky mapping, {:s} = \n".format(dist_string)
-        out_str += "        {:s}\n".format(", ".join(["{:+8.3f}".format(c) \
+        out_str += "img2sky {:s} = {:s}\n".format(dist_string, ", ".join(["{:+8.3f}".format(c) \
             if abs(c) > 10e-4 else "{:+8.1e}".format(c) for c in self.x_poly_fwd]))
-        out_str += "        - sky to image mapping, {:s} = \n".format(dist_string)
-        out_str += "        {:s}\n".format(", ".join(["{:+8.3f}".format(c) \
+        out_str += "sky2img {:s} = {:s}\n".format(dist_string, ", ".join(["{:+8.3f}".format(c) \
             if abs(c) > 10e-4 else "{:+8.1e}".format(c) for c in self.x_poly_rev]))
 
         # Only print the rest if the polynomial fit is used
         if self.distortion_type.startswith("poly"):
-            out_str += "        - image to sky mapping, Y-axis = \n"
-            out_str += "        {:s}\n".format(", ".join(["{:+8.3f}".format(c) \
+            out_str += "img2sky Y = {:s}\n".format(", ".join(["{:+8.3f}".format(c) \
                 if abs(c) > 10e-4 else "{:+8.1e}".format(c) for c in self.y_poly_fwd]))
-            out_str += "        - sky to image mapping, Y-axis = \n"
-            out_str += "        {:s}\n".format(", ".join(["{:+8.3f}".format(c) \
+            out_str += "sky2img Y = {:s}\n".format(", ".join(["{:+8.3f}".format(c) \
                 if abs(c) > 10e-4 else "{:+8.1e}".format(c) for c in self.y_poly_rev]))
 
         return out_str
