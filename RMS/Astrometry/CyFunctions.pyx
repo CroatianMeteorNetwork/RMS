@@ -621,6 +621,11 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
         k3 = x_poly_rev[5]
         k4 = x_poly_rev[6]
 
+    # If the polynomial distortion was used, unpack the offsets
+    else:
+        x0 = x_poly_rev[0]
+        y0 = y_poly_rev[0]
+
 
     # Convert all equatorial coordinates to image coordinates
     for i in range(ra_data.shape[0]):
@@ -658,10 +663,10 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
         if dist_type == "poly3+radial":
 
             # Compute the radius
-            r = sqrt(x**2 + y**2)
+            r = sqrt((x - x0)**2 + (y - y0)**2)
 
             # Calculate the distortion in X direction
-            dx = (x_poly_rev[0]
+            dx = (x0
                 + x_poly_rev[1]*x
                 + x_poly_rev[2]*y
                 + x_poly_rev[3]*x**2
@@ -675,7 +680,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
                 + x_poly_rev[11]*y*r)
 
             # Calculate the distortion in Y direction
-            dy = (y_poly_rev[0]
+            dy = (y0
                 + y_poly_rev[1]*x
                 + y_poly_rev[2]*y
                 + y_poly_rev[3]*x**2
@@ -841,7 +846,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         if dist_type == "poly3+radial":
 
             # Compute the radius
-            r = sqrt(x_img**2 + y_img**2)
+            r = sqrt((x_img - x0)**2 + (y_img - y0)**2)
 
             # Compute offset in X direction
             dx = (x0
