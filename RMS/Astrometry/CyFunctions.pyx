@@ -143,8 +143,8 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
             _, elev = cyraDec2AltAz(radians(ra), radians(dec), jd, radians(lat), radians(lon))
 
 
-            # Only take stars above 0 degrees
-            if degrees(elev) > 0:
+            # Only take stars above -20 degrees
+            if degrees(elev) > -20:
             
                 filtered_list[k,0] = ra
                 filtered_list[k,1] = dec
