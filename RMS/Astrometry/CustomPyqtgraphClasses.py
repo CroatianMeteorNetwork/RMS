@@ -30,7 +30,7 @@ class Plus(QPainterPath):
 class Cross(QPainterPath):
     """
     Used as a symbol for ScatterPlotItem
-    ex. item.setSymbol(Plus())
+    ex. item.setSymbol(Cross())
 
     Consists of two lines with no fill making a cross
     """
@@ -52,7 +52,7 @@ class Cross(QPainterPath):
 class CircleLine(QPainterPath):
     """
     Used as a symbol for ScatterPlotItem
-    ex. item.setSymbol(Plus())
+    ex. item.setSymbol(CircleLine())
 
     Consists of a circle with fill that can be removed (with setBrush(QColor(0,0,0,0))),
     with a line going from the top to the center
@@ -61,16 +61,16 @@ class CircleLine(QPainterPath):
         QPainterPath.__init__(self)
         points = np.asarray([(0, -0.5), (0, 0)])
         self.moveTo(*points[0])
-        for x, y in points[1:]:
-            self.lineTo(x, y)
+        self.lineTo(*points[1])
         self.closeSubpath()
+
         self.addEllipse(QPoint(0, 0), 0.5, 0.5)
 
 
 class Crosshair(QPainterPath):
     """
     Used as a symbol for ScatterPlotItem
-    ex. item.setSymbol(Plus())
+    ex. item.setSymbol(Crosshair())
 
     Consists of a circle with fill that can be removed (with setBrush(QColor(0,0,0,0))),
     with four lines going from the top, bottom, left and right to near the center

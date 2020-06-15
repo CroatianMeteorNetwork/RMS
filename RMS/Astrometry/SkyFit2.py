@@ -6,6 +6,7 @@ import time
 import datetime
 import argparse
 import traceback
+import copy
 
 import numpy as np
 import matplotlib
@@ -112,7 +113,7 @@ class FOVinputDialog(object):
 
 
 class PlateTool(QMainWindow):
-    def __init__(self, dir_path, config, beginning_time=None, fps=None, gamma=None):
+    def __init__(self, dir_path, config, beginning_time=None, fps=None, gamma=None, startUI=True):
         """ SkyFit interactive window.
 
         Arguments:
@@ -286,7 +287,8 @@ class PlateTool(QMainWindow):
         self.dist_type_index = self.platepar.distortion_type_list.index(self.platepar.distortion_type)
 
         # SETUP WINDOW
-        self.setupUI()
+        if startUI:
+            self.setupUI()
 
     def setupUI(self):
         """ Setup pyqt UI with widgets """
@@ -401,7 +403,7 @@ class PlateTool(QMainWindow):
         # centroid star markers (zoom window)
         self.centroid_star_markers2 = pg.ScatterPlotItem()
         self.zoom_window.addItem(self.centroid_star_markers2)
-        self.centroid_star_markers2.setPen(QColor(255, 165,0))
+        self.centroid_star_markers2.setPen(QColor(255, 165, 0))
         self.centroid_star_markers2.setSize(15)
         self.centroid_star_markers2.setSymbol(Plus())
         self.centroid_star_markers2.setZValue(4)
@@ -455,7 +457,6 @@ class PlateTool(QMainWindow):
         # mouse binding
         self.img_frame.scene().sigMouseMoved.connect(self.mouseMove)
         self.img_frame.scene().sigMouseClicked.connect(self.mouseClick)  # NOTE: clicking event doesnt trigger if moving
-
 
         self.scrolls_back = 0
 
@@ -850,9 +851,41 @@ class PlateTool(QMainWindow):
             pass
 
     def saveState(self):
-        # TODO: fix bug
-        savePickle(self, self.dir_path, 'skyFit_latest.state')
+        """
+        Saves the state of the object to a file so that when loading, it will appear the
+        same as before
+
+        Can be loaded by calling:
+        python -m RMS.Astrometry.SkyFit2 PATH/skyFit2_latest.state --config .
+        """
+        # you cant pickle a class that inherits from something, so convert all variables
+        # that dont inherit from something into a dictionary and pickle them
+        to_remove = []
+
+        dic = copy.copy(self.__dict__)
+        for k, v in dic.items():
+            if v.__class__.__bases__[0] is not object and not isinstance(v, bool) and not isinstance(v, float):
+                to_remove.append(k)  # remove class that inherits from something
+
+        for remove in to_remove:
+            del dic[remove]
+
+        savePickle(dic, self.dir_path, 'skyFit2_latest.state')
         print("Saved state to file")
+
+    def loadState(self, dir_path, state_name):
+        # function should theoretically work if called in the middle of the program
+        variables = loadPickle(dir_path, state_name)
+        for k, v in variables.items():
+            setattr(self, k, v)
+
+        #  if setupUI hasnt already been called, call it
+        if not hasattr(self, 'central'):
+            self.setupUI()
+        else:
+            self.updateImage()
+            self.updateLeftLabels()
+
 
     def mouseClick(self, event):
         modifiers = QApplication.keyboardModifiers()
@@ -1008,7 +1041,8 @@ class PlateTool(QMainWindow):
 
                 # Fit the photometric offset (disable vignetting fit if a flat is used)
                 photom_params, fit_stddev, fit_resids = photometryFit(px_intens_list, radius_list,
-                    catalog_mags, fixed_vignetting=(0.0 if self.flat_struct is not None else None))
+                                                                      catalog_mags, fixed_vignetting=(
+                        0.0 if self.flat_struct is not None else None))
 
                 photom_offset, vignetting_coeff = photom_params
 
@@ -2513,13 +2547,18 @@ if __name__ == '__main__':
 
     #########################
 
+    app = QApplication(sys.argv)
+
     # If the state file was given, load the state
     if cml_args.dir_path[0].endswith('.state'):
 
         dir_path, state_name = os.path.split(cml_args.dir_path[0])
+        config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
 
-        # Load the manual redicution tool object from a state file
-        plate_tool = loadPickle(dir_path, state_name)
+        # create plate_tool without calling its constructor then calling loadstate
+        plate_tool = PlateTool.__new__(PlateTool)
+        super(PlateTool, plate_tool).__init__()
+        plate_tool.loadState(dir_path, state_name)
 
         # Set the dir path in case it changed
         plate_tool.dir_path = dir_path
@@ -2540,8 +2579,6 @@ if __name__ == '__main__':
         else:
             beginning_time = None
 
-    # Displaying window
-    app = QApplication(sys.argv)
-    plate_tool = PlateTool(dir_path, config, beginning_time=beginning_time,
-                           fps=cml_args.fps, gamma=cml_args.gamma)
+        plate_tool = PlateTool(dir_path, config, beginning_time=beginning_time,
+                               fps=cml_args.fps, gamma=cml_args.gamma)
     sys.exit(app.exec_())

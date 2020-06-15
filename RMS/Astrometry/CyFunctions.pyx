@@ -24,6 +24,7 @@ cdef double pi = np.pi
 
 # Declare math functions
 cdef extern from "math.h":
+    double abs(double)
     double sin(double)
     double asin(double)
     double cos(double)
@@ -137,8 +138,8 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
             _, elev = cyraDec2AltAz(radians(ra), radians(dec), jd, radians(lat), radians(lon))
 
 
-            # Only take stars above 0 degrees
-            if degrees(elev) > 0:
+            # Only take stars above -20 degrees
+            if degrees(elev) > -20:
 
                 filtered_list[k,0] = ra
                 filtered_list[k,1] = dec
@@ -550,7 +551,8 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
 
     cdef int i
     cdef double ra_centre, dec_centre, ra, dec
-    cdef double radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, r_corr, r_scale
+    cdef double radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, x_img, y_img, r_corr, r_scale
+    cdef double x0, y0, xy, k1, k2, k3, k4
 
     # Init output arrays
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] x_array = np.zeros_like(ra_data)
@@ -570,6 +572,33 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     if refraction:
         ra_centre, dec_centre = eqRefractionTrueToApparent(ra_centre, dec_centre, jd, radians(lat), \
             radians(lon))
+
+
+    # If the radial distortion is used, unpack radial parameters
+    if dist_type.startswith("radial"):
+
+        # Offsets
+        x0 = x_poly_rev[0]
+        y0 = x_poly_rev[1]
+
+        # Aspect ratio
+        xy = x_poly_rev[2]
+
+        # If the aspect ratio is smaller than 0.1, force it to 0
+        xy = abs(xy)
+        if xy < 0.1:
+            xy = 0.0
+
+        # Distortion coeffs
+        k1 = x_poly_rev[3]
+        k2 = x_poly_rev[4]
+        k3 = x_poly_rev[5]
+        k4 = x_poly_rev[6]
+
+    # If the polynomial distortion was used, unpack the offsets
+    else:
+        x0 = x_poly_rev[0]
+        y0 = y_poly_rev[0]
 
 
     # Convert all equatorial coordinates to image coordinates
@@ -608,10 +637,10 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
         if dist_type == "poly3+radial":
 
             # Compute the radius
-            r = sqrt((x - x_poly_rev[0])**2 + (y - y_poly_rev[0])**2)
+            r = sqrt((x - x0)**2 + (y - y0)**2)
 
             # Calculate the distortion in X direction
-            dx = (x_poly_rev[0]
+            dx = (x0
                 + x_poly_rev[1]*x
                 + x_poly_rev[2]*y
                 + x_poly_rev[3]*x**2
@@ -625,7 +654,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
                 + x_poly_rev[11]*y*r)
 
             # Calculate the distortion in Y direction
-            dy = (y_poly_rev[0]
+            dy = (y0
                 + y_poly_rev[1]*x
                 + y_poly_rev[2]*y
                 + y_poly_rev[3]*x**2
@@ -642,33 +671,28 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
         # Apply a radial distortion
         elif dist_type.startswith("radial"):
 
-            # Compute the radius
-            #   Use the X array for storing the distortion parameters (index 0 for X offset, 1 for Y offset)
-            r = sqrt((x - x_poly_rev[0])**2 + (y - x_poly_rev[1])**2)
+            # Compute the normalized radius to horizontal size
+            r = sqrt(x**2 + y**2)/(x_res/2.0)
             r_corr = r
 
             # Apply the 3rd order radial distortion
             if dist_type == "radial3":
 
                 # Compute the new radius
-                #r_corr = r*(1 + x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2)
-                r_corr = r - x_poly_rev[2]*r**2 - x_poly_rev[3]*r**3
+                r_corr = (1.0 - k1 - k2)*r + k1*r**2 - k2*r**3
 
             # Apply the 4th order radial distortion
             elif dist_type == "radial4":
 
                 # Compute the new radius
-                #r_corr = r*(1 + x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2 + x_poly_rev[5]*r**3)
-                r_corr = r - x_poly_rev[2]*r**2 - x_poly_rev[3]*r**3 - x_poly_rev[4]*r**4
+                r_corr = (1.0 - k1 - k2 - k3)*r + k1*r**2 - k2*r**3 + k3*r**4
 
 
             # Apply the 5th order radial distortion
             elif dist_type == "radial5":
 
                 # Compute the new radius
-                # r_corr = r*(1 + x_poly_rev[2] + x_poly_rev[3]*r + x_poly_rev[4]*r**2 + x_poly_rev[5]*r**3 \
-                #     + x_poly_rev[6]*r**4)
-                r_corr = r - x_poly_rev[2]*r**2 - x_poly_rev[3]*r**3 - x_poly_rev[4]*r**4 - x_poly_rev[5]*r**5
+                r_corr = (1.0 - k1 - k2 - k3 - k4)*r + k1*r**2 - k2*r**3 + k3*r**4 - k4*r**5
 
 
             # Compute the scaling term
@@ -677,16 +701,22 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
             else:
                 r_scale = (r_corr/r - 1)
 
-            # Use the X array for storing the distortion parameters (index 0 for X offset, 1 for Y offset)
-            dx = x_poly_rev[0] + x*r_scale
-            dy = x_poly_rev[1] + y*r_scale
+            # Compute distortion offsets
+            dx = (x - x0)*r_scale
+            dy = (y - y0)*r_scale/(1.0 + xy)
 
 
-        # Add the distortion correction and calculate X image coordinates
-        x_array[i] = x - dx + x_res/2.0
 
-        # Add the distortion correction and calculate Y image coordinates
-        y_array[i] = y - dy + y_res/2.0
+        # Add the distortion
+        x_img = x - dx
+        y_img = y - dy
+
+
+        # Calculate X image coordinates
+        x_array[i] = x_img + x_res/2.0
+
+        # Calculate Y image coordinates
+        y_array[i] = y_img + y_res/2.0
 
 
     return x_array, y_array
@@ -729,7 +759,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     """
 
     cdef int i
-    cdef double jd, x_img, y_img, r_img, dx, x_corr, dy, y_corr, r_corr, r_scale
+    cdef double jd, x_img, y_img, r, dx, x_corr, dy, y_corr, r_corr, r_scale
+    cdef double x0, y0, xy, k1, k2, k3, k4
     cdef double radius, theta, sin_t, cos_t
     cdef double ha, ra_ref_now, ra_ref_now_corr, ra, dec, dec_ref_corr
 
@@ -739,6 +770,35 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data = np.zeros_like(jd_data)
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data = np.zeros_like(jd_data)
+
+
+    # If the radial distortion is used, unpack radial parameters
+    if dist_type.startswith("radial"):
+
+        # Offsets
+        x0 = x_poly_fwd[0]
+        y0 = x_poly_fwd[1]
+
+        # Aspect ratio
+        xy = x_poly_fwd[2]
+
+        # If the aspect ratio is smaller than 0.1, force it to 0
+        xy = abs(xy)
+        if xy < 0.1:
+            xy = 0.0
+
+        # Distortion coeffs
+        k1 = x_poly_fwd[3]
+        k2 = x_poly_fwd[4]
+        k3 = x_poly_fwd[5]
+        k4 = x_poly_fwd[6]
+
+
+    # If the polynomial distortion was used, unpack the offsets
+    else:
+        x0 = x_poly_fwd[0]
+        y0 = y_poly_fwd[0]
+
 
     # Go through all given data points and convert them from X, Y to RA, Dec
     for i in range(jd_data.shape[0]):
@@ -756,18 +816,14 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         y_img = y_img - y_res/2.0
 
 
-        # Set initial values
-        dx = 0
-        dy = 0
-
         # Apply 3rd order polynomial + one radial term distortion
         if dist_type == "poly3+radial":
 
             # Compute the radius
-            r_img = sqrt((x_img - x_poly_fwd[0])**2 + (y_img - y_poly_fwd[0])**2)
+            r = sqrt((x_img - x0)**2 + (y_img - y0)**2)
 
             # Compute offset in X direction
-            dx = (x_poly_fwd[0]
+            dx = (x0
                 + x_poly_fwd[1]*x_img
                 + x_poly_fwd[2]*y_img
                 + x_poly_fwd[3]*x_img**2
@@ -777,11 +833,11 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
                 + x_poly_fwd[7]*x_img**2*y_img
                 + x_poly_fwd[8]*x_img*y_img**2
                 + x_poly_fwd[9]*y_img**3
-                + x_poly_fwd[10]*x_img*r_img
-                + x_poly_fwd[11]*y_img*r_img)
+                + x_poly_fwd[10]*x_img*r
+                + x_poly_fwd[11]*y_img*r)
 
             # Compute offset in Y direction
-            dy = (y_poly_fwd[0]
+            dy = (y0
                 + y_poly_fwd[1]*x_img
                 + y_poly_fwd[2]*y_img
                 + y_poly_fwd[3]*x_img**2
@@ -791,52 +847,51 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
                 + y_poly_fwd[7]*x_img**2*y_img
                 + y_poly_fwd[8]*x_img*y_img**2
                 + y_poly_fwd[9]*y_img**3
-                + y_poly_fwd[10]*y_img*r_img
-                + y_poly_fwd[11]*x_img*r_img)
+                + y_poly_fwd[10]*y_img*r
+                + y_poly_fwd[11]*x_img*r)
+
 
         # Apply a radial distortion
         elif dist_type.startswith("radial"):
 
-            # Compute the radius
-            #   Use the X array for storing the distortion parameters (index 0 for X offset, 1 for Y offset)
-            r_img = sqrt((x_img - x_poly_fwd[0])**2 + (y_img - x_poly_fwd[1])**2)
-            r_corr = r_img
+            # Compute the radius normalized to the horizontal image size
+            r = sqrt(x_img**2 + (1.0 + xy)*y_img**2)/(x_res/2.0)
+            r_corr = r
 
             # Apply the 3rd order radial distortion
             if dist_type == "radial3":
 
                 # Compute the new radius
-                r_corr = r_img*(1 + x_poly_fwd[2] + x_poly_fwd[3]*r_img + x_poly_fwd[4]*r_img**2)
+                r_corr = (1.0 - k1 - k2)*r + k1*r**2 - k2*r**3
 
             # Apply the 4th order radial distortion
             elif dist_type == "radial4":
 
                 # Compute the new radius
-                r_corr = r_img*(1 + x_poly_fwd[2] + x_poly_fwd[3]*r_img + x_poly_fwd[4]*r_img**2 \
-                    + x_poly_fwd[5]*r_img**3)
+                r_corr = (1.0 - k1 - k2 - k3)*r + k1*r**2 - k2*r**3 + k3*r**4
 
             # Apply the 5th order radial distortion
             elif dist_type == "radial5":
 
                 # Compute the new radius
-                r_corr = r_img*(1 + x_poly_fwd[2] + x_poly_fwd[3]*r_img + x_poly_fwd[4]*r_img**2 \
-                    + x_poly_fwd[5]*r_img**3 + x_poly_fwd[6]*r_img**4)
+                r_corr = (1.0 - k1 - k2 - k3 - k4)*r + k1*r**2 - k2*r**3 + k3*r**4 - k4*r**5
 
 
             # Compute the scaling term
-            if r_img == 0:
+            if r == 0:
                 r_scale = 0
             else:
-                r_scale = (r_corr/r_img - 1)
+                r_scale = (r_corr/r - 1)
 
             # Compute offsets
-            dx = x_poly_fwd[0] + x_img*r_scale
-            dy = x_poly_fwd[1] + y_img*r_scale
+            dx = (x_img - x0)*r_scale
+            dy = (y_img - y0)*r_scale*(1.0 + xy)
 
 
         # Correct image coordinates for distortion
-        y_corr = y_img + dy
         x_corr = x_img + dx
+        y_corr = y_img + dy
+
 
         # Gnomonize coordinates
         x_corr = x_corr/pix_scale
@@ -853,8 +908,6 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         # Compute theta - the direction angle between the FOV centre, sky coordinate, and the north
         #   celestial pole
         theta = (pi/2 - radians(pos_angle_ref) + atan2(y_corr, x_corr))%(2*pi)
-
-        ### Transform the radius and direction to coordinates on the sky ###
 
 
         # Compute the reference RA centre at the given JD by adding the hour angle difference

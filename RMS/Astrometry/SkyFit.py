@@ -2735,9 +2735,8 @@ class PlateTool(object):
 
 
         # Extract paired catalog stars and image coordinates separately
-        catalog_stars = np.array([cat_coords for img_coords, cat_coords in self.paired_stars])
-        img_stars = np.array([img_coords for img_coords, cat_coords in self.paired_stars])
-
+        img_stars = np.array(self.paired_stars)[:, 0]
+        catalog_stars = np.array(self.paired_stars)[:, 1]
 
         # Get the Julian date of the image that's being fit
         jd = date2JD(*self.img_handle.currentTime())
@@ -2775,7 +2774,7 @@ class PlateTool(object):
             distance = np.sqrt(delta_x**2 + delta_y**2)
 
 
-            # Compute the residuals in ra/dec in angular coordiniates
+            # Compute the residuals in ra/dec in angular coordinates
             img_time = self.img_handle.currentTime()
             _, ra_img, dec_img, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar)
 
@@ -2862,8 +2861,8 @@ class PlateTool(object):
 
 
         # Extract paired catalog stars and image coordinates separately
-        catalog_stars = np.array([cat_coords for img_coords, cat_coords in self.paired_stars])
-        img_stars = np.array([img_coords for img_coords, cat_coords in self.paired_stars])
+        img_stars = np.array(self.paired_stars)[:, 0]
+        catalog_stars = np.array(self.paired_stars)[:, 1]
 
         # Get the Julian date of the image that's being fit
         jd = date2JD(*self.img_handle.currentTime())

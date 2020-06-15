@@ -7,6 +7,8 @@ import pyqtgraph as pg
 import time
 import sys
 import numpy as np
+import dill
+import os
 
 from RMS.Astrometry.CustomPyqtgraphClasses import *
 
@@ -223,6 +225,13 @@ class GUI(QMainWindow):
         else:
             self.hist.setLevels(*self.hist_levels)
 
+    def saveState(self):
+        dir_path = 'C:/users/jonat/documents'
+        file_name = 'file.state'
+        with open(os.path.join(dir_path, file_name), 'wb') as f:
+            dill.dump(self, f, protocol=2)
+
+
     def nextImg(self):
         """ get new data """
         self.data = pg.gaussianFilter(np.random.normal(size=(256, 256)), (20, 20))
@@ -269,6 +278,9 @@ class GUI(QMainWindow):
             elif self.label_visible == 1:
                 self.label.show()
                 self.label_visible = 0
+
+        elif event.key() == Qt.Key_S and modifiers == Qt.ControlModifier:
+            self.saveState()
 
         elif not self.image_scroll and event.key() == Qt.Key_Z and modifiers == Qt.ShiftModifier:
             if self.zoom_visible:
