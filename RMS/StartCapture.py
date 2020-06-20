@@ -184,7 +184,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         else:
             log.info("Previous capture directory found: {:s}".format(night_data_dir))
 
-
+        # Resume run is finished now, reset resume flag
+        cml_args.resume = False
 
     # Make a name for the capture data directory
     if night_data_dir_name is None:

@@ -499,7 +499,7 @@ class Platepar(object):
 
         # Fit the astrometric parameters using the reverse transform for reference        
         res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, \
-            args=(self, jd, catalog_stars, img_stars), method='Nelder-Mead')
+            args=(self, jd, catalog_stars, img_stars), method='SLSQP')
 
         # # Fit the astrometric parameters using the forward transform for reference
         #   WARNING: USING THIS MAKES THE FIT UNSTABLE
@@ -517,8 +517,16 @@ class Platepar(object):
 
         ### DISTORTION FIT ###
 
-        # If there are more than 12 paired stars, fit the distortion parameters
-        if len(img_stars) > 12:
+        # fit the polynomial distortion parameters if there are more than 12 stars picked
+        if self.distortion_type.startswith("poly"):
+            min_fit_stars = 12
+
+        # fit the radial distortion parameters if there are more than 7 stars picked
+        else:
+            min_fit_stars = 7
+
+
+        if len(img_stars) >= min_fit_stars:
 
             ### REVERSE MAPPING FIT ###
 
@@ -552,6 +560,14 @@ class Platepar(object):
 
                 # IMPORTANT NOTE - the X polynomial is used to store the fit paramters
                 self.x_poly_rev = res.x
+
+                # If the aspect ratio is below 1, force it to 0
+                if abs(self.x_poly_rev[2]) < 0.1:
+                    self.x_poly_rev[2] = 0
+
+                # Set all parameters not used by the radial fit to 0
+                n_params = int(self.distortion_type[-1])
+                self.x_poly_rev[(n_params + 2):] *= 0
 
 
             ### ###
@@ -598,6 +614,14 @@ class Platepar(object):
 
                 # Extract fitted X polynomial
                 self.x_poly_fwd = res.x
+
+                # If the aspect ratio is below 1, force it to 0
+                if abs(self.x_poly_fwd[2]) < 0.1:
+                    self.x_poly_fwd[2] = 0
+
+                # Set all parameters not used by the radial fit to 0
+                n_params = int(self.distortion_type[-1])
+                self.x_poly_fwd[(n_params + 2):] *= 0
 
             ### ###
 
@@ -952,22 +976,115 @@ class Platepar(object):
 
 
     def __repr__(self):
-        return str(self.__dict__)
+
+        out_str  = "Platepar\n"
+        out_str += "--------\n"
+        out_str += "Reference pointing equatorial (J2000):\n"
+        out_str += "    JD      = {:.10f} \n".format(self.JD)
+        out_str += "    RA      = {:.6f}\n".format(self.RA_d)
+        out_str += "    Dec     = {:.6f}\n".format(self.dec_d)
+        out_str += "    Pos ang = {:.6f}\n".format(self.pos_angle_ref)
+        out_str += "Distortion:\n"
+        out_str += "    Type = {:s}\n".format(self.distortion_type)
+
+        # If the polynomial is used, the X axis parameters are stored in x_poly, otherwise radials paramters
+        #   are used
+        if self.distortion_type.startswith("poly"):
+            out_str += "    Distortion coeffs (polynomial):\n"
+            dist_string = "X"
+        else:
+            out_str += "    Distortion coeffs (radial):\n"
+            out_str += "                 x0,       y0, aspect-1,       k1,       k2,       k3,       k4\n"
+            dist_string = ""
+
+        out_str += "img2sky {:s} = {:s}\n".format(dist_string, ", ".join(["{:+8.3f}".format(c) \
+            if abs(c) > 10e-4 else "{:+8.1e}".format(c) for c in self.x_poly_fwd]))
+        out_str += "sky2img {:s} = {:s}\n".format(dist_string, ", ".join(["{:+8.3f}".format(c) \
+            if abs(c) > 10e-4 else "{:+8.1e}".format(c) for c in self.x_poly_rev]))
+
+        # Only print the rest if the polynomial fit is used
+        if self.distortion_type.startswith("poly"):
+            out_str += "img2sky Y = {:s}\n".format(", ".join(["{:+8.3f}".format(c) \
+                if abs(c) > 10e-4 else "{:+8.1e}".format(c) for c in self.y_poly_fwd]))
+            out_str += "sky2img Y = {:s}\n".format(", ".join(["{:+8.3f}".format(c) \
+                if abs(c) > 10e-4 else "{:+8.1e}".format(c) for c in self.y_poly_rev]))
+
+        return out_str
 
 
 
 if __name__ == "__main__":
 
 
-    # Platepar file
-    pp_file = "/home/dvida/Desktop/platepar_cmn2010.cal"
+    import argparse
 
+    # Init argument parser
+    arg_parser = argparse.ArgumentParser(description="Test the astrometry functions using the given platepar.")
+    arg_parser.add_argument('platepar_path', metavar='PLATEPAR', type=str, \
+        help='Path to the platepar file')
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+
+
+    # Load the platepar file
     pp = Platepar()
-    pp.read(pp_file)
+    pp.read(cml_args.platepar_path)
 
-    print(pp.x_poly_fwd)
-    print(pp.station_code)
 
-    #txt = json.dumps(pp, default=lambda o: o.__dict__)
+    # Try with using standard coordinates by resetting the distortion coeffs
+    pp.resetDistortionParameters()
 
-    pp.write(pp_file + '.json')
+    # # Reset distortion fit (forward and reverse)
+    # pp.x_poly_fwd = np.zeros(shape=(12,), dtype=np.float64)
+    # pp.y_poly_fwd = np.zeros(shape=(12,), dtype=np.float64)
+    # pp.x_poly_rev = np.zeros(shape=(12,), dtype=np.float64)
+    # pp.y_poly_rev = np.zeros(shape=(12,), dtype=np.float64)
+
+
+    print(pp)
+
+    # Try forward and reverse mapping, and compare results
+    for i in range(5):
+
+        # Randomly generate a pick inside the image
+        x_img = np.random.uniform(0, pp.X_res)
+        y_img = np.random.uniform(0, pp.Y_res)
+
+        # Take current time
+        time_data = [2020, 5, 30, 1, 20, 34, 567]
+
+        # Map to RA/Dec
+        jd_data, ra_data, dec_data, _ = RMS.Astrometry.ApplyAstrometry.xyToRaDecPP([time_data], [x_img], \
+            [y_img], [0], pp)
+
+        # Map back to X, Y
+        x_data, y_data = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(ra_data, dec_data, jd_data[0], pp)
+
+        # Map forward to sky again
+        _, ra_data_rev, dec_data_rev, _ = RMS.Astrometry.ApplyAstrometry.xyToRaDecPP([time_data], x_data, \
+            y_data, [0], pp)
+
+
+        print()
+        print("-----------------------")
+        print("Init image coordinates:")
+        print("X = {:.3f}".format(x_img))
+        print("Y = {:.3f}".format(y_img))
+        print("Sky coordinates:")
+        print("RA  = {:.4f}".format(ra_data[0]))
+        print("Dec = {:+.4f}".format(dec_data[0]))
+        print("Reverse image coordinates:")
+        print("X = {:.3f}".format(x_data[0]))
+        print("Y = {:.3f}".format(y_data[0]))
+        print("Reverse sky coordinates:")
+        print("RA  = {:.4f}".format(ra_data_rev[0]))
+        print("Dec = {:+.4f}".format(dec_data_rev[0]))
+        print("Image diff:")
+        print("X = {:.3f}".format(x_img - x_data[0]))
+        print("Y = {:.3f}".format(y_img - y_data[0]))
+        print("Sky diff:")
+        print("RA  = {:.4f} amin".format(60*(ra_data[0] - ra_data_rev[0])))
+        print("Dec = {:+.4f} amin".format(60*(dec_data[0] - dec_data_rev[0])))
+
