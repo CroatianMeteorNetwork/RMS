@@ -28,6 +28,8 @@ from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
 from RMS.Routines import Image
 
+# to read UFO XML files
+import xml.etree.ElementTree as ET
 
 # Morphology - Cython init
 import pyximport
@@ -511,44 +513,66 @@ class InputTypeVideo(object):
         # Don't byteswap the images
         self.byteswap = False
 
+        print('Using video file:', self.file_path)
+
+        # Open the video file
+        self.cap = cv2.VideoCapture(self.file_path)
+
+        # Get the FPS
+        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+
         # Remove the file extension
         file_name_noext = ".".join(self.file_name.split('.')[:-1])
 
         if beginning_time is None:
-            
-            try:
-                # Try reading the beginning time of the video from the name if time is not given
-                self.beginning_datetime = datetime.datetime.strptime(file_name_noext, "%Y%m%d_%H%M%S.%f")
+            fname = file_name_noext
+            # check if we can process the file as a UFOcapture AVI
+            if fname[0] == 'M':
+                print('UFO-style video')
+                try:
+                    xfname=self.file_name.split('.')[:-1]
+                    xmlfile=os.path.join(self.dir_path, xfname[0]+'.xml')
+                    tree=ET.parse(xmlfile)
+                    yr = int(tree.getroot().attrib['y'])
+                    mo = int(tree.getroot().attrib['mo'])
+                    dy = int(tree.getroot().attrib['d'])
+                    hr = int(tree.getroot().attrib['h'])
+                    mi = int(tree.getroot().attrib['m'])
+                    sc =float(tree.getroot().attrib['s'])
+                    # ufo timestamps frame 32 in the capture, so we need to subtract 32/framerate
+                    # seconds from this time
+                    sc = sc - 32/self.fps
+                    microsecs = int(round(1000000*(sc -int(sc)),0))
+                    secs = int(sc)
+                    
+                    self.beginning_datetime = datetime.datetime(yr, mo, dy, hr, mi, secs, microsecs)
+                except:
+                    messagebox.showerror('Video Input error', 'The time of the beginning cannot be read from the XML file. Check it is present')
+                    sys.exit()
+            else:                                
+                try:
+                    # Try reading the beginning time of the video from the name if time is not given
+                    self.beginning_datetime = datetime.datetime.strptime(file_name_noext, "%Y%m%d_%H%M%S.%f")
 
-            except:
-                messagebox.showerror('Video Input error', 'The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.')
-                sys.exit()
-
+                except:
+                    messagebox.showerror('Video Input error', 'The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.')
+                    sys.exit()
         else:
             self.beginning_datetime = beginning_time
 
 
         self.detection = detection
 
-
-        print('Using video file:', self.file_path)
-
-        # Open the video file
-        self.cap = cv2.VideoCapture(self.file_path)
-
         self.current_frame_chunk = 0
 
         # Prop values: https://stackoverflow.com/questions/11420748/setting-camera-parameters-in-opencv-python
 
-        # Get the FPS
-        self.fps = self.cap.get(5)
-
         # Get the total time number of video frames in the file
-        self.total_frames = int(self.cap.get(7))
+        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
         # Get the image size
-        self.nrows = int(self.cap.get(4))
-        self.ncols = int(self.cap.get(3))
+        self.nrows = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self.ncols = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 
         # Apply the binning if the detection is used
         if self.detection:
@@ -1231,26 +1255,15 @@ class InputTypeImages(object):
 
         # Check if the beginning time was given (it will be read from the PNG if the UWO format is given)
         if beginning_time is None:
-            fname = self.img_list[0]
-            if fname[:1] == 'M':
-                try:
-                    # try reading the beginning time from the UFO style filename
-                    fname = fname[1:16]
-                    self.beginning_datetime = datetime.datetime.strptime(fname, "%Y%m%d_%H%M%S")
-                except:
-                    print(os.path.basename(self.dir_path))
-                    messagebox.showerror('Input error', 'The time of the beginning cannot be read from the file name! Either change the name of the file to be in the UFO MYYYYMMDD_hhmmss format, or specify the beginning time using command line options.')
-                    sys.exit()
-            else:                
-                try:
-                    # Try reading the beginning time of the video from the name if time is not given
-                    self.beginning_datetime = datetime.datetime.strptime(os.path.basename(self.dir_path), \
-                        "%Y%m%d_%H%M%S.%f")
+            try:
+                # Try reading the beginning time of the video from the name if time is not given
+                self.beginning_datetime = datetime.datetime.strptime(os.path.basename(self.dir_path), \
+                    "%Y%m%d_%H%M%S.%f")
 
-                except:
-                    print(os.path.basename(self.dir_path))
-                    messagebox.showerror('Input error', 'The time of the beginning cannot be read from the file name! Either change the name of the folder to be in the YYYYMMDD_hhmmss.f format, or specify the beginning time using command line options.')
-                    sys.exit()
+            except:
+                print(os.path.basename(self.dir_path))
+                messagebox.showerror('Input error', 'The time of the beginning cannot be read from the file name! Either change the name of the folder to be in the YYYYMMDD_hhmmss.f format, or specify the beginning time using command line options.')
+                sys.exit()
         else:
             self.beginning_datetime = beginning_time
 
