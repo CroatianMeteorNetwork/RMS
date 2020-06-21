@@ -462,7 +462,7 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar):
         np.array(Y_data, dtype=np.float64), float(platepar.lat), float(platepar.lon), float(platepar.X_res), \
         float(platepar.Y_res), float(platepar.Ho), float(platepar.RA_d), float(platepar.dec_d), \
         float(platepar.pos_angle_ref), float(platepar.F_scale), platepar.x_poly_fwd, platepar.y_poly_fwd, \
-        unicode(platepar.distortion_type), refraction=platepar.refraction)
+        unicode(platepar.distortion_type), refraction=platepar.refraction, equal_aspect=platepar.equal_aspect)
 
     # Compute radiia from image centre
     radius_arr = np.hypot(np.array(X_data) - platepar.X_res/2, np.array(Y_data) - platepar.Y_res/2)
@@ -500,7 +500,8 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar):
     X_data, Y_data = cyraDecToXY(RA_data, dec_data, float(jd), float(platepar.lat), float(platepar.lon), 
         float(platepar.X_res), float(platepar.Y_res), float(platepar.Ho), float(platepar.RA_d), \
         float(platepar.dec_d), float(platepar.pos_angle_ref), platepar.F_scale, platepar.x_poly_rev, \
-        platepar.y_poly_rev, unicode(platepar.distortion_type), refraction=platepar.refraction)
+        platepar.y_poly_rev, unicode(platepar.distortion_type), refraction=platepar.refraction, \
+        equal_aspect=platepar.equal_aspect)
     
     return X_data, Y_data
 

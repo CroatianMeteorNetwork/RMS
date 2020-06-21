@@ -68,7 +68,8 @@ from RMS.Misc import decimalDegreesToSexHours, openFileDialog
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession, eqRefractionTrueToApparent
+from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession, eqRefractionTrueToApparent, \
+    eqRefractionApparentToTrue, trueRaDec2ApparentAltAz, apparentAltAz2TrueRADec
 
 
 
@@ -374,6 +375,9 @@ class PlateTool(object):
         plt.rcParams['keymap.forward'] = ''
         plt.rcParams['keymap.back'] = ''
         plt.rcParams['keymap.yscale'] = ''
+        plt.rcParams['keymap.xscale'] = ''
+        plt.rcParams['keymap.grid'] = ''
+        plt.rcParams['keymap.grid_minor'] = ''
 
 
         
@@ -1066,7 +1070,7 @@ class PlateTool(object):
 
 
     def updateRefRADec(self, skip_rot_update=False):
-        """ Update the reference RA and Dec from Alt/Az. """
+        """ Update the reference RA and Dec (true in J2000) from Alt/Az (apparent in epoch of date). """
 
         if not skip_rot_update:
             
@@ -1074,13 +1078,15 @@ class PlateTool(object):
             self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
 
 
-        # Convert the reference alt/az to reference RA/Dec
-        ra, dec = altAz2RADec(self.platepar.az_centre, self.platepar.alt_centre, self.platepar.JD, \
-            self.platepar.lat, self.platepar.lon)
+        # Convert the reference apparent Alt/Az in the epoch of date to true RA/Dec in J2000
+        ra, dec = apparentAltAz2TrueRADec(\
+            np.radians(self.platepar.az_centre), np.radians(self.platepar.alt_centre), self.platepar.JD, \
+            np.radians(self.platepar.lat), np.radians(self.platepar.lon))
+
 
         # Assign the computed RA/Dec to platepar
-        self.platepar.RA_d = ra
-        self.platepar.dec_d = dec
+        self.platepar.RA_d = np.degrees(ra)
+        self.platepar.dec_d = np.degrees(dec)
 
 
         if not skip_rot_update:
@@ -1323,9 +1329,12 @@ class PlateTool(object):
 
             self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz = self.getFOVcentre()
             
-            # Recalculate reference alt/az
-            self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.RA_d, \
-                self.platepar.dec_d, self.platepar.JD, self.platepar.lat, self.platepar.lon)
+            # Compute reference Alt/Az to apparent coordinates, epoch of date
+            az_centre, alt_centre = trueRaDec2ApparentAltAz( \
+                np.radians(self.platepar.RA_d), np.radians(self.platepar.dec_d), self.platepar.JD, \
+                np.radians(self.platepar.lat), np.radians(self.platepar.lon))
+
+            self.platepar.az_centre, self.platepar.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
 
             # Compute the position angle
             self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, \
@@ -1453,6 +1462,16 @@ class PlateTool(object):
             if self.platepar is not None:
 
                 self.platepar.refraction = not self.platepar.refraction
+
+                self.updateImage()
+
+
+        # Toggle equal aspect
+        elif event.key == 'g':
+
+            if self.platepar is not None:
+
+                self.platepar.equal_aspect = not self.platepar.equal_aspect
 
                 self.updateImage()
 
@@ -2006,11 +2025,18 @@ class PlateTool(object):
             #text_str += 'Ref RA  = {:.3f}\n'.format(self.platepar.RA_d)
             #text_str += 'Ref Dec = {:.3f}\n'.format(self.platepar.dec_d)
             text_str += "Pix scale = {:.3f}'/px\n".format(60/self.platepar.F_scale)
-            text_str += "Refraction corr = {:s}\n".format(str(self.platepar.refraction))
             text_str += 'Lim mag   = {:.1f}\n'.format(self.cat_lim_mag)
             text_str += 'Increment = {:.2f}\n'.format(self.key_increment)
             text_str += 'Img Gamma = {:.2f}\n'.format(self.img_gamma)
             text_str += 'Camera Gamma = {:.2f}\n'.format(self.config.gamma)
+            text_str += "Refraction corr = {:s}\n".format(str(self.platepar.refraction))
+            text_str += "Distortion type = {:s}\n".format(\
+                self.platepar.distortion_type_list[self.dist_type_index])
+
+            # Add aspect info if the radial distortion is used
+            if not self.platepar.distortion_type.startswith("poly"):
+                text_str += "Equal aspect    = {:s}\n".format(str(self.platepar.equal_aspect))
+
             text_str += '\n'
             sign, hh, mm, ss = decimalDegreesToSexHours(ra_centre)
             if sign < 0:
@@ -2040,6 +2066,11 @@ class PlateTool(object):
             text_str += 'Q/E - Position angle\n'
             text_str += 'Up/Down - Scale\n'
             text_str += 'T - Toggle refraction correction\n'
+
+            # Add aspect info if the radial distortion is used
+            if not self.platepar.distortion_type.startswith("poly"):
+                text_str += 'G - Toggle equal aspect\n'
+
             text_str += '1/2 - X offset\n'
             text_str += '3/4 - Y offset\n'
             text_str += '5/6 - X 1st dist. coeff.\n'
@@ -2087,8 +2118,7 @@ class PlateTool(object):
             text_str  = "STAR PICKING MODE"
 
             if self.show_key_help > 0:
-                text_str += "\nDistortion type: {:s}\n".format(self.platepar.distortion_type_list[self.dist_type_index])
-                text_str += "'LEFT CLICK' - Centroid star\n"
+                text_str += "\n'LEFT CLICK' - Centroid star\n"
                 text_str += "'CTRL + LEFT CLICK' - Manual star position\n"
                 text_str += "'CTRL + Z' - Fit stars\n"
                 text_str += "'CTRL + SHIFT + Z' - Fit with initial distortion params set to 0\n"
@@ -3124,13 +3154,17 @@ if __name__ == '__main__':
 
         dir_path, state_name = os.path.split(cml_args.dir_path[0])
 
-        # Load the manual redicution tool object from a state file
+        # Load the SkyFit object from a state file
         plate_tool = loadPickle(dir_path, state_name)
 
 
         # Check if there are missing attributes
         if not hasattr(plate_tool, "invert_levels"):
             plate_tool.invert_levels = False
+
+        if plate_tool.platepar is not None:
+            if not hasattr(plate_tool, "equal_aspect"):
+                plate_tool.platepar.equal_aspect = False
             
 
         # Set the dir path in case it changed
