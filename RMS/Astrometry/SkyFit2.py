@@ -22,9 +22,9 @@ except:
     import tkMessageBox as messagebox
 
 from PyQt5.QtGui import QIcon, QFont, QColor, QPixmap, QPicture, QPainter, QBrush, QPen
-from PyQt5.QtCore import QPoint, QRectF, Qt
+from PyQt5.QtCore import QPoint, QRectF, Qt, pyqtSignal, pyqtSlot
 from PyQt5.QtWidgets import QApplication, QWidget, QGraphicsView, QLabel, QVBoxLayout, QMainWindow, QGridLayout, \
-    QLabel, QStackedWidget
+    QLabel
 import pyqtgraph as pg
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
@@ -64,6 +64,7 @@ class FOVinputDialog(object):
 
         # Bind the Enter key to run the verify function
         self.top.bind('<Return>', self.verify)
+        self.top.protocol("WM_DELETE_WINDOW", self.cancel)
 
         tkinter.Label(self.top, text="FOV centre (degrees) \nAzim +E of due N\nRotation from vertical").grid(row=0,
                                                                                                              columnspan=2)
@@ -86,7 +87,16 @@ class FOVinputDialog(object):
         self.rotation.insert(0, '0')
 
         b = tkinter.Button(self.top, text="OK", command=self.verify)
-        b.grid(row=4, columnspan=2)
+        b.grid(row=4, column=0,columnspan=1)
+
+        b2 = tkinter.Button(self.top, text="cancel", command=self.cancel)
+        b2.grid(row=4, column=1,columnspan=1)
+
+    def cancel(self, event=None):
+        self.azim = None
+        self.alt = None
+        self.rot = None
+        self.top.destroy()
 
     def verify(self, event=None):
         """ Check that the azimuth and altitude are withing the bounds. """
@@ -140,8 +150,7 @@ class PlateTool(QMainWindow):
         # Flag which regulates wheter the maxpixel or the avepixel image is shown (avepixel by default)
         self.img_type_flag = 'avepixel'
 
-        # Star picking mode
-        self.star_pick_mode = False
+        # Star picking mode=
         self.star_selection_centroid = True
         self.circle_aperature = None
         self.circle_aperature_outer = None
@@ -150,12 +159,11 @@ class PlateTool(QMainWindow):
         self.closest_cat_star_indx = None
         self.photom_deviatons_scat = []
 
-        self.catalog_stars_visible = True
-        self.draw_calstars = True
+        self.img = None
+        self.img_zoom = None
 
-        self.draw_distortion = False
-
-        self.show_key_help = 1
+        self.adjust_levels_mode = False
+        self.auto_levels = False
 
         # List of paired image and catalog stars
         self.paired_stars = []
@@ -171,21 +179,6 @@ class PlateTool(QMainWindow):
 
         # Kwy increment
         self.key_increment = 1.0
-
-        # Image gamma and levels
-        self.bit_depth = self.config.bit_depth
-        # self.img_gamma = 1.0 # instead call self.img.gamma
-
-        # img_level_min and img_level_max are not updated constantly, it is used for storing levels
-        # when transferring between images. Instead call self.hist.getLevels()
-        self.img_level_min = self.img_level_min_auto = 0
-        self.img_level_max = self.img_level_max_auto = 0  # these will be changed when the image is loaded
-
-        self.img = None
-        self.img_zoom = None
-
-        self.adjust_levels_mode = False
-        self.auto_levels = False
 
         # Platepar format (json or txt)
         self.platepar_fmt = None
@@ -203,13 +196,6 @@ class PlateTool(QMainWindow):
 
         # Flag indicating that the first platepar fit has to be done
         self.first_platepar_fit = True
-
-        # Toggle zoom window
-        self.show_zoom_window = False
-        self.show_zoom_window_size = 200
-
-        # Position of the zoom window (NE, NW, SE, SW)
-        self.zoom_window_pos = ''
 
         ######################################################################################################
 
@@ -290,7 +276,7 @@ class PlateTool(QMainWindow):
         if startUI:
             self.setupUI()
 
-    def setupUI(self):
+    def setupUI(self, loaded_file=False):
         """ Setup pyqt UI with widgets """
         self.central = QWidget()
         self.setWindowTitle('SkyFit')
@@ -298,6 +284,28 @@ class PlateTool(QMainWindow):
 
         layout = QGridLayout()
         self.central.setLayout(layout)
+
+        # default variables even when constructor isnt called
+        self.star_pick_mode = False
+        # Image gamma and levels
+        self.bit_depth = self.config.bit_depth
+        # self.img_gamma = 1.0 # instead call self.img.gamma
+
+        # img_level_min and img_level_max are not updated constantly, it is used for storing levels
+        # when transferring between images. Instead call self.hist.getLevels()
+        self.img_level_min = self.img_level_min_auto = 0
+        self.img_level_max = self.img_level_max_auto = 0  # these will be changed when the image is loaded
+
+        # Toggle zoom window
+        self.show_zoom_window = False
+        self.show_zoom_window_size = 200
+
+        self.catalog_stars_visible = True
+        self.draw_calstars = True
+
+        self.draw_distortion = False
+
+        self.show_key_help = 1
 
         # timing
         self.i = 0
@@ -439,7 +447,7 @@ class PlateTool(QMainWindow):
         self.cursor2.setZValue(20)
 
         # distortion lines (window)
-        self.distortion_lines = PlotLines()
+        self.distortion_lines = PlotLines(pxmode=True)
         self.distortion_lines.hide()
         self.img_frame.addItem(self.distortion_lines)
         self.distortion_lines.setZValue(2)
@@ -454,6 +462,17 @@ class PlateTool(QMainWindow):
         self.img_frame.addItem(self.residual_text)
         self.residual_text.setZValue(10)
 
+        # platepar parameter manager
+        self.param_manager = PlateparParameterManager(parent=None,
+                                                      platepar=self.platepar)
+
+        self.param_manager.azalt_star_signal.connect(self.updateStarsSignalAzAltSignal)
+        self.param_manager.rot_star_signal.connect(self.updateStarsSignalRotSignal)
+        self.param_manager.scale_star_signal.connect(self.updateStars)
+        self.param_manager.distortion_signal.connect(self.updateDistortionSignal)
+        layout.addWidget(self.param_manager, 0, 3)
+        self.paramm_visible = True
+
         # mouse binding
         self.img_frame.scene().sigMouseMoved.connect(self.mouseMove)
         self.img_frame.scene().sigMouseClicked.connect(self.mouseClick)  # NOTE: clicking event doesnt trigger if moving
@@ -465,9 +484,27 @@ class PlateTool(QMainWindow):
 
         self.updateImage(first_update=True)
         self.updateLeftLabels()
+        if loaded_file:
+            self.star_pick_mode = True
+            self.updatePairedStars()
+            self.photometry()
+            self.star_pick_mode = False
 
         self.setMinimumSize(1200, 800)
         self.show()
+
+    def updateDistortionSignal(self):
+        self.updateDistortion()
+        self.updateStars()
+
+    def updateStarsSignalAzAltSignal(self):
+        self.updateRefRADec()
+        self.updateStars()
+
+    def updateStarsSignalRotSignal(self):
+        self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar,
+                                                                   self.platepar.rotation_from_horiz)
+        self.updateStars()
 
     def pixelsToDistance(self, x, y):
         """ Converts between x pixels horizontally and y pixels vertically to distance
@@ -600,7 +637,7 @@ class PlateTool(QMainWindow):
         text_str += 'CTRL + D - Load dark\n'
         text_str += 'CTRL + F - Load flat\n'
         text_str += 'CTRL + X - astrometry.net img upload\n'
-        text_str += 'CTRL + SHIFT + X - astrometry.net XY\n'
+        text_str += 'CTRL + SHIFT + X - astrometry.net XY only\n'
         text_str += 'CTRL + R - Pick stars\n'
         text_str += 'SHIFT + Z - Show zoomed window\n'
         text_str += 'CTRL + N - New platepar\n'
@@ -618,6 +655,7 @@ class PlateTool(QMainWindow):
         """ Updates only the stars """
         # Draw stars that were paired in picking mode
         self.updatePairedStars()
+        self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)  # place this elsewhere
 
         # Draw stars detected on this image
         if self.draw_calstars:
@@ -635,6 +673,7 @@ class PlateTool(QMainWindow):
         ff_jd = date2JD(*self.img_handle.currentTime())
         self.catalog_x, self.catalog_y, catalog_mag = getCatalogStarsImagePositions(self.catalog_stars,
                                                                                     ff_jd, self.platepar)
+
         if self.catalog_stars_visible:
             cat_stars = np.c_[self.catalog_x, self.catalog_y, catalog_mag]
 
@@ -792,6 +831,9 @@ class PlateTool(QMainWindow):
         self.platepar.setDistortionType(dist_type)
         self.updateDistortion()
 
+        # Indicate that the platepar has been reset
+        self.first_platepar_fit = True
+
         print("Distortion model changed to: {:s}".format(dist_type))
 
     def nextImg(self):
@@ -858,6 +900,11 @@ class PlateTool(QMainWindow):
         Can be loaded by calling:
         python -m RMS.Astrometry.SkyFit2 PATH/skyFit2_latest.state --config .
         """
+        # TODO: make all entirely display related variables (especially booleans) defined in setupUI
+        # this will remove any "bugs" that appear when loading a state. Though this should be done
+        # only once SkyFit2 is merged into the dev branch and it is the primary program for development.
+        # This will make constantly updating SkyFit2 to SkyFit less annoying
+
         # you cant pickle a class that inherits from something, so convert all variables
         # that dont inherit from something into a dictionary and pickle them
         to_remove = []
@@ -881,11 +928,10 @@ class PlateTool(QMainWindow):
 
         #  if setupUI hasnt already been called, call it
         if not hasattr(self, 'central'):
-            self.setupUI()
+            self.setupUI(loaded_file=True)
         else:
             self.updateImage()
             self.updateLeftLabels()
-
 
     def mouseClick(self, event):
         modifiers = QApplication.keyboardModifiers()
@@ -1129,7 +1175,9 @@ class PlateTool(QMainWindow):
                                + "\nVignetting coeff = {:.5f}".format(self.platepar.vignetting_coeff) \
                                + "\nGamma = {:.2f}".format(self.platepar.gamma)
 
+                    print('Fit Info:')
                     print(fit_info)
+                    print()
 
                     # Plot the line fit
                     logsum_arr = np.linspace(x_min_w, x_max_w, 10)
@@ -1217,34 +1265,7 @@ class PlateTool(QMainWindow):
     def keyPressEvent(self, event):
         modifiers = QApplication.keyboardModifiers()
 
-        if event.key() == Qt.Key_Left:
-            self.prevImg()
-
-        elif event.key() == Qt.Key_Right:
-            self.nextImg()
-
-        elif event.key() == Qt.Key_M:
-            self.toggleImageType()
-
-        elif event.key() == Qt.Key_Comma:
-            # Decrement UT correction
-            self.platepar.UT_corr -= 0.5
-
-            # Update platepar JD
-            self.platepar.JD += 0.5/24
-
-            self.updateStars()
-
-        elif event.key() == Qt.Key_Period:
-            # Decrement UT correction
-            self.platepar.UT_corr += 0.5
-
-            # Update platepar JD
-            self.platepar.JD -= 0.5/24
-
-            self.updateStars()
-
-        elif event.key() == Qt.Key_A and modifiers == Qt.ControlModifier:
+        if event.key() == Qt.Key_A and modifiers == Qt.ControlModifier:
             self.auto_levels = not self.auto_levels
             if self.auto_levels:
                 self.img_level_min, self.img_level_max = self.hist.getLevels()
@@ -1255,12 +1276,6 @@ class PlateTool(QMainWindow):
                 self.hist.setMovable(True)
             # this updates image automatically
 
-        elif event.key() == Qt.Key_A and not self.star_pick_mode:
-            self.platepar.az_centre += self.key_increment
-            self.updateRefRADec()
-
-            self.updateStars()
-
         elif event.key() == Qt.Key_D and modifiers == Qt.ControlModifier:
             _, self.dark = self.loadDark()
 
@@ -1269,19 +1284,6 @@ class PlateTool(QMainWindow):
                 self.flat_struct.applyDark(self.dark)
 
             self.updateImage()
-
-        elif event.key() == Qt.Key_D and not self.star_pick_mode:
-            self.platepar.az_centre -= self.key_increment
-            self.updateRefRADec()
-
-            self.updateStars()
-
-        elif event.key() == Qt.Key_W and not self.star_pick_mode:
-
-            self.platepar.alt_centre -= self.key_increment
-            self.updateRefRADec()
-
-            self.updateStars()
 
         elif event.key() == Qt.Key_S and (modifiers & Qt.ControlModifier) and (modifiers & Qt.ShiftModifier):
             platepar_default_path = os.path.join(os.getcwd(), self.config.platepar_name)
@@ -1302,22 +1304,6 @@ class PlateTool(QMainWindow):
             # Save the state
             self.saveState()
 
-        elif event.key() == Qt.Key_S and not self.star_pick_mode:
-
-            self.platepar.alt_centre += self.key_increment
-            self.updateRefRADec()
-
-            self.updateStars()
-
-        # Move rotation parameter
-        elif event.key() == Qt.Key_Q and not self.star_pick_mode:
-            self.platepar.pos_angle_ref -= self.key_increment
-            self.updateStars()
-
-        elif event.key() == Qt.Key_E and not self.star_pick_mode:
-            self.platepar.pos_angle_ref += self.key_increment
-            self.updateStars()
-
         elif event.key() == Qt.Key_R and modifiers == Qt.ControlModifier:
             self.star_pick_mode = not self.star_pick_mode
             if self.star_pick_mode:
@@ -1330,6 +1316,232 @@ class PlateTool(QMainWindow):
                 self.cursor2.hide()
                 self.cursor.hide()
             # updates automatically
+
+            # Set distortion types
+        elif event.key() == Qt.Key_1 and modifiers == Qt.ControlModifier:
+
+            self.dist_type_index = 0
+            self.changeDistortionType()
+            self.param_manager.updatePlatepar()
+            self.updateStars()
+
+        elif event.key() == Qt.Key_2 and modifiers == Qt.ControlModifier:
+
+            self.dist_type_index = 1
+            self.changeDistortionType()
+            self.param_manager.updatePlatepar()
+            self.updateStars()
+
+        elif event.key() == Qt.Key_3 and modifiers == Qt.ControlModifier:
+
+            self.dist_type_index = 2
+            self.changeDistortionType()
+            self.param_manager.updatePlatepar()
+            self.updateStars()
+
+        elif event.key() == Qt.Key_4 and modifiers == Qt.ControlModifier:
+
+            self.dist_type_index = 3
+            self.changeDistortionType()
+            self.param_manager.updatePlatepar()
+            self.updateStars()
+
+        elif event.key() == Qt.Key_N and modifiers == Qt.ControlModifier:
+            self.makeNewPlatepar()
+
+        elif event.key() == Qt.Key_F and modifiers == Qt.ControlModifier:
+            _, self.flat_struct = self.loadFlat()
+
+            self.updateImage()
+
+        elif event.key() == Qt.Key_I and modifiers == Qt.ControlModifier:
+            self.draw_distortion = not self.draw_distortion
+
+            if self.draw_distortion:
+                self.distortion_lines.show()
+                self.updateDistortion()
+            else:
+                self.distortion_lines.hide()
+
+        elif event.key() == Qt.Key_Z and modifiers == Qt.ShiftModifier:
+            if self.star_pick_mode:
+                self.show_zoom_window = not self.show_zoom_window
+                if self.show_zoom_window:
+                    self.v_zoom.show()
+                else:
+                    self.v_zoom.hide()
+
+        # Do a fit on the selected stars while in the star picking mode
+        elif event.key() == Qt.Key_Z and modifiers == Qt.ControlModifier:
+
+            # If shift was pressed, reset distortion parameters to zero
+            if modifiers == Qt.ShiftModifier:
+                self.platepar.resetDistortionParameters()
+                self.first_platepar_fit = True
+
+            # If the first platepar is being made, do the fit twice
+            if self.first_platepar_fit:
+                self.fitPickedStars(first_platepar_fit=True)
+                self.fitPickedStars(first_platepar_fit=True)
+                self.first_platepar_fit = False
+
+            else:
+                # Otherwise, only fit the once
+                self.fitPickedStars(first_platepar_fit=False)
+
+            print('Plate fitted!')
+
+        elif event.key() == Qt.Key_H and modifiers == Qt.ControlModifier:
+            self.adjust_levels_mode = not self.adjust_levels_mode
+            if self.adjust_levels_mode:
+                self.hist.show()
+            else:
+                self.hist.hide()
+
+        elif event.key() == Qt.Key_P and modifiers == Qt.ControlModifier:
+            self.paramm_visible = not self.paramm_visible
+            if self.paramm_visible:
+                self.param_manager.show()
+            else:
+                self.param_manager.hide()
+
+
+        elif event.key() == Qt.Key_Left:
+            self.prevImg()
+
+        elif event.key() == Qt.Key_Right:
+            self.nextImg()
+
+        elif event.key() == Qt.Key_M:
+            self.toggleImageType()
+
+        elif event.key() == Qt.Key_Comma:
+            # Decrement UT correction
+            self.platepar.UT_corr -= 0.5
+
+            # Update platepar JD
+            self.platepar.JD += 0.5/24
+            self.updateStars()
+
+        elif event.key() == Qt.Key_Period:
+            # Decrement UT correction
+            self.platepar.UT_corr += 0.5
+
+            # Update platepar JD
+            self.platepar.JD -= 0.5/24
+            self.updateStars()
+
+        elif event.key() == Qt.Key_A and not self.star_pick_mode:
+            self.platepar.az_centre += self.key_increment
+            self.updateRefRADec()
+            self.param_manager.updatePlatepar()
+            self.updateStars()
+
+        elif event.key() == Qt.Key_D and not self.star_pick_mode:
+            self.platepar.az_centre -= self.key_increment
+            self.updateRefRADec()
+            self.param_manager.updatePlatepar()
+            self.updateStars()
+
+        elif event.key() == Qt.Key_W and not self.star_pick_mode:
+            self.platepar.alt_centre -= self.key_increment
+            self.updateRefRADec()
+            self.param_manager.updatePlatepar()
+            self.updateStars()
+
+        elif event.key() == Qt.Key_S and not self.star_pick_mode:
+            self.platepar.alt_centre += self.key_increment
+            self.updateRefRADec()
+            self.param_manager.updatePlatepar()
+            self.updateStars()
+
+        # Move rotation parameter
+        elif event.key() == Qt.Key_Q and not self.star_pick_mode:
+            self.platepar.pos_angle_ref -= self.key_increment
+            self.updateStars()
+            self.param_manager.updatePlatepar()
+
+        elif event.key() == Qt.Key_E and not self.star_pick_mode:
+            self.platepar.pos_angle_ref += self.key_increment
+            self.updateStars()
+            self.param_manager.updatePlatepar()
+
+        # Change image scale
+        elif event.key() == Qt.Key_Up:
+            self.platepar.F_scale *= 1.0 + self.key_increment/100.0
+            self.updateStars()
+            self.param_manager.updatePlatepar()
+
+        elif event.key() == Qt.Key_Down:
+            self.platepar.F_scale *= 1.0 - self.key_increment/100.0
+            self.updateStars()
+            self.param_manager.updatePlatepar()
+
+        elif event.key() == Qt.Key_1:
+
+            # Increment X offset
+            self.platepar.x_poly_rev[0] += 0.5
+            self.platepar.x_poly_fwd[0] += 0.5
+            self.param_manager.updatePlatepar()
+            self.updateStars()
+
+        elif event.key() == Qt.Key_2:
+
+            # Decrement X offset
+            self.platepar.x_poly_rev[0] -= 0.5
+            self.platepar.x_poly_fwd[0] -= 0.5
+            self.param_manager.updatePlatepar()
+            self.updateStars()
+
+
+        elif event.key() == Qt.Key_3:
+
+            # Increment Y offset
+            self.platepar.y_poly_rev[0] += 0.5
+            self.platepar.y_poly_fwd[0] += 0.5
+            self.param_manager.updatePlatepar()
+            self.updateStars()
+
+        elif event.key() == Qt.Key_4:
+
+            # Decrement Y offset
+            self.platepar.y_poly_rev[0] -= 0.5
+            self.platepar.y_poly_fwd[0] -= 0.5
+            self.param_manager.updatePlatepar()
+            self.updateStars()
+
+        elif event.key() == Qt.Key_5:
+
+            # Decrement X 1st order distortion
+            self.platepar.x_poly_rev[1] -= 0.01
+            self.platepar.x_poly_fwd[1] -= 0.01
+            self.param_manager.updatePlatepar()
+            self.updateStars()
+
+        elif event.key() == Qt.Key_6:
+
+            # Increment X 1st order distortion
+            self.platepar.x_poly_rev[1] += 0.01
+            self.platepar.x_poly_fwd[1] += 0.01
+            self.param_manager.updatePlatepar()
+            self.updateStars()
+
+
+        elif event.key() == Qt.Key_7:
+
+            # Decrement Y 1st order distortion
+            self.platepar.y_poly_rev[2] -= 0.01
+            self.platepar.y_poly_fwd[2] -= 0.01
+            self.param_manager.updatePlatepar()
+            self.updateStars()
+
+        elif event.key() == Qt.Key_8:
+
+            # Increment Y 1st order distortion
+            self.platepar.y_poly_rev[2] += 0.01
+            self.platepar.y_poly_fwd[2] += 0.01
+            self.param_manager.updatePlatepar()
+            self.updateStars()
 
         # Change catalog limiting magnitude
         elif event.key() == Qt.Key_R:
@@ -1371,99 +1583,6 @@ class PlateTool(QMainWindow):
                 else:
                     self.v_zoom.move(QPoint(0, 0))
 
-            # Change image scale
-        elif event.key() == Qt.Key_Up:
-
-            self.platepar.F_scale *= 1.0 + self.key_increment/100.0
-            self.updateStars()
-
-        elif event.key() == Qt.Key_Down:
-            self.platepar.F_scale *= 1.0 - self.key_increment/100.0
-            self.updateStars()
-
-        # Set distortion types
-        elif event.key() == Qt.Key_1 and modifiers == Qt.ControlModifier:
-
-            self.dist_type_index = 0
-            self.changeDistortionType()
-            self.updateStars()
-
-        elif event.key() == Qt.Key_2 and modifiers == Qt.ControlModifier:
-
-            self.dist_type_index = 1
-            self.changeDistortionType()
-            self.updateStars()
-
-        elif event.key() == Qt.Key_3 and modifiers == Qt.ControlModifier:
-
-            self.dist_type_index = 2
-            self.changeDistortionType()
-            self.updateStars()
-
-        elif event.key() == Qt.Key_4 and modifiers == Qt.ControlModifier:
-
-            self.dist_type_index = 3
-            self.changeDistortionType()
-            self.updateStars()
-
-        elif event.key() == Qt.Key_1:
-
-            # Increment X offset
-            self.platepar.x_poly_rev[0] += 0.5
-            self.platepar.x_poly_fwd[0] += 0.5
-            self.updateStars()
-
-        elif event.key() == Qt.Key_2:
-
-            # Decrement X offset
-            self.platepar.x_poly_rev[0] -= 0.5
-            self.platepar.x_poly_fwd[0] -= 0.5
-            self.updateStars()
-
-
-        elif event.key() == Qt.Key_3:
-
-            # Increment Y offset
-            self.platepar.y_poly_rev[0] += 0.5
-            self.platepar.y_poly_fwd[0] += 0.5
-            self.updateStars()
-
-        elif event.key() == Qt.Key_4:
-
-            # Decrement Y offset
-            self.platepar.y_poly_rev[0] -= 0.5
-            self.platepar.y_poly_fwd[0] -= 0.5
-            self.updateStars()
-
-        elif event.key() == Qt.Key_5:
-
-            # Decrement X 1st order distortion
-            self.platepar.x_poly_rev[1] -= 0.01
-            self.platepar.x_poly_fwd[1] -= 0.01
-            self.updateStars()
-
-        elif event.key() == Qt.Key_6:
-
-            # Increment X 1st order distortion
-            self.platepar.x_poly_rev[1] += 0.01
-            self.platepar.x_poly_fwd[1] += 0.01
-            self.updateStars()
-
-
-        elif event.key() == Qt.Key_7:
-
-            # Decrement Y 1st order distortion
-            self.platepar.y_poly_rev[2] -= 0.01
-            self.platepar.y_poly_fwd[2] -= 0.01
-            self.updateStars()
-
-        elif event.key() == Qt.Key_8:
-
-            # Increment Y 1st order distortion
-            self.platepar.y_poly_rev[2] += 0.01
-            self.platepar.y_poly_fwd[2] += 0.01
-            self.updateStars()
-
         # Key increment
         elif event.key() == Qt.Key_Plus:
 
@@ -1498,23 +1617,22 @@ class PlateTool(QMainWindow):
 
         # Enter FOV centre
         elif event.key() == Qt.Key_V:
+            data = self.getFOVcentre()
+            if data:
+                self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz = data
 
-            self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz = self.getFOVcentre()
+                # Recalculate reference alt/az
+                self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.JD,
+                                                                                self.platepar.lon, self.platepar.lat,
+                                                                                self.platepar.RA_d, self.platepar.dec_d)
 
-            # Recalculate reference alt/az
-            self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.JD,
-                                                                            self.platepar.lon, self.platepar.lat,
-                                                                            self.platepar.RA_d, self.platepar.dec_d)
+                # Compute the position angle
+                self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar,
+                                                                           self.platepar.rotation_from_horiz)
 
-            # Compute the position angle
-            self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar,
-                                                                       self.platepar.rotation_from_horiz)
+                self.param_manager.updatePlatepar()
+                self.updateStars()
 
-            self.updateStars()
-
-
-        elif event.key() == Qt.Key_N and modifiers == Qt.ControlModifier:
-            self.makeNewPlatepar()
 
         # Get initial parameters from astrometry.net
         elif event.key() == Qt.Key_X:
@@ -1529,11 +1647,6 @@ class PlateTool(QMainWindow):
 
             self.updateStars()
 
-        elif event.key() == Qt.Key_F and modifiers == Qt.ControlModifier:
-            _, self.flat_struct = self.loadFlat()
-
-            self.updateImage()
-
 
         elif event.key() == Qt.Key_C:
             self.draw_calstars = not self.draw_calstars
@@ -1544,15 +1657,6 @@ class PlateTool(QMainWindow):
                 self.calstar_markers.hide()
                 self.calstar_markers2.hide()
             # updates image automatically
-
-        elif event.key() == Qt.Key_I and modifiers == Qt.ControlModifier:
-            self.draw_distortion = not self.draw_distortion
-
-            if self.draw_distortion:
-                self.distortion_lines.show()
-                self.updateDistortion()
-            else:
-                self.distortion_lines.hide()
 
         # Increase image gamma
         elif event.key() == Qt.Key_U:
@@ -1576,14 +1680,6 @@ class PlateTool(QMainWindow):
 
                 self.updateStars()
 
-
-        elif event.key() == Qt.Key_H and modifiers == Qt.ControlModifier:
-            self.adjust_levels_mode = not self.adjust_levels_mode
-            if self.adjust_levels_mode:
-                self.hist.show()
-            else:
-                self.hist.hide()
-
         elif event.key() == Qt.Key_H:
             self.catalog_stars_visible = not self.catalog_stars_visible
             if self.catalog_stars_visible:
@@ -1599,34 +1695,6 @@ class PlateTool(QMainWindow):
             # Invert image levels
             self.img.invert()
             self.img_zoom.invert()
-
-
-        elif event.key() == Qt.Key_Z and modifiers == Qt.ShiftModifier:
-            if self.star_pick_mode:
-                self.show_zoom_window = not self.show_zoom_window
-                if self.show_zoom_window:
-                    self.v_zoom.show()
-                else:
-                    self.v_zoom.hide()
-
-        # Do a fit on the selected stars while in the star picking mode
-        elif event.key() == Qt.Key_Z and modifiers == Qt.ControlModifier:
-
-            # If shift was pressed, reset distortion parameters to zero
-            if modifiers == Qt.ShiftModifier:
-                self.platepar.resetDistortionParameters()
-
-            # If the first platepar is being made, do the fit twice
-            if self.first_platepar_fit:
-                self.fitPickedStars()
-                self.fitPickedStars()
-                self.first_platepar_fit = False
-
-            else:
-                # Otherwise, only fit the once
-                self.fitPickedStars()
-
-            print('Plate fitted!')
 
         elif event.key() == Qt.Key_Enter - 1:  # apparently there's a difference between the two enter keys
             if self.star_pick_mode:
@@ -1756,7 +1824,8 @@ class PlateTool(QMainWindow):
 
             # Plot the differences in X, Y
             data = []
-            pen = QPen(QColor(255, 0, 0, 100))
+            pen = QPen(QColor(255, 0, 0, 200))  # change appearance of lines
+            pen.setWidth(1)
             for x0, y0, xnd, ynd in zip(x_arr, y_arr, x_nodist, y_nodist):
                 data.append([x0, y0, xnd, ynd, pen])
 
@@ -1901,7 +1970,12 @@ class PlateTool(QMainWindow):
         root.withdraw()
         d = FOVinputDialog(root)
         root.wait_window(d.top)
-        self.azim_centre, self.alt_centre, rot_horizontal = d.getAltAz()
+
+        data = d.getAltAz()
+        if all([x is None for x in data]):
+            return None
+
+        self.azim_centre, self.alt_centre, rot_horizontal = data
 
         root.destroy()
 
@@ -2283,11 +2357,27 @@ class PlateTool(QMainWindow):
 
         # Fit the platepar to paired stars
         self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=first_platepar_fit)
+        self.param_manager.updatePlatepar()
+
+        # Show platepar parameters
+        print()
+        print(self.platepar)
 
         ### Calculate the fit residuals for every fitted star ###
 
         # Get image coordinates of catalog stars
         catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, self.platepar)
+
+        ## Compute standard coordinates ##
+
+        # Platepar with no distortion
+        pp_nodist = copy.deepcopy(self.platepar)
+        pp_nodist.x_poly_rev *= 0
+        pp_nodist.y_poly_rev *= 0
+
+        standard_x, standard_y, _ = getCatalogStarsImagePositions(catalog_stars, jd, pp_nodist)
+
+        ## ##
 
         residuals = []
 
@@ -2295,11 +2385,12 @@ class PlateTool(QMainWindow):
         print('Residuals')
         print('----------')
         print(
-            ' No,   Img X,   Img Y, RA (deg), Dec (deg),    Mag, -2.5*LSP,    Cat X,   Cat Y, Err amin,  Err px, Direction')
+            ' No,   Img X,   Img Y, RA (deg), Dec (deg),    Mag, -2.5*LSP,    Cat X,   Cat Y,    Std X,   Std Y, Err amin,  Err px, Direction')
 
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
-        for star_no, (cat_x, cat_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y, catalog_stars,
-                                                                        img_stars)):
+        for star_no, (cat_x, cat_y, std_x, std_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y,
+                                                                                      standard_x, standard_y,
+                                                                                      catalog_stars, img_stars)):
             img_x, img_y, sum_intens = img_c
             ra, dec, mag = cat_coords
 
@@ -2310,7 +2401,7 @@ class PlateTool(QMainWindow):
             angle = np.arctan2(delta_y, delta_x)
             distance = np.sqrt(delta_x**2 + delta_y**2)
 
-            # Compute the residuals in ra/dec in angular coordinates
+            # Compute the residuals in ra/dec in angular coordiniates
             img_time = self.img_handle.currentTime()
             _, ra_img, dec_img, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar)
 
@@ -2325,10 +2416,10 @@ class PlateTool(QMainWindow):
 
             # Print out the residuals
             print(
-                '{:3d}, {:7.2f}, {:7.2f}, {:>8.3f}, {:>+9.3f}, {:+6.2f},  {:7.2f}, {:8.2f}, {:7.2f}, {:8.2f}, {:7.2f}, {:+9.1f}'.format(
+                '{:3d}, {:7.2f}, {:7.2f}, {:>8.3f}, {:>+9.3f}, {:+6.2f},  {:7.2f}, {:8.2f}, {:7.2f}, {:8.2f}, {:7.2f}, {:8.2f}, {:7.2f}, {:+9.1f}'.format(
                     star_no + 1, img_x, img_y,
-                    ra, dec, mag, -2.5*np.log10(sum_intens), cat_x, cat_y, 60*angular_distance, distance,
-                    np.degrees(angle)))
+                    ra, dec, mag, -2.5*np.log10(sum_intens), cat_x, cat_y, std_x, std_y, 60*angular_distance,
+                    distance, np.degrees(angle)))
 
         mean_angular_error = 60*np.mean([entry[4] for entry in residuals])
 
@@ -2340,7 +2431,7 @@ class PlateTool(QMainWindow):
         else:
             angular_error_label = 'arcmin'
 
-        print('Average error: {:.2f} px, {:.2f} {:s}'.format(np.mean([entry[3] for entry in residuals]), \
+        print('Average error: {:.2f} px, {:.2f} {:s}'.format(np.mean([entry[3] for entry in residuals]),
                                                              mean_angular_error, angular_error_label))
 
         # Print the field of view size
@@ -2406,56 +2497,81 @@ class PlateTool(QMainWindow):
         # Azimuth and elevation residuals
         x_list = []
         y_list = []
+        radius_list = []
+        skyradius_list = []
         azim_list = []
         elev_list = []
         azim_residuals = []
         elev_residuals = []
         x_residuals = []
         y_residuals = []
+        radius_residuals = []
+        skyradius_residuals = []
 
         # Get image time and Julian date
         img_time = self.img_handle.currentTime()
         jd = date2JD(*img_time)
 
+        # Get RA/Dec of the FOV centre
+        ra_centre, dec_centre = self.computeCentreRADec()
+
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
-        for star_no, (cat_x, cat_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y, catalog_stars,
+        for star_no, (cat_x, cat_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y, catalog_stars, \
                                                                         img_stars)):
+            # Compute image coordinates
             img_x, img_y, _ = img_c
-            ra_cat, dec_cat, _ = cat_coords
+            img_radius = np.hypot(img_x - self.platepar.X_res/2, img_y - self.platepar.Y_res/2)
+
+            # Compute sky coordinates
+            cat_ra, cat_dec, _ = cat_coords
+            cat_ang_separation = np.degrees(angularSeparation(np.radians(cat_ra), np.radians(cat_dec), \
+                                                              np.radians(ra_centre), np.radians(dec_centre)))
+
+            # Compute RA/Dec from image
+            _, img_ra, img_dec, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar)
+            img_ra = img_ra[0]
+            img_dec = img_dec[0]
+
+            x_list.append(img_x)
+            y_list.append(img_y)
+            radius_list.append(img_radius)
+            skyradius_list.append(cat_ang_separation)
 
             # Compute image residuals
-            x_list.append(cat_x)
-            y_list.append(cat_y)
             x_residuals.append(cat_x - img_x)
             y_residuals.append(cat_y - img_y)
+            radius_residuals.append(np.hypot(cat_x - self.platepar.X_res/2, cat_y - self.platepar.Y_res/2) \
+                                    - img_radius)
+
+            # Compute sky residuals
+            img_ang_separation = np.degrees(angularSeparation(np.radians(img_ra), np.radians(img_dec),
+                                                              np.radians(ra_centre), np.radians(dec_centre)))
+            skyradius_residuals.append(cat_ang_separation - img_ang_separation)
 
             # # Correct the catalog RA/Dec for refraction
             # if self.platepar.refraction:
-            #     ra_cat, dec_cat = eqRefractionTrueToApparent(np.radians(ra_cat), np.radians(dec_cat), jd, \
+            #     cat_ra, cat_dec = eqRefractionTrueToApparent(np.radians(cat_ra), np.radians(cat_dec), jd,
             #         np.radians(self.platepar.lat), np.radians(self.platepar.lon))
-            #     ra_cat, dec_cat = np.degrees(ra_cat), np.degrees(dec_cat)
+            #     cat_ra, cat_dec = np.degrees(cat_ra), np.degrees(cat_dec)
 
             # Compute azim/elev from the catalog
-            azim_cat, elev_cat = raDec2AltAz(ra_cat, dec_cat, jd, self.platepar.lat, self.platepar.lon)
+            azim_cat, elev_cat = raDec2AltAz(cat_ra, cat_dec, jd, self.platepar.lat, self.platepar.lon)
 
             azim_list.append(azim_cat)
             elev_list.append(elev_cat)
 
-            # Compute RA/Dec from image
-            _, ra_img, dec_img, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar)
-            ra_img = ra_img[0]
-            dec_img = dec_img[0]
-
             # Compute azim/elev from image coordinates
-            azim_img, elev_img = raDec2AltAz(ra_img, dec_img, jd, self.platepar.lat, self.platepar.lon)
+            azim_img, elev_img = raDec2AltAz(img_ra, img_dec, jd, self.platepar.lat, self.platepar.lon)
 
             # Compute azim/elev residuals
             azim_residuals.append(((azim_cat - azim_img + 180)%360 - 180)*np.cos(np.radians(elev_cat)))
             elev_residuals.append(elev_cat - elev_img)
 
         # Init astrometry fit window
-        fig_a, ((ax_azim, ax_elev), (ax_x, ax_y)) = plt.subplots(ncols=2, nrows=2, facecolor=None,
-                                                                 figsize=(10, 8))
+        fig_a, (
+            (ax_azim, ax_elev, ax_skyradius),
+            (ax_x, ax_y, ax_radius)
+        ) = plt.subplots(ncols=3, nrows=2, facecolor=None, figsize=(12, 6))
 
         # Set figure title
         fig_a.canvas.set_window_title("Astrometry fit")
@@ -2479,14 +2595,24 @@ class PlateTool(QMainWindow):
             ax_azim.set_xlim([0, 360])
             ax_elev.set_xlim([0, 90])
 
+        # Plot sky radius vs radius error
+        ax_skyradius.scatter(skyradius_list, 60*np.array(skyradius_residuals), s=2, c='k', zorder=3)
+
+        ax_skyradius.grid()
+        ax_skyradius.set_xlabel("Radius from centre (deg)")
+        ax_skyradius.set_ylabel("Radius error (arcmin)")
+        ax_skyradius.set_xlim([0, np.hypot(*computeFOVSize(self.platepar))/2])
+
         # Equalize Y limits, make them multiples of 5 arcmin, and set a minimum range of 5 arcmin
-        azim_max_xlim = np.max(np.abs(ax_azim.get_ylim()))
-        elev_max_xlim = np.max(np.abs(ax_elev.get_ylim()))
-        max_xlim = np.ceil(np.max([azim_max_xlim, elev_max_xlim])/5)*5
-        if max_xlim < 5.0:
-            max_xlim = 5.0
-        ax_azim.set_ylim([-max_xlim, max_xlim])
-        ax_elev.set_ylim([-max_xlim, max_xlim])
+        azim_max_ylim = np.max(np.abs(ax_azim.get_ylim()))
+        elev_max_ylim = np.max(np.abs(ax_elev.get_ylim()))
+        skyradius_max_ylim = np.max(np.abs(ax_skyradius.get_ylim()))
+        max_ylim = np.ceil(np.max([azim_max_ylim, elev_max_ylim, skyradius_max_ylim])/5)*5
+        if max_ylim < 5.0:
+            max_ylim = 5.0
+        ax_azim.set_ylim([-max_ylim, max_ylim])
+        ax_elev.set_ylim([-max_ylim, max_ylim])
+        ax_skyradius.set_ylim([-max_ylim, max_ylim])
 
         # Plot X vs X error
         ax_x.scatter(x_list, x_residuals, s=2, c='k', zorder=3)
@@ -2504,14 +2630,24 @@ class PlateTool(QMainWindow):
         ax_y.set_ylabel("Y error (px)")
         ax_y.set_xlim([0, self.img.data.shape[0]])
 
+        # Plot radius vs radius error
+        ax_radius.scatter(radius_list, radius_residuals, s=2, c='k', zorder=3)
+
+        ax_radius.grid()
+        ax_radius.set_xlabel("Radius (px)")
+        ax_radius.set_ylabel("Radius error (px)")
+        ax_radius.set_xlim([0, np.hypot(self.img.data.shape[0]/2, self.img.data.shape[1]/2)])
+
         # Equalize Y limits, make them integers, and set a minimum range of 1 px
-        x_max_xlim = np.max(np.abs(ax_x.get_ylim()))
-        y_max_xlim = np.max(np.abs(ax_y.get_ylim()))
-        max_xlim = np.ceil(np.max([x_max_xlim, y_max_xlim]))
-        if max_xlim < 1:
-            max_xlim = 1.0
-        ax_x.set_ylim([-max_xlim, max_xlim])
-        ax_y.set_ylim([-max_xlim, max_xlim])
+        x_max_ylim = np.max(np.abs(ax_x.get_ylim()))
+        y_max_ylim = np.max(np.abs(ax_y.get_ylim()))
+        radius_max_ylim = np.max(np.abs(ax_radius.get_ylim()))
+        max_ylim = np.ceil(np.max([x_max_ylim, y_max_ylim, radius_max_ylim]))
+        if max_ylim < 1:
+            max_ylim = 1.0
+        ax_x.set_ylim([-max_ylim, max_ylim])
+        ax_y.set_ylim([-max_ylim, max_ylim])
+        ax_radius.set_ylim([-max_ylim, max_ylim])
 
         fig_a.tight_layout()
         fig_a.show()

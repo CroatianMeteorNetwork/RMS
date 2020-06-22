@@ -1,8 +1,14 @@
 import pyqtgraph as pg
 import numpy as np
-from PyQt5.QtCore import QPoint, QRectF, Qt, QLine
-from PyQt5.QtGui import QColor, QPicture, QPainter, QPen, QFont, QTransform, QPainterPath, QBrush
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtCore import QPoint, QRectF, Qt, QLine, pyqtSignal, pyqtSlot
+from PyQt5.QtGui import QColor, QPicture, QPainter, QPen, QFont, QTransform, QPainterPath, QBrush, \
+    QValidator
+from PyQt5.QtWidgets import QApplication, QLineEdit, QWidget, QGridLayout, QDoubleSpinBox, QLabel, \
+    QComboBox, QTabWidget, QFormLayout, QHBoxLayout
+
+import time
+import re
+import sys
 
 
 class Plus(QPainterPath):
@@ -12,6 +18,7 @@ class Plus(QPainterPath):
 
     Consists of two lines with no fill making a plus sign
     """
+
     def __init__(self):
         QPainterPath.__init__(self)
         points = np.asarray([
@@ -34,6 +41,7 @@ class Cross(QPainterPath):
 
     Consists of two lines with no fill making a cross
     """
+
     def __init__(self):
         QPainterPath.__init__(self)
         points = np.asarray([
@@ -57,6 +65,7 @@ class CircleLine(QPainterPath):
     Consists of a circle with fill that can be removed (with setBrush(QColor(0,0,0,0))),
     with a line going from the top to the center
     """
+
     def __init__(self):
         QPainterPath.__init__(self)
         points = np.asarray([(0, -0.5), (0, 0)])
@@ -75,6 +84,7 @@ class Crosshair(QPainterPath):
     Consists of a circle with fill that can be removed (with setBrush(QColor(0,0,0,0))),
     with four lines going from the top, bottom, left and right to near the center
     """
+
     def __init__(self):
         QPainterPath.__init__(self)
         points = np.asarray([(0, -0.5), (0, -0.2),
@@ -98,14 +108,22 @@ class PlotLines(pg.GraphicsObject):
     lines = PlotLines()
     widget.addItem(lines)
     """
-    def __init__(self, data=None):
+
+    def __init__(self, data=None, pxmode=False):
         pg.GraphicsObject.__init__(self)
         self.data = data
 
         if self.data is None:
             self.data = []
+            self.max_x = 0
+            self.max_y = 0
+        else:
+            self.max_x = max([max([x[0], x[2]]) for x in self.data])
+            self.max_y = max([max([x[1], x[3]]) for x in self.data])
 
         self.picture = QPicture()
+        self.pxmode = pxmode
+
         self.generatePicture()
 
     def setData(self, data):
@@ -118,21 +136,33 @@ class PlotLines(pg.GraphicsObject):
                 A list of these five arguments in a tuple will allow for drawing any number of lines
         """
         self.data = data
+        self.max_x = max([max([x[0], x[2]]) for x in self.data])
+        self.max_y = max([max([x[1], x[3]]) for x in self.data])
         self.update()
 
     def generatePicture(self):
         painter = QPainter(self.picture)
         for x0, y0, xnd, ynd, pen in self.data:
+            if self.pxmode and self.parentItem():
+                pos1 = self.parentItem().mapToDevice(pg.Point(x0, y0))
+                pos2 = self.parentItem().mapToDevice(pg.Point(xnd, ynd))
+                x0, y0, xnd, ynd = pos1.x(), pos1.y(), pos2.x(), pos2.y()
             painter.setPen(pen)
             painter.drawLine(QLine(x0, y0, xnd, ynd))
         painter.end()
 
     def paint(self, painter, option, widget=None):
         self.generatePicture()
+        t = painter.transform()
+
+        if self.pxmode:  # stays in coordinates according to view without changing size
+            painter.setTransform(QTransform(1, 0, t.m13(),
+                                            t.m21(), 1, t.m23(),
+                                            0, 0, t.m33()))
         painter.drawPicture(QPoint(0, 0), self.picture)
 
     def boundingRect(self):
-        return QRectF(self.picture.boundingRect())
+        return QRectF(0, 0, self.max_x, self.max_y)
 
 
 class TextItemList(pg.GraphicsObject):
@@ -235,7 +265,6 @@ class TextItemList(pg.GraphicsObject):
         super().setParentItem(parent)
         for text in self.text_list:
             text.setParentItem(parent)
-
 
     def paint(self, painter, option, widget=None):
         for text in self.text_list:
@@ -701,3 +730,267 @@ class HistogramLUTItem2(pg.HistogramLUTItem):
         super().regionChanging()
         for img in self.level_images:
             img.setLevels(self.getLevels())
+
+
+class PlateparParameterManager(QWidget):
+    azalt_star_signal = pyqtSignal()
+    rot_star_signal = pyqtSignal()
+    scale_star_signal = pyqtSignal()
+    distortion_signal = pyqtSignal()
+
+    def __init__(self, parent, platepar):
+        QWidget.__init__(self, parent)
+        self.platepar = platepar
+
+        self.attr_list = {}
+        self.setMaximumWidth(300)
+
+        layout = QFormLayout()
+        layout.setLabelAlignment(Qt.AlignRight)
+        self.setLayout(layout)
+
+        hbox = QHBoxLayout()
+        self.az_centre = QDoubleSpinBox()
+        self.az_centre.setMinimum(-360)
+        self.az_centre.setMaximum(360)
+        self.az_centre.setDecimals(8)
+        self.az_centre.setSingleStep(1)
+        self.az_centre.setFixedWidth(100)
+        self.az_centre.setValue(self.platepar.az_centre)
+        self.az_centre.valueChanged.connect(self.azChanged)
+        hbox.addWidget(self.az_centre)
+        hbox.addWidget(QLabel('degrees', alignment=Qt.AlignLeft))
+        layout.addRow(QLabel('Az'), hbox)
+
+        hbox = QHBoxLayout()
+        self.alt_centre = QDoubleSpinBox()
+        self.alt_centre.setMinimum(-360)
+        self.alt_centre.setMaximum(360)
+        self.alt_centre.setDecimals(8)
+        self.alt_centre.setSingleStep(1)
+        self.alt_centre.setFixedWidth(100)
+        self.alt_centre.setValue(self.platepar.alt_centre)
+        self.alt_centre.valueChanged.connect(self.altChanged)
+        hbox.addWidget(self.alt_centre)
+        hbox.addWidget(QLabel('degrees', alignment=Qt.AlignLeft))
+        layout.addRow(QLabel('Alt'), hbox)
+
+        hbox = QHBoxLayout()
+        self.rotation_from_horiz = QDoubleSpinBox()
+        self.rotation_from_horiz.setMinimum(-360)
+        self.rotation_from_horiz.setMaximum(360)
+        self.rotation_from_horiz.setDecimals(8)
+        self.rotation_from_horiz.setSingleStep(1)
+        self.rotation_from_horiz.setFixedWidth(100)
+        self.rotation_from_horiz.setValue(self.platepar.rotation_from_horiz)
+        self.rotation_from_horiz.valueChanged.connect(self.rotChanged)
+        hbox.addWidget(self.rotation_from_horiz)
+        hbox.addWidget(QLabel('degrees', alignment=Qt.AlignLeft))
+        layout.addRow(QLabel('Rot from horiz'), hbox)
+
+        hbox = QHBoxLayout()
+        self.F_scale = QDoubleSpinBox()
+        self.F_scale.setMinimum(0)
+        self.F_scale.setMaximum(1)
+        self.F_scale.setDecimals(8)
+        self.F_scale.setSingleStep(0.01)
+        self.F_scale.setFixedWidth(100)
+        self.F_scale.setValue(self.platepar.F_scale/60)
+        self.F_scale.valueChanged.connect(self.scaleChanged)
+        hbox.addWidget(self.F_scale)
+        hbox.addWidget(QLabel('arcmin/px', alignment=Qt.AlignLeft))
+        layout.addRow(QLabel('Scale'), hbox)
+
+        self.distortion_type = QComboBox(self)
+        self.distortion_type.addItems(self.platepar.distortion_type_list)
+        self.distortion_type.currentIndexChanged.connect(self.onIndexChanged)
+        layout.addRow(QLabel('Distortion'), self.distortion_type)
+
+        self.fit_parameters = ArrayTabWidget(parent=None, platepar=self.platepar)
+        self.fit_parameters.valueModified.connect(self.scale_star_signal.emit)  # calls updateStars
+        layout.addRow(self.fit_parameters)
+
+    def azChanged(self):
+        self.platepar.az_centre = self.az_centre.value()
+        self.azalt_star_signal.emit()
+
+    def altChanged(self):
+        self.platepar.alt_centre = self.alt_centre.value()
+        self.azalt_star_signal.emit()
+
+    def rotChanged(self):
+        self.platepar.rotation_from_horiz = self.rotation_from_horiz.value()
+        self.rot_star_signal.emit()
+
+    def scaleChanged(self):
+        self.platepar.F_scale = self.F_scale.value()*60
+        self.scale_star_signal.emit()
+
+    def onIndexChanged(self):
+        text = self.distortion_type.currentText()
+        self.platepar.setDistortionType(text, reset_params=False)
+
+        if text == 'poly3+radial':
+            self.fit_parameters.changeNumberShown(12)
+        elif text == 'radial3':
+            self.fit_parameters.changeNumberShown(5)
+        elif text == 'radial4':
+            self.fit_parameters.changeNumberShown(6)
+        elif text == 'radial5':
+            self.fit_parameters.changeNumberShown(7)
+
+        self.distortion_signal.emit()
+
+    def updatePlatepar(self):
+        t = time.time()
+        self.az_centre.setValue(self.platepar.az_centre)
+        self.alt_centre.setValue(self.platepar.alt_centre)
+        self.rotation_from_horiz.setValue(self.rotation_from_horiz)
+        self.F_scale.setValue(self.platepar.F_scale/60)
+        self.fit_parameters.updateValues()
+
+
+class ArrayTabWidget(QTabWidget):
+    valueModified = pyqtSignal()
+
+    def __init__(self, parent=None, platepar=None):
+        super(ArrayTabWidget, self).__init__(parent)
+        self.platepar = platepar
+
+        self.vars = ['x_poly_rev', 'y_poly_rev', 'x_poly_fwd', 'y_poly_fwd']
+        # self.units = [-1, 1, 1, 4, 4, 4, 7, 7, 6, 6, 4, 4]
+        self.tabs = [QWidget() for x in range(4)]
+        self.layouts = []
+        self.boxes = [[], [], [], []]
+        self.labels = [[], [], [], []]
+        for i in range(len(self.vars)):
+            self.addTab(self.tabs[i], self.vars[i])
+            self.setupTab(i)
+
+        self.n_shown = 12
+
+    def changeNumberShown(self, n):
+        assert 0 <= n <= 12
+        if n == self.n_shown:
+            return
+
+        elif n > self.n_shown:
+            for i in range(4):
+                for j in range(self.n_shown, n):
+                    self.layouts[i].insertRow(j, self.labels[i][j], self.boxes[i][j])
+                    self.labels[i][j].show()
+                    self.boxes[i][j].show()
+
+        elif n < self.n_shown:
+            for i in range(4):
+                for j in range(n, self.n_shown):
+                    self.labels[i][j].hide()
+                    self.boxes[i][j].hide()
+                    self.layouts[i].removeWidget(self.labels[i][j])
+                    self.layouts[i].removeWidget(self.boxes[i][j])
+
+        self.n_shown = n
+
+
+    def setupTab(self, i):
+        layout = QFormLayout()
+
+        for j in range(12):
+            box = ScientificDoubleSpinBox()
+            box.setSingleStep(0.5)
+            box.setFixedWidth(100)
+            box.setValue(getattr(self.platepar, self.vars[i])[j])
+            box.buttonPressed.connect(box.editingFinished)
+            box.editingFinished.connect(self.updated(i, j))
+            label = QLabel("{}[{}]".format(self.vars[i], j))
+            layout.addRow(label, box)
+            self.boxes[i].append(box)
+            self.labels[i].append(label)
+
+        self.setTabText(i, self.vars[i])
+        self.tabs[i].setLayout(layout)
+        self.layouts.append(layout)
+
+    def updated(self, i, j):
+        def f():
+            getattr(self.platepar, self.vars[i])[j] = self.boxes[i][j].value()
+            self.valueModified.emit()
+
+        return f
+
+    def updateValues(self):
+        for i in range(4):
+            for j in range(12):
+                self.boxes[i][j].setValue(getattr(self.platepar, self.vars[i])[j])
+
+
+# https://jdreaver.com/posts/2014-07-28-scientific-notation-spin-box-pyside.html
+
+_float_re = re.compile(r'(([+-]?\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?)')
+
+
+def valid_float_string(string):
+    match = _float_re.search(string)
+    return match.groups()[0] == string if match else False
+
+
+class FloatValidator(QValidator):
+    def validate(self, string, position):
+        if valid_float_string(string):
+            state = QValidator.Acceptable
+        elif string == "" or string[position - 1] in 'e.-+':
+            state = QValidator.Intermediate
+        else:
+            state = QValidator.Invalid
+        return state, string, position
+
+    def fixup(self, text):
+        match = _float_re.search(text)
+        return match.groups()[0] if match else ""
+
+
+class ScientificDoubleSpinBox(QDoubleSpinBox):
+    buttonPressed = pyqtSignal()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setMinimum(-1e30)
+        self.setMaximum(1e30)
+        self.validator = FloatValidator()
+        self.setDecimals(1000)
+        self.step_size = 1
+
+    def setSingleStep(self, val):
+        self.step_size = val
+
+    def singleStep(self):
+        return self.step_size
+
+    def validate(self, text, position):
+        return self.validator.validate(text, position)
+
+    def fixup(self, text):
+        return self.validator.fixup(text)
+
+    def valueFromText(self, text):
+        return float(text)
+
+    def textFromValue(self, value):
+        return format_float(value)
+
+    def stepBy(self, steps):
+        text = self.cleanText()
+        groups = _float_re.search(text).groups()
+        decimal = float(groups[1])
+        decimal += steps*self.singleStep()
+        new_string = "{:e}".format(float(str(decimal) + groups[3]))
+        self.lineEdit().setText(new_string)
+
+        self.buttonPressed.emit()
+
+
+def format_float(value):
+    """Modified form of the 'g' format specifier."""
+    string = "{:e}".format(value)  # .replace("e+", "e")
+    # string = re.sub("e(-?)0*(\d+)", r"e\1\2", string)
+    return string

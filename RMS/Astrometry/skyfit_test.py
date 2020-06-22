@@ -48,7 +48,7 @@ class GUI(QMainWindow):
         self.data = pg.gaussianFilter(np.random.normal(size=(256, 256)), (20, 20))
         for i in range(32):
             for j in range(32):
-                self.data[i * 8, j * 8] += .1
+                self.data[i*8, j*8] += .1
 
         self.img = None
         self.img_copy = None
@@ -136,8 +136,8 @@ class GUI(QMainWindow):
     def updateLabel(self):
         """ Update text """
         self.text.getTextItem(0).setText("Position: ({:.2f},{:.2f})\n"
-                           "Gamma: {:.2f}\n"
-                           "MORE TEXT".format(*self.mouse, self.img.gamma))
+                                         "Gamma: {:.2f}\n"
+                                         "MORE TEXT".format(*self.mouse, self.img.gamma))
 
     def zoom(self):
         """ Update the zoom window to zoom on the correct position """
@@ -166,7 +166,7 @@ class GUI(QMainWindow):
             self.zoom()
             # moving zoom window to the right position
             range_ = self.vb.getState()['viewRange'][0]
-            if mp.x() > (range_[1] - range_[0]) / 2 + range_[0]:
+            if mp.x() > (range_[1] - range_[0])/2 + range_[0]:
                 self.v_zoom.move(QPoint(0, 0))
             else:
                 self.v_zoom.move(QPoint(self.vb.size().width() - self.zoom_window_width, 0))
@@ -231,13 +231,12 @@ class GUI(QMainWindow):
         with open(os.path.join(dir_path, file_name), 'wb') as f:
             dill.dump(self, f, protocol=2)
 
-
     def nextImg(self):
         """ get new data """
         self.data = pg.gaussianFilter(np.random.normal(size=(256, 256)), (20, 20))
         for i in range(32):
             for j in range(32):
-                self.data[i * 8, j * 8] += .1
+                self.data[i*8, j*8] += .1
 
         self.markers.clear()
         self.updateImage()
@@ -293,8 +292,8 @@ class GUI(QMainWindow):
             self.nextImg()
 
         elif event.key() == Qt.Key_U:
-            self.img.updateGamma(1 / 0.9)
-            self.img_copy.updateGamma(1 / 0.9)
+            self.img.updateGamma(1/0.9)
+            self.img_copy.updateGamma(1/0.9)
             self.updateLabel()
 
         elif event.key() == Qt.Key_J:
@@ -305,8 +304,8 @@ class GUI(QMainWindow):
     def printFrameRate(self):
         try:
             print('FPS: {}'.format(np.average(self.frames)))
-            self.frames[self.i] = 1 / (time.time() - self.time)
-            self.i = (self.i + 1) % self.n
+            self.frames[self.i] = 1/(time.time() - self.time)
+            self.i = (self.i + 1)%self.n
         except ZeroDivisionError:
             pass
         self.time = time.time()
