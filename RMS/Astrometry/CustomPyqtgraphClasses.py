@@ -231,7 +231,7 @@ class TextItemList(pg.GraphicsObject):
         else:
             self.getTextItem(i).hide()
 
-    def setTextItem(self, i, *args, **kwargs):
+    def setTextItem(self, parent, i, *args, **kwargs):
         """
         Replace the TextItem at index i to a TextItem initialized with args and kwargs
 
@@ -239,8 +239,9 @@ class TextItemList(pg.GraphicsObject):
             i [int]: index of TextItem to replace
             args, kwargs: same arguments as __init__ in TextItem
         """
+        self.parentItem().scene().removeItem(self.text_list[i])
         self.text_list[i].setParentItem(None)
-        self.text_list[i] = TextItem(*args, **kwargs)
+        self.text_list.insert(i, TextItem(*args, **kwargs))
         self.text_list[i].setParentItem(self.parentItem())
         self.text_list[i].setZValue(self.z)
 
@@ -259,6 +260,7 @@ class TextItemList(pg.GraphicsObject):
             i [int]: index
         """
         item = self.text_list.pop(i)
+        self.parentItem().scene().removeItem(item)
         item.setParentItem(None)
 
     def setParentItem(self, parent):
@@ -750,53 +752,53 @@ class PlateparParameterManager(QWidget):
         self.setLayout(layout)
 
         hbox = QHBoxLayout()
-        self.az_centre = QDoubleSpinBox()
+        self.az_centre = DoubleSpinBox()
         self.az_centre.setMinimum(-360)
         self.az_centre.setMaximum(360)
         self.az_centre.setDecimals(8)
         self.az_centre.setSingleStep(1)
         self.az_centre.setFixedWidth(100)
         self.az_centre.setValue(self.platepar.az_centre)
-        self.az_centre.valueChanged.connect(self.azChanged)
+        self.az_centre.valueModified.connect(self.azChanged)
         hbox.addWidget(self.az_centre)
         hbox.addWidget(QLabel('degrees', alignment=Qt.AlignLeft))
         layout.addRow(QLabel('Az'), hbox)
 
         hbox = QHBoxLayout()
-        self.alt_centre = QDoubleSpinBox()
+        self.alt_centre = DoubleSpinBox()
         self.alt_centre.setMinimum(-360)
         self.alt_centre.setMaximum(360)
         self.alt_centre.setDecimals(8)
         self.alt_centre.setSingleStep(1)
         self.alt_centre.setFixedWidth(100)
         self.alt_centre.setValue(self.platepar.alt_centre)
-        self.alt_centre.valueChanged.connect(self.altChanged)
+        self.alt_centre.valueModified.connect(self.altChanged)
         hbox.addWidget(self.alt_centre)
         hbox.addWidget(QLabel('degrees', alignment=Qt.AlignLeft))
         layout.addRow(QLabel('Alt'), hbox)
 
         hbox = QHBoxLayout()
-        self.rotation_from_horiz = QDoubleSpinBox()
+        self.rotation_from_horiz = DoubleSpinBox()
         self.rotation_from_horiz.setMinimum(-360)
         self.rotation_from_horiz.setMaximum(360)
         self.rotation_from_horiz.setDecimals(8)
         self.rotation_from_horiz.setSingleStep(1)
         self.rotation_from_horiz.setFixedWidth(100)
         self.rotation_from_horiz.setValue(self.platepar.rotation_from_horiz)
-        self.rotation_from_horiz.valueChanged.connect(self.rotChanged)
+        self.rotation_from_horiz.valueModified.connect(self.rotChanged)
         hbox.addWidget(self.rotation_from_horiz)
         hbox.addWidget(QLabel('degrees', alignment=Qt.AlignLeft))
         layout.addRow(QLabel('Rot from horiz'), hbox)
 
         hbox = QHBoxLayout()
-        self.F_scale = QDoubleSpinBox()
+        self.F_scale = DoubleSpinBox()
         self.F_scale.setMinimum(0)
         self.F_scale.setMaximum(1)
         self.F_scale.setDecimals(8)
         self.F_scale.setSingleStep(0.01)
         self.F_scale.setFixedWidth(100)
         self.F_scale.setValue(self.platepar.F_scale/60)
-        self.F_scale.valueChanged.connect(self.scaleChanged)
+        self.F_scale.valueModified.connect(self.scaleChanged)
         hbox.addWidget(self.F_scale)
         hbox.addWidget(QLabel('arcmin/px', alignment=Qt.AlignLeft))
         layout.addRow(QLabel('Scale'), hbox)
@@ -842,7 +844,6 @@ class PlateparParameterManager(QWidget):
         self.distortion_signal.emit()
 
     def updatePlatepar(self):
-        t = time.time()
         self.az_centre.setValue(self.platepar.az_centre)
         self.alt_centre.setValue(self.platepar.alt_centre)
         self.rotation_from_horiz.setValue(self.rotation_from_horiz)
@@ -858,11 +859,12 @@ class ArrayTabWidget(QTabWidget):
         self.platepar = platepar
 
         self.vars = ['x_poly_rev', 'y_poly_rev', 'x_poly_fwd', 'y_poly_fwd']
-        # self.units = [-1, 1, 1, 4, 4, 4, 7, 7, 6, 6, 4, 4]
+
         self.tabs = [QWidget() for x in range(4)]
         self.layouts = []
         self.boxes = [[], [], [], []]
         self.labels = [[], [], [], []]
+
         for i in range(len(self.vars)):
             self.addTab(self.tabs[i], self.vars[i])
             self.setupTab(i)
@@ -891,7 +893,6 @@ class ArrayTabWidget(QTabWidget):
 
         self.n_shown = n
 
-
     def setupTab(self, i):
         layout = QFormLayout()
 
@@ -900,8 +901,7 @@ class ArrayTabWidget(QTabWidget):
             box.setSingleStep(0.5)
             box.setFixedWidth(100)
             box.setValue(getattr(self.platepar, self.vars[i])[j])
-            box.buttonPressed.connect(box.editingFinished)
-            box.editingFinished.connect(self.updated(i, j))
+            box.valueModified.connect(self.updated(i, j))
             label = QLabel("{}[{}]".format(self.vars[i], j))
             layout.addRow(label, box)
             self.boxes[i].append(box)
@@ -922,6 +922,25 @@ class ArrayTabWidget(QTabWidget):
         for i in range(4):
             for j in range(12):
                 self.boxes[i][j].setValue(getattr(self.platepar, self.vars[i])[j])
+
+
+class RightOptionsTab(QTabWidget):
+    def __init__(self, parent=None, platepar=None):
+        super(RightOptionsTab, self).__init__(parent)
+
+        self.hist = HistogramLUTWidget2()
+        self.param_manager = PlateparParameterManager(parent=None,
+                                                      platepar=platepar)
+
+        self.setFixedWidth(250)
+        self.addTab(self.hist, 'Levels')
+        self.addTab(self.param_manager, 'Fit Parameters')
+
+        self.setTabText(0, 'Levels')
+        self.setTabText(1, 'Fit Parameters')
+
+        self.setTabPosition(QTabWidget.East)
+        self.setMovable(True)
 
 
 # https://jdreaver.com/posts/2014-07-28-scientific-notation-spin-box-pyside.html
@@ -949,8 +968,31 @@ class FloatValidator(QValidator):
         return match.groups()[0] if match else ""
 
 
+class DoubleSpinBox(QDoubleSpinBox):
+    buttonPressed = pyqtSignal()
+    valueModified = pyqtSignal()  # press enter or buttonpressed
+
+    def __init__(self, *args, **kwargs):
+        """
+        Identical to QDoubleSpinBox functionally except has more signals
+        so you can tell more of what's happening
+        """
+        super().__init__(*args, **kwargs)
+
+    def stepBy(self, steps):
+        super().stepBy(steps)
+        self.buttonPressed.emit()
+        self.valueModified.emit()
+
+    def keyPressEvent(self, e):
+        super().keyPressEvent(e)
+        if e.key() == Qt.Key_Enter - 1:
+            self.valueModified.emit()
+
+
 class ScientificDoubleSpinBox(QDoubleSpinBox):
     buttonPressed = pyqtSignal()
+    valueModified = pyqtSignal()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -987,6 +1029,12 @@ class ScientificDoubleSpinBox(QDoubleSpinBox):
         self.lineEdit().setText(new_string)
 
         self.buttonPressed.emit()
+        self.valueModified.emit()
+
+    def keyPressEvent(self, e):
+        super().keyPressEvent(e)
+        if e.key() == Qt.Key_Enter - 1:
+            self.valueModified.emit()
 
 
 def format_float(value):

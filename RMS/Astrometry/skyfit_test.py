@@ -108,6 +108,8 @@ class GUI(QMainWindow):
         self.cursor_scroll = False  # optional
         self.cursor.setZValue(100)
 
+        self.x = []
+
         self.cursor2 = CursorItem(10)
         self.zoom_window.addItem(self.cursor2, ignoreBounds=True)
         self.cursor2.hide()
@@ -173,6 +175,14 @@ class GUI(QMainWindow):
             # self.text.update()
             self.text2.update()
             self.updateLabel()
+
+            t = time.time()
+            for i in range(100):
+                self.text.clear()
+                self.text.addTextItem(10, 10, 100, 100, 'hello')
+                # self.text.setTextItem(self.vb,0, 10, 10, 100, 100, 'hello')
+
+            print(time.time() - t)
 
         # self.printFrameRate()
         self.update()

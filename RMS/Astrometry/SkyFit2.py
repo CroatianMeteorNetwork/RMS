@@ -87,10 +87,10 @@ class FOVinputDialog(object):
         self.rotation.insert(0, '0')
 
         b = tkinter.Button(self.top, text="OK", command=self.verify)
-        b.grid(row=4, column=0,columnspan=1)
+        b.grid(row=4, column=0, columnspan=1)
 
         b2 = tkinter.Button(self.top, text="cancel", command=self.cancel)
-        b2.grid(row=4, column=1,columnspan=1)
+        b2.grid(row=4, column=1, columnspan=1)
 
     def cancel(self, event=None):
         self.azim = None
@@ -338,9 +338,9 @@ class PlateTool(QMainWindow):
         self.zoom_window.invertY()
 
         # histogram
-        self.hist = HistogramLUTWidget2()
-        layout.addWidget(self.hist, 0, 2)
-        self.hist.hide()
+        # self.hist = HistogramLUTWidget2()
+        # layout.addWidget(self.hist, 0, 2)
+        # self.hist.hide()
         #
         # self.labels = TextItemList()
         # self.labels.setZValue(1000)
@@ -463,15 +463,15 @@ class PlateTool(QMainWindow):
         self.residual_text.setZValue(10)
 
         # platepar parameter manager
-        self.param_manager = PlateparParameterManager(parent=None,
-                                                      platepar=self.platepar)
+        # self.param_manager = PlateparParameterManager(parent=None,
+        #                                               platepar=self.platepar)
+        self.tab = RightOptionsTab(platepar=self.platepar)
 
-        self.param_manager.azalt_star_signal.connect(self.updateStarsSignalAzAltSignal)
-        self.param_manager.rot_star_signal.connect(self.updateStarsSignalRotSignal)
-        self.param_manager.scale_star_signal.connect(self.updateStars)
-        self.param_manager.distortion_signal.connect(self.updateDistortionSignal)
-        layout.addWidget(self.param_manager, 0, 3)
-        self.paramm_visible = True
+        self.tab.param_manager.azalt_star_signal.connect(self.updateStarsSignalAzAltSignal)
+        self.tab.param_manager.rot_star_signal.connect(self.updateStarsSignalRotSignal)
+        self.tab.param_manager.scale_star_signal.connect(self.updateStars)
+        self.tab.param_manager.distortion_signal.connect(self.updateDistortionSignal)
+        layout.addWidget(self.tab, 0, 2)
 
         # mouse binding
         self.img_frame.scene().sigMouseMoved.connect(self.mouseMove)
@@ -487,7 +487,6 @@ class PlateTool(QMainWindow):
         if loaded_file:
             self.star_pick_mode = True
             self.updatePairedStars()
-            self.photometry()
             self.star_pick_mode = False
 
         self.setMinimumSize(1200, 800)
@@ -655,6 +654,7 @@ class PlateTool(QMainWindow):
         """ Updates only the stars """
         # Draw stars that were paired in picking mode
         self.updatePairedStars()
+
         self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)  # place this elsewhere
 
         # Draw stars detected on this image
@@ -701,10 +701,6 @@ class PlateTool(QMainWindow):
 
         self.updateLeftLabels()
         self.updateDistortion()
-
-        # Draw photometry
-        if len(self.paired_stars) > 2:
-            self.photometry()
 
         # Draw fit residuals
         if self.residuals is not None:
@@ -781,17 +777,17 @@ class PlateTool(QMainWindow):
             self.platepar.Y_res = data_dict[self.img_type_flag].shape[1]
 
         elif not self.auto_levels:
-            self.img_level_min, self.img_level_max = self.hist.getLevels()
+            self.img_level_min, self.img_level_max = self.tab.hist.getLevels()
 
         # update histogram and its levels
-        self.hist.setImageItem(self.img)
-        self.hist.setImages(self.img_zoom)
+        self.tab.hist.setImageItem(self.img)
+        self.tab.hist.setImages(self.img_zoom)
 
         # set levels for image
         if self.auto_levels:
-            self.hist.setLevels(self.img_level_min_auto, self.img_level_max_auto)
+            self.tab.hist.setLevels(self.img_level_min_auto, self.img_level_max_auto)
         else:
-            self.hist.setLevels(self.img_level_min, self.img_level_max)
+            self.tab.hist.setLevels(self.img_level_min, self.img_level_max)
 
         self.updateStars()
 
@@ -1030,6 +1026,7 @@ class PlateTool(QMainWindow):
                 self.v_zoom.move(QPoint(self.img_frame.size().width() - self.show_zoom_window_size, 0))
 
             self.updateBottomLabel()
+
         # self.printFrameRate()
 
     def printFrameRate(self):
@@ -1065,6 +1062,7 @@ class PlateTool(QMainWindow):
             radius_list = []
             px_intens_list = []
             catalog_mags = []
+
             for paired_star in self.paired_stars:
 
                 img_star, catalog_star = paired_star
@@ -1268,12 +1266,12 @@ class PlateTool(QMainWindow):
         if event.key() == Qt.Key_A and modifiers == Qt.ControlModifier:
             self.auto_levels = not self.auto_levels
             if self.auto_levels:
-                self.img_level_min, self.img_level_max = self.hist.getLevels()
-                self.hist.setLevels(self.img_level_min_auto, self.img_level_max_auto)
-                self.hist.setMovable(False)
+                self.img_level_min, self.img_level_max = self.tab.hist.getLevels()
+                self.tab.hist.setLevels(self.img_level_min_auto, self.img_level_max_auto)
+                self.tab.hist.setMovable(False)
             else:
-                self.hist.setLevels(self.img_level_min, self.img_level_max)
-                self.hist.setMovable(True)
+                self.tab.hist.setLevels(self.img_level_min, self.img_level_max)
+                self.tab.hist.setMovable(True)
             # this updates image automatically
 
         elif event.key() == Qt.Key_D and modifiers == Qt.ControlModifier:
@@ -1322,28 +1320,28 @@ class PlateTool(QMainWindow):
 
             self.dist_type_index = 0
             self.changeDistortionType()
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
             self.updateStars()
 
         elif event.key() == Qt.Key_2 and modifiers == Qt.ControlModifier:
 
             self.dist_type_index = 1
             self.changeDistortionType()
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
             self.updateStars()
 
         elif event.key() == Qt.Key_3 and modifiers == Qt.ControlModifier:
 
             self.dist_type_index = 2
             self.changeDistortionType()
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
             self.updateStars()
 
         elif event.key() == Qt.Key_4 and modifiers == Qt.ControlModifier:
 
             self.dist_type_index = 3
             self.changeDistortionType()
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
             self.updateStars()
 
         elif event.key() == Qt.Key_N and modifiers == Qt.ControlModifier:
@@ -1393,17 +1391,17 @@ class PlateTool(QMainWindow):
 
         elif event.key() == Qt.Key_H and modifiers == Qt.ControlModifier:
             self.adjust_levels_mode = not self.adjust_levels_mode
-            if self.adjust_levels_mode:
-                self.hist.show()
-            else:
-                self.hist.hide()
+            # if self.adjust_levels_mode:
+            #     self.tab.hist.show()
+            # else:
+            #     self.tab.hist.hide()
 
         elif event.key() == Qt.Key_P and modifiers == Qt.ControlModifier:
             self.paramm_visible = not self.paramm_visible
-            if self.paramm_visible:
-                self.param_manager.show()
-            else:
-                self.param_manager.hide()
+            # if self.paramm_visible:
+            #     self.tab.param_manager.show()
+            # else:
+            #     self.tab.param_manager.hide()
 
 
         elif event.key() == Qt.Key_Left:
@@ -1434,55 +1432,55 @@ class PlateTool(QMainWindow):
         elif event.key() == Qt.Key_A and not self.star_pick_mode:
             self.platepar.az_centre += self.key_increment
             self.updateRefRADec()
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
             self.updateStars()
 
         elif event.key() == Qt.Key_D and not self.star_pick_mode:
             self.platepar.az_centre -= self.key_increment
             self.updateRefRADec()
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
             self.updateStars()
 
         elif event.key() == Qt.Key_W and not self.star_pick_mode:
             self.platepar.alt_centre -= self.key_increment
             self.updateRefRADec()
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
             self.updateStars()
 
         elif event.key() == Qt.Key_S and not self.star_pick_mode:
             self.platepar.alt_centre += self.key_increment
             self.updateRefRADec()
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
             self.updateStars()
 
         # Move rotation parameter
         elif event.key() == Qt.Key_Q and not self.star_pick_mode:
             self.platepar.pos_angle_ref -= self.key_increment
             self.updateStars()
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
 
         elif event.key() == Qt.Key_E and not self.star_pick_mode:
             self.platepar.pos_angle_ref += self.key_increment
             self.updateStars()
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
 
         # Change image scale
         elif event.key() == Qt.Key_Up:
             self.platepar.F_scale *= 1.0 + self.key_increment/100.0
             self.updateStars()
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
 
         elif event.key() == Qt.Key_Down:
             self.platepar.F_scale *= 1.0 - self.key_increment/100.0
             self.updateStars()
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
 
         elif event.key() == Qt.Key_1:
 
             # Increment X offset
             self.platepar.x_poly_rev[0] += 0.5
             self.platepar.x_poly_fwd[0] += 0.5
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
             self.updateStars()
 
         elif event.key() == Qt.Key_2:
@@ -1490,7 +1488,7 @@ class PlateTool(QMainWindow):
             # Decrement X offset
             self.platepar.x_poly_rev[0] -= 0.5
             self.platepar.x_poly_fwd[0] -= 0.5
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
             self.updateStars()
 
 
@@ -1499,7 +1497,7 @@ class PlateTool(QMainWindow):
             # Increment Y offset
             self.platepar.y_poly_rev[0] += 0.5
             self.platepar.y_poly_fwd[0] += 0.5
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
             self.updateStars()
 
         elif event.key() == Qt.Key_4:
@@ -1507,7 +1505,7 @@ class PlateTool(QMainWindow):
             # Decrement Y offset
             self.platepar.y_poly_rev[0] -= 0.5
             self.platepar.y_poly_fwd[0] -= 0.5
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
             self.updateStars()
 
         elif event.key() == Qt.Key_5:
@@ -1515,7 +1513,7 @@ class PlateTool(QMainWindow):
             # Decrement X 1st order distortion
             self.platepar.x_poly_rev[1] -= 0.01
             self.platepar.x_poly_fwd[1] -= 0.01
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
             self.updateStars()
 
         elif event.key() == Qt.Key_6:
@@ -1523,7 +1521,7 @@ class PlateTool(QMainWindow):
             # Increment X 1st order distortion
             self.platepar.x_poly_rev[1] += 0.01
             self.platepar.x_poly_fwd[1] += 0.01
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
             self.updateStars()
 
 
@@ -1532,7 +1530,7 @@ class PlateTool(QMainWindow):
             # Decrement Y 1st order distortion
             self.platepar.y_poly_rev[2] -= 0.01
             self.platepar.y_poly_fwd[2] -= 0.01
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
             self.updateStars()
 
         elif event.key() == Qt.Key_8:
@@ -1540,7 +1538,7 @@ class PlateTool(QMainWindow):
             # Increment Y 1st order distortion
             self.platepar.y_poly_rev[2] += 0.01
             self.platepar.y_poly_fwd[2] += 0.01
-            self.param_manager.updatePlatepar()
+            self.tab.param_manager.updatePlatepar()
             self.updateStars()
 
         # Change catalog limiting magnitude
@@ -1630,7 +1628,7 @@ class PlateTool(QMainWindow):
                 self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar,
                                                                            self.platepar.rotation_from_horiz)
 
-                self.param_manager.updatePlatepar()
+                self.tab.param_manager.updatePlatepar()
                 self.updateStars()
 
 
@@ -1743,25 +1741,27 @@ class PlateTool(QMainWindow):
         """ Change star selector aperature on scroll. """
         delta = event.angleDelta().y()
         modifier = QApplication.keyboardModifiers()
-        if modifier == Qt.ControlModifier:
-            if delta < 0:
-                self.scrolls_back = 0
-                self.star_aperature_radius += 1
-                self.cursor.setRadius(self.star_aperature_radius)
-                self.cursor2.setRadius(self.star_aperature_radius)
-            elif delta > 0 and self.star_aperature_radius > 1:
-                self.scrolls_back = 0
-                self.star_aperature_radius -= 1
-                self.cursor.setRadius(self.star_aperature_radius)
-                self.cursor2.setRadius(self.star_aperature_radius)
-        else:
-            if delta < 0:
-                self.scrolls_back += 1
-                if self.scrolls_back > 2:
-                    self.img_frame.autoRange(padding=0)
-            elif delta > 0:
-                self.scrolls_back = 0
-                self.img_frame.scaleBy([0.95, 0.95], QPoint(self.mouse_x, self.mouse_y))
+
+        if self.img_frame.sceneBoundingRect().contains(event.pos()):
+            if modifier == Qt.ControlModifier:
+                if delta < 0:
+                    self.scrolls_back = 0
+                    self.star_aperature_radius += 1
+                    self.cursor.setRadius(self.star_aperature_radius)
+                    self.cursor2.setRadius(self.star_aperature_radius)
+                elif delta > 0 and self.star_aperature_radius > 1:
+                    self.scrolls_back = 0
+                    self.star_aperature_radius -= 1
+                    self.cursor.setRadius(self.star_aperature_radius)
+                    self.cursor2.setRadius(self.star_aperature_radius)
+            else:
+                if delta < 0:
+                    self.scrolls_back += 1
+                    if self.scrolls_back > 2:
+                        self.img_frame.autoRange(padding=0)
+                elif delta > 0:
+                    self.scrolls_back = 0
+                    self.img_frame.scaleBy([0.95, 0.95], QPoint(self.mouse_x, self.mouse_y))
 
     def toggleImageType(self):
         """ Toggle between the maxpixel and avepixel. """
@@ -1824,7 +1824,7 @@ class PlateTool(QMainWindow):
 
             # Plot the differences in X, Y
             data = []
-            pen = QPen(QColor(255, 0, 0, 200))  # change appearance of lines
+            pen = QPen(QColor(255, 255, 0, 200))  # change appearance of lines
             pen.setWidth(1)
             for x0, y0, xnd, ynd in zip(x_arr, y_arr, x_nodist, y_nodist):
                 data.append([x0, y0, xnd, ynd, pen])
@@ -1910,7 +1910,7 @@ class PlateTool(QMainWindow):
             if self.img.data.itemsize*8 > 8:
 
                 # Rescale the image to 8bit
-                minv, maxv = self.hist.getLevels()
+                minv, maxv = self.tab.hist.getLevels()
                 img_data = Image.adjustLevels(self.self.img.data, minv, self.img.gamma, maxv)
                 img_data -= np.min(img_data)
                 img_data = 255*(img_data/np.max(img_data))
@@ -1989,7 +1989,7 @@ class PlateTool(QMainWindow):
         self.platepar.Ho = JD2HourAngle(self.platepar.JD)%360
 
         # Convert FOV centre to RA, Dec
-        ra, dec = altAz2RADec(self.azim_centre, self.alt_centre, date2JD(*img_time), \
+        ra, dec = altAz2RADec(self.azim_centre, self.alt_centre, date2JD(*img_time),
                               self.platepar.lat, self.platepar.lon)
 
         return ra, dec, rot_horizontal
@@ -2256,7 +2256,6 @@ class PlateTool(QMainWindow):
 
         # Perform gamma correction
         img_crop = Image.gammaCorrection(img_crop, self.config.gamma)
-        # img_crop = Image.adjustLevels(img_crop, self.hist.getLevels()[0], self.config.gamma, self.hist.getLevels()[1])
 
         ######################################################################################################
 
@@ -2357,7 +2356,7 @@ class PlateTool(QMainWindow):
 
         # Fit the platepar to paired stars
         self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=first_platepar_fit)
-        self.param_manager.updatePlatepar()
+        self.tab.param_manager.updatePlatepar()
 
         # Show platepar parameters
         print()
