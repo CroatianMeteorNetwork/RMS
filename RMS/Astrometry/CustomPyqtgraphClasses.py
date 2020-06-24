@@ -336,23 +336,33 @@ class TextItem(pg.GraphicsObject):
         """
         return self.wh
 
+    def setPos(self, x, y):
+        self.xy = x, y
+        self.update()
+
     def setBackgroundBrush(self, brush):
         self.background_brush = brush
+        self.update()
 
     def setBackgroundPen(self, pen):
         self.background_pen = pen
+        self.update()
 
     def setPen(self, pen):
         self.pen = pen
+        self.update()
 
     def setFont(self, font):
         self.font = font
+        self.update()
 
     def setText(self, text):
         self.text = text
+        self.update()
 
     def setAlignment(self, align):
         self.align = align
+        self.update()
 
     def generatePicture(self):
         painter = QPainter(self.picture)
@@ -735,6 +745,10 @@ class HistogramLUTItem2(pg.HistogramLUTItem):
 
 
 class PlateparParameterManager(QWidget):
+    """
+    QWidget that contains various QDoubleSpinBox's that can be changed to
+    manage platepar parameters
+    """
     azalt_star_signal = pyqtSignal()
     rot_star_signal = pyqtSignal()
     scale_star_signal = pyqtSignal()
@@ -812,22 +826,27 @@ class PlateparParameterManager(QWidget):
         self.fit_parameters.valueModified.connect(self.scale_star_signal.emit)  # calls updateStars
         layout.addRow(self.fit_parameters)
 
+    @pyqtSlot()
     def azChanged(self):
         self.platepar.az_centre = self.az_centre.value()
         self.azalt_star_signal.emit()
 
+    @pyqtSlot()
     def altChanged(self):
         self.platepar.alt_centre = self.alt_centre.value()
         self.azalt_star_signal.emit()
 
+    @pyqtSlot()
     def rotChanged(self):
         self.platepar.rotation_from_horiz = self.rotation_from_horiz.value()
         self.rot_star_signal.emit()
 
+    @pyqtSlot()
     def scaleChanged(self):
         self.platepar.F_scale = self.F_scale.value()*60
         self.scale_star_signal.emit()
 
+    @pyqtSlot()
     def onIndexChanged(self):
         text = self.distortion_type.currentText()
         self.platepar.setDistortionType(text, reset_params=False)
@@ -844,14 +863,30 @@ class PlateparParameterManager(QWidget):
         self.distortion_signal.emit()
 
     def updatePlatepar(self):
+        """
+        Updates QDoubleSpinBox values to the values of the platepar.
+        Call this whenever the platepar values are changed
+        """
         self.az_centre.setValue(self.platepar.az_centre)
         self.alt_centre.setValue(self.platepar.alt_centre)
-        self.rotation_from_horiz.setValue(self.rotation_from_horiz)
+        self.rotation_from_horiz.setValue(self.platepar.rotation_from_horiz)
         self.F_scale.setValue(self.platepar.F_scale/60)
         self.fit_parameters.updateValues()
 
 
+class SettingsWidget(QWidget):
+    variablesChanged = pyqtSignal()
+
+    def __init__(self, parent=None):
+        QWidget.__init__(self, parent)
+
+
 class ArrayTabWidget(QTabWidget):
+    """
+    Widget to the right which holds the histogram as well as the parameter manager
+    This class does not manipulate their values itself, that is done by accessing
+    the variables themselves
+    """
     valueModified = pyqtSignal()
 
     def __init__(self, parent=None, platepar=None):
@@ -872,6 +907,12 @@ class ArrayTabWidget(QTabWidget):
         self.n_shown = 12
 
     def changeNumberShown(self, n):
+        """
+        Change the number of QDoubleSpinBoxes visible
+
+        Arguments:
+            n [int]: Number of QDoubleSpinBoxes to be visible
+        """
         assert 0 <= n <= 12
         if n == self.n_shown:
             return
@@ -932,6 +973,8 @@ class RightOptionsTab(QTabWidget):
         self.param_manager = PlateparParameterManager(parent=None,
                                                       platepar=platepar)
 
+        self.index = 0
+        self.maximized = False
         self.setFixedWidth(250)
         self.addTab(self.hist, 'Levels')
         self.addTab(self.param_manager, 'Fit Parameters')
@@ -939,8 +982,23 @@ class RightOptionsTab(QTabWidget):
         self.setTabText(0, 'Levels')
         self.setTabText(1, 'Fit Parameters')
 
+        self.setCurrentIndex(self.index)  # redundant
         self.setTabPosition(QTabWidget.East)
         self.setMovable(True)
+
+        self.tabBarClicked.connect(self.onTabBarClicked)
+
+    def onTabBarClicked(self, index):
+        if index != self.index:
+            self.index = index
+            self.maximized = True
+            self.setFixedWidth(250)
+        else:
+            self.maximized = not self.maximized
+            if self.maximized:
+                self.setFixedWidth(250)
+            else:
+                self.setFixedWidth(19)
 
 
 # https://jdreaver.com/posts/2014-07-28-scientific-notation-spin-box-pyside.html

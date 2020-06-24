@@ -22,6 +22,9 @@ ctypedef np.float64_t FLOAT_TYPE_t
 # Define Pi
 cdef double pi = np.pi
 
+# Define the Julian date at the J2000 epoch
+cdef double J2000_DAYS = 2451545.0
+
 # Declare math functions
 cdef extern from "math.h":
     double abs(double)
@@ -242,15 +245,10 @@ cdef double cyjd2LST(double jd, double lon):
 
     cdef double gst
 
-    # Define the Julian date at the J2000 epoch
-    cdef double J2000_days = 2451545.0
-
-
-
-    cdef double t = (jd - J2000_days)/36525.0
+    cdef double t = (jd - J2000_DAYS)/36525.0
 
     # Calculate the Mean sidereal rotation of the Earth in radians (Greenwich Sidereal Time)
-    gst = 280.46061837 + 360.98564736629*(jd - J2000_days) + 0.000387933*t**2 - (t**3)/38710000.0
+    gst = 280.46061837 + 360.98564736629*(jd - J2000_DAYS) + 0.000387933*t**2 - (t**3)/38710000.0
     gst = (gst + 360)%360
 
 
@@ -279,7 +277,7 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
     cdef double T, t, zeta, z, theta, A, B, C, ra_corr, dec_corr
 
 
-    T = (start_epoch - 2451545    )/36525.0
+    T = (start_epoch - J2000_DAYS )/36525.0
     t = (final_epoch - start_epoch)/36525.0
 
     # Calculate correction parameters in degrees
@@ -338,7 +336,7 @@ cdef double refractionApparentToTrue(double elev):
 
 
 
-cdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double jd, double lat, double lon):
+cpdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double jd, double lat, double lon):
     """ Correct the equatorial coordinates for refraction. The correction is done from apparent to true
         coordinates.
     
@@ -357,7 +355,7 @@ cdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double j
     cdef double azim, alt
 
     # Precess RA/Dec from J2000 to the epoch of date
-    ra, dec = equatorialCoordPrecession(2451545.0, jd, ra, dec)
+    ra, dec = equatorialCoordPrecession(J2000_DAYS, jd, ra, dec)
 
     # Convert coordinates to alt/az
     azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
@@ -369,7 +367,7 @@ cdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double j
     ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
 
     # Precess RA/Dec from the epoch of date to J2000
-    ra, dec = equatorialCoordPrecession(jd, 2451545.0, ra, dec)
+    ra, dec = equatorialCoordPrecession(jd, J2000_DAYS, ra, dec)
 
 
     return (ra, dec)
@@ -422,7 +420,7 @@ cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double 
     cdef double azim, alt
 
     # Precess RA/Dec from J2000 to the epoch of date
-    ra, dec = equatorialCoordPrecession(2451545.0, jd, ra, dec)
+    ra, dec = equatorialCoordPrecession(J2000_DAYS, jd, ra, dec)
 
     # Convert coordinates to alt/az
     azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
@@ -434,7 +432,7 @@ cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double 
     ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
 
     # Precess RA/Dec from the epoch of date to J2000
-    ra, dec = equatorialCoordPrecession(jd, 2451545.0, ra, dec)
+    ra, dec = equatorialCoordPrecession(jd, J2000_DAYS, ra, dec)
 
 
     return (ra, dec)
@@ -443,7 +441,8 @@ cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double 
 
 @cython.cdivision(True)
 cpdef (double, double) cyraDec2AltAz(double ra, double dec, double jd, double lat, double lon):
-    """ Convert right ascension and declination to azimuth (+east of sue north) and altitude. 
+    """ Convert right ascension and declination to azimuth (+East of due North) and altitude. Same epoch is
+        assumed, no correction for refraction is done.
     Arguments:
         ra: [float] Right ascension in radians.
         dec: [float] Declination in radians.
@@ -482,6 +481,39 @@ cpdef (double, double) cyraDec2AltAz(double ra, double dec, double jd, double la
 
 
 
+cpdef (double, double) trueRaDec2ApparentAltAz(double ra, double dec, double jd, double lat, double lon):
+    """ Convert the true right ascension and declination in J2000 to azimuth (+East of due North) and 
+        altitude in the epoch of date. The correction for refraction is performed.
+    Arguments:
+        ra: [float] Right ascension in radians (J2000).
+        dec: [float] Declination in radians (J2000).
+        jd: [float] Julian date.
+        lat: [float] Latitude in radians.
+        lon: [float] Longitude in radians.
+    Return:
+        (azim, elev): [tuple]
+            azim: [float] Azimuth (+east of due north) in radians (epoch of date).
+            elev: [float] Elevation above horizon in radians (epoch of date).
+        """
+
+    cdef double azim, elev
+
+
+    # Precess RA/Dec to the epoch of date
+    ra, dec = equatorialCoordPrecession(J2000_DAYS, jd, ra, dec)
+
+    # Convert to alt/az
+    azim, elev = cyraDec2AltAz(ra, dec, jd, lat, lon)
+
+    # Correct elevation for refraction
+    elev = refractionTrueToApparent(elev)
+
+
+    return (azim, elev)
+
+
+
+
 @cython.cdivision(True)
 cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double lat, double lon):
     """ Convert azimuth and altitude in a given time and position on Earth to right ascension and 
@@ -517,6 +549,39 @@ cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double
 
 
 
+cpdef (double, double) apparentAltAz2TrueRADec(double azim, double elev, double jd, double lat, double lon):
+    """ Convert the apparent azimuth and altitude in the epoch of date to true (refraction corrected) right 
+        ascension and declination in J2000.
+    Arguments:
+        azim: [float] Azimuth (+East of due North) in radians (epoch of date).
+        elev: [float] Elevation above horizon in radians (epoch of date).
+        jd: [float] Julian date.
+        lat: [float] Latitude of the observer in radians.
+        lon: [float] Longitde of the observer in radians.
+    Return:
+        (ra, dec): [tuple]
+            ra: [float] Right ascension (radians, J2000).
+            dec: [float] Declination (radians, J2000).
+    """
+
+
+    cdef double ra, dec
+
+
+    # Correct elevation for refraction
+    elev = refractionApparentToTrue(elev)
+
+    # Convert to RA/Dec (true, epoch of date)
+    ra, dec = cyaltAz2RADec(azim, elev, jd, lat, lon)
+
+    # Precess RA/Dec to J2000
+    ra, dec = equatorialCoordPrecession(jd, J2000_DAYS, ra, dec)
+
+
+    return (ra, dec)
+
+
+
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -525,7 +590,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data, double jd, double lat, double lon, double x_res, \
     double y_res, double h0, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, \
-    str dist_type, bool refraction=True):
+    str dist_type, bool refraction=True, bool equal_aspect=False):
     """ Convert RA, Dec to distorion corrected image coordinates.
     Arguments:
         RA_data: [ndarray] Array of right ascensions (degrees).
@@ -544,6 +609,8 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
         y_poly_rev: [ndarray float] Distortion polynomail in Y direction for reverse mapping.
         dist_type: [str] Distortion type. Can be: poly3+radial, radial3, radial4, or radial5.
         refraction: [bool] Apply refraction correction. True by default.
+        equal_aspect: [bool] Force the X/Y aspect ratio to be equal. Used only for radial distortion. \
+            False by default.
 
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
@@ -582,12 +649,12 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
         y0 = x_poly_rev[1]
 
         # Aspect ratio
-        xy = x_poly_rev[2]
-
-        # If the aspect ratio is smaller than 0.1, force it to 0
-        xy = abs(xy)
-        if xy < 0.1:
+        if equal_aspect:
             xy = 0.0
+
+        else:
+            xy = x_poly_rev[2]
+
 
         # Distortion coeffs
         k1 = x_poly_rev[3]
@@ -730,7 +797,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_data, double lat, double lon, double x_res, double y_res, \
     double h0, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
-    str dist_type, bool refraction=True):
+    str dist_type, bool refraction=True, bool equal_aspect=False):
     """
     Arguments:
         jd_data: [ndarray] Julian date of each data point.
@@ -749,6 +816,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         y_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward Y axis polynomial parameters.
         dist_type: [str] Distortion type. Can be: poly3+radial, radial3, radial4, or radial5.
         refraction: [bool] Apply refraction correction. True by default.
+        equal_aspect: [bool] Force the X/Y aspect ratio to be equal. Used only for radial distortion. \
+            False by default.
 
     Return:
         (ra_data, dec_data): [tuple of ndarrays]
@@ -780,12 +849,12 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         y0 = x_poly_fwd[1]
 
         # Aspect ratio
-        xy = x_poly_fwd[2]
-
-        # If the aspect ratio is smaller than 0.1, force it to 0
-        xy = abs(xy)
-        if xy < 0.1:
+        if equal_aspect:
             xy = 0.0
+
+        else:
+            xy = x_poly_fwd[2]
+
 
         # Distortion coeffs
         k1 = x_poly_fwd[3]

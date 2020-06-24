@@ -59,12 +59,10 @@ if sys.version_info.major == 3:
 def correctVignetting(px_sum, radius, vignetting_coeff):
     """ Given a pixel sum, radius from focal plane centre and the vignetting coefficient, correct the pixel
         sum for the vignetting effect.
-
     Arguments:
         px_sum: [float] Pixel sum.
         radius: [float] Radius (px) from focal plane centre.
         vignetting_coeff: [float] Vignetting ceofficient (deg/px).
-
     Return:
         px_sum_corr: [float] Corrected pixel sum.
     """
@@ -78,16 +76,15 @@ def correctVignetting(px_sum, radius, vignetting_coeff):
 
 
 def photomLine(input_params, photom_offset, vignetting_coeff):
-    """ Line used for photometry, the slope is fixed to -2.5, only the photometric offset is given. 
-    
+    """ Line used for photometry, the slope is fixed to -2.5, only the photometric offset is given.
+
     Arguments:
         input_params: [tuple]
             - px_sum: [float] sum of pixel intensities.
             - radius: [float] Radius from the centre of the focal plane to the centroid.
         photom_offset: [float] The photometric offet.
         vignetting_coeff: [float] Vignetting coefficient.
-
-    Return: 
+    Return:
         [float] Magnitude.
     """
 
@@ -95,14 +92,14 @@ def photomLine(input_params, photom_offset, vignetting_coeff):
 
     # Apply the vignetting correction and compute the LSP
     lsp = np.log10(correctVignetting(px_sum, radius, vignetting_coeff))
-    
+
     # The slope is fixed to -2.5, this comes from the definition of magnitude
     return -2.5*lsp + photom_offset
 
 
 
 def photomLineMinimize(params, px_sum, radius, catalog_mags, fixed_vignetting):
-    """ Modified photomLine function used for minimization. The function uses the L1 norm for minimization. 
+    """ Modified photomLine function used for minimization. The function uses the L1 norm for minimization.
     """
 
     photom_offset, vignetting_coeff = params
@@ -116,17 +113,15 @@ def photomLineMinimize(params, px_sum, radius, catalog_mags, fixed_vignetting):
 
 
 def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=None):
-    """ Fit the photometry on given data. 
-    
+    """ Fit the photometry on given data.
+
     Arguments:
         px_intens_list: [list] A list of sums of pixel intensities.
         radius_list: [list] A list of raddia from the focal plane centre (px).
         catalog_mags: [list] A list of corresponding catalog magnitudes of stars.
-
     Keyword arguments:
         fixed_vignetting: [float] Fixed vignetting coefficient. None by default, in which case it will be
             computed.
-
     Return:
         (photom_offset, fit_stddev, fit_resid):
             photom_params: [list]
@@ -159,17 +154,15 @@ def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=No
 
 
 def photometryFitRobust(px_intens_list, radius_list, catalog_mags, fixed_vignetting=None):
-    """ Fit the photometry on given data robustly by rejecting 2 sigma residuals several times. 
-    
+    """ Fit the photometry on given data robustly by rejecting 2 sigma residuals several times.
+
     Arguments:
         px_intens_list: [list] A list of sums of pixel intensities.
         radius_list: [list] A list of raddia from the focal plane centre (px).
         catalog_mags: [list] A list of corresponding catalog magnitudes of stars.
-
     Keyword arguments:
         fixed_vignetting: [float] Fixed vignetting coefficient. None by default, in which case it will be
             computed.
-
     Return:
         (photom_offset, fit_stddev, fit_resid, px_intens_list, radius_list, catalog_mags):
             photom_params: [list]
@@ -212,11 +205,10 @@ def photometryFitRobust(px_intens_list, radius_list, catalog_mags, fixed_vignett
 
 
 def computeFOVSize(platepar):
-    """ Computes the size of the FOV in deg from the given platepar. 
-        
+    """ Computes the size of the FOV in deg from the given platepar.
+
     Arguments:
         platepar: [Platepar instance]
-
     Return:
         fov_h: [float] Horizontal FOV in degrees.
         fov_v: [float] Vertical FOV in degrees.
@@ -249,11 +241,10 @@ def computeFOVSize(platepar):
 
 
 def rotationWrtHorizon(platepar):
-    """ Given the platepar, compute the rotation of the FOV with respect to the horizon. 
-    
+    """ Given the platepar, compute the rotation of the FOV with respect to the horizon.
+
     Arguments:
         pletepar: [Platepar object] Input platepar.
-
     Return:
         rot_angle: [float] Rotation w.r.t. horizon (degrees).
     """
@@ -275,7 +266,7 @@ def rotationWrtHorizon(platepar):
     azim_up = azim[1]
     alt_up = alt[1]
 
-    # Compute the rotation wrt horizon (deg)    
+    # Compute the rotation wrt horizon (deg)
     rot_angle = np.degrees(np.arctan2(np.radians(alt_up) - np.radians(alt_mid), \
         np.radians(azim_up) - np.radians(azim_mid)))
 
@@ -288,15 +279,13 @@ def rotationWrtHorizon(platepar):
 
 
 def rotationWrtHorizonToPosAngle(platepar, rot_angle):
-    """ Given the rotation angle w.r.t horizon, numerically compute the position angle. 
-    
+    """ Given the rotation angle w.r.t horizon, numerically compute the position angle.
+
     Arguments:
         pletepar: [Platepar object] Input platepar.
         rot_angle: [float] The rotation angle w.r.t. horizon (deg)>
-
     Return:
         pos_angle: [float] Position angle (deg).
-
     """
 
     platepar = copy.deepcopy(platepar)
@@ -327,12 +316,11 @@ def rotationWrtHorizonToPosAngle(platepar, rot_angle):
 
 
 def rotationWrtStandard(platepar):
-    """ Given the platepar, compute the rotation from the celestial meridian passing through the centre of 
+    """ Given the platepar, compute the rotation from the celestial meridian passing through the centre of
         the FOV.
-    
+
     Arguments:
         pletepar: [Platepar object] Input platepar.
-
     Return:
         rot_angle: [float] Rotation from the meridian (degrees).
     """
@@ -366,15 +354,13 @@ def rotationWrtStandard(platepar):
 
 
 def rotationWrtStandardToPosAngle(platepar, rot_angle):
-    """ Given the rotation angle w.r.t horizon, numerically compute the position angle. 
-    
+    """ Given the rotation angle w.r.t horizon, numerically compute the position angle.
+
     Arguments:
         pletepar: [Platepar object] Input platepar.
         rot_angle: [float] The rotation angle w.r.t. horizon (deg)>
-
     Return:
         pos_angle: [float] Position angle (deg).
-
     """
 
     platepar = copy.deepcopy(platepar)
@@ -404,15 +390,13 @@ def rotationWrtStandardToPosAngle(platepar, rot_angle):
 
 
 def calculateMagnitudes(px_sum_arr, radius_arr, photom_offset, vignetting_coeff):
-    """ Calculate the magnitude of the data points with given magnitude calibration parameters. 
-    
+    """ Calculate the magnitude of the data points with given magnitude calibration parameters.
+
     Arguments:
         px_sum_arr: [ndarray] Sum of pixel intensities of the meteor centroid (arbitrary units).
         radius_arr: [ndarray] A list of raddia from image centre (px).
         photom_offset: [float] Magnitude intercept, i.e. the photometric offset.
         vignetting_coeff: [float] Vignetting ceofficient (deg/px).
-
-
     Return:
         magnitude_data: [ndarray] Apparent magnitude.
     """
@@ -434,17 +418,15 @@ def calculateMagnitudes(px_sum_arr, radius_arr, photom_offset, vignetting_coeff)
 
 
 def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar):
-    """ Converts image XY to RA,Dec, but it takes a platepar instead of individual parameters. 
-    
+    """ Converts image XY to RA,Dec, but it takes a platepar instead of individual parameters.
+
     Arguments:
-        time_data: [2D ndarray] Numpy array containing time tuples of each data point (year, month, day, 
+        time_data: [2D ndarray] Numpy array containing time tuples of each data point (year, month, day,
             hour, minute, second, millisecond).
         X_data: [ndarray] 1D numpy array containing the image X component.
         Y_data: [ndarray] 1D numpy array containing the image Y component.
         level_data: [ndarray] Levels of the meteor centroid.
         platepar: [Platepar structure] Astrometry parameters.
-
-
     Return:
         (JD_data, RA_data, dec_data, magnitude_data): [tuple of ndarrays]
             JD_data: [ndarray] Julian date of each data point.
@@ -462,7 +444,7 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar):
         np.array(Y_data, dtype=np.float64), float(platepar.lat), float(platepar.lon), float(platepar.X_res), \
         float(platepar.Y_res), float(platepar.Ho), float(platepar.RA_d), float(platepar.dec_d), \
         float(platepar.pos_angle_ref), float(platepar.F_scale), platepar.x_poly_fwd, platepar.y_poly_fwd, \
-        unicode(platepar.distortion_type), refraction=platepar.refraction)
+        unicode(platepar.distortion_type), refraction=platepar.refraction, equal_aspect=platepar.equal_aspect)
 
     # Compute radiia from image centre
     radius_arr = np.hypot(np.array(X_data) - platepar.X_res/2, np.array(Y_data) - platepar.Y_res/2)
@@ -484,46 +466,40 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar):
 
 def raDecToXYPP(RA_data, dec_data, jd, platepar):
     """ Converts RA, Dec to image coordinates, but the platepar is given instead of individual parameters.
-
     Arguments:
         RA: [ndarray] Array of right ascensions (degrees).
         dec: [ndarray] Array of declinations (degrees).
         jd: [float] Julian date.
         platepar: [Platepar structure] Astrometry parameters.
-
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
-
     """
 
     # Use the cythonized funtion insted of the Python function
-    X_data, Y_data = cyraDecToXY(RA_data, dec_data, float(jd), float(platepar.lat), float(platepar.lon), 
+    X_data, Y_data = cyraDecToXY(RA_data, dec_data, float(jd), float(platepar.lat), float(platepar.lon),
         float(platepar.X_res), float(platepar.Y_res), float(platepar.Ho), float(platepar.RA_d), \
         float(platepar.dec_d), float(platepar.pos_angle_ref), platepar.F_scale, platepar.x_poly_rev, \
-        platepar.y_poly_rev, unicode(platepar.distortion_type), refraction=platepar.refraction)
-    
+        platepar.y_poly_rev, unicode(platepar.distortion_type), refraction=platepar.refraction, \
+        equal_aspect=platepar.equal_aspect)
+
     return X_data, Y_data
 
 
 
 
 def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=False):
-    """ Given the meteor centroids and a platepar file, compute meteor astrometry and photometry (RA/Dec, 
+    """ Given the meteor centroids and a platepar file, compute meteor astrometry and photometry (RA/Dec,
         alt/az, mag).
-
     Arguments:
         ff_name: [str] Name of the FF file with the meteor.
         fps: [float] Frames per second of the video.
         meteor_meas: [list] A list of [calib_status, frame_n, x, y, ra, dec, azim, elev, inten, mag].
         platepar: [Platepar instance] Platepar which will be used for astrometry and photometry.
-
     Keyword arguments:
         add_calstatus: [bool] Add a column with calibration status at the beginning. False by default.
-
     Return:
-        meteor_picks: [ndarray] A numpy 2D array of: [frames, X_data, Y_data, RA_data, dec_data, az_data, 
+        meteor_picks: [ndarray] A numpy 2D array of: [frames, X_data, Y_data, RA_data, dec_data, az_data,
         alt_data, level_data, magnitudes]
-
     """
 
 
@@ -598,17 +574,14 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
 def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, UT_corr=0, platepar=None):
     """ Use the given platepar to calculate the celestial coordinates of detected meteors from a FTPdetectinfo
         file and save the updates values.
-
     Arguments:
         dir_path: [str] Path to the night.
         ftp_detectinfo_file: [str] Name of the FTPdetectinfo file.
         platepar_file: [str] Name of the platepar file.
-
     Keyword arguments:
         UT_corr: [float] Difference of time from UTC in hours.
-        platepar: [Platepar obj] Loaded platepar. None by default. If given, the platepar file won't be read, 
+        platepar: [Platepar obj] Loaded platepar. None by default. If given, the platepar file won't be read,
             but this platepar structure will be used instead.
-
     Return:
         None
     """

@@ -183,6 +183,9 @@ class Platepar(object):
         # Refraction on/off
         self.refraction = True
 
+        # Equal aspect (X and Y scales are equal) - used ONLY for radial distortion
+        self.equal_aspect = False
+
         # Photometry calibration
         self.mag_0 = -2.5
         self.mag_lev = 1.0
@@ -546,8 +549,8 @@ class Platepar(object):
                 # IMPORTANT NOTE - the X polynomial is used to store the fit paramters
                 self.x_poly_rev = res.x
 
-                # If the aspect ratio is below 1, force it to 0
-                if abs(self.x_poly_rev[2]) < 0.1:
+                # Force aspect ratio to 0 if axes are set to be equal
+                if self.equal_aspect:
                     self.x_poly_rev[2] = 0
 
                 # Set all parameters not used by the radial fit to 0
@@ -600,8 +603,8 @@ class Platepar(object):
                 # Extract fitted X polynomial
                 self.x_poly_fwd = res.x
 
-                # If the aspect ratio is below 1, force it to 0
-                if abs(self.x_poly_fwd[2]) < 0.1:
+                # Force aspect ratio to 0 if axes are set to be equal
+                if self.equal_aspect:
                     self.x_poly_fwd[2] = 0
 
                 # Set all parameters not used by the radial fit to 0
@@ -655,6 +658,11 @@ class Platepar(object):
         # If the refraction was not used for the fit, assume it is disabled
         if not 'refraction' in self.__dict__:
             self.refraction = False
+
+
+        # Add equal aspect
+        if not 'equal_aspect' in self.__dict__:
+            self.equal_aspect = False
 
 
         # Add the distortion type if not present (assume it's the polynomal type with the radial term)
@@ -959,9 +967,10 @@ class Platepar(object):
         out_str += "--------\n"
         out_str += "Reference pointing equatorial (J2000):\n"
         out_str += "    JD      = {:.10f} \n".format(self.JD)
-        out_str += "    RA      = {:.6f}\n".format(self.RA_d)
-        out_str += "    Dec     = {:.6f}\n".format(self.dec_d)
-        out_str += "    Pos ang = {:.6f}\n".format(self.pos_angle_ref)
+        out_str += "    RA      = {:.6f} deg\n".format(self.RA_d)
+        out_str += "    Dec     = {:.6f} deg\n".format(self.dec_d)
+        out_str += "    Pos ang = {:.6f} deg\n".format(self.pos_angle_ref)
+        out_str += "    Pix scl = {:.2f} arcmin/px\n".format(60/self.F_scale)
         out_str += "Distortion:\n"
         out_str += "    Type = {:s}\n".format(self.distortion_type)
 

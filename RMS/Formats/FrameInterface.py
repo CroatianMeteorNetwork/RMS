@@ -16,6 +16,7 @@ except:
     import tkMessageBox as messagebox
 
 
+import rawpy
 import cv2
 import numpy as np
 
@@ -1169,7 +1170,7 @@ class InputTypeImages(object):
 
 
         ### Find images in the given folder ###
-        img_types = ['.png', '.jpg', '.bmp']
+        img_types = ['.png', '.jpg', '.bmp', '.nef']
 
         self.img_list = []
 
@@ -1452,8 +1453,13 @@ class InputTypeImages(object):
             current_img_file = self.current_img_file
             fr_no = self.current_frame
 
-        # Get the current image
-        frame = cv2.imread(os.path.join(self.dir_path, current_img_file), -1)
+        if current_img_file.endswith('.nef'):
+            # get raw data from .nef file and get image from it
+            raw = rawpy.imread(os.path.join(self.dir_path, current_img_file))
+            frame = raw.postprocess()
+        else:
+            # Get the current image
+            frame = cv2.imread(os.path.join(self.dir_path, current_img_file), -1)
 
         # Convert the image to black and white if it's 8 bit
         if 8*frame.itemsize == 8:

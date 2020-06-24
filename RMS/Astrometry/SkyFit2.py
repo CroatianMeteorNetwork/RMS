@@ -45,7 +45,8 @@ from RMS.Astrometry.Conversions import J2000_JD, date2JD, JD2HourAngle, raDec2Al
 import pyximport
 
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
-from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession, eqRefractionTrueToApparent
+from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession, eqRefractionTrueToApparent, \
+    eqRefractionApparentToTrue, trueRaDec2ApparentAltAz, apparentAltAz2TrueRADec
 
 from RMS.Astrometry.CustomPyqtgraphClasses import *
 
@@ -337,11 +338,6 @@ class PlateTool(QMainWindow):
         self.v_zoom_left = True  # whether to draw zoom window on left or right
         self.zoom_window.invertY()
 
-        # histogram
-        # self.hist = HistogramLUTWidget2()
-        # layout.addWidget(self.hist, 0, 2)
-        # self.hist.hide()
-        #
         # self.labels = TextItemList()
         # self.labels.setZValue(1000)
         # self.labels.addTextItem(0, 0, 200, 230, '',
@@ -434,6 +430,20 @@ class PlateTool(QMainWindow):
         self.calstar_markers2.setSymbol('o')
         self.calstar_markers2.setZValue(5)
 
+        self.star_pick_info = TextItem(0, 0, 400, 200, "",
+                                       align=Qt.AlignCenter, pxmode=3)
+        text_str = "STAR PICKING MODE"
+        text_str += "\n'LEFT CLICK' - Centroid star\n"
+        text_str += "'CTRL + LEFT CLICK' - Manual star position\n"
+        text_str += "'CTRL + Z' - Fit stars\n"
+        text_str += "'CTRL + SHIFT + Z' - Fit with initial distortion params set to 0\n"
+        text_str += "'L' - Astrometry fit details\n"
+        text_str += "'P' - Photometry fit"
+        self.star_pick_info.setText(text_str)
+        self.star_pick_info.hide()
+        self.star_pick_info.setZValue(10000)
+        self.img_frame.addItem(self.star_pick_info)
+
         # cursor
         self.cursor = CursorItem(self.star_aperature_radius, pxmode=True)
         self.img_frame.addItem(self.cursor, ignoreBounds=True)
@@ -453,7 +463,7 @@ class PlateTool(QMainWindow):
         self.distortion_lines.setZValue(2)
 
         # fit residuals
-        self.residual_lines = PlotLines()
+        self.residual_lines = PlotLines(pxmode=True)
         self.img_frame.addItem(self.residual_lines)
         self.residual_lines.setZValue(2)
 
@@ -483,7 +493,6 @@ class PlateTool(QMainWindow):
         self.img_zoom = None
 
         self.updateImage(first_update=True)
-        self.updateLeftLabels()
         if loaded_file:
             self.star_pick_mode = True
             self.updatePairedStars()
@@ -491,6 +500,9 @@ class PlateTool(QMainWindow):
 
         self.setMinimumSize(1200, 800)
         self.show()
+
+        self.updateLeftLabels()
+        self.star_pick_info.setPos(self.img_frame.width()/2, self.img_frame.height() - 50)
 
     def updateDistortionSignal(self):
         self.updateDistortion()
@@ -579,18 +591,25 @@ class PlateTool(QMainWindow):
         # Show text on image with platepar parameters
         text_str = self.img_handle.name() + '\n' + self.img_type_flag + '\n\n'
         text_str += 'UT corr  = {:.1f}h\n'.format(self.platepar.UT_corr)
-        text_str += 'Ref Az   = {:.3f}°\n'.format(self.platepar.az_centre)
-        text_str += 'Ref Alt  = {:.3f}°\n'.format(self.platepar.alt_centre)
-        text_str += 'Rot horiz = {:.3f}°\n'.format(rotationWrtHorizon(self.platepar))
-        text_str += 'Rot eq    = {:.3f}°\n'.format(rotationWrtStandard(self.platepar))
+        text_str += 'Ref Az   = {:.3f}$\\degree$\n'.format(self.platepar.az_centre)
+        text_str += 'Ref Alt  = {:.3f}$\\degree$\n'.format(self.platepar.alt_centre)
+        text_str += 'Rot horiz = {:.3f}$\\degree$\n'.format(rotationWrtHorizon(self.platepar))
+        text_str += 'Rot eq    = {:.3f}$\\degree$\n'.format(rotationWrtStandard(self.platepar))
         # text_str += 'Ref RA  = {:.3f}\n'.format(self.platepar.RA_d)
         # text_str += 'Ref Dec = {:.3f}\n'.format(self.platepar.dec_d)
         text_str += "Pix scale = {:.3f}'/px\n".format(60/self.platepar.F_scale)
-        text_str += "Refraction corr = {:s}\n".format(str(self.platepar.refraction))
         text_str += 'Lim mag   = {:.1f}\n'.format(self.cat_lim_mag)
         text_str += 'Increment = {:.2f}\n'.format(self.key_increment)
         text_str += 'Img Gamma = {:.2f}\n'.format(self.img.gamma)
         text_str += 'Camera Gamma = {:.2f}\n'.format(self.config.gamma)
+        text_str += "Refraction corr = {:s}\n".format(str(self.platepar.refraction))
+        text_str += "Distortion type = {:s}\n".format(
+            self.platepar.distortion_type_list[self.dist_type_index])
+
+        # Add aspect info if the radial distortion is used
+        if not self.platepar.distortion_type.startswith("poly"):
+            text_str += "Equal aspect    = {:s}\n".format(str(self.platepar.equal_aspect))
+
         text_str += '\n'
         sign, hh, mm, ss = decimalDegreesToSexHours(ra_centre)
         if sign < 0:
@@ -610,6 +629,11 @@ class PlateTool(QMainWindow):
         text_str += 'Q/E - Position angle\n'
         text_str += 'Up/Down - Scale\n'
         text_str += 'T - Toggle refraction correction\n'
+
+        # Add aspect info if the radial distortion is used
+        if not self.platepar.distortion_type.startswith("poly"):
+            text_str += 'G - Toggle equal aspect\n'
+
         text_str += '1/2 - X offset\n'
         text_str += '3/4 - Y offset\n'
         text_str += '5/6 - X 1st dist. coeff.\n'
@@ -885,6 +909,7 @@ class PlateTool(QMainWindow):
         try:
             # self.labels.moveText(1, 0, self.img_frame.height() - self.labels.getTextItem(1).size()[1])
             self.label2.move(QPoint(0, self.img_frame.height() - self.label2.height()))
+            self.star_pick_info.setPos(self.img_frame.width()/2, self.img_frame.height() - 50)
         except:
             pass
 
@@ -896,13 +921,6 @@ class PlateTool(QMainWindow):
         Can be loaded by calling:
         python -m RMS.Astrometry.SkyFit2 PATH/skyFit2_latest.state --config .
         """
-        # TODO: make all entirely display related variables (especially booleans) defined in setupUI
-        # this will remove any "bugs" that appear when loading a state. Though this should be done
-        # only once SkyFit2 is merged into the dev branch and it is the primary program for development.
-        # This will make constantly updating SkyFit2 to SkyFit less annoying
-
-        # you cant pickle a class that inherits from something, so convert all variables
-        # that dont inherit from something into a dictionary and pickle them
         to_remove = []
 
         dic = copy.copy(self.__dict__)
@@ -921,6 +939,11 @@ class PlateTool(QMainWindow):
         variables = loadPickle(dir_path, state_name)
         for k, v in variables.items():
             setattr(self, k, v)
+
+        # updating old state files with new platepar variables
+        if plate_tool.platepar is not None:
+            if not hasattr(plate_tool, "equal_aspect"):
+                plate_tool.platepar.equal_aspect = False
 
         #  if setupUI hasnt already been called, call it
         if not hasattr(self, 'central'):
@@ -1004,6 +1027,7 @@ class PlateTool(QMainWindow):
     def mouseMove(self, event):
         pos = event
         if self.img_frame.sceneBoundingRect().contains(pos):
+            self.img_frame.setFocus()
             mp = self.img_frame.mapSceneToView(pos)
 
             self.cursor.setCenter(mp)
@@ -1242,18 +1266,20 @@ class PlateTool(QMainWindow):
                 print('Need more than 2 stars for photometry plot!')
 
     def updateRefRADec(self, skip_rot_update=False):
-        """ Update the reference RA and Dec from Alt/Az. """
+        """ Update the reference RA and Dec (true in J2000) from Alt/Az (apparent in epoch of date). """
+
         if not skip_rot_update:
             # Save the current rotation w.r.t horizon value
             self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
 
-        # Convert the reference alt/az to reference RA/Dec
-        ra, dec = altAz2RADec(self.platepar.az_centre, self.platepar.alt_centre, self.platepar.JD,
-                              self.platepar.lat, self.platepar.lon)
+        # Convert the reference apparent Alt/Az in the epoch of date to true RA/Dec in J2000
+        ra, dec = apparentAltAz2TrueRADec(
+            np.radians(self.platepar.az_centre), np.radians(self.platepar.alt_centre), self.platepar.JD,
+            np.radians(self.platepar.lat), np.radians(self.platepar.lon))
 
         # Assign the computed RA/Dec to platepar
-        self.platepar.RA_d = ra
-        self.platepar.dec_d = dec
+        self.platepar.RA_d = np.degrees(ra)
+        self.platepar.dec_d = np.degrees(dec)
 
         if not skip_rot_update:
             # Update the position angle so that the rotation wrt horizon doesn't change
@@ -1305,11 +1331,13 @@ class PlateTool(QMainWindow):
         elif event.key() == Qt.Key_R and modifiers == Qt.ControlModifier:
             self.star_pick_mode = not self.star_pick_mode
             if self.star_pick_mode:
+                self.star_pick_info.show()
                 self.cursor.show()
                 self.cursor2.show()
                 if self.show_zoom_window:
                     self.v_zoom.show()
             else:
+                self.star_pick_info.hide()
                 self.v_zoom.hide()
                 self.cursor2.hide()
                 self.cursor.hide()
@@ -1581,6 +1609,19 @@ class PlateTool(QMainWindow):
                 else:
                     self.v_zoom.move(QPoint(0, 0))
 
+            if self.show_key_help == 1:
+                text_str = "STAR PICKING MODE"
+                text_str += "\n'LEFT CLICK' - Centroid star\n"
+                text_str += "'CTRL + LEFT CLICK' - Manual star position\n"
+                text_str += "'CTRL + Z' - Fit stars\n"
+                text_str += "'CTRL + SHIFT + Z' - Fit with initial distortion params set to 0\n"
+                text_str += "'L' - Astrometry fit details\n"
+                text_str += "'P' - Photometry fit"
+            else:
+                text_str = ''
+            self.star_pick_info.setText(text_str)
+
+
         # Key increment
         elif event.key() == Qt.Key_Plus:
 
@@ -1619,10 +1660,12 @@ class PlateTool(QMainWindow):
             if data:
                 self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz = data
 
-                # Recalculate reference alt/az
-                self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.JD,
-                                                                                self.platepar.lon, self.platepar.lat,
-                                                                                self.platepar.RA_d, self.platepar.dec_d)
+                # Compute reference Alt/Az to apparent coordinates, epoch of date
+                az_centre, alt_centre = trueRaDec2ApparentAltAz(
+                    np.radians(self.platepar.RA_d), np.radians(self.platepar.dec_d), self.platepar.JD,
+                    np.radians(self.platepar.lat), np.radians(self.platepar.lon))
+
+                self.platepar.az_centre, self.platepar.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
 
                 # Compute the position angle
                 self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar,
@@ -1631,6 +1674,10 @@ class PlateTool(QMainWindow):
                 self.tab.param_manager.updatePlatepar()
                 self.updateStars()
 
+        elif event.key() == Qt.Key_G:
+            if self.platepar is not None:
+                self.platepar.equal_aspect = not self.platepar.equal_aspect
+                self.updateStars()
 
         # Get initial parameters from astrometry.net
         elif event.key() == Qt.Key_X:
