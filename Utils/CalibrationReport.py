@@ -10,7 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, raDecToXYPP, \
-    photometryFitRobust, correctVignetting, photomLine, rotationWrtHorizon
+    photometryFitRobust, correctVignetting, photomLine, rotationWrtHorizon, extinctionCorrectionTrueToApparent
 from RMS.Astrometry.CheckFit import matchStarsResiduals
 from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 from RMS.Formats.CALSTARS import readCALSTARS
@@ -465,11 +465,14 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
         # Extact intensities and mangitudes
         star_intensities = image_stars[:, 2]
-        catalog_mags = matched_catalog_stars[:, 2]
+        catalog_ra, catalog_dec, catalog_mags = matched_catalog_stars.T
 
         # Compute radius of every star from image centre
         radius_arr = np.hypot(image_stars[:, 0] - img_h/2, image_stars[:, 1] - img_w/2)
 
+        # Compute apparent extinction corrected magnitudes
+        catalog_mags = extinctionCorrectionTrueToApparent(catalog_mags, catalog_ra, catalog_dec, max_jd, \
+            platepar)
 
         # Fit the photometry on automated star intensities (use the fixed vignetting coeff, use robust fit)
         photom_params, fit_stddev, fit_resid, star_intensities, radius_arr, catalog_mags = \
@@ -491,7 +494,8 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
             gridspec_kw={'height_ratios':[2, 1]})
 
         # Plot raw star intensities
-        ax_p.scatter(-2.5*np.log10(star_intensities), catalog_mags, s=5, c='r', alpha=0.5, label="Raw")
+        ax_p.scatter(-2.5*np.log10(star_intensities), catalog_mags, s=5, c='r', alpha=0.5, \
+            label="Raw (extinction corrected)")
 
         # If a flat is used, disregard the vignetting
         if not config.use_flat:

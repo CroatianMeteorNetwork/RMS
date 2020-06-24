@@ -52,7 +52,7 @@ import scipy.ndimage
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
-    rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting
+    rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, extinctionCorrectionTrueToApparent
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
 from RMS.Astrometry.Conversions import J2000_JD, date2JD, JD2HourAngle, raDec2AltAz, altAz2RADec
 import RMS.ConfigReader as cr
@@ -867,13 +867,15 @@ class PlateTool(object):
             star_coords = []
             radius_list = []
             px_intens_list = []
+            catalog_ra = []
+            catalog_dec = []
             catalog_mags = []
             for paired_star in self.paired_stars:
 
                 img_star, catalog_star = paired_star
 
                 star_x, star_y, px_intens = img_star
-                _, _, star_mag = catalog_star
+                star_ra, star_dec, star_mag = catalog_star
 
 
                 # Skip intensities which were not properly calculated
@@ -884,12 +886,18 @@ class PlateTool(object):
                 star_coords.append([star_x, star_y])
                 radius_list.append(np.hypot(star_x - self.platepar.X_res/2, star_y - self.platepar.Y_res/2))
                 px_intens_list.append(px_intens)
+                catalog_ra.append(star_ra)
+                catalog_dec.append(star_dec)
                 catalog_mags.append(star_mag)
 
 
 
             # Make sure there are more than 3 stars picked
             if len(px_intens_list) > 3:
+
+                # Compute apparent magnitude corrected for extinction
+                catalog_mags = extinctionCorrectionTrueToApparent(catalog_mags, catalog_ra, catalog_dec, \
+                    date2JD(*self.img_handle.currentTime()), self.platepar)
 
                 # Fit the photometric offset (disable vignetting fit if a flat is used)
                 photom_params, fit_stddev, fit_resids = photometryFit(px_intens_list, radius_list, \
@@ -966,7 +974,7 @@ class PlateTool(object):
                     # Plot catalog magnitude vs. raw logsum of pixel intensities
                     lsp_arr = np.log10(np.array(px_intens_list))
                     ax_p.scatter(-2.5*lsp_arr, catalog_mags, s=5, c='r', zorder=3, alpha=0.5, \
-                        label="Raw")
+                        label="Raw (extinction corrected)")
 
                     # Plot catalog magnitude vs. raw logsum of pixel intensities (only when no flat is used)
                     if self.flat_struct is None:
