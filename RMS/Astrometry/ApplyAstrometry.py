@@ -114,7 +114,7 @@ def extinctionCorrectionTrueToApparent(catalog_mags, ra_data, dec_data, jd, plat
     # Correct catalog magnitudes for extinction
     extinction_correction = atmosphericExtinctionCorrection(np.array(elevation_data), platepar.elev) \
         - atmosphericExtinctionCorrection(90, platepar.elev)
-    corrected_catalog_mags = np.array(catalog_mags) + extinction_correction
+    corrected_catalog_mags = np.array(catalog_mags) + platepar.extinction_scale*extinction_correction
 
     return corrected_catalog_mags
 
@@ -162,7 +162,7 @@ def extinctionCorrectionApparentToTrue(mags, x_data, y_data, jd, platepar):
     # Correct catalog magnitudes for extinction
     extinction_correction = atmosphericExtinctionCorrection(np.array(elevation_data), platepar.elev) \
         - atmosphericExtinctionCorrection(90, platepar.elev)
-    corrected_mags = np.array(mags) - extinction_correction
+    corrected_mags = np.array(mags) - platepar.extinction_scale*extinction_correction
 
     return corrected_mags
 

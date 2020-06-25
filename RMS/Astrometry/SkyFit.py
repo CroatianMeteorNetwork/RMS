@@ -1182,6 +1182,24 @@ class PlateTool(object):
             self.platepar.pos_angle_ref += self.key_increment
             self.updateImage()
 
+
+        # Change extinction scale
+        elif event.key == '9':
+            self.platepar.extinction_scale -= 0.1
+            if self.platepar.extinction_scale < 0.1:
+                self.platepar.extinction_scale = 0.1
+
+            self.updateImage()
+
+        # Change extinction scale
+        elif event.key == '0':
+            self.platepar.extinction_scale += 0.1
+            if self.platepar.extinction_scale > 2.0:
+                self.platepar.extinction_scale = 2.0
+
+            self.updateImage()
+            
+
         # Change catalog limiting magnitude
         elif event.key == 'r':
             self.cat_lim_mag += 0.1
@@ -2037,6 +2055,7 @@ class PlateTool(object):
             text_str += 'Increment = {:.2f}\n'.format(self.key_increment)
             text_str += 'Img Gamma = {:.2f}\n'.format(self.img_gamma)
             text_str += 'Camera Gamma = {:.2f}\n'.format(self.config.gamma)
+            text_str += 'Extinct. scale  = {:.1f}\n'.format(self.platepar.extinction_scale)
             text_str += "Refraction corr = {:s}\n".format(str(self.platepar.refraction))
             text_str += "Distortion type = {:s}\n".format(\
                 self.platepar.distortion_type_list[self.dist_type_index])
@@ -2074,6 +2093,7 @@ class PlateTool(object):
             text_str += 'Q/E - Position angle\n'
             text_str += 'Up/Down - Scale\n'
             text_str += 'T - Toggle refraction correction\n'
+            text_str += "9/0 - Extinction scale\n"
 
             # Add aspect info if the radial distortion is used
             if not self.platepar.distortion_type.startswith("poly"):
@@ -3171,8 +3191,12 @@ if __name__ == '__main__':
             plate_tool.invert_levels = False
 
         if plate_tool.platepar is not None:
-            if not hasattr(plate_tool, "equal_aspect"):
+            if not hasattr(plate_tool.platepar, "equal_aspect"):
                 plate_tool.platepar.equal_aspect = False
+
+        if plate_tool.platepar is not None:
+            if not hasattr(plate_tool.platepar, "extinction_scale"):
+                plate_tool.platepar.extinction_scale = 1.0
             
 
         # Set the dir path in case it changed

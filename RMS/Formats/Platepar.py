@@ -199,6 +199,9 @@ class Platepar(object):
         self.gamma = 1.0
         self.vignetting_coeff = 0.0
 
+        # Extinction correction scaling
+        self.extinction_scale = 1.0
+
         self.station_code = None
 
         self.star_list = None
@@ -711,6 +714,9 @@ class Platepar(object):
             # Add the default vignetting coeff
             self.addVignettingCoeff(use_flat=use_flat)
 
+        # Add extinction scale
+        if not 'extinction_scale' in self.__dict__:
+            self.extinction_scale = 1.0
 
         # Add the list of calibration stars if it was not in the platepar
         if not 'star_list' in self.__dict__:
