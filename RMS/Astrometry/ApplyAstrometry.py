@@ -80,7 +80,14 @@ def extinctionCorrectionTrueToApparent(catalog_mags, ra_data, dec_data, jd, plat
     """ Compute apparent magnitudes by applying extinction correction to catalog magnitudes. 
     
     Arguments:
+        catalog_mags: [list] A list of catalog magnitudes.
+        ra_data: [list] A list of catalog right ascensions (J2000) in degrees.
+        dec_data: [list] A list of catalog declinations (J2000) in degrees.
+        jd: [float] Julian date.
+        platepar: [Platepar object]
 
+    Return:
+        corrected_catalog_mags: [list] Extinction corrected catalog magnitudes.
 
     """
 
@@ -117,7 +124,14 @@ def extinctionCorrectionApparentToTrue(mags, x_data, y_data, jd, platepar):
     """ Compute true magnitudes by applying extinction correction to apparent magnitudes. 
     
     Arguments:
+        mags: [list] A list of apparent magnitudes.
+        x_data: [list] A list of pixel columns.
+        y_data: [list] A list of pixel rows.
+        jd: [float] Julian date.
+        platepar: [Platepar object]
 
+    Return:
+        corrected_mags: [list] A list of extinction corrected mangitudes.
 
     """
 
