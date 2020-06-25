@@ -1,6 +1,6 @@
 import pyqtgraph as pg
 import numpy as np
-from PyQt5.QtCore import QPoint, QRectF, Qt, QLine, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import QPoint, QRectF, Qt, QLine, pyqtSignal, pyqtSlot, QRect
 from PyQt5.QtGui import QColor, QPicture, QPainter, QPen, QFont, QTransform, QPainterPath, QBrush, \
     QValidator
 from PyQt5.QtWidgets import QApplication, QLineEdit, QWidget, QGridLayout, QDoubleSpinBox, QLabel, \
@@ -231,7 +231,7 @@ class TextItemList(pg.GraphicsObject):
         else:
             self.getTextItem(i).hide()
 
-    def setTextItem(self, parent, i, *args, **kwargs):
+    def setTextItem(self, i, *args, **kwargs):
         """
         Replace the TextItem at index i to a TextItem initialized with args and kwargs
 
@@ -241,7 +241,7 @@ class TextItemList(pg.GraphicsObject):
         """
         self.parentItem().scene().removeItem(self.text_list[i])
         self.text_list[i].setParentItem(None)
-        self.text_list.insert(i, TextItem(*args, **kwargs))
+        self.text_list[i] = TextItem(*args, **kwargs)
         self.text_list[i].setParentItem(self.parentItem())
         self.text_list[i].setZValue(self.z)
 
@@ -438,7 +438,7 @@ class TextItem(pg.GraphicsObject):
             rect.translate(self.xy[0] - origin.x(), self.xy[1] - origin.y())
 
         if self.align == Qt.AlignCenter:
-            rect.translate(-self.wh[0]/2, -self.wh[0]/2)
+            rect.translate(-self.wh[0]/2, -self.wh[1]/2)
         elif self.align == Qt.AlignRight:
             rect.translate(-self.wh[0], 0)
 
@@ -587,7 +587,6 @@ class CursorItem(pg.GraphicsObject):
         """
         super().__init__()
         self._center = QPoint(0, 0)
-        self.last_center = QPoint(0, 0)
         self._r = r
         self.mode = True
         self.thickness = thickness
@@ -625,7 +624,7 @@ class CursorItem(pg.GraphicsObject):
         Arguments:
             new_center [QPoint]: Center of the new circle
         """
-        self.last_center = self.center
+        self.setPos(new_center)
         self._center = new_center
         self.update()
 
@@ -656,10 +655,14 @@ class CursorItem(pg.GraphicsObject):
             painter.drawEllipse(QPoint(0, 0), 2*r, 2*r)
         painter.end()
 
+
+        rect = QRect(-3*self.r, -3*self.r, 6*self.r, 6*self.r)
+        self.picture.setBoundingRect(rect)
+
     def paint(self, painter, option, widget=None):
         self.generatePicture()
-        painter.translate(self.center.x(), self.center.y())
         if self.pxmode:
+            painter.translate(self.center.x(), self.center.y())
             t = painter.transform()
             pts = self.parentItem().mapToDevice(pg.Point(self.center.x(), self.center.y()))
             painter.setTransform(QTransform(1, 0, t.m13(),
@@ -668,24 +671,7 @@ class CursorItem(pg.GraphicsObject):
         painter.drawPicture(0, 0, self.picture)
 
     def boundingRect(self):
-        if self.pxmode and self.parentItem() is not None:
-            origin = self.parentItem().mapToDevice(pg.Point(0, 0))
-            pos = self.parentItem().mapToDevice(pg.Point(self.r, self.r))
-            r = pos.x() - origin.x()
-        else:
-            r = self.r
-
-        size = 10
-        rect = QRectF(0, 0, size*2*r, size*2*r)
-
-        if self.pxmode:
-            origin = self.parentItem().mapToDevice(pg.Point(0, 0))
-            pos = self.parentItem().mapFromDevice(pg.Point(rect.width() + origin.x(), rect.height() + origin.y()))
-            rect.setWidth(pos.x())
-            rect.setHeight(pos.y())
-
-        rect.moveCenter(self.last_center)
-        return rect
+        return QRectF(self.picture.boundingRect())
 
 
 class HistogramLUTWidget2(pg.HistogramLUTWidget):
@@ -775,8 +761,8 @@ class PlateparParameterManager(QWidget):
         self.az_centre.setValue(self.platepar.az_centre)
         self.az_centre.valueModified.connect(self.azChanged)
         hbox.addWidget(self.az_centre)
-        hbox.addWidget(QLabel('degrees', alignment=Qt.AlignLeft))
-        layout.addRow(QLabel('Az'), hbox)
+        hbox.addWidget(QLabel('°', alignment=Qt.AlignLeft))
+        layout.addRow(QLabel('Azim'), hbox)
 
         hbox = QHBoxLayout()
         self.alt_centre = DoubleSpinBox()
@@ -788,7 +774,7 @@ class PlateparParameterManager(QWidget):
         self.alt_centre.setValue(self.platepar.alt_centre)
         self.alt_centre.valueModified.connect(self.altChanged)
         hbox.addWidget(self.alt_centre)
-        hbox.addWidget(QLabel('degrees', alignment=Qt.AlignLeft))
+        hbox.addWidget(QLabel('°', alignment=Qt.AlignLeft))
         layout.addRow(QLabel('Alt'), hbox)
 
         hbox = QHBoxLayout()
@@ -801,8 +787,8 @@ class PlateparParameterManager(QWidget):
         self.rotation_from_horiz.setValue(self.platepar.rotation_from_horiz)
         self.rotation_from_horiz.valueModified.connect(self.rotChanged)
         hbox.addWidget(self.rotation_from_horiz)
-        hbox.addWidget(QLabel('degrees', alignment=Qt.AlignLeft))
-        layout.addRow(QLabel('Rot from horiz'), hbox)
+        hbox.addWidget(QLabel('°', alignment=Qt.AlignLeft))
+        layout.addRow(QLabel('Horz rot'), hbox)
 
         hbox = QHBoxLayout()
         self.F_scale = DoubleSpinBox()
@@ -814,7 +800,7 @@ class PlateparParameterManager(QWidget):
         self.F_scale.setValue(self.platepar.F_scale/60)
         self.F_scale.valueModified.connect(self.scaleChanged)
         hbox.addWidget(self.F_scale)
-        hbox.addWidget(QLabel('arcmin/px', alignment=Qt.AlignLeft))
+        hbox.addWidget(QLabel('\'/px', alignment=Qt.AlignLeft))
         layout.addRow(QLabel('Scale'), hbox)
 
         self.distortion_type = QComboBox(self)
@@ -872,6 +858,7 @@ class PlateparParameterManager(QWidget):
         self.rotation_from_horiz.setValue(self.platepar.rotation_from_horiz)
         self.F_scale.setValue(self.platepar.F_scale/60)
         self.fit_parameters.updateValues()
+        self.distortion_type.setCurrentIndex(self.platepar.distortion_type_list.index(self.platepar.distortion_type))
 
 
 class SettingsWidget(QWidget):
