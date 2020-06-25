@@ -1198,7 +1198,7 @@ class PlateTool(object):
                 self.platepar.extinction_scale = 2.0
 
             self.updateImage()
-            
+
 
         # Change catalog limiting magnitude
         elif event.key == 'r':
@@ -2055,7 +2055,7 @@ class PlateTool(object):
             text_str += 'Increment = {:.2f}\n'.format(self.key_increment)
             text_str += 'Img Gamma = {:.2f}\n'.format(self.img_gamma)
             text_str += 'Camera Gamma = {:.2f}\n'.format(self.config.gamma)
-            text_str += 'Extinct. scale  = {:.1f}\n'.format(self.platepar.extinction_scale)
+            text_str += 'Extinct. scale  = {:.1f}x\n'.format(self.platepar.extinction_scale)
             text_str += "Refraction corr = {:s}\n".format(str(self.platepar.refraction))
             text_str += "Distortion type = {:s}\n".format(\
                 self.platepar.distortion_type_list[self.dist_type_index])
