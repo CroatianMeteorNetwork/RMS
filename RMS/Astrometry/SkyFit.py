@@ -590,7 +590,7 @@ class PlateTool(object):
             time_data = [self.img_handle.currentTime()]
 
             # Compute RA, dec
-            jd, ra, dec, _ = xyToRaDecPP(time_data, [x], [y], [1], self.platepar)
+            jd, ra, dec, _ = xyToRaDecPP(time_data, [x], [y], [1], self.platepar, extinction_correction=False)
 
 
             # Precess RA/Dec to epoch of date for alt/az computation
@@ -1956,9 +1956,14 @@ class PlateTool(object):
         if self.draw_calstars:
             self.drawCalstars()
 
-        # Update centre of FOV in horizontal coordinates
-        self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.RA_d, \
-            self.platepar.dec_d, self.platepar.JD, self.platepar.lat, self.platepar.lon)
+        
+
+        # Update centre of FOV in horizontal coordinates (epoch of date)
+        az_centre, alt_centre = trueRaDec2ApparentAltAz(np.radians(self.platepar.RA_d), \
+            np.radians(self.platepar.dec_d), self.platepar.JD, np.radians(self.platepar.lat), \
+            np.radians(self.platepar.lon))
+        self.platepar.az_centre, self.platepar.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
+
 
         ### Draw catalog stars on the image using the current platepar ###
         ######################################################################################################
@@ -2197,8 +2202,8 @@ class PlateTool(object):
         img_time = self.img_handle.currentTime()
 
         # Convert the FOV centre to RA/Dec
-        _, ra_centre, dec_centre, _ = xyToRaDecPP([img_time], [self.platepar.X_res/2], 
-            [self.platepar.Y_res/2], [1], self.platepar)
+        _, ra_centre, dec_centre, _ = xyToRaDecPP([img_time], [self.platepar.X_res/2], \
+            [self.platepar.Y_res/2], [1], self.platepar, extinction_correction=False)
         
         ra_centre = ra_centre[0]
         dec_centre = dec_centre[0]
@@ -2865,7 +2870,8 @@ class PlateTool(object):
 
             # Compute the residuals in ra/dec in angular coordiniates
             img_time = self.img_handle.currentTime()
-            _, ra_img, dec_img, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar)
+            _, ra_img, dec_img, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar, \
+                extinction_correction=False)
 
             ra_img = ra_img[0]
             dec_img = dec_img[0]
@@ -3000,7 +3006,8 @@ class PlateTool(object):
 
 
             # Compute RA/Dec from image
-            _, img_ra, img_dec, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar)
+            _, img_ra, img_dec, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar, \
+                extinction_correction=False)
             img_ra = img_ra[0]
             img_dec = img_dec[0]
 

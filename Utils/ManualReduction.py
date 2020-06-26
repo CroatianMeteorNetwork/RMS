@@ -1368,7 +1368,7 @@ class ManualReductionTool(object):
             time_data = [self.getCurrentFrameTime()]
 
             # Compute RA, dec
-            jd, ra, dec, _ = xyToRaDecPP(time_data, [x], [y], [1], self.platepar)
+            jd, ra, dec, _ = xyToRaDecPP(time_data, [x], [y], [1], self.platepar, extinction_correction=False)
 
 
             # Precess RA/Dec to epoch of date for alt/az computation

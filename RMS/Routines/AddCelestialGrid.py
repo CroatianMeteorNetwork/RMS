@@ -26,7 +26,7 @@ def addEquatorialGrid(plt_handle, platepar, jd):
 
     # Estimate RA,dec of the centre of the FOV
     _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(jd)], [platepar.X_res/2], [platepar.Y_res/2], [1], 
-        platepar)
+        platepar, extinction_correction=False)
 
     RA_c = RA_c[0]
     dec_c = dec_c[0]

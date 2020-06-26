@@ -47,7 +47,8 @@ import Utils.RMS2UFO
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import cyraDecToXY, cyXYToRADec, equatorialCoordPrecession
+from RMS.Astrometry.CyFunctions import cyraDecToXY, cyXYToRADec, equatorialCoordPrecession, \
+    trueRaDec2ApparentAltAz
 
 
 # Handle Python 2/3 compability
@@ -357,18 +358,16 @@ def rotationWrtHorizon(platepar):
     img_up_w = img_mid_w + 10
     img_up_h = img_mid_h
 
-    # Compute Alt/az from X,Y
+    # Compute apparent alt/az in the epoch of date from X,Y
     jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP(2*[jd2Date(platepar.JD)], [img_mid_w, img_up_w], \
-        [img_mid_h, img_up_h], [1, 1], platepar)
-    azim, alt = raDec2AltAz_vect(ra_arr, dec_arr, jd_arr, platepar.lat, platepar.lon)
-    azim_mid = azim[0]
-    alt_mid = alt[0]
-    azim_up = azim[1]
-    alt_up = alt[1]
+        [img_mid_h, img_up_h], [1, 1], platepar, extinction_correction=False)
+    azim_mid, alt_mid = trueRaDec2ApparentAltAz(np.radians(ra_arr[0]), np.radians(dec_arr[0]), jd_arr[0], \
+        np.radians(platepar.lat), np.radians(platepar.lon))
+    azim_up, alt_up = trueRaDec2ApparentAltAz(np.radians(ra_arr[1]), np.radians(dec_arr[1]), jd_arr[1], \
+        np.radians(platepar.lat), np.radians(platepar.lon))
 
     # Compute the rotation wrt horizon (deg)    
-    rot_angle = np.degrees(np.arctan2(np.radians(alt_up) - np.radians(alt_mid), \
-        np.radians(azim_up) - np.radians(azim_mid)))
+    rot_angle = np.degrees(np.arctan2(alt_up - alt_mid, azim_up - azim_mid))
 
     # Wrap output to <-180, 180] range
     if rot_angle > 180:
