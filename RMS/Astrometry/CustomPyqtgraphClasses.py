@@ -4,7 +4,7 @@ from PyQt5.QtCore import QPoint, QRectF, Qt, QLine, pyqtSignal, pyqtSlot, QRect
 from PyQt5.QtGui import QColor, QPicture, QPainter, QPen, QFont, QTransform, QPainterPath, QBrush, \
     QValidator
 from PyQt5.QtWidgets import QApplication, QLineEdit, QWidget, QGridLayout, QDoubleSpinBox, QLabel, \
-    QComboBox, QTabWidget, QFormLayout, QHBoxLayout
+    QComboBox, QTabWidget, QFormLayout, QHBoxLayout, QGraphicsTextItem
 
 import time
 import re
@@ -190,7 +190,15 @@ class TextItemList(pg.GraphicsObject):
         """
         return self.text_list[i]
 
-    def addTextItem(self, *args, **kwargs):
+    def __getitem__(self, key):
+        return self.text_list[key]
+
+    def addTextItem(self, text):
+        text.setParentItem(self.parentItem())
+        text.setZValue(self.z)
+        self.text_list.append(text)
+
+    def addNewTextItem(self, *args, **kwargs):
         """
         Has the same arguments as __init__ in TextItem
         """
@@ -210,40 +218,6 @@ class TextItemList(pg.GraphicsObject):
         self.z = z
         for text in self.text_list:
             text.setZValue(z)
-
-    def moveText(self, i, x, y):
-        """
-        Moves the TextItem at index i to coordinates (x,y) while maintaining all of its properties
-
-        Arguments:
-            i [int]: index of TextItem
-            x [float]: x coordinate to move TextItem to (depends on pxmode)
-            y [float]: y coordinate to move TextItem to (depends on pxmode)
-        """
-        text = self.getTextItem(i)
-        visible = text.isVisible()
-        self.setTextItem(i, x, y, *text.wh, text.text,
-                         pen=text.pen, font=text.font, align=text.align, pxmode=text.pxmode,
-                         background_brush=text.background_brush, background_pen=text.background_pen,
-                         margin=text.margin)
-        if visible:
-            self.getTextItem(i).show()
-        else:
-            self.getTextItem(i).hide()
-
-    def setTextItem(self, i, *args, **kwargs):
-        """
-        Replace the TextItem at index i to a TextItem initialized with args and kwargs
-
-        Arguments:
-            i [int]: index of TextItem to replace
-            args, kwargs: same arguments as __init__ in TextItem
-        """
-        self.parentItem().scene().removeItem(self.text_list[i])
-        self.text_list[i].setParentItem(None)
-        self.text_list[i] = TextItem(*args, **kwargs)
-        self.text_list[i].setParentItem(self.parentItem())
-        self.text_list[i].setZValue(self.z)
 
     def clear(self):
         """
@@ -276,173 +250,17 @@ class TextItemList(pg.GraphicsObject):
         return QRectF()
 
 
-class TextItem(pg.GraphicsObject):
-    def __init__(self, x, y, w, h, text,
-                 pen=None, font=None, align=None, pxmode=0,
-                 background_brush=None, background_pen=None, margin=None):
-        """
-        Adds a TextItem
+class TextItem(pg.TextItem):
+    def __init__(self, text='', color=(200, 200, 200), html=None, anchor=(0, 0),
+                 border=None, fill=None, angle=0, rotateAxis=None):
+        pg.TextItem.__init__(self, text, color, html, anchor, border, fill, angle, rotateAxis)
 
-        Arguments:
-            x [float]: x coordinate of TextItem (depends on pxmode)
-            y [float]: y coordinate of TextItem (depends on pxmode)
-            w [float]: width of area to write in (depends on pxmode)
-            h [float]: height of area to write in (depends on pxmode)
-            text [str]: text to show
-            pen [QPen]: pen to write text in
-            font [QFont]: font to write text in
-            align: Qt.AlignLeft, Qt.AlignRight or Qt.AlignCenter
-            pxmode:
-                0: x, y, w, and h represent distance and text has a fixed length in distance
-                1: x and y respresent distance distance, w and h represent pixels and text has
-                    fixed length in pixels
-                2: x, y, w and h represent pixels and text has a fixed length in pixels
-                3: same as 2 except x any y represent pixels from corner of parent not its axis
-            background_brush [QBrush]: Brush used for background (fill)
-            background_pen [QPen]: Pen used for background (outline)
-            margin [float]: amount of space between sides of background to text
-        """
-
-        pg.GraphicsObject.__init__(self)
-        self.xy = (x, y)
-        self.wh = (w, h)
-
-        self.text = text
-        self.font = font
-        self.pen = pen
-        self.align = align
-        self.margin = margin
-        self.background_brush = background_brush
-        self.background_pen = background_pen
-
-        if pen is None:
-            self.pen = QPen(QColor(Qt.white))
-        if font is None:
-            self.font = QFont()
-        if align is None:
-            self.align = Qt.AlignLeft
-        if margin is None:
-            self.margin = 0  # margin does nothing if align is Qt.AlignCenter
-
-        self.pxmode = pxmode
-        self.setFlag(self.ItemIgnoresTransformations, self.pxmode != 0)
-
-        self.picture = QPicture()
-
-    def size(self):
-        """
-        Returns:
-             (float, float): width and height of the background
-        """
-        return self.wh
-
-    def setPos(self, x, y):
-        self.xy = x, y
-        self.update()
-
-    def setBackgroundBrush(self, brush):
-        self.background_brush = brush
-        self.update()
-
-    def setBackgroundPen(self, pen):
-        self.background_pen = pen
-        self.update()
-
-    def setPen(self, pen):
-        self.pen = pen
-        self.update()
-
-    def setFont(self, font):
-        self.font = font
-        self.update()
-
-    def setText(self, text):
-        self.text = text
-        self.update()
-
-    def setAlignment(self, align):
-        self.align = align
-        self.update()
-
-    def generatePicture(self):
-        painter = QPainter(self.picture)
-        background = (self.background_pen is not None) or (self.background_brush is not None)
-        if background:
-            if self.background_pen:
-                painter.setPen(self.background_pen)
-                painter.setBrush(Qt.NoBrush)
-            elif self.background_brush:
-                painter.setBrush(self.background_brush)
-                painter.setPen(Qt.NoPen)
-
-            if self.background_brush:
-                painter.setBrush(self.background_brush)
-
-            painter.drawRect(0, 0, *self.wh)
-
-        painter.setPen(self.pen)
-        painter.setFont(self.font)
-        if self.align == Qt.AlignLeft or self.align == Qt.AlignRight:
-            painter.drawText(self.margin, self.margin,
-                             self.wh[0] - 2*self.margin, self.wh[1] - 2*self.margin,
-                             self.align, self.text)
-        elif self.align == Qt.AlignCenter:
-            painter.drawText(0, 0, *self.wh, self.align, self.text)
-        else:
-            raise KeyError
-        painter.end()
-
-    def paint(self, painter, option, widget=None):
-        self.generatePicture()
-
-        # transformations
-        painter.save()
-        t = painter.transform()
-
-        painter.translate(*self.xy)  # transformation is overriden if self.pxmode != 0
-        if self.pxmode == 1:  # stays in coordinates according to view without changing size
-            pts = self.parentItem().mapToDevice(pg.Point(self.xy[0], self.xy[1]))
-            painter.setTransform(QTransform(1, 0, t.m13(),
-                                            t.m21(), 1, t.m23(),
-                                            pts.x(), pts.y(), t.m33()))
-        elif self.pxmode == 2:  # constant amount of pixels from corner of view
-            painter.setTransform(QTransform(1, 0, t.m13(),
-                                            t.m21(), 1, t.m23(),
-                                            t.m31() + self.xy[0], t.m32() + self.xy[1], t.m33()))
-        elif self.pxmode == 3:  # constant number of pixels from corner of parent widget
-            pts = self.parentItem().mapToDevice(pg.Point(0, 0))
-            painter.setTransform(QTransform(1, 0, t.m13(),
-                                            t.m21(), 1, t.m23(),
-                                            t.m31() + self.xy[0] - pts.x(), t.m32() + self.xy[1] - pts.y(), t.m33()))
-
-        # transform where the center is for convenience
-        if self.align == Qt.AlignCenter:
-            painter.translate(-self.wh[0]/2, -self.wh[1]/2)
-        elif self.align == Qt.AlignRight:
-            painter.translate(-self.wh[0], 0)
-
-        painter.drawPicture(0, 0, self.picture)
-        painter.restore()
-
-    def boundingRect(self):
-        rect = QRectF(0, 0, *self.wh)
-
-        if self.pxmode in [0, 1]:
-            origin = self.parentItem().mapToDevice(pg.Point(0, 0))
-            pos = self.parentItem().mapToDevice(pg.Point(self.xy[0], self.xy[1]))
-            rect.translate(pos.x() - origin.x(), pos.y() - origin.y())
-        elif self.pxmode == 2:
-            rect.translate(self.xy[0], self.xy[1])
-        elif self.pxmode == 3:
-            origin = self.parentItem().mapToDevice(pg.Point(0, 0))
-            rect.translate(self.xy[0] - origin.x(), self.xy[1] - origin.y())
-
-        if self.align == Qt.AlignCenter:
-            rect.translate(-self.wh[0]/2, -self.wh[1]/2)
-        elif self.align == Qt.AlignRight:
-            rect.translate(-self.wh[0], 0)
-
-        return rect
+    def setAlign(self, align):
+        option = self.textItem.document().defaultTextOption()
+        option.setAlignment(align)
+        self.textItem.document().setDefaultTextOption(option)
+        self.textItem.setTextWidth(self.textItem.boundingRect().width())
+        self.updateTextPos()
 
 
 class ImageItem2(pg.ImageItem):
@@ -654,7 +472,6 @@ class CursorItem(pg.GraphicsObject):
             painter.setBrush(Qt.NoBrush)
             painter.drawEllipse(QPoint(0, 0), 2*r, 2*r)
         painter.end()
-
 
         rect = QRect(-3*self.r, -3*self.r, 6*self.r, 6*self.r)
         self.picture.setBoundingRect(rect)

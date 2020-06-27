@@ -347,16 +347,16 @@ class PlateTool(QMainWindow):
         # self.img_frame.addItem(self.labels)
 
         # top left label
-        self.label1 = QLabel(v)
-        self.label1.setFixedWidth(200)
-        self.label1.setStyleSheet("background-color: rgba(255,255,255,100)")
-        self.label1.setMargin(10)
+        self.label1 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
+        self.label1.setTextWidth(200)
+        self.label1.setZValue(1000)
+        self.label1.setParentItem(self.img_frame)
 
         # bottom left label
-        self.label2 = QLabel(v)
-        self.label2.setFixedWidth(200)
-        self.label2.setStyleSheet("background-color: rgba(255,255,255,100)")
-        self.label2.setMargin(10)
+        self.label2 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
+        self.label2.setTextWidth(200)
+        self.label2.setZValue(1000)
+        self.label2.setParentItem(self.img_frame)
 
         # bottom information
         self.label3 = QLabel()
@@ -430,19 +430,18 @@ class PlateTool(QMainWindow):
         self.calstar_markers2.setSymbol('o')
         self.calstar_markers2.setZValue(5)
 
-        text_str = "STAR PICKING MODE"
-        text_str += "\n'LEFT CLICK' - Centroid star\n"
+        text_str = "STAR PICKING MODE\n"
+        text_str += "'LEFT CLICK' - Centroid star\n"
         text_str += "'CTRL + LEFT CLICK' - Manual star position\n"
         text_str += "'CTRL + Z' - Fit stars\n"
         text_str += "'CTRL + SHIFT + Z' - Fit with initial distortion params set to 0\n"
         text_str += "'L' - Astrometry fit details\n"
         text_str += "'P' - Photometry fit"
-        self.star_pick_info = TextItem(0, 0, 400, 200, text_str,
-                                       align=Qt.AlignCenter, pxmode=3)
-
+        self.star_pick_info = TextItem(text_str, anchor=(0.5, 0.5), color=(255, 255, 255))
+        self.star_pick_info.setAlign(Qt.AlignCenter)
         self.star_pick_info.hide()
         self.star_pick_info.setZValue(10000)
-        self.img_frame.addItem(self.star_pick_info)
+        self.star_pick_info.setParentItem(self.img_frame)
 
         # cursor
         self.cursor = CursorItem(self.star_aperature_radius, pxmode=True)
@@ -486,6 +485,7 @@ class PlateTool(QMainWindow):
         # mouse binding
         self.img_frame.scene().sigMouseMoved.connect(self.mouseMove)
         self.img_frame.scene().sigMouseClicked.connect(self.mouseClick)  # NOTE: clicking event doesnt trigger if moving
+        self.img_frame.sigResized.connect(self.onFrameResize)
 
         self.scrolls_back = 0
 
@@ -672,7 +672,7 @@ class PlateTool(QMainWindow):
         # self.labels.getTextItem(1).setText(text_str)
         # self.labels.moveText(1, 0, self.img_frame.height() - self.labels.getTextItem(1).size()[1])
         self.label2.setText(text_str)
-        self.label2.move(QPoint(0, self.img_frame.height() - self.label2.height()))
+        self.label2.setPos(0, self.img_frame.height() - self.label2.boundingRect().height())
 
     def updateStars(self):
         """ Updates only the stars """
@@ -902,16 +902,9 @@ class PlateTool(QMainWindow):
 
         self.updateImage()
 
-    def resizeEvent(self, event):
-        """ When the window is resized, move the bottom label to the correct position """
-
-        QMainWindow.resizeEvent(self, event)
-        try:
-            # self.labels.moveText(1, 0, self.img_frame.height() - self.labels.getTextItem(1).size()[1])
-            self.label2.move(QPoint(0, self.img_frame.height() - self.label2.height()))
-            self.star_pick_info.setPos(self.img_frame.width()/2, self.img_frame.height() - 50)
-        except:
-            pass
+    def onFrameResize(self):
+        self.label2.setPos(0, self.img_frame.height() - self.label2.boundingRect().height())
+        self.star_pick_info.setPos(self.img_frame.width()/2, self.img_frame.height() - 50)
 
     def saveState(self):
         """
@@ -1041,8 +1034,7 @@ class PlateTool(QMainWindow):
             if mp.x() > (range_[1] - range_[0])/2 + range_[0]:
                 self.v_zoom_left = True
                 if self.show_key_help != 2:
-                    # self.v_zoom.move(QPoint(self.labels.getTextItem(0).size()[0], 0))
-                    self.v_zoom.move(QPoint(self.label1.width(), 0))
+                    self.v_zoom.move(QPoint(self.label1.boundingRect().width(), 0))
                 else:
                     self.v_zoom.move(QPoint(0, 0))
             else:
@@ -1144,13 +1136,19 @@ class PlateTool(QMainWindow):
                         # Determine the size of the residual text, larger the residual, larger the text
                         photom_resid_size = 8 + np.abs(fit_diff)/(np.max(np.abs(fit_resids))/5.0)
 
-                        self.residual_text.addTextItem(star_x, star_y + y, 100, 100, photom_resid_txt,
-                                                       align=Qt.AlignCenter, font=QFont('times', photom_resid_size),
-                                                       pxmode=1)
+                        text1 = TextItem(photom_resid_txt, anchor=(0.5, -0.5))
+                        text1.setPos(star_x, star_y)
+                        text1.setFont(QFont('times', photom_resid_size))
+                        text1.setColor(QColor(255, 255, 255))
+                        text1.setAlign(Qt.AlignCenter)
+                        self.residual_text.addTextItem(text1)
 
-                        self.residual_text.addTextItem(star_x, star_y - y, 100, 100, "{:+6.2f}".format(star_mag),
-                                                       align=Qt.AlignCenter, font=QFont('times', 10), pen=QPen(Qt.red),
-                                                       pxmode=1)
+                        text2 = TextItem("{:+6.2f}".format(star_mag), anchor=(0.5, 1.5))
+                        text2.setPos(star_x, star_y)
+                        text2.setFont(QFont('times', 10))
+                        text2.setColor(QColor(255, 0, 0))
+                        text2.setAlign(Qt.AlignCenter)
+                        self.residual_text.addTextItem(text2)
                     self.residual_text.update()
 
                 # Show the photometry fit plot
@@ -1584,31 +1582,24 @@ class PlateTool(QMainWindow):
                 self.show_key_help = 0
 
             if self.show_key_help == 0:
-                # self.labels.getTextItem(0).show()
-                # self.labels.getTextItem(1).hide()
                 self.label1.show()
                 self.label2.hide()
             elif self.show_key_help == 1:
-                # self.labels.getTextItem(0).show()
-                # self.labels.getTextItem(1).show()
                 self.label1.show()
                 self.label2.show()
             else:
-                # self.labels.getTextItem(0).hide()
-                # self.labels.getTextItem(1).hide()
                 self.label1.hide()
                 self.label2.hide()
 
             if self.v_zoom_left:
                 if self.show_key_help != 2:
-                    # self.v_zoom.move(QPoint(self.labels.getTextItem(0).size()[0], 0))
-                    self.v_zoom.move(QPoint(self.label1.width(), 0))
+                    self.v_zoom.move(QPoint(self.label1.boundingRect().width(), 0))
                 else:
                     self.v_zoom.move(QPoint(0, 0))
 
             if self.show_key_help == 1:
-                text_str = "STAR PICKING MODE"
-                text_str += "\n'LEFT CLICK' - Centroid star\n"
+                text_str = "STAR PICKING MODE\n"
+                text_str += "'LEFT CLICK' - Centroid star\n"
                 text_str += "'CTRL + LEFT CLICK' - Manual star position\n"
                 text_str += "'CTRL + Z' - Fit stars\n"
                 text_str += "'CTRL + SHIFT + Z' - Fit with initial distortion params set to 0\n"
