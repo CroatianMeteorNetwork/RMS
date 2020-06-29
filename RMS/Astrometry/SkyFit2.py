@@ -142,7 +142,6 @@ class PlateTool(QMainWindow):
 
         self.config = config
         self.dir_path = dir_path
-        self.time = time.time()
 
         # If camera gamma was given, change the value in config
         if gamma is not None:
@@ -153,18 +152,9 @@ class PlateTool(QMainWindow):
 
         # Star picking mode=
         self.star_selection_centroid = True
-        self.circle_aperature = None
-        self.circle_aperature_outer = None
         self.star_aperature_radius = 5
         self.x_centroid = self.y_centroid = None
         self.closest_cat_star_indx = None
-        self.photom_deviatons_scat = []
-
-        self.img = None
-        self.img_zoom = None
-
-        self.adjust_levels_mode = False
-        self.auto_levels = False
 
         # List of paired image and catalog stars
         self.paired_stars = []
@@ -286,26 +276,6 @@ class PlateTool(QMainWindow):
         layout = QGridLayout()
         self.central.setLayout(layout)
 
-        # default variables even when constructor isnt called
-        self.star_pick_mode = False
-        # Image gamma and levels
-        self.bit_depth = self.config.bit_depth
-        # self.img_gamma = 1.0 # instead call self.img.gamma
-
-        # img_level_min and img_level_max are not updated constantly, it is used for storing levels
-        # when transferring between images. Instead call self.hist.getLevels()
-        self.img_level_min = self.img_level_min_auto = 0
-        self.img_level_max = self.img_level_max_auto = 0  # these will be changed when the image is loaded
-
-        # Toggle zoom window
-        self.show_zoom_window = False
-        self.show_zoom_window_size = 200
-
-        self.catalog_stars_visible = True
-        self.draw_calstars = True
-
-        self.draw_distortion = False
-
         self.show_key_help = 1
 
         # timing
@@ -324,6 +294,8 @@ class PlateTool(QMainWindow):
         layout.addWidget(v, 0, 1)
 
         # zoom window
+        self.show_zoom_window = False
+        self.show_zoom_window_size = 200
         self.v_zoom = pg.GraphicsView(v)
         self.zoom_window = pg.ViewBox()
         self.zoom_window.setAspectLocked()
@@ -337,14 +309,6 @@ class PlateTool(QMainWindow):
         self.v_zoom.move(QPoint(0, 0))
         self.v_zoom_left = True  # whether to draw zoom window on left or right
         self.zoom_window.invertY()
-
-        # self.labels = TextItemList()
-        # self.labels.setZValue(1000)
-        # self.labels.addTextItem(0, 0, 200, 230, '',
-        #                         margin=10, pxmode=3, background_brush=QColor(255, 255, 255, 100))
-        # self.labels.addTextItem(0, 0, 200, 540, '',
-        #                         margin=10, pxmode=3, background_brush=QColor(255, 255, 255, 100))
-        # self.img_frame.addItem(self.labels)
 
         # top left label
         self.label1 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
@@ -361,6 +325,8 @@ class PlateTool(QMainWindow):
         # bottom information
         self.label3 = QLabel()
         layout.addWidget(self.label3, 1, 1)
+
+        self.catalog_stars_visible = True
 
         # catalog star markers (main window)
         self.cat_star_markers = pg.ScatterPlotItem()
@@ -399,7 +365,6 @@ class PlateTool(QMainWindow):
         self.centroid_star_markers = pg.ScatterPlotItem()
         self.img_frame.addItem(self.centroid_star_markers)
         self.centroid_star_markers.setPen(QColor(255, 165, 0))
-        # self.centroid_star_markers.setBrush(QColor(0, 0, 0, 0))
         self.centroid_star_markers.setSize(15)
         self.centroid_star_markers.setSymbol(Plus())
         self.centroid_star_markers.setZValue(4)
@@ -411,6 +376,8 @@ class PlateTool(QMainWindow):
         self.centroid_star_markers2.setSize(15)
         self.centroid_star_markers2.setSymbol(Plus())
         self.centroid_star_markers2.setZValue(4)
+
+        self.draw_calstars = True
 
         # calstar markers (main window)
         self.calstar_markers = pg.ScatterPlotItem()
@@ -443,6 +410,9 @@ class PlateTool(QMainWindow):
         self.star_pick_info.setZValue(10000)
         self.star_pick_info.setParentItem(self.img_frame)
 
+        # default variables even when constructor isnt called
+        self.star_pick_mode = False
+
         # cursor
         self.cursor = CursorItem(self.star_aperature_radius, pxmode=True)
         self.img_frame.addItem(self.cursor, ignoreBounds=True)
@@ -456,6 +426,7 @@ class PlateTool(QMainWindow):
         self.cursor2.setZValue(20)
 
         # distortion lines (window)
+        self.draw_distortion = False
         self.distortion_lines = PlotLines(pxmode=True)
         self.distortion_lines.hide()
         self.img_frame.addItem(self.distortion_lines)
@@ -471,9 +442,12 @@ class PlateTool(QMainWindow):
         self.img_frame.addItem(self.residual_text)
         self.residual_text.setZValue(10)
 
-        # platepar parameter manager
-        # self.param_manager = PlateparParameterManager(parent=None,
-        #                                               platepar=self.platepar)
+        # img_level_min and img_level_max are not updated constantly, it is used for storing levels
+        # when transferring between images. Instead call self.hist.getLevels()
+        self.img_level_min = self.img_level_min_auto = 0
+        self.img_level_max = self.img_level_max_auto = 0  # these will be changed when the image is loaded
+        self.bit_depth = self.config.bit_depth  # Image gamma and levels
+        self.auto_levels = False
         self.tab = RightOptionsTab(platepar=self.platepar)
 
         self.tab.param_manager.azalt_star_signal.connect(self.updateStarsSignalAzAltSignal)
@@ -483,8 +457,8 @@ class PlateTool(QMainWindow):
         layout.addWidget(self.tab, 0, 2)
 
         # mouse binding
-        self.img_frame.scene().sigMouseMoved.connect(self.mouseMove)
-        self.img_frame.scene().sigMouseClicked.connect(self.mouseClick)  # NOTE: clicking event doesnt trigger if moving
+        self.img_frame.scene().sigMouseMoved.connect(self.onMouseMoved)
+        self.img_frame.scene().sigMouseClicked.connect(self.onMouseClicked)  # NOTE: clicking event doesnt trigger if moving
         self.img_frame.sigResized.connect(self.onFrameResize)
 
         self.scrolls_back = 0
@@ -516,24 +490,6 @@ class PlateTool(QMainWindow):
         self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar,
                                                                    self.platepar.rotation_from_horiz)
         self.updateStars()
-
-    def pixelsToDistance(self, x, y):
-        """ Converts between x pixels horizontally and y pixels vertically to distance
-            on self.img_frame (x,y)
-
-        Arguments
-            x: [float] number of pixels horizontally
-            y: [float] number of pixels vertically
-
-        Return:
-            [(float, float)]: distance horizontally and distance vertically
-        """
-        r = self.img_frame.viewRange()
-        self.img_frame.autoRange(padding=0)
-        origin = self.img_frame.mapToDevice(self.img_frame.mapFromView(pg.Point(0, 0)))
-        pos = self.img_frame.mapToView(self.img_frame.mapFromDevice(pg.Point(x + origin.x(), y + origin.y())))
-        self.img_frame.setRange(xRange=r[0], yRange=r[1], padding=0)
-        return pos.x(), pos.y()
 
     def mouseOverStatus(self, x, y):
         """ Format the status message which will be printed in the status bar below the plot.
@@ -619,7 +575,6 @@ class PlateTool(QMainWindow):
         text_str += 'RA centre  = {:s}{:02d}h {:02d}m {:05.2f}s\n'.format(sign_str, hh, mm, ss)
         text_str += 'Dec centre = {:.3f}°\n'.format(dec_centre)
 
-        # self.labels.getTextItem(0).setText(text_str)
         self.label1.setText(text_str)
 
         text_str = 'Keys:\n'
@@ -653,7 +608,6 @@ class PlateTool(QMainWindow):
         text_str += 'CTRL + I - Show/hide distortion\n'
         text_str += 'U/J - Img Gamma\n'
         text_str += 'I - Invert colors\n'
-        text_str += 'CTRL + H - Adjust levels\n'
         text_str += 'V - FOV centre\n'
         text_str += '\n'
         text_str += 'CTRL + A - Auto levels\n'
@@ -669,8 +623,6 @@ class PlateTool(QMainWindow):
         text_str += '\n'
         text_str += 'Hide on-screen text - F1\n'
 
-        # self.labels.getTextItem(1).setText(text_str)
-        # self.labels.moveText(1, 0, self.img_frame.height() - self.labels.getTextItem(1).size()[1])
         self.label2.setText(text_str)
         self.label2.setPos(0, self.img_frame.height() - self.label2.boundingRect().height())
 
@@ -902,6 +854,7 @@ class PlateTool(QMainWindow):
 
         self.updateImage()
 
+    @pyqtSlot()
     def onFrameResize(self):
         self.label2.setPos(0, self.img_frame.height() - self.label2.boundingRect().height())
         self.star_pick_info.setPos(self.img_frame.width()/2, self.img_frame.height() - 50)
@@ -945,9 +898,8 @@ class PlateTool(QMainWindow):
             self.updateImage()
             self.updateLeftLabels()
 
-    def mouseClick(self, event):
+    def onMouseClicked(self, event):
         modifiers = QApplication.keyboardModifiers()
-        pos = self.img_frame.mapSceneToView(event.pos())
         if self.star_pick_mode:
             self.mouse_press_x = self.mouse_x  # pos.x()# why is this wrong when clicking on a marker?
             self.mouse_press_y = self.mouse_y  # pos.y()
@@ -1017,7 +969,7 @@ class PlateTool(QMainWindow):
 
                     self.updatePairedStars()
 
-    def mouseMove(self, event):
+    def onMouseMoved(self, event):
         pos = event
         if self.img_frame.sceneBoundingRect().contains(pos):
             self.img_frame.setFocus()
@@ -1127,7 +1079,6 @@ class PlateTool(QMainWindow):
                     star_coords = np.array(star_coords)
                     star_coords_x, star_coords_y = star_coords.T
                     self.residual_text.clear()
-                    _, y = self.pixelsToDistance(0, 10)
 
                     for star_x, star_y, fit_diff, star_mag in zip(star_coords_x, star_coords_y, fit_resids,
                                                                   catalog_mags):
@@ -1412,21 +1363,6 @@ class PlateTool(QMainWindow):
 
             print('Plate fitted!')
 
-        elif event.key() == Qt.Key_H and modifiers == Qt.ControlModifier:
-            self.adjust_levels_mode = not self.adjust_levels_mode
-            # if self.adjust_levels_mode:
-            #     self.tab.hist.show()
-            # else:
-            #     self.tab.hist.hide()
-
-        elif event.key() == Qt.Key_P and modifiers == Qt.ControlModifier:
-            self.paramm_visible = not self.paramm_visible
-            # if self.paramm_visible:
-            #     self.tab.param_manager.show()
-            # else:
-            #     self.tab.param_manager.hide()
-
-
         elif event.key() == Qt.Key_Left:
             self.prevImg()
 
@@ -1567,7 +1503,6 @@ class PlateTool(QMainWindow):
         # Change catalog limiting magnitude
         elif event.key() == Qt.Key_R:
             self.cat_lim_mag += 0.1
-            self.time = time.time()
             self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
             self.updateStars()
 

@@ -234,7 +234,10 @@ class TextItemList(pg.GraphicsObject):
             i [int]: index
         """
         item = self.text_list.pop(i)
-        self.parentItem().scene().removeItem(item)
+        try:
+            self.parentItem().scene().removeItem(item)
+        except:
+            pass
         item.setParentItem(None)
 
     def setParentItem(self, parent):
