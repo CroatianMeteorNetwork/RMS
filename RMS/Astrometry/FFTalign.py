@@ -233,7 +233,7 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
         # Get the RA/Dec of the image centre
         _, ra_centre, dec_centre, _ = ApplyAstrometry.xyToRaDecPP([calstars_time], [platepar.X_res/2], \
-                [platepar.Y_res/2], [1], platepar)
+                [platepar.Y_res/2], [1], platepar, extinction_correction=False)
 
         ra_centre = ra_centre[0]
         dec_centre = dec_centre[0]
@@ -299,11 +299,10 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         platepar_aligned.F_scale *= scale
 
     # Compute the new reference RA and Dec
-    # _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.xyToRaDecPP([jd2Date(platepar.JD)], \
-    #     [platepar.X_res/2 - translation_x], [platepar.Y_res/2 - translation_y], [1], platepar)
     _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.xyToRaDecPP([jd2Date(platepar.JD)], \
         [platepar.X_res/2 - platepar.x_poly_fwd[0] - translation_x], \
-        [platepar.Y_res/2 - platepar.y_poly_fwd[0] - translation_y], [1], platepar)
+        [platepar.Y_res/2 - platepar.y_poly_fwd[0] - translation_y], [1], platepar, \
+        extinction_correction=False)
 
     # Correct RA/Dec
     platepar_aligned.RA_d = ra_centre_new[0]

@@ -19,7 +19,7 @@ import scipy.optimize
 
 from RMS.Astrometry import CheckFit
 from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo, applyPlateparToCentroids, \
-    rotationWrtHorizon, photometryFitRobust
+    rotationWrtHorizon, photometryFitRobust, extinctionCorrectionTrueToApparent
 from RMS.Astrometry.Conversions import date2JD, raDec2AltAz
 from RMS.Astrometry.FFTalign import alignPlatepar
 import RMS.ConfigReader as cr
@@ -201,7 +201,11 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
         # Get a list of matched image and catalog stars
         image_stars, matched_catalog_stars, _ = matched_stars[jd]
         star_intensities = image_stars[:, 2]
-        catalog_mags = matched_catalog_stars[:, 2]
+        ra_catalog, dec_catalog, catalog_mags = matched_catalog_stars.T
+
+        # Compute apparent star magnitudes by including extinction
+        catalog_mags = extinctionCorrectionTrueToApparent(catalog_mags, ra_catalog, dec_catalog, jd, \
+            working_platepar)
 
         # Compute radius of every star from image centre
         radius_arr = np.hypot(image_stars[:, 0] - working_platepar.Y_res/2, \
