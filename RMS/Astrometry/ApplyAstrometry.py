@@ -667,8 +667,12 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
         ra_tmp = RA_data[i]
         dec_tmp = dec_data[i]
 
-        # Alt and az are kept in the J2000 epoch, which is the CAMS standard!
-        az_tmp, alt_tmp = raDec2AltAz(ra_tmp, dec_tmp, jd, platepar.lat, platepar.lon)
+        # Precess RA/Dec to epoch of date
+        ra_tmp, dec_tmp = equatorialCoordPrecession(J2000_JD.days, jd, np.radians(ra_tmp), \
+            np.radians(dec_tmp))
+
+        # Alt/Az are apparent (in the epoch of date, corresponding to geographical azimuths)
+        az_tmp, alt_tmp = raDec2AltAz(np.degrees(ra_tmp), np.degrees(dec_tmp), jd, platepar.lat, platepar.lon)
 
         az_data[i] = az_tmp
         alt_data[i] = alt_tmp

@@ -91,13 +91,18 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
             else:
                 ftpdetect_file.write("Uncalibrated" + "\n")
 
-            # Calculate meteor's angular velocity
-            first_centroid = centroids[0]
-            last_centroid  = centroids[-1]
-            frame1, x1, y1 = first_centroid[:3]
-            frame2, x2, y2 = last_centroid[:3]
 
-            ang_vel = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)/float(frame2 - frame1)
+            # Calculate meteor's angular velocity
+            if len(centroids) > 1:
+                first_centroid = centroids[0]
+                last_centroid  = centroids[-1]
+                frame1, x1, y1 = first_centroid[:3]
+                frame2, x2, y2 = last_centroid[:3]
+
+                ang_vel = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)/float(frame2 - frame1)
+
+            else:
+                ang_vel = 0.0
 
             # Write detection header
             ftpdetect_file.write(str(cam_code).zfill(4) + " " + str(int(meteor_No)).zfill(4) + " " + 
@@ -214,7 +219,7 @@ def readFTPdetectinfo(ff_directory, file_name, ret_input_format=False):
             if entry_counter > 3:
                 
                 # Skip lines with NaNs for centroids
-                if '000nan' in line:
+                if '00nan' in line:
                     continue
 
                 mag = np.nan
