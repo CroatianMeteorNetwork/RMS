@@ -15,8 +15,10 @@ try:
 except:
     import tkMessageBox as messagebox
 
-
-import rawpy
+try:
+    import rawpy
+except ImportError:
+    pass
 import cv2
 import numpy as np
 
@@ -1168,9 +1170,11 @@ class InputTypeImages(object):
         # Disctionary which holds the time of every frame, used for fast frame time lookup
         self.uwo_png_dt_dict = {}
 
-
-        ### Find images in the given folder ###
-        img_types = ['.png', '.jpg', '.bmp', '.nef']
+        if 'rawpy' in sys.modules:
+            ### Find images in the given folder ###
+            img_types = ['.png', '.jpg', '.bmp', '.nef']
+        else:
+            img_types = ['.png', '.jpg', '.bmp']
 
         self.img_list = []
 
@@ -1454,6 +1458,7 @@ class InputTypeImages(object):
             fr_no = self.current_frame
 
         if current_img_file.endswith('.nef'):
+            # .nef files will not be brought here if rawpy is not installed
             # get raw data from .nef file and get image from it
             raw = rawpy.imread(os.path.join(self.dir_path, current_img_file))
             frame = raw.postprocess()

@@ -1,17 +1,13 @@
 import pyqtgraph as pg
 import numpy as np
-from PyQt5.QtCore import QPoint, QRectF, Qt, QLine, pyqtSignal, pyqtSlot, QRect
-from PyQt5.QtGui import QColor, QPicture, QPainter, QPen, QFont, QTransform, QPainterPath, QBrush, \
-    QValidator
-from PyQt5.QtWidgets import QApplication, QLineEdit, QWidget, QGridLayout, QDoubleSpinBox, QLabel, \
-    QComboBox, QTabWidget, QFormLayout, QHBoxLayout, QGraphicsTextItem
+from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 import time
 import re
 import sys
 
 
-class Plus(QPainterPath):
+class Plus(QtGui.QPainterPath):
     """
     Used as a symbol for ScatterPlotItem
     ex. item.setSymbol(Plus())
@@ -20,7 +16,7 @@ class Plus(QPainterPath):
     """
 
     def __init__(self):
-        QPainterPath.__init__(self)
+        QtGui.QPainterPath.__init__(self)
         points = np.asarray([
             (-0.5, 0),
             (0.5, 0),
@@ -34,7 +30,7 @@ class Plus(QPainterPath):
         self.closeSubpath()
 
 
-class Cross(QPainterPath):
+class Cross(QtGui.QPainterPath):
     """
     Used as a symbol for ScatterPlotItem
     ex. item.setSymbol(Cross())
@@ -43,7 +39,7 @@ class Cross(QPainterPath):
     """
 
     def __init__(self):
-        QPainterPath.__init__(self)
+        QtGui.QPainterPath.__init__(self)
         points = np.asarray([
             (-0.5, -0.5),
             (0.5, 0.5),
@@ -57,7 +53,7 @@ class Cross(QPainterPath):
         self.closeSubpath()
 
 
-class CircleLine(QPainterPath):
+class CircleLine(QtGui.QPainterPath):
     """
     Used as a symbol for ScatterPlotItem
     ex. item.setSymbol(CircleLine())
@@ -67,16 +63,16 @@ class CircleLine(QPainterPath):
     """
 
     def __init__(self):
-        QPainterPath.__init__(self)
+        QtGui.QPainterPath.__init__(self)
         points = np.asarray([(0, -0.5), (0, 0)])
         self.moveTo(*points[0])
         self.lineTo(*points[1])
         self.closeSubpath()
 
-        self.addEllipse(QPoint(0, 0), 0.5, 0.5)
+        self.addEllipse(QtCore.QPoint(0, 0), 0.5, 0.5)
 
 
-class Crosshair(QPainterPath):
+class Crosshair(QtGui.QPainterPath):
     """
     Used as a symbol for ScatterPlotItem
     ex. item.setSymbol(Crosshair())
@@ -86,7 +82,7 @@ class Crosshair(QPainterPath):
     """
 
     def __init__(self):
-        QPainterPath.__init__(self)
+        QtGui.QPainterPath.__init__(self)
         points = np.asarray([(0, -0.5), (0, -0.2),
                              (0, 0.5), (0, 0.2),
                              (0.5, 0), (0.2, 0),
@@ -97,7 +93,7 @@ class Crosshair(QPainterPath):
             self.lineTo(*points[i + 1])
         self.closeSubpath()
 
-        self.addEllipse(QPoint(0, 0), 0.5, 0.5)
+        self.addEllipse(QtCore.QPoint(0, 0), 0.5, 0.5)
 
 
 # custom pyqtgraph items
@@ -110,6 +106,11 @@ class PlotLines(pg.GraphicsObject):
     """
 
     def __init__(self, data=None, pxmode=False):
+        """
+        Arguments:
+            data: same format as setData
+            pxmode: whether the width of the lines will change when zooming
+        """
         pg.GraphicsObject.__init__(self)
         self.data = data
 
@@ -121,7 +122,7 @@ class PlotLines(pg.GraphicsObject):
             self.max_x = max([max([x[0], x[2]]) for x in self.data])
             self.max_y = max([max([x[1], x[3]]) for x in self.data])
 
-        self.picture = QPicture()
+        self.picture = QtGui.QPicture()
         self.pxmode = pxmode
 
         self.generatePicture()
@@ -141,14 +142,14 @@ class PlotLines(pg.GraphicsObject):
         self.update()
 
     def generatePicture(self):
-        painter = QPainter(self.picture)
+        painter = QtGui.QPainter(self.picture)
         for x0, y0, xnd, ynd, pen in self.data:
             if self.pxmode and self.parentItem():
                 pos1 = self.parentItem().mapToDevice(pg.Point(x0, y0))
                 pos2 = self.parentItem().mapToDevice(pg.Point(xnd, ynd))
                 x0, y0, xnd, ynd = pos1.x(), pos1.y(), pos2.x(), pos2.y()
             painter.setPen(pen)
-            painter.drawLine(QLine(x0, y0, xnd, ynd))
+            painter.drawLine(QtCore.QLine(x0, y0, xnd, ynd))
         painter.end()
 
     def paint(self, painter, option, widget=None):
@@ -156,13 +157,13 @@ class PlotLines(pg.GraphicsObject):
         t = painter.transform()
 
         if self.pxmode:  # stays in coordinates according to view without changing size
-            painter.setTransform(QTransform(1, 0, t.m13(),
-                                            t.m21(), 1, t.m23(),
-                                            0, 0, t.m33()))
-        painter.drawPicture(QPoint(0, 0), self.picture)
+            painter.setTransform(QtGui.QTransform(1, 0, t.m13(),
+                                                  t.m21(), 1, t.m23(),
+                                                  0, 0, t.m33()))
+        painter.drawPicture(QtCore.QPoint(0, 0), self.picture)
 
     def boundingRect(self):
-        return QRectF(0, 0, self.max_x, self.max_y)
+        return QtCore.QRectF(0, 0, self.max_x, self.max_y)
 
 
 class TextItemList(pg.GraphicsObject):
@@ -170,8 +171,7 @@ class TextItemList(pg.GraphicsObject):
     Allows for a list of TextItems without having to constantly add items to a widget
     ex.
     text_list = TextItemList()
-    text_list.addTextItem(0,0,100,100,'hello')
-    text_list.addTextItem(10,10,100,100,'you')
+    text_list.addNewTextItem('hello')
     widget.addItem(text_list)
     """
 
@@ -185,6 +185,11 @@ class TextItemList(pg.GraphicsObject):
         Return the TextItem at index i. Can only be used for getting information, changing
         values will not change any values in the list
 
+        Identical to:
+        text = TextItemList()
+        ...
+        text[i]
+
         Arguments:
             i [int]: index
         """
@@ -194,6 +199,13 @@ class TextItemList(pg.GraphicsObject):
         return self.text_list[key]
 
     def addTextItem(self, text):
+        """
+        Add TextItem object to list. It will be displayed automatically without
+        any management of the TextItem
+
+        Arguments:
+            text [TextItem]: TextItem to add to list
+        """
         text.setParentItem(self.parentItem())
         text.setZValue(self.z)
         self.text_list.append(text)
@@ -250,7 +262,7 @@ class TextItemList(pg.GraphicsObject):
             text.update()
 
     def boundingRect(self):
-        return QRectF()
+        return QtCore.QRectF()
 
 
 class TextItem(pg.TextItem):
@@ -259,6 +271,12 @@ class TextItem(pg.TextItem):
         pg.TextItem.__init__(self, text, color, html, anchor, border, fill, angle, rotateAxis)
 
     def setAlign(self, align):
+        """
+        Set alignment of the TextItem
+
+        Arguments:
+            align [Qt.AlignLeft, Qt.AlignCenter, Qt.AlignRight]
+        """
         option = self.textItem.document().defaultTextOption()
         option.setAlignment(align)
         self.textItem.document().setDefaultTextOption(option)
@@ -407,13 +425,13 @@ class CursorItem(pg.GraphicsObject):
             thickness [float]: width of the circles and center dot
         """
         super().__init__()
-        self._center = QPoint(0, 0)
+        self._center = QtCore.QPoint(0, 0)
         self._r = r
         self.mode = True
         self.thickness = thickness
 
         self.pxmode = pxmode
-        self.picture = QPicture()
+        self.picture = QtGui.QPicture()
 
     def setMode(self, mode):
         """
@@ -457,26 +475,26 @@ class CursorItem(pg.GraphicsObject):
         else:
             r = self.r
 
-        painter = QPainter(self.picture)
+        painter = QtGui.QPainter(self.picture)
         if self.mode:
-            pen = QPen(Qt.yellow, self.thickness, Qt.SolidLine)
+            pen = QtGui.QPen(QtCore.Qt.yellow, self.thickness, QtCore.Qt.SolidLine)
             painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawEllipse(QPoint(0, 0), r, r)
+            painter.setBrush(QtCore.Qt.NoBrush)
+            painter.drawEllipse(QtCore.QPoint(0, 0), r, r)
 
             # pen.setStyle(Qt.DotLine)
             painter.setPen(pen)
-            painter.drawEllipse(QPoint(0, 0), 2*r, 2*r)
-            painter.setPen(QPen(Qt.blue, 2*self.thickness))
-            painter.drawPoint(QPoint(0, 0))
+            painter.drawEllipse(QtCore.QPoint(0, 0), 2*r, 2*r)
+            painter.setPen(QtGui.QPen(QtCore.Qt.blue, 2*self.thickness))
+            painter.drawPoint(QtCore.QPoint(0, 0))
         else:
-            pen = QPen(QPen(QColor(128, 0, 128), self.thickness, Qt.SolidLine))
+            pen = QtGui.QPen(QtGui.QColor(128, 0, 128), self.thickness, QtCore.Qt.SolidLine)
             painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawEllipse(QPoint(0, 0), 2*r, 2*r)
+            painter.setBrush(QtCore.Qt.NoBrush)
+            painter.drawEllipse(QtCore.QPoint(0, 0), 2*r, 2*r)
         painter.end()
 
-        rect = QRect(-3*self.r, -3*self.r, 6*self.r, 6*self.r)
+        rect = QtCore.QRect(-3*self.r, -3*self.r, 6*self.r, 6*self.r)
         self.picture.setBoundingRect(rect)
 
     def paint(self, painter, option, widget=None):
@@ -485,13 +503,13 @@ class CursorItem(pg.GraphicsObject):
             painter.translate(self.center.x(), self.center.y())
             t = painter.transform()
             pts = self.parentItem().mapToDevice(pg.Point(self.center.x(), self.center.y()))
-            painter.setTransform(QTransform(1, 0, t.m13(),
-                                            t.m21(), 1, t.m23(),
-                                            pts.x(), pts.y(), t.m33()))
+            painter.setTransform(QtGui.QTransform(1, 0, t.m13(),
+                                                  t.m21(), 1, t.m23(),
+                                                  pts.x(), pts.y(), t.m33()))
         painter.drawPicture(0, 0, self.picture)
 
     def boundingRect(self):
-        return QRectF(self.picture.boundingRect())
+        return QtCore.QRectF(self.picture.boundingRect())
 
 
 class HistogramLUTWidget2(pg.HistogramLUTWidget):
@@ -503,12 +521,12 @@ class HistogramLUTWidget2(pg.HistogramLUTWidget):
 
     def mousePressEvent(self, event):
         super().mousePressEvent(event)
-        modifier = QApplication.keyboardModifiers()
+        modifier = QtWidgets.QApplication.keyboardModifiers()
         pos = self.vb.mapSceneToView(event.pos())
-        if self.item.movable and modifier == Qt.ControlModifier:
-            if event.button() == Qt.LeftButton:
+        if self.item.movable and modifier == QtCore.Qt.ControlModifier:
+            if event.button() == QtCore.Qt.LeftButton:
                 self.setLevels(pos.y(), self.getLevels()[1])
-            elif event.button() == Qt.RightButton:
+            elif event.button() == QtCore.Qt.RightButton:
                 self.setLevels(self.getLevels()[0], pos.y())
 
 
@@ -550,28 +568,28 @@ class HistogramLUTItem2(pg.HistogramLUTItem):
             img.setLevels(self.getLevels())
 
 
-class PlateparParameterManager(QWidget):
+class PlateparParameterManager(QtWidgets.QWidget):
     """
     QWidget that contains various QDoubleSpinBox's that can be changed to
     manage platepar parameters
     """
-    azalt_star_signal = pyqtSignal()
-    rot_star_signal = pyqtSignal()
-    scale_star_signal = pyqtSignal()
-    distortion_signal = pyqtSignal()
+    sigAzAltChanged = QtCore.pyqtSignal()
+    sigRotChanged = QtCore.pyqtSignal()
+    sigScaleChanged = QtCore.pyqtSignal()
+    sigFitParametersChanged = QtCore.pyqtSignal()
 
     def __init__(self, parent, platepar):
-        QWidget.__init__(self, parent)
+        QtWidgets.QWidget.__init__(self, parent)
         self.platepar = platepar
 
         self.attr_list = {}
         self.setMaximumWidth(300)
 
-        layout = QFormLayout()
-        layout.setLabelAlignment(Qt.AlignRight)
+        layout = QtWidgets.QFormLayout()
+        layout.setLabelAlignment(QtCore.Qt.AlignRight)
         self.setLayout(layout)
 
-        hbox = QHBoxLayout()
+        hbox = QtWidgets.QHBoxLayout()
         self.az_centre = DoubleSpinBox()
         self.az_centre.setMinimum(-360)
         self.az_centre.setMaximum(360)
@@ -579,12 +597,12 @@ class PlateparParameterManager(QWidget):
         self.az_centre.setSingleStep(1)
         self.az_centre.setFixedWidth(100)
         self.az_centre.setValue(self.platepar.az_centre)
-        self.az_centre.valueModified.connect(self.azChanged)
+        self.az_centre.valueModified.connect(self.onAzChanged)
         hbox.addWidget(self.az_centre)
-        hbox.addWidget(QLabel('°', alignment=Qt.AlignLeft))
-        layout.addRow(QLabel('Azim'), hbox)
+        hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
+        layout.addRow(QtWidgets.QLabel('Azim'), hbox)
 
-        hbox = QHBoxLayout()
+        hbox = QtWidgets.QHBoxLayout()
         self.alt_centre = DoubleSpinBox()
         self.alt_centre.setMinimum(-360)
         self.alt_centre.setMaximum(360)
@@ -592,12 +610,12 @@ class PlateparParameterManager(QWidget):
         self.alt_centre.setSingleStep(1)
         self.alt_centre.setFixedWidth(100)
         self.alt_centre.setValue(self.platepar.alt_centre)
-        self.alt_centre.valueModified.connect(self.altChanged)
+        self.alt_centre.valueModified.connect(self.onAltChanged)
         hbox.addWidget(self.alt_centre)
-        hbox.addWidget(QLabel('°', alignment=Qt.AlignLeft))
-        layout.addRow(QLabel('Alt'), hbox)
+        hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
+        layout.addRow(QtWidgets.QLabel('Alt'), hbox)
 
-        hbox = QHBoxLayout()
+        hbox = QtWidgets.QHBoxLayout()
         self.rotation_from_horiz = DoubleSpinBox()
         self.rotation_from_horiz.setMinimum(-360)
         self.rotation_from_horiz.setMaximum(360)
@@ -605,12 +623,12 @@ class PlateparParameterManager(QWidget):
         self.rotation_from_horiz.setSingleStep(1)
         self.rotation_from_horiz.setFixedWidth(100)
         self.rotation_from_horiz.setValue(self.platepar.rotation_from_horiz)
-        self.rotation_from_horiz.valueModified.connect(self.rotChanged)
+        self.rotation_from_horiz.valueModified.connect(self.onRotChanged)
         hbox.addWidget(self.rotation_from_horiz)
-        hbox.addWidget(QLabel('°', alignment=Qt.AlignLeft))
-        layout.addRow(QLabel('Horz rot'), hbox)
+        hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
+        layout.addRow(QtWidgets.QLabel('Horz rot'), hbox)
 
-        hbox = QHBoxLayout()
+        hbox = QtWidgets.QHBoxLayout()
         self.F_scale = DoubleSpinBox()
         self.F_scale.setMinimum(0)
         self.F_scale.setMaximum(1)
@@ -618,41 +636,36 @@ class PlateparParameterManager(QWidget):
         self.F_scale.setSingleStep(0.01)
         self.F_scale.setFixedWidth(100)
         self.F_scale.setValue(self.platepar.F_scale/60)
-        self.F_scale.valueModified.connect(self.scaleChanged)
+        self.F_scale.valueModified.connect(self.onScaleChanged)
         hbox.addWidget(self.F_scale)
-        hbox.addWidget(QLabel('\'/px', alignment=Qt.AlignLeft))
-        layout.addRow(QLabel('Scale'), hbox)
+        hbox.addWidget(QtWidgets.QLabel('\'/px', alignment=QtCore.Qt.AlignLeft))
+        layout.addRow(QtWidgets.QLabel('Scale'), hbox)
 
-        self.distortion_type = QComboBox(self)
+        self.distortion_type = QtWidgets.QComboBox(self)
         self.distortion_type.addItems(self.platepar.distortion_type_list)
         self.distortion_type.currentIndexChanged.connect(self.onIndexChanged)
-        layout.addRow(QLabel('Distortion'), self.distortion_type)
+        layout.addRow(QtWidgets.QLabel('Distortion'), self.distortion_type)
 
         self.fit_parameters = ArrayTabWidget(parent=None, platepar=self.platepar)
-        self.fit_parameters.valueModified.connect(self.scale_star_signal.emit)  # calls updateStars
+        self.fit_parameters.valueModified.connect(self.sigScaleChanged.emit)  # calls updateStars
         layout.addRow(self.fit_parameters)
 
-    @pyqtSlot()
-    def azChanged(self):
+    def onAzChanged(self):
         self.platepar.az_centre = self.az_centre.value()
-        self.azalt_star_signal.emit()
+        self.sigAzAltChanged.emit()
 
-    @pyqtSlot()
-    def altChanged(self):
+    def onAltChanged(self):
         self.platepar.alt_centre = self.alt_centre.value()
-        self.azalt_star_signal.emit()
+        self.sigAzAltChanged.emit()
 
-    @pyqtSlot()
-    def rotChanged(self):
+    def onRotChanged(self):
         self.platepar.rotation_from_horiz = self.rotation_from_horiz.value()
-        self.rot_star_signal.emit()
+        self.sigRotChanged.emit()
 
-    @pyqtSlot()
-    def scaleChanged(self):
+    def onScaleChanged(self):
         self.platepar.F_scale = self.F_scale.value()*60
-        self.scale_star_signal.emit()
+        self.sigScaleChanged.emit()
 
-    @pyqtSlot()
     def onIndexChanged(self):
         text = self.distortion_type.currentText()
         self.platepar.setDistortionType(text, reset_params=False)
@@ -666,7 +679,7 @@ class PlateparParameterManager(QWidget):
         elif text == 'radial5':
             self.fit_parameters.changeNumberShown(7)
 
-        self.distortion_signal.emit()
+        self.sigFitParametersChanged.emit()
 
     def updatePlatepar(self):
         """
@@ -681,20 +694,13 @@ class PlateparParameterManager(QWidget):
         self.distortion_type.setCurrentIndex(self.platepar.distortion_type_list.index(self.platepar.distortion_type))
 
 
-class SettingsWidget(QWidget):
-    variablesChanged = pyqtSignal()
-
-    def __init__(self, parent=None):
-        QWidget.__init__(self, parent)
-
-
-class ArrayTabWidget(QTabWidget):
+class ArrayTabWidget(QtWidgets.QTabWidget):
     """
     Widget to the right which holds the histogram as well as the parameter manager
     This class does not manipulate their values itself, that is done by accessing
     the variables themselves
     """
-    valueModified = pyqtSignal()
+    valueModified = QtCore.pyqtSignal()
 
     def __init__(self, parent=None, platepar=None):
         super(ArrayTabWidget, self).__init__(parent)
@@ -702,7 +708,7 @@ class ArrayTabWidget(QTabWidget):
 
         self.vars = ['x_poly_rev', 'y_poly_rev', 'x_poly_fwd', 'y_poly_fwd']
 
-        self.tabs = [QWidget() for x in range(4)]
+        self.tabs = [QtWidgets.QWidget() for x in range(4)]
         self.layouts = []
         self.boxes = [[], [], [], []]
         self.labels = [[], [], [], []]
@@ -742,15 +748,15 @@ class ArrayTabWidget(QTabWidget):
         self.n_shown = n
 
     def setupTab(self, i):
-        layout = QFormLayout()
+        layout = QtWidgets.QFormLayout()
 
         for j in range(12):
             box = ScientificDoubleSpinBox()
             box.setSingleStep(0.5)
             box.setFixedWidth(100)
             box.setValue(getattr(self.platepar, self.vars[i])[j])
-            box.valueModified.connect(self.updated(i, j))
-            label = QLabel("{}[{}]".format(self.vars[i], j))
+            box.valueModified.connect(self.onFitParameterChanged(i, j))
+            label = QtWidgets.QLabel("{}[{}]".format(self.vars[i], j))
             layout.addRow(label, box)
             self.boxes[i].append(box)
             self.labels[i].append(label)
@@ -759,7 +765,7 @@ class ArrayTabWidget(QTabWidget):
         self.tabs[i].setLayout(layout)
         self.layouts.append(layout)
 
-    def updated(self, i, j):
+    def onFitParameterChanged(self, i, j):
         def f():
             getattr(self.platepar, self.vars[i])[j] = self.boxes[i][j].value()
             self.valueModified.emit()
@@ -772,7 +778,7 @@ class ArrayTabWidget(QTabWidget):
                 self.boxes[i][j].setValue(getattr(self.platepar, self.vars[i])[j])
 
 
-class RightOptionsTab(QTabWidget):
+class RightOptionsTab(QtWidgets.QTabWidget):
     def __init__(self, parent=None, platepar=None):
         super(RightOptionsTab, self).__init__(parent)
 
@@ -790,7 +796,7 @@ class RightOptionsTab(QTabWidget):
         self.setTabText(1, 'Fit Parameters')
 
         self.setCurrentIndex(self.index)  # redundant
-        self.setTabPosition(QTabWidget.East)
+        self.setTabPosition(QtWidgets.QTabWidget.East)
         self.setMovable(True)
 
         self.tabBarClicked.connect(self.onTabBarClicked)
@@ -818,14 +824,14 @@ def valid_float_string(string):
     return match.groups()[0] == string if match else False
 
 
-class FloatValidator(QValidator):
+class FloatValidator(QtGui.QValidator):
     def validate(self, string, position):
         if valid_float_string(string):
-            state = QValidator.Acceptable
+            state = QtGui.QValidator.Acceptable
         elif string == "" or string[position - 1] in 'e.-+':
-            state = QValidator.Intermediate
+            state = QtGui.QValidator.Intermediate
         else:
-            state = QValidator.Invalid
+            state = QtGui.QValidator.Invalid
         return state, string, position
 
     def fixup(self, text):
@@ -833,9 +839,9 @@ class FloatValidator(QValidator):
         return match.groups()[0] if match else ""
 
 
-class DoubleSpinBox(QDoubleSpinBox):
-    buttonPressed = pyqtSignal()
-    valueModified = pyqtSignal()  # press enter or buttonpressed
+class DoubleSpinBox(QtWidgets.QDoubleSpinBox):
+    buttonPressed = QtCore.pyqtSignal()
+    valueModified = QtCore.pyqtSignal()  # press enter or buttonpressed
 
     def __init__(self, *args, **kwargs):
         """
@@ -851,13 +857,13 @@ class DoubleSpinBox(QDoubleSpinBox):
 
     def keyPressEvent(self, e):
         super().keyPressEvent(e)
-        if e.key() == Qt.Key_Enter - 1:
+        if e.key() == QtCore.Qt.Key_Enter - 1:
             self.valueModified.emit()
 
 
-class ScientificDoubleSpinBox(QDoubleSpinBox):
-    buttonPressed = pyqtSignal()
-    valueModified = pyqtSignal()
+class ScientificDoubleSpinBox(QtWidgets.QDoubleSpinBox):
+    buttonPressed = QtCore.pyqtSignal()
+    valueModified = QtCore.pyqtSignal()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -898,7 +904,7 @@ class ScientificDoubleSpinBox(QDoubleSpinBox):
 
     def keyPressEvent(self, e):
         super().keyPressEvent(e)
-        if e.key() == Qt.Key_Enter - 1:
+        if e.key() == QtCore.Qt.Key_Enter - 1:
             self.valueModified.emit()
 
 

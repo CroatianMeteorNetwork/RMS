@@ -47,7 +47,8 @@ import Utils.RMS2UFO
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import cyraDecToXY, cyXYToRADec, equatorialCoordPrecession
+from RMS.Astrometry.CyFunctions import cyraDecToXY, cyXYToRADec, equatorialCoordPrecession, \
+    trueRaDec2ApparentAltAz
 
 
 # Handle Python 2/3 compability
@@ -78,6 +79,13 @@ def extinctionCorrectionTrueToApparent(catalog_mags, ra_data, dec_data, jd, plat
     """ Compute apparent magnitudes by applying extinction correction to catalog magnitudes.
 
     Arguments:
+        catalog_mags: [list] A list of catalog magnitudes.
+        ra_data: [list] A list of catalog right ascensions (J2000) in degrees.
+        dec_data: [list] A list of catalog declinations (J2000) in degrees.
+        jd: [float] Julian date.
+        platepar: [Platepar object]
+    Return:
+        corrected_catalog_mags: [list] Extinction corrected catalog magnitudes.
     """
 
 
@@ -103,7 +111,7 @@ def extinctionCorrectionTrueToApparent(catalog_mags, ra_data, dec_data, jd, plat
     # Correct catalog magnitudes for extinction
     extinction_correction = atmosphericExtinctionCorrection(np.array(elevation_data), platepar.elev) \
         - atmosphericExtinctionCorrection(90, platepar.elev)
-    corrected_catalog_mags = np.array(catalog_mags) + extinction_correction
+    corrected_catalog_mags = np.array(catalog_mags) + platepar.extinction_scale*extinction_correction
 
     return corrected_catalog_mags
 
@@ -113,6 +121,13 @@ def extinctionCorrectionApparentToTrue(mags, x_data, y_data, jd, platepar):
     """ Compute true magnitudes by applying extinction correction to apparent magnitudes.
 
     Arguments:
+        mags: [list] A list of apparent magnitudes.
+        x_data: [list] A list of pixel columns.
+        y_data: [list] A list of pixel rows.
+        jd: [float] Julian date.
+        platepar: [Platepar object]
+    Return:
+        corrected_mags: [list] A list of extinction corrected mangitudes.
     """
 
 
@@ -142,7 +157,7 @@ def extinctionCorrectionApparentToTrue(mags, x_data, y_data, jd, platepar):
     # Correct catalog magnitudes for extinction
     extinction_correction = atmosphericExtinctionCorrection(np.array(elevation_data), platepar.elev) \
         - atmosphericExtinctionCorrection(90, platepar.elev)
-    corrected_mags = np.array(mags) - extinction_correction
+    corrected_mags = np.array(mags) - platepar.extinction_scale*extinction_correction
 
     return corrected_mags
 
@@ -330,18 +345,16 @@ def rotationWrtHorizon(platepar):
     img_up_w = img_mid_w + 10
     img_up_h = img_mid_h
 
-    # Compute Alt/az from X,Y
+    # Compute apparent alt/az in the epoch of date from X,Y
     jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP(2*[jd2Date(platepar.JD)], [img_mid_w, img_up_w], \
-        [img_mid_h, img_up_h], [1, 1], platepar)
-    azim, alt = raDec2AltAz_vect(ra_arr, dec_arr, jd_arr, platepar.lat, platepar.lon)
-    azim_mid = azim[0]
-    alt_mid = alt[0]
-    azim_up = azim[1]
-    alt_up = alt[1]
+        [img_mid_h, img_up_h], [1, 1], platepar, extinction_correction=False)
+    azim_mid, alt_mid = trueRaDec2ApparentAltAz(np.radians(ra_arr[0]), np.radians(dec_arr[0]), jd_arr[0], \
+        np.radians(platepar.lat), np.radians(platepar.lon))
+    azim_up, alt_up = trueRaDec2ApparentAltAz(np.radians(ra_arr[1]), np.radians(dec_arr[1]), jd_arr[1], \
+        np.radians(platepar.lat), np.radians(platepar.lon))
 
     # Compute the rotation wrt horizon (deg)
-    rot_angle = np.degrees(np.arctan2(np.radians(alt_up) - np.radians(alt_mid), \
-        np.radians(azim_up) - np.radians(azim_mid)))
+    rot_angle = np.degrees(np.arctan2(alt_up - alt_mid, azim_up - azim_mid))
 
     # Wrap output to <-180, 180] range
     if rot_angle > 180:

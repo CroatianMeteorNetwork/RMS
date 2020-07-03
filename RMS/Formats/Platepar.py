@@ -121,7 +121,7 @@ def getPairedStarsSkyPositions(img_x, img_y, jd, platepar):
     # Compute RA, Dec of image stars
     img_time = jd2Date(jd)
     _, ra_array, dec_array, _ = RMS.Astrometry.ApplyAstrometry.xyToRaDecPP(len(img_x)*[img_time], img_x,
-        img_y, len(img_x)*[1], platepar)
+        img_y, len(img_x)*[1], platepar, extinction_correction=False)
 
     return ra_array, dec_array
 
@@ -192,6 +192,9 @@ class Platepar(object):
         self.mag_lev_stddev = 0.0
         self.gamma = 1.0
         self.vignetting_coeff = 0.0
+
+        # Extinction correction scaling
+        self.extinction_scale = 1.0
 
         self.station_code = None
 
@@ -694,6 +697,9 @@ class Platepar(object):
             # Add the default vignetting coeff
             self.addVignettingCoeff(use_flat=use_flat)
 
+        # Add extinction scale
+        if not 'extinction_scale' in self.__dict__:
+            self.extinction_scale = 1.0
 
         # Add the list of calibration stars if it was not in the platepar
         if not 'star_list' in self.__dict__:
@@ -1044,14 +1050,14 @@ if __name__ == "__main__":
 
         # Map to RA/Dec
         jd_data, ra_data, dec_data, _ = RMS.Astrometry.ApplyAstrometry.xyToRaDecPP([time_data], [x_img], \
-            [y_img], [0], pp)
+            [y_img], [1], pp, extinction_correction=False)
 
         # Map back to X, Y
         x_data, y_data = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(ra_data, dec_data, jd_data[0], pp)
 
         # Map forward to sky again
         _, ra_data_rev, dec_data_rev, _ = RMS.Astrometry.ApplyAstrometry.xyToRaDecPP([time_data], x_data, \
-            y_data, [0], pp)
+            y_data, [1], pp, extinction_correction=False)
 
 
         print()

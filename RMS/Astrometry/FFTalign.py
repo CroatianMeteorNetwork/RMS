@@ -87,9 +87,9 @@ def constructImage(img_size, point_list, dot_radius):
 
 def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_radius=2, show_plot=False):
     """ Given a list of reference and predicted star positions, return a transform (rotation, scale, \
-        translation) between the two lists using FFT image registration. This is achieved by creating a 
+        translation) between the two lists using FFT image registration. This is achieved by creating a
         synthetic star image using both lists and searching for the transform using phase correlation.
-    
+
     Arguments:
         config: [Config instance]
         reference_list: [2D list] A list of reference (x, y) star coordinates.
@@ -223,7 +223,7 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
         # Get the RA/Dec of the image centre
         _, ra_centre, dec_centre, _ = ApplyAstrometry.xyToRaDecPP([calstars_time], [platepar.X_res/2], \
-                [platepar.Y_res/2], [1], platepar)
+                [platepar.Y_res/2], [1], platepar, extinction_correction=False)
 
         ra_centre = ra_centre[0]
         dec_centre = dec_centre[0]
@@ -289,11 +289,10 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         platepar_aligned.F_scale *= scale
 
     # Compute the new reference RA and Dec
-    # _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.xyToRaDecPP([jd2Date(platepar.JD)], \
-    #     [platepar.X_res/2 - translation_x], [platepar.Y_res/2 - translation_y], [1], platepar)
     _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.xyToRaDecPP([jd2Date(platepar.JD)], \
         [platepar.X_res/2 - platepar.x_poly_fwd[0] - translation_x], \
-        [platepar.Y_res/2 - platepar.y_poly_fwd[0] - translation_y], [1], platepar)
+        [platepar.Y_res/2 - platepar.y_poly_fwd[0] - translation_y], [1], platepar, \
+        extinction_correction=False)
 
     # Correct RA/Dec
     platepar_aligned.RA_d = ra_centre_new[0]
@@ -376,11 +375,11 @@ if __name__ == "__main__":
 
     # Extract star list from CALSTARS file from FF file with most stars
     max_len_ff = max(calstars_dict, key=lambda k: len(calstars_dict[k]))
-    
+
     # Take only X, Y (change order so X is first)
     calstars_coords = np.array(calstars_dict[max_len_ff])[:, :2]
     calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
-        
+
     # Get the time of the FF file
     calstars_time = getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True)
 
@@ -413,10 +412,10 @@ if __name__ == "__main__":
 
     # # Generate some random points as stars
     # npoints = 100
-    # reference_list = np.c_[np.random.randint(-100, config.width + 100, size=npoints), 
+    # reference_list = np.c_[np.random.randint(-100, config.width + 100, size=npoints),
     #                        np.random.randint(-100, config.height + 100, size=npoints)]
 
-    
+
     # # Create a list of shifted stars
     # moved_list = np.copy(reference_list)
 

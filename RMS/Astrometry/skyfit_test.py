@@ -100,8 +100,8 @@ class GUI(QMainWindow):
         self.markers2.setZValue(2)
 
         # cursor
-        # TODO: when label is shown cursor makes the framerate drop by 200FPS and it stops clipping
-        self.cursor = CursorItem(10, pxmode=True)
+        self.cursor = CursorItem(1, pxmode=True)
+        self.radius = 1
         self.vb.addItem(self.cursor, ignoreBounds=True)
         self.cursor_visible = False
         self.cursor.hide()
@@ -110,23 +110,31 @@ class GUI(QMainWindow):
 
         self.x = []
 
-        self.cursor2 = CursorItem(10)
+        self.cursor2 = CursorItem(1)
         self.zoom_window.addItem(self.cursor2, ignoreBounds=True)
         self.cursor2.hide()
         self.cursor2.setZValue(200)
 
         # text
-        self.text = TextItemList()
-        self.vb.addItem(self.text)
-        self.text.addTextItem(0, 0, 150, 150, '',
-                              pxmode=3,
-                              background_brush=QColor(255, 255, 255, 1),
-                              margin=10)
-        self.text.setZValue(1000)
-
-        self.text2 = TextItem(50, 50, 100, 100, 'hey', pxmode=1)
-        self.text2.setZValue(2)
+        self.text2 = TextItem(html='hello how are you doing\nhello',
+                              fill=QColor(255, 255, 255, 100), anchor=(0.5, -0.5))
+        self.text2.setColor(QColor(255, 255, 0))
+        self.text2.setPos(100, 100)
+        self.text2.setZValue(1000)
         self.vb.addItem(self.text2)
+
+        self.text3 = TextItem(html='hello how are you doing\nhello',
+                      fill=QColor(255, 255, 255, 100), anchor=(0.5, 1.5))
+        self.text3.setColor(QColor(255, 255, 0))
+        self.text3.setPos(100, 100)
+        self.text3.setZValue(1000)
+        self.vb.addItem(self.text3)
+
+        self.text = TextItem('', fill=QColor(255, 255, 255, 100))
+        self.text.setTextWidth(150)
+        self.text.setPos(0,0)
+        self.text.setParentItem(self.vb)
+        self.text.setZValue(1000)
 
         # key binding
         self.vb.scene().sigMouseMoved.connect(self.mouseMove)
@@ -137,7 +145,7 @@ class GUI(QMainWindow):
 
     def updateLabel(self):
         """ Update text """
-        self.text.getTextItem(0).setText("Position: ({:.2f},{:.2f})\n"
+        self.text.setText("Position: ({:.2f},{:.2f})\n"
                                          "Gamma: {:.2f}\n"
                                          "MORE TEXT".format(*self.mouse, self.img.gamma))
 
@@ -163,6 +171,8 @@ class GUI(QMainWindow):
             mp = self.vb.mapSceneToView(pos)
             self.cursor.setCenter(mp)
             self.cursor2.setCenter(mp)
+            self.text2.setPos(mp)
+            self.text3.setPos(mp)
             self.mouse = (mp.x(), mp.y())
 
             self.zoom()
@@ -172,35 +182,32 @@ class GUI(QMainWindow):
                 self.v_zoom.move(QPoint(0, 0))
             else:
                 self.v_zoom.move(QPoint(self.vb.size().width() - self.zoom_window_width, 0))
-            # self.text.update()
-            self.text2.update()
+
             self.updateLabel()
 
-            t = time.time()
-            for i in range(100):
-                self.text.clear()
-                self.text.addTextItem(10, 10, 100, 100, 'hello')
-                # self.text.setTextItem(self.vb,0, 10, 10, 100, 100, 'hello')
-
-            print(time.time() - t)
-
         # self.printFrameRate()
-        self.update()
+        # self.update()
 
     def wheelEvent(self, event):
-        ad = event.angleDelta().y()
-        if self.cursor_scroll and self.cursor_visible:
-            if ad < 0:
-                self.cursor.setRadius(self.cursor.r + 1)
-            elif ad > 0 and self.cursor.r > 3:
-                self.cursor.setRadius(self.cursor.r - 1)
-        elif self.image_scroll:
-            if ad < 0:
-                self.vb.autoRange(padding=0)
-            elif ad > 0:
-                self.vb.scaleBy([0.95, 0.95], QPoint(*self.mouse))
-                # xrange = self.vb.viewRange()[0]
-                # self.vb.setXRange(xrange[0] + 10, xrange[1] - 10, padding=0)
+        """ Change star selector aperature on scroll. """
+        delta = event.angleDelta().y()
+        modifier = QApplication.keyboardModifiers()
+
+        if self.vb.sceneBoundingRect().contains(event.pos()):
+            if modifier == Qt.ControlModifier:
+                if delta < 0:
+                    self.radius += 1
+                    self.cursor.setRadius(self.radius)
+                    self.cursor2.setRadius(self.radius)
+                elif delta > 0 and self.radius > 1:
+                    self.radius -= 1
+                    self.cursor.setRadius(self.radius)
+                    self.cursor2.setRadius(self.radius)
+            else:
+                if delta < 0:
+                    self.vb.autoRange(padding=0)
+                elif delta > 0:
+                    self.vb.scaleBy([0.95, 0.95], QPoint(*self.mouse))
 
     def updateImage(self):
         """ Adjust image to new self. """

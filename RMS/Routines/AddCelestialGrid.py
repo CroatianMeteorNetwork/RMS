@@ -11,22 +11,18 @@ from RMS.Math import angularSeparation
 
 def addEquatorialGrid(plt_handle, platepar, jd):
     """ Given the plot handle containing the image, the function plots an equatorial grid.
-
         Arguments:
             plt_handle: [pyplot instance]
             platepar: [Platepar object]
-            jd: [float] Julian date of the image. 
-
-
+            jd: [float] Julian date of the image.
         Return:
             plt_handle: [pyplot instance] Pyplot instance with the added grid.
-
     """
 
 
     # Estimate RA,dec of the centre of the FOV
-    _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(jd)], [platepar.X_res/2], [platepar.Y_res/2], [1], 
-        platepar)
+    _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(jd)], [platepar.X_res/2], [platepar.Y_res/2], [1],
+        platepar, extinction_correction=False)
 
     RA_c = RA_c[0]
     dec_c = dec_c[0]
