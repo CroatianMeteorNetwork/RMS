@@ -11,7 +11,7 @@ imreg_dft
 onvif_zeep
 configparser
 imageio
-pyqtgraph git+git://github.com/pyqtgraph/pyqtgraph@develope#egg=pyqtgraph
+pyqtgraph @ git+https://github.com/pyqtgraph/pyqtgraph@develop#egg=pyqtgraph
 opencv-python
 # pyqt5
 # libraw.py
