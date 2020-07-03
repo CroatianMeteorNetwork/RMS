@@ -1,3 +1,5 @@
+from __future__ import division, absolute_import, unicode_literals
+
 import pyqtgraph as pg
 import numpy as np
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
