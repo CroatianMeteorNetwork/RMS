@@ -12,7 +12,5 @@ onvif_zeep
 configparser
 imageio
 pyqtgraph @ git+https://github.com/pyqtgraph/pyqtgraph@develop#egg=pyqtgraph
-opencv-python
-# pyqt5
 # libraw.py
 # rawpy
