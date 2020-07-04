@@ -1089,7 +1089,7 @@ class PlateTool(object):
         # Convert the reference apparent Alt/Az in the epoch of date to true RA/Dec in J2000
         ra, dec = apparentAltAz2TrueRADec(\
             np.radians(self.platepar.az_centre), np.radians(self.platepar.alt_centre), self.platepar.JD, \
-            np.radians(self.platepar.lat), np.radians(self.platepar.lon))
+            np.radians(self.platepar.lat), np.radians(self.platepar.lon), self.platepar.refraction)
 
 
         # Assign the computed RA/Dec to platepar
@@ -1358,7 +1358,7 @@ class PlateTool(object):
             # Compute reference Alt/Az to apparent coordinates, epoch of date
             az_centre, alt_centre = trueRaDec2ApparentAltAz( \
                 np.radians(self.platepar.RA_d), np.radians(self.platepar.dec_d), self.platepar.JD, \
-                np.radians(self.platepar.lat), np.radians(self.platepar.lon))
+                np.radians(self.platepar.lat), np.radians(self.platepar.lon), self.platepar.refraction)
 
             self.platepar.az_centre, self.platepar.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
 
@@ -1961,7 +1961,7 @@ class PlateTool(object):
         # Update centre of FOV in horizontal coordinates (epoch of date)
         az_centre, alt_centre = trueRaDec2ApparentAltAz(np.radians(self.platepar.RA_d), \
             np.radians(self.platepar.dec_d), self.platepar.JD, np.radians(self.platepar.lat), \
-            np.radians(self.platepar.lon))
+            np.radians(self.platepar.lon), self.platepar.refraction)
         self.platepar.az_centre, self.platepar.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
 
 

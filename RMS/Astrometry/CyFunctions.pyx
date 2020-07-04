@@ -504,7 +504,8 @@ cpdef (double, double) cyraDec2AltAz(double ra, double dec, double jd, double la
 
 
 
-cpdef (double, double) trueRaDec2ApparentAltAz(double ra, double dec, double jd, double lat, double lon):
+cpdef (double, double) trueRaDec2ApparentAltAz(double ra, double dec, double jd, double lat, double lon, \
+    bool refraction=True):
     """ Convert the true right ascension and declination in J2000 to azimuth (+East of due North) and 
         altitude in the epoch of date. The correction for refraction is performed.
 
@@ -514,6 +515,9 @@ cpdef (double, double) trueRaDec2ApparentAltAz(double ra, double dec, double jd,
         jd: [float] Julian date.
         lat: [float] Latitude in radians.
         lon: [float] Longitude in radians.
+
+    Keyword arguments:
+        refraction: [bool] Apply refraction correction. True by default.
 
     Return:
         (azim, elev): [tuple]
@@ -532,7 +536,8 @@ cpdef (double, double) trueRaDec2ApparentAltAz(double ra, double dec, double jd,
     azim, elev = cyraDec2AltAz(ra, dec, jd, lat, lon)
 
     # Correct elevation for refraction
-    elev = refractionTrueToApparent(elev)
+    if refraction:
+        elev = refractionTrueToApparent(elev)
 
 
     return (azim, elev)
@@ -577,7 +582,8 @@ cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double
 
 
 
-cpdef (double, double) apparentAltAz2TrueRADec(double azim, double elev, double jd, double lat, double lon):
+cpdef (double, double) apparentAltAz2TrueRADec(double azim, double elev, double jd, double lat, double lon, \
+    bool refraction=True):
     """ Convert the apparent azimuth and altitude in the epoch of date to true (refraction corrected) right 
         ascension and declination in J2000.
 
@@ -587,6 +593,9 @@ cpdef (double, double) apparentAltAz2TrueRADec(double azim, double elev, double 
         jd: [float] Julian date.
         lat: [float] Latitude of the observer in radians.
         lon: [float] Longitde of the observer in radians.
+
+    Keyword arguments:
+        refraction: [bool] Apply refraction correction. True by default.
 
     Return:
         (ra, dec): [tuple]
@@ -599,7 +608,8 @@ cpdef (double, double) apparentAltAz2TrueRADec(double azim, double elev, double 
 
 
     # Correct elevation for refraction
-    elev = refractionApparentToTrue(elev)
+    if refraction:
+        elev = refractionApparentToTrue(elev)
 
     # Convert to RA/Dec (true, epoch of date)
     ra, dec = cyaltAz2RADec(azim, elev, jd, lat, lon)
