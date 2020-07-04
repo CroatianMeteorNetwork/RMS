@@ -138,10 +138,17 @@ class PlotLines(pg.GraphicsObject):
                 QPen argmument is the pen to draw the line with
                 A list of these five arguments in a tuple will allow for drawing any number of lines
         """
-        self.data = data
-        self.max_x = max([max([x[0], x[2]]) for x in self.data])
-        self.max_y = max([max([x[1], x[3]]) for x in self.data])
+        if data is not None and len(data):
+            self.data = data
+            self.max_x = max([max([x[0], x[2]]) for x in self.data])
+            self.max_y = max([max([x[1], x[3]]) for x in self.data])
+        else:
+            self.data = []
         self.update()
+
+    def clear(self):
+        """ Removes all data """
+        self.setData([])
 
     def generatePicture(self):
         painter = QtGui.QPainter(self.picture)
@@ -579,6 +586,9 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigRotChanged = QtCore.pyqtSignal()
     sigScaleChanged = QtCore.pyqtSignal()
     sigFitParametersChanged = QtCore.pyqtSignal()
+    sigLocationChanged = QtCore.pyqtSignal()
+    sigElevChanged = QtCore.pyqtSignal()
+    sigExtinctionChanged = QtCore.pyqtSignal()
 
     def __init__(self, parent, platepar):
         QtWidgets.QWidget.__init__(self, parent)
@@ -643,6 +653,58 @@ class PlateparParameterManager(QtWidgets.QWidget):
         hbox.addWidget(QtWidgets.QLabel('\'/px', alignment=QtCore.Qt.AlignLeft))
         layout.addRow(QtWidgets.QLabel('Scale'), hbox)
 
+        hbox = QtWidgets.QHBoxLayout()
+        self.extinction_scale = DoubleSpinBox()
+        self.extinction_scale.setMinimum(0)
+        self.extinction_scale.setMaximum(100)
+        self.extinction_scale.setDecimals(8)
+        self.extinction_scale.setSingleStep(0.1)
+        self.extinction_scale.setFixedWidth(100)
+        self.extinction_scale.setValue(self.platepar.extinction_scale)
+        self.extinction_scale.valueModified.connect(self.onExtinctionChanged)
+        hbox.addWidget(self.extinction_scale)
+        hbox.addWidget(QtWidgets.QLabel('', alignment=QtCore.Qt.AlignLeft))
+        layout.addRow(QtWidgets.QLabel('Extinction'), hbox)
+
+        hbox = QtWidgets.QHBoxLayout()
+        self.lat = DoubleSpinBox()
+        self.lat.setMinimum(-360)
+        self.lat.setMaximum(360)
+        self.lat.setDecimals(8)
+        self.lat.setSingleStep(1)
+        self.lat.setFixedWidth(100)
+        self.lat.setValue(self.platepar.lat)
+        self.lat.valueModified.connect(self.onLatChanged)
+        hbox.addWidget(self.lat)
+        hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
+        layout.addRow(QtWidgets.QLabel('Lat'), hbox)
+
+        hbox = QtWidgets.QHBoxLayout()
+        self.lon = DoubleSpinBox()
+        self.lon.setMinimum(-360)
+        self.lon.setMaximum(360)
+        self.lon.setDecimals(8)
+        self.lon.setSingleStep(1)
+        self.lon.setFixedWidth(100)
+        self.lon.setValue(self.platepar.lon)
+        self.lon.valueModified.connect(self.onLonChanged)
+        hbox.addWidget(self.lon)
+        hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
+        layout.addRow(QtWidgets.QLabel('Lon'), hbox)
+
+        hbox = QtWidgets.QHBoxLayout()
+        self.elev = DoubleSpinBox()
+        self.elev.setMinimum(0)
+        self.elev.setMaximum(1000000)
+        self.elev.setDecimals(8)
+        self.elev.setSingleStep(100)
+        self.elev.setFixedWidth(100)
+        self.elev.setValue(self.platepar.elev)
+        self.elev.valueModified.connect(self.onElevChanged)
+        hbox.addWidget(self.elev)
+        hbox.addWidget(QtWidgets.QLabel('m', alignment=QtCore.Qt.AlignLeft))
+        layout.addRow(QtWidgets.QLabel('Elev'), hbox)
+
         self.distortion_type = QtWidgets.QComboBox(self)
         self.distortion_type.addItems(self.platepar.distortion_type_list)
         self.distortion_type.currentIndexChanged.connect(self.onIndexChanged)
@@ -651,6 +713,18 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.fit_parameters = ArrayTabWidget(parent=None, platepar=self.platepar)
         self.fit_parameters.valueModified.connect(self.sigScaleChanged.emit)  # calls updateStars
         layout.addRow(self.fit_parameters)
+
+    def onLatChanged(self):
+        self.platepar.lat = self.lat.value()
+        self.sigLocationChanged.emit()
+
+    def onLonChanged(self):
+        self.platepar.lon = self.lon.value()
+        self.sigLocationChanged.emit()
+
+    def onElevChanged(self):
+        self.platepar.elev = self.elev.value()
+        self.sigElevChanged.emit()
 
     def onAzChanged(self):
         self.platepar.az_centre = self.az_centre.value()
@@ -667,6 +741,10 @@ class PlateparParameterManager(QtWidgets.QWidget):
     def onScaleChanged(self):
         self.platepar.F_scale = self.F_scale.value()*60
         self.sigScaleChanged.emit()
+
+    def onExtinctionChanged(self):
+        self.platepar.extinction_scale = self.extinction_scale.value()
+        self.sigExtinctionChanged.emit()
 
     def onIndexChanged(self):
         text = self.distortion_type.currentText()
@@ -694,6 +772,10 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.F_scale.setValue(self.platepar.F_scale/60)
         self.fit_parameters.updateValues()
         self.distortion_type.setCurrentIndex(self.platepar.distortion_type_list.index(self.platepar.distortion_type))
+        self.lat.setValue(self.platepar.lat)
+        self.lon.setValue(self.platepar.lon)
+        self.elev.setValue(self.platepar.elev)
+        self.extinction_scale.setValue(self.platepar.extinction_scale)
 
 
 class ArrayTabWidget(QtWidgets.QTabWidget):
