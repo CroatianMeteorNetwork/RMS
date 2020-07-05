@@ -39,10 +39,8 @@ import pprint
 import re
 import RMS.ConfigReader as cr
 from time import sleep
-
-from onvif import ONVIFCamera
-sys.path.append ('./python-dvr')
-from dvrip import DVRIPCam
+import importlib  
+dvr = importlib.import_module("python-dvr.dvrip")
 
 def rebootCamera(cam):
     """Reboot the Camera
@@ -340,7 +338,7 @@ def CameraControl(camera_ip, cmd, opts=''):
         opts (array of strings): Optional array of field, subfield and value for the SetParam command
     """
      # Process the IP camera control command
-    cam = DVRIPCam(camera_ip, "admin", "")
+    cam = dvr.DVRIPCam(camera_ip, "admin", "")
     if cam.login():
         try:
             dvripCommand(cam, cmd, opts)
