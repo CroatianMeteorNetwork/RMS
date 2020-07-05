@@ -167,16 +167,54 @@ def getCameraParams(cam, showit=True):
 
 def setEncodeParam(cam, opts):
     """ Set a parameter in the Encode section of the camera config
+        Note: a different approach has to be taken here than for camera params
+        as its not possible to set individual parameters without crashing the camera
+    Args:
+        cam - the camera 
+        opts - array of fields, subfields and the value to set
+    """
+    intflds=['FPS','BitRate','GOP','Quality']
+
+    params = cam.get_info("Simplify.Encode")
+    fld=opts[1]
+    if fld == 'Video':
+        subfld=opts[2]
+        val = opts[3]
+        if subfld=='Compression' and val !='H.264' and val != 'H.265':
+            print('Compression must be H.264 or H.265')
+            return 
+        if subfld=='Resolution' and val !='720P' and val != '1080P' and val !='3M':
+            print('Resolution must be 720P, 1080P or 3M')
+            return 
+        if subfld=='BitRateControl' and val !='CBR' and val !='VBR':
+            print('BitRateControl must be VBR or CBR')
+            return
+        if subfld in intflds:
+            val = int(val)
+        params[0]['MainFormat']['Video'][subfld] = val
+    else:
+        val = opts[2]
+        if val!=0 and val!=1:
+            print('AudioEnable and VideoEnable must be 1 or 0')
+            return 
+        subfld=''
+        params[0]['MainFormat'][fld]=val
+    cam.set_info("Simplify.Encode", params)
+    print ('Set {} {} to {}'.format(fld, subfld, val))
+    print ('Camera Reboot required to take effect')
+       
+def setNetworkParam(cam, opts):
+    """ Set a parameter in the Network section of the camera config
 
     Args:
         cam - the camera 
         opts - array of fields, subfields and the value to set
     """
-    print('not implemented yet')
+    print('Network field setting not implemented yet')
 
 def setCameraParam(cam, opts):
     """ Set a parameter in the Camera section of the camera config
-
+        Individual parameters can be set and the change will take effect immediately 
     Args:
         cam - the camera 
         opts - array of fields, subfields and the value to set
@@ -235,8 +273,10 @@ def setParameter(cam, opts):
         print('Not enough parameters, need at least block, field, value')
     if opts[0] == 'Camera':
         setCameraParam(cam, opts)
-    elif opts[0] == 'Video':
+    elif opts[0] == 'Encode':
         setEncodeParam(cam, opts)
+    elif opts[0] == 'Network':
+        setNetworkParam(cam, opts)
     else:
         print('Setting not currently supported for', opts)
 
@@ -251,11 +291,6 @@ def dvripCommand(cam, cmd, opts):
     if cmd == 'GetHostname':
         nc,_=getNetworkParams(cam, False)
         print(nc['HostName'])
-
-    elif cmd == 'GetIP':
-        ns,_=getNetworkParams(cam, False)
-        ip =ns['HostIP']
-        print(iptoString(ip))
 
     elif cmd == 'GetNetConfig':
         getNetworkParams(cam, True)
@@ -324,7 +359,7 @@ if __name__ == '__main__':
     """
 
     # list of supported commands
-    cmd_list = ['reboot', 'GetHostname', 'GetIP','GetSettings','GetNetConfig', 'GetDeviceInformation', \
+    cmd_list = ['reboot', 'GetHostname', 'GetSettings','GetDeviceInformation','GetNetConfig',  \
         'GetCameraParams','GetEncodeParams','SetParam','SaveSettings', 'LoadSettings']
     opthelp='optional parameters for SetParam for example Camera ElecLevel 70 \n' \
         'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first'
@@ -396,8 +431,10 @@ DWDR Lim	    BroadTrends.Gain		50
 
 Video Encoding Dialog Settings
 ==============================
-Stored in Simplify.Encode.[0] block
-Main Channel, Extra Channel identical except ExtraFormat
+Stored in Simplify.Encode.[0] block. Cannot be written indivudally;
+to update you must get the whole Simplify.Encode block, amend then write it back
+
+Main Channel shown, Extra Channel identical but prefixed ExtraFormat instead
 ------------
 Compression	    MainFormat.Compression		    'H.264'
 Resolution	    MainFormat.Video.Resolution		'720P'
@@ -463,7 +500,7 @@ Auto Upgrade	???
 
 
 
-Info/Version Dialog
+Info/Version Dialog - location unknown at this point
 ===================
 Record Chan
 Extra Chan
