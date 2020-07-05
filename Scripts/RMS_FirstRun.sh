@@ -164,7 +164,7 @@ fi
 echo ""
 echo "2) Changing the default password"
 echo "--------------------------------"
-echo "The default password is either 'raspberry' or 'rmsraspberry'. Please change it so nobody can connect to your Raspberry Pi and hack the computers on your network!"
+echo "The default password is 'raspberry'. Please change it so nobody can connect to your Raspberry Pi and hack the computers on your network!"
 
 echo ""
 read -n1 -r -p 'Press ENTER to change the password (recommended), or Q to skip this step...' key

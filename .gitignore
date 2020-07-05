@@ -89,12 +89,4 @@ target/
 #Jetbrains code files
 .idea
 
-.config.inuse
-config.inuse
-config.orig
-platepar_cmn2010.orig
-.config.curr
-camerasettings/cam.json
-camerasettings/net1.json
-camerasettings/vid.json
-camerasettings/net2.json
+camerasettings/*.json
