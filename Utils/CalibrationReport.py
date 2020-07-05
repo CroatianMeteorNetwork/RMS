@@ -9,10 +9,10 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 
-from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, raDecToXYPP, raDec2AltAz, \
-    photometryFitRobust, correctVignetting, photomLine, rotationWrtHorizon
+from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, raDecToXYPP, \
+    photometryFitRobust, correctVignetting, photomLine, rotationWrtHorizon, extinctionCorrectionTrueToApparent
 from RMS.Astrometry.CheckFit import matchStarsResiduals
-from RMS.Astrometry.Conversions import date2JD, jd2Date
+from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 from RMS.Formats.CALSTARS import readCALSTARS
 from RMS.Formats.FFfile import validFFName, getMiddleTimeFF
 from RMS.Formats.FFfile import read as readFF
@@ -348,7 +348,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
     # Estimate RA,dec of the centre of the FOV
     _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(max_jd)], [platepar.X_res/2], [platepar.Y_res/2], [1], 
-        platepar)
+        platepar, extinction_correction=False)
 
     RA_c = RA_c[0]
     dec_c = dec_c[0]
@@ -356,7 +356,8 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     fov_radius = np.hypot(*computeFOVSize(platepar))
 
     # Get stars from the catalog around the defined center in a given radius
-    _, extracted_catalog = subsetCatalog(catalog_stars, RA_c, dec_c, fov_radius, faintest_mag)
+    _, extracted_catalog = subsetCatalog(catalog_stars, RA_c, dec_c, max_jd, platepar.lat, platepar.lon, \
+        fov_radius, faintest_mag)
     ra_catalog, dec_catalog, mag_catalog = extracted_catalog.T
 
     # Compute image positions of all catalog stars that should be on the image
@@ -403,7 +404,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     plt.scatter(platepar.X_res/2, platepar.Y_res/2, marker='+', s=20, c='r', zorder=4)
 
     # Compute FOV centre alt/az
-    azim_centre, alt_centre = raDec2AltAz(max_jd, platepar.lon, platepar.lat, RA_c, dec_c)
+    azim_centre, alt_centre = raDec2AltAz(RA_c, dec_c, max_jd, platepar.lat, platepar.lon)
 
     # Compute FOV size
     fov_h, fov_v = computeFOVSize(platepar)
@@ -464,11 +465,14 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
         # Extact intensities and mangitudes
         star_intensities = image_stars[:, 2]
-        catalog_mags = matched_catalog_stars[:, 2]
+        catalog_ra, catalog_dec, catalog_mags = matched_catalog_stars.T
 
         # Compute radius of every star from image centre
         radius_arr = np.hypot(image_stars[:, 0] - img_h/2, image_stars[:, 1] - img_w/2)
 
+        # Compute apparent extinction corrected magnitudes
+        catalog_mags = extinctionCorrectionTrueToApparent(catalog_mags, catalog_ra, catalog_dec, max_jd, \
+            platepar)
 
         # Fit the photometry on automated star intensities (use the fixed vignetting coeff, use robust fit)
         photom_params, fit_stddev, fit_resid, star_intensities, radius_arr, catalog_mags = \
@@ -490,7 +494,8 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
             gridspec_kw={'height_ratios':[2, 1]})
 
         # Plot raw star intensities
-        ax_p.scatter(-2.5*np.log10(star_intensities), catalog_mags, s=5, c='r', alpha=0.5, label="Raw")
+        ax_p.scatter(-2.5*np.log10(star_intensities), catalog_mags, s=5, c='r', alpha=0.5, \
+            label="Raw (extinction corrected)")
 
         # If a flat is used, disregard the vignetting
         if not config.use_flat:

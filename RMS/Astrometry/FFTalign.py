@@ -21,7 +21,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from RMS.Astrometry import ApplyAstrometry
-from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle
+from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, raDec2AltAz
 import RMS.ConfigReader as cr
 from RMS.Formats import CALSTARS
 from RMS.Formats.FFfile import getMiddleTimeFF
@@ -233,22 +233,24 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
         # Get the RA/Dec of the image centre
         _, ra_centre, dec_centre, _ = ApplyAstrometry.xyToRaDecPP([calstars_time], [platepar.X_res/2], \
-                [platepar.Y_res/2], [1], platepar)
+                [platepar.Y_res/2], [1], platepar, extinction_correction=False)
 
         ra_centre = ra_centre[0]
         dec_centre = dec_centre[0]
+
+        # Compute Julian date
+        jd = date2JD(*calstars_time)
 
         # Calculate the FOV radius in degrees
         fov_y, fov_x = ApplyAstrometry.computeFOVSize(platepar)
         fov_radius = np.sqrt(fov_x**2 + fov_y**2)
 
         # Take only those stars which are inside the FOV
-        filtered_indices, _ = subsetCatalog(catalog_stars, ra_centre, dec_centre, \
-            fov_radius, config.catalog_mag_limit)
+        filtered_indices, _ = subsetCatalog(catalog_stars, ra_centre, dec_centre, jd, platepar.lat, \
+            platepar.lon, fov_radius, config.catalog_mag_limit)
 
         # Take those catalog stars which should be inside the FOV
         ra_catalog, dec_catalog, _ = catalog_stars[filtered_indices].T
-        jd = date2JD(*calstars_time)
         catalog_xy = ApplyAstrometry.raDecToXYPP(ra_catalog, dec_catalog, jd, platepar)
 
         catalog_x, catalog_y = catalog_xy
@@ -297,11 +299,10 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         platepar_aligned.F_scale *= scale
 
     # Compute the new reference RA and Dec
-    # _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.xyToRaDecPP([jd2Date(platepar.JD)], \
-    #     [platepar.X_res/2 - translation_x], [platepar.Y_res/2 - translation_y], [1], platepar)
     _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.xyToRaDecPP([jd2Date(platepar.JD)], \
         [platepar.X_res/2 - platepar.x_poly_fwd[0] - translation_x], \
-        [platepar.Y_res/2 - platepar.y_poly_fwd[0] - translation_y], [1], platepar)
+        [platepar.Y_res/2 - platepar.y_poly_fwd[0] - translation_y], [1], platepar, \
+        extinction_correction=False)
 
     # Correct RA/Dec
     platepar_aligned.RA_d = ra_centre_new[0]
@@ -312,12 +313,9 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     # platepar_aligned.Ho = JD2HourAngle(jd)
 
     # Recompute the FOV centre in Alt/Az and update the rotation
-    platepar_aligned.az_centre, platepar_aligned.alt_centre = ApplyAstrometry.raDec2AltAz(platepar.JD, \
-                platepar.lon, platepar.lat, platepar.RA_d, platepar.dec_d)
+    platepar_aligned.az_centre, platepar_aligned.alt_centre = raDec2AltAz(platepar.RA_d, \
+        platepar.dec_d, platepar.JD, platepar.lat, platepar.lon)
     platepar_aligned.rotation_from_horiz = ApplyAstrometry.rotationWrtHorizon(platepar_aligned)
-
-    # Indicate that the platepar has been automatically updated
-    platepar_aligned.auto_check_fit_refined = True
 
     ###
 

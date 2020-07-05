@@ -15,7 +15,7 @@ tail -Fn0 /var/log/kern.log | \
       killall python
       sleep 2
       cd ~/source/RMS
-      lxterminal -e Scripts/RMS_StartCapture.sh
+      lxterminal -e Scripts/RMS_StartCapture.sh -r
     fi
 
     sudo logger 'watchdog continuing...'

@@ -48,7 +48,7 @@ def writeCAL(night_dir, config, platepar):
     platepar = copy.deepcopy(platepar)
 
 
-    # Compute rotations (must be done before distorsion correction)
+    # Compute rotations (must be done before distortion correction)
     rot_horiz = rotationWrtHorizon(platepar)
     rot_std = rotationWrtStandard(platepar)
 
@@ -57,7 +57,7 @@ def writeCAL(night_dir, config, platepar):
     platepar.y_poly_fwd[11], platepar.y_poly_fwd[10] = platepar.y_poly_fwd[10], platepar.y_poly_fwd[11]
 
 
-    # Correct distorsion parameters so they are CAMS compatible
+    # Correct distortion parameters so they are CAMS compatible
     platepar.x_poly_fwd[ 1] = +platepar.x_poly_fwd[ 1] + 1.0
     platepar.x_poly_fwd[ 2] = -platepar.x_poly_fwd[ 2]
     platepar.x_poly_fwd[ 4] = -platepar.x_poly_fwd[ 4]
