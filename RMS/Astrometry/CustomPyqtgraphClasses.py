@@ -590,16 +590,22 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigElevChanged = QtCore.pyqtSignal()
     sigExtinctionChanged = QtCore.pyqtSignal()
 
-    def __init__(self, parent, platepar):
+    sigAstrometryPressed = QtCore.pyqtSignal()
+    sigPhotometryPressed = QtCore.pyqtSignal()
+
+    def __init__(self, parent, gui):
         QtWidgets.QWidget.__init__(self, parent)
-        self.platepar = platepar
+        self.gui = gui
 
         self.attr_list = {}
         self.setMaximumWidth(300)
 
-        layout = QtWidgets.QFormLayout()
-        layout.setLabelAlignment(QtCore.Qt.AlignRight)
-        self.setLayout(layout)
+        vbox = QtWidgets.QVBoxLayout()
+        self.setLayout(vbox)
+
+        form = QtWidgets.QFormLayout()
+        form.setLabelAlignment(QtCore.Qt.AlignRight)
+        vbox.addLayout(form)
 
         hbox = QtWidgets.QHBoxLayout()
         self.az_centre = DoubleSpinBox()
@@ -608,11 +614,11 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.az_centre.setDecimals(8)
         self.az_centre.setSingleStep(1)
         self.az_centre.setFixedWidth(100)
-        self.az_centre.setValue(self.platepar.az_centre)
+        self.az_centre.setValue(self.gui.platepar.az_centre)
         self.az_centre.valueModified.connect(self.onAzChanged)
         hbox.addWidget(self.az_centre)
         hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
-        layout.addRow(QtWidgets.QLabel('Azim'), hbox)
+        form.addRow(QtWidgets.QLabel('Azim'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
         self.alt_centre = DoubleSpinBox()
@@ -621,11 +627,11 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.alt_centre.setDecimals(8)
         self.alt_centre.setSingleStep(1)
         self.alt_centre.setFixedWidth(100)
-        self.alt_centre.setValue(self.platepar.alt_centre)
+        self.alt_centre.setValue(self.gui.platepar.alt_centre)
         self.alt_centre.valueModified.connect(self.onAltChanged)
         hbox.addWidget(self.alt_centre)
         hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
-        layout.addRow(QtWidgets.QLabel('Alt'), hbox)
+        form.addRow(QtWidgets.QLabel('Alt'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
         self.rotation_from_horiz = DoubleSpinBox()
@@ -634,11 +640,11 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.rotation_from_horiz.setDecimals(8)
         self.rotation_from_horiz.setSingleStep(1)
         self.rotation_from_horiz.setFixedWidth(100)
-        self.rotation_from_horiz.setValue(self.platepar.rotation_from_horiz)
+        self.rotation_from_horiz.setValue(self.gui.platepar.rotation_from_horiz)
         self.rotation_from_horiz.valueModified.connect(self.onRotChanged)
         hbox.addWidget(self.rotation_from_horiz)
         hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
-        layout.addRow(QtWidgets.QLabel('Horz rot'), hbox)
+        form.addRow(QtWidgets.QLabel('Horz rot'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
         self.F_scale = DoubleSpinBox()
@@ -647,11 +653,11 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.F_scale.setDecimals(8)
         self.F_scale.setSingleStep(0.01)
         self.F_scale.setFixedWidth(100)
-        self.F_scale.setValue(self.platepar.F_scale/60)
+        self.F_scale.setValue(self.gui.platepar.F_scale/60)
         self.F_scale.valueModified.connect(self.onScaleChanged)
         hbox.addWidget(self.F_scale)
         hbox.addWidget(QtWidgets.QLabel('\'/px', alignment=QtCore.Qt.AlignLeft))
-        layout.addRow(QtWidgets.QLabel('Scale'), hbox)
+        form.addRow(QtWidgets.QLabel('Scale'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
         self.extinction_scale = DoubleSpinBox()
@@ -660,11 +666,11 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.extinction_scale.setDecimals(8)
         self.extinction_scale.setSingleStep(0.1)
         self.extinction_scale.setFixedWidth(100)
-        self.extinction_scale.setValue(self.platepar.extinction_scale)
+        self.extinction_scale.setValue(self.gui.platepar.extinction_scale)
         self.extinction_scale.valueModified.connect(self.onExtinctionChanged)
         hbox.addWidget(self.extinction_scale)
         hbox.addWidget(QtWidgets.QLabel('', alignment=QtCore.Qt.AlignLeft))
-        layout.addRow(QtWidgets.QLabel('Extinction'), hbox)
+        form.addRow(QtWidgets.QLabel('Extinction'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
         self.lat = DoubleSpinBox()
@@ -673,11 +679,11 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.lat.setDecimals(8)
         self.lat.setSingleStep(1)
         self.lat.setFixedWidth(100)
-        self.lat.setValue(self.platepar.lat)
+        self.lat.setValue(self.gui.platepar.lat)
         self.lat.valueModified.connect(self.onLatChanged)
         hbox.addWidget(self.lat)
         hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
-        layout.addRow(QtWidgets.QLabel('Lat'), hbox)
+        form.addRow(QtWidgets.QLabel('Lat'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
         self.lon = DoubleSpinBox()
@@ -686,11 +692,11 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.lon.setDecimals(8)
         self.lon.setSingleStep(1)
         self.lon.setFixedWidth(100)
-        self.lon.setValue(self.platepar.lon)
+        self.lon.setValue(self.gui.platepar.lon)
         self.lon.valueModified.connect(self.onLonChanged)
         hbox.addWidget(self.lon)
         hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
-        layout.addRow(QtWidgets.QLabel('Lon'), hbox)
+        form.addRow(QtWidgets.QLabel('Lon'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
         self.elev = DoubleSpinBox()
@@ -699,56 +705,85 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.elev.setDecimals(8)
         self.elev.setSingleStep(100)
         self.elev.setFixedWidth(100)
-        self.elev.setValue(self.platepar.elev)
+        self.elev.setValue(self.gui.platepar.elev)
         self.elev.valueModified.connect(self.onElevChanged)
         hbox.addWidget(self.elev)
         hbox.addWidget(QtWidgets.QLabel('m', alignment=QtCore.Qt.AlignLeft))
-        layout.addRow(QtWidgets.QLabel('Elev'), hbox)
+        form.addRow(QtWidgets.QLabel('Elev'), hbox)
 
         self.distortion_type = QtWidgets.QComboBox(self)
-        self.distortion_type.addItems(self.platepar.distortion_type_list)
+        self.distortion_type.addItems(self.gui.platepar.distortion_type_list)
         self.distortion_type.currentIndexChanged.connect(self.onIndexChanged)
-        layout.addRow(QtWidgets.QLabel('Distortion'), self.distortion_type)
+        form.addRow(QtWidgets.QLabel('Distortion'), self.distortion_type)
 
-        self.fit_parameters = ArrayTabWidget(parent=None, platepar=self.platepar)
-        self.fit_parameters.valueModified.connect(self.sigScaleChanged.emit)  # calls updateStars
-        layout.addRow(self.fit_parameters)
+        self.fit_parameters = ArrayTabWidget(parent=None, platepar=self.gui.platepar)
+        self.fit_parameters.valueModified.connect(self.onFitParametersChanged)
+        form.addRow(self.fit_parameters)
+
+        hbox = QtWidgets.QHBoxLayout()
+        hbox.addStretch(1)
+        self.astrometry_button = QtWidgets.QPushButton('Astrometry')
+        self.astrometry_button.clicked.connect(self.sigAstrometryPressed.emit)
+        hbox.addWidget(self.astrometry_button)
+
+        self.photometry_button = QtWidgets.QPushButton('Photometry')
+        self.photometry_button.clicked.connect(self.sigPhotometryPressed.emit)
+        hbox.addWidget(self.photometry_button)
+
+        self.updatePairedStars()
+
+        vbox.addStretch(1)
+        vbox.addLayout(hbox)
 
     def onLatChanged(self):
-        self.platepar.lat = self.lat.value()
+        self.gui.platepar.lat = self.lat.value()
+        self.gui.view_widget.setFocus()
         self.sigLocationChanged.emit()
 
     def onLonChanged(self):
-        self.platepar.lon = self.lon.value()
+        self.gui.platepar.lon = self.lon.value()
+        self.gui.view_widget.setFocus()
         self.sigLocationChanged.emit()
 
     def onElevChanged(self):
-        self.platepar.elev = self.elev.value()
+        self.gui.platepar.elev = self.elev.value()
+        self.gui.view_widget.setFocus()
         self.sigElevChanged.emit()
 
     def onAzChanged(self):
-        self.platepar.az_centre = self.az_centre.value()
+        self.gui.platepar.az_centre = self.az_centre.value()
+        self.gui.view_widget.setFocus()
         self.sigAzAltChanged.emit()
 
     def onAltChanged(self):
-        self.platepar.alt_centre = self.alt_centre.value()
+        self.gui.platepar.alt_centre = self.alt_centre.value()
+        self.gui.view_widget.setFocus()
         self.sigAzAltChanged.emit()
 
     def onRotChanged(self):
-        self.platepar.rotation_from_horiz = self.rotation_from_horiz.value()
+        self.gui.platepar.rotation_from_horiz = self.rotation_from_horiz.value()
+        self.gui.view_widget.setFocus()
         self.sigRotChanged.emit()
 
     def onScaleChanged(self):
-        self.platepar.F_scale = self.F_scale.value()*60
+        self.gui.platepar.F_scale = self.F_scale.value()*60
+        self.gui.view_widget.setFocus()
         self.sigScaleChanged.emit()
 
     def onExtinctionChanged(self):
-        self.platepar.extinction_scale = self.extinction_scale.value()
+        self.gui.platepar.extinction_scale = self.extinction_scale.value()
+        self.gui.view_widget.setFocus()
         self.sigExtinctionChanged.emit()
+
+    def onFitParametersChanged(self):
+        # fit parameter object updates platepar by itself
+        self.gui.view_widget.setFocus()
+        self.sigFitParametersChanged.emit()
 
     def onIndexChanged(self):
         text = self.distortion_type.currentText()
-        self.platepar.setDistortionType(text, reset_params=False)
+        self.gui.view_widget.setFocus()
+        self.gui.platepar.setDistortionType(text, reset_params=False)
 
         if text == 'poly3+radial':
             self.fit_parameters.changeNumberShown(12)
@@ -766,16 +801,25 @@ class PlateparParameterManager(QtWidgets.QWidget):
         Updates QDoubleSpinBox values to the values of the platepar.
         Call this whenever the platepar values are changed
         """
-        self.az_centre.setValue(self.platepar.az_centre)
-        self.alt_centre.setValue(self.platepar.alt_centre)
-        self.rotation_from_horiz.setValue(self.platepar.rotation_from_horiz)
-        self.F_scale.setValue(self.platepar.F_scale/60)
+        self.az_centre.setValue(self.gui.platepar.az_centre)
+        self.alt_centre.setValue(self.gui.platepar.alt_centre)
+        self.rotation_from_horiz.setValue(self.gui.platepar.rotation_from_horiz)
+        self.F_scale.setValue(self.gui.platepar.F_scale/60)
         self.fit_parameters.updateValues()
-        self.distortion_type.setCurrentIndex(self.platepar.distortion_type_list.index(self.platepar.distortion_type))
-        self.lat.setValue(self.platepar.lat)
-        self.lon.setValue(self.platepar.lon)
-        self.elev.setValue(self.platepar.elev)
-        self.extinction_scale.setValue(self.platepar.extinction_scale)
+        self.distortion_type.setCurrentIndex(
+            self.gui.platepar.distortion_type_list.index(self.gui.platepar.distortion_type))
+        self.lat.setValue(self.gui.platepar.lat)
+        self.lon.setValue(self.gui.platepar.lon)
+        self.elev.setValue(self.gui.platepar.elev)
+        self.extinction_scale.setValue(self.gui.platepar.extinction_scale)
+
+    def updatePairedStars(self):
+        """
+        Updates QPushButtons to be enabled/disabled based on the number of paired stars
+        Call whenever paired_stars is changed
+        """
+        self.astrometry_button.setEnabled(len(self.gui.paired_stars) > 0)
+        self.photometry_button.setEnabled(len(self.gui.paired_stars) > 3)
 
 
 class ArrayTabWidget(QtWidgets.QTabWidget):
@@ -863,12 +907,12 @@ class ArrayTabWidget(QtWidgets.QTabWidget):
 
 
 class RightOptionsTab(QtWidgets.QTabWidget):
-    def __init__(self, parent=None, platepar=None):
+    def __init__(self, parent=None, gui=None):
         super(RightOptionsTab, self).__init__(parent)
 
         self.hist = HistogramLUTWidget2()
         self.param_manager = PlateparParameterManager(parent=None,
-                                                      platepar=platepar)
+                                                      gui=gui)
 
         self.index = 0
         self.maximized = False

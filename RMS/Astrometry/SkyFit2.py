@@ -283,19 +283,19 @@ class PlateTool(QtWidgets.QMainWindow):
         self.frames = np.zeros(self.n)
 
         # Image on left
-        v = pg.GraphicsView()
+        self.view_widget = pg.GraphicsView()
         self.img_frame = pg.ViewBox()
         self.img_frame.setAspectLocked()
         self.img_frame.setMouseEnabled(False, False)
         self.img_frame.setMenuEnabled(False)
-        v.setCentralItem(self.img_frame)
+        self.view_widget.setCentralItem(self.img_frame)
         self.img_frame.invertY()
-        layout.addWidget(v, 0, 1)
+        layout.addWidget(self.view_widget, 0, 1)
 
         # zoom window
         self.show_zoom_window = False
         self.show_zoom_window_size = 200
-        self.v_zoom = pg.GraphicsView(v)
+        self.v_zoom = pg.GraphicsView(self.view_widget)
         self.zoom_window = pg.ViewBox()
         self.zoom_window.setAspectLocked()
         self.zoom_window.setMouseEnabled(False, False)
@@ -447,7 +447,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img_level_max = self.img_level_max_auto = 0  # these will be changed when the image is loaded
         self.bit_depth = self.config.bit_depth  # Image gamma and levels
         self.auto_levels = False
-        self.tab = RightOptionsTab(platepar=self.platepar)
+        self.tab = RightOptionsTab(gui=self)
 
         self.tab.param_manager.sigElevChanged.connect(self.onExtinctionChanged)
         self.tab.param_manager.sigLocationChanged.connect(self.onAzAltChanged)
@@ -456,12 +456,14 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigScaleChanged.connect(self.updateStars)
         self.tab.param_manager.sigFitParametersChanged.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigExtinctionChanged.connect(self.onExtinctionChanged)
+
+        self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
+        self.tab.param_manager.sigAstrometryPressed.connect(lambda: self.showAstrometryFitPlots())
         layout.addWidget(self.tab, 0, 2)
 
         # mouse binding
         self.img_frame.scene().sigMouseMoved.connect(self.onMouseMoved)
-        self.img_frame.scene().sigMouseClicked.connect(
-            self.onMouseClicked)  # NOTE: clicking event doesnt trigger if moving
+        self.img_frame.scene().sigMouseClicked.connect(self.onMouseClicked)  # NOTE: clicking event doesnt trigger if moving
         self.img_frame.sigResized.connect(self.onFrameResize)
 
         self.scrolls_back = 0
@@ -496,6 +498,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.star_pick_mode = True
         self.photometry()
         self.star_pick_mode = temp
+        self.updateLeftLabels()
 
     def onAzAltChanged(self):
         self.updateRefRADec()
@@ -534,10 +537,10 @@ class PlateTool(QtWidgets.QMainWindow):
             jd, ra, dec, _ = xyToRaDecPP(time_data, [x], [y], [1], self.platepar, extinction_correction=False)
 
             # Precess RA/Dec to epoch of date for alt/az computation
-            ra_date, dec_date = equatorialCoordPrecession(J2000_JD.days, jd[0], ra[0], dec[0])
+            ra_date, dec_date = equatorialCoordPrecession(J2000_JD.days, jd[0], np.radians(ra[0]), np.radians(dec[0]))
 
             # Compute alt, az
-            azim, alt = raDec2AltAz(ra_date, dec_date, jd[0], self.platepar.lat, self.platepar.lon)
+            azim, alt = raDec2AltAz(np.degrees(ra_date), np.degrees(dec_date), jd[0], self.platepar.lat, self.platepar.lon)
 
             status_str += ",  Azim={:6.2f}  Alt={:6.2f} (date),  RA={:6.2f}  Dec={:+6.2f} (J2000)".format(
                 azim, alt, ra[0], dec[0])
@@ -583,6 +586,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if not self.platepar.distortion_type.startswith("poly"):
             text_str += "Equal aspect    = {:s}\n".format(str(self.platepar.equal_aspect))
 
+        text_str += "Extinction Scale = {:.2f}\n".format(self.platepar.extinction_scale)
         text_str += '\n'
         sign, hh, mm, ss = decimalDegreesToSexHours(ra_centre)
         if sign < 0:
@@ -610,6 +614,7 @@ class PlateTool(QtWidgets.QMainWindow):
         text_str += '3/4 - Y offset\n'
         text_str += '5/6 - X 1st dist. coeff.\n'
         text_str += '7/8 - Y 1st dist. coeff.\n'
+        text_str += '9/0 - extinction scale\n'
         text_str += 'CTRL + 1 - poly3+radial distortion\n'
         text_str += 'CTRL + 2 - radial3 distortion\n'
         text_str += 'CTRL + 3 - radial4 distortion\n'
@@ -687,10 +692,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def updateImage(self, first_update=False):
         """ Update self.img with the img_handle at the current chunk """
-
-        # Limit key increment so it cant be lower than 0.01
-        if self.key_increment < 0.01:
-            self.key_increment = 0.01
 
         # remove old image
         if not first_update:
@@ -788,6 +789,8 @@ class PlateTool(QtWidgets.QMainWindow):
             # Draw photometry
             if len(self.paired_stars) > 2:
                 self.photometry()
+
+            self.tab.param_manager.updatePairedStars()
 
     def drawCalstars(self):
         """ Draw extracted stars on the current image. """
@@ -974,6 +977,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.paired_stars.pop(picked_indx)
 
                     self.updatePairedStars()
+                    self.photometry()
 
     def onMouseMoved(self, event):
         pos = event
@@ -1059,6 +1063,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 catalog_mags.append(star_mag)
 
             # Make sure there are more than 3 stars picked
+            self.residual_text.clear()
             if len(px_intens_list) > 3:
 
                 # Compute apparent magnitude corrected for extinction
@@ -1084,7 +1089,6 @@ class PlateTool(QtWidgets.QMainWindow):
                     # Plot photometry deviations on the main plot as colour coded rings
                     star_coords = np.array(star_coords)
                     star_coords_x, star_coords_y = star_coords.T
-                    self.residual_text.clear()
 
                     for star_x, star_y, fit_diff, star_mag in zip(star_coords_x, star_coords_y, fit_resids,
                                                                   catalog_mags):
@@ -1238,9 +1242,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar,
                                                                        self.platepar.rotation_from_horiz)
 
-    def keyPressEvent(self, event):
-        modifiers = QtWidgets.QApplication.keyboardModifiers()
+    def keyReleaseEvent(self, e):
+        print('released', e.key())
 
+    def keyPressEvent(self, event):
+        print('pressed', event.key())
+        modifiers = QtWidgets.QApplication.keyboardModifiers()
         if event.key() == QtCore.Qt.Key_A and modifiers == QtCore.Qt.ControlModifier:
             self.auto_levels = not self.auto_levels
             if self.auto_levels:
@@ -1486,7 +1493,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.x_poly_rev[0] += 0.5
             self.platepar.x_poly_fwd[0] += 0.5
             self.tab.param_manager.updatePlatepar()
+            if self.tab.param_manager.fit_parameters.currentIndex() != 2:
+                self.tab.param_manager.fit_parameters.setCurrentIndex(0)
             self.updateStars()
+            self.updateDistortion()
 
         elif event.key() == QtCore.Qt.Key_2:
 
@@ -1494,8 +1504,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.x_poly_rev[0] -= 0.5
             self.platepar.x_poly_fwd[0] -= 0.5
             self.tab.param_manager.updatePlatepar()
+            if self.tab.param_manager.fit_parameters.currentIndex() != 2:
+                self.tab.param_manager.fit_parameters.setCurrentIndex(0)
             self.updateStars()
-
+            self.updateDistortion()
 
         elif event.key() == QtCore.Qt.Key_3:
 
@@ -1503,7 +1515,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.y_poly_rev[0] += 0.5
             self.platepar.y_poly_fwd[0] += 0.5
             self.tab.param_manager.updatePlatepar()
+            if self.tab.param_manager.fit_parameters.currentIndex() != 3:
+                self.tab.param_manager.fit_parameters.setCurrentIndex(1)
             self.updateStars()
+            self.updateDistortion()
 
         elif event.key() == QtCore.Qt.Key_4:
 
@@ -1511,7 +1526,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.y_poly_rev[0] -= 0.5
             self.platepar.y_poly_fwd[0] -= 0.5
             self.tab.param_manager.updatePlatepar()
+            if self.tab.param_manager.fit_parameters.currentIndex() != 3:
+                self.tab.param_manager.fit_parameters.setCurrentIndex(1)
             self.updateStars()
+            self.updateDistortion()
 
         elif event.key() == QtCore.Qt.Key_5:
 
@@ -1519,7 +1537,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.x_poly_rev[1] -= 0.01
             self.platepar.x_poly_fwd[1] -= 0.01
             self.tab.param_manager.updatePlatepar()
+            if self.tab.param_manager.fit_parameters.currentIndex() != 2:
+                self.tab.param_manager.fit_parameters.setCurrentIndex(0)
             self.updateStars()
+            self.updateDistortion()
 
         elif event.key() == QtCore.Qt.Key_6:
 
@@ -1527,8 +1548,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.x_poly_rev[1] += 0.01
             self.platepar.x_poly_fwd[1] += 0.01
             self.tab.param_manager.updatePlatepar()
+            if self.tab.param_manager.fit_parameters.currentIndex() != 2:
+                self.tab.param_manager.fit_parameters.setCurrentIndex(0)
             self.updateStars()
-
+            self.updateDistortion()
 
         elif event.key() == QtCore.Qt.Key_7:
 
@@ -1536,7 +1559,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.y_poly_rev[2] -= 0.01
             self.platepar.y_poly_fwd[2] -= 0.01
             self.tab.param_manager.updatePlatepar()
+            if self.tab.param_manager.fit_parameters.currentIndex() != 3:
+                self.tab.param_manager.fit_parameters.setCurrentIndex(1)
             self.updateStars()
+            self.updateDistortion()
 
         elif event.key() == QtCore.Qt.Key_8:
 
@@ -1544,17 +1570,32 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.y_poly_rev[2] += 0.01
             self.platepar.y_poly_fwd[2] += 0.01
             self.tab.param_manager.updatePlatepar()
+            if self.tab.param_manager.fit_parameters.currentIndex() != 3:
+                self.tab.param_manager.fit_parameters.setCurrentIndex(1)
             self.updateStars()
+            self.updateDistortion()
+
+        elif event.key() == QtCore.Qt.Key_9:
+            self.platepar.extinction_scale += 0.1
+            self.tab.param_manager.updatePlatepar()
+            self.onExtinctionChanged()
+
+        elif event.key() == QtCore.Qt.Key_0:
+            self.platepar.extinction_scale -= 0.1
+            self.tab.param_manager.updatePlatepar()
+            self.onExtinctionChanged()
 
         # Change catalog limiting magnitude
         elif event.key() == QtCore.Qt.Key_R:
             self.cat_lim_mag += 0.1
             self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+            self.updateLeftLabels()
             self.updateStars()
 
         elif event.key() == QtCore.Qt.Key_F:
             self.cat_lim_mag -= 0.1
             self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+            self.updateLeftLabels()
             self.updateStars()
 
         elif event.key() == QtCore.Qt.Key_F1:
@@ -1708,6 +1749,8 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 self.cat_star_markers.hide()
                 self.cat_star_markers2.hide()
+
+            self.photometry()
             # updates image automatically
 
         elif event.key() == QtCore.Qt.Key_I:
@@ -1716,7 +1759,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img.invert()
             self.img_zoom.invert()
 
-        elif event.key() == QtCore.Qt.Key_Enter - 1:  # apparently there's a difference between the two enter keys
+        elif event.key() == QtCore.Qt.Key_Return:
             if self.star_pick_mode:
                 # If the right catalog star has been selected, save the pair to the list
                 if not self.star_selection_centroid:
@@ -1934,13 +1977,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Rescale the image to 8bit
                 minv, maxv = self.tab.hist.getLevels()
-                img_data = Image.adjustLevels(self.self.img.data, minv, self.img.gamma, maxv)
+                img_data = Image.adjustLevels(self.img.data, minv, self.img.gamma, maxv)
                 img_data -= np.min(img_data)
                 img_data = 255*(img_data/np.max(img_data))
                 img_data = img_data.astype(np.uint8)
 
             else:
-                img_data = self.self.img.data
+                img_data = self.img.data
 
             solution = novaAstrometryNetSolve(img=img_data, fov_w_range=fov_w_range)
 
@@ -2156,7 +2199,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         try:
             # Load the flat, byteswap the flat if vid file is used or UWO png
-            flat = Image.loadFlat(*os.path.split(flat_file), dtype=self.self.img.data.dtype,
+            flat = Image.loadFlat(*os.path.split(flat_file), dtype=self.img.data.dtype,
                                   byteswap=self.img_handle.byteswap)
         except:
             messagebox.showerror(title='Flat field file error',
@@ -2164,7 +2207,7 @@ class PlateTool(QtWidgets.QMainWindow):
             return False, None
 
         # Check if the size of the file matches
-        if self.self.img.data.shape != flat.flat_img.shape:
+        if self.img.data.shape != flat.flat_img.shape:
             messagebox.showerror(title='Flat field file error',
                                  message='The size of the flat field does not match the size of the image!')
 
@@ -2190,7 +2233,7 @@ class PlateTool(QtWidgets.QMainWindow):
         try:
 
             # Load the dark
-            dark = Image.loadDark(*os.path.split(dark_file), dtype=self.self.img.data.dtype,
+            dark = Image.loadDark(*os.path.split(dark_file), dtype=self.img.data.dtype,
                                   byteswap=self.img_handle.byteswap)
 
         except:
@@ -2199,10 +2242,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
             return False, None
 
-        dark = dark.astype(self.self.img.data.dtype)
+        dark = dark.astype(self.img.data.dtype)
 
         # Check if the size of the file matches
-        if self.self.img.data.shape != dark.shape:
+        if self.img.data.shape != dark.shape:
             messagebox.showerror(title='Dark field file error',
                                  message='The size of the dark frame does not match the size of the image!')
 
