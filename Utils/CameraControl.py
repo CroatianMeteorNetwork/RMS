@@ -39,8 +39,18 @@ import pprint
 import re
 import RMS.ConfigReader as cr
 from time import sleep
-import importlib  
-dvr = importlib.import_module("python-dvr.dvrip")
+import importlib  #used to import python-dvr as it has a dash in the name
+
+# if not present, force update of the submodule
+try:
+    dvr = importlib.import_module("python-dvr.dvrip")
+except:
+    print("updating python-dvr")
+    os.system('git submodule init && git submodule update -f')
+    try:
+        dvr = importlib.import_module("python-dvr.dvrip")
+    except:
+        print('unable to update python-dvr - do you have internet access?')
 
 def rebootCamera(cam):
     """Reboot the Camera
@@ -387,127 +397,11 @@ if __name__ == '__main__':
     CameraControl(camera_ip, cmd, opts)    
 
 """Known Field mappings
+These are available in Guides/imx2910config-maps.md
+
 To set these values pass split at the dot if there is one, then call SetParam 
 eg 
   SetParam ExposureParam Level 0
   SetParam DayNightColor 0
 Decimals will be converted to hex strings if necesssary. 
-
-Camera Parameters Dialog mappings
-=================================
-Stored in the Camera.Param.[0] block
-Note that exposure times are set in millisecs but stored in microsec, hence
-SetParam ExposureParam LeastTime 1 will set the min exposure to 1ms and store '0x00000064' 
-------------
-Exposure Mode	ExposureParam.Level		0
-Min Time	    ExposureParam.LeastTime	'0x00009C40'
-Max Time	    ExposureParam.MostTime	'0x00009C40'
-DayNight Mode	DayNightColor		    '0x00000002'
-BLC		        BLCMode	        		'0x00000000'
-Auto Iris	    ApertureMode			'0x00000000'
-White Balance	WhiteBalance		    '0x00000002'
-AE Ref		    ElecLevel		        100
-DNC Thresh  	DncThr    		    	50
-AE Sensitivity  AeSensitivity			1
-Defogging	    ClearFog.Enable	    	False
-Defog Rating	ClearFog.level    		50
-AGC		        GainParam.AutoGain		1
-AGC Limit	    GainParam.Gain		    70
-Slow Shutter	EsShutter		        '0x00000000'
-IR_Cut		    IRCUTMode			    0
-DayNtLevel	    Day_nfLevel	    		0
-NightNtLevel	Night_nfLevel 			0
-Mirror		    PictureMirror			'0x00000000'
-Flip		    PictureFlip		    	'0x00000000'
-Anti Flicker	RejectFlicker	    	'0x00000000'
-IR Swap		    IrcutSwap     			0
-
-Extra parameters coded in the ParamEx.[0] block. Set as per above 
-Image Style	    Style 	    		    'type1' == Style2
-DWDR		    BroadTrends.AutoGain	0
-DWDR Lim	    BroadTrends.Gain		50
-
-Video Encoding Dialog Settings
-==============================
-Stored in Simplify.Encode.[0] block. Cannot be written indivudally;
-to update you must get the whole Simplify.Encode block, amend then write it back
-
-Main Channel shown, Extra Channel identical but prefixed ExtraFormat instead
-------------
-Compression	    MainFormat.Compression		    'H.264'
-Resolution	    MainFormat.Video.Resolution		'720P'
-FPS		        MainFormat.Video.FPS		    25
-Bit Rate Type	MainFormat.Video.BitRateControl	'VBR'
-Quality		    MainFormat.Video.Quality		6
-BitRate		    MainFormat.Video.BitRate		4096
-I Frame Int	    MainFormat.Video.GOP		    2
-Video on	    MainFormat.VideoEnable	    	True
-Audio On	    MainFormat.AudioEnable		    False
-
-Location of other parameters unknown
-
-Network Dialog and NetService NTP Settings
-=======================
-Stored in the Network block
-Not currently settable by this tool. To set, save settings, edit the file and reload
---------
-Net Card	    NetCommon.DeviceType		    1
-DHCP Enable	    NetDHCP.[0].Enabl               False
-IP Address	    NetCommon.HostIP                '0x0A01A8C0'
-Subnet		    NetCommon.Submask               '0xFFFFFFFF'
-Gateway		    NetCommon.GateWay               '0x0A01A8C0'
-Primary DNS	    NetDNS.Address			        '0xFE01A8C0'
-Secondary DNS	NetDNS.SpareAddress	    	    '0x00000000'
-Media Port	    NetCommon.TCPPort   		    34567
-HTTP Port	    NetCommon.HttpPort		        80
-Onvif Port	    ????                            8899
-Device Info	    NetCommon.MAC			        '00:12:31:00:00:00'
-High Speed	    NetCommon.UseHSDownLoad	        True
-Transfer Policy	NetCommon.TransferPlan	    	'Fluency'
-Product ID	    NetCommon.HostName		        'whatever'
-Netservice NTP settings Dialog
-NTP Enable		NetNTP.Enable			        True
-NTP Custom		NetNTP.TimeZone         		13
-NTP Autoselect	set the above to 14 for some reason
-NTP Server 	    NetNTP.Server.Name		        servername or IPaddress string
-NTP Port		NetNTP.Server.Port			    123
-NTP  period	    NetNTP.UpdatePeriod			    60
-
-General Dialog
-=============
-Not currently settable via this tool
--------------
-TimeZone	    Read from NTP settings
-System Time	    call get_time()
-Date Format	    General.Location.DateFormat 		                'YYMMDD'
-DST		        General.Location.DSTRule	            	        'Off'
-Date Separator	General.Location.DateSeparator	                	'-'
-Time Format	    General.Location.TimeFormat	                  	    '24'
-Language	    General.Location.Language   		                'English'
-HDD Full	    ????
-DVR No		    ????
-Video Standard	General.Location.VideoFormat		                'PAL'
-Auto Logout	    General.AutoLogout			                        0
-
-AutoMaintain Dialog
-===================
-Auto Reboot 	General.AutoMaintain.AutoRebootDay      		    'Tuesday'
-At		        General.AutoMaintain.AutoRebootHour		            2
-Auto Delete	    General.AutoMaintain.AutoDeleteFilesDays	        0
-Auto Upgrade	???
-
-
-
-Info/Version Dialog - location unknown at this point
-===================
-Record Chan
-Extra Chan
-Alarm In
-Alarm Out
-System
-Build Date
-System Status
-Serial ID
-Nat Status
-Nat Stat Code
-    """
+"""
