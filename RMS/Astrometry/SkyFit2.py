@@ -446,43 +446,60 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img_level_max = self.img_level_max_auto = 0  # these will be changed when the image is loaded
         self.bit_depth = self.config.bit_depth  # Image gamma and levels
         self.auto_levels = False
-        self.tab = RightOptionsTab(gui=self)
+        self.tab = RightOptionsTab(self)
 
-        self.tab.param_manager.sigElevChanged.connect(self.onExtinctionChanged)
-        self.tab.param_manager.sigLocationChanged.connect(self.onAzAltChanged)
-        self.tab.param_manager.sigAzAltChanged.connect(self.onAzAltChanged)
-        self.tab.param_manager.sigRotChanged.connect(self.onRotChanged)
-        self.tab.param_manager.sigScaleChanged.connect(self.updateStars)
-        self.tab.param_manager.sigFitParametersChanged.connect(self.onFitParametersChanged)
-        self.tab.param_manager.sigExtinctionChanged.connect(self.onExtinctionChanged)
-        self.tab.param_manager.sigFitPressed.connect(lambda: self.fitPickedStars(first_platepar_fit=False))
-
-        self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
-        self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
-        layout.addWidget(self.tab, 0, 2)
-
-        # mouse binding
-        self.img_frame.scene().sigMouseMoved.connect(self.onMouseMoved)
-        self.img_frame.scene().sigMouseClicked.connect(
-            self.onMouseClicked)  # NOTE: clicking event doesnt trigger if moving
-        self.img_frame.sigResized.connect(self.onFrameResize)
-
-        self.scrolls_back = 0
-
+        # adding img
         self.img = None
         self.img_zoom = None
 
         self.updateImage(first_update=True)
+        self.tab.settings.updateInvertColours()
+        self.tab.settings.updateImageGamma()
         if loaded_file:
             self.star_pick_mode = True
             self.updatePairedStars()
             self.star_pick_mode = False
+
+
+        # make connections
+        self.tab.param_manager.sigElevChanged.connect(self.onExtinctionChanged)
+        self.tab.param_manager.sigLocationChanged.connect(self.onAzAltChanged)
+        self.tab.param_manager.sigAzAltChanged.connect(self.onAzAltChanged)
+        self.tab.param_manager.sigRotChanged.connect(self.onRotChanged)
+        self.tab.param_manager.sigScaleChanged.connect(self.onScaleChanged)
+        self.tab.param_manager.sigFitParametersChanged.connect(self.onFitParametersChanged)
+        self.tab.param_manager.sigExtinctionChanged.connect(self.onExtinctionChanged)
+
+        self.tab.param_manager.sigRefractionToggled.connect(self.onRefractionChanged)
+
+        self.tab.param_manager.sigFitPressed.connect(lambda: self.fitPickedStars(first_platepar_fit=False))
+        self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
+        self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
+
+        self.tab.settings.sigMaxAveToggled.connect(self.toggleImageType)
+        self.tab.settings.sigCatStarsToggled.connect(self.toggleShowCatStars)
+        self.tab.settings.sigCalStarsToggled.connect(self.toggleShowCalStars)
+        self.tab.settings.sigDistortionToggled.connect(self.toggleDistortion)
+        self.tab.settings.sigInvertToggled.connect(self.toggleInvertColours)
+
+        layout.addWidget(self.tab, 0, 2)
+
+        # mouse binding
+        self.img_frame.scene().sigMouseMoved.connect(self.onMouseMoved)
+        self.img_frame.scene().sigMouseClicked.connect(self.onMouseClicked)  # NOTE: clicking event doesnt trigger if moving
+        self.img_frame.sigResized.connect(self.onFrameResize)
+
+        self.scrolls_back = 0
 
         self.setMinimumSize(1200, 800)
         self.show()
 
         self.updateLeftLabels()
         self.star_pick_info.setPos(self.img_frame.width()/2, self.img_frame.height() - 50)
+
+    def onRefractionChanged(self):
+        self.updateStars()
+        self.updateLeftLabels()
 
     def onScaleChanged(self):
         self.updateFitResiduals()
@@ -1351,13 +1368,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateImage()
 
         elif event.key() == QtCore.Qt.Key_I and modifiers == QtCore.Qt.ControlModifier:
-            self.draw_distortion = not self.draw_distortion
-
-            if self.draw_distortion:
-                self.distortion_lines.show()
-                self.updateDistortion()
-            else:
-                self.distortion_lines.hide()
+            self.toggleDistortion()
+            self.tab.settings.updateShowDistortion()
 
         elif event.key() == QtCore.Qt.Key_Z and modifiers == QtCore.Qt.ShiftModifier:
             if self.star_pick_mode:
@@ -1394,6 +1406,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         elif event.key() == QtCore.Qt.Key_M:
             self.toggleImageType()
+            self.tab.settings.updateMaxAvePixel()
 
         elif event.key() == QtCore.Qt.Key_Comma:
             # Decrement UT correction
@@ -1589,12 +1602,14 @@ class PlateTool(QtWidgets.QMainWindow):
             self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
             self.updateLeftLabels()
             self.updateStars()
+            self.tab.settings.updateLimMag()
 
         elif event.key() == QtCore.Qt.Key_F:
             self.cat_lim_mag -= 0.1
             self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
             self.updateLeftLabels()
             self.updateStars()
+            self.tab.settings.updateLimMag()
 
         elif event.key() == QtCore.Qt.Key_F1:
             self.show_key_help += 1
@@ -1707,13 +1722,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         elif event.key() == QtCore.Qt.Key_C:
-            self.draw_calstars = not self.draw_calstars
-            if self.draw_calstars:
-                self.calstar_markers.show()
-                self.calstar_markers2.show()
-            else:
-                self.calstar_markers.hide()
-                self.calstar_markers2.hide()
+            self.toggleShowCalStars()
+            self.tab.settings.updateShowCalStars()
             # updates image automatically
 
         # Increase image gamma
@@ -1723,6 +1733,7 @@ class PlateTool(QtWidgets.QMainWindow):
             if self.img_zoom:
                 self.img_zoom.updateGamma(1/0.9)
             self.updateLeftLabels()
+            self.tab.settings.updateImageGamma()
 
         elif event.key() == QtCore.Qt.Key_J:
             # Decrease image gamma by a factor of 0.9x
@@ -1731,31 +1742,22 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.img_zoom.updateGamma(0.9)
 
             self.updateLeftLabels()
+            self.tab.settings.updateImageGamma()
 
         elif event.key() == QtCore.Qt.Key_T:
             if self.platepar is not None:
                 self.platepar.refraction = not self.platepar.refraction
 
-                self.updateLeftLabels()
-                self.updateStars()
+                self.onRefractionChanged()
+                self.tab.param_manager.updatePlatepar()
 
         elif event.key() == QtCore.Qt.Key_H:
-            self.catalog_stars_visible = not self.catalog_stars_visible
-            if self.catalog_stars_visible:
-                self.cat_star_markers.show()
-                self.cat_star_markers2.show()
-            else:
-                self.cat_star_markers.hide()
-                self.cat_star_markers2.hide()
-
-            self.photometry()
-            # updates image automatically
+            self.toggleShowCatStars()
+            self.tab.settings.updateShowCatStars()
 
         elif event.key() == QtCore.Qt.Key_I:
-
-            # Invert image levels
-            self.img.invert()
-            self.img_zoom.invert()
+            self.toggleInvertColours()
+            self.tab.settings.updateInvertColours()
 
         elif event.key() == QtCore.Qt.Key_Return:
             if self.star_pick_mode:
@@ -1828,7 +1830,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def toggleImageType(self):
         """ Toggle between the maxpixel and avepixel. """
-
+        print(self.img_type_flag)
         if self.img_type_flag == 'maxpixel':
             self.img_type_flag = 'avepixel'
 
@@ -1838,6 +1840,40 @@ class PlateTool(QtWidgets.QMainWindow):
         ### UPDATE IMAGE ###
         self.img.selectImage(self.img_type_flag)
         self.img_zoom.selectImage(self.img_type_flag)
+
+    def toggleShowCatStars(self):
+        """ Toggle between showing catalog stars and not """
+        self.catalog_stars_visible = not self.catalog_stars_visible
+        if self.catalog_stars_visible:
+            self.cat_star_markers.show()
+            self.cat_star_markers2.show()
+        else:
+            self.cat_star_markers.hide()
+            self.cat_star_markers2.hide()
+
+        self.photometry()
+
+    def toggleShowCalStars(self):
+        self.draw_calstars = not self.draw_calstars
+        if self.draw_calstars:
+            self.calstar_markers.show()
+            self.calstar_markers2.show()
+        else:
+            self.calstar_markers.hide()
+            self.calstar_markers2.hide()
+
+    def toggleDistortion(self):
+        self.draw_distortion = not self.draw_distortion
+
+        if self.draw_distortion:
+            self.distortion_lines.show()
+            self.updateDistortion()
+        else:
+            self.distortion_lines.hide()
+
+    def toggleInvertColours(self):
+        self.img.invert()
+        self.img_zoom.invert()
 
     def loadCatalogStars(self, lim_mag):
         """ Loads stars from the BSC star catalog.

@@ -589,6 +589,45 @@ class HistogramLUTItem(pg.HistogramLUTItem):
             img.setLevels(self.getLevels())
 
 
+class RightOptionsTab(QtWidgets.QTabWidget):
+    def __init__(self, gui, parent=None):
+        super(RightOptionsTab, self).__init__(parent)
+
+        self.hist = HistogramLUTWidget()
+        self.param_manager = PlateparParameterManager(parent=None,
+                                                      gui=gui)
+        self.settings = SettingsWidget(gui=gui, parent=None)
+
+        self.index = 0
+        self.maximized = False
+        self.setFixedWidth(250)
+        self.addTab(self.hist, 'Levels')
+        self.addTab(self.param_manager, 'Fit Parameters')
+        self.addTab(self.settings, 'Settings')
+
+        self.setTabText(0, 'Levels')
+        self.setTabText(1, 'Fit Parameters')
+        self.setTabText(2, 'Settings')
+
+        self.setCurrentIndex(self.index)  # redundant
+        self.setTabPosition(QtWidgets.QTabWidget.East)
+        self.setMovable(True)
+
+        self.tabBarClicked.connect(self.onTabBarClicked)
+
+    def onTabBarClicked(self, index):
+        if index != self.index:
+            self.index = index
+            self.maximized = True
+            self.setFixedWidth(250)
+        else:
+            self.maximized = not self.maximized
+            if self.maximized:
+                self.setFixedWidth(250)
+            else:
+                self.setFixedWidth(19)
+
+
 class PlateparParameterManager(QtWidgets.QWidget):
     """
     QWidget that contains various QDoubleSpinBox's that can be changed to
@@ -606,12 +645,11 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigAstrometryPressed = QtCore.pyqtSignal()
     sigPhotometryPressed = QtCore.pyqtSignal()
 
-    def __init__(self, parent, gui):
+    sigRefractionToggled = QtCore.pyqtSignal()
+
+    def __init__(self, gui, parent=None):
         QtWidgets.QWidget.__init__(self, parent)
         self.gui = gui
-
-        self.attr_list = {}
-        self.setMaximumWidth(300)
 
         full_layout = QtWidgets.QVBoxLayout()
         self.setLayout(full_layout)
@@ -641,6 +679,10 @@ class PlateparParameterManager(QtWidgets.QWidget):
         form.setLabelAlignment(QtCore.Qt.AlignRight)
         full_layout.addLayout(form)
 
+        self.refraction = QtWidgets.QCheckBox('Refraction')
+        self.refraction.released.connect(self.onRefractionToggled)
+        form.addWidget(self.refraction)
+
         hbox = QtWidgets.QHBoxLayout()
         self.az_centre = DoubleSpinBox()
         self.az_centre.setMinimum(-360)
@@ -648,7 +690,6 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.az_centre.setDecimals(8)
         self.az_centre.setSingleStep(1)
         self.az_centre.setFixedWidth(100)
-        self.az_centre.setValue(self.gui.platepar.az_centre)
         self.az_centre.valueModified.connect(self.onAzChanged)
         hbox.addWidget(self.az_centre)
         hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
@@ -661,7 +702,6 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.alt_centre.setDecimals(8)
         self.alt_centre.setSingleStep(1)
         self.alt_centre.setFixedWidth(100)
-        self.alt_centre.setValue(self.gui.platepar.alt_centre)
         self.alt_centre.valueModified.connect(self.onAltChanged)
         hbox.addWidget(self.alt_centre)
         hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
@@ -674,7 +714,6 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.rotation_from_horiz.setDecimals(8)
         self.rotation_from_horiz.setSingleStep(1)
         self.rotation_from_horiz.setFixedWidth(100)
-        self.rotation_from_horiz.setValue(self.gui.platepar.rotation_from_horiz)
         self.rotation_from_horiz.valueModified.connect(self.onRotChanged)
         hbox.addWidget(self.rotation_from_horiz)
         hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
@@ -687,7 +726,6 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.F_scale.setDecimals(8)
         self.F_scale.setSingleStep(0.01)
         self.F_scale.setFixedWidth(100)
-        self.F_scale.setValue(self.gui.platepar.F_scale/60)
         self.F_scale.valueModified.connect(self.onScaleChanged)
         hbox.addWidget(self.F_scale)
         hbox.addWidget(QtWidgets.QLabel('\'/px', alignment=QtCore.Qt.AlignLeft))
@@ -700,7 +738,6 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.extinction_scale.setDecimals(8)
         self.extinction_scale.setSingleStep(0.1)
         self.extinction_scale.setFixedWidth(100)
-        self.extinction_scale.setValue(self.gui.platepar.extinction_scale)
         self.extinction_scale.valueModified.connect(self.onExtinctionChanged)
         hbox.addWidget(self.extinction_scale)
         hbox.addWidget(QtWidgets.QLabel('', alignment=QtCore.Qt.AlignLeft))
@@ -713,7 +750,6 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.lat.setDecimals(8)
         self.lat.setSingleStep(1)
         self.lat.setFixedWidth(100)
-        self.lat.setValue(self.gui.platepar.lat)
         self.lat.valueModified.connect(self.onLatChanged)
         hbox.addWidget(self.lat)
         hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
@@ -726,7 +762,6 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.lon.setDecimals(8)
         self.lon.setSingleStep(1)
         self.lon.setFixedWidth(100)
-        self.lon.setValue(self.gui.platepar.lon)
         self.lon.valueModified.connect(self.onLonChanged)
         hbox.addWidget(self.lon)
         hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
@@ -739,7 +774,6 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.elev.setDecimals(8)
         self.elev.setSingleStep(100)
         self.elev.setFixedWidth(100)
-        self.elev.setValue(self.gui.platepar.elev)
         self.elev.valueModified.connect(self.onElevChanged)
         hbox.addWidget(self.elev)
         hbox.addWidget(QtWidgets.QLabel('m', alignment=QtCore.Qt.AlignLeft))
@@ -753,6 +787,12 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.fit_parameters = ArrayTabWidget(parent=None, platepar=self.gui.platepar)
         self.fit_parameters.valueModified.connect(self.onFitParametersChanged)
         form.addRow(self.fit_parameters)
+
+        self.updatePlatepar()
+
+    def onRefractionToggled(self):
+        self.gui.platepar.refraction = self.refraction.isChecked()
+        self.sigRefractionToggled.emit()
 
     def onLatChanged(self):
         self.gui.platepar.lat = self.lat.value()
@@ -831,6 +871,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.lon.setValue(self.gui.platepar.lon)
         self.elev.setValue(self.gui.platepar.elev)
         self.extinction_scale.setValue(self.gui.platepar.extinction_scale)
+        self.refraction.setChecked(self.gui.platepar.refraction)
 
     def updatePairedStars(self):
         """
@@ -850,7 +891,7 @@ class ArrayTabWidget(QtWidgets.QTabWidget):
     """
     valueModified = QtCore.pyqtSignal()
 
-    def __init__(self, parent=None, platepar=None):
+    def __init__(self, platepar, parent=None):
         super(ArrayTabWidget, self).__init__(parent)
         self.platepar = platepar
 
@@ -926,40 +967,109 @@ class ArrayTabWidget(QtWidgets.QTabWidget):
                 self.boxes[i][j].setValue(getattr(self.platepar, self.vars[i])[j])
 
 
-class RightOptionsTab(QtWidgets.QTabWidget):
-    def __init__(self, parent=None, gui=None):
-        super(RightOptionsTab, self).__init__(parent)
+class SettingsWidget(QtWidgets.QTabWidget):
+    sigMaxAveToggled = QtCore.pyqtSignal()
+    sigCatStarsToggled = QtCore.pyqtSignal()
+    sigCalStarsToggled = QtCore.pyqtSignal()
+    sigDistortionToggled = QtCore.pyqtSignal()
+    sigInvertToggled = QtCore.pyqtSignal()
 
-        self.hist = HistogramLUTWidget()
-        self.param_manager = PlateparParameterManager(parent=None,
-                                                      gui=gui)
+    def __init__(self, gui, parent=None):
+        QtWidgets.QTabWidget.__init__(self, parent)
+        self.gui = gui
 
-        self.index = 0
-        self.maximized = False
-        self.setFixedWidth(250)
-        self.addTab(self.hist, 'Levels')
-        self.addTab(self.param_manager, 'Fit Parameters')
+        vbox = QtWidgets.QVBoxLayout()
+        vbox.setAlignment(QtCore.Qt.AlignTop)
+        self.setLayout(vbox)
 
-        self.setTabText(0, 'Levels')
-        self.setTabText(1, 'Fit Parameters')
+        hbox = QtWidgets.QHBoxLayout()
+        self.ave_pixel = QtWidgets.QRadioButton('avepixel')
+        self.max_pixel = QtWidgets.QRadioButton('maxpixel')
+        self.updateMaxAvePixel()
+        self.ave_pixel.released.connect(self.sigMaxAveToggled.emit)
+        self.max_pixel.released.connect(self.sigMaxAveToggled.emit)
+        hbox.addWidget(self.ave_pixel)
+        hbox.addWidget(self.max_pixel)
+        vbox.addLayout(hbox)
 
-        self.setCurrentIndex(self.index)  # redundant
-        self.setTabPosition(QtWidgets.QTabWidget.East)
-        self.setMovable(True)
+        self.catalog_stars = QtWidgets.QCheckBox('Show Catalog Stars')
+        self.catalog_stars.released.connect(self.sigCatStarsToggled.emit)
+        self.updateShowCatStars()
+        vbox.addWidget(self.catalog_stars)
 
-        self.tabBarClicked.connect(self.onTabBarClicked)
+        self.detected_stars = QtWidgets.QCheckBox('Show Detected Stars')
+        self.detected_stars.released.connect(self.sigCalStarsToggled.emit)
+        self.updateShowCalStars()
+        vbox.addWidget(self.detected_stars)
 
-    def onTabBarClicked(self, index):
-        if index != self.index:
-            self.index = index
-            self.maximized = True
-            self.setFixedWidth(250)
-        else:
-            self.maximized = not self.maximized
-            if self.maximized:
-                self.setFixedWidth(250)
-            else:
-                self.setFixedWidth(19)
+        self.distortion = QtWidgets.QCheckBox('Show Distortion')
+        self.distortion.released.connect(self.sigDistortionToggled.emit)
+        self.updateShowDistortion()
+        vbox.addWidget(self.distortion)
+
+        self.invert = QtWidgets.QCheckBox('Invert Colors')
+        self.invert.released.connect(self.sigInvertToggled.emit)
+        try:
+            self.updateInvertColours()
+        except AttributeError:
+            self.invert.setChecked(False)
+        vbox.addWidget(self.invert)
+
+        form = QtWidgets.QFormLayout()
+        vbox.addLayout(form)
+
+        self.img_gamma = DoubleSpinBox()
+        self.img_gamma.setSingleStep(0.1)
+        self.img_gamma.setDecimals(5)
+        try:
+            self.updateImageGamma()
+        except AttributeError:
+            self.img_gamma.setValue(1)
+        self.img_gamma.valueModified.connect(self.onGammaChanged)
+        form.addRow(QtWidgets.QLabel('Gamma'), self.img_gamma)
+
+        self.lim_mag = DoubleSpinBox()
+        self.lim_mag.setSingleStep(0.1)
+        self.lim_mag.setMinimum(0)
+        self.lim_mag.setDecimals(1)
+        self.updateLimMag()
+        self.lim_mag.valueModified.connect(self.onLimMagChanged)
+        form.addRow(QtWidgets.QLabel('Lim Mag'), self.lim_mag)
+
+
+    def updateMaxAvePixel(self):
+        self.ave_pixel.setChecked(self.gui.img_type_flag == 'avepixel')
+        self.max_pixel.setChecked(self.gui.img_type_flag == 'maxpixel')
+
+    def updateShowCatStars(self):
+        self.catalog_stars.setChecked(self.gui.catalog_stars_visible)
+
+    def updateShowCalStars(self):
+        self.detected_stars.setChecked(self.gui.draw_calstars)
+
+    def updateShowDistortion(self):
+        self.distortion.setChecked(self.gui.draw_distortion)
+
+    def updateInvertColours(self):
+        self.invert.setChecked(self.gui.img.invert_img)
+
+    def updateImageGamma(self):
+        self.img_gamma.setValue(self.gui.img.gamma)
+
+    def updateLimMag(self):
+        self.lim_mag.setValue(self.gui.cat_lim_mag)
+
+    def onGammaChanged(self):
+        self.gui.img.setGamma(self.img_gamma.value())
+        self.gui.img_zoom.setGamma(self.img_gamma.value())
+        self.gui.updateLeftLabels()
+        self.updateImageGamma()  # gamma may be changed by setGamma
+
+    def onLimMagChanged(self):
+        self.gui.cat_lim_mag = self.lim_mag.value()
+        self.gui.catalog_stars = self.gui.loadCatalogStars(self.gui.cat_lim_mag)
+        self.gui.updateLeftLabels()
+        self.gui.updateStars()
 
 
 # https://jdreaver.com/posts/2014-07-28-scientific-notation-spin-box-pyside.html
