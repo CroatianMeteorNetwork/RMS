@@ -293,12 +293,24 @@ class TextItem(pg.TextItem):
         self.updateTextPos()
 
 
-class ImageItem2(pg.ImageItem):
+class ViewBox(pg.ViewBox):
+    def __init__(self, *args, **kwargs):
+        pg.ViewBox.__init__(self, *args, **kwargs)
+
+    def keyPressEvent(self, ev):
+        """
+        The original ViewBox accepts key mappings to + - and =, which prevents their usage.
+        This passes the keypressevent on
+        """
+        ev.ignore()
+
+
+class ImageItem(pg.ImageItem):
     # ImageItem that allows for a change in gamma
     def __init__(self, image=None, default_key=None, invert=False, **kwargs):
         """
         ex
-        ImageItem2({'maxpixel':data1,'avepixel':data2}, 'avepixel')
+        ImageItem({'maxpixel':data1,'avepixel':data2}, 'avepixel')
         selectImage('maxpixel')
 
         Arguments:
@@ -521,10 +533,10 @@ class CursorItem(pg.GraphicsObject):
         return QtCore.QRectF(self.picture.boundingRect())
 
 
-class HistogramLUTWidget2(pg.HistogramLUTWidget):
+class HistogramLUTWidget(pg.HistogramLUTWidget):
     def __init__(self, parent=None, *args, **kwargs):
         pg.HistogramLUTWidget.__init__(self, parent, *args, **kwargs)
-        self.item = HistogramLUTItem2(*args, **kwargs)
+        self.item = HistogramLUTItem(*args, **kwargs)
         self.setCentralItem(self.item)
         self.vb.setMenuEnabled(False)
 
@@ -539,7 +551,7 @@ class HistogramLUTWidget2(pg.HistogramLUTWidget):
                 self.setLevels(self.getLevels()[0], pos.y())
 
 
-class HistogramLUTItem2(pg.HistogramLUTItem):
+class HistogramLUTItem(pg.HistogramLUTItem):
     def __init__(self, *args, **kwargs):
         pg.HistogramLUTItem.__init__(self, *args, **kwargs)
         self.level_images = []
@@ -550,11 +562,11 @@ class HistogramLUTItem2(pg.HistogramLUTItem):
             the initial one
 
         Arguments:
-            img: [ImageItem2 or list of ImageItem2]
+            img: [ImageItem or list of ImageItem]
         """
-        if type(img) == ImageItem2:
+        if type(img) == ImageItem:
             self.level_images = [img]
-        elif type(img) == list and type(img[0]) == ImageItem2:
+        elif type(img) == list and type(img[0]) == ImageItem:
             self.level_images = img
         else:
             raise TypeError
@@ -590,6 +602,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigElevChanged = QtCore.pyqtSignal()
     sigExtinctionChanged = QtCore.pyqtSignal()
 
+    sigFitPressed = QtCore.pyqtSignal()
     sigAstrometryPressed = QtCore.pyqtSignal()
     sigPhotometryPressed = QtCore.pyqtSignal()
 
@@ -600,12 +613,33 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.attr_list = {}
         self.setMaximumWidth(300)
 
-        vbox = QtWidgets.QVBoxLayout()
-        self.setLayout(vbox)
+        full_layout = QtWidgets.QVBoxLayout()
+        self.setLayout(full_layout)
+
+        box = QtWidgets.QVBoxLayout()
+
+        self.fit_astrometry_button = QtWidgets.QPushButton("Fit")
+        self.fit_astrometry_button.clicked.connect(self.sigFitPressed.emit)
+        box.addWidget(self.fit_astrometry_button)
+
+        hbox = QtWidgets.QHBoxLayout()
+        self.astrometry_button = QtWidgets.QPushButton('Astrometry')
+        self.astrometry_button.clicked.connect(self.sigAstrometryPressed.emit)
+        hbox.addWidget(self.astrometry_button)
+
+        self.photometry_button = QtWidgets.QPushButton('Photometry')
+        self.photometry_button.clicked.connect(self.sigPhotometryPressed.emit)
+        hbox.addWidget(self.photometry_button)
+        box.addLayout(hbox)
+
+        self.updatePairedStars()
+        group = QtWidgets.QGroupBox('Photometry and Astrometry')
+        group.setLayout(box)
+        full_layout.addWidget(group)
 
         form = QtWidgets.QFormLayout()
         form.setLabelAlignment(QtCore.Qt.AlignRight)
-        vbox.addLayout(form)
+        full_layout.addLayout(form)
 
         hbox = QtWidgets.QHBoxLayout()
         self.az_centre = DoubleSpinBox()
@@ -720,21 +754,6 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.fit_parameters.valueModified.connect(self.onFitParametersChanged)
         form.addRow(self.fit_parameters)
 
-        hbox = QtWidgets.QHBoxLayout()
-        hbox.addStretch(1)
-        self.astrometry_button = QtWidgets.QPushButton('Astrometry')
-        self.astrometry_button.clicked.connect(self.sigAstrometryPressed.emit)
-        hbox.addWidget(self.astrometry_button)
-
-        self.photometry_button = QtWidgets.QPushButton('Photometry')
-        self.photometry_button.clicked.connect(self.sigPhotometryPressed.emit)
-        hbox.addWidget(self.photometry_button)
-
-        self.updatePairedStars()
-
-        vbox.addStretch(1)
-        vbox.addLayout(hbox)
-
     def onLatChanged(self):
         self.gui.platepar.lat = self.lat.value()
         self.gui.view_widget.setFocus()
@@ -820,6 +839,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         """
         self.astrometry_button.setEnabled(len(self.gui.paired_stars) > 0)
         self.photometry_button.setEnabled(len(self.gui.paired_stars) > 3)
+        self.fit_astrometry_button.setEnabled(len(self.gui.paired_stars) > 3)
 
 
 class ArrayTabWidget(QtWidgets.QTabWidget):
@@ -910,7 +930,7 @@ class RightOptionsTab(QtWidgets.QTabWidget):
     def __init__(self, parent=None, gui=None):
         super(RightOptionsTab, self).__init__(parent)
 
-        self.hist = HistogramLUTWidget2()
+        self.hist = HistogramLUTWidget()
         self.param_manager = PlateparParameterManager(parent=None,
                                                       gui=gui)
 
@@ -985,7 +1005,7 @@ class DoubleSpinBox(QtWidgets.QDoubleSpinBox):
 
     def keyPressEvent(self, e):
         super().keyPressEvent(e)
-        if e.key() == QtCore.Qt.Key_Enter - 1:
+        if e.key() == QtCore.Qt.Key_Return:
             self.valueModified.emit()
 
 
@@ -1032,7 +1052,7 @@ class ScientificDoubleSpinBox(QtWidgets.QDoubleSpinBox):
 
     def keyPressEvent(self, e):
         super().keyPressEvent(e)
-        if e.key() == QtCore.Qt.Key_Enter - 1:
+        if e.key() == QtCore.Qt.Key_Return:
             self.valueModified.emit()
 
 

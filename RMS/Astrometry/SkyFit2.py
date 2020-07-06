@@ -284,11 +284,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Image on left
         self.view_widget = pg.GraphicsView()
-        self.img_frame = pg.ViewBox()
+        self.img_frame = ViewBox()
         self.img_frame.setAspectLocked()
         self.img_frame.setMouseEnabled(False, False)
         self.img_frame.setMenuEnabled(False)
-        self.view_widget.setCentralItem(self.img_frame)
+        self.view_widget.setCentralWidget(self.img_frame)
         self.img_frame.invertY()
         layout.addWidget(self.view_widget, 0, 1)
 
@@ -296,7 +296,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.show_zoom_window = False
         self.show_zoom_window_size = 200
         self.v_zoom = pg.GraphicsView(self.view_widget)
-        self.zoom_window = pg.ViewBox()
+        self.zoom_window = ViewBox()
         self.zoom_window.setAspectLocked()
         self.zoom_window.setMouseEnabled(False, False)
         self.zoom_window.setMenuEnabled(False)
@@ -341,7 +341,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.cat_star_markers2.setPen('r')
         self.cat_star_markers2.setBrush(QtGui.QColor(0, 0, 0, 0))
         self.cat_star_markers2.setSize(10)
-        self.cat_star_markers2.setSymbol(Crosshair())
+        self.cat_star_markers2.setSymbol(Cross())
         self.cat_star_markers2.setZValue(4)
 
         # selected catalog star markers (main window)
@@ -395,7 +395,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.calstar_markers2.setSize(20)
         self.calstar_markers2.setSymbol('o')
         self.calstar_markers2.setZValue(5)
-
         text_str = "STAR PICKING MODE\n"
         text_str += "'LEFT CLICK' - Centroid star\n"
         text_str += "'CTRL + LEFT CLICK' - Manual star position\n"
@@ -456,14 +455,16 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigScaleChanged.connect(self.updateStars)
         self.tab.param_manager.sigFitParametersChanged.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigExtinctionChanged.connect(self.onExtinctionChanged)
+        self.tab.param_manager.sigFitPressed.connect(lambda: self.fitPickedStars(first_platepar_fit=False))
 
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
-        self.tab.param_manager.sigAstrometryPressed.connect(lambda: self.showAstrometryFitPlots())
+        self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
         layout.addWidget(self.tab, 0, 2)
 
         # mouse binding
         self.img_frame.scene().sigMouseMoved.connect(self.onMouseMoved)
-        self.img_frame.scene().sigMouseClicked.connect(self.onMouseClicked)  # NOTE: clicking event doesnt trigger if moving
+        self.img_frame.scene().sigMouseClicked.connect(
+            self.onMouseClicked)  # NOTE: clicking event doesnt trigger if moving
         self.img_frame.sigResized.connect(self.onFrameResize)
 
         self.scrolls_back = 0
@@ -540,7 +541,8 @@ class PlateTool(QtWidgets.QMainWindow):
             ra_date, dec_date = equatorialCoordPrecession(J2000_JD.days, jd[0], np.radians(ra[0]), np.radians(dec[0]))
 
             # Compute alt, az
-            azim, alt = raDec2AltAz(np.degrees(ra_date), np.degrees(dec_date), jd[0], self.platepar.lat, self.platepar.lon)
+            azim, alt = raDec2AltAz(np.degrees(ra_date), np.degrees(dec_date), jd[0], self.platepar.lat,
+                                    self.platepar.lon)
 
             status_str += ",  Azim={:6.2f}  Alt={:6.2f} (date),  RA={:6.2f}  Dec={:+6.2f} (J2000)".format(
                 azim, alt, ra[0], dec[0])
@@ -734,8 +736,8 @@ class PlateTool(QtWidgets.QMainWindow):
         data_dict = {'maxpixel': max_data, 'avepixel': ave_data}
 
         # update display with image
-        self.img = ImageItem2(image=data_dict, default_key=self.img_type_flag, gamma=gamma, invert=invert)
-        self.img_zoom = ImageItem2(image=data_dict, default_key=self.img_type_flag, gamma=gamma, invert=invert)
+        self.img = ImageItem(image=data_dict, default_key=self.img_type_flag, gamma=gamma, invert=invert)
+        self.img_zoom = ImageItem(image=data_dict, default_key=self.img_type_flag, gamma=gamma, invert=invert)
 
         # add new images to viewboxes
         self.img_frame.addItem(self.img)
@@ -1242,11 +1244,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar,
                                                                        self.platepar.rotation_from_horiz)
 
-    def keyReleaseEvent(self, e):
-        print('released', e.key())
-
     def keyPressEvent(self, event):
-        print('pressed', event.key())
         modifiers = QtWidgets.QApplication.keyboardModifiers()
         if event.key() == QtCore.Qt.Key_A and modifiers == QtCore.Qt.ControlModifier:
             self.auto_levels = not self.auto_levels
