@@ -585,7 +585,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Show text on image with platepar parameters
         text_str = self.img_handle.name() + '\n' + self.img_type_flag + '\n\n'
-        text_str += 'UT corr  = {:.1f}h\n'.format(self.platepar.UT_corr)
         text_str += 'Ref Az   = {:.3f}°\n'.format(self.platepar.az_centre)
         text_str += 'Ref Alt  = {:.3f}°\n'.format(self.platepar.alt_centre)
         text_str += 'Rot horiz = {:.3f}°\n'.format(rotationWrtHorizon(self.platepar))
@@ -639,7 +638,6 @@ class PlateTool(QtWidgets.QMainWindow):
         text_str += 'CTRL + 3 - radial4 distortion\n'
         text_str += 'CTRL + 4 - radial5 distortion\n'
         text_str += '\n'
-        text_str += ',/. - UT correction\n'
         text_str += 'R/F - Lim mag\n'
         text_str += '+/- - Increment\n'
         text_str += '\n'
@@ -1408,40 +1406,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.toggleImageType()
             self.tab.settings.updateMaxAvePixel()
 
-        elif event.key() == QtCore.Qt.Key_Comma:
-            # Decrement UT correction
-            self.platepar.UT_corr -= 0.5
-
-            # Update platepar JD
-            self.platepar.JD += 0.5/24
-
-            # Update centre of FOV in horizontal coordinates
-            az_centre, alt_centre = \
-                trueRaDec2ApparentAltAz(np.radians(self.platepar.RA_d),
-                                        np.radians(self.platepar.dec_d), self.platepar.JD,
-                                        np.radians(self.platepar.lat), np.radians(self.platepar.lon))
-            self.platepar.az_centre, self.platepar.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
-            self.updateLeftLabels()
-            self.tab.param_manager.updatePlatepar()
-            self.updateStars()
-
-        elif event.key() == QtCore.Qt.Key_Period:
-            # Decrement UT correction
-            self.platepar.UT_corr += 0.5
-
-            # Update platepar JD
-            self.platepar.JD -= 0.5/24
-
-            # Update centre of FOV in horizontal coordinates
-            az_centre, alt_centre = \
-                trueRaDec2ApparentAltAz(np.radians(self.platepar.RA_d),
-                                        np.radians(self.platepar.dec_d), self.platepar.JD,
-                                        np.radians(self.platepar.lat), np.radians(self.platepar.lon))
-            self.platepar.az_centre, self.platepar.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
-            self.updateLeftLabels()
-            self.tab.param_manager.updatePlatepar()
-            self.updateStars()
-
         elif event.key() == QtCore.Qt.Key_A:
             self.platepar.az_centre += self.key_increment
             self.updateRefRADec()
@@ -1830,7 +1794,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def toggleImageType(self):
         """ Toggle between the maxpixel and avepixel. """
-        print(self.img_type_flag)
         if self.img_type_flag == 'maxpixel':
             self.img_type_flag = 'avepixel'
 
@@ -2083,7 +2046,7 @@ class PlateTool(QtWidgets.QMainWindow):
         img_time = self.img_handle.currentTime()
 
         # Set the reference platepar time to the time of the FF
-        self.platepar.JD = date2JD(*img_time, UT_corr=float(self.platepar.UT_corr))
+        self.platepar.JD = date2JD(*img_time)
 
         # Set the reference hour angle
         self.platepar.Ho = JD2HourAngle(self.platepar.JD)%360

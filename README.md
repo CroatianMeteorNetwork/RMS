@@ -16,6 +16,14 @@ The software is still in the development phase, but here are the current feature
 Please see our website for more info: https://globalmeteornetwork.org/
 We are also selling Plug And Play meteor systems which run this code!
 
+# Table of Contents
+
+1. [Requirements](#requirements)
+    - [Hardware](#hardware)
+    - [Software](#software)
+1. [Setting Up](#setting-up)
+1. [Running the Code](#running-the-code)
+1. [Citations](#citations)
 
 ## Requirements
 This guide will assume basic knowledge of electronics, the Unix environment, and some minor experience with the Raspberry Pi platform itself.
@@ -275,7 +283,6 @@ python -m RMS.DetectStarsAndMeteors ~/RMS_data/YYYMMDD_hhmmss_uuuuuu
 ```
 
 where YYYMMDD_hhmmss_uuuuuu is the name of the night directory. This will take a while to run, and when it is done, it will generate a file called CALSTARS (which will hold information about detected stars on images), and FTPdetectinfo file which will hold information about detected meteors.
-
 
 ## Citations
 
