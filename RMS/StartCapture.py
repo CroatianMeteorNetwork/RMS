@@ -435,6 +435,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         upload_manager.addFiles([archive_name])
         log.info('File added...')
 
+        # Delay the upload, if the delay is given
+        #   Only delay if the capture was run normally, from sunset to sunrise
+        if duration is None:
+            upload_manager.delayNextUpload(delay=config.upload_delay)
+
 
     # Delete detector backup files
     if detector is not None:

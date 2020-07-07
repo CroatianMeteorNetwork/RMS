@@ -206,8 +206,14 @@ class UploadManager(multiprocessing.Process):
         self.file_queue = Queue.Queue()
         self.exit = multiprocessing.Event()
         self.upload_in_progress = multiprocessing.Value(ctypes.c_bool, False)
+
+        # Time when the upload was run last
         self.last_runtime = None
         self.last_runtime_lock = multiprocessing.Lock()
+
+        # Time when the next upload should be run (used for delaying the upload)
+        self.next_runtime = None
+        self.next_runtime_lock = multiprocessing.Lock() 
 
         # Construct the path to the queue backup file
         self.upload_queue_file_path = os.path.join(self.config.data_dir, self.config.upload_queue_file)
@@ -383,6 +389,16 @@ class UploadManager(multiprocessing.Process):
         self.upload_in_progress.value = False
 
 
+    def delayNextUpload(self, delay=0):
+        """ Delay the upload by the given number of seconds frmo now. Zero by default. """
+
+        # Set the next run time using a delay
+        with self.next_runtime_lock:
+            self.next_runtime = datetime.datetime.utcnow() + datetime.timedelta(seconds=delay)
+
+            log.info("Upload delayed until {:s}".format(self.next_runtime))
+
+
 
     def run(self):
         """ Try uploading the files every 15 minutes. """
@@ -393,9 +409,18 @@ class UploadManager(multiprocessing.Process):
         while not self.exit.is_set():
 
             with self.last_runtime_lock:
-                # Check if the upload should be run
+
+                # Check if the upload should be run (if 15 minutes are up)
                 if self.last_runtime is not None:
                     if (datetime.datetime.utcnow() - self.last_runtime).total_seconds() < 15*60:
+                        time.sleep(1)
+                        continue
+
+            with self.next_runtime_lock:
+
+                # Check if the upload delay is up
+                if self.next_runtime is not None:
+                    if (datetime.datetime.utcnow() - self.next_runtime).total_seconds() < 0:
                         time.sleep(1)
                         continue
 
