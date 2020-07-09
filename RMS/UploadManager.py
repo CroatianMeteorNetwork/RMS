@@ -396,7 +396,7 @@ class UploadManager(multiprocessing.Process):
         with self.next_runtime_lock:
             self.next_runtime = datetime.datetime.utcnow() + datetime.timedelta(seconds=delay)
 
-            log.info("Upload delayed until {:s}".format(self.next_runtime))
+            log.info("Upload delayed for {:.1f} min until {:s}".format(delay/60, str(self.next_runtime)))
 
 
 
