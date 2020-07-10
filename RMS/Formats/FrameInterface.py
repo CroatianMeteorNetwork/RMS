@@ -1457,7 +1457,7 @@ class InputTypeImages(object):
             current_img_file = self.current_img_file
             fr_no = self.current_frame
 
-        if current_img_file.endswith('.nef'):
+        if current_img_file.endswith('.NEF'):
             # .nef files will not be brought here if rawpy is not installed
             # get raw data from .nef file and get image from it
             raw = rawpy.imread(os.path.join(self.dir_path, current_img_file))

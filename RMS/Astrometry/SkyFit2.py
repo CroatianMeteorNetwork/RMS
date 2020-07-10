@@ -40,6 +40,7 @@ from RMS.Routines import Image
 from RMS.Math import angularSeparation
 from RMS.Misc import decimalDegreesToSexHours, openFileDialog
 from RMS.Astrometry.Conversions import J2000_JD, date2JD, JD2HourAngle, raDec2AltAz, altAz2RADec
+from RMS.Routines.AddCelestialGrid import updateEquatorialGrid
 
 import pyximport
 
@@ -286,7 +287,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.view_widget = pg.GraphicsView()
         self.img_frame = ViewBox()
         self.img_frame.setAspectLocked()
-        self.img_frame.setMouseEnabled(False, False)
         self.img_frame.setMenuEnabled(False)
         self.view_widget.setCentralWidget(self.img_frame)
         self.img_frame.invertY()
@@ -425,17 +425,25 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # distortion lines (window)
         self.draw_distortion = False
-        self.distortion_lines = PlotLines(pxmode=True)
+        self.distortion_lines = pg.PlotCurveItem(connect='pairs', pen=(255, 255, 0, 200))
         self.distortion_lines.hide()
         self.img_frame.addItem(self.distortion_lines)
         self.distortion_lines.setZValue(2)
 
+        self.grid_visible = True
+        self.celestial_grid = pg.PlotCurveItem(pen=pg.mkPen((255, 255, 255, 255), style=QtCore.Qt.DotLine))
+        updateEquatorialGrid(self.celestial_grid, self.platepar)
+        self.celestial_grid.setZValue(1)
+        self.img_frame.addItem(self.celestial_grid)
+
         # fit residuals
-        self.residual_lines = PlotLines(pxmode=True)
+        self.residual_lines = pg.PlotCurveItem(connect='pairs', pen=pg.mkPen((255, 255, 0),
+                                                                             style=QtCore.Qt.DashLine))
         self.img_frame.addItem(self.residual_lines)
         self.residual_lines.setZValue(2)
 
         # text
+        self.stdev_text_filter = 0
         self.residual_text = TextItemList()
         self.img_frame.addItem(self.residual_text)
         self.residual_text.setZValue(10)
@@ -456,12 +464,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.updateInvertColours()
         self.tab.settings.updateImageGamma()
         if loaded_file:
-            self.star_pick_mode = True
             self.updatePairedStars()
-            self.star_pick_mode = False
 
-
-        # make connections
+        # make connections to sidebar gui
         self.tab.param_manager.sigElevChanged.connect(self.onExtinctionChanged)
         self.tab.param_manager.sigLocationChanged.connect(self.onAzAltChanged)
         self.tab.param_manager.sigAzAltChanged.connect(self.onAzAltChanged)
@@ -480,13 +485,15 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigCatStarsToggled.connect(self.toggleShowCatStars)
         self.tab.settings.sigCalStarsToggled.connect(self.toggleShowCalStars)
         self.tab.settings.sigDistortionToggled.connect(self.toggleDistortion)
+        self.tab.settings.sigGridToggled.connect(self.toggleGrid)
         self.tab.settings.sigInvertToggled.connect(self.toggleInvertColours)
 
         layout.addWidget(self.tab, 0, 2)
 
         # mouse binding
         self.img_frame.scene().sigMouseMoved.connect(self.onMouseMoved)
-        self.img_frame.scene().sigMouseClicked.connect(self.onMouseClicked)  # NOTE: clicking event doesnt trigger if moving
+        self.img_frame.scene().sigMouseClicked.connect(
+            self.onMouseClicked)  # NOTE: clicking event doesnt trigger if moving
         self.img_frame.sigResized.connect(self.onFrameResize)
 
         self.scrolls_back = 0
@@ -503,31 +510,32 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def onScaleChanged(self):
         self.updateFitResiduals()
+        updateEquatorialGrid(self.celestial_grid, self.platepar)
         self.updateStars()
         self.updateLeftLabels()
 
     def onFitParametersChanged(self):
         self.updateDistortion()
         self.updateStars()
+        updateEquatorialGrid(self.celestial_grid, self.platepar)
         self.updateLeftLabels()
 
     def onExtinctionChanged(self):
-        temp = self.star_pick_mode
-        self.star_pick_mode = True
         self.photometry()
-        self.star_pick_mode = temp
         self.updateLeftLabels()
 
     def onAzAltChanged(self):
         self.updateRefRADec()
         self.updateStars()
         self.updateLeftLabels()
+        updateEquatorialGrid(self.celestial_grid, self.platepar)
 
     def onRotChanged(self):
         self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar,
                                                                    self.platepar.rotation_from_horiz)
         self.updateStars()
         self.updateLeftLabels()
+        updateEquatorialGrid(self.celestial_grid, self.platepar)
 
     def mouseOverStatus(self, x, y):
         """ Format the status message which will be printed in the status bar below the plot.
@@ -797,17 +805,21 @@ class PlateTool(QtWidgets.QMainWindow):
             Draws the stars that were picked for calibration as well as draw the
             residuals and star magnitude
         """
-        if self.star_pick_mode:
+        if len(self.paired_stars) > 0:
             self.sel_cat_star_markers.setData(pos=[pair[0][:2] for pair in self.paired_stars])
             self.sel_cat_star_markers2.setData(pos=[pair[0][:2] for pair in self.paired_stars])
-            self.centroid_star_markers.clear()
-            self.centroid_star_markers2.clear()
+        else:
+            self.sel_cat_star_markers.clear()
+            self.sel_cat_star_markers2.clear()
 
-            # Draw photometry
-            if len(self.paired_stars) > 2:
-                self.photometry()
+        self.centroid_star_markers.clear()
+        self.centroid_star_markers2.clear()
 
-            self.tab.param_manager.updatePairedStars()
+        # Draw photometry
+        if len(self.paired_stars) > 2:
+            self.photometry()
+
+        self.tab.param_manager.updatePairedStars()
 
     def drawCalstars(self):
         """ Draw extracted stars on the current image. """
@@ -994,6 +1006,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.paired_stars.pop(picked_indx)
 
                     self.updatePairedStars()
+                    self.updateFitResiduals()
                     self.photometry()
 
     def onMouseMoved(self, event):
@@ -1049,71 +1062,71 @@ class PlateTool(QtWidgets.QMainWindow):
     def photometry(self, show_plot=False):
         """ Perform the photometry on selectes stars. """
 
-        if self.star_pick_mode:
+        ### Make a photometry plot
 
-            ### Make a photometry plot
+        # Extract star intensities and star magnitudes
+        star_coords = []
+        radius_list = []
+        px_intens_list = []
+        catalog_ra = []
+        catalog_dec = []
+        catalog_mags = []
+        for paired_star in self.paired_stars:
 
-            # Extract star intensities and star magnitudes
-            star_coords = []
-            radius_list = []
-            px_intens_list = []
-            catalog_ra = []
-            catalog_dec = []
-            catalog_mags = []
-            for paired_star in self.paired_stars:
+            img_star, catalog_star = paired_star
 
-                img_star, catalog_star = paired_star
+            star_x, star_y, px_intens = img_star
+            star_ra, star_dec, star_mag = catalog_star
 
-                star_x, star_y, px_intens = img_star
-                star_ra, star_dec, star_mag = catalog_star
+            # Skip intensities which were not properly calculated
+            lsp = np.log10(px_intens)
+            if np.isnan(lsp) or np.isinf(lsp):
+                continue
 
-                # Skip intensities which were not properly calculated
-                lsp = np.log10(px_intens)
-                if np.isnan(lsp) or np.isinf(lsp):
-                    continue
+            star_coords.append([star_x, star_y])
+            radius_list.append(np.hypot(star_x - self.platepar.X_res/2, star_y - self.platepar.Y_res/2))
+            px_intens_list.append(px_intens)
+            catalog_ra.append(star_ra)
+            catalog_dec.append(star_dec)
+            catalog_mags.append(star_mag)
 
-                star_coords.append([star_x, star_y])
-                radius_list.append(np.hypot(star_x - self.platepar.X_res/2, star_y - self.platepar.Y_res/2))
-                px_intens_list.append(px_intens)
-                catalog_ra.append(star_ra)
-                catalog_dec.append(star_dec)
-                catalog_mags.append(star_mag)
+        # Make sure there are more than 3 stars picked
+        self.residual_text.clear()
+        if len(px_intens_list) > 3:
 
-            # Make sure there are more than 3 stars picked
-            self.residual_text.clear()
-            if len(px_intens_list) > 3:
+            # Compute apparent magnitude corrected for extinction
+            catalog_mags = extinctionCorrectionTrueToApparent(catalog_mags, catalog_ra, catalog_dec,
+                                                              date2JD(*self.img_handle.currentTime()),
+                                                              self.platepar)
 
-                # Compute apparent magnitude corrected for extinction
-                catalog_mags = extinctionCorrectionTrueToApparent(catalog_mags, catalog_ra, catalog_dec,
-                                                                  date2JD(*self.img_handle.currentTime()),
-                                                                  self.platepar)
+            # Fit the photometric offset (disable vignetting fit if a flat is used)
+            photom_params, fit_stddev, fit_resids = photometryFit(px_intens_list, radius_list,
+                                                                  catalog_mags, fixed_vignetting=(
+                    0.0 if self.flat_struct is not None else None))
 
-                # Fit the photometric offset (disable vignetting fit if a flat is used)
-                photom_params, fit_stddev, fit_resids = photometryFit(px_intens_list, radius_list,
-                                                                      catalog_mags, fixed_vignetting=(
-                        0.0 if self.flat_struct is not None else None))
+            photom_offset, vignetting_coeff = photom_params
 
-                photom_offset, vignetting_coeff = photom_params
+            # Set photometry parameters
+            self.platepar.mag_0 = -2.5
+            self.platepar.mag_lev = photom_offset
+            self.platepar.mag_lev_stddev = fit_stddev
+            self.platepar.vignetting_coeff = vignetting_coeff
 
-                # Set photometry parameters
-                self.platepar.mag_0 = -2.5
-                self.platepar.mag_lev = photom_offset
-                self.platepar.mag_lev_stddev = fit_stddev
-                self.platepar.vignetting_coeff = vignetting_coeff
+            if self.catalog_stars_visible:
 
-                if self.catalog_stars_visible:
+                # Plot photometry deviations on the main plot as colour coded rings
+                star_coords = np.array(star_coords)
+                star_coords_x, star_coords_y = star_coords.T
 
-                    # Plot photometry deviations on the main plot as colour coded rings
-                    star_coords = np.array(star_coords)
-                    star_coords_x, star_coords_y = star_coords.T
+                std = np.std(fit_resids)
+                for star_x, star_y, fit_diff, star_mag in zip(star_coords_x, star_coords_y, fit_resids,
+                                                              catalog_mags):
+                    photom_resid_txt = "{:.2f}".format(fit_diff)
 
-                    for star_x, star_y, fit_diff, star_mag in zip(star_coords_x, star_coords_y, fit_resids,
-                                                                  catalog_mags):
-                        photom_resid_txt = "{:.2f}".format(fit_diff)
+                    # Determine the size of the residual text, larger the residual, larger the text
+                    photom_resid_size = 8 + np.abs(fit_diff)/(np.max(np.abs(fit_resids))/5.0)
 
-                        # Determine the size of the residual text, larger the residual, larger the text
-                        photom_resid_size = 8 + np.abs(fit_diff)/(np.max(np.abs(fit_resids))/5.0)
-
+                    if self.stdev_text_filter*std <= abs(fit_diff):
                         text1 = TextItem(photom_resid_txt, anchor=(0.5, -0.5))
                         text1.setPos(star_x, star_y)
                         text1.setFont(QtGui.QFont('times', photom_resid_size))
@@ -1127,116 +1140,116 @@ class PlateTool(QtWidgets.QMainWindow):
                         text2.setColor(QtGui.QColor(255, 0, 0))
                         text2.setAlign(QtCore.Qt.AlignCenter)
                         self.residual_text.addTextItem(text2)
-                    self.residual_text.update()
+                self.residual_text.update()
 
-                # Show the photometry fit plot
-                if show_plot:
+            # Show the photometry fit plot
+            if show_plot:
 
-                    ### PLOT PHOTOMETRY FIT ###
-                    # Note: An almost identical code exists in Utils.CalibrationReport
+                ### PLOT PHOTOMETRY FIT ###
+                # Note: An almost identical code exists in Utils.CalibrationReport
 
-                    # Init plot for photometry
-                    fig_p, (ax_p, ax_r) = plt.subplots(nrows=2, facecolor=None, figsize=(6.4, 7.2),
-                                                       gridspec_kw={'height_ratios': [2, 1]})
+                # Init plot for photometry
+                fig_p, (ax_p, ax_r) = plt.subplots(nrows=2, facecolor=None, figsize=(6.4, 7.2),
+                                                   gridspec_kw={'height_ratios': [2, 1]})
 
-                    # Set photometry window title
-                    fig_p.canvas.set_window_title('Photometry')
+                # Set photometry window title
+                fig_p.canvas.set_window_title('Photometry')
 
-                    # Plot catalog magnitude vs. raw logsum of pixel intensities
-                    lsp_arr = np.log10(np.array(px_intens_list))
-                    ax_p.scatter(-2.5*lsp_arr, catalog_mags, s=5, c='r', zorder=3, alpha=0.5,
-                                 label="Raw (extinction corrected)")
+                # Plot catalog magnitude vs. raw logsum of pixel intensities
+                lsp_arr = np.log10(np.array(px_intens_list))
+                ax_p.scatter(-2.5*lsp_arr, catalog_mags, s=5, c='r', zorder=3, alpha=0.5,
+                             label="Raw (extinction corrected)")
 
-                    # Plot catalog magnitude vs. raw logsum of pixel intensities (only when no flat is used)
-                    if self.flat_struct is None:
-                        lsp_corr_arr = np.log10(correctVignetting(np.array(px_intens_list),
-                                                                  np.array(radius_list),
-                                                                  self.platepar.vignetting_coeff))
+                # Plot catalog magnitude vs. raw logsum of pixel intensities (only when no flat is used)
+                if self.flat_struct is None:
+                    lsp_corr_arr = np.log10(correctVignetting(np.array(px_intens_list),
+                                                              np.array(radius_list),
+                                                              self.platepar.vignetting_coeff))
 
-                        ax_p.scatter(-2.5*lsp_corr_arr, catalog_mags, s=5, c='b', zorder=3, alpha=0.5,
-                                     label="Corrected for vignetting")
+                    ax_p.scatter(-2.5*lsp_corr_arr, catalog_mags, s=5, c='b', zorder=3, alpha=0.5,
+                                 label="Corrected for vignetting")
 
-                    x_min, x_max = ax_p.get_xlim()
-                    y_min, y_max = ax_p.get_ylim()
+                x_min, x_max = ax_p.get_xlim()
+                y_min, y_max = ax_p.get_ylim()
 
-                    x_min_w = x_min - 3
-                    x_max_w = x_max + 3
-                    y_min_w = y_min - 3
-                    y_max_w = y_max + 3
+                x_min_w = x_min - 3
+                x_max_w = x_max + 3
+                y_min_w = y_min - 3
+                y_max_w = y_max + 3
 
-                    # Plot fit info
-                    fit_info = "Fit: {:+.1f}*LSP + {:.2f} +/- {:.2f} ".format(self.platepar.mag_0,
-                                                                              self.platepar.mag_lev, fit_stddev) \
-                               + "\nVignetting coeff = {:.5f}".format(self.platepar.vignetting_coeff) \
-                               + "\nGamma = {:.2f}".format(self.platepar.gamma)
+                # Plot fit info
+                fit_info = "Fit: {:+.1f}*LSP + {:.2f} +/- {:.2f} ".format(self.platepar.mag_0,
+                                                                          self.platepar.mag_lev, fit_stddev) \
+                           + "\nVignetting coeff = {:.5f}".format(self.platepar.vignetting_coeff) \
+                           + "\nGamma = {:.2f}".format(self.platepar.gamma)
 
-                    print('Fit Info:')
-                    print(fit_info)
-                    print()
+                print('Fit Info:')
+                print(fit_info)
+                print()
 
-                    # Plot the line fit
-                    logsum_arr = np.linspace(x_min_w, x_max_w, 10)
-                    ax_p.plot(logsum_arr, photomLine((10**(logsum_arr/(-2.5)), np.zeros_like(logsum_arr)),
-                                                     photom_offset, self.platepar.vignetting_coeff), label=fit_info,
-                              linestyle='--', color='k', alpha=0.5, zorder=3)
+                # Plot the line fit
+                logsum_arr = np.linspace(x_min_w, x_max_w, 10)
+                ax_p.plot(logsum_arr, photomLine((10**(logsum_arr/(-2.5)), np.zeros_like(logsum_arr)),
+                                                 photom_offset, self.platepar.vignetting_coeff), label=fit_info,
+                          linestyle='--', color='k', alpha=0.5, zorder=3)
 
-                    ax_p.legend()
+                ax_p.legend()
 
-                    ax_p.set_ylabel("Catalog magnitude ({:s})".format(self.mag_band_string))
-                    ax_p.set_xlabel("Uncalibrated magnitude")
+                ax_p.set_ylabel("Catalog magnitude ({:s})".format(self.mag_band_string))
+                ax_p.set_xlabel("Uncalibrated magnitude")
 
-                    # Set wider axis limits
-                    ax_p.set_xlim(x_min_w, x_max_w)
-                    ax_p.set_ylim(y_min_w, y_max_w)
+                # Set wider axis limits
+                ax_p.set_xlim(x_min_w, x_max_w)
+                ax_p.set_ylim(y_min_w, y_max_w)
 
-                    ax_p.invert_yaxis()
-                    ax_p.invert_xaxis()
+                ax_p.invert_yaxis()
+                ax_p.invert_xaxis()
 
-                    ax_p.grid()
+                ax_p.grid()
 
-                    ###
+                ###
 
-                    ### PLOT MAG DIFFERENCE BY RADIUS
+                ### PLOT MAG DIFFERENCE BY RADIUS
 
-                    img_diagonal = np.hypot(self.platepar.X_res/2, self.platepar.Y_res/2)
+                img_diagonal = np.hypot(self.platepar.X_res/2, self.platepar.Y_res/2)
 
-                    # Plot radius from centre vs. fit residual (including vignetting)
-                    ax_r.scatter(radius_list, fit_resids, s=5, c='b', alpha=0.5, zorder=3)
+                # Plot radius from centre vs. fit residual (including vignetting)
+                ax_r.scatter(radius_list, fit_resids, s=5, c='b', alpha=0.5, zorder=3)
 
-                    # Plot a zero line
-                    ax_r.plot(np.linspace(0, img_diagonal, 10), np.zeros(10), linestyle='dashed', alpha=0.5,
-                              color='k')
+                # Plot a zero line
+                ax_r.plot(np.linspace(0, img_diagonal, 10), np.zeros(10), linestyle='dashed', alpha=0.5,
+                          color='k')
 
-                    # Plot the vignetting curve (only when no flat is used)
-                    if self.flat_struct is None:
-                        # Plot radius from centre vs. fit residual (excluding vignetting
-                        fit_resids_novignetting = catalog_mags - photomLine((np.array(px_intens_list),
-                                                                             np.array(radius_list)), photom_offset, 0.0)
-                        ax_r.scatter(radius_list, fit_resids_novignetting, s=5, c='r', alpha=0.5, zorder=3)
+                # Plot the vignetting curve (only when no flat is used)
+                if self.flat_struct is None:
+                    # Plot radius from centre vs. fit residual (excluding vignetting
+                    fit_resids_novignetting = catalog_mags - photomLine((np.array(px_intens_list),
+                                                                         np.array(radius_list)), photom_offset, 0.0)
+                    ax_r.scatter(radius_list, fit_resids_novignetting, s=5, c='r', alpha=0.5, zorder=3)
 
-                        px_sum_tmp = 1000
-                        radius_arr_tmp = np.linspace(0, img_diagonal, 50)
+                    px_sum_tmp = 1000
+                    radius_arr_tmp = np.linspace(0, img_diagonal, 50)
 
-                        # Plot the vignetting curve
-                        vignetting_loss = 2.5*np.log10(px_sum_tmp) \
-                                          - 2.5*np.log10(correctVignetting(px_sum_tmp, radius_arr_tmp,
-                                                                           self.platepar.vignetting_coeff))
+                    # Plot the vignetting curve
+                    vignetting_loss = 2.5*np.log10(px_sum_tmp) \
+                                      - 2.5*np.log10(correctVignetting(px_sum_tmp, radius_arr_tmp,
+                                                                       self.platepar.vignetting_coeff))
 
-                        ax_r.plot(radius_arr_tmp, vignetting_loss, linestyle='dotted', alpha=0.5, color='k')
+                    ax_r.plot(radius_arr_tmp, vignetting_loss, linestyle='dotted', alpha=0.5, color='k')
 
-                    ax_r.grid()
+                ax_r.grid()
 
-                    ax_r.set_ylabel("Fit residuals (mag)")
-                    ax_r.set_xlabel("Radius from centre (px)")
+                ax_r.set_ylabel("Fit residuals (mag)")
+                ax_r.set_xlabel("Radius from centre (px)")
 
-                    ax_r.set_xlim(0, img_diagonal)
+                ax_r.set_xlim(0, img_diagonal)
 
-                    fig_p.tight_layout()
-                    fig_p.show()
+                fig_p.tight_layout()
+                fig_p.show()
 
 
-            else:
-                print('Need more than 2 stars for photometry plot!')
+        else:
+            print('Need more than 2 stars for photometry plot!')
 
     def updateRefRADec(self, skip_rot_update=False):
         """ Update the reference RA and Dec (true in J2000) from Alt/Az (apparent in epoch of date). """
@@ -1304,12 +1317,14 @@ class PlateTool(QtWidgets.QMainWindow):
         elif event.key() == QtCore.Qt.Key_R and modifiers == QtCore.Qt.ControlModifier:
             self.star_pick_mode = not self.star_pick_mode
             if self.star_pick_mode:
+                self.img_frame.setMouseEnabled(False, False)
                 self.star_pick_info.show()
                 self.cursor.show()
                 self.cursor2.show()
                 if self.show_zoom_window:
                     self.v_zoom.show()
             else:
+                self.img_frame.setMouseEnabled(True, True)
                 self.star_pick_info.hide()
                 self.v_zoom.hide()
                 self.cursor2.hide()
@@ -1396,6 +1411,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.fitPickedStars(first_platepar_fit=False)
             print('Plate fitted!')
 
+        elif event.key() == QtCore.Qt.Key_G and modifiers == QtCore.Qt.ControlModifier:
+            self.toggleGrid()
+            self.tab.settings.updateShowGrid()
+
         elif event.key() == QtCore.Qt.Key_Left:
             self.prevImg()
 
@@ -1409,6 +1428,8 @@ class PlateTool(QtWidgets.QMainWindow):
         elif event.key() == QtCore.Qt.Key_A:
             self.platepar.az_centre += self.key_increment
             self.updateRefRADec()
+
+            updateEquatorialGrid(self.celestial_grid, self.platepar)
             self.tab.param_manager.updatePlatepar()
             self.updateLeftLabels()
             self.updateStars()
@@ -1416,6 +1437,8 @@ class PlateTool(QtWidgets.QMainWindow):
         elif event.key() == QtCore.Qt.Key_D:
             self.platepar.az_centre -= self.key_increment
             self.updateRefRADec()
+
+            updateEquatorialGrid(self.celestial_grid, self.platepar)
             self.tab.param_manager.updatePlatepar()
             self.updateLeftLabels()
             self.updateStars()
@@ -1423,6 +1446,8 @@ class PlateTool(QtWidgets.QMainWindow):
         elif event.key() == QtCore.Qt.Key_W:
             self.platepar.alt_centre -= self.key_increment
             self.updateRefRADec()
+
+            updateEquatorialGrid(self.celestial_grid, self.platepar)
             self.tab.param_manager.updatePlatepar()
             self.updateLeftLabels()
             self.updateStars()
@@ -1430,6 +1455,8 @@ class PlateTool(QtWidgets.QMainWindow):
         elif event.key() == QtCore.Qt.Key_S:
             self.platepar.alt_centre += self.key_increment
             self.updateRefRADec()
+
+            updateEquatorialGrid(self.celestial_grid, self.platepar)
             self.tab.param_manager.updatePlatepar()
             self.updateLeftLabels()
             self.updateStars()
@@ -1771,7 +1798,7 @@ class PlateTool(QtWidgets.QMainWindow):
         delta = event.angleDelta().y()
         modifier = QtWidgets.QApplication.keyboardModifiers()
 
-        if self.img_frame.sceneBoundingRect().contains(event.pos()):
+        if self.img_frame.sceneBoundingRect().contains(event.pos()) and self.star_pick_mode:
             if modifier == QtCore.Qt.ControlModifier:
                 if delta < 0:
                     self.scrolls_back = 0
@@ -1790,7 +1817,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.img_frame.autoRange(padding=0)
                 elif delta > 0:
                     self.scrolls_back = 0
-                    self.img_frame.scaleBy([0.95, 0.95], QtCore.QPoint(self.mouse_x, self.mouse_y))
+                    self.img_frame.scaleBy([0.80, 0.80], QtCore.QPoint(self.mouse_x, self.mouse_y))
 
     def toggleImageType(self):
         """ Toggle between the maxpixel and avepixel. """
@@ -1803,6 +1830,13 @@ class PlateTool(QtWidgets.QMainWindow):
         ### UPDATE IMAGE ###
         self.img.selectImage(self.img_type_flag)
         self.img_zoom.selectImage(self.img_type_flag)
+
+    def toggleGrid(self):
+        self.grid_visible = not self.grid_visible
+        if self.grid_visible:
+            self.celestial_grid.show()
+        else:
+            self.celestial_grid.hide()
 
     def toggleShowCatStars(self):
         """ Toggle between showing catalog stars and not """
@@ -1857,7 +1891,6 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Draw distortion guides. """
         # Only draw the distortion if we have a platepar
         if self.platepar:
-
             # Sample points on every image axis (start/end 5% from image corners)
             x_samples = 30
             y_samples = int(x_samples*(self.platepar.Y_res/self.platepar.X_res))
@@ -1884,14 +1917,15 @@ class PlateTool(QtWidgets.QMainWindow):
             jd = date2JD(*self.img_handle.currentTime())
             x_nodist, y_nodist = raDecToXYPP(ra_data, dec_data, jd, platepar_nodist)
 
-            # Plot the differences in X, Y
-            data = []
-            pen = QtGui.QPen(QtGui.QColor(255, 255, 0, 200))  # change appearance of lines
-            pen.setWidth(1)
-            for x0, y0, xnd, ynd in zip(x_arr, y_arr, x_nodist, y_nodist):
-                data.append([x0, y0, xnd, ynd, pen])
+            x = [None]*2*len(x_arr)
+            x[::2] = x_arr
+            x[1::2] = x_nodist
 
-            self.distortion_lines.setData(data)
+            y = [None]*2*len(y_arr)
+            y[::2] = y_arr
+            y[1::2] = y_nodist
+
+            self.distortion_lines.setData(x=x, y=y)
 
     def computeCentreRADec(self):
         """ Compute RA and Dec of the FOV centre in degrees. """
@@ -2512,10 +2546,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
         if self.residuals is not None:
 
-            data = []
-            pen1 = QtGui.QPen(QtGui.QColor(255, 165, 0, 255))
-            pen2 = QtGui.QPen(QtGui.QColor(255, 255, 0, 255))
-            pen2.setStyle(QtCore.Qt.DashLine)
+            x1 = []
+            y1 = []
+
+            x2 = []
+            y2 = []
+            # pen1 = QtGui.QPen(QtGui.QColor(255, 165, 0, 255))
+            # pen2 = QtGui.QPen(QtGui.QColor(255, 255, 0, 255))
+            # pen2.setStyle(QtCore.Qt.DashLine)
             # Plot the residuals
             res_scale = 100
             for entry in self.residuals:
@@ -2526,7 +2564,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 res_y = img_y + res_scale*np.sin(angle)*distance
 
                 # Plot the image residuals
-                data.append([img_x, img_y, res_x, res_y, pen1])
+                x1.extend([img_x, res_x])
+                y1.extend([img_y, res_y])
 
                 # Convert the angular distance from degrees to equivalent image pixels
                 ang_dist_img = angular_distance*self.platepar.F_scale
@@ -2534,9 +2573,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 res_y = img_y + res_scale*np.sin(angle)*ang_dist_img
 
                 # Plot the sky residuals
-                data.append([img_x, img_y, res_x, res_y, pen2])
+                x2.extend([img_x, res_x])
+                y2.extend([img_y, res_y])
 
-            self.residual_lines.setData(data)
+            self.residual_lines.setData(x=x2, y=y2)
         else:
             self.residual_lines.clear()
 

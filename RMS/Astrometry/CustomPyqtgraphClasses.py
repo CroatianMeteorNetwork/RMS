@@ -98,83 +98,6 @@ class Crosshair(QtGui.QPainterPath):
         self.addEllipse(QtCore.QPoint(0, 0), 0.5, 0.5)
 
 
-# custom pyqtgraph items
-class PlotLines(pg.GraphicsObject):
-    """
-    Used to add to a pyqt widget (such as ViewBox), which allows for the plotting of lines
-    ex.
-    lines = PlotLines()
-    widget.addItem(lines)
-    """
-
-    def __init__(self, data=None, pxmode=False):
-        """
-        Arguments:
-            data: same format as setData
-            pxmode: whether the width of the lines will change when zooming
-        """
-        pg.GraphicsObject.__init__(self)
-        self.data = data
-
-        if self.data is None:
-            self.data = []
-            self.max_x = 0
-            self.max_y = 0
-        else:
-            self.max_x = max([max([x[0], x[2]]) for x in self.data])
-            self.max_y = max([max([x[1], x[3]]) for x in self.data])
-
-        self.picture = QtGui.QPicture()
-        self.pxmode = pxmode
-
-        self.generatePicture()
-
-    def setData(self, data):
-        """
-        Arguments:
-            data [list of (float, float, float, float, QPen)]:
-                First two floats are x0 and y0, the initial coordinates of the line to draw
-                Second two floats are xf and yf, the final coordinates of the line to draw
-                QPen argmument is the pen to draw the line with
-                A list of these five arguments in a tuple will allow for drawing any number of lines
-        """
-        if data is not None and len(data):
-            self.data = data
-            self.max_x = max([max([x[0], x[2]]) for x in self.data])
-            self.max_y = max([max([x[1], x[3]]) for x in self.data])
-        else:
-            self.data = []
-        self.update()
-
-    def clear(self):
-        """ Removes all data """
-        self.setData([])
-
-    def generatePicture(self):
-        painter = QtGui.QPainter(self.picture)
-        for x0, y0, xnd, ynd, pen in self.data:
-            if self.pxmode and self.parentItem():
-                pos1 = self.parentItem().mapToDevice(pg.Point(x0, y0))
-                pos2 = self.parentItem().mapToDevice(pg.Point(xnd, ynd))
-                x0, y0, xnd, ynd = pos1.x(), pos1.y(), pos2.x(), pos2.y()
-            painter.setPen(pen)
-            painter.drawLine(QtCore.QLine(x0, y0, xnd, ynd))
-        painter.end()
-
-    def paint(self, painter, option, widget=None):
-        self.generatePicture()
-        t = painter.transform()
-
-        if self.pxmode:  # stays in coordinates according to view without changing size
-            painter.setTransform(QtGui.QTransform(1, 0, t.m13(),
-                                                  t.m21(), 1, t.m23(),
-                                                  0, 0, t.m33()))
-        painter.drawPicture(QtCore.QPoint(0, 0), self.picture)
-
-    def boundingRect(self):
-        return QtCore.QRectF(0, 0, self.max_x, self.max_y)
-
-
 class TextItemList(pg.GraphicsObject):
     """
     Allows for a list of TextItems without having to constantly add items to a widget
@@ -599,7 +522,7 @@ class RightOptionsTab(QtWidgets.QTabWidget):
         self.settings = SettingsWidget(gui=gui, parent=None)
 
         self.index = 0
-        self.maximized = False
+        self.maximized = True
         self.setFixedWidth(250)
         self.addTab(self.hist, 'Levels')
         self.addTab(self.param_manager, 'Fit Parameters')
@@ -697,8 +620,8 @@ class PlateparParameterManager(QtWidgets.QWidget):
 
         hbox = QtWidgets.QHBoxLayout()
         self.alt_centre = DoubleSpinBox()
-        self.alt_centre.setMinimum(-360)
-        self.alt_centre.setMaximum(360)
+        self.alt_centre.setMinimum(-90)
+        self.alt_centre.setMaximum(90)
         self.alt_centre.setDecimals(8)
         self.alt_centre.setSingleStep(1)
         self.alt_centre.setFixedWidth(100)
@@ -796,52 +719,52 @@ class PlateparParameterManager(QtWidgets.QWidget):
 
     def onLatChanged(self):
         self.gui.platepar.lat = self.lat.value()
-        self.gui.view_widget.setFocus()
+        # self.gui.view_widget.setFocus()
         self.sigLocationChanged.emit()
 
     def onLonChanged(self):
         self.gui.platepar.lon = self.lon.value()
-        self.gui.view_widget.setFocus()
+        # self.gui.view_widget.setFocus()
         self.sigLocationChanged.emit()
 
     def onElevChanged(self):
         self.gui.platepar.elev = self.elev.value()
-        self.gui.view_widget.setFocus()
+        # self.gui.view_widget.setFocus()
         self.sigElevChanged.emit()
 
     def onAzChanged(self):
         self.gui.platepar.az_centre = self.az_centre.value()
-        self.gui.view_widget.setFocus()
+        # self.gui.view_widget.setFocus()
         self.sigAzAltChanged.emit()
 
     def onAltChanged(self):
         self.gui.platepar.alt_centre = self.alt_centre.value()
-        self.gui.view_widget.setFocus()
+        # self.gui.view_widget.setFocus()
         self.sigAzAltChanged.emit()
 
     def onRotChanged(self):
         self.gui.platepar.rotation_from_horiz = self.rotation_from_horiz.value()
-        self.gui.view_widget.setFocus()
+        # self.gui.view_widget.setFocus()
         self.sigRotChanged.emit()
 
     def onScaleChanged(self):
         self.gui.platepar.F_scale = self.F_scale.value()*60
-        self.gui.view_widget.setFocus()
+        # self.gui.view_widget.setFocus()
         self.sigScaleChanged.emit()
 
     def onExtinctionChanged(self):
         self.gui.platepar.extinction_scale = self.extinction_scale.value()
-        self.gui.view_widget.setFocus()
+        # self.gui.view_widget.setFocus()
         self.sigExtinctionChanged.emit()
 
     def onFitParametersChanged(self):
         # fit parameter object updates platepar by itself
-        self.gui.view_widget.setFocus()
+        # self.gui.view_widget.setFocus()
         self.sigFitParametersChanged.emit()
 
     def onIndexChanged(self):
         text = self.distortion_type.currentText()
-        self.gui.view_widget.setFocus()
+        # self.gui.view_widget.setFocus()
         self.gui.platepar.setDistortionType(text, reset_params=False)
 
         if text == 'poly3+radial':
@@ -973,6 +896,7 @@ class SettingsWidget(QtWidgets.QTabWidget):
     sigCalStarsToggled = QtCore.pyqtSignal()
     sigDistortionToggled = QtCore.pyqtSignal()
     sigInvertToggled = QtCore.pyqtSignal()
+    sigGridToggled = QtCore.pyqtSignal()
 
     def __init__(self, gui, parent=None):
         QtWidgets.QTabWidget.__init__(self, parent)
@@ -1007,6 +931,11 @@ class SettingsWidget(QtWidgets.QTabWidget):
         self.updateShowDistortion()
         vbox.addWidget(self.distortion)
 
+        self.grid = QtWidgets.QCheckBox('Show Celestial Grid')
+        self.grid.released.connect(self.sigGridToggled.emit)
+        self.updateShowGrid()
+        vbox.addWidget(self.grid)
+
         self.invert = QtWidgets.QCheckBox('Invert Colors')
         self.invert.released.connect(self.sigInvertToggled.emit)
         try:
@@ -1036,6 +965,13 @@ class SettingsWidget(QtWidgets.QTabWidget):
         self.lim_mag.valueModified.connect(self.onLimMagChanged)
         form.addRow(QtWidgets.QLabel('Lim Mag'), self.lim_mag)
 
+        self.std = DoubleSpinBox()
+        self.std.setSingleStep(0.1)
+        self.std.setMinimum(0)
+        self.std.setValue(self.gui.stdev_text_filter)
+        self.std.valueModified.connect(self.onStdChanged)
+        form.addRow(QtWidgets.QLabel('Filter Res Std'), self.std)
+
 
     def updateMaxAvePixel(self):
         self.ave_pixel.setChecked(self.gui.img_type_flag == 'avepixel')
@@ -1049,6 +985,9 @@ class SettingsWidget(QtWidgets.QTabWidget):
 
     def updateShowDistortion(self):
         self.distortion.setChecked(self.gui.draw_distortion)
+
+    def updateShowGrid(self):
+        self.grid.setChecked(self.gui.grid_visible)
 
     def updateInvertColours(self):
         self.invert.setChecked(self.gui.img.invert_img)
@@ -1070,6 +1009,10 @@ class SettingsWidget(QtWidgets.QTabWidget):
         self.gui.catalog_stars = self.gui.loadCatalogStars(self.gui.cat_lim_mag)
         self.gui.updateLeftLabels()
         self.gui.updateStars()
+
+    def onStdChanged(self):
+        self.gui.stdev_text_filter = self.std.value()
+        self.gui.photometry()
 
 
 # https://jdreaver.com/posts/2014-07-28-scientific-notation-spin-box-pyside.html
