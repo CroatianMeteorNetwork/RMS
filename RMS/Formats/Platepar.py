@@ -34,9 +34,14 @@ import datetime
 import numpy as np
 import scipy.optimize
 
-from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
+from RMS.Astrometry.Conversions import date2JD, jd2Date
 import RMS.Astrometry.ApplyAstrometry
 from RMS.Math import angularSeparation
+
+# Import Cython functions
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+from RMS.Astrometry.CyFunctions import trueRaDec2ApparentAltAz
 
 
 
@@ -515,8 +520,11 @@ class Platepar(object):
         # Update fitted astrometric parameters
         self.RA_d, self.dec_d, self.pos_angle_ref, self.F_scale = res.x
 
-        # Recalculate FOV centre
-        self.az_centre, self.alt_centre = raDec2AltAz(self.RA_d, self.dec_d, self.JD, self.lat, self.lon)
+        # Compute reference Alt/Az to apparent coordinates, epoch of date
+        az_centre, alt_centre = trueRaDec2ApparentAltAz( \
+            np.radians(self.RA_d), np.radians(self.dec_d), self.JD, \
+            np.radians(self.lat), np.radians(self.lon), self.refraction)
+        self.az_centre, self.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
 
         ### ###
 
