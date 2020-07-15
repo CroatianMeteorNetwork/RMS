@@ -34,9 +34,15 @@ import datetime
 import numpy as np
 import scipy.optimize
 
+from RMS.Astrometry.ApplyAstrometry import rotationWrtHorizon, rotationWrtHorizonToPosAngle, \
+    raDecToXYPP, xyToRaDecPP
 from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
-import RMS.Astrometry.ApplyAstrometry
 from RMS.Math import angularSeparation
+
+
+import pyximport
+pyximport.install(setup_args={'include_dirs': [np.get_include()]})
+from RMS.Astrometry.CyFunctions import apparentAltAz2TrueRADec, trueRaDec2ApparentAltAz
 
 
 
@@ -101,7 +107,7 @@ def getCatalogStarsImagePositions(catalog_stars, jd, platepar):
     ra_catalog, dec_catalog, mag_catalog = catalog_stars.T
 
     # Convert star RA, Dec to image coordinates
-    x_array, y_array = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(ra_catalog, dec_catalog, jd, platepar)
+    x_array, y_array = raDecToXYPP(ra_catalog, dec_catalog, jd, platepar)
 
     return x_array, y_array, mag_catalog
 
@@ -120,7 +126,7 @@ def getPairedStarsSkyPositions(img_x, img_y, jd, platepar):
 
     # Compute RA, Dec of image stars
     img_time = jd2Date(jd)
-    _, ra_array, dec_array, _ = RMS.Astrometry.ApplyAstrometry.xyToRaDecPP(len(img_x)*[img_time], img_x,
+    _, ra_array, dec_array, _ = xyToRaDecPP(len(img_x)*[img_time], img_x,
         img_y, len(img_x)*[1], platepar, extinction_correction=False)
 
     return ra_array, dec_array
@@ -502,7 +508,6 @@ class Platepar(object):
 
         # Recalculate FOV centre
         self.az_centre, self.alt_centre = raDec2AltAz(self.RA_d, self.dec_d, self.JD, self.lat, self.lon)
-
         ### ###
 
 
@@ -728,7 +733,7 @@ class Platepar(object):
 
         # Add rotation from horizontal
         if not 'rotation_from_horiz' in self.__dict__:
-            self.rotation_from_horiz = RMS.Astrometry.ApplyAstrometry.rotationWrtHorizon(self)
+            self.rotation_from_horiz = rotationWrtHorizon(self)
 
         # Calculate the datetime
         self.time = jd2Date(self.JD, dt_obj=True)
@@ -966,6 +971,24 @@ class Platepar(object):
 
         return fmt
 
+    def updateRefRADec(self, skip_rot_update=False):
+        """ Update the reference RA and Dec (true in J2000) from Alt/Az (apparent in epoch of date). """
+
+        if not skip_rot_update:
+            # Save the current rotation w.r.t horizon value
+            self.rotation_from_horiz = rotationWrtHorizon(self)
+
+        # Convert the reference apparent Alt/Az in the epoch of date to true RA/Dec in J2000
+        ra, dec = apparentAltAz2TrueRADec(
+            self.az_centre, self.alt_centre, self.JD, self.lat, self.lon, self.refraction)
+
+        # Assign the computed RA/Dec to platepar
+        self.RA_d = ra
+        self.dec_d = dec
+
+        if not skip_rot_update:
+            # Update the position angle so that the rotation wrt horizon doesn't change
+            self.pos_angle_ref = rotationWrtHorizonToPosAngle(self, self.rotation_from_horiz)
 
     def __repr__(self):
 
@@ -1049,14 +1072,14 @@ if __name__ == "__main__":
         time_data = [2020, 5, 30, 1, 20, 34, 567]
 
         # Map to RA/Dec
-        jd_data, ra_data, dec_data, _ = RMS.Astrometry.ApplyAstrometry.xyToRaDecPP([time_data], [x_img], \
+        jd_data, ra_data, dec_data, _ = xyToRaDecPP([time_data], [x_img], \
             [y_img], [1], pp, extinction_correction=False)
 
         # Map back to X, Y
-        x_data, y_data = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(ra_data, dec_data, jd_data[0], pp)
+        x_data, y_data = raDecToXYPP(ra_data, dec_data, jd_data[0], pp)
 
         # Map forward to sky again
-        _, ra_data_rev, dec_data_rev, _ = RMS.Astrometry.ApplyAstrometry.xyToRaDecPP([time_data], x_data, \
+        _, ra_data_rev, dec_data_rev, _ = xyToRaDecPP([time_data], x_data, \
             y_data, [1], pp, extinction_correction=False)
 
 

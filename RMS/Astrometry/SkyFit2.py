@@ -9,6 +9,8 @@ import datetime
 import argparse
 import traceback
 import copy
+import cProfile
+import pstats
 
 import numpy as np
 import matplotlib
@@ -40,7 +42,7 @@ from RMS.Routines import Image
 from RMS.Math import angularSeparation
 from RMS.Misc import decimalDegreesToSexHours, openFileDialog
 from RMS.Astrometry.Conversions import J2000_JD, date2JD, JD2HourAngle, raDec2AltAz, altAz2RADec
-from RMS.Routines.AddCelestialGrid import updateEquatorialGrid
+from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 
 import pyximport
 
@@ -430,9 +432,15 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img_frame.addItem(self.distortion_lines)
         self.distortion_lines.setZValue(2)
 
-        self.grid_visible = True
+        self.grid_visible = 1
         self.celestial_grid = pg.PlotCurveItem(pen=pg.mkPen((255, 255, 255, 255), style=QtCore.Qt.DotLine))
-        updateEquatorialGrid(self.celestial_grid, self.platepar)
+        # pr=cProfile.Profile()
+        # pr.enable()
+        self.onGridChanged()
+        # pr.disable()
+        # ps = pstats.Stats(pr, stream=sys.stdout).sort_stats('time')
+        # ps.print_stats()
+
         self.celestial_grid.setZValue(1)
         self.img_frame.addItem(self.celestial_grid)
 
@@ -485,22 +493,21 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigCatStarsToggled.connect(self.toggleShowCatStars)
         self.tab.settings.sigCalStarsToggled.connect(self.toggleShowCalStars)
         self.tab.settings.sigDistortionToggled.connect(self.toggleDistortion)
-        self.tab.settings.sigGridToggled.connect(self.toggleGrid)
+        self.tab.settings.sigGridToggled.connect(self.onGridChanged)
         self.tab.settings.sigInvertToggled.connect(self.toggleInvertColours)
 
         layout.addWidget(self.tab, 0, 2)
 
         # mouse binding
         self.img_frame.scene().sigMouseMoved.connect(self.onMouseMoved)
-        self.img_frame.scene().sigMouseClicked.connect(
-            self.onMouseClicked)  # NOTE: clicking event doesnt trigger if moving
+        # NOTE: clicking event doesnt trigger if moving
+        self.img_frame.scene().sigMouseClicked.connect(self.onMouseClicked)
         self.img_frame.sigResized.connect(self.onFrameResize)
 
         self.scrolls_back = 0
 
         self.setMinimumSize(1200, 800)
         self.show()
-
         self.updateLeftLabels()
         self.star_pick_info.setPos(self.img_frame.width()/2, self.img_frame.height() - 50)
 
@@ -508,16 +515,26 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateStars()
         self.updateLeftLabels()
 
+    def onGridChanged(self):
+        if self.grid_visible == 0:
+            self.celestial_grid.hide()
+        elif self.grid_visible == 1:
+            self.celestial_grid.show()
+            updateRaDecGrid(self.celestial_grid, self.platepar)
+        else:
+            self.celestial_grid.show()
+            updateAzAltGrid(self.celestial_grid, self.platepar)
+
     def onScaleChanged(self):
         self.updateFitResiduals()
-        updateEquatorialGrid(self.celestial_grid, self.platepar)
+        self.onGridChanged()
         self.updateStars()
         self.updateLeftLabels()
 
     def onFitParametersChanged(self):
         self.updateDistortion()
         self.updateStars()
-        updateEquatorialGrid(self.celestial_grid, self.platepar)
+        self.onGridChanged()
         self.updateLeftLabels()
 
     def onExtinctionChanged(self):
@@ -525,17 +542,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateLeftLabels()
 
     def onAzAltChanged(self):
-        self.updateRefRADec()
+        self.platepar.updateRefRADec()
         self.updateStars()
         self.updateLeftLabels()
-        updateEquatorialGrid(self.celestial_grid, self.platepar)
+        self.onGridChanged()
 
     def onRotChanged(self):
         self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar,
                                                                    self.platepar.rotation_from_horiz)
         self.updateStars()
         self.updateLeftLabels()
-        updateEquatorialGrid(self.celestial_grid, self.platepar)
+        self.onGridChanged()
 
     def mouseOverStatus(self, x, y):
         """ Format the status message which will be printed in the status bar below the plot.
@@ -568,9 +585,10 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute alt, az
             azim, alt = raDec2AltAz(np.degrees(ra_date), np.degrees(dec_date), jd[0], self.platepar.lat,
                                     self.platepar.lon)
-
-            status_str += ",  Azim={:6.2f}  Alt={:6.2f} (date),  RA={:6.2f}  Dec={:+6.2f} (J2000)".format(
-                azim, alt, ra[0], dec[0])
+            azim2, alt2 = trueRaDec2ApparentAltAz(np.degrees(ra_date), np.degrees(dec_date), jd[0], self.platepar.lat,
+                                self.platepar.lon, self.platepar.refraction)
+            status_str += ",  Azim={:6.2f}  Alt={:6.2f} (date),  RA={:6.2f}  Dec={:+6.2f} (J2000) az={:6.2f} alt={:+6.2f}".format(
+                azim, alt, ra[0], dec[0],azim2, alt2)
 
         return status_str
 
@@ -798,6 +816,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateStars()
         self.updateLeftLabels()
         self.updateFitResiduals()
+        self.onGridChanged()
         self.updateDistortion()
 
     def updatePairedStars(self):
@@ -1251,26 +1270,6 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             print('Need more than 2 stars for photometry plot!')
 
-    def updateRefRADec(self, skip_rot_update=False):
-        """ Update the reference RA and Dec (true in J2000) from Alt/Az (apparent in epoch of date). """
-
-        if not skip_rot_update:
-            # Save the current rotation w.r.t horizon value
-            self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
-
-        # Convert the reference apparent Alt/Az in the epoch of date to true RA/Dec in J2000
-        ra, dec = apparentAltAz2TrueRADec(
-            np.radians(self.platepar.az_centre), np.radians(self.platepar.alt_centre), self.platepar.JD,
-            np.radians(self.platepar.lat), np.radians(self.platepar.lon))
-
-        # Assign the computed RA/Dec to platepar
-        self.platepar.RA_d = np.degrees(ra)
-        self.platepar.dec_d = np.degrees(dec)
-
-        if not skip_rot_update:
-            # Update the position angle so that the rotation wrt horizon doesn't change
-            self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar,
-                                                                       self.platepar.rotation_from_horiz)
 
     def keyPressEvent(self, event):
         modifiers = QtWidgets.QApplication.keyboardModifiers()
@@ -1412,7 +1411,8 @@ class PlateTool(QtWidgets.QMainWindow):
             print('Plate fitted!')
 
         elif event.key() == QtCore.Qt.Key_G and modifiers == QtCore.Qt.ControlModifier:
-            self.toggleGrid()
+            self.grid_visible = (self.grid_visible + 1)%3
+            self.onGridChanged()
             self.tab.settings.updateShowGrid()
 
         elif event.key() == QtCore.Qt.Key_Left:
@@ -1427,36 +1427,36 @@ class PlateTool(QtWidgets.QMainWindow):
 
         elif event.key() == QtCore.Qt.Key_A:
             self.platepar.az_centre += self.key_increment
-            self.updateRefRADec()
+            self.platepar.updateRefRADec()
 
-            updateEquatorialGrid(self.celestial_grid, self.platepar)
+            self.onGridChanged()
             self.tab.param_manager.updatePlatepar()
             self.updateLeftLabels()
             self.updateStars()
 
         elif event.key() == QtCore.Qt.Key_D:
             self.platepar.az_centre -= self.key_increment
-            self.updateRefRADec()
+            self.platepar.updateRefRADec()
 
-            updateEquatorialGrid(self.celestial_grid, self.platepar)
+            self.onGridChanged()
             self.tab.param_manager.updatePlatepar()
             self.updateLeftLabels()
             self.updateStars()
 
         elif event.key() == QtCore.Qt.Key_W:
             self.platepar.alt_centre -= self.key_increment
-            self.updateRefRADec()
+            self.platepar.updateRefRADec()
 
-            updateEquatorialGrid(self.celestial_grid, self.platepar)
+            self.onGridChanged()
             self.tab.param_manager.updatePlatepar()
             self.updateLeftLabels()
             self.updateStars()
 
         elif event.key() == QtCore.Qt.Key_S:
             self.platepar.alt_centre += self.key_increment
-            self.updateRefRADec()
+            self.platepar.updateRefRADec()
 
-            updateEquatorialGrid(self.celestial_grid, self.platepar)
+            self.onGridChanged()
             self.tab.param_manager.updatePlatepar()
             self.updateLeftLabels()
             self.updateStars()
@@ -1676,10 +1676,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Compute reference Alt/Az to apparent coordinates, epoch of date
                 az_centre, alt_centre = trueRaDec2ApparentAltAz(
-                    np.radians(self.platepar.RA_d), np.radians(self.platepar.dec_d), self.platepar.JD,
-                    np.radians(self.platepar.lat), np.radians(self.platepar.lon))
+                    self.platepar.RA_d, self.platepar.dec_d, self.platepar.JD,
+                    self.platepar.lat, self.platepar.lon, self.platepar.refraction)
 
-                self.platepar.az_centre, self.platepar.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
+                self.platepar.az_centre, self.platepar.alt_centre = az_centre, alt_centre
 
                 # Compute the position angle
                 self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar,
@@ -1830,13 +1830,6 @@ class PlateTool(QtWidgets.QMainWindow):
         ### UPDATE IMAGE ###
         self.img.selectImage(self.img_type_flag)
         self.img_zoom.selectImage(self.img_type_flag)
-
-    def toggleGrid(self):
-        self.grid_visible = not self.grid_visible
-        if self.grid_visible:
-            self.celestial_grid.show()
-        else:
-            self.celestial_grid.hide()
 
     def toggleShowCatStars(self):
         """ Toggle between showing catalog stars and not """
@@ -2041,7 +2034,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.az_centre = azim
         self.platepar.alt_centre = alt
 
-        self.updateRefRADec(skip_rot_update=True)
+        self.platepar.updateRefRADec(skip_rot_update=True)
 
         # Save the current rotation w.r.t horizon value
         self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
@@ -2502,8 +2495,7 @@ class PlateTool(QtWidgets.QMainWindow):
             dec_img = dec_img[0]
 
             # Compute the angular distance in degrees
-            angular_distance = np.degrees(angularSeparation(np.radians(ra), np.radians(dec),
-                                                            np.radians(ra_img), np.radians(dec_img)))
+            angular_distance = angularSeparation(ra, dec, ra_img, dec_img)
 
             residuals.append([img_x, img_y, angle, distance, angular_distance])
 
@@ -2539,6 +2531,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateLeftLabels()
         self.updateStars()
         self.updateFitResiduals()
+        self.onGridChanged()
         self.tab.param_manager.updatePlatepar()
 
     def updateFitResiduals(self):
@@ -2625,8 +2618,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute sky coordinates
             cat_ra, cat_dec, _ = cat_coords
-            cat_ang_separation = np.degrees(angularSeparation(np.radians(cat_ra), np.radians(cat_dec),
-                                                              np.radians(ra_centre), np.radians(dec_centre)))
+            cat_ang_separation = angularSeparation(cat_ra, cat_dec, ra_centre, dec_centre)
 
             # Compute RA/Dec from image
             _, img_ra, img_dec, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar,
@@ -2646,8 +2638,7 @@ class PlateTool(QtWidgets.QMainWindow):
                                     - img_radius)
 
             # Compute sky residuals
-            img_ang_separation = np.degrees(angularSeparation(np.radians(img_ra), np.radians(img_dec),
-                                                              np.radians(ra_centre), np.radians(dec_centre)))
+            img_ang_separation = angularSeparation(img_ra, img_dec, ra_centre, dec_centre)
             skyradius_residuals.append(cat_ang_separation - img_ang_separation)
 
             # # Correct the catalog RA/Dec for refraction

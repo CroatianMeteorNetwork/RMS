@@ -474,6 +474,12 @@ class HistogramLUTWidget(pg.HistogramLUTWidget):
                 self.setLevels(self.getLevels()[0], pos.y())
 
 
+class CelestialGrid(pg.PlotCurveItem):
+    def __int__(self):
+        pg.PlotCurveItem.__init__(self, pen=pg.mkPen((255, 255, 255, 255), style=QtCore.Qt.DotLine))
+        # self.
+
+
 class HistogramLUTItem(pg.HistogramLUTItem):
     def __init__(self, *args, **kwargs):
         pg.HistogramLUTItem.__init__(self, *args, **kwargs)
@@ -907,11 +913,14 @@ class SettingsWidget(QtWidgets.QTabWidget):
         self.setLayout(vbox)
 
         hbox = QtWidgets.QHBoxLayout()
+        pixel_group = QtWidgets.QButtonGroup(self)
         self.ave_pixel = QtWidgets.QRadioButton('avepixel')
         self.max_pixel = QtWidgets.QRadioButton('maxpixel')
         self.updateMaxAvePixel()
         self.ave_pixel.released.connect(self.sigMaxAveToggled.emit)
         self.max_pixel.released.connect(self.sigMaxAveToggled.emit)
+        pixel_group.addButton(self.ave_pixel)
+        pixel_group.addButton(self.max_pixel)
         hbox.addWidget(self.ave_pixel)
         hbox.addWidget(self.max_pixel)
         vbox.addLayout(hbox)
@@ -931,10 +940,18 @@ class SettingsWidget(QtWidgets.QTabWidget):
         self.updateShowDistortion()
         vbox.addWidget(self.distortion)
 
-        self.grid = QtWidgets.QCheckBox('Show Celestial Grid')
-        self.grid.released.connect(self.sigGridToggled.emit)
+
+        hbox = QtWidgets.QHBoxLayout()
+        grid_group = QtWidgets.QButtonGroup()
+        self.grid = []
+        for i, text in enumerate(['None', 'RaDec Grid', 'AzAlt Grid']):
+            button = QtWidgets.QRadioButton(text)
+            grid_group.addButton(button)
+            button.released.connect(self.onGridChanged)
+            hbox.addWidget(button)
+            self.grid.append(button)
         self.updateShowGrid()
-        vbox.addWidget(self.grid)
+        vbox.addLayout(hbox)
 
         self.invert = QtWidgets.QCheckBox('Invert Colors')
         self.invert.released.connect(self.sigInvertToggled.emit)
@@ -972,7 +989,6 @@ class SettingsWidget(QtWidgets.QTabWidget):
         self.std.valueModified.connect(self.onStdChanged)
         form.addRow(QtWidgets.QLabel('Filter Res Std'), self.std)
 
-
     def updateMaxAvePixel(self):
         self.ave_pixel.setChecked(self.gui.img_type_flag == 'avepixel')
         self.max_pixel.setChecked(self.gui.img_type_flag == 'maxpixel')
@@ -987,7 +1003,8 @@ class SettingsWidget(QtWidgets.QTabWidget):
         self.distortion.setChecked(self.gui.draw_distortion)
 
     def updateShowGrid(self):
-        self.grid.setChecked(self.gui.grid_visible)
+        for i, button in enumerate(self.grid):
+            button.setChecked(self.gui.grid_visible == i)
 
     def updateInvertColours(self):
         self.invert.setChecked(self.gui.img.invert_img)
@@ -1003,6 +1020,15 @@ class SettingsWidget(QtWidgets.QTabWidget):
         self.gui.img_zoom.setGamma(self.img_gamma.value())
         self.gui.updateLeftLabels()
         self.updateImageGamma()  # gamma may be changed by setGamma
+
+    def onGridChanged(self):
+        if self.grid[0].isChecked():
+            self.gui.grid_visible = 0
+        elif self.grid[1].isChecked():
+            self.gui.grid_visible = 1
+        else:
+            self.gui.grid_visible = 2
+        self.sigGridToggled.emit()
 
     def onLimMagChanged(self):
         self.gui.cat_lim_mag = self.lim_mag.value()

@@ -35,13 +35,11 @@ import argparse
 import numpy as np
 import scipy.optimize
 
-from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz, raDec2AltAz_vect, J2000_JD
+from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz, J2000_JD
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
-import RMS.Formats.Platepar
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Math import angularSeparation
-import Utils.RMS2UFO
 
 
 # Import Cython functions
@@ -346,12 +344,12 @@ def rotationWrtHorizon(platepar):
     img_up_h = img_mid_h
 
     # Compute apparent alt/az in the epoch of date from X,Y
-    jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP(2*[jd2Date(platepar.JD)], [img_mid_w, img_up_w], \
+    jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP(2*[jd2Date(platepar.JD)], [img_mid_w, img_up_w],
         [img_mid_h, img_up_h], [1, 1], platepar, extinction_correction=False)
-    azim_mid, alt_mid = trueRaDec2ApparentAltAz(np.radians(ra_arr[0]), np.radians(dec_arr[0]), jd_arr[0], \
-        np.radians(platepar.lat), np.radians(platepar.lon))
-    azim_up, alt_up = trueRaDec2ApparentAltAz(np.radians(ra_arr[1]), np.radians(dec_arr[1]), jd_arr[1], \
-        np.radians(platepar.lat), np.radians(platepar.lon))
+    azim_mid, alt_mid = trueRaDec2ApparentAltAz(ra_arr[0], dec_arr[0], jd_arr[0], platepar.lat, platepar.lon,
+                                                platepar.refraction)
+    azim_up, alt_up = trueRaDec2ApparentAltAz(ra_arr[1], dec_arr[1], jd_arr[1], platepar.lat, platepar.lon,
+                                              platepar.refraction)
 
     # Compute the rotation wrt horizon (deg)
     rot_angle = np.degrees(np.arctan2(alt_up - alt_mid, azim_up - azim_mid))
@@ -730,7 +728,7 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
 
 
 if __name__ == "__main__":
-
+    import Utils.RMS2UFO  # TODO: may result in circular imports, put this main in a different file
 
     ### COMMAND LINE ARGUMENTS
 

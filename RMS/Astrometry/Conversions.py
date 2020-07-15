@@ -43,7 +43,7 @@ from RMS.Math import vectMag, vectNorm
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import cyraDec2AltAz
+from RMS.Astrometry.CyFunctions import cyraDec2AltAz, cyaltAz2RADec, cyraDec2AltAz_vect, cyaltAz2RADec_vect
 
 
 ### CONSTANTS ###
@@ -408,27 +408,14 @@ def altAz2RADec(azim, elev, jd, lat, lon):
             dec: [float] declination (degrees)
     """
 
-    azim = np.radians(azim)
-    elev = np.radians(elev)
-    lat = np.radians(lat)
-    lon = np.radians(lon)
+    if isinstance(azim, float) or isinstance(azim, int) or isinstance(azim, np.float64):
+        ra, dec = cyaltAz2RADec(azim, elev, jd, lat, lon)
+    elif isinstance(azim, np.ndarray):
+        ra, dec = cyaltAz2RADec_vect(azim, elev, jd, lat, lon)
+    else:
+        raise TypeError("azim must be a number or np.ndarray, given: {}".format(type(azim)))
 
-    # Calculate hour angle
-    ha = np.arctan2(-np.sin(azim), np.tan(elev)*np.cos(lat) - np.cos(azim)*np.sin(lat))
-
-    # Calculate Local Sidereal Time
-    lst = np.radians(JD2LST(jd, np.degrees(lon))[0])
-
-    # Calculate right ascension
-    ra = (lst - ha)%(2*np.pi)
-
-    # Calculate declination
-    dec = np.arcsin(np.sin(lat)*np.sin(elev) + np.cos(lat)*np.cos(elev)*np.cos(azim))
-
-    return np.degrees(ra), np.degrees(dec)
-
-# Vectorize the raDec2AltAz function so it can take numpy arrays for: ra, dec, jd
-altAz2RADec_vect = np.vectorize(altAz2RADec, excluded=['lat', 'lon'])
+    return ra, dec
 
 
 def raDec2AltAz(ra, dec, jd, lat, lon):
@@ -444,19 +431,14 @@ def raDec2AltAz(ra, dec, jd, lat, lon):
     """
 
     # Compute azim and elev using a fast cython function
-    azim, elev = cyraDec2AltAz(np.radians(ra), np.radians(dec), jd, np.radians(lat), np.radians(lon))
-
-
-    # Convert alt/az to degrees
-    azim = np.degrees(azim)
-    elev = np.degrees(elev)
+    if isinstance(ra, float) or isinstance(ra, int) or isinstance(ra, np.float64):
+        azim, elev = cyraDec2AltAz(ra, dec, jd, lat, lon)
+    elif isinstance(ra, np.ndarray):
+        azim, elev = cyraDec2AltAz_vect(ra, dec, jd, lat, lon)
+    else:
+        raise TypeError("ra must be a number or np.ndarray, given: {}".format(type(ra)))
 
     return azim, elev
-
-
-# Vectorize the raDec2AltAz function so it can take numpy arrays for: ra, dec, jd
-raDec2AltAz_vect = np.vectorize(raDec2AltAz, excluded=['lat', 'lon'])
-
 
 
 def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, include_rotation=True):
