@@ -692,8 +692,8 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
 
         # Force the distortion centre to the image centre
         if force_distortion_centre:
-            x0 = 0.0
-            y0 = 0.0
+            x0 = 0.5
+            y0 = 0.5
         else:
             # Read distortion offsets
             x0 = x_poly_rev[0]
@@ -900,8 +900,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
         # Force the distortion centre to the image centre
         if force_distortion_centre:
-            x0 = 0.0
-            y0 = 0.0
+            x0 = 0.5
+            y0 = 0.5
         else:
             # Read distortion offsets
             x0 = x_poly_fwd[0]

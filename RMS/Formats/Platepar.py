@@ -580,8 +580,8 @@ class Platepar(object):
 
                 # Force distortion centre to image centre
                 if self.force_distortion_centre:
-                    self.x_poly_rev[0] = 0
-                    self.x_poly_rev[1] = 0
+                    self.x_poly_rev[0] = 0.5
+                    self.x_poly_rev[1] = 0.5
 
                 # Force aspect ratio to 0 if axes are set to be equal
                 if self.equal_aspect:
@@ -639,8 +639,8 @@ class Platepar(object):
 
                 # Force distortion centre to image centre
                 if self.force_distortion_centre:
-                    self.x_poly_fwd[0] = 0
-                    self.x_poly_fwd[1] = 0
+                    self.x_poly_fwd[0] = 0.5
+                    self.x_poly_fwd[1] = 0.5
 
                 # Force aspect ratio to 0 if axes are set to be equal
                 if self.equal_aspect:
