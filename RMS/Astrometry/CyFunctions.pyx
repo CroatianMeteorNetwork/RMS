@@ -630,7 +630,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data, double jd, double lat, double lon, double x_res, \
     double y_res, double h0, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, \
-    str dist_type, bool refraction=True, bool equal_aspect=False):
+    str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False):
     """ Convert RA, Dec to distorion corrected image coordinates. 
 
     Arguments:
@@ -649,9 +649,13 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
         x_poly_rev: [ndarray float] Distortion polynomial in X direction for reverse mapping.
         y_poly_rev: [ndarray float] Distortion polynomail in Y direction for reverse mapping.
         dist_type: [str] Distortion type. Can be: poly3+radial, radial3, radial4, or radial5.
+        
+    Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
         equal_aspect: [bool] Force the X/Y aspect ratio to be equal. Used only for radial distortion. \
             False by default.
+        force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
+
     
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
@@ -685,14 +689,20 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     # If the radial distortion is used, unpack radial parameters
     if dist_type.startswith("radial"):
 
-        # Offsets
-        x0 = x_poly_rev[0]
-        y0 = x_poly_rev[1]
+
+        # Force the distortion centre to the image centre
+        if force_distortion_centre:
+            x0 = 0.0
+            y0 = 0.0
+        else:
+            # Read distortion offsets
+            x0 = x_poly_rev[0]
+            y0 = x_poly_rev[1]
+
 
         # Aspect ratio
         if equal_aspect:
             xy = 0.0
-
         else:
             xy = x_poly_rev[2]
 
@@ -838,7 +848,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_data, double lat, double lon, double x_res, double y_res, \
     double h0, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
-    str dist_type, bool refraction=True, bool equal_aspect=False):
+    str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False):
     """
     Arguments:
         jd_data: [ndarray] Julian date of each data point.
@@ -856,9 +866,12 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         x_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward X axis polynomial parameters.
         y_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward Y axis polynomial parameters.
         dist_type: [str] Distortion type. Can be: poly3+radial, radial3, radial4, or radial5.
+        
+    Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
         equal_aspect: [bool] Force the X/Y aspect ratio to be equal. Used only for radial distortion. \
             False by default.
+        force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
     
     Return:
         (ra_data, dec_data): [tuple of ndarrays]
@@ -885,15 +898,21 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     # If the radial distortion is used, unpack radial parameters
     if dist_type.startswith("radial"):
 
-        # Offsets
-        x0 = x_poly_fwd[0]
-        y0 = x_poly_fwd[1]
+        # Force the distortion centre to the image centre
+        if force_distortion_centre:
+            x0 = 0.0
+            y0 = 0.0
+        else:
+            # Read distortion offsets
+            x0 = x_poly_fwd[0]
+            y0 = x_poly_fwd[1]
+
 
         # Aspect ratio
         if equal_aspect:
             xy = 0.0
-
         else:
+            # Read aspect ratio
             xy = x_poly_fwd[2]
 
 

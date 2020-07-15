@@ -1498,6 +1498,16 @@ class PlateTool(object):
                 self.updateImage()
 
 
+        # Toggle forcing distortion centre to image centre
+        elif event.key == 'b':
+
+            if self.platepar is not None:
+
+                self.platepar.force_distortion_centre = not self.platepar.force_distortion_centre
+
+                self.updateImage()
+
+
         elif event.key == 'ctrl+h':
 
             # Toggle levels adustment mode
@@ -2061,9 +2071,10 @@ class PlateTool(object):
             text_str += "Distortion type = {:s}\n".format(\
                 self.platepar.distortion_type_list[self.dist_type_index])
 
-            # Add aspect info if the radial distortion is used
+            # Add extra info if the radial distortion is used
             if not self.platepar.distortion_type.startswith("poly"):
                 text_str += "Equal aspect    = {:s}\n".format(str(self.platepar.equal_aspect))
+                text_str += "Force dist cent = {:s}\n".format(str(self.platepar.force_distortion_centre))
 
             text_str += '\n'
             sign, hh, mm, ss = decimalDegreesToSexHours(ra_centre)
@@ -3210,6 +3221,10 @@ if __name__ == '__main__':
         if plate_tool.platepar is not None:
             if not hasattr(plate_tool.platepar, "equal_aspect"):
                 plate_tool.platepar.equal_aspect = False
+
+        if plate_tool.platepar is not None:
+            if not hasattr(plate_tool.platepar, "force_distortion_centre"):
+                plate_tool.platepar.force_distortion_centre = False
 
         if plate_tool.platepar is not None:
             if not hasattr(plate_tool.platepar, "extinction_scale"):
