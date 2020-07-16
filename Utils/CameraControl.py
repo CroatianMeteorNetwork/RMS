@@ -1,7 +1,8 @@
-""" Controls ONVIF-compatible IP camera 
+""" Controls CMS-compatible IP camera 
     This module can read and control the IMX291 Cameras and possibly other IMX cameras
     that comply with the dvrip protocol and can be controlled from CMS.
-    See end of file for list of known field mappings 
+
+    Note:the DVRIP module used by this code requires Python 3.5 or later.
 
     usage 1: 
     Python -m Utils.CameraControl command {opts}
@@ -32,6 +33,11 @@
 """
 
 import sys, os
+if sys.version_info.major < 3 or (sys.version_info.major > 2 and sys.version_info.minor < 5) :
+        print('This module can only be used with Python 3.5 or later')
+        print('Please use CameraControl27 for older versions of Python')
+        exit()
+
 import ipaddress as ip
 import argparse
 import json
@@ -39,18 +45,22 @@ import pprint
 import re
 import RMS.ConfigReader as cr
 from time import sleep
-import importlib  #used to import python-dvr as it has a dash in the name
+import git, importlib  #used to import python-dvr as it has a dash in the name
 
 # if not present, force update of the submodule
 try:
     dvr = importlib.import_module("python-dvr.dvrip")
 except:
     print("updating python-dvr")
-    os.system('git submodule init && git submodule update -f')
+    rmsloc,_= os.path.split(os.path.realpath(__file__))
+    rmsrepo=git.Repo(rmsloc)
+    for sm in rmsrepo.submodules:
+        sm.update(init=True, force=True)
     try:
         dvr = importlib.import_module("python-dvr.dvrip")
     except:
-        print('unable to update python-dvr - do you have internet access?')
+        print('unable to update python-dvr - can\'t continue')
+        exit()
 
 def rebootCamera(cam):
     """Reboot the Camera
