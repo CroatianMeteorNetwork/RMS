@@ -2110,6 +2110,7 @@ class PlateTool(object):
             # Add aspect info if the radial distortion is used
             if not self.platepar.distortion_type.startswith("poly"):
                 text_str += 'G - Toggle equal aspect\n'
+                text_str += 'B - Dist = img centre toggle\n'
 
             text_str += '1/2 - X offset\n'
             text_str += '3/4 - Y offset\n'
