@@ -398,7 +398,7 @@ if __name__ == '__main__':
 
     config = cr.parse('.config')
 
-    if config.deviceID.isdigit():
+    if str(config.deviceID).isdigit():
         print('Error: this utility only works with IP cameras')
         exit(1)
     # extract IP from config file
