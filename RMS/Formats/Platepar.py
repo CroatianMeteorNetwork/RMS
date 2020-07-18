@@ -36,13 +36,8 @@ import scipy.optimize
 
 from RMS.Astrometry.ApplyAstrometry import rotationWrtHorizon, rotationWrtHorizonToPosAngle, \
     raDecToXYPP, xyToRaDecPP
-from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
+from RMS.Astrometry.Conversions import date2JD, jd2Date, trueRaDec2ApparentAltAz, apparentAltAz2TrueRADec
 from RMS.Math import angularSeparation
-
-
-import pyximport
-pyximport.install(setup_args={'include_dirs': [np.get_include()]})
-from RMS.Astrometry.CyFunctions import apparentAltAz2TrueRADec, trueRaDec2ApparentAltAz
 
 
 
@@ -507,7 +502,7 @@ class Platepar(object):
         self.RA_d, self.dec_d, self.pos_angle_ref, self.F_scale = res.x
 
         # Recalculate FOV centre
-        self.az_centre, self.alt_centre = raDec2AltAz(self.RA_d, self.dec_d, self.JD, self.lat, self.lon)
+        self.az_centre, self.alt_centre = trueRaDec2ApparentAltAz(self.RA_d, self.dec_d, self.JD, self.lat, self.lon)
         ### ###
 
 

@@ -35,19 +35,17 @@ import argparse
 import numpy as np
 import scipy.optimize
 
-from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz, J2000_JD
+# from RMS.Formats.Platepar import Platepar
+from RMS.Astrometry.Conversions import date2JD, jd2Date, trueRaDec2ApparentAltAz, J2000_JD
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Math import angularSeparation
 
-
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import cyraDecToXY, cyXYToRADec, equatorialCoordPrecession, \
-    trueRaDec2ApparentAltAz
-
+from RMS.Astrometry.CyFunctions import cyraDecToXY, cyXYToRADec
 
 # Handle Python 2/3 compability
 if sys.version_info.major == 3:
@@ -93,11 +91,8 @@ def extinctionCorrectionTrueToApparent(catalog_mags, ra_data, dec_data, jd, plat
     elevation_data = []
     for ra, dec in zip(ra_data, dec_data):
 
-        # Precess to epoch of date
-        ra, dec = equatorialCoordPrecession(J2000_JD.days, jd, np.radians(ra), np.radians(dec))
-
         # Compute elevation
-        _, elev = raDec2AltAz(np.degrees(ra), np.degrees(dec), jd, platepar.lat, platepar.lon)
+        _, elev = trueRaDec2ApparentAltAz(ra, dec, jd, platepar.lat, platepar.lon)
 
         if elev < 0:
             elev = 0
@@ -139,11 +134,8 @@ def extinctionCorrectionApparentToTrue(mags, x_data, y_data, jd, platepar):
     elevation_data = []
     for ra, dec in zip(ra_data, dec_data):
 
-        # Precess to epoch of date
-        ra, dec = equatorialCoordPrecession(J2000_JD.days, jd, np.radians(ra), np.radians(dec))
-
         # Compute elevation
-        _, elev = raDec2AltAz(np.degrees(ra), np.degrees(dec), jd, platepar.lat, platepar.lon)
+        _, elev = trueRaDec2ApparentAltAz(ra, dec, jd, platepar.lat, platepar.lon)
 
         if elev < 0:
             elev = 0
@@ -636,7 +628,7 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
         dec_tmp = dec_data[i]
 
         # Alt and az are kept in the J2000 epoch, which is the CAMS standard!
-        az_tmp, alt_tmp = raDec2AltAz(ra_tmp, dec_tmp, jd, platepar.lat, platepar.lon)
+        az_tmp, alt_tmp = trueRaDec2ApparentAltAz(ra_tmp, dec_tmp, jd, platepar.lat, platepar.lon)
 
         az_data[i] = az_tmp
         alt_data[i] = alt_tmp
@@ -691,7 +683,7 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
     if platepar is None:
 
         # Load the platepar
-        platepar = RMS.Formats.Platepar.Platepar()
+        platepar = Platepar()
         platepar.read(os.path.join(dir_path, platepar_file), use_flat=None)
 
 

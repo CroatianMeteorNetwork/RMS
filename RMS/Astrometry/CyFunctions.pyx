@@ -28,7 +28,7 @@ cdef double J2000_DAYS = 2451545.0
 
 # Declare math functions
 cdef extern from "math.h":
-    double abs(double)
+    double fabs(double)
     double sin(double)
     double asin(double)
     double cos(double)
@@ -46,14 +46,12 @@ cdef double radians(double deg):
     return deg/180.0*(pi)
 
 
-
 @cython.cdivision(True)
 cdef double degrees(double deg):
     """Converts radians to degrees.
     """
 
     return deg*180.0/pi
-
 
 
 @cython.boundscheck(False)
@@ -164,7 +162,7 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
         if (angularSeparation(ra, dec, ra_c, dec_c) <= radius) and (mag <= mag_limit):
 
             # Compute the local star elevation
-            _, elev = cyraDec2AltAz(ra, dec, jd, lat, lon)
+            _, elev = cyraDec2AltAz(radians(ra), radians(dec), jd, radians(lat), radians(lon))
 
 
             # Only take stars above -20 degrees
@@ -325,7 +323,7 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
     ra_corr = (atan2(A, B) + z + 2*pi)%(2*pi)
 
     # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
-    if (pi/2 - abs(dec)) < radians(0.5):
+    if (pi/2 - fabs(dec)) < radians(0.5):
         dec_corr = acos(sqrt(A**2 + B**2))
     else:
         dec_corr = asin(C)
@@ -333,6 +331,55 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
 
     return ra_corr, dec_corr
 
+@cython.cdivision(True)
+def equatorialCoordPrecession_vect(double start_epoch, double final_epoch, np.ndarray[FLOAT_TYPE_t, ndim=1] ra,
+    np.ndarray[FLOAT_TYPE_t, ndim=1] dec):
+    """ Corrects Right Ascension and Declination from one epoch to another, taking only precession into 
+        account.
+        Implemented from: Jean Meeus - Astronomical Algorithms, 2nd edition, pages 134-135
+    
+    Arguments:
+        start_epoch: [float] Julian date of the starting epoch.
+        final_epoch: [float] Julian date of the final epoch.
+        ra: [float] Input right ascension (radians).
+        dec: [float] Input declination (radians).
+    
+    Return:
+        (ra, dec): [tuple of floats] Precessed equatorial coordinates (radians).
+    """
+
+    cdef double T, t, zeta, z, theta
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] A, B, C, ra_corr, dec_corr
+    cdef np.ndarray[BOOL_TYPE_t, ndim=1] filter
+
+    T = (start_epoch - J2000_DAYS )/36525.0
+    t = (final_epoch - start_epoch)/36525.0
+
+    # Calculate correction parameters in degrees
+    zeta  = ((2306.2181 + 1.39656*T - 0.000139*T**2)*t + (0.30188 - 0.000344*T)*t**2 + 0.017998*t**3)/3600
+    z     = ((2306.2181 + 1.39656*T - 0.000139*T**2)*t + (1.09468 + 0.000066*T)*t**2 + 0.018203*t**3)/3600
+    theta = ((2004.3109 - 0.85330*T - 0.000217*T**2)*t - (0.42665 + 0.000217*T)*t**2 - 0.041833*t**3)/3600
+
+    # Convert parameters to radians
+    zeta  = radians(zeta)
+    z     = radians(z)
+    theta = radians(theta)
+
+    # Calculate the next set of parameters
+    A = np.cos(dec  )*np.sin(ra + zeta)
+    B = cos(theta)*np.cos(dec)*np.cos(ra + zeta) - sin(theta)*np.sin(dec)
+    C = sin(theta)*np.cos(dec)*np.cos(ra + zeta) + cos(theta)*np.sin(dec)
+
+    # Calculate right ascension
+    ra_corr = (np.arctan2(A, B) + z + 2*pi)%(2*pi)
+
+    # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
+    dec_corr = np.arcsin(C)
+
+    # filter = (pi/2 - np.abs(dec)) < radians(0.5)
+    # dec_corr[filter] = np.arccos(np.sqrt(A[filter]**2 + B[filter]**2))
+
+    return ra_corr, dec_corr
 
 
 @cython.cdivision(True)
@@ -360,6 +407,30 @@ cdef double refractionApparentToTrue(double elev):
     # Correct the elevation
     return elev - refraction
 
+
+@cython.cdivision(True)
+cpdef np.ndarray[FLOAT_TYPE_t, ndim=1] refractionApparentToTrue_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] elev):
+    """ Correct the apparent elevation of a star for refraction to true elevation. The temperature and air
+        pressure are assumed to be unknown. 
+        Source: Explanatory Supplement to the Astronomical Almanac (1992), p. 144.
+    Arguments:
+        elev: [float] Apparent elevation (radians).
+    Return:
+        [float] True elevation (radians).
+    """
+
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] refraction
+    cdef np.ndarray[BOOL_TYPE_t, ndim=1] filter
+
+    # Don't apply refraction for elevation below -0.5 deg
+    filter = elev > radians(-0.5)
+
+    # Refraction in radians
+    refraction = np.zeros_like(elev)
+    refraction[filter] = np.radians(1.0/(60*np.tan(np.radians(np.degrees(elev[filter]) + 7.31/(np.degrees(elev[filter]) + 4.4)))))
+
+    # Apply the refraction
+    return elev + refraction
 
 
 cpdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double jd, double lat, double lon):
@@ -426,6 +497,31 @@ cdef double refractionTrueToApparent(double elev):
     return elev + refraction
 
 
+@cython.cdivision(True)
+cpdef np.ndarray[FLOAT_TYPE_t, ndim=1] refractionTrueToApparent_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] elev):
+    """ Correct the true elevation of a star for refraction to apparent elevation. The temperature and air
+        pressure are assumed to be unknown. 
+        Source: https://en.wikipedia.org/wiki/Atmospheric_refraction
+    Arguments:
+        elev: [float] Apparent elevation (radians).
+    Return:
+        [float] True elevation (radians).
+    """
+
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] refraction
+    cdef np.ndarray[BOOL_TYPE_t, ndim=1] filter
+
+    # Don't apply refraction for elevation below -0.5 deg
+    filter = elev > radians(-0.5)
+
+    # Refraction in radians
+    refraction = np.zeros_like(elev)
+    refraction[filter] = np.radians(1.02/(60*np.tan(np.radians(np.degrees(elev[filter]) + 10.3/(np.degrees(elev[filter]) + 5.11)))))
+
+    # Apply the refraction
+    return elev + refraction
+
+
 
 cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double jd, double lat, double lon):
     """ Correct the equatorial coordinates for refraction. The correction is done from true to apparent
@@ -465,31 +561,27 @@ cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double 
 
 
 
+
 @cython.cdivision(True)
 cpdef (double, double) cyraDec2AltAz(double ra, double dec, double jd, double lat, double lon):
     """ Convert right ascension and declination to azimuth (+East of due North) and altitude. Same epoch is
         assumed, no correction for refraction is done.
     Arguments:
-        ra: [float] Right ascension in degrees.
-        dec: [float] Declination in degrees.
+        ra: [float] Right ascension in radians.
+        dec: [float] Declination in radians.
         jd: [float] Julian date.
-        lat: [float] Latitude in degrees.
-        lon: [float] Longitude in degrees.
+        lat: [float] Latitude in radians.
+        lon: [float] Longitude in radians.
     Return:
         (azim, elev): [tuple]
-            azim: [float] Azimuth (+east of due north) in degrees.
-            elev: [float] Elevation above horizon in degrees.
+            azim: [float] Azimuth (+east of due north) in radians.
+            elev: [float] Elevation above horizon in radians.
         """
 
     cdef double lst, ha, azim, sin_elev, elev
 
-    # convert to radians
-    ra = radians(ra)
-    dec = radians(dec)
-    lat = radians(lat)
-
     # Calculate Local Sidereal Time
-    lst = radians(cyjd2LST(jd, lon))
+    lst = radians(cyjd2LST(jd, degrees(lon)))
 
     # Calculate the hour angle
     ha = lst - ra
@@ -508,42 +600,31 @@ cpdef (double, double) cyraDec2AltAz(double ra, double dec, double jd, double la
 
     elev = asin(sin_elev)
 
-    # convert back to degrees
-    azim = degrees(azim)
-    elev = degrees(elev)
-
     return (azim, elev)
 
 
-@cython.boundscheck(False)
-@cython.wraparound(False)
 @cython.cdivision(True)
 def cyraDec2AltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra, np.ndarray[FLOAT_TYPE_t, ndim=1] dec,
                        double jd, double lat, double lon):
     """ Convert right ascension and declination to azimuth (+East of due North) and altitude. Same epoch is
         assumed, no correction for refraction is done.
     Arguments:
-        ra: [np.ndarray] Right ascension in degrees.
-        dec: [np.ndarray] Declination in degrees.
+        ra: [float] Right ascension in radians.
+        dec: [float] Declination in radians.
         jd: [float] Julian date.
-        lat: [float] Latitude in degrees.
-        lon: [float] Longitude in degrees.
+        lat: [float] Latitude in radians.
+        lon: [float] Longitude in radians.
     Return:
         (azim, elev): [tuple]
-            azim: [np.ndarray] Azimuth (+east of due north) in degrees.
-            elev: [np.ndarray] Elevation above horizon in degrees.
+            azim: [float] Azimuth (+east of due north) in radians.
+            elev: [float] Elevation above horizon in radians.
         """
 
     cdef double lst
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] azim, elev, sin_elev, ha
 
-    # convert to radians
-    ra = np.radians(ra)
-    dec = np.radians(dec)
-    lat = radians(lat)
-
     # Calculate Local Sidereal Time
-    lst = radians(cyjd2LST(jd, lon))
+    lst = radians(cyjd2LST(jd, degrees(lon)))
 
     # Calculate the hour angle
     ha = lst - ra
@@ -562,43 +643,32 @@ def cyraDec2AltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra, np.ndarray[FLOAT_TYP
 
     elev = np.arcsin(sin_elev)
 
-    # convert back to degrees
-    azim = np.degrees(azim)
-    elev = np.degrees(elev)
-
     return (azim, elev)
 
 
-cpdef (double, double) trueRaDec2ApparentAltAz(double ra, double dec, double jd, double lat, double lon,
+cpdef (double, double) trueRaDec2ApparentAltAz(double ra, double dec, double jd, double lat, double lon, \
     bool refraction=True):
     """ Convert the true right ascension and declination in J2000 to azimuth (+East of due North) and 
         altitude in the epoch of date. The correction for refraction is performed.
-        
     Arguments:
-        ra: [float] Right ascension in degrees (J2000).
-        dec: [float] Declination in degrees (J2000).
+        ra: [float] Right ascension in radians (J2000).
+        dec: [float] Declination in radians (J2000).
         jd: [float] Julian date.
-        lat: [float] Latitude in degrees.
-        lon: [float] Longitude in degrees.
-        
+        lat: [float] Latitude in radians.
+        lon: [float] Longitude in radians.
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
-        
     Return:
         (azim, elev): [tuple]
-            azim: [float] Azimuth (+east of due north) in degrees (epoch of date).
-            elev: [float] Elevation above horizon in degrees (epoch of date).
+            azim: [float] Azimuth (+east of due north) in radians (epoch of date).
+            elev: [float] Elevation above horizon in radians (epoch of date).
         """
+
     cdef double azim, elev
 
-    ra = radians(ra)
-    dec = radians(dec)
-    lat = radians(lat)
-    lon = radians(lon)
-    print('GOING IN:',ra,dec)
     # Precess RA/Dec to the epoch of date
     ra, dec = equatorialCoordPrecession(J2000_DAYS, jd, ra, dec)
-    print('GOING OUT:',ra,dec)
+
     # Convert to alt/az
     azim, elev = cyraDec2AltAz(ra, dec, jd, lat, lon)
 
@@ -607,7 +677,42 @@ cpdef (double, double) trueRaDec2ApparentAltAz(double ra, double dec, double jd,
         elev = refractionTrueToApparent(elev)
 
 
-    return (degrees(azim), degrees(elev))
+    return (azim, elev)
+
+
+
+cpdef trueRaDec2ApparentAltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra, np.ndarray[FLOAT_TYPE_t, ndim=1] dec,
+    double jd, double lat, double lon, bool refraction=True):
+    """ Convert the true right ascension and declination in J2000 to azimuth (+East of due North) and 
+        altitude in the epoch of date. The correction for refraction is performed.
+    Arguments:
+        ra: [float] Right ascension in radians (J2000).
+        dec: [float] Declination in radians (J2000).
+        jd: [float] Julian date.
+        lat: [float] Latitude in radians.
+        lon: [float] Longitude in radians.
+    Keyword arguments:
+        refraction: [bool] Apply refraction correction. True by default.
+    Return:
+        (azim, elev): [tuple]
+            azim: [float] Azimuth (+east of due north) in radians (epoch of date).
+            elev: [float] Elevation above horizon in radians (epoch of date).
+        """
+
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] azim, elev
+
+    # Precess RA/Dec to the epoch of date
+    ra, dec = equatorialCoordPrecession_vect(J2000_DAYS, jd, ra, dec)
+
+    # Convert to alt/az
+    azim, elev = cyraDec2AltAz_vect(ra, dec, jd, lat, lon)
+
+    # Correct elevation for refraction
+    if refraction:
+        elev = refractionTrueToApparent_vect(elev)
+
+
+    return (azim, elev)
 
 
 
@@ -617,26 +722,22 @@ cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double
     """ Convert azimuth and altitude in a given time and position on Earth to right ascension and 
         declination. 
     Arguments:
-        azim: [float] Azimuth (+east of due north) in degrees.
-        elev: [float] Elevation above horizon in degrees.
+        azim: [float] Azimuth (+east of due north) in radians.
+        elev: [float] Elevation above horizon in radians.
         jd: [float] Julian date.
-        lat: [float] Latitude of the observer in degrees.
-        lon: [float] Longitde of the observer in degrees.
+        lat: [float] Latitude of the observer in radians.
+        lon: [float] Longitde of the observer in radians.
     Return:
         (RA, dec): [tuple]
-            RA: [float] Right ascension (degrees).
-            dec: [float] Declination (degrees).
+            RA: [float] Right ascension (radians).
+            dec: [float] Declination (radians).
     """
 
 
     cdef double lst, ha, ra, dec
 
-    azim = radians(azim)
-    elev = radians(elev)
-    lat = radians(lat)
-
     # Calculate Local Sidereal Time
-    lst = radians(cyjd2LST(jd, lon))
+    lst = radians(cyjd2LST(jd, degrees(lon)))
 
     # Calculate hour angle
     ha = atan2(-sin(azim), tan(elev)*cos(lat) - cos(azim)*sin(lat))
@@ -647,41 +748,35 @@ cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double
     # Calculate declination
     dec = asin(sin(lat)*sin(elev) + cos(lat)*cos(elev)*cos(azim))
 
-    ra = degrees(ra)
-    dec = degrees(dec)
-
     return (ra, dec)
 
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-def cyaltAz2RADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim, np.ndarray[FLOAT_TYPE_t, ndim=1] elev,
-                       double jd, double lat, double lon):
+def cyaltAz2RADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim, np.ndarray[FLOAT_TYPE_t, ndim=1] elev, double jd,
+    double lat, double lon):
     """ Convert azimuth and altitude in a given time and position on Earth to right ascension and 
         declination. 
     Arguments:
-        azim: [float] Azimuth (+east of due north) in degrees.
-        elev: [float] Elevation above horizon in degrees.
+        azim: [float] Azimuth (+east of due north) in radians.
+        elev: [float] Elevation above horizon in radians.
         jd: [float] Julian date.
-        lat: [float] Latitude of the observer in degrees.
-        lon: [float] Longitde of the observer in degrees.
+        lat: [float] Latitude of the observer in radians.
+        lon: [float] Longitde of the observer in radians.
     Return:
         (RA, dec): [tuple]
-            RA: [float] Right ascension (degrees).
-            dec: [float] Declination (degrees).
+            RA: [float] Right ascension (radians).
+            dec: [float] Declination (radians).
     """
+
 
 
     cdef double lst
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ha, ra, dec
 
-    azim = np.radians(azim)
-    elev = np.radians(elev)
-    lat = radians(lat)
-
     # Calculate Local Sidereal Time
-    lst = radians(cyjd2LST(jd, lon))
+    lst = radians(cyjd2LST(jd, degrees(lon)))
 
     # Calculate hour angle
     ha = np.arctan2(-np.sin(azim), np.tan(elev)*cos(lat) - np.cos(azim)*sin(lat))
@@ -692,38 +787,33 @@ def cyaltAz2RADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim, np.ndarray[FLOAT_T
     # Calculate declination
     dec = np.arcsin(sin(lat)*np.sin(elev) + cos(lat)*np.cos(elev)*np.cos(azim))
 
-    ra = np.degrees(ra)
-    dec = np.degrees(dec)
-
     return (ra, dec)
 
 
-cpdef (double, double) apparentAltAz2TrueRADec(double azim, double elev, double jd, double lat, double lon,
+cpdef (double, double) apparentAltAz2TrueRADec(double azim, double elev, double jd, double lat, double lon, \
     bool refraction=True):
     """ Convert the apparent azimuth and altitude in the epoch of date to true (refraction corrected) right 
         ascension and declination in J2000.
     Arguments:
-        azim: [float] Azimuth (+East of due North) in degrees (epoch of date).
-        elev: [float] Elevation above horizon in degrees (epoch of date).
+        azim: [float] Azimuth (+East of due North) in radians (epoch of date).
+        elev: [float] Elevation above horizon in radians (epoch of date).
         jd: [float] Julian date.
-        lat: [float] Latitude of the observer in degrees.
-        lon: [float] Longitde of the observer in degrees.
+        lat: [float] Latitude of the observer in radians.
+        lon: [float] Longitde of the observer in radians.
+    Keyword arguments:
+        refraction: [bool] Apply refraction correction. True by default.
     Return:
         (ra, dec): [tuple]
-            ra: [float] Right ascension (degrees, J2000).
-            dec: [float] Declination (degrees, J2000).
+            ra: [float] Right ascension (radians, J2000).
+            dec: [float] Declination (radians, J2000).
     """
 
 
     cdef double ra, dec
 
-    azim = radians(azim)
-    elev = radians(elev)
-    lat = radians(lat)
-    lon = radians(lon)
 
+    # Correct elevation for refraction
     if refraction:
-        # Correct elevation for refraction
         elev = refractionApparentToTrue(elev)
 
     # Convert to RA/Dec (true, epoch of date)
@@ -733,8 +823,42 @@ cpdef (double, double) apparentAltAz2TrueRADec(double azim, double elev, double 
     ra, dec = equatorialCoordPrecession(jd, J2000_DAYS, ra, dec)
 
 
-    return (degrees(ra), degrees(dec))
+    return (ra, dec)
 
+
+
+def apparentAltAz2TrueRADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim, np.ndarray[FLOAT_TYPE_t, ndim=1] elev,
+    double jd, double lat, double lon, bool refraction=True):
+    """ Convert the apparent azimuth and altitude in the epoch of date to true (refraction corrected) right 
+        ascension and declination in J2000.
+    Arguments:
+        azim: [float] Azimuth (+East of due North) in radians (epoch of date).
+        elev: [float] Elevation above horizon in radians (epoch of date).
+        jd: [float] Julian date.
+        lat: [float] Latitude of the observer in radians.
+        lon: [float] Longitde of the observer in radians.
+    Keyword arguments:
+        refraction: [bool] Apply refraction correction. True by default.
+    Return:
+        (ra, dec): [tuple]
+            ra: [float] Right ascension (radians, J2000).
+            dec: [float] Declination (radians, J2000).
+    """
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ra, dec
+
+
+    # Correct elevation for refraction
+    if refraction:
+        elev = refractionApparentToTrue_vect(elev)
+
+    # Convert to RA/Dec (true, epoch of date)
+    ra, dec = cyaltAz2RADec_vect(azim, elev, jd, lat, lon)
+
+    # Precess RA/Dec to J2000
+    ra, dec = equatorialCoordPrecession_vect(jd, J2000_DAYS, ra, dec)
+
+
+    return (ra, dec)
 
 
 
@@ -837,7 +961,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
 
 
         # Compute the distance from the FOV centre to the sky coordinate
-        radius = radians(angularSeparation(degrees(ra), degrees(dec), degrees(ra_centre), \
+        radius = radians(angularSeparation(degrees(ra), degrees(dec), degrees(ra_centre),
             degrees(dec_centre)))
 
         # Compute theta - the direction angle between the FOV centre, sky coordinate, and the image vertical
@@ -1177,103 +1301,103 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     return ra_data, dec_data
 
 
-@cython.boundscheck(False)
-@cython.cdivision(True)
-def generateRaDecGrid(double ra_d, double dec_d, double jd, double lat, double lon, double x_res, \
-    double y_res, double h0, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
-    double fov_radius, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
-    np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, \
-    str dist_type, bool refraction=True, bool equal_aspect=False):
-
-    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] RA_c, dec_c
-    RA_c, dec_c = cyXYToRADec(np.array([jd]),
-                              np.array(x_res/2, dtype=np.float64), np.array(y_res/2, dtype=np.float64),
-                              lat, lon, x_res, y_res, h0, ra_d, dec_d, pos_angle_ref, pix_scale, x_poly_fwd,
-                              y_poly_fwd, dist_type, refraction=refraction,
-                              equal_aspect=equal_aspect)
-
-
-    # Compute FOV centre alt/az
-    cdef double azim_centre, alt_centre
-    azim_centre, alt_centre = cyraDec2AltAz(RA_c[0], dec_c[0], jd, lat, lon)
-
-    # Determine gridline frequency (double the gridlines if the number is < 4eN)
-    cdef double grid_freq = 10**np.floor(np.log10(fov_radius))
-    if 10**(np.log10(fov_radius) - np.floor(np.log10(fov_radius))) < 4:
-        grid_freq /= 2
-
-    # Set a maximum grid frequency of 15 deg
-    if grid_freq > 15:
-        grid_freq = 15
-
-    # Grid plot density
-    cdef double plot_dens = grid_freq/100
-
-    # Compute the range of declinations to consider
-    cdef double dec_min = dec_d - fov_radius/2
-    if dec_min < -90:
-        dec_min = -90
-
-    cdef double dec_max = dec_d + fov_radius/2
-    if dec_max > 90:
-        dec_max = 90
-
-    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ra_grid_arr = np.arange(0, 360, grid_freq)
-    cdef np.ndarray[FLOAT_TYPE_t, ndim=1]dec_grid_arr = np.arange(-90, 90, grid_freq)
-
-    # Filter out the dec grid for min/max declination
-    dec_grid_arr = dec_grid_arr[(dec_grid_arr >= dec_min) & (dec_grid_arr <= dec_max)]
-
-    cdef list x = []
-    cdef list y = []
-    cdef list cuts = []
-
-    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ra_grid_plot
-    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] dec_grid_plot
-    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] az_grid_plot
-    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] alt_grid_plot
-    cdef np.ndarray[BOOL_TYPE_t, ndim=1] filter_arr
-
-    cdef list ra_grid_plot_list
-    cdef list dec_grid_plot_list
-
-    cdef np.ndarray[INT_TYPE_t, ndim=2] gap_indices
-
-
-    # Plot the celestial parallel grid (circles)
-    for dec_grid in dec_grid_arr:
-
-        ra_grid_plot = np.arange(0, 360, plot_dens)
-        dec_grid_plot = np.zeros_like(ra_grid_plot) + dec_grid
-
-        # Compute alt/az
-        az_grid_plot, alt_grid_plot = cyraDec2AltAz_vect(ra_grid_plot, dec_grid_plot, jd, lat, lon)
-
-        # Filter out points below the horizon  and outside the FOV
-        filter_arr = (alt_grid_plot > 0) & (angularSeparation_fv(alt_centre,
-                                                                azim_centre,
-                                                                alt_grid_plot,
-                                                                az_grid_plot) < fov_radius)
-        ra_grid_plot = ra_grid_plot[filter_arr]
-        dec_grid_plot = dec_grid_plot[filter_arr]
-
-        # Find gaps in continuity and break up plotting individual lines
-        gap_indices = np.argwhere(np.abs(ra_grid_plot[1:] - ra_grid_plot[:-1]) > fov_radius)
-        if len(gap_indices):
-
-            ra_grid_plot_list = []
-            dec_grid_plot_list = []
-
-            # Separate gridlines with large gaps
-            prev_gap_indx = 0
-            for entry in gap_indices:
-                gap_indx = entry[0]
-
-                ra_grid_plot_list.append(ra_grid_plot[prev_gap_indx:gap_indx + 1])
-                dec_grid_plot_list.append(dec_grid_plot[prev_gap_indx:gap_indx + 1])
-
-                prev_gap_indx = gap_indx
-
-            # Add the last segment
-            ra_grid_plot_list.append(ra_grid_plot[prev_gap_indx + 1:-1])
-            dec_grid_plot_list.append(dec_grid_plot[prev_gap_indx + 1:-1])
+# @cython.boundscheck(False)
+# @cython.cdivision(True)
+# def generateRaDecGrid(double ra_d, double dec_d, double jd, double lat, double lon, double x_res, \
+#     double y_res, double h0, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
+#     double fov_radius, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
+#     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, \
+#     str dist_type, bool refraction=True, bool equal_aspect=False):
+#
+#     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] RA_c, dec_c
+#     RA_c, dec_c = cyXYToRADec(np.array([jd]),
+#                               np.array(x_res/2, dtype=np.float64), np.array(y_res/2, dtype=np.float64),
+#                               lat, lon, x_res, y_res, h0, ra_d, dec_d, pos_angle_ref, pix_scale, x_poly_fwd,
+#                               y_poly_fwd, dist_type, refraction=refraction,
+#                               equal_aspect=equal_aspect)
+#
+#
+#     # Compute FOV centre alt/az
+#     cdef double azim_centre, alt_centre
+#     azim_centre, alt_centre = cyraDec2AltAz(RA_c[0], dec_c[0], jd, lat, lon)
+#
+#     # Determine gridline frequency (double the gridlines if the number is < 4eN)
+#     cdef double grid_freq = 10**np.floor(np.log10(fov_radius))
+#     if 10**(np.log10(fov_radius) - np.floor(np.log10(fov_radius))) < 4:
+#         grid_freq /= 2
+#
+#     # Set a maximum grid frequency of 15 deg
+#     if grid_freq > 15:
+#         grid_freq = 15
+#
+#     # Grid plot density
+#     cdef double plot_dens = grid_freq/100
+#
+#     # Compute the range of declinations to consider
+#     cdef double dec_min = dec_d - fov_radius/2
+#     if dec_min < -90:
+#         dec_min = -90
+#
+#     cdef double dec_max = dec_d + fov_radius/2
+#     if dec_max > 90:
+#         dec_max = 90
+#
+#     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ra_grid_arr = np.arange(0, 360, grid_freq)
+#     cdef np.ndarray[FLOAT_TYPE_t, ndim=1]dec_grid_arr = np.arange(-90, 90, grid_freq)
+#
+#     # Filter out the dec grid for min/max declination
+#     dec_grid_arr = dec_grid_arr[(dec_grid_arr >= dec_min) & (dec_grid_arr <= dec_max)]
+#
+#     cdef list x = []
+#     cdef list y = []
+#     cdef list cuts = []
+#
+#     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ra_grid_plot
+#     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] dec_grid_plot
+#     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] az_grid_plot
+#     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] alt_grid_plot
+#     cdef np.ndarray[BOOL_TYPE_t, ndim=1] filter_arr
+#
+#     cdef list ra_grid_plot_list
+#     cdef list dec_grid_plot_list
+#
+#     cdef np.ndarray[INT_TYPE_t, ndim=2] gap_indices
+#
+#
+#     # Plot the celestial parallel grid (circles)
+#     for dec_grid in dec_grid_arr:
+#
+#         ra_grid_plot = np.arange(0, 360, plot_dens)
+#         dec_grid_plot = np.zeros_like(ra_grid_plot) + dec_grid
+#
+#         # Compute alt/az
+#         az_grid_plot, alt_grid_plot = cyraDec2AltAz_vect(ra_grid_plot, dec_grid_plot, jd, lat, lon)
+#
+#         # Filter out points below the horizon  and outside the FOV
+#         filter_arr = (alt_grid_plot > 0) & (angularSeparation_fv(alt_centre,
+#                                                                 azim_centre,
+#                                                                 alt_grid_plot,
+#                                                                 az_grid_plot) < fov_radius)
+#         ra_grid_plot = ra_grid_plot[filter_arr]
+#         dec_grid_plot = dec_grid_plot[filter_arr]
+#
+#         # Find gaps in continuity and break up plotting individual lines
+#         gap_indices = np.argwhere(np.abs(ra_grid_plot[1:] - ra_grid_plot[:-1]) > fov_radius)
+#         if len(gap_indices):
+#
+#             ra_grid_plot_list = []
+#             dec_grid_plot_list = []
+#
+#             # Separate gridlines with large gaps
+#             prev_gap_indx = 0
+#             for entry in gap_indices:
+#                 gap_indx = entry[0]
+#
+#                 ra_grid_plot_list.append(ra_grid_plot[prev_gap_indx:gap_indx + 1])
+#                 dec_grid_plot_list.append(dec_grid_plot[prev_gap_indx:gap_indx + 1])
+#
+#                 prev_gap_indx = gap_indx
+#
+#             # Add the last segment
+#             ra_grid_plot_list.append(ra_grid_plot[prev_gap_indx + 1:-1])
+#             dec_grid_plot_list.append(dec_grid_plot[prev_gap_indx + 1:-1])

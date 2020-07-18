@@ -940,6 +940,13 @@ class SettingsWidget(QtWidgets.QTabWidget):
         self.updateShowDistortion()
         vbox.addWidget(self.distortion)
 
+        self.invert = QtWidgets.QCheckBox('Invert Colors')
+        self.invert.released.connect(self.sigInvertToggled.emit)
+        try:
+            self.updateInvertColours()
+        except AttributeError:
+            self.invert.setChecked(False)
+        vbox.addWidget(self.invert)
 
         hbox = QtWidgets.QHBoxLayout()
         grid_group = QtWidgets.QButtonGroup()
@@ -952,14 +959,6 @@ class SettingsWidget(QtWidgets.QTabWidget):
             self.grid.append(button)
         self.updateShowGrid()
         vbox.addLayout(hbox)
-
-        self.invert = QtWidgets.QCheckBox('Invert Colors')
-        self.invert.released.connect(self.sigInvertToggled.emit)
-        try:
-            self.updateInvertColours()
-        except AttributeError:
-            self.invert.setChecked(False)
-        vbox.addWidget(self.invert)
 
         form = QtWidgets.QFormLayout()
         vbox.addLayout(form)

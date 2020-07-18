@@ -34,34 +34,33 @@ Includes:
 import math
 from datetime import datetime, timedelta, MINYEAR
 
-
 import numpy as np
 
 from RMS.Math import vectMag, vectNorm
 
-
 # Import Cython functions
 import pyximport
-pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import cyraDec2AltAz, cyaltAz2RADec, cyraDec2AltAz_vect, cyaltAz2RADec_vect
 
+pyximport.install(setup_args={'include_dirs': [np.get_include()]})
+import RMS.Astrometry.CyFunctions as cy
 
 ### CONSTANTS ###
 
 # Define Julian epoch
-JULIAN_EPOCH = datetime(2000, 1, 1, 12) # noon (the epoch name is unrelated)
-J2000_JD = timedelta(2451545) # julian epoch in julian dates
+JULIAN_EPOCH = datetime(2000, 1, 1, 12)  # noon (the epoch name is unrelated)
+J2000_JD = timedelta(2451545)  # julian epoch in julian dates
+
 
 class EARTH_CONSTANTS(object):
     """ Holds Earth's shape parameters. """
 
     def __init__(self):
-
         # Earth elipsoid parameters in meters (source: IERS 2003)
         self.EQUATORIAL_RADIUS = 6378136.6
         self.POLAR_RADIUS = 6356751.9
         self.RATIO = self.EQUATORIAL_RADIUS/self.POLAR_RADIUS
         self.SQR_DIFF = self.EQUATORIAL_RADIUS**2 - self.POLAR_RADIUS**2
+
 
 # Initialize Earth shape constants object
 EARTH = EARTH_CONSTANTS()
@@ -108,14 +107,11 @@ def unixTime2Date(ts, tu, dt_obj=False):
     # Convert the UNIX timestamp to datetime object
     dt = datetime.utcfromtimestamp(float(ts) + float(tu)/1000000)
 
-
     if dt_obj:
         return dt
 
     else:
         return dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, float(tu)/1000
-
-
 
 
 def datetime2UnixTime(dt):
@@ -133,8 +129,6 @@ def datetime2UnixTime(dt):
     return unix_timestamp
 
 
-
-
 def date2UnixTime(year, month, day, hour, minute, second, millisecond=0, UT_corr=0.0):
     """ Convert date and time to Unix time. 
     Arguments:
@@ -150,15 +144,13 @@ def date2UnixTime(year, month, day, hour, minute, second, millisecond=0, UT_corr
     
     Return:
         [float] Unix time
-    """# Convert all input arguments to integer (except milliseconds)
+    """  # Convert all input arguments to integer (except milliseconds)
     year, month, day, hour, minute, second = map(int, (year, month, day, hour, minute, second))
 
     # Create datetime object of current time
     dt = datetime(year, month, day, hour, minute, second, int(millisecond*1000)) - timedelta(hours=UT_corr)
 
     return datetime2UnixTime(dt)
-
-
 
 
 def date2JD(year, month, day, hour, minute, second, millisecond=0, UT_corr=0.0):
@@ -187,7 +179,6 @@ def date2JD(year, month, day, hour, minute, second, millisecond=0, UT_corr=0.0):
     return julian.days + (julian.seconds + julian.microseconds/1000000.0)/86400.0
 
 
-
 def datetime2JD(dt, UT_corr=0.0):
     """ Converts a datetime object to Julian date.
     Arguments:
@@ -199,8 +190,7 @@ def datetime2JD(dt, UT_corr=0.0):
     """
 
     return date2JD(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000.0,
-        UT_corr=UT_corr)
-
+                   UT_corr=UT_corr)
 
 
 def jd2Date(jd, UT_corr=0, dt_obj=False):
@@ -214,7 +204,6 @@ def jd2Date(jd, UT_corr=0, dt_obj=False):
         (year, month, day, hour, minute, second, millisecond)
     """
 
-
     dt = timedelta(days=jd)
 
     try:
@@ -224,7 +213,6 @@ def jd2Date(jd, UT_corr=0, dt_obj=False):
     # library. Time handling should be switched to astropy.time
     except OverflowError:
         date = datetime(MINYEAR, 1, 1, 0, 0, 0)
-
 
     # Return a datetime object if dt_obj == True
     if dt_obj:
@@ -246,7 +234,6 @@ def unixTime2JD(ts, tu):
     return date2JD(*unixTime2Date(ts, tu))
 
 
-
 def jd2UnixTime(jd, UT_corr=0):
     """ Converts the given Julian date to Unix timestamp.
     Arguments:
@@ -258,7 +245,6 @@ def jd2UnixTime(jd, UT_corr=0):
     """
 
     return date2UnixTime(*jd2Date(jd, UT_corr=UT_corr))
-
 
 
 def JD2LST(julian_date, lon):
@@ -276,11 +262,11 @@ def JD2LST(julian_date, lon):
     t = (julian_date - J2000_JD.days)/36525.0
 
     # Greenwich Sidreal Time
-    GST = 280.46061837 + 360.98564736629 * (julian_date - 2451545) + 0.000387933 *t**2 - ((t**3) / 38710000)
-    GST = (GST+360) % 360
+    GST = 280.46061837 + 360.98564736629*(julian_date - 2451545) + 0.000387933*t**2 - ((t**3)/38710000)
+    GST = (GST + 360)%360
 
     # Local Sidreal Time
-    LST = (GST + lon + 360) % 360
+    LST = (GST + lon + 360)%360
 
     return LST, GST
 
@@ -295,7 +281,7 @@ def JD2HourAngle(jd):
 
     T = (jd - 2451545)/36525.0
     hour_angle = 280.46061837 + 360.98564736629*(jd - 2451545.0) + 0.000387933*T**2 \
-        - (T**3)/38710000.0
+                 - (T**3)/38710000.0
 
     return hour_angle
 
@@ -322,13 +308,13 @@ def geo2Cartesian(lat, lon, h, julian_date):
     LST_rad = math.radians(JD2LST(julian_date, lon)[0])
 
     # Get distance from Earth centre to the position given by geographical coordinates
-    Rh = h + math.sqrt(EARTH.POLAR_RADIUS**2 + (EARTH.SQR_DIFF/((EARTH.RATIO * math.tan(lat_rad)) *
-        (EARTH.RATIO * math.tan(lat_rad)) + 1)))
+    Rh = h + math.sqrt(EARTH.POLAR_RADIUS**2 + (EARTH.SQR_DIFF/((EARTH.RATIO*math.tan(lat_rad))*
+                                                                (EARTH.RATIO*math.tan(lat_rad)) + 1)))
 
     # Calculate Cartesian coordinates (in meters)
-    x = Rh * math.cos(lat_rad) * math.cos(LST_rad)
-    y = Rh * math.cos(lat_rad) * math.sin(LST_rad)
-    z = Rh * math.sin(lat_rad)
+    x = Rh*math.cos(lat_rad)*math.cos(LST_rad)
+    y = Rh*math.cos(lat_rad)*math.sin(LST_rad)
+    z = Rh*math.sin(lat_rad)
 
     return x, y, z
 
@@ -392,7 +378,6 @@ def vector2RaDec(eci):
     return np.degrees(ra), np.degrees(dec)
 
 
-
 def altAz2RADec(azim, elev, jd, lat, lon):
     """ Convert azimuth and altitude in a given time and position on Earth to right ascension and
         declination.
@@ -407,15 +392,35 @@ def altAz2RADec(azim, elev, jd, lat, lon):
             RA: [float] right ascension (degrees)
             dec: [float] declination (degrees)
     """
+    azim = np.radians(azim)
+    elev = np.radians(elev)
+    lat = np.radians(lat)
+    lon = np.radians(lon)
 
     if isinstance(azim, float) or isinstance(azim, int) or isinstance(azim, np.float64):
-        ra, dec = cyaltAz2RADec(azim, elev, jd, lat, lon)
+        ra, dec = cy.cyaltAz2RADec(azim, elev, jd, lat, lon)
     elif isinstance(azim, np.ndarray):
-        ra, dec = cyaltAz2RADec_vect(azim, elev, jd, lat, lon)
+        ra, dec = cy.cyaltAz2RADec_vect(azim, elev, jd, lat, lon)
     else:
         raise TypeError("azim must be a number or np.ndarray, given: {}".format(type(azim)))
 
-    return ra, dec
+    return np.degrees(ra), np.degrees(dec)
+
+
+def apparentAltAz2TrueRADec(azim, elev, jd, lat, lon, refraction=True):
+    azim = np.radians(azim)
+    elev = np.radians(elev)
+    lat = np.radians(lat)
+    lon = np.radians(lon)
+
+    if isinstance(azim, float) or isinstance(azim, int) or isinstance(azim, np.float64):
+        ra, dec = cy.apparentAltAz2TrueRADec(azim, elev, jd, lat, lon, refraction)
+    elif isinstance(azim, np.ndarray):
+        ra, dec = cy.apparentAltAz2TrueRADec_vect(azim, elev, jd, lat, lon, refraction)
+    else:
+        raise TypeError("azim must be a number or np.ndarray, given: {}".format(type(azim)))
+
+    return np.degrees(ra), np.degrees(dec)
 
 
 def raDec2AltAz(ra, dec, jd, lat, lon):
@@ -429,16 +434,36 @@ def raDec2AltAz(ra, dec, jd, lat, lon):
     Return:
         (azim, elev): [tuple of float]: Azimuth and elevation (degrees).
     """
+    ra = np.radians(ra)
+    dec = np.radians(dec)
+    lat = np.radians(lat)
+    lon = np.radians(lon)
 
     # Compute azim and elev using a fast cython function
     if isinstance(ra, float) or isinstance(ra, int) or isinstance(ra, np.float64):
-        azim, elev = cyraDec2AltAz(ra, dec, jd, lat, lon)
+        azim, elev = cy.cyraDec2AltAz(ra, dec, jd, lat, lon)
     elif isinstance(ra, np.ndarray):
-        azim, elev = cyraDec2AltAz_vect(ra, dec, jd, lat, lon)
+        azim, elev = cy.cyraDec2AltAz_vect(ra, dec, jd, lat, lon)
     else:
         raise TypeError("ra must be a number or np.ndarray, given: {}".format(type(ra)))
 
-    return azim, elev
+    return np.degrees(azim), np.degrees(elev)
+
+
+def trueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True):
+    ra = np.radians(ra)
+    dec = np.radians(dec)
+    lat = np.radians(lat)
+    lon = np.radians(lon)
+
+    if isinstance(ra, float) or isinstance(ra, int) or isinstance(ra, np.float64):
+        azim, elev = cy.trueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction)
+    elif isinstance(ra, np.ndarray):
+        azim, elev = cy.trueRaDec2ApparentAltAz_vect(ra, dec, jd, lat, lon, refraction)
+    else:
+        raise TypeError("ra must be a number or np.ndarray, given: {}".format(type(ra)))
+
+    return np.degrees(azim), np.degrees(elev)
 
 
 def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, include_rotation=True):
@@ -461,23 +486,17 @@ def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, 
         (ra, dec, v_init): Apparent radiant (deg) and velocity (m/s).
     """
 
-
     # Compute ECI coordinates of the meteor state vector
     state_vector = geo2Cartesian(lat, lon, elev, jd)
 
     eci_x, eci_y, eci_z = state_vector
 
-
     # Assume that the velocity at infinity corresponds to the initial velocity
     v_init = np.sqrt(vg**2 + (2*6.67408*5.9722)*1e13/vectMag(state_vector))
-
 
     # Calculate the geocentric latitude (latitude which considers the Earth as an elipsoid) of the reference
     # trajectory point
     lat_geocentric = np.degrees(math.atan2(eci_z, math.sqrt(eci_x**2 + eci_y**2)))
-
-
-
 
     ### Uncorrect for zenith attraction ###
 
@@ -491,28 +510,22 @@ def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, 
     diff = 10e-5
     zc = eta
     while diff > 10e-6:
-
         # Update the zenith distance
         zc -= diff
 
         # Calculate the zenith attraction correction
-        delta_zc  = 2*math.atan((v_init - vg)*math.tan(zc/2.0)/(v_init + vg))
+        delta_zc = 2*math.atan((v_init - vg)*math.tan(zc/2.0)/(v_init + vg))
         diff = zc + delta_zc - eta
-
 
     # Compute the uncorrected geocentric radiant for zenith attraction
     ra, dec = altAz2RADec(azim, 90.0 - np.degrees(zc), jd, lat_geocentric, lon)
 
     ### ###
 
-
-
     # Apply the rotation correction
     if include_rotation:
-
         # Calculate the velocity of the Earth rotation at the position of the reference trajectory point (m/s)
         v_e = 2*math.pi*vectMag(state_vector)*math.cos(np.radians(lat_geocentric))/86164.09053
-
 
         # Calculate the equatorial coordinates of east from the reference position on the trajectory
         azimuth_east = 90.0
@@ -522,14 +535,12 @@ def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, 
         # Compute the radiant vector in ECI coordinates of the apparent radiant
         v_ref_vect = v_init*np.array(raDec2Vector(ra, dec))
 
-
         v_ref_nocorr = np.zeros(3)
 
         # Calculate the derotated reference velocity vector/radiant
         v_ref_nocorr[0] = v_ref_vect[0] + v_e*np.cos(np.radians(ra_east))
         v_ref_nocorr[1] = v_ref_vect[1] + v_e*np.sin(np.radians(ra_east))
         v_ref_nocorr[2] = v_ref_vect[2]
-
 
         # Compute the radiant without Earth's rotation included
         ra_norot, dec_norot = vector2RaDec(vectNorm(v_ref_nocorr))
@@ -539,23 +550,13 @@ def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, 
         dec = dec_norot
         v_init = v_init_norot
 
-
-
     return ra, dec, v_init
-
-
-
-
-
 
 
 ###########################################
 
 
-
 if __name__ == "__main__":
-
-
     # Test the geocentric to apparent radiant function
     ra_g = 108.67522
     dec_g = 31.91152
@@ -567,15 +568,13 @@ if __name__ == "__main__":
 
     jd = 2456274.636704600416
 
-
     print('Geocentric radiant:')
     print('ra_g = ', ra_g)
     print('dec_g = ', dec_g)
     print('vg = ', vg)
 
-
     ra, dec, v_init = geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, \
-        include_rotation=True)
+                                                             include_rotation=True)
 
     print('Apparent radiant:')
     print('ra = ', ra)

@@ -31,6 +31,8 @@ from pyqtgraph.Qt import QtCore, QtWidgets, QtGui
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, extinctionCorrectionTrueToApparent
+from RMS.Astrometry.Conversions import J2000_JD, date2JD, JD2HourAngle, altAz2RADec, trueRaDec2ApparentAltAz, \
+    apparentAltAz2TrueRADec
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
 import RMS.ConfigReader as cr
 import RMS.Formats.CALSTARS as CALSTARS
@@ -41,14 +43,12 @@ from RMS.Pickling import loadPickle, savePickle
 from RMS.Routines import Image
 from RMS.Math import angularSeparation
 from RMS.Misc import decimalDegreesToSexHours, openFileDialog
-from RMS.Astrometry.Conversions import J2000_JD, date2JD, JD2HourAngle, raDec2AltAz, altAz2RADec
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 
 import pyximport
 
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
-from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession, eqRefractionTrueToApparent, \
-    eqRefractionApparentToTrue, trueRaDec2ApparentAltAz, apparentAltAz2TrueRADec
+from RMS.Astrometry.CyFunctions import subsetCatalog  # , eqRefractionTrueToApparent, eqRefractionApparentToTrue
 
 from RMS.Astrometry.CustomPyqtgraphClasses import *
 
@@ -433,10 +433,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.distortion_lines.setZValue(2)
 
         self.grid_visible = 1
-        self.celestial_grid = pg.PlotCurveItem(pen=pg.mkPen((255, 255, 255, 255), style=QtCore.Qt.DotLine))
+        self.celestial_grid = pg.PlotCurveItem(pen=pg.mkPen((255, 255, 255, 150), style=QtCore.Qt.DotLine))
         # pr=cProfile.Profile()
         # pr.enable()
-        self.onGridChanged()
+        # self.onGridChanged() # called in updatestars
         # pr.disable()
         # ps = pstats.Stats(pr, stream=sys.stdout).sort_stats('time')
         # ps.print_stats()
@@ -527,14 +527,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def onScaleChanged(self):
         self.updateFitResiduals()
-        self.onGridChanged()
         self.updateStars()
         self.updateLeftLabels()
 
     def onFitParametersChanged(self):
         self.updateDistortion()
         self.updateStars()
-        self.onGridChanged()
         self.updateLeftLabels()
 
     def onExtinctionChanged(self):
@@ -545,14 +543,12 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.updateRefRADec()
         self.updateStars()
         self.updateLeftLabels()
-        self.onGridChanged()
 
     def onRotChanged(self):
         self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar,
                                                                    self.platepar.rotation_from_horiz)
         self.updateStars()
         self.updateLeftLabels()
-        self.onGridChanged()
 
     def mouseOverStatus(self, x, y):
         """ Format the status message which will be printed in the status bar below the plot.
@@ -579,16 +575,12 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute RA, dec
             jd, ra, dec, _ = xyToRaDecPP(time_data, [x], [y], [1], self.platepar, extinction_correction=False)
 
-            # Precess RA/Dec to epoch of date for alt/az computation
-            ra_date, dec_date = equatorialCoordPrecession(J2000_JD.days, jd[0], np.radians(ra[0]), np.radians(dec[0]))
-
             # Compute alt, az
-            azim, alt = raDec2AltAz(np.degrees(ra_date), np.degrees(dec_date), jd[0], self.platepar.lat,
-                                    self.platepar.lon)
-            azim2, alt2 = trueRaDec2ApparentAltAz(np.degrees(ra_date), np.degrees(dec_date), jd[0], self.platepar.lat,
-                                self.platepar.lon, self.platepar.refraction)
-            status_str += ",  Azim={:6.2f}  Alt={:6.2f} (date),  RA={:6.2f}  Dec={:+6.2f} (J2000) az={:6.2f} alt={:+6.2f}".format(
-                azim, alt, ra[0], dec[0],azim2, alt2)
+            azim, alt = trueRaDec2ApparentAltAz(ra[0], dec[0], jd[0], self.platepar.lat, self.platepar.lon,
+                                                self.platepar.refraction)
+
+            status_str += ",  Azim={:6.2f}  Alt={:6.2f} (date), RA={:6.2f}  Dec={:+6.2f} (J2000)".format(
+                azim, alt, ra[0], dec[0])
 
         return status_str
 
@@ -695,6 +687,7 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Updates only the stars """
         # Draw stars that were paired in picking mode
         self.updatePairedStars()
+        self.onGridChanged()
 
         # Draw stars detected on this image
         if self.draw_calstars:
@@ -816,7 +809,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateStars()
         self.updateLeftLabels()
         self.updateFitResiduals()
-        self.onGridChanged()
         self.updateDistortion()
 
     def updatePairedStars(self):
@@ -1270,7 +1262,6 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             print('Need more than 2 stars for photometry plot!')
 
-
     def keyPressEvent(self, event):
         modifiers = QtWidgets.QApplication.keyboardModifiers()
         if event.key() == QtCore.Qt.Key_A and modifiers == QtCore.Qt.ControlModifier:
@@ -1429,7 +1420,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.az_centre += self.key_increment
             self.platepar.updateRefRADec()
 
-            self.onGridChanged()
             self.tab.param_manager.updatePlatepar()
             self.updateLeftLabels()
             self.updateStars()
@@ -1438,7 +1428,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.az_centre -= self.key_increment
             self.platepar.updateRefRADec()
 
-            self.onGridChanged()
             self.tab.param_manager.updatePlatepar()
             self.updateLeftLabels()
             self.updateStars()
@@ -1447,7 +1436,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.alt_centre -= self.key_increment
             self.platepar.updateRefRADec()
 
-            self.onGridChanged()
             self.tab.param_manager.updatePlatepar()
             self.updateLeftLabels()
             self.updateStars()
@@ -1456,7 +1444,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.alt_centre += self.key_increment
             self.platepar.updateRefRADec()
 
-            self.onGridChanged()
             self.tab.param_manager.updatePlatepar()
             self.updateLeftLabels()
             self.updateStars()
@@ -1465,6 +1452,7 @@ class PlateTool(QtWidgets.QMainWindow):
         elif event.key() == QtCore.Qt.Key_Q:
             self.platepar.pos_angle_ref -= self.key_increment
             self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
+
             self.updateLeftLabels()
             self.updateStars()
             self.tab.param_manager.updatePlatepar()
@@ -1472,6 +1460,7 @@ class PlateTool(QtWidgets.QMainWindow):
         elif event.key() == QtCore.Qt.Key_E:
             self.platepar.pos_angle_ref += self.key_increment
             self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
+
             self.updateLeftLabels()
             self.updateStars()
             self.tab.param_manager.updatePlatepar()
@@ -1479,12 +1468,14 @@ class PlateTool(QtWidgets.QMainWindow):
         # Change image scale
         elif event.key() == QtCore.Qt.Key_Up:
             self.platepar.F_scale *= 1.0 + self.key_increment/100.0
+
             self.updateLeftLabels()
             self.updateStars()
             self.tab.param_manager.updatePlatepar()
 
         elif event.key() == QtCore.Qt.Key_Down:
             self.platepar.F_scale *= 1.0 - self.key_increment/100.0
+
             self.updateLeftLabels()
             self.updateStars()
             self.tab.param_manager.updatePlatepar()
@@ -1494,6 +1485,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Increment X offset
             self.platepar.x_poly_rev[0] += 0.5
             self.platepar.x_poly_fwd[0] += 0.5
+
             self.tab.param_manager.updatePlatepar()
             if self.tab.param_manager.fit_parameters.currentIndex() != 2:
                 self.tab.param_manager.fit_parameters.setCurrentIndex(0)
@@ -1505,6 +1497,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Decrement X offset
             self.platepar.x_poly_rev[0] -= 0.5
             self.platepar.x_poly_fwd[0] -= 0.5
+
             self.tab.param_manager.updatePlatepar()
             if self.tab.param_manager.fit_parameters.currentIndex() != 2:
                 self.tab.param_manager.fit_parameters.setCurrentIndex(0)
@@ -1516,6 +1509,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Increment Y offset
             self.platepar.y_poly_rev[0] += 0.5
             self.platepar.y_poly_fwd[0] += 0.5
+
             self.tab.param_manager.updatePlatepar()
             if self.tab.param_manager.fit_parameters.currentIndex() != 3:
                 self.tab.param_manager.fit_parameters.setCurrentIndex(1)
@@ -1527,6 +1521,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Decrement Y offset
             self.platepar.y_poly_rev[0] -= 0.5
             self.platepar.y_poly_fwd[0] -= 0.5
+
             self.tab.param_manager.updatePlatepar()
             if self.tab.param_manager.fit_parameters.currentIndex() != 3:
                 self.tab.param_manager.fit_parameters.setCurrentIndex(1)
@@ -1538,6 +1533,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Decrement X 1st order distortion
             self.platepar.x_poly_rev[1] -= 0.01
             self.platepar.x_poly_fwd[1] -= 0.01
+
             self.tab.param_manager.updatePlatepar()
             if self.tab.param_manager.fit_parameters.currentIndex() != 2:
                 self.tab.param_manager.fit_parameters.setCurrentIndex(0)
@@ -1549,6 +1545,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Increment X 1st order distortion
             self.platepar.x_poly_rev[1] += 0.01
             self.platepar.x_poly_fwd[1] += 0.01
+
             self.tab.param_manager.updatePlatepar()
             if self.tab.param_manager.fit_parameters.currentIndex() != 2:
                 self.tab.param_manager.fit_parameters.setCurrentIndex(0)
@@ -1560,6 +1557,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Decrement Y 1st order distortion
             self.platepar.y_poly_rev[2] -= 0.01
             self.platepar.y_poly_fwd[2] -= 0.01
+
             self.tab.param_manager.updatePlatepar()
             if self.tab.param_manager.fit_parameters.currentIndex() != 3:
                 self.tab.param_manager.fit_parameters.setCurrentIndex(1)
@@ -1571,6 +1569,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Increment Y 1st order distortion
             self.platepar.y_poly_rev[2] += 0.01
             self.platepar.y_poly_fwd[2] += 0.01
+
             self.tab.param_manager.updatePlatepar()
             if self.tab.param_manager.fit_parameters.currentIndex() != 3:
                 self.tab.param_manager.fit_parameters.setCurrentIndex(1)
@@ -1579,11 +1578,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
         elif event.key() == QtCore.Qt.Key_9:
             self.platepar.extinction_scale += 0.1
+
             self.tab.param_manager.updatePlatepar()
             self.onExtinctionChanged()
 
         elif event.key() == QtCore.Qt.Key_0:
             self.platepar.extinction_scale -= 0.1
+
             self.tab.param_manager.updatePlatepar()
             self.onExtinctionChanged()
 
@@ -1591,6 +1592,7 @@ class PlateTool(QtWidgets.QMainWindow):
         elif event.key() == QtCore.Qt.Key_R:
             self.cat_lim_mag += 0.1
             self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+
             self.updateLeftLabels()
             self.updateStars()
             self.tab.settings.updateLimMag()
@@ -1598,6 +1600,7 @@ class PlateTool(QtWidgets.QMainWindow):
         elif event.key() == QtCore.Qt.Key_F:
             self.cat_lim_mag -= 0.1
             self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+
             self.updateLeftLabels()
             self.updateStars()
             self.tab.settings.updateLimMag()
@@ -2026,7 +2029,7 @@ class PlateTool(QtWidgets.QMainWindow):
         pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, orientation)
 
         # Compute reference azimuth and altitude
-        azim, alt = raDec2AltAz(ra, dec, jd, self.platepar.lat, self.platepar.lon)
+        azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, self.platepar.lat, self.platepar.lon)
 
         # Set parameters to platepar
         self.platepar.pos_angle_ref = pos_angle_ref
@@ -2181,9 +2184,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz = self.getFOVcentre()
 
         # Recalculate reference alt/az
-        self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.JD,
-                                                                        self.platepar.lon, self.platepar.lat,
-                                                                        self.platepar.RA_d, self.platepar.dec_d)
+        self.platepar.az_centre, self.platepar.alt_centre = trueRaDec2ApparentAltAz(self.platepar.JD,
+                                                                                    self.platepar.lon,
+                                                                                    self.platepar.lat,
+                                                                                    self.platepar.RA_d,
+                                                                                    self.platepar.dec_d)
 
         # Check that the calibration parameters are within the nominal range
         self.checkParamRange()
@@ -2531,7 +2536,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateLeftLabels()
         self.updateStars()
         self.updateFitResiduals()
-        self.onGridChanged()
         self.tab.param_manager.updatePlatepar()
 
     def updateFitResiduals(self):
@@ -2641,20 +2645,14 @@ class PlateTool(QtWidgets.QMainWindow):
             img_ang_separation = angularSeparation(img_ra, img_dec, ra_centre, dec_centre)
             skyradius_residuals.append(cat_ang_separation - img_ang_separation)
 
-            # # Correct the catalog RA/Dec for refraction
-            # if self.platepar.refraction:
-            #     cat_ra, cat_dec = eqRefractionTrueToApparent(np.radians(cat_ra), np.radians(cat_dec), jd,
-            #         np.radians(self.platepar.lat), np.radians(self.platepar.lon))
-            #     cat_ra, cat_dec = np.degrees(cat_ra), np.degrees(cat_dec)
-
             # Compute azim/elev from the catalog
-            azim_cat, elev_cat = raDec2AltAz(cat_ra, cat_dec, jd, self.platepar.lat, self.platepar.lon)
+            azim_cat, elev_cat = trueRaDec2ApparentAltAz(cat_ra, cat_dec, jd, self.platepar.lat, self.platepar.lon)
 
             azim_list.append(azim_cat)
             elev_list.append(elev_cat)
 
             # Compute azim/elev from image coordinates
-            azim_img, elev_img = raDec2AltAz(img_ra, img_dec, jd, self.platepar.lat, self.platepar.lon)
+            azim_img, elev_img = trueRaDec2ApparentAltAz(img_ra, img_dec, jd, self.platepar.lat, self.platepar.lon)
 
             # Compute azim/elev residuals
             azim_residuals.append(((azim_cat - azim_img + 180)%360 - 180)*np.cos(np.radians(elev_cat)))
