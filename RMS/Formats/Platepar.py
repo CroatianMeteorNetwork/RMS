@@ -187,6 +187,9 @@ class Platepar(object):
         # Equal aspect (X and Y scales are equal) - used ONLY for radial distortion
         self.equal_aspect = False
 
+        # Force distortion centre to image centre
+        self.force_distortion_centre = False
+
         # Photometry calibration
         self.mag_0 = -2.5
         self.mag_lev = 1.0
@@ -552,6 +555,12 @@ class Platepar(object):
                 # IMPORTANT NOTE - the X polynomial is used to store the fit paramters
                 self.x_poly_rev = res.x
 
+
+                # Force distortion centre to image centre
+                if self.force_distortion_centre:
+                    self.x_poly_rev[0] = 0.5
+                    self.x_poly_rev[1] = 0.5
+
                 # Force aspect ratio to 0 if axes are set to be equal
                 if self.equal_aspect:
                     self.x_poly_rev[2] = 0
@@ -605,6 +614,12 @@ class Platepar(object):
 
                 # Extract fitted X polynomial
                 self.x_poly_fwd = res.x
+
+
+                # Force distortion centre to image centre
+                if self.force_distortion_centre:
+                    self.x_poly_rev[0] = 0.5
+                    self.x_poly_rev[1] = 0.5
 
                 # Force aspect ratio to 0 if axes are set to be equal
                 if self.equal_aspect:
@@ -666,6 +681,9 @@ class Platepar(object):
         # Add equal aspect
         if not 'equal_aspect' in self.__dict__:
             self.equal_aspect = False
+
+        if not 'force_distribution_centre' in self.__dict__:
+            self.force_distortion_centre = False
 
 
         # Add the distortion type if not present (assume it's the polynomal type with the radial term)

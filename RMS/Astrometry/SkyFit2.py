@@ -333,7 +333,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.cat_star_markers = pg.ScatterPlotItem()
         self.img_frame.addItem(self.cat_star_markers)
         self.cat_star_markers.setPen('r')
-        self.cat_star_markers.setBrush(QtGui.QColor(0, 0, 0, 0))
+        self.cat_star_markers.setBrush((0, 0, 0, 0))
         self.cat_star_markers.setSymbol(Crosshair())
         self.cat_star_markers.setZValue(4)
 
@@ -341,7 +341,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.cat_star_markers2 = pg.ScatterPlotItem()
         self.zoom_window.addItem(self.cat_star_markers2)
         self.cat_star_markers2.setPen('r')
-        self.cat_star_markers2.setBrush(QtGui.QColor(0, 0, 0, 0))
+        self.cat_star_markers2.setBrush((0, 0, 0, 0))
         self.cat_star_markers2.setSize(10)
         self.cat_star_markers2.setSymbol(Cross())
         self.cat_star_markers2.setZValue(4)
@@ -365,7 +365,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # centroid star markers (main window)
         self.centroid_star_markers = pg.ScatterPlotItem()
         self.img_frame.addItem(self.centroid_star_markers)
-        self.centroid_star_markers.setPen(QtGui.QColor(255, 165, 0))
+        self.centroid_star_markers.setPen((255, 165, 0))
         self.centroid_star_markers.setSize(15)
         self.centroid_star_markers.setSymbol(Plus())
         self.centroid_star_markers.setZValue(4)
@@ -373,7 +373,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # centroid star markers (zoom window)
         self.centroid_star_markers2 = pg.ScatterPlotItem()
         self.zoom_window.addItem(self.centroid_star_markers2)
-        self.centroid_star_markers2.setPen(QtGui.QColor(255, 165, 0))
+        self.centroid_star_markers2.setPen((255, 165, 0))
         self.centroid_star_markers2.setSize(15)
         self.centroid_star_markers2.setSymbol(Plus())
         self.centroid_star_markers2.setZValue(4)
@@ -383,8 +383,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # calstar markers (main window)
         self.calstar_markers = pg.ScatterPlotItem()
         self.img_frame.addItem(self.calstar_markers)
-        self.calstar_markers.setPen('g')
-        self.calstar_markers.setBrush(QtGui.QColor(0, 0, 0, 0))
+        self.calstar_markers.setPen((0, 255, 0, 100))
+        self.calstar_markers.setBrush((0, 0, 0, 0))
         self.calstar_markers.setSize(10)
         self.calstar_markers.setSymbol('o')
         self.calstar_markers.setZValue(2)
@@ -392,8 +392,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # calstar markers (zoom window)
         self.calstar_markers2 = pg.ScatterPlotItem()
         self.zoom_window.addItem(self.calstar_markers2)
-        self.calstar_markers2.setPen('g')
-        self.calstar_markers2.setBrush(QtGui.QColor(0, 0, 0, 0))
+        self.calstar_markers2.setPen((0, 255, 0, 100))
+        self.calstar_markers2.setBrush((0, 0, 0, 0))
         self.calstar_markers2.setSize(20)
         self.calstar_markers2.setSymbol('o')
         self.calstar_markers2.setZValue(5)
@@ -484,6 +484,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigExtinctionChanged.connect(self.onExtinctionChanged)
 
         self.tab.param_manager.sigRefractionToggled.connect(self.onRefractionChanged)
+        self.tab.param_manager.sigEqAspectToggled.connect(self.onRefractionChanged)
 
         self.tab.param_manager.sigFitPressed.connect(lambda: self.fitPickedStars(first_platepar_fit=False))
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
@@ -645,6 +646,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Add aspect info if the radial distortion is used
         if not self.platepar.distortion_type.startswith("poly"):
             text_str += 'G - Toggle equal aspect\n'
+            text_str += 'B - Dist = img centre toggle\n'
 
         text_str += '1/2 - X offset\n'
         text_str += '3/4 - Y offset\n'
@@ -936,9 +938,15 @@ class PlateTool(QtWidgets.QMainWindow):
             setattr(self, k, v)
 
         # updating old state files with new platepar variables
-        if plate_tool.platepar is not None:
-            if not hasattr(plate_tool, "equal_aspect"):
-                plate_tool.platepar.equal_aspect = False
+        if self.platepar is not None:
+            if not hasattr(self, "equal_aspect"):
+                self.platepar.equal_aspect = False
+
+            if not hasattr(self, "force_distortion_centre"):
+                self.platepar.force_distortion_centre = False
+
+            if not hasattr(self, "extinction_scale"):
+                self.platepar.extinction_scale = 1.0
 
         #  if setupUI hasnt already been called, call it
         if not hasattr(self, 'central'):
@@ -1695,6 +1703,8 @@ class PlateTool(QtWidgets.QMainWindow):
         elif event.key() == QtCore.Qt.Key_G:
             if self.platepar is not None:
                 self.platepar.equal_aspect = not self.platepar.equal_aspect
+
+                self.tab.param_manager.updatePlatepar()
                 self.updateLeftLabels()
                 self.updateStars()
 
@@ -1744,6 +1754,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 self.onRefractionChanged()
                 self.tab.param_manager.updatePlatepar()
+
+        elif event.key() == QtCore.Qt.Key_B:
+            if self.platepar is not None:
+                self.platepar.force_distortion_centre = not self.platepar.force_distortion_centre
+                self.updateStars()
+                self.updateLeftLabels()
 
         elif event.key() == QtCore.Qt.Key_H:
             self.toggleShowCatStars()

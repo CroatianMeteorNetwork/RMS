@@ -575,6 +575,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigPhotometryPressed = QtCore.pyqtSignal()
 
     sigRefractionToggled = QtCore.pyqtSignal()
+    sigEqAspectToggled = QtCore.pyqtSignal()
 
     def __init__(self, gui, parent=None):
         QtWidgets.QWidget.__init__(self, parent)
@@ -611,6 +612,10 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.refraction = QtWidgets.QCheckBox('Refraction')
         self.refraction.released.connect(self.onRefractionToggled)
         form.addWidget(self.refraction)
+
+        self.eqAspect = QtWidgets.QCheckBox('Equal Aspect')
+        self.eqAspect.released.connect(self.onEqualAspectToggled)
+        form.addWidget(self.eqAspect)
 
         hbox = QtWidgets.QHBoxLayout()
         self.az_centre = DoubleSpinBox()
@@ -723,6 +728,10 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.gui.platepar.refraction = self.refraction.isChecked()
         self.sigRefractionToggled.emit()
 
+    def onEqualAspectToggled(self):
+        self.gui.platepar.equal_aspect = self.eqAspect.isChecked()
+        self.sigEqAspectToggled.emit()
+
     def onLatChanged(self):
         self.gui.platepar.lat = self.lat.value()
         # self.gui.view_widget.setFocus()
@@ -801,6 +810,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.elev.setValue(self.gui.platepar.elev)
         self.extinction_scale.setValue(self.gui.platepar.extinction_scale)
         self.refraction.setChecked(self.gui.platepar.refraction)
+        self.eqAspect.setChecked(self.gui.platepar.equal_aspect)
 
     def updatePairedStars(self):
         """
