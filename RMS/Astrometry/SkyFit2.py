@@ -271,12 +271,34 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def setupUI(self, loaded_file=False):
         """ Setup pyqt UI with widgets """
+        self.mode = 'skyfit'
+        self.mode_list = ['skyfit', 'manualreduction']
+
         self.central = QtWidgets.QWidget()
         self.setWindowTitle('SkyFit')
         self.setCentralWidget(self.central)
 
         layout = QtWidgets.QGridLayout()
         self.central.setLayout(layout)
+
+        # top menu
+        menu = self.menuBar()
+
+        self.new_platepar_action = QtWidgets.QAction("New platepar")
+        self.new_platepar_action.setShortcut("Ctrl+N")
+        self.new_platepar_action.triggered.connect(self.makeNewPlatepar)
+
+        self.save_platepar_action = QtWidgets.QAction("Save platepar")
+        self.save_platepar_action.setShortcut('Ctrl+S')
+        self.save_platepar_action.triggered.connect(self.saveState)
+
+        self.station_action = QtWidgets.QAction("Change station")
+
+        self.file_menu = menu.addMenu('File')
+        self.file_menu.addActions([self.new_platepar_action,
+                                   self.save_platepar_action,
+                                   self.station_action])
+
 
         self.show_key_help = 1
 
@@ -324,8 +346,16 @@ class PlateTool(QtWidgets.QMainWindow):
         self.label2.setParentItem(self.img_frame)
 
         # bottom information
-        self.label3 = QtWidgets.QLabel()
-        layout.addWidget(self.label3, 1, 1)
+        self.status_bar = QtWidgets.QStatusBar()
+        self.setStatusBar(self.status_bar)
+
+        self.skyfit_button = QtWidgets.QPushButton('SkyFit')
+        self.skyfit_button.setDisabled(True)
+        self.skyfit_button.pressed.connect(lambda: self.changeMode('skyfit'))
+        self.manualreduction_button = QtWidgets.QPushButton('ManualReduction')
+        self.manualreduction_button.pressed.connect(lambda: self.changeMode('manualreduction'))
+        self.status_bar.addPermanentWidget(self.skyfit_button)
+        self.status_bar.addPermanentWidget(self.manualreduction_button)
 
         self.catalog_stars_visible = True
 
@@ -345,6 +375,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.cat_star_markers2.setSize(10)
         self.cat_star_markers2.setSymbol(Cross())
         self.cat_star_markers2.setZValue(4)
+
+        self.selected_stars_visible = True
 
         # selected catalog star markers (main window)
         self.sel_cat_star_markers = pg.ScatterPlotItem()
@@ -484,7 +516,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigExtinctionChanged.connect(self.onExtinctionChanged)
 
         self.tab.param_manager.sigRefractionToggled.connect(self.onRefractionChanged)
-        self.tab.param_manager.sigEqAspectToggled.connect(self.onRefractionChanged)
+        self.tab.param_manager.sigEqAspectToggled.connect(self.onFitParametersChanged)
+        self.tab.param_manager.sigForceDistortionToggled.connect(self.onFitParametersChanged)
 
         self.tab.param_manager.sigFitPressed.connect(lambda: self.fitPickedStars(first_platepar_fit=False))
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
@@ -493,6 +526,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigMaxAveToggled.connect(self.toggleImageType)
         self.tab.settings.sigCatStarsToggled.connect(self.toggleShowCatStars)
         self.tab.settings.sigCalStarsToggled.connect(self.toggleShowCalStars)
+        self.tab.settings.sigSelStarsToggled.connect(self.toggleShowSelectedStars)
         self.tab.settings.sigDistortionToggled.connect(self.toggleDistortion)
         self.tab.settings.sigGridToggled.connect(self.onGridChanged)
         self.tab.settings.sigInvertToggled.connect(self.toggleInvertColours)
@@ -511,6 +545,25 @@ class PlateTool(QtWidgets.QMainWindow):
         self.show()
         self.updateLeftLabels()
         self.star_pick_info.setPos(self.img_frame.width()/2, self.img_frame.height() - 50)
+
+    def changeMode(self, new_mode):
+        if new_mode == 'skyfit':
+            self.mode = 'skyfit'
+            self.skyfit_button.setDisabled(True)
+            self.manualreduction_button.setDisabled(False)
+            self.setWindowTitle('SkyFit')
+
+            self.tab.onSkyFit()
+            # DO STUFF HERE
+        else:
+            self.mode = 'manualreduction'
+            self.skyfit_button.setDisabled(False)
+            self.manualreduction_button.setDisabled(True)
+            self.setWindowTitle('ManualReduction')
+
+            self.resetStarPick()
+            self.tab.onManualReduction()
+            # DO STUFF HERE
 
     def onRefractionChanged(self):
         self.updateStars()
@@ -587,7 +640,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def updateBottomLabel(self):
         """ Update bottom label with current mouse position """
-        self.label3.setText(self.mouseOverStatus(self.mouse_x, self.mouse_y))
+        self.status_bar.showMessage(self.mouseOverStatus(self.mouse_x, self.mouse_y))
 
     def zoom(self):
         """ Update the zoom window to zoom on the correct position """
@@ -1131,7 +1184,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.mag_lev_stddev = fit_stddev
             self.platepar.vignetting_coeff = vignetting_coeff
 
-            if self.catalog_stars_visible:
+            if self.selected_stars_visible:
 
                 # Plot photometry deviations on the main plot as colour coded rings
                 star_coords = np.array(star_coords)
@@ -1156,7 +1209,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         text2 = TextItem("{:+6.2f}".format(star_mag), anchor=(0.5, 1.5))
                         text2.setPos(star_x, star_y)
                         text2.setFont(QtGui.QFont('times', 10))
-                        text2.setColor(QtGui.QColor(255, 0, 0))
+                        text2.setColor(QtGui.QColor(0, 255, 0))
                         text2.setAlign(QtCore.Qt.AlignCenter)
                         self.residual_text.addTextItem(text2)
                 self.residual_text.update()
@@ -1368,10 +1421,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         elif event.key() == QtCore.Qt.Key_N and modifiers == QtCore.Qt.ControlModifier:
             self.makeNewPlatepar()
-            self.tab.param_manager.updatePlatepar()
-            self.updateLeftLabels()
-            self.updateStars()
-            self.updateDistortion()
 
         elif event.key() == QtCore.Qt.Key_F and modifiers == QtCore.Qt.ControlModifier:
             _, self.flat_struct = self.loadFlat()
@@ -1758,6 +1807,8 @@ class PlateTool(QtWidgets.QMainWindow):
         elif event.key() == QtCore.Qt.Key_B:
             if self.platepar is not None:
                 self.platepar.force_distortion_centre = not self.platepar.force_distortion_centre
+
+                self.tab.param_manager.updatePlatepar()
                 self.updateStars()
                 self.updateLeftLabels()
 
@@ -1786,13 +1837,7 @@ class PlateTool(QtWidgets.QMainWindow):
         elif event.key() == QtCore.Qt.Key_Escape:
             if self.star_pick_mode:
                 # If the ESC is pressed when the star has been centroided, reset the centroid
-                if not self.star_selection_centroid:
-                    self.star_selection_centroid = True
-                    self.x_centroid = None
-                    self.y_centroid = None
-                    self.star_intensity = None
-                    self.cursor.setMode(self.star_selection_centroid)
-                    self.updatePairedStars()
+                self.resetStarPick()
 
         elif event.key() == QtCore.Qt.Key_P:
             # Show the photometry plot
@@ -1838,6 +1883,15 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.scrolls_back = 0
                     self.img_frame.scaleBy([0.80, 0.80], QtCore.QPoint(self.mouse_x, self.mouse_y))
 
+    def resetStarPick(self):
+        if not self.star_selection_centroid:
+            self.star_selection_centroid = True
+            self.x_centroid = None
+            self.y_centroid = None
+            self.star_intensity = None
+            self.cursor.setMode(self.star_selection_centroid)
+            self.updatePairedStars()
+
     def toggleImageType(self):
         """ Toggle between the maxpixel and avepixel. """
         if self.img_type_flag == 'maxpixel':
@@ -1859,6 +1913,15 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             self.cat_star_markers.hide()
             self.cat_star_markers2.hide()
+
+    def toggleShowSelectedStars(self):
+        self.selected_stars_visible = not self.selected_stars_visible
+        if self.selected_stars_visible:
+            self.sel_cat_star_markers.show()
+            self.sel_cat_star_markers2.show()
+        else:
+            self.sel_cat_star_markers.hide()
+            self.sel_cat_star_markers2.hide()
 
         self.photometry()
 
@@ -2225,6 +2288,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Indicate that a new platepar is being made
         self.new_platepar = True
+
+        self.tab.param_manager.updatePlatepar()
+        self.updateLeftLabels()
+        self.updateStars()
+        self.updateDistortion()
 
     def loadFlat(self):
         """ Open a file dialog and ask user to load a flat field. """

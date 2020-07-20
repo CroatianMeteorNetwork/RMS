@@ -326,7 +326,7 @@ class InputTypeFF(object):
 
 
                 # Init an empty FF structure
-                self.ff = FFMimickInterface(self.nrows, self.ncols, self.fr_chunk_no, np.uint8)
+                self.ff = FFMimickInterface(self.nrows, self.ncols, np.uint8)
 
                 # Store maxpixel selections, avepixels, stdpixels
                 maxpixel_list = []

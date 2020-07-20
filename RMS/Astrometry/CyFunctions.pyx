@@ -324,7 +324,7 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
 
     # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
     if (pi/2 - fabs(dec)) < radians(0.5):
-        dec_corr = acos(sqrt(A**2 + B**2))
+        dec_corr = np.sign(dec)*acos(sqrt(A**2 + B**2))
     else:
         dec_corr = asin(C)
 
@@ -376,8 +376,8 @@ def equatorialCoordPrecession_vect(double start_epoch, double final_epoch, np.nd
     # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
     dec_corr = np.arcsin(C)
 
-    # filter = (pi/2 - np.abs(dec)) < radians(0.5)
-    # dec_corr[filter] = np.arccos(np.sqrt(A[filter]**2 + B[filter]**2))
+    filter = (pi/2 - np.abs(dec)) < radians(0.5)
+    dec_corr[filter] = np.sign(dec[filter])*np.arccos(np.sqrt(A[filter]**2 + B[filter]**2))
 
     return ra_corr, dec_corr
 
@@ -869,7 +869,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data, double jd, double lat, double lon, double x_res, \
     double y_res, double h0, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, \
-    str dist_type, bool refraction=True, bool equal_aspect=False, bool forece_distorion_centre=False):
+    str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False):
     """ Convert RA, Dec to distorion corrected image coordinates.
     Arguments:
         RA_data: [ndarray] Array of right ascensions (degrees).
@@ -924,7 +924,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
 
 
     # If the radial distortion is used, unpack radial parameters
- if dist_type.startswith("radial"):
+    if dist_type.startswith("radial"):
 
 
         # Force the distortion centre to the image centre
@@ -1085,7 +1085,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_data, double lat, double lon, double x_res, double y_res, \
     double h0, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
-    str dist_type, bool refraction=True, bool equal_aspect=False):
+    str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False):
     """
     Arguments:
         jd_data: [ndarray] Julian date of each data point.
