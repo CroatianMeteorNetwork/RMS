@@ -27,7 +27,7 @@ cdef double J2000_DAYS = 2451545.0
 
 # Declare math functions
 cdef extern from "math.h":
-    double abs(double)
+    double fabs(double)
     double sin(double)
     double asin(double)
     double cos(double)
@@ -53,6 +53,14 @@ cdef double degrees(double deg):
     
     return deg*180.0/pi
 
+
+cdef double sign(double x):
+    if (x > 1):
+        return 1
+    elif (x < 1):
+        return -1
+
+    return 0
 
 
 @cython.boundscheck(False)
@@ -307,8 +315,8 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
     ra_corr = (atan2(A, B) + z + 2*pi)%(2*pi)
 
     # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
-    if (pi/2 - abs(dec)) < radians(0.5):
-        dec_corr = acos(sqrt(A**2 + B**2))
+    if (pi/2 - fabs(dec)) < radians(0.5):
+        dec_corr = sign(C)*acos(sqrt(A**2 + B**2))
     else:
         dec_corr = asin(C)
 
