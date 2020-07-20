@@ -54,13 +54,12 @@ cdef double degrees(double deg):
     return deg*180.0/pi
 
 
-cdef double sign(double x):
-    if (x > 1):
-        return 1
-    elif (x < 1):
-        return -1
+cdef double sign(double x):    
+    if (x >= 1):
+        return 1.0
 
-    return 0
+    return -1.0
+        
 
 
 @cython.boundscheck(False)
@@ -316,7 +315,7 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
 
     # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
     if (pi/2 - fabs(dec)) < radians(0.5):
-        dec_corr = sign(C)*acos(sqrt(A**2 + B**2))
+        dec_corr = sign(dec)*acos(sqrt(A**2 + B**2))
     else:
         dec_corr = asin(C)
 
