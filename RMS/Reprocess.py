@@ -23,7 +23,9 @@ from RMS.Formats.Platepar import Platepar
 from RMS.Formats import CALSTARS
 from RMS.UploadManager import UploadManager
 from RMS.Routines.Image import saveImage
+from RMS.Routines.MaskImage import loadMask
 from Utils.CalibrationReport import generateCalibrationReport
+from Utils.FOVKML import fovKML
 from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
@@ -136,6 +138,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     night_data_dir_name = os.path.basename(os.path.abspath(night_data_dir))
 
     platepar = None
+    kml_file = None
     
     # If the detection should be run
     if (not nodetect):
@@ -227,6 +230,38 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
+
+            # Generate the FOV KML file
+            log.info("Generating a FOV KML file...")
+            try:
+
+                mask_path = None
+                mask = None
+
+                # Try loading the mask
+                if os.path.exists(os.path.join(night_data_dir, config.mask_file)):
+                    mask_path = os.path.join(night_data_dir, config.mask_file)
+
+                # Try loading the default mask
+                elif os.path.exists(config.mask_file):
+                    mask_path = os.path.abspath(config.mask_file)
+
+                # Load the mask if given
+                if mask_path:
+                    mask = loadMask(mask_path)
+
+                if mask is not None:
+                    log.info("Loaded mask: {:s}".format(mask_path))
+
+                # Generate the KML
+                kml_file = fovKML(config, night_data_dir, platepar, mask=mask)
+
+
+            except Exception as e:
+                log.debug("Generating a FOV KML file failed with the message:\n" + repr(e))
+                log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+
     else:
         ff_detected = []
         detector = None
@@ -304,6 +339,11 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         recalibrated_platepars_path = os.path.join(night_data_dir, config.platepars_recalibrated_name)
         if os.path.exists(recalibrated_platepars_path):
             extra_files.append(recalibrated_platepars_path)
+
+    # Add the FOV KML file
+    if kml_file is not None:
+        extra_files.append(kml_file)
+        
 
     ### ###
 

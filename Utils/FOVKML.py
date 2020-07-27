@@ -27,6 +27,9 @@ def fovKML(config, dir_path, platepar, mask=None, area_ht=100000, side_points=10
             to the longest side.
         plot_station: [bool] Plot the location of the station. True by default.
 
+    Return:
+        kml_path: [str] Path to the saved KML file.
+
     """
 
     # Find lat/lon/elev describing the view area
@@ -127,6 +130,9 @@ def fovKML(config, dir_path, platepar, mask=None, area_ht=100000, side_points=10
         f.write(kml)
 
     print("KML saved to:", kml_path)
+
+
+    return kml_path
 
 
 
