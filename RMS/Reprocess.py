@@ -253,8 +253,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 if mask is not None:
                     log.info("Loaded mask: {:s}".format(mask_path))
 
-                # Generate the KML
-                kml_file = fovKML(config, night_data_dir, platepar, mask=mask)
+                # Generate the KML (only the FOV is shown, without the station)
+                kml_file = fovKML(config, night_data_dir, platepar, mask=mask, plot_station=False)
 
 
             except Exception as e:
