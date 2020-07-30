@@ -54,7 +54,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, extinctionCorrectionTrueToApparent
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
-from RMS.Astrometry.Conversions import J2000_JD, date2JD, JD2HourAngle, raDec2AltAz, altAz2RADec
+from RMS.Astrometry.Conversions import date2JD, JD2HourAngle
 import RMS.ConfigReader as cr
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
@@ -68,8 +68,7 @@ from RMS.Misc import decimalDegreesToSexHours, openFileDialog
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession, eqRefractionTrueToApparent, \
-    eqRefractionApparentToTrue, trueRaDec2ApparentAltAz, apparentAltAz2TrueRADec
+from RMS.Astrometry.CyFunctions import subsetCatalog, trueRaDec2ApparentAltAz, apparentAltAz2TrueRADec
 
 
 
@@ -589,17 +588,14 @@ class PlateTool(object):
             # Get the current frame time
             time_data = [self.img_handle.currentTime()]
 
-            # Compute RA, dec
+            # Compute RA, Dec
             jd, ra, dec, _ = xyToRaDecPP(time_data, [x], [y], [1], self.platepar, extinction_correction=False)
 
-
-            # Precess RA/Dec to epoch of date for alt/az computation
-            ra_date, dec_date = equatorialCoordPrecession(J2000_JD.days, jd[0], np.radians(ra[0]), 
-                np.radians(dec[0]))
-            ra_date, dec_date = np.degrees(ra_date), np.degrees(dec_date)
-
-            # Compute alt, az
-            azim, alt = raDec2AltAz(ra_date, dec_date, jd[0], self.platepar.lat, self.platepar.lon)
+            # Compute apparent alt/az
+            azim, alt = trueRaDec2ApparentAltAz( \
+                np.radians(ra[0]), np.radians(dec[0]), jd[0], np.radians(self.platepar.lat), \
+                np.radians(self.platepar.lon), self.platepar.refraction)
+            azim, alt = np.degrees(azim), np.degrees(alt)
 
 
             status_str += ",  Azim={:6.2f}  Alt={:6.2f} (date),  RA={:6.2f}  Dec={:+6.2f} (J2000)".format(\
@@ -1502,6 +1498,16 @@ class PlateTool(object):
                 self.updateImage()
 
 
+        # Toggle forcing distortion centre to image centre
+        elif event.key == 'b':
+
+            if self.platepar is not None:
+
+                self.platepar.force_distortion_centre = not self.platepar.force_distortion_centre
+
+                self.updateImage()
+
+
         elif event.key == 'ctrl+h':
 
             # Toggle levels adustment mode
@@ -2065,9 +2071,10 @@ class PlateTool(object):
             text_str += "Distortion type = {:s}\n".format(\
                 self.platepar.distortion_type_list[self.dist_type_index])
 
-            # Add aspect info if the radial distortion is used
+            # Add extra info if the radial distortion is used
             if not self.platepar.distortion_type.startswith("poly"):
                 text_str += "Equal aspect    = {:s}\n".format(str(self.platepar.equal_aspect))
+                text_str += "Force dist cent = {:s}\n".format(str(self.platepar.force_distortion_centre))
 
             text_str += '\n'
             sign, hh, mm, ss = decimalDegreesToSexHours(ra_centre)
@@ -2103,6 +2110,7 @@ class PlateTool(object):
             # Add aspect info if the radial distortion is used
             if not self.platepar.distortion_type.startswith("poly"):
                 text_str += 'G - Toggle equal aspect\n'
+                text_str += 'B - Dist = img centre toggle\n'
 
             text_str += '1/2 - X offset\n'
             text_str += '3/4 - Y offset\n'
@@ -2304,19 +2312,22 @@ class PlateTool(object):
 
         jd = date2JD(*self.img_handle.currentTime())
 
+        # Set plate scale
+        self.platepar.F_scale = scale
+
+        # Compute reference Alt/Az to apparent coordinates, epoch of date
+        az_centre, alt_centre = trueRaDec2ApparentAltAz(np.radians(ra), np.radians(dec), jd, \
+            np.radians(self.platepar.lat), np.radians(self.platepar.lon), self.platepar.refraction)
+        self.platepar.az_centre, self.platepar.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
+
+        # Compute reference RA/Dec from given reference Alt/az
+        self.updateRefRADec(skip_rot_update=True)
+
         # Compute the position angle from the orientation
         pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, orientation)
 
-        # Compute reference azimuth and altitude
-        azim, alt = raDec2AltAz(ra, dec, jd, self.platepar.lat, self.platepar.lon)
-
-        # Set parameters to platepar
+        # Update reference position angle
         self.platepar.pos_angle_ref = pos_angle_ref
-        self.platepar.F_scale = scale
-        self.platepar.az_centre = azim
-        self.platepar.alt_centre = alt
-
-        self.updateRefRADec(skip_rot_update=True)
         
         # Save the current rotation w.r.t horizon value
         self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
@@ -2357,9 +2368,12 @@ class PlateTool(object):
         # Set the reference hour angle
         self.platepar.Ho = JD2HourAngle(self.platepar.JD)%360
 
-        # Convert FOV centre to RA, Dec
-        ra, dec = altAz2RADec(self.azim_centre, self.alt_centre, date2JD(*img_time), \
-            self.platepar.lat, self.platepar.lon)
+
+        # Convert the reference apparent Alt/Az in the epoch of date to true RA/Dec in J2000
+        ra, dec = apparentAltAz2TrueRADec(\
+            np.radians(self.azim_centre), np.radians(self.alt_centre), date2JD(*img_time), \
+            np.radians(self.platepar.lat), np.radians(self.platepar.lon), self.platepar.refraction)
+        ra, dec = np.degrees(ra), np.degrees(dec)
 
 
         return ra, dec, rot_horizontal
@@ -2469,9 +2483,11 @@ class PlateTool(object):
         # Get reference RA, Dec of the image centre
         self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz = self.getFOVcentre()
 
-        # Recalculate reference alt/az
-        self.platepar.az_centre, self.platepar.alt_centre = raDec2AltAz(self.platepar.JD, \
-            self.platepar.lon, self.platepar.lat, self.platepar.RA_d, self.platepar.dec_d)
+        # Update centre of FOV in horizontal coordinates (epoch of date)
+        az_centre, alt_centre = trueRaDec2ApparentAltAz(np.radians(self.platepar.RA_d), \
+            np.radians(self.platepar.dec_d), self.platepar.JD, np.radians(self.platepar.lat), \
+            np.radians(self.platepar.lon), self.platepar.refraction)
+        self.platepar.az_centre, self.platepar.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
 
         # Check that the calibration parameters are within the nominal range
         self.checkParamRange()
@@ -3040,14 +3056,20 @@ class PlateTool(object):
 
 
             # Compute azim/elev from the catalog
-            azim_cat, elev_cat = raDec2AltAz(cat_ra, cat_dec, jd, self.platepar.lat, self.platepar.lon)
+            azim_cat, elev_cat = trueRaDec2ApparentAltAz( \
+                np.radians(cat_ra), np.radians(cat_dec), jd, np.radians(self.platepar.lat), \
+                np.radians(self.platepar.lon), self.platepar.refraction)
+            azim_cat, elev_cat = np.degrees(azim_cat), np.degrees(elev_cat)
 
             azim_list.append(azim_cat)
             elev_list.append(elev_cat)
 
 
             # Compute azim/elev from image coordinates
-            azim_img, elev_img = raDec2AltAz(img_ra, img_dec, jd, self.platepar.lat, self.platepar.lon)
+            azim_img, elev_img = trueRaDec2ApparentAltAz( \
+                np.radians(img_ra), np.radians(img_dec), jd, np.radians(self.platepar.lat), \
+                np.radians(self.platepar.lon), self.platepar.refraction)
+            azim_img, elev_img = np.degrees(azim_img), np.degrees(elev_img)
 
             # Compute azim/elev residuals
             azim_residuals.append(((azim_cat - azim_img + 180)%360 - 180)*np.cos(np.radians(elev_cat)))
@@ -3200,6 +3222,10 @@ if __name__ == '__main__':
         if plate_tool.platepar is not None:
             if not hasattr(plate_tool.platepar, "equal_aspect"):
                 plate_tool.platepar.equal_aspect = False
+
+        if plate_tool.platepar is not None:
+            if not hasattr(plate_tool.platepar, "force_distortion_centre"):
+                plate_tool.platepar.force_distortion_centre = False
 
         if plate_tool.platepar is not None:
             if not hasattr(plate_tool.platepar, "extinction_scale"):

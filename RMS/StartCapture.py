@@ -435,6 +435,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         upload_manager.addFiles([archive_name])
         log.info('File added...')
 
+        # Delay the upload, if the delay is given
+        upload_manager.delayNextUpload(delay=60*config.upload_delay)
+
 
     # Delete detector backup files
     if detector is not None:
