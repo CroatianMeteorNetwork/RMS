@@ -4,6 +4,8 @@ import pyqtgraph as pg
 import numpy as np
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
+from RMS.Routines import Image
+
 import time
 import re
 import sys
@@ -217,6 +219,9 @@ class TextItem(pg.TextItem):
 
 
 class ViewBox(pg.ViewBox):
+    sigMousePressed = QtCore.pyqtSignal(object)
+    sigMouseReleased = QtCore.pyqtSignal(object)
+
     def __init__(self, *args, **kwargs):
         pg.ViewBox.__init__(self, *args, **kwargs)
 
@@ -227,10 +232,20 @@ class ViewBox(pg.ViewBox):
         """
         ev.ignore()
 
+    def mouseReleaseEvent(self, event):
+        self.sigMouseReleased.emit(event)
+
+    def mousePressEvent(self, event):
+        if self.mouseEnabled()[0]:
+            super().mousePressEvent(event)
+        else:
+            self.sigMousePressed.emit(event)
+            event.accept()
+
 
 class ImageItem(pg.ImageItem):
     # ImageItem that allows for a change in gamma
-    def __init__(self, image=None, default_key=None, invert=False, **kwargs):
+    def __init__(self, img_handle=None, **kwargs):
         """
         ex
         ImageItem({'maxpixel':data1,'avepixel':data2}, 'avepixel')
@@ -241,25 +256,165 @@ class ImageItem(pg.ImageItem):
                 data to store and show
             default_key: if image is a dict, use to pick which data to use first
             invert [boolean]: whether to invert image when displaying
+            gamma
             kwargs: other __init__ arguments of pg.ImageItem
         """
-        if type(image) == dict:
-            self.data_dict = image
-            image = self.data_dict[default_key]
-        else:
-            self.data_dict = None
+        self.img_handle = img_handle
+        pg.ImageItem.__init__(self, image=None, **kwargs)
 
-        pg.ImageItem.__init__(self, image, **kwargs)
         if 'gamma' in kwargs.keys():
             self._gamma = kwargs['gamma']
         else:
             self._gamma = 1
 
-        self.invert_img = invert
+        if 'invert' in kwargs.keys():
+            self.invert_img = kwargs['invert']
+        else:
+            self.invert_img = False
 
-    def selectImage(self, key):
-        self.image = self.data_dict[key]
-        self.updateImage()
+        if 'dark' in kwargs.keys():
+            self.dark = kwargs['dark']
+        else:
+            self.dark = None
+
+        if 'flat_struct' in kwargs.keys():
+            self.flat_struct = kwargs['flat_struct']
+        else:
+            self.flat_struct = None
+
+        self.avepixel()
+        self.img_showing = 'avepixel'
+
+    def maxpixel(self):
+        maxpixel = self.img_handle.loadChunk().maxpixel
+
+        # adding background to FR files
+        if self.img_handle.name()[:2] == 'FR':
+            original_index = self.img_handle.current_ff_index
+            original_time = self.img_handle.currentTime()
+            for index in range(len(self.img_handle.ff_list)):
+                if index == original_index:
+                    continue
+
+                self.img_handle.current_ff_index = index
+                if original_time == self.img_handle.currentTime() and self.img_handle.name()[:2] == 'FF':
+                    maxpixel = maxpixel + self.img_handle.loadChunk().maxpixel*(maxpixel == 0)
+                    break
+
+            self.img_handle.current_ff_index = original_index
+
+        if self.dark is not None:
+            maxpixel = Image.applyDark(maxpixel, self.dark)
+        if self.flat_struct is not None:
+            maxpixel = Image.applyFlat(maxpixel, self.flat_struct)
+        self.setImage(np.swapaxes(maxpixel, 0, 1))
+        self.img_showing = 'maxpixel'
+
+    def avepixel(self):
+        avepixel = self.img_handle.loadChunk().avepixel
+
+        # adding background to FR files
+        if self.img_handle.name()[:2] == 'FR':
+            original_index = self.img_handle.current_ff_index
+            original_time = self.img_handle.currentTime()
+            for index in range(len(self.img_handle.ff_list)):
+                if index == original_index:
+                    continue
+
+                self.img_handle.current_ff_index = index
+                if original_time == self.img_handle.currentTime() and self.img_handle.name()[:2] == 'FF':
+                    avepixel = avepixel + self.img_handle.loadChunk().avepixel*(avepixel == 0)
+                    break
+
+            self.img_handle.current_ff_index = original_index
+
+        if self.dark is not None:
+            avepixel = Image.applyDark(avepixel, self.dark)
+        if self.flat_struct is not None:
+            avepixel = Image.applyFlat(avepixel, self.flat_struct)
+        self.setImage(np.swapaxes(avepixel, 0, 1))
+        self.img_showing = 'avepixel'
+
+    def changeHandle(self, img_handle):
+        self.img_handle = img_handle
+        if self.img_showing == 'maxpixel':
+            self.maxpixel()
+        elif self.img_showing == 'avepixel':
+            self.avepixel()
+        elif self.img_showing == 'frame':
+            self.loadFrame()
+
+    def loadFrame(self):
+        frame = self.img_handle.loadFrame(avepixel=True)
+
+        # adding background to FR files
+        if self.img_handle.name()[:2] == 'FR':
+            original_index = self.img_handle.current_ff_index
+            original_time = self.img_handle.currentTime()
+            for index in range(len(self.img_handle.ff_list)):
+                if index == original_index:
+                    continue
+
+                self.img_handle.current_ff_index = index
+                if original_time == self.img_handle.currentTime() and self.img_handle.name()[:2] == 'FF':
+                    frame = frame + self.img_handle.loadChunk().avepixel*(frame == 0)
+                    break
+
+            self.img_handle.current_ff_index = original_index
+
+        if self.dark is not None:
+            frame = Image.applyDark(frame, self.dark)
+        if self.flat_struct is not None:
+            frame = Image.applyFlat(frame, self.flat_struct)
+        self.setImage(np.swapaxes(frame, 0, 1))
+        self.img_showing = 'frame'
+
+    def nextChunk(self):
+        self.img_handle.nextChunk()
+
+    def prevChunk(self):
+        self.img_handle.prevChunk()
+
+    def nextFrame(self):
+        self.img_handle.nextFrame()
+
+    def prevFrame(self):
+        self.img_handle.prevFrame()
+
+    def setFrame(self, n):
+        self.img_handle.setFrame(n)
+
+    def getAutolevels(self, lower=0.1, upper=99.95):
+        return np.percentile(self.image, lower), np.percentile(self.image, upper)
+
+    def loadImage(self, mode, flag='avepixel'):
+        if flag == 'maxpixel':
+            self.maxpixel()
+        elif mode == 'skyfit':
+            self.avepixel()
+        else:
+            self.loadFrame()
+
+    def getFrame(self):
+        return self.img_handle.current_frame
+
+    def nextLine(self):
+        if hasattr(self.img_handle, 'current_line'):
+            self.img_handle.current_line = (self.img_handle.current_line + 1)% \
+                                           self.img_handle.line_number[self.img_handle.current_ff_index]
+
+    def prevLine(self):
+        if hasattr(self.img_handle, 'current_line'):
+            self.img_handle.current_line = (self.img_handle.current_line - 1)% \
+                                           self.img_handle.line_number[self.img_handle.current_ff_index]
+
+    @property
+    def line(self):
+        return self.img_handle.current_line
+
+    @line.setter
+    def line(self, line):
+        self.img_handle.current_line = line
 
     @property
     def gamma(self):
@@ -371,7 +526,7 @@ class CursorItem(pg.GraphicsObject):
         super().__init__()
         self._center = QtCore.QPoint(0, 0)
         self._r = r
-        self.mode = True
+        self.mode = 0
         self.thickness = thickness
 
         self.pxmode = pxmode
@@ -382,8 +537,9 @@ class CursorItem(pg.GraphicsObject):
         Change the mode of the cursor which changes its appearance
 
         Arguments:
-            mode [boolean]: True is two yellow circles with blue point
-                            False is a single purple circle
+            mode [int]: 0 is two yellow circles with blue point
+                        1 is a single purple circle
+                        2 is a single filled in red circle
         """
         self.mode = mode
         self.update()
@@ -420,7 +576,7 @@ class CursorItem(pg.GraphicsObject):
             r = self.r
 
         painter = QtGui.QPainter(self.picture)
-        if self.mode:
+        if self.mode == 0:
             pen = QtGui.QPen(QtCore.Qt.yellow, self.thickness, QtCore.Qt.SolidLine)
             painter.setPen(pen)
             painter.setBrush(QtCore.Qt.NoBrush)
@@ -431,11 +587,16 @@ class CursorItem(pg.GraphicsObject):
             painter.drawEllipse(QtCore.QPoint(0, 0), 2*r, 2*r)
             painter.setPen(QtGui.QPen(QtCore.Qt.blue, 2*self.thickness))
             painter.drawPoint(QtCore.QPoint(0, 0))
-        else:
+        elif self.mode == 1:
             pen = QtGui.QPen(QtGui.QColor(128, 0, 128), self.thickness, QtCore.Qt.SolidLine)
             painter.setPen(pen)
             painter.setBrush(QtCore.Qt.NoBrush)
             painter.drawEllipse(QtCore.QPoint(0, 0), 2*r, 2*r)
+        else:
+            pen = QtGui.QPen(QtGui.QColor(255, 0, 0), self.thickness, QtCore.Qt.SolidLine)
+            painter.setPen(pen)
+            painter.setBrush(QtGui.QColor(255, 0, 0, 100))
+            painter.drawEllipse(QtCore.QPoint(0, 0), r, r)
         painter.end()
 
         rect = QtCore.QRect(-3*self.r, -3*self.r, 6*self.r, 6*self.r)
@@ -467,24 +628,20 @@ class HistogramLUTWidget(pg.HistogramLUTWidget):
         super().mousePressEvent(event)
         modifier = QtWidgets.QApplication.keyboardModifiers()
         pos = self.vb.mapSceneToView(event.pos())
-        if self.item.movable and modifier == QtCore.Qt.ControlModifier:
+        if self.item.region.movable and modifier == QtCore.Qt.ControlModifier:
             if event.button() == QtCore.Qt.LeftButton:
                 self.setLevels(pos.y(), self.getLevels()[1])
             elif event.button() == QtCore.Qt.RightButton:
                 self.setLevels(self.getLevels()[0], pos.y())
 
 
-class CelestialGrid(pg.PlotCurveItem):
-    def __int__(self):
-        pg.PlotCurveItem.__init__(self, pen=pg.mkPen((255, 255, 255, 255), style=QtCore.Qt.DotLine))
-        # self.
-
-
 class HistogramLUTItem(pg.HistogramLUTItem):
     def __init__(self, *args, **kwargs):
         pg.HistogramLUTItem.__init__(self, *args, **kwargs)
         self.level_images = []
-        self.movable = True
+        self.auto_levels = False
+        self.saved_manual_levels = None
+        self.region.setBounds((0, None))
 
     def setImages(self, img):
         """ Store images to automatically set levels that correspond to
@@ -500,22 +657,42 @@ class HistogramLUTItem(pg.HistogramLUTItem):
         else:
             raise TypeError
 
-    def setMovable(self, boolean):
-        """
-        Set whether the minimum and maximum values can be changed
-        mouse interaction
-        """
-        self.movable = boolean
-        self.region.setMovable(self.movable)
+    def toggleAutoLevels(self):
+        if not self.auto_levels:
+            self.saved_manual_levels = self.getLevels()
+            self.setLevels(*self.imageItem().getAutolevels())
+        else:
+            self.setLevels(*self.saved_manual_levels)
+
+        self.auto_levels = not self.auto_levels
+        self.region.setMovable(not self.auto_levels)
 
     def paint(self, p, *args):
         # tbh this is an improvement
         pass
 
     def regionChanging(self):
-        super().regionChanging()
+        pass  # doesnt update when moving it
+
+
+    def regionChanged(self):
+        super().regionChanged()
         for img in self.level_images:
             img.setLevels(self.getLevels())
+
+    def setLevels(self, min=None, max=None, rgba=None):
+        super().setLevels(min, max, rgba)
+        for img in self.level_images:
+            img.setLevels(self.getLevels())
+
+    def imageChanged(self, autoLevel=False, autoRange=False):
+        if not self.auto_levels:
+            self.saved_manual_levels = self.getLevels()
+        super().imageChanged(autoLevel, autoRange)
+        if self.auto_levels:
+            self.setLevels(*self.imageItem().getAutolevels())
+        else:
+            self.setLevels(*self.saved_manual_levels)
 
 
 class RightOptionsTab(QtWidgets.QTabWidget):
@@ -533,7 +710,6 @@ class RightOptionsTab(QtWidgets.QTabWidget):
         self.addTab(self.hist, 'Levels')
         self.addTab(self.param_manager, 'Fit Parameters')
         self.addTab(self.settings, 'Settings')
-
 
         self.setTabText(0, 'Levels')
         self.setTabText(1, 'Fit Parameters')
@@ -623,10 +799,14 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.eqAspect = QtWidgets.QCheckBox('Equal Aspect')
         self.eqAspect.released.connect(self.onEqualAspectToggled)
         full_layout.addWidget(self.eqAspect)
+        if not self.gui.platepar.distortion_type.startswith('radial'):
+            self.eqAspect.hide()
 
         self.fdistortion = QtWidgets.QCheckBox('Force Distortion Centre')
         self.fdistortion.released.connect(self.onForceDistortionToggled)
         full_layout.addWidget(self.fdistortion)
+        if not self.gui.platepar.distortion_type.startswith('radial'):
+            self.fdistortion.hide()
 
         # spin boxes
         form = QtWidgets.QFormLayout()
@@ -811,6 +991,13 @@ class PlateparParameterManager(QtWidgets.QWidget):
         elif text == 'radial5':
             self.fit_parameters.changeNumberShown(7)
 
+        if self.gui.platepar.distortion_type.startswith('radial'):
+            self.eqAspect.show()
+            self.fdistortion.show()
+        else:
+            self.eqAspect.hide()
+            self.fdistortion.hide()
+
         self.sigFitParametersChanged.emit()
 
     def updatePlatepar(self):
@@ -832,6 +1019,13 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.refraction.setChecked(self.gui.platepar.refraction)
         self.eqAspect.setChecked(self.gui.platepar.equal_aspect)
         self.fdistortion.setChecked(self.gui.platepar.force_distortion_centre)
+
+        if self.gui.platepar.distortion_type.startswith('radial'):
+            self.eqAspect.show()
+            self.fdistortion.show()
+        else:
+            self.eqAspect.hide()
+            self.fdistortion.hide()
 
     def updatePairedStars(self):
         """
@@ -1086,16 +1280,15 @@ class SettingsWidget(QtWidgets.QTabWidget):
         self.lim_mag_label.show()
         self.std.show()
         self.std_label.show()
-        self.catalog_stars.show()
         self.detected_stars.show()
         self.distortion.show()
+        self.selected_stars.show()
 
-        self.sigCatStarsToggled.emit()  # toggle makes it true
-        self.updateShowCatStars()
-
+        self.gui.selected_stars_visible = False
         self.sigSelStarsToggled.emit()  # toggle makes it true
         self.updateShowSelStars()
 
+        self.gui.draw_calstars = False
         self.sigCalStarsToggled.emit()  # toggle makes it true
         self.updateShowCalStars()
 
@@ -1104,13 +1297,9 @@ class SettingsWidget(QtWidgets.QTabWidget):
         self.lim_mag_label.hide()
         self.std.hide()
         self.std_label.hide()
-        self.catalog_stars.hide()
         self.detected_stars.hide()
         self.distortion.hide()
-
-        self.gui.catalog_stars_visible = True
-        self.sigCatStarsToggled.emit()  # toggle makes it false
-        self.updateShowCatStars()
+        self.selected_stars.hide()
 
         self.gui.draw_distortion = True
         self.sigDistortionToggled.emit()  # toggle makes it false

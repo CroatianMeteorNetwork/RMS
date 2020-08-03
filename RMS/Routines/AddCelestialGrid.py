@@ -23,6 +23,8 @@ def updateRaDecGrid(grid, platepar):
     _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(platepar.JD)], [platepar.X_res/2], [platepar.Y_res/2], [1],
                                     platepar, extinction_correction=False)
 
+    # azim_centre, alt_centre = trueRaDec2ApparentAltAz(RA_c, dec_c, platepar.JD, platepar.lat, platepar.lon)
+
     # Compute FOV size
     fov_radius = np.hypot(*computeFOVSize(platepar))
 
@@ -41,7 +43,6 @@ def updateRaDecGrid(grid, platepar):
     ra_grid_arr = np.arange(0, 360, grid_freq)
     dec_grid_arr = np.arange(-90, 90, grid_freq)
 
-
     x = []
     y = []
     cuts = []
@@ -56,7 +57,10 @@ def updateRaDecGrid(grid, platepar):
                                                               platepar.lon, platepar.refraction)
 
         # Filter out points below the horizon  and outside the FOV
-        filter_arr = (alt_grid_plot > 0)
+        filter_arr = (alt_grid_plot > 0) # & (angularSeparation(alt_centre,
+                                                              # azim_centre,
+                                                              # alt_grid_plot,
+                                                              # az_grid_plot) < fov_radius)
         ra_grid_plot = ra_grid_plot[filter_arr]
         dec_grid_plot = dec_grid_plot[filter_arr]
 
@@ -81,14 +85,16 @@ def updateRaDecGrid(grid, platepar):
                                                               platepar.lon, platepar.refraction)
 
         # Filter out points below the horizon
-        filter_arr = (alt_grid_plot > 0)
+        filter_arr = (alt_grid_plot > 0) #& (angularSeparation(alt_centre,
+                                                              # azim_centre,
+                                                              # alt_grid_plot,
+                                                              # az_grid_plot) < fov_radius)
         ra_grid_plot = ra_grid_plot[filter_arr]
         dec_grid_plot = dec_grid_plot[filter_arr]
 
         # Compute image coordinates for every grid celestial parallel
         x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
 
-        # Filter out everything outside the FOV
         filter_arr = (x_grid >= 0) & (x_grid <= platepar.X_res) & (y_grid >= 0) & (y_grid <= platepar.Y_res)
         x_grid = x_grid[filter_arr]
         y_grid = y_grid[filter_arr]

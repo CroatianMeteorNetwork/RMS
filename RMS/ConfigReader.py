@@ -166,7 +166,7 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
 
             # Locate all files in the data directory that start with '.config'
             config_files = [file_name for file_name in os.listdir(dir_path) \
-                if file_name.startswith('.config')]
+                if file_name.startswith('.config') or file_name.startswith('dfnstation.cfg')]
 
             # If there is exactly one config file, use it
             if len(config_files) == 1:
@@ -486,27 +486,32 @@ def normalizeParameterMeteor(param, config, binning=1):
     return param*width_factor*height_factor
 
 
-def parse(filename, strict=True):
+def parse(path, strict=True):
 
     try:
         # Python 3
-        parser = RawConfigParser(inline_comment_prefixes=(";"), strict=strict)
+        parser = RawConfigParser(inline_comment_prefixes=(";",), strict=strict)
 
     except:
         # Python 2
         parser = RawConfigParser()
 
-    parser.read(filename)
+    parser.read(path)
     
     config = Config()
-    
-    parseAllSections(config, parser)
+
+    if os.path.basename(path) == '.config':
+        parseConfigFile(config, parser)
+    elif os.path.basename(path) == 'dfnstation.cfg':
+        parseDFNStation(config, parser)
+    else:
+        raise RuntimeError('Unknown config file name: {}'.format(os.path.basename(path)))
     
     return config
 
 
 
-def parseAllSections(config, parser):
+def parseConfigFile(config, parser):
     parseSystem(config, parser)
     parseCapture(config, parser)
     parseBuildArgs(config, parser)
@@ -519,6 +524,36 @@ def parseAllSections(config, parser):
     parseThumbnails(config, parser)
     parseStack(config, parser)
 
+
+def parseDFNStation(config, parser):
+    section = 'station'
+    if not parser.has_section(section):
+        return
+
+    if parser.has_option(section, "location"):
+        config.stationID = parser.get(section, "location")
+
+    if parser.has_option(section, "lat"):
+        config.latitude = parser.getfloat(section, "lat")
+
+    if parser.has_option(section, "lon"):
+        config.longitude = parser.getfloat(section, "lon")
+
+    if parser.has_option(section, "altitude"):
+        config.elevation = parser.getfloat(section, "altitude")
+
+    config.fov_h = 180
+    config.fov_w = 180
+    config.width = 4912
+    config.height = 7360
+    config.fps = 25
+    config.gamma = 1
+    config.bit_depth = 8
+    config.catalog_mag_limit = 5
+
+    config.star_catalog_path = 'Catalogs'
+    config.star_catalog_file = 'BSC5'
+    config.platepar_name = 'platepar_cmn2010.cal'
 
 
 def parseSystem(config, parser):
