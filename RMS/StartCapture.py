@@ -184,7 +184,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         else:
             log.info("Previous capture directory found: {:s}".format(night_data_dir))
 
-
+        # Resume run is finished now, reset resume flag
+        cml_args.resume = False
 
     # Make a name for the capture data directory
     if night_data_dir_name is None:
@@ -433,6 +434,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         log.info('Adding file to upload list: ' + archive_name)
         upload_manager.addFiles([archive_name])
         log.info('File added...')
+
+        # Delay the upload, if the delay is given
+        upload_manager.delayNextUpload(delay=60*config.upload_delay)
 
 
     # Delete detector backup files
