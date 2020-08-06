@@ -34,9 +34,14 @@ import datetime
 import numpy as np
 import scipy.optimize
 
-from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
+from RMS.Astrometry.Conversions import date2JD, jd2Date
 import RMS.Astrometry.ApplyAstrometry
 from RMS.Math import angularSeparation
+
+# Import Cython functions
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+from RMS.Astrometry.CyFunctions import trueRaDec2ApparentAltAz
 
 
 
@@ -191,6 +196,9 @@ class Platepar(object):
 
         # Equal aspect (X and Y scales are equal) - used ONLY for radial distortion
         self.equal_aspect = False
+
+        # Force distortion centre to image centre
+        self.force_distortion_centre = False
 
         # Photometry calibration
         self.mag_0 = -2.5
@@ -515,8 +523,11 @@ class Platepar(object):
         # Update fitted astrometric parameters
         self.RA_d, self.dec_d, self.pos_angle_ref, self.F_scale = res.x
 
-        # Recalculate FOV centre
-        self.az_centre, self.alt_centre = raDec2AltAz(self.RA_d, self.dec_d, self.JD, self.lat, self.lon)
+        # Compute reference Alt/Az to apparent coordinates, epoch of date
+        az_centre, alt_centre = trueRaDec2ApparentAltAz( \
+            np.radians(self.RA_d), np.radians(self.dec_d), self.JD, \
+            np.radians(self.lat), np.radians(self.lon), self.refraction)
+        self.az_centre, self.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
 
         ### ###
 
@@ -566,6 +577,11 @@ class Platepar(object):
 
                 # IMPORTANT NOTE - the X polynomial is used to store the fit paramters
                 self.x_poly_rev = res.x
+
+                # Force distortion centre to image centre
+                if self.force_distortion_centre:
+                    self.x_poly_rev[0] = 0.5
+                    self.x_poly_rev[1] = 0.5
 
                 # Force aspect ratio to 0 if axes are set to be equal
                 if self.equal_aspect:
@@ -620,6 +636,11 @@ class Platepar(object):
 
                 # Extract fitted X polynomial
                 self.x_poly_fwd = res.x
+
+                # Force distortion centre to image centre
+                if self.force_distortion_centre:
+                    self.x_poly_fwd[0] = 0.5
+                    self.x_poly_fwd[1] = 0.5
 
                 # Force aspect ratio to 0 if axes are set to be equal
                 if self.equal_aspect:
@@ -683,6 +704,10 @@ class Platepar(object):
         # Add equal aspect
         if not 'equal_aspect' in self.__dict__:
             self.equal_aspect = False
+
+        # Add forcing distortion centre to image center
+        if not 'force_distortion_centre' in self.__dict__:
+            self.force_distortion_centre = False
 
 
         # Add the distortion type if not present (assume it's the polynomal type with the radial term)

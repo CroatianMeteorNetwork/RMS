@@ -438,8 +438,9 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     plt.xlim([0, ff.avepixel.shape[1]])
     plt.ylim([ff.avepixel.shape[0], 0])
 
-    # Remove the margins
-    plt.subplots_adjust(left=0, bottom=0, right=1, top=1, wspace=0, hspace=0)
+    # Remove the margins (top and right are set to 0.9999, as setting them to 1.0 makes the image blank in 
+    #   some matplotlib versions)
+    plt.subplots_adjust(left=0, bottom=0, right=0.9999, top=0.9999, wspace=0, hspace=0)
 
     plt.savefig(os.path.join(night_dir_path, night_name + '_calib_report_astrometry.jpg'), \
         bbox_inches='tight', pad_inches=0, dpi=dpi)
