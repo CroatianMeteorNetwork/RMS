@@ -132,7 +132,7 @@ def GenerateMP4s(dir_path, ftpfile_name):
                     + mp4_path
 
         #print(com)
-        retcode=subprocess.call(com, shell=True, cwd=dir_path, timeout=None)
+        subprocess.call(com, shell=True, cwd=dir_path, timeout=None)
         
         #Delete temporary directory and files inside
         if os.path.exists(dir_tmp_path):
