@@ -12,6 +12,7 @@ import subprocess
 import shutil
 import datetime
 import cv2
+import time
 import Utils.FFtoFrames as f2f
 
 from RMS.Formats import FTPdetectinfo
@@ -130,12 +131,17 @@ def GenerateMP4s(dir_path, ftpfile_name):
                     + " -vcodec libx264 -pix_fmt yuv420p -crf 25 -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.97)\" " \
                     + mp4_path
 
-        print(com)
-        subprocess.call(com, shell=True, cwd=dir_path)
-        
-        #Delete temporary directory and files inside
+        #print(com)
+        retcode = subprocess.call(com, shell=True, cwd=dir_path, timeout=None)
+        #print('retcode=', retcode)
+        #Delete temporary directory and files inside; occasionally this fails, not sure why
         if os.path.exists(dir_tmp_path):
-            shutil.rmtree(dir_tmp_path)
+            try:
+            	shutil.rmtree(dir_tmp_path)
+            except:
+            	time.sleep(2)
+            	shutil.rmtree(dir_tmp_path)
+
             print("Deleted temporary directory : " + dir_tmp_path)
 		
     print("Total time:", datetime.datetime.utcnow() - t1)
