@@ -362,9 +362,9 @@ def rotationWrtHorizon(platepar):
     jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP(2*[jd2Date(platepar.JD)], [img_mid_w, img_up_w], \
         [img_mid_h, img_up_h], [1, 1], platepar, extinction_correction=False)
     azim_mid, alt_mid = trueRaDec2ApparentAltAz(np.radians(ra_arr[0]), np.radians(dec_arr[0]), jd_arr[0], \
-        np.radians(platepar.lat), np.radians(platepar.lon))
+        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
     azim_up, alt_up = trueRaDec2ApparentAltAz(np.radians(ra_arr[1]), np.radians(dec_arr[1]), jd_arr[1], \
-        np.radians(platepar.lat), np.radians(platepar.lon))
+        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
 
     # Compute the rotation wrt horizon (deg)    
     rot_angle = np.degrees(np.arctan2(alt_up - alt_mid, azim_up - azim_mid))
@@ -556,7 +556,8 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
         np.array(Y_data, dtype=np.float64), float(platepar.lat), float(platepar.lon), float(platepar.X_res), \
         float(platepar.Y_res), float(platepar.Ho), float(platepar.RA_d), float(platepar.dec_d), \
         float(platepar.pos_angle_ref), float(platepar.F_scale), platepar.x_poly_fwd, platepar.y_poly_fwd, \
-        unicode(platepar.distortion_type), refraction=platepar.refraction, equal_aspect=platepar.equal_aspect)
+        unicode(platepar.distortion_type), refraction=platepar.refraction, \
+        equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre)
 
     # Compute radiia from image centre
     radius_arr = np.hypot(np.array(X_data) - platepar.X_res/2, np.array(Y_data) - platepar.Y_res/2)
@@ -596,7 +597,7 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar):
         float(platepar.X_res), float(platepar.Y_res), float(platepar.Ho), float(platepar.RA_d), \
         float(platepar.dec_d), float(platepar.pos_angle_ref), platepar.F_scale, platepar.x_poly_rev, \
         platepar.y_poly_rev, unicode(platepar.distortion_type), refraction=platepar.refraction, \
-        equal_aspect=platepar.equal_aspect)
+        equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre)
     
     return X_data, Y_data
 
@@ -667,8 +668,12 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
         ra_tmp = RA_data[i]
         dec_tmp = dec_data[i]
 
-        # Alt and az are kept in the J2000 epoch, which is the CAMS standard!
-        az_tmp, alt_tmp = raDec2AltAz(ra_tmp, dec_tmp, jd, platepar.lat, platepar.lon)
+        # Precess RA/Dec to epoch of date
+        ra_tmp, dec_tmp = equatorialCoordPrecession(J2000_JD.days, jd, np.radians(ra_tmp), \
+            np.radians(dec_tmp))
+
+        # Alt/Az are apparent (in the epoch of date, corresponding to geographical azimuths)
+        az_tmp, alt_tmp = raDec2AltAz(np.degrees(ra_tmp), np.degrees(dec_tmp), jd, platepar.lat, platepar.lon)
 
         az_data[i] = az_tmp
         alt_data[i] = alt_tmp

@@ -14,33 +14,59 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import print_function, division, absolute_import, unicode_literals
+
 import os
 import numpy as np
 import struct
 
 
 class fr_struct:
-    """ Default structure for a FR*.bin file.
-    """
-    
     def __init__(self):
+        """ Default structure for a FR*.bin file. This file holds raw frame cutouts of fireball detections,
+            with metadata necessary to reconstruct the original fireball video.
+        """
+
+        # Number of lines (i.e. detections) in the file
         self.lines = 0
+
+        ### The lists below hold values for every line.
+        ### E.g. a list of frame numbers for line (with index 0) can be retrieved as self.t[0]
+
+        # Total number of frames for every line. E.g. for line 0, the total number of frames in the line
+        #   can be retriever with self.frameNum[0]
         self.frameNum = []
+
+        # Y coordinates of the centre of the cutout on the full image
+        #   This is used to correctly place the cutout on the FF file
         self.yc = []
+
+        # X coordinates of the centre of the cutout on the full image
         self.xc = []
+
+        # Frame indices (as referece to the FF file) of cutouts for every line
         self.t = []
+
+        # The width and height of every cutout (the cutouts are square, so only one size is saved)
         self.size = []
+
+        # Image data for the cutouts. If you want to retrieve the cutout image for the first line and the 
+        #   second frame, call: self.frames[0][1]
         self.frames = []
+
+        ### ###
         
 
 
 def read(dir_path, filename):
-    """ Read FRF*.bin file from specified directory.
+    """ Read an FR*.bin file.
     
-    @param dir: path to directory containing file
-    @param filename: name of FR*.bin file (either with FR and extension or without)
+    Arguments:
+        dir_path: [str] Path to directory containing file.
+        filename: [str] Name of FR*.bin file (either with the FR prefix and the .bin suffix, or without).
     
-    @return: fr structure
+    Return:
+        fr: [fr_struct instance] 
     """
     
     if filename[:2] == "FR":
