@@ -90,3 +90,4 @@ target/
 .idea
 
 .config.inuse
+camerasettings/*.json
