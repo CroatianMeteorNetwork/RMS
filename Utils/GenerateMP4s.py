@@ -12,6 +12,7 @@ import subprocess
 import shutil
 import datetime
 import cv2
+import time
 import Utils.FFtoFrames as f2f
 
 from RMS.Formats import FTPdetectinfo
@@ -35,9 +36,8 @@ def GenerateMP4s(dir_path, ftpfile_name):
     # load the ftpfile so we know which frames we want
     meteor_list = FTPdetectinfo.readFTPdetectinfo(dir_path, ftpfile_name)  
     for meteor in meteor_list:
-        ff_name, cam_code, meteor_No, n_segments, fps, hnr, mle, binn, px_fm, rho, phi, \
+        ff_name, _, _, n_segments, _, _, _, _, _, _, _, \
             meteor_meas = meteor
-        #print(ff_name, cam_code, meteor_No, n_segments, hnr, mle)
         # determine which frames we want
 
         first_frame=int(meteor_meas[0][1])-30
@@ -131,12 +131,17 @@ def GenerateMP4s(dir_path, ftpfile_name):
                     + " -vcodec libx264 -pix_fmt yuv420p -crf 25 -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.97)\" " \
                     + mp4_path
 
-        print(com)
-        subprocess.call(com, shell=True, cwd=dir_path)
-        
-        #Delete temporary directory and files inside
+        #print(com)
+        retcode = subprocess.call(com, shell=True, cwd=dir_path, timeout=None)
+        #print('retcode=', retcode)
+        #Delete temporary directory and files inside; occasionally this fails, not sure why
         if os.path.exists(dir_tmp_path):
-            shutil.rmtree(dir_tmp_path)
+            try:
+            	shutil.rmtree(dir_tmp_path)
+            except:
+            	time.sleep(2)
+            	shutil.rmtree(dir_tmp_path)
+
             print("Deleted temporary directory : " + dir_tmp_path)
 		
     print("Total time:", datetime.datetime.utcnow() - t1)
@@ -150,8 +155,6 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
         help='Path to directory with FF files.')
-    #arg_parser.add_argument('ftpfile_name', metavar='FTPFILE_NAME', type=str, \
-    #    help='name of FTPdetect file.')
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -165,7 +168,6 @@ if __name__ == "__main__":
     else:
         ftpdate=os.path.split(dir_path)[1]
     ftpfile_name="FTPdetectinfo_"+ftpdate+'.txt'
-    print(ftpfile_name)
-    #ftpfile_name = cml_args.ftpfile_name
+    # print(ftpfile_name)
 
     GenerateMP4s(dir_path, ftpfile_name)
