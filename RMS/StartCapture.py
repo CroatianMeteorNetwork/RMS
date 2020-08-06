@@ -435,6 +435,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         upload_manager.addFiles([archive_name])
         log.info('File added...')
 
+        # Delay the upload, if the delay is given
+        upload_manager.delayNextUpload(delay=60*config.upload_delay)
+
 
     # Delete detector backup files
     if detector is not None:
@@ -845,7 +848,7 @@ if __name__ == "__main__":
             time_now = datetime.datetime.utcnow()
             waiting_time = start_time - time_now
 
-            log.info('Waiting {:s} to start recording for {:.2f} hrs'.format(str(waiting_time), \
+            log.info('MM Waiting {:s} to start recording for {:.2f} hrs'.format(str(waiting_time), \
                 duration/60/60))
 
             # Reset the Ctrl+C to KeyboardInterrupt

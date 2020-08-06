@@ -27,7 +27,7 @@ cdef double J2000_DAYS = 2451545.0
 
 # Declare math functions
 cdef extern from "math.h":
-    double abs(double)
+    double fabs(double)
     double sin(double)
     double asin(double)
     double cos(double)
@@ -53,6 +53,13 @@ cdef double degrees(double deg):
     
     return deg*180.0/pi
 
+
+cdef double sign(double x):    
+    if (x >= 1):
+        return 1.0
+
+    return -1.0
+        
 
 
 @cython.boundscheck(False)
@@ -307,8 +314,8 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
     ra_corr = (atan2(A, B) + z + 2*pi)%(2*pi)
 
     # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
-    if (pi/2 - abs(dec)) < radians(0.5):
-        dec_corr = acos(sqrt(A**2 + B**2))
+    if (pi/2 - fabs(dec)) < radians(0.5):
+        dec_corr = sign(dec)*acos(sqrt(A**2 + B**2))
     else:
         dec_corr = asin(C)
 
@@ -504,7 +511,8 @@ cpdef (double, double) cyraDec2AltAz(double ra, double dec, double jd, double la
 
 
 
-cpdef (double, double) trueRaDec2ApparentAltAz(double ra, double dec, double jd, double lat, double lon):
+cpdef (double, double) trueRaDec2ApparentAltAz(double ra, double dec, double jd, double lat, double lon, \
+    bool refraction=True):
     """ Convert the true right ascension and declination in J2000 to azimuth (+East of due North) and 
         altitude in the epoch of date. The correction for refraction is performed.
 
@@ -514,6 +522,9 @@ cpdef (double, double) trueRaDec2ApparentAltAz(double ra, double dec, double jd,
         jd: [float] Julian date.
         lat: [float] Latitude in radians.
         lon: [float] Longitude in radians.
+
+    Keyword arguments:
+        refraction: [bool] Apply refraction correction. True by default.
 
     Return:
         (azim, elev): [tuple]
@@ -532,7 +543,8 @@ cpdef (double, double) trueRaDec2ApparentAltAz(double ra, double dec, double jd,
     azim, elev = cyraDec2AltAz(ra, dec, jd, lat, lon)
 
     # Correct elevation for refraction
-    elev = refractionTrueToApparent(elev)
+    if refraction:
+        elev = refractionTrueToApparent(elev)
 
 
     return (azim, elev)
@@ -577,7 +589,8 @@ cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double
 
 
 
-cpdef (double, double) apparentAltAz2TrueRADec(double azim, double elev, double jd, double lat, double lon):
+cpdef (double, double) apparentAltAz2TrueRADec(double azim, double elev, double jd, double lat, double lon, \
+    bool refraction=True):
     """ Convert the apparent azimuth and altitude in the epoch of date to true (refraction corrected) right 
         ascension and declination in J2000.
 
@@ -587,6 +600,9 @@ cpdef (double, double) apparentAltAz2TrueRADec(double azim, double elev, double 
         jd: [float] Julian date.
         lat: [float] Latitude of the observer in radians.
         lon: [float] Longitde of the observer in radians.
+
+    Keyword arguments:
+        refraction: [bool] Apply refraction correction. True by default.
 
     Return:
         (ra, dec): [tuple]
@@ -599,7 +615,8 @@ cpdef (double, double) apparentAltAz2TrueRADec(double azim, double elev, double 
 
 
     # Correct elevation for refraction
-    elev = refractionApparentToTrue(elev)
+    if refraction:
+        elev = refractionApparentToTrue(elev)
 
     # Convert to RA/Dec (true, epoch of date)
     ra, dec = cyaltAz2RADec(azim, elev, jd, lat, lon)
@@ -620,7 +637,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data, double jd, double lat, double lon, double x_res, \
     double y_res, double h0, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, \
-    str dist_type, bool refraction=True, bool equal_aspect=False):
+    str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False):
     """ Convert RA, Dec to distorion corrected image coordinates. 
 
     Arguments:
@@ -639,9 +656,13 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
         x_poly_rev: [ndarray float] Distortion polynomial in X direction for reverse mapping.
         y_poly_rev: [ndarray float] Distortion polynomail in Y direction for reverse mapping.
         dist_type: [str] Distortion type. Can be: poly3+radial, radial3, radial4, or radial5.
+        
+    Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
         equal_aspect: [bool] Force the X/Y aspect ratio to be equal. Used only for radial distortion. \
             False by default.
+        force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
+
     
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
@@ -675,14 +696,20 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     # If the radial distortion is used, unpack radial parameters
     if dist_type.startswith("radial"):
 
-        # Offsets
-        x0 = x_poly_rev[0]
-        y0 = x_poly_rev[1]
+
+        # Force the distortion centre to the image centre
+        if force_distortion_centre:
+            x0 = 0.5
+            y0 = 0.5
+        else:
+            # Read distortion offsets
+            x0 = x_poly_rev[0]
+            y0 = x_poly_rev[1]
+
 
         # Aspect ratio
         if equal_aspect:
             xy = 0.0
-
         else:
             xy = x_poly_rev[2]
 
@@ -828,7 +855,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_data, double lat, double lon, double x_res, double y_res, \
     double h0, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
-    str dist_type, bool refraction=True, bool equal_aspect=False):
+    str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False):
     """
     Arguments:
         jd_data: [ndarray] Julian date of each data point.
@@ -846,9 +873,12 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         x_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward X axis polynomial parameters.
         y_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward Y axis polynomial parameters.
         dist_type: [str] Distortion type. Can be: poly3+radial, radial3, radial4, or radial5.
+        
+    Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
         equal_aspect: [bool] Force the X/Y aspect ratio to be equal. Used only for radial distortion. \
             False by default.
+        force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
     
     Return:
         (ra_data, dec_data): [tuple of ndarrays]
@@ -875,15 +905,21 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     # If the radial distortion is used, unpack radial parameters
     if dist_type.startswith("radial"):
 
-        # Offsets
-        x0 = x_poly_fwd[0]
-        y0 = x_poly_fwd[1]
+        # Force the distortion centre to the image centre
+        if force_distortion_centre:
+            x0 = 0.5
+            y0 = 0.5
+        else:
+            # Read distortion offsets
+            x0 = x_poly_fwd[0]
+            y0 = x_poly_fwd[1]
+
 
         # Aspect ratio
         if equal_aspect:
             xy = 0.0
-
         else:
+            # Read aspect ratio
             xy = x_poly_fwd[2]
 
 
