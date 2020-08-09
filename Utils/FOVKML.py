@@ -84,11 +84,15 @@ def fovKML(config, dir_path, platepar, mask=None, area_ht=100000, side_points=10
                 </Style>
                 <styleUrl>#camera</styleUrl>\n""" \
         + "<name>{:s}</name>\n".format(config.stationID) \
-        + "                <description>Area height: {:d} km\n".format(int(area_ht/1000)) \
-        + "Longitude: {:10.6f} deg\n".format(platepar.lat) \
-        + "Latitude:  {:11.6f} deg\n".format(platepar.lon) \
-        + "Altitude: {:.2f} m\n".format(platepar.elev) \
-        + """
+        + "                <description>Area height: {:d} km\n".format(int(area_ht/1000))
+
+    # Only add station info if the station is plotted
+    if plot_station:
+        kml += "Longitude: {:10.6f} deg\n".format(platepar.lat) \
+             + "Latitude:  {:11.6f} deg\n".format(platepar.lon) \
+             + "Altitude: {:.2f} m\n".format(platepar.elev) \
+
+    kml += """
     </description>
     
     <MultiGeometry>"""
