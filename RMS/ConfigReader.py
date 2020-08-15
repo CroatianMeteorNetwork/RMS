@@ -487,7 +487,17 @@ def normalizeParameterMeteor(param, config, binning=1):
 
 
 def parse(path, strict=True):
+    """
+    Parses config file at the given path and returns the corresponding Config object
 
+    Argumentss:
+        path: [str] path to file (.config or dfnstation.cfg)
+        strict: [bool]
+
+    Returns:
+        config [Config]
+
+    """
     try:
         # Python 3
         parser = RawConfigParser(inline_comment_prefixes=(";",), strict=strict)
@@ -500,7 +510,7 @@ def parse(path, strict=True):
     
     config = Config()
 
-    if os.path.basename(path) == '.config':
+    if os.path.basename(path).startswith('.config'):
         parseConfigFile(config, parser)
     elif os.path.basename(path) == 'dfnstation.cfg':
         parseDFNStation(config, parser)
@@ -546,7 +556,7 @@ def parseDFNStation(config, parser):
     config.fov_w = 180
     config.width = 4912
     config.height = 7360
-    config.fps = 25
+    config.fps = 20
     config.gamma = 1
     config.bit_depth = 8
     config.catalog_mag_limit = 5

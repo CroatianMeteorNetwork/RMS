@@ -60,8 +60,6 @@ class fr_struct:
         self.__maxpixel = None
         self.__avepixel = None
 
-        self.dtype = None
-
     @property
     def nframes(self):
         return 255

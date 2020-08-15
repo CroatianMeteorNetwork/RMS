@@ -13,6 +13,7 @@ import time
 
 def updateRaDecGrid(grid, platepar):
     """
+    Updates the values of grid to form a right ascension and declination grid
 
     Arguments:
         grid: [pg.PlotCurveItem]
@@ -134,6 +135,15 @@ def updateRaDecGrid(grid, platepar):
 
 
 def updateAzAltGrid(grid, platepar):
+    """
+    Updates the values of grid to form an azimuth and altitude grid
+
+    Arguments:
+        grid: [pg.PlotCurveItem]
+        platepar: [Platepar object]
+
+    """
+
     # Compute FOV size
     fov_radius = np.hypot(*computeFOVSize(platepar))
 

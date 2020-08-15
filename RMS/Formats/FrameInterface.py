@@ -1350,7 +1350,7 @@ class InputTypeImages(InputType):
 
         if len(self.img_list) == 0:
             messagebox.showerror('Input error',
-                                 "Can't find any images in the given directory! Only PNG, JPG and BMP are supported!")
+                                 "Can't find any images in the given directory! Only PNG, JPG, NEF and BMP are supported!")
             sys.exit()
 
         ### ###
@@ -1399,7 +1399,7 @@ class InputTypeImages(InputType):
                         "%Y-%m-%d_%H%M%S")
 
                 except:
-                    messagebox.showerror('Input error','hey')
+                    messagebox.showerror('Input error', 'hey')
 
                     sys.exit()
 
@@ -1414,7 +1414,6 @@ class InputTypeImages(InputType):
         self.total_frames = len(self.img_list)
 
         self.current_frame = 0
-        self.current_img_file = self.img_list[self.current_frame]
 
         # Load the first image
         img = self.loadFrame()
@@ -1461,6 +1460,10 @@ class InputTypeImages(InputType):
             print('Using FPS:', self.fps)
 
         print('Total frames:', self.total_frames)
+
+    @property
+    def current_img_file(self):
+        return self.img_list[self.current_frame]
 
     def nextChunk(self):
         """ Go to the next frame chunk. """
@@ -1717,6 +1720,185 @@ class InputTypeImages(InputType):
             return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
 
 
+class InputTypeDFN(InputType):
+    def __init__(self, dir_path, config, beginning_time=None, fps=None):
+        """ Input file type handle for a folder with images.
+
+        Arguments:
+            dir_path: [str] Path to the vid file.
+            config: [ConfigStruct object]
+
+        Keyword arguments:
+            beginning_time: [datetime] datetime of the beginning of the video. Optional, None by default.
+            fps: [float] Known FPS of the images. None by default, in which case it will be read from the
+                config file.
+            detection: [bool] Indicates that the input is used for detection. False by default. This will
+                control whether the binning is applied or not.
+
+        """
+        self.input_type = 'dfn'
+
+        self.dir_path = dir_path
+        self.config = config
+
+        # This type of input probably won't have any calstars files
+        self.require_calstars = False
+
+        if 'rawpy' in sys.modules:
+            ### Find images in the given folder ###
+            img_types = ['.png', '.jpg', '.bmp', '.nef']
+        else:
+            img_types = ['.png', '.jpg', '.bmp']
+
+        self.img_list = []
+        self.beginning_datetime_list = []
+        for file_name in sorted(os.listdir(self.dir_path)):
+
+            # Check if the file ends with support file extensions
+            if any([file_name.lower().endswith(fextens) for fextens in img_types]):
+                try:
+                    beginning_datetime = datetime.datetime.strptime(
+                        file_name[4:21],
+                        "%Y-%m-%d_%H%M%S")
+
+                    self.beginning_datetime_list.append(beginning_datetime)
+                    self.img_list.append(file_name)
+                except:
+                    pass
+
+                break
+
+        if len(self.img_list) == 0:
+            messagebox.showerror('Input error',
+                                 "Can't find any images in the given directory! Only PNG, JPG, NEF and BMP are supported!")
+            sys.exit()
+
+        print('Using folder:', self.dir_path)
+
+        # Compute the total number of used frames
+        self.total_images = len(self.img_list)
+        self.current_image_index = 0
+
+        self.current_frame = 100
+        self.total_frames = 1024
+
+        self.cache = {}
+
+        # Load the first image
+        img = self.loadImage()
+
+        # Get the image size (the binning correction doesn't have to be applied because the image is already
+        #   binned)
+        self.nrows = img.shape[0]
+        self.ncols = img.shape[1]
+        self.img_dtype = img.dtype
+
+        # If FPS is not given, use one from the config file
+        if fps is None:
+            self.fps = self.config.fps
+            print('Using FPS from config file: ', self.fps)
+
+        else:
+            self.fps = fps
+            print('Using FPS:', self.fps)
+
+    def loadImage(self):
+        if self.current_img_file.endswith('.NEF'):
+            # .nef files will not be brought here if rawpy is not installed
+            # get raw data from .nef file and get image from it
+            raw = rawpy.imread(os.path.join(self.dir_path, self.current_img_file))
+            frame = raw.postprocess()
+        else:
+            # Get the current image
+            frame = cv2.imread(os.path.join(self.dir_path, self.current_img_file), -1)
+
+        # Convert the image to black and white if it's 8 bit
+        if 8*frame.itemsize == 8:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        return frame
+
+    @property
+    def current_img_file(self):
+        return self.img_list[self.current_image_index]
+
+    @property
+    def beginning_datetime(self):
+        return self.beginning_datetime_list[self.current_image_index]
+
+    def nextChunk(self):
+        """ Go to the next DFN image in folder """
+
+        self.current_image_index = (self.current_image_index + 1)%self.total_images
+
+    def prevChunk(self):
+        """ Go to the previous DFN image in folder """
+
+        self.current_image_index = (self.current_image_index - 1)%self.total_images
+
+    def loadChunk(self, first_frame=None, read_nframes=None):
+        """ Load the frame chunk file.
+
+        Keyword arguments:
+            first_frame: [int] First frame to read.
+            read_nframes: [int] Number of frames to read. If not given (None), self.fr_chunk_no frames will be
+                read. If -1, all frames will be read in.
+        """
+
+        # Find which file read
+        file_name = self.current_img_file
+
+        # save and load file from cache
+        if file_name in self.cache:
+            ff_struct_fake = self.cache[file_name]
+        else:
+            image = self.loadImage()
+            ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, self.img_dtype)
+            ff_struct_fake.addFrame(image.astype(np.uint16))
+            self.cache[file_name] = ff_struct_fake
+            ff_struct_fake.finish()
+
+        return ff_struct_fake
+
+    def loadFrame(self, avepixel=False):
+        pass
+
+    def name(self, beginning=False):
+        return self.img_list[self.current_image_index]
+
+    def currentTime(self, dt_obj=False):
+        # Compute the datetime of the current frame
+        dt = self.beginning_datetime + datetime.timedelta(seconds=self.total_frames/self.fps/2)
+
+        if dt_obj:
+            return dt
+
+        else:
+            return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
+
+    def currentFrameTime(self, frame_no=None, dt_obj=False):
+        """
+
+        Args:
+            frame_no:
+            dt_obj:
+
+        Returns:
+
+        """
+        if frame_no is None:
+            frame_no = self.current_frame
+
+        # Compute the datetime of the current frame
+        dt = self.beginning_datetime + datetime.timedelta(seconds=frame_no/self.fps)
+
+        if dt_obj:
+            return dt
+
+        else:
+            return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
+
+
 def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_dir=False, detection=False):
     """ Given the folder of a file, detect the input format.
 
@@ -1752,7 +1934,8 @@ def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_d
                 img_handle.ncols = config.width
                 img_handle.nrows = config.height
 
-        # If not, check if there any image files in the folder
+        elif config.width == 4912 or config.width == 7360:
+            img_handle = InputTypeDFN(input_path, config, beginning_time=beginning_time, fps=fps)
         else:
             img_handle = InputTypeImages(input_path, config, beginning_time=beginning_time, fps=fps, \
                                          detection=detection)

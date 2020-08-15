@@ -59,7 +59,7 @@ from RMS.Astrometry.CustomPyqtgraphClasses import *
 
 class FOVinputDialog(object):
     """ Dialog for inputting FOV centre in Alt/Az. """
-
+    # TODO: reimplement this with pyqt or remove it entirely
     def __init__(self, parent):
 
         self.parent = parent
@@ -166,7 +166,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.closest_cat_star_indx = None
 
         # List of paired image and catalog stars
-        self.pick_list = []
+        self.pick_list = {}
         self.paired_stars = []
         self.residuals = None
 
@@ -194,11 +194,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Flag indicating that the first platepar fit has to be done
         self.first_platepar_fit = True
 
-        ######################################################################################################
-        # IMAGES
 
-        # Detect input file type and load appropriate input plugin
-        self.img_handle = detectInputType(self.dir_path, self.config, beginning_time=beginning_time, fps=fps)
 
         ###################################################################################################
         # LOADING STARS
@@ -217,31 +213,8 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             print('Star catalog loaded!')
 
-        # Find the CALSTARS file in the given folder
-        calstars_file = None
-        for cal_file in os.listdir(self.dir_path):
-            if ('CALSTARS' in cal_file) and ('.txt' in cal_file):
-                calstars_file = cal_file
-                break
-
-        if calstars_file is None:
-
-            # Check if the calstars file is required
-            if self.img_handle.require_calstars:
-                messagebox.showinfo(title='CALSTARS error',
-                                    message='CALSTARS file could not be found in the given directory!')
-
-            self.calstars = {}
-
-        else:
-
-            # Load the calstars file
-            calstars_list = CALSTARS.readCALSTARS(self.dir_path, calstars_file)
-
-            # Convert the list to a dictionary
-            self.calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
-
-            print('CALSTARS file: ' + calstars_file + ' loaded!')
+        self.calstars = {}
+        self.loadCalstars()
 
         ###################################################################################################
         # PLATEPAR
@@ -275,6 +248,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.dist_type_index = self.platepar.distortion_type_list.index(self.platepar.distortion_type)
 
         ###################################################################################################
+
+        print()
         # SETUP WINDOW
         if startUI:
             self.setupUI()
@@ -326,7 +301,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self.station_action = QtWidgets.QAction("Change station")
         self.station_action.triggered.connect(self.changeStation)
 
+        self.toggle_info_action = QtWidgets.QAction("Toggle Info")
+        self.toggle_info_action.triggered.connect(self.toggleInfo)
+        self.toggle_info_action.setShortcut('F1')
+
+        self.toggle_zoom_window = QtWidgets.QAction("Toggle zoom window")
+        self.toggle_zoom_window = QtWidgets.QAction("Toggle zoom window")
+        self.toggle_zoom_window.triggered.connect(self.toggleZoomWindow)
+        self.toggle_zoom_window.setShortcut('shift+Z')
+
         self.file_menu = menu.addMenu('File')
+        self.view_menu = menu.addMenu('View')
 
         # TESTING
         self.i = 0
@@ -469,10 +454,15 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # pick markers (manual reduction)
         self.pick_marker = pg.ScatterPlotItem()
-        self.pick_marker.setPen((255, 0, 0))
         self.pick_marker.setSymbol(Plus())
         self.pick_marker.setZValue(5)
         self.img_frame.addItem(self.pick_marker)
+
+        # pick marker (manual reduction - zoom window)
+        self.pick_marker2 = pg.ScatterPlotItem()
+        self.pick_marker2.setSymbol(Plus())
+        self.pick_marker2.setZValue(5)
+        self.zoom_window.addItem(self.pick_marker2)
 
         # star pick info
         text_str = "STAR PICKING MODE\n"
@@ -485,7 +475,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.star_pick_info = TextItem(text_str, anchor=(0.5, 0.5), color=(255, 255, 255))
         self.star_pick_info.setAlign(QtCore.Qt.AlignCenter)
         self.star_pick_info.hide()
-        self.star_pick_info.setZValue(10000)
+        self.star_pick_info.setZValue(10)
         self.star_pick_info.setParentItem(self.img_frame)
         self.star_pick_info.setPos(self.platepar.X_res/2, self.platepar.Y_res - 50)
 
@@ -532,6 +522,9 @@ class PlateTool(QtWidgets.QMainWindow):
         ###################################################################################################
         # RIGHT WIDGET
 
+        # Detect input file type and load appropriate input plugin
+        self.img_handle = detectInputType(self.dir_path, self.config)
+
         # adding img
         gamma = 1
         invert = False
@@ -546,7 +539,7 @@ class PlateTool(QtWidgets.QMainWindow):
         lut = np.array([[0, 0, 0, 0], [0, 255, 0, 76]], dtype=np.ubyte)
         self.region = pg.ImageItem(lut=lut)
         self.region.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)
-        self.region.setZValue(3)
+        self.region.setZValue(10)
         self.img_frame.addItem(self.region)
 
         bit_depth = 8*self.img.data.itemsize  # self.config.bit_depth  # Image gamma and levels
@@ -606,6 +599,15 @@ class PlateTool(QtWidgets.QMainWindow):
         self.changeMode(self.mode)
 
     def changeMode(self, new_mode):
+        """
+        Changes the mode to either 'skyfit' or 'manualreduction', updating the
+        gui accordingly.
+
+        Args:
+            new_mode [str]: either 'skyfit' or 'manualreduction'
+
+        """
+        # won't update image if not necessary
         if self.mode == new_mode:
             first_time = True
         else:
@@ -620,12 +622,16 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateLeftLabels()
             self.tab.onSkyFit()
             self.pick_marker.hide()
+            self.region.hide()
 
-            if not first_time:
+            if not first_time and self.img.img_handle.input_type != 'dfn':
                 self.img.loadImage(self.mode, self.img_type_flag)
 
             for action in self.file_menu.actions():
                 self.file_menu.removeAction(action)
+
+            for action in self.view_menu.actions():
+                self.view_menu.removeAction(action)
 
             self.file_menu.addActions([self.new_platepar_action,
                                        self.load_platepar_action,
@@ -634,6 +640,17 @@ class PlateTool(QtWidgets.QMainWindow):
                                        self.save_state_action,
                                        self.station_action])
 
+            self.view_menu.addActions([self.toggle_info_action,
+                                       self.toggle_zoom_window])
+
+            text_str = "STAR PICKING MODE\n"
+            text_str += "'LEFT CLICK' - Centroid star\n"
+            text_str += "'CTRL + LEFT CLICK' - Manual star position\n"
+            text_str += "'CTRL + Z' - Fit stars\n"
+            text_str += "'CTRL + SHIFT + Z' - Fit with initial distortion params set to 0\n"
+            text_str += "'L' - Astrometry fit details\n"
+            text_str += "'P' - Photometry fit"
+            self.star_pick_info.setText(text_str)
 
         else:
             self.mode = 'manualreduction'
@@ -642,14 +659,15 @@ class PlateTool(QtWidgets.QMainWindow):
             self.setWindowTitle('ManualReduction')
 
             self.updateLeftLabels()
-            self.show_zoom_window = False
-            self.zoom_window.hide()
+            # self.show_zoom_window = False
+            # self.zoom_window.hide()
             self.resetStarPick()
             self.star_pick_mode = False
             self.cursor.hide()
             self.cursor2.hide()
             self.tab.onManualReduction()
             self.pick_marker.show()
+            self.region.show()
 
             self.img_type_flag = 'avepixel'
             self.tab.settings.updateMaxAvePixel()
@@ -658,10 +676,17 @@ class PlateTool(QtWidgets.QMainWindow):
             for action in self.file_menu.actions():
                 self.file_menu.removeAction(action)
 
+            for action in self.view_menu.actions():
+                self.view_menu.removeAction(action)
+
             self.file_menu.addActions([self.save_reduction_action,
                                        self.save_current_frame_action,
                                        self.load_platepar_action,
                                        self.save_state_action])
+
+            self.view_menu.addActions([self.toggle_info_action,
+                                       self.toggle_zoom_window])
+            self.star_pick_info.setText('')
 
     def onRefractionChanged(self):
         self.updateStars()
@@ -754,7 +779,8 @@ class PlateTool(QtWidgets.QMainWindow):
             ra_centre, dec_centre = self.computeCentreRADec()
 
             # Show text on image with platepar parameters
-            text_str = self.img_handle.name() + '\n\n'
+            text_str = "Station: {:s} \n".format(self.platepar.station_code)
+            text_str += self.img_handle.name() + '\n\n'
             text_str += self.img_type_flag + '\n'
             text_str += 'Ref Az   = {:.3f}°\n'.format(self.platepar.az_centre)
             text_str += 'Ref Alt  = {:.3f}°\n'.format(self.platepar.alt_centre)
@@ -785,8 +811,11 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'RA centre  = {:s}{:02d}h {:02d}m {:05.2f}s\n'.format(sign_str, hh, mm, ss)
             text_str += 'Dec centre = {:.3f}°\n'.format(dec_centre)
         else:
-            text_str = self.img_handle.name() + '\n\n'
+            text_str = "Station: {:s} \n".format(self.platepar.station_code)
+            text_str += self.img_handle.name() + '\n\n'
             text_str += self.img_type_flag + '\n'
+            text_str += "Time  = {:s}\n".format(
+                self.img_handle.currentFrameTime(dt_obj=True).strftime("%Y/%m/%d %H:%M:%S.%f")[:-3])
             text_str += 'Frame = {:d}\n'.format(self.img.getFrame())
             text_str += 'Image gamma = {:.2f}\n'.format(self.img.gamma)
             text_str += 'Camera gamma = {:.2f}\n'.format(self.config.gamma)
@@ -839,8 +868,6 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + N - New platepar\n'
             text_str += 'CTRL + S - Save platepar\n'
             text_str += 'SHIFT + CTRL + S - Save platepar as default\n'
-            text_str += '\n'
-            text_str += 'Hide on-screen text - F1\n'
         else:
             text_str = 'Keys:\n'
             text_str += '-----------\n'
@@ -863,10 +890,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.label2.setPos(0, self.img_frame.height() - self.label2.boundingRect().height())
 
     def updateStars(self):
-        """ Updates only the stars """
+        """ Updates only the stars, including catalog stars, calstars and paired stars """
         # Draw stars that were paired in picking mode
         self.updatePairedStars()
-        self.onGridChanged()
+        self.onGridChanged()  # for ease of use
 
         # Draw stars detected on this image
         if self.draw_calstars:
@@ -939,19 +966,46 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.calstar_markers.setPoints(x=x, y=y)
             self.calstar_markers2.setPoints(x=x, y=y)
+        else:
+            self.calstar_markers.clear()
+            self.calstar_markers2.clear()
 
     def drawPicks(self):
+        """ Draw pick markers for manualreduction """
+        red = pg.mkPen((255, 0, 0))
+        yellow = pg.mkPen((255, 255, 0))
+
+        current = []
+        current_pen = red
+
         data1 = []
         data2 = []
-        for pick in self.pick_list:
+        for frame, pick in self.pick_list.items():
             if pick['x_centroid']:
-                if self.img.getFrame() == pick['frame']:
-                    data1.append((pick['x_centroid'], pick['y_centroid']))
-                else:
-                    data2.append((pick['x_centroid'], pick['y_centroid']))
+                if self.img.getFrame() == frame:
+                    current = [(pick['x_centroid'], pick['y_centroid'])]
+                    if pick['mode'] == 1:
+                        current_pen = red
+                    else:
+                        current_pen = yellow
 
-        self.pick_marker.setData(pos=data1, size=30)
-        self.pick_marker.addPoints(pos=data2, size=10)
+                elif pick['mode'] == 1:
+                    data1.append([pick['x_centroid'], pick['y_centroid']])
+
+                else:
+                    data2.append([pick['x_centroid'], pick['y_centroid']])
+
+        plus = Plus()
+
+        self.pick_marker.clear()
+        self.pick_marker.addPoints(pos=current, size=30, pen=current_pen)
+        self.pick_marker.addPoints(pos=data1, size=10, pen=red)
+        self.pick_marker.addPoints(pos=data2, size=10, pen=yellow)
+
+        self.pick_marker2.clear()
+        self.pick_marker2.addPoints(pos=current, size=30, pen=current_pen)
+        self.pick_marker2.addPoints(pos=data1, size=10, pen=red)
+        self.pick_marker2.addPoints(pos=data2, size=10, pen=yellow)
 
     def changeDistortionType(self):
         """ Change the distortion type. """
@@ -966,8 +1020,17 @@ class PlateTool(QtWidgets.QMainWindow):
         print("Distortion model changed to: {:s}".format(dist_type))
 
     def nextImg(self, n=1):
-        """ Shows the next FF file in the list. """
+        """
+        Increments the image index by value n. n=1 will go to next image and n=-1
+        will go to the previous. In manualreduction, nextImg will not change chunks
+        but will change frames, and n can be any integer and the frame will increment
+        by that much.
 
+        Arguments:
+            n [int]: The number of images to go forward or backward
+
+        """
+        self.profile.enable()
         if self.mode == 'skyfit':
             # Don't allow image change while in star picking mode
             if self.star_pick_mode:
@@ -975,9 +1038,13 @@ class PlateTool(QtWidgets.QMainWindow):
                                        message='You cannot cycle through images while in star picking mode!')
                 return
 
+            # don't change images if there's no image to change to
+            if self.img.img_handle.input_type == 'dfn' and self.img.img_handle.total_images == 1:
+                return
+
             if n > 0:
                 self.img.nextChunk()
-            else:
+            elif n < 0:
                 self.img.prevChunk()
             self.img.loadImage(self.mode, self.img_type_flag)
 
@@ -989,9 +1056,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.pick_marker.clear()
 
             # Reset paired stars
-            self.pick_list = []
+            self.pick_list = {}
             self.paired_stars = []
             self.residuals = None
+            self.drawPhotometryColoring()  # TODO: check to see if this lags when not doing anything
 
             self.updateStars()
         else:
@@ -1005,6 +1073,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.drawPhotometryColoring()
 
         self.updateLeftLabels()
+        self.profile.disable()
+        with open('C:/users/jonat/profile_stats_test.stats', 'w+') as stream:
+            pstats.Stats(self.profile, stream=stream).sort_stats('time').print_stats()
 
     def onFrameResize(self):
         self.label2.setPos(0, self.img_frame.height() - self.label2.boundingRect().height())
@@ -1018,6 +1089,11 @@ class PlateTool(QtWidgets.QMainWindow):
         Can be loaded by calling:
         python -m RMS.Astrometry.SkyFit2 PATH/skyFit2_latest.state --config .
         """
+        # this is pretty thrown together. It's to get around an error where pyqt widgets cant be saved to a
+        # pickle. If there's a better way to do this, go ahead
+
+        # currently, any important variables should be initialized in the constructor (and cannot be classes that
+        # inherit). Anything that can be generated for that information should be done in setupUI
         to_remove = []
 
         dic = copy.copy(self.__dict__)
@@ -1032,7 +1108,7 @@ class PlateTool(QtWidgets.QMainWindow):
         print("Saved state to file")
 
     def loadState(self, dir_path, state_name):
-        # function should theoretically work if called in the middle of the program
+        # function should theoretically work if called in the middle of the program (but is not recommended)
         variables = loadPickle(dir_path, state_name)
         for k, v in variables.items():
             setattr(self, k, v)
@@ -1056,9 +1132,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def onMouseReleased(self, event):
         self.clicked = 0
-        self.profile.disable()
-        with open('C:/users/jonat/profile_stats_test.stats', 'w+') as stream:
-            pstats.Stats(self.profile, stream=stream).sort_stats('time').print_stats()
 
     def onMouseMoved(self, event):
         pos = event
@@ -1094,15 +1167,12 @@ class PlateTool(QtWidgets.QMainWindow):
         # self.printFrameRate()
 
     def onMousePressed(self, event):
-        pos = event.pos()
         if event.button() == QtCore.Qt.LeftButton:
             self.clicked = 1
         elif event.button() == QtCore.Qt.MiddleButton:
             self.clicked = 2
         elif event.button() == QtCore.Qt.RightButton:
             self.clicked = 3
-
-        self.profile.enable()
 
         modifiers = QtWidgets.QApplication.keyboardModifiers()
         if self.star_pick_mode:  # redundant
@@ -1172,15 +1242,21 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.updatePairedStars()
                         self.updateFitResiduals()
                         self.photometry()
-            else:
+            else:  # manual reduction
                 if event.button() == QtCore.Qt.LeftButton:
                     if self.cursor.mode == 0:
-                        if modifiers == QtCore.Qt.ControlModifier:
+                        mode = 1
+                        if modifiers == QtCore.Qt.ControlModifier or \
+                                (modifiers == QtCore.Qt.AltModifier and self.img.img_handle.input_type == 'dfn'):
                             self.x_centroid, self.y_centroid = self.mouse_x, self.mouse_y
                         else:
                             self.x_centroid, self.y_centroid, _ = self.centroid()
 
-                        self.addCentroid(self.img.getFrame(), self.x_centroid, self.y_centroid)
+                        if modifiers == QtCore.Qt.AltModifier and self.img.img_handle.input_type == 'dfn':
+                            mode = 0
+
+                        self.addCentroid(self.img.getFrame(), self.x_centroid, self.y_centroid, mode=mode)
+
                         self.drawPicks()
                     elif self.cursor.mode == 2:
                         self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
@@ -1219,7 +1295,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.dec_d = -89.999
 
     def photometry(self, show_plot=False):
-        """ Perform the photometry on selectes stars. """
+        """ Perform the photometry on selected stars. """
 
         ### Make a photometry plot
 
@@ -1406,10 +1482,6 @@ class PlateTool(QtWidgets.QMainWindow):
                 fig_p.tight_layout()
                 fig_p.show()
 
-
-        else:
-            print('Need more than 2 stars for photometry plot!')
-
     def keyPressEvent(self, event):
         modifiers = QtWidgets.QApplication.keyboardModifiers()
         qmodifiers = QtWidgets.QApplication.queryKeyboardModifiers()
@@ -1438,17 +1510,16 @@ class PlateTool(QtWidgets.QMainWindow):
             self.star_pick_mode = not self.star_pick_mode
             if self.star_pick_mode:
                 self.img_frame.setMouseEnabled(False, False)
-                self.star_pick_info.show()
                 self.cursor.show()
                 self.cursor2.show()
-                if self.show_zoom_window:
-                    self.v_zoom.show()
+
+                self.star_pick_info.show()
             else:
                 self.img_frame.setMouseEnabled(True, True)
-                self.star_pick_info.hide()
-                self.v_zoom.hide()
                 self.cursor2.hide()
                 self.cursor.hide()
+
+                self.star_pick_info.hide()
             # updates automatically
 
         elif event.key() == QtCore.Qt.Key_G and modifiers == QtCore.Qt.ControlModifier:
@@ -1482,32 +1553,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateLeftLabels()
             self.updateStars()
             self.tab.settings.updateLimMag()
-
-        elif event.key() == QtCore.Qt.Key_F1:
-            self.show_key_help += 1
-            if self.show_key_help >= 3:
-                self.show_key_help = 0
-
-            if self.show_key_help == 0:
-                self.label1.show()
-                self.label2.hide()
-            elif self.show_key_help == 1:
-                self.label1.show()
-                self.label2.show()
-            else:
-                self.label1.hide()
-                self.label2.hide()
-
-            if self.v_zoom_left:
-                if self.show_key_help != 2:
-                    self.v_zoom.move(QtCore.QPoint(self.label1.boundingRect().width(), 0))
-                else:
-                    self.v_zoom.move(QtCore.QPoint(0, 0))
-
-            if self.show_key_help == 1 and self.star_pick_mode:
-                self.star_pick_info.show()
-            else:
-                self.star_pick_info.hide()
 
         # Increase image gamma
         elif event.key() == QtCore.Qt.Key_U:
@@ -1585,14 +1630,6 @@ class PlateTool(QtWidgets.QMainWindow):
             elif event.key() == QtCore.Qt.Key_I and modifiers == QtCore.Qt.ControlModifier:
                 self.toggleDistortion()
                 self.tab.settings.updateShowDistortion()
-
-            elif event.key() == QtCore.Qt.Key_Z and modifiers == QtCore.Qt.ShiftModifier:
-                if self.star_pick_mode:
-                    self.show_zoom_window = not self.show_zoom_window
-                    if self.show_zoom_window:
-                        self.v_zoom.show()
-                    else:
-                        self.v_zoom.hide()
 
             # Do a fit on the selected stars while in the star picking mode
             elif event.key() == QtCore.Qt.Key_Z and modifiers == QtCore.Qt.ControlModifier:
@@ -1904,11 +1941,17 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.showAstrometryFitPlots()
 
         elif self.mode == 'manualreduction':
-            if qmodifiers == QtCore.Qt.ShiftModifier:
+            if qmodifiers == QtCore.Qt.ShiftModifier and self.img.img_handle.input_type != 'dfn':
                 self.cursor.setMode(2)
 
             if event.key() == QtCore.Qt.Key_P:
                 self.showLightcurve()
+
+            elif event.key() == QtCore.Qt.Key_D or event.key() == QtCore.Qt.Key_Space:
+                self.nextImg(n=1)
+
+            elif event.key() == QtCore.Qt.Key_A:
+                self.nextImg(n=-1)
 
             elif event.key() == QtCore.Qt.Key_Up:
                 self.nextImg(n=25)
@@ -1955,13 +1998,16 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 if delta < 0:
                     self.scrolls_back += 1
-                    if self.scrolls_back > 2:
+                    if self.scrolls_back > 2 and self.mode == 'skyfit':
                         self.img_frame.autoRange(padding=0)
+                    else:
+                        self.img_frame.scaleBy([1.2, 1.2], QtCore.QPoint(self.mouse_x, self.mouse_y))
                 elif delta > 0:
                     self.scrolls_back = 0
                     self.img_frame.scaleBy([0.80, 0.80], QtCore.QPoint(self.mouse_x, self.mouse_y))
 
     def resetStarPick(self):
+        """ Call when finished starpicking """
         if self.cursor.mode:
             self.x_centroid = None
             self.y_centroid = None
@@ -1969,8 +2015,44 @@ class PlateTool(QtWidgets.QMainWindow):
             self.cursor.setMode(0)
             self.updatePairedStars()
 
+    def toggleZoomWindow(self):
+        self.show_zoom_window = not self.show_zoom_window
+        if self.show_zoom_window:
+            self.v_zoom.show()
+        else:
+            self.v_zoom.hide()
+
+    def toggleInfo(self):
+        self.show_key_help += 1
+        if self.show_key_help >= 3:
+            self.show_key_help = 0
+
+        if self.show_key_help == 0:
+            self.label1.show()
+            self.label2.hide()
+        elif self.show_key_help == 1:
+            self.label1.show()
+            self.label2.show()
+        else:
+            self.label1.hide()
+            self.label2.hide()
+
+        if self.v_zoom_left:
+            if self.show_key_help != 2:
+                self.v_zoom.move(QtCore.QPoint(self.label1.boundingRect().width(), 0))
+            else:
+                self.v_zoom.move(QtCore.QPoint(0, 0))
+
+        if self.show_key_help == 1 and self.star_pick_mode:
+            self.star_pick_info.show()
+        else:
+            self.star_pick_info.hide()
+
     def toggleImageType(self):
         """ Toggle between the maxpixel and avepixel. """
+        if self.img.img_handle.input_type == 'dfn':
+            return
+
         if self.img_type_flag == 'maxpixel':
             self.img_type_flag = 'avepixel'
         else:
@@ -2240,27 +2322,79 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.Ho = JD2HourAngle(self.platepar.JD)%360
 
         # Convert FOV centre to RA, Dec
-        ra, dec = altAz2RADec(self.azim_centre, self.alt_centre, date2JD(*img_time),
-                              self.platepar.lat, self.platepar.lon)
+        ra, dec = apparentAltAz2TrueRADec(self.azim_centre, self.alt_centre, date2JD(*img_time),
+                                          self.platepar.lat, self.platepar.lon)
 
         return ra, dec, rot_horizontal
 
     def changeStation(self):
-        self.dir_path = openFolderDialog(os.path.dirname(self.dir_path), 'Select new station folder', matplotlib)
+        """
+        Opens folder explorer window for user to select new station folder, then loads a platepar from that
+        folder, and reads the config file, updating the gui to show what it should
+        """
+        dir_path = openFolderDialog(os.path.dirname(self.dir_path), 'Select new station folder', matplotlib)
+        if not dir_path:
+            return
+
+        self.dir_path = dir_path
         self.config = cr.loadConfigFromDirectory('.', self.dir_path)
         self.img_handle = detectInputType(self.dir_path, self.config, fps=self.config.fps)
         self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
         self.cat_lim_mag = self.config.catalog_mag_limit
+        self.loadCalstars()
         self.loadPlatepar(update=True)
+        print()
+
         self.img.changeHandle(self.img_handle)
         self.img_zoom.changeHandle(self.img_handle)
         self.tab.hist.setImages(self.img)
         self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
         self.img_frame.autoRange(padding=0)
-        # add calstars
+
+        self.paired_stars = []
+        self.pick_list = {}
+        self.residuals = None
+        self.drawPicks()
+        self.drawPhotometryColoring()
+
+        self.tab.debruijn.updateTable()
+
+    def loadCalstars(self):
+        # Find the CALSTARS file in the given folder
+        calstars_file = None
+        for cal_file in os.listdir(self.dir_path):
+            if ('CALSTARS' in cal_file) and ('.txt' in cal_file):
+                calstars_file = cal_file
+                break
+
+        if calstars_file is None:
+
+            # Check if the calstars file is required
+            if self.img_handle.require_calstars:
+                messagebox.showinfo(title='CALSTARS error',
+                                    message='CALSTARS file could not be found in the given directory!')
+
+            self.calstars = {}
+
+        else:
+
+            # Load the calstars file
+            calstars_list = CALSTARS.readCALSTARS(self.dir_path, calstars_file)
+
+            # Convert the list to a dictionary
+            self.calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
+
+            print('CALSTARS file: ' + calstars_file + ' loaded!')
 
     def loadPlatepar(self, update=False):
-        """ Open a file dialog and ask user to open the platepar file. """
+        """
+        Open a file dialog and ask user to open the platepar file, changing self.platepar and self.platepar_file
+
+        Args:
+            update: [bool] Whether to update the gui after loading new platepar (leave as False if gui objects
+                            may not exist)
+
+        """
 
         platepar = Platepar()
 
@@ -2322,6 +2456,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateLeftLabels()
 
     def savePlatepar(self):
+        """  Save platepar to a file """
         # If the platepar is new, save it to the working directory
         if not self.platepar_file:
             self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
@@ -2508,33 +2643,52 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return min_index
 
-    def addCentroid(self, frame, x_centroid, y_centroid):
+    def addCentroid(self, frame, x_centroid, y_centroid, mode=1):
+        """
+        Adds or modifies a pick marker at given frame to self.pick_list with given information
+
+        Arguments:
+            frame: [int] Frame to add/modify pick to
+            x_centroid: [float] x coordinate of pick
+            y_centroid: [float] y coordinate of pick
+
+        """
         print('Added centroid at ({:.2f}, {:.2f}) on frame {:d}'.format(x_centroid, y_centroid, frame))
 
-        prev_pick = False
-        for pick in self.pick_list:
-            if pick['frame'] == self.img.getFrame():
-                prev_pick = True
-                pick['x_centroid'] = x_centroid
-                pick['y_centroid'] = y_centroid
-                break
+        pick = self.getCurrentPick()
+        if pick:
+            pick['x_centroid'] = x_centroid
+            pick['y_centroid'] = y_centroid
+            pick['mode'] = mode
 
-        if not prev_pick:
-            pick = {'frame': frame,
-                    'x_centroid': x_centroid,
+        else:
+            pick = {'x_centroid': x_centroid,
                     'y_centroid': y_centroid,
+                    'mode': mode,
                     'intensity_sum': None,
                     'photometry_pixels': None}
-            self.pick_list.append(pick)
+            self.pick_list[frame] = pick
+
+        self.tab.debruijn.modifyRow(frame, mode)
 
     def removeCentroid(self, frame):
-        for i, pick in enumerate(self.pick_list):
-            if pick['frame'] == self.img.getFrame() and pick['x_centroid']:
-                print('Removed centroid at ({:.2f}, {:.2f}) on frame {:d}'.format(pick['x_centroid'],
-                                                                                  pick['y_centroid'],
-                                                                                  frame))
-                self.pick_list.pop(i)
-                break
+        """
+        Removes the pick from given frame if it is there
+
+        Arguments:
+            frame: [int] frame to remove pick from
+
+        """
+        pick = self.getCurrentPick()
+        if pick and pick['x_centroid']:
+            print('Removed centroid at ({:.2f}, {:.2f}) on frame {:d}'.format(pick['x_centroid'],
+                                                                              pick['y_centroid'],
+                                                                              self.img.getFrame()))
+
+            self.pick_list[self.img.getFrame()]['x_centroid'] = None
+            self.pick_list[self.img.getFrame()]['y_centroid'] = None
+            self.pick_list[self.img.getFrame()]['mode'] = None
+            self.tab.debruijn.removeRow(frame)
 
     def centroid(self, prev_x_cent=None, prev_y_cent=None):
         """ Find the centroid of the star clicked on the image. """
@@ -2768,7 +2922,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.updatePlatepar()
 
     def updateFitResiduals(self):
-        """ Draw fit residuals. """
+        """ Draw fit residual lines. """
 
         if self.residuals is not None:
 
@@ -2978,11 +3132,7 @@ class PlateTool(QtWidgets.QMainWindow):
         """
 
         # Find the pick done on the current frame
-        pick = None
-        for _pick in self.pick_list:
-            if _pick['frame'] == self.img.getFrame():
-                pick = _pick
-                break
+        pick = self.getCurrentPick()
 
         if pick:
             # If there are no photometry pixels, set the intensity to 0
@@ -3049,8 +3199,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Create the list of picks for saving
         centroids = []
-        for pick in self.pick_list:
-            centroids.append([pick['frame'], pick['x_centroid'], pick['y_centroid'], pick['intensity_sum']])
+        for frame, pick in self.pick_list.items():
+            centroids.append([frame, pick['x_centroid'], pick['y_centroid'], pick['intensity_sum']])
 
         # If there are less than 3 points, don't show the lightcurve
         if len(centroids) < 3:
@@ -3118,11 +3268,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def changePhotometry(self, frame, photometry_pixels, add_photometry):
         """ Add/remove photometry pixels of the pick. """
-        pick = None
-        for _pick in self.pick_list:
-            if _pick['frame'] == self.img.getFrame():
-                pick = _pick
-                break
+        pick = self.getCurrentPick()
 
         if pick:
             if pick['photometry_pixels'] is None:
@@ -3138,16 +3284,47 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Add a new pick
         elif add_photometry:
-            pick = {'frame': frame,
-                    'x_centroid': None,
+            pick = {'x_centroid': None,
                     'y_centroid': None,
+                    'mode': None,
                     'intensity_sum': None,
                     'photometry_pixels': photometry_pixels}
 
-            self.pick_list.append(pick)
+            self.pick_list[frame] = pick
+
+    def getCurrentPick(self):
+        try:
+            return self.pick_list[self.img.getFrame()]
+        except KeyError:
+            return None
+
+    def resetPickFrames(self, new_initial_frame, reverse=False):
+        first_frame = 1024
+        for frame, pick in self.pick_list.items():
+            if frame < first_frame and pick['x_centroid'] is not None:
+                first_frame = frame
+        temp = {}
+
+        if reverse is False:
+            f = lambda frame: frame - first_frame + new_initial_frame
+        else:
+            f = lambda frame: 2**(9+1) - (frame - first_frame + new_initial_frame)
+
+        for frame, pick in self.pick_list.items():
+            temp[f(frame)] = self.pick_list[frame]
+
+        self.pick_list = temp
+        self.drawPicks()
+
+        return f
 
     def photometryColoring(self):
-        """ Color pixels for photometry. """
+        """
+        Color pixels for photometry.
+
+        Returns: [list of tuples with 2 elements] List of the x and y coordinates of all
+                    pixels to be coloured
+        """
 
         pixel_list = []
 
@@ -3176,22 +3353,19 @@ class PlateTool(QtWidgets.QMainWindow):
         return pixel_list
 
     def drawPhotometryColoring(self):
-        pick = None
-        for _pick in self.pick_list:
-            if _pick['frame'] == self.img.getFrame():
-                pick = _pick
-                break
+        """ Updates image to have the colouring in the current frame """
+        pick = self.getCurrentPick()
 
         if pick and pick['photometry_pixels']:
             # Create a coloring mask
             x_mask, y_mask = np.array(pick['photometry_pixels']).T
 
             mask_img = np.zeros(self.img.data.shape)
-            mask_img[x_mask, y_mask] = 1
+            mask_img[x_mask, y_mask] = 255
 
             self.region.setImage(mask_img)
         else:
-            self.region.setImage(np.zeros(self.img.data.shape))
+            self.region.setImage(np.array([[0]]))
 
     def saveFTPdetectinfo(self):
         """ Saves the picks to a FTPdetectinfo file in the same folder where the first given file is. """
@@ -3208,21 +3382,21 @@ class PlateTool(QtWidgets.QMainWindow):
 
         else:
             # Construct a fake FF file name
-            ff_name_ftp = "FF_{:s}_".format(self.station_name) \
+            ff_name_ftp = "FF_{:s}_".format(self.platepar.station_code) \
                           + self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_") \
                           + "{:03d}".format(int(round(self.img_handle.beginning_datetime.microsecond/1000))) \
                           + "_0000000.fits"
 
         # Create the list of picks for saving
         centroids = []
-        for pick in self.pick_list:
+        for frame, pick in self.pick_list.items():
 
             # Make sure to centroid is picked and is not just the photometry
             if pick['x_centroid'] is None:
                 continue
 
             # Get the rolling shutter corrected (or not, depending on the config) frame number
-            frame_no = self.getRollingShutterCorrectedFrameNo(pick)
+            frame_no = self.getRollingShutterCorrectedFrameNo(frame, pick)
 
             centroids.append([frame_no, pick['x_centroid'], pick['y_centroid'], pick['intensity_sum']])
 
@@ -3303,7 +3477,7 @@ class PlateTool(QtWidgets.QMainWindow):
         json_dict['meastype'] = 1
 
         centroids = []
-        for pick in self.pick_list:
+        for frame, pick in self.pick_list.items():
 
             # Make sure to centroid is picked and is not just the photometry
             if pick['x_centroid'] is None:
@@ -3326,7 +3500,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 ra = dec = mag = None
 
             # Get the rolling shutter corrected (or not, depending on the config) frame number
-            frame_no = self.getRollingShutterCorrectedFrameNo(pick)
+            frame_no = self.getRollingShutterCorrectedFrameNo(frame, pick)
 
             # Compute the time relative to the reference JD
             t_rel = frame_no/self.img_handle.fps
@@ -3353,7 +3527,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         print('JSON with picks saved to:', json_file_path)
 
-    def getRollingShutterCorrectedFrameNo(self, pick):
+    def getRollingShutterCorrectedFrameNo(self, frame, pick):
         """ Given a pick object, return rolling shutter corrected (or not, depending on the config) frame
             number.
         """
@@ -3369,11 +3543,11 @@ class PlateTool(QtWidgets.QMainWindow):
                 img_h = self.img.data.shape[0]
 
             # Compute the corrected frame time
-            frame_no = RollingShutterCorrection.correctRollingShutterTemporal(pick['frame'], pick['y_centroid'], img_h)
+            frame_no = RollingShutterCorrection.correctRollingShutterTemporal(frame, pick['y_centroid'], img_h)
 
         # If global shutter, do no correction
         else:
-            frame_no = pick['frame']
+            frame_no = frame
 
         return frame_no
 
@@ -3391,10 +3565,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Construct a fake FF file name
             ff_name_ftp = "FF_{:s}_".format(self.station_name) \
-                + self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_") \
-                + "{:03d}".format(int(round(self.img_handle.beginning_datetime.microsecond/1000))) \
-                + "_0000000.fits"
-
+                          + self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_") \
+                          + "{:03d}".format(int(round(self.img_handle.beginning_datetime.microsecond/1000))) \
+                          + "_0000000.fits"
 
         # Remove the file extension of the image file
         ff_name_ftp = ff_name_ftp.replace('.bin', '').replace('.fits', '')

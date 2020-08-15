@@ -23,7 +23,7 @@ def readBSC(file_path, file_name, years_from_J2000=0, lim_mag=None):
         BSC_data: [ndarray] Array of (RA, dec, mag) parameters for each star in the BSC corrected for
             proper motion, coordinates are in degrees.
     """
-
+    # TODO: try making this faster
     bsc_path = os.path.join(file_path, file_name)
 
     # Check if the BSC file exits

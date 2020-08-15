@@ -5,6 +5,7 @@ import numpy as np
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from RMS.Routines import Image
+from RMS.Routines.DebruijnSequence import findAllInDeBruijnSequence, generateDeBruijnSequence
 
 import time
 import re
@@ -98,6 +99,34 @@ class Crosshair(QtGui.QPainterPath):
         self.closeSubpath()
 
         self.addEllipse(QtCore.QPoint(0, 0), 0.5, 0.5)
+
+
+class CustomMessageBox(QtWidgets.QMessageBox):
+    def __init__(self, *args, **kwargs):
+        QtWidgets.QMessageBox.__init__(self, *args, **kwargs)
+        content = QtWidgets.QWidget()
+        self.vbox = QtWidgets.QVBoxLayout(content)
+        self.layout().addWidget(content, 0, 0)
+
+        self._label = QtWidgets.QLabel()
+        self._label.hide()
+        self.vbox.addWidget(self._label)
+
+    def addWidget(self, widget):
+        self.vbox.addWidget(widget)
+
+    def setText(self, text):
+        self._label.setText(text)
+        if self._label.text() != '':
+            self._label.show()
+        else:
+            self._label.hide()
+
+    def setInformativeText(self, text):
+        pass
+
+    def setIcon(self, icon):
+        pass
 
 
 class TextItemList(pg.GraphicsObject):
@@ -244,19 +273,17 @@ class ViewBox(pg.ViewBox):
 
 
 class ImageItem(pg.ImageItem):
-    # ImageItem that allows for a change in gamma
+    # ImageItem that provides an interface around img_handle
     def __init__(self, img_handle=None, **kwargs):
         """
-        ex
-        ImageItem({'maxpixel':data1,'avepixel':data2}, 'avepixel')
-        selectImage('maxpixel')
+        Makes an image item with img_handle, with the default image of avepixel
 
         Arguments:
-            image [2D np.array or dict with 2D np.array]:
-                data to store and show
-            default_key: if image is a dict, use to pick which data to use first
-            invert [boolean]: whether to invert image when displaying
-            gamma
+            image_handle: [InputType]
+            invert: [boolean] whether to invert image when displaying
+            gamma: [float]
+            dark:
+            flat_struct:
             kwargs: other __init__ arguments of pg.ImageItem
         """
         self.img_handle = img_handle
@@ -336,6 +363,13 @@ class ImageItem(pg.ImageItem):
         self.img_showing = 'avepixel'
 
     def changeHandle(self, img_handle):
+        """
+        Sets the img_handle to a new one and updates the image accordingly
+
+        Argumentss:
+            img_handle: [InputType]
+
+        """
         self.img_handle = img_handle
         if self.img_showing == 'maxpixel':
             self.maxpixel()
@@ -347,27 +381,28 @@ class ImageItem(pg.ImageItem):
     def loadFrame(self):
         frame = self.img_handle.loadFrame(avepixel=True)
 
-        # adding background to FR files
-        if self.img_handle.name()[:2] == 'FR':
-            original_index = self.img_handle.current_ff_index
-            original_time = self.img_handle.currentTime()
-            for index in range(len(self.img_handle.ff_list)):
-                if index == original_index:
-                    continue
+        if frame is not None:
+            # adding background to FR files
+            if self.img_handle.name()[:2] == 'FR':
+                original_index = self.img_handle.current_ff_index
+                original_time = self.img_handle.currentTime()
+                for index in range(len(self.img_handle.ff_list)):
+                    if index == original_index:
+                        continue
 
-                self.img_handle.current_ff_index = index
-                if original_time == self.img_handle.currentTime() and self.img_handle.name()[:2] == 'FF':
-                    frame = frame + self.img_handle.loadChunk().avepixel*(frame == 0)
-                    break
+                    self.img_handle.current_ff_index = index
+                    if original_time == self.img_handle.currentTime() and self.img_handle.name()[:2] == 'FF':
+                        frame = frame + self.img_handle.loadChunk().avepixel*(frame == 0)
+                        break
 
-            self.img_handle.current_ff_index = original_index
+                self.img_handle.current_ff_index = original_index
 
-        if self.dark is not None:
-            frame = Image.applyDark(frame, self.dark)
-        if self.flat_struct is not None:
-            frame = Image.applyFlat(frame, self.flat_struct)
-        self.setImage(np.swapaxes(frame, 0, 1))
-        self.img_showing = 'frame'
+            if self.dark is not None:
+                frame = Image.applyDark(frame, self.dark)
+            if self.flat_struct is not None:
+                frame = Image.applyFlat(frame, self.flat_struct)
+            self.setImage(np.swapaxes(frame, 0, 1))
+            self.img_showing = 'frame'
 
     def nextChunk(self):
         self.img_handle.nextChunk()
@@ -388,6 +423,16 @@ class ImageItem(pg.ImageItem):
         return np.percentile(self.image, lower), np.percentile(self.image, upper)
 
     def loadImage(self, mode, flag='avepixel'):
+        """
+        Loads an image for the given flag in the given mode. To change the image,
+        use nextChunk, prevChunk, or nextFrame, prevFrame, setFrame, or nextLine,
+        prevLine (depending on the flag and mode), before calling this
+
+        Args:
+            mode: [str] 'skyfit' or ''manualreduction'
+            flag: [str] 'avepixel' or 'maxpixel' or 'frame'
+
+        """
         if flag == 'maxpixel':
             self.maxpixel()
         elif mode == 'skyfit':
@@ -425,6 +470,13 @@ class ImageItem(pg.ImageItem):
         return self.image
 
     def setGamma(self, gamma):
+        """
+        Sets the image gamma to the given then updates the image
+
+        Args:
+            gamma: [float]
+
+        """
         old = self._gamma
         self._gamma = gamma
 
@@ -658,6 +710,9 @@ class HistogramLUTItem(pg.HistogramLUTItem):
             raise TypeError
 
     def toggleAutoLevels(self):
+        """
+        Switch between auto levels and manual levels
+        """
         if not self.auto_levels:
             self.saved_manual_levels = self.getLevels()
             self.setLevels(*self.imageItem().getAutolevels())
@@ -673,7 +728,6 @@ class HistogramLUTItem(pg.HistogramLUTItem):
 
     def regionChanging(self):
         pass  # doesnt update when moving it
-
 
     def regionChanged(self):
         super().regionChanged()
@@ -696,24 +750,28 @@ class HistogramLUTItem(pg.HistogramLUTItem):
 
 
 class RightOptionsTab(QtWidgets.QTabWidget):
-    def __init__(self, gui, parent=None):
-        super(RightOptionsTab, self).__init__(parent)
+    """
+    Tab widget which initializes and holds each of the tabs. They can be accessed with
+    self.hist, self.param_manager, and self.settings
+    """
+
+    def __init__(self, gui):
+        super(RightOptionsTab, self).__init__()
+
+        self.gui = gui
 
         self.hist = HistogramLUTWidget()
-        self.param_manager = PlateparParameterManager(parent=None,
-                                                      gui=gui)
-        self.settings = SettingsWidget(gui=gui, parent=None)
+        self.param_manager = PlateparParameterManager(gui)
+        self.settings = SettingsWidget(gui)
+        self.debruijn = DebruijnSequenceManager(gui)
 
         self.index = 0
         self.maximized = True
         self.setFixedWidth(250)
+
         self.addTab(self.hist, 'Levels')
         self.addTab(self.param_manager, 'Fit Parameters')
         self.addTab(self.settings, 'Settings')
-
-        self.setTabText(0, 'Levels')
-        self.setTabText(1, 'Fit Parameters')
-        self.setTabText(2, 'Settings')
 
         self.setCurrentIndex(self.index)  # redundant
         self.setTabPosition(QtWidgets.QTabWidget.East)
@@ -733,12 +791,341 @@ class RightOptionsTab(QtWidgets.QTabWidget):
                 self.setFixedWidth(19)
 
     def onSkyFit(self):
+        # if self.gui.img.img_handle.input_type == 'dfn':
+        self.removeTab(1)
+
         self.insertTab(1, self.param_manager, 'Fit Parameters')
         self.settings.onSkyFit()
+
+        self.setCurrentIndex(self.index)
 
     def onManualReduction(self):
         self.removeTab(1)
         self.settings.onManualReduction()
+
+        # if self.gui.img.img_handle.input_type == 'dfn':
+        self.insertTab(1, self.debruijn, 'Debruijn')
+
+        self.setCurrentIndex(self.index)
+
+
+class DebruijnSequenceManager(QtWidgets.QWidget):
+    # this whole thing could use some huge lower level changes
+    def __init__(self, gui):
+        QtWidgets.QWidget.__init__(self)
+        self.gui = gui
+        self.sequence = generateDeBruijnSequence(2, 9)
+
+        layout = QtWidgets.QVBoxLayout()
+        self.setLayout(layout)
+
+        self.table = QtWidgets.QTableWidget(0, 3)
+        self.table.setFixedWidth(205)
+        self.table.setColumnWidth(0, 45)
+        self.table.setColumnWidth(1, 80)
+        self.table.setColumnWidth(2, 45)
+        self.table.setHorizontalHeaderLabels(['break', 'time', 'value'])
+        self.table.verticalHeader().hide()
+        self.table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.table.currentCellChanged.connect(self.onCurrentCellChanged)
+        self.table.cellChanged.connect(self.onCellChanged)
+        self.updateTable()
+        layout.addWidget(self.table)
+
+        self.button = QtWidgets.QPushButton('Check Sequence')
+        self.button.clicked.connect(self.onButtonPressed)
+        layout.addWidget(self.button)
+
+        self.no_direction = QtWidgets.QRadioButton('Don\'t assume direction')
+        layout.addWidget(self.no_direction)
+        self.no_direction.setChecked(True)
+        self.correct_direction = QtWidgets.QRadioButton('Assume correct direction')
+        layout.addWidget(self.correct_direction)
+        self.reverse_direction = QtWidgets.QRadioButton('Assume reverse direction')
+        layout.addWidget(self.reverse_direction)
+
+    def onButtonPressed(self):
+        reversed = None
+        if self.correct_direction.isChecked():
+            reversed = False
+        elif self.reverse_direction.isChecked():
+            reversed = True
+
+        test, paired_first_bit = self.getSequence(get_paired_first_bit=True)
+        if test is None:
+            msg = QtWidgets.QMessageBox()
+            msg.setWindowTitle('DFN Manual Reduction Error')
+            msg.setIcon(QtWidgets.QMessageBox.Information)
+            msg.setText('Sequence is incorrect')
+            msg.setInformativeText('Inputted sequence must be a sequence of 11 or 10. '
+                                   'The inputted sequence does not.')
+            msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
+            msg.exec_()
+            return
+
+        forward, backward = findAllInDeBruijnSequence(test, self.sequence, unknowns=True, reverse=reversed)
+        # elements_given = sum([1 if i is not None else 0 for i in test])
+        # if elements_given < 9:
+        #     print('Neither were found')
+        #     msg = QtWidgets.QMessageBox()
+        #     msg.setWindowTitle('DFN Manual Reduction Error')
+        #     msg.setIcon(QtWidgets.QMessageBox.Information)
+        #     msg.setText('Sequence could not be found')
+        #     msg.setInformativeText('Sequence must have at least 9 known elements. Given: ' + str(elements_given))
+        #     msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
+        #     msg.exec_()
+        #     return
+        # if forward is not None and backward is not None:
+        #     print('Sequence exists in forward and reverse')
+        #     msg = QtWidgets.QMessageBox()
+        #     msg.setWindowTitle('DFN Manual Reduction Error')
+        #     msg.setIcon(QtWidgets.QMessageBox.Information)
+        #     msg.setText('Direction cannot be determined')
+        #     msg.setInformativeText('Sequence exists in both forward and reversed De Bruijn sequence.')
+        #     length = 10
+        #     if forward < length:
+        #         length = forward
+        #     if backward < length:
+        #         length = backward
+        #     text = 'In order to identify the order, you must add enough ' \
+        #            'points to distinguish between these two sequences:\n' + \
+        #            ''.join([str(i) for i in self.sequence])[forward - length:forward + len(test) + length] + \
+        #            '\n' + \
+        #            ''.join([str(i) for i in self.sequence[::-1]])[backward - length:backward + len(test) + length] + \
+        #            '\n' + ' '*length*2 + ''.join([str(i) if i is not None else 'x' for i in test]) + ' '*5 + '(current)'
+        #
+        #     msg.setDetailedText(text)
+        #     msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
+        #     msg.exec_()
+        #     return
+        if len(forward) + len(backward) > 1:
+            print('Multiple solutions exist')
+            msg = CustomMessageBox()
+            msg.setWindowTitle('DFN Manual Reduction Solution Selection')
+            msg.setText('There are multiple possible matches of the given sequence to the De Bruijn Sequence.\n'
+                        'Select one.')
+            msg.setStandardButtons(QtWidgets.QMessageBox.Ok | QtWidgets.QMessageBox.Cancel)
+            msg.buttons()[0].setDisabled(True)
+            table = QtWidgets.QTableWidget(len(forward) + len(backward), 4)
+            table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+            table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+            table.setHorizontalHeaderLabels(['break', 'start time', 'direction', 'pattern'])
+            table.setColumnWidth(0, 60)
+            table.setColumnWidth(3, 170)
+            table.verticalHeader().hide()
+            table.currentCellChanged.connect(lambda: msg.buttons()[0].setDisabled(False))
+            table.setFixedWidth(450)
+            table.setFixedHeight(300)
+            msg.addWidget(table)
+            for row, frame in enumerate(forward):
+                break_ = 2*frame + (not paired_first_bit)
+
+                item1 = QtWidgets.QTableWidgetItem(str(break_))
+                item1.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                table.setItem(row, 0, item1)
+
+                item2 = QtWidgets.QTableWidgetItem(
+                    self.gui.img.img_handle.currentFrameTime(dt_obj=True, frame_no=break_).strftime("%H:%M:%S.%f")[:-3])
+                item2.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                table.setItem(row, 1, item2)
+
+                item3 = QtWidgets.QTableWidgetItem('forward')
+                item3.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                table.setItem(row, 2, item3)
+
+                item4 = QtWidgets.QTableWidgetItem(
+                    ''.join(str(x) for x in self.sequence[frame-4:frame + len(test) + 4]))
+                item4.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                table.setItem(row, 3, item4)
+
+            for row, frame in enumerate(backward[::-1]):
+                row += len(forward)
+                break_ = 1024 - 2*frame - (not paired_first_bit) - self.table.rowCount() + 1
+
+                item1 = QtWidgets.QTableWidgetItem(str(break_))
+                item1.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                table.setItem(row, 0, item1)
+
+                item2 = QtWidgets.QTableWidgetItem(
+                    self.gui.img.img_handle.currentFrameTime(dt_obj=True, frame_no=break_).strftime("%H:%M:%S.%f")[:-3])
+                item2.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                table.setItem(row, 1, item2)
+
+                item3 = QtWidgets.QTableWidgetItem('backward')
+                item3.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                table.setItem(row, 2, item3)
+
+                item4 = QtWidgets.QTableWidgetItem(
+                    ''.join(str(x) for x in self.sequence[::-1][frame-4:frame + len(test) + 4]))
+                item4.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                table.setItem(row, 3, item4)
+
+            result = msg.exec_()
+            if result == msg.standardButton(msg.buttons()[0]):
+                index = table.currentIndex().row()
+                if index < len(forward):
+                    forward = [forward[index]]
+                    backward = []
+                else:
+                    backward = [(forward + backward[::-1])[index]]
+                    forward = []
+            else:
+                return
+
+        if len(forward) == 1:
+            f = self.gui.resetPickFrames(2*forward[0] + (not paired_first_bit), reverse=False)
+
+        elif len(backward) == 1:
+            f = self.gui.resetPickFrames(2*backward[0] + (not paired_first_bit), reverse=True)
+        else:
+            print('Neither were found')
+            msg = QtWidgets.QMessageBox()
+            msg.setWindowTitle('DFN Manual Reduction Error')
+            msg.setIcon(QtWidgets.QMessageBox.Information)
+            msg.setText('Sequence could not be found')
+            msg.setInformativeText('The sequence given is incorrect.')
+            msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
+            msg.exec_()
+            return
+
+        self.gui.img.setFrame(f(self.gui.img.getFrame()))
+        self.gui.updateLeftLabels()
+        self.updateTable()
+        self.correct_direction.setChecked(True)
+
+    def updateTable(self):
+        self.table.setRowCount(0)
+
+        for frame, pick in self.gui.pick_list.items():
+            self.modifyRow(frame, pick['mode'])
+
+    def getSequence(self, get_paired_first_bit=False):
+        dic = {(1, 1): 1, (1, 0): 0}  # for reference, not used
+
+        sequence = [None]*1024
+        start = 1024
+        end = 0
+        for frame, pick in self.gui.pick_list.items():
+            if pick['x_centroid'] is not None:
+                if frame < start:
+                    start = frame
+                if frame > end:
+                    end = frame
+                sequence[frame] = pick['mode']
+
+        # sequence with pairs as bits
+        parsed_sequence = []
+        sequence = sequence[start:end + 1]
+        paired_first_bit = True
+
+        # convert sequence with pairs in to single sequence
+        worked = True
+        for i in range(int(np.ceil(len(sequence)/2))):
+            if sequence[2*i] == 1 or sequence[2*i] is None:
+                try:
+                    parsed_sequence.append(sequence[2*i + 1])
+                except IndexError:
+                    parsed_sequence.append(None)
+
+            elif sequence[2*i] == 0:
+                worked = False
+                break
+
+        if not worked:
+            paired_first_bit = False
+            worked = True
+            parsed_sequence = [sequence[0]]
+            for i in range(len(sequence)//2):
+                if sequence[2*i + 1] == 1 or sequence[2*i + 1] is None:
+                    try:
+                        parsed_sequence.append(sequence[2*i + 2])
+                    except IndexError:
+                        parsed_sequence.append(None)
+
+                elif sequence[2*i + 1] == 0:
+                    worked = False
+                    break
+        if not worked:
+            parsed_sequence = None
+            paired_first_bit = None
+
+        if get_paired_first_bit:
+            return parsed_sequence, paired_first_bit
+        else:
+            return parsed_sequence
+
+    def removeRow(self, frame):
+        for row in range(self.table.rowCount()):
+            if int(self.table.item(row, 0).text()) == frame:
+                self.table.removeRow(row)
+                break
+            elif int(self.table.item(row, 0).text()) > frame:
+                break
+
+    def modifyRow(self, frame, value):
+        if value is None:
+            return
+
+        for row in range(self.table.rowCount()):
+            if int(self.table.item(row, 0).text()) == frame:
+                self.table.item(row, 2).setText(str(value))
+                return
+            elif int(self.table.item(row, 0).text()) > frame:
+                self.table.insertRow(row)
+
+                item1 = QtWidgets.QTableWidgetItem(str(frame))
+                item1.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                self.table.setItem(row, 0, item1)
+
+                item2 = QtWidgets.QTableWidgetItem(
+                    self.gui.img.img_handle.currentFrameTime(dt_obj=True, frame_no=frame).strftime("%H:%M:%S.%f")[:-3])
+                item2.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                self.table.setItem(row, 1, item2)
+
+                item3 = QtWidgets.QTableWidgetItem(str(value))
+                self.table.setItem(row, 2, item3)
+                return
+
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+
+        item1 = QtWidgets.QTableWidgetItem(str(frame))
+        item1.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+        self.table.setItem(row, 0, item1)
+
+        item2 = QtWidgets.QTableWidgetItem(
+            self.gui.img.img_handle.currentFrameTime(dt_obj=True, frame_no=frame).strftime("%H:%M:%S.%f")[:-3])
+        item2.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+        self.table.setItem(row, 1, item2)
+
+        item3 = QtWidgets.QTableWidgetItem(str(value))
+        self.table.setItem(row, 2, item3)
+
+    @QtCore.pyqtSlot(int, int, int, int)
+    def onCurrentCellChanged(self, row, column, prev_row, prev_col):
+        if self.table.item(row, 0) is not None:
+            self.gui.img.img_handle.setFrame(int(self.table.item(row, 0).text()))
+            self.gui.updateLeftLabels()
+            self.gui.drawPicks()
+
+    @QtCore.pyqtSlot(int, int)
+    def onCellChanged(self, row, column):
+        if column == 2:
+            frame = int(self.table.item(row, 0).text())
+            pick = self.gui.pick_list[frame]
+
+            if '1' in self.table.item(row, column).text():
+                self.table.item(row, column).setText('1')
+                pick['mode'] = 1
+            elif '0' in self.table.item(row, column).text():
+                self.table.item(row, column).setText('0')
+                pick['mode'] = 0
+            else:
+                self.table.item(row, column).setText('1')
+                pick['mode'] = 1
+
+            self.gui.drawPicks()
 
 
 class PlateparParameterManager(QtWidgets.QWidget):
@@ -762,8 +1149,8 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigEqAspectToggled = QtCore.pyqtSignal()
     sigForceDistortionToggled = QtCore.pyqtSignal()
 
-    def __init__(self, gui, parent=None):
-        QtWidgets.QWidget.__init__(self, parent)
+    def __init__(self, gui):
+        QtWidgets.QWidget.__init__(self)
         self.gui = gui
 
         full_layout = QtWidgets.QVBoxLayout()
@@ -914,7 +1301,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.distortion_type.currentIndexChanged.connect(self.onIndexChanged)
         form.addRow(QtWidgets.QLabel('Distortion'), self.distortion_type)
 
-        self.fit_parameters = ArrayTabWidget(parent=None, platepar=self.gui.platepar)
+        self.fit_parameters = ArrayTabWidget(platepar=self.gui.platepar)
         self.fit_parameters.valueModified.connect(self.onFitParametersChanged)
         form.addRow(self.fit_parameters)
 
@@ -1045,8 +1432,8 @@ class ArrayTabWidget(QtWidgets.QTabWidget):
     """
     valueModified = QtCore.pyqtSignal()
 
-    def __init__(self, platepar, parent=None):
-        super(ArrayTabWidget, self).__init__(parent)
+    def __init__(self, platepar):
+        super(ArrayTabWidget, self).__init__()
         self.platepar = platepar
 
         self.vars = ['x_poly_rev', 'y_poly_rev', 'x_poly_fwd', 'y_poly_fwd']
@@ -1121,7 +1508,11 @@ class ArrayTabWidget(QtWidgets.QTabWidget):
                 self.boxes[i][j].setValue(getattr(self.platepar, self.vars[i])[j])
 
 
-class SettingsWidget(QtWidgets.QTabWidget):
+class SettingsWidget(QtWidgets.QWidget):
+    """
+    QWidget which displays all of the visual values of the gui. Changing any parameters
+    here will not affect the functionality of the gui and will not be saved with savestate.
+    """
     sigMaxAveToggled = QtCore.pyqtSignal()
     sigCatStarsToggled = QtCore.pyqtSignal()
     sigCalStarsToggled = QtCore.pyqtSignal()
@@ -1130,8 +1521,8 @@ class SettingsWidget(QtWidgets.QTabWidget):
     sigGridToggled = QtCore.pyqtSignal()
     sigSelStarsToggled = QtCore.pyqtSignal()
 
-    def __init__(self, gui, parent=None):
-        QtWidgets.QTabWidget.__init__(self, parent)
+    def __init__(self, gui):
+        QtWidgets.QWidget.__init__(self)
         self.gui = gui
 
         vbox = QtWidgets.QVBoxLayout()
