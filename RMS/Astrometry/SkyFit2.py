@@ -39,7 +39,7 @@ from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
 import RMS.ConfigReader as cr
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
-from RMS.Formats.FrameInterface import detectInputType
+from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
@@ -59,6 +59,7 @@ from RMS.Astrometry.CustomPyqtgraphClasses import *
 
 class FOVinputDialog(object):
     """ Dialog for inputting FOV centre in Alt/Az. """
+
     # TODO: reimplement this with pyqt or remove it entirely
     def __init__(self, parent):
 
@@ -130,7 +131,7 @@ class FOVinputDialog(object):
 
 
 class PlateTool(QtWidgets.QMainWindow):
-    def __init__(self, dir_path, config, beginning_time=None, fps=None, gamma=None, startUI=True):
+    def __init__(self, dir_path, config, gamma=None, startUI=True):
         """ SkyFit interactive window.
 
         Arguments:
@@ -151,6 +152,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.config = config
         self.dir_path = dir_path
+        self.file_path = None
 
         # Extract the directory path if a file was given
         if os.path.isfile(self.dir_path):
@@ -193,8 +195,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Flag indicating that the first platepar fit has to be done
         self.first_platepar_fit = True
-
-
 
         ###################################################################################################
         # LOADING STARS
@@ -297,6 +297,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.save_state_action = QtWidgets.QAction("Save state")
         self.save_state_action.triggered.connect(self.saveState)
+
+        self.load_state_action = QtWidgets.QAction("Load state")
+        self.load_state_action.triggered.connect(self.findLoadState)
 
         self.station_action = QtWidgets.QAction("Change station")
         self.station_action.triggered.connect(self.changeStation)
@@ -521,9 +524,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         ###################################################################################################
         # RIGHT WIDGET
-
-        # Detect input file type and load appropriate input plugin
-        self.img_handle = detectInputType(self.dir_path, self.config)
+        self.detectInputType(load=True)
 
         # adding img
         gamma = 1
@@ -638,6 +639,7 @@ class PlateTool(QtWidgets.QMainWindow):
                                        self.save_platepar_action,
                                        self.save_default_platepar_action,
                                        self.save_state_action,
+                                       self.load_state_action,
                                        self.station_action])
 
             self.view_menu.addActions([self.toggle_info_action,
@@ -658,17 +660,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.manualreduction_button.setDisabled(True)
             self.setWindowTitle('ManualReduction')
 
-            self.updateLeftLabels()
-            # self.show_zoom_window = False
-            # self.zoom_window.hide()
-            self.resetStarPick()
-            self.star_pick_mode = False
-            self.cursor.hide()
-            self.cursor2.hide()
-            self.tab.onManualReduction()
-            self.pick_marker.show()
-            self.region.show()
-
             self.img_type_flag = 'avepixel'
             self.tab.settings.updateMaxAvePixel()
             self.img.loadImage(self.mode, self.img_type_flag)
@@ -682,11 +673,23 @@ class PlateTool(QtWidgets.QMainWindow):
             self.file_menu.addActions([self.save_reduction_action,
                                        self.save_current_frame_action,
                                        self.load_platepar_action,
-                                       self.save_state_action])
+                                       self.save_state_action,
+                                       self.load_state_action])
 
             self.view_menu.addActions([self.toggle_info_action,
                                        self.toggle_zoom_window])
             self.star_pick_info.setText('')
+
+            self.updateLeftLabels()
+            # self.show_zoom_window = False
+            # self.zoom_window.hide()
+            self.resetStarPick()
+            self.star_pick_mode = False
+            self.cursor.hide()
+            self.cursor2.hide()
+            self.tab.onManualReduction()
+            self.pick_marker.show()
+            self.region.show()
 
     def onRefractionChanged(self):
         self.updateStars()
@@ -1107,6 +1110,14 @@ class PlateTool(QtWidgets.QMainWindow):
         savePickle(dic, self.dir_path, 'skyFitMR_latest.state')
         print("Saved state to file")
 
+    def findLoadState(self):
+        file = openFileDialog(self.dir_path, None, 'Load .state file', matplotlib,
+                              [('State File', '*.state'),
+                               ('All Files', '*')])
+
+        if file:
+            self.loadState(os.path.dirname(file), os.path.basename(file))
+
     def loadState(self, dir_path, state_name):
         # function should theoretically work if called in the middle of the program (but is not recommended)
         variables = loadPickle(dir_path, state_name)
@@ -1128,7 +1139,23 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, 'central'):
             self.setupUI(loaded_file=True)
         else:
+            self.detectInputType(load=True)  # get new img_handle
+            self.img.changeHandle(self.img_handle)
+            self.img_zoom.changeHandle(self.img_handle)
+            self.tab.hist.setImages(self.img)
+            self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+            self.img_frame.autoRange(padding=0)
+
+            self.drawCalstars()
+            self.updateStars()
+            self.updateDistortion()
+            self.updateFitResiduals()
+            self.tab.param_manager.updatePlatepar()
+            self.tab.debruijn.updateTable()
+            self.changeMode(self.mode)
+
             self.updateLeftLabels()
+
 
     def onMouseReleased(self, event):
         self.clicked = 0
@@ -1998,8 +2025,9 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 if delta < 0:
                     self.scrolls_back += 1
-                    if self.scrolls_back > 2 and self.mode == 'skyfit':
-                        self.img_frame.autoRange(padding=0)
+                    if self.mode == 'skyfit':
+                        if self.scrolls_back > 2:
+                            self.img_frame.autoRange(padding=0)
                     else:
                         self.img_frame.scaleBy([1.2, 1.2], QtCore.QPoint(self.mouse_x, self.mouse_y))
                 elif delta > 0:
@@ -2327,6 +2355,27 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return ra, dec, rot_horizontal
 
+    def detectInputType(self, load=False):
+        if load and self.file_path is not None:  # only for loadState
+            self.img_handle = detectInputTypeFile(self.file_path, self.config)
+        else:
+            # Detect input file type and load appropriate input plugin
+            self.img_handle = detectInputTypeFolder(self.dir_path, self.config)
+            self.file_path = None
+
+        if self.img_handle is None:
+            self.file_path = openFileDialog(self.dir_path, None, 'Select file to open', matplotlib,
+                                            [('All Readable Files',
+                                              '*.fits;*.bin;*.mp4;*.avi;*.mkv;*.vid;*.png,*.jpg;*.bmp;*.nef'),
+                                             ('All Files', '*'),
+                                             ('FF and FR Files', '*.fits;*.bin'),
+                                             ('Video Files', '*.mp4;*.avi;*.mkv'),
+                                             ('VID Files', '*.vid'),
+                                             ('FITS Files', '*.fits'), ('BIN Files', '*.bin'),
+                                             ('Image Files', '*.png,*.jpg;*.bmp;*.nef')])
+
+            self.img_handle = detectInputTypeFile(self.file_path, self.config)
+
     def changeStation(self):
         """
         Opens folder explorer window for user to select new station folder, then loads a platepar from that
@@ -2338,7 +2387,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.dir_path = dir_path
         self.config = cr.loadConfigFromDirectory('.', self.dir_path)
-        self.img_handle = detectInputType(self.dir_path, self.config, fps=self.config.fps)
+        self.detectInputType()
         self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
         self.cat_lim_mag = self.config.catalog_mag_limit
         self.loadCalstars()
@@ -2352,11 +2401,15 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img_frame.autoRange(padding=0)
 
         self.paired_stars = []
+        self.updatePairedStars()
         self.pick_list = {}
         self.residuals = None
+        self.updateFitResiduals()
         self.drawPicks()
         self.drawPhotometryColoring()
+        self.photometry()
 
+        self.updateLeftLabels()
         self.tab.debruijn.updateTable()
 
     def loadCalstars(self):
@@ -2428,7 +2481,7 @@ class PlateTool(QtWidgets.QMainWindow):
             messagebox.showerror(title='Platepar file error',
                                  message='The file you selected could not be loaded as a platepar file!')
 
-            platepar_file, platepar = self.loadPlatepar()
+            self.loadPlatepar()
 
         # Set geo location and gamma from config, if they were updated
         if platepar is not None:
@@ -2436,6 +2489,9 @@ class PlateTool(QtWidgets.QMainWindow):
             platepar.lat = self.config.latitude
             platepar.lon = self.config.longitude
             platepar.elev = self.config.elevation
+
+            platepar.X_res = self.config.width
+            platepar.Y_res = self.config.height
 
             # Set the camera gamma from the config file
             platepar.gamma = self.config.gamma
@@ -3308,7 +3364,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if reverse is False:
             f = lambda frame: frame - first_frame + new_initial_frame
         else:
-            f = lambda frame: 2**(9+1) - (frame - first_frame + new_initial_frame)
+            f = lambda frame: 2**(9 + 1) - (frame - first_frame + new_initial_frame)
 
         for frame, pick in self.pick_list.items():
             temp[f(frame)] = self.pick_list[frame]
@@ -3636,14 +3692,5 @@ if __name__ == '__main__':
         # Load the config file
         config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
 
-        # Parse the beginning time into a datetime object
-        if cml_args.timebeg is not None:
-
-            beginning_time = datetime.datetime.strptime(cml_args.timebeg[0], "%Y%m%d_%H%M%S.%f")
-
-        else:
-            beginning_time = None
-
-        plate_tool = PlateTool(dir_path, config, beginning_time=beginning_time,
-                               fps=cml_args.fps, gamma=cml_args.gamma)
+        plate_tool = PlateTool(dir_path, config, gamma=cml_args.gamma)
     sys.exit(app.exec_())

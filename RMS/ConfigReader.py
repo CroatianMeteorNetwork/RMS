@@ -554,8 +554,8 @@ def parseDFNStation(config, parser):
 
     config.fov_h = 180
     config.fov_w = 180
-    config.width = 4912
-    config.height = 7360
+    config.width = 7360
+    config.height = 4912
     config.fps = 20
     config.gamma = 1
     config.bit_depth = 8
@@ -564,6 +564,7 @@ def parseDFNStation(config, parser):
     config.star_catalog_path = 'Catalogs'
     config.star_catalog_file = 'BSC5'
     config.platepar_name = 'platepar_cmn2010.cal'
+    config.deinterlace_order = -2
 
 
 def parseSystem(config, parser):

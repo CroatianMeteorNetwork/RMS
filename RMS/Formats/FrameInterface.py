@@ -10,6 +10,10 @@ import time
 import datetime
 
 # tkinter import that works on both Python 2 and 3
+import matplotlib
+
+from RMS.Misc import openFileDialog
+
 try:
     from tkinter import messagebox
 except:
@@ -1008,11 +1012,11 @@ class InputTypeVideo(InputType):
 
 
 class InputTypeUWOVid(InputType):
-    def __init__(self, dir_path, config, detection=False):
+    def __init__(self, file_path, config, detection=False):
         """ Input file type handle for UWO .vid files.
         
         Arguments:
-            dir_path: [str] Path to the vid file.
+            file_path: [str] Path to the vid file.
             config: [ConfigStruct object]
 
         Keyword arguments:
@@ -1023,8 +1027,8 @@ class InputTypeUWOVid(InputType):
         self.input_type = 'vid'
 
         # Separate directory path and file name
-        self.vid_path = dir_path
-        self.dir_path, vid_file = os.path.split(dir_path)
+        self.vid_path = file_path
+        self.dir_path, vid_file = os.path.split(file_path)
 
         self.config = config
 
@@ -1721,7 +1725,7 @@ class InputTypeImages(InputType):
 
 
 class InputTypeDFN(InputType):
-    def __init__(self, dir_path, config, beginning_time=None, fps=None):
+    def __init__(self, file_path, config, beginning_time=None, fps=None):
         """ Input file type handle for a folder with images.
 
         Arguments:
@@ -1738,7 +1742,7 @@ class InputTypeDFN(InputType):
         """
         self.input_type = 'dfn'
 
-        self.dir_path = dir_path
+        self.dir_path, self.image_file = os.path.split(file_path)
         self.config = config
 
         # This type of input probably won't have any calstars files
@@ -1750,39 +1754,25 @@ class InputTypeDFN(InputType):
         else:
             img_types = ['.png', '.jpg', '.bmp']
 
-        self.img_list = []
-        self.beginning_datetime_list = []
-        for file_name in sorted(os.listdir(self.dir_path)):
+        self.beginning_datetime = beginning_time
+        # Check if the file ends with support file extensions
+        if self.beginning_datetime is None and \
+                any([self.image_file.lower().endswith(fextens) for fextens in img_types]):
+            try:
+                beginning_datetime = datetime.datetime.strptime(
+                    self.image_file[4:21],
+                    "%Y-%m-%d_%H%M%S")
 
-            # Check if the file ends with support file extensions
-            if any([file_name.lower().endswith(fextens) for fextens in img_types]):
-                try:
-                    beginning_datetime = datetime.datetime.strptime(
-                        file_name[4:21],
-                        "%Y-%m-%d_%H%M%S")
-
-                    self.beginning_datetime_list.append(beginning_datetime)
-                    self.img_list.append(file_name)
-                except:
-                    pass
-
-                break
-
-        if len(self.img_list) == 0:
-            messagebox.showerror('Input error',
-                                 "Can't find any images in the given directory! Only PNG, JPG, NEF and BMP are supported!")
-            sys.exit()
+                self.beginning_datetime = beginning_datetime
+            except:
+                messagebox.showerror('Input error',
+                                     "Can't parse given DFN file name!")
+                sys.exit()
 
         print('Using folder:', self.dir_path)
 
-        # Compute the total number of used frames
-        self.total_images = len(self.img_list)
-        self.current_image_index = 0
-
         self.current_frame = 100
         self.total_frames = 1024
-
-        self.cache = {}
 
         # Load the first image
         img = self.loadImage()
@@ -1792,6 +1782,16 @@ class InputTypeDFN(InputType):
         self.nrows = img.shape[0]
         self.ncols = img.shape[1]
         self.img_dtype = img.dtype
+
+        if self.nrows > self.ncols:
+            temp = self.nrows
+            self.nrows = self.ncols
+            self.ncols = temp
+            img = np.rot90(img)
+
+        self.ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, self.img_dtype)
+        self.ff_struct_fake.addFrame(img.astype(np.uint16))
+        self.ff_struct_fake.finish()
 
         # If FPS is not given, use one from the config file
         if fps is None:
@@ -1803,38 +1803,20 @@ class InputTypeDFN(InputType):
             print('Using FPS:', self.fps)
 
     def loadImage(self):
-        if self.current_img_file.endswith('.NEF'):
+        if self.image_file.endswith('.NEF'):
             # .nef files will not be brought here if rawpy is not installed
             # get raw data from .nef file and get image from it
-            raw = rawpy.imread(os.path.join(self.dir_path, self.current_img_file))
+            raw = rawpy.imread(os.path.join(self.dir_path, self.image_file))
             frame = raw.postprocess()
         else:
             # Get the current image
-            frame = cv2.imread(os.path.join(self.dir_path, self.current_img_file), -1)
+            frame = cv2.imread(os.path.join(self.dir_path, self.image_file), -1)
 
         # Convert the image to black and white if it's 8 bit
         if 8*frame.itemsize == 8:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         return frame
-
-    @property
-    def current_img_file(self):
-        return self.img_list[self.current_image_index]
-
-    @property
-    def beginning_datetime(self):
-        return self.beginning_datetime_list[self.current_image_index]
-
-    def nextChunk(self):
-        """ Go to the next DFN image in folder """
-
-        self.current_image_index = (self.current_image_index + 1)%self.total_images
-
-    def prevChunk(self):
-        """ Go to the previous DFN image in folder """
-
-        self.current_image_index = (self.current_image_index - 1)%self.total_images
 
     def loadChunk(self, first_frame=None, read_nframes=None):
         """ Load the frame chunk file.
@@ -1844,27 +1826,10 @@ class InputTypeDFN(InputType):
             read_nframes: [int] Number of frames to read. If not given (None), self.fr_chunk_no frames will be
                 read. If -1, all frames will be read in.
         """
-
-        # Find which file read
-        file_name = self.current_img_file
-
-        # save and load file from cache
-        if file_name in self.cache:
-            ff_struct_fake = self.cache[file_name]
-        else:
-            image = self.loadImage()
-            ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, self.img_dtype)
-            ff_struct_fake.addFrame(image.astype(np.uint16))
-            self.cache[file_name] = ff_struct_fake
-            ff_struct_fake.finish()
-
-        return ff_struct_fake
-
-    def loadFrame(self, avepixel=False):
-        pass
+        return self.ff_struct_fake
 
     def name(self, beginning=False):
-        return self.img_list[self.current_image_index]
+        return self.image_file
 
     def currentTime(self, dt_obj=False):
         # Compute the datetime of the current frame
@@ -1899,7 +1864,7 @@ class InputTypeDFN(InputType):
             return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
 
 
-def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_dir=False, detection=False):
+def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip_ff_dir=False, detection=False):
     """ Given the folder of a file, detect the input format.
 
     Arguments:
@@ -1917,12 +1882,18 @@ def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_d
                 control whether the binning is applied or not. No effect on FF image handle.
 
     """
+    if 'rawpy' in sys.modules:
+        ### Find images in the given folder ###
+        img_types = ['.png', '.jpg', '.bmp', '.nef']
+    else:
+        img_types = ['.png', '.jpg', '.bmp']
 
+    img_handle = None
     # If the given dir path is a directory, search for FF files or individual images
-    if os.path.isdir(input_path):
+    if os.path.isdir(input_dir):
 
         # Check if there are valid FF names in the directory
-        if any([validFFName(ff_file) or validFRName(ff_file) for ff_file in os.listdir(input_path)]):
+        if any([validFFName(ff_file) or validFRName(ff_file) for ff_file in os.listdir(input_dir)]):
 
             if skip_ff_dir:
                 messagebox.showinfo('FF directory',
@@ -1930,51 +1901,52 @@ def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_d
                 return None
             else:
                 # Init the image handle for FF files in a directory
-                img_handle = InputTypeFRFF(input_path, config)
+                img_handle = InputTypeFRFF(input_dir, config)
                 img_handle.ncols = config.width
                 img_handle.nrows = config.height
 
-        elif config.width == 4912 or config.width == 7360:
-            img_handle = InputTypeDFN(input_path, config, beginning_time=beginning_time, fps=fps)
-        else:
-            img_handle = InputTypeImages(input_path, config, beginning_time=beginning_time, fps=fps, \
+        elif any([input_dir.lower().endswith(x) for x in img_types]) and config.width != 4912 and config.width != 7360:
+            img_handle = InputTypeImages(input_dir, config, beginning_time=beginning_time, fps=fps,
                                          detection=detection)
-
-
-    # If the given path is a file, look for a single FF file, video files, or vid files
     else:
+        raise NotADirectoryError
 
-        dir_path, file_name = os.path.split(input_path)
-
-        # Check if a single FF file was given
-        if validFFName(file_name) or validFRName(file_name):
-
-            # Init the image handle for FF a single FF file
-            img_handle = InputTypeFRFF(input_path, config, single_ff=True)
-            img_handle.ncols = config.width
-            img_handle.nrows = config.height
+    return img_handle
 
 
-        # Check if the given file is a video file
-        elif file_name.lower().endswith('.mp4') or file_name.lower().endswith('.avi') \
-                or file_name.lower().endswith('.mkv'):
+def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, skip_ff_dir=False, detection=False):
+    # If the given path is a file, look for a single FF file, video files, or vid files
+    dir_path, file_name = os.path.split(input_file)
 
-            # Init the image hadle for video files
-            img_handle = InputTypeVideo(input_path, config, beginning_time=beginning_time, \
-                                        detection=detection)
+    # Check if a single FF file was given
+    if validFFName(file_name) or validFRName(file_name):
 
+        # Init the image handle for FF a single FF file
+        img_handle = InputTypeFRFF(input_file, config, single_ff=True)
+        img_handle.ncols = config.width
+        img_handle.nrows = config.height
 
-        # Check if the given files is the UWO .vid format
-        elif file_name.endswith('.vid'):
+    # Check if the given file is a video file
+    elif file_name.lower().endswith('.mp4') or file_name.lower().endswith('.avi') \
+            or file_name.lower().endswith('.mkv'):
 
-            # Init the image handle for UWO-type .vid files
-            img_handle = InputTypeUWOVid(input_path, config, detection=detection)
+        # Init the image hadle for video files
+        img_handle = InputTypeVideo(input_file, config, beginning_time=beginning_time,
+                                    detection=detection)
 
+    # Check if the given files is the UWO .vid format
+    elif file_name.endswith('.vid'):
 
-        else:
-            messagebox.showerror(title='Input format error',
-                                 message='Only these video formats are supported: .mp4, .avi, .mkv, .vid!')
-            return None
+        # Init the image handle for UWO-type .vid files
+        img_handle = InputTypeUWOVid(input_file, config, detection=detection)
+
+    elif config.width == 4912 or config.width == 7360:
+        img_handle = InputTypeDFN(input_file, config, beginning_time=beginning_time, fps=fps)
+
+    else:
+        messagebox.showerror(title='Input format error',
+                             message='Couldn\'t find the file type given')
+        return None
 
     return img_handle
 

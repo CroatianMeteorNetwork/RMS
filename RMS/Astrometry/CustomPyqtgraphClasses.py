@@ -791,8 +791,7 @@ class RightOptionsTab(QtWidgets.QTabWidget):
                 self.setFixedWidth(19)
 
     def onSkyFit(self):
-        # if self.gui.img.img_handle.input_type == 'dfn':
-        self.removeTab(1)
+        self.removeTabText('Debruijn')
 
         self.insertTab(1, self.param_manager, 'Fit Parameters')
         self.settings.onSkyFit()
@@ -800,14 +799,26 @@ class RightOptionsTab(QtWidgets.QTabWidget):
         self.setCurrentIndex(self.index)
 
     def onManualReduction(self):
-        self.removeTab(1)
+        self.removeTabText('Fit Parameters')
         self.settings.onManualReduction()
 
-        # if self.gui.img.img_handle.input_type == 'dfn':
-        self.insertTab(1, self.debruijn, 'Debruijn')
+        if self.gui.img.img_handle.input_type == 'dfn':
+            self.insertTab(1, self.debruijn, 'Debruijn')
 
         self.setCurrentIndex(self.index)
 
+    def removeTabText(self, text):
+        """
+        Removes the tab with text. If it can't be found, does nothing.
+
+        Arguments:
+            text: The tab to be removed has text text
+
+        """
+        for i in range(self.count()):
+            if self.tabText(i) == text:
+                self.removeTab(i)
+                break
 
 class DebruijnSequenceManager(QtWidgets.QWidget):
     # this whole thing could use some huge lower level changes
@@ -822,10 +833,10 @@ class DebruijnSequenceManager(QtWidgets.QWidget):
         self.table = QtWidgets.QTableWidget(0, 3)
         self.table.setFixedWidth(205)
         self.table.setColumnWidth(0, 45)
-        self.table.setColumnWidth(1, 80)
-        self.table.setColumnWidth(2, 45)
+        self.table.setColumnWidth(1, 75)
+        self.table.setColumnWidth(2, 40)
         self.table.setHorizontalHeaderLabels(['break', 'time', 'value'])
-        self.table.verticalHeader().hide()
+        # self.table.verticalHeader().hide()
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.table.currentCellChanged.connect(self.onCurrentCellChanged)
