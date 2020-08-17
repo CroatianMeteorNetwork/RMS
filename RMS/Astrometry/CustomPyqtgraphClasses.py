@@ -102,6 +102,10 @@ class Crosshair(QtGui.QPainterPath):
 
 
 class CustomMessageBox(QtWidgets.QMessageBox):
+    """  Identical to QMessageBox except doesn't use setInformativeText and an icon.
+        instead allows to add widgets to the top section that can be changed externally.
+     """
+
     def __init__(self, *args, **kwargs):
         QtWidgets.QMessageBox.__init__(self, *args, **kwargs)
         content = QtWidgets.QWidget()
@@ -248,6 +252,7 @@ class TextItem(pg.TextItem):
 
 
 class ViewBox(pg.ViewBox):
+    # new signals are made since they give more information that mouseClickEvent
     sigMousePressed = QtCore.pyqtSignal(object)
     sigMouseReleased = QtCore.pyqtSignal(object)
 
@@ -362,21 +367,25 @@ class ImageItem(pg.ImageItem):
         self.setImage(np.swapaxes(avepixel, 0, 1))
         self.img_showing = 'avepixel'
 
-    def changeHandle(self, img_handle):
-        """
-        Sets the img_handle to a new one and updates the image accordingly
-
-        Argumentss:
-            img_handle: [InputType]
-
-        """
-        self.img_handle = img_handle
+    def reloadImage(self):
+        """ If img_handle or the flats and darks was changed, reload the current image """
         if self.img_showing == 'maxpixel':
             self.maxpixel()
         elif self.img_showing == 'avepixel':
             self.avepixel()
         elif self.img_showing == 'frame':
             self.loadFrame()
+
+    def changeHandle(self, img_handle):
+        """
+        Sets the img_handle to a new one and updates the image accordingly
+
+        Arguments:
+            img_handle: [InputType]
+
+        """
+        self.img_handle = img_handle
+        self.reloadImage()
 
     def loadFrame(self):
         frame = self.img_handle.loadFrame(avepixel=True)
@@ -473,7 +482,7 @@ class ImageItem(pg.ImageItem):
         """
         Sets the image gamma to the given then updates the image
 
-        Args:
+        Arguments:
             gamma: [float]
 
         """
@@ -566,6 +575,8 @@ class ImageItem(pg.ImageItem):
 
 
 class CursorItem(pg.GraphicsObject):
+    # this object could be changed so that it uses scatterplotitems instead, since using
+    # their libraries is probably faster than what I've made, but it isn't necessary.
     def __init__(self, r, pxmode=False, thickness=1):
         """
         Adds a CursorItem to the point (0,0).
@@ -752,7 +763,7 @@ class HistogramLUTItem(pg.HistogramLUTItem):
 class RightOptionsTab(QtWidgets.QTabWidget):
     """
     Tab widget which initializes and holds each of the tabs. They can be accessed with
-    self.hist, self.param_manager, and self.settings
+    self.hist, self.param_manager, self.debruijn and self.settings
     """
 
     def __init__(self, gui):
@@ -777,6 +788,13 @@ class RightOptionsTab(QtWidgets.QTabWidget):
         self.setTabPosition(QtWidgets.QTabWidget.East)
 
         self.tabBarClicked.connect(self.onTabBarClicked)
+
+    def keyPressEvent(self, event):
+        """ Pressing escape when you're focused on any widget on the right focuses
+            on the main widget
+        """
+        if event.key() == QtCore.Qt.Key_Escape:
+            self.gui.view_widget.setFocus()
 
     def onTabBarClicked(self, index):
         if index != self.index:
@@ -820,6 +838,7 @@ class RightOptionsTab(QtWidgets.QTabWidget):
                 self.removeTab(i)
                 break
 
+
 class DebruijnSequenceManager(QtWidgets.QWidget):
     # this whole thing could use some huge lower level changes
     def __init__(self, gui):
@@ -830,6 +849,7 @@ class DebruijnSequenceManager(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout()
         self.setLayout(layout)
 
+        # table
         self.table = QtWidgets.QTableWidget(0, 3)
         self.table.setFixedWidth(205)
         self.table.setColumnWidth(0, 45)
@@ -844,10 +864,12 @@ class DebruijnSequenceManager(QtWidgets.QWidget):
         self.updateTable()
         layout.addWidget(self.table)
 
+        # check sequence button
         self.button = QtWidgets.QPushButton('Check Sequence')
         self.button.clicked.connect(self.onButtonPressed)
         layout.addWidget(self.button)
 
+        # direction radio buttons
         self.no_direction = QtWidgets.QRadioButton('Don\'t assume direction')
         layout.addWidget(self.no_direction)
         self.no_direction.setChecked(True)
@@ -876,40 +898,8 @@ class DebruijnSequenceManager(QtWidgets.QWidget):
             return
 
         forward, backward = findAllInDeBruijnSequence(test, self.sequence, unknowns=True, reverse=reversed)
-        # elements_given = sum([1 if i is not None else 0 for i in test])
-        # if elements_given < 9:
-        #     print('Neither were found')
-        #     msg = QtWidgets.QMessageBox()
-        #     msg.setWindowTitle('DFN Manual Reduction Error')
-        #     msg.setIcon(QtWidgets.QMessageBox.Information)
-        #     msg.setText('Sequence could not be found')
-        #     msg.setInformativeText('Sequence must have at least 9 known elements. Given: ' + str(elements_given))
-        #     msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
-        #     msg.exec_()
-        #     return
-        # if forward is not None and backward is not None:
-        #     print('Sequence exists in forward and reverse')
-        #     msg = QtWidgets.QMessageBox()
-        #     msg.setWindowTitle('DFN Manual Reduction Error')
-        #     msg.setIcon(QtWidgets.QMessageBox.Information)
-        #     msg.setText('Direction cannot be determined')
-        #     msg.setInformativeText('Sequence exists in both forward and reversed De Bruijn sequence.')
-        #     length = 10
-        #     if forward < length:
-        #         length = forward
-        #     if backward < length:
-        #         length = backward
-        #     text = 'In order to identify the order, you must add enough ' \
-        #            'points to distinguish between these two sequences:\n' + \
-        #            ''.join([str(i) for i in self.sequence])[forward - length:forward + len(test) + length] + \
-        #            '\n' + \
-        #            ''.join([str(i) for i in self.sequence[::-1]])[backward - length:backward + len(test) + length] + \
-        #            '\n' + ' '*length*2 + ''.join([str(i) if i is not None else 'x' for i in test]) + ' '*5 + '(current)'
-        #
-        #     msg.setDetailedText(text)
-        #     msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
-        #     msg.exec_()
-        #     return
+
+        # if multiple solutions exist, show popup window that allows you to select between them
         if len(forward) + len(backward) > 1:
             print('Multiple solutions exist')
             msg = CustomMessageBox()
@@ -946,7 +936,7 @@ class DebruijnSequenceManager(QtWidgets.QWidget):
                 table.setItem(row, 2, item3)
 
                 item4 = QtWidgets.QTableWidgetItem(
-                    ''.join(str(x) for x in self.sequence[frame-4:frame + len(test) + 4]))
+                    ''.join(str(x) for x in self.sequence[frame - 4:frame + len(test) + 4]))
                 item4.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
                 table.setItem(row, 3, item4)
 
@@ -968,7 +958,7 @@ class DebruijnSequenceManager(QtWidgets.QWidget):
                 table.setItem(row, 2, item3)
 
                 item4 = QtWidgets.QTableWidgetItem(
-                    ''.join(str(x) for x in self.sequence[::-1][frame-4:frame + len(test) + 4]))
+                    ''.join(str(x) for x in self.sequence[::-1][frame - 4:frame + len(test) + 4]))
                 item4.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
                 table.setItem(row, 3, item4)
 
@@ -983,12 +973,13 @@ class DebruijnSequenceManager(QtWidgets.QWidget):
                     forward = []
             else:
                 return
-
+        # if there is exactly one solution (possibly after selecting one), update pick frames
         if len(forward) == 1:
             f = self.gui.resetPickFrames(2*forward[0] + (not paired_first_bit), reverse=False)
 
         elif len(backward) == 1:
             f = self.gui.resetPickFrames(2*backward[0] + (not paired_first_bit), reverse=True)
+
         else:
             print('Neither were found')
             msg = QtWidgets.QMessageBox()
@@ -1075,6 +1066,15 @@ class DebruijnSequenceManager(QtWidgets.QWidget):
                 break
 
     def modifyRow(self, frame, value):
+        """
+        Edit or append row to table with given information.
+
+        Args:
+            frame: [int] If frame isn't in table, append new row with this value. Otherwise change
+                        the value of the row with this value.
+            value: [0 or 1]
+        """
+
         if value is None:
             return
 
@@ -1118,7 +1118,7 @@ class DebruijnSequenceManager(QtWidgets.QWidget):
         if self.table.item(row, 0) is not None:
             self.gui.img.img_handle.setFrame(int(self.table.item(row, 0).text()))
             self.gui.updateLeftLabels()
-            self.gui.drawPicks()
+            self.gui.updatePicks()
 
     @QtCore.pyqtSlot(int, int)
     def onCellChanged(self, row, column):
@@ -1136,7 +1136,7 @@ class DebruijnSequenceManager(QtWidgets.QWidget):
                 self.table.item(row, column).setText('1')
                 pick['mode'] = 1
 
-            self.gui.drawPicks()
+            self.gui.updatePicks()
 
 
 class PlateparParameterManager(QtWidgets.QWidget):
@@ -1531,6 +1531,8 @@ class SettingsWidget(QtWidgets.QWidget):
     sigInvertToggled = QtCore.pyqtSignal()
     sigGridToggled = QtCore.pyqtSignal()
     sigSelStarsToggled = QtCore.pyqtSignal()
+    sigPicksToggled = QtCore.pyqtSignal()
+    sigRegionToggled = QtCore.pyqtSignal()
 
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
@@ -1567,6 +1569,18 @@ class SettingsWidget(QtWidgets.QWidget):
         self.selected_stars.released.connect(self.sigSelStarsToggled.emit)
         self.updateShowSelStars()
         vbox.addWidget(self.selected_stars)
+
+        self.picks = QtWidgets.QCheckBox('Show Picks')
+        self.picks.released.connect(self.sigPicksToggled.emit)
+        self.updateShowPicks()
+        self.picks.hide()
+        vbox.addWidget(self.picks)
+
+        self.region = QtWidgets.QCheckBox('Show Photometry Highlight')
+        self.region.released.connect(self.sigRegionToggled.emit)
+        self.updateShowRegion()
+        self.region.hide()
+        vbox.addWidget(self.region)
 
         self.distortion = QtWidgets.QCheckBox('Show Distortion')
         self.distortion.released.connect(self.sigDistortionToggled.emit)
@@ -1636,6 +1650,12 @@ class SettingsWidget(QtWidgets.QWidget):
     def updateShowSelStars(self):
         self.selected_stars.setChecked(self.gui.selected_stars_visible)
 
+    def updateShowPicks(self):
+        self.picks.setChecked(self.gui.pick_marker.isVisible())
+
+    def updateShowRegion(self):
+        self.region.setChecked(self.gui.region.isVisible())
+
     def updateShowDistortion(self):
         self.distortion.setChecked(self.gui.draw_distortion)
 
@@ -1685,6 +1705,8 @@ class SettingsWidget(QtWidgets.QWidget):
         self.detected_stars.show()
         self.distortion.show()
         self.selected_stars.show()
+        self.picks.hide()
+        self.region.hide()
 
         self.gui.selected_stars_visible = False
         self.sigSelStarsToggled.emit()  # toggle makes it true
@@ -1702,6 +1724,9 @@ class SettingsWidget(QtWidgets.QWidget):
         self.detected_stars.hide()
         self.distortion.hide()
         self.selected_stars.hide()
+        self.picks.show()
+        if self.gui.img.img_handle.input_type != 'dfn':
+            self.region.show()
 
         self.gui.draw_distortion = True
         self.sigDistortionToggled.emit()  # toggle makes it false

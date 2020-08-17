@@ -721,7 +721,7 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
 
 
 if __name__ == "__main__":
-    import Utils.RMS2UFO  # TODO: may result in circular imports, put this main in a different file
+    import Utils.RMS2UFO
 
     ### COMMAND LINE ARGUMENTS
 
