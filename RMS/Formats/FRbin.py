@@ -60,9 +60,11 @@ class fr_struct:
         self.__maxpixel = None
         self.__avepixel = None
 
+        self.dtype = None
+
     @property
     def nframes(self):
-        return 255
+        return 256
 
     @property
     def maxpixel(self):
@@ -107,7 +109,7 @@ class fr_struct:
             img_count[img_count <= 0] = 1
             img_count = np.swapaxes(img_count, 0, 1)
             img = np.swapaxes(img, 0, 1)
-            self.__avepixel = ((img - self.maxpixel)/img_count).astype(np.uint8)
+            self.__avepixel = ((img - self.maxpixel)/img_count).astype(np.uint16)
 
         return self.__avepixel
 

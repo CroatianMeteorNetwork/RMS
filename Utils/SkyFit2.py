@@ -1,23 +1,18 @@
 from __future__ import print_function, division, absolute_import, unicode_literals
 
 import os
-import sys
 import math
-import copy
-import time
-import datetime
+# import time
 import argparse
 import traceback
 import copy
 import cProfile
-import pstats
+# import pstats
 import json
 
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
-import scipy.optimize
-import scipy.ndimage
 
 try:
     import tkinter
@@ -33,14 +28,13 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, extinctionCorrectionTrueToApparent, \
     applyAstrometryFTPdetectinfo
-from RMS.Astrometry.Conversions import J2000_JD, date2JD, JD2HourAngle, altAz2RADec, trueRaDec2ApparentAltAz, \
+from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
     apparentAltAz2TrueRADec, jd2Date, datetime2JD
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
 import RMS.ConfigReader as cr
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
 from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
-from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
 from RMS.Pickling import loadPickle, savePickle

@@ -870,12 +870,12 @@ class DebruijnSequenceManager(QtWidgets.QWidget):
         layout.addWidget(self.button)
 
         # direction radio buttons
-        self.no_direction = QtWidgets.QRadioButton('Don\'t assume direction')
+        self.no_direction = QtWidgets.QRadioButton('Either time direction')
         layout.addWidget(self.no_direction)
         self.no_direction.setChecked(True)
-        self.correct_direction = QtWidgets.QRadioButton('Assume correct direction')
+        self.correct_direction = QtWidgets.QRadioButton('Picked time direction')
         layout.addWidget(self.correct_direction)
-        self.reverse_direction = QtWidgets.QRadioButton('Assume reverse direction')
+        self.reverse_direction = QtWidgets.QRadioButton('Reverse time direction')
         layout.addWidget(self.reverse_direction)
 
     def onButtonPressed(self):

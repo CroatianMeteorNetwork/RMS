@@ -94,7 +94,7 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
 
 
 
-def openFileDialog(dir_path, initialfile, title, mpl, filetypes=None):
+def openFileDialog(dir_path, initialfile, title, mpl, filetypes=()):
     """ Open the file dialog and close it properly, depending on the backend used. 
     
     Arguments:
@@ -113,9 +113,8 @@ def openFileDialog(dir_path, initialfile, title, mpl, filetypes=None):
     root.update()
 
     # Open the file dialog
-    file_name = filedialog.askopenfilename(initialdir=dir_path, \
+    file_name = filedialog.askopenfilename(initialdir=dir_path,
         initialfile=initialfile, title=title, filetypes=filetypes)
-
     root.update()
 
     if (mpl.get_backend() != 'TkAgg') and (mpl.get_backend() != 'WXAgg'):

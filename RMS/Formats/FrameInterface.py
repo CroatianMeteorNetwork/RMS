@@ -6,13 +6,7 @@ from __future__ import print_function, division, absolute_import
 import os
 import sys
 import copy
-import time
 import datetime
-
-# tkinter import that works on both Python 2 and 3
-import matplotlib
-
-from RMS.Misc import openFileDialog
 
 try:
     from tkinter import messagebox
@@ -65,7 +59,7 @@ def computeFramesToRead(read_nframes, total_frames, fr_chunk_no, first_frame):
             frames_to_read = read_nframes
 
         # Make sure not to try to read more frames than there's available
-        if first_frame + fr_chunk_no > total_frames:
+        if first_frame + frames_to_read > total_frames:
             frames_to_read = total_frames - first_frame
 
     return int(frames_to_read)
@@ -535,10 +529,9 @@ class InputTypeFRFF(InputType):
         # Sort the FF list
         self.ff_list = sorted(self.ff_list, key=lambda x: x[2:] + x[:2])
 
-        # Init the frame number
-        self.current_frame_list = [None]*len(self.ff_list)
-        self.line_list = [0]*len(self.ff_list)
-        self.line_number = [1]*len(self.ff_list)
+        self.current_frame_list = [None]*len(self.ff_list)  # each file has their own current frame
+        self.line_list = [0]*len(self.ff_list)  # the line stored for each file (0 to self.line_numer[i])
+        self.line_number = [1]*len(self.ff_list)  # number of lines for each file
 
         # Number for frames to read by default
         self.total_frames = 256
@@ -602,31 +595,182 @@ class InputTypeFRFF(InputType):
             read_nframes: [int] Number of frames to read. If not given (None), self.fr_chunk_no frames will be
                 read. If -1, all frames will be read in.
         """
-        # Find which file read
-        file_name = self.name()
+        if first_frame is None and read_nframes is None:
+            # Find which file read
+            file_name = self.name()
 
-        # save and load file from cache
-        if file_name in self.cache:
-            ff = self.cache[file_name]
-        elif validFFName(file_name):
-            # Load the FF file from disk
-            ff = readFF(self.dir_path, file_name)
+            # save and load file from cache
+            if file_name in self.cache:
+                ff = self.cache[file_name]
+            elif validFFName(file_name):
+                # Load the FF file from disk
+                ff = readFF(self.dir_path, file_name)
 
-            # Put the FF into separate cache
-            self.cache[file_name] = ff
-        else:
-            ff = readFR(self.dir_path, file_name)
-            ff.nrows = self.nrows
-            ff.ncols = self.ncols
-            self.cache[file_name] = ff
-
-            self.line_number[self.current_ff_index] = ff.lines
-
-        if self.current_frame is None:
-            if validFFName(file_name):
-                self.current_frame = 0
+                # Put the FF into separate cache
+                self.cache[file_name] = ff
             else:
-                self.current_frame = ff.t[self.current_line][0]
+                ff = readFR(self.dir_path, file_name)
+                ff.nrows = self.nrows
+                ff.ncols = self.ncols
+                self.cache[file_name] = ff
+
+                self.line_number[self.current_ff_index] = ff.lines
+
+            # when calling loadChunk on an image never called before, set the current frame to the start
+            # if it's an FR file, otherwise set it to 0
+            if self.current_frame is None:
+                if validFFName(file_name):
+                    self.current_frame = 0
+                else:
+                    self.current_frame = ff.t[self.current_line][0]
+
+        elif validFFName(self.ff_list[0]):  # if it contains at least one FF file
+
+            if first_frame == -1:
+                first_frame = 0
+
+            total_ff_frames = len([x for x in self.ff_list if validFFName(x)])*256
+            frames_to_read = computeFramesToRead(read_nframes, total_ff_frames, 256, first_frame)
+            ffs_to_read = self.ff_list[first_frame//256:(first_frame + frames_to_read)//256 + 1]
+
+            if len(ffs_to_read) == 1:
+                file_name = ffs_to_read[0]
+
+                # Compute the range of frames to read
+                min_frame = first_frame%256
+                max_frame = (first_frame + frames_to_read)%256
+
+                # Read the FF file
+                ff = readFF(self.dir_path, file_name)
+
+                # Select the frames
+                ff.maxpixel = selectFFFrames(ff.maxpixel, ff, min_frame, max_frame)
+            else:
+
+                # Init an empty FF structure
+                ff = FFMimickInterface(self.nrows, self.ncols, np.uint8)
+
+                # Store maxpixel selections, avepixels, stdpixels
+                maxpixel_list = []
+                avepixel_list = []
+                stdpixel_list = []
+
+                # Read the FF files that have to read and reconstruct the frames
+                for i, file_name in enumerate(ffs_to_read):
+                    # Compute the range of frames to read
+                    min_frame = 0
+                    max_frame = 255
+
+                    if i == 0:
+                        min_frame = first_frame%256
+
+                    elif i == len(ffs_to_read) - 1:
+                        max_frame = (first_frame + frames_to_read)%256
+
+                    # Read the FF file
+                    ff_temp = readFF(self.dir_path, file_name)
+
+                    # Reconstruct the maxpixel in the given frame range
+                    maxpixel = selectFFFrames(ff_temp.maxpixel, ff_temp, min_frame, max_frame)
+
+                    # Reconstruct the avepixel in the given frame range
+                    avepixel = selectFFFrames(ff_temp.avepixel, ff_temp, min_frame, max_frame)
+
+                    # Store the computed frames
+                    maxpixel_list.append(maxpixel)
+                    avepixel_list.append(avepixel)
+                    stdpixel_list.append(ff_temp.stdpixel)
+
+                # Immidiately extract the appropriate frames
+                if len(maxpixel_list) == 1:
+
+                    ff.maxpixel = maxpixel_list[0]
+                    ff.avepixel = avepixel_list[0]
+                    ff.stdpixel = stdpixel_list[0]
+
+                # Otherwise, compute the combined FF
+                else:
+                    maxpixel_list = np.array(maxpixel_list)
+                    avepixel_list = np.array(avepixel_list)
+                    stdpixel_list = np.array(stdpixel_list)
+
+                    ff.maxpixel = np.max(maxpixel_list, axis=0)
+
+                    # The maximum of the avepixel is taken because only the frame range of avepixel is taken
+                    ff.avepixel = np.max(avepixel_list, axis=0)
+
+                    ff.stdpixel = np.max(stdpixel_list, axis=0)
+
+        else:  # if there are only FR files
+
+            if first_frame == -1:
+                first_frame = 0
+
+            # cache all fr files since they will be used
+            for file_name in self.ff_list:
+                ff = readFR(self.dir_path, file_name)
+                ff.nrows = self.nrows
+                ff.ncols = self.ncols
+                self.cache[file_name] = ff
+
+                self.line_number[self.current_ff_index] = ff.lines
+
+            ff = FFMimickInterface(self.nrows, self.ncols, np.uint8)
+
+            fr_files = list(self.cache.values())
+            fr_file_frames = [fr.frameNum for fr in fr_files]  # number of frames in each fr file
+            total_frames = sum(sum(x) for x in fr_file_frames)
+            frames_to_read = computeFramesToRead(read_nframes, total_frames, 256, first_frame)
+
+            frame_list = []
+            img_count = np.full((self.ncols, self.nrows), -1, dtype=np.float64)
+            stop = False
+            # go through every line in every fr file
+            for fr, line_list in enumerate(fr_file_frames):
+                for line, frame_count_line in enumerate(line_list):
+                    # don't do anything until you get to the first frame
+                    if first_frame > 0:
+                        first_frame -= frame_count_line
+
+                    if first_frame <= 0 < frames_to_read:
+                        min_frame = (frame_count_line - abs(first_frame))%frame_count_line
+                        max_frame = min(frame_count_line, min_frame + frames_to_read)
+
+                        # put all frames from the fr files in the range into frame_list
+                        for i in range(min_frame, max_frame + 1):
+                            img = np.zeros((self.ncols, self.nrows), np.float)
+                            filter_x = np.arange(int(fr_files[fr].xc[line][i] - fr_files[fr].size[line][i]/2),
+                                                 int(fr_files[fr].xc[line][i] + fr_files[fr].size[line][i]/2))
+                            filter_y = np.arange(int(fr_files[fr].yc[line][i] - fr_files[fr].size[line][i]/2),
+                                                 int(fr_files[fr].yc[line][i] + fr_files[fr].size[line][i]/2))
+                            filter_x, filter_y = np.meshgrid(filter_x, filter_y)
+
+                            img[filter_x, filter_y] = fr_files[fr].frames[line][i]
+                            img_count[filter_x, filter_y] += 1
+
+                            frame_list.append(img)
+
+                        first_frame = 0
+                        frames_to_read -= frame_count_line
+
+                    if frames_to_read <= 0:
+                        stop = True
+                        break
+                if stop:
+                    break
+
+            frame_list = np.array(frame_list)
+            # calculate maxpixel
+            ff.maxpixel = np.swapaxes(np.max(frame_list, axis=0), 0, 1).astype(np.uint16)
+
+            # calculate avepixel
+            img_count[img_count <= 0] = 1
+            img = np.sum(frame_list, axis=0)
+            ff.avepixel = np.swapaxes(img/img_count, 0, 1).astype(np.uint16)
+
+            ff.stdpixel = np.swapaxes(
+                np.sqrt(np.sum(np.abs(frame_list - ff.avepixel)**2, axis=0)/img_count),
+                0, 1).astype(np.uint16)
 
         return ff
 
@@ -1558,28 +1702,6 @@ class InputTypeImages(InputType):
 
         return ff_struct_fake
 
-    def nextFrame(self):
-        """ Increment current frame. """
-
-        super().nextFrame()
-        self.current_img_file = self.img_list[self.current_frame]
-
-    def prevFrame(self):
-        """ Increment current frame. """
-
-        super().prevFrame()
-        self.current_img_file = self.img_list[self.current_frame]
-
-    def setFrame(self, fr_num):
-        """ Set the current frame. 
-    
-        Arguments:
-            fr_num: [float] Frame number to set.
-        """
-
-        super().setFrame(fr_num)
-        self.current_img_file = self.img_list[self.current_frame]
-
     def loadFrame(self, avepixel=None, fr_no=None):
         """ Loads the current frame. 
     
@@ -1629,7 +1751,7 @@ class InputTypeImages(InputType):
 
         # Bin the frame
         if self.detection and (self.config.detection_binning_factor > 1):
-            frame = Image.binImage(frame, self.config.detection_binning_factor, \
+            frame = Image.binImage(frame, self.config.detection_binning_factor,
                                    self.config.detection_binning_method)
 
         return frame
@@ -1668,7 +1790,7 @@ class InputTypeImages(InputType):
         else:
 
             # Compute number of seconds since the beginning of the video file to the mean time of the frame chunk
-            seconds_since_beginning = (self.current_frame_chunk*self.fr_chunk_no \
+            seconds_since_beginning = (self.current_frame_chunk*self.fr_chunk_no
                                        + self.current_fr_chunk_size/2)/self.fps
 
             # Compute the absolute time
@@ -1678,7 +1800,7 @@ class InputTypeImages(InputType):
             return dt
 
         else:
-            return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
+            return dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000
 
     def currentFrameTime(self, frame_no=None, dt_obj=False):
         """ Return the time of the frame. """
@@ -1721,7 +1843,7 @@ class InputTypeImages(InputType):
             return dt
 
         else:
-            return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
+            return dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000
 
 
 class InputTypeDFN(InputType):
@@ -1839,18 +1961,9 @@ class InputTypeDFN(InputType):
             return dt
 
         else:
-            return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
+            return dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000
 
     def currentFrameTime(self, frame_no=None, dt_obj=False):
-        """
-
-        Args:
-            frame_no:
-            dt_obj:
-
-        Returns:
-
-        """
         if frame_no is None:
             frame_no = self.current_frame
 
@@ -1861,7 +1974,17 @@ class InputTypeDFN(InputType):
             return dt
 
         else:
-            return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
+            return dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000
+
+
+def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_dir=False, detection=False):
+    # used by ManualReduction.py only.
+    if os.path.isdir(input_path):
+        img_handle = detectInputTypeFolder(input_path, config, beginning_time, fps, skip_ff_dir, detection)
+    else:
+        img_handle = detectInputTypeFile(input_path, config, beginning_time, fps, skip_ff_dir, detection)
+
+    return img_handle
 
 
 def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip_ff_dir=False, detection=False):
@@ -1890,26 +2013,25 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
 
     img_handle = None
     # If the given dir path is a directory, search for FF files or individual images
-    if os.path.isdir(input_dir):
+    if not os.path.isdir(input_dir):
+        return None
 
-        # Check if there are valid FF names in the directory
-        if any([validFFName(ff_file) or validFRName(ff_file) for ff_file in os.listdir(input_dir)]):
+    # Check if there are valid FF names in the directory
+    if any([validFFName(ff_file) or validFRName(ff_file) for ff_file in os.listdir(input_dir)]):
 
-            if skip_ff_dir:
-                messagebox.showinfo('FF directory',
-                                    'ManualReduction only works on individual FF files, and not directories with FF files!')
-                return None
-            else:
-                # Init the image handle for FF files in a directory
-                img_handle = InputTypeFRFF(input_dir, config)
-                img_handle.ncols = config.width
-                img_handle.nrows = config.height
+        if skip_ff_dir:
+            messagebox.showinfo('FF directory',
+                                'ManualReduction only works on individual FF files, and not directories with FF files!')
+            return None
+        else:
+            # Init the image handle for FF files in a directory
+            img_handle = InputTypeFRFF(input_dir, config)
+            img_handle.ncols = config.width
+            img_handle.nrows = config.height
 
-        elif any([input_dir.lower().endswith(x) for x in img_types]) and config.width != 4912 and config.width != 7360:
-            img_handle = InputTypeImages(input_dir, config, beginning_time=beginning_time, fps=fps,
-                                         detection=detection)
-    else:
-        raise NotADirectoryError
+    elif any([input_dir.lower().endswith(x) for x in img_types]) and config.width != 4912 and config.width != 7360:
+        img_handle = InputTypeImages(input_dir, config, beginning_time=beginning_time, fps=fps,
+                                     detection=detection)
 
     return img_handle
 

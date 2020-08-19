@@ -111,7 +111,6 @@ class ManualReductionTool(object):
 
 
         self.img_handle = img_handle
-
         self.ff = None
         self.fr = None
 
@@ -145,7 +144,22 @@ class ManualReductionTool(object):
         # Each FR bin can have multiple detections, the first one is by default
         self.current_line = 0
 
-        self.fr = None
+        # Load the FR file is given
+        if self.fr_file is not None:
+            self.fr = readFR(*os.path.split(self.fr_file))
+
+            print('Total lines:', self.fr.lines)
+
+            # Update the total frame number
+            if self.img_handle is None:
+
+                # Assume the time in the FR file coresponds to the beginning of the FF file
+                self.nframes = 255
+
+                self.dir_path, _ = os.path.split(self.fr_file)
+
+        else:
+            self.fr = None
 
 
         # Take the FPS from the FF file, if available
@@ -237,7 +251,13 @@ class ManualReductionTool(object):
             self.current_frame = first_frame%self.nframes
 
         else:
-            self.current_frame = 0
+
+            # Set the first frame to the first frame in FR, if given
+            if self.fr is not None:
+                self.current_frame = self.fr.t[self.current_line][0]
+
+            else:
+                self.current_frame = 0
 
 
         # Set the current frame in the image handle
@@ -318,6 +338,18 @@ class ManualReductionTool(object):
             if self.img_handle.input_type == 'images':
                 print('File:', self.img_handle.current_img_file)
 
+            # FF mode
+            else:
+
+                if self.fr is not None:
+
+                    print('Line:', self.current_line)
+
+                    # Get all frames in the line
+                    frames = self.fr.t[self.current_line]
+
+                    # Print line frame range
+                    print('Line frame range:', min(frames), max(frames))
 
 
 
@@ -477,6 +509,68 @@ class ManualReductionTool(object):
 
             # Take the current frame from FF file
             img = self.img_handle.loadFrame(avepixel=True)
+
+        # Otherwise, create a blank background with the size enough to fit the FR bin
+        else:
+
+            # Get the maximum extent of the meteor frames
+            y_size = max(max(np.array(self.fr.yc[i]) + np.array(self.fr.size[i])//2) for i in \
+                range(self.fr.lines))
+            x_size = max(max(np.array(self.fr.xc[i]) + np.array(self.fr.size[i])//2) for i in \
+                range(self.fr.lines))
+
+            # Make the image square
+            img_size = max(y_size, x_size)
+
+            img = np.zeros((img_size, img_size), np.uint8)
+
+
+        # If FR is given, paste the raw frame onto the image
+        if self.fr is not None:
+
+            # Compute the index of the frame in the FR bin structure
+            frame_indx = int(self.current_frame) - self.fr.t[self.current_line][0]
+
+            # Reconstruct the frame if it is within the bounds
+            if (frame_indx < self.fr.frameNum[self.current_line]) and (frame_indx >= 0):
+
+                # Get the center position of the detection on the current frame
+                yc = self.fr.yc[self.current_line][frame_indx]
+                xc = self.fr.xc[self.current_line][frame_indx]
+
+                # # Get the frame number
+                # t = self.fr.t[self.current_line][frame_indx]
+
+                # Get the size of the window
+                size = self.fr.size[self.current_line][frame_indx]
+
+
+                # Paste the frames onto the big image
+                y_img = np.arange(yc - size//2, yc + size//2)
+                x_img = np.arange(xc - size//2,  xc + size//2)
+
+                Y_img, X_img = np.meshgrid(y_img, x_img)
+
+                y_frame = np.arange(len(y_img))
+                x_frame = np.arange(len(x_img))
+
+                Y_frame, X_frame = np.meshgrid(y_frame, x_frame)
+
+                img[Y_img, X_img] = self.fr.frames[self.current_line][frame_indx][Y_frame, X_frame]
+
+                # Save the limits of the FR
+                self.fr_xmin = np.min(x_img)
+                self.fr_xmax = np.max(x_img)
+                self.fr_ymin = np.max(y_img)
+                self.fr_ymax = np.min(y_img)
+
+                # Draw a red rectangle around the pasted frame
+                rect_x = np.min(x_img)
+                rect_y = np.max(y_img)
+                rect_w = np.max(x_img) - rect_x
+                rect_h = np.min(y_img) - rect_y
+                plt.gca().add_patch(mpatches.Rectangle((rect_x, rect_y), rect_w, rect_h, fill=None, \
+                    edgecolor='red', alpha=0.5))
 
 
 
@@ -931,6 +1025,10 @@ class ManualReductionTool(object):
 
                 self.current_line = self.current_line%self.fr.lines
 
+                # Update the total frame number
+                if self.img_handle is None:
+                    self.nframes = len(self.fr.t[self.current_line])
+
                 self.printStatus()
 
 
@@ -942,6 +1040,10 @@ class ManualReductionTool(object):
                 self.current_line += 1
 
                 self.current_line = self.current_line%self.fr.lines
+
+                # Update the total frame number
+                if self.img_handle is None:
+                    self.nframes = len(self.fr.t[self.current_line])
 
                 self.printStatus()
 
@@ -2264,6 +2366,16 @@ if __name__ == "__main__":
         input2 = cml_args.timebeg[0]
 
 
+    # If the second agrument is an FR file, set it as found
+    if input2 is not None:
+
+        head2, tail2 = os.path.split(input2)
+
+        if validFRName(tail2):
+            fr_name = input2
+
+
+
     ### Detect the input type ###
 
     # If only an FR file was given
@@ -2277,6 +2389,15 @@ if __name__ == "__main__":
         manual_tool.dir_path = head1
         manual_tool.updateImage()
         manual_tool.registerEventHandling()
+
+
+    elif validFRName(tail1):
+
+        print('FR only mode!')
+
+        # Init the tool with only the FR file
+        manual_tool = ManualReductionTool(config, ff_name, file1, first_frame=cml_args.begframe, \
+            fps=cml_args.fps, deinterlace_mode=deinterlace_mode, station_name=station_name)
 
 
     else:
