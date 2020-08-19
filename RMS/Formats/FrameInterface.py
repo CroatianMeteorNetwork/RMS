@@ -715,7 +715,7 @@ class InputTypeFRFF(InputType):
 
                 self.line_number[self.current_ff_index] = ff.lines
 
-            ff = FFMimickInterface(self.nrows, self.ncols, np.uint8)
+            ff = FFMimickInterface(self.nrows, self.ncols, np.uint16)
 
             fr_files = list(self.cache.values())
             fr_file_frames = [fr.frameNum for fr in fr_files]  # number of frames in each fr file
