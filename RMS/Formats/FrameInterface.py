@@ -465,7 +465,7 @@ class InputTypeFF(InputType):
             return dt
 
         else:
-            return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
+            return dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000
 
 
 class InputTypeFRFF(InputType):
@@ -715,7 +715,7 @@ class InputTypeFRFF(InputType):
 
                 self.line_number[self.current_ff_index] = ff.lines
 
-            ff = FFMimickInterface(self.nrows, self.ncols, np.uint16)
+            ff = FFMimickInterface(self.nrows, self.ncols, np.uint8)
 
             fr_files = list(self.cache.values())
             fr_file_frames = [fr.frameNum for fr in fr_files]  # number of frames in each fr file
@@ -761,16 +761,14 @@ class InputTypeFRFF(InputType):
 
             frame_list = np.array(frame_list)
             # calculate maxpixel
-            ff.maxpixel = np.swapaxes(np.max(frame_list, axis=0), 0, 1).astype(np.uint16)
+            ff.maxpixel = np.swapaxes(np.max(frame_list, axis=0), 0, 1).astype(np.uint8)
 
             # calculate avepixel
             img_count[img_count <= 0] = 1
             img = np.sum(frame_list, axis=0)
-            ff.avepixel = np.swapaxes(img/img_count, 0, 1).astype(np.uint16)
+            ff.avepixel = np.swapaxes(img/img_count, 0, 1).astype(np.uint8)
 
-            ff.stdpixel = np.swapaxes(
-                np.sqrt(np.sum(np.abs(frame_list - ff.avepixel)**2, axis=0)/img_count),
-                0, 1).astype(np.uint16)
+            ff.stdpixel = np.zeros_like(ff.avepixel)
 
         return ff
 
@@ -1069,11 +1067,11 @@ class InputTypeVideo(InputType):
 
             # Bin the frame
             if self.detection and (self.config.detection_binning_factor > 1):
-                frame = Image.binImage(frame, self.config.detection_binning_factor, \
+                frame = Image.binImage(frame, self.config.detection_binning_factor,
                                        self.config.detection_binning_method)
 
             # Add frame for FF processing
-            ff_struct_fake.addFrame(frame.astype(np.uint16))
+            ff_struct_fake.addFrame(frame.astype(np.uint8))
 
         self.current_fr_chunk_size = i + 1
 
@@ -1108,7 +1106,7 @@ class InputTypeVideo(InputType):
         """ Return the mean time of the current image. """
 
         # Compute number of seconds since the beginning of the video file to the mean time of the frame chunk
-        seconds_since_beginning = (self.current_frame_chunk*self.fr_chunk_no \
+        seconds_since_beginning = (self.current_frame_chunk*self.fr_chunk_no
                                    + self.current_fr_chunk_size/2)/self.fps
 
         # Compute the absolute time
@@ -1118,7 +1116,7 @@ class InputTypeVideo(InputType):
             return dt
 
         else:
-            return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
+            return dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000
 
     def loadFrame(self, avepixel=False):
         """ Load the current frame. """
@@ -1134,7 +1132,7 @@ class InputTypeVideo(InputType):
 
         # Bin the frame
         if self.detection and (self.config.detection_binning_factor > 1):
-            frame = Image.binImage(frame, self.config.detection_binning_factor, \
+            frame = Image.binImage(frame, self.config.detection_binning_factor,
                                    self.config.detection_binning_method)
 
         return frame
@@ -1152,7 +1150,7 @@ class InputTypeVideo(InputType):
             return dt
 
         else:
-            return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
+            return dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000
 
 
 class InputTypeUWOVid(InputType):
@@ -1314,7 +1312,7 @@ class InputTypeUWOVid(InputType):
 
             # Bin the frame
             if self.detection and (self.config.detection_binning_factor > 1):
-                frame = Image.binImage(frame, self.config.detection_binning_factor, \
+                frame = Image.binImage(frame, self.config.detection_binning_factor,
                                        self.config.detection_binning_method)
 
             unix_time = self.vid.ts + self.vid.tu/1000000.0
@@ -1442,22 +1440,21 @@ class InputTypeUWOVid(InputType):
             return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
 
 
-class InputTypeImages(InputType):
+class InputTypeImages(object):
     def __init__(self, dir_path, config, beginning_time=None, fps=None, detection=False):
         """ Input file type handle for a folder with images.
-        
+
         Arguments:
             dir_path: [str] Path to the vid file.
             config: [ConfigStruct object]
-
         Keyword arguments:
             beginning_time: [datetime] datetime of the beginning of the video. Optional, None by default.
             fps: [float] Known FPS of the images. None by default, in which case it will be read from the
                 config file.
             detection: [bool] Indicates that the input is used for detection. False by default. This will
                 control whether the binning is applied or not.
-
         """
+
         self.input_type = 'images'
 
         self.dir_path = dir_path
@@ -1498,7 +1495,7 @@ class InputTypeImages(InputType):
 
         if len(self.img_list) == 0:
             messagebox.showerror('Input error',
-                                 "Can't find any images in the given directory! Only PNG, JPG, NEF and BMP are supported!")
+                                 "Can't find any images in the given directory! Only PNG, JPG and BMP are supported!")
             sys.exit()
 
         ### ###
@@ -1534,22 +1531,16 @@ class InputTypeImages(InputType):
 
         # Check if the beginning time was given (it will be read from the PNG if the UWO format is given)
         if beginning_time is None:
+
             try:
                 # Try reading the beginning time of the video from the name if time is not given
-                self.beginning_datetime = datetime.datetime.strptime(
-                    os.path.basename(self.dir_path),
-                    "%Y%m%d_%H%M%S.%f")
+                self.beginning_datetime = datetime.datetime.strptime(os.path.basename(self.dir_path), \
+                                                                     "%Y%m%d_%H%M%S.%f")
 
             except:
-                try:
-                    self.beginning_datetime = datetime.datetime.strptime(
-                        self.img_list[0][4:21],
-                        "%Y-%m-%d_%H%M%S")
-
-                except:
-                    messagebox.showerror('Input error', 'hey')
-
-                    sys.exit()
+                messagebox.showerror('Input error',
+                                     'The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.')
+                sys.exit()
 
         else:
             self.beginning_datetime = beginning_time
@@ -1562,6 +1553,7 @@ class InputTypeImages(InputType):
         self.total_frames = len(self.img_list)
 
         self.current_frame = 0
+        self.current_img_file = self.img_list[self.current_frame]
 
         # Load the first image
         img = self.loadFrame()
@@ -1609,10 +1601,6 @@ class InputTypeImages(InputType):
 
         print('Total frames:', self.total_frames)
 
-    @property
-    def current_img_file(self):
-        return self.img_list[self.current_frame]
-
     def nextChunk(self):
         """ Go to the next frame chunk. """
 
@@ -1630,8 +1618,8 @@ class InputTypeImages(InputType):
         self.current_frame = self.current_frame_chunk*self.fr_chunk_no
 
     def loadChunk(self, first_frame=None, read_nframes=None):
-        """ Load the frame chunk file. 
-    
+        """ Load the frame chunk file.
+
         Keyword arguments:
             first_frame: [int] First frame to read.
             read_nframes: [int] Number of frames to read. If not given (None), self.fr_chunk_no frames will be
@@ -1702,9 +1690,31 @@ class InputTypeImages(InputType):
 
         return ff_struct_fake
 
+    def nextFrame(self):
+        """ Increment current frame. """
+
+        self.current_frame = (self.current_frame + 1)%self.total_frames
+        self.current_img_file = self.img_list[self.current_frame]
+
+    def prevFrame(self):
+        """ Increment current frame. """
+
+        self.current_frame = (self.current_frame - 1)%self.total_frames
+        self.current_img_file = self.img_list[self.current_frame]
+
+    def setFrame(self, fr_num):
+        """ Set the current frame.
+
+        Arguments:
+            fr_num: [float] Frame number to set.
+        """
+
+        self.current_frame = fr_num%self.total_frames
+        self.current_img_file = self.img_list[self.current_frame]
+
     def loadFrame(self, avepixel=None, fr_no=None):
-        """ Loads the current frame. 
-    
+        """ Loads the current frame.
+
         Keyword arguments:
             avepixel: [bool] Does nothing, just for function interface consistency with other input types.
             fr_no: [int] Load a specific frame. None by default, then the current frame will be loaded.
@@ -1718,7 +1728,7 @@ class InputTypeImages(InputType):
             current_img_file = self.current_img_file
             fr_no = self.current_frame
 
-        if current_img_file.endswith('.NEF'):
+        if current_img_file.lower().endswith('.nef'):
             # .nef files will not be brought here if rawpy is not installed
             # get raw data from .nef file and get image from it
             raw = rawpy.imread(os.path.join(self.dir_path, current_img_file))
@@ -1757,7 +1767,7 @@ class InputTypeImages(InputType):
         return frame
 
     def name(self, beginning=False):
-        """ Return the name of the chunk, which is just the time of the middle of the current frame chunk. 
+        """ Return the name of the chunk, which is just the time of the middle of the current frame chunk.
             Alternatively, the beginning of the whole file can be returned.
 
         Keyword arguments:
@@ -1790,7 +1800,7 @@ class InputTypeImages(InputType):
         else:
 
             # Compute number of seconds since the beginning of the video file to the mean time of the frame chunk
-            seconds_since_beginning = (self.current_frame_chunk*self.fr_chunk_no
+            seconds_since_beginning = (self.current_frame_chunk*self.fr_chunk_no \
                                        + self.current_fr_chunk_size/2)/self.fps
 
             # Compute the absolute time
@@ -1800,7 +1810,7 @@ class InputTypeImages(InputType):
             return dt
 
         else:
-            return dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000
+            return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
 
     def currentFrameTime(self, frame_no=None, dt_obj=False):
         """ Return the time of the frame. """
@@ -1843,7 +1853,7 @@ class InputTypeImages(InputType):
             return dt
 
         else:
-            return dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000
+            return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
 
 
 class InputTypeDFN(InputType):
@@ -1912,7 +1922,7 @@ class InputTypeDFN(InputType):
             img = np.rot90(img)
 
         self.ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, self.img_dtype)
-        self.ff_struct_fake.addFrame(img.astype(np.uint16))
+        self.ff_struct_fake.addFrame(img.astype(self.img_dtype))
         self.ff_struct_fake.finish()
 
         # If FPS is not given, use one from the config file
@@ -2029,7 +2039,8 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
             img_handle.ncols = config.width
             img_handle.nrows = config.height
 
-    elif any([input_dir.lower().endswith(x) for x in img_types]) and config.width != 4912 and config.width != 7360:
+    elif any([any(file.lower().endswith(x) for x in img_types) for file in os.listdir(input_dir)]) and \
+            config.width != 4912 and config.width != 7360:
         img_handle = InputTypeImages(input_dir, config, beginning_time=beginning_time, fps=fps,
                                      detection=detection)
 

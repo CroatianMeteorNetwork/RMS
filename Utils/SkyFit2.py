@@ -216,21 +216,6 @@ class PlateTool(QtWidgets.QMainWindow):
         # Load the platepar file
         self.loadPlatepar()
 
-        if self.platepar_file:
-
-            print('Platepar loaded:', self.platepar_file)
-
-            # Print the field of view size
-            print("FOV: {:.2f} x {:.2f} deg".format(*computeFOVSize(self.platepar)))
-
-
-        # If the platepar file was not loaded, set initial values from config
-        else:
-            self.makeNewPlatepar()
-
-            # Create the name of the platepar file
-            self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
-
         # Set the given gamma value to platepar
         if gamma is not None:
             self.platepar.gamma = gamma
@@ -274,12 +259,13 @@ class PlateTool(QtWidgets.QMainWindow):
         self.load_platepar_action.triggered.connect(lambda: self.loadPlatepar(update=True))
 
         self.save_platepar_action = QtWidgets.QAction("Save platepar")
-        self.save_platepar_action.setShortcut('Ctrl+S')
         self.save_platepar_action.triggered.connect(self.savePlatepar)
 
-        self.save_reduction_action = QtWidgets.QAction('Save reduction')
+        self.save_reduction_action = QtWidgets.QAction('Save state and reduction')
         self.save_reduction_action.setShortcut('Ctrl+S')
-        self.save_reduction_action.triggered.connect(lambda: [self.saveFTPdetectinfo(), self.saveJSON()])
+        self.save_reduction_action.triggered.connect(lambda: [self.saveState(),
+                                                              self.saveFTPdetectinfo(),
+                                                              self.saveJSON()])
 
         self.save_current_frame_action = QtWidgets.QAction('Save current frame')
         self.save_current_frame_action.setShortcut('Ctrl+W')
@@ -289,8 +275,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.save_default_platepar_action.setShortcut('Ctrl+Shift+S')
         self.save_default_platepar_action.triggered.connect(self.saveDefaultPlatepar)
 
-        self.save_state_action = QtWidgets.QAction("Save state")
-        self.save_state_action.triggered.connect(self.saveState)
+        self.save_state_platepar_action = QtWidgets.QAction("Save state and platepar")
+        self.save_state_platepar_action.triggered.connect(lambda: [self.saveState(), self.savePlatepar()])
+        self.save_state_platepar_action.setShortcut('Ctrl+S')
 
         self.load_state_action = QtWidgets.QAction("Load state")
         self.load_state_action.triggered.connect(self.findLoadState)
@@ -381,74 +368,74 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # catalog star markers (main window)
         self.cat_star_markers = pg.ScatterPlotItem()
-        self.img_frame.addItem(self.cat_star_markers)
         self.cat_star_markers.setPen('r')
         self.cat_star_markers.setBrush((0, 0, 0, 0))
         self.cat_star_markers.setSymbol(Crosshair())
         self.cat_star_markers.setZValue(4)
+        self.img_frame.addItem(self.cat_star_markers)
 
         # catalog star markers (zoom window)
         self.cat_star_markers2 = pg.ScatterPlotItem()
-        self.zoom_window.addItem(self.cat_star_markers2)
         self.cat_star_markers2.setPen('r')
         self.cat_star_markers2.setBrush((0, 0, 0, 0))
         self.cat_star_markers2.setSize(10)
         self.cat_star_markers2.setSymbol(Cross())
         self.cat_star_markers2.setZValue(4)
+        self.zoom_window.addItem(self.cat_star_markers2)
 
         self.selected_stars_visible = True
 
         # selected catalog star markers (main window)
         self.sel_cat_star_markers = pg.ScatterPlotItem()
-        self.img_frame.addItem(self.sel_cat_star_markers)
         self.sel_cat_star_markers.setPen('b')
         self.sel_cat_star_markers.setSize(10)
         self.sel_cat_star_markers.setSymbol(Cross())
         self.sel_cat_star_markers.setZValue(4)
+        self.img_frame.addItem(self.sel_cat_star_markers)
 
         # selected catalog star markers (zoom window)
         self.sel_cat_star_markers2 = pg.ScatterPlotItem()
-        self.zoom_window.addItem(self.sel_cat_star_markers2)
         self.sel_cat_star_markers2.setPen('b')
         self.sel_cat_star_markers2.setSize(10)
         self.sel_cat_star_markers2.setSymbol(Cross())
         self.sel_cat_star_markers2.setZValue(4)
+        self.zoom_window.addItem(self.sel_cat_star_markers2)
 
         # centroid star markers (main window)
         self.centroid_star_markers = pg.ScatterPlotItem()
-        self.img_frame.addItem(self.centroid_star_markers)
         self.centroid_star_markers.setPen((255, 165, 0))
         self.centroid_star_markers.setSize(15)
         self.centroid_star_markers.setSymbol(Plus())
         self.centroid_star_markers.setZValue(4)
+        self.img_frame.addItem(self.centroid_star_markers)
 
         # centroid star markers (zoom window)
         self.centroid_star_markers2 = pg.ScatterPlotItem()
-        self.zoom_window.addItem(self.centroid_star_markers2)
         self.centroid_star_markers2.setPen((255, 165, 0))
         self.centroid_star_markers2.setSize(15)
         self.centroid_star_markers2.setSymbol(Plus())
         self.centroid_star_markers2.setZValue(4)
+        self.zoom_window.addItem(self.centroid_star_markers2)
 
         self.draw_calstars = True
 
         # calstar markers (main window)
         self.calstar_markers = pg.ScatterPlotItem()
-        self.img_frame.addItem(self.calstar_markers)
         self.calstar_markers.setPen((0, 255, 0, 100))
         self.calstar_markers.setBrush((0, 0, 0, 0))
         self.calstar_markers.setSize(10)
         self.calstar_markers.setSymbol('o')
         self.calstar_markers.setZValue(2)
+        self.img_frame.addItem(self.calstar_markers)
 
         # calstar markers (zoom window)
         self.calstar_markers2 = pg.ScatterPlotItem()
-        self.zoom_window.addItem(self.calstar_markers2)
         self.calstar_markers2.setPen((0, 255, 0, 100))
         self.calstar_markers2.setBrush((0, 0, 0, 0))
         self.calstar_markers2.setSize(20)
         self.calstar_markers2.setSymbol('o')
         self.calstar_markers2.setZValue(5)
+        self.zoom_window.addItem(self.calstar_markers2)
 
         # pick markers (manual reduction)
         self.pick_marker = pg.ScatterPlotItem()
@@ -538,11 +525,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.region.setZValue(10)
         self.img_frame.addItem(self.region)
 
-        bit_depth = 8*self.img.data.itemsize  # self.config.bit_depth  # Image gamma and levels
         self.tab = RightOptionsTab(self)
         self.tab.hist.setImageItem(self.img)
         self.tab.hist.setImages(self.img_zoom)
-        self.tab.hist.setLevels(0, 2**bit_depth - 1)
+        self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
 
         self.tab.settings.updateInvertColours()
         self.tab.settings.updateImageGamma()
@@ -628,6 +614,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             if not first_time and self.img.img_handle.input_type != 'dfn':
                 self.img.loadImage(self.mode, self.img_type_flag)
+                self.img_zoom.loadImage(self.mode, self.img_type_flag)
 
             for action in self.file_menu.actions():
                 self.file_menu.removeAction(action)
@@ -639,7 +626,7 @@ class PlateTool(QtWidgets.QMainWindow):
                                        self.load_platepar_action,
                                        self.save_platepar_action,
                                        self.save_default_platepar_action,
-                                       self.save_state_action,
+                                       self.save_state_platepar_action,
                                        self.load_state_action,
                                        self.station_action])
 
@@ -664,6 +651,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img_type_flag = 'avepixel'
             self.tab.settings.updateMaxAvePixel()
             self.img.loadImage(self.mode, self.img_type_flag)
+            self.img_zoom.loadImage(self.mode, self.img_type_flag)
 
             for action in self.file_menu.actions():
                 self.file_menu.removeAction(action)
@@ -674,7 +662,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.file_menu.addActions([self.save_reduction_action,
                                        self.save_current_frame_action,
                                        self.load_platepar_action,
-                                       self.save_state_action,
                                        self.load_state_action])
 
             self.view_menu.addActions([self.toggle_info_action,
@@ -715,7 +702,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.img.changeHandle(self.img_handle)
         self.img_zoom.changeHandle(self.img_handle)
-        self.tab.hist.setImages(self.img)
         self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
         self.img_frame.autoRange(padding=0)
 
@@ -822,6 +808,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def updateLeftLabels(self):
         """ Update the two labels on the left with their information """
+
         if self.mode == 'skyfit':
             ra_centre, dec_centre = self.computeCentreRADec()
 
@@ -1367,6 +1354,7 @@ class PlateTool(QtWidgets.QMainWindow):
             elif n < 0:
                 self.img.prevChunk()
             self.img.loadImage(self.mode, self.img_type_flag)
+            self.img_zoom.loadImage(self.mode, self.img_type_flag)
 
             # remove markers
             self.calstar_markers.clear()
@@ -1389,6 +1377,7 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 self.img.setFrame(self.img.getFrame() + n)
             self.img.loadImage(self.mode, self.img_type_flag)
+            self.img_zoom.loadImage(self.mode, self.img_type_flag)
             self.updatePicks()
             self.drawPhotometryColoring()
 
@@ -1468,7 +1457,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.detectInputType(load=True)  # get new img_handle
             self.img.changeHandle(self.img_handle)
             self.img_zoom.changeHandle(self.img_handle)
-            self.tab.hist.setImages(self.img)
             self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
             self.img_frame.autoRange(padding=0)
 
@@ -2008,7 +1996,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                     # Compute reference Alt/Az to apparent coordinates, epoch of date
                     az_centre, alt_centre = trueRaDec2ApparentAltAz(
-                        self.platepar.RA_d, self.platepar.dec_d, self.platepar.JD,
+                        self.platepar.RA_d, self.platepar.dec_d, date2JD(*self.img_handle.currentTime()),
                         self.platepar.lat, self.platepar.lon, self.platepar.refraction)
 
                     self.platepar.az_centre, self.platepar.alt_centre = az_centre, alt_centre
@@ -2076,6 +2064,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 if self.star_pick_mode:
                     # If the ESC is pressed when the star has been centroided, reset the centroid
                     self.resetStarPick()
+                    self.updatePairedStars()
 
             elif event.key() == QtCore.Qt.Key_P:
                 # Show the photometry plot
@@ -2225,8 +2214,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img_type_flag = 'maxpixel'
 
         self.img.loadImage(self.mode, self.img_type_flag)
+        self.img_zoom.loadImage(self.mode, self.img_type_flag)
 
         self.img.setLevels(self.tab.hist.getLevels())
+        self.img_zoom.setLevels(self.tab.hist.getLevels())
         self.updateLeftLabels()
 
     def toggleShowCatStars(self):
@@ -2469,24 +2460,27 @@ class PlateTool(QtWidgets.QMainWindow):
 
         """
         if load and self.file_path is not None:  # only for loadState
-            self.img_handle = detectInputTypeFile(self.file_path, self.config)
+            img_handle = detectInputTypeFile(self.file_path, self.config)
         else:
             # Detect input file type and load appropriate input plugin
-            self.img_handle = detectInputTypeFolder(self.dir_path, self.config)
+            img_handle = detectInputTypeFolder(self.dir_path, self.config)
             self.file_path = None
 
-        if self.img_handle is None:
+        if img_handle is None:
             self.file_path = openFileDialog(self.dir_path, None, 'Select file to open', matplotlib,
                                             [('All Readable Files',
-                                              '*.fits;*.bin;*.mp4;*.avi;*.mkv;*.vid;*.png,*.jpg;*.bmp;*.nef'),
+                                              '*.fits;*.bin;*.mp4;*.avi;*.mkv;*.vid;*.png;*.jpg;*.bmp;*.nef'),
                                              ('All Files', '*'),
                                              ('FF and FR Files', '*.fits;*.bin'),
                                              ('Video Files', '*.mp4;*.avi;*.mkv'),
                                              ('VID Files', '*.vid'),
                                              ('FITS Files', '*.fits'), ('BIN Files', '*.bin'),
-                                             ('Image Files', '*.png,*.jpg;*.bmp;*.nef')])
+                                             ('Image Files', '*.png;*.jpg;*.bmp;*.nef')])
 
-            self.img_handle = detectInputTypeFile(self.file_path, self.config)
+            img_handle = detectInputTypeFile(self.file_path, self.config)
+
+        self.img_handle = img_handle
+
 
     def loadCalstars(self):
         """ Loads data from calstars file and updates self.calstars """
@@ -2500,7 +2494,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if calstars_file is None:
 
             # Check if the calstars file is required
-            if self.img_handle.require_calstars:
+            if hasattr(self, 'img_handle') and self.img_handle.require_calstars:
                 messagebox.showinfo(title='CALSTARS error',
                                     message='CALSTARS file could not be found in the given directory!')
 
@@ -2554,29 +2548,31 @@ class PlateTool(QtWidgets.QMainWindow):
                                        [('Platepar Files', '*.cal'), ('All File', '*')])
 
         if not platepar_file:
-            self.platepar_file, self.platepar = None, platepar
-            return
+            self.platepar = platepar
+            self.makeNewPlatepar()
+            self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
+            self.first_platepar_fit = True
 
-        # Parse the platepar file
-        try:
-            self.platepar_fmt = platepar.read(platepar_file, use_flat=self.config.use_flat)
-            pp_status = True
+        else:
+            # Parse the platepar file
+            try:
+                self.platepar_fmt = platepar.read(platepar_file, use_flat=self.config.use_flat)
 
-        except Exception as e:
-            print('Loading platepar failed with error:' + repr(e))
-            print(*traceback.format_exception(*sys.exc_info()))
+            except Exception as e:
+                print('Loading platepar failed with error:' + repr(e))
+                print(*traceback.format_exception(*sys.exc_info()))
 
-            pp_status = False
+                messagebox.showerror(title='Platepar file error',
+                                     message='The file you selected could not be loaded as a platepar file!')
 
-        # Check if the platepar was successfuly loaded
-        if not pp_status:
-            messagebox.showerror(title='Platepar file error',
-                                 message='The file you selected could not be loaded as a platepar file!')
+                self.loadPlatepar(update)
+                return
 
-            self.loadPlatepar()
+            print('Platepar loaded:', platepar_file)
+            print("FOV: {:.2f} x {:.2f} deg".format(*computeFOVSize(platepar)))
 
-        # Set geo location and gamma from config, if they were updated
-        if platepar is not None:
+            # Set geo location and gamma from config, if they were updated
+
             # Update the location from the config file
             platepar.lat = self.config.latitude
             platepar.lon = self.config.longitude
@@ -2594,9 +2590,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute the rotation w.r.t. horizon
             platepar.rotation_from_horiz = rotationWrtHorizon(platepar)
 
-        self.first_platepar_fit = False
+            self.first_platepar_fit = False
 
-        self.platepar_file, self.platepar = platepar_file, platepar
+            self.platepar_file, self.platepar = platepar_file, platepar
 
         if update:
             self.updateStars()
@@ -2652,10 +2648,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def makeNewPlatepar(self):
         """ Make a new platepar from the loaded one, but set the parameters from the config file. """
-        # Update the reference time
-        img_time = self.img_handle.currentTime()
-        self.platepar.JD = date2JD(*img_time)
-
         # Update the location from the config file
         self.platepar.lat = self.config.latitude
         self.platepar.lon = self.config.longitude
@@ -2688,15 +2680,19 @@ class PlateTool(QtWidgets.QMainWindow):
         # Set station ID
         self.platepar.station_code = self.config.stationID
 
-        # Get reference RA, Dec of the image centre
-        self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz = self.getFOVcentre()
+        if hasattr(self, 'img_handle'):
+            img_time = self.img_handle.currentTime()
+            self.platepar.JD = date2JD(*img_time)
 
-        # Recalculate reference alt/az
-        self.platepar.az_centre, self.platepar.alt_centre = trueRaDec2ApparentAltAz(self.platepar.JD,
-                                                                                    self.platepar.lon,
-                                                                                    self.platepar.lat,
-                                                                                    self.platepar.RA_d,
-                                                                                    self.platepar.dec_d)
+            # Get reference RA, Dec of the image centre
+            self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz = self.getFOVcentre()
+
+            # Recalculate reference alt/az
+            self.platepar.az_centre, self.platepar.alt_centre = trueRaDec2ApparentAltAz(self.platepar.JD,
+                                                                                        self.platepar.lon,
+                                                                                        self.platepar.lat,
+                                                                                        self.platepar.RA_d,
+                                                                                        self.platepar.dec_d)
 
         # Check that the calibration parameters are within the nominal range
         self.checkParamRange()
@@ -2733,7 +2729,9 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             initialfile = ''
 
-        flat_file = openFileDialog(self.dir_path, initialfile, 'Select the flat field file', matplotlib)
+        flat_file = openFileDialog(self.dir_path, initialfile, 'Select the flat field file', matplotlib,
+                                   [('Image Files', '*.png,*.jpg;*.bmp'),
+                                    ('All Files', '*')])
 
         if not flat_file:
             return False, None
@@ -2744,6 +2742,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Load the flat, byteswap the flat if vid file is used or UWO png
             flat = Image.loadFlat(*os.path.split(flat_file), dtype=self.img.data.dtype,
                                   byteswap=self.img_handle.byteswap)
+            flat.flat_img = np.swapaxes(flat.flat_img, 0, 1)
         except:
             messagebox.showerror(title='Flat field file error',
                                  message='Flat could not be loaded!')
@@ -3553,7 +3552,8 @@ class PlateTool(QtWidgets.QMainWindow):
             # Get the rolling shutter corrected (or not, depending on the config) frame number
             frame_no = self.getRollingShutterCorrectedFrameNo(frame, pick)
 
-            centroids.append([frame_no, pick['x_centroid'], pick['y_centroid'], pick['intensity_sum']])
+            if pick['mode'] == 1:
+                centroids.append([frame_no, pick['x_centroid'], pick['y_centroid'], pick['intensity_sum']])
 
         # If there are no centroids, don't save anything
         if len(centroids) == 0:

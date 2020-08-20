@@ -149,6 +149,7 @@ Navigate with terminal to base git directory (e.g. /home/pi/RMS/), and run:
 ```
 sudo python setup.py install
 ```
+Note that in order to run this, cython and numpy need to be installed.
 
 This will compile the code in C++ which we are using as one of the processing steps in meteor detection. The method in question is called Kernel-based Hough Transform, and you can read more about it here: [KHT](http://www2.ic.uff.br/~laffernandes/projects/kht/)
 

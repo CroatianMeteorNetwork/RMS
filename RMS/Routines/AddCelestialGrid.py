@@ -6,9 +6,6 @@ import numpy as np
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, computeFOVSize
 from RMS.Astrometry.Conversions import jd2Date, apparentAltAz2TrueRADec, trueRaDec2ApparentAltAz
-from RMS.Math import angularSeparation
-
-import time
 
 
 def updateRaDecGrid(grid, platepar):
@@ -128,8 +125,9 @@ def updateRaDecGrid(grid, platepar):
 
     # convert cuts into connect
     connect = np.full(len(x), 1)
-    for i in cuts:
-        connect[i] = 0
+    if len(connect) > 0:
+        for i in cuts:
+            connect[i] = 0
 
     grid.setData(x=x, y=y, connect=connect)
 

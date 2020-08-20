@@ -60,7 +60,7 @@ class fr_struct:
         self.__maxpixel = None
         self.__avepixel = None
 
-        self.dtype = None
+        self.dtype = np.uint8
 
     @property
     def nframes(self):
@@ -82,7 +82,7 @@ class fr_struct:
 
                     img[filter_x, filter_y] = np.maximum(img[filter_x, filter_y], self.frames[line][i])
 
-            self.__maxpixel = np.swapaxes(img, 0, 1).astype(np.uint16)
+            self.__maxpixel = np.swapaxes(img, 0, 1).astype(self.dtype)
         return self.__maxpixel
 
     @maxpixel.setter
@@ -109,7 +109,7 @@ class fr_struct:
             img_count[img_count <= 0] = 1
             img_count = np.swapaxes(img_count, 0, 1)
             img = np.swapaxes(img, 0, 1)
-            self.__avepixel = ((img - self.maxpixel)/img_count).astype(np.uint16)
+            self.__avepixel = ((img - self.maxpixel)/img_count).astype(self.dtype)
 
         return self.__avepixel
 

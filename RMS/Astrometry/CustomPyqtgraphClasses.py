@@ -540,6 +540,7 @@ class ImageItem(pg.ImageItem):
         # if the image data is a small int, then we can combine levels + lut
         # into a single lut for better performance
         levels = self.levels
+        # print('Levels:',levels)
         if levels is not None and levels.ndim == 1 and image.dtype in (np.ubyte, np.uint16):
             if self._effectiveLut is None:
                 eflsize = 2**(image.itemsize*8)
@@ -748,6 +749,7 @@ class HistogramLUTItem(pg.HistogramLUTItem):
     def setLevels(self, min=None, max=None, rgba=None):
         super().setLevels(min, max, rgba)
         for img in self.level_images:
+            # print('img levels:', img.getLevels(), img.levels)
             img.setLevels(self.getLevels())
 
     def imageChanged(self, autoLevel=False, autoRange=False):
@@ -756,9 +758,10 @@ class HistogramLUTItem(pg.HistogramLUTItem):
         super().imageChanged(autoLevel, autoRange)
         if self.auto_levels:
             self.setLevels(*self.imageItem().getAutolevels())
+            # print('auto levels:', self.imageItem().getAutolevels())
         else:
             self.setLevels(*self.saved_manual_levels)
-
+            # print('saved manual levels:', self.saved_manual_levels)
 
 class RightOptionsTab(QtWidgets.QTabWidget):
     """
@@ -1332,52 +1335,41 @@ class PlateparParameterManager(QtWidgets.QWidget):
 
     def onLatChanged(self):
         self.gui.platepar.lat = self.lat.value()
-        # self.gui.view_widget.setFocus()
         self.sigLocationChanged.emit()
 
     def onLonChanged(self):
         self.gui.platepar.lon = self.lon.value()
-        # self.gui.view_widget.setFocus()
         self.sigLocationChanged.emit()
 
     def onElevChanged(self):
         self.gui.platepar.elev = self.elev.value()
-        # self.gui.view_widget.setFocus()
         self.sigElevChanged.emit()
 
     def onAzChanged(self):
         self.gui.platepar.az_centre = self.az_centre.value()
-        # self.gui.view_widget.setFocus()
         self.sigAzAltChanged.emit()
 
     def onAltChanged(self):
         self.gui.platepar.alt_centre = self.alt_centre.value()
-        # self.gui.view_widget.setFocus()
         self.sigAzAltChanged.emit()
 
     def onRotChanged(self):
         self.gui.platepar.rotation_from_horiz = self.rotation_from_horiz.value()
-        # self.gui.view_widget.setFocus()
         self.sigRotChanged.emit()
 
     def onScaleChanged(self):
         self.gui.platepar.F_scale = self.F_scale.value()*60
-        # self.gui.view_widget.setFocus()
         self.sigScaleChanged.emit()
 
     def onExtinctionChanged(self):
-        self.gui.platepar.extinction_scale = self.extinction_scale.value()
-        # self.gui.view_widget.setFocus()
         self.sigExtinctionChanged.emit()
 
     def onFitParametersChanged(self):
         # fit parameter object updates platepar by itself
-        # self.gui.view_widget.setFocus()
         self.sigFitParametersChanged.emit()
 
     def onIndexChanged(self):
         text = self.distortion_type.currentText()
-        # self.gui.view_widget.setFocus()
         self.gui.platepar.setDistortionType(text, reset_params=False)
 
         if text == 'poly3+radial':
