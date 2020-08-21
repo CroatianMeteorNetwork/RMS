@@ -278,6 +278,7 @@ class ViewBox(pg.ViewBox):
 
 
 class ImageItem(pg.ImageItem):
+    sigLevelsChanged = QtCore.pyqtSignal()
     # ImageItem that provides an interface around img_handle
     def __init__(self, img_handle=None, **kwargs):
         """
@@ -335,11 +336,14 @@ class ImageItem(pg.ImageItem):
 
             self.img_handle.current_ff_index = original_index
 
+        maxpixel = np.swapaxes(maxpixel, 0, 1)
+
         if self.dark is not None:
             maxpixel = Image.applyDark(maxpixel, self.dark)
         if self.flat_struct is not None:
             maxpixel = Image.applyFlat(maxpixel, self.flat_struct)
-        self.setImage(np.swapaxes(maxpixel, 0, 1))
+
+        self.setImage(maxpixel)
         self.img_showing = 'maxpixel'
 
     def avepixel(self):
@@ -360,11 +364,14 @@ class ImageItem(pg.ImageItem):
 
             self.img_handle.current_ff_index = original_index
 
+        avepixel = np.swapaxes(avepixel, 0, 1)
+
         if self.dark is not None:
             avepixel = Image.applyDark(avepixel, self.dark)
         if self.flat_struct is not None:
             avepixel = Image.applyFlat(avepixel, self.flat_struct)
-        self.setImage(np.swapaxes(avepixel, 0, 1))
+
+        self.setImage(avepixel)
         self.img_showing = 'avepixel'
 
     def reloadImage(self):
@@ -406,11 +413,14 @@ class ImageItem(pg.ImageItem):
 
                 self.img_handle.current_ff_index = original_index
 
+            frame = np.swapaxes(frame, 0, 1)
+
             if self.dark is not None:
                 frame = Image.applyDark(frame, self.dark)
             if self.flat_struct is not None:
                 frame = Image.applyFlat(frame, self.flat_struct)
-            self.setImage(np.swapaxes(frame, 0, 1))
+
+            self.setImage(frame)
             self.img_showing = 'frame'
 
     def nextChunk(self):
@@ -504,6 +514,11 @@ class ImageItem(pg.ImageItem):
         self.invert_img = not self.invert_img
         self.updateImage()
 
+    def setLevels(self, levels, update=True):
+        super().setLevels(levels, update)
+        self.sigLevelsChanged.emit()
+
+
     def render(self):
         # THIS WAS COPY PASTED FROM SOURCE CODE AND WAS SLIGHTLY
         # CHANGED TO IMPLEMENT GAMMA AND INVERT
@@ -540,7 +555,7 @@ class ImageItem(pg.ImageItem):
         # if the image data is a small int, then we can combine levels + lut
         # into a single lut for better performance
         levels = self.levels
-        # print('Levels:',levels)
+
         if levels is not None and levels.ndim == 1 and image.dtype in (np.ubyte, np.uint16):
             if self._effectiveLut is None:
                 eflsize = 2**(image.itemsize*8)
@@ -721,6 +736,9 @@ class HistogramLUTItem(pg.HistogramLUTItem):
         else:
             raise TypeError
 
+        self.imageItem().sigLevelsChanged.connect(
+            lambda: [i.setLevels(self.imageItem().getLevels()) for i in self.level_images])
+
     def toggleAutoLevels(self):
         """
         Switch between auto levels and manual levels
@@ -730,7 +748,6 @@ class HistogramLUTItem(pg.HistogramLUTItem):
             self.setLevels(*self.imageItem().getAutolevels())
         else:
             self.setLevels(*self.saved_manual_levels)
-
         self.auto_levels = not self.auto_levels
         self.region.setMovable(not self.auto_levels)
 
@@ -741,27 +758,15 @@ class HistogramLUTItem(pg.HistogramLUTItem):
     def regionChanging(self):
         pass  # doesnt update when moving it
 
-    def regionChanged(self):
-        super().regionChanged()
-        for img in self.level_images:
-            img.setLevels(self.getLevels())
-
-    def setLevels(self, min=None, max=None, rgba=None):
-        super().setLevels(min, max, rgba)
-        for img in self.level_images:
-            # print('img levels:', img.getLevels(), img.levels)
-            img.setLevels(self.getLevels())
-
     def imageChanged(self, autoLevel=False, autoRange=False):
         if not self.auto_levels:
             self.saved_manual_levels = self.getLevels()
         super().imageChanged(autoLevel, autoRange)
         if self.auto_levels:
             self.setLevels(*self.imageItem().getAutolevels())
-            # print('auto levels:', self.imageItem().getAutolevels())
         else:
             self.setLevels(*self.saved_manual_levels)
-            # print('saved manual levels:', self.saved_manual_levels)
+
 
 class RightOptionsTab(QtWidgets.QTabWidget):
     """

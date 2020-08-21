@@ -516,6 +516,12 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img_frame.addItem(self.img)
         self.img_frame.autoRange(padding=0)
 
+        self.fr_box = QtWidgets.QGraphicsRectItem()
+        self.fr_box.setPen(QtGui.QColor(255, 0, 0, 255))
+        self.fr_box.setBrush(QtGui.QColor(0, 0, 0, 0))
+        self.fr_box.hide()
+        self.img_frame.addItem(self.fr_box)
+
         self.img_zoom = ImageItem(img_handle=self.img_handle, gamma=gamma, invert=invert)
         self.zoom_window.addItem(self.img_zoom)
 
@@ -613,8 +619,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.cursor2.hide()
 
             if not first_time and self.img.img_handle.input_type != 'dfn':
-                self.img.loadImage(self.mode, self.img_type_flag)
                 self.img_zoom.loadImage(self.mode, self.img_type_flag)
+                self.img.loadImage(self.mode, self.img_type_flag)
 
             for action in self.file_menu.actions():
                 self.file_menu.removeAction(action)
@@ -650,8 +656,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.img_type_flag = 'avepixel'
             self.tab.settings.updateMaxAvePixel()
-            self.img.loadImage(self.mode, self.img_type_flag)
             self.img_zoom.loadImage(self.mode, self.img_type_flag)
+            self.img.loadImage(self.mode, self.img_type_flag)
 
             for action in self.file_menu.actions():
                 self.file_menu.removeAction(action)
@@ -759,6 +765,17 @@ class PlateTool(QtWidgets.QMainWindow):
     def onFrameResize(self):
         self.label2.setPos(0, self.img_frame.height() - self.label2.boundingRect().height())
         self.star_pick_info.setPos(self.img_frame.width()/2, self.img_frame.height() - 50)
+
+        if self.config.height/self.config.width < self.img_frame.height()/self.img_frame.width():
+            self.img_frame.setLimits(xMin=0,
+                                     xMax=self.config.width,
+                                     yMin=None,
+                                     yMax=None)
+        else:
+            self.img_frame.setLimits(xMin=None,
+                                     xMax=None,
+                                     yMin=0,
+                                     yMax=self.config.height)
 
     def mouseOverStatus(self, x, y):
         """ Format the status message which will be printed in the status bar below the plot.
@@ -975,11 +992,11 @@ class PlateTool(QtWidgets.QMainWindow):
             self.sel_cat_star_markers.setData(pos=[pair[0][:2] for pair in self.paired_stars])
             self.sel_cat_star_markers2.setData(pos=[pair[0][:2] for pair in self.paired_stars])
         else:
-            self.sel_cat_star_markers.clear()
-            self.sel_cat_star_markers2.clear()
+            self.sel_cat_star_markers.setData(pos=[])
+            self.sel_cat_star_markers2.setData(pos=[])
 
-        self.centroid_star_markers.clear()
-        self.centroid_star_markers2.clear()
+        self.centroid_star_markers.setData(pos=[])
+        self.centroid_star_markers2.setData(pos=[])
 
         # Draw photometry
         if len(self.paired_stars) > 2:
@@ -1001,8 +1018,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.calstar_markers.setPoints(x=x, y=y)
             self.calstar_markers2.setPoints(x=x, y=y)
         else:
-            self.calstar_markers.clear()
-            self.calstar_markers2.clear()
+            self.calstar_markers.setData(pos=[])
+            self.calstar_markers2.setData(pos=[])
 
     def updatePicks(self):
         """ Draw pick markers for manualreduction """
@@ -1353,15 +1370,15 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.img.nextChunk()
             elif n < 0:
                 self.img.prevChunk()
-            self.img.loadImage(self.mode, self.img_type_flag)
             self.img_zoom.loadImage(self.mode, self.img_type_flag)
+            self.img.loadImage(self.mode, self.img_type_flag)
 
             # remove markers
-            self.calstar_markers.clear()
-            self.calstar_markers2.clear()
-            self.cat_star_markers.clear()
-            self.cat_star_markers2.clear()
-            self.pick_marker.clear()
+            self.calstar_markers.setData(pos=[])
+            self.calstar_markers2.setData(pos=[])
+            self.cat_star_markers.setData(pos=[])
+            self.cat_star_markers2.setData(pos=[])
+            self.pick_marker.setData(pos=[])
 
             # Reset paired stars
             self.pick_list = {}
@@ -1376,10 +1393,24 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.img.nextFrame()
             else:
                 self.img.setFrame(self.img.getFrame() + n)
-            self.img.loadImage(self.mode, self.img_type_flag)
             self.img_zoom.loadImage(self.mode, self.img_type_flag)
+            self.img.loadImage(self.mode, self.img_type_flag)
             self.updatePicks()
             self.drawPhotometryColoring()
+
+            if self.img.img_handle.name().startswith('FR'):
+                fr = self.img_handle.loadChunk()
+                if fr.t[self.img_handle.current_line][0] <= self.img.getFrame() <= fr.t[self.img_handle.current_line][-1]:
+                    fr_no = self.img.getFrame() - fr.t[self.img_handle.current_line][0]
+                    x = int(fr.xc[self.img_handle.current_line][fr_no] -
+                            fr.size[self.img_handle.current_line][fr_no]/2)
+                    y = int(fr.yc[self.img_handle.current_line][fr_no] -
+                            fr.size[self.img_handle.current_line][fr_no]/2)
+                    h = fr.size[self.img_handle.current_line][fr_no]
+                    self.fr_box.setRect(x, y, h, h)
+                    self.fr_box.show()
+                else:
+                    self.fr_box.hide()
 
         self.updateLeftLabels()
         # self.profile.disable()
@@ -1476,6 +1507,7 @@ class PlateTool(QtWidgets.QMainWindow):
     def onMouseMoved(self, event):
         pos = event
         if self.img_frame.sceneBoundingRect().contains(pos):
+            # print(self.img.getLevels(), self.img_zoom.getLevels())
             self.img_frame.setFocus()
             mp = self.img_frame.mapSceneToView(pos)
 
@@ -1520,7 +1552,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 if event.button() == QtCore.Qt.LeftButton:
                     if self.cursor.mode == 0:
                         # If CTRL is pressed, place the pick manually - NOTE: the intensity might be off then!!!
-                        if modifiers == QtCore.Qt.ControlModifier:
+                        if modifiers & QtCore.Qt.ControlModifier:
                             self.x_centroid = self.mouse_x
                             self.y_centroid = self.mouse_y
 
@@ -1586,14 +1618,14 @@ class PlateTool(QtWidgets.QMainWindow):
                 if event.button() == QtCore.Qt.LeftButton:
                     if self.cursor.mode == 0:
                         mode = 1
-                        if modifiers == QtCore.Qt.ControlModifier or \
-                                ((modifiers == QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and
+                        if modifiers & QtCore.Qt.ControlModifier or \
+                                ((modifiers & QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and
                                  self.img.img_handle.input_type == 'dfn'):
                             self.x_centroid, self.y_centroid = self.mouse_x, self.mouse_y
                         else:
                             self.x_centroid, self.y_centroid, _ = self.centroid()
 
-                        if (modifiers == QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and \
+                        if (modifiers & QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and \
                                 self.img.img_handle.input_type == 'dfn':
                             mode = 0
 
@@ -1631,14 +1663,19 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.flat_struct.applyDark(self.dark)
 
             self.img.dark = self.dark
+            self.img_zoom.flat_struct = self.flat_struct
             self.img.flat_struct = self.flat_struct
+            self.img_zoom.reloadImage()
             self.img.reloadImage()
 
         elif event.key() == QtCore.Qt.Key_F and modifiers == QtCore.Qt.ControlModifier:
             _, self.flat_struct = self.loadFlat()
 
-            self.img.dark = self.dark
+            # self.img.dark = self.dark
+            self.img_zoom.flat_struct = self.flat_struct
             self.img.flat_struct = self.flat_struct
+            self.img_zoom.reloadImage()
+            self.img.reloadImage()
 
         elif event.key() == QtCore.Qt.Key_R and modifiers == QtCore.Qt.ControlModifier:
             self.star_pick_mode = not self.star_pick_mode
@@ -2076,7 +2113,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.showAstrometryFitPlots()
 
         elif self.mode == 'manualreduction':
-            if qmodifiers == QtCore.Qt.ShiftModifier and self.img.img_handle.input_type != 'dfn':
+            if qmodifiers & QtCore.Qt.ShiftModifier and self.img.img_handle.input_type != 'dfn':
                 self.cursor.setMode(2)
 
             if event.key() == QtCore.Qt.Key_P:
@@ -2123,7 +2160,7 @@ class PlateTool(QtWidgets.QMainWindow):
         modifier = QtWidgets.QApplication.keyboardModifiers()
 
         if self.img_frame.sceneBoundingRect().contains(event.pos()) and self.star_pick_mode:
-            if modifier == QtCore.Qt.ControlModifier:
+            if modifier & QtCore.Qt.ControlModifier:
                 if delta < 0:
                     self.scrolls_back = 0
                     self.star_aperature_radius += 1
@@ -2213,8 +2250,8 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             self.img_type_flag = 'maxpixel'
 
-        self.img.loadImage(self.mode, self.img_type_flag)
         self.img_zoom.loadImage(self.mode, self.img_type_flag)
+        self.img.loadImage(self.mode, self.img_type_flag)
 
         self.img.setLevels(self.tab.hist.getLevels())
         self.img_zoom.setLevels(self.tab.hist.getLevels())
@@ -2480,7 +2517,6 @@ class PlateTool(QtWidgets.QMainWindow):
             img_handle = detectInputTypeFile(self.file_path, self.config)
 
         self.img_handle = img_handle
-
 
     def loadCalstars(self):
         """ Loads data from calstars file and updates self.calstars """
@@ -2765,7 +2801,9 @@ class PlateTool(QtWidgets.QMainWindow):
     def loadDark(self):
         """ Open a file dialog and ask user to load a dark frame. """
 
-        dark_file = openFileDialog(self.dir_path, None, 'Select the dark frame file', matplotlib)
+        dark_file = openFileDialog(self.dir_path, None, 'Select the dark frame file', matplotlib,
+                                   [('Image Files', '*.png,*.jpg;*.bmp'),
+                                    ('All Files', '*')])
 
         if not dark_file:
             return False, None

@@ -1922,7 +1922,7 @@ class InputTypeDFN(InputType):
             img = np.rot90(img)
 
         self.ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, self.img_dtype)
-        self.ff_struct_fake.addFrame(img.astype(self.img_dtype))
+        self.ff_struct_fake.addFrame(img.astype(np.uint16))
         self.ff_struct_fake.finish()
 
         # If FPS is not given, use one from the config file
