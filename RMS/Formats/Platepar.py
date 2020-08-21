@@ -374,7 +374,7 @@ class Platepar(object):
             pp_copy.RA_d = ra_ref
             pp_copy.dec_d = dec_ref
             pp_copy.pos_angle_ref = pos_angle_ref
-            pp_copy.F_scale = F_scale
+            pp_copy.F_scale = abs(F_scale)
 
             # Get image coordinates of catalog stars
             catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy)
@@ -399,7 +399,7 @@ class Platepar(object):
             pp_copy.RA_d = ra_ref
             pp_copy.dec_d = dec_ref
             pp_copy.pos_angle_ref = pos_angle_ref
-            pp_copy.F_scale = F_scale
+            pp_copy.F_scale = abs(F_scale)
 
             img_x, img_y, _ = img_stars.T
 
@@ -509,7 +509,7 @@ class Platepar(object):
         ### ASTROMETRIC PARAMETERS FIT ###
 
         # Initial parameters for the astrometric fit
-        p0 = [self.RA_d, self.dec_d, self.pos_angle_ref, self.F_scale]
+        p0 = [self.RA_d, self.dec_d, self.pos_angle_ref, abs(self.F_scale)]
 
         # Fit the astrometric parameters using the reverse transform for reference        
         res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, \
@@ -522,6 +522,10 @@ class Platepar(object):
 
         # Update fitted astrometric parameters
         self.RA_d, self.dec_d, self.pos_angle_ref, self.F_scale = res.x
+
+        # Force scale to be positive
+        self.F_scale = abs(self.F_scale)
+        
 
         # Compute reference Alt/Az to apparent coordinates, epoch of date
         az_centre, alt_centre = trueRaDec2ApparentAltAz( \
