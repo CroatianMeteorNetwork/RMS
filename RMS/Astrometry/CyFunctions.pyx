@@ -45,13 +45,20 @@ cdef double radians(double deg):
 
     return deg/180.0*(pi)
 
-
+  
 @cython.cdivision(True)
 cdef double degrees(double deg):
     """Converts radians to degrees.
     """
 
     return deg*180.0/pi
+
+
+cdef double sign(double x):    
+    if (x >= 1):
+        return 1.0
+
+    return -1.0
 
 
 @cython.boundscheck(False)
@@ -116,6 +123,7 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
         lon: [float] Observer longitude (deg).
         radius: [float] Extraction radius (degrees).
         mag_limit: [float] Limiting magnitude.
+
     Return:
         filtered_indices, filtered_list: (ndarray, ndarray)
             - filtered_indices - Indices of catalog_list entries which satifly the filters.
@@ -286,6 +294,7 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
     double dec):
     """ Corrects Right Ascension and Declination from one epoch to another, taking only precession into 
         account.
+
         Implemented from: Jean Meeus - Astronomical Algorithms, 2nd edition, pages 134-135
     
     Arguments:
@@ -432,7 +441,6 @@ cpdef np.ndarray[FLOAT_TYPE_t, ndim=1] refractionApparentToTrue_vect(np.ndarray[
     # Apply the refraction
     return elev + refraction
 
-
 cpdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double jd, double lat, double lon):
     """ Correct the equatorial coordinates for refraction. The correction is done from apparent to true
         coordinates.
@@ -566,6 +574,7 @@ cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double 
 cpdef (double, double) cyraDec2AltAz(double ra, double dec, double jd, double lat, double lon):
     """ Convert right ascension and declination to azimuth (+East of due North) and altitude. Same epoch is
         assumed, no correction for refraction is done.
+
     Arguments:
         ra: [float] Right ascension in radians.
         dec: [float] Declination in radians.
@@ -717,6 +726,47 @@ cpdef trueRaDec2ApparentAltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra, np.ndarr
 
 
 
+cpdef (double, double) trueRaDec2ApparentAltAz(double ra, double dec, double jd, double lat, double lon, \
+    bool refraction=True):
+    """ Convert the true right ascension and declination in J2000 to azimuth (+East of due North) and 
+        altitude in the epoch of date. The correction for refraction is performed.
+
+    Arguments:
+        ra: [float] Right ascension in radians (J2000).
+        dec: [float] Declination in radians (J2000).
+        jd: [float] Julian date.
+        lat: [float] Latitude in radians.
+        lon: [float] Longitude in radians.
+
+    Keyword arguments:
+        refraction: [bool] Apply refraction correction. True by default.
+
+    Return:
+        (azim, elev): [tuple]
+            azim: [float] Azimuth (+east of due north) in radians (epoch of date).
+            elev: [float] Elevation above horizon in radians (epoch of date).
+
+        """
+
+    cdef double azim, elev
+
+
+    # Precess RA/Dec to the epoch of date
+    ra, dec = equatorialCoordPrecession(J2000_DAYS, jd, ra, dec)
+
+    # Convert to alt/az
+    azim, elev = cyraDec2AltAz(ra, dec, jd, lat, lon)
+
+    # Correct elevation for refraction
+    if refraction:
+        elev = refractionTrueToApparent(elev)
+
+
+    return (azim, elev)
+
+
+
+
 @cython.cdivision(True)
 cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double lat, double lon):
     """ Convert azimuth and altitude in a given time and position on Earth to right ascension and 
@@ -861,6 +911,46 @@ def apparentAltAz2TrueRADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim, np.ndarr
     return (ra, dec)
 
 
+cpdef (double, double) apparentAltAz2TrueRADec(double azim, double elev, double jd, double lat, double lon, \
+    bool refraction=True):
+    """ Convert the apparent azimuth and altitude in the epoch of date to true (refraction corrected) right 
+        ascension and declination in J2000.
+
+    Arguments:
+        azim: [float] Azimuth (+East of due North) in radians (epoch of date).
+        elev: [float] Elevation above horizon in radians (epoch of date).
+        jd: [float] Julian date.
+        lat: [float] Latitude of the observer in radians.
+        lon: [float] Longitde of the observer in radians.
+
+    Keyword arguments:
+        refraction: [bool] Apply refraction correction. True by default.
+
+    Return:
+        (ra, dec): [tuple]
+            ra: [float] Right ascension (radians, J2000).
+            dec: [float] Declination (radians, J2000).
+    """
+
+
+    cdef double ra, dec
+
+
+    # Correct elevation for refraction
+    if refraction:
+        elev = refractionApparentToTrue(elev)
+
+    # Convert to RA/Dec (true, epoch of date)
+    ra, dec = cyaltAz2RADec(azim, elev, jd, lat, lon)
+
+    # Precess RA/Dec to J2000
+    ra, dec = equatorialCoordPrecession(jd, J2000_DAYS, ra, dec)
+
+
+    return (ra, dec)
+
+
+
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -870,7 +960,9 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     double y_res, double h0, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, \
     str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False):
+
     """ Convert RA, Dec to distorion corrected image coordinates.
+
     Arguments:
         RA_data: [ndarray] Array of right ascensions (degrees).
         dec_data: [ndarray] Array of declinations (degrees).
@@ -1060,12 +1152,9 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
             dx = (x - x0)*r_scale
             dy = (y - y0)*r_scale/(1.0 + xy)
 
-
-
         # Add the distortion
         x_img = x - dx
         y_img = y - dy
-
 
         # Calculate X image coordinates
         x_array[i] = x_img + x_res/2.0
@@ -1272,6 +1361,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         radius = radians(sqrt(x_corr**2 + y_corr**2))
 
         # Compute theta - the direction angle between the FOV centre, sky coordinate, and the north
+
         #   celestial pole
         theta = (pi/2 - radians(pos_angle_ref) + atan2(y_corr, x_corr))%(2*pi)
 

@@ -279,6 +279,9 @@ class Config:
         # Flag determining if uploading is enabled or not
         self.upload_enabled = True
 
+        # Delay upload after files are added to the queue by the given number of minues
+        self.upload_delay = 0
+
         # Address of the upload server
         self.hostname = ''
 
@@ -781,6 +784,10 @@ def parseUpload(config, parser):
     # Address of the upload server
     if parser.has_option(section, "hostname"):
         config.hostname = parser.get(section, "hostname")
+
+    # Upload delay
+    if parser.has_option(section, "upload_delay"):
+        config.upload_delay = parser.getfloat(section, "upload_delay")
 
     # SSH port
     if parser.has_option(section, "host_port"):

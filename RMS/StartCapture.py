@@ -137,6 +137,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         upload_manager: [UploadManager object] A handle to the UploadManager, which handles uploading files to
             the central server. None by default.
         resume_capture: [bool] Resume capture in the last data directory in CapturedFiles.
+
     Return:
         night_archive_dir: [str] Path to the archive folder of the processed night.
     """
@@ -264,7 +265,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     # Add the FF file to the detector
                     detector.addJob([night_data_dir, ff_name, config])
                     log.info("Added existing FF files for detection: {:s}".format(ff_name))
-
 
     # Initialize buffered capture
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file)
@@ -428,6 +428,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         log.info('Adding file to upload list: ' + archive_name)
         upload_manager.addFiles([archive_name])
         log.info('File added...')
+
+        # Delay the upload, if the delay is given
+        upload_manager.delayNextUpload(delay=60*config.upload_delay)
 
 
     # Delete detector backup files

@@ -351,6 +351,7 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius, v
 def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict, match_radius):
     """ Calculates the differences between the stars on the image and catalog stars in image coordinates with
         the given astrometrical solution.
+
     Arguments:
         params: [list] Fit parameters - reference RA, Dec, position angle, and scale.
         config: [Config]
@@ -359,6 +360,7 @@ def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict,
         star_dict: [dict] Dictionary which contains the JD, and a list of (X, Y, bg_intens, intens) of the
             stars on the image.
         match_radius: [float] Star match radius (px).
+
     Return:
         [float] The average pixel residual (difference between image and catalog positions) normalized
             by the square root of the total number of matched stars.

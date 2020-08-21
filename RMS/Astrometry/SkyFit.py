@@ -377,7 +377,6 @@ class PlateTool(object):
         plt.rcParams['keymap.grid_minor'] = ''
 
 
-
         self.ax.figure.canvas.mpl_connect('button_press_event', self.onMousePress)
         self.ax.figure.canvas.mpl_connect('button_release_event', self.onMouseRelease)
 
@@ -1957,7 +1956,6 @@ class PlateTool(object):
             self.drawCalstars()
 
 
-
         # Update centre of FOV in horizontal coordinates (epoch of date)
         az_centre, alt_centre = trueRaDec2ApparentAltAz(np.radians(self.platepar.RA_d), \
             np.radians(self.platepar.dec_d), self.platepar.JD, np.radians(self.platepar.lat), \
@@ -2034,7 +2032,6 @@ class PlateTool(object):
             font_color = 'w'
 
         ### ###
-
 
         if self.show_key_help == 0:
             text_str = 'Show fit parameters - F1'
@@ -2229,7 +2226,6 @@ class PlateTool(object):
 
         # Compute the current Julian date
         jd = date2JD(*self.img_handle.currentTime())
-
 
         # Take only those stars which are inside the FOV
         filtered_indices, filtered_catalog_stars = subsetCatalog(catalog_stars, ra_centre, dec_centre, \
@@ -3067,8 +3063,6 @@ class PlateTool(object):
             azim_residuals.append(((azim_cat - azim_img + 180)%360 - 180)*np.cos(np.radians(elev_cat)))
             elev_residuals.append(elev_cat - elev_img)
 
-
-
         # Init astrometry fit window
         fig_a, ( \
             (ax_azim, ax_elev, ax_skyradius), \
@@ -3160,7 +3154,6 @@ class PlateTool(object):
         ax_x.set_ylim([-max_ylim, max_ylim])
         ax_y.set_ylim([-max_ylim, max_ylim])
         ax_radius.set_ylim([-max_ylim, max_ylim])
-
 
         fig_a.tight_layout()
         fig_a.show()

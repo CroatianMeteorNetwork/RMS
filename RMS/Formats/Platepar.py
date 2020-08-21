@@ -39,6 +39,11 @@ from RMS.Astrometry.ApplyAstrometry import rotationWrtHorizon, rotationWrtHorizo
 from RMS.Astrometry.Conversions import date2JD, jd2Date, trueRaDec2ApparentAltAz, apparentAltAz2TrueRADec
 from RMS.Math import angularSeparation
 
+# Import Cython functions
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+from RMS.Astrometry.CyFunctions import trueRaDec2ApparentAltAz
+
 
 
 class stationData(object):
@@ -360,7 +365,7 @@ class Platepar(object):
             pp_copy.RA_d = ra_ref
             pp_copy.dec_d = dec_ref
             pp_copy.pos_angle_ref = pos_angle_ref
-            pp_copy.F_scale = F_scale
+            pp_copy.F_scale = abs(F_scale)
 
             # Get image coordinates of catalog stars
             catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy)
@@ -384,7 +389,7 @@ class Platepar(object):
             pp_copy.RA_d = ra_ref
             pp_copy.dec_d = dec_ref
             pp_copy.pos_angle_ref = pos_angle_ref
-            pp_copy.F_scale = F_scale
+            pp_copy.F_scale = abs(F_scale)
 
             img_x, img_y, _ = img_stars.T
 
@@ -490,7 +495,8 @@ class Platepar(object):
         ### ASTROMETRIC PARAMETERS FIT ###
 
         # Initial parameters for the astrometric fit
-        p0 = [self.RA_d, self.dec_d, self.pos_angle_ref, self.F_scale]
+        p0 = [self.RA_d, self.dec_d, self.pos_angle_ref, abs(self.F_scale)]
+
 
         # Fit the astrometric parameters using the reverse transform for reference
         res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, \
@@ -506,6 +512,7 @@ class Platepar(object):
 
         # Recalculate FOV centre
         self.az_centre, self.alt_centre = trueRaDec2ApparentAltAz(self.RA_d, self.dec_d, self.JD, self.lat, self.lon)
+
         ### ###
 
 
@@ -554,6 +561,19 @@ class Platepar(object):
 
                 # IMPORTANT NOTE - the X polynomial is used to store the fit paramters
                 self.x_poly_rev = res.x
+
+                # Force distortion centre to image centre
+                if self.force_distortion_centre:
+                    self.x_poly_rev[0] = 0.5
+                    self.x_poly_rev[1] = 0.5
+
+                # Force aspect ratio to 0 if axes are set to be equal
+                if self.equal_aspect:
+                    self.x_poly_rev[2] = 0
+
+                # Set all parameters not used by the radial fit to 0
+                n_params = int(self.distortion_type[-1])
+                self.x_poly_rev[(n_params + 2):] *= 0
 
 
                 # Force distortion centre to image centre
@@ -682,7 +702,8 @@ class Platepar(object):
         if not 'equal_aspect' in self.__dict__:
             self.equal_aspect = False
 
-        if not 'force_distribution_centre' in self.__dict__:
+        # Add forcing distortion centre to image center
+        if not 'force_distortion_centre' in self.__dict__:
             self.force_distortion_centre = False
 
 
@@ -1085,14 +1106,14 @@ if __name__ == "__main__":
         time_data = [2020, 5, 30, 1, 20, 34, 567]
 
         # Map to RA/Dec
-        jd_data, ra_data, dec_data, _ = xyToRaDecPP([time_data], [x_img], \
+        jd_data, ra_data, dec_data, _ = RMS.Astrometry.ApplyAstrometry.xyToRaDecPP([time_data], [x_img], \
             [y_img], [1], pp, extinction_correction=False)
 
         # Map back to X, Y
-        x_data, y_data = raDecToXYPP(ra_data, dec_data, jd_data[0], pp)
+        x_data, y_data = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(ra_data, dec_data, jd_data[0], pp)
 
         # Map forward to sky again
-        _, ra_data_rev, dec_data_rev, _ = xyToRaDecPP([time_data], x_data, \
+        _, ra_data_rev, dec_data_rev, _ = RMS.Astrometry.ApplyAstrometry.xyToRaDecPP([time_data], x_data, \
             y_data, [1], pp, extinction_correction=False)
 
 

@@ -45,7 +45,8 @@ from RMS.Math import angularSeparation
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import cyraDecToXY, cyXYToRADec
+from RMS.Astrometry.CyFunctions import cyraDecToXY, cyXYToRADec, equatorialCoordPrecession, \
+    trueRaDec2ApparentAltAz
 
 # Handle Python 2/3 compability
 if sys.version_info.major == 3:
@@ -72,7 +73,7 @@ def correctVignetting(px_sum, radius, vignetting_coeff):
 
 
 def extinctionCorrectionTrueToApparent(catalog_mags, ra_data, dec_data, jd, platepar):
-    """ Compute apparent magnitudes by applying extinction correction to catalog magnitudes.
+    """ Compute apparent magnitudes by applying extinction correction to catalog magnitudes. 
 
     Arguments:
         catalog_mags: [list] A list of catalog magnitudes.
@@ -80,6 +81,7 @@ def extinctionCorrectionTrueToApparent(catalog_mags, ra_data, dec_data, jd, plat
         dec_data: [list] A list of catalog declinations (J2000) in degrees.
         jd: [float] Julian date.
         platepar: [Platepar object]
+
     Return:
         corrected_catalog_mags: [list] Extinction corrected catalog magnitudes.
     """
@@ -119,6 +121,7 @@ def extinctionCorrectionApparentToTrue(mags, x_data, y_data, jd, platepar):
         y_data: [list] A list of pixel rows.
         jd: [float] Julian date.
         platepar: [Platepar object]
+
     Return:
         corrected_mags: [list] A list of extinction corrected mangitudes.
     """
@@ -344,6 +347,7 @@ def rotationWrtHorizon(platepar):
                                               platepar.refraction)
 
     # Compute the rotation wrt horizon (deg)
+    
     rot_angle = np.degrees(np.arctan2(alt_up - alt_mid, azim_up - azim_mid))
 
     # Wrap output to <-180, 180] range
@@ -503,6 +507,7 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
         Y_data: [ndarray] 1D numpy array containing the image Y component.
         level_data: [ndarray] Levels of the meteor centroid.
         platepar: [Platepar structure] Astrometry parameters.
+
     Keyword arguments:
         extinction_correction: [bool] Apply extinction correction. True by default. False is set to prevent
             infinite recursion in extinctionCorrectionApparentToTrue when set to True.
@@ -523,8 +528,10 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
         np.array(Y_data, dtype=np.float64), float(platepar.lat), float(platepar.lon), float(platepar.X_res), \
         float(platepar.Y_res), float(platepar.Ho), float(platepar.RA_d), float(platepar.dec_d), \
         float(platepar.pos_angle_ref), float(platepar.F_scale), platepar.x_poly_fwd, platepar.y_poly_fwd, \
+
         unicode(platepar.distortion_type), refraction=platepar.refraction, equal_aspect=platepar.equal_aspect,
         force_distortion_centre=platepar.force_distortion_centre)
+
 
     # Compute radiia from image centre
     radius_arr = np.hypot(np.array(X_data) - platepar.X_res/2, np.array(Y_data) - platepar.Y_res/2)

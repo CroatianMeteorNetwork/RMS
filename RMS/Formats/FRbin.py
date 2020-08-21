@@ -51,10 +51,12 @@ class fr_struct:
         self.size = []
 
         # Image data for the cutouts. If you want to retrieve the cutout image for the first line and the
+
         #   second frame, call: self.frames[0][1]
         self.frames = []
 
         ### ###
+
         self.nrows = None
         self.ncols = None
         self.__maxpixel = None
@@ -117,7 +119,7 @@ class fr_struct:
     def avepixel(self, avepixel):
         self.__avepixel = avepixel
 
-
+        
 def read(dir_path, filename):
     """ Read an FR*.bin file.
 
@@ -127,6 +129,7 @@ def read(dir_path, filename):
 
     Return:
         fr: [fr_struct instance]
+
     """
     if filename[:2] == "FR":
         fid = open(os.path.join(dir_path, filename), "rb")
