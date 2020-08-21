@@ -21,9 +21,6 @@ except:
     import Tkinter as tkinter
     import tkMessageBox as messagebox
 
-from pyqtgraph import Qt
-from pyqtgraph.Qt import QtCore, QtWidgets, QtGui
-
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, extinctionCorrectionTrueToApparent, \
@@ -48,7 +45,7 @@ import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog
 
-from RMS.Astrometry.CustomPyqtgraphClasses import *
+from RMS.Routines.CustomPyqtgraphClasses import *
 
 
 class FOVinputDialog(object):
