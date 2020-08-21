@@ -617,6 +617,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.star_pick_mode = False
             self.cursor.hide()
             self.cursor2.hide()
+            self.fr_box.hide()
 
             if not first_time and self.img.img_handle.input_type != 'dfn':
                 self.img_zoom.loadImage(self.mode, self.img_type_flag)
@@ -658,6 +659,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.tab.settings.updateMaxAvePixel()
             self.img_zoom.loadImage(self.mode, self.img_type_flag)
             self.img.loadImage(self.mode, self.img_type_flag)
+            self.showFRBox()
 
             for action in self.file_menu.actions():
                 self.file_menu.removeAction(action)
@@ -1397,25 +1399,29 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img.loadImage(self.mode, self.img_type_flag)
             self.updatePicks()
             self.drawPhotometryColoring()
-
-            if self.img.img_handle.name().startswith('FR'):
-                fr = self.img_handle.loadChunk()
-                if fr.t[self.img_handle.current_line][0] <= self.img.getFrame() <= fr.t[self.img_handle.current_line][-1]:
-                    fr_no = self.img.getFrame() - fr.t[self.img_handle.current_line][0]
-                    x = int(fr.xc[self.img_handle.current_line][fr_no] -
-                            fr.size[self.img_handle.current_line][fr_no]/2)
-                    y = int(fr.yc[self.img_handle.current_line][fr_no] -
-                            fr.size[self.img_handle.current_line][fr_no]/2)
-                    h = fr.size[self.img_handle.current_line][fr_no]
-                    self.fr_box.setRect(x, y, h, h)
-                    self.fr_box.show()
-                else:
-                    self.fr_box.hide()
+            self.showFRBox()
 
         self.updateLeftLabels()
         # self.profile.disable()
         # with open('C:/users/jonat/profile_stats_test.stats', 'w+') as stream:
         #     pstats.Stats(self.profile, stream=stream).sort_stats('time').print_stats()
+
+    def showFRBox(self):
+        """ On manual reduction, call this and a red rectangle will be drawn around the FR cutout """
+        if self.img.img_handle.name().startswith('FR'):
+            fr = self.img_handle.loadChunk()
+            if fr.t[self.img_handle.current_line][0] <= self.img.getFrame() <= fr.t[self.img_handle.current_line][
+                -1]:
+                fr_no = self.img.getFrame() - fr.t[self.img_handle.current_line][0]
+                x = int(fr.xc[self.img_handle.current_line][fr_no] -
+                        fr.size[self.img_handle.current_line][fr_no]/2)
+                y = int(fr.yc[self.img_handle.current_line][fr_no] -
+                        fr.size[self.img_handle.current_line][fr_no]/2)
+                h = fr.size[self.img_handle.current_line][fr_no]
+                self.fr_box.setRect(x, y, h, h)
+                self.fr_box.show()
+            else:
+                self.fr_box.hide()
 
     def saveState(self):
         """
