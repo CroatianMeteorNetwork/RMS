@@ -1601,6 +1601,7 @@ class InputTypeImages(object):
 
         print('Total frames:', self.total_frames)
 
+
     def nextChunk(self):
         """ Go to the next frame chunk. """
 
@@ -1609,6 +1610,7 @@ class InputTypeImages(object):
 
         self.current_frame = self.current_frame_chunk*self.fr_chunk_no
 
+
     def prevChunk(self):
         """ Go to the previous frame chunk. """
 
@@ -1616,6 +1618,7 @@ class InputTypeImages(object):
         self.current_frame_chunk = self.current_frame_chunk%self.total_fr_chunks
 
         self.current_frame = self.current_frame_chunk*self.fr_chunk_no
+
 
     def loadChunk(self, first_frame=None, read_nframes=None):
         """ Load the frame chunk file.
@@ -1690,17 +1693,20 @@ class InputTypeImages(object):
 
         return ff_struct_fake
 
+
     def nextFrame(self):
         """ Increment current frame. """
 
         self.current_frame = (self.current_frame + 1)%self.total_frames
         self.current_img_file = self.img_list[self.current_frame]
 
+
     def prevFrame(self):
         """ Increment current frame. """
 
         self.current_frame = (self.current_frame - 1)%self.total_frames
         self.current_img_file = self.img_list[self.current_frame]
+
 
     def setFrame(self, fr_num):
         """ Set the current frame.
@@ -1711,6 +1717,7 @@ class InputTypeImages(object):
 
         self.current_frame = fr_num%self.total_frames
         self.current_img_file = self.img_list[self.current_frame]
+
 
     def loadFrame(self, avepixel=None, fr_no=None):
         """ Loads the current frame.
@@ -1728,13 +1735,21 @@ class InputTypeImages(object):
             current_img_file = self.current_img_file
             fr_no = self.current_frame
 
+        # Load an .NEF file
         if current_img_file.lower().endswith('.nef'):
+            
             # .nef files will not be brought here if rawpy is not installed
-            # get raw data from .nef file and get image from it
+            
+            # Get raw data from .nef file and get image from it
             raw = rawpy.imread(os.path.join(self.dir_path, current_img_file))
-            frame = raw.postprocess()
+            frame = raw.postprocess(gamma=(1,1), output_bps=16, no_auto_bright=True, no_auto_scale=True, \
+                output_color=rawpy.ColorSpace.sRGB)
+
+            # Convert the image to grayscale
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+
         else:
-            # Get the current image
+            # Get the current image if it's not an NEF file (e.g. png, jpg...)
             frame = cv2.imread(os.path.join(self.dir_path, current_img_file), -1)
 
         # Convert the image to black and white if it's 8 bit
@@ -1935,11 +1950,20 @@ class InputTypeDFN(InputType):
             print('Using FPS:', self.fps)
 
     def loadImage(self):
+
+        # Load the NEF file
         if self.image_file.endswith('.NEF'):
+            
             # .nef files will not be brought here if rawpy is not installed
             # get raw data from .nef file and get image from it
             raw = rawpy.imread(os.path.join(self.dir_path, self.image_file))
-            frame = raw.postprocess()
+            frame = raw.postprocess(gamma=(1,1), output_bps=16, no_auto_bright=True, no_auto_scale=True, \
+                output_color=rawpy.ColorSpace.sRGB)
+
+            # Convert the image to grayscale
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+
+            
         else:
             # Get the current image
             frame = cv2.imread(os.path.join(self.dir_path, self.image_file), -1)
