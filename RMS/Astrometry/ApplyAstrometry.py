@@ -35,8 +35,8 @@ import argparse
 import numpy as np
 import scipy.optimize
 
-# from RMS.Formats.Platepar import Platepar
-from RMS.Astrometry.Conversions import date2JD, jd2Date, trueRaDec2ApparentAltAz, J2000_JD
+
+from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz, J2000_JD
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.FFfile import filenameToDatetime
@@ -45,7 +45,8 @@ from RMS.Math import angularSeparation
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import cyraDecToXY, cyXYToRADec
+from RMS.Astrometry.CyFunctions import cyraDecToXY, cyXYToRADec, equatorialCoordPrecession, \
+    cyTrueRaDec2ApparentAltAz
 
 # Handle Python 2/3 compability
 if sys.version_info.major == 3:
@@ -72,7 +73,7 @@ def correctVignetting(px_sum, radius, vignetting_coeff):
 
 
 def extinctionCorrectionTrueToApparent(catalog_mags, ra_data, dec_data, jd, platepar):
-    """ Compute apparent magnitudes by applying extinction correction to catalog magnitudes.
+    """ Compute apparent magnitudes by applying extinction correction to catalog magnitudes. 
 
     Arguments:
         catalog_mags: [list] A list of catalog magnitudes.
@@ -80,8 +81,10 @@ def extinctionCorrectionTrueToApparent(catalog_mags, ra_data, dec_data, jd, plat
         dec_data: [list] A list of catalog declinations (J2000) in degrees.
         jd: [float] Julian date.
         platepar: [Platepar object]
+
     Return:
         corrected_catalog_mags: [list] Extinction corrected catalog magnitudes.
+
     """
 
 
@@ -91,8 +94,11 @@ def extinctionCorrectionTrueToApparent(catalog_mags, ra_data, dec_data, jd, plat
     elevation_data = []
     for ra, dec in zip(ra_data, dec_data):
 
+        # Precess to epoch of date
+        ra, dec = equatorialCoordPrecession(J2000_JD.days, jd, np.radians(ra), np.radians(dec))
+
         # Compute elevation
-        _, elev = trueRaDec2ApparentAltAz(ra, dec, jd, platepar.lat, platepar.lon)
+        _, elev = raDec2AltAz(np.degrees(ra), np.degrees(dec), jd, platepar.lat, platepar.lon)
 
         if elev < 0:
             elev = 0
@@ -111,16 +117,18 @@ def extinctionCorrectionTrueToApparent(catalog_mags, ra_data, dec_data, jd, plat
 
 
 def extinctionCorrectionApparentToTrue(mags, x_data, y_data, jd, platepar):
-    """ Compute true magnitudes by applying extinction correction to apparent magnitudes.
-
+    """ Compute true magnitudes by applying extinction correction to apparent magnitudes. 
+    
     Arguments:
         mags: [list] A list of apparent magnitudes.
         x_data: [list] A list of pixel columns.
         y_data: [list] A list of pixel rows.
         jd: [float] Julian date.
         platepar: [Platepar object]
+
     Return:
         corrected_mags: [list] A list of extinction corrected mangitudes.
+
     """
 
 
@@ -134,12 +142,15 @@ def extinctionCorrectionApparentToTrue(mags, x_data, y_data, jd, platepar):
     elevation_data = []
     for ra, dec in zip(ra_data, dec_data):
 
+        # Precess to epoch of date
+        ra, dec = equatorialCoordPrecession(J2000_JD.days, jd, np.radians(ra), np.radians(dec))
+
         # Compute elevation
-        _, elev = trueRaDec2ApparentAltAz(ra, dec, jd, platepar.lat, platepar.lon)
+        _, elev = raDec2AltAz(np.degrees(ra), np.degrees(dec), jd, platepar.lat, platepar.lon)
 
         if elev < 0:
             elev = 0
-
+            
         elevation_data.append(elev)
 
     ### ###
@@ -336,12 +347,12 @@ def rotationWrtHorizon(platepar):
     img_up_h = img_mid_h
 
     # Compute apparent alt/az in the epoch of date from X,Y
-    jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP(2*[jd2Date(platepar.JD)], [img_mid_w, img_up_w],
+    jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP(2*[jd2Date(platepar.JD)], [img_mid_w, img_up_w], \
         [img_mid_h, img_up_h], [1, 1], platepar, extinction_correction=False)
-    azim_mid, alt_mid = trueRaDec2ApparentAltAz(ra_arr[0], dec_arr[0], jd_arr[0], platepar.lat, platepar.lon,
-                                                platepar.refraction)
-    azim_up, alt_up = trueRaDec2ApparentAltAz(ra_arr[1], dec_arr[1], jd_arr[1], platepar.lat, platepar.lon,
-                                              platepar.refraction)
+    azim_mid, alt_mid = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[0]), np.radians(dec_arr[0]), jd_arr[0], \
+        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
+    azim_up, alt_up = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[1]), np.radians(dec_arr[1]), jd_arr[1], \
+        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
 
     # Compute the rotation wrt horizon (deg)
     rot_angle = np.degrees(np.arctan2(alt_up - alt_mid, azim_up - azim_mid))
@@ -494,7 +505,7 @@ def calculateMagnitudes(px_sum_arr, radius_arr, photom_offset, vignetting_coeff)
 
 
 def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_correction=True):
-    """ Converts image XY to RA,Dec, but it takes a platepar instead of individual parameters.
+    """ Converts image XY to RA,Dec, but it takes a platepar instead of individual parameters. 
 
     Arguments:
         time_data: [2D ndarray] Numpy array containing time tuples of each data point (year, month, day,
@@ -503,9 +514,11 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
         Y_data: [ndarray] 1D numpy array containing the image Y component.
         level_data: [ndarray] Levels of the meteor centroid.
         platepar: [Platepar structure] Astrometry parameters.
+
     Keyword arguments:
-        extinction_correction: [bool] Apply extinction correction. True by default. False is set to prevent
+        extinction_correction: [bool] Apply extinction correction. True by default. False is set to prevent 
             infinite recursion in extinctionCorrectionApparentToTrue when set to True.
+
     Return:
         (JD_data, RA_data, dec_data, magnitude_data): [tuple of ndarrays]
             JD_data: [ndarray] Julian date of each data point.
@@ -523,8 +536,8 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
         np.array(Y_data, dtype=np.float64), float(platepar.lat), float(platepar.lon), float(platepar.X_res), \
         float(platepar.Y_res), float(platepar.Ho), float(platepar.RA_d), float(platepar.dec_d), \
         float(platepar.pos_angle_ref), float(platepar.F_scale), platepar.x_poly_fwd, platepar.y_poly_fwd, \
-        unicode(platepar.distortion_type), refraction=platepar.refraction, equal_aspect=platepar.equal_aspect,
-        force_distortion_centre=platepar.force_distortion_centre)
+        unicode(platepar.distortion_type), refraction=platepar.refraction, \
+        equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre)
 
     # Compute radiia from image centre
     radius_arr = np.hypot(np.array(X_data) - platepar.X_res/2, np.array(Y_data) - platepar.Y_res/2)
@@ -628,8 +641,12 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
         ra_tmp = RA_data[i]
         dec_tmp = dec_data[i]
 
-        # Alt and az are kept in the J2000 epoch, which is the CAMS standard!
-        az_tmp, alt_tmp = trueRaDec2ApparentAltAz(ra_tmp, dec_tmp, jd, platepar.lat, platepar.lon)
+        # Precess RA/Dec to epoch of date
+        ra_tmp, dec_tmp = equatorialCoordPrecession(J2000_JD.days, jd, np.radians(ra_tmp), \
+            np.radians(dec_tmp))
+
+        # Alt/Az are apparent (in the epoch of date, corresponding to geographical azimuths)
+        az_tmp, alt_tmp = raDec2AltAz(np.degrees(ra_tmp), np.degrees(dec_tmp), jd, platepar.lat, platepar.lon)
 
         az_data[i] = az_tmp
         alt_data[i] = alt_tmp

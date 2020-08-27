@@ -50,11 +50,12 @@ class fr_struct:
         # The width and height of every cutout (the cutouts are square, so only one size is saved)
         self.size = []
 
-        # Image data for the cutouts. If you want to retrieve the cutout image for the first line and the
+        # Image data for the cutouts. If you want to retrieve the cutout image for the first line and the 
         #   second frame, call: self.frames[0][1]
         self.frames = []
 
         ### ###
+
         self.nrows = None
         self.ncols = None
         self.__maxpixel = None
@@ -62,71 +63,97 @@ class fr_struct:
 
         self.dtype = np.uint8
 
+
     @property
     def nframes(self):
         return 256
 
     @property
     def maxpixel(self):
+        """ Construct a maxpixel from an FR file. """
+
         assert self.nrows is not None and self.ncols is not None
+
         if self.__maxpixel is None:
+
+            # Init an empty image
             img = np.zeros((self.ncols, self.nrows), np.float)
 
+            # Crease a maxpixel using all lines
             for line in range(self.lines):
+
                 for i in range(self.frameNum[line]):
+
                     filter_x = np.arange(int(self.xc[line][i] - self.size[line][i]/2),
                                          int(self.xc[line][i] + self.size[line][i]/2))
+
                     filter_y = np.arange(int(self.yc[line][i] - self.size[line][i]/2),
                                          int(self.yc[line][i] + self.size[line][i]/2))
+
                     filter_x, filter_y = np.meshgrid(filter_x, filter_y)
 
                     img[filter_x, filter_y] = np.maximum(img[filter_x, filter_y], self.frames[line][i])
 
             self.__maxpixel = np.swapaxes(img, 0, 1).astype(self.dtype)
+
         return self.__maxpixel
 
     @maxpixel.setter
     def maxpixel(self, maxpixel):
         self.__maxpixel = maxpixel
 
+
     @property
     def avepixel(self):
+        """ Construct an avepixel from an FR file. """
+
         assert self.nrows is not None and self.ncols is not None
+
         if self.__avepixel is None:
+
+            # Init an empty image
             img = np.zeros((self.ncols, self.nrows), np.float64)
             img_count = np.full((self.ncols, self.nrows), -1, dtype=np.float64)
 
             for line in range(self.lines):
                 for i in range(self.frameNum[line]):
+
                     filter_x = np.arange(int(self.xc[line][i] - self.size[line][i]/2),
                                          int(self.xc[line][i] + self.size[line][i]/2))
+
                     filter_y = np.arange(int(self.yc[line][i] - self.size[line][i]/2),
                                          int(self.yc[line][i] + self.size[line][i]/2))
+
                     filter_x, filter_y = np.meshgrid(filter_x, filter_y)
 
                     img[filter_x, filter_y] += self.frames[line][i]
                     img_count[filter_x, filter_y] += 1
+
             img_count[img_count <= 0] = 1
             img_count = np.swapaxes(img_count, 0, 1)
             img = np.swapaxes(img, 0, 1)
+
             self.__avepixel = ((img - self.maxpixel)/img_count).astype(self.dtype)
 
         return self.__avepixel
+
 
     @avepixel.setter
     def avepixel(self, avepixel):
         self.__avepixel = avepixel
 
 
+
 def read(dir_path, filename):
     """ Read an FR*.bin file.
-
+    
     Arguments:
         dir_path: [str] Path to directory containing file.
         filename: [str] Name of FR*.bin file (either with the FR prefix and the .bin suffix, or without).
-
+    
     Return:
-        fr: [fr_struct instance]
+        fr: [fr_struct instance] 
+
     """
     if filename[:2] == "FR":
         fid = open(os.path.join(dir_path, filename), "rb")

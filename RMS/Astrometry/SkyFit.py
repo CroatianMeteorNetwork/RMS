@@ -68,7 +68,7 @@ from RMS.Misc import decimalDegreesToSexHours, openFileDialog
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import subsetCatalog, trueRaDec2ApparentAltAz, apparentAltAz2TrueRADec
+from RMS.Astrometry.CyFunctions import subsetCatalog, cyTrueRaDec2ApparentAltAz, cyApparentAltAz2TrueRADec
 
 
 
@@ -377,7 +377,6 @@ class PlateTool(object):
         plt.rcParams['keymap.grid_minor'] = ''
 
 
-
         self.ax.figure.canvas.mpl_connect('button_press_event', self.onMousePress)
         self.ax.figure.canvas.mpl_connect('button_release_event', self.onMouseRelease)
 
@@ -588,7 +587,7 @@ class PlateTool(object):
             jd, ra, dec, _ = xyToRaDecPP(time_data, [x], [y], [1], self.platepar, extinction_correction=False)
 
             # Compute apparent alt/az
-            azim, alt = trueRaDec2ApparentAltAz( \
+            azim, alt = cyTrueRaDec2ApparentAltAz( \
                 np.radians(ra[0]), np.radians(dec[0]), jd[0], np.radians(self.platepar.lat), \
                 np.radians(self.platepar.lon), self.platepar.refraction)
             azim, alt = np.degrees(azim), np.degrees(alt)
@@ -1079,7 +1078,7 @@ class PlateTool(object):
 
 
         # Convert the reference apparent Alt/Az in the epoch of date to true RA/Dec in J2000
-        ra, dec = apparentAltAz2TrueRADec(\
+        ra, dec = cyApparentAltAz2TrueRADec(\
             np.radians(self.platepar.az_centre), np.radians(self.platepar.alt_centre), self.platepar.JD, \
             np.radians(self.platepar.lat), np.radians(self.platepar.lon), self.platepar.refraction)
 
@@ -1348,7 +1347,7 @@ class PlateTool(object):
             self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz = self.getFOVcentre()
 
             # Compute reference Alt/Az to apparent coordinates, epoch of date
-            az_centre, alt_centre = trueRaDec2ApparentAltAz( \
+            az_centre, alt_centre = cyTrueRaDec2ApparentAltAz( \
                 np.radians(self.platepar.RA_d), np.radians(self.platepar.dec_d), self.platepar.JD, \
                 np.radians(self.platepar.lat), np.radians(self.platepar.lon), self.platepar.refraction)
 
@@ -1957,9 +1956,8 @@ class PlateTool(object):
             self.drawCalstars()
 
 
-
         # Update centre of FOV in horizontal coordinates (epoch of date)
-        az_centre, alt_centre = trueRaDec2ApparentAltAz(np.radians(self.platepar.RA_d), \
+        az_centre, alt_centre = cyTrueRaDec2ApparentAltAz(np.radians(self.platepar.RA_d), \
             np.radians(self.platepar.dec_d), self.platepar.JD, np.radians(self.platepar.lat), \
             np.radians(self.platepar.lon), self.platepar.refraction)
         self.platepar.az_centre, self.platepar.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
@@ -2034,7 +2032,6 @@ class PlateTool(object):
             font_color = 'w'
 
         ### ###
-
 
         if self.show_key_help == 0:
             text_str = 'Show fit parameters - F1'
@@ -2230,7 +2227,6 @@ class PlateTool(object):
         # Compute the current Julian date
         jd = date2JD(*self.img_handle.currentTime())
 
-
         # Take only those stars which are inside the FOV
         filtered_indices, filtered_catalog_stars = subsetCatalog(catalog_stars, ra_centre, dec_centre, \
             jd, self.platepar.lat, self.platepar.lon, fov_radius, self.cat_lim_mag)
@@ -2310,7 +2306,7 @@ class PlateTool(object):
         self.platepar.F_scale = scale
 
         # Compute reference Alt/Az to apparent coordinates, epoch of date
-        az_centre, alt_centre = trueRaDec2ApparentAltAz(np.radians(ra), np.radians(dec), jd, \
+        az_centre, alt_centre = cyTrueRaDec2ApparentAltAz(np.radians(ra), np.radians(dec), jd, \
             np.radians(self.platepar.lat), np.radians(self.platepar.lon), self.platepar.refraction)
         self.platepar.az_centre, self.platepar.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
 
@@ -2364,7 +2360,7 @@ class PlateTool(object):
 
 
         # Convert the reference apparent Alt/Az in the epoch of date to true RA/Dec in J2000
-        ra, dec = apparentAltAz2TrueRADec(\
+        ra, dec = cyApparentAltAz2TrueRADec(\
             np.radians(self.azim_centre), np.radians(self.alt_centre), date2JD(*img_time), \
             np.radians(self.platepar.lat), np.radians(self.platepar.lon), self.platepar.refraction)
         ra, dec = np.degrees(ra), np.degrees(dec)
@@ -2478,7 +2474,7 @@ class PlateTool(object):
         self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz = self.getFOVcentre()
 
         # Update centre of FOV in horizontal coordinates (epoch of date)
-        az_centre, alt_centre = trueRaDec2ApparentAltAz(np.radians(self.platepar.RA_d), \
+        az_centre, alt_centre = cyTrueRaDec2ApparentAltAz(np.radians(self.platepar.RA_d), \
             np.radians(self.platepar.dec_d), self.platepar.JD, np.radians(self.platepar.lat), \
             np.radians(self.platepar.lon), self.platepar.refraction)
         self.platepar.az_centre, self.platepar.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
@@ -3028,7 +3024,7 @@ class PlateTool(object):
 
 
             # Compute image residuals
-            x_residuals.append(cat_x - img_x)
+            x_residuals.append(cat_x - img_x) 
             y_residuals.append(cat_y - img_y)
             radius_residuals.append(np.hypot(cat_x - self.platepar.X_res/2, cat_y - self.platepar.Y_res/2) \
                 - img_radius)
@@ -3048,7 +3044,7 @@ class PlateTool(object):
 
 
             # Compute azim/elev from the catalog
-            azim_cat, elev_cat = trueRaDec2ApparentAltAz( \
+            azim_cat, elev_cat = cyTrueRaDec2ApparentAltAz( \
                 np.radians(cat_ra), np.radians(cat_dec), jd, np.radians(self.platepar.lat), \
                 np.radians(self.platepar.lon), self.platepar.refraction)
             azim_cat, elev_cat = np.degrees(azim_cat), np.degrees(elev_cat)
@@ -3058,7 +3054,7 @@ class PlateTool(object):
 
 
             # Compute azim/elev from image coordinates
-            azim_img, elev_img = trueRaDec2ApparentAltAz( \
+            azim_img, elev_img = cyTrueRaDec2ApparentAltAz( \
                 np.radians(img_ra), np.radians(img_dec), jd, np.radians(self.platepar.lat), \
                 np.radians(self.platepar.lon), self.platepar.refraction)
             azim_img, elev_img = np.degrees(azim_img), np.degrees(elev_img)

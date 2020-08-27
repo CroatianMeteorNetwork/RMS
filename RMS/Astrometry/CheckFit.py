@@ -97,7 +97,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
     for jd in star_dict:
 
         # Estimate RA,dec of the centre of the FOV
-        _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(jd)], [platepar.X_res/2], [platepar.Y_res/2], [1],
+        _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(jd)], [platepar.X_res/2], [platepar.Y_res/2], [1], \
             platepar, extinction_correction=False)
 
         RA_c = RA_c[0]
@@ -349,8 +349,9 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius, v
 
 
 def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict, match_radius):
-    """ Calculates the differences between the stars on the image and catalog stars in image coordinates with
-        the given astrometrical solution.
+    """ Calculates the differences between the stars on the image and catalog stars in image coordinates with 
+        the given astrometrical solution. 
+
     Arguments:
         params: [list] Fit parameters - reference RA, Dec, position angle, and scale.
         config: [Config]
@@ -359,6 +360,7 @@ def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict,
         star_dict: [dict] Dictionary which contains the JD, and a list of (X, Y, bg_intens, intens) of the
             stars on the image.
         match_radius: [float] Star match radius (px).
+
     Return:
         [float] The average pixel residual (difference between image and catalog positions) normalized
             by the square root of the total number of matched stars.

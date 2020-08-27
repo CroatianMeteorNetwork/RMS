@@ -6,6 +6,7 @@ import numpy as np
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, computeFOVSize
 from RMS.Astrometry.Conversions import jd2Date, apparentAltAz2TrueRADec, trueRaDec2ApparentAltAz
+from RMS.Math import angularSeparation
 
 
 def updateRaDecGrid(grid, platepar):
@@ -18,10 +19,12 @@ def updateRaDecGrid(grid, platepar):
 
     """
     # Estimate RA,dec of the centre of the FOV
-    _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(platepar.JD)], [platepar.X_res/2], [platepar.Y_res/2], [1],
+    _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(platepar.JD)], [platepar.X_res/2], [platepar.Y_res/2], [1], \
                                     platepar, extinction_correction=False)
+    RA_c = RA_c[0]
+    dec_c = dec_c[0]
 
-    # azim_centre, alt_centre = trueRaDec2ApparentAltAz(RA_c, dec_c, platepar.JD, platepar.lat, platepar.lon)
+    azim_centre, alt_centre = trueRaDec2ApparentAltAz(RA_c, dec_c, platepar.JD, platepar.lat, platepar.lon)
 
     # Compute FOV size
     fov_radius = np.hypot(*computeFOVSize(platepar))
@@ -51,14 +54,11 @@ def updateRaDecGrid(grid, platepar):
         dec_grid_plot = np.zeros_like(ra_grid_plot) + dec_grid
 
         # Compute alt/az
-        az_grid_plot, alt_grid_plot = trueRaDec2ApparentAltAz(ra_grid_plot, dec_grid_plot, platepar.JD, platepar.lat,
-                                                              platepar.lon, platepar.refraction)
+        az_grid_plot, alt_grid_plot = trueRaDec2ApparentAltAz(ra_grid_plot, dec_grid_plot, platepar.JD, \
+            platepar.lat, platepar.lon, platepar.refraction)
 
         # Filter out points below the horizon  and outside the FOV
-        filter_arr = (alt_grid_plot > 0) # & (angularSeparation(alt_centre,
-                                                              # azim_centre,
-                                                              # alt_grid_plot,
-                                                              # az_grid_plot) < fov_radius)
+        filter_arr = (alt_grid_plot > 0) & (angularSeparation(alt_centre, azim_centre, alt_grid_plot, az_grid_plot) < fov_radius)
         ra_grid_plot = ra_grid_plot[filter_arr]
         dec_grid_plot = dec_grid_plot[filter_arr]
 

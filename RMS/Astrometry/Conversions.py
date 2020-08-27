@@ -31,18 +31,25 @@ Includes:
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+from __future__ import print_function, division, absolute_import, unicode_literals
+
 import math
 from datetime import datetime, timedelta, MINYEAR
 
 import numpy as np
+import scipy.optimize
 
 from RMS.Math import vectMag, vectNorm
 
 # Import Cython functions
 import pyximport
-
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
-import RMS.Astrometry.CyFunctions as cy
+from RMS.Astrometry.CyFunctions import cyaltAz2RADec, cyraDec2AltAz, cyApparentAltAz2TrueRADec, \
+    cyApparentAltAz2TrueRADec_vect, cyTrueRaDec2ApparentAltAz, cyTrueRaDec2ApparentAltAz_vect
+
+# Vectorize some functions
+cyaltAz2RADec_vect = np.vectorize(cyaltAz2RADec, excluded=["jd", "lat", "lon"])
+cyraDec2AltAz_vect = np.vectorize(cyraDec2AltAz, excluded=["jd", "lat", "lon"])
 
 ### CONSTANTS ###
 
@@ -52,12 +59,14 @@ J2000_JD = timedelta(2451545)  # julian epoch in julian dates
 
 
 class EARTH_CONSTANTS(object):
-    """ Holds Earth's shape parameters. """
+    """ Holds Earth's shape and physical parameters. """
 
     def __init__(self):
-        # Earth elipsoid parameters in meters (source: IERS 2003)
-        self.EQUATORIAL_RADIUS = 6378136.6
-        self.POLAR_RADIUS = 6356751.9
+
+        # Earth elipsoid parameters in meters (source: WGS84, the GPS standard)
+        self.EQUATORIAL_RADIUS = 6378137.0
+        self.POLAR_RADIUS = 6356752.314245
+        self.E = math.sqrt(1.0 - self.POLAR_RADIUS**2/self.EQUATORIAL_RADIUS**2)
         self.RATIO = self.EQUATORIAL_RADIUS/self.POLAR_RADIUS
         self.SQR_DIFF = self.EQUATORIAL_RADIUS**2 - self.POLAR_RADIUS**2
 
@@ -291,54 +300,294 @@ def JD2HourAngle(jd):
 
 ### Spatial coordinates transformations ###
 
-@floatArguments
-def geo2Cartesian(lat, lon, h, julian_date):
-    """ Convert geographical Earth coordinates to Cartesian coordinate system (Earth center as origin).
-        The Earth is considered as an elipsoid.
-    @param lat: [float] latitude of the observer in degrees
-    @param lon: [float] longitde of the observer in degress
-    @param h: [int or float] elevation of the observer in meters
-    @param julian_date: [float] decimal julian date, epoch J2000.0
-    @return (x, y, z): [tuple of floats] a tuple of X, Y, Z Cartesian coordinates
+
+def LST2LongitudeEast(julian_date, LST):
+    """ Convert Julian date and Local Sidereal Time to east longitude. 
+    
+    Arguments:
+        julian_date: [float] decimal julian date, epoch J2000.0
+        LST: [float] Local Sidereal Time in degrees
+
+    Return:
+        lon: [float] longitude of the observer in degrees
     """
 
-    lat_rad = math.radians(lat)
+    # Greenwich Sidereal Time (apparent)
+    _, GST = JD2LST(julian_date, 0)
+
+    # Calculate longitude
+    lon = (LST - GST + 180)%360 - 180
+
+    return lon, GST
+
+
+
+def latLonAlt2ECEF(lat, lon, h):
+    """ Convert geographical coordinates to Earth centered - Earth fixed coordinates.
+
+    Arguments:
+        lat: [float] latitude in radians (+north)
+        lon: [float] longitude in radians (+east)
+        h: [float] elevation in meters (WGS84)
+
+    Return:
+        (x, y, z): [tuple of floats] ECEF coordinates
+
+    """
+
+    # Get distance from Earth centre to the position given by geographical coordinates, in WGS84
+    N = EARTH.EQUATORIAL_RADIUS/math.sqrt(1.0 - (EARTH.E**2)*math.sin(lat)**2)
+
+    # Calculate ECEF coordinates
+    ecef_x = (N + h)*math.cos(lat)*math.cos(lon)
+    ecef_y = (N + h)*math.cos(lat)*math.sin(lon)
+    ecef_z = ((1 - EARTH.E**2)*N + h)*math.sin(lat)
+
+    return ecef_x, ecef_y, ecef_z
+
+
+@floatArguments
+def geo2Cartesian(lat, lon, h, julian_date):
+    """ Convert geographical Earth coordinates to Cartesian ECI coordinate system (Earth center as origin).
+        The Earth is considered as an elipsoid.
+    
+    Arguments:
+        lat_rad: [float] Latitude of the observer in degrees (+N), WGS84.
+        lon_rad: [float] Longitde of the observer in degrees (+E), WGS84.
+        h: [int or float] Elevation of the observer in meters (WGS84 convention).
+        julian_date: [float] Julian date, epoch J2000.0.
+    
+    Return:
+        (x, y, z): [tuple of floats] A tuple of X, Y, Z Cartesian ECI coordinates in meters.
+        
+    """
+
+    lat_rad = np.radians(lat)
+    lon_rad = np.radians(lon)
+
+    # Calculate ECEF coordinates
+    ecef_x, ecef_y, ecef_z = latLonAlt2ECEF(lat_rad, lon_rad, h)
+
 
     # Get Local Sidreal Time
-    LST_rad = math.radians(JD2LST(julian_date, lon)[0])
+    LST_rad = math.radians(JD2LST(julian_date, np.degrees(lon_rad))[0])
 
-    # Get distance from Earth centre to the position given by geographical coordinates
-    Rh = h + math.sqrt(EARTH.POLAR_RADIUS**2 + (EARTH.SQR_DIFF/((EARTH.RATIO*math.tan(lat_rad))*
-                                                                (EARTH.RATIO*math.tan(lat_rad)) + 1)))
+    # Calculate the Earth radius at given latitude
+    Rh = math.sqrt(ecef_x**2 + ecef_y**2 + ecef_z**2)
 
-    # Calculate Cartesian coordinates (in meters)
-    x = Rh*math.cos(lat_rad)*math.cos(LST_rad)
-    y = Rh*math.cos(lat_rad)*math.sin(LST_rad)
-    z = Rh*math.sin(lat_rad)
+    # Calculate the geocentric latitude (latitude which considers the Earth as an elipsoid)
+    lat_geocentric = math.atan2(ecef_z, math.sqrt(ecef_x**2 + ecef_y**2))
+
+    # Calculate Cartesian ECI coordinates (in meters), in the epoch of date
+    x = Rh*np.cos(lat_geocentric)*np.cos(LST_rad)
+    y = Rh*np.cos(lat_geocentric)*np.sin(LST_rad)
+    z = Rh*np.sin(lat_geocentric)
 
     return x, y, z
 
 
-def cartesian2Geographical(julian_date, lon, Xi, Yi, Zi):
-    """ Convert Cartesian coordinates of a point (origin in Earth's centre) to geographical coordinates.
-    @param julian_date: [float] decimal julian date, epoch J2000.0
-    @param lon: [float] longitde of the observer in degress
-    @param Xi: [float] X coordinate of a point in space (meters)
-    @param Yi: [float] Y coordinate of a point in space (meters)
-    @param Zi: [float] Z coordinate of a point in space (meters)
-    @return (lon_p, lat_p): [tuple of floats]
-        lon_p: longitude of the point in degrees
-        lat_p: latitude of the point in degrees
+
+def ecef2LatLonAlt(x, y, z):
+    """ Convert Earth centered - Earth fixed coordinates to geographical coordinates (latitude, longitude, 
+        elevation).
+
+    Arguments:
+        x: [float] ECEF x coordinate
+        y: [float] ECEF y coordinate
+        z: [float] ECEF z coordinate
+
+    Return:
+        (lat, lon, alt): [tuple of floats] latitude and longitude in radians, WGS84 elevation in meters
+
     """
 
-    # Get LST and GST
-    LST, GST = JD2LST(julian_date, lon)
+    # Calculate the polar eccentricity
+    ep = np.sqrt((EARTH.EQUATORIAL_RADIUS**2 - EARTH.POLAR_RADIUS**2)/(EARTH.POLAR_RADIUS**2))
 
-    # Convert Cartesian coordinates to latitude and longitude
-    lon_p = math.degrees(math.atan2(Yi, Xi) - math.radians(GST))
-    lat_p = math.degrees(math.atan2(math.sqrt(Xi**2 + Yi**2), Zi))
+    # Calculate the longitude
+    lon = np.arctan2(y, x)
 
-    return lon_p, lat_p
+    p = np.sqrt(x**2  +  y**2)
+
+    theta = np.arctan2( z*EARTH.EQUATORIAL_RADIUS, p*EARTH.POLAR_RADIUS)
+
+    # Calculate the latitude
+    lat = np.arctan2(z + (ep**2)*EARTH.POLAR_RADIUS*np.sin(theta)**3, \
+        p - (EARTH.E**2)*EARTH.EQUATORIAL_RADIUS*np.cos(theta)**3)
+
+    # Get distance from Earth centre to the position given by geographical coordinates, in WGS84
+    N = EARTH.EQUATORIAL_RADIUS/math.sqrt(1.0 - (EARTH.E**2)*math.sin(lat)**2)
+
+    
+    # Calculate the height in meters
+
+    # Correct for numerical instability in altitude near exact poles (and make sure cos(lat) is not 0!)
+    if((np.abs(x) < 1000) and (np.abs(y) < 1000)):
+        alt = np.abs(z) - EARTH.POLAR_RADIUS
+
+    else:
+        # Calculate altitude anywhere else
+        alt = p/np.cos(lat) - N
+
+
+    return lat, lon, alt
+
+
+
+def AER2ECEF(azim, elev, r, lat, lon, alt):
+    """ Given an azimuth, altitude, and range, compute the ECEF coordinate of that point given a location
+        of the observer by lat, lon, alt.
+
+        Source: https://stackoverflow.com/questions/15954978/ecef-from-azimuth-elevation-range-and-observer-lat-lon-alt
+
+    Arguments:
+        azim: [float] Azimuth (+E of due N) in degrees.
+        elev: [float] Elevation in degrees.
+        r: [float] Range in meters.
+        lat: [float] Latitude of observer in degrees.
+        lon: [float] Longitude of observer in degrees.
+        alt: [float] Altitude of observer in meters.
+
+    Return:
+        (x, y, z): [list of floats] ECEF coordinates of the given point.
+
+    """
+
+    # Observer ECEF coordinates
+    obs_x, obs_y, obs_z = latLonAlt2ECEF(np.radians(lat), np.radians(lon), alt)
+
+    # Precalculate some values
+    slat = np.sin(np.radians(lat))
+    slon = np.sin(np.radians(lon))
+    clat = np.cos(np.radians(lat))
+    clon = np.cos(np.radians(lon))
+
+    azim_rad = np.radians(azim)
+    elev_rad = np.radians(elev)
+
+    # Convert alt/az to direction components
+    south  = -r*np.cos(elev_rad)*np.cos(azim_rad)
+    east   =  r*np.cos(elev_rad)*np.sin(azim_rad)
+    zenith =  r*np.sin(elev_rad)
+
+
+    x = obs_x + ( slat*clon*south) + (-slon*east) + (clat*clon*zenith)
+    y = obs_y + ( slat*slon*south) + ( clon*east) + (clat*slon*zenith)
+    z = obs_z + (-clat*     south)                + (slat*     zenith)
+
+    return x, y, z
+
+
+
+def AEH2Range(azim, elev, h, lat, lon, alt):
+    """ Given an azimuth and altitude, compute the range to a point along the given line of sight
+        that has the specified height above the ground.
+
+    Arguments:
+        azim: [float] Azimuth (+E of due N) in degrees.
+        elev: [float] Elevation in degrees.
+        h: [float] Height of the point on the line of sight (meters).
+        lat: [float] Latitude of observer in degrees.
+        lon: [float] Longitude of observer in degrees.
+        alt: [float] Altitude of observer in meters.
+
+    Return:
+        r: [float] Range to point in meters.
+
+    """
+
+
+    def _heightCostFunction(params, azim, elev, h, lat, lon, alt):
+
+        # Get the guessed range
+        r = params
+
+        # Compute the ECEF coordinates with the given range
+        x, y, z = AER2ECEF(azim, elev, r, lat, lon, alt)
+
+        # Compute the height
+        _, _, h_computed = ecef2LatLonAlt(x, y, z)
+
+        # Return residual between the heights
+        return (h_computed - h)**2
+
+
+    # Use a flat-Earth range as a first guess of range if the elevation is higher than 10 degrees
+    if elev > np.radians(10):
+        r0 = (h - alt)/np.sin(np.radians(elev))
+    else:
+        # Otherwise, use a distance of 1000 km
+        r0 = 1e6
+
+    # Numerically find the range which corresponds to the given height above the ground
+    res = scipy.optimize.minimize(_heightCostFunction, r0, \
+        args=(azim, elev, h, lat, lon, alt))
+
+    # Return the minimized solution
+    return res.x[0]
+
+
+
+def AEH2LatLonAlt(azim, elev, h, lat, lon, alt):
+    """ Given an azimuth and altitude, compute lat, lon, and lat to a point along the given line of sight
+        that has the specified height above the ground.
+
+    Arguments:
+        azim: [float] Azimuth (+E of due N) in degrees.
+        elev: [float] Elevation in degrees.
+        h: [float] Height of the point on the line of sight (meters).
+        lat: [float] Latitude of observer in degrees.
+        lon: [float] Longitude of observer in degrees.
+        alt: [float] Altitude of observer in meters.
+
+    Return:
+        (lat, lon, alt): [tuple of floats] latitude and longitude in degrees, WGS84 elevation in meters
+
+    """
+
+    # Compute the range to the point
+    r = AEH2Range(azim, elev, h, lat, lon, alt)
+
+
+    # Compute lat/lon/alt of the point on the line of sight
+    x, y, z = AER2ECEF(azim, elev, r, lat, lon, alt)
+    lat2, lon2, alt2 = ecef2LatLonAlt(x, y, z)
+    lat2, lon2 = np.degrees(lat2), np.degrees(lon2)
+
+
+    return lat2, lon2, alt2
+
+
+
+def cartesian2Geo(julian_date, x, y, z):
+    """ Convert Cartesian ECI coordinates of a point (origin in Earth's centre) to geographical coordinates.
+    
+    Arguments:
+        julian_date: [float] decimal julian date
+        X: [float] X coordinate of a point in space (meters)
+        Y: [float] Y coordinate of a point in space (meters)
+        Z: [float] Z coordinate of a point in space (meters)
+    
+    Return:
+        (lon, lat, ele): [tuple of floats]
+            lat: longitude of the point in degrees
+            lon: latitude of the point in degrees
+            ele: elevation in meters
+    """
+
+
+    # Calculate LLA
+    lat, r_LST, ele = ecef2LatLonAlt(x, y, z)
+
+    # Calculate proper longitude from the given JD
+    lon, _ = LST2LongitudeEast(julian_date, np.degrees(r_LST))
+
+    # Convert longitude to radians
+    lon = np.radians(lon)
+
+
+    return np.degrees(lat), np.degrees(lon), ele
+
 
 
 def raDec2Vector(ra, dec):
@@ -398,9 +647,9 @@ def altAz2RADec(azim, elev, jd, lat, lon):
     lon = np.radians(lon)
 
     if isinstance(azim, float) or isinstance(azim, int) or isinstance(azim, np.float64):
-        ra, dec = cy.cyaltAz2RADec(azim, elev, jd, lat, lon)
+        ra, dec = cyaltAz2RADec(azim, elev, jd, lat, lon)
     elif isinstance(azim, np.ndarray):
-        ra, dec = cy.cyaltAz2RADec_vect(azim, elev, jd, lat, lon)
+        ra, dec = cyaltAz2RADec_vect(azim, elev, jd, lat, lon)
     else:
         raise TypeError("azim must be a number or np.ndarray, given: {}".format(type(azim)))
 
@@ -408,15 +657,33 @@ def altAz2RADec(azim, elev, jd, lat, lon):
 
 
 def apparentAltAz2TrueRADec(azim, elev, jd, lat, lon, refraction=True):
+    """ Convert the apparent azimuth and altitude in the epoch of date to true (refraction corrected) right 
+        ascension and declination in J2000.
+    Arguments:
+        azim: [float] Azimuth (+East of due North) in degrees (epoch of date).
+        elev: [float] Elevation above horizon in degrees (epoch of date).
+        jd: [float] Julian date.
+        lat: [float] Latitude of the observer in degrees.
+        lon: [float] Longitde of the observer in degrees.
+    Keyword arguments:
+        refraction: [bool] Apply refraction correction. True by default.
+    Return:
+        (ra, dec): [tuple]
+            ra: [float] Right ascension (degrees, J2000).
+            dec: [float] Declination (degrees, J2000).
+    """
+
     azim = np.radians(azim)
     elev = np.radians(elev)
     lat = np.radians(lat)
     lon = np.radians(lon)
 
     if isinstance(azim, float) or isinstance(azim, int) or isinstance(azim, np.float64):
-        ra, dec = cy.apparentAltAz2TrueRADec(azim, elev, jd, lat, lon, refraction)
+        ra, dec = cyApparentAltAz2TrueRADec(azim, elev, jd, lat, lon, refraction)
+    
     elif isinstance(azim, np.ndarray):
-        ra, dec = cy.apparentAltAz2TrueRADec_vect(azim, elev, jd, lat, lon, refraction)
+        ra, dec = cyApparentAltAz2TrueRADec_vect(azim, elev, jd, lat, lon, refraction)
+
     else:
         raise TypeError("azim must be a number or np.ndarray, given: {}".format(type(azim)))
 
@@ -441,9 +708,12 @@ def raDec2AltAz(ra, dec, jd, lat, lon):
 
     # Compute azim and elev using a fast cython function
     if isinstance(ra, float) or isinstance(ra, int) or isinstance(ra, np.float64):
-        azim, elev = cy.cyraDec2AltAz(ra, dec, jd, lat, lon)
+        azim, elev = cyraDec2AltAz(ra, dec, jd, lat, lon)
+
     elif isinstance(ra, np.ndarray):
-        azim, elev = cy.cyraDec2AltAz_vect(ra, dec, jd, lat, lon)
+        # Compute it for numpy arrays
+        azim, elev = cyraDec2AltAz_vect(ra, dec, jd, lat, lon)
+
     else:
         raise TypeError("ra must be a number or np.ndarray, given: {}".format(type(ra)))
 
@@ -451,15 +721,35 @@ def raDec2AltAz(ra, dec, jd, lat, lon):
 
 
 def trueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True):
+    """ Convert the true right ascension and declination in J2000 to azimuth (+East of due North) and 
+        altitude in the epoch of date. The correction for refraction is performed.
+    Arguments:
+        ra: [float] Right ascension in degrees (J2000).
+        dec: [float] Declination in degrees (J2000).
+        jd: [float] Julian date.
+        lat: [float] Latitude in degrees.
+        lon: [float] Longitude in degrees.
+    Keyword arguments:
+        refraction: [bool] Apply refraction correction. True by default.
+    Return:
+        (azim, elev): [tuple]
+            azim: [float] Azimuth (+east of due north) in degrees (epoch of date).
+            elev: [float] Elevation above horizon in degrees (epoch of date).
+    """
+
     ra = np.radians(ra)
     dec = np.radians(dec)
     lat = np.radians(lat)
     lon = np.radians(lon)
 
     if isinstance(ra, float) or isinstance(ra, int) or isinstance(ra, np.float64):
-        azim, elev = cy.trueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction)
+        azim, elev = cyTrueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction)
+
     elif isinstance(ra, np.ndarray):
-        azim, elev = cy.trueRaDec2ApparentAltAz_vect(ra, dec, jd, lat, lon, refraction)
+
+        # Compute it for numpy arrays
+        azim, elev = cyTrueRaDec2ApparentAltAz_vect(ra, dec, jd, lat, lon, refraction)
+
     else:
         raise TypeError("ra must be a number or np.ndarray, given: {}".format(type(ra)))
 
@@ -580,3 +870,21 @@ if __name__ == "__main__":
     print('ra = ', ra)
     print('dec = ', dec)
     print('v_init = ', v_init)
+
+
+
+    ### Test computing Lat/Lon/Alt given an azim, elev and height ###
+
+    azim = 0
+    elev = 45
+    h = 100000
+    lat = 45.0
+    lon = 13.0
+    alt = 90.0
+
+    # Compute lat/lon/alt of the point along the LOS
+    lat2, lon2, alt2 = AEH2LatLonAlt(azim, elev, h, lat, lon, alt)
+    print(lat2, lon2, alt2)
+
+
+    ### ###

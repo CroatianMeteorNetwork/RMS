@@ -126,8 +126,10 @@ def wait(duration, compressor):
 def runCapture(config, duration=None, video_file=None, nodetect=False, detect_end=False, \
     upload_manager=None, resume_capture=False):
     """ Run capture and compression for the given time.given
+    
     Arguments:
         config: [config object] Configuration read from the .config file.
+
     Keyword arguments:
         duration: [float] Time in seconds to capture. None by default.
         video_file: [str] Path to the video file, if it was given as the video source. None by default.
@@ -137,6 +139,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         upload_manager: [UploadManager object] A handle to the UploadManager, which handles uploading files to
             the central server. None by default.
         resume_capture: [bool] Resume capture in the last data directory in CapturedFiles.
+
     Return:
         night_archive_dir: [str] Path to the archive folder of the processed night.
     """
@@ -428,6 +431,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         log.info('Adding file to upload list: ' + archive_name)
         upload_manager.addFiles([archive_name])
         log.info('File added...')
+
+        # Delay the upload, if the delay is given
+        upload_manager.delayNextUpload(delay=60*config.upload_delay)
 
 
     # Delete detector backup files
@@ -901,7 +907,7 @@ if __name__ == "__main__":
         log.info('Starting capture for {:.2f} hours'.format(duration/60/60))
 
         # Run capture and compression
-        night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect,
+        night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect, \
             upload_manager=upload_manager, detect_end=cml_args.detectend, resume_capture=cml_args.resume)
 
         # Indicate that the capture was done once

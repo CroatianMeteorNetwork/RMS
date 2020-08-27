@@ -26,6 +26,23 @@ with open('requirements.txt') as f:
     requirements = f.read().splitlines()
 
 
+### Add rawpy is running on Windows or Linux (not the Pi) ###
+
+# Check if running on Windows
+if 'win' in sys.platform:
+    requirements.append("rawpy")
+
+# Check if running on Linux
+else:
+
+    # Check if running on the Pi
+    if 'arm' in os.uname()[4]:
+        print("Not installing rawpy because it is not available on the Pi...")
+
+    else:
+        requirements.append("rawpy")
+
+### ###
 
 
 ### HANDLE DIFFERENT ONVIF LIBRARIES FOR Py 2 AND 3 ###
