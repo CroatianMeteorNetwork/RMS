@@ -564,25 +564,30 @@ class ImageItem(pg.ImageItem):
         # into a single lut for better performance
         levels = self.levels
 
-        if levels is not None and levels.ndim == 1 and image.dtype in (np.ubyte, np.uint16):
+        if (levels is not None) and (levels.ndim == 1) and (image.dtype in (np.ubyte, np.uint16)):
+
             if self._effectiveLut is None:
+
                 eflsize = 2**(image.itemsize*8)
                 ind = np.arange(eflsize)
                 minlev, maxlev = levels
                 levdiff = maxlev - minlev
                 levdiff = 1 if levdiff == 0 else levdiff  # don't allow division by 0
+
                 if lut is None:
                     efflut = pg.fn.rescaleData(ind, scale=255./levdiff,
                                                offset=minlev, dtype=np.ubyte)
                 else:
                     lutdtype = np.min_scalar_type(lut.shape[0] - 1)
-                    efflut = pg.fn.rescaleData(ind, scale=(lut.shape[0] - 1)/levdiff,
+                    efflut = pg.fn.rescaleData(ind, scale=(lut.shape[0] - 1)/levdiff, \
                                                offset=minlev, dtype=lutdtype, clip=(0, lut.shape[0] - 1))
                     efflut = lut[efflut]
 
                 self._effectiveLut = efflut
+
             lut = self._effectiveLut
             levels = None
+
 
         # Assume images are in column-major order for backward compatibility
         # (most images are in row-major order)
@@ -590,11 +595,22 @@ class ImageItem(pg.ImageItem):
         if self.axisOrder == 'col-major':
             image = image.transpose((1, 0, 2)[:image.ndim])
 
+        # Make an RGB image
         argb, alpha = pg.fn.makeARGB(image, lut=lut, levels=levels)
-        # LINE THAT WAS CHANGED
-        argb[:, :, :3] = np.clip(np.power(argb[:, :, :3]/255, 1/self._gamma)*255, 0, 255)
+        
+        # Perform gamma correction on only one channel to speed things up
+        argb[:, :, 0] = np.clip(np.power(argb[:, :, 0]/255, 1/self._gamma)*255, 0, 255)
+        argb[:, :, 1] = argb[:, :, 0]
+        argb[:, :, 2] = argb[:, :, 0]
+
+        
+        # Invert image colors
         if self.invert_img:
-            argb[:, :, :3] = 255 - argb[:, :, :3]
+            argb[:, :, 0] = 255 - argb[:, :, 0]
+            argb[:, :, 1] = argb[:, :, 0]
+            argb[:, :, 2] = argb[:, :, 0]
+
+
         self.qimage = pg.fn.makeQImage(argb, alpha, transpose=False)
 
 

@@ -57,8 +57,10 @@ def updateRaDecGrid(grid, platepar):
         az_grid_plot, alt_grid_plot = trueRaDec2ApparentAltAz(ra_grid_plot, dec_grid_plot, platepar.JD, \
             platepar.lat, platepar.lon, platepar.refraction)
 
-        # Filter out points below the horizon  and outside the FOV
-        filter_arr = (alt_grid_plot > 0) & (angularSeparation(alt_centre, azim_centre, alt_grid_plot, az_grid_plot) < fov_radius)
+        # Filter out points below the horizon and outside the FOV
+        filter_arr = (alt_grid_plot > 0) & (np.degrees(angularSeparation(np.radians(alt_centre), \
+            np.radians(azim_centre), np.radians(alt_grid_plot), np.radians(az_grid_plot))) < fov_radius)
+
         ra_grid_plot = ra_grid_plot[filter_arr]
         dec_grid_plot = dec_grid_plot[filter_arr]
 
@@ -83,10 +85,10 @@ def updateRaDecGrid(grid, platepar):
                                                               platepar.lon, platepar.refraction)
 
         # Filter out points below the horizon
-        filter_arr = (alt_grid_plot > 0) #& (angularSeparation(alt_centre,
-                                                              # azim_centre,
-                                                              # alt_grid_plot,
-                                                              # az_grid_plot) < fov_radius)
+        filter_arr = (alt_grid_plot > 0) & (np.degrees(angularSeparation(np.radians(alt_centre),
+                                                              np.radians(azim_centre),
+                                                              np.radians(alt_grid_plot),
+                                                              np.radians(az_grid_plot))) < fov_radius)
         ra_grid_plot = ra_grid_plot[filter_arr]
         dec_grid_plot = dec_grid_plot[filter_arr]
 
@@ -169,10 +171,10 @@ def updateAzAltGrid(grid, platepar):
         alt_grid_plot = np.arange(0, 360, plot_dens)  # how many degrees of circle
         az_grid_plot = np.zeros_like(alt_grid_plot) + az_grid
 
-        # filter_arr = (angularSeparation(alt_centre,
-        #                                 azim_centre,
-        #                                 alt_grid_plot,
-        #                                 az_grid_plot) < fov_radius)
+        # filter_arr = (np.degrees(angularSeparation(np.radians(alt_centre),
+        #                                 np.radians(azim_centre),
+        #                                 np.radians(alt_grid_plot),
+        #                                 np.radians(az_grid_plot))) < fov_radius)
         #
         # alt_grid_plot = alt_grid_plot[filter_arr]
         # az_grid_plot = az_grid_plot[filter_arr]
@@ -194,10 +196,10 @@ def updateAzAltGrid(grid, platepar):
         az_grid_plot = np.arange(0, 90, plot_dens)
         alt_grid_plot = np.zeros_like(az_grid_plot) + alt_grid
 
-        # filter_arr = (angularSeparation(alt_centre,
-        #                                 azim_centre,
-        #                                 alt_grid_plot,
-        #                                 az_grid_plot) < fov_radius)
+        # filter_arr = (np.degrees(angularSeparation(np.radians(alt_centre),
+        #                                 np.radians(azim_centre),
+        #                                 np.radians(alt_grid_plot),
+        #                                 np.radians(az_grid_plot))) < fov_radius)
         #
         # alt_grid_plot = alt_grid_plot[filter_arr]
         # az_grid_plot = az_grid_plot[filter_arr]

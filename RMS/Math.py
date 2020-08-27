@@ -8,20 +8,16 @@ def angularSeparation(ra1, dec1, ra2, dec2):
     """ Calculates the angle between two points on a sphere. 
     
     Arguments:
-        dec1: [float] Declination 1 (degrees).
-        ra1: [float] Right ascension 1 (degrees).
-        dec2: [float] Declination 2 (degrees).
-        ra2: [float] Right ascension 2 (degrees).
+        dec1: [float] Declination 1 (radians).
+        ra1: [float] Right ascension 1 (radians).
+        dec2: [float] Declination 2 (radians).
+        ra2: [float] Right ascension 2 (radians).
 
     Return:
-        [float] Angle between two coordinates (degrees).
+        [float] Angle between two coordinates (radians).
     """
-    ra1 = np.radians(ra1)
-    dec1 = np.radians(dec1)
-    ra2 = np.radians(ra2)
-    dec2 = np.radians(dec2)
 
-    return np.degrees(np.arccos(np.sin(dec1)*np.sin(dec2) + np.cos(dec1)*np.cos(dec2)*np.cos(ra2 - ra1)))
+    return np.arccos(np.sin(dec1)*np.sin(dec2) + np.cos(dec1)*np.cos(dec2)*np.cos(ra2 - ra1))
 
 
 def angularSeparationVect(vect1, vect2):
