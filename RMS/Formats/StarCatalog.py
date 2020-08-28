@@ -5,8 +5,10 @@ from __future__ import print_function, division, absolute_import
 import os
 import numpy as np
 
+from RMS.Decorators import memoizeSingle
 
-def readBSC(file_path, file_name, years_from_J2000=0, lim_mag=None):
+@memoizeSingle
+def readBSC(file_path, file_name, years_from_J2000=0):
     """ Import the Bright Star Catalog in a numpy array. 
     
     Arguments:
@@ -16,14 +18,12 @@ def readBSC(file_path, file_name, years_from_J2000=0, lim_mag=None):
     Keyword arguments:
         years_from_J2000: [float] Decimal years elapsed from the J2000 epoch (for applying poper motion 
             correction, leave at 0 to read non-corrected coordinates).
-        lim_mag: [float] Limiting magnitude. Stars fainter than this magnitude will be filtered out. None by
-            defualt.
     
     Return:
         BSC_data: [ndarray] Array of (RA, dec, mag) parameters for each star in the BSC corrected for
             proper motion, coordinates are in degrees.
     """
-    # TODO: try making this faster
+    
     bsc_path = os.path.join(file_path, file_name)
 
     # Check if the BSC file exits
@@ -75,10 +75,6 @@ def readBSC(file_path, file_name, years_from_J2000=0, lim_mag=None):
             BSC_data[i][1] = np.degrees(dec + dec_proper*years_from_J2000)
             BSC_data[i][2] = mag
 
-
-    # Filter out stars fainter than the limiting magnitude, if it was given
-    if lim_mag is not None:
-        BSC_data = BSC_data[BSC_data[:, 2] < lim_mag]
 
     # Sort stars by descending declination
     BSC_data = BSC_data[BSC_data[:,1].argsort()[::-1]]
@@ -144,7 +140,15 @@ def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
 
     # Use the BSC star catalog if BSC is given
     if 'BSC' in file_name:
-        return readBSC(dir_path, file_name, lim_mag=lim_mag), 'BSC5 V band', [0.0, 1.0, 0.0, 0.0]
+
+        # Load all BSC stars
+        BSC_data = readBSC(dir_path, file_name)
+
+        # Filter out stars fainter than the limiting magnitude, if it was given
+        if lim_mag is not None:
+            BSC_data = BSC_data[BSC_data[:, 2] < lim_mag]
+
+        return BSC_data, 'BSC5 V band', [0.0, 1.0, 0.0, 0.0]
 
 
     # Use the GAIA star catalog

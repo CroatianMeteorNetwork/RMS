@@ -490,15 +490,14 @@ def normalizeParameterMeteor(param, config, binning=1):
 
 
 def parse(path, strict=True):
-    """
-    Parses config file at the given path and returns the corresponding Config object
+    """ Parses config file at the given path and returns the corresponding Config object.
 
-    Argumentss:
+    Arguments:
         path: [str] path to file (.config or dfnstation.cfg)
         strict: [bool]
 
     Returns:
-        config [Config]
+        config: [Config]
 
     """
     try:
@@ -513,10 +512,14 @@ def parse(path, strict=True):
     
     config = Config()
 
+    # Parse an RMS config file
     if os.path.basename(path).startswith('.config'):
         parseConfigFile(config, parser)
+
+    # Parse a DFN config file
     elif os.path.basename(path) == 'dfnstation.cfg':
         parseDFNStation(config, parser)
+
     else:
         raise RuntimeError('Unknown config file name: {}'.format(os.path.basename(path)))
     
@@ -555,14 +558,14 @@ def parseDFNStation(config, parser):
     if parser.has_option(section, "altitude"):
         config.elevation = parser.getfloat(section, "altitude")
 
-    config.fov_h = 180
-    config.fov_w = 180
+    config.fov_h = 150
+    config.fov_w = 200
     config.width = 7360
     config.height = 4912
     config.fps = 20
     config.gamma = 1
-    config.bit_depth = 8
-    config.catalog_mag_limit = 5
+    config.bit_depth = 16
+    config.catalog_mag_limit = 4.5
 
     config.star_catalog_path = 'Catalogs'
     config.star_catalog_file = 'BSC5'

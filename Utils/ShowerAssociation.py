@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
 from RMS.Astrometry.Conversions import raDec2Vector, vector2RaDec, datetime2JD, jd2Date, raDec2AltAz, \
-    raDec2AltAz_vect, geocentricToApparentRadiantAndVelocity, EARTH_CONSTANTS
+    geocentricToApparentRadiantAndVelocity, EARTH_CONSTANTS
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
 from RMS.Formats.Showers import loadShowers, generateActivityDiagram
@@ -649,7 +649,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             ra_gc, dec_gc = meteor_obj.sampleGC(phase_angles)
 
             # Cull all points below the horizon
-            azim_gc, elev_gc = raDec2AltAz_vect(ra_gc, dec_gc, meteor_obj.jdt_ref, config.latitude, \
+            azim_gc, elev_gc = raDec2AltAz(ra_gc, dec_gc, meteor_obj.jdt_ref, config.latitude, \
                 config.longitude)
             temp_arr = np.c_[ra_gc, dec_gc]
             temp_arr = temp_arr[elev_gc > 0]

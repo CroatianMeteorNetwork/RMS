@@ -583,20 +583,6 @@ class Platepar(object):
                 self.x_poly_rev[(n_params + 2):] *= 0
 
 
-                # Force distortion centre to image centre
-                if self.force_distortion_centre:
-                    self.x_poly_rev[0] = 0.5
-                    self.x_poly_rev[1] = 0.5
-
-                # Force aspect ratio to 0 if axes are set to be equal
-                if self.equal_aspect:
-                    self.x_poly_rev[2] = 0
-
-                # Set all parameters not used by the radial fit to 0
-                n_params = int(self.distortion_type[-1])
-                self.x_poly_rev[(n_params + 2):] *= 0
-
-
             ### ###
 
 
@@ -853,7 +839,7 @@ class Platepar(object):
 
                 # Calculate the reference hour angle
                 T = (self.JD - 2451545.0)/36525.0
-                self.Ho = (280.46061837 + 360.98564736629*(self.JD - 2451545.0) + 0.000387933*T**2 -
+                self.Ho = (280.46061837 + 360.98564736629*(self.JD - 2451545.0) + 0.000387933*T**2 - \
                     T**3/38710000.0)%360
 
                 # Parse camera parameters

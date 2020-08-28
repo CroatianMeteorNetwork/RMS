@@ -8,15 +8,21 @@ import sys
 import copy
 import datetime
 
+
+# tkinter import that works on both Python 2 and 3
 try:
     from tkinter import messagebox
 except:
     import tkMessageBox as messagebox
 
+
+# Rawpy for DFN images
 try:
     import rawpy
 except ImportError:
     pass
+
+
 import cv2
 import numpy as np
 
@@ -30,9 +36,8 @@ from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
 from RMS.Routines import Image
 
-# Morphology - Cython init
+# Import cython functions
 import pyximport
-
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Routines.DynamicFTPCompressionCy import FFMimickInterface
 
@@ -67,6 +72,8 @@ def computeFramesToRead(read_nframes, total_frames, fr_chunk_no, first_frame):
 
 class InputType(object):
     def __init__(self):
+        """ Template class for all input types. """
+
         self.current_frame = 0
         self.total_frames = 1
 
@@ -118,6 +125,7 @@ class InputType(object):
 
     def currentFrameTime(self, frame_no=None, dt_obj=False):
         pass
+
 
 
 class InputTypeFF(InputType):

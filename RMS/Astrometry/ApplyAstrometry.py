@@ -40,6 +40,7 @@ from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz, J2000_JD
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.FFfile import filenameToDatetime
+import RMS.Formats.Platepar
 from RMS.Math import angularSeparation
 
 # Import Cython functions
@@ -701,7 +702,7 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
     if platepar is None:
 
         # Load the platepar
-        platepar = Platepar()
+        platepar = RMS.Formats.Platepar.Platepar()
         platepar.read(os.path.join(dir_path, platepar_file), use_flat=None)
 
 
@@ -738,6 +739,7 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
 
 
 if __name__ == "__main__":
+    
     import Utils.RMS2UFO
 
     ### COMMAND LINE ARGUMENTS
