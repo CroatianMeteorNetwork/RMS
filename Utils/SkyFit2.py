@@ -2203,7 +2203,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.updateLeftLabels()
 
 
-            elif event.key() == QtCore.Qt.Key_Return:
+            elif (event.key() == QtCore.Qt.Key_Return) or (event.key() == QtCore.Qt.Key_Enter):
                 if self.star_pick_mode:
                     # If the right catalog star has been selected, save the pair to the list
                     if self.cursor.mode == 1:
