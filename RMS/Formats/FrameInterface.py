@@ -2020,9 +2020,12 @@ class InputTypeDFN(InputType):
 
 
 def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_dir=False, detection=False):
-    # used by ManualReduction.py only.
+    """ Detect input data type. """
+    
+
     if os.path.isdir(input_path):
         img_handle = detectInputTypeFolder(input_path, config, beginning_time, fps, skip_ff_dir, detection)
+        
     else:
         img_handle = detectInputTypeFile(input_path, config, beginning_time, fps, skip_ff_dir, detection)
 

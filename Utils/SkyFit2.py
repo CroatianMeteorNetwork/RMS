@@ -7,6 +7,7 @@ import traceback
 import copy
 import cProfile
 import json
+import datetime
 
 import numpy as np
 import matplotlib
@@ -118,7 +119,7 @@ class FOVinputDialog(object):
 
 
 class PlateTool(QtWidgets.QMainWindow):
-    def __init__(self, dir_path, config, gamma=None, startUI=True):
+    def __init__(self, dir_path, config, beginning_time=None, fps=None, gamma=None, startUI=True):
         """ SkyFit interactive window.
 
         Arguments:
@@ -131,6 +132,7 @@ class PlateTool(QtWidgets.QMainWindow):
             fps: [float] Frames per second, used only when images in a folder are used.
             gamma: [float] Camera gamma. None by default, then it will be used from the platepar file or
                 config.
+            startUI: [bool] Start the GUI. True by default.
         """
 
         super(PlateTool, self).__init__()
@@ -151,6 +153,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # If camera gamma was given, change the value in config
         if gamma is not None:
             config.gamma = gamma
+
+        # If the FPS was given, change the FPS in the config file
+        if fps is not None:
+            config.fps = fps
 
         # Star picking mode variables
         self.star_aperature_radius = 5
@@ -232,11 +238,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # INIT WINDOW
         if startUI:
-            self.setupUI()
+            self.setupUI(beginning_time=beginning_time)
 
 
-    def setupUI(self, loaded_file=False):
+    def setupUI(self, beginning_time=None, loaded_file=False):
         """ Setup pyqt UI with widgets. No variables worth saving should be defined here.
+
+        Keyword arguments:
+            beginning_time: [datetime] Datetime of the video beginning. Optional, only can be given for
+                video input formats.
+            loaded_file: [bool] Loaded a state from a file. False by default.
         """
 
         self.central = QtWidgets.QWidget()
@@ -506,7 +517,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         ###################################################################################################
         # RIGHT WIDGET
-        self.detectInputType(load=True)
+
+
+        # Detect data input type
+        self.detectInputType(load=True, beginning_time=beginning_time)
 
         # adding img
         gamma = 1
@@ -1499,6 +1513,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if file:
             self.loadState(os.path.dirname(file), os.path.basename(file))
 
+
     def loadState(self, dir_path, state_name):
         """ Loads state with path to file dir_path and file name state_name. Works mid-program and at the start of
         the program (if done properly).
@@ -1528,7 +1543,7 @@ class PlateTool(QtWidgets.QMainWindow):
             if not hasattr(self, "extinction_scale"):
                 self.platepar.extinction_scale = 1.0
 
-        #  if setupUI hasnt already been called, call it
+        #  If setupUI hasnt already been called, call it
         if not hasattr(self, 'central'):
             self.setupUI(loaded_file=True)
 
@@ -2596,22 +2611,26 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return ra, dec, rot_horizontal
 
-    def detectInputType(self, load=False):
+
+
+    def detectInputType(self,  beginning_time=None, load=False):
         """
         Tries to find image files to load by looking at the self.dir_path folder. If the files
         in the folder must be loaded individually rather than a group, opens a file explorer
         for you to select one to load.
 
-        Arguments:
+        Keyword arguments:
+            beginning_time: [datetime] Datetime of the video beginning. Optional, only can be given for
+                video input formats.
             load: [bool] If state was most recently loaded. Allows you to skip the file dialog if
                         you know which file is to opened.
 
         """
         if load and self.file_path is not None:  # only for loadState
-            img_handle = detectInputTypeFile(self.file_path, self.config)
+            img_handle = detectInputTypeFile(self.file_path, self.config, beginning_time=beginning_time)
         else:
             # Detect input file type and load appropriate input plugin
-            img_handle = detectInputTypeFolder(self.dir_path, self.config)
+            img_handle = detectInputTypeFolder(self.dir_path, self.config, beginning_time=beginning_time)
             self.file_path = None
 
         if img_handle is None:
@@ -2625,9 +2644,10 @@ class PlateTool(QtWidgets.QMainWindow):
                                              ('FITS Files', '*.fits'), ('BIN Files', '*.bin'),
                                              ('Image Files', '*.png;*.jpg;*.bmp;*.nef')])
 
-            img_handle = detectInputTypeFile(self.file_path, self.config)
+            img_handle = detectInputTypeFile(self.file_path, self.config, beginning_time=beginning_time)
 
         self.img_handle = img_handle
+
 
     def loadCalstars(self):
         """ Loads data from calstars file and updates self.calstars """
@@ -3919,5 +3939,18 @@ if __name__ == '__main__':
         # Load the config file
         config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
 
-        plate_tool = PlateTool(dir_path, config, gamma=cml_args.gamma)
+        # Parse the beginning time into a datetime object
+        if cml_args.timebeg is not None:
+
+            beginning_time = datetime.datetime.strptime(cml_args.timebeg[0], "%Y%m%d_%H%M%S.%f")
+
+        else:
+            beginning_time = None
+
+        # Init SkyFit
+        plate_tool = PlateTool(dir_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
+            gamma=cml_args.gamma)
+
+
+    # Run the GUI app
     sys.exit(app.exec_())
