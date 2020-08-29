@@ -1841,7 +1841,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.tab.settings.updateShowCatStars()
 
         # Toggle inverting colors
-        elif event.key() == QtCore.Qt.Key_I:
+        elif (event.key() == QtCore.Qt.Key_I) and not (modifiers == QtCore.Qt.ControlModifier):
             self.toggleInvertColours()
             self.tab.settings.updateInvertColours()
 
@@ -3313,7 +3313,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute sky coordinates
             cat_ra, cat_dec, _ = cat_coords
-            cat_ang_separation = angularSeparation(cat_ra, cat_dec, ra_centre, dec_centre)
+            cat_ang_separation = np.degrees(angularSeparation(np.radians(cat_ra), np.radians(cat_dec), np.radians(ra_centre), np.radians(dec_centre)))
 
             # Compute RA/Dec from image
             _, img_ra, img_dec, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar,
@@ -3333,7 +3333,8 @@ class PlateTool(QtWidgets.QMainWindow):
                                     - img_radius)
 
             # Compute sky residuals
-            img_ang_separation = angularSeparation(img_ra, img_dec, ra_centre, dec_centre)
+            img_ang_separation = np.degrees(angularSeparation(np.radians(img_ra), np.radians(img_dec), \
+                np.radians(ra_centre), np.radians(dec_centre)))
             skyradius_residuals.append(cat_ang_separation - img_ang_separation)
 
             # Compute azim/elev from the catalog

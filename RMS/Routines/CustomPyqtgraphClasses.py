@@ -1282,9 +1282,9 @@ class PlateparParameterManager(QtWidgets.QWidget):
         hbox = QtWidgets.QHBoxLayout()
         self.F_scale = DoubleSpinBox()
         self.F_scale.setMinimum(0)
-        self.F_scale.setMaximum(1)
+        self.F_scale.setMaximum(50)
         self.F_scale.setDecimals(8)
-        self.F_scale.setSingleStep(0.01)
+        self.F_scale.setSingleStep(0.1)
         self.F_scale.setFixedWidth(100)
         self.F_scale.valueModified.connect(self.onScaleChanged)
         hbox.addWidget(self.F_scale)
@@ -1387,7 +1387,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.sigRotChanged.emit()
 
     def onScaleChanged(self):
-        self.gui.platepar.F_scale = self.F_scale.value()*60
+        self.gui.platepar.F_scale = 60/self.F_scale.value()
         self.sigScaleChanged.emit()
 
     def onExtinctionChanged(self):
@@ -1427,7 +1427,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.az_centre.setValue(self.gui.platepar.az_centre)
         self.alt_centre.setValue(self.gui.platepar.alt_centre)
         self.rotation_from_horiz.setValue(self.gui.platepar.rotation_from_horiz)
-        self.F_scale.setValue(self.gui.platepar.F_scale/60)
+        self.F_scale.setValue(60/self.gui.platepar.F_scale)
         self.fit_parameters.updateValues()
         self.distortion_type.setCurrentIndex(
             self.gui.platepar.distortion_type_list.index(self.gui.platepar.distortion_type))
