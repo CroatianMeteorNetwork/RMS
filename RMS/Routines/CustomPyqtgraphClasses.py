@@ -1245,7 +1245,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
 
         hbox = QtWidgets.QHBoxLayout()
         self.az_centre = DoubleSpinBox()
-        self.az_centre.setMinimum(-360)
+        self.az_centre.setMinimum(0.0)
         self.az_centre.setMaximum(360)
         self.az_centre.setDecimals(8)
         self.az_centre.setSingleStep(1)

@@ -175,8 +175,13 @@ class PlateTool(QtWidgets.QMainWindow):
         # Key increment
         self.key_increment = 1.0
 
+        
+        # Init a blank platepar
+        self.platepar = Platepar()
+
         # Platepar format (json or txt)
         self.platepar_fmt = None
+
 
         # Flat field
         self.flat_struct = None
@@ -216,15 +221,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.calstars = {}
         self.loadCalstars()
 
-        ###################################################################################################
-        # PLATEPAR
-
-        # Load the platepar file
-        self.loadPlatepar()
-
-        # Set the given gamma value to platepar
-        if gamma is not None:
-            self.platepar.gamma = gamma
 
         ###################################################################################################
         # ADDITIONAL VARIABLES (DEPENDANT ON IMAGE AND PLATEPAR)
@@ -239,6 +235,33 @@ class PlateTool(QtWidgets.QMainWindow):
         # INIT WINDOW
         if startUI:
             self.setupUI(beginning_time=beginning_time)
+
+
+        ###################################################################################################
+        # PLATEPAR
+
+        # Disable plotting stars and grid before the platepar is loaded
+        self.grid_visible = 0
+        self.onGridChanged()
+        self.toggleShowCatStars()
+
+
+        # Load the platepar file
+        self.loadPlatepar()
+
+
+        # Enable plotting grid and stars
+        self.grid_visible = 1
+        self.onGridChanged()
+        self.toggleShowCatStars()
+
+        self.updateStars()
+        
+
+        # Set the given gamma value to platepar
+        if gamma is not None:
+            self.platepar.gamma = gamma
+
 
 
     def setupUI(self, beginning_time=None, loaded_file=False):
@@ -961,6 +984,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def updateStars(self):
         """ Updates only the stars, including catalog stars, calstars and paired stars """
+
+
         # Draw stars that were paired in picking mode
         self.updatePairedStars()
         self.onGridChanged()  # for ease of use
@@ -2815,6 +2840,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def makeNewPlatepar(self):
         """ Make a new platepar from the loaded one, but set the parameters from the config file. """
+
         # Update the location from the config file
         self.platepar.lat = self.config.latitude
         self.platepar.lon = self.config.longitude
@@ -2886,6 +2912,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateLeftLabels()
             self.updateStars()
             self.updateDistortion()
+
 
     def loadFlat(self):
         """ Open a file dialog and ask user to load a flat field. """
@@ -3267,6 +3294,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateStars()
         self.updateFitResiduals()
         self.tab.param_manager.updatePlatepar()
+
 
     def showAstrometryFitPlots(self):
         """ Show window with astrometry fit details. """

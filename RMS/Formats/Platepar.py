@@ -162,17 +162,17 @@ class Platepar(object):
 
         # Reference time and date
         self.time = 0
-        self.JD = 0
+        self.JD = 2451545.0
 
         # UT correction
         self.UT_corr = 0
 
         self.Ho = 0
-        self.X_res = 0
-        self.Y_res = 0
+        self.X_res = 1280
+        self.Y_res = 720
 
-        self.fov_h = 0
-        self.fov_v = 0
+        self.fov_h = 88
+        self.fov_v = 45
 
         # FOV centre
         self.RA_d = 0
@@ -205,7 +205,7 @@ class Platepar(object):
         # Extinction correction scaling
         self.extinction_scale = 1.0
 
-        self.station_code = None
+        self.station_code = "None"
 
         self.star_list = None
 
