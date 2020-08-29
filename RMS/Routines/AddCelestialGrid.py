@@ -207,8 +207,8 @@ def updateRaDecGrid(grid, platepar):
             platepar.lat, platepar.lon, platepar.refraction)
 
         # Filter out points below the horizon and outside the FOV
-        filter_arr = (alt_grid_plot > 0) & (np.degrees(angularSeparation(np.radians(alt_centre), \
-            np.radians(azim_centre), np.radians(alt_grid_plot), np.radians(az_grid_plot))) < fov_radius)
+        filter_arr = (alt_grid_plot >= 0) & (np.degrees(angularSeparation(np.radians(alt_centre), \
+            np.radians(azim_centre), np.radians(alt_grid_plot), np.radians(az_grid_plot))) <= fov_radius)
 
         ra_grid_plot = ra_grid_plot[filter_arr]
         dec_grid_plot = dec_grid_plot[filter_arr]
@@ -234,10 +234,10 @@ def updateRaDecGrid(grid, platepar):
                                                               platepar.lon, platepar.refraction)
 
         # Filter out points below the horizon
-        filter_arr = (alt_grid_plot > 0) & (np.degrees(angularSeparation(np.radians(alt_centre),
+        filter_arr = (alt_grid_plot >= 0) & (np.degrees(angularSeparation(np.radians(alt_centre),
                                                               np.radians(azim_centre),
                                                               np.radians(alt_grid_plot),
-                                                              np.radians(az_grid_plot))) < fov_radius)
+                                                              np.radians(az_grid_plot))) <= fov_radius)
         ra_grid_plot = ra_grid_plot[filter_arr]
         dec_grid_plot = dec_grid_plot[filter_arr]
 
@@ -328,8 +328,8 @@ def updateAzAltGrid(grid, platepar):
         # alt_grid_plot = alt_grid_plot[filter_arr]
         # az_grid_plot = az_grid_plot[filter_arr]
 
-        ra_grid_plot, dec_grid_plot = apparentAltAz2TrueRADec(alt_grid_plot, az_grid_plot, platepar.JD, platepar.lat,
-                                                              platepar.lon, platepar.refraction)
+        ra_grid_plot, dec_grid_plot = apparentAltAz2TrueRADec(alt_grid_plot, az_grid_plot, platepar.JD, \
+            platepar.lat, platepar.lon, platepar.refraction)
         x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
 
         filter_arr = (x_grid >= 0) & (x_grid <= platepar.X_res) & (y_grid >= 0) & (y_grid <= platepar.Y_res)
@@ -353,8 +353,8 @@ def updateAzAltGrid(grid, platepar):
         # alt_grid_plot = alt_grid_plot[filter_arr]
         # az_grid_plot = az_grid_plot[filter_arr]
 
-        ra_grid_plot, dec_grid_plot = apparentAltAz2TrueRADec(alt_grid_plot, az_grid_plot, platepar.JD, platepar.lat,
-                                                              platepar.lon, platepar.refraction)
+        ra_grid_plot, dec_grid_plot = apparentAltAz2TrueRADec(alt_grid_plot, az_grid_plot, platepar.JD, 
+            platepar.lat, platepar.lon, platepar.refraction)
         x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
 
         filter_arr = (x_grid >= 0) & (x_grid <= platepar.X_res) & (y_grid >= 0) & (y_grid <= platepar.Y_res)
