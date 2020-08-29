@@ -222,11 +222,26 @@ class PlateTool(QtWidgets.QMainWindow):
         self.loadCalstars()
 
 
+
+        # Detect data input type and init the image handle
+        self.detectInputType(load=True, beginning_time=beginning_time)
+
+
         ###################################################################################################
-        # ADDITIONAL VARIABLES (DEPENDANT ON IMAGE AND PLATEPAR)
+        # PLATEPAR
+
+        # Load the platepar file
+        self.loadPlatepar()
+
+
+        # Set the given gamma value to platepar
+        if gamma is not None:
+            self.platepar.gamma = gamma
+
 
         # Load distorion type index
         self.dist_type_index = self.platepar.distortion_type_list.index(self.platepar.distortion_type)
+
 
         ###################################################################################################
 
@@ -234,42 +249,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # INIT WINDOW
         if startUI:
-            self.setupUI(beginning_time=beginning_time)
-
-
-        ###################################################################################################
-        # PLATEPAR
-
-        # Disable plotting stars and grid before the platepar is loaded
-        self.grid_visible = 0
-        self.onGridChanged()
-        self.toggleShowCatStars()
-
-
-        # Load the platepar file
-        self.loadPlatepar()
-
-
-        # Enable plotting grid and stars
-        self.grid_visible = 1
-        self.onGridChanged()
-        self.toggleShowCatStars()
-
-        self.updateStars()
-        
-
-        # Set the given gamma value to platepar
-        if gamma is not None:
-            self.platepar.gamma = gamma
+            self.setupUI()
 
 
 
-    def setupUI(self, beginning_time=None, loaded_file=False):
+    def setupUI(self, loaded_file=False):
         """ Setup pyqt UI with widgets. No variables worth saving should be defined here.
 
         Keyword arguments:
-            beginning_time: [datetime] Datetime of the video beginning. Optional, only can be given for
-                video input formats.
             loaded_file: [bool] Loaded a state from a file. False by default.
         """
 
@@ -540,10 +527,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         ###################################################################################################
         # RIGHT WIDGET
-
-
-        # Detect data input type
-        self.detectInputType(load=True, beginning_time=beginning_time)
 
         # adding img
         gamma = 1
@@ -2856,7 +2839,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Estimate the scale
         scale_x = self.config.fov_w/self.config.width
         scale_y = self.config.fov_h/self.config.height
-        self.platepar.F_scale = 1/((scale_x + scale_y)/2)
+        self.platepar.F_scale = 1.0/((scale_x + scale_y)/2)
 
         # Set distortion polynomials to zero
         self.platepar.x_poly_fwd *= 0
@@ -2873,6 +2856,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Set station ID
         self.platepar.station_code = self.config.stationID
 
+        # Get the FOV centre if the image handle is available so the time can be extracted
         if hasattr(self, 'img_handle'):
             img_time = self.img_handle.currentTime()
             self.platepar.JD = date2JD(*img_time)
