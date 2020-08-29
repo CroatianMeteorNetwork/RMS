@@ -1515,8 +1515,9 @@ class InputTypeImages(object):
         # Load the first image
         img = self.loadFrame(fr_no=0)
 
-        # Check the magick number
-        if (img[0][0] == 22121) and (img[0][1] == 17410):
+
+        # Check the magick number for UWO PNGs
+        if ((img[0][0] == 22121) and (img[0][1] == 17410)) or ((img[0][0] == 86) and (img[0][1] == 105)):
             self.uwo_png_mode = True
 
             # Get the beginning time
@@ -1760,19 +1761,31 @@ class InputTypeImages(object):
             # Get the current image if it's not an NEF file (e.g. png, jpg...)
             frame = cv2.imread(os.path.join(self.dir_path, current_img_file), -1)
 
-        # Convert the image to black and white if it's 8 bit
-        if 8*frame.itemsize == 8:
+        
+        # Convert the image to black and white if it's 8 bit and has colors
+        if (8*frame.itemsize == 8) and (frame.ndim == 3):
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
 
         # If UWO PNG's are used, byteswap the image and read the image time
         if self.uwo_png_mode:
 
-            # Byteswap if it's the UWO style png
-            frame = frame.byteswap()
+            # Read time from an 8-bit image
+            if (8*frame.itemsize == 8):
 
-            # Read the time from the image
-            ts = frame[0][6] + (frame[0][7] << 16)
-            tu = frame[0][8] + (frame[0][9] << 16)
+                # Read the time from the image for 8 bit images
+                ts = (frame[0][23] << 24) + (frame[0][22] << 16) + (frame[0][21] << 8) + frame[0][20]
+                tu = (frame[0][27] << 24) + (frame[0][26] << 16) + (frame[0][25] << 8) + frame[0][24]
+
+            else:
+
+                # Byteswap if it's the UWO style 16-bit png
+                frame = frame.byteswap()
+
+                # Read the time from the image for 16 bit images
+                ts = frame[0][6] + (frame[0][7] << 16)
+                tu = frame[0][8] + (frame[0][9] << 16)
+
 
             frame_dt = unixTime2Date(ts, tu, dt_obj=True)
 
