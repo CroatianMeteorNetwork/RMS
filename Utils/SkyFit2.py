@@ -574,9 +574,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigEqAspectToggled.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigForceDistortionToggled.connect(self.onFitParametersChanged)
 
+        # Connect astronmetry & photometry buttons to functions
         self.tab.param_manager.sigFitPressed.connect(lambda: self.fitPickedStars(first_platepar_fit=False))
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
         self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
+        self.tab.param_manager.sigResetDistortionPressed.connect(self.resetDistortion)
 
         self.tab.settings.sigMaxAveToggled.connect(self.toggleImageType)
         self.tab.settings.sigCatStarsToggled.connect(self.toggleShowCatStars)
@@ -1379,6 +1381,16 @@ class PlateTool(QtWidgets.QMainWindow):
         self.first_platepar_fit = True
 
         print("Distortion model changed to: {:s}".format(dist_type))
+
+
+    def resetDistortion(self):
+        """ Reset distortion parameters to default values. """
+
+        self.platepar.resetDistortionParameters()
+        self.onFitParametersChanged()
+        self.updateFitResiduals()
+        self.tab.param_manager.updatePlatepar()
+
 
 
     def nextImg(self, n=1):

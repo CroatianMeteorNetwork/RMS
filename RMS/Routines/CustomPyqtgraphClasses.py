@@ -1187,6 +1187,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigFitPressed = QtCore.pyqtSignal()
     sigAstrometryPressed = QtCore.pyqtSignal()
     sigPhotometryPressed = QtCore.pyqtSignal()
+    sigResetDistortionPressed = QtCore.pyqtSignal()
 
     sigRefractionToggled = QtCore.pyqtSignal()
     sigEqAspectToggled = QtCore.pyqtSignal()
@@ -1343,6 +1344,11 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.distortion_type.addItems(self.gui.platepar.distortion_type_list)
         self.distortion_type.currentIndexChanged.connect(self.onIndexChanged)
         form.addRow(QtWidgets.QLabel('Distortion'), self.distortion_type)
+
+
+        self.reset_distortion_button = QtWidgets.QPushButton("Reset distortion")
+        self.reset_distortion_button.clicked.connect(self.sigResetDistortionPressed.emit)
+        form.addWidget(self.reset_distortion_button)
 
         self.fit_parameters = ArrayTabWidget(platepar=self.gui.platepar)
         self.fit_parameters.valueModified.connect(self.onFitParametersChanged)
