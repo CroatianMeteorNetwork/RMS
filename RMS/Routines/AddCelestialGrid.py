@@ -167,16 +167,24 @@ def updateRaDecGrid(grid, platepar):
         platepar: [Platepar object]
 
     """
+
+
+    ### COMPUTE FOV CENTRE ###
     # Estimate RA,dec of the centre of the FOV
     _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(platepar.JD)], [platepar.X_res/2], [platepar.Y_res/2], [1], \
                                     platepar, extinction_correction=False)
     RA_c = RA_c[0]
     dec_c = dec_c[0]
 
+    # Compute alt/az of FOV centre
     azim_centre, alt_centre = trueRaDec2ApparentAltAz(RA_c, dec_c, platepar.JD, platepar.lat, platepar.lon)
+
+    ### ###
+
 
     # Compute FOV size
     fov_radius = np.hypot(*computeFOVSize(platepar))
+
 
     # Determine gridline frequency (double the gridlines if the number is < 4eN)
     grid_freq = 10**np.floor(np.log10(fov_radius))
@@ -190,6 +198,7 @@ def updateRaDecGrid(grid, platepar):
     # Grid plot density
     plot_dens = grid_freq/100
 
+    # Make an array of RA and Dec
     ra_grid_arr = np.arange(0, 360, grid_freq)
     dec_grid_arr = np.arange(-90, 90, grid_freq)
 
@@ -197,8 +206,10 @@ def updateRaDecGrid(grid, platepar):
     y = []
     cuts = []
 
-    # Plot the celestial parallel grid (circles)
+    # Generate points for the celestial parallels grid
     for dec_grid in dec_grid_arr:
+
+        # Keep the declination fixed and evaluate all right ascensions
         ra_grid_plot = np.arange(0, 360, plot_dens)
         dec_grid_plot = np.zeros_like(ra_grid_plot) + dec_grid
 
@@ -213,20 +224,26 @@ def updateRaDecGrid(grid, platepar):
         ra_grid_plot = ra_grid_plot[filter_arr]
         dec_grid_plot = dec_grid_plot[filter_arr]
 
+
         # Compute image coordinates for every grid celestial parallel
         x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
 
+        # Filter out all points outside the image
         filter_arr = (x_grid >= 0) & (x_grid <= platepar.X_res) & (y_grid >= 0) & (y_grid <= platepar.Y_res)
         x_grid = x_grid[filter_arr]
         y_grid = y_grid[filter_arr]
 
+        # Add points to the list
         x.extend(x_grid)
         y.extend(y_grid)
         cuts.append(len(x) - 1)
 
-    # Plot the celestial meridian grid (outward lines)
+
+    # Generate points for the celestial meridian grid
     for ra_grid in ra_grid_arr:
-        dec_grid_plot = np.arange(-90, 90, plot_dens)  # how close to horizon
+
+        # Keep the RA fixed and evaluate all declinations
+        dec_grid_plot = np.arange(-90, 90, plot_dens)
         ra_grid_plot = np.zeros_like(dec_grid_plot) + ra_grid
 
         # Compute alt/az
@@ -244,6 +261,7 @@ def updateRaDecGrid(grid, platepar):
         # Compute image coordinates for every grid celestial parallel
         x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
 
+        # Filter out points outside the image
         filter_arr = (x_grid >= 0) & (x_grid <= platepar.X_res) & (y_grid >= 0) & (y_grid <= platepar.Y_res)
         x_grid = x_grid[filter_arr]
         y_grid = y_grid[filter_arr]
@@ -252,14 +270,25 @@ def updateRaDecGrid(grid, platepar):
         y.extend(y_grid)
         cuts.append(len(x) - 1)
 
-    # horizon
+
+    # Generate points for the horizon
     az_horiz_arr = np.arange(0, 360, plot_dens)
     alt_horiz_arr = np.zeros_like(az_horiz_arr)
-    ra_horiz_plot, dec_horiz_plot = apparentAltAz2TrueRADec(az_horiz_arr, alt_horiz_arr, platepar.JD, platepar.lat,
-                                                            platepar.lon, platepar.refraction)
+    ra_horiz_plot, dec_horiz_plot = apparentAltAz2TrueRADec(az_horiz_arr, alt_horiz_arr, platepar.JD, \
+        platepar.lat, platepar.lon, platepar.refraction)
 
+    # Filter out all horizon points outside the FOV
+    filter_arr = np.degrees(angularSeparation(np.radians(alt_centre), np.radians(azim_centre), \
+        np.radians(alt_horiz_arr), np.radians(az_horiz_arr))) <= fov_radius
+
+    ra_horiz_plot = ra_horiz_plot[filter_arr]
+    dec_horiz_plot = dec_horiz_plot[filter_arr]
+
+
+    # Compute image coordinates of the horizon
     x_horiz, y_horiz = raDecToXYPP(ra_horiz_plot, dec_horiz_plot, platepar.JD, platepar)
 
+    # Filter out all horizon points outside the image
     filter_arr = (x_horiz >= 0) & (x_horiz <= platepar.X_res) & (y_horiz >= 0) & (y_horiz <= platepar.Y_res)
     x_horiz = x_horiz[filter_arr]
     y_horiz = y_horiz[filter_arr]
@@ -267,6 +296,8 @@ def updateRaDecGrid(grid, platepar):
     x.extend(x_horiz)
     y.extend(y_horiz)
     cuts.append(len(x) - 1)
+
+    
 
     r = 15  # adjust this parameter if you see extraneous lines
     # disconnect lines that are distant (unfinished circles had straight lines completing them)
