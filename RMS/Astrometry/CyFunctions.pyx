@@ -699,7 +699,7 @@ def cyApparentAltAz2TrueRADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr, np
     for i in range(len(azim_arr)):
 
         # Compute RA/Dec
-        ra, dec = cyApparentAltAz2TrueRADec(azim_arr[i], elev_arr[0], jd, lat, lon, \
+        ra, dec = cyApparentAltAz2TrueRADec(azim_arr[i], elev_arr[i], jd, lat, lon, \
             refraction=refraction)
 
         ra_arr[i] = ra

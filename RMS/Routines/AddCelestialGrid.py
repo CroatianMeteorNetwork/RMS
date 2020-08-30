@@ -73,8 +73,8 @@ def addEquatorialGrid(plt_handle, platepar, jd):
             platepar.lon)
 
         # Filter out points below the horizon  and outside the FOV
-        filter_arr = (alt_grid_plot > 0) & (np.degrees(angularSeparation(np.radians(alt_centre), \
-            np.radians(azim_centre), np.radians(alt_grid_plot), np.radians(az_grid_plot))) < fov_radius)
+        filter_arr = (alt_grid_plot > 0) & (np.degrees(angularSeparation(np.radians(azim_centre), \
+            np.radians(alt_centre), np.radians(az_grid_plot), np.radians(alt_grid_plot))) <= fov_radius)
         ra_grid_plot = ra_grid_plot[filter_arr]
         dec_grid_plot = dec_grid_plot[filter_arr]
 
@@ -135,8 +135,8 @@ def addEquatorialGrid(plt_handle, platepar, jd):
             platepar.lon)
 
         # Filter out points below the horizon
-        filter_arr = (alt_grid_plot > 0) & (np.degrees(angularSeparation(np.radians(alt_centre), \
-            np.radians(azim_centre), np.radians(alt_grid_plot), np.radians(az_grid_plot))) < fov_radius)
+        filter_arr = (alt_grid_plot > 0) & (np.degrees(angularSeparation(np.radians(azim_centre), \
+            np.radians(alt_centre), np.radians(az_grid_plot), np.radians(alt_grid_plot))) <= fov_radius)
         ra_grid_plot = ra_grid_plot[filter_arr]
         dec_grid_plot = dec_grid_plot[filter_arr]
 
@@ -170,14 +170,14 @@ def updateRaDecGrid(grid, platepar):
 
 
     ### COMPUTE FOV CENTRE ###
+    
     # Estimate RA,dec of the centre of the FOV
     _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(platepar.JD)], [platepar.X_res/2], [platepar.Y_res/2], [1], \
                                     platepar, extinction_correction=False)
-    RA_c = RA_c[0]
-    dec_c = dec_c[0]
 
     # Compute alt/az of FOV centre
-    azim_centre, alt_centre = trueRaDec2ApparentAltAz(RA_c, dec_c, platepar.JD, platepar.lat, platepar.lon)
+    azim_centre, alt_centre = trueRaDec2ApparentAltAz(RA_c[0], dec_c[0], platepar.JD, platepar.lat, \
+        platepar.lon)
 
     ### ###
 
@@ -218,8 +218,8 @@ def updateRaDecGrid(grid, platepar):
             platepar.lat, platepar.lon, platepar.refraction)
 
         # Filter out points below the horizon and outside the FOV
-        filter_arr = (alt_grid_plot >= 0) & (np.degrees(angularSeparation(np.radians(alt_centre), \
-            np.radians(azim_centre), np.radians(alt_grid_plot), np.radians(az_grid_plot))) <= fov_radius)
+        filter_arr = (alt_grid_plot >= 0) & (np.degrees(angularSeparation(np.radians(azim_centre), \
+            np.radians(alt_centre), np.radians(az_grid_plot), np.radians(alt_grid_plot))) <= fov_radius)
 
         ra_grid_plot = ra_grid_plot[filter_arr]
         dec_grid_plot = dec_grid_plot[filter_arr]
@@ -247,14 +247,12 @@ def updateRaDecGrid(grid, platepar):
         ra_grid_plot = np.zeros_like(dec_grid_plot) + ra_grid
 
         # Compute alt/az
-        az_grid_plot, alt_grid_plot = trueRaDec2ApparentAltAz(ra_grid_plot, dec_grid_plot, platepar.JD, platepar.lat,
-                                                              platepar.lon, platepar.refraction)
+        az_grid_plot, alt_grid_plot = trueRaDec2ApparentAltAz(ra_grid_plot, dec_grid_plot, platepar.JD, \
+            platepar.lat, platepar.lon, platepar.refraction)
 
         # Filter out points below the horizon
-        filter_arr = (alt_grid_plot >= 0) & (np.degrees(angularSeparation(np.radians(alt_centre),
-                                                              np.radians(azim_centre),
-                                                              np.radians(alt_grid_plot),
-                                                              np.radians(az_grid_plot))) <= fov_radius)
+        filter_arr = (alt_grid_plot >= 0) & (np.degrees(angularSeparation(np.radians(azim_centre), \
+            np.radians(alt_centre), np.radians(az_grid_plot), np.radians(alt_grid_plot))) <= fov_radius)
         ra_grid_plot = ra_grid_plot[filter_arr]
         dec_grid_plot = dec_grid_plot[filter_arr]
 
@@ -297,7 +295,7 @@ def updateRaDecGrid(grid, platepar):
     y.extend(y_horiz)
     cuts.append(len(x) - 1)
 
-    
+
 
     r = 15  # adjust this parameter if you see extraneous lines
     # disconnect lines that are distant (unfinished circles had straight lines completing them)
@@ -324,8 +322,21 @@ def updateAzAltGrid(grid, platepar):
 
     """
 
+    ### COMPUTE FOV CENTRE ###
+    
+    # Estimate RA,dec of the centre of the FOV
+    _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(platepar.JD)], [platepar.X_res/2], [platepar.Y_res/2], [1], \
+                                    platepar, extinction_correction=False)
+
+    # Compute alt/az of FOV centre
+    azim_centre, alt_centre = trueRaDec2ApparentAltAz(RA_c[0], dec_c[0], platepar.JD, platepar.lat, \
+        platepar.lon)
+
+    ### ###
+
     # Compute FOV size
     fov_radius = np.hypot(*computeFOVSize(platepar))
+
 
     # Determine gridline frequency (double the gridlines if the number is < 4eN)
     grid_freq = 10**np.floor(np.log10(fov_radius))
@@ -339,55 +350,35 @@ def updateAzAltGrid(grid, platepar):
     # Grid plot density
     plot_dens = grid_freq/100
 
-    az_grid_arr = np.arange(0, 90, grid_freq)
-    alt_grid_arr = np.arange(0, 360, grid_freq)
+
+    # Generate a grid of all azimuths and altitudes
+    alt_grid_arr = np.arange(0, 90, grid_freq)
+    az_grid_arr = np.arange(0, 360, grid_freq)
 
     x = []
     y = []
     cuts = []
 
-    # circles
-    for az_grid in az_grid_arr:
-        alt_grid_plot = np.arange(0, 360, plot_dens)  # how many degrees of circle
-        az_grid_plot = np.zeros_like(alt_grid_plot) + az_grid
-
-        # filter_arr = (np.degrees(angularSeparation(np.radians(alt_centre),
-        #                                 np.radians(azim_centre),
-        #                                 np.radians(alt_grid_plot),
-        #                                 np.radians(az_grid_plot))) < fov_radius)
-        #
-        # alt_grid_plot = alt_grid_plot[filter_arr]
-        # az_grid_plot = az_grid_plot[filter_arr]
-
-        ra_grid_plot, dec_grid_plot = apparentAltAz2TrueRADec(alt_grid_plot, az_grid_plot, platepar.JD, \
-            platepar.lat, platepar.lon, platepar.refraction)
-        x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
-
-        filter_arr = (x_grid >= 0) & (x_grid <= platepar.X_res) & (y_grid >= 0) & (y_grid <= platepar.Y_res)
-        x_grid = x_grid[filter_arr]
-        y_grid = y_grid[filter_arr]
-
-        x.extend(x_grid)
-        y.extend(y_grid)
-        cuts.append(len(x) - 1)
-
-    # Outward lines
+    # Altitude lines
     for alt_grid in alt_grid_arr:
-        az_grid_plot = np.arange(0, 90, plot_dens)
+
+        # Keep the altitude fixed and plot all azimuth lines
+        az_grid_plot = np.arange(0, 360, plot_dens)
         alt_grid_plot = np.zeros_like(az_grid_plot) + alt_grid
 
-        # filter_arr = (np.degrees(angularSeparation(np.radians(alt_centre),
-        #                                 np.radians(azim_centre),
-        #                                 np.radians(alt_grid_plot),
-        #                                 np.radians(az_grid_plot))) < fov_radius)
-        #
-        # alt_grid_plot = alt_grid_plot[filter_arr]
-        # az_grid_plot = az_grid_plot[filter_arr]
+        # Filter out all lines outside the FOV
+        filter_arr = np.degrees(angularSeparation(np.radians(azim_centre), np.radians(alt_centre), \
+            np.radians(az_grid_plot), np.radians(alt_grid_plot))) <= fov_radius
+        
+        az_grid_plot = az_grid_plot[filter_arr]
+        alt_grid_plot = alt_grid_plot[filter_arr]
 
-        ra_grid_plot, dec_grid_plot = apparentAltAz2TrueRADec(alt_grid_plot, az_grid_plot, platepar.JD, 
+        # Compute image coordinates
+        ra_grid_plot, dec_grid_plot = apparentAltAz2TrueRADec(az_grid_plot, alt_grid_plot, platepar.JD, \
             platepar.lat, platepar.lon, platepar.refraction)
         x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
 
+        # Filter out all points outside the image
         filter_arr = (x_grid >= 0) & (x_grid <= platepar.X_res) & (y_grid >= 0) & (y_grid <= platepar.Y_res)
         x_grid = x_grid[filter_arr]
         y_grid = y_grid[filter_arr]
@@ -396,7 +387,43 @@ def updateAzAltGrid(grid, platepar):
         y.extend(y_grid)
         cuts.append(len(x) - 1)
 
-    r = 50
+
+    # Azimuth lines
+    for az_grid in az_grid_arr:
+
+        # Keep the azimuth fixed and plot all altitude lines
+        alt_grid_plot = np.arange(0, 90, plot_dens)
+        az_grid_plot = np.zeros_like(alt_grid_plot) + az_grid
+
+        
+        # Filter out all lines outside the FOV
+        filter_arr = np.degrees(angularSeparation(np.radians(azim_centre), np.radians(alt_centre), \
+            np.radians(az_grid_plot), np.radians(alt_grid_plot))) <= fov_radius
+        
+        az_grid_plot = az_grid_plot[filter_arr]
+        alt_grid_plot = alt_grid_plot[filter_arr]
+
+        
+        # Compute image coordinates
+        ra_grid_plot, dec_grid_plot = apparentAltAz2TrueRADec(az_grid_plot, alt_grid_plot, platepar.JD, \
+            platepar.lat, platepar.lon, platepar.refraction)
+        x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
+
+        
+        # Filter out all points outside the image
+        filter_arr = (x_grid >= 0) & (x_grid <= platepar.X_res) & (y_grid >= 0) & (y_grid <= platepar.Y_res)
+        x_grid = x_grid[filter_arr]
+        y_grid = y_grid[filter_arr]
+
+
+        x.extend(x_grid)
+        y.extend(y_grid)
+        cuts.append(len(x) - 1)
+
+
+
+    r = 15  # adjust this parameter if you see extraneous lines
+    # disconnect lines that are distant (unfinished circles had straight lines completing them)
     for i in range(len(x) - 1):
         if (x[i] - x[i + 1])**2 + (y[i] - y[i + 1])**2 > r**2:
             cuts.append(i)
