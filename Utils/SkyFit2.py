@@ -1725,6 +1725,8 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.drawPhotometryColoring()
 
     def keyPressEvent(self, event):
+
+        # Read modifiers (e.g. CTRL, SHIFT)
         modifiers = QtWidgets.QApplication.keyboardModifiers()
         qmodifiers = QtWidgets.QApplication.queryKeyboardModifiers()
 
@@ -1908,10 +1910,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
             # Do a fit on the selected stars while in the star picking mode
-            elif (event.key() == QtCore.Qt.Key_Z) and (modifiers == QtCore.Qt.ControlModifier):
+            elif (event.key() == QtCore.Qt.Key_Z) and ((modifiers == QtCore.Qt.ControlModifier) \
+                or (modifiers == (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier))):
 
                 # If shift was pressed, reset distortion parameters to zero
-                if modifiers == QtCore.Qt.ShiftModifier:
+                if modifiers == (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier):
                     print("Resetting the distortion coeffs and refitting...")
                     self.platepar.resetDistortionParameters()
                     self.first_platepar_fit = True
