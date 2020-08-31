@@ -2306,35 +2306,53 @@ class PlateTool(QtWidgets.QMainWindow):
             if qmodifiers != QtCore.Qt.ShiftModifier:
                 self.cursor.setMode(0)
 
+
     def wheelEvent(self, event):
         """ Change star selector aperature on scroll. """
         
         delta = event.angleDelta().y()
         modifier = QtWidgets.QApplication.keyboardModifiers()
 
+        # Handle scroll events when in the star pricking mode
         if self.img_frame.sceneBoundingRect().contains(event.pos()) and self.star_pick_mode:
+
+            # If control is pressed, change the size of the aperture
             if modifier & QtCore.Qt.ControlModifier:
+
+                # Increase aperture size
                 if delta < 0:
                     self.scrolls_back = 0
-                    self.star_aperature_radius += 1
+                    self.star_aperature_radius += 0.5
                     self.cursor.setRadius(self.star_aperature_radius)
                     self.cursor2.setRadius(self.star_aperature_radius)
+
+                # Decrease aperture size
                 elif delta > 0 and self.star_aperature_radius > 1:
                     self.scrolls_back = 0
-                    self.star_aperature_radius -= 1
+                    self.star_aperature_radius -= 0.5
                     self.cursor.setRadius(self.star_aperature_radius)
                     self.cursor2.setRadius(self.star_aperature_radius)
+
             else:
+
+                # Unzoom the image
                 if delta < 0:
+
                     self.scrolls_back += 1
-                    if self.mode == 'skyfit':
-                        if self.scrolls_back > 2:
-                            self.img_frame.autoRange(padding=0)
+
+                    # Reset the zoom if scrolled back multiple times
+                    if self.scrolls_back > 3:
+                        self.img_frame.autoRange(padding=0)
+
                     else:
                         self.img_frame.scaleBy([1.2, 1.2], QtCore.QPoint(self.mouse_x, self.mouse_y))
+
+                # Zoom in the image
                 elif delta > 0:
                     self.scrolls_back = 0
-                    self.img_frame.scaleBy([0.80, 0.80], QtCore.QPoint(self.mouse_x, self.mouse_y))
+                    self.img_frame.scaleBy([0.95, 0.95], QtCore.QPoint(self.mouse_x, self.mouse_y))
+
+
 
     def checkParamRange(self):
         """ Checks that the astrometry parameters are within the allowed range. """

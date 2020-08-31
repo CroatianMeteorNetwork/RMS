@@ -277,11 +277,15 @@ class ViewBox(pg.ViewBox):
             event.accept()
 
     def wheelEvent(self, ev, axis=None):
-        xrange, yrange = self.viewRange()
-        # dont zoom if it's past the limits
-        if not ((self.state['limits']['xLimits'] == [round(x, 8) for x in xrange] or
-                 self.state['limits']['yLimits'] == [round(y, 8) for y in yrange])
+
+        # Get the rage of X and Y of the current view
+        x_range, y_range = self.viewRange()
+
+        # Don't zoom if it's past the limits
+        if not ((self.state['limits']['xLimits'] == [round(x, 8) for x in x_range] or
+                 self.state['limits']['yLimits'] == [round(y, 8) for y in y_range])
                 and ev.delta() < 0):
+
             super().wheelEvent(ev, axis)
 
 
