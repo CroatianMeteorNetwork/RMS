@@ -944,8 +944,7 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + R - Pick stars\n'
             text_str += 'SHIFT + Z - Show zoomed window\n'
             text_str += 'CTRL + N - New platepar\n'
-            text_str += 'CTRL + S - Save platepar\n'
-            text_str += 'SHIFT + CTRL + S - Save platepar as default\n'
+            text_str += 'CTRL + S - Save platepar & state\n'
         else:
             text_str = 'Keys:\n'
             text_str += '-----------\n'
@@ -2195,11 +2194,15 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
             # Get initial parameters from astrometry.net
-            elif event.key() == QtCore.Qt.Key_X:
+            elif (event.key() == QtCore.Qt.Key_X) and ((modifiers == QtCore.Qt.ControlModifier) \
+                or (modifiers == (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier))):
+
                 print("Solving with astrometry.net")
 
                 upload_image = True
-                if modifiers == QtCore.Qt.ShiftModifier:
+
+                # If shift was pressed, only upload the detected stars
+                if modifiers == (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier):
                     upload_image = False
 
                 # Estimate initial parameters using astrometry.net
@@ -2215,6 +2218,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.toggleShowCalStars()
                 self.tab.settings.updateShowCalStars()
                 # updates image automatically
+
 
             # Force distortion centre to image centre
             elif event.key() == QtCore.Qt.Key_B:
