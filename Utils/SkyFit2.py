@@ -2350,7 +2350,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Zoom in the image
                 elif delta > 0:
                     self.scrolls_back = 0
-                    self.img_frame.scaleBy([0.95, 0.95], QtCore.QPoint(self.mouse_x, self.mouse_y))
+                    self.img_frame.scaleBy([0.8, 0.8], QtCore.QPoint(self.mouse_x, self.mouse_y))
 
 
 
