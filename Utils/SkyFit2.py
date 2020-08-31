@@ -3354,7 +3354,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ra_centre, dec_centre = self.computeCentreRADec()
 
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
-        for star_no, (cat_x, cat_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y, catalog_stars,
+        for star_no, (cat_x, cat_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y, catalog_stars, \
                                                                         img_stars)):
             # Compute image coordinates
             img_x, img_y, _ = img_c
@@ -3362,7 +3362,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute sky coordinates
             cat_ra, cat_dec, _ = cat_coords
-            cat_ang_separation = np.degrees(angularSeparation(np.radians(cat_ra), np.radians(cat_dec), np.radians(ra_centre), np.radians(dec_centre)))
+            cat_ang_separation = np.degrees(angularSeparation(np.radians(cat_ra), np.radians(cat_dec), \
+                np.radians(ra_centre), np.radians(dec_centre)))
 
             # Compute RA/Dec from image
             _, img_ra, img_dec, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar,
