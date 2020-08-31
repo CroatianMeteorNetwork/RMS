@@ -32,17 +32,24 @@ def readBSC(file_path, file_name, years_from_J2000=0):
 
     with open(os.path.join(file_path, file_name), 'rb') as fid:
 
-        ## Define data types for reading the file
+        ### Define data types for reading the file
+        
         # 32-bit integer
         int_32d = np.dtype('<i4')
+
         # 8-bit integer
         int_8d = np.dtype('<i2')
+
         # 32-bit float
         float_32d = np.dtype('<f4')
+
         # 64-bit float
         float_64d = np.dtype('<f8')
+
         # 8-bit char
         char_8d = np.dtype('<a2')
+
+        ###
 
         # Read the header
         star_seq_offset = np.fromfile(fid, dtype=int_32d, count = 1)[0]
@@ -57,7 +64,8 @@ def readBSC(file_path, file_name, years_from_J2000=0):
         BSC_data = np.zeros(shape=(star_num, 3), dtype=float_64d)
 
         # Read entries
-        for i in range(star_num):
+        c = 0
+        for _ in range(star_num):
 
             # Read the entry for each star
             catalog_No = np.fromfile(fid, dtype=float_32d, count=1)[0]
@@ -68,13 +76,22 @@ def readBSC(file_path, file_name, years_from_J2000=0):
             RA_proper = np.fromfile(fid, dtype=float_32d, count=1)[0]
             dec_proper = np.fromfile(fid, dtype=float_32d, count=1)[0]
 
-            # print(catalog_No, RA, dec, spectral, mag, RA_proper, dec_proper)
+            # Skip RA/Dec = (zero, zero) entries
+            if (RA == 0) and (dec == 0):
+                continue
+
+            # print(catalog_No, np.degrees(RA), np.degrees(dec), spectral, mag, RA_proper, dec_proper)
 
             # Assign data to array and apply the proper motion correction
-            BSC_data[i][0] = np.degrees(RA + RA_proper*years_from_J2000)
-            BSC_data[i][1] = np.degrees(dec + dec_proper*years_from_J2000)
-            BSC_data[i][2] = mag
+            BSC_data[c][0] = np.degrees(RA + RA_proper*years_from_J2000)
+            BSC_data[c][1] = np.degrees(dec + dec_proper*years_from_J2000)
+            BSC_data[c][2] = mag
 
+            c += 1
+
+
+    # Cut the list to the number of stars actually added
+    BSC_data = BSC_data[:c]
 
     # Sort stars by descending declination
     BSC_data = BSC_data[BSC_data[:,1].argsort()[::-1]]
