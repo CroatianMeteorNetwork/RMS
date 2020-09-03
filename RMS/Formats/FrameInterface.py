@@ -128,356 +128,8 @@ class InputType(object):
 
 
 
-class InputTypeFF(InputType):
-    def __init__(self, dir_path, config, single_ff=False):
-        """ Input file type handle for FF files.
-        
-        Arguments:
-            dir_path: [str] Path to directory with FF files. 
-            config: [ConfigStruct object]
-
-        Keyword arguments:
-            single_ff: [bool] If True, a single FF file should be given as input, and not a directory with FF
-                files. False by default.
-            detection: [bool] Indicates that the input is used for detection. False by default. Has no effect
-                for FF files.
-
-        """
-
-        self.input_type = 'ff'
-
-        self.dir_path = dir_path
-        self.config = config
-
-        self.single_ff = single_ff
-
-        # This type of input should have the calstars file
-        self.require_calstars = True
-
-        # Don't byteswap the images
-        self.byteswap = False
-
-        if self.single_ff:
-            print('Using FF file:', self.dir_path)
-        else:
-            print('Using FF files from:', self.dir_path)
-
-        self.ff_list = []
-        self.ff = None
-        self.ff_frame = None
-        self.frame_ff_name = None
-
-        # Add the single FF file to the list
-        if self.single_ff:
-
-            self.dir_path, file_name = os.path.split(self.dir_path)
-
-            self.ff_list.append(file_name)
-
-        else:
-
-            # Get a list of FF files in the folder
-            for file_name in os.listdir(dir_path):
-                if validFFName(file_name):
-                    self.ff_list.append(file_name)
-
-        # Check that there are any FF files in the folder
-        if not self.ff_list:
-            messagebox.showinfo(title='File list warning', message='No FF files in the selected folder!')
-
-            sys.exit()
-
-        # Sort the FF list
-        self.ff_list = sorted(self.ff_list)
-
-        # Init the first file
-        self.current_ff_index = 0
-        self.current_ff_file = self.ff_list[self.current_ff_index]
-
-        # Update the beginning time
-        self.beginning_datetime = filenameToDatetime(self.current_ff_file)
-
-        # Init the frame number
-        self.current_frame = 0
-
-        # Number for frames to read by default
-        self.fr_chunk_no = 256
-
-        # Initially assume this to be true, but this will change after the first load
-        self.total_frames = self.fr_chunk_no
-
-        self.cache = {}
-        self.cache_frames = {}
-
-        # Load the first chunk for initing parameters
-        self.loadChunk()
-
-        # Read FPS from FF file if available, otherwise use from config
-        if hasattr(self.ff, 'fps'):
-            self.fps = self.ff.fps
-
-        else:
-            self.fps = self.config.fps
-
-        if self.ff is not None:
-            # Get the image size
-            self.nrows = self.ff.nrows
-            self.ncols = self.ff.ncols
-
-            # Compute the total number of frames in all video files
-            self.total_frames = len(self.ff_list)*self.ff.nframes
-
-    def nextChunk(self):
-        """ Go to the next FF file. """
-
-        self.current_ff_index = (self.current_ff_index + 1)%len(self.ff_list)
-        self.current_ff_file = self.ff_list[self.current_ff_index]
-
-        # Update the beginning time
-        self.beginning_datetime = filenameToDatetime(self.current_ff_file)
-
-    def prevChunk(self):
-        """ Go to the previous FF file. """
-
-        self.current_ff_index = (self.current_ff_index - 1)%len(self.ff_list)
-        self.current_ff_file = self.ff_list[self.current_ff_index]
-
-        # Update the beginning time
-        self.beginning_datetime = filenameToDatetime(self.current_ff_file)
-
-    def loadChunk(self, first_frame=None, read_nframes=None):
-        """ Load the frame chunk file. 
-    
-        Keyword arguments:
-            first_frame: [int] First frame to read.
-            read_nframes: [int] Number of frames to read. If not given (None), self.fr_chunk_no frames will be
-                read. If -1, all frames will be read in.
-        """
-
-        # If no extra arguments were given, assume it's a normal read and read the current FF file
-        if (first_frame is None) and (read_nframes is None):
-            ff_file = self.current_ff_file
-
-        else:
-            ff_file = None
-
-        # If all frames should be taken, set the frame to 0
-        if read_nframes == -1:
-
-            first_frame = 0
-
-        # Otherwise, set it to the appropriate chunk or given first frame
-        else:
-
-            # Compute the first frame if not given
-            if first_frame is None:
-                first_frame = self.current_ff_index*self.fr_chunk_no
-
-            # Make sure the first frame is within the limits
-            first_frame = first_frame%self.total_frames
-
-        # Compute the number of frames to read
-        frames_to_read = computeFramesToRead(read_nframes, self.total_frames, self.fr_chunk_no, first_frame)
-
-        # If it's a normal read, get the current FF file
-        if ff_file is not None:
-            cache_id = self.current_ff_file
-            whole_ff = True
-
-        # If the number of frames is exactly one FF file from beginning to end
-        #   just return the whole FF file
-        elif (first_frame%self.fr_chunk_no == 0) and (frames_to_read == self.fr_chunk_no):
-
-            # Find the FF file to read
-            ff_file = self.ff_list[first_frame//self.fr_chunk_no]
-
-            cache_id = ff_file
-            whole_ff = True
-
-        else:
-
-            # Get the cache ID
-            cache_id = getCacheID(first_frame, frames_to_read)
-            whole_ff = False
-
-        # Check if this chunk has been cached
-        if cache_id in self.cache:
-            self.ff = self.cache[cache_id]
-            return self.ff
-
-        # If the whole file has to be returned
-        if whole_ff:
-
-            # Load the FF file from disk
-            self.ff = readFF(self.dir_path, ff_file)
-
-        # If a selection of frames has to be reconstructed, go through all FF files and create new FF
-        else:
-
-            # Determine which FF files are to be read and which frame ranges from each
-            frame_ranges = []
-            ffs_to_read = []
-            for i in range(frames_to_read):
-
-                # Compute the frame index
-                fr_index = first_frame + i
-
-                # Get the file name of the file that has to be read
-                file_index = fr_index//self.fr_chunk_no
-                file_name = self.ff_list[file_index]
-
-                # Get the frame index on the FF
-                ff_local_index = fr_index%self.fr_chunk_no
-
-                # Add the file to the list
-                if file_name not in ffs_to_read:
-
-                    # Add the FF to the list of frames to read
-                    ffs_to_read.append(file_name)
-
-                    # Add the frame index to the list
-                    frame_ranges.append([ff_local_index])
-
-                # Store the local frame number to the list if on the same FF file
-                else:
-                    frame_ranges[len(ffs_to_read) - 1].append(ff_local_index)
-
-            # If there is only one FF file to read, make a selection of frames, but preserve everything else
-            if len(ffs_to_read) == 1:
-
-                file_name = ffs_to_read[0]
-
-                frame_range = frame_ranges[0]
-
-                # Compute the range of frames to read
-                min_frame = np.min(frame_range)
-                max_frame = np.max(frame_range)
-
-                # Read the FF file
-                self.ff = readFF(self.dir_path, file_name)
-
-                # Select the frames
-                self.ff.maxpixel = selectFFFrames(self.ff.maxpixel, self.ff, min_frame, max_frame)
-
-
-            else:
-
-                # Init an empty FF structure
-                self.ff = FFMimickInterface(self.nrows, self.ncols, np.uint8)
-
-                # Store maxpixel selections, avepixels, stdpixels
-                maxpixel_list = []
-                avepixel_list = []
-                stdpixel_list = []
-
-                # Read the FF files that have to read and reconstruct the frames
-                for file_name, frame_range in zip(ffs_to_read, frame_ranges):
-                    # Compute the range of frames to read
-                    min_frame = np.min(frame_range)
-                    max_frame = np.max(frame_range)
-
-                    # Read the FF file
-                    ff = readFF(self.dir_path, file_name)
-
-                    # Reconstruct the maxpixel in the given frame range
-                    maxpixel = selectFFFrames(ff.maxpixel, ff, min_frame, max_frame)
-
-                    # Reconstruct the avepixel in the given frame range
-                    avepixel = selectFFFrames(ff.avepixel, ff, min_frame, max_frame)
-
-                    # Store the computed frames
-                    maxpixel_list.append(maxpixel)
-                    avepixel_list.append(avepixel)
-                    stdpixel_list.append(ff.stdpixel)
-
-                # Immidiately extract the appropriate frames
-                if len(maxpixel_list) == 1:
-
-                    self.ff.maxpixel = maxpixel_list[0]
-                    self.ff.avepixel = avepixel_list[0]
-                    self.ff.stdpixel = stdpixel_list[0]
-
-                # Otherwise, compute the combined FF
-                else:
-                    maxpixel_list = np.array(maxpixel_list)
-                    avepixel_list = np.array(avepixel_list)
-                    stdpixel_list = np.array(stdpixel_list)
-
-                    self.ff.maxpixel = np.max(maxpixel_list, axis=0)
-
-                    # The maximum of the avepixel is taken because only the frame range of avepixel is taken
-                    self.ff.avepixel = np.max(avepixel_list, axis=0)
-
-                    self.ff.stdpixel = np.max(stdpixel_list, axis=0)
-
-        # Set the fixed dtype of uint8 to the FF
-        if self.ff is not None:
-            self.ff.dtype = np.uint8
-
-        # Store the loaded file to cache for faster loading
-        self.cache = {}
-        self.cache[cache_id] = self.ff
-
-        return self.ff
-
-    def name(self, beginning=None):
-        """ Return the name of the FF file. """
-
-        return self.current_ff_file
-
-    def currentTime(self, dt_obj=False):
-        """ Return the middle time of the current image. """
-
-        if dt_obj:
-            return datetime.datetime(*getMiddleTimeFF(self.current_ff_file, self.fps, \
-                                                      ret_milliseconds=False))
-
-        else:
-            return getMiddleTimeFF(self.current_ff_file, self.fps, ret_milliseconds=True)
-
-    def loadFrame(self, avepixel=False):
-        """ Load the current frame. """
-
-        # Compute which file read
-        file_name = self.ff_list[self.current_ff_index]
-
-        # Try loading the FF file from cache
-        if file_name in self.cache_frames:
-            self.ff_frame = self.cache_frames[file_name]
-        else:
-            # Load the FF file from disk
-            self.ff_frame = readFF(self.dir_path, file_name)
-
-            # Put the FF into separate cache
-            self.cache_frames = {}
-            self.cache_frames[file_name] = self.ff_frame
-
-        # Store the name of the current FF file from which the frame was read
-        self.frame_ff_name = file_name
-
-        # Reconstruct the frame from an FF file
-        frame = reconstructFrameFF(self.ff_frame, self.current_frame%self.fr_chunk_no, avepixel=avepixel)
-
-        return frame
-
-    def currentFrameTime(self, frame_no=None, dt_obj=False):
-        """ Return the time of the frame. """
-
-        if frame_no is None:
-            frame_no = self.current_frame
-
-        # Compute the datetime of the current frame
-        dt = self.beginning_datetime + datetime.timedelta(seconds=frame_no/self.fps)
-
-        if dt_obj:
-            return dt
-
-        else:
-            return dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000
-
-
 class InputTypeFRFF(InputType):
-    def __init__(self, dir_path, config, single_ff=False):
+    def __init__(self, dir_path, config, single_ff=False, use_fr_files=False):
         """ Input file type handle for FF files.
 
         Arguments:
@@ -489,6 +141,7 @@ class InputTypeFRFF(InputType):
                 files. False by default.
             detection: [bool] Indicates that the input is used for detection. False by default. Has no effect
                 for FF files.
+            use_fr_files: [bool] Include FR files together with FF files. False by default, only used in SkyFit.
 
         """
 
@@ -496,6 +149,8 @@ class InputTypeFRFF(InputType):
 
         self.dir_path = dir_path
         self.config = config
+
+        self.use_fr_files = use_fr_files
 
         self.__nrows = None
         self.__ncols = None
@@ -511,10 +166,16 @@ class InputTypeFRFF(InputType):
         if self.single_ff:
             print('Using FF or FR file:', self.dir_path)
         else:
-            print('Using FF and/or FR files from:', self.dir_path)
+            if use_fr_files:
+                print('Using FF and/or FR files from:', self.dir_path)
+            else:
+                print('Using FF files from:', self.dir_path)
+                
 
-        self.ff_list = []  # list of FF and FR file names
+        # List of FF and FR file names
+        self.ff_list = []  
         self.current_ff_index = 0
+        self.ff = None
 
         # Add the single FF file to the list
         if self.single_ff:
@@ -525,8 +186,14 @@ class InputTypeFRFF(InputType):
 
             # Get a list of FF files in the folder
             for file_name in os.listdir(dir_path):
-                if validFFName(file_name) or validFRName(file_name):
+                if validFFName(file_name):
                     self.ff_list.append(file_name)
+
+                # Add FR files to the list only if they are used
+                if self.use_fr_files:
+                    if validFRName(file_name):
+                        self.ff_list.append(file_name)
+
 
         # Check that there are any FF files in the folder
         if not self.ff_list:
@@ -604,13 +271,16 @@ class InputTypeFRFF(InputType):
                 read. If -1, all frames will be read in.
         """
         if first_frame is None and read_nframes is None:
+            
             # Find which file read
             file_name = self.name()
 
             # save and load file from cache
             if file_name in self.cache:
                 ff = self.cache[file_name]
+
             elif validFFName(file_name):
+                
                 # Load the FF file from disk
                 ff = readFF(self.dir_path, file_name)
 
@@ -768,6 +438,7 @@ class InputTypeFRFF(InputType):
                     break
 
             frame_list = np.array(frame_list)
+
             # calculate maxpixel
             ff.maxpixel = np.swapaxes(np.max(frame_list, axis=0), 0, 1).astype(np.uint8)
 
@@ -777,6 +448,9 @@ class InputTypeFRFF(InputType):
             ff.avepixel = np.swapaxes(img/img_count, 0, 1).astype(np.uint8)
 
             ff.stdpixel = np.zeros_like(ff.avepixel)
+
+        
+        self.ff = ff
 
         return ff
 
@@ -1923,6 +1597,7 @@ class InputTypeDFN(InputType):
             img_types = ['.png', '.jpg', '.bmp']
 
         self.beginning_datetime = beginning_time
+
         # Check if the file ends with support file extensions
         if self.beginning_datetime is None and \
                 any([self.image_file.lower().endswith(fextens) for fextens in img_types]):
@@ -1942,6 +1617,8 @@ class InputTypeDFN(InputType):
         self.current_frame = 100
         self.total_frames = 1024
 
+        self.ff = None
+
         # Load the first image
         img = self.loadImage()
 
@@ -1957,9 +1634,9 @@ class InputTypeDFN(InputType):
             self.ncols = temp
             img = np.rot90(img)
 
-        self.ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, self.img_dtype)
-        self.ff_struct_fake.addFrame(img.astype(np.uint16))
-        self.ff_struct_fake.finish()
+        self.ff = FFMimickInterface(self.nrows, self.ncols, self.img_dtype)
+        self.ff.addFrame(img.astype(np.uint16))
+        self.ff.finish()
 
         # If FPS is not given, use one from the config file
         if fps is None:
@@ -2003,7 +1680,7 @@ class InputTypeDFN(InputType):
             read_nframes: [int] Number of frames to read. If not given (None), self.fr_chunk_no frames will be
                 read. If -1, all frames will be read in.
         """
-        return self.ff_struct_fake
+        return self.ff
 
     def name(self, beginning=False):
         return self.image_file
@@ -2032,24 +1709,12 @@ class InputTypeDFN(InputType):
             return dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000
 
 
-def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_dir=False, detection=False):
-    """ Detect input data type. """
-    
-
-    if os.path.isdir(input_path):
-        img_handle = detectInputTypeFolder(input_path, config, beginning_time, fps, skip_ff_dir, detection)
-        
-    else:
-        img_handle = detectInputTypeFile(input_path, config, beginning_time, fps, skip_ff_dir, detection)
-
-    return img_handle
-
-
-def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip_ff_dir=False, detection=False):
+def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_dir=False, detection=False,
+    use_fr_files=False):
     """ Given the folder of a file, detect the input format.
 
     Arguments:
-        input_path: [str] Input directory path or file name (e.g. dir with FF files, or path to video file).
+        input_path: [str] Input directory path (e.g. dir with FF files or path to a video file).
         config: [Config Struct]
 
     Keyword arguments:
@@ -2061,6 +1726,43 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
             by default. This is only used for ManualReduction.
         detection: [bool] Indicates that the input is used for detection. False by default. This will
                 control whether the binning is applied or not. No effect on FF image handle.
+        use_fr_files: [bool] Include FR files together with FF files. False by default, only used in SkyFit.
+
+    """
+    
+
+    if os.path.isdir(input_path):
+
+        # Detect input type if a directory is given
+        img_handle = detectInputTypeFolder(input_path, config, beginning_time=beginning_time, fps=fps, \
+            skip_ff_dir=skip_ff_dir, detection=detection, use_fr_files=use_fr_files)
+        
+    else:
+        # Detect input type if a path to a file is given
+        img_handle = detectInputTypeFile(input_path, config, beginning_time=beginning_time, fps=fps, \
+            detection=fps)
+
+    return img_handle
+
+
+def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip_ff_dir=False, \
+    detection=False, use_fr_files=False):
+    """ Given the folder of a file, detect the input format.
+
+    Arguments:
+        input_path: [str] Input directory path (e.g. dir with FF files).
+        config: [Config Struct]
+
+    Keyword arguments:
+        beginning_time: [datetime] Datetime of the video beginning. Optional, only can be given for
+            when images in a directory as used.
+        fps: [float] Frames per second, used only when images in a folder are used. If it's not given,
+            it will be read from the config file.
+        skip_ff_dir: [bool] Skip the input type where there are multiple FFs in the same directory. False
+            by default. This is only used for ManualReduction.
+        detection: [bool] Indicates that the input is used for detection. False by default. This will
+                control whether the binning is applied or not. No effect on FF image handle.
+        use_fr_files: [bool] Include FR files together with FF files. False by default, only used in SkyFit.
 
     """
     if 'rawpy' in sys.modules:
@@ -2070,20 +1772,31 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
         img_types = ['.png', '.jpg', '.bmp']
 
     img_handle = None
+    
     # If the given dir path is a directory, search for FF files or individual images
     if not os.path.isdir(input_dir):
         return None
 
+
     # Check if there are valid FF names in the directory
     if any([validFFName(ff_file) or validFRName(ff_file) for ff_file in os.listdir(input_dir)]):
+
+
+        # If FR files are not used, only check for FF files
+        if not use_fr_files:
+            if not any([validFFName(ff_file) for ff_file in os.listdir(input_dir)]):
+                print("No FF files found in directory!")
+                return None
+
 
         if skip_ff_dir:
             messagebox.showinfo('FF directory',
                                 'ManualReduction only works on individual FF files, and not directories with FF files!')
             return None
+
         else:
             # Init the image handle for FF files in a directory
-            img_handle = InputTypeFRFF(input_dir, config)
+            img_handle = InputTypeFRFF(input_dir, config, use_fr_files=use_fr_files)
             img_handle.ncols = config.width
             img_handle.nrows = config.height
 
@@ -2095,7 +1808,24 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
     return img_handle
 
 
-def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, skip_ff_dir=False, detection=False):
+
+def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detection=False):
+    """ Given a file, detect the input format.
+
+    Arguments:
+        input_path: [str] Input file path (e.g. path to a video file).
+        config: [Config Struct]
+
+    Keyword arguments:
+        beginning_time: [datetime] Datetime of the video beginning. Optional, only can be given for
+            video input formats.
+        fps: [float] Frames per second, used only for a DFN image. If it's not given, it will be read from 
+            the config file.
+        detection: [bool] Indicates that the input is used for detection. False by default. This will
+                control whether the binning is applied or not. No effect on FF image handle.
+
+    """
+
     # If the given path is a file, look for a single FF file, video files, or vid files
     dir_path, file_name = os.path.split(input_file)
 

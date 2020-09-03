@@ -119,7 +119,8 @@ class FOVinputDialog(object):
 
 
 class PlateTool(QtWidgets.QMainWindow):
-    def __init__(self, dir_path, config, beginning_time=None, fps=None, gamma=None, startUI=True):
+    def __init__(self, dir_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False, \
+        startUI=True):
         """ SkyFit interactive window.
 
         Arguments:
@@ -132,6 +133,7 @@ class PlateTool(QtWidgets.QMainWindow):
             fps: [float] Frames per second, used only when images in a folder are used.
             gamma: [float] Camera gamma. None by default, then it will be used from the platepar file or
                 config.
+            use_fr_files: [bool] Include FR files together with FF files. False by default.
             startUI: [bool] Start the GUI. True by default.
         """
 
@@ -146,6 +148,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.dir_path = dir_path
         self.file_path = None
 
+        # Store forced time of first frame
+        self.beginning_time = beginning_time
+
         # Extract the directory path if a file was given
         if os.path.isfile(self.dir_path):
             self.dir_path, _ = os.path.split(self.dir_path)
@@ -157,6 +162,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # If the FPS was given, change the FPS in the config file
         if fps is not None:
             config.fps = fps
+
+        self.use_fr_files = use_fr_files
 
         # Star picking mode variables
         self.star_aperature_radius = 5
@@ -224,7 +231,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Detect data input type and init the image handle
-        self.detectInputType(load=True, beginning_time=beginning_time)
+        self.detectInputType(load=True, beginning_time=beginning_time, use_fr_files=self.use_fr_files)
 
 
         ###################################################################################################
@@ -527,6 +534,19 @@ class PlateTool(QtWidgets.QMainWindow):
 
         ###################################################################################################
         # RIGHT WIDGET
+
+
+        # # If the file is being loaded, detect the input type
+        # if loaded_file and not hasattr(self, "img_handle"):
+
+        #     if hasattr(self, "beginning_time"):
+        #         beginning_time = self.beginning_time
+        #     else:
+        #         beginning_time = None
+
+        #     # Detect data input type and init the image handle
+        #     self.detectInputType(load=True, beginning_time=beginning_time)
+
 
         # adding img
         gamma = 1
@@ -1413,7 +1433,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 return None
 
             # don't change images if there's no image to change to
-            if self.img.img_handle.input_type == 'dfn' and self.img.img_handle.total_images == 1:
+            if (self.img.img_handle.input_type == 'dfn') and (self.img.img_handle.total_images == 1):
                 return None
 
             if n > 0:
@@ -2341,7 +2361,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.scrolls_back += 1
 
                     # Reset the zoom if scrolled back multiple times
-                    if self.scrolls_back > 3:
+                    if self.scrolls_back > 1:
                         self.img_frame.autoRange(padding=0)
 
                     else:
@@ -2658,7 +2678,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
 
-    def detectInputType(self,  beginning_time=None, load=False):
+    def detectInputType(self,  beginning_time=None, use_fr_files=False, load=False):
         """
         Tries to find image files to load by looking at the self.dir_path folder. If the files
         in the folder must be loaded individually rather than a group, opens a file explorer
@@ -2667,15 +2687,20 @@ class PlateTool(QtWidgets.QMainWindow):
         Keyword arguments:
             beginning_time: [datetime] Datetime of the video beginning. Optional, only can be given for
                 video input formats.
+            use_fr_files: [bool] Include FR files together with FF files. False by default.
             load: [bool] If state was most recently loaded. Allows you to skip the file dialog if
                         you know which file is to opened.
+
 
         """
         if load and self.file_path is not None:  # only for loadState
             img_handle = detectInputTypeFile(self.file_path, self.config, beginning_time=beginning_time)
+        
         else:
             # Detect input file type and load appropriate input plugin
-            img_handle = detectInputTypeFolder(self.dir_path, self.config, beginning_time=beginning_time)
+            img_handle = detectInputTypeFolder(self.dir_path, self.config, beginning_time=beginning_time, \
+                use_fr_files=self.use_fr_files)
+            
             self.file_path = None
 
         if img_handle is None:
@@ -3708,9 +3733,9 @@ class PlateTool(QtWidgets.QMainWindow):
         ### Add all pixels within the aperture to the list for photometry ###
 
         x_list = range(mouse_x - self.star_aperature_radius, mouse_x \
-                       + self.star_aperature_radius + 1)
+                       + int(self.star_aperature_radius) + 1)
         y_list = range(mouse_y - self.star_aperature_radius, mouse_y \
-                       + self.star_aperature_radius + 1)
+                       + int(self.star_aperature_radius) + 1)
 
         for x in x_list:
             for y in y_list:
@@ -3950,6 +3975,9 @@ if __name__ == '__main__':
                             help="Path to a config file which will be used instead of the default one."
                                  " To load the .config file in the given data directory, write '.' (dot).")
 
+    arg_parser.add_argument('-r', '--fr', action="store_true", \
+        help="""Use FR files. """)
+
     arg_parser.add_argument('-t', '--timebeg', nargs=1, metavar='TIME', type=str,
                             help="The beginning time of the video file in the YYYYMMDD_hhmmss.uuuuuu format.")
 
@@ -3960,6 +3988,8 @@ if __name__ == '__main__':
                             help="Camera gamma value. Science grade cameras have 1.0, consumer grade cameras have 0.45. "
                                  "Adjusting this is essential for good photometry, and doing star photometry through SkyFit"
                                  " can reveal the real camera gamma.")
+
+
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -4000,7 +4030,7 @@ if __name__ == '__main__':
 
         # Init SkyFit
         plate_tool = PlateTool(dir_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
-            gamma=cml_args.gamma)
+            gamma=cml_args.gamma, use_fr_files=cml_args.fr)
 
 
     # Run the GUI app
