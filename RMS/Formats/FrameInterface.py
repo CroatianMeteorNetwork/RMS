@@ -164,13 +164,13 @@ class InputTypeFRFF(InputType):
         self.byteswap = False
 
         if self.single_ff:
-            print('Using FF or FR file:', self.dir_path)
+            print('Using file:', self.dir_path)
         else:
             if use_fr_files:
                 print('Using FF and/or FR files from:', self.dir_path)
             else:
                 print('Using FF files from:', self.dir_path)
-                
+
 
         # List of FF and FR file names
         self.ff_list = []  
@@ -211,7 +211,11 @@ class InputTypeFRFF(InputType):
         # Number for frames to read by default
         self.total_frames = 256
 
+        # Cahcne for whole FF files
         self.cache = {}
+
+        # Cache for individual frames
+        self.cache_frames = {}
 
         # Load the first chunk for initing parameters
         self.loadChunk()
@@ -262,6 +266,7 @@ class InputTypeFRFF(InputType):
 
         self.current_ff_index = (self.current_ff_index - 1)%len(self.ff_list)
 
+
     def loadChunk(self, first_frame=None, read_nframes=None):
         """ Load the frame chunk file.
 
@@ -275,7 +280,7 @@ class InputTypeFRFF(InputType):
             # Find which file read
             file_name = self.name()
 
-            # save and load file from cache
+            # Save and load file from cache
             if file_name in self.cache:
                 ff = self.cache[file_name]
 
@@ -286,7 +291,9 @@ class InputTypeFRFF(InputType):
 
                 # Put the FF into separate cache
                 self.cache[file_name] = ff
+
             else:
+                # Load the FR files from disk
                 ff = readFR(self.dir_path, file_name)
                 ff.nrows = self.nrows
                 ff.ncols = self.ncols
@@ -302,7 +309,9 @@ class InputTypeFRFF(InputType):
                 else:
                     self.current_frame = ff.t[self.current_line][0]
 
-        elif validFFName(self.ff_list[0]):  # if it contains at least one FF file
+
+        # If it contains at least one FF file
+        elif any([validFFName(ff_file) for ff_file in self.ff_list]):
 
             if first_frame == -1:
                 first_frame = 0
@@ -323,6 +332,7 @@ class InputTypeFRFF(InputType):
 
                 # Select the frames
                 ff.maxpixel = selectFFFrames(ff.maxpixel, ff, min_frame, max_frame)
+
             else:
 
                 # Init an empty FF structure
@@ -379,23 +389,21 @@ class InputTypeFRFF(InputType):
 
                     ff.stdpixel = np.max(stdpixel_list, axis=0)
 
-        else:  # if there are only FR files
+        # If there are only FR files
+        else:  
 
             if first_frame == -1:
                 first_frame = 0
 
-            # cache all fr files since they will be used
-            for file_name in self.ff_list:
-                ff = readFR(self.dir_path, file_name)
-                ff.nrows = self.nrows
-                ff.ncols = self.ncols
-                self.cache[file_name] = ff
 
-                self.line_number[self.current_ff_index] = ff.lines
+            # Load the given FR file
+            ff = readFR(self.dir_path, self.ff_list[self.current_ff_index]) 
+            ff.nrows = self.nrows
+            ff.ncols = self.ncols
 
-            ff = FFMimickInterface(self.nrows, self.ncols, np.uint8)
+            self.line_number[self.current_ff_index] = ff.lines
 
-            fr_files = list(self.cache.values())
+            fr_files = [ff]
             fr_file_frames = [fr.frameNum for fr in fr_files]  # number of frames in each fr file
             total_frames = sum(sum(x) for x in fr_file_frames)
             frames_to_read = computeFramesToRead(read_nframes, total_frames, 256, first_frame)
@@ -403,7 +411,8 @@ class InputTypeFRFF(InputType):
             frame_list = []
             img_count = np.full((self.ncols, self.nrows), -1, dtype=np.float64)
             stop = False
-            # go through every line in every fr file
+
+            # Go through every line in every FR file
             for fr, line_list in enumerate(fr_file_frames):
                 for line, frame_count_line in enumerate(line_list):
                     # don't do anything until you get to the first frame
@@ -452,7 +461,16 @@ class InputTypeFRFF(InputType):
         
         self.ff = ff
 
+        # Set the fixed dtype of uint8 to the FF
+        if self.ff is not None:
+            self.ff.dtype = np.uint8
+                
+        # Store the loaded file to cache for faster loading (always just have a cache of 1)
+        self.cache = {}
+        self.cache[file_name] = self.ff
+
         return ff
+
 
     @property
     def current_ff_file(self):
@@ -498,17 +516,20 @@ class InputTypeFRFF(InputType):
         # save and load file from cache
         if file_name in self.cache:
             ff_frame = self.cache[file_name]
+
         elif validFFName(file_name):
             # Load the FF file from disk
             ff_frame = readFF(self.dir_path, file_name)
 
             # Put the FF into separate cache
             self.cache[file_name] = ff_frame
+
         else:
             ff_frame = readFR(self.dir_path, file_name)
             ff_frame.nrows = self.nrows
             ff_frame.ncols = self.ncols
             self.cache[file_name] = ff_frame
+
 
         if self.current_frame is None:
             if validFFName(file_name):
@@ -516,8 +537,10 @@ class InputTypeFRFF(InputType):
             else:
                 self.current_frame = ff_frame.t[self.current_line][0]
 
+
         # get frame from file
         if validFFName(file_name):
+            
             # Reconstruct the frame from an FF file
             frame = reconstructFrameFF(ff_frame, self.current_frame%self.total_frames,
                                        avepixel=avepixel)
@@ -558,6 +581,8 @@ class InputTypeFRFF(InputType):
                 frame[Y_img, X_img] = np.swapaxes(ff_frame.frames[self.current_line][frame_indx], 0, 1)
 
         return frame
+
+
 
     def currentFrameTime(self, frame_no=None, dt_obj=False):
         """ Return the time of the frame. """
