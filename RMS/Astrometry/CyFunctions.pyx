@@ -77,13 +77,29 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
     @return angular_separation: [float] angular separation (in degrees)
     """
 
+    cdef double deldec2
+    cdef double delra2
+    cdef double sindis
+
     # Convert input coordinates to radians
     ra1 = radians(ra1)
     dec1 =  radians(dec1)
     ra2 = radians(ra2)
     dec2 = radians(dec2)
 
-    return degrees(acos(sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra2 - ra1)))
+
+    # Classical method
+    # return degrees(acos(sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra2 - ra1)))
+
+
+    # Compute the angular separation using the haversine formula
+    #   Source: https://idlastro.gsfc.nasa.gov/ftp/pro/astro/gcirc.pro
+    deldec2 = (dec2 - dec1)/2.0
+    delra2 =  (ra2 - ra1)/2.0
+    sindis = np.sqrt(np.sin(deldec2)*np.sin(deldec2) \
+        + np.cos(dec1)*np.cos(dec2)*np.sin(delra2)*np.sin(delra2))
+
+    return degrees(2.0*np.arcsin(sindis))
 
 
 
