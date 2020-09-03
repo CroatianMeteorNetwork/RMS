@@ -243,7 +243,7 @@ def updateRaDecGrid(grid, platepar):
     for ra_grid in ra_grid_arr:
 
         # Keep the RA fixed and evaluate all declinations
-        dec_grid_plot = np.arange(-90, 90, plot_dens)
+        dec_grid_plot = np.arange(-90, 90 + plot_dens, plot_dens)
         ra_grid_plot = np.zeros_like(dec_grid_plot) + ra_grid
 
         # Compute alt/az
@@ -392,7 +392,7 @@ def updateAzAltGrid(grid, platepar):
     for az_grid in az_grid_arr:
 
         # Keep the azimuth fixed and plot all altitude lines
-        alt_grid_plot = np.arange(0, 90, plot_dens)
+        alt_grid_plot = np.arange(0, 90 + plot_dens, plot_dens)
         az_grid_plot = np.zeros_like(alt_grid_plot) + az_grid
 
         
