@@ -924,6 +924,8 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.mode == 'skyfit':
             text_str = 'Keys:\n'
             text_str += '-----\n'
+            text_str += 'Left/Right - Previous/next image\n'
+            text_str += 'CTRL + Left/Right - +/- 10 images\n'
             text_str += 'A/D - Azimuth\n'
             text_str += 'S/W - Altitude\n'
             text_str += 'Q/E - Position angle\n'
@@ -969,7 +971,8 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str = 'Keys:\n'
             text_str += '-----------\n'
             text_str += 'Left/Right - Previous/next frame\n'
-            text_str += 'Page Down/Up - +/- 25 frames\n'
+            text_str += 'CTRL + Left/Right - +/- 10 frames\n'
+            text_str += 'Down/Up - +/- 25 frames\n'
             text_str += ',/. - Previous/next FR line\n'
             text_str += 'M - Show maxpixel\n'
             text_str += 'K - Subtract average\n'
@@ -1437,10 +1440,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 return None
 
             if n > 0:
-                self.img.nextChunk()
+                for _ in range(n):
+                    self.img.nextChunk()
 
             elif n < 0:
-                self.img.prevChunk()
+                for _ in range(abs(n)):
+                    self.img.prevChunk()
 
             self.img_zoom.loadImage(self.mode, self.img_type_flag)
             self.img.loadImage(self.mode, self.img_type_flag)
@@ -1811,18 +1816,35 @@ class PlateTool(QtWidgets.QMainWindow):
             # updates automatically
 
         # Toggle grid
-        elif event.key() == QtCore.Qt.Key_G and (modifiers == QtCore.Qt.ControlModifier):
+        elif (event.key() == QtCore.Qt.Key_G) and (modifiers == QtCore.Qt.ControlModifier):
             self.grid_visible = (self.grid_visible + 1)%3
             self.onGridChanged()
             self.tab.settings.updateShowGrid()
 
+
         # Previous image/frame
         elif event.key() == QtCore.Qt.Key_Left:
-            self.nextImg(n=-1)
+
+            n = -1
+
+            # Skip 10 images back if CTRL is pressed
+            if modifiers == QtCore.Qt.ControlModifier:
+                n = -10
+
+            self.nextImg(n=n)
+
 
         # Next image/frame
         elif event.key() == QtCore.Qt.Key_Right:
-            self.nextImg()
+
+            n = 1
+
+            # Skip 10 images forward if CTRL is pressed
+            if modifiers == QtCore.Qt.ControlModifier:
+                n = 10
+
+            self.nextImg(n=n)
+
 
         # Switch between maxpixel and avepixel
         elif event.key() == QtCore.Qt.Key_M:
@@ -2700,7 +2722,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Detect input file type and load appropriate input plugin
             img_handle = detectInputTypeFolder(self.dir_path, self.config, beginning_time=beginning_time, \
                 use_fr_files=self.use_fr_files)
-            
+
             self.file_path = None
 
         if img_handle is None:
