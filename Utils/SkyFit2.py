@@ -392,6 +392,13 @@ class PlateTool(QtWidgets.QMainWindow):
         self.label2.setZValue(1000)
         self.label2.setParentItem(self.img_frame)
 
+        # F1 info label
+        self.label_f1 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
+        self.label_f1.setTextWidth(100)
+        self.label_f1.setZValue(1000)
+        self.label_f1.setParentItem(self.img_frame)
+        self.label_f1.hide()
+
         self.catalog_stars_visible = True
 
         # catalog star markers (main window)
@@ -810,7 +817,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateLeftLabels()
 
     def onFrameResize(self):
+        """ What happens when the window is resized. """
+
         self.label2.setPos(0, self.img_frame.height() - self.label2.boundingRect().height())
+        self.label_f1.setPos(0, self.img_frame.height() - self.label_f1.boundingRect().height())
+
         self.star_pick_info.setPos(self.img_frame.width()/2, self.img_frame.height() - 50)
 
         if self.config.height/self.config.width < self.img_frame.height()/self.img_frame.width():
@@ -907,7 +918,8 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 sign_str = ' '
             text_str += 'RA centre  = {:s}{:02d}h {:02d}m {:05.2f}s\n'.format(sign_str, hh, mm, ss)
-            text_str += 'Dec centre = {:.3f}°\n'.format(dec_centre)
+            text_str += 'Dec centre = {:.3f}°'.format(dec_centre)
+
         else:
             text_str = "Station: {:s} \n".format(self.platepar.station_code)
             text_str += self.img_handle.name() + '\n\n'
@@ -917,13 +929,14 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'Frame = {:d}\n'.format(self.img.getFrame())
             text_str += 'Image gamma = {:.2f}\n'.format(self.img.gamma)
             text_str += 'Camera gamma = {:.2f}\n'.format(self.config.gamma)
-            text_str += 'Refraction = {:s}\n'.format(str(self.platepar.refraction))
+            text_str += 'Refraction = {:s}'.format(str(self.platepar.refraction))
 
         self.label1.setText(text_str)
 
         if self.mode == 'skyfit':
             text_str = 'Keys:\n'
             text_str += '-----\n'
+            text_str += 'F1 - Hide/show this text\n'
             text_str += 'Left/Right - Previous/next image\n'
             text_str += 'CTRL + Left/Right - +/- 10 images\n'
             text_str += 'A/D - Azimuth\n'
@@ -966,10 +979,11 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + R - Pick stars\n'
             text_str += 'SHIFT + Z - Show zoomed window\n'
             text_str += 'CTRL + N - New platepar\n'
-            text_str += 'CTRL + S - Save platepar & state\n'
+            text_str += 'CTRL + S - Save platepar & state'
         else:
             text_str = 'Keys:\n'
             text_str += '-----------\n'
+            text_str += 'F1 - Hide/show this text\n'
             text_str += 'Left/Right - Previous/next frame\n'
             text_str += 'CTRL + Left/Right - +/- 10 frames\n'
             text_str += 'Down/Up - +/- 25 frames\n'
@@ -984,10 +998,15 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + F - Load flat\n'
             text_str += 'CTRL + P - Load platepar\n'
             text_str += 'CTRL + W - Save current frame\n'
-            text_str += 'CTRL + S - Save FTPdetectinfo\n'
+            text_str += 'CTRL + S - Save FTPdetectinfo'
 
         self.label2.setText(text_str)
         self.label2.setPos(0, self.img_frame.height() - self.label2.boundingRect().height())
+
+
+        # F1 info label which will be shown when labels 1 and 2 are hidden
+        self.label_f1.setText("F1 - Show hotkeys")
+        self.label_f1.setPos(0, self.img_frame.height() - self.label_f1.boundingRect().height())
 
     def updateStars(self):
         """ Updates only the stars, including catalog stars, calstars and paired stars """
@@ -2428,19 +2447,26 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def toggleInfo(self):
         """ Toggle left label info """
+
         self.show_key_help += 1
+
         if self.show_key_help >= 3:
             self.show_key_help = 0
 
         if self.show_key_help == 0:
             self.label1.show()
             self.label2.hide()
+            self.label_f1.show()
+
         elif self.show_key_help == 1:
             self.label1.show()
             self.label2.show()
+            self.label_f1.hide()
+
         else:
             self.label1.hide()
             self.label2.hide()
+            self.label_f1.show()
 
         if self.v_zoom_left:
             if self.show_key_help != 2:
@@ -2452,6 +2478,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.star_pick_info.show()
         else:
             self.star_pick_info.hide()
+
 
     def toggleImageType(self):
         """ Toggle between the maxpixel and avepixel. """
@@ -3754,7 +3781,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         ### Add all pixels within the aperture to the list for photometry ###
 
-        x_list = range(mouse_x - self.star_aperature_radius, mouse_x \
+        x_list = range(mouse_x - int(self.star_aperature_radius), mouse_x \
                        + int(self.star_aperature_radius) + 1)
         y_list = range(mouse_y - self.star_aperature_radius, mouse_y \
                        + int(self.star_aperature_radius) + 1)
