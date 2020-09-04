@@ -422,7 +422,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # selected catalog star markers (main window)
         self.sel_cat_star_markers = pg.ScatterPlotItem()
-        self.sel_cat_star_markers.setPen('b')
+        self.sel_cat_star_markers.setPen('r', width=2)
         self.sel_cat_star_markers.setSize(10)
         self.sel_cat_star_markers.setSymbol(Cross())
         self.sel_cat_star_markers.setZValue(4)
@@ -430,7 +430,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # selected catalog star markers (zoom window)
         self.sel_cat_star_markers2 = pg.ScatterPlotItem()
-        self.sel_cat_star_markers2.setPen('b')
+        self.sel_cat_star_markers2.setPen('r', width=2)
         self.sel_cat_star_markers2.setSize(10)
         self.sel_cat_star_markers2.setSymbol(Cross())
         self.sel_cat_star_markers2.setZValue(4)
@@ -438,16 +438,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # centroid star markers (main window)
         self.centroid_star_markers = pg.ScatterPlotItem()
-        self.centroid_star_markers.setPen((255, 165, 0))
-        self.centroid_star_markers.setSize(15)
+        self.centroid_star_markers.setPen((255, 165, 0), width=2)
+        self.centroid_star_markers.setSize(20)
         self.centroid_star_markers.setSymbol(Plus())
         self.centroid_star_markers.setZValue(4)
         self.img_frame.addItem(self.centroid_star_markers)
 
         # centroid star markers (zoom window)
         self.centroid_star_markers2 = pg.ScatterPlotItem()
-        self.centroid_star_markers2.setPen((255, 165, 0))
-        self.centroid_star_markers2.setSize(15)
+        self.centroid_star_markers2.setPen((255, 165, 0), width=2)
+        self.centroid_star_markers2.setSize(20)
         self.centroid_star_markers2.setSymbol(Plus())
         self.centroid_star_markers2.setZValue(4)
         self.zoom_window.addItem(self.centroid_star_markers2)
@@ -508,7 +508,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.cursor.hide()
         self.cursor.setZValue(20)
 
-        # Dursor (window)
+        # Cursor (window)
         self.cursor2 = CursorItem(self.star_aperature_radius, pxmode=True, thickness=2)
         self.zoom_window.addItem(self.cursor2, ignoreBounds=True)
         self.cursor2.hide()
@@ -527,11 +527,19 @@ class PlateTool(QtWidgets.QMainWindow):
         self.celestial_grid.setZValue(1)
         self.img_frame.addItem(self.celestial_grid)
 
-        # Fit residuals
-        self.residual_lines = pg.PlotCurveItem(connect='pairs', pen=pg.mkPen((255, 255, 0),
+
+        # Fit residuals (image, orange)
+        self.residual_lines_img = pg.PlotCurveItem(connect='pairs', pen=pg.mkPen((255, 128, 0),
                                                                              style=QtCore.Qt.DashLine))
-        self.img_frame.addItem(self.residual_lines)
-        self.residual_lines.setZValue(2)
+        self.img_frame.addItem(self.residual_lines_img)
+        self.residual_lines_img.setZValue(2)
+        
+        # Fit residuals (astrometric, yellow)
+        self.residual_lines_astro = pg.PlotCurveItem(connect='pairs', pen=pg.mkPen((255, 255, 0),
+                                                                             style=QtCore.Qt.DashLine))
+        self.img_frame.addItem(self.residual_lines_astro)
+        self.residual_lines_astro.setZValue(2)
+
 
         # Text
         self.stdev_text_filter = 0
@@ -1153,7 +1161,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 res_x = img_x + res_scale*np.cos(angle)*distance
                 res_y = img_y + res_scale*np.sin(angle)*distance
 
-                # Plot the image residuals
+                # Save image residuals
                 x1.extend([img_x, res_x])
                 y1.extend([img_y, res_y])
 
@@ -1162,13 +1170,15 @@ class PlateTool(QtWidgets.QMainWindow):
                 res_x = img_x + res_scale*np.cos(angle)*ang_dist_img
                 res_y = img_y + res_scale*np.sin(angle)*ang_dist_img
 
-                # Plot the sky residuals
+                # Save sky residuals
                 x2.extend([img_x, res_x])
                 y2.extend([img_y, res_y])
 
-            self.residual_lines.setData(x=x2, y=y2)
+            self.residual_lines_img.setData(x=x1, y=y1)
+            self.residual_lines_astro.setData(x=x2, y=y2)
         else:
-            self.residual_lines.clear()
+            self.residual_lines_img.clear()
+            self.residual_lines_astro.clear()
 
     def updateDistortion(self):
         """ Draw distortion guides. """
@@ -2513,11 +2523,13 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.selected_stars_visible:
             self.sel_cat_star_markers.show()
             self.sel_cat_star_markers2.show()
-            self.residual_lines.show()
+            self.residual_lines_astro.show()
+            self.residual_lines_img.show()
         else:
             self.sel_cat_star_markers.hide()
             self.sel_cat_star_markers2.hide()
-            self.residual_lines.hide()
+            self.residual_lines_astro.hide()
+            self.residual_lines_img.hide()
 
         self.photometry()
 
