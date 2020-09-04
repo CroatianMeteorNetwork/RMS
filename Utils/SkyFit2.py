@@ -551,16 +551,16 @@ class PlateTool(QtWidgets.QMainWindow):
         # RIGHT WIDGET
 
 
-        # # If the file is being loaded, detect the input type
-        # if loaded_file and not hasattr(self, "img_handle"):
+        # If the file is being loaded, detect the input type
+        if loaded_file and not hasattr(self, "img_handle"):
 
-        #     if hasattr(self, "beginning_time"):
-        #         beginning_time = self.beginning_time
-        #     else:
-        #         beginning_time = None
+            if hasattr(self, "beginning_time"):
+                beginning_time = self.beginning_time
+            else:
+                beginning_time = None
 
-        #     # Detect data input type and init the image handle
-        #     self.detectInputType(load=True, beginning_time=beginning_time)
+            # Detect data input type and init the image handle
+            self.detectInputType(load=True, beginning_time=beginning_time)
 
 
         # adding img
@@ -672,6 +672,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateLeftLabels()
             self.tab.onSkyFit()
             self.pick_marker.hide()
+            self.pick_marker2.hide()
             self.region.hide()
             self.img_frame.setMouseEnabled(True, True)
             self.star_pick_mode = False
@@ -748,6 +749,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.cursor2.hide()
             self.tab.onManualReduction()
             self.pick_marker.show()
+            self.pick_marker2.show()
             self.region.show()
 
     def changeStation(self):
@@ -1616,14 +1618,18 @@ class PlateTool(QtWidgets.QMainWindow):
             if not hasattr(self, "extinction_scale"):
                 self.platepar.extinction_scale = 1.0
 
-        #  If setupUI hasnt already been called, call it
+        # If setupUI hasn't already been called, call it
         if not hasattr(self, 'central'):
+
             self.setupUI(loaded_file=True)
 
         else:
-            self.detectInputType(load=True)  # get new img_handle
+            
+            # Get and set the new img_handle
+            self.detectInputType(load=True)  
             self.img.changeHandle(self.img_handle)
             self.img_zoom.changeHandle(self.img_handle)
+
             self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
             self.img_frame.autoRange(padding=0)
 
