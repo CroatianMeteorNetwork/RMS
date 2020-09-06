@@ -1353,19 +1353,23 @@ class InputTypeImages(object):
     def nextChunk(self):
         """ Go to the next frame chunk. """
 
-        self.current_frame_chunk += 1
-        self.current_frame_chunk = self.current_frame_chunk%self.total_fr_chunks
+        if not self.single_image_mode:
 
-        self.current_frame = self.current_frame_chunk*self.fr_chunk_no
+            self.current_frame_chunk += 1
+            self.current_frame_chunk = self.current_frame_chunk%self.total_fr_chunks
+
+            self.current_frame = self.current_frame_chunk*self.fr_chunk_no
 
 
     def prevChunk(self):
         """ Go to the previous frame chunk. """
 
-        self.current_frame_chunk -= 1
-        self.current_frame_chunk = self.current_frame_chunk%self.total_fr_chunks
+        if not self.single_image_mode:
 
-        self.current_frame = self.current_frame_chunk*self.fr_chunk_no
+            self.current_frame_chunk -= 1
+            self.current_frame_chunk = self.current_frame_chunk%self.total_fr_chunks
+
+            self.current_frame = self.current_frame_chunk*self.fr_chunk_no
 
 
     def loadChunk(self, first_frame=None, read_nframes=None):
@@ -1486,7 +1490,14 @@ class InputTypeImages(object):
         """
 
         self.current_frame = fr_num%self.total_frames
-        self.current_img_file = self.img_list[self.current_frame]
+
+
+        # In the single image mode, don't change the image
+        if self.single_image_mode:
+            pass
+
+        else:
+            self.current_img_file = self.img_list[self.current_frame]
 
 
     def loadFrame(self, avepixel=None, fr_no=None):
