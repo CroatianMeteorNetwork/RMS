@@ -1170,6 +1170,7 @@ class InputTypeImages(object):
         self.detection = detection
 
         self.ff = None
+        self.cache = {}
 
         # This type of input probably won't have any calstars files
         self.require_calstars = False
@@ -1206,6 +1207,24 @@ class InputTypeImages(object):
             sys.exit()
 
         ### ###
+
+
+        # Compute the total number of used frames
+        self.total_frames = len(self.img_list)
+
+
+
+        self.single_image_mode = False
+
+        # If there is only one image, enable the single image mode
+        if self.total_frames == 1:
+
+            self.single_image_mode = True
+
+            print()
+            print("Single image mode")
+
+
 
         ### Try to detect if the given images are UWO-style PNGs ###
 
@@ -1253,15 +1272,54 @@ class InputTypeImages(object):
         else:
             self.beginning_datetime = beginning_time
 
+
+
+        ### SET THE FPS ###
+
+        # Estimate the FPS if UWO pngs are given
+        if self.uwo_png_mode:
+            # Convert datetimes to Unix times
+            unix_times = [datetime2UnixTime(dt) for dt in self.uwo_png_dt_list]
+
+            fps = 1/((unix_times[-1] - unix_times[0])/self.current_fr_chunk_size)
+
+        # If FPS is not given, use one from the config file
+        if fps is None:
+
+            self.fps = self.config.fps
+            print('Using FPS from config file: ', self.fps)
+
+        else:
+
+            self.fps = fps
+            print('Using FPS:', self.fps)
+
+        ### ###
+
+
         print('Using folder:', self.dir_path)
 
         self.current_frame_chunk = 0
 
-        # Compute the total number of used frames
-        self.total_frames = len(self.img_list)
 
         self.current_frame = 0
         self.current_img_file = self.img_list[self.current_frame]
+
+
+
+        if self.single_image_mode:
+
+            # Start at frame 100 to accomodate reversing picks, set the max number of frames to 1024
+            self.current_frame = 100
+            self.total_frames = 1024
+
+
+            # Correct the time so that the given time starts on frame 100
+            self.beginning_datetime -= datetime.timedelta(seconds=self.current_frame/self.fps)
+
+            print("Beginning time is now relative to frame 100!")
+            print()
+
 
         # Load the first image
         img = self.loadFrame()
@@ -1284,28 +1342,10 @@ class InputTypeImages(object):
         if self.total_fr_chunks == 0:
             self.total_fr_chunks = 1
 
-        self.cache = {}
 
         # Do the initial load
         self.loadChunk()
 
-        # Estimate the FPS if UWO pngs are given
-        if self.uwo_png_mode:
-            # Convert datetimes to Unix times
-            unix_times = [datetime2UnixTime(dt) for dt in self.uwo_png_dt_list]
-
-            fps = 1/((unix_times[-1] - unix_times[0])/self.current_fr_chunk_size)
-
-        # If FPS is not given, use one from the config file
-        if fps is None:
-
-            self.fps = self.config.fps
-            print('Using FPS from config file: ', self.fps)
-
-        else:
-
-            self.fps = fps
-            print('Using FPS:', self.fps)
 
         print('Total frames:', self.total_frames)
 
@@ -1350,8 +1390,19 @@ class InputTypeImages(object):
             # Make sure the first frame is within the limits
             first_frame = first_frame%self.total_frames
 
-        # Compute the number of frames to read
-        frames_to_read = computeFramesToRead(read_nframes, self.total_frames, self.fr_chunk_no, first_frame)
+
+
+        # In the single image mode, only read one frame
+        if self.single_image_mode:
+
+            frames_to_read = 1
+
+        else:
+
+            # Compute the number of frames to read
+            frames_to_read = computeFramesToRead(read_nframes, self.total_frames, self.fr_chunk_no, \
+                first_frame)
+
 
         # Get the cache ID
         cache_id = getCacheID(first_frame, frames_to_read)
@@ -1406,14 +1457,25 @@ class InputTypeImages(object):
         """ Increment current frame. """
 
         self.current_frame = (self.current_frame + 1)%self.total_frames
-        self.current_img_file = self.img_list[self.current_frame]
+
+
+        # In the single image mode, continously cycle through the same frame
+        if self.single_image_mode:
+            pass
+        else:
+            self.current_img_file = self.img_list[self.current_frame]
 
 
     def prevFrame(self):
         """ Increment current frame. """
 
         self.current_frame = (self.current_frame - 1)%self.total_frames
-        self.current_img_file = self.img_list[self.current_frame]
+
+        # In the single image mode, continously cycle through the same frame
+        if self.single_image_mode:
+            pass
+        else:
+            self.current_img_file = self.img_list[self.current_frame]
 
 
     def setFrame(self, fr_num):
@@ -1443,6 +1505,19 @@ class InputTypeImages(object):
             current_img_file = self.current_img_file
             fr_no = self.current_frame
 
+
+        # In the single image mode, the frame will not change, so load it from the cache if available
+        single_image_key = "single_image"
+        if self.single_image_mode:
+            if single_image_key in self.cache:
+                
+                # Load the frame from cache
+                frame = self.cache[single_image_key]
+
+                return frame
+
+
+
         # Load an .NEF file
         if current_img_file.lower().endswith('.nef'):
             
@@ -1456,7 +1531,9 @@ class InputTypeImages(object):
             # Convert the image to grayscale
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
 
+        # Load a normal image
         else:
+
             # Get the current image if it's not an NEF file (e.g. png, jpg...)
             frame = cv2.imread(os.path.join(self.dir_path, current_img_file), -1)
 
@@ -1499,7 +1576,14 @@ class InputTypeImages(object):
             frame = Image.binImage(frame, self.config.detection_binning_factor,
                                    self.config.detection_binning_method)
 
+
+        # In the single image mode, store the frame to memory so it doesn't have to be reloaded
+        if self.single_image_mode:
+            self.cache[single_image_key] = frame
+
+
         return frame
+
 
     def name(self, beginning=False):
         """ Return the name of the chunk, which is just the time of the middle of the current frame chunk.
@@ -1639,6 +1723,8 @@ class InputTypeDFN(InputType):
 
         print('Using folder:', self.dir_path)
 
+
+        # DFN frames start at 100 to accomodate picking previous frames, and 1024 picks total are allowed
         self.current_frame = 100
         self.total_frames = 1024
 

@@ -829,8 +829,10 @@ class RightOptionsTab(QtWidgets.QTabWidget):
         """ Pressing escape when you're focused on any widget on the right focuses
             on the main widget
         """
+        
         if event.key() == QtCore.Qt.Key_Escape:
             self.gui.view_widget.setFocus()
+
 
     def onTabBarClicked(self, index):
         if index != self.index:

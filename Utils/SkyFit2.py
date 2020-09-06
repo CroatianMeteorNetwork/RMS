@@ -2322,6 +2322,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             elif event.key() == QtCore.Qt.Key_Escape:
                 if self.star_pick_mode:
+                    
                     # If the ESC is pressed when the star has been centroided, reset the centroid
                     self.resetStarPick()
                     self.updatePairedStars()
@@ -3850,7 +3851,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Construct a fake FF file name
             ff_name_ftp = "FF_{:s}_".format(self.platepar.station_code) \
                           + self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_") \
-                          + "{:03d}".format(int(round(self.img_handle.beginning_datetime.microsecond/1000))) \
+                          + "{:03d}".format(int(self.img_handle.beginning_datetime.microsecond//1000)) \
                           + "_0000000.fits"
 
         # Create the list of picks for saving
