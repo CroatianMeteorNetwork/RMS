@@ -486,18 +486,19 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Star pick info
         text_str = "STAR PICKING MODE\n"
-        text_str += "'LEFT CLICK' - Centroid star\n"
-        text_str += "'CTRL + LEFT CLICK' - Manual star position\n"
-        text_str += "'CTRL + Z' - Fit stars\n"
-        text_str += "'CTRL + SHIFT + Z' - Fit with initial distortion params set to 0\n"
-        text_str += "'L' - Astrometry fit details\n"
-        text_str += "'P' - Photometry fit"
+        text_str += "LEFT CLICK - Centroid star\n"
+        text_str += "CTRL + LEFT CLICK - Manual star position\n"
+        text_str += "CTRL + SCROLL - Aperture radius adjust\n"
+        text_str += "CTRL + Z - Fit stars\n"
+        text_str += "CTRL + SHIFT + Z - Fit with initial distortion params set to 0\n"
+        text_str += "L - Astrometry fit details\n"
+        text_str += "P - Photometry fit"
         self.star_pick_info = TextItem(text_str, anchor=(0.5, 0.5), color=(255, 255, 255))
         self.star_pick_info.setAlign(QtCore.Qt.AlignCenter)
         self.star_pick_info.hide()
         self.star_pick_info.setZValue(10)
         self.star_pick_info.setParentItem(self.img_frame)
-        self.star_pick_info.setPos(self.platepar.X_res/2, self.platepar.Y_res - 50)
+        self.star_pick_info.setPos(self.platepar.X_res/2, self.platepar.Y_res - 55)
 
         # Default variables even when constructor isnt called
         self.star_pick_mode = False
@@ -702,12 +703,13 @@ class PlateTool(QtWidgets.QMainWindow):
                                        self.toggle_zoom_window])
 
             text_str = "STAR PICKING MODE\n"
-            text_str += "'LEFT CLICK' - Centroid star\n"
-            text_str += "'CTRL + LEFT CLICK' - Manual star position\n"
-            text_str += "'CTRL + Z' - Fit stars\n"
-            text_str += "'CTRL + SHIFT + Z' - Fit with initial distortion params set to 0\n"
-            text_str += "'L' - Astrometry fit details\n"
-            text_str += "'P' - Photometry fit"
+            text_str += "LEFT CLICK - Centroid star\n"
+            text_str += "CTRL + LEFT CLICK - Manual star position\n"
+            text_str += "CTRL + SCROLL - Aperture radius adjust\n"
+            text_str += "CTRL + Z - Fit stars\n"
+            text_str += "CTRL + SHIFT + Z - Fit with initial distortion params set to 0\n"
+            text_str += "L - Astrometry fit details\n"
+            text_str += "P - Photometry fit"
             self.star_pick_info.setText(text_str)
 
         else:
@@ -829,8 +831,10 @@ class PlateTool(QtWidgets.QMainWindow):
     def onFrameResize(self):
         """ What happens when the window is resized. """
 
-        self.label2.setPos(0, self.img_frame.height() - self.label2.boundingRect().height())
-        self.label_f1.setPos(0, self.img_frame.height() - self.label_f1.boundingRect().height())
+        self.label2.setPos(self.img_frame.width() - self.label2.boundingRect().width(), \
+            self.img_frame.height() - self.label2.boundingRect().height())
+        self.label_f1.setPos(self.img_frame.width() - self.label_f1.boundingRect().width(), \
+            self.img_frame.height() - self.label_f1.boundingRect().height())
 
         self.star_pick_info.setPos(self.img_frame.width()/2, self.img_frame.height() - 50)
 
@@ -970,8 +974,11 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + 3 - radial4 distortion\n'
             text_str += 'CTRL + 4 - radial5 distortion\n'
             text_str += '\n'
+            text_str += 'CTRL + R - Pick stars\n'
+            text_str += '\n'
+            text_str += 'Scroll - zoom in/out\n'
             text_str += 'R/F - Lim mag\n'
-            text_str += '+/- - Increment\n'
+            text_str += '+/- - Increment adjust\n'
             text_str += '\n'
             text_str += 'M - Toggle maxpixel/avepixel\n'
             text_str += 'H - Hide/show catalog stars\n'
@@ -986,7 +993,6 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + F - Load flat\n'
             text_str += 'CTRL + X - astrometry.net img upload\n'
             text_str += 'CTRL + SHIFT + X - astrometry.net XY only\n'
-            text_str += 'CTRL + R - Pick stars\n'
             text_str += 'SHIFT + Z - Show zoomed window\n'
             text_str += 'CTRL + N - New platepar\n'
             text_str += 'CTRL + S - Save platepar & state'
@@ -998,10 +1004,13 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + Left/Right - +/- 10 frames\n'
             text_str += 'Down/Up - +/- 25 frames\n'
             text_str += ',/. - Previous/next FR line\n'
+            text_str += '\n'
+            text_str += 'Scroll - zoom in/out\n'
             text_str += 'M - Show maxpixel\n'
             text_str += 'K - Subtract average\n'
             text_str += 'T - Toggle refraction correction\n'
             text_str += 'U/J - Img Gamma\n'
+            text_str += '\n'
             text_str += 'P - Show lightcurve\n'
             text_str += 'CTRL + A - Auto levels\n'
             text_str += 'CTRL + D - Load dark\n'
@@ -1011,12 +1020,14 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + S - Save FTPdetectinfo'
 
         self.label2.setText(text_str)
-        self.label2.setPos(0, self.img_frame.height() - self.label2.boundingRect().height())
+        self.label2.setPos(self.img_frame.width() - self.label2.boundingRect().width(), \
+            self.img_frame.height() - self.label2.boundingRect().height())
 
 
         # F1 info label which will be shown when labels 1 and 2 are hidden
         self.label_f1.setText("F1 - Show hotkeys")
-        self.label_f1.setPos(0, self.img_frame.height() - self.label_f1.boundingRect().height())
+        self.label_f1.setPos(self.img_frame.width() - self.label_f1.boundingRect().width(), \
+            self.img_frame.height() - self.label_f1.boundingRect().height())
 
     def updateStars(self):
         """ Updates only the stars, including catalog stars, calstars and paired stars """
