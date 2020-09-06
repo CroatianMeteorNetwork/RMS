@@ -725,7 +725,10 @@ class CursorItem(pg.GraphicsObject):
 
 
 class HistogramLUTWidget(pg.HistogramLUTWidget):
-    def __init__(self, parent=None, *args, **kwargs):
+    def __init__(self, gui, parent=None, *args, **kwargs):
+
+        self.gui = gui
+
         pg.HistogramLUTWidget.__init__(self, parent, *args, **kwargs)
         self.item = HistogramLUTItem(*args, **kwargs)
         self.setCentralItem(self.item)
@@ -740,6 +743,9 @@ class HistogramLUTWidget(pg.HistogramLUTWidget):
                 self.setLevels(pos.y(), self.getLevels()[1])
             elif event.button() == QtCore.Qt.RightButton:
                 self.setLevels(self.getLevels()[0], pos.y())
+
+        # Set focus back on the image window
+        self.gui.view_widget.setFocus()
 
 
 class HistogramLUTItem(pg.HistogramLUTItem):
@@ -807,7 +813,7 @@ class RightOptionsTab(QtWidgets.QTabWidget):
 
         self.gui = gui
 
-        self.hist = HistogramLUTWidget()
+        self.hist = HistogramLUTWidget(gui)
         self.param_manager = PlateparParameterManager(gui)
         self.settings = SettingsWidget(gui)
         self.debruijn = DebruijnSequenceManager(gui)
@@ -829,7 +835,7 @@ class RightOptionsTab(QtWidgets.QTabWidget):
         """ Pressing escape when you're focused on any widget on the right focuses
             on the main widget
         """
-        
+
         if event.key() == QtCore.Qt.Key_Escape:
             self.gui.view_widget.setFocus()
 
@@ -845,6 +851,10 @@ class RightOptionsTab(QtWidgets.QTabWidget):
                 self.setFixedWidth(250)
             else:
                 self.setFixedWidth(19)
+
+        # Always set the focus back to the image window
+        self.gui.view_widget.setFocus()
+
 
     def onSkyFit(self):
         self.removeTabText('Debruijn')
@@ -1205,6 +1215,8 @@ class PlateparParameterManager(QtWidgets.QWidget):
 
         full_layout = QtWidgets.QVBoxLayout()
         self.setLayout(full_layout)
+
+        full_layout.addWidget(QtWidgets.QLabel("Press Esc to focus on image"))
 
         # buttons
         box = QtWidgets.QVBoxLayout()
@@ -1574,6 +1586,8 @@ class SettingsWidget(QtWidgets.QWidget):
         vbox = QtWidgets.QVBoxLayout()
         vbox.setAlignment(QtCore.Qt.AlignTop)
         self.setLayout(vbox)
+
+        vbox.addWidget(QtWidgets.QLabel("Press Esc to focus on image"))
 
         hbox = QtWidgets.QHBoxLayout()
         pixel_group = QtWidgets.QButtonGroup(self)

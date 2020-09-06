@@ -1647,6 +1647,7 @@ class PlateTool(QtWidgets.QMainWindow):
     def onMouseReleased(self, event):
         self.clicked = 0
 
+
     def onMouseMoved(self, event):
 
         pos = event
