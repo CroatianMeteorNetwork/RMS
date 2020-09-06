@@ -1274,29 +1274,6 @@ class InputTypeImages(object):
 
 
 
-        ### SET THE FPS ###
-
-        # Estimate the FPS if UWO pngs are given
-        if self.uwo_png_mode:
-            # Convert datetimes to Unix times
-            unix_times = [datetime2UnixTime(dt) for dt in self.uwo_png_dt_list]
-
-            fps = 1/((unix_times[-1] - unix_times[0])/self.current_fr_chunk_size)
-
-        # If FPS is not given, use one from the config file
-        if fps is None:
-
-            self.fps = self.config.fps
-            print('Using FPS from config file: ', self.fps)
-
-        else:
-
-            self.fps = fps
-            print('Using FPS:', self.fps)
-
-        ### ###
-
-
         print('Using folder:', self.dir_path)
 
         self.current_frame_chunk = 0
@@ -1312,13 +1289,6 @@ class InputTypeImages(object):
             # Start at frame 100 to accomodate reversing picks, set the max number of frames to 1024
             self.current_frame = 100
             self.total_frames = 1024
-
-
-            # Correct the time so that the given time starts on frame 100
-            self.beginning_datetime -= datetime.timedelta(seconds=self.current_frame/self.fps)
-
-            print("Beginning time is now relative to frame 100!")
-            print()
 
 
         # Load the first image
@@ -1345,6 +1315,39 @@ class InputTypeImages(object):
 
         # Do the initial load
         self.loadChunk()
+
+
+
+        ### SET THE FPS ###
+
+        # Estimate the FPS if UWO pngs are given
+        if self.uwo_png_mode:
+            # Convert datetimes to Unix times
+            unix_times = [datetime2UnixTime(dt) for dt in self.uwo_png_dt_list]
+
+            fps = 1/((unix_times[-1] - unix_times[0])/self.current_fr_chunk_size)
+
+        # If FPS is not given, use one from the config file
+        if fps is None:
+
+            self.fps = self.config.fps
+            print('Using FPS from config file: ', self.fps)
+
+        else:
+
+            self.fps = fps
+            print('Using FPS:', self.fps)
+
+        ### ###
+
+
+        if self.single_image_mode:
+
+            # Correct the time so that the given time starts on frame 100
+            self.beginning_datetime -= datetime.timedelta(seconds=self.current_frame/self.fps)
+
+            print("Beginning time is now relative to frame 100!")
+            print()
 
 
         print('Total frames:', self.total_frames)
