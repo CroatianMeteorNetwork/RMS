@@ -298,8 +298,3 @@ if [ $VAR_1 = $VAR_2 ]; then
 fi
 echo "END EXTERNAL SCRIPT..."
 echo ""
-if [ $USER = "pi" ]; then
-	echo "REBOOTING SYSTEM..."
-	echo ""
-	sudo shutdown -r now
-fi
