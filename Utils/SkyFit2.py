@@ -875,7 +875,7 @@ class PlateTool(QtWidgets.QMainWindow):
             jd, ra, dec, _ = xyToRaDecPP(time_data, [x], [y], [1], self.platepar, extinction_correction=False)
 
             # Compute alt, az
-            azim, alt = trueRaDec2ApparentAltAz(ra[0], dec[0], jd[0], self.platepar.lat, self.platepar.lon,
+            azim, alt = trueRaDec2ApparentAltAz(ra[0], dec[0], jd[0], self.platepar.lat, self.platepar.lon, \
                                                 self.platepar.refraction)
 
             status_str += ",  Azim={:6.2f}  Alt={:6.2f} (date), RA={:6.2f}  Dec={:+6.2f} (J2000)".format(
@@ -2248,22 +2248,24 @@ class PlateTool(QtWidgets.QMainWindow):
             # Enter FOV centre
             elif event.key() == QtCore.Qt.Key_V:
 
+                # Load the new FOV centre
                 data = self.getFOVcentre()
 
-                if data:
+                if data is not None:
 
                     self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz = data
 
                     # Compute reference Alt/Az to apparent coordinates, epoch of date
-                    az_centre, alt_centre = trueRaDec2ApparentAltAz( \
-                        self.platepar.RA_d, self.platepar.dec_d, date2JD(*self.img_handle.currentTime()), \
+                    self.platepar.az_centre, self.platepar.alt_centre = trueRaDec2ApparentAltAz( \
+                        self.platepar.RA_d, self.platepar.dec_d, self.platepar.JD, \
                         self.platepar.lat, self.platepar.lon, self.platepar.refraction)
-
-                    self.platepar.az_centre, self.platepar.alt_centre = az_centre, alt_centre
 
                     # Compute the position angle
                     self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, \
                         self.platepar.rotation_from_horiz)
+
+                    # Check that the calibration parameters are within the nominal range
+                    self.checkParamRange()
 
                     self.tab.param_manager.updatePlatepar()
                     self.updateLeftLabels()
@@ -2983,35 +2985,23 @@ class PlateTool(QtWidgets.QMainWindow):
         scale_y = self.config.fov_h/self.config.height
         self.platepar.F_scale = 1.0/((scale_x + scale_y)/2)
 
-        # Set distortion polynomials to zero
-        self.platepar.x_poly_fwd *= 0
-        self.platepar.x_poly_rev *= 0
-        self.platepar.y_poly_fwd *= 0
-        self.platepar.y_poly_rev *= 0
+        # Reset the distortion coeffs
+        self.platepar.resetDistortionParameters()
 
-        # Set the first coeffs to 0.5, as that is the real centre of the FOV
-        self.platepar.x_poly_fwd[0] = 0.5
-        self.platepar.x_poly_rev[0] = 0.5
-        self.platepar.y_poly_fwd[0] = 0.5
-        self.platepar.y_poly_rev[0] = 0.5
 
         # Set station ID
         self.platepar.station_code = self.config.stationID
 
         # Get the FOV centre if the image handle is available so the time can be extracted
         if hasattr(self, 'img_handle'):
-            img_time = self.img_handle.currentTime()
-            self.platepar.JD = date2JD(*img_time)
 
             # Get reference RA, Dec of the image centre
             self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz = self.getFOVcentre()
 
             # Recalculate reference alt/az
-            self.platepar.az_centre, self.platepar.alt_centre = trueRaDec2ApparentAltAz(self.platepar.JD,
-                                                                                        self.platepar.lon,
-                                                                                        self.platepar.lat,
-                                                                                        self.platepar.RA_d,
-                                                                                        self.platepar.dec_d)
+            self.platepar.az_centre, self.platepar.alt_centre = trueRaDec2ApparentAltAz(self.platepar.RA_d, \
+                self.platepar.dec_d, self.platepar.JD, self.platepar.lat, self.platepar.lon)
+
 
         # Check that the calibration parameters are within the nominal range
         self.checkParamRange()
@@ -3493,13 +3483,15 @@ class PlateTool(QtWidgets.QMainWindow):
             skyradius_residuals.append(cat_ang_separation - img_ang_separation)
 
             # Compute azim/elev from the catalog
-            azim_cat, elev_cat = trueRaDec2ApparentAltAz(cat_ra, cat_dec, jd, self.platepar.lat, self.platepar.lon)
+            azim_cat, elev_cat = trueRaDec2ApparentAltAz(cat_ra, cat_dec, jd, self.platepar.lat, \
+                self.platepar.lon)
 
             azim_list.append(azim_cat)
             elev_list.append(elev_cat)
 
             # Compute azim/elev from image coordinates
-            azim_img, elev_img = trueRaDec2ApparentAltAz(img_ra, img_dec, jd, self.platepar.lat, self.platepar.lon)
+            azim_img, elev_img = trueRaDec2ApparentAltAz(img_ra, img_dec, jd, self.platepar.lat, \
+                self.platepar.lon)
 
             # Compute azim/elev residuals
             azim_residuals.append(((azim_cat - azim_img + 180)%360 - 180)*np.cos(np.radians(elev_cat)))
