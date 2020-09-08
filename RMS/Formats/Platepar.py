@@ -1001,10 +1001,10 @@ class Platepar(object):
 
 
 
-    def updateRefRADec(self, skip_rot_update=False):
+    def updateRefRADec(self, skip_rot_update=False, preserve_rotation=False):
         """ Update the reference RA and Dec (true in J2000) from Alt/Az (apparent in epoch of date). """
 
-        if not skip_rot_update:
+        if (not skip_rot_update) and (not preserve_rotation):
 
             # Save the current rotation w.r.t horizon value
             self.rotation_from_horiz = RMS.Astrometry.ApplyAstrometry.rotationWrtHorizon(self)

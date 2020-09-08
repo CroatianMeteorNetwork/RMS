@@ -413,8 +413,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.cat_star_markers2 = pg.ScatterPlotItem()
         self.cat_star_markers2.setPen('r')
         self.cat_star_markers2.setBrush((0, 0, 0, 0))
-        self.cat_star_markers2.setSize(10)
-        self.cat_star_markers2.setSymbol(Cross())
+        self.cat_star_markers2.setSize(20)
+        self.cat_star_markers2.setSymbol(Crosshair())
         self.cat_star_markers2.setZValue(4)
         self.zoom_window.addItem(self.cat_star_markers2)
 
@@ -422,7 +422,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # selected catalog star markers (main window)
         self.sel_cat_star_markers = pg.ScatterPlotItem()
-        self.sel_cat_star_markers.setPen('r', width=2)
+        self.sel_cat_star_markers.setPen('b', width=3)
         self.sel_cat_star_markers.setSize(10)
         self.sel_cat_star_markers.setSymbol(Cross())
         self.sel_cat_star_markers.setZValue(4)
@@ -430,7 +430,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # selected catalog star markers (zoom window)
         self.sel_cat_star_markers2 = pg.ScatterPlotItem()
-        self.sel_cat_star_markers2.setPen('r', width=2)
+        self.sel_cat_star_markers2.setPen('b', width=3)
         self.sel_cat_star_markers2.setSize(10)
         self.sel_cat_star_markers2.setSymbol(Cross())
         self.sel_cat_star_markers2.setZValue(4)
@@ -1049,19 +1049,34 @@ class PlateTool(QtWidgets.QMainWindow):
         self.catalog_x, self.catalog_y, catalog_mag = getCatalogStarsImagePositions(self.catalog_stars,
                                                                                     ff_jd, self.platepar)
 
+        cat_stars_xy = np.c_[self.catalog_x, self.catalog_y, catalog_mag]
+
+        ### Take only those stars inside the FOV  and iamge ###
+
+        # Get indices of stars inside the fov
+        filtered_indices, _ = self.filterCatalogStarsInsideFOV(self.catalog_stars)
+
+        # Create a mask to filter out all stars outside the image and the FOV
+        filter_indices_mask = np.zeros(len(cat_stars_xy), dtype=np.bool)
+        filter_indices_mask[filtered_indices] = True
+        filtered_indices_all = filter_indices_mask & (cat_stars_xy[:, 0] > 0) \
+                                                & (cat_stars_xy[:, 0] < self.platepar.X_res) \
+                                                & (cat_stars_xy[:, 1] > 0) \
+                                                & (cat_stars_xy[:, 1] < self.platepar.Y_res)
+
+        # Filter out catalog image stars
+        cat_stars_xy = cat_stars_xy[filtered_indices_all]
+
+        # Create a filtered catalog
+        self.catalog_stars_filtered = self.catalog_stars[filtered_indices_all]
+
+        # Create a list of filtered catalog image coordinates
+        self.catalog_x_filtered, self.catalog_y_filtered, catalog_mag_filtered = cat_stars_xy.T
+
+        # Show stars on the image
         if self.catalog_stars_visible:
-            cat_stars = np.c_[self.catalog_x, self.catalog_y, catalog_mag]
 
-            # Take only those stars inside the FOV
-            filtered_indices, _ = self.filterCatalogStarsInsideFOV(self.catalog_stars)
-            cat_stars = cat_stars[filtered_indices]
-            cat_stars = cat_stars[cat_stars[:, 0] > 0]
-            cat_stars = cat_stars[cat_stars[:, 0] < self.platepar.X_res]
-            cat_stars = cat_stars[cat_stars[:, 1] > 0]
-            cat_stars = cat_stars[cat_stars[:, 1] < self.platepar.Y_res]
-
-            self.catalog_x_filtered, self.catalog_y_filtered, catalog_mag_filtered = cat_stars.T
-
+            # Only show if there are any stars to show
             if len(catalog_mag_filtered):
 
                 cat_mag_faintest = np.max(catalog_mag_filtered)
@@ -1069,8 +1084,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Plot catalog stars
                 size = ((4.0 + (cat_mag_faintest - catalog_mag_filtered))/2.0)**(2*2.512*0.5)
 
-                self.cat_star_markers.setPoints(x=self.catalog_x_filtered, y=self.catalog_y_filtered, size=size)
-                self.cat_star_markers2.setPoints(x=self.catalog_x_filtered, y=self.catalog_y_filtered, size=size)
+                self.cat_star_markers.setPoints(x=self.catalog_x_filtered, y=self.catalog_y_filtered, \
+                    size=size)
+                self.cat_star_markers2.setPoints(x=self.catalog_x_filtered, y=self.catalog_y_filtered, \
+                    size=size)
             else:
                 print('No catalog stars visible!')
 
@@ -1165,14 +1182,53 @@ class PlateTool(QtWidgets.QMainWindow):
             x2 = []
             y2 = []
 
-            # Plot the residuals
+            # Plot the residuals (enlarge 100x)
             res_scale = 100
             for entry in self.residuals:
                 img_x, img_y, angle, distance, angular_distance = entry
 
+
+                ### Limit the distance to the edge of the image ###
+                # All angles are reference to a line pointing right, angles increase clockwise
+
+                # Residual angle
+                ang_test = angle%(2*np.pi)
+
+                # Compute the angles of every corner relative to the point
+                ul_ang = np.arctan2(                  0 - img_y,                   0 - img_x)%(2*np.pi)
+                ur_ang = np.arctan2(                  0 - img_y, self.platepar.X_res - img_x)%(2*np.pi)
+                ll_ang = np.arctan2(self.platepar.Y_res - img_y,                   0 - img_x)%(2*np.pi)
+                lr_ang = np.arctan2(self.platepar.Y_res - img_y, self.platepar.X_res - img_x)%(2*np.pi)
+
+
+                # Locate the point in the correct quadrant and compute the distance to the edge of the image
+                dist_side = distance
+                if   (ang_test > ul_ang) and (ang_test < ur_ang):
+                    # Upper side
+                    # Compute the distance to the side of the image
+                    dist_side = abs(img_y/np.cos(ang_test - 3/2*np.pi))
+
+                elif (ang_test > ur_ang) or (ang_test < lr_ang):
+                    # Right side
+                    dist_side = abs((self.platepar.X_res - img_x)/np.cos(ang_test))
+
+                elif (ang_test > lr_ang) and (ang_test < ll_ang):
+                    # Bottom side
+                    dist_side = abs((self.platepar.Y_res - img_y)/np.cos(ang_test - np.pi/2))
+
+                else:
+                    # Left side
+                    dist_side = abs(img_x/np.cos(ang_test - np.pi))
+
+
+                # Limit the distance for plotting to the side of the image
+                distance_plot = min([res_scale*distance, dist_side])
+
+                ### ###
+
                 # Calculate coordinates of the end of the residual line
-                res_x = img_x + res_scale*np.cos(angle)*distance
-                res_y = img_y + res_scale*np.sin(angle)*distance
+                res_x = img_x + np.cos(angle)*distance_plot
+                res_y = img_y + np.sin(angle)*distance_plot
 
                 # Save image residuals
                 x1.extend([img_x, res_x])
@@ -1180,8 +1236,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Convert the angular distance from degrees to equivalent image pixels
                 ang_dist_img = angular_distance*self.platepar.F_scale
-                res_x = img_x + res_scale*np.cos(angle)*ang_dist_img
-                res_y = img_y + res_scale*np.sin(angle)*ang_dist_img
+                ang_dist_img_plot = min([res_scale*ang_dist_img, dist_side])
+                res_x = img_x + np.cos(angle)*ang_dist_img_plot
+                res_y = img_y + np.sin(angle)*ang_dist_img_plot
 
                 # Save sky residuals
                 x2.extend([img_x, res_x])
@@ -1192,6 +1249,7 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             self.residual_lines_img.clear()
             self.residual_lines_astro.clear()
+
 
     def updateDistortion(self):
         """ Draw distortion guides. """
@@ -1705,8 +1763,13 @@ class PlateTool(QtWidgets.QMainWindow):
             self.clicked = 3
 
         modifiers = QtWidgets.QApplication.keyboardModifiers()
+        
         if self.star_pick_mode:  # redundant
+
+            # Add star pair in SkyFit
             if self.mode == 'skyfit':
+
+                # Add star
                 if event.button() == QtCore.Qt.LeftButton:
                     if self.cursor.mode == 0:
 
@@ -1739,28 +1802,30 @@ class PlateTool(QtWidgets.QMainWindow):
                         # Select the closest catalog star to the centroid as the first guess
                         self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.x_centroid,
                                                                                       self.y_centroid)
-                        self.sel_cat_star_markers.addPoints(x=[self.catalog_x[self.closest_cat_star_indx]],
-                                                            y=[self.catalog_y[self.closest_cat_star_indx]])
-                        self.sel_cat_star_markers2.addPoints(x=[self.catalog_x[self.closest_cat_star_indx]],
-                                                             y=[self.catalog_y[self.closest_cat_star_indx]])
+                        self.sel_cat_star_markers.addPoints(x=[self.catalog_x_filtered[self.closest_cat_star_indx]],
+                                                            y=[self.catalog_y_filtered[self.closest_cat_star_indx]])
+                        self.sel_cat_star_markers2.addPoints(x=[self.catalog_x_filtered[self.closest_cat_star_indx]],
+                                                             y=[self.catalog_y_filtered[self.closest_cat_star_indx]])
 
                         # Switch to the mode where the catalog star is selected
                         self.cursor.setMode(1)
 
                     elif self.cursor.mode == 1:
+
                         # Select the closest catalog star
-                        self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.mouse_x,
+                        self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.mouse_x, \
                                                                                       self.mouse_y)
 
                         # REMOVE marker for previously selected
                         self.sel_cat_star_markers.setData(pos=[pair[0][:2] for pair in self.paired_stars])
                         self.sel_cat_star_markers2.setData(pos=[pair[0][:2] for pair in self.paired_stars])
 
-                        self.sel_cat_star_markers.addPoints(x=[self.catalog_x[self.closest_cat_star_indx]],
-                                                            y=[self.catalog_y[self.closest_cat_star_indx]])
-                        self.sel_cat_star_markers2.addPoints(x=[self.catalog_x[self.closest_cat_star_indx]],
-                                                             y=[self.catalog_y[self.closest_cat_star_indx]])
+                        self.sel_cat_star_markers.addPoints(x=[self.catalog_x_filtered[self.closest_cat_star_indx]],
+                                                            y=[self.catalog_y_filtered[self.closest_cat_star_indx]])
+                        self.sel_cat_star_markers2.addPoints(x=[self.catalog_x_filtered[self.closest_cat_star_indx]],
+                                                             y=[self.catalog_y_filtered[self.closest_cat_star_indx]])
 
+                # Remove star pair
                 elif event.button() == QtCore.Qt.RightButton:
                     if self.cursor.mode == 0:
 
@@ -1775,7 +1840,8 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.updateFitResiduals()
                         self.photometry()
 
-            else:  # manual reduction
+            # Add centroid in manual reduction
+            else:
                 if event.button() == QtCore.Qt.LeftButton:
                     if self.cursor.mode == 0:
                         mode = 1
@@ -2034,7 +2100,10 @@ class PlateTool(QtWidgets.QMainWindow):
             # Increase reference azimuth
             elif event.key() == QtCore.Qt.Key_A:
                 self.platepar.az_centre += self.key_increment
-                self.platepar.updateRefRADec()
+                
+                self.checkParamRange()
+                self.platepar.updateRefRADec(preserve_rotation=True)
+                self.checkParamRange()
 
                 self.tab.param_manager.updatePlatepar()
                 self.updateLeftLabels()
@@ -2043,7 +2112,10 @@ class PlateTool(QtWidgets.QMainWindow):
             # Decrease reference azimuth
             elif event.key() == QtCore.Qt.Key_D:
                 self.platepar.az_centre -= self.key_increment
-                self.platepar.updateRefRADec()
+
+                self.checkParamRange()
+                self.platepar.updateRefRADec(preserve_rotation=True)
+                self.checkParamRange()
 
                 self.tab.param_manager.updatePlatepar()
                 self.updateLeftLabels()
@@ -2052,7 +2124,10 @@ class PlateTool(QtWidgets.QMainWindow):
             # Increase reference altitude
             elif event.key() == QtCore.Qt.Key_W:
                 self.platepar.alt_centre -= self.key_increment
-                self.platepar.updateRefRADec()
+
+                self.checkParamRange()
+                self.platepar.updateRefRADec(preserve_rotation=True)
+                self.checkParamRange()
 
                 self.tab.param_manager.updatePlatepar()
                 self.updateLeftLabels()
@@ -2061,7 +2136,10 @@ class PlateTool(QtWidgets.QMainWindow):
             # Decrease reference altitude
             elif event.key() == QtCore.Qt.Key_S:
                 self.platepar.alt_centre += self.key_increment
-                self.platepar.updateRefRADec()
+
+                self.checkParamRange()
+                self.platepar.updateRefRADec(preserve_rotation=True)
+                self.checkParamRange()
 
                 self.tab.param_manager.updatePlatepar()
                 self.updateLeftLabels()
@@ -2305,6 +2383,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.tab.param_manager.updatePlatepar()
 
 
+            # Toggle showing detected stars
             elif event.key() == QtCore.Qt.Key_C:
                 self.toggleShowCalStars()
                 self.tab.settings.updateShowCalStars()
@@ -2322,12 +2401,15 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
             elif (event.key() == QtCore.Qt.Key_Return) or (event.key() == QtCore.Qt.Key_Enter):
+                
                 if self.star_pick_mode:
+                    
                     # If the right catalog star has been selected, save the pair to the list
                     if self.cursor.mode == 1:
+
                         # Add the image/catalog pair to the list
                         self.paired_stars.append([[self.x_centroid, self.y_centroid, self.star_intensity], \
-                                                  self.catalog_stars[self.closest_cat_star_indx]])
+                                                  self.catalog_stars_filtered[self.closest_cat_star_indx]])
 
                         # Switch back to centroiding mode
                         self.closest_cat_star_indx = None
@@ -2458,6 +2540,18 @@ class PlateTool(QtWidgets.QMainWindow):
 
         if self.platepar.dec_d <= -90:
             self.platepar.dec_d = -89.999
+
+
+        # Right ascension should be within 0-360
+        self.platepar.az_centre = (self.platepar.az_centre + 360)%360
+
+        # Keep the declination in the allowed range
+        if self.platepar.alt_centre >= 90:
+            self.platepar.alt_centre = 89.999
+
+        if self.platepar.alt_centre <= -90:
+            self.platepar.alt_centre = -89.999
+
 
     def resetStarPick(self):
         """ Call when finished starpicking """
@@ -3283,7 +3377,7 @@ class PlateTool(QtWidgets.QMainWindow):
         min_dist = np.inf
 
         # Find the index of the closest catalog star to the given image coordinates
-        for i, (x, y) in enumerate(zip(self.catalog_x, self.catalog_y)):
+        for i, (x, y) in enumerate(zip(self.catalog_x_filtered, self.catalog_y_filtered)):
 
             dist = (pos_x - x)**2 + (pos_y - y)**2
 
