@@ -3900,7 +3900,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         x_list = range(mouse_x - int(self.star_aperature_radius), mouse_x \
                        + int(self.star_aperature_radius) + 1)
-        y_list = range(mouse_y - self.star_aperature_radius, mouse_y \
+        y_list = range(mouse_y - int(self.star_aperature_radius), mouse_y \
                        + int(self.star_aperature_radius) + 1)
 
         for x in x_list:

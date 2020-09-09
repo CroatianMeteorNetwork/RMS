@@ -778,7 +778,7 @@ class InputTypeVideo(InputType):
                                        self.config.detection_binning_method)
 
             # Add frame for FF processing
-            ff_struct_fake.addFrame(frame.astype(np.uint8))
+            ff_struct_fake.addFrame(frame.astype(np.uint16))
 
         self.current_fr_chunk_size = i + 1
 
