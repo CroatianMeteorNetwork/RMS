@@ -137,6 +137,9 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
                     if len(line) == 9:
                         frame, x, y, ra, dec, azim, elev, level, mag = line
 
+                        if mag is None:
+                            mag = 10.0
+
                     else:
                         frame, x, y, level = line
 
@@ -145,11 +148,9 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
                         continue
 
 
-                    # Check that level and magnitude are numbers
+                    # Check that level is a number
                     if level is None:
                         level = 1
-                    if mag is None:
-                        mag = 10.0
 
                     ftpdetect_file.write("{:06.4f} {:07.2f} {:07.2f}".format(round(frame, 4), round(x, 2), \
                         round(y, 2)) + " 000.00 000.00 000.00 000.00 " + "{:06d}".format(int(level)) \
