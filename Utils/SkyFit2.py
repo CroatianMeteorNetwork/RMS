@@ -3249,7 +3249,7 @@ class PlateTool(QtWidgets.QMainWindow):
             pick = {'x_centroid': x_centroid,
                     'y_centroid': y_centroid,
                     'mode': mode,
-                    'intensity_sum': None,
+                    'intensity_sum': 1,
                     'photometry_pixels': None}
             self.pick_list[frame] = pick
 
