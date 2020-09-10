@@ -494,6 +494,10 @@ def calculateMagnitudes(px_sum_arr, radius_arr, photom_offset, vignetting_coeff)
     # Go through all levels of a meteor
     for i, (px_sum, radius) in enumerate(zip(px_sum_arr, radius_arr)):
 
+        # Make sure the pixel sum is a number
+        if px_sum is None:
+            px_sum = 1
+
         # Correct vignetting
         px_sum_corr = correctVignetting(px_sum, radius, vignetting_coeff)
 
