@@ -64,6 +64,7 @@ cdef double sign(double x):
 
 @cython.boundscheck(False)
 @cython.wraparound(False) 
+@cython.cdivision(True)
 cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2):
     """ Calculate the angular separation between 2 stars in equatorial celestial coordinates. 
 
@@ -96,10 +97,9 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
     #   Source: https://idlastro.gsfc.nasa.gov/ftp/pro/astro/gcirc.pro
     deldec2 = (dec2 - dec1)/2.0
     delra2 =  (ra2 - ra1)/2.0
-    sindis = np.sqrt(np.sin(deldec2)*np.sin(deldec2) \
-        + np.cos(dec1)*np.cos(dec2)*np.sin(delra2)*np.sin(delra2))
+    sindis = sqrt(sin(deldec2)*sin(deldec2) + cos(dec1)*cos(dec2)*sin(delra2)*sin(delra2))
 
-    return degrees(2.0*np.arcsin(sindis))
+    return degrees(2.0*asin(sindis))
 
 
 
