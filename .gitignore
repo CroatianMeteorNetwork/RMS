@@ -91,3 +91,4 @@ target/
 
 .config.inuse
 camerasettings/*.json
+.config.uk000*

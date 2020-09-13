@@ -1,5 +1,6 @@
 import os
 import sys
+import subprocess
 
 import numpy
 
@@ -25,8 +26,8 @@ kht_module = Extension("kht_module",
 with open('requirements.txt') as f:
     requirements = f.read().splitlines()
 
-
-
+#init the submodule
+x=subprocess.run(['git','submodule','update','--init'])
 
 ### HANDLE DIFFERENT ONVIF LIBRARIES FOR Py 2 AND 3 ###
 
