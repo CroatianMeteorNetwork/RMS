@@ -547,7 +547,7 @@ def parseDFNStation(config, parser):
         return
 
     if parser.has_option(section, "location"):
-        config.stationID = parser.get(section, "location")
+        config.stationID = parser.get(section, "location").replace("_", "").replace(" ", "")
 
     if parser.has_option(section, "lat"):
         config.latitude = parser.getfloat(section, "lat")

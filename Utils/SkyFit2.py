@@ -1687,6 +1687,20 @@ class PlateTool(QtWidgets.QMainWindow):
             if not hasattr(self, "extinction_scale"):
                 self.platepar.extinction_scale = 1.0
 
+
+        # Set the dir path in case it changed
+        plate_tool.dir_path = dir_path
+
+        # Update the dir path in the img_handle
+        if hasattr(plate_tool, "img_handle"):
+            plate_tool.img_handle.dir_path = dir_path
+
+        # Update file path
+        if plate_tool.file_path is not None:
+            plate_tool.file_path = os.path.join(dir_path, os.path.basename(plate_tool.file_path))
+
+            
+
         # If setupUI hasn't already been called, call it
         if not hasattr(self, 'central'):
 
@@ -4174,9 +4188,6 @@ if __name__ == '__main__':
         plate_tool = PlateTool.__new__(PlateTool)
         super(PlateTool, plate_tool).__init__()
         plate_tool.loadState(dir_path, state_name)
-
-        # Set the dir path in case it changed
-        plate_tool.dir_path = dir_path
 
     else:
 
