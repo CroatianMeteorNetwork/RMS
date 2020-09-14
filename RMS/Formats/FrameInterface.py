@@ -77,6 +77,9 @@ class InputType(object):
         self.current_frame = 0
         self.total_frames = 1
 
+        # Only used for image mode
+        self.single_image_mode = False
+
     def nextChunk(self):
         pass
 

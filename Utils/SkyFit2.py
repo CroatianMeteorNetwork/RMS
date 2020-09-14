@@ -181,7 +181,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Key increment
         self.key_increment = 1.0
-
         
         # Init a blank platepar
         self.platepar = Platepar()
@@ -1005,6 +1004,11 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'Down/Up - +/- 25 frames\n'
             text_str += ',/. - Previous/next FR line\n'
             text_str += '\n'
+            text_str += 'CTRL + R - Pick points\n'
+            text_str += 'Left click - Centroid\n'
+            text_str += 'CTRL + Left click - Force pick\n'
+            text_str += 'ALT + Left click - Mark gap (DFN)\n'
+            text_str += '\n'
             text_str += 'Scroll - zoom in/out\n'
             text_str += 'M - Show maxpixel\n'
             text_str += 'K - Subtract average\n'
@@ -1533,6 +1537,10 @@ class PlateTool(QtWidgets.QMainWindow):
             if self.star_pick_mode:
                 messagebox.showwarning(title='Star picking mode', \
                                        message='You cannot cycle through images while in star picking mode!')
+
+                # Set focus back on the SkyFit window
+                self.activateWindow()
+
                 return None
 
             # don't change images if there's no image to change to
@@ -1568,9 +1576,45 @@ class PlateTool(QtWidgets.QMainWindow):
         # Manual reduction mode
         else:
 
+
+            # For DFN or single images, only allow changing frames to +1 from the highest, and -1 from the 
+            #   lowest frame number
+            if (self.img.img_handle.input_type == 'dfn') or \
+                ((self.img.img_handle.input_type == 'images') and self.img.img_handle.single_image_mode):
+
+                change_allowed = True
+
+                # If the pick list is empty, don't allow changing the frame
+                if not len(self.pick_list):
+                    change_allowed = False
+
+                else:
+
+                    # Get a range of frames
+                    max_frame = max(self.pick_list.keys())
+                    min_frame = min(self.pick_list.keys())
+                    next_frame = self.img.getFrame() + n
+
+                    # Only allow changing frames to adjecent ones to the max/min
+                    if (next_frame < (min_frame - 1)) or (next_frame > (max_frame + 1)):
+                        change_allowed = False
+
+
+                if not change_allowed:
+
+                    messagebox.showinfo(title='Frame counter error',
+                        message="The frame number on DFN images cannot be advanced if a pick was not made!")
+
+                    # Set focus back on the SkyFit window
+                    self.activateWindow()
+
+                    return None
+
+
             self.computeIntensitySum()
+
                 
-            # Change shown frame
+            # Change shown frame either by one or more
             if n == 1:
                 self.img.nextFrame()
             else:
@@ -1582,6 +1626,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updatePicks()
             self.drawPhotometryColoring()
             self.showFRBox()
+
+
 
         self.updateLeftLabels()
 
@@ -1678,13 +1724,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # updating old state files with new platepar variables
         if self.platepar is not None:
-            if not hasattr(self, "equal_aspect"):
+            if not hasattr(self.platepar, "equal_aspect"):
                 self.platepar.equal_aspect = False
 
-            if not hasattr(self, "force_distortion_centre"):
+            if not hasattr(self.platepar, "force_distortion_centre"):
                 self.platepar.force_distortion_centre = False
 
-            if not hasattr(self, "extinction_scale"):
+            if not hasattr(self.platepar, "extinction_scale"):
+                self.platepar.extinction_scale = 1.0
+
+
+            if not hasattr(self.platepar, "extinction_scale"):
                 self.platepar.extinction_scale = 1.0
 
 
@@ -1699,7 +1749,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if plate_tool.file_path is not None:
             plate_tool.file_path = os.path.join(dir_path, os.path.basename(plate_tool.file_path))
 
-            
+
 
         # If setupUI hasn't already been called, call it
         if not hasattr(self, 'central'):
@@ -1903,7 +1953,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Load the dark
         elif event.key() == QtCore.Qt.Key_D and (modifiers == QtCore.Qt.ControlModifier):
+            
             _, self.dark = self.loadDark()
+
+            # Set focus back on the SkyFit window
+            self.activateWindow()
 
             # Apply the dark to the flat
             if self.flat_struct is not None:
@@ -1917,7 +1971,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Load the flat
         elif event.key() == QtCore.Qt.Key_F and (modifiers == QtCore.Qt.ControlModifier):
+            
             _, self.flat_struct = self.loadFlat()
+
+            # Set focus back on the SkyFit window
+            self.activateWindow()
 
             # self.img.dark = self.dark
             self.img_zoom.flat_struct = self.flat_struct
@@ -2797,6 +2855,9 @@ class PlateTool(QtWidgets.QMainWindow):
             messagebox.showerror(title='Astrometry.net error',
                                  message='Astrometry.net failed to find a solution!')
 
+            # Set focus back on the SkyFit window
+            self.activateWindow()
+
             return None
 
         # Extract the parameters
@@ -2924,6 +2985,9 @@ class PlateTool(QtWidgets.QMainWindow):
             if hasattr(self, 'img_handle') and self.img_handle.require_calstars:
                 messagebox.showinfo(title='CALSTARS error',
                                     message='CALSTARS file could not be found in the given directory!')
+
+                # Set focus back on the SkyFit window
+                self.activateWindow()
 
             self.calstars = {}
 
@@ -3164,6 +3228,10 @@ class PlateTool(QtWidgets.QMainWindow):
         except:
             messagebox.showerror(title='Flat field file error',
                                  message='Flat could not be loaded!')
+
+            # Set focus back on the SkyFit window
+            self.activateWindow()
+
             return False, None
 
         # Check if the size of the file matches
@@ -3171,12 +3239,18 @@ class PlateTool(QtWidgets.QMainWindow):
             messagebox.showerror(title='Flat field file error',
                                  message='The size of the flat field does not match the size of the image!')
 
+            # Set focus back on the SkyFit window
+            self.activateWindow()
+
             flat = None
 
         # Check if the flat field was successfuly loaded
         if flat is None:
             messagebox.showerror(title='Flat field file error',
                                  message='The file you selected could not be loaded as a flat field!')
+
+            # Set focus back on the SkyFit window
+            self.activateWindow()
 
         return flat_file, flat
 
@@ -3413,6 +3487,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Fit the astrometry parameters, at least 5 stars are needed
         if len(self.paired_stars) < 4:
             messagebox.showwarning(title='Number of stars', message="At least 5 paired stars are needed to do the fit!")
+
+            # Set focus back on the SkyFit window
+            self.activateWindow()
 
             return self.platepar
 
@@ -3768,7 +3845,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # If there are less than 3 points, don't show the lightcurve
         if len(centroids) < 3:
+            
             messagebox.showinfo('Lightcurve info', 'Less than 3 centroids!')
+            
+            # Set focus back on the SkyFit window
+            self.activateWindow()
+
             return 1
 
         # Sort by frame number
@@ -3779,7 +3861,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # If there are less than 3 points, don't show the lightcurve
         if len(fr_intens) < 3:
+
             messagebox.showinfo('Lightcurve info', 'Less than 3 points have intensities!')
+
+            # Set focus back on the SkyFit window
+            self.activateWindow()
+
             return 1
 
         # Extract frames and intensities
@@ -3982,7 +4069,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # If there are no centroids, don't save anything
         if len(centroids) == 0:
+            
             messagebox.showinfo('FTPdetectinfo saving error', 'No centroids to save!')
+
+            # Set focus back on the SkyFit window
+            self.activateWindow()
+
             return 1
 
         # Sort by frame number
