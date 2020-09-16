@@ -1271,7 +1271,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.az_centre.setFixedWidth(100)
         self.az_centre.valueModified.connect(self.onAzChanged)
         hbox.addWidget(self.az_centre)
-        hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
+        hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
         form.addRow(QtWidgets.QLabel('Azim'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
@@ -1283,7 +1283,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.alt_centre.setFixedWidth(100)
         self.alt_centre.valueModified.connect(self.onAltChanged)
         hbox.addWidget(self.alt_centre)
-        hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
+        hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
         form.addRow(QtWidgets.QLabel('Alt'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
@@ -1295,7 +1295,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.rotation_from_horiz.setFixedWidth(100)
         self.rotation_from_horiz.valueModified.connect(self.onRotChanged)
         hbox.addWidget(self.rotation_from_horiz)
-        hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
+        hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
         form.addRow(QtWidgets.QLabel('Horz rot'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
@@ -1331,7 +1331,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.lat.setFixedWidth(100)
         self.lat.valueModified.connect(self.onLatChanged)
         hbox.addWidget(self.lat)
-        hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
+        hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
         form.addRow(QtWidgets.QLabel('Lat'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
@@ -1343,7 +1343,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.lon.setFixedWidth(100)
         self.lon.valueModified.connect(self.onLonChanged)
         hbox.addWidget(self.lon)
-        hbox.addWidget(QtWidgets.QLabel('°', alignment=QtCore.Qt.AlignLeft))
+        hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
         form.addRow(QtWidgets.QLabel('Lon'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()

@@ -904,10 +904,10 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str = "Station: {:s} \n".format(self.platepar.station_code)
             text_str += self.img_handle.name() + '\n\n'
             text_str += self.img_type_flag + '\n'
-            text_str += 'Ref Az   = {:.3f}°\n'.format(self.platepar.az_centre)
-            text_str += 'Ref Alt  = {:.3f}°\n'.format(self.platepar.alt_centre)
-            text_str += 'Rot horiz = {:.3f}°\n'.format(rotationWrtHorizon(self.platepar))
-            text_str += 'Rot eq    = {:.3f}°\n'.format(rotationWrtStandard(self.platepar))
+            text_str += u'Ref Az   = {:.3f}\N{DEGREE SIGN}\n'.format(self.platepar.az_centre)
+            text_str += u'Ref Alt  = {:.3f}\N{DEGREE SIGN}\n'.format(self.platepar.alt_centre)
+            text_str += u'Rot horiz = {:.3f}\N{DEGREE SIGN}\n'.format(rotationWrtHorizon(self.platepar))
+            text_str += u'Rot eq    = {:.3f}\N{DEGREE SIGN}\n'.format(rotationWrtStandard(self.platepar))
             # text_str += 'Ref RA  = {:.3f}\n'.format(self.platepar.RA_d)
             # text_str += 'Ref Dec = {:.3f}\n'.format(self.platepar.dec_d)
             text_str += "Pix scale = {:.3f}'/px\n".format(60/self.platepar.F_scale)
@@ -931,7 +931,7 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 sign_str = ' '
             text_str += 'RA centre  = {:s}{:02d}h {:02d}m {:05.2f}s\n'.format(sign_str, hh, mm, ss)
-            text_str += 'Dec centre = {:.3f}°'.format(dec_centre)
+            text_str += u'Dec centre = {:.3f}\N{DEGREE SIGN}'.format(dec_centre)
 
         else:
             text_str = "Station: {:s} \n".format(self.platepar.station_code)
