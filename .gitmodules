@@ -1,0 +1,3 @@
+[submodule "python-dvr"]
+	path = python-dvr
+	url = https://github.com/NeiroNx/python-dvr.git
