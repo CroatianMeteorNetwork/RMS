@@ -7,7 +7,7 @@ from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
 from RMS.Routines.Image import saveImage
 
-def BatchFFtoImage(dir_path, fmt):
+def batchFFtoImage(dir_path, fmt):
     # Go through all files in the given folder
     for file_name in os.listdir(dir_path):
 
@@ -51,5 +51,5 @@ if __name__ == "__main__":
 
     dir_path = cml_args.dir_path[0]
 
-    BatchFFtoImage(dir_path, cml_args.file_format[0])
+    batchFFtoImage(dir_path, cml_args.file_format[0])
 
