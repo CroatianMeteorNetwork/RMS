@@ -89,6 +89,6 @@ target/
 #Jetbrains code files
 .idea
 
-.config.inuse
 camerasettings/*.json
+.config.inuse
 .config.uk000*

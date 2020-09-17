@@ -132,15 +132,17 @@ def GenerateMP4s(dir_path, ftpfile_name):
                     + mp4_path
 
         #print(com)
-        retcode = subprocess.call(com, shell=True, cwd=dir_path)
-        #print('retcode=', retcode)
-        #Delete temporary directory and files inside; occasionally this fails, not sure why
+        subprocess.call(com, shell=True, cwd=dir_path)
+        
+        #Delete temporary directory and files inside
         if os.path.exists(dir_tmp_path):
             try:
-            	shutil.rmtree(dir_tmp_path)
+                shutil.rmtree(dir_tmp_path)
             except:
-            	time.sleep(2)
-            	shutil.rmtree(dir_tmp_path)
+                # may occasionally fail due to ffmpeg thread still terminating
+                # so catch this and wait a bit
+                time.sleep(2)
+                shutil.rmtree(dir_tmp_path)
 
             print("Deleted temporary directory : " + dir_tmp_path)
 		

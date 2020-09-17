@@ -26,8 +26,9 @@ kht_module = Extension("kht_module",
 with open('requirements.txt') as f:
     requirements = f.read().splitlines()
 
-#init the submodule
+#init the submodules
 x=subprocess.call(['git','submodule','update','--init'])
+
 
 ### HANDLE DIFFERENT ONVIF LIBRARIES FOR Py 2 AND 3 ###
 
