@@ -29,6 +29,7 @@ with open('requirements.txt') as f:
 #init the submodules
 x=subprocess.call(['git','submodule','update','--init'])
 
+
 ### HANDLE DIFFERENT ONVIF LIBRARIES FOR Py 2 AND 3 ###
 
 # Python 2 uses the 'onvif' library and Python 3 uses the onvif_zeep library
