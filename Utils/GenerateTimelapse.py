@@ -151,6 +151,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
         help='Path to directory with FF files.')
 
+    arg_parser.add_argument('-fps', '--fps', metavar='FPS', type=int, \
+        help='FPS to use for video.')
+
     arg_parser.add_argument('-x', '--nodel', action="store_true", \
         help="""Do not delete generated JPG file.""")
 
@@ -166,5 +169,5 @@ if __name__ == "__main__":
         fps=10
     if cml_args.fps is not None:
         fps=cml_args.fps
-        
+
     GenerateTimelapse(dir_path, cml_args.nodel)
