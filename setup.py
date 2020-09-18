@@ -26,7 +26,7 @@ kht_module = Extension("kht_module",
 with open('requirements.txt') as f:
     requirements = f.read().splitlines()
 
-#init the submodules
+# Init the submodules (python-dvr)
 x = subprocess.call(['git','submodule','update','--init'])
 
 
