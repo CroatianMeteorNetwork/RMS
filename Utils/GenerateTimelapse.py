@@ -19,7 +19,9 @@ from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
 from RMS.Misc import mkdirP
 
-def GenerateTimelapse(dir_path, nodel) :   
+fps=10
+
+def generateTimelapse(dir_path, nodel) :   
 
     t1 = datetime.datetime.utcnow()
 
@@ -103,7 +105,7 @@ def GenerateTimelapse(dir_path, nodel) :
         mp4_path = os.path.join(dir_path, os.path.basename(dir_path) + ".mp4")
         temp_img_path = os.path.basename(dir_tmp_path) + os.sep + "temp_%04d.jpg"
         com = "cd " + dir_path + ";" \
-            + software_name + " -v quiet -r 30 -y -i " + temp_img_path \
+            + software_name + " -v quiet -r " + str(fps) + " -y -i " + temp_img_path \
             + " -vcodec libx264 -pix_fmt yuv420p -crf 25 -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" " \
             + mp4_path
 
@@ -122,14 +124,14 @@ def GenerateTimelapse(dir_path, nodel) :
         # Construct the ecommand for ffmpeg           
         mp4_path = os.path.basename(dir_path) + ".mp4"
         temp_img_path = os.path.join(os.path.basename(dir_tmp_path), "temp_%04d.jpg")
-        com = ffmpeg_path + " -v quiet -r 10 -i " + temp_img_path + " -c:v libx264 -pix_fmt yuv420p -an -crf 25 -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" -movflags faststart -y " + mp4_path
+        com = ffmpeg_path + " -v quiet -r " + str(fps) + " -i " + temp_img_path + " -c:v libx264 -pix_fmt yuv420p -an -crf 25 -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" -movflags faststart -y " + mp4_path
 		
         print("Creating timelapse using ffmpeg...")
         print(com)
         subprocess.call(com, shell=True, cwd=dir_path)
 		
     else :
-        print ("GenerateTimelapse only works on Linux or Windows the video could not be encoded")
+        print ("generateTimelapse only works on Linux or Windows the video could not be encoded")
 
     #Delete temporary directory and files inside
     if os.path.exists(dir_tmp_path) and not nodel:
@@ -158,5 +160,11 @@ if __name__ == "__main__":
     #########################
 
     dir_path = os.path.normpath(cml_args.dir_path)
-
+    if platform.system() == 'Linux':
+        fps=30
+    else:
+        fps=10
+    if cml_args.fps is not None:
+        fps=cml_args.fps
+        
     GenerateTimelapse(dir_path, cml_args.nodel)
