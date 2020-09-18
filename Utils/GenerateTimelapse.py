@@ -105,7 +105,7 @@ def generateTimelapse(dir_path, nodel) :
         mp4_path = os.path.join(dir_path, os.path.basename(dir_path) + ".mp4")
         temp_img_path = os.path.basename(dir_tmp_path) + os.sep + "temp_%04d.jpg"
         com = "cd " + dir_path + ";" \
-            + software_name + " -v quiet -r " + str(fps) + " -y -i " + temp_img_path \
+            + software_name + " -v quiet -r "+ str(fps) +" -y -i " + temp_img_path \
             + " -vcodec libx264 -pix_fmt yuv420p -crf 25 -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" " \
             + mp4_path
 
@@ -161,7 +161,6 @@ if __name__ == "__main__":
     cml_args = arg_parser.parse_args()
 
     #########################
-
     dir_path = os.path.normpath(cml_args.dir_path)
     if platform.system() == 'Linux':
         fps=30
@@ -169,5 +168,5 @@ if __name__ == "__main__":
         fps=10
     if cml_args.fps is not None:
         fps=cml_args.fps
-
-    GenerateTimelapse(dir_path, cml_args.nodel)
+    #print('fps is', fps)
+    generateTimelapse(dir_path, cml_args.nodel)
