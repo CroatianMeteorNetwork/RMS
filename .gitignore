@@ -90,5 +90,3 @@ target/
 .idea
 
 camerasettings/*.json
-.config.inuse
-.config.uk000*
