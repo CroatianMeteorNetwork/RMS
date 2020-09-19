@@ -20,8 +20,6 @@ import RMS.ConfigReader as cr
 from onvif import ONVIFCamera
 import os, platform
 
-# location of the web service definition files used by ONVIF
-
 def getHostname(cam):
     resp = cam.devicemgmt.GetHostname()
     print('getHostname:\n' + str(resp))
@@ -93,7 +91,6 @@ def onvifCommand(config, cmd):
 
     try:
         print('Connecting to {}:{}'.format(camera_ip, camera_onvif_port))
-        print ('WSDL location is ', wsdl_loc)
         cam = ONVIFCamera(camera_ip, camera_onvif_port, 'admin', '', wsdl_loc)
     except:
         print('Could not connect to camera!')
