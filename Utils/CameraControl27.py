@@ -1,8 +1,14 @@
 """ Controls ONVIF-compatible IP camera """
 
+# Prerequisites:
+# Python2 
+#   pip install onvif
+# python3
+#   pip install onvif_zeep
+# note that if you install onvif_zeep on python2 it will not work
+
 # Usage examples:
 #
-# pip install onvif_zeep
 # python -m Utils.CameraControl27 reboot
 # python -m Utils.CameraControl27 getDeviceInformation
 
@@ -12,7 +18,7 @@ import argparse
 import re
 import RMS.ConfigReader as cr
 from onvif import ONVIFCamera
-
+import os, platform
 
 def getHostname(cam):
     resp = cam.devicemgmt.GetHostname()
@@ -26,7 +32,43 @@ def systemReboot(cam):
     resp = cam.devicemgmt.SystemReboot()
     print('systemReboot: ' + str(resp))
 
+# function to find where your WSDL files are. 
+def getOnvifWsdlLocation():
 
+    platf = platform.system()
+    if platf == 'Linux':
+        basedir=os.path.join(os.environ['HOME'],'vRMS/lib')
+
+    elif platf == 'Windows':
+        # assumes you're using Anaconda
+        try:
+            condadir=os.environ['CONDA_PREFIX']
+        except:
+            print('I don\'t know how to find the WSDL files on your platform')
+            exit(1)
+        basedir=os.path.join(condadir, 'lib\\site-packages')
+
+    elif platf == 'Darwin':
+        # MacOS - should be the same as Linux i hope
+        basedir=os.path.join(os.environ['HOME'],'vRMS/lib/')
+
+    else:
+        print('unknown platform {:s} - assuming linux-like' % platform)
+        basedir=os.path.join(os.environ['HOME'],'vRMS/lib')
+
+    wsdl_loc=''   
+    for root, dirs, _ in os.walk(basedir, topdown=False):
+        for name in dirs:
+            wsdl_loc = os.path.join(root,name)
+            # on the Pi, the correct version is in an onvif-x.xx.x folder
+            if name =='wsdl' and 'onvif' in root:
+                return wsdl_loc
+            if name == 'wsdl' and platf == 'Windows' and 'zeep' not in root:
+                return wsdl_loc
+    if wsdl_loc == '':
+        print ('Unable to find WSDL files, unable to continue')
+        exit(1)
+    return wsdl_loc
 
 def onvifCommand(config, cmd):
     """ Execute ONVIF command to the IP camera.
@@ -40,6 +82,8 @@ def onvifCommand(config, cmd):
     """
 
     cam = None
+    
+    wsdl_loc = getOnvifWsdlLocation()
 
     # extract IP from config file
     camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
@@ -47,7 +91,7 @@ def onvifCommand(config, cmd):
 
     try:
         print('Connecting to {}:{}'.format(camera_ip, camera_onvif_port))
-        cam = ONVIFCamera(camera_ip, camera_onvif_port, 'admin', '', '/home/pi/vRMS/wsdl')
+        cam = ONVIFCamera(camera_ip, camera_onvif_port, 'admin', '', wsdl_loc)
     except:
         print('Could not connect to camera!')
         exit(1)
@@ -65,10 +109,6 @@ def onvifCommand(config, cmd):
         getDeviceInformation(cam)
 
     exit(0)
-
-
-
-
 
 if __name__ == '__main__':
 
