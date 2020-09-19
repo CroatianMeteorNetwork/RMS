@@ -164,9 +164,9 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
         #   loaded only if there's one file with '.config' in the directory
         if cml_args_config[0] == '.':
 
-            # Locate all files in the data directory that start with '.config'
+            # Locate all files in the data directory that end with '.config'
             config_files = [file_name for file_name in os.listdir(dir_path) \
-                if file_name.startswith('.config') or file_name.startswith('dfnstation.cfg')]
+                if file_name.endswith('.config') or file_name.endswith('dfnstation.cfg')]
 
             # If there is exactly one config file, use it
             if len(config_files) == 1:
@@ -513,7 +513,7 @@ def parse(path, strict=True):
     config = Config()
 
     # Parse an RMS config file
-    if os.path.basename(path).startswith('.config'):
+    if os.path.basename(path).endswith('.config'):
         parseConfigFile(config, parser)
 
     # Parse a DFN config file

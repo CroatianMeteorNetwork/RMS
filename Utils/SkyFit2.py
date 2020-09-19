@@ -3533,7 +3533,7 @@ class PlateTool(QtWidgets.QMainWindow):
         print('Residuals')
         print('----------')
         print(
-            ' No,   Img X,   Img Y, RA (deg), Dec (deg),    Mag, -2.5*LSP,    Cat X,   Cat Y,    Std X,   Std Y, Err amin,  Err px, Direction')
+            ' No,       Img X,       Img Y,    RA (deg),    Dec (deg),    Mag, -2.5*LSP,    Cat X,   Cat Y,    Std X,   Std Y, Err amin,  Err px, Direction')
 
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
         for star_no, (cat_x, cat_y, std_x, std_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y,
@@ -3564,7 +3564,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Print out the residuals
             print(
-                '{:3d}, {:7.2f}, {:7.2f}, {:>8.3f}, {:>+9.3f}, {:+6.2f},  {:7.2f}, {:8.2f}, {:7.2f}, {:8.2f}, {:7.2f}, {:8.2f}, {:7.2f}, {:+9.1f}'.format(
+                '{:3d}, {:11.6f}, {:11.6f}, {:>11.6f}, {:>+12.6f}, {:+6.2f},  {:7.2f}, {:8.2f}, {:7.2f}, {:8.2f}, {:7.2f}, {:8.2f}, {:7.2f}, {:+9.1f}'.format(
                     star_no + 1, img_x, img_y,
                     ra, dec, mag, -2.5*np.log10(sum_intens), cat_x, cat_y, std_x, std_y, 60*angular_distance,
                     distance, np.degrees(angle)))

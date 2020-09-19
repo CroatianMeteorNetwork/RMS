@@ -1314,6 +1314,7 @@ class InputTypeImages(object):
         self.total_fr_chunks = self.total_frames//self.fr_chunk_no
         if self.total_fr_chunks == 0:
             self.total_fr_chunks = 1
+            self.current_fr_chunk_size = self.fr_chunk_no = self.total_frames
 
 
         # Do the initial load
