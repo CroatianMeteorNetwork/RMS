@@ -1,5 +1,6 @@
 """ Make a KML file outlining the field of view of the camera. """
 
+
 from __future__ import print_function, division, absolute_import, unicode_literals
 
 import os
