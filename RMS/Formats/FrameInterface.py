@@ -1567,9 +1567,16 @@ class InputTypeImages(object):
             # Read time from an 8-bit image
             if (8*frame.itemsize == 8):
 
-                # Read the time from the image for 8 bit images
-                ts = (frame[0][23] << 24) + (frame[0][22] << 16) + (frame[0][21] << 8) + frame[0][20]
-                tu = (frame[0][27] << 24) + (frame[0][26] << 16) + (frame[0][25] << 8) + frame[0][24]
+
+                # Read the time from an ASGARD image
+                if frame[0][3] == 2:
+                    ts = (frame[0][15] << 24) + (frame[0][14] << 16) + (frame[0][13] << 8) + frame[0][12]
+                    tu = (frame[0][19] << 24) + (frame[0][18] << 16) + (frame[0][17] << 8) + frame[0][16]
+
+                # Read the time from an ASGARD mancut image
+                else:
+                    ts = (frame[0][23] << 24) + (frame[0][22] << 16) + (frame[0][21] << 8) + frame[0][20]
+                    tu = (frame[0][27] << 24) + (frame[0][26] << 16) + (frame[0][25] << 8) + frame[0][24]
 
             else:
 
