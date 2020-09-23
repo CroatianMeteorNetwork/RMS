@@ -1,5 +1,7 @@
 #!/usr/bin/python
 import os
+import sys
+import traceback
 import subprocess
 import datetime
 import logging
@@ -13,7 +15,7 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
 
     # create lock file to avoid RMS rebooting the system
     lockfile = os.path.join(config.data_dir, config.reboot_lock_file)
-    with open(lockfile, 'w') as fp:
+    with open(lockfile, 'w') as _:
         pass
 
     # Compute the capture duration from now
@@ -59,3 +61,12 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
 
     # relase lock file so RMS is authorized to reboot, if needed
     os.remove(lockfile)
+
+
+    # Reboot the computer (script needs sudo priviledges, works only on Linux)
+    try:
+        log.info("Rebooting system...")
+        os.system('sudo shutdown -r now')
+    except Exception as e:
+        log.debug('Rebooting failed with message:\n' + repr(e))
+        log.debug(repr(traceback.format_exception(*sys.exc_info())))
