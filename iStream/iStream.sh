@@ -78,7 +78,7 @@ SERVER="http://istrastream.com"
 AGENT="$SYSTEM-$STATION_ID"
 FTP_DETECT_INFO="$(ls $CAPTURED_DIR_NAME/*.txt | grep 'FTPdetectinfo' | grep -vE "uncalibrated")"
 
-#Thanks to Alfredo Dal´Ava Júnior :)
+#Thanks to Alfredo Dal'Ava Junior :)
 if [[ -z "$FTP_DETECT_INFO" ]]; then
    METEOR_COUNT="0"
 else
