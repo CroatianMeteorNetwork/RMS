@@ -1325,7 +1325,8 @@ class InputTypeImages(object):
         ### SET THE FPS ###
 
         # Estimate the FPS if UWO pngs are given
-        if self.uwo_png_mode:
+        if self.uwo_png_mode and not self.single_image_mode:
+
             # Convert datetimes to Unix times
             unix_times = [datetime2UnixTime(dt) for dt in self.uwo_png_dt_list]
 
@@ -1524,9 +1525,10 @@ class InputTypeImages(object):
             fr_no = self.current_frame
 
 
-        # In the single image mode, the frame will not change, so load it from the cache if available
+        # In the single image mode (but not for UWO), the frame will not change, so load it from the cache 
+        #   if available
         single_image_key = "single_image"
-        if self.single_image_mode:
+        if self.single_image_mode and not self.uwo_png_mode:
             if single_image_key in self.cache:
                 
                 # Load the frame from cache
