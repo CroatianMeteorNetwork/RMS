@@ -119,12 +119,13 @@ class FOVinputDialog(object):
 
 
 class PlateTool(QtWidgets.QMainWindow):
-    def __init__(self, dir_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False, \
+    def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False, \
         startUI=True):
         """ SkyFit interactive window.
 
         Arguments:
-            dir_path: [str] Absolute path to the directory containing image files.
+            input_path: [str] Absolute path to the directory containing FF or image files, or a path to a 
+                video file.
             config: [Config struct]
 
         Keyword arguments:
@@ -144,9 +145,15 @@ class PlateTool(QtWidgets.QMainWindow):
         self.mode = 'skyfit'
         self.mode_list = ['skyfit', 'manualreduction']
 
+
+        self.input_path = input_path
+        if os.path.isfile(self.input_path):
+            self.dir_path = os.path.dirname(self.input_path)
+        else:
+            self.dir_path = self.input_path
+
+
         self.config = config
-        self.dir_path = dir_path
-        self.file_path = None
 
         # Store forced time of first frame
         self.beginning_time = beginning_time
@@ -230,7 +237,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Detect data input type and init the image handle
-        self.detectInputType(load=True, beginning_time=beginning_time, use_fr_files=self.use_fr_files)
+        self.detectInputType(load=False, beginning_time=beginning_time, use_fr_files=self.use_fr_files)
 
 
         ###################################################################################################
@@ -1745,9 +1752,9 @@ class PlateTool(QtWidgets.QMainWindow):
         if hasattr(plate_tool, "img_handle"):
             plate_tool.img_handle.dir_path = dir_path
 
-        # Update file path
-        if plate_tool.file_path is not None:
-            plate_tool.file_path = os.path.join(dir_path, os.path.basename(plate_tool.file_path))
+        # Update possibly missing input_path variable
+        if not hasattr(plate_tool, "input_path"):
+            plate_tool.input_path = dir_path
 
 
 
@@ -2944,28 +2951,37 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         """
-        if load and self.file_path is not None:  # only for loadState
-            img_handle = detectInputTypeFile(self.file_path, self.config, beginning_time=beginning_time)
+
+        img_handle = None
+
+        # Load a state file
+        if load:
+            img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time)
         
-        else:
+        # Load given data from a folder
+        elif os.path.isdir(self.input_path):
+
             # Detect input file type and load appropriate input plugin
             img_handle = detectInputTypeFolder(self.dir_path, self.config, beginning_time=beginning_time, \
                 use_fr_files=self.use_fr_files)
 
-            self.file_path = None
+            # If the data was not being able to load from the folder, choose a file to load
+            if img_handle is None:
+                self.input_path = openFileDialog(self.dir_path, None, 'Select file to open', matplotlib, \
+                                        [('All Readable Files',
+                                          '*.fits;*.bin;*.mp4;*.avi;*.mkv;*.vid;*.png;*.jpg;*.bmp;*.nef'),
+                                         ('All Files', '*'),
+                                         ('FF and FR Files', '*.fits;*.bin'),
+                                         ('Video Files', '*.mp4;*.avi;*.mkv'),
+                                         ('VID Files', '*.vid'),
+                                         ('FITS Files', '*.fits'), ('BIN Files', '*.bin'),
+                                         ('Image Files', '*.png;*.jpg;*.bmp;*.nef')])
 
+
+        # If no previous ways of opening data was sucessful, open a file
         if img_handle is None:
-            self.file_path = openFileDialog(self.dir_path, None, 'Select file to open', matplotlib,
-                                            [('All Readable Files',
-                                              '*.fits;*.bin;*.mp4;*.avi;*.mkv;*.vid;*.png;*.jpg;*.bmp;*.nef'),
-                                             ('All Files', '*'),
-                                             ('FF and FR Files', '*.fits;*.bin'),
-                                             ('Video Files', '*.mp4;*.avi;*.mkv'),
-                                             ('VID Files', '*.vid'),
-                                             ('FITS Files', '*.fits'), ('BIN Files', '*.bin'),
-                                             ('Image Files', '*.png;*.jpg;*.bmp;*.nef')])
+            img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time)
 
-            img_handle = detectInputTypeFile(self.file_path, self.config, beginning_time=beginning_time)
 
         self.img_handle = img_handle
 
@@ -4239,7 +4255,7 @@ if __name__ == '__main__':
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Tool for fitting astrometry plates and photometric calibration.")
 
-    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str,
+    arg_parser.add_argument('input_path', metavar='INPUT_PATH', type=str,
                             help='Path to the folder with FF or image files, path to a video file, or to a state file.'
                                  ' If images or videos are given, their names must be in the format: YYYYMMDD_hhmmss.uuuuuu')
 
@@ -4271,12 +4287,12 @@ if __name__ == '__main__':
     app = QtWidgets.QApplication(sys.argv)
 
     # If the state file was given, load the state
-    if cml_args.dir_path[0].endswith('.state'):
+    if cml_args.input_path.endswith('.state'):
 
-        dir_path, state_name = os.path.split(cml_args.dir_path[0])
-        config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
+        dir_path, state_name = os.path.split(cml_args.input_path)
+        config = cr.loadConfigFromDirectory(cml_args.config, cml_args.input_path)
 
-        # create plate_tool without calling its constructor then calling loadstate
+        # Create plate_tool without calling its constructor then calling loadstate
         plate_tool = PlateTool.__new__(PlateTool)
         super(PlateTool, plate_tool).__init__()
         plate_tool.loadState(dir_path, state_name)
@@ -4284,10 +4300,14 @@ if __name__ == '__main__':
     else:
 
         # Extract the data directory path
-        dir_path = cml_args.dir_path[0].replace('"', '')
+        input_path = cml_args.input_path.replace('"', '')
+        if os.path.isfile(input_path):
+            dir_path = os.path.dirname(input_path)
+        else:
+            dir_path = input_path
 
         # Load the config file
-        config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
+        config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
         # Parse the beginning time into a datetime object
         if cml_args.timebeg is not None:
@@ -4298,7 +4318,7 @@ if __name__ == '__main__':
             beginning_time = None
 
         # Init SkyFit
-        plate_tool = PlateTool(dir_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
+        plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
             gamma=cml_args.gamma, use_fr_files=cml_args.fr)
 
 
