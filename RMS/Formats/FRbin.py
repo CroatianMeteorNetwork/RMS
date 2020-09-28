@@ -84,15 +84,21 @@ class fr_struct:
 
                 for i in range(self.frameNum[line]):
 
-                    filter_x = np.arange(int(self.xc[line][i] - self.size[line][i]/2),
-                                         int(self.xc[line][i] + self.size[line][i]/2))
+                    # Compute indices on the image where the FR file will be pasted
+                    x_img = np.arange(int(self.xc[line][i] - self.size[line][i]//2),
+                                      int(self.xc[line][i] + self.size[line][i]//2))
+                    y_img = np.arange(int(self.yc[line][i] - self.size[line][i]//2),
+                                      int(self.yc[line][i] + self.size[line][i]//2))
+                    X_img, Y_img = np.meshgrid(x_img, y_img)
 
-                    filter_y = np.arange(int(self.yc[line][i] - self.size[line][i]/2),
-                                         int(self.yc[line][i] + self.size[line][i]/2))
+                    # Compute FR frame coordiantes
+                    y_frame = np.arange(len(y_img))
+                    x_frame = np.arange(len(x_img))
+                    Y_frame, X_frame = np.meshgrid(y_frame, x_frame)
 
-                    filter_x, filter_y = np.meshgrid(filter_x, filter_y)
+                    # Paste frame onto the image (take only max values)
+                    img[X_img, Y_img] = np.maximum(img[X_img, Y_img], self.frames[line][i][X_frame, Y_frame])
 
-                    img[filter_x, filter_y] = np.maximum(img[filter_x, filter_y], self.frames[line][i])
 
             self.__maxpixel = np.swapaxes(img, 0, 1).astype(self.dtype)
 
@@ -118,16 +124,21 @@ class fr_struct:
             for line in range(self.lines):
                 for i in range(self.frameNum[line]):
 
-                    filter_x = np.arange(int(self.xc[line][i] - self.size[line][i]/2),
-                                         int(self.xc[line][i] + self.size[line][i]/2))
+                    # Compute indices on the image where the FR file will be pasted
+                    x_img = np.arange(int(self.xc[line][i] - self.size[line][i]//2),
+                                      int(self.xc[line][i] + self.size[line][i]//2))
+                    y_img = np.arange(int(self.yc[line][i] - self.size[line][i]//2),
+                                      int(self.yc[line][i] + self.size[line][i]//2))
+                    X_img, Y_img = np.meshgrid(x_img, y_img)
 
-                    filter_y = np.arange(int(self.yc[line][i] - self.size[line][i]/2),
-                                         int(self.yc[line][i] + self.size[line][i]/2))
+                    # Compute FR frame coordiantes
+                    y_frame = np.arange(len(y_img))
+                    x_frame = np.arange(len(x_img))
+                    Y_frame, X_frame = np.meshgrid(y_frame, x_frame)
 
-                    filter_x, filter_y = np.meshgrid(filter_x, filter_y)
-
-                    img[filter_x, filter_y] += self.frames[line][i]
-                    img_count[filter_x, filter_y] += 1
+                    # Add values to correct positions on the image
+                    img[X_img, Y_img] += self.frames[line][i][X_frame, Y_frame]
+                    img_count[X_img, Y_img] += 1
 
             img_count[img_count <= 0] = 1
             img_count = np.swapaxes(img_count, 0, 1)

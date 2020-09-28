@@ -278,7 +278,9 @@ class InputTypeFRFF(InputType):
             read_nframes: [int] Number of frames to read. If not given (None), self.fr_chunk_no frames will be
                 read. If -1, all frames will be read in.
         """
-        if first_frame is None and read_nframes is None:
+
+        # Load pure FF or FR files
+        if (first_frame is None) and (read_nframes is None):
             
             # Find which file read
             file_name = self.name()
@@ -323,6 +325,7 @@ class InputTypeFRFF(InputType):
             frames_to_read = computeFramesToRead(read_nframes, total_ff_frames, 256, first_frame)
             ffs_to_read = self.ff_list[first_frame//256:(first_frame + frames_to_read)//256 + 1]
 
+            # If there is only one FF to read, reconstruct given frames
             if len(ffs_to_read) == 1:
                 file_name = ffs_to_read[0]
 
@@ -336,6 +339,7 @@ class InputTypeFRFF(InputType):
                 # Select the frames
                 ff.maxpixel = selectFFFrames(ff.maxpixel, ff, min_frame, max_frame)
 
+            # If there are more FFs to read, make a fake FF
             else:
 
                 # Init an empty FF structure
@@ -426,17 +430,27 @@ class InputTypeFRFF(InputType):
                         min_frame = (frame_count_line - abs(first_frame))%frame_count_line
                         max_frame = min(frame_count_line, min_frame + frames_to_read)
 
-                        # put all frames from the fr files in the range into frame_list
+                        # Create a fake FF using FR frames
                         for i in range(min_frame, max_frame + 1):
-                            img = np.zeros((self.ncols, self.nrows), np.float)
-                            filter_x = np.arange(int(fr_files[fr].xc[line][i] - fr_files[fr].size[line][i]/2),
-                                                 int(fr_files[fr].xc[line][i] + fr_files[fr].size[line][i]/2))
-                            filter_y = np.arange(int(fr_files[fr].yc[line][i] - fr_files[fr].size[line][i]/2),
-                                                 int(fr_files[fr].yc[line][i] + fr_files[fr].size[line][i]/2))
-                            filter_x, filter_y = np.meshgrid(filter_x, filter_y)
 
-                            img[filter_x, filter_y] = fr_files[fr].frames[line][i]
-                            img_count[filter_x, filter_y] += 1
+                            # Init an empty image
+                            img = np.zeros((self.ncols, self.nrows), np.float)
+
+                            # Compute indices on the image where the FR file will be pasted
+                            x_img = np.arange(int(fr_files[fr].xc[line][i] - fr_files[fr].size[line][i]//2),
+                                              int(fr_files[fr].xc[line][i] + fr_files[fr].size[line][i]//2))
+                            y_img = np.arange(int(fr_files[fr].yc[line][i] - fr_files[fr].size[line][i]//2),
+                                              int(fr_files[fr].yc[line][i] + fr_files[fr].size[line][i]//2))
+                            X_img, Y_img = np.meshgrid(x_img, y_img)
+
+                            # Compute FR frame coordiantes
+                            y_frame = np.arange(len(y_img))
+                            x_frame = np.arange(len(x_img))
+                            Y_frame, X_frame = np.meshgrid(y_frame, x_frame)
+
+                            # Paste frame onto the image
+                            img[X_img, Y_img] = fr_files[fr].frames[line][i][Y_frame, X_frame]
+                            img_count[X_img, Y_img] += 1
 
                             frame_list.append(img)
 
@@ -568,6 +582,7 @@ class InputTypeFRFF(InputType):
 
             # Reconstruct the frame if it is within the bounds
             if (frame_indx < ff_frame.frameNum[self.current_line]) and (frame_indx >= 0):
+
                 # Get the center position of the detection on the current frame
                 yc = ff_frame.yc[self.current_line][frame_indx]
                 xc = ff_frame.xc[self.current_line][frame_indx]
@@ -576,12 +591,18 @@ class InputTypeFRFF(InputType):
                 size = ff_frame.size[self.current_line][frame_indx]
 
                 # Paste the frames onto the big image
-                y_img = np.arange(int(yc - size/2), int(yc + size/2))
-                x_img = np.arange(int(xc - size/2), int(xc + size/2))
+                y_img = np.arange(int(yc - size//2), int(yc + size//2))
+                x_img = np.arange(int(xc - size//2), int(xc + size//2))
 
                 Y_img, X_img = np.meshgrid(y_img, x_img)
 
-                frame[Y_img, X_img] = np.swapaxes(ff_frame.frames[self.current_line][frame_indx], 0, 1)
+
+                y_frame = np.arange(len(y_img))
+                x_frame = np.arange(len(x_img))
+
+                Y_frame, X_frame = np.meshgrid(y_frame, x_frame)
+
+                frame[Y_img, X_img] = ff_frame.frames[self.current_line][frame_indx][Y_frame, X_frame]
 
         return frame
 
