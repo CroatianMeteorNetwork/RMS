@@ -237,7 +237,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Detect data input type and init the image handle
-        self.detectInputType(load=False, beginning_time=beginning_time, use_fr_files=self.use_fr_files)
+        self.detectInputType(load=True, beginning_time=beginning_time, use_fr_files=self.use_fr_files)
 
 
         ###################################################################################################
@@ -2955,7 +2955,7 @@ class PlateTool(QtWidgets.QMainWindow):
         img_handle = None
 
         # Load a state file
-        if load:
+        if load and os.path.isfile(self.input_path):
             img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time)
         
         # Load given data from a folder
