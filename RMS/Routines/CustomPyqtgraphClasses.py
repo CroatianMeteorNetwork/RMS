@@ -4,6 +4,7 @@ import pyqtgraph as pg
 import numpy as np
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
+from RMS.Formats.FFfile import reconstructFrame as reconstructFrameFF
 from RMS.Routines import Image
 from RMS.Routines.DebruijnSequence import findAllInDeBruijnSequence, generateDeBruijnSequence
 
@@ -408,20 +409,43 @@ class ImageItem(pg.ImageItem):
         self.reloadImage()
 
     def loadFrame(self):
+
+        # Load the frame
         frame = self.img_handle.loadFrame(avepixel=True)
 
         if frame is not None:
-            # adding background to FR files
+
+            # Adding background to FR files
             if self.img_handle.name()[:2] == 'FR':
+
+                # Save the original frame number
+                current_frame = self.img_handle.current_frame
+
                 original_index = self.img_handle.current_ff_index
                 original_time = self.img_handle.currentTime()
+
+                # Find the FF file which corresponds to the FR file
                 for index in range(len(self.img_handle.ff_list)):
                     if index == original_index:
                         continue
 
+                    # If there is an FF file present, add the FF avepixel to the reconstructed FR frame
+                    #   background
                     self.img_handle.current_ff_index = index
-                    if original_time == self.img_handle.currentTime() and self.img_handle.name()[:2] == 'FF':
-                        frame = frame + self.img_handle.loadChunk().avepixel*(frame == 0)
+                    if (original_time == self.img_handle.currentTime()) \
+                        and (self.img_handle.name()[:2] == 'FF'):
+
+                        # Load the FF file
+                        ff = self.img_handle.loadChunk()
+
+                        # Reconstruct the given frame
+                        ff_frame = reconstructFrameFF(ff, current_frame, avepixel=True)
+
+                        # Old method where only the avepixel was pasted
+                        # ff_frame = self.img_handle.loadChunk().avepixel
+
+                        # Paste the background to pixels outside the FR cutout
+                        frame = frame + ff_frame*(frame == 0)
                         break
 
                 self.img_handle.current_ff_index = original_index

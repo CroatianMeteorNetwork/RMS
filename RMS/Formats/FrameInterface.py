@@ -530,22 +530,27 @@ class InputTypeFRFF(InputType):
         # Find which file read
         file_name = self.name()
 
-        # save and load file from cache
+        # Save and load file from cache
         if file_name in self.cache:
             ff_frame = self.cache[file_name]
 
         elif validFFName(file_name):
+
             # Load the FF file from disk
             ff_frame = readFF(self.dir_path, file_name)
 
             # Put the FF into separate cache
             self.cache[file_name] = ff_frame
 
+        # Read the FR file from disk
         else:
             ff_frame = readFR(self.dir_path, file_name)
             ff_frame.nrows = self.nrows
             ff_frame.ncols = self.ncols
             self.cache[file_name] = ff_frame
+
+            # If there is a corresponding FF file in the folder, reconstruct the frame from it
+            
 
 
         if self.current_frame is None:
@@ -555,15 +560,19 @@ class InputTypeFRFF(InputType):
                 self.current_frame = ff_frame.t[self.current_line][0]
 
 
-        # get frame from file
+        # Get frame from file
         if validFFName(file_name):
             
             # Reconstruct the frame from an FF file
-            frame = reconstructFrameFF(ff_frame, self.current_frame%self.total_frames,
+            frame = reconstructFrameFF(ff_frame, self.current_frame%self.total_frames, \
                                        avepixel=avepixel)
         else:
+
             # For FR files
+
+            # If there is no underlying FF file, make a blank background
             if self.nrows is None or self.nrows is None:
+                
                 # Get the maximum extent of the meteor frames
                 y_size = max(
                     max(np.array(ff_frame.yc[i]) + np.array(ff_frame.size[i])//2) for i in range(ff_frame.lines))
