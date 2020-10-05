@@ -550,7 +550,7 @@ class InputTypeFRFF(InputType):
             self.cache[file_name] = ff_frame
 
             # If there is a corresponding FF file in the folder, reconstruct the frame from it
-            
+
 
 
         if self.current_frame is None:
@@ -676,6 +676,7 @@ class InputTypeVideo(InputType):
             except:
                 messagebox.showerror('Input error',
                                      'The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.')
+
                 sys.exit()
 
         else:

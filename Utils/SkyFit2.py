@@ -559,7 +559,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # If the file is being loaded, detect the input type
-        if loaded_file and not hasattr(self, "img_handle"):
+        if loaded_file and (not hasattr(self, "img_handle")):
 
             if hasattr(self, "beginning_time"):
                 beginning_time = self.beginning_time
@@ -1676,7 +1676,7 @@ class PlateTool(QtWidgets.QMainWindow):
         python -m RMS.Astrometry.SkyFit2 PATH/skyFit2_latest.state --config .
         """
 
-        # This is pretty thrown together. It's to get around an error where pyqt widgets cant be saved to a
+        # This is pretty thrown together. It's to get around an error where pyqt widgets can't be saved to a
         # pickle. If there's a better way to do this, go ahead.
 
         # Currently, any important variables should be initialized in the constructor (and cannot be classes
@@ -1711,7 +1711,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.loadState(os.path.dirname(file), os.path.basename(file))
 
 
-    def loadState(self, dir_path, state_name):
+    def loadState(self, dir_path, state_name, beginning_time=None):
         """ Loads state with path to file dir_path and file name state_name. Works mid-program and at the start of
         the program (if done properly).
 
@@ -1722,6 +1722,10 @@ class PlateTool(QtWidgets.QMainWindow):
         Arguments:
             dir_path: [str] Path to directory (ex. C:/path).
             state_name: [str] File name (ex. file.state).
+
+        Keyword arguments:
+            beginning_time: [datetime] Datetime of the video beginning. Optional, only can be given for
+                video input formats.
 
         """
 
@@ -1746,16 +1750,20 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Set the dir path in case it changed
-        plate_tool.dir_path = dir_path
+        self.dir_path = dir_path
 
         # Update the dir path in the img_handle
-        if hasattr(plate_tool, "img_handle"):
-            plate_tool.img_handle.dir_path = dir_path
+        if hasattr(self, "img_handle"):
+            self.img_handle.dir_path = dir_path
 
         # Update possibly missing input_path variable
-        if not hasattr(plate_tool, "input_path"):
-            plate_tool.input_path = dir_path
+        if not hasattr(self, "input_path"):
+            self.input_path = dir_path
 
+
+        # Update the possibly missing begin time
+        if not hasattr(self, "beginning_time"):
+            self.beginning_time = beginning_time
 
 
         # If setupUI hasn't already been called, call it
@@ -4284,6 +4292,16 @@ if __name__ == '__main__':
 
     #########################
 
+
+    # Parse the beginning time into a datetime object
+    if cml_args.timebeg is not None:
+
+        beginning_time = datetime.datetime.strptime(cml_args.timebeg[0], "%Y%m%d_%H%M%S.%f")
+
+    else:
+        beginning_time = None
+
+
     app = QtWidgets.QApplication(sys.argv)
 
     # If the state file was given, load the state
@@ -4295,7 +4313,7 @@ if __name__ == '__main__':
         # Create plate_tool without calling its constructor then calling loadstate
         plate_tool = PlateTool.__new__(PlateTool)
         super(PlateTool, plate_tool).__init__()
-        plate_tool.loadState(dir_path, state_name)
+        plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time)
 
     else:
 
@@ -4308,14 +4326,6 @@ if __name__ == '__main__':
 
         # Load the config file
         config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
-
-        # Parse the beginning time into a datetime object
-        if cml_args.timebeg is not None:
-
-            beginning_time = datetime.datetime.strptime(cml_args.timebeg[0], "%Y%m%d_%H%M%S.%f")
-
-        else:
-            beginning_time = None
 
         # Init SkyFit
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
