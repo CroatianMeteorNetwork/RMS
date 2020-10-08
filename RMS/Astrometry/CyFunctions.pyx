@@ -90,16 +90,16 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
 
 
     # Classical method
-    # return degrees(acos(sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra2 - ra1)))
+    return degrees(acos(sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra2 - ra1)))
 
 
-    # Compute the angular separation using the haversine formula
-    #   Source: https://idlastro.gsfc.nasa.gov/ftp/pro/astro/gcirc.pro
-    deldec2 = (dec2 - dec1)/2.0
-    delra2 =  (ra2 - ra1)/2.0
-    sindis = sqrt(sin(deldec2)*sin(deldec2) + cos(dec1)*cos(dec2)*sin(delra2)*sin(delra2))
+    # # Compute the angular separation using the haversine formula
+    # #   Source: https://idlastro.gsfc.nasa.gov/ftp/pro/astro/gcirc.pro
+    # deldec2 = (dec2 - dec1)/2.0
+    # delra2 =  (ra2 - ra1)/2.0
+    # sindis = sqrt(sin(deldec2)*sin(deldec2) + cos(dec1)*cos(dec2)*sin(delra2)*sin(delra2))
 
-    return degrees(2.0*asin(sindis))
+    # return degrees(2.0*asin(sindis))
 
 
 

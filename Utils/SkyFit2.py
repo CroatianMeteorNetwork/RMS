@@ -3236,7 +3236,7 @@ class PlateTool(QtWidgets.QMainWindow):
             initialfile = ''
 
         flat_file = openFileDialog(self.dir_path, initialfile, 'Select the flat field file', matplotlib,
-                                   [('Image Files', '*.png,*.jpg;*.bmp'),
+                                   [('Image Files', '*.png;*.jpg;*.bmp'),
                                     ('All Files', '*')])
 
         if not flat_file:
@@ -3282,7 +3282,7 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Open a file dialog and ask user to load a dark frame. """
 
         dark_file = openFileDialog(self.dir_path, None, 'Select the dark frame file', matplotlib,
-                                   [('Image Files', '*.png,*.jpg;*.bmp'),
+                                   [('Image Files', '*.png;*.jpg;*.bmp'),
                                     ('All Files', '*')])
 
         if not dark_file:
@@ -3582,7 +3582,8 @@ class PlateTool(QtWidgets.QMainWindow):
             dec_img = dec_img[0]
 
             # Compute the angular distance in degrees
-            angular_distance = angularSeparation(ra, dec, ra_img, dec_img)
+            angular_distance = np.degrees(angularSeparation(np.radians(ra), np.radians(dec), \
+                np.radians(ra_img), np.radians(dec_img)))
 
             residuals.append([img_x, img_y, angle, distance, angular_distance])
 

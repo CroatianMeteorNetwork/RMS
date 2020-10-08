@@ -18,17 +18,17 @@ def angularSeparation(ra1, dec1, ra2, dec2):
     """
 
     # Classical method
-    # return np.arccos(np.sin(dec1)*np.sin(dec2) + np.cos(dec1)*np.cos(dec2)*np.cos(ra2 - ra1))
+    return np.arccos(np.sin(dec1)*np.sin(dec2) + np.cos(dec1)*np.cos(dec2)*np.cos(ra2 - ra1))
 
-    # Compute the angular separation using the haversine formula
-    #   Source: https://idlastro.gsfc.nasa.gov/ftp/pro/astro/gcirc.pro
-    deldec2 = (dec2 - dec1)/2.0
-    delra2 =  (ra2 - ra1)/2.0
-    sindis = np.sqrt(np.sin(deldec2)*np.sin(deldec2) \
-        + np.cos(dec1)*np.cos(dec2)*np.sin(delra2)*np.sin(delra2))
-    dis = 2.0*np.arcsin(sindis) 
+    # # Compute the angular separation using the haversine formula
+    # #   Source: https://idlastro.gsfc.nasa.gov/ftp/pro/astro/gcirc.pro
+    # deldec2 = (dec2 - dec1)/2.0
+    # delra2 =  (ra2 - ra1)/2.0
+    # sindis = np.sqrt(np.sin(deldec2)*np.sin(deldec2) \
+    #     + np.cos(dec1)*np.cos(dec2)*np.sin(delra2)*np.sin(delra2))
+    # dis = 2.0*np.arcsin(sindis) 
 
-    return dis
+    # return dis
 
 
 def angularSeparationVect(vect1, vect2):
