@@ -1749,6 +1749,20 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.platepar.extinction_scale = 1.0
 
 
+        # Update the platepar path
+        if hasattr(self, "platepar_file"):
+            if self.platepar_file is not None:
+
+                # Extract the platepar name
+                platepar_dir, platepar_name = os.path.split(self.platepar_file)
+
+                # If the platepar dir is the same as the old dir path, replace it with the new dir path
+                if os.path.realpath(self.dir_path) == os.path.realpath(platepar_dir):
+
+                    # Update the path to the platepar
+                    self.platepar_file = os.path.join(dir_path, platepar_name)
+
+
         # Set the dir path in case it changed
         self.dir_path = dir_path
 
