@@ -2989,7 +2989,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # If the data was not being able to load from the folder, choose a file to load
             if img_handle is None:
-                self.input_path = openFileDialog(self.dir_path, None, 'Select file to open', matplotlib, \
+                self.input_path = openFileDialog(self.dir_path, None, 'Select image/video file to open', \
+                    matplotlib, \
                                         [('All Readable Files',
                                           '*.fits;*.bin;*.mp4;*.avi;*.mkv;*.vid;*.png;*.jpg;*.bmp;*.nef'),
                                          ('All Files', '*'),
@@ -3554,16 +3555,16 @@ class PlateTool(QtWidgets.QMainWindow):
         # Get image coordinates of catalog stars
         catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, self.platepar)
 
-        ## Compute standard coordinates ##
+        # ## Compute standard coordinates ##
 
-        # Platepar with no distortion
-        pp_nodist = copy.deepcopy(self.platepar)
-        pp_nodist.x_poly_rev *= 0
-        pp_nodist.y_poly_rev *= 0
+        # # Platepar with no distortion
+        # pp_nodist = copy.deepcopy(self.platepar)
+        # pp_nodist.x_poly_rev *= 0
+        # pp_nodist.y_poly_rev *= 0
 
-        standard_x, standard_y, _ = getCatalogStarsImagePositions(catalog_stars, jd, pp_nodist)
+        # standard_x, standard_y, _ = getCatalogStarsImagePositions(catalog_stars, jd, pp_nodist)
 
-        ## ##
+        # ## ##
 
         residuals = []
 
@@ -3571,12 +3572,12 @@ class PlateTool(QtWidgets.QMainWindow):
         print('Residuals')
         print('----------')
         print(
-            ' No,       Img X,       Img Y,    RA (deg),    Dec (deg),    Mag, -2.5*LSP,    Cat X,   Cat Y,    Std X,   Std Y, Err amin,  Err px, Direction')
+            ' No,       Img X,       Img Y, RA cat (deg), Dec cat (deg),    Mag, -2.5*LSP,    Cat X,   Cat Y, RA img (deg), Dec img (deg), Err amin,  Err px, Direction')
 
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
-        for star_no, (cat_x, cat_y, std_x, std_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y,
-                                                                                      standard_x, standard_y,
-                                                                                      catalog_stars, img_stars)):
+        for star_no, (cat_x, cat_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y, catalog_stars, \
+                                                                        img_stars)):
+
             img_x, img_y, sum_intens = img_c
             ra, dec, mag = cat_coords
 
@@ -3589,7 +3590,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute the residuals in ra/dec in angular coordinates
             img_time = self.img_handle.currentTime()
-            _, ra_img, dec_img, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar,
+            _, ra_img, dec_img, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar, \
                                                 extinction_correction=False)
 
             ra_img = ra_img[0]
@@ -3603,10 +3604,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Print out the residuals
             print(
-                '{:3d}, {:11.6f}, {:11.6f}, {:>11.6f}, {:>+12.6f}, {:+6.2f},  {:7.2f}, {:8.2f}, {:7.2f}, {:8.2f}, {:7.2f}, {:8.2f}, {:7.2f}, {:+9.1f}'.format(
-                    star_no + 1, img_x, img_y,
-                    ra, dec, mag, -2.5*np.log10(sum_intens), cat_x, cat_y, std_x, std_y, 60*angular_distance,
-                    distance, np.degrees(angle)))
+                '{:3d}, {:11.6f}, {:11.6f}, {:>12.6f}, {:>+13.6f}, {:+6.2f},  {:7.2f}, {:8.2f}, {:7.2f}, {:>12.6f}, {:>+13.6f}, {:8.2f}, {:7.2f}, {:+9.1f}'.format(
+                    star_no + 1, img_x, img_y, ra, dec, mag, -2.5*np.log10(sum_intens), cat_x, cat_y, \
+                    ra_img, dec_img, 60*angular_distance, distance, np.degrees(angle)))
 
         mean_angular_error = 60*np.mean([entry[4] for entry in residuals])
 
