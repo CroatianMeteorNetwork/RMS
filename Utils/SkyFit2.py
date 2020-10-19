@@ -3774,7 +3774,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_x.grid()
         ax_x.set_xlabel("X (px)")
         ax_x.set_ylabel("X error (px)")
-        ax_x.set_xlim([0, self.img.data.shape[1]])
+        ax_x.set_xlim([0, self.platepar.X_res])
 
         # Plot Y vs Y error
         ax_y.scatter(y_list, y_residuals, s=2, c='k', zorder=3)
@@ -3782,7 +3782,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_y.grid()
         ax_y.set_xlabel("Y (px)")
         ax_y.set_ylabel("Y error (px)")
-        ax_y.set_xlim([0, self.img.data.shape[0]])
+        ax_y.set_xlim([0, self.platepar.Y_res])
 
         # Plot radius vs radius error
         ax_radius.scatter(radius_list, radius_residuals, s=2, c='k', zorder=3)
@@ -3790,7 +3790,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_radius.grid()
         ax_radius.set_xlabel("Radius (px)")
         ax_radius.set_ylabel("Radius error (px)")
-        ax_radius.set_xlim([0, np.hypot(self.img.data.shape[0]/2, self.img.data.shape[1]/2)])
+        ax_radius.set_xlim([0, np.hypot(self.platepar.X_res/2, self.platepar.Y_res/2)])
 
         # Equalize Y limits, make them integers, and set a minimum range of 1 px
         x_max_ylim = np.max(np.abs(ax_x.get_ylim()))
