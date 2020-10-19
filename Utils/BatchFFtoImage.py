@@ -7,7 +7,27 @@ from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
 from RMS.Routines.Image import saveImage
 
+def batchFFtoImage(dir_path, fmt):
+    # Go through all files in the given folder
+    for file_name in os.listdir(dir_path):
 
+        # Check if the file is an FF file
+        if validFFName(file_name):
+
+            # Read the FF file
+            ff = readFF(dir_path, file_name)
+
+            # Skip the file if it could not be read
+            if ff is None:
+                continue
+
+            # Make a filename for the image
+            img_file_name = file_name.replace('fits', '') + fmt
+
+            print('Saving: ', img_file_name)
+
+            # Save the maxpixel to disk
+            saveImage(os.path.join(dir_path, img_file_name), ff.maxpixel)
 
 
 if __name__ == "__main__":
@@ -31,24 +51,5 @@ if __name__ == "__main__":
 
     dir_path = cml_args.dir_path[0]
 
-    # Go through all files in the given folder
-    for file_name in os.listdir(dir_path):
-
-        # Check if the file is an FF file
-        if validFFName(file_name):
-
-            # Read the FF file
-            ff = readFF(dir_path, file_name)
-
-            # Skip the file if it could not be read
-            if ff is None:
-                continue
-
-            # Make a filename for the image
-            img_file_name = file_name.replace('fits', '') + cml_args.file_format[0]
-
-            print('Saving: ', img_file_name)
-
-            # Save the maxpixel to disk
-            saveImage(os.path.join(dir_path, img_file_name), ff.maxpixel)
+    batchFFtoImage(dir_path, cml_args.file_format[0])
 

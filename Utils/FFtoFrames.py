@@ -31,7 +31,7 @@ def saveFrame(frame, frame_no, out_dir, file_name, file_format, ff_dt, fps, half
 
 
     # Construct the file name
-    file_name_saving = file_name + '_{:03d}'.format(i)
+    file_name_saving = file_name + '_{:03d}'.format(frame_no)
 
     if half_frame is not None:
         file_name_saving += ".{:d}".format(int(5*half_frame))
@@ -54,56 +54,21 @@ def saveFrame(frame, frame_no, out_dir, file_name, file_format, ff_dt, fps, half
         half_frame_time = 0.5*half_frame
 
     # Compute the frame datetime
-    frame_dt = ff_dt + datetime.timedelta(seconds=(i + half_frame_time)/float(fps))
+    frame_dt = ff_dt + datetime.timedelta(seconds=(frame_no + half_frame_time)/float(fps))
 
     return file_name_saving, frame_dt
 
 
-
-
-
-
-if __name__ == "__main__":
-
-    ### COMMAND LINE ARGUMENTS
-
-    # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Convert the given FF file to individual reconstructed FF video frames.")
-
-    arg_parser.add_argument('file_path', nargs=1, metavar='FILE_PATH', type=str, \
-        help='Path to the FF file.')
-
-    arg_parser.add_argument('output_dir', nargs=1, metavar='OUTPUT_DIR', type=str, \
-        help='Path to the output directory.')
-
-    arg_parser.add_argument('file_format', nargs=1, metavar='FILE_FORMAT', type=str, \
-        help='File format of images, e.g. jpg or png. Use pngm for METAL type png.')
-
-    arg_parser.add_argument('-d', '--deinterlace', nargs='?', type=int, default=-1, help="Perform manual reduction on deinterlaced frames, even first by default. If odd first is desired, -d 1 should be used.")
-
-    arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float, help="Frames per second of the video. If not given, it will be read from a) the FF file if available, b) from the config file.")
-
-    # Parse the command line arguments
-    cml_args = arg_parser.parse_args()
-
+def FFtoFrames(file_path, out_dir, file_format, deinterlace_mode, first_frame=0, last_frame=255) : 
     #########################
 
     # Load the configuration file
     config = cr.parse(".config")
 
-
-    file_path = cml_args.file_path[0]
-    out_dir = cml_args.output_dir[0]
-    file_format = cml_args.file_format[0]
-
-
     # Read the deinterlace
     #   -1 - no deinterlace
     #    0 - odd first
     #    1 - even first
-    deinterlace_mode = cml_args.deinterlace
-    if cml_args.deinterlace is None:
-        deinterlace_mode = 0
 
     if deinterlace_mode not in (-1, 0, 1):
         print('Unknown deinterlace mode:', deinterlace_mode)
@@ -141,17 +106,12 @@ if __name__ == "__main__":
     if fps is None:
         fps = config.fps
 
-
-
-
     # Try to read the number of frames from the FF file itself
     if ff.nframes > 0:
         nframes = ff.nframes
 
     else:
         nframes = 256
-
-
 
     # Construct a file name for saving
     if file_format == 'pngm':
@@ -174,36 +134,34 @@ if __name__ == "__main__":
 
         # Reconstruct individual frames
         frame = reconstructFrame(ff, i, avepixel=True)
+        if i >= first_frame and i <= last_frame:
+            # Deinterlace the frame if necessary, odd first
+            if deinterlace_mode == 0:
 
-        # Deinterlace the frame if necessary, odd first
-        if deinterlace_mode == 0:
+                frame_odd = deinterlaceOdd(frame)
+                frame_name, frame_dt = saveFrame(frame_odd, i, out_dir, file_name_saving, file_format, ff_dt, fps, half_frame=0)
+                frame_name_time_list.append([frame_name, frame_dt])
 
-            frame_odd = deinterlaceOdd(frame)
-            frame_name, frame_dt = saveFrame(frame_odd, i, out_dir, file_name_saving, file_format, ff_dt, fps, half_frame=0)
-            frame_name_time_list.append([frame_name, frame_dt])
+                frame_even = deinterlaceEven(frame)
+                frame_name, frame_dt = saveFrame(frame_even, i, out_dir, file_name_saving, file_format, ff_dt, fps, half_frame=1)
+                frame_name_time_list.append([frame_name, frame_dt])
 
-            frame_even = deinterlaceEven(frame)
-            frame_name, frame_dt = saveFrame(frame_even, i, out_dir, file_name_saving, file_format, ff_dt, fps, half_frame=1)
-            frame_name_time_list.append([frame_name, frame_dt])
+            # Even first
+            elif deinterlace_mode == 1:
 
-        # Even first
-        elif deinterlace_mode == 1:
+                frame_even = deinterlaceEven(frame)
+                frame_name, frame_dt = saveFrame(frame_even, i, out_dir, file_name_saving, file_format, ff_dt, fps, half_frame=0)
+                frame_name_time_list.append([frame_name, frame_dt])
 
-            frame_even = deinterlaceEven(frame)
-            frame_name, frame_dt = saveFrame(frame_even, i, out_dir, file_name_saving, file_format, ff_dt, fps, half_frame=0)
-            frame_name_time_list.append([frame_name, frame_dt])
-
-            frame_odd = deinterlaceOdd(frame)
-            frame_name, frame_dt = saveFrame(frame_odd, i, out_dir, file_name_saving, file_format, ff_dt, fps, half_frame=1)
-            frame_name_time_list.append([frame_name, frame_dt])
-
-
-        # No deinterlace
-        else:
-            frame_name, frame_dt = saveFrame(frame, i, out_dir, file_name_saving, file_format, ff_dt, fps)
-            frame_name_time_list.append([frame_name, frame_dt])
+                frame_odd = deinterlaceOdd(frame)
+                frame_name, frame_dt = saveFrame(frame_odd, i, out_dir, file_name_saving, file_format, ff_dt, fps, half_frame=1)
+                frame_name_time_list.append([frame_name, frame_dt])
 
 
+            # No deinterlace
+            else:
+                frame_name, frame_dt = saveFrame(frame, i-first_frame, out_dir, file_name_saving, file_format, ff_dt, fps)
+                frame_name_time_list.append([frame_name, frame_dt])
 
     # If the frames are saved for METAL, the times have to be given in a separate file
     if file_format == 'pngm':
@@ -216,6 +174,36 @@ if __name__ == "__main__":
                 f.write('{:s} {:s}\n'.format(frame_name, frame_dt.strftime("%Y%m%d:%H:%M:%S.%f")))
 
 
+if __name__ == "__main__":
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Convert the given FF file to individual reconstructed FF video frames.")
+
+    arg_parser.add_argument('file_path', nargs=1, metavar='FILE_PATH', type=str, \
+        help='Path to the FF file.')
+
+    arg_parser.add_argument('output_dir', nargs=1, metavar='OUTPUT_DIR', type=str, \
+        help='Path to the output directory.')
+
+    arg_parser.add_argument('file_format', nargs=1, metavar='FILE_FORMAT', type=str, \
+        help='File format of images, e.g. jpg or png. Use pngm for METAL type png.')
+
+    arg_parser.add_argument('-d', '--deinterlace', nargs='?', type=int, default=-1, help="Perform manual reduction on deinterlaced frames, even first by default. If odd first is desired, -d 1 should be used.")
+
+    arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float, help="Frames per second of the video. If not given, it will be read from a) the FF file if available, b) from the config file.")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    file_path = cml_args.file_path[0]
+    out_dir = cml_args.output_dir[0]
+    file_format = cml_args.file_format[0]
+    deinterlace_mode = cml_args.deinterlace
+    if cml_args.deinterlace is None:
+        deinterlace_mode = 0
+
+    FFtoFrames(file_path, out_dir, file_format, deinterlace_mode)
 
 
 

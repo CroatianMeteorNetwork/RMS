@@ -725,7 +725,7 @@ if __name__ == "__main__":
                 # Check if the reboot lock file exists
                 reboot_lock_file_path = os.path.join(config.data_dir, config.reboot_lock_file)
                 if os.path.exists(reboot_lock_file_path):
-                    log.info("Reboot delayed for 1 minute becase the lock file exists: {:s}".format(reboot_lock_file_path))
+                    log.info("Reboot delayed for 1 minute because the lock file exists: {:s}".format(reboot_lock_file_path))
                     reboot_go = False
 
 
