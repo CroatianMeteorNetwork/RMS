@@ -34,7 +34,7 @@ from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFil
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
 from RMS.Pickling import loadPickle, savePickle
-from RMS.Math import angularSeparation
+from RMS.Math import angularSeparation, RMSD
 from RMS.Misc import decimalDegreesToSexHours, openFileDialog, openFolderDialog
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.CustomPyqtgraphClasses import *
@@ -3608,18 +3608,20 @@ class PlateTool(QtWidgets.QMainWindow):
                     star_no + 1, img_x, img_y, ra, dec, mag, -2.5*np.log10(sum_intens), cat_x, cat_y, \
                     ra_img, dec_img, 60*angular_distance, distance, np.degrees(angle)))
 
-        mean_angular_error = 60*np.mean([entry[4] for entry in residuals])
+
+        # Compute RMSD errors
+        rmsd_angular = 60*RMSD([entry[4] for entry in residuals])
+        rmsd_img = RMSD([entry[3] for entry in residuals])
 
         # If the average angular error is larger than 60 arc minutes, report it in degrees
-        if mean_angular_error > 60:
-            mean_angular_error /= 60
+        if rmsd_angular > 60:
+            rmsd_angular /= 60
             angular_error_label = 'deg'
 
         else:
             angular_error_label = 'arcmin'
 
-        print('Average error: {:.2f} px, {:.2f} {:s}'.format(np.mean([entry[3] for entry in residuals]),
-                                                             mean_angular_error, angular_error_label))
+        print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
 
         # Print the field of view size
         print("FOV: {:.2f} x {:.2f} deg".format(*computeFOVSize(self.platepar)))

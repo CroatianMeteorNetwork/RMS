@@ -910,9 +910,9 @@ if __name__ == "__main__":
         ftpdetectinfo_path_list += glob.glob(entry)
 
 
-    # If therea are files given, notify the user
+    # If there are no good files given, notify the user
     if len(ftpdetectinfo_path_list) == 0:
-        print('No valid FTPdetectinfo files given!')
+        print("No FTPdetectinfo files given!")
         sys.exit()
         
 

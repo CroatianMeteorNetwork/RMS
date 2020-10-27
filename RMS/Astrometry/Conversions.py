@@ -479,7 +479,7 @@ def AER2ECEF(azim, elev, r, lat, lon, alt):
 
 
 
-def AEH2Range(azim, elev, h, lat, lon, alt):
+def AEH2Range(azim, elev, h, lat, lon, alt, accurate=False):
     """ Given an azimuth and altitude, compute the range to a point along the given line of sight
         that has the specified height above the ground.
 
@@ -490,6 +490,10 @@ def AEH2Range(azim, elev, h, lat, lon, alt):
         lat: [float] Latitude of observer in degrees.
         lon: [float] Longitude of observer in degrees.
         alt: [float] Altitude of observer in meters.
+
+    Keyword arguments:
+        accurate: [bool] Minimize the range for very accurate solution. False by default, in which case
+            the accuracy is +/- 10 m using an analytical approach.
 
     Return:
         r: [float] Range to point in meters.
@@ -512,19 +516,50 @@ def AEH2Range(azim, elev, h, lat, lon, alt):
         return (h_computed - h)**2
 
 
-    # Use a flat-Earth range as a first guess of range if the elevation is higher than 10 degrees
-    if elev > np.radians(10):
-        r0 = (h - alt)/np.sin(np.radians(elev))
-    else:
-        # Otherwise, use a distance of 1000 km
-        r0 = 1e6
 
-    # Numerically find the range which corresponds to the given height above the ground
-    res = scipy.optimize.minimize(_heightCostFunction, r0, \
-        args=(azim, elev, h, lat, lon, alt))
+    ### Law of sines solution ###
+
+    # Get distance from Earth centre to the position given by geographical coordinates, in WGS84
+    N = EARTH.EQUATORIAL_RADIUS/math.sqrt(1.0 - (EARTH.E**2)*math.sin(np.radians(lat))**2)
+
+    # Compute the distance from Earth centre to the observer
+    rs = N + alt
+
+    # Compute the distance from Earth centre to the point
+    rm = N + h
+
+    # Compute the angle between the observer and the point
+    beta = np.pi/2 - np.radians(elev) - np.arcsin((rs*np.sin(np.pi/2 + np.radians(elev)))/rm)
+
+    # Compute the range
+    r = rm*np.sin(beta)/np.sin(np.pi/2 + np.radians(elev))
+
+    ### ###
+
+
+    # Compute an accurate numerical solution if needed
+    if accurate:
+
+        # First guess of range if the elevation is higher than 10 degrees
+        if elev < np.radians(10):
+
+            # Flat-Earth assumption
+            r0 = r
+
+        else:
+            # Otherwise, use a distance of 1000 km
+            r0 = 1e6
+
+        # Numerically find the range which corresponds to the given height above the ground
+        res = scipy.optimize.minimize(_heightCostFunction, r0, \
+            args=(azim, elev, h, lat, lon, alt))
+
+        # Minimized range
+        r = res.x[0]
+
 
     # Return the minimized solution
-    return res.x[0]
+    return r
 
 
 
@@ -541,7 +576,8 @@ def AEH2LatLonAlt(azim, elev, h, lat, lon, alt):
         alt: [float] Altitude of observer in meters.
 
     Return:
-        (lat, lon, alt): [tuple of floats] latitude and longitude in degrees, WGS84 elevation in meters
+        (r, lat, lon, alt): [tuple of floats] range in meteors, latitude and longitude in degrees, 
+            WGS84 elevation in meters
 
     """
 
@@ -555,7 +591,7 @@ def AEH2LatLonAlt(azim, elev, h, lat, lon, alt):
     lat2, lon2 = np.degrees(lat2), np.degrees(lon2)
 
 
-    return lat2, lon2, alt2
+    return r, lat2, lon2, alt2
 
 
 
@@ -587,6 +623,70 @@ def cartesian2Geo(julian_date, x, y, z):
 
 
     return np.degrees(lat), np.degrees(lon), ele
+
+
+
+def areaGeoPolygon(lats, lons, ht):
+    """ Computes area of spherical polygon given by geo coordinates, assuming spherical Earth. 
+        Line integral based on Green's Theorem.
+
+        Source: https://stackoverflow.com/a/61184491
+
+    Arguments:
+        lats: [list/ndarray] A list of latitudes (degrees).
+        lons: [list/ndarray] A list of longitudes (degrees).
+        ht: [float] Height above sea level (meters).
+
+    Return:
+        area: [float] Area enclosed by the polygon in m^2.
+    
+    """
+
+    lats = np.radians(np.array(lats))
+    lons = np.radians(np.array(lons))
+
+    # Compute the mean latitude
+    lat_mean = np.mean(lats)
+
+    # Get distance from Earth centre to the position given by mean geographical coordinates, in WGS84 (m)
+    N = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(lat_mean)**2)
+
+    # Compute the total radius including the height
+    radius = N + ht
+
+
+    # Check if a closed polygon is given, and if not, close it
+    if (lats[0] != lats[-1]) or (lons[0] != lons[-1]):
+        lats = np.append(lats, lats[0])
+        lons = np.append(lons, lons[0])
+
+    # Get colatitude (a measure of surface distance as an angle)
+    a = np.sin(lats/2)**2 + np.cos(lats)*np.sin(lons/2)**2
+    colat = 2*np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+
+    # Azimuth of each point in segment from the arbitrary origin
+    az = np.arctan2(np.cos(lats)*np.sin(lons), np.sin(lats))%(2*np.pi)
+
+    # Calculate step sizes
+    daz = np.diff(az)
+    daz = (daz + np.pi)%(2*np.pi) - np.pi
+
+    # Determine average surface distance for each step
+    deltas = np.diff(colat)/2
+    colat = colat[0:-1] + deltas
+
+    # Integral over azimuth is 1-cos(colatitudes)
+    integrands = (1 - np.cos(colat))*daz
+
+    # Integrate and save the answer as a fraction of the unit sphere.
+    # Note that the sum of the integrands will include a factor of 4pi.
+    area = abs(sum(integrands))/(4*np.pi)
+
+    # Could be area of inside or outside the polygon, choose the smaller value aka. the inner area
+    area = min(area, 1 - area)
+
+    # Compute the area in square meters
+    return area*4*np.pi*radius**2
 
 
 
@@ -883,8 +983,8 @@ if __name__ == "__main__":
     alt = 90.0
 
     # Compute lat/lon/alt of the point along the LOS
-    lat2, lon2, alt2 = AEH2LatLonAlt(azim, elev, h, lat, lon, alt)
-    print(lat2, lon2, alt2)
+    r, lat2, lon2, alt2 = AEH2LatLonAlt(azim, elev, h, lat, lon, alt)
+    print(r, lat2, lon2, alt2)
 
 
     ### ###

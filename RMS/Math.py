@@ -184,3 +184,22 @@ def sphericalPointFromHeadingAndDistance(ra1, dec1, heading, distance):
 
     return np.degrees(ra)%360, np.degrees(dec)
     
+
+
+def RMSD(x, weights=None):
+    """ Root-mean-square deviation of measurements vs. model. 
+    
+    Arguments:
+        x: [ndarray] An array of model and measurement differences.
+
+    Return:
+        [float] RMSD
+    """
+
+    if isinstance(x, list):
+        x = np.array(x)
+
+    if weights is None:
+        weights = np.ones_like(x)
+
+    return np.sqrt(np.sum(weights*x**2)/np.sum(weights))
