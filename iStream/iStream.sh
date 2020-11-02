@@ -22,6 +22,7 @@ else
         sudo apt-get -y install imagemagick 
         sudo apt-get -y install libav-tools
         sudo apt-get -y install ffmpeg
+	sudo apt-get -y install curl
     else
     	echo "NO SUDO PRIVILEDGES TO INSTALL DEPENDENCIES..."
     fi
