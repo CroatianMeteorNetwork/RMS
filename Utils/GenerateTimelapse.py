@@ -21,7 +21,7 @@ from RMS.Misc import mkdirP
 
 fps=10
 
-def GenerateTimelapse(dir_path, nodel) :   
+def generateTimelapse(dir_path, nodel) :   
 
     t1 = datetime.datetime.utcnow()
 
@@ -131,7 +131,7 @@ def GenerateTimelapse(dir_path, nodel) :
         subprocess.call(com, shell=True, cwd=dir_path)
 		
     else :
-        print ("GenerateTimelapse only works on Linux or Windows the video could not be encoded")
+        print ("generateTimelapse only works on Linux or Windows the video could not be encoded")
 
     #Delete temporary directory and files inside
     if os.path.exists(dir_tmp_path) and not nodel:
@@ -169,4 +169,4 @@ if __name__ == "__main__":
     if cml_args.fps is not None:
         fps=cml_args.fps
     #print('fps is', fps)
-    GenerateTimelapse(dir_path, cml_args.nodel)
+    generateTimelapse(dir_path, cml_args.nodel)

@@ -23,7 +23,7 @@ from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
 from RMS.Misc import mkdirP
 
-def GenerateMP4s(dir_path, ftpfile_name):
+def generateMP4s(dir_path, ftpfile_name):
     t1 = datetime.datetime.utcnow()
 
     # Load the font for labeling
@@ -172,4 +172,4 @@ if __name__ == "__main__":
     ftpfile_name="FTPdetectinfo_"+ftpdate+'.txt'
     # print(ftpfile_name)
 
-    GenerateMP4s(dir_path, ftpfile_name)
+    generateMP4s(dir_path, ftpfile_name)
