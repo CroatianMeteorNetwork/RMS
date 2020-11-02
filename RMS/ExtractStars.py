@@ -672,6 +672,29 @@ if __name__ == "__main__":
         plt.show()
 
 
+        # Plot stddev by radius from centre
+        x_list = np.array(x_list)
+        y_list = np.array(y_list)
+        radius_list = np.hypot(x_list - config.width/2, y_list - config.height/2)
+
+        radius_min = 0
+        radius_max = np.hypot(config.width/2, config.height/2)
+
+        plt.hexbin(radius_list, np.array(sigma_list), gridsize=(hexbin_grid, hexbin_grid), \
+            extent=(radius_min, radius_max, y_min, y_max))
+
+
+        plt.xlabel("Radius from center (px)")
+        plt.ylabel("PSF $\sigma$ (px)")
+
+        plt.xlim(radius_min, radius_max)
+        plt.ylim(y_min, y_max)
+
+        plt.tight_layout()
+
+        plt.savefig(os.path.join(ff_dir, 'PSF_radius_vs_stddev.png'), dpi=300)
+
+        plt.show()
 
 
 
