@@ -4,6 +4,7 @@ import os
 import sys
 import glob
 import copy
+import datetime
 
 import numpy as np
 
@@ -34,6 +35,11 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=120, d
         dht: [float] Height delta (km).
         elev_limit: [float] Limit of elevation above horizon (deg). 10 degrees by default.
 
+    Return:
+        col_areas_ht: [dict] A dictionary where the keys are heights of area evaluation, and values are
+            segment dictionaries. Segment dictionaries have keys which are tuples of (x, y) coordinates of
+            segment midpoints, and values are segment collection areas corrected for sensor effects.
+
     """
 
 
@@ -51,6 +57,9 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=120, d
     shorter_dpx = int(platepar.Y_res//shorter_side_points)
 
 
+    # Distionary of collection areas per height
+    col_areas_ht = {}
+
     # Estimate the collection area for a given range of heights
     for ht in np.arange(ht_min, ht_max + dht, dht):
 
@@ -60,6 +69,9 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=120, d
         print(ht/1000, "km")
 
         total_area = 0
+
+        # Dictionary of computed sensor-corrected collection areas where X and Y are keys
+        col_areas_xy = {}
 
         # Sample the image
         for x0 in np.linspace(0, platepar.X_res, longer_side_points, dtype=np.int, endpoint=False):
@@ -154,8 +166,15 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=120, d
                 ### ###
 
 
+                # Store the sensor-corrected segment collection area
+                col_areas_xy[(x_mean, y_mean)] = area
+
+
                 total_area += area
 
+
+        # Store segments to the height dictionary (save a copy so it doesn't get overwritten)
+        col_areas_ht[ht] = dict(col_areas_xy)
 
         print("SUM:", total_area/1e6, "km^2")
 
@@ -174,19 +193,11 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=120, d
 
 
 
-
-
-
-
-
-
-        # Compute the ratio of masked and unmasked pixels
-
-
-
         pass
 
 
+
+    return col_areas_ht
 
     
 
@@ -194,19 +205,21 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=120, d
 
 
 
-def computeFlux(config, ftpdetectinfo_list, shower_code=None, mask=None):
+def computeFlux(config, ftpdetectinfo_list, shower_code, dt_beg, dt_end, timebin, timebin_intdt=0.25, mask=None):
     """ Compute flux using measurements in the given FTPdetectinfo file. 
     
     Arguments:
         config: [Config instance]
         ftpdetectinfo_list: [list] A list of paths to FTPdetectinfo files.
+        shower_code: [str] IAU shower code (e.g. ETA, PER, SDA).
+        dt_beg: [Datetime] Datetime object of the observation beginning.
+        dt_end: [Datetime] Datetime object of the observation end.
+        timebin: [float] Time bin in hours.
 
     Keyword arguments:
-        shower_code: [str] Only use this one shower for association (e.g. ETA, PER, SDA). None by default,
-            in which case all active showers will be used.
+        timebin_intdt: [float] Time step for computing the integrated collection area in hours. 15 minutes by
+            default. If smaller than that, only one collection are will be computed.
         mask: [Mask object] Mask object, None by default.
-
-
 
     """
 
@@ -258,8 +271,8 @@ def computeFlux(config, ftpdetectinfo_list, shower_code=None, mask=None):
 
 
     # Perform shower association
-    associations, shower_counts = showerAssociation(config, ftpdetectinfo_list, shower_code=shower_code, show_plot=False, save_plot=False, \
-        plot_activity=False)
+    associations, shower_counts = showerAssociation(config, ftpdetectinfo_list, shower_code=shower_code, \
+        show_plot=False, save_plot=False, plot_activity=False)
 
     # If there are no shower association, return nothing
     if not associations:
@@ -268,8 +281,23 @@ def computeFlux(config, ftpdetectinfo_list, shower_code=None, mask=None):
 
 
 
-    # Compute the collecting area
-    collecting_area = collectingArea(platepar, mask=mask)
+
+    for key in associations:
+        meteor, shower = associations[key]
+
+        if shower is not None:
+
+            print(meteor.jdt_ref, shower.name)
+
+
+    # Compute the collecting areas segments per height
+    col_areas_ht = collectingArea(platepar, associations, mask=mask)
+
+
+    ### Apply time-dependent corrections ###
+
+    # Go through all time bins within the observation period
+    
 
 
 
@@ -287,12 +315,21 @@ if __name__ == "__main__":
     arg_parser.add_argument("ftpdetectinfo_path", nargs="+", metavar="FTPDETECTINFO_PATH", type=str, \
         help="Path to one or more FTPdetectinfo files. The directory also has to contain a platepar and mask file.")
 
+    arg_parser.add_argument("shower_code", metavar="SHOWER_CODE", type=str, \
+        help="IAU shower code (e.g. ETA, PER, SDA).")
+
+    arg_parser.add_argument("tbeg", metavar="BEG_TIME", type=str, \
+        help="Time of the observation beginning. YYYYMMDD-HHMMSS format.")
+
+    arg_parser.add_argument("tend", metavar="END_TIME", type=str, \
+        help="Time of the observation ending. YYYYMMDD-HHMMSS format.")
+
+    arg_parser.add_argument("dt", metavar="TIME_BIN", type=float, \
+        help="Time bin width in hours.")
+
     arg_parser.add_argument("-c", "--config", metavar="CONFIG_PATH", type=str,
                             help="Path to a config file which will be used instead of the default one."
                                  " To load the .config file in the given data directory, write '.' (dot).")
-
-    arg_parser.add_argument("-s", "--shower", metavar="SHOWER", type=str, \
-        help="Associate just this single shower given its code (e.g. PER, ORI, ETA).")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -312,6 +349,11 @@ if __name__ == "__main__":
     if len(ftpdetectinfo_path_list) == 0:
         print("No FTPdetectinfo files given!")
         sys.exit()
+
+
+    # Parse the beg/end time
+    dt_beg = datetime.datetime.strptime(cml_args.tbeg, "%Y%m%d-%H%M%S")
+    dt_end = datetime.datetime.strptime(cml_args.tend, "%Y%m%d-%H%M%S")
         
 
     # Extract parent directory
@@ -322,4 +364,4 @@ if __name__ == "__main__":
 
 
     # Compute the flux
-    computeFlux(config, ftpdetectinfo_path_list, shower_code=cml_args.shower)
+    computeFlux(config, ftpdetectinfo_path_list, cml_args.shower_code dt_beg, dt_end, cml_args.dt)

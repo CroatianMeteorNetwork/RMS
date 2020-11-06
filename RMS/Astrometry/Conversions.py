@@ -529,10 +529,10 @@ def AEH2Range(azim, elev, h, lat, lon, alt, accurate=False):
     rm = N + h
 
     # Compute the angle between the observer and the point
-    beta = np.pi/2 - np.radians(elev) - np.arcsin((rs*np.sin(np.pi/2 + np.radians(elev)))/rm)
+    beta = np.radians(elev) + np.arcsin((rs*np.cos(np.radians(elev)))/rm)
 
     # Compute the range
-    r = rm*np.sin(beta)/np.sin(np.pi/2 + np.radians(elev))
+    r = rm*np.cos(beta)/np.cos(np.radians(elev))
 
     ### ###
 
