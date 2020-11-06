@@ -9,6 +9,7 @@ import sys
 import traceback
 import argparse
 import logging
+import random
 
 from RMS.ArchiveDetections import archiveDetections, archiveFieldsums
 # from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo
@@ -18,6 +19,7 @@ import RMS.ConfigReader as cr
 from RMS.DownloadPlatepar import downloadNewPlatepar
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteorsDirectory, saveDetections
 from RMS.Formats.CAL import writeCAL
+from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats import CALSTARS
@@ -139,6 +141,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     platepar = None
     kml_file = None
+    recalibrated_platepars = None
     
     # If the detection should be run
     if (not nodetect):
@@ -197,8 +200,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             log.info("Recalibrating astrometry on FF files with detections...")
 
             # Recalibrate astrometry on every FF file and apply the calibration to detections
-            recalibrateIndividualFFsAndApplyAstrometry(night_data_dir, os.path.join(night_data_dir, \
-                ftpdetectinfo_name), calstars_list, config, platepar)
+            recalibrated_platepars = recalibrateIndividualFFsAndApplyAstrometry(night_data_dir, \
+                os.path.join(night_data_dir, ftpdetectinfo_name), calstars_list, config, platepar)
 
             
 
@@ -343,6 +346,38 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     # Add the FOV KML file
     if kml_file is not None:
         extra_files.append(kml_file)
+
+
+
+    # If FFs are not uploaded, choose two to upload
+    if config.upload_mode > 1:
+    
+        # If all FF files are not uploaded, add two FF files which were successfuly recalibrated
+        recalibrated_ffs = []
+        for ff_name in recalibrated_platepars:
+
+            pp = recalibrated_platepars[ff_name]
+
+            # Check if the FF was recalibrated
+            if pp.auto_recalibrated:
+                recalibrated_ffs.append(ff_name)
+
+        # Choose two files randomly
+        if len(recalibrated_ffs) > 2:
+            extra_files += random.sample(recalibrated_ffs, 2)
+
+        elif len(recalibrated_ffs) > 0:
+            extra_files += recalibrated_ffs
+
+
+        # If no were recalibrated
+        else:
+
+            # Create a list of all FF files
+            ff_list = [ff_name for ff_name in os.listdir(night_data_dir) if validFFName(ff_name)]
+
+            # Add any two FF files
+            extra_files += random.sample(ff_list, 2)
         
 
     ### ###
