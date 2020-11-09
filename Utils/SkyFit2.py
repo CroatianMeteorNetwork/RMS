@@ -13,13 +13,6 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 
-try:
-    import tkinter
-    from tkinter import messagebox
-except:
-    import Tkinter as tkinter
-    import tkMessageBox as messagebox
-
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
@@ -45,77 +38,70 @@ pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession, cyTrueRaDec2ApparentAltAz, cyaltAz2RADec
 
 
-class FOVinputDialog(object):
-    """ Dialog for inputting FOV centre in Alt/Az. """
+def qmessagebox(message="", title="Error", message_type="warning"):
+    msg = QtGui.QMessageBox()
+    if message_type == "warning":
+        msg.setIcon(QtGui.QMessageBox.Warning)
+    elif message_type == "error":
+        msg.setIcon(QtGui.QMessageBox.Critical)
+    else:
+        msg.setIcon(QtGui.QMessageBox.Information)
+    msg.setText(message)
+    msg.setWindowTitle(title)
+    msg.setStandardButtons(QtGui.QMessageBox.Ok)
+    msg.exec_()
 
-    # TODO: reimplement this with pyqt or remove it entirely
-    def __init__(self, parent):
 
-        self.parent = parent
+class QFOVinputDialog(QtWidgets.QDialog):
 
-        # Set initial angle values
-        self.azim = self.alt = self.rot = 0
+    def __init__(self, *args, **kwargs):
+        super(QFOVinputDialog, self).__init__(*args, **kwargs)
 
-        self.top = tkinter.Toplevel(parent)
+        self.setWindowTitle("Pointing information")
 
-        # Bind the Enter key to run the verify function
-        self.top.bind('<Return>', self.verify)
-        self.top.protocol("WM_DELETE_WINDOW", self.cancel)
+        btn = QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
 
-        tkinter.Label(self.top, text="FOV centre (degrees) \nAzim +E of due N\nRotation from vertical").grid(row=0,
-                                                                                                             columnspan=2)
+        buttonBox = QtWidgets.QDialogButtonBox(btn)
+        buttonBox.accepted.connect(self.accept)
+        buttonBox.rejected.connect(self.reject)
 
-        azim_label = tkinter.Label(self.top, text='Azim = ')
-        azim_label.grid(row=1, column=0)
-        self.azimuth = tkinter.Entry(self.top)
-        self.azimuth.grid(row=1, column=1)
-        self.azimuth.focus_set()
+        self.azim_edit = QtWidgets.QLineEdit(self)
+        self.alt_edit = QtWidgets.QLineEdit(self)
+        self.rot_edit = QtWidgets.QLineEdit(self)
 
-        elev_label = tkinter.Label(self.top, text='Alt  =')
-        elev_label.grid(row=2, column=0)
-        self.altitude = tkinter.Entry(self.top)
-        self.altitude.grid(row=2, column=1)
+        azim_validator = QtGui.QDoubleValidator(-180, 360, 9)
+        azim_validator.setNotation(QtGui.QDoubleValidator.StandardNotation)
+        self.azim_edit.setValidator(azim_validator)
+        alt_validator = QtGui.QDoubleValidator(0, 90, 9)
+        alt_validator.setNotation(QtGui.QDoubleValidator.StandardNotation)
+        self.alt_edit.setValidator(alt_validator)
+        rot_validator = QtGui.QDoubleValidator(-180, 360, 9)
+        rot_validator.setNotation(QtGui.QDoubleValidator.StandardNotation)
+        self.rot_edit.setValidator(rot_validator)
+        layout = QtWidgets.QVBoxLayout(self)
 
-        rot_label = tkinter.Label(self.top, text='Rotation  =')
-        rot_label.grid(row=3, column=0)
-        self.rotation = tkinter.Entry(self.top)
-        self.rotation.grid(row=3, column=1)
-        self.rotation.insert(0, '0')
+        layout.addWidget(QtWidgets.QLabel("Please enter FOV centre (degrees),\nAzimuth +E of due N\nRotation from vertical"))
 
-        b = tkinter.Button(self.top, text="OK", command=self.verify)
-        b.grid(row=4, column=0, columnspan=1)
+        formlayout = QtWidgets.QFormLayout()
+        formlayout.setLabelAlignment(QtCore.Qt.AlignLeft)
 
-        b2 = tkinter.Button(self.top, text="cancel", command=self.cancel)
-        b2.grid(row=4, column=1, columnspan=1)
+        formlayout.addRow("Azimuth", self.azim_edit)
+        formlayout.addRow("Altitude", self.alt_edit)
+        formlayout.addRow("Rotation", self.rot_edit)
 
-    def cancel(self, event=None):
-        self.azim = None
-        self.alt = None
-        self.rot = None
-        self.top.destroy()
+        layout.addLayout(formlayout)
+        layout.addWidget(buttonBox)
+        self.setLayout(layout)
 
-    def verify(self, event=None):
-        """ Check that the azimuth and altitude are withing the bounds. """
-
+    def getInputs(self):
         try:
-            # Read values
-            self.azim = float(self.azimuth.get())%360
-            self.alt = float(self.altitude.get())
-            self.rot = float(self.rotation.get())%360
+            azim = float(self.azim_edit.text()) % 360
+            alt = float(self.alt_edit.text())
+            rot = float(self.rot_edit.text()) % 360
+        except ValueError:
+            return 0, 0, 0
 
-            # Check that the values are within the bounds
-            if (self.alt < 0) or (self.alt > 90):
-                messagebox.showerror(title='Range error', message='The altitude is not within the limits!')
-            else:
-                self.top.destroy()
-
-        except:
-            messagebox.showerror(title='Range error', message='Please enter floating point numbers, not text!')
-
-    def getAltAz(self):
-        """ Returns inputed FOV centre. """
-
-        return self.azim, self.alt, self.rot
+        return azim, alt, rot
 
 
 class PlateTool(QtWidgets.QMainWindow):
@@ -220,10 +206,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # Check if the catalog exists
         if not self.catalog_stars.any():
 
-            messagebox.showerror(title='Star catalog error', \
+            qmessagebox(title='Star catalog error', \
                 message='Star catalog from path ' \
                     + os.path.join(self.config.star_catalog_path, self.config.star_catalog_file) \
-                    + 'could not be loaded!')
+                    + 'could not be loaded!',
+                message_type="error")
 
             sys.exit()
 
@@ -1545,11 +1532,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Don't allow image change while in star picking mode
             if self.star_pick_mode:
-                messagebox.showwarning(title='Star picking mode', \
-                                       message='You cannot cycle through images while in star picking mode!')
-
-                # Set focus back on the SkyFit window
-                self.activateWindow()
+                qmessagebox(title='Star picking mode', \
+                            message='You cannot cycle through images while in star picking mode!',
+                            message_type="warning")
 
                 return None
 
@@ -1612,11 +1597,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 if not change_allowed:
 
-                    messagebox.showinfo(title='Frame counter error',
-                        message="The frame number on DFN images cannot be advanced if a pick was not made!")
-
-                    # Set focus back on the SkyFit window
-                    self.activateWindow()
+                    qmessagebox(title='Frame counter error',
+                                message="The frame number on DFN images cannot be advanced if a pick was not made!",
+                                message_type="info")
 
                     return None
 
@@ -2948,11 +2931,9 @@ class PlateTool(QtWidgets.QMainWindow):
             solution = novaAstrometryNetSolve(img=img_data, fov_w_range=fov_w_range)
 
         if solution is None:
-            messagebox.showerror(title='Astrometry.net error',
-                                 message='Astrometry.net failed to find a solution!')
-
-            # Set focus back on the SkyFit window
-            self.activateWindow()
+            qmessagebox(title='Astrometry.net error',
+                        message='Astrometry.net failed to find a solution!',
+                        message_type="error")
 
             return None
 
@@ -2995,18 +2976,13 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Asks the user to input the centre of the FOV in altitude and azimuth. """
 
         # Get FOV centre
-        root = tkinter.Tk()
-        root.withdraw()
-        d = FOVinputDialog(root)
-        root.wait_window(d.top)
-
-        data = d.getAltAz()
-        if all([x is None for x in data]):
-            return None
+        d = QFOVinputDialog(self)
+        if d.exec_():
+             data = d.getInputs()
+        else:
+            return 0, 0, 0
 
         self.azim_centre, self.alt_centre, rot_horizontal = data
-
-        root.destroy()
 
         # Get the middle time of the first FF
         img_time = self.img_handle.currentTime()
@@ -3022,7 +2998,6 @@ class PlateTool(QtWidgets.QMainWindow):
                                           self.platepar.lat, self.platepar.lon)
 
         return ra, dec, rot_horizontal
-
 
 
     def detectInputType(self,  beginning_time=None, use_fr_files=False, load=False):
@@ -3089,11 +3064,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Check if the calstars file is required
             if hasattr(self, 'img_handle') and self.img_handle.require_calstars:
-                messagebox.showinfo(title='CALSTARS error',
-                                    message='CALSTARS file could not be found in the given directory!')
-
-                # Set focus back on the SkyFit window
-                self.activateWindow()
+                qmessagebox(title='CALSTARS error',
+                            message='CALSTARS file could not be found in the given directory!',
+                            message_type="info")
 
             self.calstars = {}
 
@@ -3141,10 +3114,10 @@ class PlateTool(QtWidgets.QMainWindow):
             initialfile = ''
 
         # Load the platepar file
-        platepar_file = openFileDialog(self.dir_path, initialfile, 'Select the platepar file', matplotlib,
-                                       [('Platepar Files', '*.cal'), ('All File', '*')])
+        platepar_file = None #openFileDialog(self.dir_path, initialfile, 'Select the platepar file', matplotlib,
+                             #               [('Platepar Files', '*.cal'), ('All File', '*')])
 
-        if not platepar_file:
+        if platepar_file is None:
             self.platepar = platepar
             self.makeNewPlatepar()
             self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
@@ -3159,8 +3132,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 print('Loading platepar failed with error:' + repr(e))
                 print(*traceback.format_exception(*sys.exc_info()))
 
-                messagebox.showerror(title='Platepar file error',
-                                     message='The file you selected could not be loaded as a platepar file!')
+                qmessagebox(title='Platepar file error',
+                            message='The file you selected could not be loaded as a platepar file!',
+                            message_type="error")
 
                 self.loadPlatepar(update)
                 return
@@ -3332,31 +3306,25 @@ class PlateTool(QtWidgets.QMainWindow):
                                   byteswap=self.img_handle.byteswap)
             flat.flat_img = np.swapaxes(flat.flat_img, 0, 1)
         except:
-            messagebox.showerror(title='Flat field file error',
-                                 message='Flat could not be loaded!')
-
-            # Set focus back on the SkyFit window
-            self.activateWindow()
+            qmessagebox(title='Flat field file error',
+                        message='Flat could not be loaded!',
+                        message_type="error")
 
             return False, None
 
         # Check if the size of the file matches
         if self.img.data.shape != flat.flat_img.shape:
-            messagebox.showerror(title='Flat field file error',
-                                 message='The size of the flat field does not match the size of the image!')
-
-            # Set focus back on the SkyFit window
-            self.activateWindow()
+            qmessagebox(title='Flat field file error',
+                        message='The size of the flat field does not match the size of the image!',
+                        message_type="error")
 
             flat = None
 
         # Check if the flat field was successfuly loaded
         if flat is None:
-            messagebox.showerror(title='Flat field file error',
-                                 message='The file you selected could not be loaded as a flat field!')
-
-            # Set focus back on the SkyFit window
-            self.activateWindow()
+            qmessagebox(title='Flat field file error',
+                        message='The file you selected could not be loaded as a flat field!',
+                        message_type="error")
 
         return flat_file, flat
 
@@ -3379,8 +3347,9 @@ class PlateTool(QtWidgets.QMainWindow):
                                   byteswap=self.img_handle.byteswap)
 
         except:
-            messagebox.showerror(title='Dark frame error',
-                                 message='Dark frame could not be loaded!')
+            qmessagebox(title='Dark frame error',
+                        message='Dark frame could not be loaded!',
+                        message_type="error")
 
             return False, None
 
@@ -3388,15 +3357,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Check if the size of the file matches
         if self.img.data.shape != dark.shape:
-            messagebox.showerror(title='Dark field file error',
-                                 message='The size of the dark frame does not match the size of the image!')
+            qmessagebox(title='Dark field file error',
+                        message='The size of the dark frame does not match the size of the image!',
+                        message_type="error")
 
             dark = None
 
         # Check if the dark frame was successfuly loaded
         if dark is None:
-            messagebox.showerror(title='Dark field file error',
-                                 message='The file you selected could not be loaded as a dark field!')
+            qmessagebox(title='Dark field file error',
+                        message='The file you selected could not be loaded as a dark field!',
+                        message_type="error")
 
         return dark_file, dark
 
@@ -3592,10 +3563,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Fit the astrometry parameters, at least 5 stars are needed
         if len(self.paired_stars) < 4:
-            messagebox.showwarning(title='Number of stars', message="At least 5 paired stars are needed to do the fit!")
-
-            # Set focus back on the SkyFit window
-            self.activateWindow()
+            qmessagebox(title='Number of stars', message="At least 5 paired stars are needed to do the fit!", message_type="warning")
 
             return self.platepar
 
@@ -3994,10 +3962,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # If there are less than 3 points, don't show the lightcurve
         if len(centroids) < 3:
             
-            messagebox.showinfo('Lightcurve info', 'Less than 3 centroids!')
-            
-            # Set focus back on the SkyFit window
-            self.activateWindow()
+            qmessagebox(title='Lightcurve info',
+                        message='Less than 3 centroids!',
+                        message_type="info")
 
             return 1
 
@@ -4010,10 +3977,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # If there are less than 3 points, don't show the lightcurve
         if len(fr_intens) < 3:
 
-            messagebox.showinfo('Lightcurve info', 'Less than 3 points have intensities!')
-
-            # Set focus back on the SkyFit window
-            self.activateWindow()
+            qmessagebox(title='Lightcurve info',
+                        message='Less than 3 points have intensities!',
+                        message_type="info")
 
             return 1
 
@@ -4218,10 +4184,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # If there are no centroids, don't save anything
         if len(centroids) == 0:
             
-            messagebox.showinfo('FTPdetectinfo saving error', 'No centroids to save!')
-
-            # Set focus back on the SkyFit window
-            self.activateWindow()
+            qmessagebox(title='FTPdetectinfo saving error',
+                        message='No centroids to save!',
+                        message_type="info")
 
             return 1
 
@@ -4424,7 +4389,6 @@ if __name__ == '__main__':
 
     else:
         beginning_time = None
-
 
     app = QtWidgets.QApplication(sys.argv)
 
