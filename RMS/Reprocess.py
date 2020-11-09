@@ -360,7 +360,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
             # Check if the FF was recalibrated
             if pp.auto_recalibrated:
-                recalibrated_ffs.append(ff_name)
+                recalibrated_ffs.append(os.path.join(night_data_dir, ff_name))
 
         # Choose two files randomly
         if len(recalibrated_ffs) > 2:
@@ -374,7 +374,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         else:
 
             # Create a list of all FF files
-            ff_list = [ff_name for ff_name in os.listdir(night_data_dir) if validFFName(ff_name)]
+            ff_list = [os.path.join(night_data_dir, ff_name) for ff_name in os.listdir(night_data_dir) \
+                if validFFName(ff_name)]
 
             # Add any two FF files
             extra_files += random.sample(ff_list, 2)
