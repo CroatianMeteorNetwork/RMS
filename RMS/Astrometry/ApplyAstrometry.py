@@ -60,7 +60,7 @@ def correctVignetting(px_sum, radius, vignetting_coeff):
     Arguments:
         px_sum: [float] Pixel sum.
         radius: [float] Radius (px) from focal plane centre.
-        vignetting_coeff: [float] Vignetting ceofficient (deg/px).
+        vignetting_coeff: [float] Vignetting coefficient (rad/px).
     Return:
         px_sum_corr: [float] Corrected pixel sum.
     """
@@ -173,7 +173,7 @@ def photomLine(input_params, photom_offset, vignetting_coeff):
             - px_sum: [float] sum of pixel intensities.
             - radius: [float] Radius from the centre of the focal plane to the centroid.
         photom_offset: [float] The photometric offet.
-        vignetting_coeff: [float] Vignetting coefficient.
+        vignetting_coeff: [float] Vignetting coefficient (rad/px).
     Return:
         [float] Magnitude.
     """
@@ -216,7 +216,7 @@ def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=No
         (photom_offset, fit_stddev, fit_resid):
             photom_params: [list]
                 - photom_offset: [float] The photometric offset.
-                - vignetting_coeff: [float] Vignetting coefficient.
+                - vignetting_coeff: [float] Vignetting coefficient (rad/px).
             fit_stddev: [float] The standard deviation of the fit.
             fit_resid: [float] Magnitude fit residuals.
     """
@@ -257,7 +257,7 @@ def photometryFitRobust(px_intens_list, radius_list, catalog_mags, fixed_vignett
         (photom_offset, fit_stddev, fit_resid, px_intens_list, radius_list, catalog_mags):
             photom_params: [list]
                 - photom_offset: [float] The photometric offset.
-                - vignetting_coeff: [float] Vignetting coefficient.
+                - vignetting_coeff: [float] Vignetting coefficient (rad/px).
             fit_stddev: [float] The standard deviation of the fit.
             fit_resid: [float] Magnitude fit residuals.
             px_intens_list: [ndarray] A list of filtered pixel intensities.
@@ -484,7 +484,7 @@ def calculateMagnitudes(px_sum_arr, radius_arr, photom_offset, vignetting_coeff)
         px_sum_arr: [ndarray] Sum of pixel intensities of the meteor centroid (arbitrary units).
         radius_arr: [ndarray] A list of raddia from image centre (px).
         photom_offset: [float] Magnitude intercept, i.e. the photometric offset.
-        vignetting_coeff: [float] Vignetting ceofficient (deg/px).
+        vignetting_coeff: [float] Vignetting ceofficient (rad/px).
     Return:
         magnitude_data: [ndarray] Apparent magnitude.
     """

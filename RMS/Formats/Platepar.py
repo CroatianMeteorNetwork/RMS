@@ -35,7 +35,7 @@ import numpy as np
 import scipy.optimize
 
 
-from RMS.Astrometry.Conversions import date2JD, jd2Date
+from RMS.Astrometry.Conversions import date2JD, jd2Date, trueRaDec2ApparentAltAz
 import RMS.Astrometry.ApplyAstrometry
 from RMS.Math import angularSeparation
 
@@ -330,9 +330,9 @@ class Platepar(object):
 
             else:
 
-                # Use 0.001 deg/px as the default coefficeint, as that's the one for 3.6 mm f/0.95 and 16 mm
+                # Use 0.001 rad/px as the default coefficeint, as that's the one for 3.6 mm f/0.95 and 16 mm
                 #   f/1.0 lenses. The vignetting coeff is dependent on the resolution, the default value of
-                #   0.001 deg/px is for 720p.
+                #   0.001 rad/px is for 720p.
                 self.vignetting_coeff = 0.001*np.hypot(1280, 720)/np.hypot(self.X_res, self.Y_res)
 
 
@@ -1030,14 +1030,28 @@ class Platepar(object):
 
     def __repr__(self):
 
+        # Compute alt/az pointing
+        azim, elev = trueRaDec2ApparentAltAz(self.RA_d, self.dec_d, self.JD, self.lat, self.lon, \
+            refraction=self.refraction)
+
         out_str  = "Platepar\n"
         out_str += "--------\n"
-        out_str += "Reference pointing equatorial (J2000):\n"
+        out_str += "Camera info:\n"
+        out_str += "    Lat (+N)  = {:+11.6f} deg\n".format(self.lat)
+        out_str += "    Lon (+E)  = {:+11.6f} deg\n".format(self.lon)
+        out_str += "    Ele (MSL) = {:11.2f} m\n".format(self.elev)
+        out_str += "    FOV       = {:6.2f} x {:6.2f} deg\n".format(*RMS.Astrometry.ApplyAstrometry.computeFOVSize(self))
+        out_str += "    Img res   = {:6d} x {:6d} px\n".format(self.X_res, self.Y_res)
+        out_str += "Reference pointing - equatorial (J2000):\n"
         out_str += "    JD      = {:.10f} \n".format(self.JD)
-        out_str += "    RA      = {:.6f} deg\n".format(self.RA_d)
-        out_str += "    Dec     = {:.6f} deg\n".format(self.dec_d)
+        out_str += "    RA      = {:11.6f} deg\n".format(self.RA_d)
+        out_str += "    Dec     = {:+11.6f} deg\n".format(self.dec_d)
         out_str += "    Pos ang = {:.6f} deg\n".format(self.pos_angle_ref)
         out_str += "    Pix scl = {:.2f} arcmin/px\n".format(60/self.F_scale)
+        out_str += "Reference pointing - apparent azimuthal (date):\n"
+        out_str += "    Azim    = {:.6f} deg (+E of N)\n".format(azim)
+        out_str += "    Alt     = {:.6f} deg\n".format(elev)
+        out_str += "    Rot/hor = {:.6f} deg\n".format(RMS.Astrometry.ApplyAstrometry.rotationWrtHorizon(self))
         out_str += "Distortion:\n"
         out_str += "    Type = {:s}\n".format(self.distortion_type)
 
