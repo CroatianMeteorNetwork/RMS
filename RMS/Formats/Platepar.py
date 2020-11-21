@@ -45,7 +45,6 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz, cyApparentAltAz2TrueRADec
 
 
-
 class stationData(object):
     """ Holds information about one meteor station (location) and observed points.
     """
@@ -245,10 +244,10 @@ class Platepar(object):
 
 
         # Reset distortion fit (forward and reverse)
-        self.x_poly_fwd = np.zeros(shape=(12,), dtype=np.float64)
-        self.y_poly_fwd = np.zeros(shape=(12,), dtype=np.float64)
-        self.x_poly_rev = np.zeros(shape=(12,), dtype=np.float64)
-        self.y_poly_rev = np.zeros(shape=(12,), dtype=np.float64)
+        self.x_poly_fwd = np.zeros(shape=(self.poly_length,), dtype=np.float64)
+        self.y_poly_fwd = np.zeros(shape=(self.poly_length,), dtype=np.float64)
+        self.x_poly_rev = np.zeros(shape=(self.poly_length,), dtype=np.float64)
+        self.y_poly_rev = np.zeros(shape=(self.poly_length,), dtype=np.float64)
 
 
 
@@ -293,17 +292,26 @@ class Platepar(object):
     def setDistortionType(self, distortion_type, reset_params=True):
         """ Sets the distortion type. """
 
-        # List of distortion types an number of parameters for each
+        # List of distortion types
         self.distortion_type_list = [
-             "poly3+radial",
-                  "radial3",
-                  "radial4",
-                  "radial5"
+            "poly3+radial", \
+            "poly3+radial3", \
+            "radial3", \
+            "radial4", \
+            "radial5"
             ]
+
+        self.distortion_type_poly_length = [
+            12, 13, 5, 6, 6
+        ]
 
         # Set the length of the distortion polynomial depending on the distortion type
         if distortion_type in self.distortion_type_list:
+            
             self.distortion_type = distortion_type
+
+            # Get the polynomial length
+            self.poly_length = self.distortion_type_poly_length[self.distortion_type_list.index(distortion_type)]
 
         else:
             raise ValueError("The distortion type is not recognized: {:s}".format(self.distortion_type))
@@ -312,6 +320,10 @@ class Platepar(object):
         # Reset distortion parameters
         if reset_params:
             self.resetDistortionParameters()
+
+
+        # Set the correct polynomial size
+        self.padDictParams()
 
 
     def addVignettingCoeff(self, use_flat):
@@ -339,7 +351,7 @@ class Platepar(object):
 
     def fitAstrometry(self, jd, img_stars, catalog_stars, first_platepar_fit=False):
         """ Fit astrometric parameters to the list of star image and celectial catalog coordinates.
-        At least 4 stars are needed to fit the rigid body parameters, and 12 to fit the distortion.
+        At least 4 stars are needed to fit the rigid body parameters, and 13 to fit the distortion.
         New parameters are saved to the given object.
         Arguments:
             jd: [float] Julian date of the image.
@@ -420,10 +432,10 @@ class Platepar(object):
 
             if (dimension == 'x') or (dimension == 'radial'):
                 pp_copy.x_poly_rev = params
-                pp_copy.y_poly_rev = np.zeros(12)
+                pp_copy.y_poly_rev = np.zeros(platepar.poly_length)
 
             else:
-                pp_copy.x_poly_rev = np.zeros(12)
+                pp_copy.x_poly_rev = np.zeros(platepar.poly_length)
                 pp_copy.y_poly_rev = params
 
 
@@ -525,11 +537,11 @@ class Platepar(object):
 
         ### DISTORTION FIT ###
 
-        # fit the polynomial distortion parameters if there are more than 12 stars picked
+        # Fit the polynomial distortion parameters if there are more than 14 stars picked
         if self.distortion_type.startswith("poly"):
-            min_fit_stars = 12
+            min_fit_stars = 14
 
-        # fit the radial distortion parameters if there are more than 7 stars picked
+        # Fit the radial distortion parameters if there are more than 7 stars picked
         else:
             min_fit_stars = 7
 
@@ -675,6 +687,29 @@ class Platepar(object):
         return map(float, f.readline().split())
 
 
+    def padDictParams(self):
+        """ Update the array length if an old platepar version was loaded which was shorter/longer. """
+
+        # Extend the array if it's too short
+        if self.x_poly_fwd.shape[0] < self.poly_length:
+            self.x_poly_fwd = np.pad(self.x_poly_fwd, (0, self.poly_length - self.x_poly_fwd.shape[0]), \
+                'constant', constant_values=0)
+            self.x_poly_rev = np.pad(self.x_poly_rev, (0, self.poly_length - self.x_poly_rev.shape[0]), \
+                'constant', constant_values=0)
+            self.y_poly_fwd = np.pad(self.y_poly_fwd, (0, self.poly_length - self.y_poly_fwd.shape[0]), \
+                'constant', constant_values=0)
+            self.y_poly_rev = np.pad(self.y_poly_rev, (0, self.poly_length - self.y_poly_rev.shape[0]), \
+                'constant', constant_values=0)
+
+
+        # Cut the array if it's too long
+        if self.x_poly_fwd.shape[0] > self.poly_length:
+            self.x_poly_fwd = self.x_poly_fwd[:self.poly_length]
+            self.x_poly_rev = self.x_poly_rev[:self.poly_length]
+            self.y_poly_fwd = self.y_poly_fwd[:self.poly_length]
+            self.y_poly_rev = self.y_poly_rev[:self.poly_length]
+
+
     def loadFromDict(self, platepar_dict, use_flat=None):
         """ Load the platepar from a dictionary. """
 
@@ -712,8 +747,6 @@ class Platepar(object):
             # Otherwise, assume the polynomial type
             else:
                 self.distortion_type = "poly3+radial"
-
-        self.setDistortionType(self.distortion_type, reset_params=False)
 
         # Add UT correction if it was not in the platepar
         if not 'UT_corr' in self.__dict__:
@@ -753,6 +786,11 @@ class Platepar(object):
         self.x_poly_rev = np.array(self.x_poly_rev)
         self.y_poly_fwd = np.array(self.y_poly_fwd)
         self.y_poly_rev = np.array(self.y_poly_rev)
+
+
+        # Set the distortion type
+        self.setDistortionType(self.distortion_type, reset_params=False)
+
 
         # Set polynomial parameters used by the old code
         self.x_poly = self.x_poly_fwd
@@ -862,13 +900,13 @@ class Platepar(object):
                 self.mag_0, self.mag_lev = self.parseLine(f)
 
                 # Load X axis polynomial parameters
-                self.x_poly_fwd = self.x_poly_rev = np.zeros(shape=(12,), dtype=np.float64)
-                for i in range(12):
+                self.x_poly_fwd = self.x_poly_rev = np.zeros(shape=(self.poly_length,), dtype=np.float64)
+                for i in range(self.poly_length):
                     self.x_poly_fwd[i] = self.x_poly_fwd[i] = self.parseLine(f)[0]
 
                 # Load Y axis polynomial parameters
-                self.y_poly_fwd = self.y_poly_rev = np.zeros(shape=(12,), dtype=np.float64)
-                for i in range(12):
+                self.y_poly_fwd = self.y_poly_rev = np.zeros(shape=(self.poly_length,), dtype=np.float64)
+                for i in range(self.poly_length):
                     self.y_poly_fwd[i] = self.y_poly_rev[i] = self.parseLine(f)[0]
 
                 # Read station code
@@ -1062,7 +1100,7 @@ class Platepar(object):
             dist_string = "X"
         else:
             out_str += "    Distortion coeffs (radial):\n"
-            out_str += "                 x0,       y0, aspect-1,       k1,       k2,       k3,       k4\n"
+            out_str += "                 x0,       y0, aspect-1,       k1,       k2,       k3\n"
             dist_string = ""
 
         out_str += "img2sky {:s} = {:s}\n".format(dist_string, ", ".join(["{:+8.3f}".format(c) \

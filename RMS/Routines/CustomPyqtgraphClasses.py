@@ -1449,14 +1449,8 @@ class PlateparParameterManager(QtWidgets.QWidget):
         text = self.distortion_type.currentText()
         self.gui.platepar.setDistortionType(text, reset_params=False)
 
-        if text == 'poly3+radial':
-            self.fit_parameters.changeNumberShown(12)
-        elif text == 'radial3':
-            self.fit_parameters.changeNumberShown(5)
-        elif text == 'radial4':
-            self.fit_parameters.changeNumberShown(6)
-        elif text == 'radial5':
-            self.fit_parameters.changeNumberShown(7)
+        # Set the number of shown poly parameters in the GUI
+        self.fit_parameters.changeNumberShown(self.gui.platepar.poly_length)
 
         if self.gui.platepar.distortion_type.startswith('radial'):
             self.eqAspect.show()
@@ -1518,16 +1512,19 @@ class ArrayTabWidget(QtWidgets.QTabWidget):
 
         self.vars = ['x_poly_rev', 'y_poly_rev', 'x_poly_fwd', 'y_poly_fwd']
 
+        # Maximum number of parameters that can be shown
+        self.max_n_shown = max(self.platepar.distortion_type_poly_length)
+
         self.tabs = [QtWidgets.QWidget() for x in range(4)]
         self.layouts = []
         self.boxes = [[], [], [], []]
         self.labels = [[], [], [], []]
 
+        self.n_shown = self.platepar.poly_length
+
         for i in range(len(self.vars)):
             self.addTab(self.tabs[i], self.vars[i])
             self.setupTab(i)
-
-        self.n_shown = 12
 
     def changeNumberShown(self, n):
         """
@@ -1536,7 +1533,7 @@ class ArrayTabWidget(QtWidgets.QTabWidget):
         Arguments:
             n [int]: Number of QDoubleSpinBoxes to be visible
         """
-        assert 0 <= n <= 12
+        assert 0 <= n <= self.max_n_shown
         if n == self.n_shown:
             return
 
@@ -1558,13 +1555,22 @@ class ArrayTabWidget(QtWidgets.QTabWidget):
         self.n_shown = n
 
     def setupTab(self, i):
+        """ Setup all boxes with polynomail values. """
+        
         layout = QtWidgets.QFormLayout()
 
-        for j in range(12):
+        for j in range(self.max_n_shown):
             box = ScientificDoubleSpinBox()
             box.setSingleStep(0.5)
             box.setFixedWidth(100)
-            box.setValue(getattr(self.platepar, self.vars[i])[j])
+
+            # Set the value to the box from the platepar polynomial
+            poly_arr = getattr(self.platepar, self.vars[i])
+            if len(poly_arr) > j:
+                box.setValue(poly_arr[j])
+            else:
+                box.setValue(0)
+
             box.valueModified.connect(self.onFitParameterChanged(i, j))
             label = QtWidgets.QLabel("{}[{}]".format(self.vars[i], j))
             layout.addRow(label, box)
@@ -1584,7 +1590,7 @@ class ArrayTabWidget(QtWidgets.QTabWidget):
 
     def updateValues(self):
         for i in range(4):
-            for j in range(12):
+            for j in range(self.n_shown):
                 self.boxes[i][j].setValue(getattr(self.platepar, self.vars[i])[j])
 
 
