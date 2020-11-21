@@ -1231,6 +1231,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
 
     sigRefractionToggled = QtCore.pyqtSignal()
     sigEqAspectToggled = QtCore.pyqtSignal()
+    sigAsymmetryCorrToggled = QtCore.pyqtSignal()
     sigForceDistortionToggled = QtCore.pyqtSignal()
 
     def __init__(self, gui):
@@ -1274,6 +1275,12 @@ class PlateparParameterManager(QtWidgets.QWidget):
         full_layout.addWidget(self.eqAspect)
         if not self.gui.platepar.distortion_type.startswith('radial'):
             self.eqAspect.hide()
+
+        self.asymmetryCorr = QtWidgets.QCheckBox('Asymmetry Correction')
+        self.asymmetryCorr.released.connect(self.onAsymmetryCorrToggled)
+        full_layout.addWidget(self.asymmetryCorr)
+        if not self.gui.platepar.distortion_type.startswith('radial'):
+            self.asymmetryCorr.hide()
 
         self.fdistortion = QtWidgets.QCheckBox('Force Distortion Centre')
         self.fdistortion.released.connect(self.onForceDistortionToggled)
@@ -1406,6 +1413,10 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.gui.platepar.equal_aspect = self.eqAspect.isChecked()
         self.sigEqAspectToggled.emit()
 
+    def onAsymmetryCorrToggled(self):
+        self.gui.platepar.asymmetry_corr = self.asymmetryCorr.isChecked()
+        self.sigAsymmetryCorrToggled.emit()
+
     def onForceDistortionToggled(self):
         self.gui.platepar.force_distortion_centre = self.fdistortion.isChecked()
         self.sigForceDistortionToggled.emit()
@@ -1451,12 +1462,15 @@ class PlateparParameterManager(QtWidgets.QWidget):
 
         # Set the number of shown poly parameters in the GUI
         self.fit_parameters.changeNumberShown(self.gui.platepar.poly_length)
+        self.fit_parameters.updateValues()
 
         if self.gui.platepar.distortion_type.startswith('radial'):
             self.eqAspect.show()
+            self.asymmetryCorr.show()
             self.fdistortion.show()
         else:
             self.eqAspect.hide()
+            self.asymmetryCorr.hide()
             self.fdistortion.hide()
 
         self.sigFitParametersChanged.emit()
@@ -1479,13 +1493,16 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.extinction_scale.setValue(self.gui.platepar.extinction_scale)
         self.refraction.setChecked(self.gui.platepar.refraction)
         self.eqAspect.setChecked(self.gui.platepar.equal_aspect)
+        self.asymmetryCorr.setChecked(self.gui.platepar.asymmetry_corr)
         self.fdistortion.setChecked(self.gui.platepar.force_distortion_centre)
 
         if self.gui.platepar.distortion_type.startswith('radial'):
             self.eqAspect.show()
+            self.asymmetryCorr.show()
             self.fdistortion.show()
         else:
             self.eqAspect.hide()
+            self.asymmetryCorr.hide()
             self.fdistortion.hide()
 
     def updatePairedStars(self):
@@ -1538,15 +1555,15 @@ class ArrayTabWidget(QtWidgets.QTabWidget):
             return
 
         elif n > self.n_shown:
-            for i in range(4):
+            for i in range(len(self.vars)):
                 for j in range(self.n_shown, n):
                     self.layouts[i].insertRow(j, self.labels[i][j], self.boxes[i][j])
                     self.labels[i][j].show()
                     self.boxes[i][j].show()
 
         elif n < self.n_shown:
-            for i in range(4):
-                for j in range(n, self.n_shown):
+            for i in range(len(self.vars)):
+                for j in range(n, self.max_n_shown):
                     self.labels[i][j].hide()
                     self.boxes[i][j].hide()
                     self.layouts[i].removeWidget(self.labels[i][j])
@@ -1556,7 +1573,7 @@ class ArrayTabWidget(QtWidgets.QTabWidget):
 
     def setupTab(self, i):
         """ Setup all boxes with polynomail values. """
-        
+
         layout = QtWidgets.QFormLayout()
 
         for j in range(self.max_n_shown):
@@ -1589,9 +1606,11 @@ class ArrayTabWidget(QtWidgets.QTabWidget):
         return f
 
     def updateValues(self):
-        for i in range(4):
+        for i in range(len(self.vars)):
             for j in range(self.n_shown):
-                self.boxes[i][j].setValue(getattr(self.platepar, self.vars[i])[j])
+                poly_arr = getattr(self.platepar, self.vars[i])
+                if len(poly_arr) > j:
+                    self.boxes[i][j].setValue(poly_arr[j])
 
 
 class SettingsWidget(QtWidgets.QWidget):

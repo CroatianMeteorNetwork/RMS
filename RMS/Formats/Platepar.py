@@ -140,9 +140,11 @@ class Platepar(object):
         Keyword arguments:
             distortion_type: [str] Distortion type. It can be one of the following:
                 - "poly3+radial" - 3rd order polynomial fit including a single radial term
+                - "poly3+radial3" - 3rd order polynomial fit including two radial terms (r + r^3)
                 - "radial3" - 3rd order radial distortion
-                - "radial4" - 4th order radial distortion
                 - "radial5" - 5th order radial distortion
+                - "radial7" - 7th order radial distortion
+                - "radial9" - 7th order radial distortion
 
         Return:
             self: [object] Instance of this class with loaded platepar parameters.
@@ -193,6 +195,9 @@ class Platepar(object):
 
         # Force distortion centre to image centre
         self.force_distortion_centre = False
+
+        # Asymmetry correction - used ONLY for radial distortion
+        self.asymmetry_corr = True
 
         # Photometry calibration
         self.mag_0 = -2.5
@@ -297,16 +302,21 @@ class Platepar(object):
             "poly3+radial", \
             "poly3+radial3", \
             "radial3", \
-            "radial4", \
-            "radial5"
+            "radial5", \
+            "radial7", \
+            "radial9", \
             ]
 
         self.distortion_type_poly_length = [
-            12, 13, 5, 6, 6
+            12, 13, 7, 8, 9, 10
         ]
 
         # Set the length of the distortion polynomial depending on the distortion type
         if distortion_type in self.distortion_type_list:
+
+            # If the new distortion type (poly vs radial) is different from the old, reset the parameters
+            if distortion_type[:4] != self.distortion_type[:4]:
+                reset_params = True
             
             self.distortion_type = distortion_type
 
@@ -590,9 +600,13 @@ class Platepar(object):
                 if self.equal_aspect:
                     self.x_poly_rev[2] = 0
 
-                # Set all parameters not used by the radial fit to 0
-                n_params = int(self.distortion_type[-1])
-                self.x_poly_rev[(n_params + 2):] *= 0
+                # Disable asymmetry
+                if not self.asymmetry_corr:
+                    self.x_poly_rev[3] = 0
+                    self.x_poly_rev[4] = 0
+
+                # # Set all parameters not used by the radial fit to 0
+                # self.x_poly_rev[(self.poly_length - 1):] *= 0
 
 
             ### ###
@@ -650,9 +664,10 @@ class Platepar(object):
                 if self.equal_aspect:
                     self.x_poly_fwd[2] = 0
 
-                # Set all parameters not used by the radial fit to 0
-                n_params = int(self.distortion_type[-1])
-                self.x_poly_fwd[(n_params + 2):] *= 0
+                # Disable asymmetry
+                if not self.asymmetry_corr:
+                    self.x_poly_fwd[3] = 0
+                    self.x_poly_fwd[4] = 0
 
             ### ###
 
@@ -729,6 +744,11 @@ class Platepar(object):
         # Add equal aspect
         if not 'equal_aspect' in self.__dict__:
             self.equal_aspect = False
+
+
+        # Add asymmetry correction
+        if not 'asymmetry_corr' in self.__dict__:
+            self.asymmetry_corr = False
 
 
         # Add forcing distortion centre to image center

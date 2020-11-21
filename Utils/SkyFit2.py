@@ -968,6 +968,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Add aspect info if the radial distortion is used
             if not self.platepar.distortion_type.startswith("poly"):
                 text_str += 'G - Toggle equal aspect\n'
+                text_str += 'Y - Toggle asymmetry correction\n'
                 text_str += 'B - Dist = img centre toggle\n'
 
             text_str += '1/2 - X offset\n'
@@ -978,8 +979,9 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + 1 - poly3+radial distortion\n'
             text_str += 'CTRL + 2 - poly3+radial3 distortion\n'
             text_str += 'CTRL + 3 - radial3 distortion\n'
-            text_str += 'CTRL + 4 - radial4 distortion\n'
-            text_str += 'CTRL + 5 - radial5 distortion\n'
+            text_str += 'CTRL + 4 - radial5 distortion\n'
+            text_str += 'CTRL + 5 - radial7 distortion\n'
+            text_str += 'CTRL + 6 - radial9 distortion\n'
             text_str += '\n'
             text_str += 'CTRL + R - Pick stars\n'
             text_str += '\n'
@@ -1742,6 +1744,9 @@ class PlateTool(QtWidgets.QMainWindow):
             if not hasattr(self.platepar, "force_distortion_centre"):
                 self.platepar.force_distortion_centre = False
 
+            if not hasattr(self.platepar, "asymmetry_corr"):
+                self.platepar.asymmetry_corr = False
+
             if not hasattr(self.platepar, "extinction_scale"):
                 self.platepar.extinction_scale = 1.0
 
@@ -2167,7 +2172,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateDistortion()
                 self.updateStars()
 
-            # Change distortion type to radial4
+            # Change distortion type to radial5
             elif (event.key() == QtCore.Qt.Key_4) and (modifiers == QtCore.Qt.ControlModifier):
 
                 self.dist_type_index = 3
@@ -2177,10 +2182,20 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateDistortion()
                 self.updateStars()
 
-            # Change distortion type to radial5
+            # Change distortion type to radial7
             elif (event.key() == QtCore.Qt.Key_5) and (modifiers == QtCore.Qt.ControlModifier):
 
                 self.dist_type_index = 4
+                self.changeDistortionType()
+                self.tab.param_manager.updatePlatepar()
+                self.updateLeftLabels()
+                self.updateDistortion()
+                self.updateStars()
+
+            # Change distortion type to radial7
+            elif (event.key() == QtCore.Qt.Key_6) and (modifiers == QtCore.Qt.ControlModifier):
+
+                self.dist_type_index = 5
                 self.changeDistortionType()
                 self.tab.param_manager.updatePlatepar()
                 self.updateLeftLabels()
@@ -2478,6 +2493,18 @@ class PlateTool(QtWidgets.QMainWindow):
                 if self.platepar is not None:
 
                     self.platepar.equal_aspect = not self.platepar.equal_aspect
+
+                    self.tab.param_manager.updatePlatepar()
+                    self.updateLeftLabels()
+                    self.updateStars()
+
+
+            # Toggle asymmetry correction for radial distortions
+            elif event.key() == QtCore.Qt.Key_Y:
+
+                if self.platepar is not None:
+
+                    self.platepar.asymmetry_corr = not self.platepar.asymmetry_corr
 
                     self.tab.param_manager.updatePlatepar()
                     self.updateLeftLabels()
