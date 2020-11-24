@@ -279,10 +279,11 @@ def heightModel(v_init, ht_type='beg'):
 
 
 
-def estimateMeteorHeight(meteor_obj, shower):
+def estimateMeteorHeight(config, meteor_obj, shower):
     """ Estimate the height of a meteor from single station give a candidate shower. 
 
     Arguments:
+        config: [Config instance]
         meteor_obj: [MeteorSingleStation instance]
         shower: [Shower instance]
 
@@ -302,11 +303,6 @@ def estimateMeteorHeight(meteor_obj, shower):
     end_azim, end_alt = raDec2AltAz(end_ra, end_dec, meteor_obj.jdt_ref, meteor_obj.lat, meteor_obj.lon)
     end_vect_horiz = raDec2Vector(end_azim, end_alt)
 
-    # Compute normal vector in alt/az
-    normal_azim, normal_alt = raDec2AltAz(meteor_obj.normal_ra, meteor_obj.normal_dec, meteor_obj.jdt_ref, \
-        meteor_obj.lat, meteor_obj.lon)
-    normal_horiz = raDec2Vector(normal_azim, normal_alt)
-
     # Compute radiant vector in alt/az
     radiant_azim, radiant_alt = raDec2AltAz(shower.ra, shower.dec, meteor_obj.jdt_ref, meteor_obj.lat, \
         meteor_obj.lon)
@@ -317,34 +313,36 @@ def estimateMeteorHeight(meteor_obj, shower):
     if radiant_alt < 0:
         return -1
 
+
+    # Get distance from Earth's centre to the position given by geographical coordinates for the 
+    #   observer's latitude
+    earth_radius = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(np.radians(config.latitude))**2)
+
+    # Compute the distance from Earth's centre to the station (including the sea level height of the station)
+    re_dist = earth_radius + config.elevation
+
     ### ###
 
 
-    # Compute cartesian coordinates of the pointing at the beginning of the meteor
-    pt = vectNorm(beg_vect_horiz)
+    # Compute the distance the meteor traversed during its duration (meters)
+    dist = shower.v_init*meteor_obj.duration
 
-    # Compute reference vector perpendicular to the plane normal and the radiant
-    vec = vectNorm(np.cross(normal_horiz, radiant_vector_horiz))
+    # Compute the angle between the begin and the end point of the meteor (rad)
+    ang_beg_end = np.arccos(np.dot(vectNorm(beg_vect_horiz), vectNorm(end_vect_horiz)))
 
-    # Compute angles between the reference vector and the pointing
-    dot_vb = np.dot(vec, beg_vect_horiz)
-    dot_ve = np.dot(vec, end_vect_horiz)
-    dot_vp = np.dot(vec, pt)
+    # Compute the angle between the radiant vector and the begin point (rad)
+    ang_beg_rad = np.arccos(np.dot(vectNorm(radiant_vector_horiz), -vectNorm(beg_vect_horiz)))
 
-    # Compute distance to the radiant intersection line
-    r_mag  = 1.0/(dot_vb**2)
-    r_mag += 1.0/(dot_ve**2)
-    r_mag += -2*np.cos(meteor_obj.ang_be)/(dot_vb*dot_ve)
-    r_mag  = np.sqrt(r_mag)
-    r_mag  = shower.v_init*meteor_obj.duration/r_mag
-    pt_mag = r_mag/dot_vp
 
-    # Compute the height
-    ht  = pt_mag**2 + EARTH.EQUATORIAL_RADIUS**2 \
-        - 2*pt_mag*EARTH.EQUATORIAL_RADIUS*np.cos(np.radians(90 - meteor_obj.beg_alt))
-    ht  = np.sqrt(ht)
-    ht -= EARTH.EQUATORIAL_RADIUS
+    # Compute the distance from the station to the begin point (meters)
+    dist_beg = dist*np.sin(ang_beg_rad)/np.sin(ang_beg_end)
+
+
+    # Compute the height using the law of cosines
+    ht  = np.sqrt(dist_beg**2 + re_dist**2 - 2*dist_beg*re_dist*np.cos(np.radians(90 + meteor_obj.beg_alt)))
+    ht -= earth_radius
     ht  = abs(ht)
+
 
     return ht
 
@@ -424,6 +422,11 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             
         # Fit the great circle and compute the geometrical parameters
         meteor_obj.fitGC()
+
+
+        # Skip all meteors with beginning heights below 15 deg
+        if meteor_obj.beg_alt < 15:
+            continue
 
         
         # Go through all showers in the list and find the best match
@@ -510,12 +513,36 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             filter_end_ht = heightModel(shower.v_init, ht_type='end')
 
 
-            # Estimate the meteor beginning height
-            meteor_beg_ht = estimateMeteorHeight(meteor_obj, shower)
+            ### Estimate the meteor beginning height with +/- 1 frame, otherwise some short meteor may get
+            ###   rejected
+
+            meteor_obj_orig = copy.deepcopy(meteor_obj)
+
+            # Shorter
+            meteor_obj_m1 = copy.deepcopy(meteor_obj_orig)
+            meteor_obj_m1.duration -= 1.0/config.fps
+            meteor_beg_ht_m1 = estimateMeteorHeight(config, meteor_obj_m1, shower)
+
+            # Nominal
+            meteor_beg_ht = estimateMeteorHeight(config, meteor_obj_orig, shower)
+
+            # Longer
+            meteor_obj_p1 = copy.deepcopy(meteor_obj_orig)
+            meteor_obj_p1.duration += 1.0/config.fps
+            meteor_beg_ht_p1 = estimateMeteorHeight(config, meteor_obj_p1, shower)
+
+
+            meteor_obj = meteor_obj_orig
+
+
+            ### ###
 
             
-            # If the height is outside the height range, reject the meteor
-            if (meteor_beg_ht < filter_end_ht) or (meteor_beg_ht > filter_beg_ht):
+            # If all heights (even those with +/- 1 frame) are outside the height range, reject the meteor
+            if ((meteor_beg_ht_p1 < filter_end_ht) or (meteor_beg_ht_p1 > filter_beg_ht)) and \
+                ((meteor_beg_ht    < filter_end_ht) or (meteor_beg_ht    > filter_beg_ht)) and \
+                ((meteor_beg_ht_m1 < filter_end_ht) or (meteor_beg_ht_m1 > filter_beg_ht)):
+
                 continue
 
             ### ###

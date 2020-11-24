@@ -297,6 +297,9 @@ class Config:
         # Directory on server where the files will be uploaded to
         self.remote_dir = 'files'
 
+        # 1 - Normal, 2 - Skip uploading FFs, 3 - Skip FFs and FRs
+        self.upload_mode = 1
+
 
         ##### Weave compilation arguments
         self.extra_compile_args = ["-O3"]
@@ -807,6 +810,10 @@ def parseUpload(config, parser):
     # Directory on the server where the detected files will be uploaded to
     if parser.has_option(section, "remote_dir"):
         config.remote_dir = parser.get(section, "remote_dir")
+
+    # SSH port
+    if parser.has_option(section, "upload_mode"):
+        config.upload_mode = parser.getint(section, "upload_mode")
         
 
 

@@ -275,9 +275,11 @@ class BufferedCapture(Process):
             t_frame = 0
             t_assignment = 0
             t_convert = 0
+            t_block = time.time()
+            block_frames = 256
 
-            log.info('Grabbing a new block of 256 frames...')
-            for i in range(256):
+            log.info('Grabbing a new block of {} frames...'.format(block_frames))
+            for i in range(block_frames):
 
                 # Read the frame
                 t1_frame = time.time()
@@ -396,6 +398,8 @@ class BufferedCapture(Process):
             
             # Switch the frame block buffer flags
             first = not first
+            if self.config.report_dropped_frames:
+                log.info('Estimated FPS: {:.3f}'.format(block_frames/(time.time() - t_block)))
         
 
         log.info('Releasing video device...')

@@ -1,5 +1,6 @@
 import os
 import sys
+import subprocess
 
 import numpy
 
@@ -25,7 +26,6 @@ kht_module = Extension("kht_module",
 with open('requirements.txt') as f:
     requirements = f.read().splitlines()
 
-
 ### Add rawpy is running on Windows or Linux (not the Pi) ###
 
 # Check if running on Windows
@@ -43,6 +43,10 @@ else:
         requirements.append("rawpy")
 
 ### ###
+
+
+# Init the submodules (python-dvr)
+x = subprocess.call(['git','submodule','update','--init'])
 
 
 ### HANDLE DIFFERENT ONVIF LIBRARIES FOR Py 2 AND 3 ###
