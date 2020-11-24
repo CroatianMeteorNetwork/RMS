@@ -102,11 +102,19 @@ def trackStack(dir_path, config, border=5):
         mask_path = os.path.abspath(config.mask_file)
 
     # Load the mask if given
+    mask = None
     if mask_path is not None:
         mask = loadMask(mask_path)
         print("Loaded mask:", mask_path)
 
-    else:
+    # If the shape of the mask doesn't fit, init an empty mask
+    if mask is not None:
+        if (mask.img.shape[0] != pp_ref.Y_res) or (mask.img.shape[1] != pp_ref.X_res):
+            print("Mask is of wrong shape!")
+            mask = None
+
+
+    if mask is None:
         mask = MaskStructure(255 + np.zeros((pp_ref.Y_res, pp_ref.X_res), dtype=np.uint8))
 
 
