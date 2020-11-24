@@ -308,7 +308,7 @@ class Platepar(object):
             ]
 
         self.distortion_type_poly_length = [
-            12, 13, 7, 8, 9, 10
+            12, 13, 8, 9, 10, 11
         ]
 
         # Set the length of the distortion polynomial depending on the distortion type
@@ -547,13 +547,8 @@ class Platepar(object):
 
         ### DISTORTION FIT ###
 
-        # Fit the polynomial distortion parameters if there are more than 14 stars picked
-        if self.distortion_type.startswith("poly"):
-            min_fit_stars = 14
-
-        # Fit the radial distortion parameters if there are more than 7 stars picked
-        else:
-            min_fit_stars = 7
+        # Fit the polynomial distortion parameters if there are enough picked stars
+        min_fit_stars = self.poly_length + 1
 
 
         if len(img_stars) >= min_fit_stars:
