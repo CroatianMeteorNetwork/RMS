@@ -172,7 +172,9 @@ def trackStack(dir_path, config, border=5):
 
 
     # Init the image
-    stack_img = np.zeros((img_size, img_size), dtype=np.uint8)
+    avg_stack_sum = np.zeros((img_size, img_size), dtype=np.float)
+    avg_stack_count = np.zeros((img_size, img_size), dtype=np.int)
+    max_deaveraged = np.zeros((img_size, img_size), dtype=np.uint8)
 
 
     # Load individual FFs and map them to the stack
@@ -206,21 +208,41 @@ def trackStack(dir_path, config, border=5):
         stack_y = np.round(stack_y, decimals=0).astype(np.int)
 
         # Cut the image to limits
-        filter_arr = (stack_x > 0 ) & (stack_x < img_size) & (stack_y > 0) & (stack_y < img_size)
+        filter_arr = (stack_x > 0) & (stack_x < img_size) & (stack_y > 0) & (stack_y < img_size)
         x_coords = x_coords[filter_arr].astype(np.int)
         y_coords = y_coords[filter_arr].astype(np.int)
         stack_x = stack_x[filter_arr]
         stack_y = stack_y[filter_arr]
 
 
-        # Apply the mask to the maxpixel
+        # Apply the mask to maxpixel and avepixel
         maxpixel = copy.deepcopy(ff.maxpixel)
         maxpixel[mask.img == 0] = 0
+        avepixel = copy.deepcopy(ff.avepixel)
+        avepixel[mask.img == 0] = 0
+
+        # Compute deaveraged maxpixel
+        max_deavg = maxpixel - avepixel
+
+        # Add the average pixel to the sum
+        avg_stack_sum[stack_y, stack_x] += avepixel[y_coords, x_coords]
+
+        # Increment the counter image where the avepixel is not zero
+        ones_img = np.ones_like(avepixel)
+        ones_img[avepixel == 0] = 0
+        avg_stack_count[stack_y, stack_x] += ones_img[y_coords, x_coords]
 
         # Set pixel values to the stack, only take the max values
-        stack_img[stack_y, stack_x] = np.max(np.dstack([stack_img[stack_y, stack_x], \
-                                                        maxpixel[y_coords, x_coords]]), axis=2)
+        max_deaveraged[stack_y, stack_x] = np.max(np.dstack([max_deaveraged[stack_y, stack_x], \
+                                                             max_deavg[y_coords, x_coords]]), axis=2)
 
+
+    # Compute the blended avepixel background
+    stack_img = avg_stack_sum
+    stack_img[avg_stack_count > 0] /= avg_stack_count[avg_stack_count > 0]
+    stack_img += max_deaveraged
+    stack_img = np.clip(stack_img, 0, 255)
+    stack_img = stack_img.astype(np.uint8)
 
 
     # Crop image
