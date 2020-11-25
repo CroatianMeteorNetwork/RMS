@@ -28,7 +28,7 @@ from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
 from RMS.Pickling import loadPickle, savePickle
 from RMS.Math import angularSeparation, RMSD
-from RMS.Misc import decimalDegreesToSexHours, openFileDialog, openFolderDialog
+from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.CustomPyqtgraphClasses import *
 from RMS.Routines import RollingShutterCorrection
@@ -752,7 +752,9 @@ class PlateTool(QtWidgets.QMainWindow):
         Opens folder explorer window for user to select new station folder, then loads a platepar from that
         folder, and reads the config file, updating the gui to show what it should
         """
-        dir_path = openFolderDialog(os.path.dirname(self.dir_path), 'Select new station folder', matplotlib)
+        dir_path = str(QtGui.QFileDialog.getExistingDirectory(self, "Select new station folder",
+                                                              self.dir_path, QtGui.QFileDialog.ShowDirsOnly))
+
         if not dir_path:
             return
 
@@ -1689,12 +1691,11 @@ class PlateTool(QtWidgets.QMainWindow):
     def findLoadState(self):
         """ Opens file dialog to find .state file to load then calls loadState """
 
-        file = openFileDialog(self.dir_path, None, 'Load .state file', matplotlib, \
-                              [('State File', '*.state'), \
-                               ('All Files', '*')])
+        file_ = QtGui.QFileDialog.getOpenFileName(self, "Load .state file", self.dir_path,
+                                                      "State file (*.state);;All files (*)")[0]
 
-        if file:
-            self.loadState(os.path.dirname(file), os.path.basename(file))
+        if file_:
+            self.loadState(os.path.dirname(file_), os.path.basename(file_))
 
 
     def loadState(self, dir_path, state_name, beginning_time=None):
@@ -3012,16 +3013,15 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # If the data was not being able to load from the folder, choose a file to load
             if img_handle is None:
-                self.input_path = openFileDialog(self.dir_path, None, 'Select image/video file to open', \
-                    matplotlib, \
-                                        [('All Readable Files',
-                                          '*.fits;*.bin;*.mp4;*.avi;*.mkv;*.vid;*.png;*.jpg;*.bmp;*.nef'),
-                                         ('All Files', '*'),
-                                         ('FF and FR Files', '*.fits;*.bin'),
-                                         ('Video Files', '*.mp4;*.avi;*.mkv'),
-                                         ('VID Files', '*.vid'),
-                                         ('FITS Files', '*.fits'), ('BIN Files', '*.bin'),
-                                         ('Image Files', '*.png;*.jpg;*.bmp;*.nef')])
+                self.input_path = QtGui.QFileDialog.getOpenFileName(self, "Select image/video file to open",
+                    self.dir_path, "All readable files (*.fits *.bin *.mp4 *.avi *.mkv *.vid *.png *.jpg *.bmp *.nef);;" + \
+                                   "All files (*);;" + \
+                                   "FF and FR Files (*.fits;*.bin);;" + \
+                                   "Video Files (*.mp4 *.avi *.mkv);;" + \
+                                   "VID Files (*.vid);;" + \
+                                   "FITS Files (*.fits);;" + \
+                                   "BIN Files (*.bin);;" + \
+                                   "Image Files (*.png *.jpg *.bmp *.nef)")[0]
 
 
         # If no previous ways of opening data was sucessful, open a file
@@ -3095,8 +3095,8 @@ class PlateTool(QtWidgets.QMainWindow):
             initialfile = ''
 
         # Load the platepar file
-        platepar_file = None #openFileDialog(self.dir_path, initialfile, 'Select the platepar file', matplotlib,
-                             #               [('Platepar Files', '*.cal'), ('All File', '*')])
+        platepar_file = QtGui.QFileDialog.getOpenFileName(self, "Select the platepar file", self.dir_path,
+                                                          "Platepar files (*.cal);;All files (*)")[0]
 
         if platepar_file is None:
             self.platepar = platepar
@@ -3272,9 +3272,8 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             initialfile = ''
 
-        flat_file = openFileDialog(self.dir_path, initialfile, 'Select the flat field file', matplotlib,
-                                   [('Image Files', '*.png;*.jpg;*.bmp'),
-                                    ('All Files', '*')])
+        flat_file = QtGui.QFileDialog.getOpenFileName(self, "Select the flat field file", self.dir_path,
+                                                      "Image files (*.png *.jpg *.bmp);;All files (*)")[0]
 
         if not flat_file:
             return False, None
@@ -3312,9 +3311,8 @@ class PlateTool(QtWidgets.QMainWindow):
     def loadDark(self):
         """ Open a file dialog and ask user to load a dark frame. """
 
-        dark_file = openFileDialog(self.dir_path, None, 'Select the dark frame file', matplotlib,
-                                   [('Image Files', '*.png;*.jpg;*.bmp'),
-                                    ('All Files', '*')])
+        dark_file = QtGui.QFileDialog.getOpenFileName(self, "Select the dark frame file", self.dir_path,
+                                                      "Image files (*.png *.jpg *.bmp);;All files (*)")[0]
 
         if not dark_file:
             return False, None
