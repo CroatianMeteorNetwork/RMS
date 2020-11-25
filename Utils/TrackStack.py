@@ -7,7 +7,6 @@ import copy
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-import scipy.ndimage
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP
 from RMS.Astrometry.Conversions import date2JD, jd2Date
