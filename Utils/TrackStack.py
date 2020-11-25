@@ -18,9 +18,13 @@ from RMS.Routines.MaskImage import loadMask, MaskStructure
 
 
 def trackStack(dir_path, config, border=5):
-    """ Generate a stack with aligned stars, so the sky appears static. 
+    """ Generate a stack with aligned stars, so the sky appears static. The folder should have a
+        platepars_all_recalibrated.json file.
 
-    
+    Arguments:
+        dir_path: [str] Path to the directory with image files.
+        config: [Config instance]
+
     Keyword arguments:
         border: [int] Border around the image to exclude (px).
     """
@@ -59,7 +63,7 @@ def trackStack(dir_path, config, border=5):
             ff_list.append(file_name)
 
 
-    # Take the platepar with the middle time as the refernce one
+    # Take the platepar with the middle time as the reference one
     ff_found_list = []
     jd_list = []
     for ff_name_temp in recalibrated_platepars:
@@ -120,7 +124,7 @@ def trackStack(dir_path, config, border=5):
 
 
 
-    # Compute the middle RA/Dec for the given time
+    # Compute the middle RA/Dec of the reference platepar
     _, ra_temp, dec_temp, _ = xyToRaDecPP([jd2Date(jd_middle)], [pp_ref.X_res/2], [pp_ref.Y_res/2], [1], \
         pp_ref, extinction_correction=False)
 
