@@ -242,7 +242,7 @@ def trackStack(dir_path, config, border=5):
         # Normalize the avepixel by subtracting out the background brightness
         avepixel = avepixel.astype(np.float)
         avepixel /= avepixel_median
-        avepixel *= 50
+        avepixel *= 50 # Normalize to a good background value, which is usually 50
         avepixel = np.clip(avepixel, 0, 255)
         avepixel = avepixel.astype(np.uint8)
 
