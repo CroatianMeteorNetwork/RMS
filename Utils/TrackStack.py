@@ -6,6 +6,7 @@ import copy
 
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy.ndimage
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP
 from RMS.Astrometry.Conversions import date2JD, jd2Date
@@ -223,6 +224,11 @@ def trackStack(dir_path, config, border=5):
         stack_y = stack_y[filter_arr]
 
 
+
+        # Apply a median filter to the avepixel to get an estimate of the background brightness
+        avepixel_median = scipy.ndimage.median_filter(ff.avepixel, size=51)
+
+
         # Apply the mask to maxpixel and avepixel
         maxpixel = copy.deepcopy(ff.maxpixel)
         maxpixel[mask.img == 0] = 0
@@ -231,6 +237,17 @@ def trackStack(dir_path, config, border=5):
 
         # Compute deaveraged maxpixel
         max_deavg = maxpixel - avepixel
+
+
+        # Normalize the avepixel by subtracting out the background brightness
+        avepixel = avepixel.astype(np.float)
+        avepixel /= avepixel_median
+        avepixel *= 50
+        avepixel = np.clip(avepixel, 0, 255)
+        avepixel = avepixel.astype(np.uint8)
+
+        # plt.imshow(avepixel, cmap='gray', vmin=0, vmax=255)
+        # plt.show()
 
         # Add the average pixel to the sum
         avg_stack_sum[stack_y, stack_x] += avepixel[y_coords, x_coords]
