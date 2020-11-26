@@ -2162,8 +2162,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateDistortion()
                 self.updateStars()
 
-            # Change distortion type to radial3
-            elif (event.key() == QtCore.Qt.Key_3) and (modifiers == QtCore.Qt.ControlModifier):
+            # Change distortion type to poly3+radial5
+            if (event.key() == QtCore.Qt.Key_3) and (modifiers == QtCore.Qt.ControlModifier):
 
                 self.dist_type_index = 2
                 self.changeDistortionType()
@@ -2172,7 +2172,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateDistortion()
                 self.updateStars()
 
-            # Change distortion type to radial5
+            # Change distortion type to radial3
             elif (event.key() == QtCore.Qt.Key_4) and (modifiers == QtCore.Qt.ControlModifier):
 
                 self.dist_type_index = 3
@@ -2182,7 +2182,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateDistortion()
                 self.updateStars()
 
-            # Change distortion type to radial7
+            # Change distortion type to radial5
             elif (event.key() == QtCore.Qt.Key_5) and (modifiers == QtCore.Qt.ControlModifier):
 
                 self.dist_type_index = 4
@@ -2196,6 +2196,16 @@ class PlateTool(QtWidgets.QMainWindow):
             elif (event.key() == QtCore.Qt.Key_6) and (modifiers == QtCore.Qt.ControlModifier):
 
                 self.dist_type_index = 5
+                self.changeDistortionType()
+                self.tab.param_manager.updatePlatepar()
+                self.updateLeftLabels()
+                self.updateDistortion()
+                self.updateStars()
+
+            # Change distortion type to radial9
+            elif (event.key() == QtCore.Qt.Key_7) and (modifiers == QtCore.Qt.ControlModifier):
+
+                self.dist_type_index = 6
                 self.changeDistortionType()
                 self.tab.param_manager.updatePlatepar()
                 self.updateLeftLabels()

@@ -284,8 +284,10 @@ class Platepar(object):
             # If the distortion is radial, set the second X parameter to 0.5, as x_poly[1] is used for the Y
             #   offset in the radial models
             if self.distortion_type.startswith("radial"):
-                self.x_poly_fwd[1] = 0.5
-                self.x_poly_rev[1] = 0.5
+                self.x_poly_fwd[0] /= self.X_res/2
+                self.x_poly_rev[0] /= self.X_res/2
+                self.x_poly_fwd[1] = 0.5/(self.Y_res/2)
+                self.x_poly_rev[1] = 0.5/(self.Y_res/2)
 
 
 
@@ -301,6 +303,7 @@ class Platepar(object):
         self.distortion_type_list = [
             "poly3+radial", \
             "poly3+radial3", \
+            "poly3+radial5", \
             "radial3", \
             "radial5", \
             "radial7", \
@@ -308,7 +311,7 @@ class Platepar(object):
             ]
 
         self.distortion_type_poly_length = [
-            12, 13, 8, 9, 10, 11
+            12, 13, 14, 8, 9, 10, 11
         ]
 
         # Set the length of the distortion polynomial depending on the distortion type
@@ -588,8 +591,8 @@ class Platepar(object):
 
                 # Force distortion centre to image centre
                 if self.force_distortion_centre:
-                    self.x_poly_rev[0] = 0.5
-                    self.x_poly_rev[1] = 0.5
+                    self.x_poly_rev[0] = 0.5/(self.X_res/2)
+                    self.x_poly_rev[1] = 0.5/(self.Y_res/2)
 
                 # Force aspect ratio to 0 if axes are set to be equal
                 if self.equal_aspect:
@@ -652,8 +655,8 @@ class Platepar(object):
 
                 # Force distortion centre to image centre
                 if self.force_distortion_centre:
-                    self.x_poly_fwd[0] = 0.5
-                    self.x_poly_fwd[1] = 0.5
+                    self.x_poly_fwd[0] = 0.5/(self.X_res/2)
+                    self.x_poly_fwd[1] = 0.5/(self.Y_res/2)
 
                 # Force aspect ratio to 0 if axes are set to be equal
                 if self.equal_aspect:

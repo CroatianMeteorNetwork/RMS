@@ -796,12 +796,17 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
 
         # Force the distortion centre to the image centre
         if force_distortion_centre:
-            x0 = 0.5
-            y0 = 0.5
+            x0 = 0.5/(x_res/2.0)
+            y0 = 0.5/(y_res/2.0)
         else:
             # Read distortion offsets
             x0 = x_poly_rev[0]
             y0 = x_poly_rev[1]
+
+
+        # Normalize offsets
+        x0 *= (x_res/2.0)
+        y0 *= (y_res/2.0)
 
 
         # Aspect ratio
@@ -891,10 +896,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
                 + x_poly_rev[9]*y**3
                 + x_poly_rev[10]*x*r
                 + x_poly_rev[11]*y*r)
-
-            # If the 3rd order radial term is used, apply it
-            if dist_type.endswith("+radial3"):
-                dx += x_poly_rev[12]*r**3
+                
 
             # Calculate the distortion in Y direction
             dy = (y0
@@ -911,8 +913,15 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
                 + y_poly_rev[11]*x*r)
 
             # If the 3rd order radial term is used, apply it
-            if dist_type.endswith("+radial3"):
+            if dist_type.endswith("+radial3") or dist_type.endswith("+radial5"):
+                dx += x_poly_rev[12]*r**3
                 dy += y_poly_rev[12]*r**3
+
+
+            # If the 5th order radial term is used, apply it
+            if dist_type.endswith("+radial5"):
+                dx += x_poly_rev[13]*r**5
+                dy += y_poly_rev[13]*r**5
 
 
         # Apply a radial distortion
@@ -1049,12 +1058,17 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
         # Force the distortion centre to the image centre
         if force_distortion_centre:
-            x0 = 0.5
-            y0 = 0.5
+            x0 = 0.5/(x_res/2.0)
+            y0 = 0.5/(y_res/2.0)
         else:
             # Read distortion offsets
             x0 = x_poly_fwd[0]
             y0 = x_poly_fwd[1]
+
+
+        # Normalize offsets
+        x0 *= (x_res/2.0)
+        y0 *= (y_res/2.0)
 
 
         # Aspect ratio
@@ -1132,9 +1146,6 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
                 + x_poly_fwd[10]*x_img*r
                 + x_poly_fwd[11]*y_img*r)
 
-            # If the 3rd order radial term is used, apply it
-            if dist_type.endswith("+radial3"):
-                dx += x_poly_fwd[12]*r**3
 
             # Compute offset in Y direction
             dy = (y0
@@ -1151,8 +1162,14 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
                 + y_poly_fwd[11]*x_img*r)
 
             # If the 3rd order radial term is used, apply it
-            if dist_type.endswith("+radial3"):
+            if dist_type.endswith("+radial3") or dist_type.endswith("+radial5"):
+                dx += x_poly_fwd[12]*r**3
                 dy += y_poly_fwd[12]*r**3
+
+            # If the 5th order radial term is used, apply it
+            if dist_type.endswith("+radial5"):
+                dx += x_poly_fwd[13]*r**5
+                dy += y_poly_fwd[13]*r**5
 
 
         # Apply a radial distortion
