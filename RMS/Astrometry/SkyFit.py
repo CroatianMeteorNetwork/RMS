@@ -2150,8 +2150,8 @@ class PlateTool(object):
             text_str += 'Hide on-screen text - F1\n'
 
 
-            self.ax.text(8, self.current_ff.nrows - 5, text_str, color=font_color, \
-                verticalalignment='bottom', horizontalalignment='left', fontproperties=font)
+            self.ax.text(self.current_ff.ncols - 5, self.current_ff.nrows - 5, text_str, color='w', verticalalignment='bottom', 
+                horizontalalignment='right', fontproperties=font)
 
 
         # Show fitting instructions
