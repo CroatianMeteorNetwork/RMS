@@ -202,7 +202,7 @@ if __name__ == '__main__':
         help="Apply a given flat frame. If no path to the flat is given, flat.bmp from the folder will be taken.")
 
     arg_parser.add_argument('-m', '--mask', metavar='MASK_PATH', type=str, 
-        help="Apply a given flat frame. If no path to the flat is given, flat.bmp from the folder will be taken.")
+        help="Apply a given mask. If no path to the mask is given, mask.bmp from the folder will be taken.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()

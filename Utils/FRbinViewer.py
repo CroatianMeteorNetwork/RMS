@@ -29,7 +29,7 @@ import RMS.ConfigReader as cr
 from RMS.Formats import FFfile, FRbin
 
 
-def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='png'):
+def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='png', hide=False):
     """ Shows the detected fireball stored in the FR file. 
     
     Arguments:
@@ -41,6 +41,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='
     Keyword arguments:
         save_frames: [bool] Save FR frames to disk. False by defualt.
         extract_format: [str] Format of saved images. png by default.
+        hide: [bool] Don't show frames on the screen.
 
     """
 
@@ -117,44 +118,47 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='
                 cv2.imwrite(os.path.join(dir_path, frame_file_name), img)
 
 
-            # Show the frame
-            cv2.imshow(name, img)
 
-            # If this is the first image, move it to the upper left corner
-            if first_image:
-                cv2.moveWindow(name, 0, 0)
-                first_image = False
+            if not hide:
+            
+                # Show the frame
+                cv2.imshow(name, img)
+
+                # If this is the first image, move it to the upper left corner
+                if first_image:
+                    cv2.moveWindow(name, 0, 0)
+                    first_image = False
 
 
-            if pause_flag:
-                wait_time = 0
-            else:
-                wait_time = 2*int(1000.0/config.fps)
+                if pause_flag:
+                    wait_time = 0
+                else:
+                    wait_time = 2*int(1000.0/config.fps)
 
-            # Space key: pause display. 
-            # 1: previous file. 
-            # 2: next line. 
-            # q: Quit.
-            key = cv2.waitKey(wait_time) & 0xFF
+                # Space key: pause display. 
+                # 1: previous file. 
+                # 2: next line. 
+                # q: Quit.
+                key = cv2.waitKey(wait_time) & 0xFF
 
-            if key == ord("1"): 
-                cv2.destroyWindow(name)
-                return -1
+                if key == ord("1"): 
+                    cv2.destroyWindow(name)
+                    return -1
 
-            elif key == ord("2"): 
-                break
+                elif key == ord("2"): 
+                    break
 
-            elif key == ord(" "): 
+                elif key == ord(" "): 
+                    
+                    # Pause/unpause video
+                    pause_flag = not pause_flag
+
+                elif key == ord("q") : 
+                    os._exit(0)
                 
-                # Pause/unpause video
-                pause_flag = not pause_flag
 
-            elif key == ord("q") : 
-                os._exit(0)
-                
-
-    
-    cv2.destroyWindow(name)
+    if not hide:
+        cv2.destroyWindow(name)
             
 
 if __name__ == "__main__":
@@ -175,6 +179,9 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-e', '--extract', action="store_true", \
         help="Save frames from FR files to disk.")
+
+    arg_parser.add_argument('-x', '--hide', action="store_true", \
+        help="Do not show frames on the screen.")
     
     arg_parser.add_argument('-f', '--extractformat', metavar='EXTRACT_FORMAT', help="""Image format for extracted files. png by default. """)
 
@@ -232,7 +239,7 @@ if __name__ == "__main__":
         
         # View the fireball detection
         retval = view(dir_path, ff_match, fr, config, save_frames=cml_args.extract, \
-            extract_format=cml_args.extractformat)
+            extract_format=cml_args.extractformat, hide=cml_args.hide)
 
         # Return to previous file
         if retval == -1:
