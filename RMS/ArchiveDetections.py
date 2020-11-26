@@ -18,7 +18,7 @@ from Utils.StackFFs import stackFFs
 log = logging.getLogger("logger")
 
 
-def selectFiles(dir_path, ff_detected):
+def selectFiles(config, dir_path, ff_detected):
     """ Make a list of all files which should be zipped in the given night directory. 
     
         In the list are included:
@@ -27,6 +27,7 @@ def selectFiles(dir_path, ff_detected):
             - all FF bin files with detections
 
     Arguments:
+        config: [conf object] Configuration.
         dir_path: [str] Path to the night directory.
         ff_detected: [list] A list of FF bin file with detections on them.
 
@@ -34,6 +35,21 @@ def selectFiles(dir_path, ff_detected):
         selected_files: [list] A list of files selected for compression.
 
     """
+
+    ### Decide what to upload, given the upload mode ###
+    
+    upload_ffs = True
+    upload_frs = True
+    
+    if config.upload_mode == 2:
+        upload_ffs = False
+
+    if config.upload_mode == 3:
+        upload_ffs = False
+        upload_frs = False
+
+    ### ###
+
 
 
     selected_list = []
@@ -57,7 +73,7 @@ def selectFiles(dir_path, ff_detected):
 
 
         # Take all FR bin files, and their parent FF bin files
-        if ('FR' in file_name) and ('.bin' in file_name):
+        if upload_frs and ('FR' in file_name) and ('.bin' in file_name):
 
             fr_split = file_name.split('_')
 
@@ -83,7 +99,7 @@ def selectFiles(dir_path, ff_detected):
 
 
         # Add FF file which contain detections to the list
-        if (ff_detected is not None) and (file_name in ff_detected):
+        if upload_ffs and (ff_detected is not None) and (file_name in ff_detected):
             selected_list.append(file_name)
 
 
@@ -146,7 +162,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
     """
 
     # Get the list of files to archive
-    file_list = selectFiles(captured_path, ff_detected)
+    file_list = selectFiles(config, captured_path, ff_detected)
 
     
     log.info('Generating thumbnails...')

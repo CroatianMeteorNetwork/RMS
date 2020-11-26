@@ -795,7 +795,7 @@ if __name__ == "__main__":
 
 
         # Wait to start capturing
-        if start_time != True:
+        if not isinstance(start_time, bool):
 
             # Run auto-reprocessing
             if config.auto_reprocess:
@@ -843,6 +843,9 @@ if __name__ == "__main__":
                     else:
                         log.info("No detections from the previous night to show as a slideshow!")
 
+
+            # Update start time and duration
+            start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
             
             # Calculate how many seconds to wait until capture starts, and with for that time
             time_now = datetime.datetime.utcnow()
@@ -855,8 +858,11 @@ if __name__ == "__main__":
             resetSIGINT()
 
             try:
+                
                 # Wait until sunset
-                time.sleep(int(waiting_time.total_seconds()))
+                waiting_time_seconds = int(waiting_time.total_seconds())
+                if waiting_time_seconds > 0:
+                    time.sleep(waiting_time_seconds)
 
             except KeyboardInterrupt:
 
