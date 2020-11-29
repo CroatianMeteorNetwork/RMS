@@ -268,7 +268,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 if os.path.isfile(ff_path) and (str(config.stationID) in ff_name) and validFFName(ff_name):
 
                     # Add the FF file to the detector
-                    detector.addJob([night_data_dir, ff_name, config])
+                    detector.addJob([night_data_dir, ff_name, config], wait_time=0.005)
                     log.info("Added existing FF files for detection: {:s}".format(ff_name))
 
     
