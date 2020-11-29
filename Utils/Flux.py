@@ -5,11 +5,12 @@ import sys
 import glob
 import copy
 import datetime
+import json
 
 import numpy as np
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
-from RMS.Astrometry.Conversions import areaGeoPolygon, jd2Date, J2000_JD
+from RMS.Astrometry.Conversions import areaGeoPolygon, jd2Date, datetime2JD, J2000_JD, raDec2AltAz
 import RMS.ConfigReader as cr
 from RMS.Formats import Platepar
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
@@ -18,9 +19,96 @@ from RMS.Routines.MaskImage import loadMask, MaskStructure
 from Utils.ShowerAssociation import showerAssociation
 
 
+def generateColAreaJSONFileName(station_code, side_points, ht_min, ht_max, dht, elev_limit):
+    """ Generate a file name for the collection area JSON file. """
+
+    file_name = "col_areas_{:s}_sp-{:d}_htmin-{:.1f}_htmax-{:.1f}_dht-{:.1f}_elemin-{:.1f}.json".format(\
+        station_code, side_points, ht_min, ht_max, dht, elev_limit)
+
+    return file_name
 
 
-def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=120, dht=2, elev_limit=10):
+def saveRawCollectionAreas(dir_path, file_name, col_areas_ht):
+    """ Save the raw collection area calculations so they don't have to be regenerated every time. """
+
+    file_path = os.path.join(dir_path, file_name)
+
+    with open(file_path, 'w') as f:
+
+        # Convert tuple keys (x_mid, y_mid) to str keys
+        col_areas_ht_strkeys = {}
+        for key in col_areas_ht:
+            col_areas_ht_strkeys[key] = {}
+
+            for tuple_key in col_areas_ht[key]:
+
+                str_key = "{:.2f}, {:.2f}".format(*tuple_key)
+
+                col_areas_ht_strkeys[key][str_key] = col_areas_ht[key][tuple_key]
+
+
+
+        # Convert collection areas to JSON
+        out_str = json.dumps(col_areas_ht_strkeys, indent=4, sort_keys=True)
+
+        # Save to disk
+        f.write(out_str)
+    
+
+def loadRawCollectionAreas(dir_path, file_name):
+    """ Read raw collection areas from disk. """
+
+    file_path = os.path.join(dir_path, file_name)
+
+
+    # Load the JSON file
+    with open(file_path) as f:
+        
+        data = " ".join(f.readlines())
+
+        col_areas_ht_strkeys = json.loads(data)
+
+        # Convert tuple keys (x_mid, y_mid) to str keys
+        col_areas_ht = {}
+        for key in col_areas_ht_strkeys:
+            col_areas_ht[key] = {}
+
+            for str_key in col_areas_ht_strkeys[key]:
+
+                # Convert the string "x_mid, y_mid" to tuple of floats (x_mid, y_mid)
+                tuple_key = tuple(map(float, str_key.split(", ")))
+
+                col_areas_ht[key][tuple_key] = col_areas_ht_strkeys[key][str_key]
+
+
+        return col_areas_ht
+
+
+
+
+class FluxConfig(object):
+    def __init__(self):
+        """ Container for flux calculations. """
+
+        # How many points to use to evaluate the FOV on seach side of the image. Normalized to the longest 
+        #   side.
+        self.side_points = 20
+
+        # Minimum height (km).
+        self.ht_min = 60
+
+        # Maximum height (km).
+        self.ht_max = 130
+
+        # Height sampling delta (km).
+        self.dht = 2
+
+        # Limit of elevation above horizon (deg). 10 degrees by default.
+        self.elev_limit = 10
+
+
+
+def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, dht=2, elev_limit=10):
     """ Compute the collecting area for the range of given heights.
     
     Arguments:
@@ -174,7 +262,7 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=120, d
 
 
         # Store segments to the height dictionary (save a copy so it doesn't get overwritten)
-        col_areas_ht[ht] = dict(col_areas_xy)
+        col_areas_ht[float(ht)] = dict(col_areas_xy)
 
         print("SUM:", total_area/1e6, "km^2")
 
@@ -193,10 +281,6 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=120, d
 
 
 
-        pass
-
-
-
     return col_areas_ht
 
     
@@ -205,11 +289,12 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=120, d
 
 
 
-def computeFlux(config, ftpdetectinfo_list, shower_code, dt_beg, dt_end, timebin, timebin_intdt=0.25, mask=None):
+def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_end, timebin, timebin_intdt=0.25, mask=None):
     """ Compute flux using measurements in the given FTPdetectinfo file. 
     
     Arguments:
         config: [Config instance]
+        dir_path: [str] Path to the working directory.
         ftpdetectinfo_list: [list] A list of paths to FTPdetectinfo files.
         shower_code: [str] IAU shower code (e.g. ETA, PER, SDA).
         dt_beg: [Datetime] Datetime object of the observation beginning.
@@ -290,13 +375,90 @@ def computeFlux(config, ftpdetectinfo_list, shower_code, dt_beg, dt_end, timebin
             print(meteor.jdt_ref, shower.name)
 
 
-    # Compute the collecting areas segments per height
-    col_areas_ht = collectingArea(platepar, associations, mask=mask)
+
+    # Init the flux configuration
+    flux_config = FluxConfig()
+
+
+    # Make a file name to save the raw collection areas
+    col_areas_file_name = generateColAreaJSONFileName(platepar.station_code, flux_config.side_points, \
+        flux_config.ht_min, flux_config.ht_max, flux_config.dht, flux_config.elev_limit)
+
+    # Check if the collection area file exists. If yes, load the data. If not, generate collection areas
+    if col_areas_file_name in os.listdir(dir_path):
+        col_areas_ht = loadRawCollectionAreas(dir_path, col_areas_file_name)
+
+        print("Loaded collection areas from:", col_areas_file_name)
+
+    else:
+
+        # Compute the collecting areas segments per height
+        col_areas_ht = collectingArea(platepar, mask=mask, side_points=flux_config.side_points, \
+            ht_min=flux_config.ht_min, ht_max=flux_config.ht_max, dht=flux_config.dht, \
+            elev_limit=flux_config.elev_limit)
+
+        # Save the collection areas to file
+        saveRawCollectionAreas(dir_path, col_areas_file_name, col_areas_ht)
+
+        print("Saved raw collection areas to:", col_areas_file_name)
 
 
     ### Apply time-dependent corrections ###
 
     # Go through all time bins within the observation period
+    total_time_hrs = (dt_end - dt_beg).total_seconds()/3600
+    nbins = int(np.ceil(total_time_hrs/timebin))
+    for t_bin in range(nbins):
+
+        # Compute bin start and end time
+        bin_dt_beg = dt_beg + datetime.timedelta(hours=timebin*t_bin)
+        bin_dt_end = bin_dt_beg + datetime.timedelta(hours=timebin)
+
+        if bin_dt_end > dt_end:
+            bin_dt_end = dt_end
+
+        # Convert to Julian date
+        bin_jd_beg = datetime2JD(bin_dt_beg)
+        bin_jd_end = datetime2JD(bin_dt_end)
+
+        # Only select meteors in this bin
+        bin_meteors = []
+        for key in associations:
+            meteor, shower = associations[key]
+
+            if shower is not None:
+                if (shower.name == shower_code) and (meteor.jdt_ref > bin_jd_beg) \
+                    and (meteor.jdt_ref <= bin_jd_end):
+                    
+                    bin_meteors.append([meteor, shower])
+
+
+
+        print(bin_dt_beg, bin_dt_end, len(bin_meteors))
+
+        if len(bin_meteors) > 0:
+
+
+            ### Compute the radiant elevation at the middle of the time bin ###
+
+            jd_mean = (bin_jd_beg + bin_jd_end)/2
+
+            # Compute the apparent radiant
+            ra, dec, _ = shower.computeApparentRadiant(platepar.lat, platepar.lon, jd_mean)
+
+            # Compute the radiant elevation
+            _, radiant_elev = raDec2AltAz(ra, dec, jd_mean, platepar.lat, platepar.lon)
+
+            print(radiant_elev)
+
+            ### ###
+
+
+            ### Compute the camera pointing direction ###
+
+
+
+
     
 
 
@@ -364,4 +526,4 @@ if __name__ == "__main__":
 
 
     # Compute the flux
-    computeFlux(config, ftpdetectinfo_path_list, cml_args.shower_code dt_beg, dt_end, cml_args.dt)
+    computeFlux(config, dir_path, ftpdetectinfo_path_list, cml_args.shower_code, dt_beg, dt_end, cml_args.dt)

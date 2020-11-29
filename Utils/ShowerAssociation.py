@@ -240,6 +240,40 @@ class Shower(object):
         self.shower_vector = None
 
 
+    def computeApparentRadiant(self, latitude, longitude, jdt_ref, meteor_fixed_ht=100000):
+        """ Compute the apparent radiant of the shower at the given location and time.
+
+        Arguments:
+            latitude: [float] Latitude of the observer (deg).
+            longitude: [float] Longitude of the observer (deg).
+            jdt_ref: [float] Julian date.
+
+        Keyword arguments:
+            meteor_fixed_ht: [float] Assumed height of the meteor (m). 100 km by default.
+
+        Return;
+            ra, dec, v_init: [tuple of floats] Apparent radiant (deg and m/s).
+
+        """
+
+
+        # Compute the location of the radiant due to radiant drift
+        if not np.any(np.isnan([self.dra, self.ddec])):
+            
+            # Solar longitude difference form the peak
+            lasun_diff = (np.degrees(jd2SolLonSteyaert(jdt_ref)) - self.lasun_max + 180)%360 - 180
+
+            ra_g = self.ra_g + lasun_diff*self.dra
+            dec_g = self.dec_g + lasun_diff*self.ddec
+
+
+        # Compute the apparent radiant - assume that the meteor is directly above the station
+        self.ra, self.dec, self.v_init = geocentricToApparentRadiantAndVelocity(ra_g, \
+            dec_g, 1000*self.vg, latitude, longitude, meteor_fixed_ht, \
+            jdt_ref, include_rotation=True)
+
+        return self.ra, self.dec, self.v_init
+
 
 
 def heightModel(v_init, ht_type='beg'):
@@ -466,21 +500,10 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
             ### Radiant filter ###
 
-            # Compute the location of the radiant due to radiant drift
-            if not np.any(np.isnan([shower.dra, shower.ddec])):
-                
-                # Solar longitude difference form the peak
-                lasun_diff = (meteor_obj.lasun - shower.lasun_max + 180)%360 - 180
-
-                shower.ra_g = shower.ra_g + lasun_diff*shower.dra
-                shower.dec_g = shower.dec_g + lasun_diff*shower.ddec
-
-
-            # Compute the apparent radiant - assume that the meteor is directly above the station
+            # Assume a fixed meteor height for an approximate apparent radiant
             meteor_fixed_ht = 100000 # 100 km
-            shower.ra, shower.dec, shower.v_init = geocentricToApparentRadiantAndVelocity(shower.ra_g, \
-                shower.dec_g, 1000*shower.vg, config.latitude, config.longitude, meteor_fixed_ht, \
-                meteor_obj.jdt_ref, include_rotation=True)
+            shower.computeApparentRadiant(config.latitude, config.longitude, meteor_obj.jdt_ref, \
+                meteor_fixed_ht=meteor_fixed_ht)
 
             # Compute the angle between the meteor radiant and the great circle normal
             radiant_separation = meteor_obj.angularSeparationFromGC(shower.ra, shower.dec)
