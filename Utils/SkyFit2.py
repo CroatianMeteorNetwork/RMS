@@ -3940,6 +3940,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # Create the list of picks for saving
         centroids = []
         for frame, pick in self.pick_list.items():
+
+            # Skip None entries
+            if (pick['x_centroid'] is None) or (pick['y_centroid'] is None):
+                continue
+
             centroids.append([frame, pick['x_centroid'], pick['y_centroid'], pick['intensity_sum']])
 
         # If there are less than 3 points, don't show the lightcurve
