@@ -4112,7 +4112,7 @@ class PlateTool(QtWidgets.QMainWindow):
             for y in y_list:
 
                 # Skip pixels ourside the image
-                if (x < 0) or (x > self.img.data.shape[0]) or (y < 0) or (y > self.img.data.shape[1]):
+                if (x < 0) or (x >= self.img.data.shape[0]) or (y < 0) or (y >= self.img.data.shape[1]):
                     continue
 
                 # Check if the given pixels are within the aperture radius
