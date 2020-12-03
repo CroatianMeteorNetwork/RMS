@@ -141,10 +141,13 @@ class Platepar(object):
             distortion_type: [str] Distortion type. It can be one of the following:
                 - "poly3+radial" - 3rd order polynomial fit including a single radial term
                 - "poly3+radial3" - 3rd order polynomial fit including two radial terms (r + r^3)
-                - "radial3" - 3rd order radial distortion
-                - "radial5" - 5th order radial distortion
-                - "radial7" - 7th order radial distortion
-                - "radial9" - 7th order radial distortion
+                - "radial3-all" - 3rd order radial distortion, all powers
+                - "radial4-all" - 4rd order radial distortion, all powers
+                - "radial5-all" - 5rd order radial distortion, all powers
+                - "radial3-odd" - 3rd order radial distortion, only odd powers
+                - "radial5-odd" - 5th order radial distortion, only odd powers
+                - "radial7-odd" - 7th order radial distortion, only odd powers
+                - "radial9-odd" - 7th order radial distortion, only odd powers
 
         Return:
             self: [object] Instance of this class with loaded platepar parameters.
@@ -304,27 +307,49 @@ class Platepar(object):
             "poly3+radial", \
             "poly3+radial3", \
             "poly3+radial5", \
-            "radial3", \
-            "radial5", \
-            "radial7", \
-            "radial9", \
+            "radial3-all", \
+            "radial4-all", \
+            "radial5-all", \
+            "radial3-odd", \
+            "radial5-odd", \
+            "radial7-odd", \
+            "radial9-odd", \
             ]
 
         self.distortion_type_poly_length = [
-            12, 13, 14, 8, 9, 10, 11
+            12, 13, 14, 8, 9, 10, 8, 9, 10, 11
         ]
 
         # Set the length of the distortion polynomial depending on the distortion type
         if distortion_type in self.distortion_type_list:
 
             # If the new distortion type (poly vs radial) is different from the old, reset the parameters
-            if distortion_type[:4] != self.distortion_type[:4]:
+            if (distortion_type[:4] != self.distortion_type[:4]):
                 reset_params = True
+
+            # If the all vs odd only radial powers type is changed, reset the distortion
+            if distortion_type.startswith("radial"):
+                if (distortion_type[-3:] != self.distortion_type[-3:]):
+                    reset_params = True
+
             
             self.distortion_type = distortion_type
 
             # Get the polynomial length
             self.poly_length = self.distortion_type_poly_length[self.distortion_type_list.index(distortion_type)]
+
+
+            # Remove aspect parameter for radial distortions if it's not used
+            if distortion_type.startswith("radial"):
+                if self.equal_aspect:
+                    self.poly_length -= 1
+
+            # Remove asymmetry correction parameters for radial distortions if they are not used
+            if distortion_type.startswith("radial"):
+                if not self.asymmetry_corr:
+                    self.poly_length -= 3
+
+
 
         else:
             raise ValueError("The distortion type is not recognized: {:s}".format(self.distortion_type))
@@ -594,18 +619,6 @@ class Platepar(object):
                     self.x_poly_rev[0] = 0.5/(self.X_res/2)
                     self.x_poly_rev[1] = 0.5/(self.Y_res/2)
 
-                # Force aspect ratio to 0 if axes are set to be equal
-                if self.equal_aspect:
-                    self.x_poly_rev[2] = 0
-
-                # Disable asymmetry
-                if not self.asymmetry_corr:
-                    self.x_poly_rev[3] = 0
-                    self.x_poly_rev[4] = 0
-
-                # # Set all parameters not used by the radial fit to 0
-                # self.x_poly_rev[(self.poly_length - 1):] *= 0
-
 
             ### ###
 
@@ -657,15 +670,6 @@ class Platepar(object):
                 if self.force_distortion_centre:
                     self.x_poly_fwd[0] = 0.5/(self.X_res/2)
                     self.x_poly_fwd[1] = 0.5/(self.Y_res/2)
-
-                # Force aspect ratio to 0 if axes are set to be equal
-                if self.equal_aspect:
-                    self.x_poly_fwd[2] = 0
-
-                # Disable asymmetry
-                if not self.asymmetry_corr:
-                    self.x_poly_fwd[3] = 0
-                    self.x_poly_fwd[4] = 0
 
             ### ###
 

@@ -2503,10 +2503,13 @@ class PlateTool(QtWidgets.QMainWindow):
                 if self.platepar is not None:
 
                     self.platepar.equal_aspect = not self.platepar.equal_aspect
+                    self.platepar.resetDistortionParameters()
 
                     self.tab.param_manager.updatePlatepar()
                     self.updateLeftLabels()
                     self.updateStars()
+                    self.updateDistortion()
+                    self.tab.param_manager.onIndexChanged()
 
 
             # Toggle asymmetry correction for radial distortions
@@ -2515,10 +2518,13 @@ class PlateTool(QtWidgets.QMainWindow):
                 if self.platepar is not None:
 
                     self.platepar.asymmetry_corr = not self.platepar.asymmetry_corr
+                    self.platepar.resetDistortionParameters()
 
                     self.tab.param_manager.updatePlatepar()
                     self.updateLeftLabels()
                     self.updateStars()
+                    self.updateDistortion()
+                    self.tab.param_manager.onIndexChanged()
 
 
             # Get initial parameters from astrometry.net
