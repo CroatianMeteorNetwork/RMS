@@ -292,6 +292,11 @@ class Platepar(object):
                 self.x_poly_fwd[1] = 0.5/(self.Y_res/2)
                 self.x_poly_rev[1] = 0.5/(self.Y_res/2)
 
+                # If the distortion center is forced to the center of the image, reset all parameters to zero
+                if self.force_distortion_centre:
+                    self.x_poly_fwd *= 0
+                    self.x_poly_rev *= 0
+
 
 
         self.x_poly = self.x_poly_fwd
@@ -316,6 +321,8 @@ class Platepar(object):
             "radial9-odd", \
             ]
 
+        # Lenghts of full polynomials, (including distortion center, aspect, and asymmetry correction for 
+        #   radial distortions)
         self.distortion_type_poly_length = [
             12, 13, 14, 8, 9, 10, 8, 9, 10, 11
         ]
@@ -338,6 +345,11 @@ class Platepar(object):
             # Get the polynomial length
             self.poly_length = self.distortion_type_poly_length[self.distortion_type_list.index(distortion_type)]
 
+
+            # Remove distortion center for radial distortions if it's not used
+            if distortion_type.startswith("radial"):
+                if self.force_distortion_centre:
+                    self.poly_length -= 2
 
             # Remove aspect parameter for radial distortions if it's not used
             if distortion_type.startswith("radial"):
@@ -614,11 +626,6 @@ class Platepar(object):
                 # IMPORTANT NOTE - the X polynomial is used to store the fit paramters
                 self.x_poly_rev = res.x
 
-                # Force distortion centre to image centre
-                if self.force_distortion_centre:
-                    self.x_poly_rev[0] = 0.5/(self.X_res/2)
-                    self.x_poly_rev[1] = 0.5/(self.Y_res/2)
-
 
             ### ###
 
@@ -664,12 +671,6 @@ class Platepar(object):
 
                 # Extract fitted X polynomial
                 self.x_poly_fwd = res.x
-
-
-                # Force distortion centre to image centre
-                if self.force_distortion_centre:
-                    self.x_poly_fwd[0] = 0.5/(self.X_res/2)
-                    self.x_poly_fwd[1] = 0.5/(self.Y_res/2)
 
             ### ###
 

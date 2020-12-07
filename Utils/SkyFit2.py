@@ -2496,6 +2496,19 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.updateLeftLabels()
                     self.updateStars()
 
+            
+
+            # Force distortion centre to image centre
+            elif event.key() == QtCore.Qt.Key_B:
+                if self.platepar is not None:
+                    self.platepar.force_distortion_centre = not self.platepar.force_distortion_centre
+
+                    self.tab.param_manager.updatePlatepar()
+                    self.updateLeftLabels()
+                    self.updateStars()
+                    self.updateDistortion()
+                    self.tab.param_manager.onIndexChanged()
+
 
             # Toggle equal aspect ratio for radial distortions
             elif event.key() == QtCore.Qt.Key_G:
@@ -2553,16 +2566,6 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.toggleShowCalStars()
                 self.tab.settings.updateShowCalStars()
                 # updates image automatically
-
-
-            # Force distortion centre to image centre
-            elif event.key() == QtCore.Qt.Key_B:
-                if self.platepar is not None:
-                    self.platepar.force_distortion_centre = not self.platepar.force_distortion_centre
-
-                    self.tab.param_manager.updatePlatepar()
-                    self.updateStars()
-                    self.updateLeftLabels()
 
 
             elif (event.key() == QtCore.Qt.Key_Return) or (event.key() == QtCore.Qt.Key_Enter):

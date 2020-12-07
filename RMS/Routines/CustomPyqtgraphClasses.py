@@ -1413,7 +1413,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.gui.platepar.equal_aspect = self.eqAspect.isChecked()
         self.sigEqAspectToggled.emit()
 
-        # Reset the distortion parameters
+        # Apply changes to distortion
         self.sigResetDistortionPressed.emit()
         self.onIndexChanged()
 
@@ -1421,13 +1421,17 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.gui.platepar.asymmetry_corr = self.asymmetryCorr.isChecked()
         self.sigAsymmetryCorrToggled.emit()
 
-        # Reset the distortion parameters
+        # Apply changes to distortion
         self.sigResetDistortionPressed.emit()
         self.onIndexChanged()
 
     def onForceDistortionToggled(self):
         self.gui.platepar.force_distortion_centre = self.fdistortion.isChecked()
         self.sigForceDistortionToggled.emit()
+
+        # Apply changes to distortion
+        self.sigResetDistortionPressed.emit()
+        self.onIndexChanged()
 
     def onLatChanged(self):
         self.gui.platepar.lat = self.lat.value()

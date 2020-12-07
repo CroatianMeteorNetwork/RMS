@@ -794,11 +794,15 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     # If the radial distortion is used, unpack radial parameters
     if dist_type.startswith("radial"):
 
+        # Index offset for reading distortion parameters. May change as equal aspect or asymmetry correction
+        #   is toggled on/off
+        index_offset = 0
 
         # Force the distortion centre to the image centre
         if force_distortion_centre:
             x0 = 0.5/(x_res/2.0)
             y0 = 0.5/(y_res/2.0)
+            index_offset += 2
         else:
             # Read distortion offsets
             x0 = x_poly_rev[0]
@@ -810,24 +814,19 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
         y0 *= (y_res/2.0)
 
 
-        # Index offset for reading distortion parameters. May change as equal aspect or asymmetry correction
-        #   is toggled on/off
-        index_offset = 0
-
-
         # Aspect ratio
         if equal_aspect:
             xy = 0.0
             index_offset += 1
         else:
-            xy = x_poly_rev[2]
+            xy = x_poly_rev[2 - index_offset]
 
 
         # Asymmetry correction
         if asymmetry_corr:
-            a1 = x_poly_rev[3]
-            a2 = x_poly_rev[4]
-            a3 = x_poly_rev[5]
+            a1 = x_poly_rev[3 - index_offset]
+            a2 = x_poly_rev[4 - index_offset]
+            a3 = x_poly_rev[5 - index_offset]
         else:
             a1 = 0.0
             a2 = 0.0
@@ -1083,10 +1082,16 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     # If the radial distortion is used, unpack radial parameters
     if dist_type.startswith("radial"):
 
+
+        # Index offset for reading distortion parameters. May change as equal aspect or asymmetry correction
+        #   is toggled on/off
+        index_offset = 0
+
         # Force the distortion centre to the image centre
         if force_distortion_centre:
             x0 = 0.5/(x_res/2.0)
             y0 = 0.5/(y_res/2.0)
+            index_offset += 2
         else:
             # Read distortion offsets
             x0 = x_poly_fwd[0]
@@ -1097,25 +1102,20 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         x0 *= (x_res/2.0)
         y0 *= (y_res/2.0)
 
-
-        # Index offset for reading distortion parameters. May change as equal aspect or asymmetry correction
-        #   is toggled on/off
-        index_offset = 0
-
         # Aspect ratio
         if equal_aspect:
             xy = 0.0
             index_offset += 1
         else:
             # Read aspect ratio
-            xy = x_poly_fwd[2]
+            xy = x_poly_fwd[2 - index_offset]
 
 
         # Asymmetry correction
         if asymmetry_corr:
-            a1 = x_poly_fwd[3]
-            a2 = x_poly_fwd[4]
-            a3 = x_poly_fwd[5]
+            a1 = x_poly_fwd[3 - index_offset]
+            a2 = x_poly_fwd[4 - index_offset]
+            a3 = x_poly_fwd[5 - index_offset]
         else:
             a1 = 0.0
             a2 = 0.0
