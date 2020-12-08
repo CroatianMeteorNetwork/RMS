@@ -6,8 +6,10 @@ import glob
 import copy
 import datetime
 import json
+import collections
 
 import numpy as np
+import scipy.stats
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
 from RMS.Astrometry.Conversions import areaGeoPolygon, jd2Date, datetime2JD, J2000_JD, raDec2AltAz
@@ -16,7 +18,8 @@ from RMS.Formats import Platepar
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
 from RMS.Routines.FOVArea import xyHt2Geo, fovArea
 from RMS.Routines.MaskImage import loadMask, MaskStructure
-from Utils.ShowerAssociation import showerAssociation
+from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
+from Utils.ShowerAssociation import showerAssociation, heightModel
 
 
 def generateColAreaJSONFileName(station_code, side_points, ht_min, ht_max, dht, elev_limit):
@@ -69,9 +72,9 @@ def loadRawCollectionAreas(dir_path, file_name):
         col_areas_ht_strkeys = json.loads(data)
 
         # Convert tuple keys (x_mid, y_mid) to str keys
-        col_areas_ht = {}
+        col_areas_ht = collections.OrderedDict()
         for key in col_areas_ht_strkeys:
-            col_areas_ht[key] = {}
+            col_areas_ht[key] = collections.OrderedDict()
 
             for str_key in col_areas_ht_strkeys[key]:
 
@@ -146,7 +149,7 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
 
 
     # Distionary of collection areas per height
-    col_areas_ht = {}
+    col_areas_ht = collections.OrderedDict()
 
     # Estimate the collection area for a given range of heights
     for ht in np.arange(ht_min, ht_max + dht, dht):
@@ -159,7 +162,7 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
         total_area = 0
 
         # Dictionary of computed sensor-corrected collection areas where X and Y are keys
-        col_areas_xy = {}
+        col_areas_xy = collections.OrderedDict()
 
         # Sample the image
         for x0 in np.linspace(0, platepar.X_res, longer_side_points, dtype=np.int, endpoint=False):
@@ -227,35 +230,16 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
                 # Compute the range correction (w.r.t 100 km) to the mean point
                 r, _, _, _ = xyHt2Geo(platepar, x_mean, y_mean, ht, indicate_limit=True, \
                     elev_limit=elev_limit)
-                range_correction = (1e5/r)**2
 
-
-                # Compute angular velocity loss using the estimated stddev at the given image segment
-
-
-
-                # Compute radiant distance correction
-
-
-                ## Apply collection area corrections ##
 
                 # Correct the area for the masked portion
                 area *= unmasked_ratio
 
-                # Correct the area for vignetting and extinction
-                area *= sensitivity_ratio
-
-                # Correct for the range
-                area *= range_correction
-
-                ## ##
-                
-
                 ### ###
 
 
-                # Store the sensor-corrected segment collection area
-                col_areas_xy[(x_mean, y_mean)] = area
+                # Store the raw masked segment collection area, sensivitiy, and the range
+                col_areas_xy[(x_mean, y_mean)] = [area, sensitivity_ratio, r]
 
 
                 total_area += area
@@ -289,7 +273,8 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
 
 
 
-def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_end, timebin, timebin_intdt=0.25, mask=None):
+def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_end, timebin, mass_index, \
+    timebin_intdt=0.25, ht_std_percent=5.0, mask=None):
     """ Compute flux using measurements in the given FTPdetectinfo file. 
     
     Arguments:
@@ -300,10 +285,12 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
         dt_beg: [Datetime] Datetime object of the observation beginning.
         dt_end: [Datetime] Datetime object of the observation end.
         timebin: [float] Time bin in hours.
+        mass_index: [float] Cumulative mass index of the shower.
 
     Keyword arguments:
         timebin_intdt: [float] Time step for computing the integrated collection area in hours. 15 minutes by
             default. If smaller than that, only one collection are will be computed.
+        ht_std_percent: [float] Meteor height standard deviation in percent.
         mask: [Mask object] Mask object, None by default.
 
     """
@@ -417,6 +404,10 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
         if bin_dt_end > dt_end:
             bin_dt_end = dt_end
 
+
+        # Compute bin duration in hours
+        bin_hours = (bin_dt_end - bin_dt_beg).total_seconds()/3600
+
         # Convert to Julian date
         bin_jd_beg = datetime2JD(bin_dt_beg)
         bin_jd_end = datetime2JD(bin_dt_end)
@@ -433,9 +424,6 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
                     bin_meteors.append([meteor, shower])
 
 
-
-        print(bin_dt_beg, bin_dt_end, len(bin_meteors))
-
         if len(bin_meteors) > 0:
 
 
@@ -443,22 +431,91 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
 
             jd_mean = (bin_jd_beg + bin_jd_end)/2
 
+
+            print(np.degrees(jd2SolLonSteyaert(jd_mean)), bin_dt_beg, bin_dt_end, len(bin_meteors))
+
             # Compute the apparent radiant
-            ra, dec, _ = shower.computeApparentRadiant(platepar.lat, platepar.lon, jd_mean)
+            ra, dec, v_init = shower.computeApparentRadiant(platepar.lat, platepar.lon, jd_mean)
+
+            # Compute the mean meteor height
+            meteor_ht_beg = heightModel(v_init, ht_type='beg')
+            meteor_ht_end = heightModel(v_init, ht_type='end')
+            meteor_ht = (meteor_ht_beg + meteor_ht_end)/2
+
+            # Compute the standard deviation of the height
+            meteor_ht_std = meteor_ht*ht_std_percent/100.0
+
+            # Init the Gaussian height distribution
+            meteor_ht_gauss = scipy.stats.norm(meteor_ht, meteor_ht_std)
+
 
             # Compute the radiant elevation
             _, radiant_elev = raDec2AltAz(ra, dec, jd_mean, platepar.lat, platepar.lon)
 
-            print(radiant_elev)
+            ### ###
+
+
+            ### Weight collection area by meteor height distribution ###
+
+            # Determine weights for each height
+            weight_sum = 0
+            weights = {}
+            for ht in col_areas_ht:
+                wt = meteor_ht_gauss.pdf(float(ht))
+                weight_sum += wt
+                weights[ht] = wt
+
+            # Normalize the weights so that the sum is 1
+            for ht in weights:
+                weights[ht] /= weight_sum
 
             ### ###
 
 
-            ### Compute the camera pointing direction ###
+            # Final correction area value (height-weightned)
+            collection_area = 0
+
+            # Go through all heights and segment blocks
+            for ht in col_areas_ht:
+                for img_coords in col_areas_ht[ht]:
+
+                    x_mean, y_mean = img_coords
+
+                    # Unpack precomputed values
+                    area, sensitivity_ratio, r = col_areas_ht[ht][img_coords]
+
+
+                    ### Compute the camera pointing direction ###
 
 
 
+                    ###
 
+
+                    # Compute the range correction
+                    range_correction = (1e5/r)**2
+
+
+                    ### Apply corrections
+
+                    correction_ratio = 1.0
+                    
+                    # Correct the area for vignetting and extinction
+                    correction_ratio *= sensitivity_ratio
+
+                    # Correct for the range
+                    correction_ratio *= range_correction
+
+                    # Correct for the radiant elevation
+                    correction_ratio *= np.sin(np.radians(radiant_elev))
+
+
+                    # Add the collection area to the final estimate with the height weight
+                    #   # Raise the correction to the mass index power
+                    collection_area += weights[ht]*area*correction_ratio**(mass_index - 1)
+
+
+            print("Flux:", 1e9*len(bin_meteors)/collection_area/bin_hours, "meteors/1000km^2/h")
     
 
 
@@ -488,6 +545,9 @@ if __name__ == "__main__":
 
     arg_parser.add_argument("dt", metavar="TIME_BIN", type=float, \
         help="Time bin width in hours.")
+
+    arg_parser.add_argument("s", metavar="MASS_INDEX", type=float, \
+        help="Mass index of the shower.")
 
     arg_parser.add_argument("-c", "--config", metavar="CONFIG_PATH", type=str,
                             help="Path to a config file which will be used instead of the default one."
@@ -526,4 +586,5 @@ if __name__ == "__main__":
 
 
     # Compute the flux
-    computeFlux(config, dir_path, ftpdetectinfo_path_list, cml_args.shower_code, dt_beg, dt_end, cml_args.dt)
+    computeFlux(config, dir_path, ftpdetectinfo_path_list, cml_args.shower_code, dt_beg, dt_end, \
+        cml_args.dt, cml_args.s)

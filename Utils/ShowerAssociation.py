@@ -286,6 +286,9 @@ def heightModel(v_init, ht_type='beg'):
     Keyword arguments:
         ht_type: [str] 'beg' or 'end'
 
+    Return:
+        ht: [float] Height (m).
+
     """
 
     def _htVsVelModel(v_init, c, a, b):
