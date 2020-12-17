@@ -814,8 +814,8 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
         y0 *= (y_res/2.0)
 
         # Wrap offsets to always be within the image
-        x0 = x0%(x_res/2.0)
-        y0 = y0%(y_res/2.0)
+        x0 = -x_res/2.0 + (x0 + x_res/2.0)%x_res
+        y0 = -y_res/2.0 + (y0 + y_res/2.0)%y_res
 
 
         # Aspect ratio
@@ -828,8 +828,13 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
 
         # Asymmetry correction
         if asymmetry_corr:
+
+            # Asymmetry amplitude
             a1 = x_poly_rev[3 - index_offset]
-            a2 = x_poly_rev[4 - index_offset]
+
+            # Asymmetry angle - normalize so full circle fits within 0-1
+            a2 = (x_poly_rev[4 - index_offset]*(2*pi))%(2*pi)
+
         else:
             a1 = 0.0
             a2 = 0.0
@@ -1106,8 +1111,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         y0 *= (y_res/2.0)
 
         # Wrap offsets to always be within the image
-        x0 = x0%(x_res/2.0)
-        y0 = y0%(y_res/2.0)
+        x0 = -x_res/2.0 + (x0 + x_res/2.0)%x_res
+        y0 = -y_res/2.0 + (y0 + y_res/2.0)%y_res
 
         # Aspect ratio
         if equal_aspect:
@@ -1120,8 +1125,13 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
         # Asymmetry correction
         if asymmetry_corr:
+
+            # Asymmetry amplitude
             a1 = x_poly_fwd[3 - index_offset]
-            a2 = x_poly_fwd[4 - index_offset]
+
+            # Asymmetry angle - normalize so full circle fits within 0-1
+            a2 = (x_poly_fwd[4 - index_offset]*(2*pi))%(2*pi)
+
         else:
             a1 = 0.0
             a2 = 0.0

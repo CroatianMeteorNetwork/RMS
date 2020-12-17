@@ -1215,15 +1215,52 @@ class Platepar(object):
         if self.distortion_type.startswith("poly"):
             out_str += "    Distortion coeffs (polynomial):\n"
             dist_string = "X"
+
+            # Poly parameters for printing (needed for radial which will be modified)
+            x_poly_fwd_print = self.x_poly_fwd
+            x_poly_rev_print = self.x_poly_rev
+
+        # Radial coefficients
         else:
             out_str += "    Distortion coeffs (radial):\n"
-            out_str += "                 x0,       y0, aspect-1,       k1,       k2,       k3\n"
+
+            out_str += "           "
+            if not self.force_distortion_centre:
+                out_str += " x0 (px),  y0 (px), "
+
+            if not self.equal_aspect:
+                out_str += "aspect-1, "
+
+            if self.asymmetry_corr:
+                out_str += "      a1,       a2, "
+
+            out_str +="      k1,       k2,       k3,       k4,       k5\n"
+            
             dist_string = ""
 
+
+
+            x_poly_fwd_print = np.array(self.x_poly_fwd)
+            x_poly_rev_print = np.array(self.x_poly_rev)
+
+            if not self.force_distortion_centre:
+
+                # Report x0 and y0 in px (unnormalize and wrap)
+                x_poly_fwd_print[0] *= self.X_res/2
+                x_poly_fwd_print[1] *= self.Y_res/2
+                x_poly_rev_print[0] *= self.X_res/2
+                x_poly_rev_print[1] *= self.Y_res/2
+                x_poly_fwd_print[0] = -self.X_res/2.0 + (x_poly_fwd_print[0] + self.X_res/2.0)%self.X_res
+                x_poly_fwd_print[1] = -self.Y_res/2.0 + (x_poly_fwd_print[1] + self.Y_res/2.0)%self.Y_res
+                x_poly_rev_print[0] = -self.X_res/2.0 + (x_poly_rev_print[0] + self.X_res/2.0)%self.X_res
+                x_poly_rev_print[1] = -self.Y_res/2.0 + (x_poly_rev_print[1] + self.Y_res/2.0)%self.Y_res
+
+
+
         out_str += "img2sky {:s} = {:s}\n".format(dist_string, ", ".join(["{:+8.3f}".format(c) \
-            if abs(c) > 10e-4 else "{:+8.1e}".format(c) for c in self.x_poly_fwd]))
+            if abs(c) > 10e-4 else "{:+8.1e}".format(c) for c in x_poly_fwd_print]))
         out_str += "sky2img {:s} = {:s}\n".format(dist_string, ", ".join(["{:+8.3f}".format(c) \
-            if abs(c) > 10e-4 else "{:+8.1e}".format(c) for c in self.x_poly_rev]))
+            if abs(c) > 10e-4 else "{:+8.1e}".format(c) for c in x_poly_rev_print]))
 
         # Only print the rest if the polynomial fit is used
         if self.distortion_type.startswith("poly"):
