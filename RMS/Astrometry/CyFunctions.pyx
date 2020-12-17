@@ -768,7 +768,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     cdef int i
     cdef double ra_centre, dec_centre, ra, dec
     cdef double radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, x_img, y_img, r_corr, r_scale
-    cdef double x0, y0, xy, a1, a2, a3, k1, k2, k3, k4, k5
+    cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4, k5
     cdef int index_offset
 
     # Init output arrays
@@ -813,6 +813,10 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
         x0 *= (x_res/2.0)
         y0 *= (y_res/2.0)
 
+        # Wrap offsets to always be within the image
+        x0 = x0%(x_res/2.0)
+        y0 = y0%(y_res/2.0)
+
 
         # Aspect ratio
         if equal_aspect:
@@ -826,25 +830,23 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
         if asymmetry_corr:
             a1 = x_poly_rev[3 - index_offset]
             a2 = x_poly_rev[4 - index_offset]
-            a3 = x_poly_rev[5 - index_offset]
         else:
             a1 = 0.0
             a2 = 0.0
-            a3 = 0.0
-            index_offset += 3
+            index_offset += 2
 
         # Distortion coeffs
-        k1 = x_poly_rev[6 - index_offset]
-        k2 = x_poly_rev[7 - index_offset]
+        k1 = x_poly_rev[5 - index_offset]
+        k2 = x_poly_rev[6 - index_offset]
+
+        if x_poly_rev.shape[0] > (7 - index_offset):
+            k3 = x_poly_rev[7 - index_offset]
 
         if x_poly_rev.shape[0] > (8 - index_offset):
-            k3 = x_poly_rev[8 - index_offset]
+            k4 = x_poly_rev[8 - index_offset]
 
         if x_poly_rev.shape[0] > (9 - index_offset):
-            k4 = x_poly_rev[9 - index_offset]
-
-        if x_poly_rev.shape[0] > (10 - index_offset):
-            k5 = x_poly_rev[10 - index_offset]
+            k5 = x_poly_rev[9 - index_offset]
 
     # If the polynomial distortion was used, unpack the offsets
     else:
@@ -940,7 +942,8 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
             # Apply the asymmetry correction
             #off_direction = atan2(y, x)
             #r = r*(1.0 + a1*sin(off_direction + a2))
-            r = (1.0 + a1)*(r + a2*y*cos(a3) - a2*x*sin(a3))
+            #r = (1.0 + a1)*(r + a2*y*cos(a3) - a2*x*sin(a3))
+            r = (r + a1*y*cos(a2) - a1*x*sin(a2))
 
             # Normalize radius to horizontal size
             r = r/(x_res/2.0)
@@ -1066,7 +1069,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
     cdef int i
     cdef double jd, x_img, y_img, r, dx, x_corr, dy, y_corr, r_corr, r_scale
-    cdef double x0, y0, xy, off_direction, a1, a2, a3, k1, k2, k3, k4, k5
+    cdef double x0, y0, xy, off_direction, a1, a2, k1, k2, k3, k4, k5
     cdef int index_offset
     cdef double radius, theta, sin_t, cos_t
     cdef double ha, ra_ref_now, ra_ref_now_corr, ra, dec, dec_ref_corr
@@ -1102,6 +1105,10 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         x0 *= (x_res/2.0)
         y0 *= (y_res/2.0)
 
+        # Wrap offsets to always be within the image
+        x0 = x0%(x_res/2.0)
+        y0 = y0%(y_res/2.0)
+
         # Aspect ratio
         if equal_aspect:
             xy = 0.0
@@ -1115,26 +1122,24 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         if asymmetry_corr:
             a1 = x_poly_fwd[3 - index_offset]
             a2 = x_poly_fwd[4 - index_offset]
-            a3 = x_poly_fwd[5 - index_offset]
         else:
             a1 = 0.0
             a2 = 0.0
-            a3 = 0.0
-            index_offset += 3
+            index_offset += 2
 
 
         # Distortion coeffs
-        k1 = x_poly_fwd[6 - index_offset]
-        k2 = x_poly_fwd[7 - index_offset]
+        k1 = x_poly_fwd[5 - index_offset]
+        k2 = x_poly_fwd[6 - index_offset]
+
+        if x_poly_fwd.shape[0] > (7 - index_offset):
+            k3 = x_poly_fwd[7 - index_offset]
 
         if x_poly_fwd.shape[0] > (8 - index_offset):
-            k3 = x_poly_fwd[8 - index_offset]
+            k4 = x_poly_fwd[8 - index_offset]
 
         if x_poly_fwd.shape[0] > (9 - index_offset):
-            k4 = x_poly_fwd[9 - index_offset]
-
-        if x_poly_fwd.shape[0] > (10 - index_offset):
-            k5 = x_poly_fwd[10 - index_offset]
+            k5 = x_poly_fwd[9 - index_offset]
 
 
     # If the polynomial distortion was used, unpack the offsets
@@ -1214,7 +1219,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
             # Apply the asymmetry correction
             # off_direction = atan2((1.0 + xy)*y_img, x_img)
             # r = r*(1.0 + a1*sin(off_direction + a2))
-            r = (1.0 + a1)*(r + a2*(1.0 + xy)*y_img*cos(a3) - a2*x_img*sin(a3))
+            # r = (1.0 + a1)*(r + a2*(1.0 + xy)*y_img*cos(a3) - a2*x_img*sin(a3))
+            r = (r + a1*(1.0 + xy)*y_img*cos(a2) - a1*x_img*sin(a2))
 
             # Normalize radius to horizontal size
             r = r/(x_res/2.0)

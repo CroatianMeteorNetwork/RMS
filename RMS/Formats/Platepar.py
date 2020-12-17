@@ -34,6 +34,14 @@ import datetime
 import numpy as np
 import scipy.optimize
 
+# # Try using pyswarms for fitting the radial distortion
+# try:
+#     import pyswarms as ps
+#     PYSWARMS_AVAILABLE = True
+# except ImportError:
+PYSWARMS_AVAILABLE = False
+
+
 
 from RMS.Astrometry.Conversions import date2JD, jd2Date, trueRaDec2ApparentAltAz
 import RMS.Astrometry.ApplyAstrometry
@@ -324,7 +332,7 @@ class Platepar(object):
         # Lenghts of full polynomials, (including distortion center, aspect, and asymmetry correction for 
         #   radial distortions)
         self.distortion_type_poly_length = [
-            12, 13, 14, 8, 9, 10, 8, 9, 10, 11
+            12, 13, 14, 7, 8, 9, 7, 8, 9, 10
         ]
 
         # Set the length of the distortion polynomial depending on the distortion type
@@ -359,7 +367,7 @@ class Platepar(object):
             # Remove asymmetry correction parameters for radial distortions if they are not used
             if distortion_type.startswith("radial"):
                 if not self.asymmetry_corr:
-                    self.poly_length -= 3
+                    self.poly_length -= 2
 
 
 
@@ -513,6 +521,11 @@ class Platepar(object):
             return dist_sum
 
 
+        # Modify the residuals function so that it takes a list of arguments
+        def _calcImageResidualsDistortionListArguments(params, *args, **kwargs):
+            return [_calcImageResidualsDistortion(param_line, *args, **kwargs) for param_line in params]
+
+
         def _calcSkyResidualsDistortion(params, platepar, jd, catalog_stars, img_stars, dimension):
             """ Calculates the differences between the stars on the image and catalog stars in sky
                 coordinates with the given astrometrical solution.
@@ -542,6 +555,11 @@ class Platepar(object):
                 np.radians(ra_catalog), np.radians(dec_catalog))**2)
 
             return separation_sum
+
+
+        # Modify the residuals function so that it takes a list of arguments
+        def _calcSkyResidualsDistortionListArguments(params, *args, **kwargs):
+            return [_calcSkyResidualsDistortion(param_line, *args, **kwargs) for param_line in params]
 
 
         # print('ASTRO', _calcImageResidualsAstro([self.RA_d, self.dec_d,
@@ -618,13 +636,55 @@ class Platepar(object):
             # Fit radial distortion
             else:
 
-                # Fit the radial distortion - the X polynomial is used to store the fit paramters
-                res = scipy.optimize.minimize(_calcImageResidualsDistortion, self.x_poly_rev, \
-                    args=(self, jd, catalog_stars, img_stars, 'radial'), method='Nelder-Mead', \
-                    options={'maxiter': 10000, 'adaptive': True})
+                # # MANUALLY DISABLE PSO
+                # PYSWARMS_AVAILABLE = False
 
-                # IMPORTANT NOTE - the X polynomial is used to store the fit paramters
-                self.x_poly_rev = res.x
+                # Fit the a PSO algorithm is it's available
+                if PYSWARMS_AVAILABLE:
+
+                    print("Running PSO...")
+
+                    # Set up hyperparameters
+                    #pso_options = {'c1': 0.5, 'c2': 0.7, 'w':0.9}
+                    pso_options = {'c1': 0.2, 'c2': 0.7, 'w':0.9} # better
+                    #pso_options = {'c1': 0.2, 'c2': 0.7, 'w':0.7} # much worse
+                    #pso_options = {'c1': 0.2, 'c2': 0.4, 'w':0.9} # much worse
+                    #pso_options = {'c1': 0.3, 'c2': 0.9, 'w':0.9} # same
+                    #pso_options = {'c1': 0.6, 'c2': 0.3, 'w':0.9} # worse
+                    #pso_options = {'c1': 0.6, 'c2': 0.3, 'w': 0.9, 'k': 10, 'p': 1}
+
+                    # Set up bounds (min, max)
+                    pso_bounds = (np.zeros(len(self.x_poly_rev)) - 1, np.zeros(len(self.x_poly_rev)) + 1)
+
+                    # Assume random locations of particles
+                    init_pos = None
+
+
+                    # Call instance of PSO with bounds argument
+                    optimizer = ps.single.GlobalBestPSO(n_particles=10000, dimensions=len(self.x_poly_rev), \
+                        options=pso_options, bounds=pso_bounds, bh_strategy='reflective', vh_strategy='invert', \
+                        init_pos=init_pos)
+
+
+                    # Run PSO
+                    cost, pos = optimizer.optimize(_calcImageResidualsDistortionListArguments, iters=100, \
+                        n_processes=None,  platepar=self, jd=jd, catalog_stars=catalog_stars, \
+                        img_stars=img_stars, dimension='radial', verbose=True)
+
+                    print(cost, pos)
+
+                    self.x_poly_rev = pos
+
+
+                else:
+
+                    # Fit the radial distortion - the X polynomial is used to store the fit paramters
+                    res = scipy.optimize.minimize(_calcImageResidualsDistortion, self.x_poly_rev, \
+                        args=(self, jd, catalog_stars, img_stars, 'radial'), method='Nelder-Mead', \
+                        options={'maxiter': 10000, 'adaptive': True})
+
+                    # IMPORTANT NOTE - the X polynomial is used to store the fit paramters
+                    self.x_poly_rev = res.x
 
 
             ### ###
@@ -664,13 +724,47 @@ class Platepar(object):
             # Fit the radial distortion
             else:
 
-                # Fit the radial distortion - the X polynomial is used to store the fit paramters
-                res = scipy.optimize.minimize(_calcSkyResidualsDistortion, self.x_poly_fwd, \
-                    args=(self, jd, catalog_stars, img_stars, 'radial'), method='Nelder-Mead', \
-                    options={'maxiter': 10000, 'adaptive': True})
+                # Fit the a PSO algorithm is it's available
+                if PYSWARMS_AVAILABLE:
 
-                # Extract fitted X polynomial
-                self.x_poly_fwd = res.x
+                    print("Running PSO...")
+
+                    # Set up hyperparameters
+                    #pso_options = {'c1': 0.5, 'c2': 0.7, 'w':0.9}
+                    #pso_options = {'c1': 0.6, 'c2': 0.3, 'w': 0.9, 'k': 10, 'p': 1}
+
+                    # Set up bounds (min, max)
+                    pso_bounds = (np.zeros(len(self.x_poly_fwd)) - 1, np.zeros(len(self.x_poly_fwd)) + 1)
+
+                    # Assume random locations of particles
+                    init_pos = None
+
+
+                    # Call instance of PSO with bounds argument
+                    optimizer = ps.single.GlobalBestPSO(n_particles=10000, dimensions=len(self.x_poly_fwd), \
+                        options=pso_options, bounds=pso_bounds, bh_strategy='reflective', vh_strategy='invert', \
+                        init_pos=init_pos)
+
+
+                    # Run PSO
+                    cost, pos = optimizer.optimize(_calcSkyResidualsDistortionListArguments, iters=100, \
+                        n_processes=None,  platepar=self, jd=jd, catalog_stars=catalog_stars, \
+                        img_stars=img_stars, dimension='radial', verbose=True)
+
+                    print(cost, pos)
+
+                    self.x_poly_fwd = pos
+
+
+                else:
+
+                    # Fit the radial distortion - the X polynomial is used to store the fit paramters
+                    res = scipy.optimize.minimize(_calcSkyResidualsDistortion, self.x_poly_fwd, \
+                        args=(self, jd, catalog_stars, img_stars, 'radial'), method='Nelder-Mead', \
+                        options={'maxiter': 10000, 'adaptive': True})
+
+                    # Extract fitted X polynomial
+                    self.x_poly_fwd = res.x
 
             ### ###
 

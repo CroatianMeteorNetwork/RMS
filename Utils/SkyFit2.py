@@ -25,7 +25,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
-    apparentAltAz2TrueRADec, jd2Date, datetime2JD
+    apparentAltAz2TrueRADec, jd2Date, datetime2JD, JD2LST
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
 import RMS.ConfigReader as cr
 import RMS.Formats.CALSTARS as CALSTARS
@@ -42,7 +42,7 @@ from RMS.Routines import RollingShutterCorrection
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
-from RMS.Astrometry.CyFunctions import subsetCatalog
+from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession, cyTrueRaDec2ApparentAltAz, cyaltAz2RADec
 
 
 class FOVinputDialog(object):
@@ -3632,6 +3632,41 @@ class PlateTool(QtWidgets.QMainWindow):
         # standard_x, standard_y, _ = getCatalogStarsImagePositions(catalog_stars, jd, pp_nodist)
 
         # ## ##
+
+
+
+        # ### TEST ###
+
+        # print("time:", self.img_handle.currentTime())
+        # print("jd:", jd)
+        # print("LST:", JD2LST(jd, self.platepar.lon)[0])
+        # print()
+
+        # print("RA_J2000, Dec_J2000, RA_date, Dec_date, RA_ref, Dec_ref, Azim_ref, Elev_ref")
+        # for cat_coords in catalog_stars:
+        #     ra, dec, _ = cat_coords
+
+        #     # Precess to epoch of date
+        #     ra_date, dec_date = equatorialCoordPrecession(2451545.0, jd, np.radians(ra), np.radians(dec))
+        #     ra_date, dec_date = np.degrees(ra_date), np.degrees(dec_date)
+
+        #     # Compute apparent RA/Dec with the applied refraction
+        #     azim, elev = cyTrueRaDec2ApparentAltAz(np.radians(ra), np.radians(dec), jd, np.radians(self.platepar.lat), np.radians(self.platepar.lon), refraction=True)
+        #     ra_ref, dec_ref = cyaltAz2RADec(azim, elev, jd, np.radians(self.platepar.lat), np.radians(self.platepar.lon))
+        #     azim, elev = np.degrees(azim), np.degrees(elev)
+        #     ra_ref, dec_ref = np.degrees(ra_ref), np.degrees(dec_ref)
+
+
+        #     print("{:>12.6f}, {:>+13.6f}, {:>12.6f}, {:>+13.6f}, {:>12.6f}, {:>+13.6f}, {:>12.6f}, {:>+13.6f}".format(ra, dec, ra_date, dec_date, ra_ref, dec_ref, azim, elev))
+
+        # ### ###
+
+
+
+        print()
+        print("Image time =", self.img_handle.currentTime(dt_obj=True), "UTC")
+        print("Image JD = {:.8f}".format(jd))
+        print("Image LST = {:.8f}".format(JD2LST(jd, self.platepar.lon)[0]))
 
         residuals = []
 
