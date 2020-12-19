@@ -3117,7 +3117,7 @@ class PlateTool(QtWidgets.QMainWindow):
         platepar_file = QtGui.QFileDialog.getOpenFileName(self, "Select the platepar file", self.dir_path,
                                                           "Platepar files (*.cal);;All files (*)")[0]
 
-        if platepar_file is None:
+        if platepar_file == '':
             self.platepar = platepar
             self.makeNewPlatepar()
             self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
