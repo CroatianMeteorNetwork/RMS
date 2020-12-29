@@ -28,6 +28,7 @@ import cv2
 from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
+from RMS.Routines.Image import saveImage
 
 # Import Cython functions
 import pyximport
@@ -184,21 +185,21 @@ class Compressor(multiprocessing.Process):
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(startTime))
 
         maxpixel, _, _, _ = np.split(array, 4, axis=0)
+        maxpixel = np.array(maxpixel)
 
         log.debug("Drawing text...")
 
         # Draw text to image
         font = cv2.FONT_HERSHEY_SIMPLEX
         text = self.config.stationID + " " + timestamp + " UTC"
-        cv2.putText(np.array(maxpixel), text, (10, maxpixel.shape[0] - 6), font, 0.4, (255, 255, 255), 1, \
+        cv2.putText(maxpixel, text, (10, maxpixel.shape[0] - 6), font, 0.4, (255, 255, 255), 1, \
             cv2.LINE_AA)
 
         # Save the labelled image to disk
         # try:
         log.debug("Saving...")
         # Save the file to disk
-        cv2.imwrite(os.path.join(self.config.data_dir, live_name), maxpixel, \
-            [cv2.IMWRITE_JPEG_QUALITY, 100])
+        saveImage(os.path.join(self.config.data_dir, live_name), maxpixel)
         # except:
         #     log.error("Could not save {:s} to disk!".format(live_name))
     
