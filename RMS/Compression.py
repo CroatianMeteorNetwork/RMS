@@ -311,7 +311,7 @@ class Compressor(multiprocessing.Process):
 
 
             # Save a live.jpg file to the data directory
-            if self.live_jpg:
+            if self.config.live_jpg:
                 self.saveLiveJPG(compressed, startTime)
 
 
