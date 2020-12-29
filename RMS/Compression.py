@@ -194,13 +194,13 @@ class Compressor(multiprocessing.Process):
             cv2.LINE_AA)
 
         # Save the labelled image to disk
-        try:
-            log.debug("Saving...")
-            # Save the file to disk
-            cv2.imwrite(os.path.join(self.config.data_dir, live_name), maxpixel, \
-                [cv2.IMWRITE_JPEG_QUALITY, 100])
-        except:
-            log.error("Could not save {:s} to disk!".format(live_name))
+        # try:
+        log.debug("Saving...")
+        # Save the file to disk
+        cv2.imwrite(os.path.join(self.config.data_dir, live_name), maxpixel, \
+            [cv2.IMWRITE_JPEG_QUALITY, 100])
+        # except:
+        #     log.error("Could not save {:s} to disk!".format(live_name))
     
 
 
