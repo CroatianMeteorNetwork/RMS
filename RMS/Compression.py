@@ -185,7 +185,7 @@ class Compressor(multiprocessing.Process):
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(startTime))
 
         maxpixel, _, _, _ = np.split(array, 4, axis=0)
-        maxpixel = np.array(maxpixel)
+        maxpixel = np.array(maxpixel[0])
 
         log.debug("Drawing text...")
 
