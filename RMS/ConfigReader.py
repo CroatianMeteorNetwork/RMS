@@ -268,6 +268,9 @@ class Config:
         # Enable/disable showing maxpixel on the screen (off by default)
         self.live_maxpixel_enable = False
 
+        # Enable/disable saving a live.jpg file in the data directory with the latest image
+        self.live_jpg = False
+
         # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
         self.slideshow_enable = False
 
@@ -721,6 +724,10 @@ def parseCapture(config, parser):
     # Enable/disable showing maxpixel on the screen
     if parser.has_option(section, "live_maxpixel_enable"):
         config.live_maxpixel_enable = parser.getboolean(section, "live_maxpixel_enable")
+
+    # Enable/disable showing maxpixel on the screen
+    if parser.has_option(section, "live_jpg"):
+        config.live_jpg = parser.getboolean(section, "live_jpg")
 
     # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
     if parser.has_option(section, "slideshow_enable"):

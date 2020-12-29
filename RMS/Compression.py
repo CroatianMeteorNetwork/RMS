@@ -18,11 +18,11 @@
 import os
 import time
 import logging
-
+import multiprocessing
 from math import floor
 
 import numpy as np
-import multiprocessing
+import cv2
 
 
 from RMS.VideoExtraction import Extractor
@@ -171,6 +171,32 @@ class Compressor(multiprocessing.Process):
         FFfile.write(ff, self.data_dir, filename, fmt=self.config.ff_format)
         
         return filename
+
+
+    def saveLiveJPG(self, array, startTime):
+        """ Save a live.jpg file to the data directory with the latest compressed image. """
+
+
+        # Name of the file
+        live_name = 'live.jpg'
+
+        # Generate the name for the file
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(startTime))
+
+        maxpixel, _, _, _ = np.split(array, 4, axis=0)
+
+        # Draw text to image
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        text = self.config.stationID + " " + timestamp + " UTC"
+        cv2.putText(maxpixel, text, (10, maxpixel.shape[0] - 6), font, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
+
+        # Save the labelled image to disk
+        try:
+            # Save the file to disk
+            cv2.imwrite(os.path.join(self.config.data_dir, live_name), maxpixel, \
+                [cv2.IMWRITE_JPEG_QUALITY, 100])
+        except:
+            log.error("Could not save {:s} to disk!".format(live_name))
     
 
 
@@ -282,6 +308,11 @@ class Compressor(multiprocessing.Process):
             n += 1
             
             log.debug("Saving time: {:.3f} s".format(time.time() - t))
+
+
+            # Save a live.jpg file to the data directory
+            if self.live_jpg:
+                self.saveLiveJPG(compressed, startTime)
 
 
             # Save the extracted intensitites per every field
