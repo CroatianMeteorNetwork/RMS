@@ -187,8 +187,6 @@ class Compressor(multiprocessing.Process):
         maxpixel, _, _, _ = np.split(array, 4, axis=0)
         maxpixel = np.array(maxpixel[0])
 
-        log.debug("Drawing text...")
-
         # Draw text to image
         font = cv2.FONT_HERSHEY_SIMPLEX
         text = self.config.stationID + " " + timestamp + " UTC"
@@ -196,12 +194,11 @@ class Compressor(multiprocessing.Process):
             cv2.LINE_AA)
 
         # Save the labelled image to disk
-        # try:
-        log.debug("Saving...")
-        # Save the file to disk
-        saveImage(os.path.join(self.config.data_dir, live_name), maxpixel)
-        # except:
-        #     log.error("Could not save {:s} to disk!".format(live_name))
+        try:
+            # Save the file to disk
+            saveImage(os.path.join(self.config.data_dir, live_name), maxpixel)
+        except:
+            log.error("Could not save {:s} to disk!".format(live_name))
     
 
 
@@ -317,9 +314,8 @@ class Compressor(multiprocessing.Process):
 
             # Save a live.jpg file to the data directory
             if self.config.live_jpg:
-                log.debug("Saving live jpg...")
+                log.debug("Saving live jpg")
                 self.saveLiveJPG(compressed, startTime)
-                log.debug("... live jpg saved!")
 
 
             # Save the extracted intensitites per every field
