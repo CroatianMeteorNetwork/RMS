@@ -248,6 +248,9 @@ def trackStack(dir_path, config, border=5, background_compensation=True):
             # avepixel_median = scipy.ndimage.median_filter(ff.avepixel, size=101)
             avepixel_median = cv2.medianBlur(ff.avepixel, 301)
 
+            # Make sure to avoid zero division
+            avepixel_median[avepixel_median < 1] = 1
+
             # Normalize the avepixel by subtracting out the background brightness
             avepixel = avepixel.astype(np.float)
             avepixel /= avepixel_median
