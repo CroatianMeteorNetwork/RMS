@@ -30,6 +30,7 @@ import json
 import copy
 import datetime
 
+import matplotlib.pyplot as plt
 
 import numpy as np
 import scipy.optimize
@@ -271,7 +272,7 @@ class Platepar(object):
         if preserve_centre:
 
             # Preserve centre for the radial distortion
-            if self.distortion_type.startswith("radial"):
+            if self.distortion_type.startswith("radial") and (not self.force_distortion_centre):
 
                 # Note that the radial distortion parameters are kept in the X poly array
                 self.x_poly_fwd[0], self.x_poly_fwd[1] = x_centre_fwd, y_centre_fwd
@@ -514,7 +515,49 @@ class Platepar(object):
 
             # Minimization for the radial distortion
             else:
+
+                # Compute the image fit error
                 dist_sum = np.sum((catalog_x - img_x)**2 + (catalog_y - img_y)**2)
+
+                # # Add the direction error to enhance pinpointing the center of distortion
+                # if not self.force_distortion_centre:
+
+                #     # Extract distortion centre
+                #     x0 = pp_copy.x_poly_rev[0]*self.X_res/2
+                #     y0 = pp_copy.x_poly_rev[1]*self.Y_res/2
+
+                #     # Compute image positions without any distortion, only with the shifted centre
+                #     pp_nodistort = copy.deepcopy(pp_copy)
+                #     pp_nodistort.resetDistortionParameters(preserve_centre=True)
+
+                #     # Get undistorted image coordinates of catalog stars
+                #     undistort_x, undistort_y, _ = getCatalogStarsImagePositions(catalog_stars, jd, pp_nodistort)
+
+                #     img_x = np.array(img_x)
+                #     img_y = np.array(img_y)
+
+                #     # Normalize to image center
+                #     img_x -= self.X_res/2
+                #     img_y -= self.Y_res/2
+                #     undistort_x -= self.X_res/2
+                #     undistort_y -= self.Y_res/2
+
+                    
+                #     # Compute the distance between a line (passing through predicted undistorted 
+                #     #   coordinates and image coordinaes) and the distortion centre
+                #     dx = undistort_x - img_x
+                #     dy = undistort_y - img_y
+                #     rho = (dy*x0 - dx*y0 + undistort_x*img_y - undistort_y*img_x)/np.sqrt(dy**2 + dx**2)
+
+                #     # Handle the edge case
+                #     rho[(dx == 0) & (dy == 0)] = 0
+
+                #     print(x0, y0)
+                #     for x, ux, y, uy, r in zip(img_x, undistort_x, img_y, undistort_y, rho):
+                #         print(x, ux, y, uy, r)
+
+                #     # Add this distance as a cost function
+                #     dist_sum += np.sum(np.abs(rho))
 
 
 
@@ -685,6 +728,38 @@ class Platepar(object):
 
                     # IMPORTANT NOTE - the X polynomial is used to store the fit paramters
                     self.x_poly_rev = res.x
+
+
+                    # ### TEST !!! !!! ###
+
+                    # img_x, img_y, _ = np.array(img_stars).T
+
+                    # # Extract distortion centre
+                    # x0 = self.x_poly_rev[0]*self.X_res/2
+                    # y0 = self.x_poly_rev[1]*self.Y_res/2
+
+                    # # Compute image positions without any distortion, only with the shifted centre
+                    # pp_nodistort = copy.deepcopy(self)
+                    # pp_nodistort.resetDistortionParameters(preserve_centre=True)
+
+                    # # Get undistorted image coordinates of catalog stars
+                    # undistort_x, undistort_y, _ = getCatalogStarsImagePositions(catalog_stars, jd, pp_nodistort)
+
+                    # # Normalize to image center
+                    # img_x -= self.X_res/2
+                    # img_y -= self.Y_res/2
+                    # undistort_x -= self.X_res/2
+                    # undistort_y -= self.Y_res/2
+
+                    # plt.scatter(img_x, img_y, c='r')
+                    # plt.scatter(undistort_x, undistort_y, c='b')
+
+                    # plt.scatter(x0, y0, c='k', marker='+')
+
+                    # plt.show()
+
+
+                    # ### ###
 
 
             ### ###
