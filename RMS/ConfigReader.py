@@ -172,7 +172,7 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
             if len(config_files) == 1:
                 config_file = os.path.join(os.path.abspath(dir_path), config_files[0])
 
-            else:
+            elif len(config_files) > 1:
                 print('There are several config files in the given directory, choose one and provide the full path to it:')
                 for cfile in config_files:
                     print('    {:s}'.format(os.path.join(dir_path, cfile)))
