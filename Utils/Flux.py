@@ -16,6 +16,7 @@ from RMS.Astrometry.Conversions import areaGeoPolygon, jd2Date, datetime2JD, J20
 import RMS.ConfigReader as cr
 from RMS.Formats import Platepar
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
+from RMS.Math import angularSeparation
 from RMS.Routines.FOVArea import xyHt2Geo, fovArea
 from RMS.Routines.MaskImage import loadMask, MaskStructure
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
@@ -204,7 +205,7 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
                 unmasked_ratio = 1 - np.count_nonzero(~mask_segment)/mask_segment.size
 
 
-                ## Compute the vignetting and extinction loss for the mean location
+                ## Compute the pointing direction and the vignetting and extinction loss for the mean location
 
                 x_mean = (x0 + xe)/2
                 y_mean = (y0 + ye)/2
@@ -212,9 +213,10 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
                 # Use a test pixel sum
                 test_px_sum = 400
 
-                # Compute the magnitude corrected for vignetting and extinction
-                _, _, _, mag = xyToRaDecPP([jd2Date(J2000_JD.days)], [x_mean], [y_mean], [test_px_sum], \
+                # Compute the pointing direction and magnitude corrected for vignetting and extinction
+                _, ra, dec, mag = xyToRaDecPP([jd2Date(J2000_JD.days)], [x_mean], [y_mean], [test_px_sum], \
                     platepar)
+                azim, elev = raDec2AltAz(ra[0], dec[0], J2000_JD.days, platepar.lat, platepar.lon)
 
                 # Compute the pixel sum back assuming no corrections
                 rev_level = 10**((mag[0] - platepar.mag_lev)/(-2.5))
@@ -239,7 +241,7 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
 
 
                 # Store the raw masked segment collection area, sensivitiy, and the range
-                col_areas_xy[(x_mean, y_mean)] = [area, sensitivity_ratio, r]
+                col_areas_xy[(x_mean, y_mean)] = [area, azim, elev, sensitivity_ratio, r]
 
 
                 total_area += area
@@ -390,6 +392,19 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
         print("Saved raw collection areas to:", col_areas_file_name)
 
 
+
+    # Compute the pointing of the middle of the FOV
+    _, ra_mid, dec_mid, _ = xyToRaDecPP([jd2Date(J2000_JD.days)], [platepar.X_res/2], [platepar.Y_res/2], \
+        [1], platepar, extinction_correction=False)
+    azim_mid, elev_mid = raDec2AltAz(ra_mid[0], dec_mid[0], J2000_JD.days, platepar.lat, platepar.lon)
+
+    # Compute the range to the middle point
+    ref_ht = 130000
+    r_mid, _, _, _ = xyHt2Geo(platepar, platepar.X_res/2, platepar.Y_res/2, ref_ht, indicate_limit=True, \
+        elev_limit=flux_config.elev_limit)
+
+
+
     ### Apply time-dependent corrections ###
 
     # Go through all time bins within the observation period
@@ -450,7 +465,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
 
 
             # Compute the radiant elevation
-            _, radiant_elev = raDec2AltAz(ra, dec, jd_mean, platepar.lat, platepar.lon)
+            radiant_azim, radiant_elev = raDec2AltAz(ra, dec, jd_mean, platepar.lat, platepar.lon)
 
             ### ###
 
@@ -472,6 +487,12 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
             ### ###
 
 
+            # Compute the angular velocity in the middle of the FOV
+            rad_dist_mid = angularSeparation(np.radians(radiant_azim), np.radians(radiant_elev), 
+                        np.radians(azim_mid), np.radians(elev_mid))
+            ang_vel_mid = v_init*np.sin(rad_dist_mid)/r_mid
+
+
             # Final correction area value (height-weightned)
             collection_area = 0
 
@@ -482,18 +503,20 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
                     x_mean, y_mean = img_coords
 
                     # Unpack precomputed values
-                    area, sensitivity_ratio, r = col_areas_ht[ht][img_coords]
+                    area, azim, elev, sensitivity_ratio, r = col_areas_ht[ht][img_coords]
 
 
-                    ### Compute the camera pointing direction ###
-
-
-
-                    ###
+                    # Compute the angular velocity in the middle of this block
+                    rad_dist = angularSeparation(np.radians(radiant_azim), np.radians(radiant_elev), 
+                        np.radians(azim), np.radians(elev))
+                    ang_vel = v_init*np.sin(rad_dist)/r
 
 
                     # Compute the range correction
                     range_correction = (1e5/r)**2
+
+                    # Compute angular velocity correction
+                    ang_vel_correction = ang_vel/ang_vel_mid
 
 
                     ### Apply corrections
@@ -509,9 +532,12 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
                     # Correct for the radiant elevation
                     correction_ratio *= np.sin(np.radians(radiant_elev))
 
+                    # Correct for angular velocity
+                    correction_ratio *= ang_vel_correction
+
 
                     # Add the collection area to the final estimate with the height weight
-                    #   # Raise the correction to the mass index power
+                    #   Raise the correction to the mass index power
                     collection_area += weights[ht]*area*correction_ratio**(mass_index - 1)
 
 
@@ -564,7 +590,14 @@ if __name__ == "__main__":
     # Apply wildcards to input
     ftpdetectinfo_path_list = []
     for entry in ftpdetectinfo_path:
-        ftpdetectinfo_path_list += glob.glob(entry)
+
+        # Expand wildcards and find all paths
+        paths = glob.glob(entry)
+
+        # Only take paths to files, not directories
+        paths = [entry for entry in paths if os.path.isfile(entry)]
+
+        ftpdetectinfo_path_list += paths
 
 
     # If there are no good files given, notify the user
