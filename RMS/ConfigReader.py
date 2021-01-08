@@ -492,17 +492,30 @@ def normalizeParameterMeteor(param, config, binning=1):
     return param*width_factor*height_factor
 
 
+
+def removeInlineComments(cfgparser, delimiter):
+    """ Removes inline comments from config file. """
+    for section in cfgparser.sections():
+        [cfgparser.set(section, item[0], item[1].split(delimiter)[0].strip()) for item in cfgparser.items(section)]
+
+
+
 def parse(filename, strict=True):
+
+    delimiter = ";"
 
     try:
         # Python 3
-        parser = RawConfigParser(inline_comment_prefixes=(";"), strict=strict)
+        parser = RawConfigParser(inline_comment_prefixes=(delimiter), strict=strict)
 
     except:
         # Python 2
         parser = RawConfigParser()
 
     parser.read(filename)
+
+    # Remove inline comments
+    removeInlineComments(parser, delimiter) 
     
     config = Config()
     
