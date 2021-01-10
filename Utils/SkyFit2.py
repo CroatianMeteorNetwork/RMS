@@ -359,10 +359,15 @@ class PlateTool(QtWidgets.QMainWindow):
         self.scrolls_back = 0
         self.clicked = 0
 
+        # Init the central image window
         self.view_widget = pg.GraphicsView()
         self.img_frame = ViewBox()
         self.img_frame.setAspectLocked()
         self.img_frame.setMenuEnabled(False)
+
+        # Override the scroll function
+        self.img_frame.wheelEvent = self.wheelEvent
+
         self.view_widget.setCentralWidget(self.img_frame)
         self.img_frame.invertY()
         layout.addWidget(self.view_widget, 0, 1)
@@ -1098,9 +1103,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Plot catalog stars
                 size = ((4.0 + (cat_mag_faintest - catalog_mag_filtered))/2.0)**(2*2.512*0.5)
 
-                self.cat_star_markers.setPoints(x=self.catalog_x_filtered, y=self.catalog_y_filtered, \
+                self.cat_star_markers.setData(x=self.catalog_x_filtered, y=self.catalog_y_filtered, \
                     size=size)
-                self.cat_star_markers2.setPoints(x=self.catalog_x_filtered, y=self.catalog_y_filtered, \
+                self.cat_star_markers2.setData(x=self.catalog_x_filtered, y=self.catalog_y_filtered, \
                     size=size)
             else:
                 print('No catalog stars visible!')
@@ -1139,8 +1144,8 @@ class PlateTool(QtWidgets.QMainWindow):
             # Get star coordinates
             y, x, _, _ = np.array(star_data).T
 
-            self.calstar_markers.setPoints(x=x, y=y)
-            self.calstar_markers2.setPoints(x=x, y=y)
+            self.calstar_markers.setData(x=x, y=y)
+            self.calstar_markers2.setData(x=x, y=y)
         else:
             self.calstar_markers.setData(pos=[])
             self.calstar_markers2.setData(pos=[])
@@ -2032,7 +2037,7 @@ class PlateTool(QtWidgets.QMainWindow):
         elif event.key() == QtCore.Qt.Key_R and (modifiers == QtCore.Qt.ControlModifier):
             self.star_pick_mode = not self.star_pick_mode
             if self.star_pick_mode:
-                self.img_frame.setMouseEnabled(False, False)
+                #self.img_frame.setMouseEnabled(False, False)
                 self.cursor.show()
                 self.cursor2.show()
 
@@ -2649,17 +2654,18 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.cursor.setMode(0)
 
 
-    def wheelEvent(self, event):
+    def wheelEvent(self, event, axis=None):
         """ Change star selector aperature on scroll. """
         
-        delta = event.angleDelta().y()
+        #delta = event.angleDelta().y()
+        delta = event.delta()
         modifier = QtWidgets.QApplication.keyboardModifiers()
 
-        # Handle scroll events when in the star pricking mode
-        if self.img_frame.sceneBoundingRect().contains(event.pos()) and self.star_pick_mode:
+        # Handle scroll events
+        if self.img_frame.sceneBoundingRect().contains(event.pos()):
 
-            # If control is pressed, change the size of the aperture
-            if modifier & QtCore.Qt.ControlModifier:
+            # If control is pressed in star picking mode, change the size of the aperture
+            if (modifier & QtCore.Qt.ControlModifier) and self.star_pick_mode:
 
                 # Increase aperture size
                 if delta < 0:
@@ -2680,19 +2686,26 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Unzoom the image
                 if delta < 0:
 
-                    self.scrolls_back += 1
+                    # Track number of scroll backs in the star picking mode so it resets the image after
+                    #   multiple zoomouts
+                    if self.star_pick_mode:
+                        self.scrolls_back += 1
+                    else:
+                        self.scrolls_back = 0
 
                     # Reset the zoom if scrolled back multiple times
                     if self.scrolls_back > 1:
                         self.img_frame.autoRange(padding=0)
 
                     else:
-                        self.img_frame.scaleBy([1.2, 1.2], QtCore.QPoint(self.mouse_x, self.mouse_y))
+                        #self.img_frame.scaleBy([1.2, 1.2], QtCore.QPoint(self.mouse_x, self.mouse_y))
+                        self.img_frame.wheelEventModified(event, axis)
 
                 # Zoom in the image
                 elif delta > 0:
                     self.scrolls_back = 0
-                    self.img_frame.scaleBy([0.8, 0.8], QtCore.QPoint(self.mouse_x, self.mouse_y))
+                    #self.img_frame.scaleBy([0.8, 0.8], QtCore.QPoint(self.mouse_x, self.mouse_y))
+                    self.img_frame.wheelEventModified(event, axis)
 
 
 

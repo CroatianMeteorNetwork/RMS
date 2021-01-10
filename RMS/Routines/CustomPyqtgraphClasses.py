@@ -271,15 +271,19 @@ class ViewBox(pg.ViewBox):
         self.sigMouseReleased.emit(event)
 
     def mousePressEvent(self, event):
-        if self.mouseEnabled()[0]:
-            super().mousePressEvent(event)
-        else:
-            self.sigMousePressed.emit(event)
-            event.accept()
+        # if self.mouseEnabled()[0]:
+        #     super().mousePressEvent(event)
+        # else:
+        #     self.sigMousePressed.emit(event)
+        #     event.accept()       
 
-    def wheelEvent(self, ev, axis=None):
+        self.sigMousePressed.emit(event)
+        event.accept()  
 
-        # Get the rage of X and Y of the current view
+
+    def wheelEventModified(self, ev, axis=None):
+
+        # Get the range of X and Y of the current view
         x_range, y_range = self.viewRange()
 
         # Don't zoom if it's past the limits
