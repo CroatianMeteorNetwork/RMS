@@ -291,7 +291,12 @@ class ViewBox(pg.ViewBox):
                  self.state['limits']['yLimits'] == [round(y, 8) for y in y_range])
                 and ev.delta() < 0):
 
-            super().wheelEvent(ev, axis)
+            # On some systems, some versions of code produce an error with this, and work well without
+            #   this function
+            try:
+                super().wheelEvent(ev, axis)
+            except AttributeError:
+                pass
 
 
 class ImageItem(pg.ImageItem):
