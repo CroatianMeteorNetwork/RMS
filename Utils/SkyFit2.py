@@ -2657,8 +2657,12 @@ class PlateTool(QtWidgets.QMainWindow):
     def wheelEvent(self, event, axis=None):
         """ Change star selector aperature on scroll. """
         
-        #delta = event.angleDelta().y()
-        delta = event.delta()
+        # Read the wheel direction
+        try:
+            delta = event.delta()
+        except AttributeError:
+            delta = event.angleDelta().y()   
+
         modifier = QtWidgets.QApplication.keyboardModifiers()
 
         # Handle scroll events
