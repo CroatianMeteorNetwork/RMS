@@ -286,10 +286,17 @@ class ViewBox(pg.ViewBox):
         # Get the range of X and Y of the current view
         x_range, y_range = self.viewRange()
 
+
+        # Read the wheel direction
+        try:
+            delta = ev.delta()
+        except AttributeError:
+            delta = ev.angleDelta().y() 
+
         # Don't zoom if it's past the limits
         if not ((self.state['limits']['xLimits'] == [round(x, 8) for x in x_range] or
                  self.state['limits']['yLimits'] == [round(y, 8) for y in y_range])
-                and ev.delta() < 0):
+                and delta < 0):
 
             # On some systems, some versions of code produce an error with this, and work well without
             #   this function
