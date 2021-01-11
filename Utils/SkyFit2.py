@@ -2702,13 +2702,11 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.img_frame.autoRange(padding=0)
 
                     else:
-                        #self.img_frame.scaleBy([1.2, 1.2], QtCore.QPoint(self.mouse_x, self.mouse_y))
                         self.img_frame.wheelEventModified(event, axis)
 
                 # Zoom in the image
                 elif delta > 0:
                     self.scrolls_back = 0
-                    #self.img_frame.scaleBy([0.8, 0.8], QtCore.QPoint(self.mouse_x, self.mouse_y))
                     self.img_frame.wheelEventModified(event, axis)
 
 

@@ -270,13 +270,7 @@ class ViewBox(pg.ViewBox):
     def mouseReleaseEvent(self, event):
         self.sigMouseReleased.emit(event)
 
-    def mousePressEvent(self, event):
-        # if self.mouseEnabled()[0]:
-        #     super().mousePressEvent(event)
-        # else:
-        #     self.sigMousePressed.emit(event)
-        #     event.accept()       
-
+    def mousePressEvent(self, event):       
         self.sigMousePressed.emit(event)
         event.accept()  
 
