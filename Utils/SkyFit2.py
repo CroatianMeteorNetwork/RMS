@@ -69,15 +69,20 @@ class QFOVinputDialog(QtWidgets.QDialog):
         self.alt_edit = QtWidgets.QLineEdit(self)
         self.rot_edit = QtWidgets.QLineEdit(self)
 
+
         azim_validator = QtGui.QDoubleValidator(-180, 360, 9)
         azim_validator.setNotation(QtGui.QDoubleValidator.StandardNotation)
         self.azim_edit.setValidator(azim_validator)
+
         alt_validator = QtGui.QDoubleValidator(0, 90, 9)
         alt_validator.setNotation(QtGui.QDoubleValidator.StandardNotation)
         self.alt_edit.setValidator(alt_validator)
+
         rot_validator = QtGui.QDoubleValidator(-180, 360, 9)
         rot_validator.setNotation(QtGui.QDoubleValidator.StandardNotation)
         self.rot_edit.setValidator(rot_validator)
+
+
         layout = QtWidgets.QVBoxLayout(self)
 
         layout.addWidget(QtWidgets.QLabel("Please enter FOV centre (degrees),\nAzimuth +E of due N\nRotation from vertical"))
@@ -94,11 +99,23 @@ class QFOVinputDialog(QtWidgets.QDialog):
         self.setLayout(layout)
 
     def getInputs(self):
+
         try:
-            azim = float(self.azim_edit.text()) % 360
+
+            azim = float(self.azim_edit.text())%360
             alt = float(self.alt_edit.text())
-            rot = float(self.rot_edit.text()) % 360
+            
+
+            # Read the rotation
+            rot_text = self.rot_edit.text()
+            if rot_text:
+                rot = float(rot_text)%360
+            else:
+                # If the rotation is not given, set it to 0
+                rot = 0
+
         except ValueError:
+            print("Given values could not be read as numbers!")
             return 0, 0, 0
 
         return azim, alt, rot
@@ -3121,12 +3138,6 @@ class PlateTool(QtWidgets.QMainWindow):
         """
 
         platepar = Platepar()
-
-        # Check if platepar exists in the folder, and set it as the default file name if it does
-        if self.config.platepar_name in os.listdir(self.dir_path):
-            initialfile = self.config.platepar_name
-        else:
-            initialfile = ''
 
         # Load the platepar file
         platepar_file = QtGui.QFileDialog.getOpenFileName(self, "Select the platepar file", self.dir_path,
