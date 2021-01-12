@@ -1808,9 +1808,6 @@ class PlateTool(QtWidgets.QMainWindow):
                 else:
                     self.input_path = dir_path
 
-            
-        print('input path:', self.input_path)
-
 
         # Update the possibly missing begin time
         if not hasattr(self, "beginning_time"):
