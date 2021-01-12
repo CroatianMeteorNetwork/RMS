@@ -850,8 +850,8 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
         if x_poly_rev.shape[0] > (8 - index_offset):
             k4 = x_poly_rev[8 - index_offset]
 
-        if x_poly_rev.shape[0] > (9 - index_offset):
-            k5 = x_poly_rev[9 - index_offset]
+        # if x_poly_rev.shape[0] > (9 - index_offset):
+        #     k5 = x_poly_rev[9 - index_offset]
 
     # If the polynomial distortion was used, unpack the offsets
     else:
@@ -977,27 +977,27 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
             elif dist_type == "radial3-odd":
 
                 # Compute the new radius
-                r_corr = (1.0 + k1)*r + k2*r**3
+                r_corr = r + k1*r**3
 
             # Apply the 5th order radial distortion, only odd powers
             elif dist_type == "radial5-odd":
 
                 # Compute the new radius
-                r_corr = (1.0 + k1)*r + k2*r**3 + k3*r**5
+                r_corr = r + k1*r**3 + k2*r**5
 
 
             # Apply the 7th order radial distortion, only odd powers
             elif dist_type == "radial7-odd":
 
                 # Compute the new radius
-                r_corr = (1.0 + k1)*r + k2*r**3 + k3*r**5 + k4*r**7
+                r_corr = r + k1*r**3 + k2*r**5 + k3*r**7
 
 
             # Apply the 9th order radial distortion, only odd powers
             elif dist_type == "radial9-odd":
 
                 # Compute the new radius
-                r_corr = (1.0 + k1)*r + k2*r**3 + k3*r**5 + k4*r**7 + k5*r**9
+                r_corr = r + k1*r**3 + k2*r**5 + k3*r**7 + k4*r**9
 
 
             # Compute the scaling term
@@ -1148,8 +1148,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         if x_poly_fwd.shape[0] > (8 - index_offset):
             k4 = x_poly_fwd[8 - index_offset]
 
-        if x_poly_fwd.shape[0] > (9 - index_offset):
-            k5 = x_poly_fwd[9 - index_offset]
+        # if x_poly_fwd.shape[0] > (9 - index_offset):
+        #     k5 = x_poly_fwd[9 - index_offset]
 
 
     # If the polynomial distortion was used, unpack the offsets
@@ -1261,25 +1261,25 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
             elif dist_type == "radial3-odd":
 
                 # Compute the new radius
-                r_corr = (1.0 + k1)*r + k2*r**3
+                r_corr = r + k1*r**3
 
             # Apply the 5th order radial distortion, only odd powers
             elif dist_type == "radial5-odd":
 
                 # Compute the new radius
-                r_corr = (1.0 + k1)*r + k2*r**3 + k3*r**5
+                r_corr = r + k1*r**3 + k2*r**5
 
             # Apply the 7th order radial distortion, only odd powers
             elif dist_type == "radial7-odd":
 
                 # Compute the new radius
-                r_corr = (1.0 + k1)*r + k2*r**3 + k3*r**5 + k4*r**7
+                r_corr = r + k1*r**3 + k2*r**5 + k3*r**7
 
             # Apply the 9th order radial distortion, only odd powers
             elif dist_type == "radial9-odd":
 
                 # Compute the new radius
-                r_corr = (1.0 + k1)*r + k2*r**3 + k3*r**5 + k4*r**7 + k5*r**9
+                r_corr = r + k1*r**3 + k2*r**5 + k3*r**7 + k4*r**9
 
 
             # Compute the scaling term
