@@ -662,7 +662,12 @@ class Platepar(object):
         ### ASTROMETRIC PARAMETERS FIT ###
 
         # Fit the pointing parameters (RA, Dec, rotation, scale)
-        self.fitPointing(jd, img_stars, catalog_stars)
+        #   Only do the fit for the polynomial distortion model, or the first time if the radial distortion
+        #   is used
+        if self.distortion_type.startswith("poly") \
+            or (not self.distortion_type.startswith("poly") and first_platepar_fit):
+
+            self.fitPointing(jd, img_stars, catalog_stars)
 
         ### ###
 
