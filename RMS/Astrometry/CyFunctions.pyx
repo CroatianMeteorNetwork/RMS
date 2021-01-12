@@ -1228,10 +1228,10 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
             # Compute the radius
             #r = sqrt(x_img**2 + (1.0 + xy)*y_img**2)
-            r = sqrt((x_img - x0)**2 + (1.0 + xy)*(y_img - y0)**2)
+            r = sqrt((x_img - x0)**2 + ((1.0 + xy)*(y_img - y0))**2)
 
             # Apply the asymmetry correction
-            # off_direction = atan2((1.0 + xy)*y_img, x_img)
+            # off_direction = atan2((1.0 + xy)*(y_img - y0), x_img - x0)
             # r = r*(1.0 + a1*sin(off_direction + a2))
             # r = (1.0 + a1)*(r + a2*(1.0 + xy)*y_img*cos(a3) - a2*x_img*sin(a3))
             #r = r + a1*(1.0 + xy)*y_img*cos(a2) - a1*x_img*sin(a2)
