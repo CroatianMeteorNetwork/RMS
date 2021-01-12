@@ -407,17 +407,17 @@ class Platepar(object):
                 self.vignetting_coeff = 0.001*np.hypot(1280, 720)/np.hypot(self.X_res, self.Y_res)
 
 
+    def fitPointing(self, jd, img_stars, catalog_stars):
+        """ Fit pointing parameters to the list of star image and celectial catalog coordinates.
+        At least 4 stars are needed to fit the rigid body parameters.
+        
+        New parameters are saved to the given object (self).
 
-    def fitAstrometry(self, jd, img_stars, catalog_stars, first_platepar_fit=False):
-        """ Fit astrometric parameters to the list of star image and celectial catalog coordinates.
-        At least 4 stars are needed to fit the rigid body parameters, and 13 to fit the distortion.
-        New parameters are saved to the given object.
         Arguments:
             jd: [float] Julian date of the image.
             img_stars: [list] A list of (x, y, intensity_sum) entires for every star.
             catalog_stars: [list] A list of (ra, dec, mag) entries for every star (degrees).
-        Keyword arguments:
-            first_platepar_fit: [bool] Fit a platepar from scratch. False by default.
+            
         """
 
 
@@ -475,6 +475,52 @@ class Platepar(object):
 
 
             return separation_sum
+
+
+        # Initial parameters for the astrometric fit
+        p0 = [self.RA_d, self.dec_d, self.pos_angle_ref, abs(self.F_scale)]
+
+
+        # Fit the astrometric parameters using the reverse transform for reference        
+        res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, \
+            args=(self, jd, catalog_stars, img_stars), method='SLSQP')
+
+        # # Fit the astrometric parameters using the forward transform for reference
+        #   WARNING: USING THIS MAKES THE FIT UNSTABLE
+        # res = scipy.optimize.minimize(_calcSkyResidualsAstro, p0, args=(self, jd, \
+        #     catalog_stars, img_stars), method='Nelder-Mead')
+
+        # Update fitted astrometric parameters
+        self.RA_d, self.dec_d, self.pos_angle_ref, self.F_scale = res.x
+
+
+        # Force scale to be positive
+        self.F_scale = abs(self.F_scale)
+        
+        # Compute reference Alt/Az to apparent coordinates, epoch of date
+        az_centre, alt_centre = cyTrueRaDec2ApparentAltAz( \
+            np.radians(self.RA_d), np.radians(self.dec_d), self.JD, \
+            np.radians(self.lat), np.radians(self.lon), self.refraction)
+        self.az_centre, self.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
+
+
+
+
+    def fitAstrometry(self, jd, img_stars, catalog_stars, first_platepar_fit=False):
+        """ Fit astrometric parameters to the list of star image and celectial catalog coordinates.
+        At least 4 stars are needed to fit the rigid body parameters.
+        
+        New parameters are saved to the given object (self).
+
+        Arguments:
+            jd: [float] Julian date of the image.
+            img_stars: [list] A list of (x, y, intensity_sum) entires for every star.
+            catalog_stars: [list] A list of (ra, dec, mag) entries for every star (degrees).
+
+        Keyword arguments:
+            first_platepar_fit: [bool] Fit a platepar from scratch. False by default.
+
+        """
 
 
 
@@ -564,6 +610,50 @@ class Platepar(object):
             return dist_sum
 
 
+
+        def _calcImageResidualsAstroAndDistortionRadial(params, platepar, jd, catalog_stars, img_stars):
+            """ Calculates the differences between the stars on the image and catalog stars in image
+                coordinates with the given astrometrical solution. Pointing and distortion paramters are used
+                in the fit.
+
+            Arguments:
+                ...
+                dimension: [str] 'x' for X polynomial fit, 'y' for Y polynomial fit
+            """
+
+            # Set distortion parameters
+            pp_copy = copy.deepcopy(platepar)
+
+            
+            # Unpack pointing parameters and assign to the copy of platepar used for the fit
+            ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
+
+            pp_copy = copy.deepcopy(platepar)
+
+            # Unnormalize the pointing parameters
+            pp_copy.RA_d = (360*ra_ref)%(360)
+            pp_copy.dec_d = -90 + (90*dec_ref + 90)%(180.000001)
+            pp_copy.pos_angle_ref = (360*pos_angle_ref)%(360)
+            pp_copy.F_scale = abs(F_scale)
+
+
+            # Assign distortion parameters
+            pp_copy.x_poly_rev = params[4:]
+
+
+            img_x, img_y, _ = img_stars.T
+
+            # Get image coordinates of catalog stars
+            catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy)
+
+
+            # Calculate the sum of squared distances between image stars and catalog stars
+            dist_sum = np.sum((catalog_x - img_x)**2 + (catalog_y - img_y)**2)
+
+
+            return dist_sum
+
+
         # Modify the residuals function so that it takes a list of arguments
         def _calcImageResidualsDistortionListArguments(params, *args, **kwargs):
             return [_calcImageResidualsDistortion(param_line, *args, **kwargs) for param_line in params]
@@ -615,35 +705,14 @@ class Platepar(object):
         #     img_stars, 'y'))
 
 
+
         ### ASTROMETRIC PARAMETERS FIT ###
 
-        # Initial parameters for the astrometric fit
-        p0 = [self.RA_d, self.dec_d, self.pos_angle_ref, abs(self.F_scale)]
-
-
-        # Fit the astrometric parameters using the reverse transform for reference        
-        res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, \
-            args=(self, jd, catalog_stars, img_stars), method='SLSQP')
-
-        # # Fit the astrometric parameters using the forward transform for reference
-        #   WARNING: USING THIS MAKES THE FIT UNSTABLE
-        # res = scipy.optimize.minimize(_calcSkyResidualsAstro, p0, args=(self, jd, \
-        #     catalog_stars, img_stars), method='Nelder-Mead')
-
-        # Update fitted astrometric parameters
-        self.RA_d, self.dec_d, self.pos_angle_ref, self.F_scale = res.x
-
-
-        # Force scale to be positive
-        self.F_scale = abs(self.F_scale)
-        
-        # Compute reference Alt/Az to apparent coordinates, epoch of date
-        az_centre, alt_centre = cyTrueRaDec2ApparentAltAz( \
-            np.radians(self.RA_d), np.radians(self.dec_d), self.JD, \
-            np.radians(self.lat), np.radians(self.lon), self.refraction)
-        self.az_centre, self.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
+        # Fit the pointing parameters (RA, Dec, rotation, scale)
+        self.fitPointing(jd, img_stars, catalog_stars)
 
         ### ###
+
 
 
         ### DISTORTION FIT ###
@@ -721,13 +790,42 @@ class Platepar(object):
 
                 else:
 
+
+                    # Initial parameters for the pointing and distortion fit (normalize to the 0-1 range)
+                    p0  = [self.RA_d/360, self.dec_d/180, self.pos_angle_ref/360, abs(self.F_scale)]
+                    p0 += self.x_poly_rev.tolist()
+
+
                     # Fit the radial distortion - the X polynomial is used to store the fit paramters
-                    res = scipy.optimize.minimize(_calcImageResidualsDistortion, self.x_poly_rev, \
-                        args=(self, jd, catalog_stars, img_stars, 'radial'), method='Nelder-Mead', \
+                    res = scipy.optimize.minimize(_calcImageResidualsAstroAndDistortionRadial, p0, \
+                        args=(self, jd, catalog_stars, img_stars), method='Nelder-Mead', \
                         options={'maxiter': 10000, 'adaptive': True})
 
-                    # IMPORTANT NOTE - the X polynomial is used to store the fit paramters
-                    self.x_poly_rev = res.x
+
+                    # Update fitted astrometric parameters (Unnormalize the pointing parameters)
+                    ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
+                    self.RA_d = (360*ra_ref)%(360)
+                    self.dec_d = -90 + (90*dec_ref + 90)%(180.000001)
+                    self.pos_angle_ref = (360*pos_angle_ref)%(360)
+                    self.F_scale = abs(F_scale)
+
+
+                    # Extract distortion parameters, IMPORTANT NOTE - the X polynomial is used to store the 
+                    #   fit paramters
+                    self.x_poly_rev = res.x[4:]
+                    
+                    
+
+                    ### OLD ###
+
+                    # # Fit the radial distortion - the X polynomial is used to store the fit paramters
+                    # res = scipy.optimize.minimize(_calcImageResidualsDistortion, self.x_poly_rev, \
+                    #     args=(self, jd, catalog_stars, img_stars, 'radial'), method='Nelder-Mead', \
+                    #     options={'maxiter': 10000, 'adaptive': True})
+
+                    # # IMPORTANT NOTE - the X polynomial is used to store the fit paramters
+                    # self.x_poly_rev = res.x
+
 
 
                     # ### TEST !!! !!! ###

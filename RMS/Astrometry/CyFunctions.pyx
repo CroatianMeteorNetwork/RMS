@@ -928,14 +928,14 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
 
             # If the 3rd order radial term is used, apply it
             if dist_type.endswith("+radial3") or dist_type.endswith("+radial5"):
-                dx += x_poly_rev[12]*r**3
-                dy += y_poly_rev[12]*r**3
+                dx += x_poly_rev[12]*x*r**3
+                dy += y_poly_rev[12]*y*r**3
 
 
             # If the 5th order radial term is used, apply it
             if dist_type.endswith("+radial5"):
-                dx += x_poly_rev[13]*r**5
-                dy += y_poly_rev[13]*r**5
+                dx += x_poly_rev[13]*x*r**5
+                dy += y_poly_rev[13]*y*r**5
 
 
         # Apply a radial distortion
@@ -959,19 +959,19 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
             if dist_type == "radial3-all":
 
                 # Compute the new radius
-                r_corr = (1.0 - k1 - k2)*r + k1*r**2 - k2*r**3
+                r_corr = r + k1*r**2 + k2*r**3
 
             # Apply the 4th order radial distortion, all powers
             elif dist_type == "radial4-all":
 
                 # Compute the new radius
-                r_corr = (1.0 - k1 - k2 - k3)*r + k1*r**2 - k2*r**3 + k3*r**4
+                r_corr = r + k1*r**2 + k2*r**3 + k3*r**4
 
             # Apply the 5th order radial distortion, all powers
             elif dist_type == "radial5-all":
 
                 # Compute the new radius
-                r_corr = (1.0 - k1 - k2 - k3 - k4)*r + k1*r**2 - k2*r**3 + k3*r**4 - k4*r**5
+                r_corr = r + k1*r**2 + k2*r**3 + k3*r**4 + k4*r**5
 
             # Apply the 3rd order radial distortion, only odd powers
             elif dist_type == "radial3-odd":
@@ -1008,8 +1008,8 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
 
 
             # Compute distortion offsets
-            dx = (x - x0)*r_scale
-            dy = (y - y0)*r_scale/(1.0 + xy)
+            dx = x*r_scale + x0
+            dy = y*r_scale/(1.0 + xy) + y0
 
 
 
@@ -1211,20 +1211,21 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
             # If the 3rd order radial term is used, apply it
             if dist_type.endswith("+radial3") or dist_type.endswith("+radial5"):
-                dx += x_poly_fwd[12]*r**3
-                dy += y_poly_fwd[12]*r**3
+                dx += x_poly_fwd[12]*x_img*r**3
+                dy += y_poly_fwd[12]*y_img*r**3
 
             # If the 5th order radial term is used, apply it
             if dist_type.endswith("+radial5"):
-                dx += x_poly_fwd[13]*r**5
-                dy += y_poly_fwd[13]*r**5
+                dx += x_poly_fwd[13]*x_img*r**5
+                dy += y_poly_fwd[13]*y_img*r**5
 
 
         # Apply a radial distortion
         elif dist_type.startswith("radial"):
 
             # Compute the radius
-            r = sqrt(x_img**2 + (1.0 + xy)*y_img**2)
+            #r = sqrt(x_img**2 + (1.0 + xy)*y_img**2)
+            r = sqrt((x_img - x0)**2 + (1.0 + xy)*(y_img - y0)**2)
 
             # Apply the asymmetry correction
             # off_direction = atan2((1.0 + xy)*y_img, x_img)
@@ -1242,19 +1243,19 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
             if dist_type == "radial3-all":
 
                 # Compute the new radius
-                r_corr = (1.0 - k1 - k2)*r + k1*r**2 - k2*r**3
+                r_corr = r + k1*r**2 + k2*r**3
 
             # Apply the 4th order radial distortion, all powers
             elif dist_type == "radial4-all":
 
                 # Compute the new radius
-                r_corr = (1.0 - k1 - k2 - k3)*r + k1*r**2 - k2*r**3 + k3*r**4
+                r_corr = r + k1*r**2 + k2*r**3 + k3*r**4
 
             # Apply the 5th order radial distortion, all powers
             elif dist_type == "radial5-all":
 
                 # Compute the new radius
-                r_corr = (1.0 - k1 - k2 - k3 - k4)*r + k1*r**2 - k2*r**3 + k3*r**4 - k4*r**5
+                r_corr = r + k1*r**2 + k2*r**3 + k3*r**4 + k4*r**5
 
             # Apply the 3rd order radial distortion, only odd powers
             elif dist_type == "radial3-odd":
@@ -1288,8 +1289,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
                 r_scale = (r_corr/r - 1)
 
             # Compute offsets
-            dx = (x_img - x0)*r_scale
-            dy = (y_img - y0)*r_scale*(1.0 + xy)
+            dx = (x_img - x0)*r_scale - x0
+            dy = (y_img - y0)*r_scale*(1.0 + xy) - y0
 
 
         # Correct image coordinates for distortion
