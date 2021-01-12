@@ -784,22 +784,30 @@ class Platepar(object):
             else:
 
 
+                ### FORWARD MAPPING FIT ###
 
-                ### REVERSE MAPPING FIT ###
+
+                # # Fit the radial distortion - the X polynomial is used to store the fit paramters
+                # res = scipy.optimize.minimize(_calcSkyResidualsDistortion, self.x_poly_fwd, \
+                #     args=(self, jd, catalog_stars, img_stars, 'radial'), method='Nelder-Mead', \
+                #     options={'maxiter': 10000, 'adaptive': True})
 
 
+                # # Extract distortion parameters, IMPORTANT NOTE - the X polynomial is used to store the 
+                # #   fit paramters
+                # self.x_poly_fwd = res.x
+
+
+
+                # Fitting the pointing direction below! - if used, it should be put BEFORE the reverse fit!
                 # Initial parameters for the pointing and distortion fit (normalize to the 0-1 range)
-                p0  = [self.RA_d/360.0, self.dec_d/90.0, self.pos_angle_ref/360.0, abs(self.F_scale)]
-                p0 += self.x_poly_rev.tolist()
-
+                p0  = [self.RA_d/360, self.dec_d/90, self.pos_angle_ref/360, abs(self.F_scale)]
+                p0 += self.x_poly_fwd.tolist()
 
                 # Fit the radial distortion - the X polynomial is used to store the fit paramters
-                res = scipy.optimize.minimize(_calcImageResidualsAstroAndDistortionRadial, p0, \
+                res = scipy.optimize.minimize(_calcSkyResidualsAstroAndDistortionRadial, p0, \
                     args=(self, jd, catalog_stars, img_stars), method='Nelder-Mead', \
                     options={'maxiter': 10000, 'adaptive': True})
-
-                print(res)
-
 
                 # Update fitted astrometric parameters (Unnormalize the pointing parameters)
                 ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
@@ -808,60 +816,29 @@ class Platepar(object):
                 self.pos_angle_ref = (360*pos_angle_ref)%(360)
                 self.F_scale = abs(F_scale)
 
-                # Compute reference Alt/Az to apparent coordinates, epoch of date
-                az_centre, alt_centre = cyTrueRaDec2ApparentAltAz( \
-                    np.radians(self.RA_d), np.radians(self.dec_d), self.JD, \
-                    np.radians(self.lat), np.radians(self.lon), self.refraction)
-                self.az_centre, self.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
-
 
                 # Extract distortion parameters, IMPORTANT NOTE - the X polynomial is used to store the 
                 #   fit paramters
-                self.x_poly_rev = res.x[4:]
-
-
-
-                # ## Distortion-only fit below!
-
-                # # Fit the radial distortion - the X polynomial is used to store the fit paramters
-                # res = scipy.optimize.minimize(_calcImageResidualsDistortion, self.x_poly_rev, \
-                #     args=(self, jd, catalog_stars, img_stars, 'radial'), method='Nelder-Mead', \
-                #     options={'maxiter': 10000, 'adaptive': True})
-
-
-                # # Extract distortion parameters, IMPORTANT NOTE - the X polynomial is used to store the 
-                # #   fit paramters
-                # self.x_poly_rev = res.x
-
+                self.x_poly_fwd = res.x[4:]
 
                 ### ###
 
 
 
-                ### FORWARD MAPPING FIT ###
+
+                ### REVERSE MAPPING FIT ###
 
 
-                # Fit the radial distortion - the X polynomial is used to store the fit paramters
-                res = scipy.optimize.minimize(_calcSkyResidualsDistortion, self.x_poly_fwd, \
-                    args=(self, jd, catalog_stars, img_stars, 'radial'), method='Nelder-Mead', \
-                    options={'maxiter': 10000, 'adaptive': True})
-
-
-                # Extract distortion parameters, IMPORTANT NOTE - the X polynomial is used to store the 
-                #   fit paramters
-                self.x_poly_fwd = res.x
-
-
-
-                ## Fitting the pointing direction below! - if used, it should be put BEFORE the reverse fit!
                 # # Initial parameters for the pointing and distortion fit (normalize to the 0-1 range)
-                # p0  = [self.RA_d/360, self.dec_d/90, self.pos_angle_ref/360, abs(self.F_scale)]
-                # p0 += self.x_poly_fwd.tolist()
+                # p0  = [self.RA_d/360.0, self.dec_d/90.0, self.pos_angle_ref/360.0, abs(self.F_scale)]
+                # p0 += self.x_poly_rev.tolist()
+
 
                 # # Fit the radial distortion - the X polynomial is used to store the fit paramters
-                # res = scipy.optimize.minimize(_calcSkyResidualsAstroAndDistortionRadial, p0, \
+                # res = scipy.optimize.minimize(_calcImageResidualsAstroAndDistortionRadial, p0, \
                 #     args=(self, jd, catalog_stars, img_stars), method='Nelder-Mead', \
                 #     options={'maxiter': 10000, 'adaptive': True})
+
 
                 # # Update fitted astrometric parameters (Unnormalize the pointing parameters)
                 # ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
@@ -870,12 +847,37 @@ class Platepar(object):
                 # self.pos_angle_ref = (360*pos_angle_ref)%(360)
                 # self.F_scale = abs(F_scale)
 
+                # # Compute reference Alt/Az to apparent coordinates, epoch of date
+                # az_centre, alt_centre = cyTrueRaDec2ApparentAltAz( \
+                #     np.radians(self.RA_d), np.radians(self.dec_d), self.JD, \
+                #     np.radians(self.lat), np.radians(self.lon), self.refraction)
+                # self.az_centre, self.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
+
 
                 # # Extract distortion parameters, IMPORTANT NOTE - the X polynomial is used to store the 
                 # #   fit paramters
-                # self.x_poly_fwd = res.x[4:]
+                # self.x_poly_rev = res.x[4:]
+
+
+
+                ## Distortion-only fit below!
+
+                # Fit the radial distortion - the X polynomial is used to store the fit paramters
+                res = scipy.optimize.minimize(_calcImageResidualsDistortion, self.x_poly_rev, \
+                    args=(self, jd, catalog_stars, img_stars, 'radial'), method='Nelder-Mead', \
+                    options={'maxiter': 10000, 'adaptive': True})
+
+
+                # Extract distortion parameters, IMPORTANT NOTE - the X polynomial is used to store the 
+                #   fit paramters
+                self.x_poly_rev = res.x
+
 
                 ### ###
+
+
+
+
 
 
 
