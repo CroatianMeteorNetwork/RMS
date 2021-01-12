@@ -948,7 +948,10 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
             #off_direction = atan2(y, x)
             #r = r*(1.0 + a1*sin(off_direction + a2))
             #r = (1.0 + a1)*(r + a2*y*cos(a3) - a2*x*sin(a3))
-            r = (r + a1*y*cos(a2) - a1*x*sin(a2))
+            #r = (r + a1*y*cos(a2) - a1*x*sin(a2))
+            r = r + a1*y*cos(a2) - a1*x*sin(a2)
+            #r_corr = r_corr + (-a1*y*cos(a2) + a1*x*sin(a2))/((x_res/2.0)**2)
+
 
             # Normalize radius to horizontal size
             r = r/(x_res/2.0)
@@ -1231,7 +1234,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
             # off_direction = atan2((1.0 + xy)*y_img, x_img)
             # r = r*(1.0 + a1*sin(off_direction + a2))
             # r = (1.0 + a1)*(r + a2*(1.0 + xy)*y_img*cos(a3) - a2*x_img*sin(a3))
-            r = (r + a1*(1.0 + xy)*y_img*cos(a2) - a1*x_img*sin(a2))
+            #r = r + a1*(1.0 + xy)*y_img*cos(a2) - a1*x_img*sin(a2)
+            r = r + a1*(1.0 + xy)*(y_img - y0)*cos(a2) - a1*(x_img - x0)*sin(a2)
 
             # Normalize radius to horizontal size
             r = r/(x_res/2.0)

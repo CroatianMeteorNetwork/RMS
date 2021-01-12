@@ -626,7 +626,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigForceDistortionToggled.connect(self.onFitParametersChanged)
 
         # Connect astronmetry & photometry buttons to functions
-        self.tab.param_manager.sigFitPressed.connect(lambda: self.fitPickedStars(first_platepar_fit=False))
+        self.tab.param_manager.sigFitPressed.connect(lambda: self.fitPickedStars())
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
         self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
         self.tab.param_manager.sigResetDistortionPressed.connect(self.resetDistortion)
@@ -1538,6 +1538,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateFitResiduals()
         self.tab.param_manager.updatePlatepar()
 
+        self.first_platepar_fit = True
+
 
 
     def nextImg(self, n=1):
@@ -1795,6 +1797,20 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, "input_path"):
             self.input_path = dir_path
 
+        # Update the input path if it exists
+        else:
+            if self.input_path:
+
+                # Check if the last part of the input path is a file or a directory (check for the dot)
+                tmp_name = os.path.basename(self.input_path)
+                if "." in tmp_name:
+                    self.input_path = os.path.join(dir_path, tmp_name)
+                else:
+                    self.input_path = dir_path
+
+            
+        print('input path:', self.input_path)
+
 
         # Update the possibly missing begin time
         if not hasattr(self, "beginning_time"):
@@ -2036,20 +2052,23 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Toggle the star picking mode
         elif event.key() == QtCore.Qt.Key_R and (modifiers == QtCore.Qt.ControlModifier):
+
             self.star_pick_mode = not self.star_pick_mode
+
             if self.star_pick_mode:
                 #self.img_frame.setMouseEnabled(False, False)
                 self.cursor.show()
                 self.cursor2.show()
 
                 self.star_pick_info.show()
+
             else:
                 self.img_frame.setMouseEnabled(True, True)
                 self.cursor2.hide()
                 self.cursor.hide()
 
                 self.star_pick_info.hide()
-            # updates automatically
+
 
         # Toggle grid
         elif (event.key() == QtCore.Qt.Key_G) and (modifiers == QtCore.Qt.ControlModifier):
@@ -2240,13 +2259,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # If the first platepar is being made, do the fit twice
                 if self.first_platepar_fit:
-                    self.fitPickedStars(first_platepar_fit=True)
-                    self.fitPickedStars(first_platepar_fit=True)
-                    self.first_platepar_fit = False
+                    self.fitPickedStars()
+                    self.fitPickedStars()
 
                 else:
                     # Otherwise, only fit the once
-                    self.fitPickedStars(first_platepar_fit=False)
+                    self.fitPickedStars()
 
                 print('Plate fitted!')
 
@@ -2783,7 +2801,7 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 self.v_zoom.move(QtCore.QPoint(0, 0))
 
-        if self.show_key_help == 1 and self.star_pick_mode:
+        if (self.show_key_help == 1) and self.star_pick_mode:
             self.star_pick_info.show()
         else:
             self.star_pick_info.hide()
@@ -3576,12 +3594,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return min_index
 
-    def fitPickedStars(self, first_platepar_fit=False):
+    def fitPickedStars(self):
         """ Fit stars that are manually picked. The function first only estimates the astrometry parameters
             without the distortion, then just the distortion parameters, then all together.
-
-        Keyword arguments:
-            first_platepar_fit: [bool] First fit of the platepar with initial values.
 
         """
 
@@ -3603,7 +3618,8 @@ class PlateTool(QtWidgets.QMainWindow):
         jd = date2JD(*self.img_handle.currentTime())
 
         # Fit the platepar to paired stars
-        self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=first_platepar_fit)
+        self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit)
+        self.first_platepar_fit = False
 
         # Show platepar parameters
         print()
