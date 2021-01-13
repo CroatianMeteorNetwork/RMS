@@ -499,7 +499,7 @@ class Platepar(object):
 
 
 
-    def fitAstrometry(self, jd, img_stars, catalog_stars, first_platepar_fit=False):
+    def fitAstrometry(self, jd, img_stars, catalog_stars, first_platepar_fit=False, fit_only_pointing=False):
         """ Fit astrometric parameters to the list of star image and celectial catalog coordinates.
         At least 4 stars are needed to fit the rigid body parameters.
         
@@ -512,6 +512,7 @@ class Platepar(object):
 
         Keyword arguments:
             first_platepar_fit: [bool] Fit a platepar from scratch. False by default.
+            fit_only_pointing: [bool] Only fit the pointing parameters, and not distortion.
 
         """
 
@@ -707,7 +708,7 @@ class Platepar(object):
         #   Only do the fit for the polynomial distortion model, or the first time if the radial distortion
         #   is used
         if self.distortion_type.startswith("poly") \
-            or (not self.distortion_type.startswith("poly") and first_platepar_fit):
+            or (not self.distortion_type.startswith("poly") and first_platepar_fit) or fit_only_pointing:
 
             self.fitPointing(jd, img_stars, catalog_stars)
 
@@ -720,8 +721,7 @@ class Platepar(object):
         # Fit the polynomial distortion parameters if there are enough picked stars
         min_fit_stars = self.poly_length + 1
 
-
-        if len(img_stars) >= min_fit_stars:
+        if (len(img_stars) >= min_fit_stars) and (not fit_only_pointing):
 
             # Fit the polynomial distortion
             if self.distortion_type.startswith("poly"):
@@ -878,13 +878,9 @@ class Platepar(object):
 
 
 
-
-
-
-
-
         else:
-            print('Too few stars to fit the distortion, only the astrometric parameters where fitted!')
+            if (len(img_stars) < min_fit_stars):
+                print('Too few stars to fit the distortion, only the astrometric parameters where fitted!')
 
 
         # Set the list of stars used for the fit to the platepar

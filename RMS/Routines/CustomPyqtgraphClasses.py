@@ -1239,6 +1239,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigPhotometryPressed = QtCore.pyqtSignal()
     sigResetDistortionPressed = QtCore.pyqtSignal()
 
+    sigFitOnlyPointingToggled = QtCore.pyqtSignal()
     sigRefractionToggled = QtCore.pyqtSignal()
     sigEqAspectToggled = QtCore.pyqtSignal()
     sigAsymmetryCorrToggled = QtCore.pyqtSignal()
@@ -1276,6 +1277,10 @@ class PlateparParameterManager(QtWidgets.QWidget):
         full_layout.addWidget(group)
 
         # check boxes
+        self.fit_only_pointing = QtWidgets.QCheckBox('Only fit pointing')
+        self.fit_only_pointing.released.connect(self.onFitOnlyPointingToggled)
+        full_layout.addWidget(self.fit_only_pointing)
+
         self.refraction = QtWidgets.QCheckBox('Refraction')
         self.refraction.released.connect(self.onRefractionToggled)
         full_layout.addWidget(self.refraction)
@@ -1414,6 +1419,11 @@ class PlateparParameterManager(QtWidgets.QWidget):
         form.addRow(self.fit_parameters)
 
         self.updatePlatepar()
+
+
+    def onFitOnlyPointingToggled(self):
+        self.gui.fit_only_pointing = self.fit_only_pointing.isChecked()
+        self.sigFitOnlyPointingToggled.emit()
 
     def onRefractionToggled(self):
         self.gui.platepar.refraction = self.refraction.isChecked()

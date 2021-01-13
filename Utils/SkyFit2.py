@@ -213,6 +213,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Flag indicating that the first platepar fit has to be done
         self.first_platepar_fit = True
 
+        # Flag indicating that 
+        self.fit_only_pointing = False
+
         ###################################################################################################
         # LOADING STARS
 
@@ -621,6 +624,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigFitParametersChanged.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigExtinctionChanged.connect(self.onExtinctionChanged)
 
+        self.tab.param_manager.sigFitOnlyPointingToggled.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigRefractionToggled.connect(self.onRefractionChanged)
         self.tab.param_manager.sigEqAspectToggled.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigForceDistortionToggled.connect(self.onFitParametersChanged)
@@ -1789,6 +1793,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Set the dir path in case it changed
         self.dir_path = dir_path
 
+
         # Update the dir path in the img_handle
         if hasattr(self, "img_handle"):
             self.img_handle.dir_path = dir_path
@@ -1796,6 +1801,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update possibly missing input_path variable
         if not hasattr(self, "input_path"):
             self.input_path = dir_path
+
+        # Update the possibly missing
+        if not hasattr(self, "fit_only_pointing"):
+            self.fit_only_pointing = False
+
 
         # Update the input path if it exists
         else:
@@ -3615,7 +3625,8 @@ class PlateTool(QtWidgets.QMainWindow):
         jd = date2JD(*self.img_handle.currentTime())
 
         # Fit the platepar to paired stars
-        self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit)
+        self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit,\
+            fit_only_pointing=self.fit_only_pointing)
         self.first_platepar_fit = False
 
         # Show platepar parameters
