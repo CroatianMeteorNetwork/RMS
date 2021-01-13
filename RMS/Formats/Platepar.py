@@ -824,6 +824,9 @@ class Platepar(object):
                 ### ###
 
 
+                # If this is the first fit of the distortion, set the forward parametrs to be equal to the reverse
+                if first_platepar_fit:
+                    self.x_poly_rev = np.array(self.x_poly_fwd)
 
 
                 ### REVERSE MAPPING FIT ###
@@ -1343,9 +1346,9 @@ class Platepar(object):
                 out_str += "aspect-1, "
 
             if self.asymmetry_corr:
-                out_str += "      a1,       a2, "
+                out_str += "      a1, a2 (deg), "
 
-            out_str +="      k1,       k2,       k3,       k4,       k5\n"
+            out_str +="      k1,       k2,       k3,       k4\n"
             
             dist_string = ""
 
@@ -1365,6 +1368,23 @@ class Platepar(object):
                 x_poly_fwd_print[1] = -self.Y_res/2.0 + (x_poly_fwd_print[1] + self.Y_res/2.0)%self.Y_res
                 x_poly_rev_print[0] = -self.X_res/2.0 + (x_poly_rev_print[0] + self.X_res/2.0)%self.X_res
                 x_poly_rev_print[1] = -self.Y_res/2.0 + (x_poly_rev_print[1] + self.Y_res/2.0)%self.Y_res
+
+            
+            # Convert the asymmetry correction parameter to degrees
+            if self.asymmetry_corr:
+                asym_ang_index = 4
+                
+                if self.force_distortion_centre:
+                    asym_ang_index -= 2
+
+                if self.equal_aspect:
+                    asym_ang_index -= 1
+
+                x_poly_fwd_print[asym_ang_index] = np.degrees((2*np.pi*x_poly_fwd_print[asym_ang_index]) \
+                    %(2*np.pi))
+                x_poly_rev_print[asym_ang_index] = np.degrees((2*np.pi*x_poly_rev_print[asym_ang_index]) \
+                    %(2*np.pi))
+
 
 
 
