@@ -571,7 +571,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # If the file is being loaded, detect the input type
-        if loaded_file and (not hasattr(self, "img_handle")):
+        if loaded_file and ((not hasattr(self, "img_handle")) or (img_handle is None)):
 
             if hasattr(self, "beginning_time"):
                 beginning_time = self.beginning_time
@@ -1802,11 +1802,6 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, "input_path"):
             self.input_path = dir_path
 
-        # Update the possibly missing
-        if not hasattr(self, "fit_only_pointing"):
-            self.fit_only_pointing = False
-
-
         # Update the input path if it exists
         else:
             if self.input_path:
@@ -1817,6 +1812,11 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.input_path = os.path.join(dir_path, tmp_name)
                 else:
                     self.input_path = dir_path
+
+
+        # Update the possibly missing params
+        if not hasattr(self, "fit_only_pointing"):
+            self.fit_only_pointing = False
 
 
         # Update the possibly missing begin time
@@ -3077,7 +3077,7 @@ class PlateTool(QtWidgets.QMainWindow):
         img_handle = None
 
         # Load a state file
-        if load and os.path.isfile(self.input_path):
+        if os.path.isfile(self.input_path):
             img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time)
         
         # Load given data from a folder
@@ -3224,7 +3224,7 @@ class PlateTool(QtWidgets.QMainWindow):
     def savePlatepar(self):
         """  Save platepar to a file """
         # If the platepar is new, save it to the working directory
-        if not self.platepar_file:
+        if (not self.platepar_file) or (not os.path.isfile(self.platepar_file)):
             self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
 
         # Save the platepar file

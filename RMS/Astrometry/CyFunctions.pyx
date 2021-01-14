@@ -949,7 +949,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
             #r = r*(1.0 + a1*sin(off_direction + a2))
             #r = (1.0 + a1)*(r + a2*y*cos(a3) - a2*x*sin(a3))
             #r = (r + a1*y*cos(a2) - a1*x*sin(a2))
-            r = r - a1*y*cos(a2 - pi) + a1*x*sin(a2 - pi)
+            r = r + a1*y*cos(a2) - a1*x*sin(a2)
             #r_corr = r_corr + (-a1*y*cos(a2) + a1*x*sin(a2))/((x_res/2.0)**2)
 
 
