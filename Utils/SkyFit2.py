@@ -569,17 +569,27 @@ class PlateTool(QtWidgets.QMainWindow):
         ###################################################################################################
         # RIGHT WIDGET
 
-
         # If the file is being loaded, detect the input type
-        if loaded_file and ((not hasattr(self, "img_handle")) or (img_handle is None)):
+        if loaded_file:
+            detect_input_type = False
 
-            if hasattr(self, "beginning_time"):
-                beginning_time = self.beginning_time
+            if not hasattr(self, "img_handle"):
+                detect_input_type = True
+
             else:
-                beginning_time = None
+                if self.img_handle is None:
+                    detect_input_type = True
 
-            # Detect data input type and init the image handle
-            self.detectInputType(load=True, beginning_time=beginning_time)
+
+            if detect_input_type:
+
+                if hasattr(self, "beginning_time"):
+                    beginning_time = self.beginning_time
+                else:
+                    beginning_time = None
+
+                # Detect data input type and init the image handle
+                self.detectInputType(load=True, beginning_time=beginning_time)
 
 
         # adding img

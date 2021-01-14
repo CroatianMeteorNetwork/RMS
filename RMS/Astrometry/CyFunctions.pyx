@@ -1012,7 +1012,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
 
             # Compute distortion offsets
             dx = x*r_scale - x0
-            dy = y*r_scale/(1.0 + xy) - y0
+            dy = y*r_scale/(1.0 + xy) - y0 + y*xy
 
 
 
@@ -1294,7 +1294,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
             # Compute offsets
             dx = (x_img - x0)*r_scale - x0
-            dy = (y_img - y0)*r_scale*(1.0 + xy) - y0*(1.0 + xy)
+            dy = (y_img - y0)*r_scale*(1.0 + xy) - y0*(1.0 + xy) + y_img*xy
 
 
         # Correct image coordinates for distortion
