@@ -1012,7 +1012,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
 
             # Compute distortion offsets
             dx = x*r_scale - x0
-            dy = y*r_scale/(1.0 + xy) - y0 + y*xy
+            dy = y*r_scale/(1.0 + xy) - y0 + y*(1.0 - 1.0/(1.0 + xy))
 
 
 
