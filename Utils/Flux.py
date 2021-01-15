@@ -9,6 +9,7 @@ import json
 import collections
 
 import numpy as np
+import matplotlib.pyplot as plt
 import scipy.stats
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
@@ -355,13 +356,18 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
 
 
 
-
+    peak_mags = []
     for key in associations:
         meteor, shower = associations[key]
 
         if shower is not None:
 
-            print(meteor.jdt_ref, shower.name)
+            # Compute peak magnitude
+            peak_mag = np.min(meteor.mag_array)
+
+            peak_mags.append(peak_mag)
+
+            print("{:.6f}, {:3s}, {:+.2f}".format(meteor.jdt_ref, shower.name, peak_mag))
 
 
 
@@ -399,10 +405,57 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
     azim_mid, elev_mid = raDec2AltAz(ra_mid[0], dec_mid[0], J2000_JD.days, platepar.lat, platepar.lon)
 
     # Compute the range to the middle point
-    ref_ht = 130000
+    ref_ht = 100000
     r_mid, _, _, _ = xyHt2Geo(platepar, platepar.X_res/2, platepar.Y_res/2, ref_ht, indicate_limit=True, \
         elev_limit=flux_config.elev_limit)
 
+
+    ### Compute the average angular velocity to which the flux variation throught the night will be normalized 
+    #   The ang vel is of the middle of the FOV in the middle of observations
+
+    # Middle Julian date of the night
+    jd_night_mid = (datetime2JD(dt_beg) + datetime2JD(dt_end))/2
+
+    # Compute the apparent radiant
+    ra, dec, v_init = shower.computeApparentRadiant(platepar.lat, platepar.lon, jd_night_mid)
+
+    # Compute the radiant elevation
+    radiant_azim, radiant_elev = raDec2AltAz(ra, dec, jd_night_mid, platepar.lat, platepar.lon)
+
+    # Compute the angular velocity in the middle of the FOV
+    rad_dist_night_mid = angularSeparation(np.radians(radiant_azim), np.radians(radiant_elev), 
+                np.radians(azim_mid), np.radians(elev_mid))
+    ang_vel_night_mid = v_init*np.sin(rad_dist_night_mid)/r_mid
+
+    ###
+
+
+    #
+
+    # Compute the average limiting magnitude to which all flux will be normalized
+
+    # Full width at half-maximum of stars (px)
+    star_stddev = 1.5
+    fwhm = 2.355*star_stddev
+
+    # Compute the theoretical stellar limiting magnitude
+    bkg_stddev = 6.0
+    star_sum = 2*np.pi*(config.k1_det*bkg_stddev + config.j1_det)*star_stddev**2
+    lm_s = -2.5*np.log10(star_sum) + platepar.mag_lev
+
+    # A meteor needs to be visible on at least 4 frames, thus it needs to have at least 4x the mass to produce
+    #   that amount of light. 1 magnitude difference scales as -0.4 of log of mass, thus:
+    frame_min_loss = np.log10(config.line_minimum_frame_range_det)/(-0.4)
+
+    lm_s += frame_min_loss
+
+    # Compute apparent meteor magnitude
+    lm_m = lm_s - 5*np.log10(r_mid/1e5) \
+        - 2.5*np.log10(np.degrees(platepar.F_scale*v_init*np.sin(rad_dist_night_mid)/(config.fps*r_mid*fwhm)))
+
+    #
+    print("Stellar lim mag using detection thresholds:", lm_s)
+    print("Apparent meteor limiting magnitude:", lm_m)
 
 
     ### Apply time-dependent corrections ###
@@ -446,8 +499,11 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
 
             jd_mean = (bin_jd_beg + bin_jd_end)/2
 
-
-            print(np.degrees(jd2SolLonSteyaert(jd_mean)), bin_dt_beg, bin_dt_end, len(bin_meteors))
+            print()
+            print("Bin beg:", bin_dt_beg)
+            print("Bin end:", bin_dt_end)
+            print("Sol mid: {:.5f}".format(np.degrees(jd2SolLonSteyaert(jd_mean))))
+            print("Meteors:", len(bin_meteors))
 
             # Compute the apparent radiant
             ra, dec, v_init = shower.computeApparentRadiant(platepar.lat, platepar.lon, jd_mean)
@@ -487,10 +543,10 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
             ### ###
 
 
-            # Compute the angular velocity in the middle of the FOV
-            rad_dist_mid = angularSeparation(np.radians(radiant_azim), np.radians(radiant_elev), 
-                        np.radians(azim_mid), np.radians(elev_mid))
-            ang_vel_mid = v_init*np.sin(rad_dist_mid)/r_mid
+            # # Compute the angular velocity in the middle of the FOV
+            # rad_dist_mid = angularSeparation(np.radians(radiant_azim), np.radians(radiant_elev), 
+            #             np.radians(azim_mid), np.radians(elev_mid))
+            # ang_vel_mid = v_init*np.sin(rad_dist_mid)/r_mid
 
 
             # Final correction area value (height-weightned)
@@ -506,7 +562,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
                     area, azim, elev, sensitivity_ratio, r = col_areas_ht[ht][img_coords]
 
 
-                    # Compute the angular velocity in the middle of this block
+                    # Compute the angular velocity (rad/s) in the middle of this block
                     rad_dist = angularSeparation(np.radians(radiant_azim), np.radians(radiant_elev), 
                         np.radians(azim), np.radians(elev))
                     ang_vel = v_init*np.sin(rad_dist)/r
@@ -515,8 +571,9 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
                     # Compute the range correction
                     range_correction = (1e5/r)**2
 
-                    # Compute angular velocity correction
-                    ang_vel_correction = ang_vel/ang_vel_mid
+                    #ang_vel_correction = ang_vel/ang_vel_mid
+                    # Compute angular velocity correction relative to the nightly mean
+                    ang_vel_correction = ang_vel/ang_vel_night_mid
 
 
                     ### Apply corrections
@@ -541,7 +598,13 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
                     collection_area += weights[ht]*area*correction_ratio**(mass_index - 1)
 
 
-            print("Flux:", 1e9*len(bin_meteors)/collection_area/bin_hours, "meteors/1000km^2/h")
+            #print("Ang vel: {:.2f} deg/s".format(np.degrees(ang_vel_mid)))
+            print("Flux:    {:.2f} meteors/1000km^2/h".format(1e9*len(bin_meteors)/collection_area/bin_hours))
+
+
+    # Plot a historgram of peak magnitudes
+    plt.hist(peak_mags, cumulative=True)
+    plt.show()
     
 
 
