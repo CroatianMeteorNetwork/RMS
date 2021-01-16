@@ -627,10 +627,10 @@ if __name__ == "__main__":
         help="IAU shower code (e.g. ETA, PER, SDA).")
 
     arg_parser.add_argument("tbeg", metavar="BEG_TIME", type=str, \
-        help="Time of the observation beginning. YYYYMMDD-HHMMSS format.")
+        help="Time of the observation beginning. YYYYMMDD_HHMMSS format.")
 
     arg_parser.add_argument("tend", metavar="END_TIME", type=str, \
-        help="Time of the observation ending. YYYYMMDD-HHMMSS format.")
+        help="Time of the observation ending. YYYYMMDD_HHMMSS format.")
 
     arg_parser.add_argument("dt", metavar="TIME_BIN", type=float, \
         help="Time bin width in hours.")
@@ -670,8 +670,8 @@ if __name__ == "__main__":
 
 
     # Parse the beg/end time
-    dt_beg = datetime.datetime.strptime(cml_args.tbeg, "%Y%m%d-%H%M%S")
-    dt_end = datetime.datetime.strptime(cml_args.tend, "%Y%m%d-%H%M%S")
+    dt_beg = datetime.datetime.strptime(cml_args.tbeg, "%Y%m%d_%H%M%S")
+    dt_end = datetime.datetime.strptime(cml_args.tend, "%Y%m%d_%H%M%S")
         
 
     # Extract parent directory
