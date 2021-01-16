@@ -1,13 +1,14 @@
+#!/usr/bin/env python
 
 from __future__ import print_function, division, absolute_import
 
 import os
+import argparse
 
 import numpy as np
 import scipy.interpolate
 
-
-from wmpl.Config import config
+import RMS.ConfigReader as cr
 
 
 def loadEGM96Data(dir_path, file_name):
@@ -52,16 +53,7 @@ def interpolateEGM96Data(geoid_heights):
 
 
 
-# Load the geoid heights array
-GEOID_HEIGHTS = loadEGM96Data(*os.path.split(config.egm96_file))
-
-# Init the interpolated geoid model
-GEOID_MODEL = interpolateEGM96Data(GEOID_HEIGHTS)
-
-
-
-
-def mslToWGS84Height(lat, lon, msl_height):
+def mslToWGS84Height(lat, lon, msl_height, config):
     """ Given the height above sea level (using the EGM96 model), compute the height above the WGS84
         ellipsoid.
     
@@ -75,6 +67,11 @@ def mslToWGS84Height(lat, lon, msl_height):
 
     """
 
+    # Load the geoid heights array
+    GEOID_HEIGHTS = loadEGM96Data(config.egm96_path, config.egm96_file_name)
+
+    # Init the interpolated geoid model
+    GEOID_MODEL = interpolateEGM96Data(GEOID_HEIGHTS)
 
     # Get the difference between WGS84 and MSL height
     lat_mod = np.pi/2 - lat
@@ -102,6 +99,11 @@ def wgs84toMSLHeight(lat, lon, wgs84_height):
 
     """
 
+    # Load the geoid heights array
+    GEOID_HEIGHTS = loadEGM96Data(config.egm96_path, config.egm96_file_name)
+
+    # Init the interpolated geoid model
+    GEOID_MODEL = interpolateEGM96Data(GEOID_HEIGHTS)
 
     # Get the difference between WGS84 and MSL height
     lat_mod = np.pi/2 - lat
@@ -120,38 +122,43 @@ if __name__ == "__main__":
 
     import matplotlib.pyplot as plt
 
+    ### COMMAND LINE ARGUMENTS
 
-    dir_path = '.'
-    file_name = "WW15MGH.DAC"
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Convert mean sea level (EGM96) to WGS84")
 
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
 
-    # Test data
-    lat = 43.2640333333
-    lon = -80.7721783333
-    msl_height = 329.49
+    arg_parser.add_argument('-i', '--inverse', action="store_true", \
+            help="Convert WGS84 to EGM96 (default is False)")
 
+    arg_parser.add_argument("latitude", type=float, help="Latitude in degrees (east is positive)")
+    arg_parser.add_argument("longitude", type=float, help="Longitude in degrees (north is positive)")
+    arg_parser.add_argument("height", type=float, help="Height to convert (in meters)")
 
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
 
-    # Compute the WGS84 height
-    wgs84_height = mslToWGS84Height(np.radians(lat), np.radians(lon), msl_height)
+    #########################
 
+    # Load the config file
+    config = cr.loadConfigFromDirectory(cml_args.config, ".")
 
+    # Load latitude and longitude
+    lat = cml_args.latitude
+    lon = cml_args.longitude
+
+    if not cml_args.inverse:
+        print("Converting MSL height to WGS84 height")
+        msl_height = cml_args.height
+        wgs84_height = mslToWGS84Height(np.radians(lat), np.radians(lon), msl_height, config)
+    else:
+        print("Converting WGS84 height to MSL height")
+        wgs84_height = cml_args.height
+        msl_height = wgs84toMSLHeight(np.radians(lat), np.radians(lon), wgs84_height, config)
 
     print('Latitude:', lat)
     print('Longitude', lon)
-    print('MSL height (m):', msl_height)
-    print('WGS84 height (m):', wgs84_height)
-    print('MSL height reverse (m):', wgs84toMSLHeight(np.radians(lat), np.radians(lon), wgs84_height))
-
-
-    # Plot the height differences
-
-    vabs = np.max(np.abs([np.min(GEOID_HEIGHTS), np.max(GEOID_HEIGHTS)]))
-    plt.imshow(GEOID_HEIGHTS, extent=(0, 360, -90, 90), aspect='auto', vmin=-vabs, vmax=vabs,
-        cmap='PiYG')
-
-    plt.xlabel('Longitude (+E)')
-    plt.ylabel('Latitude (+N)')
-
-    plt.colorbar(label='WGS84 - MSL difference (m)')
-    plt.show()
+    print('MSL height (m): {:.2f}'.format(msl_height))
+    print('WGS84 height (m): {:.2f}'.format(wgs84_height))
