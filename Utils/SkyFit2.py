@@ -18,7 +18,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
-    apparentAltAz2TrueRADec, jd2Date, datetime2JD, JD2LST
+    apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
 import RMS.ConfigReader as cr
 import RMS.Formats.CALSTARS as CALSTARS
@@ -35,7 +35,7 @@ from RMS.Routines import RollingShutterCorrection
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
-from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession, cyTrueRaDec2ApparentAltAz, cyaltAz2RADec
+from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
 
 
 def qmessagebox(message="", title="Error", message_type="warning"):
@@ -121,9 +121,85 @@ class QFOVinputDialog(QtWidgets.QDialog):
         return azim, alt, rot
 
 
+class GeoPoints(object):
+    def __init__(self, geo_points_input):
+
+        self.geo_points_input = geo_points_input
+
+        # Geo coordinates (degrees, meters)
+        self.names = []
+        self.lat_data = []
+        self.lon_data = []
+        self.ele_data = []
+
+        # Equatorial coordinates (degrees)
+        self.ra_data = []
+        self.dec_data = []
+
+        # Load the points from a file
+        self.load()
+
+
+    def load(self):
+        """ Load the geo catalog file. """
+        
+        if os.path.isfile(self.geo_points_input):
+            with open(self.geo_points_input) as f:
+                for line in f:
+
+                    # Skip comments
+                    if line.startswith("#"):
+                        continue
+
+                    line = line.replace('\n', '').replace('\r', '')
+                    line = line.split(',')
+
+                    name, lat, lon, ele = line
+
+                    self.names.append(name)
+                    self.lat_data.append(float(lat))
+                    self.lon_data.append(float(lon))
+                    self.ele_data.append(float(ele))
+
+
+
+
+    def update(self, platepar, jd):
+        """ Project points to the observer's point of view. """
+
+        # Compute ECI coordinates of the observer's location
+        ref_eci = geo2Cartesian(platepar.lat, platepar.lon, platepar.elev, jd)
+
+        for name, lat, lon, elev in zip(self.names, self.lat_data, self.lon_data, self.ele_data):
+
+            # Compute ECI coordiantes of the current point
+            eci = geo2Cartesian(lat, lon, elev, jd)
+
+            # Compute the vector pointing from the reference position to the current position
+            eci_point = np.array(eci) - np.array(ref_eci)
+
+            # Compute ra/dec in radians
+            ra, dec = vector2RaDec(eci_point)
+
+            # # Compute alt/az
+            # azim, alt = raDec2AltAz(np.radians(ra), np.radians(dec), jd, np.radians(platepar.lat), \
+            #     np.radians(platepar.lon))
+
+            # print("{:>25s}, {:8.3f}, {:7.3f}".format(name, np.degrees(azim), np.degrees(alt)))
+
+
+            # Precess RA/Dec to J2000
+            ra, dec = equatorialCoordPrecession(jd, J2000_JD.days, np.radians(ra), np.radians(dec))
+
+            self.ra_data.append(np.degrees(ra))
+            self.dec_data.append(np.degrees(dec))
+
+        
+
+
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False, \
-        startUI=True):
+        geo_points_input=None, startUI=True):
         """ SkyFit interactive window.
 
         Arguments:
@@ -138,6 +214,8 @@ class PlateTool(QtWidgets.QMainWindow):
             gamma: [float] Camera gamma. None by default, then it will be used from the platepar file or
                 config.
             use_fr_files: [bool] Include FR files together with FF files. False by default.
+            geo_points_input: [str] Path to a file with a list of geo coordinates which will be projected on
+                the image as seen from the perspective of the observer.
             startUI: [bool] Start the GUI. True by default.
         """
 
@@ -175,9 +253,25 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.use_fr_files = use_fr_files
 
+        
+        # Load the file with geo points, if given
+        self.geo_points_input = geo_points_input
+        
+        self.geo_points_obj = None
+
+        if self.geo_points_input is not None:
+            
+            if os.path.isfile(self.geo_points_input):
+                self.geo_points_obj = GeoPoints(self.geo_points_input)
+
+            else:
+                print("The file with geo points does not exist:", self.geo_points_input)
+
+
         # Star picking mode variables
         self.star_aperature_radius = 5
         self.x_centroid = self.y_centroid = None
+        self.closest_type = None
         self.closest_cat_star_indx = None
 
         # List of paired image and catalog stars
@@ -435,6 +529,23 @@ class PlateTool(QtWidgets.QMainWindow):
         self.cat_star_markers2.setSymbol(Crosshair())
         self.cat_star_markers2.setZValue(4)
         self.zoom_window.addItem(self.cat_star_markers2)
+
+        # geo points markers (main window)
+        self.geo_markers = pg.ScatterPlotItem()
+        self.geo_markers.setPen('g')
+        self.geo_markers.setBrush((0, 0, 0, 0))
+        self.geo_markers.setSymbol(Plus())
+        self.geo_markers.setZValue(4)
+        self.img_frame.addItem(self.geo_markers)
+
+        # geo points markers (zoom window)
+        self.geo_markers2 = pg.ScatterPlotItem()
+        self.geo_markers2.setPen('g')
+        self.geo_markers2.setBrush((0, 0, 0, 0))
+        self.geo_markers2.setSize(20)
+        self.geo_markers2.setSymbol(Plus())
+        self.geo_markers2.setZValue(4)
+        self.zoom_window.addItem(self.geo_markers2)
 
         self.selected_stars_visible = True
 
@@ -1071,7 +1182,6 @@ class PlateTool(QtWidgets.QMainWindow):
     def updateStars(self):
         """ Updates only the stars, including catalog stars, calstars and paired stars """
 
-
         # Draw stars that were paired in picking mode
         self.updatePairedStars()
         self.onGridChanged()  # for ease of use
@@ -1080,12 +1190,62 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.draw_calstars:
             self.updateCalstars()
 
+
+
+
+        # Get the Julian date of the current image
+        ff_jd = date2JD(*self.img_handle.currentTime())
+
+        # Update the geo points
+        if self.geo_points_obj is not None:
+
+            # Compute RA/Dec of geo points
+            self.geo_points_obj.update(self.platepar, ff_jd)
+
+            geo_points = np.c_[self.geo_points_obj.ra_data, self.geo_points_obj.dec_data, \
+                np.ones_like(self.geo_points_obj.ra_data)]
+
+
+
+            # Compute image coordiantes of geo points (always without refraction)
+            pp_noref = copy.deepcopy(self.platepar)
+            pp_noref.refraction = False
+            self.geo_x, self.geo_y, _ = getCatalogStarsImagePositions(geo_points, ff_jd, pp_noref)
+
+            geo_xy = np.c_[self.geo_x, self.geo_y]
+
+            # Get indices of points inside the fov
+            filtered_indices, _ = self.filterCatalogStarsInsideFOV(geo_points)
+
+            # Create a mask to filter out all points outside the image and the FOV
+            filter_indices_mask = np.zeros(len(geo_xy), dtype=np.bool)
+            filter_indices_mask[filtered_indices] = True
+            filtered_indices_all = filter_indices_mask & (geo_xy[:, 0] > 0) \
+                                                    & (geo_xy[:, 0] < self.platepar.X_res) \
+                                                    & (geo_xy[:, 1] > 0) \
+                                                    & (geo_xy[:, 1] < self.platepar.Y_res)
+
+
+            geo_xy = geo_xy[filtered_indices_all]
+
+            self.geo_x, self.geo_y = geo_xy.T
+
+            # Hold a list of geo points which are visible inside the FOV (with a fake magnitude)
+            self.geo_points_filtered = geo_points[filtered_indices_all]
+
+
+            if self.catalog_stars_visible:
+                geo_size = 5
+                self.geo_markers.setData(x=self.geo_x, y=self.geo_y, size=geo_size)
+                self.geo_markers2.setData(x=self.geo_x, y=self.geo_y, size=geo_size)
+
+
+
         ### Draw catalog stars on the image using the current platepar ###
         ######################################################################################################
 
         # Get positions of catalog stars on the image
-        ff_jd = date2JD(*self.img_handle.currentTime())
-        self.catalog_x, self.catalog_y, catalog_mag = getCatalogStarsImagePositions(self.catalog_stars,
+        self.catalog_x, self.catalog_y, catalog_mag = getCatalogStarsImagePositions(self.catalog_stars, \
                                                                                     ff_jd, self.platepar)
 
         cat_stars_xy = np.c_[self.catalog_x, self.catalog_y, catalog_mag]
@@ -1158,6 +1318,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Check if the given FF files is in the calstars list
         if self.img_handle.name() in self.calstars:
+
             # Get the stars detected on this FF file
             star_data = self.calstars[self.img_handle.name()]
 
@@ -1166,7 +1327,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.calstar_markers.setData(x=x, y=y)
             self.calstar_markers2.setData(x=x, y=y)
+
         else:
+
             self.calstar_markers.setData(pos=[])
             self.calstar_markers2.setData(pos=[])
 
@@ -1828,6 +1991,10 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, "fit_only_pointing"):
             self.fit_only_pointing = False
 
+        # Update the possibly missing params
+        if not hasattr(self, "geo_points_obj"):
+            self.geo_points_obj = None
+
 
         # Update the possibly missing begin time
         if not hasattr(self, "beginning_time"):
@@ -1901,6 +2068,30 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # self.printFrameRate()
 
+
+    def findClickedStarOrGeoPoint(self):
+        """ Find the coordinate of the star or geo point closest to the clicked point.  """
+
+        # Select the closest catalog star to the centroid as the first guess
+        self.closest_type, closest_indx = self.findClosestCatalogStarIndex(self.x_centroid,
+                                                                           self.y_centroid)
+
+        if self.closest_type == 'catalog':
+
+            # Fetch the coordinates of the catalog star
+            self.closest_cat_star_indx = closest_indx
+            x_data = [self.catalog_x_filtered[self.closest_cat_star_indx]]
+            y_data = [self.catalog_y_filtered[self.closest_cat_star_indx]]
+
+        else:
+            # Fetch the coordinates of the geo point
+            self.closest_geo_point_indx = closest_indx
+            x_data = [self.geo_x[self.closest_geo_point_indx]]
+            y_data = [self.geo_y[self.closest_geo_point_indx]]
+
+        return x_data, y_data
+
+
     def onMousePressed(self, event):
 
         if event.button() == QtCore.Qt.LeftButton:
@@ -1919,6 +2110,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Add star
                 if event.button() == QtCore.Qt.LeftButton:
+
                     if self.cursor.mode == 0:
 
                         # If CTRL is pressed, place the pick manually - NOTE: the intensity might be off then!!!
@@ -1944,34 +2136,37 @@ class PlateTool(QtWidgets.QMainWindow):
                             else:
                                 return None
 
+                        # Add the centroid to the plot
                         self.centroid_star_markers.addPoints(x=[self.x_centroid], y=[self.y_centroid])
                         self.centroid_star_markers2.addPoints(x=[self.x_centroid], y=[self.y_centroid])
 
-                        # Select the closest catalog star to the centroid as the first guess
-                        self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.x_centroid,
-                                                                                      self.y_centroid)
-                        self.sel_cat_star_markers.addPoints(x=[self.catalog_x_filtered[self.closest_cat_star_indx]],
-                                                            y=[self.catalog_y_filtered[self.closest_cat_star_indx]])
-                        self.sel_cat_star_markers2.addPoints(x=[self.catalog_x_filtered[self.closest_cat_star_indx]],
-                                                             y=[self.catalog_y_filtered[self.closest_cat_star_indx]])
+
+                        # Find coordiantes of the star or geo points closest to the clicked point
+                        x_data, y_data = self.findClickedStarOrGeoPoint()
+
+
+                        # Add a star marker to the main and zoom windows
+                        self.sel_cat_star_markers.addPoints(x=x_data, y=y_data)
+                        self.sel_cat_star_markers2.addPoints(x=x_data, y=y_data)
 
                         # Switch to the mode where the catalog star is selected
                         self.cursor.setMode(1)
 
-                    elif self.cursor.mode == 1:
 
-                        # Select the closest catalog star
-                        self.closest_cat_star_indx = self.findClosestCatalogStarIndex(self.mouse_x, \
-                                                                                      self.mouse_y)
+                    elif self.cursor.mode == 1:
 
                         # REMOVE marker for previously selected
                         self.sel_cat_star_markers.setData(pos=[pair[0][:2] for pair in self.paired_stars])
                         self.sel_cat_star_markers2.setData(pos=[pair[0][:2] for pair in self.paired_stars])
 
-                        self.sel_cat_star_markers.addPoints(x=[self.catalog_x_filtered[self.closest_cat_star_indx]],
-                                                            y=[self.catalog_y_filtered[self.closest_cat_star_indx]])
-                        self.sel_cat_star_markers2.addPoints(x=[self.catalog_x_filtered[self.closest_cat_star_indx]],
-                                                             y=[self.catalog_y_filtered[self.closest_cat_star_indx]])
+
+                        # Find coordiantes of the star or geo points closest to the clicked point
+                        x_data, y_data = self.findClickedStarOrGeoPoint()
+
+                        # Add the new point
+                        self.sel_cat_star_markers.addPoints(x=x_data, y=y_data)
+                        self.sel_cat_star_markers2.addPoints(x=x_data, y=y_data)
+
 
                 # Remove star pair
                 elif event.button() == QtCore.Qt.RightButton:
@@ -1981,6 +2176,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         picked_indx = self.findClosestPickedStarIndex(self.mouse_x, self.mouse_y)
 
                         if self.paired_stars:
+                            
                             # Remove the picked star from the list
                             self.paired_stars.pop(picked_indx)
 
@@ -2609,21 +2805,39 @@ class PlateTool(QtWidgets.QMainWindow):
                 # updates image automatically
 
 
+            # Save the point to the fit list by pression Enter
             elif (event.key() == QtCore.Qt.Key_Return) or (event.key() == QtCore.Qt.Key_Enter):
                 
                 if self.star_pick_mode:
                     
-                    # If the right catalog star has been selected, save the pair to the list
+                    # If the catalog star or geo points has been selected, save the pair to the list
                     if self.cursor.mode == 1:
+
+                        
+                        # Star catalog points
+                        if self.closest_type == 'catalog':
+                            selected_coords = self.catalog_stars_filtered[self.closest_cat_star_indx]
+                            self.closest_cat_star_indx = None
+
+                        # Geo coordinates of the selected points
+                        else:
+                            selected_coords = self.geo_points_filtered[self.closest_geo_point_indx]
+                            self.closest_geo_point_indx = None
+
+                            # Set a fixed value for star intensity
+                            self.star_intensity = 10.0
+
+                        print([[self.x_centroid, self.y_centroid, self.star_intensity], \
+                                                  selected_coords])
 
                         # Add the image/catalog pair to the list
                         self.paired_stars.append([[self.x_centroid, self.y_centroid, self.star_intensity], \
-                                                  self.catalog_stars_filtered[self.closest_cat_star_indx]])
+                                                  selected_coords])
 
                         # Switch back to centroiding mode
-                        self.closest_cat_star_indx = None
                         self.cursor.setMode(0)
                         self.updatePairedStars()
+
 
             elif event.key() == QtCore.Qt.Key_Escape:
                 if self.star_pick_mode:
@@ -2847,9 +3061,13 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.catalog_stars_visible:
             self.cat_star_markers.show()
             self.cat_star_markers2.show()
+            self.geo_markers.show()
+            self.geo_markers.show()
         else:
             self.cat_star_markers.hide()
             self.cat_star_markers2.hide()
+            self.geo_markers.hide()
+            self.geo_markers.hide()
 
     def toggleShowSelectedStars(self):
         """ Toggle whether to show the selected stars """
@@ -3599,6 +3817,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         min_index = 0
         min_dist = np.inf
+        min_type = 'catalog'
 
         # Find the index of the closest catalog star to the given image coordinates
         for i, (x, y) in enumerate(zip(self.catalog_x_filtered, self.catalog_y_filtered)):
@@ -3609,7 +3828,21 @@ class PlateTool(QtWidgets.QMainWindow):
                 min_dist = dist
                 min_index = i
 
-        return min_index
+
+        # If geo points are given, choose from them
+        if self.geo_points_obj is not None:
+            for i, (x, y) in enumerate(zip(self.geo_x, self.geo_y)):
+
+                dist = (pos_x - x)**2 + (pos_y - y)**2
+
+                if dist < min_dist:
+                    min_dist = dist
+                    min_index = i
+                    min_type = 'geo'
+
+
+        return min_type, min_index
+
 
     def fitPickedStars(self):
         """ Fit stars that are manually picked. The function first only estimates the astrometry parameters
@@ -4432,6 +4665,10 @@ if __name__ == '__main__':
                                  "Adjusting this is essential for good photometry, and doing star photometry through SkyFit"
                                  " can reveal the real camera gamma.")
 
+    arg_parser.add_argument('-p', '--geopoints', metavar='GEO_POINTS_PATH', type=str,
+                            help="Path to a file with a list of geo coordinates which will be projected on "
+                                 "the image as seen from the perspective of the observer.")
+
 
 
     # Parse the command line arguments
@@ -4475,7 +4712,7 @@ if __name__ == '__main__':
 
         # Init SkyFit
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
-            gamma=cml_args.gamma, use_fr_files=cml_args.fr)
+            gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints)
 
 
     # Run the GUI app
