@@ -543,10 +543,14 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
             ### ###
 
 
-            # # Compute the angular velocity in the middle of the FOV
-            # rad_dist_mid = angularSeparation(np.radians(radiant_azim), np.radians(radiant_elev), 
-            #             np.radians(azim_mid), np.radians(elev_mid))
-            # ang_vel_mid = v_init*np.sin(rad_dist_mid)/r_mid
+            # Compute the angular velocity in the middle of the FOV
+            rad_dist_mid = angularSeparation(np.radians(radiant_azim), np.radians(radiant_elev), 
+                        np.radians(azim_mid), np.radians(elev_mid))
+            ang_vel_mid = v_init*np.sin(rad_dist_mid)/r_mid
+
+            # Compute apparent meteor magnitude
+            lm_m = lm_s - 5*np.log10(r_mid/1e5) \
+                - 2.5*np.log10(np.degrees(platepar.F_scale*v_init*np.sin(rad_dist_mid)/(config.fps*r_mid*fwhm)))
 
 
             # Final correction area value (height-weightned)
@@ -598,7 +602,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
                     collection_area += weights[ht]*area*correction_ratio**(mass_index - 1)
 
 
-            #print("Ang vel: {:.2f} deg/s".format(np.degrees(ang_vel_mid)))
+            print("Ang vel: {:.2f} deg/s".format(np.degrees(ang_vel_mid)))
+            print("LM app:  {:+.2f}".format(lm_m))
             print("Flux:    {:.2f} meteors/1000km^2/h".format(1e9*len(bin_meteors)/collection_area/bin_hours))
 
 
