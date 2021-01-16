@@ -448,6 +448,11 @@ class Config:
         self.shower_path = 'share'
         self.shower_file_name = 'established_showers.csv'
 
+        #### EGM96 vs WGS84 heights file
+
+        self.egm96_path = 'share'
+        self.egm96_file_name = 'WW15MGH.DAC'
+
         # How many degrees in solar longitude to check from the shower peak for showers that don't have
         # a specified beginning and end
         self.shower_lasun_threshold = 2.0
