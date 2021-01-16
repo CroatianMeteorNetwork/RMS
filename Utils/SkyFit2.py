@@ -1202,9 +1202,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute RA/Dec of geo points
             self.geo_points_obj.update(self.platepar, ff_jd)
 
+            # RA, dec, and fake magnitude of geo points
             geo_points = np.c_[self.geo_points_obj.ra_data, self.geo_points_obj.dec_data, \
                 np.ones_like(self.geo_points_obj.ra_data)]
-
 
 
             # Compute image coordiantes of geo points (always without refraction)
@@ -1230,10 +1230,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.geo_x, self.geo_y = geo_xy.T
 
-            # Hold a list of geo points which are visible inside the FOV (with a fake magnitude)
+            # Hold a list of geo points (equatorial coordiantes) which are visible inside the FOV (with a 
+            #   fake magnitude)
             self.geo_points_filtered = geo_points[filtered_indices_all]
 
-
+            # Plot geo points
             if self.catalog_stars_visible:
                 geo_size = 5
                 self.geo_markers.setData(x=self.geo_x, y=self.geo_y, size=geo_size)
@@ -1292,13 +1293,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def updatePairedStars(self):
-        """
-            Draws the stars that were picked for calibration as well as draw the
-            residuals and star magnitude
+        """ Draws the stars that were picked for calibration as well as draw the residuals and star magnitude.
         """
         if len(self.paired_stars) > 0:
             self.sel_cat_star_markers.setData(pos=[pair[0][:2] for pair in self.paired_stars])
             self.sel_cat_star_markers2.setData(pos=[pair[0][:2] for pair in self.paired_stars])
+
         else:
             self.sel_cat_star_markers.setData(pos=[])
             self.sel_cat_star_markers2.setData(pos=[])
@@ -2069,12 +2069,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # self.printFrameRate()
 
 
-    def findClickedStarOrGeoPoint(self):
+    def findClickedStarOrGeoPoint(self, x, y):
         """ Find the coordinate of the star or geo point closest to the clicked point.  """
 
         # Select the closest catalog star to the centroid as the first guess
-        self.closest_type, closest_indx = self.findClosestCatalogStarIndex(self.x_centroid,
-                                                                           self.y_centroid)
+        self.closest_type, closest_indx = self.findClosestCatalogStarIndex(x, y)
 
         if self.closest_type == 'catalog':
 
@@ -2142,7 +2141,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
                         # Find coordiantes of the star or geo points closest to the clicked point
-                        x_data, y_data = self.findClickedStarOrGeoPoint()
+                        x_data, y_data = self.findClickedStarOrGeoPoint(self.x_centroid, self.y_centroid)
 
 
                         # Add a star marker to the main and zoom windows
@@ -2161,14 +2160,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
                         # Find coordiantes of the star or geo points closest to the clicked point
-                        x_data, y_data = self.findClickedStarOrGeoPoint()
+                        x_data, y_data = self.findClickedStarOrGeoPoint(self.mouse_x, self.mouse_y)
 
                         # Add the new point
                         self.sel_cat_star_markers.addPoints(x=x_data, y=y_data)
                         self.sel_cat_star_markers2.addPoints(x=x_data, y=y_data)
 
 
-                # Remove star pair
+                # Remove star pair on right click
                 elif event.button() == QtCore.Qt.RightButton:
                     if self.cursor.mode == 0:
 
