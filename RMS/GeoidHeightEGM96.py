@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 
+"""Convert between mean sea level (EGM96) and WGS84 heights.
+This file was taken from WesternMeteorPyLib, commit 5234439 (Dec 2020)"""
+
 from __future__ import print_function, division, absolute_import
 
 import os
@@ -13,7 +16,7 @@ import RMS.ConfigReader as cr
 
 def loadEGM96Data(dir_path, file_name):
     """ Load a file with EGM96 data.
-    
+
     EGM96 data source: http://earth-info.nga.mil/GandG/wgs84/gravitymod/egm96/binary/binarygeoid.html
     """
 
@@ -44,7 +47,7 @@ def interpolateEGM96Data(geoid_heights):
 
     # Remove points on the pole
     geoid_heights = geoid_heights[1:-1]
-        
+
     # Construct an interpolation instance
     geoid_model = scipy.interpolate.RectSphereBivariateSpline(lat_points, lon_points, geoid_heights,
         pole_values=(north_pole_value, south_pole_value))
@@ -56,7 +59,7 @@ def interpolateEGM96Data(geoid_heights):
 def mslToWGS84Height(lat, lon, msl_height, config):
     """ Given the height above sea level (using the EGM96 model), compute the height above the WGS84
         ellipsoid.
-    
+
     Arguments:
         lat: [float] Latitude +N (rad).
         lon: [float] Longitude +E (rad).
@@ -88,7 +91,7 @@ def mslToWGS84Height(lat, lon, msl_height, config):
 
 def wgs84toMSLHeight(lat, lon, wgs84_height):
     """ Given the height above the WGS84 ellipsoid compute the height above sea level (using the EGM96 model).
-    
+
     Arguments:
         lat: [float] Latitude +N (rad).
         lon: [float] Longitude +E (rad).
