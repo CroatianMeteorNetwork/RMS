@@ -324,12 +324,13 @@ class FrameAnalyser():
       self.key_pressed64 = cv2.waitKey(1) & 0xffff
       self.key_pressed = self.key_pressed64 & 0xff
       # if self.key_pressed64 != 255: print(hex(self.key_pressed64))
-      if (self.key_pressed64 < 0 or self.key_pressed64 == 255): return    # No key pressed
+      if (self.key_pressed64 < 0) or (self.key_pressed64 == 255) or (self.key_pressed == 255):
+         return    # No key pressed
       elif(self.key_pressed == 0x1b) or (self.key_pressed == 0x71): # <Esc> or q key
          self.finish()
       elif (self.key_pressed == 0x72):  # 'r' reset
          self.short_max_im8u.fill(0)
-      elif (self.key_pressed == 0x0A):  # 'Enter' key - pause and reset
+      elif (self.key_pressed == 0x0A) or (self.key_pressed == 13):  # 'Enter' key - pause and reset
          self.pause = not self.pause
          self.short_max_im8u.fill(0)
       elif (self.key_pressed == 0x73): # 's' key - save image
@@ -341,27 +342,27 @@ class FrameAnalyser():
       elif (self.key_pressed == 0x6d): # m key - toggle max pixel display
          self.short_max_im8u.fill(0)
          self.show_max = not self.show_max
-      elif (self.key_pressed64 == 0x055): # pgup arrow - rewind 100 frames
+      elif (self.key_pressed64 == 0x055) or (self.key_pressed == 44): # pgup arrow - rewind 100 frames
          self.short_max_im8u.fill(0)
          self.imageProducer.move_index(-100)
          self.clear_queue()
          self.pause = False
-      elif (self.key_pressed64 == 0x056): # pgdown arrow - forward 300 frames
+      elif (self.key_pressed64 == 0x056) or (self.key_pressed == 45): # pgdown arrow - forward 300 frames
          self.short_max_im8u.fill(0)
          self.imageProducer.move_index(300)
          self.clear_queue()
          self.pause = False
-      elif (self.key_pressed == 65361) or (self.key_pressed64 == 0x051): # left arrow - rewind 100 frames
+      elif (self.key_pressed == 65361) or (self.key_pressed64 == 0x051) or (self.key_pressed == 2): # left arrow - rewind 100 frames
          self.short_max_im8u.fill(0)
          self.imageProducer.move_index(-100)
          self.clear_queue()
          self.pause = False
-      elif (self.key_pressed == 65363) or (self.key_pressed64 == 0x053): # right arrow - forward 100 frames
+      elif (self.key_pressed == 65363) or (self.key_pressed64 == 0x053) or (self.key_pressed == 3): # right arrow - forward 100 frames
          self.short_max_im8u.fill(0)
          self.imageProducer.move_index(100)
          self.clear_queue()
          self.pause = False
-      elif (self.key_pressed == 65362) or (self.key_pressed64 == 0x052): # up arrow - flip display frame
+      elif (self.key_pressed == 65362) or (self.key_pressed64 == 0x052) or (self.key_pressed == 0): # up arrow - flip display frame
          self.short_max_im8u.fill(0)
          self.flip = not self.flip
       elif (self.key_pressed == 0x63): # 'c' key - change contrast
@@ -379,6 +380,8 @@ class FrameAnalyser():
       elif (self.key_pressed == 0x2e): # '.' key to single step
          self.single_step = True
          self.pause = False
+      else:
+          print("Unknown key:", self.key_pressed)
 
 
 
