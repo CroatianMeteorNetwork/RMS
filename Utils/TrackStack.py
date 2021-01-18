@@ -4,9 +4,9 @@ import os
 import json
 import copy
 
+import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-import scipy.ndimage
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP
 from RMS.Astrometry.Conversions import date2JD, jd2Date
@@ -17,7 +17,7 @@ from RMS.Math import angularSeparation
 from RMS.Routines.MaskImage import loadMask, MaskStructure
 
 
-def trackStack(dir_path, config, border=5):
+def trackStack(dir_path, config, border=5, background_compensation=True):
     """ Generate a stack with aligned stars, so the sky appears static. The folder should have a
         platepars_all_recalibrated.json file.
 
@@ -27,6 +27,9 @@ def trackStack(dir_path, config, border=5):
 
     Keyword arguments:
         border: [int] Border around the image to exclude (px).
+        background_compensation: [bool] Normalize the background by applying a median filter to avepixel and
+            use it as a flat field. Slows down the procedure and may sometimes introduce artifacts. True
+            by default.
     """
 
 
@@ -228,11 +231,6 @@ def trackStack(dir_path, config, border=5):
         stack_y = stack_y[filter_arr]
 
 
-
-        # Apply a median filter to the avepixel to get an estimate of the background brightness
-        avepixel_median = scipy.ndimage.median_filter(ff.avepixel, size=51)
-
-
         # Apply the mask to maxpixel and avepixel
         maxpixel = copy.deepcopy(ff.maxpixel)
         maxpixel[mask.img == 0] = 0
@@ -243,15 +241,26 @@ def trackStack(dir_path, config, border=5):
         max_deavg = maxpixel - avepixel
 
 
-        # Normalize the avepixel by subtracting out the background brightness
-        avepixel = avepixel.astype(np.float)
-        avepixel /= avepixel_median
-        avepixel *= 50 # Normalize to a good background value, which is usually 50
-        avepixel = np.clip(avepixel, 0, 255)
-        avepixel = avepixel.astype(np.uint8)
+        # Normalize the backgroud brightness by applying a large-kernel median filter to avepixel
+        if background_compensation:
 
-        # plt.imshow(avepixel, cmap='gray', vmin=0, vmax=255)
-        # plt.show()
+            # # Apply a median filter to the avepixel to get an estimate of the background brightness
+            # avepixel_median = scipy.ndimage.median_filter(ff.avepixel, size=101)
+            avepixel_median = cv2.medianBlur(ff.avepixel, 301)
+
+            # Make sure to avoid zero division
+            avepixel_median[avepixel_median < 1] = 1
+
+            # Normalize the avepixel by subtracting out the background brightness
+            avepixel = avepixel.astype(np.float)
+            avepixel /= avepixel_median
+            avepixel *= 50 # Normalize to a good background value, which is usually 50
+            avepixel = np.clip(avepixel, 0, 255)
+            avepixel = avepixel.astype(np.uint8)
+
+            # plt.imshow(avepixel, cmap='gray', vmin=0, vmax=255)
+            # plt.show()
+
 
         # Add the average pixel to the sum
         avg_stack_sum[stack_y, stack_x] += avepixel[y_coords, x_coords]
@@ -333,6 +342,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
 
+    arg_parser.add_argument('-b', '--bkgnormoff', action="store_true", \
+        help="""Disable background normalization.""")
+
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -344,4 +356,4 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
 
 
-    trackStack(cml_args.dir_path, config)
+    trackStack(cml_args.dir_path, config, background_compensation=(not cml_args.bkgnormoff))

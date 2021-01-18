@@ -129,6 +129,7 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
             if first_img:
                 merge_img = np.copy(img)
                 first_img = False
+                n_stacked += 1
                 continue
 
             print('Stacking: ', ff_name)

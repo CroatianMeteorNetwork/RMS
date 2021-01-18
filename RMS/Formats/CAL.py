@@ -8,6 +8,7 @@ import copy
 import math
 
 
+from RMS.GeoidHeightEGM96 import mslToWGS84Height
 from RMS.Astrometry.Conversions import jd2Date
 from RMS.Astrometry.ApplyAstrometry import rotationWrtHorizon, rotationWrtStandard
 
@@ -86,6 +87,11 @@ def writeCAL(night_dir, config, platepar):
         platepar.y_poly_fwd[k] = math.sin(math.radians(platepar.pos_angle_ref))*x_prime \
             - math.cos(math.radians(platepar.pos_angle_ref))*y_prime
 
+    # Compute WGS84 height
+    height_wgs84 = mslToWGS84Height(math.radians(platepar.lat), math.radians(platepar.lon),
+                                    platepar.elev, config)
+    print(platepar.lat, platepar.lon, platepar.elev)
+    print("Height wgs84 = ", height_wgs84)
 
     # Open the file
     with open(os.path.join(night_dir, file_name), 'w') as f:
@@ -100,7 +106,7 @@ def writeCAL(night_dir, config, platepar):
         s +=" Calibration time (UT)    = {:s}\n".format(calib_time)
         s +=" Longitude +west (deg)    = {:9.5f}\n".format(-platepar.lon)
         s +=" Latitude +north (deg)    = {:9.5f}\n".format(platepar.lat)
-        s +=" Height above WGS84 (km)  = {:8.5f}\n".format(platepar.elev/1000)
+        s +=" Height above WGS84 (km)  = {:8.4f}\n".format(height_wgs84/1000)
         s +=" FOV dimension hxw (deg)  =   {:.2f} x   {:.2f}\n".format(platepar.fov_v, platepar.fov_h)
         s +=" Plate scale (arcmin/pix) = {:8.3f}\n".format(arcminperpixel)
         s +=" Plate roll wrt Std (deg) = {:8.3f}\n".format(rot_std)
