@@ -490,11 +490,9 @@ class Platepar(object):
         # Force scale to be positive
         self.F_scale = abs(self.F_scale)
         
-        # Compute reference Alt/Az to apparent coordinates, epoch of date
-        az_centre, alt_centre = cyTrueRaDec2ApparentAltAz( \
-            np.radians(self.RA_d), np.radians(self.dec_d), self.JD, \
-            np.radians(self.lat), np.radians(self.lon), self.refraction)
-        self.az_centre, self.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
+        
+        # Update alt/az of pointing
+        self.updateRefAltAz()
 
 
 
@@ -816,6 +814,8 @@ class Platepar(object):
                 self.pos_angle_ref = (360*pos_angle_ref)%(360)
                 self.F_scale = abs(F_scale)
 
+                self.updateRefAltAz()
+
 
                 # Extract distortion parameters, IMPORTANT NOTE - the X polynomial is used to store the 
                 #   fit paramters
@@ -851,10 +851,7 @@ class Platepar(object):
                 # self.F_scale = abs(F_scale)
 
                 # # Compute reference Alt/Az to apparent coordinates, epoch of date
-                # az_centre, alt_centre = cyTrueRaDec2ApparentAltAz( \
-                #     np.radians(self.RA_d), np.radians(self.dec_d), self.JD, \
-                #     np.radians(self.lat), np.radians(self.lon), self.refraction)
-                # self.az_centre, self.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
+                # self.updateRefAltAz()
 
 
                 # # Extract distortion parameters, IMPORTANT NOTE - the X polynomial is used to store the 
@@ -1268,6 +1265,15 @@ class Platepar(object):
 
         return fmt
 
+
+    def updateRefAltAz(self):
+        """ Update the reference apparent azimuth and altitude from the reference RA and Dec. """
+
+        # Compute reference Alt/Az to apparent coordinates, epoch of date
+        az_centre, alt_centre = cyTrueRaDec2ApparentAltAz( \
+            np.radians(self.RA_d), np.radians(self.dec_d), self.JD, \
+            np.radians(self.lat), np.radians(self.lon), self.refraction)
+        self.az_centre, self.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
 
 
     def updateRefRADec(self, skip_rot_update=False, preserve_rotation=False):

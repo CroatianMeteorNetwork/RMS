@@ -939,8 +939,13 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.debruijn.updateTable()
 
     def onRefractionChanged(self):
+
+        # Update the reference apparent alt/az, as the refraction influences the pointing
+        self.platepar.updateRefAltAz()
+
         self.updateStars()
         self.updateLeftLabels()
+        self.tab.param_manager.updatePlatepar()
 
     def onGridChanged(self):
         if self.grid_visible == 0:
@@ -3167,9 +3172,8 @@ class PlateTool(QtWidgets.QMainWindow):
         jd = date2JD(*self.img_handle.currentTime())
 
         # Take only those stars which are inside the FOV
-        filtered_indices, filtered_catalog_stars = subsetCatalog(catalog_stars, ra_centre, dec_centre,
-                                                                 jd, self.platepar.lat, self.platepar.lon, fov_radius,
-                                                                 self.cat_lim_mag)
+        filtered_indices, filtered_catalog_stars = subsetCatalog(catalog_stars, ra_centre, dec_centre, \
+            jd, self.platepar.lat, self.platepar.lon, fov_radius, self.cat_lim_mag)
 
         return filtered_indices, np.array(filtered_catalog_stars)
 
@@ -3459,6 +3463,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute the rotation w.r.t. horizon
             platepar.rotation_from_horiz = rotationWrtHorizon(platepar)
+
+            # Update reference alt/az
+            platepar.updateRefAltAz()
 
             self.first_platepar_fit = False
 
