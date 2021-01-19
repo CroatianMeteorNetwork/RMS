@@ -3,7 +3,8 @@ from __future__ import division, absolute_import, unicode_literals
 import pyqtgraph as pg
 import numpy as np
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
-
+    
+from RMS.Astrometry.Conversions import AER2LatLonAlt
 from RMS.Formats.FFfile import reconstructFrame as reconstructFrameFF
 from RMS.Routines import Image
 from RMS.Routines.DebruijnSequence import findAllInDeBruijnSequence, generateDeBruijnSequence
@@ -849,6 +850,7 @@ class RightOptionsTab(QtWidgets.QTabWidget):
 
         self.hist = HistogramLUTWidget(gui)
         self.param_manager = PlateparParameterManager(gui)
+        self.geolocation = GeolocationWidget(gui)
         self.settings = SettingsWidget(gui)
         self.debruijn = DebruijnSequenceManager(gui)
 
@@ -858,6 +860,7 @@ class RightOptionsTab(QtWidgets.QTabWidget):
 
         self.addTab(self.hist, 'Levels')
         self.addTab(self.param_manager, 'Fit Parameters')
+        self.addTab(self.geolocation, 'Station')
         self.addTab(self.settings, 'Settings')
 
         self.setCurrentIndex(self.index)  # redundant
@@ -1221,6 +1224,257 @@ class DebruijnSequenceManager(QtWidgets.QWidget):
             self.gui.updatePicks()
 
 
+class GeolocationWidget(QtWidgets.QWidget):
+
+    sigLocationChanged = QtCore.pyqtSignal()
+    sigReloadGeoPoints = QtCore.pyqtSignal()
+
+    def __init__(self, gui):
+        """ QWidget contains station information. """
+
+        QtWidgets.QWidget.__init__(self)
+        self.gui = gui
+
+        full_layout = QtWidgets.QVBoxLayout()
+        full_layout.setAlignment(QtCore.Qt.AlignTop)
+        self.setLayout(full_layout)
+
+        full_layout.addWidget(QtWidgets.QLabel("Press Esc to focus on image"))
+
+
+
+        # Station geo position input boxes
+        form = QtWidgets.QFormLayout()
+        form.setLabelAlignment(QtCore.Qt.AlignRight)
+
+        group = QtWidgets.QGroupBox('Station coordinates')
+        group.setLayout(form)
+        full_layout.addWidget(group)
+
+
+        hbox = QtWidgets.QHBoxLayout()
+        self.lat = DoubleSpinBox()
+        self.lat.setMinimum(-90)
+        self.lat.setMaximum(90)
+        self.lat.setDecimals(8)
+        self.lat.setSingleStep(0.00001)
+        self.lat.setFixedWidth(120)
+        self.lat.valueModified.connect(self.onLatChanged)
+        hbox.addWidget(self.lat)
+        hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
+        form.addRow(QtWidgets.QLabel('Lat'), hbox)
+
+        hbox = QtWidgets.QHBoxLayout()
+        self.lon = DoubleSpinBox()
+        self.lon.setMinimum(-180)
+        self.lon.setMaximum(180)
+        self.lon.setDecimals(8)
+        self.lon.setSingleStep(0.00001)
+        self.lon.setFixedWidth(120)
+        self.lon.valueModified.connect(self.onLonChanged)
+        hbox.addWidget(self.lon)
+        hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
+        form.addRow(QtWidgets.QLabel('Lon'), hbox)
+
+        hbox = QtWidgets.QHBoxLayout()
+        self.elev = DoubleSpinBox()
+        self.elev.setMinimum(0)
+        self.elev.setMaximum(1000000)
+        self.elev.setDecimals(3)
+        self.elev.setSingleStep(1)
+        self.elev.setFixedWidth(120)
+        self.elev.valueModified.connect(self.onElevChanged)
+        hbox.addWidget(self.elev)
+        hbox.addWidget(QtWidgets.QLabel('m', alignment=QtCore.Qt.AlignLeft))
+        form.addRow(QtWidgets.QLabel('Elev'), hbox)
+
+        form.addRow(QtWidgets.QLabel("Press Enter to accept value"))
+
+
+
+        # Add buttons to move station coordinates
+        box = QtWidgets.QVBoxLayout()
+        grid = QtWidgets.QGridLayout()
+        box.addLayout(grid)
+
+        group = QtWidgets.QGroupBox('Move station coordinates')
+        group.setLayout(box)
+        full_layout.addWidget(group)
+
+
+        # Up button
+        self.up_button = QtWidgets.QPushButton("Up")
+        self.up_button.clicked.connect(self.onUpPressed)
+        grid.addWidget(self.up_button, 0, 1)
+
+        # Forward button
+        self.fwd_button = QtWidgets.QPushButton("Forward")
+        self.fwd_button.clicked.connect(self.onForwardPressed)
+        grid.addWidget(self.fwd_button, 1, 1)
+
+        # Left button
+        self.left_button = QtWidgets.QPushButton("Left")
+        self.left_button.clicked.connect(self.onLeftPressed)
+        grid.addWidget(self.left_button, 2, 0)
+
+
+        # Right button
+        self.right_button = QtWidgets.QPushButton("Right")
+        self.right_button.clicked.connect(self.onRightPressed)
+        grid.addWidget(self.right_button, 2, 2)
+
+        # Reverse button
+        self.reverse_button = QtWidgets.QPushButton("Reverse")
+        self.reverse_button.clicked.connect(self.onReversePressed)
+        grid.addWidget(self.reverse_button, 3, 1)
+
+        # Down button
+        self.down_button = QtWidgets.QPushButton("Down")
+        self.down_button.clicked.connect(self.onDownPressed)
+        grid.addWidget(self.down_button, 4, 1)
+
+
+        # movement distance box, use a default of 1 m
+        self.distance = 1.0
+        hbox = QtWidgets.QHBoxLayout()
+        self.dist_box = DoubleSpinBox()
+        self.dist_box.setMinimum(0)
+        self.dist_box.setMaximum(1000)
+        self.dist_box.setDecimals(3)
+        self.dist_box.setSingleStep(1)
+        self.dist_box.setFixedWidth(90)
+        self.dist_box.setValue(self.distance)
+        self.dist_box.valueModified.connect(self.onDistanceChanged)
+        hbox.addWidget(QtWidgets.QLabel('Distance'))
+        hbox.addWidget(self.dist_box)
+        hbox.addWidget(QtWidgets.QLabel('m', alignment=QtCore.Qt.AlignLeft))
+        box.addLayout(hbox)
+        box.addWidget(QtWidgets.QLabel("Press Enter to accept value"))
+
+
+
+        # Reload geo points
+        self.reload_geo_points_button = QtWidgets.QPushButton("Reload geo points")
+        self.reload_geo_points_button.clicked.connect(self.sigReloadGeoPoints.emit)
+        #box.addWidget(self.reload_geo_points_button)
+        full_layout.addWidget(self.reload_geo_points_button)
+        if self.gui.geo_points_obj is None:
+            self.reload_geo_points_button.hide()
+
+
+        self.updatePlatepar()
+
+
+
+    def updateGeoCoordinatesFromAzimChange(self, azim):
+        """ Given an azimuth, update the geo coordinates in the platepar by moving long the azimuth by the
+            distance given in the GUI. 
+        """
+
+        # Compute geo coordinates of the points along the azimuth for the given range, assume 0 elevation
+        lat2, lon2, elev2 = AER2LatLonAlt(azim, 0.0, self.distance, self.gui.platepar.lat, \
+            self.gui.platepar.lon, self.gui.platepar.elev)
+
+        self.gui.platepar.lat, self.gui.platepar.lon, self.gui.platepar.elev = lat2, lon2, elev2
+
+
+    def onLatChanged(self):
+        self.gui.platepar.lat = self.lat.value()
+        self.sigLocationChanged.emit()
+
+    def onLonChanged(self):
+        self.gui.platepar.lon = self.lon.value()
+        self.sigLocationChanged.emit()
+
+    def onElevChanged(self):
+        self.gui.platepar.elev = self.elev.value()
+        self.sigLocationChanged.emit()
+
+
+
+    def onUpPressed(self):
+
+        # Read the distance box
+        self.onDistanceChanged()
+
+        # Compute the new elevation
+        self.gui.platepar.elev += self.distance
+
+        self.sigLocationChanged.emit()
+        self.updatePlatepar()
+
+    def onForwardPressed(self):
+
+        # Read the distance box
+        self.onDistanceChanged()
+
+        # Move observed along azimuth - forward
+        self.updateGeoCoordinatesFromAzimChange(self.gui.platepar.az_centre)
+
+        self.sigLocationChanged.emit()
+        self.updatePlatepar()
+
+    def onLeftPressed(self):
+
+        # Read the distance box
+        self.onDistanceChanged()
+
+        # Move observed along azimuth - left
+        self.updateGeoCoordinatesFromAzimChange((self.gui.platepar.az_centre - 90)%360)
+
+        self.sigLocationChanged.emit()
+        self.updatePlatepar()
+
+    def onRightPressed(self):
+        
+        # Read the distance box
+        self.onDistanceChanged()
+
+        # Move observed along azimuth - right
+        self.updateGeoCoordinatesFromAzimChange((self.gui.platepar.az_centre + 90)%360)
+
+        self.sigLocationChanged.emit()
+        self.updatePlatepar()
+
+    def onReversePressed(self):
+        
+        # Read the distance box
+        self.onDistanceChanged()
+
+        # Move observed along azimuth - reverse
+        self.updateGeoCoordinatesFromAzimChange((self.gui.platepar.az_centre - 180)%360)
+
+        self.sigLocationChanged.emit()
+        self.updatePlatepar()
+
+    def onDownPressed(self):
+
+        # Read the distance box
+        self.onDistanceChanged()
+
+        # Compute the new elevation
+        self.gui.platepar.elev -= self.distance
+
+        self.sigLocationChanged.emit()
+        self.updatePlatepar()
+
+    def onDistanceChanged(self):
+        self.distance = self.dist_box.value()
+        pass
+
+
+
+    def updatePlatepar(self):
+        """
+        Updates QDoubleSpinBox values to the values of the platepar.
+        Call this whenever the platepar values are changed
+        """
+        self.lat.setValue(self.gui.platepar.lat)
+        self.lon.setValue(self.gui.platepar.lon)
+        self.elev.setValue(self.gui.platepar.elev)
+
+
+
 class PlateparParameterManager(QtWidgets.QWidget):
     """
     QWidget that contains various QDoubleSpinBox's that can be changed to
@@ -1231,7 +1485,6 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigScaleChanged = QtCore.pyqtSignal()
     sigFitParametersChanged = QtCore.pyqtSignal()
     sigLocationChanged = QtCore.pyqtSignal()
-    sigElevChanged = QtCore.pyqtSignal()
     sigExtinctionChanged = QtCore.pyqtSignal()
 
     sigFitPressed = QtCore.pyqtSignal()
@@ -1368,41 +1621,43 @@ class PlateparParameterManager(QtWidgets.QWidget):
         hbox.addWidget(QtWidgets.QLabel('', alignment=QtCore.Qt.AlignLeft))
         form.addRow(QtWidgets.QLabel('Extinction'), hbox)
 
-        hbox = QtWidgets.QHBoxLayout()
-        self.lat = DoubleSpinBox()
-        self.lat.setMinimum(-360)
-        self.lat.setMaximum(360)
-        self.lat.setDecimals(8)
-        self.lat.setSingleStep(1)
-        self.lat.setFixedWidth(100)
-        self.lat.valueModified.connect(self.onLatChanged)
-        hbox.addWidget(self.lat)
-        hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
-        form.addRow(QtWidgets.QLabel('Lat'), hbox)
+        form.addRow(QtWidgets.QLabel("Press Enter to accept value"))
 
-        hbox = QtWidgets.QHBoxLayout()
-        self.lon = DoubleSpinBox()
-        self.lon.setMinimum(-360)
-        self.lon.setMaximum(360)
-        self.lon.setDecimals(8)
-        self.lon.setSingleStep(1)
-        self.lon.setFixedWidth(100)
-        self.lon.valueModified.connect(self.onLonChanged)
-        hbox.addWidget(self.lon)
-        hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
-        form.addRow(QtWidgets.QLabel('Lon'), hbox)
+        # hbox = QtWidgets.QHBoxLayout()
+        # self.lat = DoubleSpinBox()
+        # self.lat.setMinimum(-360)
+        # self.lat.setMaximum(360)
+        # self.lat.setDecimals(8)
+        # self.lat.setSingleStep(1)
+        # self.lat.setFixedWidth(100)
+        # self.lat.valueModified.connect(self.onLatChanged)
+        # hbox.addWidget(self.lat)
+        # hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
+        # form.addRow(QtWidgets.QLabel('Lat'), hbox)
 
-        hbox = QtWidgets.QHBoxLayout()
-        self.elev = DoubleSpinBox()
-        self.elev.setMinimum(0)
-        self.elev.setMaximum(1000000)
-        self.elev.setDecimals(8)
-        self.elev.setSingleStep(100)
-        self.elev.setFixedWidth(100)
-        self.elev.valueModified.connect(self.onElevChanged)
-        hbox.addWidget(self.elev)
-        hbox.addWidget(QtWidgets.QLabel('m', alignment=QtCore.Qt.AlignLeft))
-        form.addRow(QtWidgets.QLabel('Elev'), hbox)
+        # hbox = QtWidgets.QHBoxLayout()
+        # self.lon = DoubleSpinBox()
+        # self.lon.setMinimum(-360)
+        # self.lon.setMaximum(360)
+        # self.lon.setDecimals(8)
+        # self.lon.setSingleStep(1)
+        # self.lon.setFixedWidth(100)
+        # self.lon.valueModified.connect(self.onLonChanged)
+        # hbox.addWidget(self.lon)
+        # hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
+        # form.addRow(QtWidgets.QLabel('Lon'), hbox)
+
+        # hbox = QtWidgets.QHBoxLayout()
+        # self.elev = DoubleSpinBox()
+        # self.elev.setMinimum(0)
+        # self.elev.setMaximum(1000000)
+        # self.elev.setDecimals(8)
+        # self.elev.setSingleStep(100)
+        # self.elev.setFixedWidth(100)
+        # self.elev.valueModified.connect(self.onElevChanged)
+        # hbox.addWidget(self.elev)
+        # hbox.addWidget(QtWidgets.QLabel('m', alignment=QtCore.Qt.AlignLeft))
+        # form.addRow(QtWidgets.QLabel('Elev'), hbox)
 
         self.distortion_type = QtWidgets.QComboBox(self)
         self.distortion_type.addItems(self.gui.platepar.distortion_type_list)
@@ -1453,17 +1708,17 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.sigResetDistortionPressed.emit()
         self.onIndexChanged()
 
-    def onLatChanged(self):
-        self.gui.platepar.lat = self.lat.value()
-        self.sigLocationChanged.emit()
+    # def onLatChanged(self):
+    #     self.gui.platepar.lat = self.lat.value()
+    #     self.sigLocationChanged.emit()
 
-    def onLonChanged(self):
-        self.gui.platepar.lon = self.lon.value()
-        self.sigLocationChanged.emit()
+    # def onLonChanged(self):
+    #     self.gui.platepar.lon = self.lon.value()
+    #     self.sigLocationChanged.emit()
 
-    def onElevChanged(self):
-        self.gui.platepar.elev = self.elev.value()
-        self.sigElevChanged.emit()
+    # def onElevChanged(self):
+    #     self.gui.platepar.elev = self.elev.value()
+    #     self.sigLocationChanged.emit()
 
     def onAzChanged(self):
         self.gui.platepar.az_centre = self.az_centre.value()
@@ -1519,9 +1774,9 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.fit_parameters.updateValues()
         self.distortion_type.setCurrentIndex(
             self.gui.platepar.distortion_type_list.index(self.gui.platepar.distortion_type))
-        self.lat.setValue(self.gui.platepar.lat)
-        self.lon.setValue(self.gui.platepar.lon)
-        self.elev.setValue(self.gui.platepar.elev)
+        # self.lat.setValue(self.gui.platepar.lat)
+        # self.lon.setValue(self.gui.platepar.lon)
+        # self.elev.setValue(self.gui.platepar.elev)
         self.extinction_scale.setValue(self.gui.platepar.extinction_scale)
         self.refraction.setChecked(self.gui.platepar.refraction)
         self.eqAspect.setChecked(self.gui.platepar.equal_aspect)
@@ -1765,6 +2020,8 @@ class SettingsWidget(QtWidgets.QWidget):
         self.std_label = QtWidgets.QLabel('Filter Res Std')
         form.addRow(self.std_label, self.std)
 
+        form.addRow(QtWidgets.QLabel("Press Enter to accept value"))
+
     def updateMaxAvePixel(self):
         self.ave_pixel.setChecked(self.gui.img_type_flag == 'avepixel')
         self.max_pixel.setChecked(self.gui.img_type_flag == 'maxpixel')
@@ -1912,7 +2169,7 @@ class DoubleSpinBox(QtWidgets.QDoubleSpinBox):
 
     def keyPressEvent(self, e):
         super().keyPressEvent(e)
-        if e.key() == QtCore.Qt.Key_Return:
+        if (e.key() == QtCore.Qt.Key_Return) or (e.key() == QtCore.Qt.Key_Enter):
             self.valueModified.emit()
 
 

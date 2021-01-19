@@ -167,6 +167,10 @@ class GeoPoints(object):
     def update(self, platepar, jd):
         """ Project points to the observer's point of view. """
 
+        # Reset RA/Dec array
+        self.ra_data = []
+        self.dec_data = []
+
         # Compute ECI coordinates of the observer's location
         ref_eci = geo2Cartesian(platepar.lat, platepar.lon, platepar.elev, jd)
 
@@ -737,7 +741,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updatePairedStars()
 
         # make connections to sidebar gui
-        self.tab.param_manager.sigElevChanged.connect(self.onExtinctionChanged)
+        #self.tab.param_manager.sigElevChanged.connect(self.onExtinctionChanged)
         self.tab.param_manager.sigLocationChanged.connect(self.onAzAltChanged)
         self.tab.param_manager.sigAzAltChanged.connect(self.onAzAltChanged)
         self.tab.param_manager.sigRotChanged.connect(self.onRotChanged)
@@ -755,6 +759,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
         self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
         self.tab.param_manager.sigResetDistortionPressed.connect(self.resetDistortion)
+
+        self.tab.geolocation.sigLocationChanged.connect(self.onAzAltChanged)
+        self.tab.geolocation.sigReloadGeoPoints.connect(self.reloadGeoPoints)
 
         self.tab.settings.sigMaxAveToggled.connect(self.toggleImageType)
         self.tab.settings.sigCatStarsToggled.connect(self.toggleShowCatStars)
@@ -1178,6 +1185,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.label_f1.setText("F1 - Show hotkeys")
         self.label_f1.setPos(self.img_frame.width() - self.label_f1.boundingRect().width(), \
             self.img_frame.height() - self.label_f1.boundingRect().height())
+
+
 
     def updateStars(self):
         """ Updates only the stars, including catalog stars, calstars and paired stars """
@@ -3364,6 +3373,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
             print('CALSTARS file: ' + calstars_file + ' loaded!')
 
+
+    def reloadGeoPoints(self):
+        """ Reload the file with geo points. """
+
+        if self.geo_points_obj is not None:
+            if os.path.isfile(self.geo_points_input):
+                self.geo_points_obj = GeoPoints(self.geo_points_input)
+
+                self.updateStars()
+
+
     def loadCatalogStars(self, lim_mag):
         """ Loads stars from the BSC star catalog.
 
@@ -3378,6 +3398,7 @@ class PlateTool(QtWidgets.QMainWindow):
             mag_band_ratios=self.config.star_catalog_band_ratios)
 
         return catalog_stars
+
 
     def loadPlatepar(self, update=False):
         """
@@ -3442,6 +3463,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.first_platepar_fit = False
 
             self.platepar_file, self.platepar = platepar_file, platepar
+
+
+            # If geo points are used, turn off the refraction
+            if self.geo_points_obj is not None:
+                platepar.refraction = False
+
 
         if update:
             self.updateStars()

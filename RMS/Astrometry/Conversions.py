@@ -562,6 +562,33 @@ def AEH2Range(azim, elev, h, lat, lon, alt, accurate=False):
     return r
 
 
+def AER2LatLonAlt(azim, elev, r, lat, lon, alt):
+    """ Given an azimuth and altitude, compute lat, lon, and lat to a point along the given line of sight
+        that is a given distance far away.
+
+    Arguments:
+        azim: [float] Azimuth (+E of due N) in degrees.
+        elev: [float] Elevation in degrees.
+        r: [float] Range along the line of sight (meters).
+        lat: [float] Latitude of observer in degrees.
+        lon: [float] Longitude of observer in degrees.
+        alt: [float] Altitude of observer in meters.
+
+    Return:
+        (lat, lon, alt): [tuple of floats] range in meteors, latitude and longitude in degrees, 
+            WGS84 elevation in meters
+
+    """
+
+
+    # Compute lat/lon/alt of the point on the line of sight
+    x, y, z = AER2ECEF(azim, elev, r, lat, lon, alt)
+    lat2, lon2, alt2 = ecef2LatLonAlt(x, y, z)
+    lat2, lon2 = np.degrees(lat2), np.degrees(lon2)
+
+
+    return lat2, lon2, alt2
+
 
 def AEH2LatLonAlt(azim, elev, h, lat, lon, alt):
     """ Given an azimuth and altitude, compute lat, lon, and lat to a point along the given line of sight
@@ -586,9 +613,7 @@ def AEH2LatLonAlt(azim, elev, h, lat, lon, alt):
 
 
     # Compute lat/lon/alt of the point on the line of sight
-    x, y, z = AER2ECEF(azim, elev, r, lat, lon, alt)
-    lat2, lon2, alt2 = ecef2LatLonAlt(x, y, z)
-    lat2, lon2 = np.degrees(lat2), np.degrees(lon2)
+    lat2, lon2, alt2 = AER2LatLonAlt(azim, elev, r, lat, lon, alt)
 
 
     return r, lat2, lon2, alt2
