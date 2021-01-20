@@ -106,7 +106,7 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
 @cython.boundscheck(False)
 @cython.wraparound(False) 
 def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, double dec_c, double jd,
-        double lat, double lon, double radius, double mag_limit):
+        double lat, double lon, double radius, double mag_limit, bool remove_under_horizon=True):
     """ Make a subset of stars from the given star catalog around the given coordinates with a given radius.
     
     Arguments:
@@ -118,6 +118,9 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
         lon: [float] Observer longitude (deg).
         radius: [float] Extraction radius (degrees).
         mag_limit: [float] Limiting magnitude.
+
+    Keyword arguments:
+        remove_under_horizon: [bool] Remove stars below the horizon (-5 deg below).
 
     Return:
         filtered_indices, filtered_list: (ndarray, ndarray)
@@ -169,8 +172,8 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
             _, elev = cyraDec2AltAz(radians(ra), radians(dec), jd, radians(lat), radians(lon))
 
 
-            # Only take stars above -20 degrees
-            if degrees(elev) > -20:
+            # Only take stars above -5 degrees, if the filtering is on
+            if not (remove_under_horizon and (degrees(elev) < -5)):
             
                 filtered_list[k,0] = ra
                 filtered_list[k,1] = dec

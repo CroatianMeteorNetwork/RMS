@@ -1229,7 +1229,7 @@ class PlateTool(QtWidgets.QMainWindow):
             geo_xy = np.c_[self.geo_x, self.geo_y]
 
             # Get indices of points inside the fov
-            filtered_indices, _ = self.filterCatalogStarsInsideFOV(geo_points)
+            filtered_indices, _ = self.filterCatalogStarsInsideFOV(geo_points, remove_under_horizon=False)
 
             # Create a mask to filter out all points outside the image and the FOV
             filter_indices_mask = np.zeros(len(geo_xy), dtype=np.bool)
@@ -3154,8 +3154,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return ra_centre, dec_centre
 
-    def filterCatalogStarsInsideFOV(self, catalog_stars):
+    def filterCatalogStarsInsideFOV(self, catalog_stars, remove_under_horizon=True):
         """ Take only catalogs stars which are inside the FOV.
+
+        Keyword arguments:
+            remove_under_horizon: [bool] Remove stars below the horizon (-5 deg below).
 
         Arguments:
             catalog_stars: [list] A list of (ra, dec, mag) tuples of catalog stars.
@@ -3173,7 +3176,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Take only those stars which are inside the FOV
         filtered_indices, filtered_catalog_stars = subsetCatalog(catalog_stars, ra_centre, dec_centre, \
-            jd, self.platepar.lat, self.platepar.lon, fov_radius, self.cat_lim_mag)
+            jd, self.platepar.lat, self.platepar.lon, fov_radius, self.cat_lim_mag, \
+            remove_under_horizon=remove_under_horizon)
 
         return filtered_indices, np.array(filtered_catalog_stars)
 
