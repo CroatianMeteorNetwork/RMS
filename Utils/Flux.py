@@ -13,10 +13,14 @@ import matplotlib.pyplot as plt
 import scipy.stats
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
+from RMS.Astrometry.ApplyRecalibrate import applyRecalibrate
 from RMS.Astrometry.Conversions import areaGeoPolygon, jd2Date, datetime2JD, J2000_JD, raDec2AltAz
 import RMS.ConfigReader as cr
-from RMS.Formats import Platepar
+from RMS.ExtractStars import extractStarsAndSave
+import RMS.Formats.CALSTARS as CALSTARS
+from RMS.Formats import FFfile
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
+from RMS.Formats import Platepar
 from RMS.Math import angularSeparation
 from RMS.Routines.FOVArea import xyHt2Geo, fovArea
 from RMS.Routines.MaskImage import loadMask, MaskStructure
@@ -27,7 +31,7 @@ from Utils.ShowerAssociation import showerAssociation, heightModel
 def generateColAreaJSONFileName(station_code, side_points, ht_min, ht_max, dht, elev_limit):
     """ Generate a file name for the collection area JSON file. """
 
-    file_name = "col_areas_{:s}_sp-{:d}_htmin-{:.1f}_htmax-{:.1f}_dht-{:.1f}_elemin-{:.1f}.json".format(\
+    file_name = "flux_col_areas_{:s}_sp-{:d}_htmin-{:.1f}_htmax-{:.1f}_dht-{:.1f}_elemin-{:.1f}.json".format(\
         station_code, side_points, ht_min, ht_max, dht, elev_limit)
 
     return file_name
@@ -52,6 +56,9 @@ def saveRawCollectionAreas(dir_path, file_name, col_areas_ht):
                 col_areas_ht_strkeys[key][str_key] = col_areas_ht[key][tuple_key]
 
 
+        # Add an explanation what each entry means
+        col_areas_ht_strkeys[-1] = {"height (m)": {"x (px), y (px) of pixel block": \
+            ["area (m^2)", "azimuth +E of due N (deg)", "elevation (deg)", "sensitivity", "range (m)"]}}
 
         # Convert collection areas to JSON
         out_str = json.dumps(col_areas_ht_strkeys, indent=4, sort_keys=True)
@@ -76,6 +83,11 @@ def loadRawCollectionAreas(dir_path, file_name):
         # Convert tuple keys (x_mid, y_mid) to str keys
         col_areas_ht = collections.OrderedDict()
         for key in col_areas_ht_strkeys:
+
+            # Skip heights below 0 (the info key)
+            if float(key) < 0:
+                continue
+
             col_areas_ht[key] = collections.OrderedDict()
 
             for str_key in col_areas_ht_strkeys[key]:
@@ -273,17 +285,118 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
     
 
 
+def sensorCharacterization(config, dir_path):
+    """ Characterize the standard deviation of the background and the FWHM of stars on every image. """
+
+    
+    # Find the CALSTARS file in the given folder that has FWHM information
+    found_good_calstars = False
+    for cal_file in os.listdir(dir_path):
+        if ('CALSTARS' in cal_file) and ('.txt' in cal_file) and (not found_good_calstars):
+
+            # Load the calstars file
+            calstars_list = CALSTARS.readCALSTARS(dir_path, cal_file)
+
+            if len(calstars_list) > 0:
+
+                # Check that at least one image has good FWHM measurements
+                for ff_name, star_data in calstars_list:
+
+                    if len(star_data) > 1:
+
+                        star_data = np.array(star_data)
+
+                        # Check if the calstars file have FWHM information
+                        fwhm = star_data[:, 4]
+
+                        # Check that FWHM values have been computed well
+                        if np.all(fwhm > 1):
+
+                            found_good_calstars = True
+
+                            print('CALSTARS file: ' + cal_file + ' loaded!')
+
+                            break
+
+
+    # If the FWHM information is not present, run the star extraction
+    if not found_good_calstars:
+
+        print()
+        print("No FWHM information found in existing CALSTARS files!")
+        print()
+        print("Rerunning star detection...")
+        print()
+
+        found_good_calstars = False
+
+        # Run star extraction again, and now FWHM will be computed
+        calstars_list = extractStarsAndSave(config, dir_path)
+
+        if len(calstars_list) == 0:
+            found_good_calstars = False
+
+
+        # Check for a minimum of detected stars
+        for ff_name, star_data in calstars_list:
+            if len(star_data) >= config.ff_min_stars:
+                found_good_calstars = True
+                break
+            
+    # If no good calstars exist, stop computing the flux
+    if not found_good_calstars:
+
+        print("No stars were detected in the data!")
+
+        return False
 
 
 
-def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_end, timebin, mass_index, \
+    # Dictionary which holds information about FWHM and standard deviation of the image background
+    sensor_data = {}
+
+    # Compute median FWHM per FF file
+    for ff_name, star_data in calstars_list:
+
+        # Check that the FF file exists in the data directory
+        if ff_name not in os.listdir(dir_path):
+            continue
+
+
+        star_data = np.array(star_data)
+
+        # Compute the median star FWHM
+        fwhm_median = np.median(star_data[:, 4])
+
+
+        # Load the FF file and compute the standard deviation of the background
+        ff = FFfile.read(dir_path, ff_name)
+
+        # Compute the median stddev of the background
+        stddev_median = np.median(ff.stdpixel)
+
+
+        # Store the values to the dictionary
+        sensor_data[ff_name] = [fwhm_median, stddev_median]
+
+
+        print("{:s}, {:5.2f}, {:5.2f}".format(ff_name, fwhm_median, stddev_median))
+
+
+    return sensor_data
+
+
+
+
+
+def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_end, timebin, mass_index, \
     timebin_intdt=0.25, ht_std_percent=5.0, mask=None):
     """ Compute flux using measurements in the given FTPdetectinfo file. 
     
     Arguments:
         config: [Config instance]
         dir_path: [str] Path to the working directory.
-        ftpdetectinfo_list: [list] A list of paths to FTPdetectinfo files.
+        ftpdetectinfo_path: [str] Path to a FTPdetectinfo file.
         shower_code: [str] IAU shower code (e.g. ETA, PER, SDA).
         dt_beg: [Datetime] Datetime object of the observation beginning.
         dt_end: [Datetime] Datetime object of the observation end.
@@ -303,6 +416,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
     file_list = sorted(os.listdir(dir_path))
 
 
+
     # Find and load the platepar file
     if config.platepar_name in file_list:
 
@@ -315,7 +429,62 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
         return None
 
 
-    # Locate the mask file
+
+
+    # # Load FTPdetectinfos
+    # meteor_data = []
+    # for ftpdetectinfo_path in ftpdetectinfo_list:
+
+    #     if not os.path.isfile(ftpdetectinfo_path):
+    #         print('No such file:', ftpdetectinfo_path)
+    #         continue
+
+    #     meteor_data += readFTPdetectinfo(*os.path.split(ftpdetectinfo_path))
+
+
+    # Load meteor data from the FTPdetectinfo file
+    meteor_data = readFTPdetectinfo(*os.path.split(ftpdetectinfo_path))
+
+    if not len(meteor_data):
+        print("No meteors in the FTPdetectinfo file!")
+        return None
+
+
+
+
+    # Find and load recalibrated platepars
+    if config.platepars_recalibrated_name in file_list:
+        with open(os.path.join(dir_path, config.platepars_recalibrated_name)) as f:
+            recalibrated_platepars_dict = json.load(f)
+
+            print("Recalibrated platepars loaded!")
+
+    # If the file is not available, apply the recalibration procedure
+    else:
+
+        recalibrated_platepars_dict = applyRecalibrate(ftpdetectinfo_path, config)
+
+        print("Recalibrated platepar file not available!")
+        print("Recalibrating...")
+
+
+    # Convert the dictionary of recalibrated platepars to a dictionary of Platepar objects
+    recalibrated_platepars = {}
+    for ff_name in recalibrated_platepars_dict:
+        pp = Platepar.Platepar()
+        pp.loadFromDict(recalibrated_platepars_dict[ff_name], use_flat=config.use_flat)
+
+        recalibrated_platepars[ff_name] = pp
+
+
+    # Compute nighly mean of the photometric zero point
+    mag_lev_nightly_mean = np.mean([recalibrated_platepars[ff_name].mag_lev \
+                                        for ff_name in recalibrated_platepars])
+
+
+
+
+    # Locate and load the mask file
     if config.mask_file in file_list:
         mask_path = os.path.join(dir_path, config.mask_file)
         mask = loadMask(mask_path)
@@ -327,35 +496,65 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
 
 
 
-    # Load FTPdetectinfos
-    meteor_data = []
-    for ftpdetectinfo_path in ftpdetectinfo_list:
+    ### SENSOR CHARACTERIZATION ###
+    # Computes FWHM of stars and noise profile of the sensor
+    
+    # File which stores the sensor characterization profile
+    sensor_characterization_file = "flux_sensor_characterization.json"
+    sensor_characterization_path = os.path.join(dir_path, sensor_characterization_file)
 
-        if not os.path.isfile(ftpdetectinfo_path):
-            print('No such file:', ftpdetectinfo_path)
-            continue
+    # Load sensor characterization file if present, so the procedure can be skipped
+    if os.path.isfile(sensor_characterization_path):
 
-        meteor_data += readFTPdetectinfo(*os.path.split(ftpdetectinfo_path))
+        # Load the JSON file
+        with open(sensor_characterization_path) as f:
+            
+            data = " ".join(f.readlines())
+            sensor_data = json.loads(data)
+
+            # Remove the info entry
+            if '-1' in sensor_data:
+                del sensor_data['-1']
+
+    else:
+
+        # Run sensor characterization
+        sensor_data = sensorCharacterization(config, dir_path)
+
+        # Save to file for posterior use
+        with open(sensor_characterization_path, 'w') as f:
+
+            # Add an explanation what each entry means
+            sensor_data_save = dict(sensor_data)
+            sensor_data_save['-1'] = {"FF file name": ['median star FWHM', 'median background noise stddev']}
+
+            # Convert collection areas to JSON
+            out_str = json.dumps(sensor_data_save, indent=4, sort_keys=True)
+
+            # Save to disk
+            f.write(out_str)
 
 
-    if not len(meteor_data):
-        print("No meteors in the FTPdetectinfo file!")
-        return None
 
+    # Compute the nighly mean FWHM and noise stddev
+    fwhm_nightly_mean = np.mean([sensor_data[key][0] for key in sensor_data])
+    stddev_nightly_mean = np.mean([sensor_data[key][1] for key in sensor_data])
+
+    ### ###
 
 
 
     # Perform shower association
-    associations, shower_counts = showerAssociation(config, ftpdetectinfo_list, shower_code=shower_code, \
+    associations, shower_counts = showerAssociation(config, [ftpdetectinfo_path], shower_code=shower_code, \
         show_plot=False, save_plot=False, plot_activity=False)
 
     # If there are no shower association, return nothing
     if not associations:
-        print("No meteors assocaited with a shower!")
+        print("No meteors associated with the shower!")
         return None
 
 
-
+    # Print the list of used meteors
     peak_mags = []
     for key in associations:
         meteor, shower = associations[key]
@@ -369,11 +568,15 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
 
             print("{:.6f}, {:3s}, {:+.2f}".format(meteor.jdt_ref, shower.name, peak_mag))
 
+    print()
 
 
     # Init the flux configuration
     flux_config = FluxConfig()
 
+
+
+    ### COMPUTE COLLECTION AREAS ###
 
     # Make a file name to save the raw collection areas
     col_areas_file_name = generateColAreaJSONFileName(platepar.station_code, flux_config.side_points, \
@@ -396,6 +599,9 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
         saveRawCollectionAreas(dir_path, col_areas_file_name, col_areas_ht)
 
         print("Saved raw collection areas to:", col_areas_file_name)
+
+
+    ### ###
 
 
 
@@ -430,32 +636,31 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
     ###
 
 
-    #
+
 
     # Compute the average limiting magnitude to which all flux will be normalized
 
-    # Full width at half-maximum of stars (px)
-    star_stddev = 1.5
-    fwhm = 2.355*star_stddev
+    # Standard deviation of star PSF, nightly mean (px)
+    star_stddev = fwhm_nightly_mean/2.355
 
-    # Compute the theoretical stellar limiting magnitude
-    bkg_stddev = 6.0
-    star_sum = 2*np.pi*(config.k1_det*bkg_stddev + config.j1_det)*star_stddev**2
-    lm_s = -2.5*np.log10(star_sum) + platepar.mag_lev
+    # Compute the theoretical stellar limiting magnitude (nightly average)
+    star_sum = 2*np.pi*(config.k1_det*stddev_nightly_mean + config.j1_det)*star_stddev**2
+    lm_s_nightly_mean = -2.5*np.log10(star_sum) + mag_lev_nightly_mean
 
     # A meteor needs to be visible on at least 4 frames, thus it needs to have at least 4x the mass to produce
     #   that amount of light. 1 magnitude difference scales as -0.4 of log of mass, thus:
     frame_min_loss = np.log10(config.line_minimum_frame_range_det)/(-0.4)
 
-    lm_s += frame_min_loss
+    lm_s_nightly_mean += frame_min_loss
 
     # Compute apparent meteor magnitude
-    lm_m = lm_s - 5*np.log10(r_mid/1e5) \
-        - 2.5*np.log10(np.degrees(platepar.F_scale*v_init*np.sin(rad_dist_night_mid)/(config.fps*r_mid*fwhm)))
+    lm_m_nightly_mean = lm_s_nightly_mean - 5*np.log10(r_mid/1e5) - 2.5*np.log10( \
+        np.degrees(platepar.F_scale*v_init*np.sin(rad_dist_night_mid)/(config.fps*r_mid*fwhm_nightly_mean)) \
+        )
 
     #
-    print("Stellar lim mag using detection thresholds:", lm_s)
-    print("Apparent meteor limiting magnitude:", lm_m)
+    print("Stellar lim mag using detection thresholds:", lm_s_nightly_mean)
+    print("Apparent meteor limiting magnitude:", lm_m_nightly_mean)
 
 
     ### Apply time-dependent corrections ###
@@ -482,6 +687,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
 
         # Only select meteors in this bin
         bin_meteors = []
+        bin_ffs = []
         for key in associations:
             meteor, shower = associations[key]
 
@@ -490,6 +696,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
                     and (meteor.jdt_ref <= bin_jd_end):
                     
                     bin_meteors.append([meteor, shower])
+                    bin_ffs.append(meteor.ff_name)
+
 
 
         if len(bin_meteors) > 0:
@@ -500,6 +708,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
             jd_mean = (bin_jd_beg + bin_jd_end)/2
 
             print()
+            print()
+            print("-- Bin information ---")
             print("Bin beg:", bin_dt_beg)
             print("Bin end:", bin_dt_end)
             print("Sol mid: {:.5f}".format(np.degrees(jd2SolLonSteyaert(jd_mean))))
@@ -548,9 +758,35 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
                         np.radians(azim_mid), np.radians(elev_mid))
             ang_vel_mid = v_init*np.sin(rad_dist_mid)/r_mid
 
+
+
+            ### Compute the limiting magnitude ###
+
+            # Compute the mean star FWHM in the given bin
+            fwhm_bin_mean = np.mean([sensor_data[ff_name][0] for ff_name in bin_ffs])
+
+            # Compute the mean background stddev in the given bin
+            stddev_bin_mean = np.mean([sensor_data[ff_name][1] for ff_name in bin_ffs])
+
+            # Compute the mean photometric zero point in the given bin
+            mag_lev_bin_mean = np.mean([recalibrated_platepars[ff_name].mag_lev for ff_name in bin_ffs])
+
+
+
+            # Standard deviation of star PSF, nightly mean (px)
+            star_stddev = fwhm_bin_mean/2.355
+
+            # Compute the theoretical stellar limiting magnitude (nightly average)
+            star_sum = 2*np.pi*(config.k1_det*stddev_bin_mean + config.j1_det)*star_stddev**2
+            lm_s = -2.5*np.log10(star_sum) + mag_lev_bin_mean
+            lm_s += frame_min_loss
+
             # Compute apparent meteor magnitude
-            lm_m = lm_s - 5*np.log10(r_mid/1e5) \
-                - 2.5*np.log10(np.degrees(platepar.F_scale*v_init*np.sin(rad_dist_mid)/(config.fps*r_mid*fwhm)))
+            lm_m = lm_s - 5*np.log10(r_mid/1e5) - 2.5*np.log10( \
+                    np.degrees(platepar.F_scale*v_init*np.sin(rad_dist_mid)/(config.fps*r_mid*fwhm_bin_mean))\
+                    )
+
+            ### ###
 
 
             # Final correction area value (height-weightned)
@@ -602,9 +838,21 @@ def computeFlux(config, dir_path, ftpdetectinfo_list, shower_code, dt_beg, dt_en
                     collection_area += weights[ht]*area*correction_ratio**(mass_index - 1)
 
 
-            print("Ang vel: {:.2f} deg/s".format(np.degrees(ang_vel_mid)))
-            print("LM app:  {:+.2f}".format(lm_m))
-            print("Flux:    {:.2f} meteors/1000km^2/h".format(1e9*len(bin_meteors)/collection_area/bin_hours))
+
+            # Compute the flux in meteors/1000km^2/h
+            flux = 1e9*len(bin_meteors)/collection_area/bin_hours
+
+
+            print("-- Sensor information ---")
+            print("Star FWHM:  {:5.2f} px".format(fwhm_bin_mean))
+            print("Bkg stddev: {:4.1f}".format(stddev_bin_mean))
+            print("Photom ZP:  {:+6.2f} mag".format(mag_lev_bin_mean))
+            print("Stellar LM: {:+.2f} mag".format(lm_s))
+            print("-- Flux ---")
+            print("Col area: {:d} km^2".format(int(collection_area/1e6)))
+            print("Ang vel:  {:.2f} deg/s".format(np.degrees(ang_vel_mid)))
+            print("LM app:   {:+.2f} mag".format(lm_m))
+            print("Flux:     {:.2f} meteors/1000km^2/h".format(flux))
 
 
     # Plot a historgram of peak magnitudes
@@ -625,8 +873,8 @@ if __name__ == "__main__":
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Compute single-station meteor shower flux.")
 
-    arg_parser.add_argument("ftpdetectinfo_path", nargs="+", metavar="FTPDETECTINFO_PATH", type=str, \
-        help="Path to one or more FTPdetectinfo files. The directory also has to contain a platepar and mask file.")
+    arg_parser.add_argument("ftpdetectinfo_path", metavar="FTPDETECTINFO_PATH", type=str, \
+        help="Path to an FTPdetectinfo file. The directory also has to contain a platepar and mask file.")
 
     arg_parser.add_argument("shower_code", metavar="SHOWER_CODE", type=str, \
         help="IAU shower code (e.g. ETA, PER, SDA).")
@@ -655,22 +903,27 @@ if __name__ == "__main__":
 
     ftpdetectinfo_path = cml_args.ftpdetectinfo_path
 
-    # Apply wildcards to input
-    ftpdetectinfo_path_list = []
-    for entry in ftpdetectinfo_path:
+    # # Apply wildcards to input
+    # ftpdetectinfo_path_list = []
+    # for entry in ftpdetectinfo_path:
 
-        # Expand wildcards and find all paths
-        paths = glob.glob(entry)
+    #     # Expand wildcards and find all paths
+    #     paths = glob.glob(entry)
 
-        # Only take paths to files, not directories
-        paths = [entry for entry in paths if os.path.isfile(entry)]
+    #     # Only take paths to files, not directories
+    #     paths = [entry for entry in paths if os.path.isfile(entry)]
 
-        ftpdetectinfo_path_list += paths
+    #     ftpdetectinfo_path_list += paths
 
 
-    # If there are no good files given, notify the user
-    if len(ftpdetectinfo_path_list) == 0:
-        print("No FTPdetectinfo files given!")
+    # # If there are no good files given, notify the user
+    # if len(ftpdetectinfo_path_list) == 0:
+    #     print("No FTPdetectinfo files given!")
+    #     sys.exit()
+
+    if not os.path.isfile(cml_args.ftpdetectinfo_path):
+        print("The FTPdetectinfo file does not exist:", cml_args.ftpdetectinfo_path)
+        print("Exiting...")
         sys.exit()
 
 
@@ -680,12 +933,13 @@ if __name__ == "__main__":
         
 
     # Extract parent directory
-    dir_path = os.path.dirname(ftpdetectinfo_path_list[0])
+    #dir_path = os.path.dirname(ftpdetectinfo_path_list[0])
+    dir_path = os.path.dirname(cml_args.ftpdetectinfo_path)
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
 
     # Compute the flux
-    computeFlux(config, dir_path, ftpdetectinfo_path_list, cml_args.shower_code, dt_beg, dt_end, \
+    computeFlux(config, dir_path, cml_args.ftpdetectinfo_path, cml_args.shower_code, dt_beg, dt_end, \
         cml_args.dt, cml_args.s)

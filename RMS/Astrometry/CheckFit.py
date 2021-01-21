@@ -58,7 +58,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
         platepar: [Platepar structure] Astrometry parameters.
         catalog_stars: [ndarray] An array of catalog stars (ra, dec, mag).
         star_dict: [ndarray] A dictionary where the keys are JDs when the stars were recorded and values are
-            2D list of stars, each entry is (X, Y, bg_level, level).
+            2D list of stars, each entry is (X, Y, bg_level, level, fwhm).
         match_radius: [float] Maximum radius for star matching (pixels).
         min_matched_stars: [int] Minimum number of matched stars on the image for the image to be accepted.
     Keyword arguments:

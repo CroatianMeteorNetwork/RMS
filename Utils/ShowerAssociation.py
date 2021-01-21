@@ -29,18 +29,20 @@ EARTH = EARTH_CONSTANTS()
 
 
 class MeteorSingleStation(object):
-    def __init__(self, station_id, lat, lon):
+    def __init__(self, station_id, lat, lon, ff_name):
         """ Container for single station observations which enables great circle fitting. 
 
         Arguments:
             station_id: [str]
             lat: [float] +N latitude (deg).
             lon: [float] +E longitude (deg).
+            ff_name: [str] Name of the FF file on which the meteor was recorded.
         """
 
         self.station_id = station_id
         self.lat = lat
         self.lon = lon
+        self.ff_name = ff_name
 
         self.jd_array = []
         self.ra_array = []
@@ -444,7 +446,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
 
         # Init container for meteor observation
-        meteor_obj = MeteorSingleStation(cam_code, config.latitude, config.longitude)
+        meteor_obj = MeteorSingleStation(cam_code, config.latitude, config.longitude, ff_name)
 
         # Infill the meteor structure
         for entry in meteor_meas:

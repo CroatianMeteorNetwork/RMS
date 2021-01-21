@@ -261,7 +261,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     # Plot detected stars
     for img_star in star_dict[max_jd]:
 
-        y, x, _, _ = img_star
+        y, x = img_star[:2]
 
         rect_side = 5*match_radius
         square_patch = plt.Rectangle((x - rect_side/2, y - rect_side/2), rect_side, rect_side, color='g', \
@@ -281,7 +281,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
         # Plot matched stars
         for img_star in image_stars:
-            x, y, _, _ = img_star
+            x, y = img_star[:2]
 
             circle_patch = plt.Circle((y, x), radius=3*match_radius, color='y', fill=False, \
                 label='Matched stars')
@@ -297,7 +297,8 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         x_predicted, y_predicted = raDecToXYPP(matched_catalog_stars[:, 0], \
             matched_catalog_stars[:, 1], max_jd, platepar)
 
-        img_y, img_x, _, _ = image_stars.T
+        img_y = image_stars[:, 0]
+        img_x = image_stars[:, 1]
 
         delta_x = x_predicted - img_x
         delta_y = y_predicted - img_y

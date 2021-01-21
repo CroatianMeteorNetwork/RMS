@@ -2172,10 +2172,11 @@ class PlateTool(object):
         if self.img_handle.name() in self.calstars:
 
             # Get the stars detected on this FF file
-            star_data = self.calstars[self.img_handle.name()]
+            star_data = np.array(self.calstars[self.img_handle.name()])
 
             # Get star coordinates
-            y, x, _, _ = np.array(star_data).T
+            y = star_data[:, 0]
+            x = star_data[:, 1]
 
             self.ax.scatter(x, y, edgecolors='g', marker='o', facecolors='none', alpha=0.8, \
                 linestyle='dotted')
@@ -2249,7 +2250,7 @@ class PlateTool(object):
         if (self.img_handle.name() in self.calstars) and (not upload_image):
 
             # Get the stars detected on this FF file
-            star_data = self.calstars[self.img_handle.name()]
+            star_data = np.array(self.calstars[self.img_handle.name()])
 
             # Make sure that there are at least 10 stars
             if len(star_data) < 10:
@@ -2259,7 +2260,8 @@ class PlateTool(object):
             else:
 
                 # Get star coordinates
-                y_data, x_data, _, _ = np.array(star_data).T
+                y_data = star_data[:, 0]
+                x_data = star_data[:, 1]
 
                 # Get astrometry.net solution, pass the FOV width estimate
                 solution = novaAstrometryNetSolve(x_data=x_data, y_data=y_data, fov_w_range=fov_w_range)

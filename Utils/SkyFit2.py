@@ -1334,10 +1334,11 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.img_handle.name() in self.calstars:
 
             # Get the stars detected on this FF file
-            star_data = self.calstars[self.img_handle.name()]
+            star_data = np.array(self.calstars[self.img_handle.name()])
 
             # Get star coordinates
-            y, x, _, _ = np.array(star_data).T
+            y = star_data[:, 0]
+            x = star_data[:, 1]
 
             self.calstar_markers.setData(x=x, y=y)
             self.calstar_markers2.setData(x=x, y=y)
@@ -2840,8 +2841,6 @@ class PlateTool(QtWidgets.QMainWindow):
                             # Set a fixed value for star intensity
                             self.star_intensity = 10.0
 
-                        print([[self.x_centroid, self.y_centroid, self.star_intensity], \
-                                                  selected_coords])
 
                         # Add the image/catalog pair to the list
                         self.paired_stars.append([[self.x_centroid, self.y_centroid, self.star_intensity], \
@@ -3194,7 +3193,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if (self.img_handle.name() in self.calstars) and (not upload_image):
 
             # Get the stars detected on this FF file
-            star_data = self.calstars[self.img_handle.name()]
+            star_data = np.array(self.calstars[self.img_handle.name()])
 
             # Make sure that there are at least 10 stars
             if len(star_data) < 10:
@@ -3204,7 +3203,8 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
 
                 # Get star coordinates
-                y_data, x_data, _, _ = np.array(star_data).T
+                y_data = star_data[:, 0]
+                x_data = star_data[:, 1]
 
                 # Get astrometry.net solution, pass the FOV width estimate
                 solution = novaAstrometryNetSolve(x_data=x_data, y_data=y_data, fov_w_range=fov_w_range)
@@ -3354,6 +3354,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def loadCalstars(self):
         """ Loads data from calstars file and updates self.calstars """
+
         # Find the CALSTARS file in the given folder
         calstars_file = None
         for cal_file in os.listdir(self.dir_path):
