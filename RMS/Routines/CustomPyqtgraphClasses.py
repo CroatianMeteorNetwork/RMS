@@ -894,17 +894,25 @@ class RightOptionsTab(QtWidgets.QTabWidget):
 
 
     def onSkyFit(self):
+
+        # Remove ManualReduction-specific tabs
         self.removeTabText('Debruijn')
 
-        self.insertTab(1, self.param_manager, 'Fit Parameters')
+        # Add Skyfit-specific tabs
+        self.insertTab(1, self.param_manager, "Fit Parameters")
+        self.insertTab(2, self.geolocation, "Station")
         self.settings.onSkyFit()
 
         self.setCurrentIndex(self.index)
 
     def onManualReduction(self):
-        self.removeTabText('Fit Parameters')
+
+        # Remove Skyfit-specific tabs
+        self.removeTabText("Fit Parameters")
+        self.removeTabText("Station")
         self.settings.onManualReduction()
 
+        # Add ManualReduction-specific tabs
         if self.gui.img.img_handle.input_type == 'dfn':
             self.insertTab(1, self.debruijn, 'Debruijn')
 
@@ -1909,6 +1917,7 @@ class SettingsWidget(QtWidgets.QWidget):
     sigCatStarsToggled = QtCore.pyqtSignal()
     sigCalStarsToggled = QtCore.pyqtSignal()
     sigDistortionToggled = QtCore.pyqtSignal()
+    sigMeasGroundPointsToggled = QtCore.pyqtSignal()
     sigInvertToggled = QtCore.pyqtSignal()
     sigGridToggled = QtCore.pyqtSignal()
     sigSelStarsToggled = QtCore.pyqtSignal()
@@ -1978,6 +1987,12 @@ class SettingsWidget(QtWidgets.QWidget):
             self.invert.setChecked(False)
         vbox.addWidget(self.invert)
 
+
+        self.meas_ground_points = QtWidgets.QCheckBox('Measure ground points')
+        self.meas_ground_points.released.connect(self.sigMeasGroundPointsToggled.emit)
+        self.updateMeasGroundPoints()
+        vbox.addWidget(self.meas_ground_points)
+
         hbox = QtWidgets.QHBoxLayout()
         grid_group = QtWidgets.QButtonGroup()
         self.grid = []
@@ -2043,6 +2058,9 @@ class SettingsWidget(QtWidgets.QWidget):
 
     def updateShowDistortion(self):
         self.distortion.setChecked(self.gui.draw_distortion)
+
+    def updateMeasGroundPoints(self):
+        self.meas_ground_points.setChecked(self.gui.meas_ground_points)
 
     def updateShowGrid(self):
         for i, button in enumerate(self.grid):

@@ -272,6 +272,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 print("The file with geo points does not exist:", self.geo_points_input)
 
 
+        # Measure points on the ground, not on the sky
+        self.meas_ground_points = False
+
         # Star picking mode variables
         self.star_aperature_radius = 5
         self.x_centroid = self.y_centroid = None
@@ -770,6 +773,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigPicksToggled.connect(self.toggleShowPicks)
         self.tab.settings.sigRegionToggled.connect(self.toggleShowRegion)
         self.tab.settings.sigDistortionToggled.connect(self.toggleDistortion)
+        self.tab.settings.sigMeasGroundPointsToggled.connect(self.toggleMeasGroundPoints)
         self.tab.settings.sigGridToggled.connect(self.onGridChanged)
         self.tab.settings.sigInvertToggled.connect(self.toggleInvertColours)
 
@@ -940,12 +944,20 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def onRefractionChanged(self):
 
-        # Update the reference apparent alt/az, as the refraction influences the pointing
-        self.platepar.updateRefAltAz()
+        # If ground points are measured, hold the alt/az the same, but update the reference RA/Dec
+        if self.meas_ground_points:
+            self.platepar.updateRefRADec()
+
+        # If points on the sky are measured, hold the reference RA/Dec the same, but update the apparent
+        #   alt/az
+        else:
+            # Update the reference apparent alt/az, as the refraction influences the pointing
+            self.platepar.updateRefAltAz()
 
         self.updateStars()
         self.updateLeftLabels()
         self.tab.param_manager.updatePlatepar()
+
 
     def onGridChanged(self):
         if self.grid_visible == 0:
@@ -1022,20 +1034,37 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Add coordinate info if platepar is present
         if self.platepar is not None:
+
             # Get the current frame time
             time_data = [self.img.img_handle.currentTime()]
 
+            # Use a modified platepar if ground points are being picked
+            pp_tmp = copy.deepcopy(self.platepar)
+            if self.meas_ground_points:
+                pp_tmp.refraction = False
+                pp_tmp.updateRefRADec()
+
             # Compute RA, dec
-            jd, ra, dec, _ = xyToRaDecPP(time_data, [x], [y], [1], self.platepar, extinction_correction=False)
+            jd, ra, dec, _ = xyToRaDecPP(time_data, [x], [y], [1], pp_tmp, extinction_correction=False)
 
             # Compute alt, az
-            azim, alt = trueRaDec2ApparentAltAz(ra[0], dec[0], jd[0], self.platepar.lat, self.platepar.lon, \
-                                                self.platepar.refraction)
+            azim, alt = trueRaDec2ApparentAltAz(ra[0], dec[0], jd[0], pp_tmp.lat, pp_tmp.lon, \
+                                                pp_tmp.refraction)
 
-            status_str += ",  Azim={:6.2f}  Alt={:6.2f} (date), RA={:6.2f}  Dec={:+6.2f} (J2000)".format(
-                azim, alt, ra[0], dec[0])
+
+            # If ground points are measured, change the text for alt/az
+            if self.meas_ground_points:
+                status_str += ",  Azim={:6.2f}  Alt={:6.2f} (ground)".format(azim, alt)
+            else:
+                status_str += ",  Azim={:6.2f}  Alt={:6.2f} (date)".format(azim, alt)
+
+
+            # Add RA/Dec info
+            status_str += ", RA={:6.2f}  Dec={:+6.2f} (J2000)".format(ra[0], dec[0])
+
 
         return status_str
+
 
     def zoom(self):
         """ Update the zoom window to zoom on the correct position """
@@ -2014,6 +2043,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update the possibly missing begin time
         if not hasattr(self, "beginning_time"):
             self.beginning_time = beginning_time
+
+        # Update possibly missing flag for measuring ground points
+        if not hasattr(self, meas_ground_points):
+            self.meas_ground_points = False
 
 
         # If setupUI hasn't already been called, call it
@@ -3132,6 +3165,11 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateDistortion()
         else:
             self.distortion_lines.hide()
+
+
+    def toggleMeasGroundPoints(self):
+        self.meas_ground_points = not self.meas_ground_points
+
 
     def toggleInvertColours(self):
         self.img.invert()
@@ -4476,6 +4514,7 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             self.region.setImage(np.array([[0]]))
 
+
     def saveFTPdetectinfo(self):
         """ Saves the picks to a FTPdetectinfo file in the same folder where the first given file is. """
 
@@ -4541,10 +4580,18 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # If the platepar is given, apply it to the reductions
         if self.platepar is not None:
-            applyAstrometryFTPdetectinfo(self.dir_path, ftpdetectinfo_name, '',
-                                         UT_corr=self.platepar.UT_corr, platepar=self.platepar)
+
+            # Use a modified platepar if ground points are being picked
+            pp_tmp = copy.deepcopy(self.platepar)
+            if self.meas_ground_points:
+                pp_tmp.refraction = False
+                pp_tmp.updateRefRADec()
+
+            applyAstrometryFTPdetectinfo(self.dir_path, ftpdetectinfo_name, '', \
+                                         UT_corr=pp_tmp.UT_corr, platepar=pp_tmp)
 
             print('Platepar applied to manual picks!')
+
 
     def saveJSON(self):
         """ Save the picks in a JSON file. """
@@ -4600,11 +4647,17 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute RA/Dec of the pick if the platepar is available
             if self.platepar is not None:
 
+                # Use a modified platepar if ground points are being picked
+                pp_tmp = copy.deepcopy(self.platepar)
+                if self.meas_ground_points:
+                    pp_tmp.refraction = False
+                    pp_tmp.updateRefRADec()
+
                 time_data = [self.img_handle.currentFrameTime()]
 
+                # Compute RA/Dec from image coordinates
                 _, ra_data, dec_data, mag_data = xyToRaDecPP(time_data, [pick['x_centroid']],
-                                                             [pick['y_centroid']], [pick['intensity_sum']],
-                                                             self.platepar)
+                    [pick['y_centroid']], [pick['intensity_sum']], pp_tmp)
 
                 ra = ra_data[0]
                 dec = dec_data[0]

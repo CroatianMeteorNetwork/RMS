@@ -579,19 +579,19 @@ if __name__ == "__main__":
 
         print()
         print(ff_name)
-        print('   ROW    COL   amplitude  intensity FWHM')
+        print('  ROW     COL       amp  intens FWHM')
         for x, y, max_ampl, level, fwhm in star_data:
-            print(' {:07.2f} {:07.2f} {:6d} {:6d} {:5.2f}'.format(round(y, 2), round(x, 2), int(max_ampl), \
+            print(' {:7.2f} {:7.2f} {:6d} {:6d} {:5.2f}'.format(round(y, 2), round(x, 2), int(max_ampl), \
                 int(level), fwhm))
 
 
-        x2, y2, amplitude, intensity, fwhm_data = star_data.T
+        x2, y2, amplitude, intensity, fwhm_data = np.array(star_data).T
 
         # Store the star info to list
         fwhm_list += fwhm_data.tolist()
-        intensity_list += intensity
-        x_list += x2
-        y_list += y2
+        intensity_list += intensity.tolist()
+        x_list += x2.tolist()
+        y_list += y2.tolist()
 
 
         # # Show stars if there are only more then 10 of them
