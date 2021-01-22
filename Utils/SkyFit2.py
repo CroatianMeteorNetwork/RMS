@@ -2045,7 +2045,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.beginning_time = beginning_time
 
         # Update possibly missing flag for measuring ground points
-        if not hasattr(self, meas_ground_points):
+        if not hasattr(self, "meas_ground_points"):
             self.meas_ground_points = False
 
 
