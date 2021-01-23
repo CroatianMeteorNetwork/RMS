@@ -374,6 +374,21 @@ cdef double refractionApparentToTrue(double elev):
 
 
 
+cpdef double pyRefractionApparentToTrue(double elev):
+    """ Python version of the refraction correction (apparent to true).
+
+    Arguments:
+        elev: [float] Apparent elevation (radians).
+
+    Return:
+        [float] True elevation (radians).
+
+    """
+
+    return refractionApparentToTrue(elev)
+
+
+
 cpdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double jd, double lat, double lon):
     """ Correct the equatorial coordinates for refraction. The correction is done from apparent to true
         coordinates.
@@ -442,6 +457,21 @@ cdef double refractionTrueToApparent(double elev):
 
     # Apply the refraction
     return elev + refraction
+
+
+
+cpdef double pyRefractionTrueToApparent(double elev):
+    """ Python version of the refraction correction (true to apparent).
+
+    Arguments:
+        elev: [float] Apparent elevation (radians).
+
+    Return:
+        [float] True elevation (radians).
+
+    """
+
+    return refractionTrueToApparent(elev)
 
 
 

@@ -44,7 +44,8 @@ from RMS.Math import angularSeparation
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz, cyApparentAltAz2TrueRADec
+from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz, cyApparentAltAz2TrueRADec, \
+    pyRefractionTrueToApparent
 
 
 class stationData(object):
@@ -1301,6 +1302,21 @@ class Platepar(object):
             # Update the position angle so that the rotation wrt horizon doesn't change
             self.pos_angle_ref = RMS.Astrometry.ApplyAstrometry.rotationWrtHorizonToPosAngle(self, \
                 self.rotation_from_horiz)
+
+
+    def switchToGroundPicks(self):
+        """ Switch the reference pointing so that points on the ground may be correctly measured. """
+
+        # If the refraction was on, turn if off and correct the centre
+        if self.refraction:
+            
+            self.refraction = False
+
+            # Preserve the reference elevation of the pointing as the apparent pointing
+            self.alt_centre = np.degrees(pyRefractionTrueToApparent(np.radians(self.alt_centre)))
+
+            self.updateRefRADec(preserve_rotation=True)
+
 
 
     def __repr__(self):

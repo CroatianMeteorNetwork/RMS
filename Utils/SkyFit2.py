@@ -943,16 +943,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.debruijn.updateTable()
 
     def onRefractionChanged(self):
-
-        # If ground points are measured, hold the alt/az the same, but update the reference RA/Dec
-        if self.meas_ground_points:
-            self.platepar.updateRefRADec()
-
-        # If points on the sky are measured, hold the reference RA/Dec the same, but update the apparent
-        #   alt/az
-        else:
-            # Update the reference apparent alt/az, as the refraction influences the pointing
-            self.platepar.updateRefAltAz()
+        
+        # Update the reference apparent alt/az, as the refraction influences the pointing
+        self.platepar.updateRefAltAz()
 
         self.updateStars()
         self.updateLeftLabels()
@@ -984,7 +977,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateLeftLabels()
 
     def onAzAltChanged(self):
-        self.platepar.updateRefRADec()
+        self.platepar.updateRefRADec(preserve_rotation=True)
         self.updateStars()
         self.updateLeftLabels()
 
@@ -1041,8 +1034,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Use a modified platepar if ground points are being picked
             pp_tmp = copy.deepcopy(self.platepar)
             if self.meas_ground_points:
-                pp_tmp.refraction = False
-                pp_tmp.updateRefRADec()
+                pp_tmp.switchToGroundPicks()
 
             # Compute RA, dec
             jd, ra, dec, _ = xyToRaDecPP(time_data, [x], [y], [1], pp_tmp, extinction_correction=False)
@@ -1253,6 +1245,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute image coordiantes of geo points (always without refraction)
             pp_noref = copy.deepcopy(self.platepar)
             pp_noref.refraction = False
+            pp_noref.updateRefRADec(preserve_rotation=True)
             self.geo_x, self.geo_y, _ = getCatalogStarsImagePositions(geo_points, ff_jd, pp_noref)
 
             geo_xy = np.c_[self.geo_x, self.geo_y]
@@ -3515,11 +3508,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar_file, self.platepar = platepar_file, platepar
 
 
-            # If geo points are used, turn off the refraction
-            if self.geo_points_obj is not None:
-                platepar.refraction = False
-
-
         if update:
             self.updateStars()
             self.tab.param_manager.updatePlatepar()
@@ -4584,8 +4572,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Use a modified platepar if ground points are being picked
             pp_tmp = copy.deepcopy(self.platepar)
             if self.meas_ground_points:
-                pp_tmp.refraction = False
-                pp_tmp.updateRefRADec()
+                pp_tmp.switchToGroundPicks()
 
             applyAstrometryFTPdetectinfo(self.dir_path, ftpdetectinfo_name, '', \
                                          UT_corr=pp_tmp.UT_corr, platepar=pp_tmp)
@@ -4650,8 +4637,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Use a modified platepar if ground points are being picked
                 pp_tmp = copy.deepcopy(self.platepar)
                 if self.meas_ground_points:
-                    pp_tmp.refraction = False
-                    pp_tmp.updateRefRADec()
+                    pp_tmp.switchToGroundPicks()
 
                 time_data = [self.img_handle.currentFrameTime()]
 
