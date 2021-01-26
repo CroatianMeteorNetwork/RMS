@@ -451,6 +451,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # bottom information
         self.status_bar = QtWidgets.QStatusBar()
+        self.status_bar.setFont(QtGui.QFont('monospace'))
         self.setStatusBar(self.status_bar)
 
         self.skyfit_button = QtWidgets.QPushButton('SkyFit')
@@ -501,18 +502,21 @@ class PlateTool(QtWidgets.QMainWindow):
         self.show_key_help = 1
 
         self.label1 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
+        self.label1.setFont(QtGui.QFont('monospace', 8))
         self.label1.setTextWidth(200)
         self.label1.setZValue(1000)
         self.label1.setParentItem(self.img_frame)
 
         # bottom left label
         self.label2 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
+        self.label2.setFont(QtGui.QFont('monospace', 8))
         self.label2.setTextWidth(200)
         self.label2.setZValue(1000)
         self.label2.setParentItem(self.img_frame)
 
         # F1 info label
         self.label_f1 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
+        self.label_f1.setFont(QtGui.QFont('monospace', 8))
         self.label_f1.setTextWidth(100)
         self.label_f1.setZValue(1000)
         self.label_f1.setParentItem(self.img_frame)
@@ -1021,7 +1025,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Write image X, Y coordinates and image intensity
         if 0 <= x <= self.img.data.shape[0] - 1 and 0 <= y <= self.img.data.shape[1] - 1:
-            status_str = "x={:7.2f}  y={:7.2f}  Intens={:d}".format(x, y, self.img.data[int(x), int(y)])
+            status_str = "x={:7.2f}  y={:7.2f}  Intens={:5d}".format(x, y, self.img.data[int(x), int(y)])
         else:
             status_str = "x={:7.2f}  y={:7.2f}  Intens=--".format(x, y)
 
