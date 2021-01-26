@@ -1659,12 +1659,13 @@ class PlateTool(QtWidgets.QMainWindow):
                 y_max_w = y_max + 3
 
                 # Plot fit info
-                fit_info = "Fit: {:+.1f}*LSP + {:.2f} +/- {:.2f} ".format(self.platepar.mag_0,
+                fit_info = "{:+.1f}*LSP + {:.2f} +/- {:.2f} ".format(self.platepar.mag_0,
                                                                           self.platepar.mag_lev, fit_stddev) \
-                           + "\nVignetting coeff = {:.5f}".format(self.platepar.vignetting_coeff) \
+                           + "\nVignetting coeff = {:.5f} rad/px".format(self.platepar.vignetting_coeff) \
                            + "\nGamma = {:.2f}".format(self.platepar.gamma)
 
-                print('Fit Info:')
+                print()
+                print('Photometric fit:')
                 print(fit_info)
                 print()
 
@@ -4049,7 +4050,7 @@ class PlateTool(QtWidgets.QMainWindow):
         print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
 
         # Print the field of view size
-        print("FOV: {:.2f} x {:.2f} deg".format(*computeFOVSize(self.platepar)))
+        #print("FOV: {:.2f} x {:.2f} deg".format(*computeFOVSize(self.platepar))) 
 
         ####################
 

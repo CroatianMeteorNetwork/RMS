@@ -1276,6 +1276,9 @@ class Platepar(object):
             np.radians(self.lat), np.radians(self.lon), self.refraction)
         self.az_centre, self.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
 
+        # Update the rotation wrt horizon
+        self.rotation_from_horiz = RMS.Astrometry.ApplyAstrometry.rotationWrtHorizon(self)
+
 
     def updateRefRADec(self, skip_rot_update=False, preserve_rotation=False):
         """ Update the reference RA and Dec (true in J2000) from Alt/Az (apparent in epoch of date). """

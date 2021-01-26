@@ -845,7 +845,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
             print("-- Sensor information ---")
             print("Star FWHM:  {:5.2f} px".format(fwhm_bin_mean))
-            print("Bkg stddev: {:4.1f}".format(stddev_bin_mean))
+            print("Bkg stddev: {:4.1f} ADU".format(stddev_bin_mean))
             print("Photom ZP:  {:+6.2f} mag".format(mag_lev_bin_mean))
             print("Stellar LM: {:+.2f} mag".format(lm_s))
             print("-- Flux ---")
