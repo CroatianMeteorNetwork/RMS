@@ -73,7 +73,7 @@ echo ""
 
 DATE_NOW=$(date +"%Y%m%d")
 TMP_VIDEO_FILE="$CAPTURED_DIR_NAME/$(basename $CAPTURED_DIR_NAME).mp4"
-VIDEO_FILE="$CAPTURED_DIR_NAME/${STATION_ID}_${DATE_NOW}.avi"
+VIDEO_FILE="$CAPTURED_DIR_NAME/${STATION_ID}_${DATE_NOW}.mp4"
 FTP_SERVER="server.istrastream.com"
 SERVER="http://istrastream.com"
 AGENT="$SYSTEM-$STATION_ID"
