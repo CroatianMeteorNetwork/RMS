@@ -1316,7 +1316,7 @@ class Platepar(object):
             self.refraction = False
 
             # Preserve the reference elevation of the pointing as the apparent pointing
-            self.alt_centre = np.degrees(pyRefractionTrueToApparent(np.radians(self.alt_centre)))
+            # self.alt_centre = np.degrees(pyRefractionTrueToApparent(np.radians(self.alt_centre)))
 
             self.updateRefRADec(preserve_rotation=True)
 
