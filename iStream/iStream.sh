@@ -93,15 +93,16 @@ function generate_captured_stack {
 	fi
 }
 
-function generate_timelapse {	
+function generate_timelapse {
+	SECONDS_LIMIT=$(expr $REMAINING_SECONDS - 120)
 	if ($LEVEL_1); then
 		cd ~/source/RMS
-		python -m Utils.GenerateTimelapse $CAPTURED_DIR_NAME
+		timeout -k 10 $SECONDS_LIMIT python -m Utils.GenerateTimelapse $CAPTURED_DIR_NAME
 		mv $TMP_VIDEO_FILE $VIDEO_FILE
 	fi
 	if ($LEVEL_2); then
 		cd ~/source/RMS
-		python -m Utils.GenerateTimelapse $CAPTURED_DIR_NAME
+		timeout -k 10 $SECONDS_LIMIT python -m Utils.GenerateTimelapse $CAPTURED_DIR_NAME
 		mv $TMP_VIDEO_FILE $VIDEO_FILE
 	fi
 }

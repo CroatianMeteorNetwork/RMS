@@ -107,6 +107,12 @@ def getPlatepar(config, night_data_dir):
             platepar = None
             platepar_fmt = None
 
+
+    # Update the geo location in the platepar using values in the config file
+    platepar.lat = config.latitude
+    platepar.lon = config.longitude
+    platepar.elev = config.elevation
+
         
 
     return platepar, platepar_path, platepar_fmt
