@@ -96,6 +96,13 @@ def getPlatepar(config, night_data_dir):
                 platepar = None
                 platepar_fmt = None
 
+            else:
+
+                # Update the geo location in the platepar using values in the config file
+                platepar.lat = config.latitude
+                platepar.lon = config.longitude
+                platepar.elev = config.elevation
+
 
     # Make sure the image resolution matches
     if platepar is not None:
@@ -106,12 +113,6 @@ def getPlatepar(config, night_data_dir):
 
             platepar = None
             platepar_fmt = None
-
-
-    # Update the geo location in the platepar using values in the config file
-    platepar.lat = config.latitude
-    platepar.lon = config.longitude
-    platepar.elev = config.elevation
 
         
 
