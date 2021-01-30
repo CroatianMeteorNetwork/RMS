@@ -303,7 +303,7 @@ def setParameter(cam, opts):
         print('Setting not currently supported for', opts)
 
 
-def dvripCommand(cam, cmd, opts):
+def dvripCall(cam, cmd, opts):
     """ retrieve or display the camera network settings
 
     Args:
@@ -367,13 +367,23 @@ def CameraControl(camera_ip, cmd, opts=''):
     cam = dvr.DVRIPCam(camera_ip, "admin", "")
     if cam.login():
         try:
-            dvripCommand(cam, cmd, opts)
+            dvripCall(cam, cmd, opts)
         except:
             print('error executing command - probably not supported')
     else:
         print("Failure. Could not connect.")
     cam.close()
-   
+
+
+def dvripCommand(config, cmd, opts=''):
+    if str(config.deviceID).isdigit():
+        print('Error: this utility only works with IP cameras')
+        exit(1)
+    # extract IP from config file
+    camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
+
+    CameraControl(camera_ip, cmd, opts)
+
 
 if __name__ == '__main__':
     """Main function
@@ -408,16 +418,10 @@ if __name__ == '__main__':
 
     config = cr.parse('.config')
 
-    if str(config.deviceID).isdigit():
-        print('Error: this utility only works with IP cameras')
-        exit(1)
-    # extract IP from config file
-    camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
-
     if sys.version_info.major < 3:
         cc27.onvifCommand(config, cmd)
     else:
-        CameraControl(camera_ip, cmd, opts)
+        dvripCommand(config, cmd, opts)
     
 
 """Known Field mappings
