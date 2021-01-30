@@ -4,10 +4,6 @@
 
     Note:the DVRIP module used by this code requires Python 3.5 or later.
 
-    Note:the DVRIP module used by this code requires Python 3.5 or later.
-
-    Note:the DVRIP module used by this code requires Python 3.5 or later.
-
     Parameters:
     command - the command you want to execute. 
     opts - array containing field and value to use when calling SetParam
@@ -28,11 +24,9 @@
     Note that some fields have subfields as shown in the last example
 """
 
-import sys, os
-if sys.version_info.major < 3 or (sys.version_info.major > 2 and sys.version_info.minor < 5) :
-        print('This module can only be used with Python 3.5 or later')
-        print('Please use CameraControl27 for older versions of Python')
-        exit()
+import sys
+import os
+import Utils.CameraControl27 as cc27
 
 import ipaddress as ip
 import argparse
@@ -41,22 +35,26 @@ import pprint
 import re
 import RMS.ConfigReader as cr
 from time import sleep
-import git, importlib  #used to import python-dvr as it has a dash in the name
 
 # if not present, force update of the submodule
-try:
-    dvr = importlib.import_module("python-dvr.dvrip")
-except:
-    print("updating python-dvr")
-    rmsloc,_= os.path.split(os.path.realpath(__file__))
-    rmsrepo=git.Repo(rmsloc)
-    for sm in rmsrepo.submodules:
-        sm.update(init=True, force=True)
+
+if sys.version_info.major > 2:
+    import git
+    import importlib  #used to import python-dvr as it has a dash in the name
     try:
         dvr = importlib.import_module("python-dvr.dvrip")
     except:
-        print('unable to update python-dvr - can\'t continue')
-        exit()
+        print("updating python-dvr")
+        rmsloc,_= os.path.split(os.path.realpath(__file__))
+        rmsrepo=git.Repo(rmsloc)
+        for sm in rmsrepo.submodules:
+            sm.update(init=True, force=True)
+        try:
+            dvr = importlib.import_module("python-dvr.dvrip")
+        except:
+            print('unable to update python-dvr - can\'t continue')
+            exit()
+
 
 def rebootCamera(cam):
     """Reboot the Camera
@@ -72,6 +70,7 @@ def rebootCamera(cam):
     else:
         print('camera nonresponsive, please wait 30s and reconnect')
 
+
 def iptoString(s):
     """Convert an IP address in hex network order to a human readable string 
 
@@ -85,6 +84,7 @@ def iptoString(s):
     addr='0x'+''.join([a[x:x+2] for x in range(0,len(a),2)][::-1])
     ipaddr=ip.IPv4Address(int(addr,16))
     return ipaddr
+
 
 def saveToFile(nc,dh,cs,vs):
     """Save the camera config to JSON files 
@@ -107,134 +107,6 @@ def saveToFile(nc,dh,cs,vs):
         json.dump(vs,f)
     print('Settings saved to ./camerasettings/')
 
-
-# if not present, force update of the submodule
-try:
-    dvr = importlib.import_module("python-dvr.dvrip")
-except:
-    print("updating python-dvr")
-    rmsloc,_= os.path.split(os.path.realpath(__file__))
-    rmsrepo=git.Repo(rmsloc)
-    for sm in rmsrepo.submodules:
-        sm.update(init=True, force=True)
-    try:
-        dvr = importlib.import_module("python-dvr.dvrip")
-    except:
-        print('unable to update python-dvr - can\'t continue')
-        exit()
-
-def rebootCamera(cam):
-    """Reboot the Camera
-
-    Args:
-        cam : The camera
-    """
-    print('rebooting, please wait....')
-    cam.reboot()
-    sleep(60) # wait while camera starts
-    if cam.login():
-        print('reboot successful')
-    else:
-        print('camera nonresponsive, please wait 30s and reconnect')
-
-def iptoString(s):
-    """Convert an IP address in hex network order to a human readable string 
-
-    Args:
-        s (string): the encoded IP address eg '0x0A01A8C0' 
-
-    Returns:
-        string: human readable IP in host order eg '192.169.1.10'
-    """
-    a=s[2:]
-    addr='0x'+''.join([a[x:x+2] for x in range(0,len(a),2)][::-1])
-    ipaddr=ip.IPv4Address(int(addr,16))
-    return ipaddr
-
-def saveToFile(nc,dh,cs,vs):
-    """Save the camera config to JSON files 
-
-    Args:
-        nc : network config
-        dh : dhcp config
-        cs : camera config
-        vs : video encoding config
-    """
-    if not os.path.exists('./camerasettings/'):
-        os.makedirs('./camerasettings/')
-    with open('./camerasettings/net1.json','w') as f:
-        json.dump(nc,f)
-    with open('./camerasettings/net2.json','w') as f:
-        json.dump(dh,f)
-    with open('./camerasettings/cam.json','w') as f:
-        json.dump(cs,f)
-    with open('./camerasettings/vid.json','w') as f:
-        json.dump(vs,f)
-    print('Settings saved to ./camerasettings/')
-
-# if not present, force update of the submodule
-try:
-    dvr = importlib.import_module("python-dvr.dvrip")
-except:
-    print("updating python-dvr")
-    rmsloc,_= os.path.split(os.path.realpath(__file__))
-    rmsrepo=git.Repo(rmsloc)
-    for sm in rmsrepo.submodules:
-        sm.update(init=True, force=True)
-    try:
-        dvr = importlib.import_module("python-dvr.dvrip")
-    except:
-        print('unable to update python-dvr - can\'t continue')
-        exit()
-
-def rebootCamera(cam):
-    """Reboot the Camera
-
-    Args:
-        cam : The camera
-    """
-    print('rebooting, please wait....')
-    cam.reboot()
-    sleep(60) # wait while camera starts
-    if cam.login():
-        print('reboot successful')
-    else:
-        print('camera nonresponsive, please wait 30s and reconnect')
-
-def iptoString(s):
-    """Convert an IP address in hex network order to a human readable string 
-
-    Args:
-        s (string): the encoded IP address eg '0x0A01A8C0' 
-
-    Returns:
-        string: human readable IP in host order eg '192.169.1.10'
-    """
-    a=s[2:]
-    addr='0x'+''.join([a[x:x+2] for x in range(0,len(a),2)][::-1])
-    ipaddr=ip.IPv4Address(int(addr,16))
-    return ipaddr
-
-def saveToFile(nc,dh,cs,vs):
-    """Save the camera config to JSON files 
-
-    Args:
-        nc : network config
-        dh : dhcp config
-        cs : camera config
-        vs : video encoding config
-    """
-    if not os.path.exists('./camerasettings/'):
-        os.makedirs('./camerasettings/')
-    with open('./camerasettings/net1.json','w') as f:
-        json.dump(nc,f)
-    with open('./camerasettings/net2.json','w') as f:
-        json.dump(dh,f)
-    with open('./camerasettings/cam.json','w') as f:
-        json.dump(cs,f)
-    with open('./camerasettings/vid.json','w') as f:
-        json.dump(vs,f)
-    print('Settings saved to ./camerasettings/')
 
 def loadFromFile():
     """Load the camera config from JSON files saved earlier
@@ -255,6 +127,7 @@ def loadFromFile():
     print('Loaded')
     return nc, dh, cs, vs 
 
+
 def getNetworkParams(cam, showit=True):
     """ retrieve or display the camera network settings
 
@@ -268,12 +141,13 @@ def getNetworkParams(cam, showit=True):
     nc=cam.get_info("NetWork.NetCommon")
     dh=cam.get_info("NetWork.NetDHCP")
 
-    if showit ==True:
+    if showit is True:
         pprint.pprint(nc)
         pprint.pprint(dh)
         print('IP Address  : ', iptoString(nc['HostIP']))
         print('Gateway     : ', iptoString(nc['GateWay']))
     return nc, dh
+
 
 def getEncodeParams(cam, showit=True):
     """ Read the Encode section of the camera config
@@ -286,9 +160,10 @@ def getEncodeParams(cam, showit=True):
         json block containing the config
     """
     vidinfo = cam.get_info("Simplify.Encode")
-    if showit == True:
+    if showit is True:
         pprint.pprint(vidinfo)
     return vidinfo
+
 
 def getCameraParams(cam, showit=True):
     """ display or retrueve the Camera section of the camera config
@@ -303,10 +178,11 @@ def getCameraParams(cam, showit=True):
     caminfo = cam.get_info("Camera")
     p1 = caminfo['Param'][0]
     p2 = caminfo['ParamEx'][0]
-    if showit == True:
+    if showit is True:
         pprint.pprint(p1)
         pprint.pprint(p2)
     return caminfo
+
 
 def setEncodeParam(cam, opts):
     """ Set a parameter in the Encode section of the camera config
@@ -343,9 +219,10 @@ def setEncodeParam(cam, opts):
         subfld=''
         params[0]['MainFormat'][fld]=val
     cam.set_info("Simplify.Encode", params)
-    print ('Set {} {} to {}'.format(fld, subfld, val))
-    print ('Camera Reboot required to take effect')
-       
+    print('Set {} {} to {}'.format(fld, subfld, val))
+    print('Camera Reboot required to take effect')
+
+
 def setNetworkParam(cam, opts):
     """ Set a parameter in the Network section of the camera config
 
@@ -355,6 +232,7 @@ def setNetworkParam(cam, opts):
     """
     print('Network field setting not implemented yet')
 
+
 def setCameraParam(cam, opts):
     """ Set a parameter in the Camera section of the camera config
         Individual parameters can be set and the change will take effect immediately 
@@ -363,7 +241,7 @@ def setCameraParam(cam, opts):
         opts - array of fields, subfields and the value to set
     """
     # these fields are stored as integers. Others are Hex strings
-    intfields=['AeSensitivity','Day_nfLevel','DncThr','ElecLevel',\
+    intfields=['AeSensitivity','Day_nfLevel','DncThr','ElecLevel',
         'IRCUTMode','IrcutSwap','Night_nfLevel', 'Level','AutoGain','Gain']
     styleFlds='typedefault','type1','type2'
     # top level field name
@@ -375,16 +253,16 @@ def setCameraParam(cam, opts):
             print('style must be one of ', styleFlds)
             return
         cam.set_info("Camera.ParamEx.[0]",{fld:val})
-        print ('Set Camera.ParamEx.[0].{} to {}'.format(fld, val))
+        print('Set Camera.ParamEx.[0].{} to {}'.format(fld, val))
     elif fld == 'BroadTrends': 
         subfld=opts[2]
         val = int(opts[3])
         fldToSet='Camera.ParamEx.[0].'+fld
         cam.set_info(fldToSet,{subfld:val})
-        print ('Set {} to {}'.format(fldToSet, val))
+        print('Set {} to {}'.format(fldToSet, val))
                 
     # Exposuretime and gainparam have subfields
-    elif fld == 'ExposureParam' or fld == 'GainParam' :
+    elif fld == 'ExposureParam' or fld == 'GainParam':
         subfld=opts[2]
         val = int(opts[3])
         if subfld not in intfields:
@@ -396,14 +274,15 @@ def setCameraParam(cam, opts):
             val ="0x%8.8X" % (int(val))
         fldToSet='Camera.Param.[0].'+fld
         cam.set_info(fldToSet,{subfld:val})
-        print ('Set {} to {}'.format(fldToSet, val))
+        print('Set {} to {}'.format(fldToSet, val))
     else:
         # other fields do not have subfields
         val = int(opts[2])
         if fld not in intfields:
             val ="0x%8.8X" % val
         cam.set_info("Camera.Param.[0]",{fld:val})
-        print ('Set Camera.Param.[0].{} to {}'.format(fld, val))
+        print('Set Camera.Param.[0].{} to {}'.format(fld, val))
+
 
 def setParameter(cam, opts):
     """ Set a parameter in various sections of the camera config
@@ -422,6 +301,7 @@ def setParameter(cam, opts):
         setNetworkParam(cam, opts)
     else:
         print('Setting not currently supported for', opts)
+
 
 def dvripCommand(cam, cmd, opts):
     """ retrieve or display the camera network settings
@@ -474,6 +354,7 @@ def dvripCommand(cam, cmd, opts):
         ugi=cam.get_upgrade_info()
         print(ugi['Hardware'])
 
+
 def CameraControl(camera_ip, cmd, opts=''):
     """CameraControl - main entry point to the module
 
@@ -482,7 +363,7 @@ def CameraControl(camera_ip, cmd, opts=''):
         cmd (string): Command to be executed
         opts (array of strings): Optional array of field, subfield and value for the SetParam command
     """
-     # Process the IP camera control command
+    # Process the IP camera control command
     cam = dvr.DVRIPCam(camera_ip, "admin", "")
     if cam.login():
         try:
@@ -502,10 +383,14 @@ if __name__ == '__main__':
     """
 
     # list of supported commands
-    cmd_list = ['reboot', 'GetHostname', 'GetSettings','GetDeviceInformation','GetNetConfig',  \
-        'GetCameraParams','GetEncodeParams','SetParam','SaveSettings', 'LoadSettings']
-    opthelp='optional parameters for SetParam for example Camera ElecLevel 70 \n' \
-        'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first'
+    if sys.version_info.major < 3:
+        cmd_list = ['reboot', 'GetHostname', 'GetDeviceInformation']
+        opthelp=''
+    else:
+        cmd_list = ['reboot', 'GetHostname', 'GetSettings','GetDeviceInformation','GetNetConfig',
+            'GetCameraParams','GetEncodeParams','SetParam','SaveSettings', 'LoadSettings']
+        opthelp='optional parameters for SetParam for example Camera ElecLevel 70 \n' \
+            'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first'
 
     parser = argparse.ArgumentParser(description='Controls CMS-Compatible IP camera')
     parser.add_argument('command', metavar='command', type=str, nargs=1, help=' | '.join(cmd_list))
@@ -517,7 +402,7 @@ if __name__ == '__main__':
     else:
         opts=''
         
-    if not cmd in cmd_list:
+    if cmd not in cmd_list:
         print('Error: command "{}" not supported'.format(cmd))
         exit(1)
 
@@ -529,7 +414,11 @@ if __name__ == '__main__':
     # extract IP from config file
     camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
 
-    CameraControl(camera_ip, cmd, opts)    
+    if sys.version_info.major < 3:
+        cc27.onvifCommand(config, cmd)
+    else:
+        CameraControl(camera_ip, cmd, opts)
+    
 
 """Known Field mappings
 These are available in Guides/imx2910config-maps.md
