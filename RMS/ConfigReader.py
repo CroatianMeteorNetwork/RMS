@@ -268,6 +268,9 @@ class Config:
         # Enable/disable showing maxpixel on the screen (off by default)
         self.live_maxpixel_enable = False
 
+        # Enable/disable saving a live.jpg file in the data directory with the latest image
+        self.live_jpg = False
+
         # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
         self.slideshow_enable = False
 
@@ -448,6 +451,11 @@ class Config:
         self.shower_path = 'share'
         self.shower_file_name = 'established_showers.csv'
 
+        #### EGM96 vs WGS84 heights file
+
+        self.egm96_path = 'share'
+        self.egm96_file_name = 'WW15MGH.DAC'
+
         # How many degrees in solar longitude to check from the shower peak for showers that don't have
         # a specified beginning and end
         self.shower_lasun_threshold = 2.0
@@ -492,17 +500,30 @@ def normalizeParameterMeteor(param, config, binning=1):
     return param*width_factor*height_factor
 
 
+
+def removeInlineComments(cfgparser, delimiter):
+    """ Removes inline comments from config file. """
+    for section in cfgparser.sections():
+        [cfgparser.set(section, item[0], item[1].split(delimiter)[0].strip()) for item in cfgparser.items(section)]
+
+
+
 def parse(filename, strict=True):
+
+    delimiter = ";"
 
     try:
         # Python 3
-        parser = RawConfigParser(inline_comment_prefixes=(";"), strict=strict)
+        parser = RawConfigParser(inline_comment_prefixes=(delimiter), strict=strict)
 
     except:
         # Python 2
         parser = RawConfigParser()
 
     parser.read(filename)
+
+    # Remove inline comments
+    removeInlineComments(parser, delimiter) 
     
     config = Config()
     
@@ -721,6 +742,10 @@ def parseCapture(config, parser):
     # Enable/disable showing maxpixel on the screen
     if parser.has_option(section, "live_maxpixel_enable"):
         config.live_maxpixel_enable = parser.getboolean(section, "live_maxpixel_enable")
+
+    # Enable/disable showing maxpixel on the screen
+    if parser.has_option(section, "live_jpg"):
+        config.live_jpg = parser.getboolean(section, "live_jpg")
 
     # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
     if parser.has_option(section, "slideshow_enable"):
