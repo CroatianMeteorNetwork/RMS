@@ -2,11 +2,12 @@
     This module can read and control the IMX291 Cameras and possibly other IMX cameras
     that comply with the dvrip protocol and can be controlled from CMS.
 
-    Note:the DVRIP module used by this code requires Python 3.5 or later.
+    Note: if you're using Python 2 then only the GetHostname and reboot parameters are 
+    supported. This is a limitation of the camera control library
 
     Parameters:
     command - the command you want to execute. 
-    opts - array containing field and value to use when calling SetParam
+    opts - field and value to use when calling SetParam
 
     example
     python -m Utils.CameraControl GetCameraParams
@@ -14,14 +15,30 @@
     will return JSON showing you the contents of the Camera Params block and Video Encoding blocks 
 
     You can set these values using SetParam eg
+
     set the AE Reference to 100
     python -m Utils.CameraControl SetParam Camera ElecLevel 100
+
     Set the Gain to 70
     python -m Utils.CameraControl SetParam Camera GainParam Gain 70
+
     Set the minimum exposure time to 40ms
     python -m Utils.CameraControl SetParam Camera ExposureParam LeastTime 40000
 
     Note that some fields have subfields as shown in the last example
+
+    Network parameters:
+    ==================
+    You can retrieve the current network settings using GetNetConfig
+
+    You can also set the IP Address, netmask and gateway using SetParam
+        eg SetParam Network HostIP 1.2.3.4
+    You can turn DHCP on and off using SetParam Network EnableDHCP 1 or 0
+
+    Note that turning on DHCP will cause the camera to lose connection
+    and you will need to scan your network or check your router to find out
+    what its address has changed to. 
+
 """
 
 import sys
@@ -29,6 +46,8 @@ import os
 import Utils.CameraControl27 as cc27
 
 import ipaddress as ip
+import binascii
+import socket
 import argparse
 import json
 import pprint
@@ -64,11 +83,22 @@ def rebootCamera(cam):
     """
     print('rebooting, please wait....')
     cam.reboot()
-    sleep(60) # wait while camera starts
-    if cam.login():
+    retry = 0
+    while retry < 5:
+        sleep(5) # wait while camera starts
+        if cam.login():
+            break
+        retry += 1
+    if retry < 5: 
         print('reboot successful')
     else:
         print('camera nonresponsive, please wait 30s and reconnect')
+
+
+def strIPtoHex(ip):
+    a = binascii.hexlify(socket.inet_aton(ip)).decode().upper()
+    addr='0x'+''.join([a[x:x+2] for x in range(0,len(a),2)][::-1])
+    return addr
 
 
 def iptoString(s):
@@ -142,10 +172,11 @@ def getNetworkParams(cam, showit=True):
     dh=cam.get_info("NetWork.NetDHCP")
 
     if showit is True:
-        pprint.pprint(nc)
-        pprint.pprint(dh)
         print('IP Address  : ', iptoString(nc['HostIP']))
-        print('Gateway     : ', iptoString(nc['GateWay']))
+        print('---------')
+        pprint.pprint(nc)
+        print('---------')
+        pprint.pprint(dh)
     return nc, dh
 
 
@@ -230,7 +261,38 @@ def setNetworkParam(cam, opts):
         cam - the camera 
         opts - array of fields, subfields and the value to set
     """
-    print('Network field setting not implemented yet')
+    # top level field name
+    fld=opts[1]
+    # these fields are stored in the ParamEx.[0] block
+    if fld == 'HostIP':
+        val = opts[2]
+        hexval = strIPtoHex(val)
+        cam.set_info("NetWork.NetCommon.HostIP", hexval)
+
+    elif fld == 'GateWay':
+        val = opts[2]
+        hexval = strIPtoHex(val)
+        cam.set_info("NetWork.NetCommon.GateWay", hexval)
+
+    elif fld == 'Submask':
+        val = opts[2]
+        hexval = strIPtoHex(val)
+        cam.set_info("NetWork.NetCommon.Submask", hexval)
+
+    elif fld == 'EnableDHCP':
+        val = int(opts[2])
+        if val == 1:
+            cam.set_info("NetWork.NetDHCP.[0].Enable", 1)
+        else:
+            cam.set_info("NetWork.NetDHCP.[0].Enable", 0)
+        dh = cam.get_info("NetWork.NetDHCP.[0]")
+        print(dh)
+
+    else:
+        print('Options for SetParam Network are: HostIP, GateWay, Submask')
+        print('followed by an ipaddress in xxx.xxx.xxx.xxx format')
+        print('or EnableDHCP followed by 1 or 0')
+
 
 
 def setCameraParam(cam, opts):
