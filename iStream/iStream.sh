@@ -73,7 +73,7 @@ echo ""
 
 DATE_NOW=$(date +"%Y%m%d")
 TMP_VIDEO_FILE="$CAPTURED_DIR_NAME/$(basename $CAPTURED_DIR_NAME).mp4"
-VIDEO_FILE="$CAPTURED_DIR_NAME/${STATION_ID}_${DATE_NOW}.avi"
+VIDEO_FILE="$CAPTURED_DIR_NAME/${STATION_ID}_${DATE_NOW}.mp4"
 FTP_SERVER="server.istrastream.com"
 SERVER="http://istrastream.com"
 AGENT="$SYSTEM-$STATION_ID"
@@ -93,7 +93,8 @@ function generate_captured_stack {
 	fi
 }
 
-function generate_timelapse {	
+function generate_timelapse {
+	SECONDS_LIMIT=$(expr $REMAINING_SECONDS - 120)
 	if ($LEVEL_1); then
 		cd ~/source/RMS
 		python -m Utils.GenerateTimelapse $CAPTURED_DIR_NAME
@@ -227,6 +228,13 @@ function upload_video_file {
 	curl --user-agent $AGENT -F"operation=upload" -F"file=@$VIDEO_FILE" "http://server.istrastream.com/?station_id=$STATION_ID&system=$SYSTEM&action=upload"	
 }
 
+function upload_kml_file {
+	KML_FILE="$CAPTURED_DIR_NAME/$STATION_ID.kml"	
+	if [ -f "$KML_FILE" ]; then		
+		curl --user-agent $AGENT -F"operation=upload" -F"file=@$KML_FILE" "$SERVER/$SYSTEM/?station_id=$STATION_ID&type=kml&action=upload&level=$ACTIVE_LEVEL"	
+	fi	
+}
+
 VAR_1="1"
 VAR_2="1"
 
@@ -285,6 +293,10 @@ if [ $VAR_1 = $VAR_2 ]; then
 
 	echo "UPLOAD PHOTOMETRY VARIATION..."
 	upload_photometry_variation
+	echo ""
+	
+	echo "UPLOAD KML FILE..."
+	upload_kml_file
 	echo ""
 
 	if [ -e "$VIDEO_FILE" ]; then
