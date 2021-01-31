@@ -82,12 +82,12 @@ def getOnvifWsdlLocation():
     wsdl_loc=''   
     for root, dirs, _ in os.walk(basedir, topdown=False):
         for name in dirs:
-            wsdl_loc = os.path.join(root,name)
+            loc = os.path.join(root,name)
             # on the Pi, the correct version is in an onvif-x.xx.x folder
             if name =='wsdl' and 'onvif' in root:
-                return wsdl_loc
+                return loc
             if name == 'wsdl' and platf == 'Windows' and 'zeep' not in root:
-                return wsdl_loc
+                return loc
     if wsdl_loc == '':
         print('Unable to find WSDL files, unable to continue')
         exit(1)
@@ -115,6 +115,7 @@ def onvifCommand(config, cmd):
 
     try:
         print('Connecting to {}:{}'.format(camera_ip, camera_onvif_port))
+        print('WSDL location is', wsdl_loc)
         cam = ONVIFCamera(camera_ip, camera_onvif_port, 'admin', '', wsdl_loc)
     except:
         print('Could not connect to camera!')
