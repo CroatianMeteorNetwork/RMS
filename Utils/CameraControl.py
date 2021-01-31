@@ -11,9 +11,8 @@
 
     Usage 2:
     >>> import Utils.CameraControl as cc
-    >>> cc.CameraControl(ip_address,command, [opts])
-    or 
-    >>> cc.dvripCommand(config, command, [opts])
+    >>> cc.CameraControl(ip_address,command, [opts]) 
+    >>> cc.CameraControlV2(config, command, [opts])
 
     Parameters:
     ipaddress: string ip address in dotted form eg 1.2.3.4
@@ -459,6 +458,14 @@ def dvripCommand(config, cmd, opts=''):
     CameraControl(camera_ip, cmd, opts)
 
 
+def CameraControlV2(config, cmd, opts=''):
+
+    if sys.version_info.major < 3:
+        cc27.onvifCommand(config, cmd)
+    else:
+        dvripCommand(config, cmd, opts)
+
+
 if __name__ == '__main__':
     """Main function
     Args:
@@ -492,10 +499,7 @@ if __name__ == '__main__':
 
     config = cr.parse('.config')
 
-    if sys.version_info.major < 3:
-        cc27.onvifCommand(config, cmd)
-    else:
-        dvripCommand(config, cmd, opts)
+    CameraControlV2(config, cmd, opts)
     
 
 """Known Field mappings
