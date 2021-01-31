@@ -563,7 +563,7 @@ def processIncompleteCaptures(config, upload_manager):
 
 
         except Exception as e:
-            log.error("An error occured when trying to reprocess partially-processed data!")
+            log.error("An error occured when trying to reprocess partially processed data!")
             log.error(repr(e))
             log.error(repr(traceback.format_exception(*sys.exc_info())))
 

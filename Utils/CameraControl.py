@@ -5,9 +5,20 @@
     Note: if you're using Python 2 then only the GetHostname and reboot parameters are 
     supported. This is a limitation of the camera control library
 
+    usage 1: 
+    Python -m Utils.CameraControl command {opts}
+    call with -h to get a list of supported commands
+
+    Usage 2:
+    >>> import Utils.CameraControl as cc
+    >>> cc.CameraControl(ip_address,command, [opts]) 
+    >>> cc.CameraControlV2(config, command, [opts])
+
     Parameters:
-    command - the command you want to execute. 
-    opts - field and value to use when calling SetParam
+    ipaddress: string ip address in dotted form eg 1.2.3.4
+    config: RMS config object
+    command: the command you want to execute. 
+    opts: field and value to use when calling SetParam
 
     example
     python -m Utils.CameraControl GetCameraParams
@@ -447,6 +458,14 @@ def dvripCommand(config, cmd, opts=''):
     CameraControl(camera_ip, cmd, opts)
 
 
+def CameraControlV2(config, cmd, opts=''):
+
+    if sys.version_info.major < 3:
+        cc27.onvifCommand(config, cmd)
+    else:
+        dvripCommand(config, cmd, opts)
+
+
 if __name__ == '__main__':
     """Main function
     Args:
@@ -464,7 +483,10 @@ if __name__ == '__main__':
         opthelp='optional parameters for SetParam for example Camera ElecLevel 70 \n' \
             'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first'
 
-    parser = argparse.ArgumentParser(description='Controls CMS-Compatible IP camera')
+    usage = 'Available commands are\n' + str(cmd_list) + '\n' + opthelp
+
+    parser = argparse.ArgumentParser(description='Controls CMS-Compatible IP camera', 
+        usage=usage)
     parser.add_argument('command', metavar='command', type=str, nargs=1, help=' | '.join(cmd_list))
     parser.add_argument('options', metavar='opts', type=str, nargs='*', help=opthelp)
     args = parser.parse_args()
@@ -480,10 +502,7 @@ if __name__ == '__main__':
 
     config = cr.parse('.config')
 
-    if sys.version_info.major < 3:
-        cc27.onvifCommand(config, cmd)
-    else:
-        dvripCommand(config, cmd, opts)
+    CameraControlV2(config, cmd, opts)
     
 
 """Known Field mappings
