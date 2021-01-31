@@ -567,8 +567,6 @@ def processIncompleteCaptures(config, upload_manager):
             log.error(repr(e))
             log.error(repr(traceback.format_exception(*sys.exc_info())))
 
-
-
 if __name__ == "__main__":
 
     ### COMMAND LINE ARGUMENTS
