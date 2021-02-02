@@ -15,9 +15,8 @@
     >>> cc.CameraControlV2(config, command, [opts])
 
     Parameters:
-    ipaddress: string ip address in dotted form eg 1.2.3.4
-    config: RMS config object
-
+    ip_address: dotted ipaddress of the camera eg 1.2.3.4
+    config: RMS config object 
     command: the command you want to execute. 
     opts: field and value to use when calling SetParam
 
