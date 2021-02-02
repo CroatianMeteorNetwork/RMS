@@ -132,9 +132,7 @@ def onvifCommand(config, cmd):
     if cmd == 'GetDeviceInformation':
         getDeviceInformation(cam)
 
-    exit(0)
-
-
+    
 if __name__ == '__main__':
 
     # list of supported commands
