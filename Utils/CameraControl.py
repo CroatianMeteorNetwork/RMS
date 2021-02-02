@@ -481,9 +481,8 @@ if __name__ == '__main__':
         opthelp='optional parameters for SetParam for example Camera ElecLevel 70 \n' \
             'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first'
 
-    usage = 'Available commands are\n' + str(cmd_list) + '\n' + opthelp
-
-    parser = argparse.ArgumentParser(description='Controls CMS-Compatible IP camera', 
+    usage = "Available commands " + str(cmd_list) + '\n' + opthelp
+    parser = argparse.ArgumentParser(description='Controls CMS-Compatible IP camera',
         usage=usage)
     parser.add_argument('command', metavar='command', type=str, nargs=1, help=' | '.join(cmd_list))
     parser.add_argument('options', metavar='opts', type=str, nargs='*', help=opthelp)

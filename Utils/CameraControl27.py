@@ -115,6 +115,7 @@ def onvifCommand(config, cmd):
 
     try:
         print('Connecting to {}:{}'.format(camera_ip, camera_onvif_port))
+        print('WSDL location is', wsdl_loc)
         cam = ONVIFCamera(camera_ip, camera_onvif_port, 'admin', '', wsdl_loc)
     except:
         print('Could not connect to camera!')
@@ -132,7 +133,7 @@ def onvifCommand(config, cmd):
     if cmd == 'GetDeviceInformation':
         getDeviceInformation(cam)
 
-    
+
 if __name__ == '__main__':
 
     # list of supported commands
