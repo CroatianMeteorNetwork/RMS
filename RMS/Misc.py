@@ -69,8 +69,6 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
     """
 
     # Make the archive directory
-    if os.path.isfile(dest_dir):
-        os.remove(dest_dir)
     mkdirP(dest_dir)
 
     # Copy the files from the source to the archive directory
