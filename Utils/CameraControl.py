@@ -5,9 +5,20 @@
     Note: if you're using Python 2 then only the GetHostname and reboot parameters are 
     supported. This is a limitation of the camera control library
 
+    usage 1: 
+    Python -m Utils.CameraControl command {opts}
+    call with -h to get a list of supported commands
+
+    Usage 2:
+    >>> import Utils.CameraControl as cc
+    >>> cc.cameraControl(ip_address,command, [opts])
+    >>> cc.cameraControlV2(config,command, [opts])
+
     Parameters:
-    command - the command you want to execute. 
-    opts - field and value to use when calling SetParam
+    ip_address: dotted ipaddress of the camera eg 1.2.3.4
+    config: RMS config object 
+    command: the command you want to execute. 
+    opts: field and value to use when calling SetParam
 
     example
     python -m Utils.CameraControl GetCameraParams
@@ -43,7 +54,6 @@
 
 import sys
 import os
-import Utils.CameraControl27 as cc27
 
 import ipaddress as ip
 import binascii
@@ -73,6 +83,9 @@ if sys.version_info.major > 2:
         except:
             print('unable to update python-dvr - can\'t continue')
             exit()
+else:
+    # Python2 compatible version with much restricted capabilities
+    import Utils.CameraControl27 as cc27
 
 
 def rebootCamera(cam):
@@ -417,7 +430,7 @@ def dvripCall(cam, cmd, opts):
         print(ugi['Hardware'])
 
 
-def CameraControl(camera_ip, cmd, opts=''):
+def cameraControl(camera_ip, cmd, opts=''):
     """CameraControl - main entry point to the module
 
     Args:
@@ -437,14 +450,17 @@ def CameraControl(camera_ip, cmd, opts=''):
     cam.close()
 
 
-def dvripCommand(config, cmd, opts=''):
+def cameraControlV2(config, cmd, opts=''):
     if str(config.deviceID).isdigit():
         print('Error: this utility only works with IP cameras')
         exit(1)
     # extract IP from config file
     camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
 
-    CameraControl(camera_ip, cmd, opts)
+    if sys.version_info.major < 3:
+        cc27.onvifCommand(config, cmd)
+    else:
+        cameraControl(camera_ip, cmd, opts)
 
 
 if __name__ == '__main__':
@@ -463,8 +479,9 @@ if __name__ == '__main__':
             'GetCameraParams','GetEncodeParams','SetParam','SaveSettings', 'LoadSettings']
         opthelp='optional parameters for SetParam for example Camera ElecLevel 70 \n' \
             'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first'
-
-    parser = argparse.ArgumentParser(description='Controls CMS-Compatible IP camera')
+    usage = "Available commands " + str(cmd_list) + '\n' + opthelp
+    parser = argparse.ArgumentParser(description='Controls CMS-Compatible IP camera',
+        usage=usage)
     parser.add_argument('command', metavar='command', type=str, nargs=1, help=' | '.join(cmd_list))
     parser.add_argument('options', metavar='opts', type=str, nargs='*', help=opthelp)
     args = parser.parse_args()
@@ -480,10 +497,7 @@ if __name__ == '__main__':
 
     config = cr.parse('.config')
 
-    if sys.version_info.major < 3:
-        cc27.onvifCommand(config, cmd)
-    else:
-        dvripCommand(config, cmd, opts)
+    cameraControlV2(config, cmd, opts)
     
 
 """Known Field mappings
