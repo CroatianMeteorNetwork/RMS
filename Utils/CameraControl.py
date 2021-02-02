@@ -456,7 +456,10 @@ def cameraControlV2(config, cmd, opts=''):
     # extract IP from config file
     camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
 
-    cameraControl(camera_ip, cmd, opts)
+    if sys.version_info.major < 3:
+        cc27.onvifCommand(config, cmd)
+    else:
+        cameraControl(camera_ip, cmd, opts)
 
 
 if __name__ == '__main__':
@@ -493,10 +496,7 @@ if __name__ == '__main__':
 
     config = cr.parse('.config')
 
-    if sys.version_info.major < 3:
-        cc27.onvifCommand(config, cmd)
-    else:
-        cameraControlV2(config, cmd, opts)
+    cameraControlV2(config, cmd, opts)
     
 
 """Known Field mappings
