@@ -11,12 +11,13 @@
 
     Usage 2:
     >>> import Utils.CameraControl as cc
-    >>> cc.cameraControl(ip_address,command, [opts])
-    >>> cc.cameraControlV2(config,command, [opts])
+    >>> cc.CameraControl(ip_address,command, [opts]) 
+    >>> cc.CameraControlV2(config, command, [opts])
 
     Parameters:
-    ip_address: dotted ipaddress of the camera eg 1.2.3.4
-    config: RMS config object 
+    ipaddress: string ip address in dotted form eg 1.2.3.4
+    config: RMS config object
+
     command: the command you want to execute. 
     opts: field and value to use when calling SetParam
 
@@ -479,8 +480,10 @@ if __name__ == '__main__':
             'GetCameraParams','GetEncodeParams','SetParam','SaveSettings', 'LoadSettings']
         opthelp='optional parameters for SetParam for example Camera ElecLevel 70 \n' \
             'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first'
-    usage = "Available commands " + str(cmd_list) + '\n' + opthelp
-    parser = argparse.ArgumentParser(description='Controls CMS-Compatible IP camera',
+
+    usage = 'Available commands are\n' + str(cmd_list) + '\n' + opthelp
+
+    parser = argparse.ArgumentParser(description='Controls CMS-Compatible IP camera', 
         usage=usage)
     parser.add_argument('command', metavar='command', type=str, nargs=1, help=' | '.join(cmd_list))
     parser.add_argument('options', metavar='opts', type=str, nargs='*', help=opthelp)
