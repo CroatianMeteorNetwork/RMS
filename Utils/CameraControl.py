@@ -76,7 +76,7 @@ if sys.version_info.major > 2:
         dvr = importlib.import_module("python-dvr.dvrip")
     except:
         print("updating python-dvr")
-        rmsloc,_= os.path.abspath('.')
+        rmsloc = os.path.abspath('.')
         rmsrepo=git.Repo(rmsloc)
         for sm in rmsrepo.submodules:
             sm.update(init=True, force=True)
