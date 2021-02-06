@@ -72,20 +72,16 @@ if sys.version_info.major > 2:
     import git
     import importlib  #used to import python-dvr as it has a dash in the name
     try:
-        print(sys.platform)
-        print(os.path.abspath('.'))
-        print(os.path.realpath(__file__))
-        if sys.platform != 'win32':
-            if os.uname()[4].startswith('arm') is True: 
-                sys.path.append('/home/pi/source/RMS') 
+        sys.path.append(os.path.abspath('.')) 
         dvr = importlib.import_module("python-dvr.dvrip")
     except:
         print("updating python-dvr")
-        rmsloc,_= os.path.split(os.path.realpath(__file__))
+        rmsloc,_= os.path.abspath('.')
         rmsrepo=git.Repo(rmsloc)
         for sm in rmsrepo.submodules:
             sm.update(init=True, force=True)
         try:
+            sys.path.append(os.path.abspath('.')) 
             dvr = importlib.import_module("python-dvr.dvrip")
         except:
             print('unable to update python-dvr - can\'t continue')
