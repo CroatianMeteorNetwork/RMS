@@ -74,6 +74,7 @@ if sys.version_info.major > 2:
     try:
         print(sys.platform)
         print(os.path.abspath('.'))
+        print(os.path.realpath(__file__))
         if sys.platform != 'win32':
             if os.uname()[4].startswith('arm') is True: 
                 sys.path.append('/home/pi/source/RMS') 
