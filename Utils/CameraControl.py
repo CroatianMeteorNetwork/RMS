@@ -75,7 +75,7 @@ if sys.version_info.major > 2:
         print(sys.platform)
         print(os.path.abspath('.'))
         if sys.platform != 'win32':
-            if sys.uname()[4].startswith('arm') is True: 
+            if os.uname()[4].startswith('arm') is True: 
                 sys.path.append('/home/pi/source/RMS') 
         dvr = importlib.import_module("python-dvr.dvrip")
     except:
