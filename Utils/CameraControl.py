@@ -72,8 +72,11 @@ if sys.version_info.major > 2:
     import git
     import importlib  #used to import python-dvr as it has a dash in the name
     try:
-        if os.uname()[4].startswith('arm') is True: 
-            sys.path.append('/home/pi/source/RMS') 
+        print(sys.platform)
+        print(os.path.abspath('.'))
+        if sys.platform != 'win32':
+            if sys.uname()[4].startswith('arm') is True: 
+                sys.path.append('/home/pi/source/RMS') 
         dvr = importlib.import_module("python-dvr.dvrip")
     except:
         print("updating python-dvr")
