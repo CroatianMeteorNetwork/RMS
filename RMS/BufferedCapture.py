@@ -304,7 +304,6 @@ class BufferedCapture(Process):
                     
                 if i == 0: 
                     startTime = t
-                    log.info('Start time adjusted...' + str(t))
 
                 # If the end of the file was reached, stop the capture
                 if (self.video_file is not None) and (frame is None):
