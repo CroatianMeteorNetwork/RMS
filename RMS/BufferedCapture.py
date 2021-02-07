@@ -211,7 +211,7 @@ class BufferedCapture(Process):
             return False
 
         else:
-            log.info('Video device opened! ' +  self.video_file)
+            log.info('Video device opened!')
 
 
 
