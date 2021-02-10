@@ -1342,8 +1342,8 @@ class GeolocationWidget(QtWidgets.QWidget):
         grid.addWidget(self.down_button, 4, 1)
 
 
-        # movement distance box, use a default of 1 m
-        self.distance = 1.0
+        # movement distance box, use a default of 2 cm
+        self.distance = 0.02
         hbox = QtWidgets.QHBoxLayout()
         self.dist_box = DoubleSpinBox()
         self.dist_box.setMinimum(0)
