@@ -496,6 +496,10 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
 
+    # Compute the population index using the classical equation
+    population_index = 10**((mass_index - 1)/2.5)
+
+
     ### SENSOR CHARACTERIZATION ###
     # Computes FWHM of stars and noise profile of the sensor
     
@@ -665,6 +669,9 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
     ### Apply time-dependent corrections ###
 
+    sol_data = []
+    flux_lm_6_5_data = []
+
     # Go through all time bins within the observation period
     total_time_hrs = (dt_end - dt_beg).total_seconds()/3600
     nbins = int(np.ceil(total_time_hrs/timebin))
@@ -707,12 +714,15 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
             jd_mean = (bin_jd_beg + bin_jd_end)/2
 
+            # Compute the mean solar longitude
+            sol_mean = np.degrees(jd2SolLonSteyaert(jd_mean))
+
             print()
             print()
             print("-- Bin information ---")
             print("Bin beg:", bin_dt_beg)
             print("Bin end:", bin_dt_end)
-            print("Sol mid: {:.5f}".format(np.degrees(jd2SolLonSteyaert(jd_mean))))
+            print("Sol mid: {:.5f}".format(sol_mean))
             print("Meteors:", len(bin_meteors))
 
             # Compute the apparent radiant
@@ -769,7 +779,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             stddev_bin_mean = np.mean([sensor_data[ff_name][1] for ff_name in bin_ffs])
 
             # Compute the mean photometric zero point in the given bin
-            mag_lev_bin_mean = np.mean([recalibrated_platepars[ff_name].mag_lev for ff_name in bin_ffs])
+            mag_lev_bin_mean = np.mean([recalibrated_platepars[ff_name].mag_lev for ff_name in bin_ffs if ff_name in recalibrated_platepars])
 
 
 
@@ -839,8 +849,15 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
 
-            # Compute the flux in meteors/1000km^2/h
+            # Compute the flux at the bin LM (meteors/1000km^2/h)
             flux = 1e9*len(bin_meteors)/collection_area/bin_hours
+
+            # Compute the flux scaled to the nightly mean LM
+            flux_lm_nightly_mean = flux*population_index**(lm_m_nightly_mean - lm_m)
+
+            # Compute the flux scaled to +6.5M
+            flux_lm_6_5 = flux*population_index**(6.5 - lm_m)
+
 
 
             print("-- Sensor information ---")
@@ -853,9 +870,20 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             print("Ang vel:  {:.2f} deg/s".format(np.degrees(ang_vel_mid)))
             print("LM app:   {:+.2f} mag".format(lm_m))
             print("Flux:     {:.2f} meteors/1000km^2/h".format(flux))
+            print("to {:+.2f}: {:.2f} meteors/1000km^2/h".format(lm_m_nightly_mean, flux_lm_nightly_mean))
+            print("to +6.50: {:.2f} meteors/1000km^2/h".format(flux_lm_6_5))
 
 
-    # Plot a historgram of peak magnitudes
+            sol_data.append(sol_mean)
+            flux_lm_6_5_data.append(flux_lm_6_5)
+
+
+    # Print the results
+    print("Solar longitude, Flux at LM +6.5:")
+    for sol, flux_lm_6_5 in zip(sol_data, flux_lm_6_5_data):
+        print("{:9.5f}, {:8.4f}".format(sol, flux_lm_6_5))
+
+    # Plot a histogram of peak magnitudes
     plt.hist(peak_mags, cumulative=True)
     plt.show()
     
