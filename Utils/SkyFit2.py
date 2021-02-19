@@ -951,6 +951,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update the reference apparent alt/az, as the refraction influences the pointing
         self.platepar.updateRefAltAz()
 
+        self.updateMeasurementRefractionCorrection()
+
         self.updateStars()
         self.updateLeftLabels()
         self.tab.param_manager.updatePlatepar()
@@ -1050,7 +1052,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # If ground points are measured, change the text for alt/az
             if self.meas_ground_points:
-                status_str += ",  Azim={:6.2f}  Alt={:6.2f} (ground)".format(azim, alt)
+                status_str += ",  Azim={:6.2f}  Alt={:6.2f} (GROUND)".format(azim, alt)
             else:
                 status_str += ",  Azim={:6.2f}  Alt={:6.2f} (date)".format(azim, alt)
 
@@ -1966,7 +1968,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # updating old state files with new platepar variables
         if self.platepar is not None:
             if not hasattr(self.platepar, "equal_aspect"):
-                self.platepar.equal_aspect = False
+                self.platepar.equal_aspect = True
 
             if not hasattr(self.platepar, "force_distortion_centre"):
                 self.platepar.force_distortion_centre = False
@@ -1978,8 +1980,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.platepar.extinction_scale = 1.0
 
 
-            if not hasattr(self.platepar, "extinction_scale"):
-                self.platepar.extinction_scale = 1.0
+            if not hasattr(self.platepar, "measurement_apparent_to_true_refraction"):
+                self.platepar.measurement_apparent_to_true_refraction = False
 
 
             # Update platepar distortion indices
@@ -1988,6 +1990,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Update the array length if an old platepar version was loaded which was shorter
             self.platepar.padDictParams()
+
+            # Compute if the measurement should be post-corrected for refraction, because it was not
+            #   taken into account during the astrometry calibration procedure
+            self.updateMeasurementRefractionCorrection()
 
 
 
@@ -3166,12 +3172,26 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def toggleMeasGroundPoints(self):
+        """ Toggle measuring points on the ground, vs on the sky. """
         self.meas_ground_points = not self.meas_ground_points
+
+        self.updateMeasurementRefractionCorrection()
 
 
     def toggleInvertColours(self):
         self.img.invert()
         self.img_zoom.invert()
+
+
+    def updateMeasurementRefractionCorrection(self):
+
+        # If the refraction is disabled and the groud points are not measured, then correct the measured
+        #   points on the sky for refraction (as it is not taken into account)
+        # WARNING: This should not be used if the distortion model itself compensates for the refraction 
+        #   (e.g. the polynomial model)
+        self.platepar.measurement_apparent_to_true_refraction = (not self.platepar.refraction) \
+            and (not self.meas_ground_points)
+
 
     def computeCentreRADec(self):
         """ Compute RA and Dec of the FOV centre in degrees. """
@@ -4646,9 +4666,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 time_data = [self.img_handle.currentFrameTime()]
 
-                # Compute RA/Dec from image coordinates
+                # Compute measured RA/Dec from image coordinates
                 _, ra_data, dec_data, mag_data = xyToRaDecPP(time_data, [pick['x_centroid']],
-                    [pick['y_centroid']], [pick['intensity_sum']], pp_tmp)
+                    [pick['y_centroid']], [pick['intensity_sum']], pp_tmp, measurement=True)
 
                 ra = ra_data[0]
                 dec = dec_data[0]
@@ -4663,7 +4683,8 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute the time relative to the reference JD
             t_rel = frame_no/self.img_handle.fps
 
-            centroids.append([t_rel, pick['x_centroid'], pick['y_centroid'], ra, dec, pick['intensity_sum'], mag])
+            centroids.append([t_rel, pick['x_centroid'], pick['y_centroid'], ra, dec, pick['intensity_sum'], \
+                mag])
 
         # Sort centroids by relative time
         centroids = sorted(centroids, key=lambda x: x[0])
@@ -4684,6 +4705,7 @@ class PlateTool(QtWidgets.QMainWindow):
             json.dump(json_dict, f, indent=4, sort_keys=True)
 
         print('JSON with picks saved to:', json_file_path)
+
 
     def getRollingShutterCorrectedFrameNo(self, frame, pick):
         """ Given a pick object, return rolling shutter corrected (or not, depending on the config) frame

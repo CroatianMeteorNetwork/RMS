@@ -196,14 +196,19 @@ class Platepar(object):
         # Refraction on/off
         self.refraction = True
 
+        # If the calibration was done without then refraction and points on the sky are measured, then they 
+        #   need to be corrected for refraction. WARNING: This should not be used if the distortion model 
+        #   itself compensates for the refraction (e.g. the polynomial model)
+        self.measurement_apparent_to_true_refraction = False
+
         # Equal aspect (X and Y scales are equal) - used ONLY for radial distortion
-        self.equal_aspect = False
+        self.equal_aspect = True
 
         # Force distortion centre to image centre
         self.force_distortion_centre = False
 
         # Asymmetry correction - used ONLY for radial distortion
-        self.asymmetry_corr = True
+        self.asymmetry_corr = False
 
         # Photometry calibration
         self.mag_0 = -2.5
@@ -948,6 +953,12 @@ class Platepar(object):
         # If the refraction was not used for the fit, assume it is disabled
         if not 'refraction' in self.__dict__:
             self.refraction = False
+
+
+        # If the measurement correction for refraction (if it was not taken into account during calibration)
+        #   is not present, assume it's false
+        if not 'measurement_apparent_to_true_refraction' in self.__dict__:
+            self.measurement_apparent_to_true_refraction = False
 
 
         # Add equal aspect

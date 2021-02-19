@@ -47,7 +47,7 @@ from RMS.Math import angularSeparation
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import cyraDecToXY, cyXYToRADec, equatorialCoordPrecession, \
-    cyTrueRaDec2ApparentAltAz
+    cyTrueRaDec2ApparentAltAz, eqRefractionApparentToTrue
 
 # Handle Python 2/3 compability
 if sys.version_info.major == 3:
@@ -509,7 +509,8 @@ def calculateMagnitudes(px_sum_arr, radius_arr, photom_offset, vignetting_coeff)
 
 
 
-def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_correction=True):
+def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_correction=True, \
+    measurement=False):
     """ Converts image XY to RA,Dec, but it takes a platepar instead of individual parameters. 
 
     Arguments:
@@ -523,6 +524,9 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
     Keyword arguments:
         extinction_correction: [bool] Apply extinction correction. True by default. False is set to prevent 
             infinite recursion in extinctionCorrectionApparentToTrue when set to True.
+        measurement: [bool] Indicates if the given images values are image measurements. Used for correcting
+            celestial coordinates for refraction if the refraction was not taken into account during
+            plate fitting.
 
     Return:
         (JD_data, RA_data, dec_data, magnitude_data): [tuple of ndarrays]
@@ -544,6 +548,18 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
         unicode(platepar.distortion_type), refraction=platepar.refraction, \
         equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre, \
         asymmetry_corr=platepar.asymmetry_corr)
+
+    # Correct the coordinates for refraction if it wasn't taken into account during the astrometry calibration
+    #   procedure
+    if (not platepar.refraction) and measurement and platepar.measurement_apparent_to_true_refraction:
+        for i, entry in enumerate(zip(JD_data, RA_data, dec_data)):
+            jd, ra, dec = entry
+            ra, dec = eqRefractionApparentToTrue(np.radians(ra), np.radians(dec), jd, \
+                np.radians(platepar.lat), np.radians(platepar.lon))
+
+            RA_data[i] = np.degrees(ra)
+            dec_data[i] = np.degrees(dec)
+            
 
     # Compute radiia from image centre
     radius_arr = np.hypot(np.array(X_data) - platepar.X_res/2, np.array(Y_data) - platepar.Y_res/2)
@@ -635,7 +651,7 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
 
     # Convert image cooredinates to RA and Dec, and do the photometry
     JD_data, RA_data, dec_data, magnitudes = xyToRaDecPP(np.array(time_data), X_data, Y_data, \
-        level_data, platepar)
+        level_data, platepar, measurement=True)
 
 
     # Compute azimuth and altitude of centroids
