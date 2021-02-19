@@ -358,16 +358,16 @@ cdef double refractionApparentToTrue(double elev):
 
     """
 
-    cdef double refraction
+    cdef double refraction, elev_calc
 
-    # Don't apply refraction for elevation below -0.5 deg
-    if elev > radians(-0.5):
-
-        # Refraction in radians
-        refraction = radians(1.0/(60*tan(radians(degrees(elev) + 7.31/(degrees(elev) + 4.4)))))
-
+    # Don't apply refraction for elevations below -0.5 deg
+    if elev <= radians(-0.5):
+        elev_calc = radians(-0.5)
     else:
-        refraction = 0.0
+        elev_calc = elev
+
+    # Refraction in radians
+    refraction = radians(1.0/(60*tan(radians(degrees(elev_calc) + 7.31/(degrees(elev_calc) + 4.4)))))
 
     # Correct the elevation
     return elev - refraction
@@ -444,16 +444,16 @@ cdef double refractionTrueToApparent(double elev):
 
     """
 
-    cdef double refraction
+    cdef double refraction, elev_calc
 
     # Don't apply refraction for elevation below -0.5 deg
-    if elev > radians(-0.5):
-
-        # Refraction in radians
-        refraction = radians(1.02/(60*tan(radians(degrees(elev) + 10.3/(degrees(elev) + 5.11)))))
-
+    if elev <= radians(-0.5):
+        elev_calc = radians(-0.5)
     else:
-        refraction = 0.0
+        elev_calc = elev
+
+    # Refraction in radians
+    refraction = radians(1.02/(60*tan(radians(degrees(elev_calc) + 10.3/(degrees(elev_calc) + 5.11)))))
 
     # Apply the refraction
     return elev + refraction
