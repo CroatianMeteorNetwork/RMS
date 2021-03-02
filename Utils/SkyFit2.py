@@ -1192,7 +1192,7 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + R - Pick points\n'
             text_str += 'Left click - Centroid\n'
             text_str += 'CTRL + Left click - Force pick\n'
-            text_str += 'ALT + Left click - Mark gap (DFN)\n'
+            text_str += 'ALT/Num0 + Left click - Mark gap (DFN)\n'
             text_str += '\n'
             text_str += 'Scroll - zoom in/out\n'
             text_str += 'M - Show maxpixel\n'
@@ -2027,12 +2027,17 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             if self.input_path:
 
+                # Normalize separator so it's system indepentent
+                self.input_path = self.input_path.replace('\\', os.sep).replace('/', os.sep)
+
                 # Check if the last part of the input path is a file or a directory (check for the dot)
                 tmp_name = os.path.basename(self.input_path)
                 if "." in tmp_name:
                     self.input_path = os.path.join(dir_path, tmp_name)
                 else:
                     self.input_path = dir_path
+
+                print(self.input_path)
 
 
         # Update the possibly missing params
@@ -2238,8 +2243,10 @@ class PlateTool(QtWidgets.QMainWindow):
             # Add centroid in manual reduction
             else:
                 if event.button() == QtCore.Qt.LeftButton:
+
                     if self.cursor.mode == 0:
                         mode = 1
+
                         if modifiers & QtCore.Qt.ControlModifier or \
                                 ((modifiers & QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and
                                  self.img.img_handle.input_type == 'dfn'):
@@ -2254,6 +2261,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.addCentroid(self.img.getFrame(), self.x_centroid, self.y_centroid, mode=mode)
 
                         self.updatePicks()
+
                     elif self.cursor.mode == 2:
                         self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
                                               add_photometry=True)
@@ -4547,6 +4555,8 @@ class PlateTool(QtWidgets.QMainWindow):
                           + self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_") \
                           + "{:03d}".format(int(self.img_handle.beginning_datetime.microsecond//1000)) \
                           + "_0000000.fits"
+
+        print(self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_"))
 
         # Create the list of picks for saving
         centroids = []

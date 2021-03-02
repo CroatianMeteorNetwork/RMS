@@ -1214,7 +1214,7 @@ class InputTypeImages(object):
 
         if 'rawpy' in sys.modules:
             ### Find images in the given folder ###
-            img_types = ['.png', '.jpg', '.bmp', '.nef']
+            img_types = ['.png', '.jpg', '.bmp', '.nef', '.cr2']
         else:
             img_types = ['.png', '.jpg', '.bmp']
 
@@ -1570,7 +1570,7 @@ class InputTypeImages(object):
 
 
         # Load an .NEF file
-        if current_img_file.lower().endswith('.nef'):
+        if current_img_file.lower().endswith('.nef') or current_img_file.lower().endswith('.cr2'):
             
             # .nef files will not be brought here if rawpy is not installed
             
@@ -1759,7 +1759,7 @@ class InputTypeDFN(InputType):
 
         if 'rawpy' in sys.modules:
             ### Find images in the given folder ###
-            img_types = ['.png', '.jpg', '.bmp', '.nef']
+            img_types = ['.png', '.jpg', '.bmp', '.nef', '.cr2']
         else:
             img_types = ['.png', '.jpg', '.bmp']
 
@@ -1819,7 +1819,7 @@ class InputTypeDFN(InputType):
     def loadImage(self):
 
         # Load the NEF file
-        if self.image_file.endswith('.NEF'):
+        if self.image_file.lower().endswith('.nef') or self.image_file.lower().endswith('.cr2'):
             
             # .nef files will not be brought here if rawpy is not installed
             # get raw data from .nef file and get image from it
@@ -1936,7 +1936,7 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
     """
     if 'rawpy' in sys.modules:
         ### Find images in the given folder ###
-        img_types = ['.png', '.jpg', '.bmp', '.nef']
+        img_types = ['.png', '.jpg', '.bmp', '.nef', '.cr2']
     else:
         img_types = ['.png', '.jpg', '.bmp']
 
@@ -2008,7 +2008,7 @@ def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detec
 
     # Check if the given file is a video file
     elif file_name.lower().endswith('.mp4') or file_name.lower().endswith('.avi') \
-            or file_name.lower().endswith('.mkv'):
+            or file_name.lower().endswith('.mkv') or file_name.lower().endswith('.wmv'):
 
         # Init the image hadle for video files
         img_handle = InputTypeVideo(input_file, config, beginning_time=beginning_time,

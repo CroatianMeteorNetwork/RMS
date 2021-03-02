@@ -196,7 +196,7 @@ def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
 
             # Skip lines which do not begin with a number
             try:
-                float(line[0])
+                float(line[0:4])
 
             except:
                 continue

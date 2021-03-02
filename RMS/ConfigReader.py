@@ -1145,8 +1145,16 @@ def parseCalibration(config, parser):
 
 
     if parser.has_option(section, "star_catalog_path"):
-        config.star_catalog_path = parser.get(section, "star_catalog_path")
+
+        cat_path = parser.get(section, "star_catalog_path")
+
+        config.star_catalog_path = cat_path
         config.star_catalog_path = os.path.join(config.rms_root_dir, config.star_catalog_path)
+
+        # Use the whole catalog path if the resulting directory doesn't exist
+        if not os.path.exists(config.star_catalog_path):
+            config.star_catalog_path = cat_path
+            
 
     if parser.has_option(section, "star_catalog_file"):
         config.star_catalog_file = parser.get(section, "star_catalog_file")
