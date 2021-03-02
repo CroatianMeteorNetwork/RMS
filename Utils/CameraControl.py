@@ -310,7 +310,6 @@ def setNetworkParam(cam, opts):
         print('or EnableDHCP followed by 1 or 0')
 
 
-
 def setCameraParam(cam, opts):
     """ Set a parameter in the Camera section of the camera config
         Individual parameters can be set and the change will take effect immediately 
@@ -361,6 +360,33 @@ def setCameraParam(cam, opts):
         cam.set_info("Camera.Param.[0]",{fld:val})
         print('Set Camera.Param.[0].{} to {}'.format(fld, val))
 
+
+def setGUI(cam, opts):
+    info = cam.get_info("AVEnc.VideoWidget")
+
+    if opts[0] == 'on':
+        info[0]["TimeTitleAttribute"]["EncodeBlend"] = True
+        info[0]["ChannelTitleAttribute"]["EncodeBlend"] = True
+    else:
+        info[0]["TimeTitleAttribute"]["EncodeBlend"] = False 
+        info[0]["ChannelTitleAttribute"]["EncodeBlend"] = False 
+
+    cam.set_info("AVEnc.VideoWidget", info)
+
+
+def setColor(cam, opts):
+    info = cam.get_info("AVEnc.VideoColor.[0]")
+    n = 1
+    info[n]["VideoColorParam"]["Brightness"] = 100
+    info[n]["VideoColorParam"]["Contrast"] = 56
+    info[n]["VideoColorParam"]["Saturation"] = 0
+    info[n]["VideoColorParam"]["Hue"] = 24
+    info[n]["VideoColorParam"]["Gain"] = 16
+    info[n]["VideoColorParam"]["Acutance"] = 0
+    # print(json.dumps(info[n], ensure_ascii=False, indent=4, sort_keys=True))
+
+    cam.set_info("AVEnc.VideoColor.[0]", info)
+    
 
 def setParameter(cam, opts):
     """ Set a parameter in various sections of the camera config
@@ -427,6 +453,12 @@ def dvripCall(cam, cmd, opts):
     elif cmd == 'SetParam':
         setParameter(cam, opts)
 
+    elif cmd == 'setColor':
+        setColor(cam, opts)
+
+    elif cmd == 'setGUI':
+        setGUI(cam, opts)
+
     else:
         print('System Info')
         ugi=cam.get_upgrade_info()
@@ -479,7 +511,8 @@ if __name__ == '__main__':
         opthelp=''
     else:
         cmd_list = ['reboot', 'GetHostname', 'GetSettings','GetDeviceInformation','GetNetConfig',
-            'GetCameraParams','GetEncodeParams','SetParam','SaveSettings', 'LoadSettings']
+            'GetCameraParams','GetEncodeParams','SetParam','SaveSettings', 'LoadSettings', 
+            'setColor', 'setGUI']
         opthelp='optional parameters for SetParam for example Camera ElecLevel 70 \n' \
             'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first'
 
