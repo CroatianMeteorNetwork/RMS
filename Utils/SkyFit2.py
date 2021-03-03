@@ -8,6 +8,7 @@ import copy
 import cProfile
 import json
 import datetime
+import collections
 
 import numpy as np
 import matplotlib
@@ -282,7 +283,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.closest_cat_star_indx = None
 
         # List of paired image and catalog stars
-        self.pick_list = {}
+        self.pick_list = collections.OrderedDict()
         self.paired_stars = []
         self.residuals = None
 
@@ -713,6 +714,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Detect data input type and init the image handle
                 self.detectInputType(load=True, beginning_time=beginning_time)
 
+                # If picks were made, change the frame to the first pick
+                if len(self.pick_list):
+                    self.img_handle.setFrame(min(self.pick_list.keys()))
+
 
         # adding img
         gamma = 1
@@ -936,7 +941,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.paired_stars = []
         self.updatePairedStars()
-        self.pick_list = {}
+        self.pick_list = collections.OrderedDict()
         self.residuals = None
         self.updateFitResiduals()
         self.updatePicks()
@@ -1808,7 +1813,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.pick_marker.setData(pos=[])
 
             # Reset paired stars
-            self.pick_list = {}
+            self.pick_list = collections.OrderedDict()
             self.paired_stars = []
             self.residuals = None
             self.drawPhotometryColoring()
