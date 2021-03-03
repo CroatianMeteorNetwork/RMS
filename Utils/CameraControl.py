@@ -343,19 +343,22 @@ def setNetworkParam(cam, opts):
         val = int(opts[2])
         if val == 1:
             cam.set_info("NetWork.NetDHCP.[0].Enable", 1)
+            print('DHCP enabled')
         else:
             cam.set_info("NetWork.NetDHCP.[0].Enable", 0)
-        dh = cam.get_info("NetWork.NetDHCP.[0]")
-        print(dh)
+            print('DHCP disabled')
+        #dh = cam.get_info("NetWork.NetDHCP.[0]")
 
     elif fld == 'EnableNTP':
         val = opts[2]
         if val == "0":
             cam.set_info("NetWork.NetNTP.Enable", False)
+            print('NTP disabled')
         else:
             # hexval = strIPtoHex(val)
             cam.set_info("NetWork.NetNTP.Server.Name", val)
             cam.set_info("NetWork.NetNTP.Enable", True)
+            print('NTP enabled')
 
     else:
         print('Options for SetParam Network are: ')
