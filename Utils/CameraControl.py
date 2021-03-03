@@ -348,10 +348,20 @@ def setNetworkParam(cam, opts):
         dh = cam.get_info("NetWork.NetDHCP.[0]")
         print(dh)
 
+    elif fld == 'EnableNTP':
+        val = opts[2]
+        if val == "0":
+            cam.set_info("NetWork.NetNTP.Enable", False)
+        else:
+            # hexval = strIPtoHex(val)
+            cam.set_info("NetWork.NetNTP.Server.Name", val)
+            cam.set_info("NetWork.NetNTP.Enable", True)
+
     else:
-        print('Options for SetParam Network are: HostIP, GateWay, Submask')
-        print('followed by an ipaddress in xxx.xxx.xxx.xxx format')
-        print('or EnableDHCP followed by 1 or 0')
+        print('Options for SetParam Network are: ')
+        print('HostIP, GateWay or Submask followed by a dotted IP address')
+        print('EnableDHCP followed by 1 or 0')
+        print('EnableNTP followed by a dotted IP address to enable or 0 to disable')
 
 
 def setCameraParam(cam, opts):
@@ -465,9 +475,9 @@ def setAutoReboot(cam, opts):
         opts - array of fields, subfields and the value to set
     """
 
-    info = cam.get_info("AutoMaintain")
+    info = cam.get_info("NetWork.NetNTP")
     print('not implemented yet')
-    #print(json.dumps(info, ensure_ascii=False, indent=4, sort_keys=True))
+    print(json.dumps(info, ensure_ascii=False, indent=4, sort_keys=True))
     #cam.set_info("AutoMaintain", info)
 
 
