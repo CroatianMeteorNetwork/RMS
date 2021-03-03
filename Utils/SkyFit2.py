@@ -19,7 +19,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
-    apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec
+    apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
 import RMS.ConfigReader as cr
 import RMS.Formats.CALSTARS as CALSTARS
@@ -28,10 +28,11 @@ from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFil
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
 from RMS.Pickling import loadPickle, savePickle
-from RMS.Math import angularSeparation, RMSD
+from RMS.Math import angularSeparation, RMSD, vectNorm
 from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.CustomPyqtgraphClasses import *
+from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePhase
 from RMS.Routines import RollingShutterCorrection
 
 import pyximport
@@ -670,6 +671,12 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img_frame.addItem(self.celestial_grid)
 
 
+        # Great circle fit
+        self.great_circle_line = pg.PlotCurveItem(pen=pg.mkPen((138, 43, 226, 255), style=QtCore.Qt.DotLine))
+        self.great_circle_line.setZValue(1)
+        self.img_frame.addItem(self.great_circle_line)
+
+
         # Fit residuals (image, orange)
         self.residual_lines_img = pg.PlotCurveItem(connect='pairs', pen=pg.mkPen((255, 128, 0),
                                                                              style=QtCore.Qt.DashLine))
@@ -780,6 +787,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigCalStarsToggled.connect(self.toggleShowCalStars)
         self.tab.settings.sigSelStarsToggled.connect(self.toggleShowSelectedStars)
         self.tab.settings.sigPicksToggled.connect(self.toggleShowPicks)
+        self.tab.settings.sigGreatCircleToggled.connect(self.toggleShowGreatCircle)
         self.tab.settings.sigRegionToggled.connect(self.toggleShowRegion)
         self.tab.settings.sigDistortionToggled.connect(self.toggleDistortion)
         self.tab.settings.sigMeasGroundPointsToggled.connect(self.toggleMeasGroundPoints)
@@ -834,6 +842,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.tab.onSkyFit()
             self.pick_marker.hide()
             self.pick_marker2.hide()
+            self.great_circle_line.hide()
             self.region.hide()
             self.img_frame.setMouseEnabled(True, True)
             self.star_pick_mode = False
@@ -912,7 +921,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.tab.onManualReduction()
             self.pick_marker.show()
             self.pick_marker2.show()
+            self.great_circle_line.show()
             self.region.show()
+
+            # Update the great circle
+            self.updateGreatCircle()
+
 
     def changeStation(self):
         """
@@ -1385,18 +1399,21 @@ class PlateTool(QtWidgets.QMainWindow):
     def updatePicks(self):
         """ Draw pick markers for manualreduction """
 
-        red = pg.mkPen((255, 0, 0))
-        yellow = pg.mkPen((255, 255, 0))
+        pick_color = pg.mkPen((255, 0, 0)) # red
+        gap_color = pg.mkPen((255, 215, 0)) # gold
 
         current = []
-        current_pen = red
+        current_pen = pick_color
 
         data1 = []
         data2 = []
 
+        # Sort picks by frame
+        sorted_picks = collections.OrderedDict(sorted(self.pick_list.items(), key=lambda t: t[0]))
+
         # Get the color for every picks to draw
-        for frame, pick in self.pick_list.items():
-            if pick['x_centroid']:
+        for frame, pick in sorted_picks.items():
+            if pick['x_centroid'] is not None:
 
                 # Get the color of the current pick
                 if self.img.getFrame() == frame:
@@ -1404,30 +1421,38 @@ class PlateTool(QtWidgets.QMainWindow):
 
                     # Position picks
                     if pick['mode'] == 1:
-                        current_pen = red
+                        current_pen = pick_color
 
                     # Gap picks
                     else:
-                        current_pen = yellow
+                        current_pen = gap_color
 
                 # Get colors for other picks
                 elif pick['mode'] == 1:
                     data1.append([pick['x_centroid'], pick['y_centroid']])
 
-                else:
+                elif pick['mode'] == 0:
                     data2.append([pick['x_centroid'], pick['y_centroid']])
 
 
-        # Add markers to the screen
+        ### Add markers to the screen ###
         self.pick_marker.clear()
-        self.pick_marker.addPoints(pos=current, size=30, pen=current_pen)
-        self.pick_marker.addPoints(pos=data1, size=10, pen=red)
-        self.pick_marker.addPoints(pos=data2, size=10, pen=yellow)
 
+        # Add the current frame pick
+        self.pick_marker.addPoints(pos=current, size=30, pen=current_pen)
+
+        # Plot pick colors
+        self.pick_marker.addPoints(pos=data1, size=10, pen=pick_color)
+
+        # Plot gap colors
+        self.pick_marker.addPoints(pos=data2, size=10, pen=gap_color)
+
+
+        # Draw zoom window picks
         self.pick_marker2.clear()
         self.pick_marker2.addPoints(pos=current, size=30, pen=current_pen)
-        self.pick_marker2.addPoints(pos=data1, size=10, pen=red)
-        self.pick_marker2.addPoints(pos=data2, size=10, pen=yellow)
+        self.pick_marker2.addPoints(pos=data1, size=10, pen=pick_color)
+        self.pick_marker2.addPoints(pos=data2, size=10, pen=gap_color)
 
 
     def updateFitResiduals(self):
@@ -3168,12 +3193,22 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def toggleShowPicks(self):
         """ Toggle whether to show the picks for manualreduction """
+
         if self.pick_marker.isVisible():
             self.pick_marker.hide()
             self.pick_marker2.hide()
         else:
             self.pick_marker.show()
-            self.pick_marker2.hide()
+            self.pick_marker2.show()
+
+    def toggleShowGreatCircle(self):
+        """ Toggle the visibility of the great circle line. """
+        
+        if self.great_circle_line.isVisible():
+            self.great_circle_line.hide()
+        else:
+            self.great_circle_line.show()
+
 
     def toggleShowRegion(self):
         """ Togle whether to show the photometry region for manualreduction """
@@ -3499,8 +3534,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
         platepar = Platepar()
 
+        if self.config.platepar_name in os.listdir(self.dir_path):
+            initial_file = os.path.join(self.dir_path, self.config.platepar_name)
+        else:
+            initial_file = self.dir_path
+
         # Load the platepar file
-        platepar_file = QtGui.QFileDialog.getOpenFileName(self, "Select the platepar file", self.dir_path,
+        platepar_file = QtGui.QFileDialog.getOpenFileName(self, "Select the platepar file", initial_file,
                                                           "Platepar files (*.cal);;All files (*)")[0]
 
         if platepar_file == '':
@@ -3677,11 +3717,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Check if flat exists in the folder, and set it as the defualt file name if it does
         if self.config.flat_file in os.listdir(self.dir_path):
-            initialfile = self.config.flat_file
+            initial_file = os.path.join(self.dir_path, self.config.flat_file)
         else:
-            initialfile = ''
+            initial_file = self.dir_path
 
-        flat_file = QtGui.QFileDialog.getOpenFileName(self, "Select the flat field file", self.dir_path,
+        flat_file = QtGui.QFileDialog.getOpenFileName(self, "Select the flat field file", initial_file,
                                                       "Image files (*.png *.jpg *.bmp);;All files (*)")[0]
 
         if not flat_file:
@@ -3717,10 +3757,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return flat_file, flat
 
+
     def loadDark(self):
         """ Open a file dialog and ask user to load a dark frame. """
 
-        dark_file = QtGui.QFileDialog.getOpenFileName(self, "Select the dark frame file", self.dir_path,
+        # Check if dark exists in the folder, and set it as the defualt file name if it does
+        if self.config.dark_file in os.listdir(self.dir_path):
+            initial_file = os.path.join(self.dir_path, self.config.dark_file)
+        else:
+            initial_file = self.dir_path
+
+        dark_file = QtGui.QFileDialog.getOpenFileName(self, "Select the dark frame file", initial_file,
                                                       "Image files (*.png *.jpg *.bmp);;All files (*)")[0]
 
         if not dark_file:
@@ -3759,6 +3806,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return dark_file, dark
 
+
     def findClosestPickedStarIndex(self, pos_x, pos_y):
         """ Finds the index of the closest picked star on the image to the given image position. """
 
@@ -3778,6 +3826,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 min_index = i
 
         return min_index
+
 
     def addCentroid(self, frame, x_centroid, y_centroid, mode=1):
         """
@@ -3807,6 +3856,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.pick_list[frame] = pick
 
         self.tab.debruijn.modifyRow(frame, mode)
+
+        self.updateGreatCircle()
 
     def removeCentroid(self, frame):
         """
@@ -3922,6 +3973,118 @@ class PlateTool(QtWidgets.QMainWindow):
         ######################################################################################################
 
         return x_centroid, y_centroid, intens_acc
+
+
+    def updateGreatCircle(self):
+        """ Fits great circle to observations. """
+
+        # Extract picked points
+        good_picks = collections.OrderedDict((frame, pick) for frame, pick in self.pick_list.items() if (pick['mode'] == 1) and (pick['x_centroid'] is not None))
+
+        # Remove the old great circle
+        self.great_circle_line.clear()
+
+        # If there are more than 2 picks, fit a great circle to the picks
+        # If ground points are measured, don't fit the great circle
+        if (len(good_picks) > 1) and (not self.meas_ground_points):
+
+            # Sort picks by frame
+            good_picks = collections.OrderedDict(sorted(good_picks.items(), key=lambda t: t[0]))
+
+            # Extract X, Y data
+            frames = np.array(list(good_picks.keys()))
+            x_data = [pick['x_centroid'] for frame, pick in good_picks.items()]
+            y_data = [pick['y_centroid'] for frame, pick in good_picks.items()]
+
+
+            # Compute RA/Dec of the pick if the platepar is available
+            if self.platepar is not None:
+
+                # Compute time data
+                time_data = [jd2Date(datetime2JD(self.img_handle.beginning_datetime \
+                    + datetime.timedelta(seconds=frame/self.img_handle.fps))) for frame in frames]
+
+                # Compute measured RA/Dec from image coordinates
+                _, ra_data, dec_data, _ = xyToRaDecPP(time_data, x_data, \
+                    y_data, np.ones_like(x_data), self.platepar, measurement=True, \
+                    extinction_correction=False)
+
+                cartesian_points = []
+
+                # Convert equatorial coordinates to a unit directon vector in the ECI frame
+                for ra, dec in zip(ra_data, dec_data):
+
+                    vect = vectNorm(raDec2Vector(ra, dec))
+
+                    if np.any(np.isnan(vect)):
+                        continue
+
+                    cartesian_points.append(vect)
+
+                cartesian_points = np.array(cartesian_points)
+
+                # Fit a great circle through observations
+                x_arr, y_arr, z_arr = cartesian_points.T
+                coeffs, theta0, phi0 = fitGreatCircle(x_arr, y_arr, z_arr)
+
+                
+                # Sample the great circle
+                phase_angles = np.linspace(0, 360, 1000)
+                x_array, y_array, z_array = greatCircle(np.radians(phase_angles), theta0, phi0)
+
+                if isinstance(x_array, float):
+                    x_array = [x_array]
+                    y_array = [y_array]
+                    z_array = [z_array]
+
+                # Compute RA/Dec of every points
+                ra_array = []
+                dec_array = []
+                for x, y, z in zip(x_array, y_array, z_array):
+                    ra, dec = vector2RaDec(np.array([x, y, z]))
+
+                    ra_array.append(ra)
+                    dec_array.append(dec)
+
+
+                ra_array, dec_array = np.array(ra_array), np.array(dec_array)
+
+                # Compute image coordinates
+                x_array, y_array = raDecToXYPP(ra_array, dec_array, \
+                    datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)), self.platepar)
+
+                # Remove points outside the image
+                filter_arr = (x_array >= 0) & (x_array <= self.platepar.X_res) & (y_array >= 0) \
+                    & (y_array <= self.platepar.Y_res)
+                x_array = x_array[filter_arr]
+                y_array = y_array[filter_arr]
+
+                connect = np.ones_like(x_array)
+                if np.any(~filter_arr):
+
+                    # Find the break in pixel coordinates and create breaks there
+                    x_diff = np.abs(np.diff(x_array))
+                    y_diff = np.abs(np.diff(y_array))
+                    if np.max(x_diff) > np.max(y_diff):
+                        break_indx = np.argmax(x_diff)
+                    else:
+                        break_indx = np.argmax(y_diff)
+
+                    # Find the index where the array breaks
+                    connect[break_indx] = 0
+                    connect[break_indx-1] = 0
+
+                
+                self.great_circle_line.setData(x=x_array, y=y_array, connect=connect)
+
+
+                ### ###
+
+
+
+        return None
+
+
 
     def findClosestCatalogStarIndex(self, pos_x, pos_y):
         """ Finds the index of the closest catalog star on the image to the given image position. """

@@ -1922,6 +1922,7 @@ class SettingsWidget(QtWidgets.QWidget):
     sigGridToggled = QtCore.pyqtSignal()
     sigSelStarsToggled = QtCore.pyqtSignal()
     sigPicksToggled = QtCore.pyqtSignal()
+    sigGreatCircleToggled = QtCore.pyqtSignal()
     sigRegionToggled = QtCore.pyqtSignal()
 
     def __init__(self, gui):
@@ -1967,6 +1968,12 @@ class SettingsWidget(QtWidgets.QWidget):
         self.updateShowPicks()
         self.picks.hide()
         vbox.addWidget(self.picks)
+
+        self.great_circle = QtWidgets.QCheckBox('Show Great Circle Line')
+        self.great_circle.released.connect(self.sigGreatCircleToggled.emit)
+        self.updateShowGreatCircle()
+        self.great_circle.hide()
+        vbox.addWidget(self.great_circle)
 
         self.region = QtWidgets.QCheckBox('Show Photometry Highlight')
         self.region.released.connect(self.sigRegionToggled.emit)
@@ -2053,6 +2060,9 @@ class SettingsWidget(QtWidgets.QWidget):
     def updateShowPicks(self):
         self.picks.setChecked(self.gui.pick_marker.isVisible())
 
+    def updateShowGreatCircle(self):
+        self.great_circle.setChecked(self.gui.great_circle_line.isVisible())
+
     def updateShowRegion(self):
         self.region.setChecked(self.gui.region.isVisible())
 
@@ -2109,6 +2119,7 @@ class SettingsWidget(QtWidgets.QWidget):
         self.distortion.show()
         self.selected_stars.show()
         self.picks.hide()
+        self.great_circle.hide()
         self.region.hide()
 
         self.gui.selected_stars_visible = False
@@ -2128,6 +2139,7 @@ class SettingsWidget(QtWidgets.QWidget):
         self.distortion.hide()
         self.selected_stars.hide()
         self.picks.show()
+        self.great_circle.show()
         if self.gui.img.img_handle.input_type != 'dfn':
             self.region.show()
 
