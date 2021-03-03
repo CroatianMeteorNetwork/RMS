@@ -1393,23 +1393,32 @@ class PlateTool(QtWidgets.QMainWindow):
 
         data1 = []
         data2 = []
+
+        # Get the color for every picks to draw
         for frame, pick in self.pick_list.items():
             if pick['x_centroid']:
+
+                # Get the color of the current pick
                 if self.img.getFrame() == frame:
                     current = [(pick['x_centroid'], pick['y_centroid'])]
+
+                    # Position picks
                     if pick['mode'] == 1:
                         current_pen = red
+
+                    # Gap picks
                     else:
                         current_pen = yellow
 
+                # Get colors for other picks
                 elif pick['mode'] == 1:
                     data1.append([pick['x_centroid'], pick['y_centroid']])
 
                 else:
                     data2.append([pick['x_centroid'], pick['y_centroid']])
 
-        plus = Plus()
 
+        # Add markers to the screen
         self.pick_marker.clear()
         self.pick_marker.addPoints(pos=current, size=30, pen=current_pen)
         self.pick_marker.addPoints(pos=data1, size=10, pen=red)
@@ -4571,11 +4580,15 @@ class PlateTool(QtWidgets.QMainWindow):
             if pick['x_centroid'] is None:
                 continue
 
+            # Only store real picks, and not gaps
+            if pick['mode'] == 0:
+                continue
+
             # Get the rolling shutter corrected (or not, depending on the config) frame number
             frame_no = self.getRollingShutterCorrectedFrameNo(frame, pick)
 
-            if pick['mode'] == 1:
-                centroids.append([frame_no, pick['x_centroid'], pick['y_centroid'], pick['intensity_sum']])
+            
+            centroids.append([frame_no, pick['x_centroid'], pick['y_centroid'], pick['intensity_sum']])
 
         # If there are no centroids, don't save anything
         if len(centroids) == 0:
@@ -4669,6 +4682,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Make sure to centroid is picked and is not just the photometry
             if pick['x_centroid'] is None:
+                continue
+
+            # Only store real picks, and not gaps
+            if pick['mode'] == 0:
                 continue
 
             # Compute RA/Dec of the pick if the platepar is available
