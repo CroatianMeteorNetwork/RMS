@@ -70,23 +70,7 @@ from time import sleep
 # if not present, force update of the submodule
 
 if sys.version_info.major > 2:
-    import git
-    import importlib  #used to import python-dvr as it has a dash in the name
-    try:
-        sys.path.append(os.path.abspath('.')) 
-        dvr = importlib.import_module("python-dvr.dvrip")
-    except:
-        print("updating python-dvr")
-        rmsloc = os.path.abspath('.')
-        rmsrepo=git.Repo(rmsloc)
-        for sm in rmsrepo.submodules:
-            sm.update(init=True, force=True)
-        try:
-            sys.path.append(os.path.abspath('.')) 
-            dvr = importlib.import_module("python-dvr.dvrip")
-        except:
-            print('unable to update python-dvr - can\'t continue')
-            exit()
+    import dvrip as dvr
 else:
     # Python2 compatible version with much restricted capabilities
     import Utils.CameraControl27 as cc27
