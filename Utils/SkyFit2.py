@@ -284,7 +284,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.closest_cat_star_indx = None
 
         # List of paired image and catalog stars
-        self.pick_list = collections.OrderedDict()
+        self.pick_list = {}
         self.paired_stars = []
         self.residuals = None
 
@@ -955,7 +955,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.paired_stars = []
         self.updatePairedStars()
-        self.pick_list = collections.OrderedDict()
+        self.pick_list = {}
         self.residuals = None
         self.updateFitResiduals()
         self.updatePicks()
@@ -1847,7 +1847,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.pick_marker.setData(pos=[])
 
             # Reset paired stars
-            self.pick_list = collections.OrderedDict()
+            self.pick_list = {}
             self.paired_stars = []
             self.residuals = None
             self.drawPhotometryColoring()
@@ -2761,13 +2761,18 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Change extintion scale
             elif event.key() == QtCore.Qt.Key_9:
+                
                 self.platepar.extinction_scale += 0.1
 
                 self.tab.param_manager.updatePlatepar()
                 self.onExtinctionChanged()
 
             elif event.key() == QtCore.Qt.Key_0:
+
                 self.platepar.extinction_scale -= 0.1
+
+                if self.platepar.extinction_scale < 0:
+                    self.platepar.extinction_scale = 0.0
 
                 self.tab.param_manager.updatePlatepar()
                 self.onExtinctionChanged()

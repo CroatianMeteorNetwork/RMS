@@ -1745,6 +1745,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.sigScaleChanged.emit()
 
     def onExtinctionChanged(self):
+        self.gui.platepar.extinction_scale = self.extinction_scale.value()
         self.sigExtinctionChanged.emit()
 
     def onFitParametersChanged(self):
