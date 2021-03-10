@@ -1,4 +1,6 @@
-Write-Output simple test script to set camera correctly
+#
+# powershell script to set an IMX291 camera up from scratch
+#
 if ( $args.count -eq 0 ){
     Write-Output "usage1 python -m Utils.CameraControl DIRECT"
     Write-Output "    configure the camera for direct connection to the pi"
@@ -9,7 +11,7 @@ if ( $args.count -eq 0 ){
     exit 1
 }
 
-currip=$(python -m Utils.CameraControl GetIP)
+$currip=$(python -m Utils.CameraControl GetIP)
 if ($args[0] -eq "DIRECT"){
     write-output Setting direct connection
     write-output Warning: you will lose connection to the camera once this completes
@@ -22,6 +24,7 @@ if ($args[0] -eq "DIRECT"){
     $camip=$args[0]
     $routerip=$args[1]
 }
+write-output "------------------------"
 # a few miscellaneous things - onscreen date/camera Id off, colour settings, autoreboot at 1500 every day
 python -m Utils.CameraControl SetOSD off
 python -m Utils.CameraControl SetColor 100,50,50,50,0,0
@@ -64,6 +67,7 @@ python -m Utils.CameraControl SetParam Camera PictureMirror 0
 python -m Utils.CameraControl SetParam Network EnableDHCP 0
 python -m Utils.CameraControl SetParam Network TransferPlan Fluency
 
+write-output "------------------------"
 write-output "about to update the camera IP address. You will see a timeout message"
 if ($args[0] -eq "DIRECT"){
     python -m Utils.CameraControl SetParam Network GateWay 192.168.42.1
@@ -73,17 +77,18 @@ if ($args[0] -eq "DIRECT"){
     python -m Utils.CameraControl SetParam Network GateWay $routerip
     python -m Utils.CameraControl SetParam Network HostIP $camip
 }
-
+write-output "------------------------"
+write-output "updating config file"
 (Get-Content .config).replace("$currip", "$camip") | Set-Content tmp.tmp
-
 Move-Item .config .config.orig -force
 Move-Item tmp.tmp .config
+write-output "------------------------"
 write-output "the camera will now reboot.... "
 Start-Sleep 5
 
 if ($args[0] -eq "DIRECT"){
     write-output "now plug the camera into the Pi"
 }else{
-    write-output Camera ip is now
-    python -m Utils.CameraControl GetIP
+    $camip=$(python -m Utils.CameraControl GetIP)
+    write-output "Camera ip is now $camip"
 }

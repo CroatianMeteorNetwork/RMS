@@ -1,6 +1,7 @@
 #!/bin/bash
-
-echo simple test script to set camera correctly
+#
+# bash script to set an IMX291 camera up from scratch
+#
 if [ $# -lt 1 ] ; then
     echo "usage1 python -m Utils.CameraControl DIRECT"
     echo "    configure the camera for direct connection to the pi"
@@ -24,6 +25,8 @@ else
     camip=$1
     routerip=$2
 fi 
+echo  "------------------------"
+
 # a few miscellaneous things - onscreen date/camera Id off, colour settings, autoreboot at 1500 every day
 python -m Utils.CameraControl SetOSD off
 python -m Utils.CameraControl SetColor 100,50,50,50,0,0
@@ -65,6 +68,8 @@ python -m Utils.CameraControl SetParam Camera PictureMirror 0
 # network parameters
 python -m Utils.CameraControl SetParam Network EnableDHCP 0
 python -m Utils.CameraControl SetParam Network TransferPlan Fluency
+
+echo  "------------------------"
 echo "about to update the camera IP address. You will see a timeout message"
 if [ "$1" == "DIRECT" ] ; then
     python -m Utils.CameraControl SetParam Network GateWay 192.168.42.1
@@ -74,16 +79,19 @@ else
     python -m Utils.CameraControl SetParam Network GateWay $routerip
     python -m Utils.CameraControl SetParam Network HostIP $camip
 fi
-
+echo "------------------------"
+echo "updating config file"
 cat .config | sed "s/$currip/$camip/g" > tmp.tmp
 mv .config .config.orig
 mv tmp.tmp .config
+
+echo "------------------------"
 echo "the camera will now reboot.... "
 sleep 5
 
 if [ "$1" == "DIRECT" ] ; then
     echo "now plug the camera into the Pi"
 else
-    echo Camera ip is now
-    python -m Utils.CameraControl GetIP
+    currip=$(python -m Utils.CameraControl GetIP)
+    echo Camera ip is now $currip
 fi

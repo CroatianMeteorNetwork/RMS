@@ -425,8 +425,8 @@ def setCameraParam(cam, opts):
     elif fld == 'BroadTrends': 
         subfld=opts[2]
         val = int(opts[3])
-        fldToSet='Camera.ParamEx.[0].'+fld
-        print('Set {} to {}'.format(fldToSet, val))
+        fldToSet='Camera.ParamEx.[0].' + fld 
+        print('Set {}.{} to {}'.format(fldToSet, subfld, val))
         cam.set_info(fldToSet,{subfld:val})
                 
     # Exposuretime and gainparam have subfields
@@ -440,8 +440,8 @@ def setCameraParam(cam, opts):
                 print('Exposure must be between 100 and 80000 microsecs')
                 return
             val ="0x%8.8X" % (int(val))
-        fldToSet='Camera.Param.[0].'+fld
-        print('Set {} to {}'.format(fldToSet, val))
+        fldToSet='Camera.Param.[0].' + fld 
+        print('Set {}.{} to {}'.format(fldToSet, subfld, val))
         cam.set_info(fldToSet,{subfld:val})
     else:
         # other fields do not have subfields
@@ -467,11 +467,11 @@ def setOSD(cam, opts):
     if opts[0] == 'on':
         info[0]["TimeTitleAttribute"]["EncodeBlend"] = True
         info[0]["ChannelTitleAttribute"]["EncodeBlend"] = True
-        print('osd enabled')
+        print('Set osd enabled')
     else:
         info[0]["TimeTitleAttribute"]["EncodeBlend"] = False 
         info[0]["ChannelTitleAttribute"]["EncodeBlend"] = False 
-        print('osd disabled')
+        print('Set osd disabled')
 
     cam.set_info("AVEnc.VideoWidget", info)
 
@@ -512,7 +512,7 @@ def setColor(cam, opts):
     info[n]["VideoColorParam"]["Gain"] = g
     info[n]["VideoColorParam"]["Acutance"] = a
     # print(json.dumps(info[n], ensure_ascii=False, indent=4, sort_keys=True))
-    print('color configuration set')
+    print('Set color configuration', b,c,s,h,g,a)
     cam.set_info("AVEnc.VideoColor.[0]", info)
 
 
@@ -544,7 +544,7 @@ def setAutoReboot(cam, opts):
 
     info["AutoRebootDay"] = day
     info["AutoRebootHour"] = hour
-    print('autoreboot set to', day, 'at', hour*100)
+    print('Set autoreboot: ', day, 'at', hour*100)
     cam.set_info("General.AutoMaintain", info)
 
 
