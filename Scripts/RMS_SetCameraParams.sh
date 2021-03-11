@@ -10,7 +10,7 @@ if [ $# -lt 1 ] ; then
     echo "    the two parameters are the IP address you want the camera to have"
     echo "    and the address of your router." 
     exit 1
-end if 
+fi 
 
 currip=$(python -m Utils.CameraControl GetIP)
 if [ "$1" == "DIRECT" ] ; then
