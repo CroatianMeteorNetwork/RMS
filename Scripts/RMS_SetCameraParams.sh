@@ -11,8 +11,20 @@ if [ $# -lt 1 ] ; then
     echo "    and the address of your router." 
     exit 1
 fi 
+echo "------------------------"
+echo "this script assumes that the RMS config file has not been changed and the"
+echo "device string still contains the IP address 192.168.42.10"
+echo ""
+echo "if this is not the case, press Ctrl-C and edit it before proceeding"
+read -p "or press any other key to continue" key
 
-currip=$(python -m Utils.CameraControl GetIP)
+echo "updating config file to use factory IP address 192.168.1.10"
+currip=192.168.42.10
+defaultip=192.168.1.10
+cat .config | sed "s/$currip/$defaultip/g" > tmp.tmp
+mv -f .config .config.orig
+mv -f tmp.tmp .config
+
 if [ "$1" == "DIRECT" ] ; then
     echo Setting direct connection
     echo Warning: you will lose connection to the camera once this completes
@@ -81,9 +93,8 @@ else
 fi
 echo "------------------------"
 echo "updating config file"
-cat .config | sed "s/$currip/$camip/g" > tmp.tmp
-mv .config .config.orig
-mv tmp.tmp .config
+cat .config | sed "s/$defaultip/$camip/g" > tmp.tmp
+mv -f tmp.tmp .config
 
 echo "------------------------"
 echo "the camera will now reboot.... "
