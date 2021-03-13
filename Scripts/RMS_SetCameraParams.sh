@@ -28,6 +28,7 @@ mv -f tmp.tmp .config
 if [ "$1" == "DIRECT" ] ; then
     echo Setting direct connection
     echo Warning: you will lose connection to the camera once this completes
+    camip=$currip
 else
     if [ $# -lt 2 ] ; then 
         echo direct mode requires you to provide a Camera IP address and your routers IP address
