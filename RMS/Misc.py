@@ -81,7 +81,10 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
     # Copy the additional files to the archive directory
     if extra_files is not None:
         for file_name in extra_files:
-            shutil.copy2(file_name, os.path.join(dest_dir, os.path.basename(file_name)))
+            try:
+                shutil.copy2(file_name, os.path.join(dest_dir, os.path.basename(file_name)))
+            except shutil.SameFileError:
+                pass
 
 
     # Compress the archive directory
