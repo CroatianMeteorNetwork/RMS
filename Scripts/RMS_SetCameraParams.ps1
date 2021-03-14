@@ -29,6 +29,7 @@ Move-Item tmp.tmp .config -force
 if ($args[0] -eq "DIRECT"){
     write-output Setting direct connection
     write-output Warning: you will lose connection to the camera once this completes
+    $camip=$currip
 }else{
     if ($args.count -lt 2){
         write-output "direct mode requires you to provide a Camera IP address and your routers IP address"
@@ -85,7 +86,7 @@ write-output "------------------------"
 write-output "about to update the camera IP address. You will see a timeout message"
 if ($args[0] -eq "DIRECT"){
     python -m Utils.CameraControl SetParam Network GateWay 192.168.42.1
-    python -m Utils.CameraControl SetParam Network HostIP 192.168.42.10
+    python -m Utils.CameraControl SetParam Network HostIP $camip
     python -m Utils.CameraControl SetParam Network EnableDHCP 1
 }else{
     python -m Utils.CameraControl SetParam Network GateWay $routerip
