@@ -2,7 +2,8 @@
     This module can read and control the IMX291 Cameras and possibly other IMX cameras
     that comply with the dvrip protocol and can be controlled from CMS.
 
-    Note:the DVRIP module used by this code requires Python 3.5 or later.
+    Note: if you're using Python 2 then only the GetHostname and reboot parameters are 
+    supported. This is a limitation of the camera control library
 
     usage 1: 
     Python -m Utils.CameraControl command {opts}
@@ -10,11 +11,14 @@
 
     Usage 2:
     >>> import Utils.CameraControl as cc
-    >>> cc.CameraControl(ip_address,command, [opts])
+    >>> cc.CameraControl(ip_address,command, [opts]) 
+    >>> cc.CameraControlV2(config, command, [opts])
 
     Parameters:
-    command - the command you want to execute. 
-    opts - array containing field and value to use when calling SetParam
+    ip_address: dotted ipaddress of the camera eg 1.2.3.4
+    config: RMS config object 
+    command: the command you want to execute. 
+    opts: field and value to use when calling SetParam
 
     example
     python -m Utils.CameraControl GetCameraParams
@@ -22,45 +26,71 @@
     will return JSON showing you the contents of the Camera Params block and Video Encoding blocks 
 
     You can set these values using SetParam eg
+
     set the AE Reference to 100
     python -m Utils.CameraControl SetParam Camera ElecLevel 100
+
     Set the Gain to 70
     python -m Utils.CameraControl SetParam Camera GainParam Gain 70
+
     Set the minimum exposure time to 40ms
     python -m Utils.CameraControl SetParam Camera ExposureParam LeastTime 40000
 
     Note that some fields have subfields as shown in the last example
+
+    Network parameters:
+    ==================
+    You can retrieve the current network settings using GetNetConfig
+
+    You can also set the IP Address, netmask and gateway using SetParam
+        eg SetParam Network HostIP 1.2.3.4
+    You can turn DHCP on and off using SetParam Network EnableDHCP 1 or 0
+
+    Note that turning on DHCP will cause the camera to lose connection
+    and you will need to scan your network or check your router to find out
+    what its address has changed to. 
+
+    API details : https://oppf.xmcsrv.com/#/api?md=readProtocol
+
 """
 
-import sys, os
-if sys.version_info.major < 3 or (sys.version_info.major > 2 and sys.version_info.minor < 5) :
-        print('This module can only be used with Python 3.5 or later')
-        print('Please use CameraControl27 for older versions of Python')
-        exit()
+import sys
+import os
 
 import ipaddress as ip
+import binascii
+import socket
 import argparse
 import json
 import pprint
 import re
 import RMS.ConfigReader as cr
 from time import sleep
-import git, importlib  #used to import python-dvr as it has a dash in the name
 
 # if not present, force update of the submodule
-try:
-    dvr = importlib.import_module("python-dvr.dvrip")
-except:
-    print("updating python-dvr")
-    rmsloc,_= os.path.split(os.path.realpath(__file__))
-    rmsrepo=git.Repo(rmsloc)
-    for sm in rmsrepo.submodules:
-        sm.update(init=True, force=True)
+
+if sys.version_info.major > 2:
+    import git
+    import importlib  #used to import python-dvr as it has a dash in the name
     try:
+        sys.path.append(os.path.abspath('.')) 
         dvr = importlib.import_module("python-dvr.dvrip")
     except:
-        print('unable to update python-dvr - can\'t continue')
-        exit()
+        print("updating python-dvr")
+        rmsloc = os.path.abspath('.')
+        rmsrepo=git.Repo(rmsloc)
+        for sm in rmsrepo.submodules:
+            sm.update(init=True, force=True)
+        try:
+            sys.path.append(os.path.abspath('.')) 
+            dvr = importlib.import_module("python-dvr.dvrip")
+        except:
+            print('unable to update python-dvr - can\'t continue')
+            exit()
+else:
+    # Python2 compatible version with much restricted capabilities
+    import Utils.CameraControl27 as cc27
+
 
 def rebootCamera(cam):
     """Reboot the Camera
@@ -70,11 +100,23 @@ def rebootCamera(cam):
     """
     print('rebooting, please wait....')
     cam.reboot()
-    sleep(60) # wait while camera starts
-    if cam.login():
+    retry = 0
+    while retry < 5:
+        sleep(5) # wait while camera starts
+        if cam.login():
+            break
+        retry += 1
+    if retry < 5: 
         print('reboot successful')
     else:
         print('camera nonresponsive, please wait 30s and reconnect')
+
+
+def strIPtoHex(ip):
+    a = binascii.hexlify(socket.inet_aton(ip)).decode().upper()
+    addr='0x'+''.join([a[x:x+2] for x in range(0,len(a),2)][::-1])
+    return addr
+
 
 def iptoString(s):
     """Convert an IP address in hex network order to a human readable string 
@@ -90,7 +132,8 @@ def iptoString(s):
     ipaddr=ip.IPv4Address(int(addr,16))
     return ipaddr
 
-def saveToFile(nc,dh,cs,vs):
+
+def saveToFile(nc, dh, cs, vs, gp, cp, rb):
     """Save the camera config to JSON files 
 
     Args:
@@ -98,6 +141,8 @@ def saveToFile(nc,dh,cs,vs):
         dh : dhcp config
         cs : camera config
         vs : video encoding config
+        gp : gui display params
+        cp : color settings dialog
     """
     if not os.path.exists('./camerasettings/'):
         os.makedirs('./camerasettings/')
@@ -109,7 +154,14 @@ def saveToFile(nc,dh,cs,vs):
         json.dump(cs,f)
     with open('./camerasettings/vid.json','w') as f:
         json.dump(vs,f)
+    with open('./camerasettings/gui.json','w') as f:
+        json.dump(gp,f)
+    with open('./camerasettings/color.json','w') as f:
+        json.dump(cp,f)
+    with open('./camerasettings/autoreboot.json','w') as f:
+        json.dump(rb,f)
     print('Settings saved to ./camerasettings/')
+
 
 def loadFromFile():
     """Load the camera config from JSON files saved earlier
@@ -127,15 +179,22 @@ def loadFromFile():
         cs = json.load(f)
     with open('./camerasettings/vid.json','r') as f:
         vs = json.load(f)
+    with open('./camerasettings/gui.json','r') as f:
+        gp = json.load(f)
+    with open('./camerasettings/color.json','r') as f:
+        cp = json.load(f)
+    with open('./camerasettings/autoreboot.json','r') as f:
+        rb = json.load(f)
     print('Loaded')
-    return nc, dh, cs, vs 
+    return nc, dh, cs, vs, gp, cp, rb
+
 
 def getNetworkParams(cam, showit=True):
     """ retrieve or display the camera network settings
 
     Args:
         cam : canera object
-        showit (bool, optional): whether to show the info or just return it. Defaults to True 
+        showit (bool, optional): whether to print out the settings.
 
     Returns:
         json block containing the config
@@ -143,34 +202,43 @@ def getNetworkParams(cam, showit=True):
     nc=cam.get_info("NetWork.NetCommon")
     dh=cam.get_info("NetWork.NetDHCP")
 
-    if showit ==True:
-        pprint.pprint(nc)
-        pprint.pprint(dh)
+    if showit is True:
         print('IP Address  : ', iptoString(nc['HostIP']))
-        print('Gateway     : ', iptoString(nc['GateWay']))
+        print('---------')
+        pprint.pprint(nc)
+        print('---------')
+        pprint.pprint(dh)
     return nc, dh
+
+
+def getIP(cam):
+    nc=cam.get_info("NetWork.NetCommon")
+    print(iptoString(nc['HostIP']))
+    return
+
 
 def getEncodeParams(cam, showit=True):
     """ Read the Encode section of the camera config
 
     Args:
         cam - the camera 
-        saveit (bool, optional): whether we're being called so the data can be saved. Defaults to True.
+        showit (bool, optional): whether to print out the settings.
 
     Returns:
         json block containing the config
     """
     vidinfo = cam.get_info("Simplify.Encode")
-    if showit == True:
+    if showit is True:
         pprint.pprint(vidinfo)
     return vidinfo
+
 
 def getCameraParams(cam, showit=True):
     """ display or retrueve the Camera section of the camera config
 
     Args:
         cam - the camera 
-        saveit (bool, optional): whether we're being called so the data can be saved. Defaults to True.
+        showit (bool, optional): whether to print out the settings.
 
     Returns:
         json block containing the config
@@ -178,10 +246,59 @@ def getCameraParams(cam, showit=True):
     caminfo = cam.get_info("Camera")
     p1 = caminfo['Param'][0]
     p2 = caminfo['ParamEx'][0]
-    if showit == True:
+    if showit is True:
         pprint.pprint(p1)
         pprint.pprint(p2)
     return caminfo
+
+
+def getGuiParams(cam, showit=True):
+    """ display or retrieve the Gui Params 
+
+    Args:
+        cam - the camera 
+        showit (bool, optional): whether to print out the settings.
+
+    Returns:
+        json block containing the config
+    """
+    caminfo = cam.get_info("AVEnc.VideoWidget")
+    if showit is True:
+        pprint.pprint(caminfo)
+    return caminfo
+
+
+def getAutoRebootParams(cam, showit=True):
+    """ display or retrieve the Autoreboot Params 
+
+    Args:
+        cam - the camera 
+        showit (bool, optional): whether to print out the settings.
+
+    Returns:
+        json block containing the config
+    """
+    info = cam.get_info("General.AutoMaintain") 
+    if showit is True:
+        pprint.pprint(info)
+    return info
+
+
+def getColorParams(cam, showit=True):
+    """ display or retrieve the Color Settings section of the camera config
+
+    Args:
+        cam - the camera 
+        showit (bool, optional): whether to print out the settings.
+
+    Returns:
+        json block containing the config
+    """
+    caminfo = cam.get_info("AVEnc.VideoColor.[0]")
+    if showit is True:
+        pprint.pprint(caminfo)
+    return caminfo
+
 
 def setEncodeParam(cam, opts):
     """ Set a parameter in the Encode section of the camera config
@@ -210,17 +327,22 @@ def setEncodeParam(cam, opts):
         if subfld in intflds:
             val = int(val)
         params[0]['MainFormat']['Video'][subfld] = val
-    else:
-        val = opts[2]
+    elif fld =='SecondStream':
+        val = int(opts[2])
         if val!=0 and val!=1:
-            print('AudioEnable and VideoEnable must be 1 or 0')
+            print('SecondStream must be 1 or 0')
             return 
+        subfld=''
+        params[0]['ExtraFormat']['VideoEnable']=val
+        params[0]['ExtraFormat']['AudioEnable']=val
+    else:
+        val = int(opts[2])
         subfld=''
         params[0]['MainFormat'][fld]=val
     cam.set_info("Simplify.Encode", params)
-    print ('Set {} {} to {}'.format(fld, subfld, val))
-    print ('Camera Reboot required to take effect')
-       
+    print('Set {} {} to {}'.format(fld, subfld, val))
+
+
 def setNetworkParam(cam, opts):
     """ Set a parameter in the Network section of the camera config
 
@@ -228,7 +350,54 @@ def setNetworkParam(cam, opts):
         cam - the camera 
         opts - array of fields, subfields and the value to set
     """
-    print('Network field setting not implemented yet')
+    # top level field name
+    fld=opts[1]
+    # these fields are stored in the ParamEx.[0] block
+    if fld == 'HostIP':
+        val = opts[2]
+        hexval = strIPtoHex(val)
+        cam.set_info("NetWork.NetCommon.HostIP", hexval)
+
+    elif fld == 'GateWay':
+        val = opts[2]
+        hexval = strIPtoHex(val)
+        cam.set_info("NetWork.NetCommon.GateWay", hexval)
+
+    elif fld == 'Submask':
+        val = opts[2]
+        hexval = strIPtoHex(val)
+        cam.set_info("NetWork.NetCommon.Submask", hexval)
+
+    elif fld == 'EnableDHCP':
+        val = int(opts[2])
+        if val == 1:
+            cam.set_info("NetWork.NetDHCP.[0].Enable", 1)
+            print('DHCP enabled')
+        else:
+            cam.set_info("NetWork.NetDHCP.[0].Enable", 0)
+            print('DHCP disabled')
+        #dh = cam.get_info("NetWork.NetDHCP.[0]")
+
+    elif fld == 'EnableNTP':
+        val = opts[2]
+        if val == "0":
+            cam.set_info("NetWork.NetNTP.Enable", False)
+            print('NTP disabled')
+        else:
+            # hexval = strIPtoHex(val)
+            cam.set_info("NetWork.NetNTP.Server.Name", val)
+            cam.set_info("NetWork.NetNTP.Enable", True)
+            print('NTP enabled')
+    elif fld == 'TransferPlan':
+        val = opts[2]
+        cam.set_info("NetWork.NetCommon.TransferPlan", val)
+
+    else:
+        print('usage: SetParam Network option,value: ')
+        print('HostIP, GateWay or Submask followed by a dotted IP address')
+        print('EnableDHCP followed by 1 or 0')
+        print('EnableNTP followed by a dotted IP address to enable or 0 to disable')
+
 
 def setCameraParam(cam, opts):
     """ Set a parameter in the Camera section of the camera config
@@ -238,9 +407,10 @@ def setCameraParam(cam, opts):
         opts - array of fields, subfields and the value to set
     """
     # these fields are stored as integers. Others are Hex strings
-    intfields=['AeSensitivity','Day_nfLevel','DncThr','ElecLevel',\
+    intfields=['AeSensitivity','Day_nfLevel','DncThr','ElecLevel',
         'IRCUTMode','IrcutSwap','Night_nfLevel', 'Level','AutoGain','Gain']
     styleFlds='typedefault','type1','type2'
+
     # top level field name
     fld=opts[1]
     # these fields are stored in the ParamEx.[0] block
@@ -249,17 +419,17 @@ def setCameraParam(cam, opts):
         if val not in styleFlds:
             print('style must be one of ', styleFlds)
             return
+        print('Set Camera.ParamEx.[0].{} to {}'.format(fld, val))
         cam.set_info("Camera.ParamEx.[0]",{fld:val})
-        print ('Set Camera.ParamEx.[0].{} to {}'.format(fld, val))
     elif fld == 'BroadTrends': 
         subfld=opts[2]
         val = int(opts[3])
-        fldToSet='Camera.ParamEx.[0].'+fld
+        fldToSet='Camera.ParamEx.[0].' + fld 
+        print('Set {}.{} to {}'.format(fldToSet, subfld, val))
         cam.set_info(fldToSet,{subfld:val})
-        print ('Set {} to {}'.format(fldToSet, val))
                 
     # Exposuretime and gainparam have subfields
-    elif fld == 'ExposureParam' or fld == 'GainParam' :
+    elif fld == 'ExposureParam' or fld == 'GainParam':
         subfld=opts[2]
         val = int(opts[3])
         if subfld not in intfields:
@@ -269,16 +439,113 @@ def setCameraParam(cam, opts):
                 print('Exposure must be between 100 and 80000 microsecs')
                 return
             val ="0x%8.8X" % (int(val))
-        fldToSet='Camera.Param.[0].'+fld
+        fldToSet='Camera.Param.[0].' + fld 
+        print('Set {}.{} to {}'.format(fldToSet, subfld, val))
         cam.set_info(fldToSet,{subfld:val})
-        print ('Set {} to {}'.format(fldToSet, val))
     else:
         # other fields do not have subfields
         val = int(opts[2])
         if fld not in intfields:
             val ="0x%8.8X" % val
+        print('Set Camera.Param.[0].{} to {}'.format(fld, val))
         cam.set_info("Camera.Param.[0]",{fld:val})
-        print ('Set Camera.Param.[0].{} to {}'.format(fld, val))
+
+
+def setOSD(cam, opts):
+    """ Set a parameter in the Gui Params section of the camera config
+    Args:
+        cam - the camera 
+        opts - array of fields, subfields and the value to set
+    """
+
+    info = cam.get_info("AVEnc.VideoWidget")
+    if len(opts) == 0:
+        print('usage: setOSD on|off')
+        return
+
+    if opts[0] == 'on':
+        info[0]["TimeTitleAttribute"]["EncodeBlend"] = True
+        info[0]["ChannelTitleAttribute"]["EncodeBlend"] = True
+        print('Set osd enabled')
+    else:
+        info[0]["TimeTitleAttribute"]["EncodeBlend"] = False 
+        info[0]["ChannelTitleAttribute"]["EncodeBlend"] = False 
+        print('Set osd disabled')
+
+    cam.set_info("AVEnc.VideoWidget", info)
+
+
+def setColor(cam, opts):
+    """ Set a parameter in the Color Settings 
+    Args:
+        cam - the camera 
+        opts - array of fields, subfields and the value to set
+    """
+
+    info = cam.get_info("AVEnc.VideoColor.[0]")
+    b,c,s,h,g,a = 100,50,0,50,0,0
+
+    if len(opts) > 0:
+        spls = opts[0].split(',')
+        try:
+            b = int(spls[0])
+            c = int(spls[1])
+            s = int(spls[2])
+            h = int(spls[3])
+            g = int(spls[4])
+            a = int(spls[5])
+        except Exception:
+            pass
+    else:
+        print('usage: setColor brightness,contrast,saturation,hue,gain,acutance')
+        print('  b,c,s,h,g all numbers from 1 to 100')
+        print('  acutance sets both horiz and vert sharpness')
+        print('  the lower 8 bits set horiz and the upper 8 bits set vert')
+        return         
+
+    n = 0
+    info[n]["VideoColorParam"]["Brightness"] = b
+    info[n]["VideoColorParam"]["Contrast"] = c
+    info[n]["VideoColorParam"]["Saturation"] = s
+    info[n]["VideoColorParam"]["Hue"] = h
+    info[n]["VideoColorParam"]["Gain"] = g
+    info[n]["VideoColorParam"]["Acutance"] = a
+    # print(json.dumps(info[n], ensure_ascii=False, indent=4, sort_keys=True))
+    print('Set color configuration', b,c,s,h,g,a)
+    cam.set_info("AVEnc.VideoColor.[0]", info)
+
+
+def setAutoReboot(cam, opts):
+    """ Set a parameter in the Color Settings 
+    Args:
+        cam - the camera 
+        opts - array of fields, subfields and the value to set
+    """
+
+    info = cam.get_info("General.AutoMaintain") 
+    # print(json.dumps(info, ensure_ascii=False, indent=4, sort_keys=True))
+    if len(opts) < 1: 
+        print('usage: setAutoReboot dayofweek,hour')
+        print('  where dayofweek is Never EveryDay Monday Tuesday etc')
+        print('  and hour is a number between 0 and 23')
+        return
+    spls = opts[0].split(',')
+    day = spls[0]
+    hour = 0
+    if len(spls) > 1:
+        hour = int(spls[1])
+    if day not in ['Everyday','Monday','Tuesday','Wednesday','Thursday','Friday', 
+            'Saturday','Sunday','Never'] or hour < 0 or hour > 23:
+        print('usage: setAutoReboot dayofweek,hour')
+        print('  where dayofweek is Never, EveryDay, Monday, Tuesday, Wednesday etc')
+        print('  and hour is a number between 0 and 23')
+        return
+
+    info["AutoRebootDay"] = day
+    info["AutoRebootHour"] = hour
+    print('Set autoreboot: ', day, 'at', hour*100)
+    cam.set_info("General.AutoMaintain", info)
+
 
 def setParameter(cam, opts):
     """ Set a parameter in various sections of the camera config
@@ -298,7 +565,8 @@ def setParameter(cam, opts):
     else:
         print('Setting not currently supported for', opts)
 
-def dvripCommand(cam, cmd, opts):
+
+def dvripCall(cam, cmd, opts):
     """ retrieve or display the camera network settings
 
     Args:
@@ -316,6 +584,9 @@ def dvripCommand(cam, cmd, opts):
     elif cmd == 'reboot':
         rebootCamera(cam)
 
+    elif cmd == 'GetIP':
+        getIP(cam)
+
     elif cmd == 'GetCameraParams':
         getCameraParams(cam, True)
     
@@ -326,30 +597,48 @@ def dvripCommand(cam, cmd, opts):
         getNetworkParams(cam, True)
         getCameraParams(cam, True)
         getEncodeParams(cam, True)
+        getGuiParams(cam, True)
+        getColorParams(cam, True)
 
     elif cmd =='SaveSettings':
         nc, dh = getNetworkParams(cam, False)
         cs = getCameraParams(cam, False)
         vs = getEncodeParams(cam, False)
-        saveToFile(nc, dh, cs, vs)
+        gp = getGuiParams(cam, False)
+        cp = getColorParams(cam, False)
+        rb = getAutoRebootParams(cam, False)
+        saveToFile(nc, dh, cs, vs, gp, cp, rb)
 
     elif cmd == 'LoadSettings':
-        nc, dh, cs, vs = loadFromFile()
+        nc, dh, cs, vs, gp, cp, rb = loadFromFile()
         cam.set_info("NetWork.NetCommon", nc)
         cam.set_info("NetWork.NetDHCP", dh)
         cam.set_info("Camera",cs)
         cam.set_info("Simplify.Encode", vs)
+        cam.set_info("AVEnc.VideoWidget", gp)
+        cam.set_info("AVEnc.VideoColor.[0]", cp)
+        cam.set_info("General.AutoMaintain", rb)
         rebootCamera(cam)
 
     elif cmd == 'SetParam':
         setParameter(cam, opts)
+
+    elif cmd == 'SetColor':
+        setColor(cam, opts)
+
+    elif cmd == 'SetOSD':
+        setOSD(cam, opts)
+
+    elif cmd == 'SetAutoReboot':
+        setAutoReboot(cam, opts)
 
     else:
         print('System Info')
         ugi=cam.get_upgrade_info()
         print(ugi['Hardware'])
 
-def CameraControl(camera_ip, cmd, opts=''):
+
+def cameraControl(camera_ip, cmd, opts=''):
     """CameraControl - main entry point to the module
 
     Args:
@@ -357,17 +646,30 @@ def CameraControl(camera_ip, cmd, opts=''):
         cmd (string): Command to be executed
         opts (array of strings): Optional array of field, subfield and value for the SetParam command
     """
-     # Process the IP camera control command
+    # Process the IP camera control command
     cam = dvr.DVRIPCam(camera_ip, "admin", "")
     if cam.login():
         try:
-            dvripCommand(cam, cmd, opts)
+            dvripCall(cam, cmd, opts)
         except:
             print('error executing command - probably not supported')
     else:
         print("Failure. Could not connect.")
     cam.close()
-   
+
+
+def cameraControlV2(config, cmd, opts=''):
+    if str(config.deviceID).isdigit():
+        print('Error: this utility only works with IP cameras')
+        exit(1)
+    # extract IP from config file
+    camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
+
+    if sys.version_info.major < 3:
+        cc27.onvifCommand(config, cmd)
+    else:
+        cameraControl(camera_ip, cmd, opts)
+
 
 if __name__ == '__main__':
     """Main function
@@ -377,12 +679,20 @@ if __name__ == '__main__':
     """
 
     # list of supported commands
-    cmd_list = ['reboot', 'GetHostname', 'GetSettings','GetDeviceInformation','GetNetConfig',  \
-        'GetCameraParams','GetEncodeParams','SetParam','SaveSettings', 'LoadSettings']
-    opthelp='optional parameters for SetParam for example Camera ElecLevel 70 \n' \
-        'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first'
+    if sys.version_info.major < 3:
+        cmd_list = ['reboot', 'GetHostname', 'GetDeviceInformation']
+        opthelp=''
+    else:
+        cmd_list = ['reboot', 'GetHostname', 'GetSettings','GetDeviceInformation','GetNetConfig',
+            'GetCameraParams','GetEncodeParams','SetParam','SaveSettings', 'LoadSettings', 
+            'SetColor', 'SetOSD', 'SetAutoReboot', 'GetIP']
+        opthelp='optional parameters for SetParam for example Camera ElecLevel 70 \n' \
+            'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first. ' \
+            'Call a function with no parameters to see the possibilities'
 
-    parser = argparse.ArgumentParser(description='Controls CMS-Compatible IP camera')
+    usage = "Available commands " + str(cmd_list) + '\n' + opthelp
+    parser = argparse.ArgumentParser(description='Controls CMS-Compatible IP camera',
+        usage=usage)
     parser.add_argument('command', metavar='command', type=str, nargs=1, help=' | '.join(cmd_list))
     parser.add_argument('options', metavar='opts', type=str, nargs='*', help=opthelp)
     args = parser.parse_args()
@@ -392,19 +702,14 @@ if __name__ == '__main__':
     else:
         opts=''
         
-    if not cmd in cmd_list:
+    if cmd not in cmd_list:
         print('Error: command "{}" not supported'.format(cmd))
         exit(1)
 
     config = cr.parse('.config')
 
-    if str(config.deviceID).isdigit():
-        print('Error: this utility only works with IP cameras')
-        exit(1)
-    # extract IP from config file
-    camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
-
-    CameraControl(camera_ip, cmd, opts)    
+    cameraControlV2(config, cmd, opts)
+    
 
 """Known Field mappings
 These are available in Guides/imx2910config-maps.md

@@ -18,22 +18,45 @@ import argparse
 import re
 import RMS.ConfigReader as cr
 from onvif import ONVIFCamera
-import os, platform
+import os
+import platform
+
 
 def getHostname(cam):
+    """get the hostname - seems pointless tbh 
+
+    Args:
+        cam : The camera
+    """
     resp = cam.devicemgmt.GetHostname()
     print('getHostname:\n' + str(resp))
 
+
 def getDeviceInformation(cam):
+    """get limited device information
+
+    Args:
+        cam : The camera
+    """
     resp = cam.devicemgmt.GetDeviceInformation()
     print('getDeviceInformation:\n' + str(resp))
 
+
 def systemReboot(cam):
+    """Reboot the Camera
+
+    Args:
+        cam : The camera
+    """
     resp = cam.devicemgmt.SystemReboot()
     print('systemReboot: ' + str(resp))
 
+
 # function to find where your WSDL files are. 
 def getOnvifWsdlLocation():
+    """Locate the ONVIF WSDL files required to use this module
+
+    """
 
     platf = platform.system()
     if platf == 'Linux':
@@ -59,16 +82,17 @@ def getOnvifWsdlLocation():
     wsdl_loc=''   
     for root, dirs, _ in os.walk(basedir, topdown=False):
         for name in dirs:
-            wsdl_loc = os.path.join(root,name)
+            loc = os.path.join(root,name)
             # on the Pi, the correct version is in an onvif-x.xx.x folder
             if name =='wsdl' and 'onvif' in root:
-                return wsdl_loc
+                return loc
             if name == 'wsdl' and platf == 'Windows' and 'zeep' not in root:
-                return wsdl_loc
+                return loc
     if wsdl_loc == '':
-        print ('Unable to find WSDL files, unable to continue')
+        print('Unable to find WSDL files, unable to continue')
         exit(1)
     return wsdl_loc
+
 
 def onvifCommand(config, cmd):
     """ Execute ONVIF command to the IP camera.
@@ -91,6 +115,7 @@ def onvifCommand(config, cmd):
 
     try:
         print('Connecting to {}:{}'.format(camera_ip, camera_onvif_port))
+        print('WSDL location is', wsdl_loc)
         cam = ONVIFCamera(camera_ip, camera_onvif_port, 'admin', '', wsdl_loc)
     except:
         print('Could not connect to camera!')
@@ -108,7 +133,6 @@ def onvifCommand(config, cmd):
     if cmd == 'GetDeviceInformation':
         getDeviceInformation(cam)
 
-    exit(0)
 
 if __name__ == '__main__':
 
@@ -121,7 +145,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     cmd = args.command[0]
 
-    if not cmd in cmd_list:
+    if cmd not in cmd_list:
         print('Error: command "{}" not supported'.format(cmd))
         exit(1)
 

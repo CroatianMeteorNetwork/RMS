@@ -4,7 +4,7 @@
 
 from __future__ import print_function, division, absolute_import
 
-import sys
+import glob
 import os
 import platform
 import argparse
@@ -20,8 +20,9 @@ from RMS.Formats import FTPdetectinfo
 from PIL import ImageFont
 
 from RMS.Formats.FFfile import read as readFF
-from RMS.Formats.FFfile import validFFName, filenameToDatetime
+from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Misc import mkdirP
+
 
 def generateMP4s(dir_path, ftpfile_name):
     t1 = datetime.datetime.utcnow()
@@ -44,7 +45,7 @@ def generateMP4s(dir_path, ftpfile_name):
         last_frame=first_frame + 60
         if first_frame < 0:
             first_frame = 0
-        if (n_segments > 1 ):
+        if (n_segments > 1):
             lastseg=int(n_segments)-1
             last_frame = int(meteor_meas[lastseg][1])+30
         #if last_frame > 255 :
@@ -76,10 +77,10 @@ def generateMP4s(dir_path, ftpfile_name):
         
         # Get the timestamp from the FF name
         timestamp = filenameToDatetime(ff_name).strftime("%Y-%m-%d %H:%M:%S")
-		
+
         # Get id cam from the file name
-            # e.g.  FF499_20170626_020520_353_0005120.bin
-            # or FF_CA0001_20170626_020520_353_0005120.fits
+        # e.g.  FF499_20170626_020520_353_0005120.bin
+        # or FF_CA0001_20170626_020520_353_0005120.fits
 
         file_split = ff_name.split('_')
 
@@ -145,17 +146,18 @@ def generateMP4s(dir_path, ftpfile_name):
                 shutil.rmtree(dir_tmp_path)
 
             print("Deleted temporary directory : " + dir_tmp_path)
-		
+
     print("Total time:", datetime.datetime.utcnow() - t1)
+
 
 if __name__ == "__main__":
 
-    ### COMMAND LINE ARGUMENTS
+    # COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Convert all FF files in a folder to animated GIFs")
 
-    arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
+    arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str,
         help='Path to directory with FF files.')
 
     # Parse the command line arguments
@@ -164,12 +166,24 @@ if __name__ == "__main__":
     #########################
 
     dir_path = os.path.normpath(cml_args.dir_path)
-    ftpdate=''
-    if os.path.split(dir_path)[1] == '' :
-        ftpdate=os.path.split(os.path.split(dir_path)[0])[1]
-    else:
-        ftpdate=os.path.split(dir_path)[1]
-    ftpfile_name="FTPdetectinfo_"+ftpdate+'.txt'
-    # print(ftpfile_name)
+    try:
+        ftps = glob.glob(os.path.join(dir_path,'FTPdetectinfo*.txt'))
+    except Exception:
+        print('unable to access target folder - check path')
+        exit(1)
 
-    generateMP4s(dir_path, ftpfile_name)
+    if len(ftps) == 0:
+        print('no ftpdetect files in target folder - unable to continue')
+
+    else:
+        ftpfile_name = ''
+        for ftpf in ftps:
+            file_name = os.path.basename(ftpf)
+            if '_detected' not in file_name and '-confirmation' not in file_name and \
+                    '_original' not in file_name and '_backup' not in file_name:
+                ftpfile_name = file_name
+        print(ftpfile_name)
+        if ftpfile_name == '':
+            print('no usable ftpdetect file present')
+        else:
+            generateMP4s(dir_path, ftpfile_name)

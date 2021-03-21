@@ -265,7 +265,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 if os.path.isfile(ff_path) and (str(config.stationID) in ff_name) and validFFName(ff_name):
 
                     # Add the FF file to the detector
-                    detector.addJob([night_data_dir, ff_name, config])
+                    detector.addJob([night_data_dir, ff_name, config], wait_time=0.005)
                     log.info("Added existing FF files for detection: {:s}".format(ff_name))
 
 
@@ -556,8 +556,12 @@ def processIncompleteCaptures(config, upload_manager):
 
             log.info("Folder {:s} reprocessed with success!".format(captured_dir_path))
 
-        except:
-            log.error("An error occured when trying to reprocess partially-processed data!")
+
+        except Exception as e:
+            log.error("An error occured when trying to reprocess partially processed data!")
+            log.error(repr(e))
+            log.error(repr(traceback.format_exception(*sys.exc_info())))
+
 
 
 if __name__ == "__main__":
@@ -842,49 +846,52 @@ if __name__ == "__main__":
 
             # Update start time and duration
             start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
+
+            # Check if waiting is needed to start capture
+            if not isinstance(start_time, bool):
             
-            # Calculate how many seconds to wait until capture starts, and with for that time
-            time_now = datetime.datetime.utcnow()
-            waiting_time = start_time - time_now
+                # Calculate how many seconds to wait until capture starts, and with for that time
+                time_now = datetime.datetime.utcnow()
+                waiting_time = start_time - time_now
 
-            log.info('Waiting {:s} to start recording for {:.2f} hrs'.format(str(waiting_time), \
-                duration/60/60))
+                log.info('Waiting {:s} to start recording for {:.2f} hrs'.format(str(waiting_time), \
+                    duration/60/60))
 
-            # Reset the Ctrl+C to KeyboardInterrupt
-            resetSIGINT()
+                # Reset the Ctrl+C to KeyboardInterrupt
+                resetSIGINT()
 
-            try:
-                
-                # Wait until sunset
-                waiting_time_seconds = int(waiting_time.total_seconds())
-                if waiting_time_seconds > 0:
-                    time.sleep(waiting_time_seconds)
+                try:
+                    
+                    # Wait until sunset
+                    waiting_time_seconds = int(waiting_time.total_seconds())
+                    if waiting_time_seconds > 0:
+                        time.sleep(waiting_time_seconds)
 
-            except KeyboardInterrupt:
+                except KeyboardInterrupt:
 
-                log.info('Ctrl + C pressed, exiting...')
+                    log.info('Ctrl + C pressed, exiting...')
+                    
+                    if upload_manager is not None:
 
-                if upload_manager is not None:
-
-                    # Stop the upload manager
-                    if upload_manager.is_alive():
-                        log.debug('Closing upload manager...')
-                        upload_manager.stop()
-                        del upload_manager
+                        # Stop the upload manager
+                        if upload_manager.is_alive():
+                            log.debug('Closing upload manager...')
+                            upload_manager.stop()
+                            del upload_manager
 
 
-                    # Stop the slideshow if it was on
-                    if slideshow_view is not None:
-                        log.info("Stopping slideshow...")
-                        slideshow_view.stop()
-                        slideshow_view.join()
-                        del slideshow_view
-                        slideshow_view = None
+                        # Stop the slideshow if it was on
+                        if slideshow_view is not None:
+                            log.info("Stopping slideshow...")
+                            slideshow_view.stop()
+                            slideshow_view.join()
+                            del slideshow_view
+                            slideshow_view = None
 
-                sys.exit()
+                    sys.exit()
 
-            # Change the Ctrl+C action to the special handle
-            setSIGINT()
+                # Change the Ctrl+C action to the special handle
+                setSIGINT()
 
 
         # Break the loop if capturing was stopped

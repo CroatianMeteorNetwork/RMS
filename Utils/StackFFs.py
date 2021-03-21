@@ -129,6 +129,7 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
             if first_img:
                 merge_img = np.copy(img)
                 first_img = False
+                n_stacked += 1
                 continue
 
             print('Stacking: ', ff_name)
@@ -202,7 +203,7 @@ if __name__ == '__main__':
         help="Apply a given flat frame. If no path to the flat is given, flat.bmp from the folder will be taken.")
 
     arg_parser.add_argument('-m', '--mask', metavar='MASK_PATH', type=str, 
-        help="Apply a given flat frame. If no path to the flat is given, flat.bmp from the folder will be taken.")
+        help="Apply a given mask. If no path to the mask is given, mask.bmp from the folder will be taken.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
