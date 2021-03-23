@@ -858,7 +858,7 @@ if __name__ == "__main__":
                 time_now = datetime.datetime.utcnow()
                 waiting_time = start_time - time_now
 
-                log.info('Waiting {:s} to start recording for {:.2f} hrs'.format(str(waiting_time), \
+                log.info('Waiting {:s} to start recording for {:.3f} hrs'.format(str(waiting_time), \
                     duration/60/60))
 
                 # Reset the Ctrl+C to KeyboardInterrupt
