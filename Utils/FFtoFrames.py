@@ -173,6 +173,8 @@ def FFtoFrames(file_path, out_dir, file_format, deinterlace_mode, first_frame=0,
                 # 20180117:01:08:29.8342
                 f.write('{:s} {:s}\n'.format(frame_name, frame_dt.strftime("%Y%m%d:%H:%M:%S.%f")))
 
+    return frame_name_time_list
+
 
 if __name__ == "__main__":
     ### COMMAND LINE ARGUMENTS
