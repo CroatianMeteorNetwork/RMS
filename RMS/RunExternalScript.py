@@ -58,7 +58,7 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
         p = multiprocessing.Process(target=externalFunction, args=(captured_night_dir, archived_night_dir, config))
         p.start()
 
-        log.info('External script stopped')
+        log.info('External script now running as a separate process')
 
 
     except Exception as e:

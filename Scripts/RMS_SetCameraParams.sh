@@ -11,6 +11,7 @@ if [ $# -lt 1 ] ; then
     echo "    and the address of your router." 
     exit 1
 fi 
+
 echo "------------------------"
 echo "this script assumes that the RMS config file has not been changed and the"
 echo "device string still contains the IP address 192.168.42.10"
@@ -24,6 +25,7 @@ defaultip=192.168.1.10
 cat .config | sed "s/$currip/$defaultip/g" > tmp.tmp
 mv -f .config .config.orig
 mv -f tmp.tmp .config
+
 
 if [ "$1" == "DIRECT" ] ; then
     echo Setting direct connection

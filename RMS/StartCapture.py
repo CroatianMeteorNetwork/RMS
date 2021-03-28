@@ -563,9 +563,10 @@ def processIncompleteCaptures(config, upload_manager):
 
 
         except Exception as e:
-            log.error("An error occured when trying to reprocess partially-processed data!")
+            log.error("An error occured when trying to reprocess partially processed data!")
             log.error(repr(e))
             log.error(repr(traceback.format_exception(*sys.exc_info())))
+
 
 
 if __name__ == "__main__":
@@ -857,7 +858,7 @@ if __name__ == "__main__":
                 time_now = datetime.datetime.utcnow()
                 waiting_time = start_time - time_now
 
-                log.info('Waiting {:s} to start recording for {:.2f} hrs'.format(str(waiting_time), \
+                log.info('Waiting {:s} to start recording for {:.3f} hrs'.format(str(waiting_time), \
                     duration/60/60))
 
                 # Reset the Ctrl+C to KeyboardInterrupt
