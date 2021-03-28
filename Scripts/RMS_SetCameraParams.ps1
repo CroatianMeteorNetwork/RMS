@@ -10,26 +10,11 @@ if ( $args.count -eq 0 ){
     write-output "    and the address of your router." 
     exit 1
 }
-Write-Output "------------------------"
-Write-Output "this script assumes that the RMS config file has not been changed and the"
-Write-Output "device string still contains the IP address 192.168.42.10"
-Write-Output ""
-Write-Output "if this is not the case, press Ctrl-C and edit it before proceeding"
-read-host -prompt "or press any other key to continue"
 
-Write-Output "updating config file to use factory IP address 192.168.1.10"
-$currip="192.168.42.10"
-$defaultip="192.168.1.10"
-
-(Get-Content .config).replace("$currip", "$defaultip") | Set-Content tmp.tmp
-Move-Item .config .config.orig -force
-Move-Item tmp.tmp .config -force
-
-#$currip=$(python -m Utils.CameraControl GetIP)
+$currip=$(python -m Utils.CameraControl GetIP)
 if ($args[0] -eq "DIRECT"){
     write-output Setting direct connection
     write-output Warning: you will lose connection to the camera once this completes
-    $camip=$currip
 }else{
     if ($args.count -lt 2){
         write-output "direct mode requires you to provide a Camera IP address and your routers IP address"
@@ -86,7 +71,7 @@ write-output "------------------------"
 write-output "about to update the camera IP address. You will see a timeout message"
 if ($args[0] -eq "DIRECT"){
     python -m Utils.CameraControl SetParam Network GateWay 192.168.42.1
-    python -m Utils.CameraControl SetParam Network HostIP $camip
+    python -m Utils.CameraControl SetParam Network HostIP 192.168.42.10
     python -m Utils.CameraControl SetParam Network EnableDHCP 1
 }else{
     python -m Utils.CameraControl SetParam Network GateWay $routerip
@@ -94,8 +79,9 @@ if ($args[0] -eq "DIRECT"){
 }
 write-output "------------------------"
 write-output "updating config file"
-(Get-Content .config).replace("$defaultip", "$camip") | Set-Content tmp.tmp
-Move-Item tmp.tmp .config -force
+(Get-Content .config).replace("$currip", "$camip") | Set-Content tmp.tmp
+Move-Item .config .config.orig -force
+Move-Item tmp.tmp .config
 write-output "------------------------"
 write-output "the camera will now reboot.... "
 Start-Sleep 5
