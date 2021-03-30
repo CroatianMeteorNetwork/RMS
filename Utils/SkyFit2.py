@@ -3407,6 +3407,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.azim_centre, self.alt_centre, rot_horizontal = data
 
+        # Wrap azimuth to 0-360 range
+        self.azim_centre %= 360
+
+        # Limit the altitude to 89 deg
+        if self.alt_centre >= 90:
+            self.alt_centre = 89.0
+
+        # Wrap the rotation in the 0-360 range
+        rot_horizontal %= 360
+
         # Get the middle time of the first FF
         img_time = self.img_handle.currentTime()
 
