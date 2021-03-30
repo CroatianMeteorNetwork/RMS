@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 """ Generate an High Quality MP4 movie from FF files. 
     Contributors: Tioga Gulon
 """
@@ -73,10 +75,7 @@ def generateMP4s(dir_path, ftpfile_name):
         print("Created directory : " + dir_tmp_path)
 
         # extract the individual frames
-        f2f.FFtoFrames(dir_path+'/'+ff_name, dir_tmp_path, 'jpg', -1, first_frame, last_frame)
-        
-        # Get the timestamp from the FF name
-        timestamp = filenameToDatetime(ff_name).strftime("%Y-%m-%d %H:%M:%S")
+        name_time_list = f2f.FFtoFrames(dir_path+'/'+ff_name, dir_tmp_path, 'jpg', -1, first_frame, last_frame)
 
         # Get id cam from the file name
         # e.g.  FF499_20170626_020520_353_0005120.bin
@@ -90,14 +89,14 @@ def generateMP4s(dir_path, ftpfile_name):
             i = 1
         camid = file_split[i]
 
+        font = cv2.FONT_HERSHEY_SIMPLEX
+
         # add datestamp to each frame
-        jpg_list = [jpg_name for jpg_name in sorted(os.listdir(dir_tmp_path))]
-        for img_file_name in jpg_list:
+        for img_file_name, timestamp in name_time_list:
             img=cv2.imread(os.path.join(dir_tmp_path, img_file_name))
 
             # Draw text to image
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            text = camid + " " + timestamp + " UTC"
+            text = camid + " " + timestamp.strftime("%Y-%m-%d %H:%M:%S") + " UTC"
             cv2.putText(img, text, (10, ff.nrows - 6), font, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
 
             # Save the labelled image to disk
@@ -155,7 +154,7 @@ if __name__ == "__main__":
     # COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Convert all FF files in a folder to animated GIFs")
+    arg_parser = argparse.ArgumentParser(description="Convert all FF files in a folder to MP4s")
 
     arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str,
         help='Path to directory with FF files.')
