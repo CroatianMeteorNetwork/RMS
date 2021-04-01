@@ -18,7 +18,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo
-from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
+from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, raDec2AltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
 import RMS.ConfigReader as cr
@@ -254,7 +254,8 @@ class PlateTool(QtWidgets.QMainWindow):
             config.gamma = gamma
 
         # If the FPS was given, change the FPS in the config file
-        if fps is not None:
+        self.fps = fps
+        if self.fps is not None:
             config.fps = fps
 
         self.use_fr_files = use_fr_files
@@ -349,6 +350,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Detect data input type and init the image handle
         self.detectInputType(load=True, beginning_time=beginning_time, use_fr_files=self.use_fr_files)
 
+        # Update the FPS if it's forced
+        self.setFPS()
+
 
         ###################################################################################################
         # PLATEPAR
@@ -374,6 +378,15 @@ class PlateTool(QtWidgets.QMainWindow):
         if startUI:
             self.setupUI()
 
+
+    def setFPS(self):
+        """ Update the FPS if it's forced. """
+
+        # Force FPS for videos if needed
+        if (self.fps is not None) and (self.img_handle is not None):
+            if self.img_handle.input_type == "video":
+                self.img_handle.fps = self.fps
+                print("Forcing video FPS to:", self.fps)
 
 
     def setupUI(self, loaded_file=False):
@@ -409,7 +422,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.save_reduction_action.setShortcut('Ctrl+S')
         self.save_reduction_action.triggered.connect(lambda: [self.saveState(),
                                                               self.saveFTPdetectinfo(),
-                                                              self.saveJSON()])
+                                                              self.saveJSON(),
+                                                              self.saveECSV()])
 
         self.save_current_frame_action = QtWidgets.QAction('Save current frame')
         self.save_current_frame_action.setShortcut('Ctrl+W')
@@ -2125,6 +2139,11 @@ class PlateTool(QtWidgets.QMainWindow):
             self.changeMode(self.mode)
 
             self.updateLeftLabels()
+
+
+        # Update the FPS if forced
+        if hasattr(self, 'fps'):
+            self.setFPS()
 
 
     def onMouseReleased(self, event):
@@ -4918,6 +4937,144 @@ class PlateTool(QtWidgets.QMainWindow):
             json.dump(json_dict, f, indent=4, sort_keys=True)
 
         print('JSON with picks saved to:', json_file_path)
+
+
+    def saveECSV(self):
+        """ Save the picks into the GDEF ECSV standard. """
+
+
+        isodate_format_file = "%Y-%m-%dT%H_%M_%S"
+        isodate_format_entry = "%Y-%m-%dT%H:%M:%S.%f"
+
+        # Reference time
+        dt_ref = self.img_handle.beginning_datetime
+
+        # ESCV files name
+        ecsv_file_name = dt_ref.strftime(isodate_format_file) + '_RMS_' + self.config.stationID + ".ecsv"
+
+
+        # Compute alt/az pointing
+        azim, elev = trueRaDec2ApparentAltAz(self.platepar.RA_d, self.platepar.dec_d, self.platepar.JD, \
+            self.platepar.lat, self.platepar.lon, refraction=False)
+
+        # Compute FOV size
+        fov_horiz, fov_vert = computeFOVSize(self.platepar)
+
+
+        # Write the meta header
+        meta_dict = {
+            'obs_latitude': self.platepar.lat,                        # Decimal signed latitude (-90 S to +90 N)
+            'obs_longitude': self.platepar.lon,                       # Decimal signed longitude (-180 W to +180 E)
+            'obs_elevation': self.platepar.elev,                      # Altitude in metres above MSL. Note not WGS84
+            'origin': 'SkyFit2',                                      # The software which produced the data file
+            'camera_id': self.config.stationID,                       # The code name of the camera, likely to be network-specific
+            'cx' : self.platepar.X_res,                               # Horizontal camera resolution in pixels
+            'cy' : self.platepar.Y_res,                               # Vertical camera resolution in pixels
+            'photometric_band' : self.mag_band_string,                # The photometric band of the star catalogue
+            'image_file' : os.path.basename(self.input_path),         # The name of the original image or video
+            'isodate_start_obs': str(dt_ref.strftime(isodate_format_entry)),               # The date and time of the start of the video or exposure
+            'astrometry_number_stars' : len(self.platepar.star_list), # The number of stars identified and used in the astrometric calibration
+            'mag_label': 'mag',                                       # The label of the Magnitude column in the Point Observation data
+            'no_frags': 1,                                            # The number of meteoroid fragments described in this data
+            'obs_az': azim,                                           # The azimuth of the centre of the field of view in decimal degrees. North = 0, increasing to the East
+            'obs_ev': elev,                                           # The elevation of the centre of the field of view in decimal degrees. Horizon =0, Zenith = 90
+            'obs_rot': rotationWrtHorizon(self.platepar),             # Rotation of the field of view from horizontal, decimal degrees. Clockwise is positive
+            'fov_horiz': fov_horiz,                                   # Horizontal extent of the field of view, decimal degrees
+            'fov_vert': fov_vert,                                     # Vertical extent of the field of view, decimal degrees
+           }
+
+
+        # Write the header
+        out_str = """# %ECSV 0.9
+# ---
+# datatype:
+# - {name: datetime, datatype: string}
+# - {name: ra, unit: deg, datatype: float64}
+# - {name: dec, unit: deg, datatype: float64}
+# - {name: azimuth, datatype: float64}
+# - {name: altitude, datatype: float64}
+# - {name: mag_data, datatype: float64}
+# - {name: x_image, unit: pix, datatype: float64}
+# - {name: y_image, unit: pix, datatype: float64}
+# delimiter: ','
+# meta: !!omap
+"""
+        # Add the meta information
+        for key in meta_dict:
+
+            value = meta_dict[key]
+
+            if isinstance(value, str):
+                value_str = "'{:s}'".format(value)
+            else:
+                value_str = str(value)
+
+            out_str += "# - {" + "{:s}: {:s}".format(key, value_str) + "}\n"
+
+
+        out_str += "# schema: astropy-2.0\n"
+        out_str += "datetime,ra,dec,azimuth,altitude,mag_data,x_image,y_image\n"
+
+        # Add the data
+        for frame, pick in self.pick_list.items():
+
+            # Make sure to centroid is picked and is not just the photometry
+            if pick['x_centroid'] is None:
+                continue
+
+            # Only store real picks, and not gaps
+            if pick['mode'] == 0:
+                continue
+
+            # Use a modified platepar if ground points are being picked
+            pp_tmp = copy.deepcopy(self.platepar)
+            if self.meas_ground_points:
+                pp_tmp.switchToGroundPicks()
+
+            time_data = [self.img_handle.currentFrameTime()]
+
+            # Compute measured RA/Dec from image coordinates
+            jd_data, ra_data, dec_data, mag_data = xyToRaDecPP(time_data, [pick['x_centroid']],
+                [pick['y_centroid']], [pick['intensity_sum']], pp_tmp, measurement=True)
+
+            jd = jd_data[0]
+            ra = ra_data[0]
+            dec = dec_data[0]
+            mag = mag_data[0]
+
+            # Compute alt/az (topocentric, i.e. without refraction)
+            azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, pp_tmp.lat, pp_tmp.lon, refraction=False)
+
+            # Get the rolling shutter corrected (or not, depending on the config) frame number
+            frame_no = self.getRollingShutterCorrectedFrameNo(frame, pick)
+
+            # Compute the time relative to the reference JD
+            t_rel = frame_no/self.img_handle.fps
+
+            # Compute the datetime of the point
+            frame_time = dt_ref + datetime.timedelta(seconds=t_rel)
+
+
+            # Add an entry to the ECSV file
+            entry = [frame_time.strftime(isodate_format_entry), "{:10.6f}".format(ra), \
+                "{:+10.6f}".format(dec), "{:10.6f}".format(azim), "{:+10.6f}".format(alt), \
+                "{:+7.2f}".format(mag), "{:9.3f}".format(pick['x_centroid']), \
+                "{:9.3f}".format(pick['y_centroid'])]
+
+            out_str += ",".join(entry) + "\n"
+
+
+
+        ecsv_file_path = os.path.join(self.dir_path, ecsv_file_name)
+
+        # Write file to disk
+        with open(ecsv_file_path, 'w') as f:
+            f.write(out_str)
+
+
+        print("ESCV file saved to:", ecsv_file_path)
+
+
 
 
     def getRollingShutterCorrectedFrameNo(self, frame, pick):

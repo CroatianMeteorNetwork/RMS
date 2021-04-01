@@ -708,7 +708,7 @@ class InputTypeVideo(InputType):
             self.nrows = self.nrows//self.config.detection_binning_factor
             self.ncols = self.ncols//self.config.detection_binning_factor
 
-        print('FPS:', self.fps)
+        print('FPS from video:', self.fps)
         print('Total frames:', self.total_frames)
 
         # Set the number of frames to be used for averaging and maxpixels
