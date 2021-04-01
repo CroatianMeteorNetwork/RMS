@@ -109,12 +109,43 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
 
 
 
-def openFileDialog(dir_path, initialfile, title, mpl):
+def openFileDialog(dir_path, initialfile, title, mpl, filetypes=()):
     """ Open the file dialog and close it properly, depending on the backend used. 
     
     Arguments:
         dir_path: [str] Initial path of the directory.
         initialfile: [str] Initial file to load.
+        title: [str] Title of the file dialog window.
+        mpl: [matplotlib instance] Instace of matplotlib import which is used to determine the used backend.
+        filetypes: [list of tuples] A tuple with file type pairs to filter (label, pattern)
+
+    Return:
+        file_name: [str] Path to the chosen file.
+    """
+
+    root = tkinter.Tk()
+    root.withdraw()
+    root.update()
+
+    # Open the file dialog
+    file_name = filedialog.askopenfilename(initialdir=dir_path,
+        initialfile=initialfile, title=title, filetypes=filetypes)
+    root.update()
+
+    if (mpl.get_backend() != 'TkAgg') and (mpl.get_backend() != 'WXAgg'):
+        root.quit()
+    else:
+        root.destroy()
+
+
+    return file_name
+
+
+def openFolderDialog(initialdir, title, mpl):
+    """ Open the file dialog and close it properly, depending on the backend used.
+
+    Arguments:
+        initialdir: [str] Initial path of the directory.
         title: [str] Title of the file dialog window.
         mpl: [matplotlib instance] Instace of matplotlib import which is used to determine the used backend.
 
@@ -127,8 +158,7 @@ def openFileDialog(dir_path, initialfile, title, mpl):
     root.update()
 
     # Open the file dialog
-    file_name = filedialog.askopenfilename(initialdir=dir_path, \
-        initialfile=initialfile, title=title)
+    file_name = filedialog.askdirectory(initialdir=initialdir, title=title, mustexist=True)
 
     root.update()
 
@@ -139,8 +169,6 @@ def openFileDialog(dir_path, initialfile, title, mpl):
 
 
     return file_name
-
-
 
 
 

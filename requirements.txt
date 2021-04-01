@@ -12,3 +12,5 @@ imreg_dft
 onvif_zeep
 configparser==4.0.2
 imageio==2.6.1
+pyqtgraph @ git+https://github.com/pyqtgraph/pyqtgraph@develop#egg=pyqtgraph
+

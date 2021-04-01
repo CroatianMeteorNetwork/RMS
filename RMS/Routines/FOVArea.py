@@ -11,8 +11,58 @@ from RMS.Formats.Platepar import Platepar
 from RMS.Routines.MaskImage import loadMask, MaskStructure
 
 
-def fovArea(platepar, mask=None, area_ht=100000, side_points=10):
-    """ Given a platepar file and a mask file, compute geo points of the FOV at the given height.
+
+def xyHt2Geo(platepar, x, y, area_ht, indicate_limit=False, elev_limit=5):
+    """ Given pixel coordiantes on the image and a height above sea level, compute geo coordiantes of the
+        point. The elevation is limited to 5 deg above horizon.
+
+    Arguments:
+        platepar: [Platepar object]
+        x: [float] Image X coordinate.
+        y: [float] Image Y coordiante.
+        area_ht: [float] Height above sea level (meters).
+
+    Keyword arguments:
+        indicate_limit: [bool] Indicate that the elevation was below the limit of 5 deg by setting the
+            height to -1. False by default.
+        elev_limit: [float] Limit of elevation above horizon (deg). 5 degrees by default.
+
+    
+    Return:
+        (r, lat, lon, ht): [tuple of floats] range in meters, latitude and longitude in degrees, \
+            WGS84 height in meters
+
+    """
+
+    
+    # Compute RA/Dec in J2000 of the image point, at J2000 epoch time so we don't have to precess
+    _, ra, dec, _ = xyToRaDecPP([jd2Date(J2000_JD.days)], [x], [y], [1], platepar, \
+        extinction_correction=False)
+
+    # Compute alt/az of the point
+    azim, elev = raDec2AltAz(ra[0], dec[0], J2000_JD.days, platepar.lat, platepar.lon)
+
+    # Limit the elevation to elev_limit degrees above the horizon
+    limit_hit = False
+    if elev < elev_limit:
+        elev = elev_limit
+        limit_hit = True
+
+    # Compute the geo location of the point along the line of sight
+    p_r, p_lat, p_lon, p_ht = AEH2LatLonAlt(azim, elev, area_ht, platepar.lat, platepar.lon, \
+        platepar.elev)
+
+
+    # If the elevation limit was hit, and the indicate flag is True, set the elevation to -1
+    if indicate_limit and limit_hit:
+        p_ht = -1
+
+    return p_r, p_lat, p_lon, p_ht
+
+
+
+def fovArea(platepar, mask=None, area_ht=100000, side_points=10, elev_limit=5):
+    """ Given a platepar file and a mask file, compute geo points of the FOV edges at the given height.
 
     Arguments:
         platepar: [Platepar object]
@@ -22,6 +72,7 @@ def fovArea(platepar, mask=None, area_ht=100000, side_points=10):
         area_ht: [float] Height in meters of the computed area.
         side_points: [int] How many points to use to evaluate the FOV on seach side of the image. Normalized
             to the longest side.
+        elev_limit: [float] Limit of elevation above horizon (deg). 5 degrees by default.
 
     Return:
         [list] A list points for every side of the image, and every side is a list of (lat, lon, elev) 
@@ -104,20 +155,8 @@ def fovArea(platepar, mask=None, area_ht=100000, side_points=10):
             #   line
             if unmasked_point_found:
 
-                # Compute RA/Dec in J2000 of the image point, at J2000 epoch time so we don't have to precess
-                _, ra, dec, _ = xyToRaDecPP([jd2Date(J2000_JD.days)], [x], [y], [1], platepar, \
-                    extinction_correction=False)
-
-                # Compute alt/az of the point
-                azim, alt = raDec2AltAz(ra[0], dec[0], J2000_JD.days, platepar.lat, platepar.lon)
-
-                # Limit the elevation to 5 degrees above the horizon
-                if alt < 5:
-                    alt = 5
-
                 # Compute the geo location of the point along the line of sight
-                p_lat, p_lon, p_elev = AEH2LatLonAlt(azim, alt, area_ht, platepar.lat, platepar.lon, \
-                    platepar.elev)
+                _, p_lat, p_lon, p_elev = xyHt2Geo(platepar, x, y, area_ht, elev_limit=elev_limit)
 
 
                 side_points.append([x, y, p_lat, p_lon, p_elev])
