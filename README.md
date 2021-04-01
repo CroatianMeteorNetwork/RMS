@@ -18,6 +18,17 @@ We are also selling Plug And Play meteor systems which run this code!
 
 Finally, if you decide to build one system from scratch, we strongly encourage you to look at our [Wiki page](https://globalmeteornetwork.org/wiki/index.php?title=Main_Page).
 
+
+# Table of Contents
+
+1. [Requirements](#requirements)
+    - [Hardware](#hardware)
+    - [Software](#software)
+1. [Setting Up](#setting-up)
+1. [Running the Code](#running-the-code)
+1. [Citations](#citations)
+
+
 ## Requirements
 This guide will assume basic knowledge of electronics, the Unix environment, and some minor experience with the Raspberry Pi platform itself.
 
@@ -67,14 +78,16 @@ The code was designed to run on a RPi, but it will also run an some Linux distri
 
 The recording **will not** run on Windows, but most of other submodules will (astrometric calibration, viewing the data, manual reduction, etc.). The problem under Windows is that for some reason the logging module object cannot be pickled when parallelized by the multiprocessing library. **We weren't able to solve this issue, but we invite people to try to take a stab at it.**
 
+
 Here we provide installation instructions for the RPi, but the procedure should be the same for any Debian-based Linux distribution: [LINK](https://docs.google.com/document/d/19ImeNqBTD1ml2iisp5y7CjDrRV33wBeF9rtx3mIVjh4/edit)
 
 Alternatively, if you are using Anaconda Python on your Linux PC, you can install all libraries except OpenCV by running:
 
 ```
 conda install -y numpy scipy gitpython cython matplotlib
-conda install -y -c conda-forge pyephem Pillow imreg_dft imageio
+conda install -y -c conda-forge pyephem Pillow imreg_dft imageio pyqtgraph
 conda install -y -c astropy astropy
+pip install rawpy
 ```
 
 To install OpenCV, use the ```opencv4_install.sh``` script. This will build OpenCV with gstreamer support.

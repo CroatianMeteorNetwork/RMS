@@ -64,6 +64,7 @@ def mslToWGS84Height(lat, lon, msl_height, config):
         lat: [float] Latitude +N (rad).
         lon: [float] Longitude +E (rad).
         msl_height: [float] Height above sea level (meters).
+        config: Config instance with the path to EGM96 coefficients
 
     Return:
         wgs84_height: [float] Height above the WGS84 ellipsoid.
@@ -89,13 +90,14 @@ def mslToWGS84Height(lat, lon, msl_height, config):
 
 
 
-def wgs84toMSLHeight(lat, lon, wgs84_height):
+def wgs84toMSLHeight(lat, lon, wgs84_height, config):
     """ Given the height above the WGS84 ellipsoid compute the height above sea level (using the EGM96 model).
 
     Arguments:
         lat: [float] Latitude +N (rad).
         lon: [float] Longitude +E (rad).
         wgs84_height: [float] Height above the WGS84 ellipsoid.
+        config: Config instance with the path to EGM96 coefficients
 
     Return:
         msl_height: [float] Height above sea level (meters).

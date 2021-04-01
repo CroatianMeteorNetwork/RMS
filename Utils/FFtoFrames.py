@@ -130,38 +130,37 @@ def FFtoFrames(file_path, out_dir, file_format, deinterlace_mode, first_frame=0,
     ff_dt = filenameToDatetime(file_name)
 
     # Go through all frames
-    for i in range(nframes):
-
+    for i in range(first_frame, last_frame+1):
         # Reconstruct individual frames
+
         frame = reconstructFrame(ff, i, avepixel=True)
-        if i >= first_frame and i <= last_frame:
-            # Deinterlace the frame if necessary, odd first
-            if deinterlace_mode == 0:
+        # Deinterlace the frame if necessary, odd first
+        if deinterlace_mode == 0:
 
-                frame_odd = deinterlaceOdd(frame)
-                frame_name, frame_dt = saveFrame(frame_odd, i, out_dir, file_name_saving, file_format, ff_dt, fps, half_frame=0)
-                frame_name_time_list.append([frame_name, frame_dt])
+            frame_odd = deinterlaceOdd(frame)
+            frame_name, frame_dt = saveFrame(frame_odd, i, out_dir, file_name_saving, file_format, ff_dt, fps, half_frame=0)
+            frame_name_time_list.append([frame_name, frame_dt])
 
-                frame_even = deinterlaceEven(frame)
-                frame_name, frame_dt = saveFrame(frame_even, i, out_dir, file_name_saving, file_format, ff_dt, fps, half_frame=1)
-                frame_name_time_list.append([frame_name, frame_dt])
+            frame_even = deinterlaceEven(frame)
+            frame_name, frame_dt = saveFrame(frame_even, i, out_dir, file_name_saving, file_format, ff_dt, fps, half_frame=1)
+            frame_name_time_list.append([frame_name, frame_dt])
 
-            # Even first
-            elif deinterlace_mode == 1:
+        # Even first
+        elif deinterlace_mode == 1:
 
-                frame_even = deinterlaceEven(frame)
-                frame_name, frame_dt = saveFrame(frame_even, i, out_dir, file_name_saving, file_format, ff_dt, fps, half_frame=0)
-                frame_name_time_list.append([frame_name, frame_dt])
+            frame_even = deinterlaceEven(frame)
+            frame_name, frame_dt = saveFrame(frame_even, i, out_dir, file_name_saving, file_format, ff_dt, fps, half_frame=0)
+            frame_name_time_list.append([frame_name, frame_dt])
 
-                frame_odd = deinterlaceOdd(frame)
-                frame_name, frame_dt = saveFrame(frame_odd, i, out_dir, file_name_saving, file_format, ff_dt, fps, half_frame=1)
-                frame_name_time_list.append([frame_name, frame_dt])
+            frame_odd = deinterlaceOdd(frame)
+            frame_name, frame_dt = saveFrame(frame_odd, i, out_dir, file_name_saving, file_format, ff_dt, fps, half_frame=1)
+            frame_name_time_list.append([frame_name, frame_dt])
 
 
-            # No deinterlace
-            else:
-                frame_name, frame_dt = saveFrame(frame, i-first_frame, out_dir, file_name_saving, file_format, ff_dt, fps)
-                frame_name_time_list.append([frame_name, frame_dt])
+        # No deinterlace
+        else:
+            frame_name, frame_dt = saveFrame(frame, i-first_frame, out_dir, file_name_saving, file_format, ff_dt, fps)
+            frame_name_time_list.append([frame_name, frame_dt])
 
     # If the frames are saved for METAL, the times have to be given in a separate file
     if file_format == 'pngm':
@@ -172,6 +171,8 @@ def FFtoFrames(file_path, out_dir, file_format, deinterlace_mode, first_frame=0,
             for frame_name, frame_dt in frame_name_time_list:
                 # 20180117:01:08:29.8342
                 f.write('{:s} {:s}\n'.format(frame_name, frame_dt.strftime("%Y%m%d:%H:%M:%S.%f")))
+
+    return frame_name_time_list
 
 
 if __name__ == "__main__":

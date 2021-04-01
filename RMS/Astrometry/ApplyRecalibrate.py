@@ -30,7 +30,7 @@ from RMS.Formats import Platepar
 from RMS.Formats import StarCatalog
 from RMS.Math import angularSeparation
 import Utils.RMS2UFO
-    
+
 
 # Neighbourhood size around individual FFs with detections which will be takes for recalibration
 #   A size of e.g. 3 means that an FF before, the FF with the detection, an an FF after will be taken
@@ -41,7 +41,6 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
         force_platepar_save=False):
     """ Given the platepar and a list of stars on one image, try to recalibrate the platepar to achieve
         the best match by brute force star matching.
-
     Arguments:
         config: [Config instance]
         working_platepar: [Platepar instance] Platepar to recalibrate.
@@ -49,12 +48,10 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
         star_dict_ff: [dict] A dictionary with only one entry, where the key is 'jd' and the value is the
             list of star coordinates.
         catalog_stars: [ndarray] A numpy array of catalog stars which should be on the image.
-
     Keyword argumnets:
         max_radius: [float] Maximum radius used for star matching. None by default, which uses all hardcoded
             values.
         force_platepar_save: [bool] Skip the goodness of fit check and save the platepar.
-
     Return:
         result: [?] A Platepar instance if refinement is successful, None if it failed.
         min_match_radius: [float] Minimum radius that successfuly matched the stars (pixels).
@@ -74,7 +71,7 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
 
 
     ### If the initial match is good enough, do only quick recalibratoin ###
-     
+
     # Match the stars and calculate the residuals
     n_matched, avg_dist, cost, _ = CheckFit.matchStarsResiduals(config, working_platepar, catalog_stars, \
         star_dict_ff, min_radius, ret_nmatch=True)
@@ -93,7 +90,7 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
             radius_list = [1.5, min_radius]
 
             print('Using a quick fit...')
-        
+
 
     ##########
 
@@ -129,7 +126,7 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
 
 
         ### Recalibrate the platepar just on these stars, use the default platepar for initial params ###
-        
+
         # Init initial parameters
         p0 = [working_platepar.RA_d, working_platepar.dec_d, working_platepar.pos_angle_ref, \
             working_platepar.F_scale]
@@ -238,7 +235,7 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
 
         # Reset the star list
         working_platepar.star_list = []
-        
+
         # Store the platepar to the list of recalibrated platepars
         result = working_platepar
 
@@ -256,20 +253,17 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
 
 def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, calstars_list, config, platepar,
     generate_plot=True):
-    """ Recalibrate FF files with detections and apply the recalibrated platepar to those detections. 
-
+    """ Recalibrate FF files with detections and apply the recalibrated platepar to those detections.
     Arguments:
         dir_path: [str] Path where the FTPdetectinfo file is.
         ftpdetectinfo_path: [str] Name of the FTPdetectinfo file.
         calstars_list: [list] A list of entries [[ff_name, star_coordinates], ...].
         config: [Config instance]
         platepar: [Platepar instance] Initial platepar.
-
     Keyword arguments:
         generate_plot: [bool] Generate the calibration variation plot. True by default.
-
     Return:
-        recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are 
+        recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are
             recalibrated platepar instances for every FF file.
     """
 
@@ -380,7 +374,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         # Recalibrate the platepar using star matching
         result, min_match_radius = recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars)
 
-        
+
         # If the recalibration failed, try using FFT alignment
         if result is None:
 
@@ -403,7 +397,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
             if (result is None) and (min_match_radius is not None):
                 print()
                 print("Using the old platepar with the minimum match radius of: {:.2f}".format(min_match_radius))
-                result, _ = recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, 
+                result, _ = recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars,
                     max_match_radius=min_match_radius, force_platepar_save=True)
 
                 if result is not None:
@@ -477,7 +471,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
                     # Check that the neighboring FF was successfuly recalibrated
                     if ff_name_tmp in recalibrated_platepars:
-                        
+
                         # Get the computed photometric offset and stddev
                         photom_offset_tmp_list.append(recalibrated_platepars[ff_name_tmp].mag_lev)
                         photom_offset_std_tmp_list.append(recalibrated_platepars[ff_name_tmp].mag_lev_stddev)
@@ -507,11 +501,11 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
     for ff_name in recalibrated_platepars:
 
         json_str = recalibrated_platepars[ff_name].jsonStr()
-        
+
         all_pps[ff_name] = json.loads(json_str)
 
     with open(os.path.join(dir_path, config.platepars_recalibrated_name), 'w') as f:
-        
+
         # Convert all platepars to a JSON file
         out_str = json.dumps(all_pps, default=lambda o: o.__dict__, indent=4, sort_keys=True)
 
@@ -545,7 +539,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
     first_dt = np.min([FFfile.filenameToDatetime(ff_name) for ff_name in recalibrated_platepars])
 
     for ff_name in recalibrated_platepars:
-        
+
         pp_temp = recalibrated_platepars[ff_name]
 
         # If the fitting failed, skip the platepar
@@ -580,8 +574,8 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         # Generate the name the plots
         plot_name = os.path.basename(ftpdetectinfo_path).replace('FTPdetectinfo_', '').replace('.txt', '')
 
-        
-        ### Plot difference from reference platepar in angular distance from (0, 0) vs rotation ###    
+
+        ### Plot difference from reference platepar in angular distance from (0, 0) vs rotation ###
 
         plt.figure()
 
@@ -589,7 +583,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
         plt.scatter(ang_dists, rot_angles, c=hour_list, zorder=3)
         plt.colorbar(label="Hours from first FF file")
-        
+
         plt.xlabel("Angular distance from reference (arcmin)")
         plt.ylabel("Rotation from reference (arcmin)")
 
@@ -598,7 +592,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         plt.grid()
         plt.legend()
 
-        plt.tight_layout()            
+        plt.tight_layout()
 
         plt.savefig(os.path.join(dir_path, plot_name + '_calibration_variation.png'), dpi=150)
 
@@ -690,20 +684,17 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
 
 
-        
+
 
 def applyRecalibrate(ftpdetectinfo_path, config, generate_plot=True):
-    """ Recalibrate FF files with detections and apply the recalibrated platepar to those detections. 
-
+    """ Recalibrate FF files with detections and apply the recalibrated platepar to those detections.
     Arguments:
         ftpdetectinfo_path: [str] Name of the FTPdetectinfo file.
         config: [Config instance]
-
     Keyword arguments:
         generate_plot: [bool] Generate the calibration variation plot. True by default.
-
     Return:
-        recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are 
+        recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are
             recalibrated platepar instances for every FF file.
     """
 
@@ -794,4 +785,3 @@ if __name__ == "__main__":
 
     # Run the recalibration and recomputation
     applyRecalibrate(ftpdetectinfo_path, config)
-    

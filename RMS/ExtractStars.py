@@ -54,7 +54,8 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     http://stackoverflow.com/questions/9111711/get-coordinates-of-local-maxima-in-2d-array-above-certain-value
     
     Arguments:
-        ff: [ff bin struct] FF bin file loaded in the FF bin structure
+        ff_dir: [str] Path to directory where FF files are.
+        ff_name: [str] Name of the FF file.
         config: [config object] configuration object (loaded from the .config file)
         max_global_intensity: [int] maximum mean intensity of an image before it is discared as too bright
         border: [int] apply a mask on the detections by removing all that are too close to the given image 
@@ -66,12 +67,12 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
         mask: [ndarray] Mask image. None by default.
 
     Return:
-        x2, y2, background, intensity, sigma_fitted: [list of ndarrays]
+        x2, y2, background, intensity, fwhm: [list of ndarrays]
             - x2: X axis coordinates of the star
             - y2: Y axis coordinates of the star
             - background: background intensity
             - intensity: intensity of the star
-            - Gaussian stddev of fitted stars
+            - Gaussian Full width at half maximum (FWHM) of fitted stars
     """
 
     # This will be returned if there was an error
@@ -172,13 +173,14 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     # plotStars(ff, x2, y2)
     
 
-    # Compute one dimensional sigma
+    # Compute FWHM from one dimensional sigma
     sigma_x_fitted = np.array(sigma_x_fitted)
     sigma_y_fitted = np.array(sigma_y_fitted)
     sigma_fitted = np.sqrt(sigma_x_fitted**2 + sigma_y_fitted**2)
+    fwhm = 2.355*sigma_fitted
 
 
-    return ff_name, x2, y2, amplitude, intensity, sigma_fitted
+    return ff_name, x2, y2, amplitude, intensity, fwhm
 
 
 
@@ -314,7 +316,7 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
             continue
 
         # Reject the star candidate if it is too large 
-        if (4*sigma_x*sigma_y / segment_radius**2 > max_feature_ratio):
+        if (4*sigma_x*sigma_y/segment_radius**2 > max_feature_ratio):
             continue
 
 
@@ -427,9 +429,107 @@ def plotStars(ff, x2, y2):
 
 
 
-if __name__ == "__main__":
+def extractStarsAndSave(config, ff_dir):
+    """ Extract stars in the given folder and save the CALSTARS file. 
+    
+    Arguments:
+        config: [config object] configuration object (loaded from the .config file)
+        ff_dir: [str] Path to directory where FF files are.
+
+    Return:
+        star_list: [list] A list of [ff_name, star_data] entries, where star_data contains a list of 
+            (column, row, amplitude, intensity, fwhm) values for every star.
+
+    """
+
+
+
 
     time_start = time.time()
+
+    # Load mask, dark, flat
+    mask, dark, flat_struct = loadImageCalibration(ff_dir, config)
+    
+
+    extraction_list = []
+
+    # Go through all files in the directory and add them to the detection list
+    for ff_name in sorted(os.listdir(ff_dir)):
+
+        # Check if the given file is a valid FF file
+        if not FFfile.validFFName(ff_name):
+            continue
+
+        extraction_list.append(ff_name)
+
+
+
+    # Run the QueuedPool for detection
+    workpool = QueuedPool(extractStars, cores=-1, backup_dir=ff_dir)
+
+
+    # Add jobs for the pool
+    for ff_name in extraction_list:
+        print('Adding for extraction:', ff_name)
+        workpool.addJob([ff_dir, ff_name, config, None, None, None, None, flat_struct, dark, mask])
+
+
+    print('Starting pool...')
+
+    # Start the detection
+    workpool.startPool()
+
+
+    print('Waiting for the detection to finish...')
+
+    # Wait for the detector to finish and close it
+    workpool.closePool()
+
+
+    # Get extraction results
+    star_list = []
+    for result in workpool.getResults():
+
+        ff_name, x2, y2, amplitude, intensity, fwhm_data = result
+
+        # Skip if no stars were found
+        if not x2:
+            continue
+
+
+        # Construct the table of the star parameters
+        star_data = list(zip(x2, y2, amplitude, intensity, fwhm_data))
+
+        # Add star info to the star list
+        star_list.append([ff_name, star_data])
+
+
+
+    dir_name = os.path.basename(os.path.abspath(ff_dir))
+    if dir_name.startswith(config.stationID):
+        prefix = dir_name
+    else:
+        prefix = "{:s}_{:s}".format(config.stationID, dir_name)
+
+    # Generate the name for the CALSTARS file
+    calstars_name = 'CALSTARS_' + prefix + '.txt'
+
+
+    # Write detected stars to the CALSTARS file
+    CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, config.stationID, config.height, config.width)
+
+    # Delete QueudPool backed up files
+    workpool.deleteBackupFiles()
+
+    print('Total time taken: {:.2f} s'.format(time.time() - time_start))
+
+
+    return star_list
+
+
+
+
+if __name__ == "__main__":
 
     ### COMMAND LINE ARGUMENTS
 
@@ -464,91 +564,34 @@ if __name__ == "__main__":
 
 
 
-    # # Try loading a flat field image
-    # flat_struct = None
-
-    # if config.use_flat:
-        
-    #     # Check if there is flat in the data directory
-    #     if os.path.exists(os.path.join(ff_dir, config.flat_file)):
-    #         flat_struct = Image.loadFlat(ff_dir, config.flat_file)
-
-    #     # Try loading the default flat
-    #     elif os.path.exists(config.flat_file):
-    #         flat_struct = Image.loadFlat(os.getcwd(), config.flat_file)
+    # Run extraction and save the resulting CALSTARS file
+    star_list = extractStarsAndSave(config, ff_dir)
 
 
-    # Load mask, dark, flat
-    mask, dark, flat_struct = loadImageCalibration(ff_dir, config)
-    
-
-    extraction_list = []
-
-    # Go through all files in the directory and add them to the detection list
-    for ff_name in sorted(ff_list):
-
-        # Check if the given file is a valid FF file
-        if not FFfile.validFFName(ff_name):
-            continue
-
-        #print(ff_name)
-        extraction_list.append(ff_name)
-
-
-    star_list = []
-
-    # Run the QueuedPool for detection
-    workpool = QueuedPool(extractStars, cores=-1, backup_dir=ff_dir)
-
-
-    # Add jobs for the pool
-    for ff_name in extraction_list:
-        print('Adding for extraction:', ff_name)
-        workpool.addJob([ff_dir, ff_name, config, None, None, None, None, flat_struct, dark, mask])
-
-
-    print('Starting pool...')
-
-    # Start the detection
-    workpool.startPool()
-
-
-    print('Waiting for the detection to finish...')
-
-    # Wait for the detector to finish and close it
-    workpool.closePool()
-
-
-    # Get extraction results
-    sigma_list = []
+    fwhm_list = []
     intensity_list = []
     x_list = []
     y_list = []
-    for result in workpool.getResults():
-
-        ff_name, x2, y2, amplitude, intensity, sigma_fitted = result
-
-        # Skip if no stars were found
-        if not x2:
-            continue
-
-        # Construct the table of the star parameters
-        star_data = list(zip(x2, y2, amplitude, intensity))
-
-        # Add star info to the star list
-        star_list.append([ff_name, star_data])
-
-        # Print found stars
-        print('   ROW    COL   amplitude  intensity')
-        for x, y, max_ampl, level in star_data:
-            print(' {:06.2f} {:06.2f} {:6d} {:6d}'.format(round(y, 2), round(x, 2), int(max_ampl), int(level)))
 
 
-        # Store the star sigma to list
-        sigma_list += sigma_fitted.tolist()
-        intensity_list += intensity
-        x_list += x2
-        y_list += y2
+    # Print found stars
+    for ff_name, star_data in star_list:
+
+        print()
+        print(ff_name)
+        print('  ROW     COL       amp  intens FWHM')
+        for x, y, max_ampl, level, fwhm in star_data:
+            print(' {:7.2f} {:7.2f} {:6d} {:6d} {:5.2f}'.format(round(y, 2), round(x, 2), int(max_ampl), \
+                int(level), fwhm))
+
+
+        x2, y2, amplitude, intensity, fwhm_data = np.array(star_data).T
+
+        # Store the star info to list
+        fwhm_list += fwhm_data.tolist()
+        intensity_list += intensity.tolist()
+        x_list += x2.tolist()
+        y_list += y2.tolist()
 
 
         # # Show stars if there are only more then 10 of them
@@ -561,52 +604,25 @@ if __name__ == "__main__":
         # plotStars(ff, x2, y2)
 
 
-    for ff_name in extraction_list:
-        
-        # Load data about the image
-        ff = FFfile.read(ff_dir, ff_name)
-
-        # Break when an FF file was successfully loaded
-        if ff is not None:
-            break
+    
 
 
-
-    dir_name = os.path.basename(os.path.abspath(ff_dir))
-    if dir_name.startswith(config.stationID):
-        prefix = dir_name
-    else:
-        prefix = "{:s}_{:s}".format(config.stationID, dir_name)
-
-    # Generate the name for the CALSTARS file
-    calstars_name = 'CALSTARS_' + prefix + '.txt'
-
-
-    # Write detected stars to the CALSTARS file
-    CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, ff.camno, ff.nrows, ff.ncols)
-
-    # Delete QueudPool backed up files
-    workpool.deleteBackupFiles()
-
-    print('Total time taken: {:.2f} s'.format(time.time() - time_start))
-
-
-    # Show the histogram of PSF stddevs
+    # Show the histogram of PSF FWHMs
     if cml_args.showstd:
 
-        print('Median:', np.median(sigma_list))
+        print('Median FWHM:', np.median(fwhm_list))
 
         # Compute the bin number
-        nbins = int(np.ceil(np.sqrt(len(sigma_list))))
+        nbins = int(np.ceil(np.sqrt(len(fwhm_list))))
         if nbins < 10:
             nbins = 10
 
-        plt.hist(sigma_list, bins=nbins)
+        plt.hist(fwhm_list, bins=nbins)
 
-        plt.xlabel('PSF $\sigma$')
+        plt.xlabel('PSF FWHM')
         plt.ylabel('Count')
 
-        plt.savefig(os.path.join(ff_dir, 'PSF_stddev_hist.png'), dpi=300)
+        plt.savefig(os.path.join(ff_dir, 'PSF_FWHM_hist.png'), dpi=300)
 
         plt.show()
 
@@ -615,25 +631,25 @@ if __name__ == "__main__":
         
         hexbin_grid = int(1.0/np.sqrt(2)*nbins)
         lsp_list = -2.5*np.log10(np.array(intensity_list))
-        sigma_list = np.array(sigma_list)
+        fwhm_list = np.array(fwhm_list)
 
         # Compute plot limits
         x_min = np.percentile(lsp_list[~np.isnan(lsp_list)], 0.5)
         x_max = np.percentile(lsp_list[~np.isnan(lsp_list)], 99.5)
-        y_min = np.percentile(sigma_list[~np.isnan(sigma_list)], 0.5)
-        y_max = np.percentile(sigma_list[~np.isnan(sigma_list)], 99.5)
+        y_min = np.percentile(fwhm_list[~np.isnan(fwhm_list)], 0.5)
+        y_max = np.percentile(fwhm_list[~np.isnan(fwhm_list)], 99.5)
 
-        plt.hexbin(lsp_list, sigma_list, gridsize=(hexbin_grid, hexbin_grid), extent=(x_min, x_max, \
+        plt.hexbin(lsp_list, fwhm_list, gridsize=(hexbin_grid, hexbin_grid), extent=(x_min, x_max, \
             y_min, y_max))
         plt.xlabel('Uncalibrated magnitude')
-        plt.ylabel('PSF $\sigma$')
+        plt.ylabel('PSF FWHM')
 
         plt.xlim(x_min, x_max)
         plt.ylim(y_min, y_max)
 
         plt.gca().invert_xaxis()
 
-        plt.savefig(os.path.join(ff_dir, 'PSF_stddev_vs_mag.png'), dpi=300)
+        plt.savefig(os.path.join(ff_dir, 'PSF_FWHM_vs_mag.png'), dpi=300)
 
         plt.show()
 
@@ -643,11 +659,11 @@ if __name__ == "__main__":
 
         x_min = np.min(x_list)
         x_max = np.max(x_list)
-        ax1.hexbin(x_list, sigma_list, gridsize=(hexbin_grid, hexbin_grid), extent=(x_min, x_max, \
+        ax1.hexbin(x_list, fwhm_list, gridsize=(hexbin_grid, hexbin_grid), extent=(x_min, x_max, \
             y_min, y_max))
 
         
-        ax1.set_ylabel('PSF $\sigma$')
+        ax1.set_ylabel('PSF FWHM')
         ax1.set_xlabel('X')
 
         ax1.set_xlim(x_min, x_max)
@@ -656,10 +672,10 @@ if __name__ == "__main__":
 
         x_min = np.min(y_list)
         x_max = np.max(y_list)
-        ax2.hexbin(y_list, sigma_list, gridsize=(hexbin_grid, hexbin_grid), extent=(x_min, x_max, \
+        ax2.hexbin(y_list, fwhm_list, gridsize=(hexbin_grid, hexbin_grid), extent=(x_min, x_max, \
             y_min, y_max))
 
-        ax2.set_ylabel('PSF $\sigma$')
+        ax2.set_ylabel('PSF FWHM')
         ax2.set_xlabel('Y')
 
         ax2.set_xlim(x_min, x_max)
@@ -667,11 +683,34 @@ if __name__ == "__main__":
 
         plt.tight_layout()
 
-        plt.savefig(os.path.join(ff_dir, 'PSF_xy_vs_stddev.png'), dpi=300)
+        plt.savefig(os.path.join(ff_dir, 'PSF_xy_vs_FWHM.png'), dpi=300)
 
         plt.show()
 
 
+        # Plot stddev by radius from centre
+        x_list = np.array(x_list)
+        y_list = np.array(y_list)
+        radius_list = np.hypot(x_list - config.width/2, y_list - config.height/2)
+
+        radius_min = 0
+        radius_max = np.hypot(config.width/2, config.height/2)
+
+        plt.hexbin(radius_list, np.array(fwhm_list), gridsize=(hexbin_grid, hexbin_grid), \
+            extent=(radius_min, radius_max, y_min, y_max))
+
+
+        plt.xlabel("Radius from center (px)")
+        plt.ylabel("PSF FWHM (px)")
+
+        plt.xlim(radius_min, radius_max)
+        plt.ylim(y_min, y_max)
+
+        plt.tight_layout()
+
+        plt.savefig(os.path.join(ff_dir, 'PSF_radius_vs_FWHM.png'), dpi=300)
+
+        plt.show()
 
 
 
