@@ -1818,8 +1818,15 @@ class InputTypeDFN(InputType):
         if self.beginning_datetime is None and \
                 any([self.image_file.lower().endswith(fextens) for fextens in img_types]):
             try:
+                
+                # Extract the DFN timestamp from the file name
+                image_filename_split = self.image_file.split("_")
+                date_str = image_filename_split[1]
+                time_str = image_filename_split[2]
+                datetime_str = date_str + "_" + time_str
+                
                 beginning_datetime = datetime.datetime.strptime(
-                    self.image_file[4:21],
+                    datetime_str,
                     "%Y-%m-%d_%H%M%S")
 
                 self.beginning_datetime = beginning_datetime
