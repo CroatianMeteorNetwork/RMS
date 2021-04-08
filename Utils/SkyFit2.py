@@ -1332,7 +1332,7 @@ class PlateTool(QtWidgets.QMainWindow):
         filtered_indices, _ = self.filterCatalogStarsInsideFOV(self.catalog_stars)
 
         # Create a mask to filter out all stars outside the image and the FOV
-        filter_indices_mask = np.zeros(len(cat_stars_xy), dtype=np.bool)
+        filter_indices_mask = np.zeros(len(cat_stars_xy), dtype=bool)
         filter_indices_mask[filtered_indices] = True
         filtered_indices_all = filter_indices_mask & (cat_stars_xy[:, 0] > 0) \
                                                 & (cat_stars_xy[:, 0] < self.platepar.X_res) \
@@ -2170,12 +2170,12 @@ class PlateTool(QtWidgets.QMainWindow):
             if mp.x() > (range_[1] - range_[0])/2 + range_[0]:
                 self.v_zoom_left = True
                 if self.show_key_help != 2:
-                    self.v_zoom.move(QtCore.QPoint(self.label1.boundingRect().width(), 0))
+                    self.v_zoom.move(QtCore.QPoint(int(self.label1.boundingRect().width()), 0))
                 else:
                     self.v_zoom.move(QtCore.QPoint(0, 0))
             else:
                 self.v_zoom_left = False
-                self.v_zoom.move(QtCore.QPoint(self.img_frame.size().width() - self.show_zoom_window_size, 0))
+                self.v_zoom.move(QtCore.QPoint(int(self.img_frame.size().width() - self.show_zoom_window_size), 0))
 
             self.updateBottomLabel()
 
