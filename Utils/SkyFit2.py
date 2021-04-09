@@ -1664,7 +1664,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     photom_resid_txt = "{:.2f}".format(fit_diff)
 
                     # Determine the size of the residual text, larger the residual, larger the text
-                    photom_resid_size = 8 + np.abs(fit_diff)/(np.max(np.abs(fit_resids))/5.0)
+                    photom_resid_size = int(8 + np.abs(fit_diff)/(np.max(np.abs(fit_resids))/5.0))
 
                     if self.stdev_text_filter*std <= abs(fit_diff):
                         text1 = TextItem(photom_resid_txt, anchor=(0.5, -0.5))
