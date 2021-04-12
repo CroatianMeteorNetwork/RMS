@@ -251,7 +251,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
         # Set a flag file to indicate that previous files are being loaded (if any)
-        capture_resume_file_path = os.path.join(night_data_dir, config.capture_resume_flag_file)
+        capture_resume_file_path = os.path.join(config.data_dir, config.capture_resume_flag_file)
         with open(capture_resume_file_path, 'w') as f:
             pass
 
