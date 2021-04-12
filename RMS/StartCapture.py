@@ -249,6 +249,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # Delay the detection for 2 minutes after capture start
             delay_detection = 120
 
+
+        # Set a flag file to indicate that previous files are being loaded (if any)
+        capture_resume_file_path = os.path.join(night_data_dir, config.capture_resume_flag_file)
+        with open(capture_resume_file_path, 'w') as f:
+            pass
+
         # Initialize the detector
         detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log, delay_start=delay_detection, \
             backup_dir=night_data_dir)
@@ -258,7 +264,14 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         # If the capture is being resumed into the directory, load all previously saved FF files
         if resume_capture:
 
-            for ff_name in sorted(os.listdir(night_data_dir)):
+            # Load all preocessed FF files
+            for i, ff_name in enumerate(sorted(os.listdir(night_data_dir))):
+
+                # Every 50 files loaded, update the flag file
+                if i%50 == 0:
+                    with open(capture_resume_file_path, 'a') as f:
+                        f.write("{:d}\n".format(i))
+                        
 
                 # Check if the file is a valid FF files
                 ff_path = os.path.join(night_data_dir, ff_name)
@@ -267,6 +280,15 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     # Add the FF file to the detector
                     detector.addJob([night_data_dir, ff_name, config], wait_time=0.005)
                     log.info("Added existing FF files for detection: {:s}".format(ff_name))
+
+
+        # Remove the flag file
+        if os.path.isfile(capture_resume_file_path):
+            try:
+                os.remove(capture_resume_file_path)
+            except:
+                log.error("There was an error during removing the capture resume flag file: " \
+                    + capture_resume_file_path)
 
 
     # Initialize buffered capture

@@ -277,6 +277,9 @@ class Config:
         # Automatically reprocess broken capture directories
         self.auto_reprocess = True
 
+        # Flag file which indicates that the previously processed files are loaded during capture resume
+        self.capture_resume_flag_file = ".capture_resuming"
+
         ##### Upload
 
         # Flag determining if uploading is enabled or not
@@ -802,6 +805,16 @@ def parseCapture(config, parser):
     # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
     if parser.has_option(section, "slideshow_enable"):
         config.slideshow_enable = parser.getboolean(section, "slideshow_enable")
+
+
+    # Enable/disable auto reprocessing
+    if parser.has_option(section, "auto_reprocess"):
+        config.auto_reprocess = parser.getboolean(section, "auto_reprocess")
+
+
+    # Load name of the capture resume flag file
+    if parser.has_option(section, "capture_resume_flag_file"):
+        config.capture_resume_flag_file = parser.get(section, "capture_resume_flag_file")
 
 
 
