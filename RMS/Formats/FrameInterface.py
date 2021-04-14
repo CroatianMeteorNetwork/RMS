@@ -1319,6 +1319,7 @@ class InputTypeImages(object):
 
             self.config.width = self.fripon_header["NAXIS1"]
             self.config.height = self.fripon_header["NAXIS2"]
+            self.config.fps = self.fps
 
             # Global shutter
             self.config.deinterlace_order = -2

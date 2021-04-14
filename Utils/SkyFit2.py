@@ -4598,7 +4598,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # If the platepar is available, compute the magnitudes, otherwise show the instrumental magnitude
         if self.platepar is not None:
 
-            time_data = [self.img.img_handle.currentFrameTime()]*len(intensities)
+            time_data = [self.img.img_handle.currentFrameTime(fr) for fr in frames]
 
             # Compute the magntiudes
             _, _, _, mag_data = xyToRaDecPP(time_data, x_centroids, y_centroids, intensities, self.platepar)
@@ -4787,8 +4787,12 @@ class PlateTool(QtWidgets.QMainWindow):
             if pick['mode'] == 0:
                 continue
 
+            # Normalize the frame number to the actual time
+            frame_dt = self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)
+            frame_no = (frame_dt - self.img_handle.beginning_datetime).total_seconds()*self.img_handle.fps
+
             # Get the rolling shutter corrected (or not, depending on the config) frame number
-            frame_no = self.getRollingShutterCorrectedFrameNo(frame, pick)
+            frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
 
             
             centroids.append([frame_no, pick['x_centroid'], pick['y_centroid'], pick['intensity_sum']])
@@ -4899,7 +4903,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 if self.meas_ground_points:
                     pp_tmp.switchToGroundPicks()
 
-                time_data = [self.img_handle.currentFrameTime()]
+                time_data = [self.img_handle.currentFrameTime(frame_no=frame)]
 
                 # Compute measured RA/Dec from image coordinates
                 _, ra_data, dec_data, mag_data = xyToRaDecPP(time_data, [pick['x_centroid']],
@@ -4912,8 +4916,12 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 ra = dec = mag = None
 
+            # Normalize the frame number to the actual time
+            frame_dt = self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)
+            frame_no = (frame_dt - self.img_handle.beginning_datetime).total_seconds()*self.img_handle.fps
+
             # Get the rolling shutter corrected (or not, depending on the config) frame number
-            frame_no = self.getRollingShutterCorrectedFrameNo(frame, pick)
+            frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
 
             # Compute the time relative to the reference JD
             t_rel = frame_no/self.img_handle.fps
@@ -5034,7 +5042,7 @@ class PlateTool(QtWidgets.QMainWindow):
             if self.meas_ground_points:
                 pp_tmp.switchToGroundPicks()
 
-            time_data = [self.img_handle.currentFrameTime()]
+            time_data = [self.img_handle.currentFrameTime(frame_no=frame)]
 
             # Compute measured RA/Dec from image coordinates
             jd_data, ra_data, dec_data, mag_data = xyToRaDecPP(time_data, [pick['x_centroid']],
@@ -5048,8 +5056,12 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute alt/az (topocentric, i.e. without refraction)
             azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, pp_tmp.lat, pp_tmp.lon, refraction=False)
 
+            # Normalize the frame number to the actual time
+            frame_dt = self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)
+            frame_no = (frame_dt - dt_ref).total_seconds()*self.img_handle.fps
+
             # Get the rolling shutter corrected (or not, depending on the config) frame number
-            frame_no = self.getRollingShutterCorrectedFrameNo(frame, pick)
+            frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
 
             # Compute the time relative to the reference JD
             t_rel = frame_no/self.img_handle.fps
