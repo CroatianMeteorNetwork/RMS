@@ -37,6 +37,7 @@ from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
 from RMS.Routines import Image
 
+
 # Import cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
@@ -1217,6 +1218,7 @@ class InputTypeImages(object):
         self.frame_dt_dict = {}
 
         self.fripon_mode = False
+        self.fripon_header = None
 
         img_types = ['.png', '.jpg', '.bmp', '.fit']
 
@@ -1308,6 +1310,30 @@ class InputTypeImages(object):
         # Set the begin time if in the FRIPON mode
         if self.fripon_mode:
             beginning_time = self.dt_frame_time
+
+            # Set station parameters if in the FRIPON mode
+            self.config.stationID = self.fripon_header["TELESCOP"].strip()
+            self.config.latitude = self.fripon_header["SITELAT"]
+            self.config.longitude = self.fripon_header["SITELONG"]
+            self.config.elevation = self.fripon_header["SITEELEV"]
+
+            self.config.width = self.fripon_header["NAXIS1"]
+            self.config.height = self.fripon_header["NAXIS2"]
+
+            # Global shutter
+            self.config.deinterlace_order = -2
+
+            # Set the catalog to BSC5
+            self.config.star_catalog_path = os.path.join(self.config.rms_root_dir, "Catalogs")
+            self.config.star_catalog_file = "BSC5"
+
+            # Set approximate FOV
+            self.config.fov_h = 180
+            self.config.fov_w = 200
+
+            # Set magnitude limit
+            self.config.catalog_mag_limit = 3.5
+
 
 
         # Check if the beginning time was given (it will be read from the PNG if the UWO format is given)
@@ -1615,11 +1641,17 @@ class InputTypeImages(object):
                 fits_file = fits.open(f)
                 frame = fits_file[0].data
 
+                # Flip image vertically
+                frame = np.flipud(frame)
+
                 # Load the header
                 head = fits_file[0].header
 
+                # Save the FRIPON header
+                self.fripon_header = head
+
                 # Load the frame time
-                self.dt_frame_time = datetime.datetime.strptime(head['DATE'], "%Y-%m-%dT%H:%M:%S.%f")
+                self.dt_frame_time = datetime.datetime.strptime(head["DATE-OBS"], "%Y-%m-%dT%H:%M:%S.%f")
 
                 # Load the FPS
                 self.fps = 1.0/head["EXPOSURE"]
@@ -1799,6 +1831,9 @@ class InputTypeDFN(InputType):
 
         """
         self.input_type = 'dfn'
+
+        # Set the frames to a global shutter, so no correction is applied
+        self.config.deinterlace_order = -2
 
         self.dir_path, self.image_file = os.path.split(file_path)
         self.config = config

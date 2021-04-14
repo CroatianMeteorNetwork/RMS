@@ -1286,7 +1286,7 @@ class GeolocationWidget(QtWidgets.QWidget):
 
         hbox = QtWidgets.QHBoxLayout()
         self.elev = DoubleSpinBox()
-        self.elev.setMinimum(0)
+        self.elev.setMinimum(-1000)
         self.elev.setMaximum(1000000)
         self.elev.setDecimals(3)
         self.elev.setSingleStep(1)

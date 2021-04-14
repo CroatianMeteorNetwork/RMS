@@ -321,6 +321,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self.fit_only_pointing = False
 
         ###################################################################################################
+
+
+        # Detect data input type and init the image handle
+        self.detectInputType(load=True, beginning_time=beginning_time, use_fr_files=self.use_fr_files)
+
+        # Update the FPS if it's forced
+        self.setFPS()
+
+
+        ###################################################################################################
+
         # LOADING STARS
 
         # Load catalog stars
@@ -344,14 +355,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.calstars = {}
         self.loadCalstars()
-
-
-
-        # Detect data input type and init the image handle
-        self.detectInputType(load=True, beginning_time=beginning_time, use_fr_files=self.use_fr_files)
-
-        # Update the FPS if it's forced
-        self.setFPS()
 
 
         ###################################################################################################
