@@ -40,20 +40,6 @@ pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
 
 
-def qmessagebox(message="", title="Error", message_type="warning"):
-    msg = QtGui.QMessageBox()
-    if message_type == "warning":
-        msg.setIcon(QtGui.QMessageBox.Warning)
-    elif message_type == "error":
-        msg.setIcon(QtGui.QMessageBox.Critical)
-    else:
-        msg.setIcon(QtGui.QMessageBox.Information)
-    msg.setText(message)
-    msg.setWindowTitle(title)
-    msg.setStandardButtons(QtGui.QMessageBox.Ok)
-    msg.exec_()
-
-
 class QFOVinputDialog(QtWidgets.QDialog):
 
     def __init__(self, *args, **kwargs):

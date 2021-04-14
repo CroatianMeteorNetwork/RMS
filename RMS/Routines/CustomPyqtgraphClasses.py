@@ -14,6 +14,21 @@ import re
 import sys
 
 
+
+def qmessagebox(message="", title="Error", message_type="warning"):
+    msg = QtGui.QMessageBox()
+    if message_type == "warning":
+        msg.setIcon(QtGui.QMessageBox.Warning)
+    elif message_type == "error":
+        msg.setIcon(QtGui.QMessageBox.Critical)
+    else:
+        msg.setIcon(QtGui.QMessageBox.Information)
+    msg.setText(message)
+    msg.setWindowTitle(title)
+    msg.setStandardButtons(QtGui.QMessageBox.Ok)
+    msg.exec_()
+
+
 class Plus(QtGui.QPainterPath):
     """
     Used as a symbol for ScatterPlotItem
