@@ -1,6 +1,5 @@
 import os
 import sys
-import subprocess
 
 import numpy
 
@@ -45,13 +44,6 @@ else:
 
     else:
         requirements.append("rawpy")
-
-### ###
-
-
-# Init the submodules (python-dvr)
-x = subprocess.call(['git','submodule','update','--init'])
-
 
 # Cython modules which will be compiled on setup
 cython_modules = [

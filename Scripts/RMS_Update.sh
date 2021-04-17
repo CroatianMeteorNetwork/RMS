@@ -56,6 +56,9 @@ git pull
 # Activate the virtual environment
 source ~/vRMS/bin/activate
 
+# make sure the correct requirements are installed
+pip install -r requirements.txt
+
 # Run the python setup
 python setup.py install
 
