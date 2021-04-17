@@ -164,15 +164,15 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
         #   loaded only if there's one file with '.config' in the directory
         if cml_args_config[0] == '.':
 
-            # Locate all files in the data directory that start with '.config'
+            # Locate all files in the data directory that end with '.config'
             config_files = [file_name for file_name in os.listdir(dir_path) \
-                if file_name.startswith('.config')]
+                if file_name.endswith('.config') or file_name.endswith('dfnstation.cfg')]
 
             # If there is exactly one config file, use it
             if len(config_files) == 1:
                 config_file = os.path.join(os.path.abspath(dir_path), config_files[0])
 
-            else:
+            elif len(config_files) > 1:
                 print('There are several config files in the given directory, choose one and provide the full path to it:')
                 for cfile in config_files:
                     print('    {:s}'.format(os.path.join(dir_path, cfile)))
@@ -508,7 +508,17 @@ def removeInlineComments(cfgparser, delimiter):
 
 
 
-def parse(filename, strict=True):
+def parse(path, strict=True):
+    """ Parses config file at the given path and returns the corresponding Config object.
+
+    Arguments:
+        path: [str] path to file (.config or dfnstation.cfg)
+        strict: [bool]
+
+    Returns:
+        config: [Config]
+
+    """
 
     delimiter = ";"
 
@@ -520,20 +530,31 @@ def parse(filename, strict=True):
         # Python 2
         parser = RawConfigParser()
 
-    parser.read(filename)
+
+    parser.read(path)
+
 
     # Remove inline comments
-    removeInlineComments(parser, delimiter) 
+    removeInlineComments(parser, delimiter)
     
     config = Config()
-    
-    parseAllSections(config, parser)
+
+    # Parse an RMS config file
+    if os.path.basename(path).endswith('.config'):
+        parseConfigFile(config, parser)
+
+    # Parse a DFN config file
+    elif os.path.basename(path) == 'dfnstation.cfg':
+        parseDFNStation(config, parser)
+
+    else:
+        raise RuntimeError('Unknown config file name: {}'.format(os.path.basename(path)))
     
     return config
 
 
 
-def parseAllSections(config, parser):
+def parseConfigFile(config, parser):
     parseSystem(config, parser)
     parseCapture(config, parser)
     parseBuildArgs(config, parser)
@@ -546,6 +567,37 @@ def parseAllSections(config, parser):
     parseThumbnails(config, parser)
     parseStack(config, parser)
 
+
+def parseDFNStation(config, parser):
+    section = 'station'
+    if not parser.has_section(section):
+        return
+
+    if parser.has_option(section, "location"):
+        config.stationID = parser.get(section, "location").replace("_", "").replace(" ", "")
+
+    if parser.has_option(section, "lat"):
+        config.latitude = parser.getfloat(section, "lat")
+
+    if parser.has_option(section, "lon"):
+        config.longitude = parser.getfloat(section, "lon")
+
+    if parser.has_option(section, "altitude"):
+        config.elevation = parser.getfloat(section, "altitude")
+
+    config.fov_h = 150
+    config.fov_w = 200
+    config.width = 7360
+    config.height = 4912
+    config.fps = 20
+    config.gamma = 1
+    config.bit_depth = 16
+    config.catalog_mag_limit = 4.5
+
+    config.star_catalog_path = 'Catalogs'
+    config.star_catalog_file = 'BSC5'
+    config.platepar_name = 'platepar_cmn2010.cal'
+    config.deinterlace_order = -2
 
 
 def parseSystem(config, parser):
@@ -1121,8 +1173,16 @@ def parseCalibration(config, parser):
 
 
     if parser.has_option(section, "star_catalog_path"):
-        config.star_catalog_path = parser.get(section, "star_catalog_path")
+
+        cat_path = parser.get(section, "star_catalog_path")
+
+        config.star_catalog_path = cat_path
         config.star_catalog_path = os.path.join(config.rms_root_dir, config.star_catalog_path)
+
+        # Use the whole catalog path if the resulting directory doesn't exist
+        if not os.path.exists(config.star_catalog_path):
+            config.star_catalog_path = cat_path
+            
 
     if parser.has_option(section, "star_catalog_file"):
         config.star_catalog_file = parser.get(section, "star_catalog_file")

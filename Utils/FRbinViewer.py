@@ -122,7 +122,13 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='
             if not hide:
             
                 # Show the frame
-                cv2.imshow(name, img)
+                try:
+                    cv2.imshow(name, img)
+                except:
+                    print("imshow not available in OpenCV, Rebuild the library with Windows, GTK+ 2.x or Cocoa support. If you are on Ubuntu or Debian, install libgtk2.0-dev and pkg-config, then re-run cmake or configure script in function 'cvShowImage'")
+                    hide = True
+                    first_image = False
+                    continue
 
                 # If this is the first image, move it to the upper left corner
                 if first_image:

@@ -1,4 +1,4 @@
-""" Common math functins. """
+""" Common math functions. """
 
 import numpy as np
 from numpy.core.umath_tests import inner1d
@@ -17,7 +17,18 @@ def angularSeparation(ra1, dec1, ra2, dec2):
         [float] Angle between two coordinates (radians).
     """
 
+    # Classical method
     return np.arccos(np.sin(dec1)*np.sin(dec2) + np.cos(dec1)*np.cos(dec2)*np.cos(ra2 - ra1))
+
+    # # Compute the angular separation using the haversine formula
+    # #   Source: https://idlastro.gsfc.nasa.gov/ftp/pro/astro/gcirc.pro
+    # deldec2 = (dec2 - dec1)/2.0
+    # delra2 =  (ra2 - ra1)/2.0
+    # sindis = np.sqrt(np.sin(deldec2)*np.sin(deldec2) \
+    #     + np.cos(dec1)*np.cos(dec2)*np.sin(delra2)*np.sin(delra2))
+    # dis = 2.0*np.arcsin(sindis) 
+
+    # return dis
 
 
 def angularSeparationVect(vect1, vect2):
@@ -173,3 +184,22 @@ def sphericalPointFromHeadingAndDistance(ra1, dec1, heading, distance):
 
     return np.degrees(ra)%360, np.degrees(dec)
     
+
+
+def RMSD(x, weights=None):
+    """ Root-mean-square deviation of measurements vs. model. 
+    
+    Arguments:
+        x: [ndarray] An array of model and measurement differences.
+
+    Return:
+        [float] RMSD
+    """
+
+    if isinstance(x, list):
+        x = np.array(x)
+
+    if weights is None:
+        weights = np.ones_like(x)
+
+    return np.sqrt(np.sum(weights*x**2)/np.sum(weights))

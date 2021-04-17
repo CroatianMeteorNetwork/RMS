@@ -49,7 +49,7 @@ if matplotlib.get_backend() == 'TkAgg':
     backends = ['Qt5Agg', 'Qt4Agg', 'WXAgg']
 
     for bk in backends:
-        
+
         # Try setting backend
         try:
             plt.switch_backend(bk)
@@ -77,13 +77,12 @@ class Pick(object):
 class ManualReductionTool(object):
     def __init__(self, config, img_handle, fr_file, first_frame=None, fps=None, deinterlace_mode=-1, \
         station_name=None):
-        """ Tool for manually picking meteor centroids and photometry. 
-        
+        """ Tool for manually picking meteor centroids and photometry.
+
         Arguments:
             config: [config] Configuration structure.
             img_handle: [object] Handle with provides common interface to various input formats.
             fr_file: [str] Path to the FR file, if given (can be None).
-
         Keyword Arguments:
             first_frame: [int] First frame to start with. None by default, which will start with the first one.
             fps: [float] Frames per second. None by default, which will read the fps from the config file.
@@ -121,7 +120,7 @@ class ManualReductionTool(object):
         # If the station name was not given and the FF file is used, read it from the FF file name
         if self.img_handle is not None:
             if (self.station_name is None) and (self.img_handle.input_type == 'ff'):
-                
+
                 # Extract the station name from the FF file
                 self.station_name = self.img_handle.current_ff_file.split("_")[1]
 
@@ -139,7 +138,7 @@ class ManualReductionTool(object):
             self.ff = self.img_handle.loadChunk(read_nframes=-1)
             self.nframes = self.ff.nframes
 
-            self.dir_path = self.img_handle.dir_path    
+            self.dir_path = self.img_handle.dir_path
 
 
         # Each FR bin can have multiple detections, the first one is by default
@@ -182,7 +181,7 @@ class ManualReductionTool(object):
         print('Using FPS:', self.fps)
 
 
-        # If there is only one frame, assume it's a static image, and enable adding more picks on the same 
+        # If there is only one frame, assume it's a static image, and enable adding more picks on the same
         #   image
         self.single_image_mode = False
         if self.img_handle is not None:
@@ -332,10 +331,10 @@ class ManualReductionTool(object):
         print('----------------------------')
         print('Frame:', self.current_frame)
 
-        
+
         if self.img_handle is not None:
 
-            # Image mode    
+            # Image mode
             if self.img_handle.input_type == 'images':
                 print('File:', self.img_handle.current_img_file)
 
@@ -372,14 +371,14 @@ class ManualReductionTool(object):
                     byteswap = True
 
             # Load the dark
-            dark = Image.loadDark(*os.path.split(dark_file), dtype=self.current_image.dtype, 
+            dark = Image.loadDark(*os.path.split(dark_file), dtype=self.current_image.dtype,
                 byteswap=byteswap)
 
         except:
             messagebox.showerror(title='Dark frame error', \
                 message='Dark frame could not be loaded!')
             return False, None
-            
+
 
         dark = dark.astype(self.current_image.dtype)
 
@@ -428,7 +427,7 @@ class ManualReductionTool(object):
             # Load the flat. Byteswap the flat if vid file is used
             flat = Image.loadFlat(*os.path.split(flat_file), dtype=self.current_image.dtype, \
                 byteswap=byteswap)
-            
+
         except:
             messagebox.showerror(title='Flat field file error', \
                 message='Flat could not be loaded!')
@@ -447,7 +446,7 @@ class ManualReductionTool(object):
             messagebox.showerror(title='Flat field file error', \
                 message='The file you selected could not be loaded as a flat field!')
 
-        
+
 
         return flat_file, flat
 
@@ -483,10 +482,10 @@ class ManualReductionTool(object):
         if platepar is None:
             messagebox.showerror(title='Platepar file error', \
                 message='The file you selected could not be loaded as a platepar file!')
-            
+
             self.loadPlatepar()
 
-            
+
         # Always turn refraction on in platepar that is being used
         if not platepar.refraction:
             platepar.refraction = True
@@ -497,8 +496,8 @@ class ManualReductionTool(object):
 
 
     def loadImage(self):
-        """ Load the current frame and apply calibration. 
-    
+        """ Load the current frame and apply calibration.
+
         Return:
             img, process_img:
                 - img [2D ndarray] Image for viewing.
@@ -555,7 +554,7 @@ class ManualReductionTool(object):
                 y_frame = np.arange(len(y_img))
                 x_frame = np.arange(len(x_img))
 
-                Y_frame, X_frame = np.meshgrid(y_frame, x_frame)                
+                Y_frame, X_frame = np.meshgrid(y_frame, x_frame)
 
                 img[Y_img, X_img] = self.fr.frames[self.current_line][frame_indx][Y_frame, X_frame]
 
@@ -656,7 +655,7 @@ class ManualReductionTool(object):
 
         # Save the previous zoom
         if self.current_image is not None:
-            
+
             self.prev_xlim = plt.gca().get_xlim()
             self.prev_ylim = plt.gca().get_ylim()
 
@@ -666,7 +665,7 @@ class ManualReductionTool(object):
         # Set the status update formatter
         plt.gca().format_coord = self.mouseOverStatus
 
-        
+
         # Load the image
         #   img - image for viewing
         #   process_img - image for processing (centroiding, photometry) which has the average subtracted
@@ -678,12 +677,12 @@ class ManualReductionTool(object):
         # Image for viewing before levels correction
         self.current_image_viewing = np.copy(img)
 
-        
+
         if first_update:
 
             # Guess the bit depth from the array type
             self.bit_depth = 8*img.itemsize
-            
+
             # Set the maximum image level after reading the bit depth
             self.img_level_max = 2**self.bit_depth - 1
 
@@ -700,7 +699,7 @@ class ManualReductionTool(object):
             img = Image.adjustLevels(img, min_lvl, self.img_gamma, max_lvl)
 
         else:
-            
+
             # Adjust levels (manual)
             img = Image.adjustLevels(img, self.img_level_min, self.img_gamma, self.img_level_max)
 
@@ -719,7 +718,7 @@ class ManualReductionTool(object):
 
         # Don't draw the picks in the photometry coloring more
         if not self.photometry_coloring_mode:
-            
+
             # Plot image pick
             self.drawPicks(update_plot=False)
 
@@ -750,7 +749,7 @@ class ManualReductionTool(object):
                 text_str = 'maxpixel\n'
 
             else:
-                
+
                 text_str  = "Station name: {:s}\n".format(self.station_name)
                 text_str += "Frame = {:.1f}\n".format(self.current_frame)
 
@@ -799,7 +798,7 @@ class ManualReductionTool(object):
 
             plt.gca().text(x_min + 10, y_min + 10, text_str, color='w', verticalalignment='top', \
                 horizontalalignment='left', fontproperties=font)
-            
+
 
             # Show text on image with instructions
             text_str  = 'Keys:\n'
@@ -832,21 +831,21 @@ class ManualReductionTool(object):
             text_str += 'F1 - Hide/show text'
 
 
-            plt.gca().text(10, self.current_image.shape[0] - 5, text_str, color='w', 
+            plt.gca().text(10, self.current_image.shape[0] - 5, text_str, color='w',
                 verticalalignment='bottom', horizontalalignment='left', fontproperties=font)
 
         else:
 
             text_str = "Show text - F1"
 
-            plt.gca().text(self.current_image.shape[1]/2, self.current_image.shape[0], text_str, color='w', 
+            plt.gca().text(self.current_image.shape[1]/2, self.current_image.shape[0], text_str, color='w',
                 verticalalignment='top', horizontalalignment='center', fontproperties=font, alpha=0.5)
 
 
 
     def getCurrentFrameTime(self, frame_no=None):
-        """ Returns the time of the current frame. 
-        
+        """ Returns the time of the current frame.
+
         Keyword arguments:
             frame_no: [float] Frame for which to compute the time. None by default which returns the time
                 of the current frame.
@@ -854,7 +853,7 @@ class ManualReductionTool(object):
 
 
         if self.img_handle is not None:
-                
+
             # Get mean time
             time_data = self.img_handle.currentFrameTime(frame_no=frame_no)
 
@@ -921,7 +920,7 @@ class ManualReductionTool(object):
 
         # If the platepar is available, compute the magnitudes, otherwise show the instrumental magnitude
         if self.platepar is not None:
-            
+
             time_data = [self.getCurrentFrameTime()]*len(intensities)
 
             # Compute the magntiudes
@@ -950,15 +949,15 @@ class ManualReductionTool(object):
             # Compute the instrumental magnitude
             inst_mag = -2.5*np.log10(intensities)
 
-            
+
 
             # Plot the magnitudes
             ax_p.plot(frames, inst_mag)
 
             ax_p.set_ylabel("Instrumental magnitude")
-        
 
-    
+
+
         ax_p.set_xlabel("Frame")
 
         ax_p.invert_yaxis()
@@ -1011,8 +1010,8 @@ class ManualReductionTool(object):
             self.updateImage()
 
         elif event.key == '-':
-            
-            self.zoomImage(zoom_in=False)            
+
+            self.zoomImage(zoom_in=False)
 
             self.updateImage()
 
@@ -1021,7 +1020,7 @@ class ManualReductionTool(object):
         elif event.key == ',':
 
             if self.fr is not None:
-                
+
                 self.current_line -= 1
 
                 self.current_line = self.current_line%self.fr.lines
@@ -1139,7 +1138,7 @@ class ManualReductionTool(object):
         elif event.key == 'ctrl+d':
             _, self.dark = self.loadDark()
 
-            
+
             # Apply the dark to the flat
             if self.flat_struct is not None:
                 self.flat_struct.applyDark(self.dark)
@@ -1178,7 +1177,7 @@ class ManualReductionTool(object):
 
             # Toggle the photometry coloring mode
             if not self.photometry_coloring_mode:
-                
+
                 self.photometry_coloring_mode = True
 
                 self.updateImage()
@@ -1195,7 +1194,7 @@ class ManualReductionTool(object):
 
             # Toggle the photometry coloring mode
             if self.photometry_coloring_mode:
-                
+
                 self.photometry_coloring_mode = False
 
                 # Redraw the centroids
@@ -1208,7 +1207,7 @@ class ManualReductionTool(object):
 
         # Check if the mouse is within bounds
         if (event.xdata is not None) and (event.ydata is not None):
-            
+
             # Read mouse position
             self.mouse_x = event.xdata
             self.mouse_y = event.ydata
@@ -1234,7 +1233,7 @@ class ManualReductionTool(object):
 
 
         if self.scroll_counter > 1:
-            
+
             if self.photometry_coloring_mode:
                 self.photometry_aperture_radius += 1
             else:
@@ -1266,7 +1265,7 @@ class ManualReductionTool(object):
         if self.photometry_aperture_radius > 250:
             self.photometry_aperture_radius = 250
 
-        
+
         self.drawCursorCircle()
 
 
@@ -1318,7 +1317,7 @@ class ManualReductionTool(object):
 
         # Check if the mouse is within bounds
         if (event.xdata is not None) and (event.ydata is not None):
-            
+
             # Store the mouse press location
             self.mouse_x_press = event.xdata
             self.mouse_y_press = event.ydata
@@ -1347,12 +1346,10 @@ class ManualReductionTool(object):
 
 
     def mouseOverStatus(self, x, y):
-        """ Format the status message which will be printed in the status bar below the plot. 
-
+        """ Format the status message which will be printed in the status bar below the plot.
         Arguments:
             x: [float] Plot X coordiante.
             y: [float] Plot Y coordinate.
-
         Return:
             [str]: formatted output string to be written in the status bar
         """
@@ -1461,7 +1458,7 @@ class ManualReductionTool(object):
 
         mouse_x = int(self.mouse_x)
         mouse_y = int(self.mouse_y)
-            
+
         ### Add all pixels within the aperture to the list for photometry ###
 
         x_list = range(mouse_x - self.photometry_aperture_radius, mouse_x \
@@ -1491,7 +1488,7 @@ class ManualReductionTool(object):
 
     def computeIntensitySum(self):
         """ Compute the background subtracted sum of intensity of colored pixels. The background is estimated
-            as the median of near pixels that are not colored. 
+            as the median of near pixels that are not colored.
         """
 
         # Find the pick done on the current frame
@@ -1503,7 +1500,7 @@ class ManualReductionTool(object):
 
             # If there are no photometry pixels, set the intensity to 0
             if not pick.photometry_pixels:
-                
+
                 pick.intensity_sum = 1
 
                 return None
@@ -1536,7 +1533,7 @@ class ManualReductionTool(object):
             if x_max > self.current_image.shape[1]: x_max = self.current_image.shape[1]
             if y_min > self.current_image.shape[0]: y_min = self.current_image.shape[0]
             if y_max < 0: y_max = 0
-            
+
 
             # Take only the colored part
             mask_img = np.ones_like(self.current_image)
@@ -1583,7 +1580,7 @@ class ManualReductionTool(object):
 
         # Go through all picks and recompute intensities
         for pick in self.pick_list:
-            
+
             # Set the current frame
             self.setFrame(pick.frame, only_number_update=True)
 
@@ -1665,7 +1662,7 @@ class ManualReductionTool(object):
             pick = pick_found[0]
 
             # Draw the centroid on the image
-            self.centroid_handle = plt.scatter(pick.x_centroid, pick.y_centroid, marker='+', c='r', s=150, 
+            self.centroid_handle = plt.scatter(pick.x_centroid, pick.y_centroid, marker='+', c='r', s=150,
                 lw=2)
 
 
@@ -1719,12 +1716,12 @@ class ManualReductionTool(object):
 
         # Check if there are previous picks on this frame
         prev_pick = [i for i, pick in enumerate(self.pick_list) if pick.frame == frame]
-            
+
         # Update centroids of previous pick if it exists
         if prev_pick:
 
             i = prev_pick[0]
-            
+
             self.pick_list[i].x_centroid = x_centroid
             self.pick_list[i].y_centroid = y_centroid
 
@@ -1764,7 +1761,7 @@ class ManualReductionTool(object):
 
         # Check if there are previous picks on this frame
         prev_pick = [i for i, pick in enumerate(self.pick_list) if pick.frame == frame]
-            
+
         # Update centroids of previous pick if it exists
         if prev_pick:
 
@@ -1775,7 +1772,7 @@ class ManualReductionTool(object):
                 self.pick_list[i].photometry_pixels = []
 
             if add_photometry:
-                
+
                 # Add the photometry pixels to the pick
                 self.pick_list[i].photometry_pixels = list(set(self.pick_list[i].photometry_pixels \
                     + photometry_pixels))
@@ -1897,8 +1894,8 @@ class ManualReductionTool(object):
 
 
     def prevFrame(self, only_number_update=False):
-        """ Cycle to the previous frame. 
-    
+        """ Cycle to the previous frame.
+
         Keyword arguments:
             only_number_update: [bool] Just cycle the frame number if True. False by default. This is used
                 when skipping multiple frames.
@@ -1936,15 +1933,14 @@ class ManualReductionTool(object):
 
 
     def nextFrame(self, only_number_update=False):
-        """ Cycle to the next frame. 
-
+        """ Cycle to the next frame.
         Keyword arguments:
         only_number_update: [bool] Just cycle the frame number if True. False by default. This is used
                 when skipping multiple frames.
         """
 
         if not only_number_update:
-            
+
             # Compute the intensity sum done on the previous frame
             self.computeIntensitySum()
 
@@ -1959,7 +1955,7 @@ class ManualReductionTool(object):
             # In the single image mode, continously cycle through frames
             else:
                 self.current_frame += 1
-                
+
 
         else:
             self.current_frame = (self.current_frame + self.frame_step)%self.nframes
@@ -1972,17 +1968,16 @@ class ManualReductionTool(object):
 
     def setFrame(self, fr_num, only_number_update=False):
         """ Set the current frame number.
-        
+
         Arguments:
             fr_num: [float] Frame number to set.
-
         Keyword arguments:
             only_number_update: [bool] Just cycle the frame number if True. False by default. This is used
                 when skipping multiple frames.
         """
 
         if not only_number_update:
-            
+
             # Compute the intensity sum done on the previous frame
             self.computeIntensitySum()
 
@@ -2108,7 +2103,7 @@ class ManualReductionTool(object):
 
         centroids = []
         for pick in self.pick_list:
-            
+
             # Make sure to centroid is picked and is not just the photometry
             if pick.x_centroid is None:
                 continue
@@ -2129,7 +2124,7 @@ class ManualReductionTool(object):
             else:
                 ra = dec = mag = None
 
-            
+
             # Get the rolling shutter corrected (or not, depending on the config) frame number
             frame_no = self.getRollingShutterCorrectedFrameNo(pick)
 
@@ -2188,7 +2183,7 @@ class ManualReductionTool(object):
                     + "{:03d}".format(int(round(self.img_handle.beginning_datetime.microsecond/1000))) \
                     + "_0000000.fits"
 
-        else:   
+        else:
             # Extract the time from the FR file otherwise
             dir_path, ff_name_ftp = os.path.split(self.fr_file)
 
@@ -2196,7 +2191,7 @@ class ManualReductionTool(object):
         # Create the list of picks for saving
         centroids = []
         for pick in self.pick_list:
-            
+
             # Make sure to centroid is picked and is not just the photometry
             if pick.x_centroid is None:
                 continue
@@ -2215,7 +2210,7 @@ class ManualReductionTool(object):
         # Sort by frame number
         centroids = sorted(centroids, key=lambda x: x[0])
 
-        # Construct the meteor 
+        # Construct the meteor
         meteor_list = [[ff_name_ftp, 1, 0, 0, centroids]]
 
 
@@ -2266,7 +2261,7 @@ class ManualReductionTool(object):
                     + "{:03d}".format(int(round(self.img_handle.beginning_datetime.microsecond/1000))) \
                     + "_0000000.fits"
 
-        else:   
+        else:
             # Extract the time from the FR file otherwise
             dir_path, ff_name_ftp = os.path.split(self.fr_file)
 
@@ -2293,7 +2288,6 @@ if __name__ == "__main__":
 
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="""Tool for manually picking positions of meteors on video frames and performing manual photometry.
-
         NOTE: The centroiding and photometry will always be done on the image with the subtracted average, except when only the FR file is given.
         """, formatter_class=argparse.RawTextHelpFormatter)
 
@@ -2374,16 +2368,16 @@ if __name__ == "__main__":
 
     # If the second agrument is an FR file, set it as found
     if input2 is not None:
-        
+
         head2, tail2 = os.path.split(input2)
-        
+
         if validFRName(tail2):
             fr_name = input2
 
 
 
     ### Detect the input type ###
-    
+
     # If only an FR file was given
     head1, tail1 = os.path.split(file1)
 
@@ -2424,7 +2418,7 @@ if __name__ == "__main__":
                 beginning_time = beginning_time.replace(tzinfo=pytz.UTC)
 
 
-            img_handle = detectInputType(file1, config, beginning_time=beginning_time, skip_ff_dir=True, 
+            img_handle = detectInputType(file1, config, beginning_time=beginning_time, skip_ff_dir=True,
                 fps=cml_args.fps)
 
 
@@ -2448,5 +2442,3 @@ if __name__ == "__main__":
 
     plt.tight_layout()
     plt.show()
-
-
