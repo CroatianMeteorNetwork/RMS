@@ -631,7 +631,7 @@ def cameraControl(camera_ip, cmd, opts=''):
         opts (array of strings): Optional array of field, subfield and value for the SetParam command
     """
     # Process the IP camera control command
-    cam = dvr.DVRIPCam(camera_ip, "admin", "")
+    cam = dvr.DVRIPCam(camera_ip)
     if cam.login():
         try:
             dvripCall(cam, cmd, opts)
