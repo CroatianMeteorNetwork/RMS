@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
-    extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo
+    extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo, getFOVSelectionRadius
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, raDec2AltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
@@ -3296,8 +3296,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ra_centre, dec_centre = self.computeCentreRADec()
 
         # Calculate the FOV radius in degrees
-        fov_y, fov_x = computeFOVSize(self.platepar)
-        fov_radius = np.sqrt(fov_x**2 + fov_y**2)
+        fov_radius = getFOVSelectionRadius(self.platepar)
 
         # Compute the current Julian date
         jd = date2JD(*self.img_handle.currentTime())

@@ -238,7 +238,7 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
         # Calculate the FOV radius in degrees
         fov_y, fov_x = ApplyAstrometry.computeFOVSize(platepar)
-        fov_radius = np.sqrt(fov_x**2 + fov_y**2)
+        fov_radius = ApplyAstrometry.getFOVSelectionRadius(platepar)
 
         # Take only those stars which are inside the FOV
         filtered_indices, _ = subsetCatalog(catalog_stars, ra_centre, dec_centre, jd, platepar.lat, \

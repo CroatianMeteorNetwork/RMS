@@ -1827,11 +1827,11 @@ class InputTypeDFN(InputType):
         """
         self.input_type = 'dfn'
 
-        # Set the frames to a global shutter, so no correction is applied
-        self.config.deinterlace_order = -2
-
         self.dir_path, self.image_file = os.path.split(file_path)
         self.config = config
+
+        # Set the frames to a global shutter, so no correction is applied
+        self.config.deinterlace_order = -2
 
         # This type of input probably won't have any calstars files
         self.require_calstars = False
@@ -1860,6 +1860,7 @@ class InputTypeDFN(InputType):
                     "%Y-%m-%d_%H%M%S")
 
                 self.beginning_datetime = beginning_datetime
+
             except:
                 qmessagebox(title='Input error', \
                     message="Can't parse given DFN file name!")
@@ -1901,6 +1902,7 @@ class InputTypeDFN(InputType):
         else:
             self.fps = fps
             print('Using FPS:', self.fps)
+
 
     def loadImage(self):
 
