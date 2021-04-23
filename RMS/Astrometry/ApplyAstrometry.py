@@ -293,48 +293,6 @@ def photometryFitRobust(px_intens_list, radius_list, catalog_mags, fixed_vignett
 
 
 
-
-def checkFOVLimits(platepar):
-    """ Check if the FOV is larger than 180 deg in any direction. """
-
-    # Construct poinits on the middle of every side of the image
-    x_data = np.array([               0,  platepar.X_res,  platepar.X_res/2, platepar.X_res/2, platepar.X_res/2.0])
-    y_data = np.array([platepar.Y_res/2, platepar.Y_res/2,                0, platepar.Y_res,   platepar.Y_res/2.0])
-    time_data = np.array(len(x_data)*[jd2Date(platepar.JD)])
-    level_data = np.ones(len(x_data))
-
-    # Compute RA/Dec of the points
-    _, ra_data, dec_data, _ = xyToRaDecPP(time_data, x_data, y_data, level_data, platepar, \
-        extinction_correction=False)
-
-    ra1, ra2, ra3, ra4, ra_mid = ra_data
-    dec1, dec2, dec3, dec4, dec_mid = dec_data
-
-
-    # Check if the mean coordinates are close the the centre of the FOV, or opposite
-    x1, y1, z1 = polarToCartesian(np.radians(ra1), np.radians(dec1))
-    x2, y2, z2 = polarToCartesian(np.radians(ra2), np.radians(dec2))
-    x3, y3, z3 = polarToCartesian(np.radians(ra3), np.radians(dec3))
-    x4, y4, z4 = polarToCartesian(np.radians(ra4), np.radians(dec4))
-
-    x_avg = np.mean([x1, x2, x3, x4])
-    y_avg = np.mean([y1, y2, y3, y4])
-    z_avg = np.mean([z1, z2, z3, z4])
-
-    dec_avg, ra_avg = cartesianToPolar(x_avg, y_avg, z_avg)
-
-    # Angular separation between middle coordiantes and the centre of the FOV
-    avg_separation = np.degrees(angularSeparation(ra_avg, dec_avg, np.radians(ra_mid), np.radians(dec_mid)))
-
-    # If the average separation is larger than 90 deg, flip the FOV radius
-    if avg_separation > 45:
-        return True
-
-    else:
-        return False
-
-
-
 def computeFOVSize(platepar):
     """ Computes the size of the FOV in deg from the given platepar.
 
@@ -359,19 +317,18 @@ def computeFOVSize(platepar):
     dec1, dec2, dec3, dec4, dec_mid = dec_data
 
     # Compute horizontal FOV
-    fov_h = np.degrees(angularSeparation(np.radians(ra1), np.radians(dec1), np.radians(ra2), \
-        np.radians(dec2)))
+    fov_hl = np.degrees(angularSeparation(np.radians(ra1), np.radians(dec1), np.radians(ra_mid), \
+        np.radians(dec_mid)))
+    fov_hr = np.degrees(angularSeparation(np.radians(ra2), np.radians(dec2), np.radians(ra_mid), \
+        np.radians(dec_mid)))
+    fov_h = fov_hl + fov_hr
 
     # Compute vertical FOV
-    fov_v = np.degrees(angularSeparation(np.radians(ra3), np.radians(dec3), np.radians(ra4), \
-        np.radians(dec4)))
-
-
-    # If the average separation is larger than 90 deg, flip the FOV radius
-    if checkFOVLimits(platepar):
-        fov_h = 360 - fov_h
-        fov_v = 360 - fov_v
-
+    fov_vu = np.degrees(angularSeparation(np.radians(ra3), np.radians(dec3), np.radians(ra_mid), \
+        np.radians(dec_mid)))
+    fov_vd = np.degrees(angularSeparation(np.radians(ra4), np.radians(dec4), np.radians(ra_mid), \
+        np.radians(dec_mid)))
+    fov_v = fov_vu + fov_vd
 
     return fov_h, fov_v
 
@@ -386,8 +343,7 @@ def getFOVSelectionRadius(platepar):
         fov_radius: [float] Radius in degrees.
     """
 
-
-    # Construct points in every corner
+    # Construct poinits on the middle of every side of the image
     x_data = np.array([0, platepar.X_res, platepar.X_res,              0, platepar.X_res/2.0])
     y_data = np.array([0, platepar.Y_res,              0, platepar.Y_res, platepar.Y_res/2.0])
     time_data = np.array(len(x_data)*[jd2Date(platepar.JD)])
@@ -400,18 +356,14 @@ def getFOVSelectionRadius(platepar):
     ra1, ra2, ra3, ra4, ra_mid = ra_data
     dec1, dec2, dec3, dec4, dec_mid = dec_data
 
-    # Compute diagonals
-    fov_diag1 = np.degrees(angularSeparation(np.radians(ra1), np.radians(dec1), np.radians(ra2), \
-        np.radians(dec2)))
-    fov_diag2 = np.degrees(angularSeparation(np.radians(ra3), np.radians(dec3), np.radians(ra4), \
-        np.radians(dec4)))
+    # Angular separation between the centre of the FOV and corners
+    ul_sep = np.degrees(angularSeparation(np.radians(ra1), np.radians(dec1), np.radians(ra_mid), np.radians(dec_mid)))
+    lr_sep = np.degrees(angularSeparation(np.radians(ra2), np.radians(dec2), np.radians(ra_mid), np.radians(dec_mid)))
+    ur_sep = np.degrees(angularSeparation(np.radians(ra3), np.radians(dec3), np.radians(ra_mid), np.radians(dec_mid)))
+    ll_sep = np.degrees(angularSeparation(np.radians(ra4), np.radians(dec4), np.radians(ra_mid), np.radians(dec_mid)))
 
-    # Compute FOV radius
-    fov_radius = np.mean([fov_diag1, fov_diag2])/2.0
-
-    # Check if the angle computed is on the short side if all-sky cameras are used, and correct the radius
-    if checkFOVLimits(platepar):
-        fov_radius = 360 - fov_radius
+    # Take the average radius
+    fov_radius = np.mean([ul_sep, lr_sep, ur_sep, ll_sep])
 
     return fov_radius
 
