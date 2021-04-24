@@ -355,7 +355,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
 
         # Save the avepixel as a memory file
         file_handle = BytesIO()
-        pil_img = Image.fromarray(img)
+        pil_img = Image.fromarray(img.T)
 
         # Save image to memory as JPG
         pil_img.save(file_handle, format='JPEG')
@@ -376,7 +376,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
 
     # Add keyword arguments
     kwargs = {}
-    kwargs['publicly_visible'] = 'n'
+    kwargs['publicly_visible'] = 'y'
     kwargs['crpix_center'] = True
     kwargs['tweak_order'] = 3
 
