@@ -13,7 +13,7 @@ tail -Fn0 /var/log/kern.log | \
 
       # Restart RMS. taking care not to kill other python apps
       # and the watchdog itself
-      ps -ef | grep RMS_St | egrep -v "atch|data|grep"|awk '{print $2}' | while read i 
+      ps -ef | grep RMS_ | egrep -v "atch|data|grep"|awk '{print $2}' | while read i 
       do 
         kill $i
       done
