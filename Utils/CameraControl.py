@@ -520,8 +520,8 @@ def setAutoReboot(cam, opts):
         hour = int(spls[1])
     if day not in ['Everyday','Monday','Tuesday','Wednesday','Thursday','Friday', 
             'Saturday','Sunday','Never'] or hour < 0 or hour > 23:
-        print('usage: setAutoReboot dayofweek,hour')
-        print('  where dayofweek is Never, EveryDay, Monday, Tuesday, Wednesday etc')
+        print('usage: SetAutoReboot dayofweek,hour')
+        print('  where dayofweek is Never, Everyday, Monday, Tuesday, Wednesday etc')
         print('  and hour is a number between 0 and 23')
         return
 
