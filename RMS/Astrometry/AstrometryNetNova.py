@@ -418,8 +418,9 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     tries = 0
     while True:
 
-        # Limit the number of checking if the fiels is solved, so the script does not get stuck
+        # Limit the number of checking if the field is solved, so the script does not get stuck
         if tries > solution_tries:
+            print("Link to web page: http://nova.astrometry.net/user_images/{:d}".format(stat.get("user_images", "")[0]))
             return None
         
         stat = c.sub_status(sub_id, justdict=True)
@@ -455,6 +456,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
 
         if solution_tries > get_solution_tries:
             print('Waiting too long for the solution!')
+            print("Link to web page: http://nova.astrometry.net/user_images/{:d}".format(stat.get("user_images", "")[0]))
             return None
 
         # Get the job status
@@ -470,6 +472,9 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
 
         elif stat.get('status','') in ['failure']:
             print('Failed to find a solution!')
+
+            print("Link to web page: http://nova.astrometry.net/user_images/{:d}".format(stat.get("user_images", "")[0]))
+
             return None
 
         # Wait until the job is solved

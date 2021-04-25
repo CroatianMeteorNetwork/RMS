@@ -3373,7 +3373,11 @@ class PlateTool(QtWidgets.QMainWindow):
         jd = date2JD(*self.img_handle.currentTime())
 
         # Compute the position angle from the orientation
-        pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, orientation)
+        #pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, orientation)
+
+        # Assume zero rotation wrt horizon
+        orientation = 0.0
+        pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, orientation)
 
         # Compute reference azimuth and altitude
         azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, self.platepar.lat, self.platepar.lon)
@@ -3388,6 +3392,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Save the current rotation w.r.t horizon value
         self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
+
+        # Reset the distortion parameters
+        self.platepar.resetDistortionParameters()
 
         # Print estimated parameters
         print()
