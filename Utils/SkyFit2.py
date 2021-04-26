@@ -3384,6 +3384,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Set parameters to platepar
         self.platepar.pos_angle_ref = pos_angle_ref
+        self.platepar.rotation_from_horiz = orientation
         self.platepar.F_scale = scale
         self.platepar.az_centre = azim
         self.platepar.alt_centre = alt
