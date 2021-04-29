@@ -227,6 +227,7 @@ class Config:
         
         ##### Capture
         self.deviceID = 0
+        self.force_v4l2 = False
 
         self.width = 1280
         self.height = 720
@@ -760,6 +761,9 @@ def parseCapture(config, parser):
 
         # If it fails, it's probably a RTSP stream
         pass
+
+    if parser.has_option(section, "force_v4l2"):
+        config.force_v4l2 = parser.getboolean(section, "force_v4l2")
 
     if parser.has_option(section, "fps"):
         config.fps = parser.getfloat(section, "fps")
