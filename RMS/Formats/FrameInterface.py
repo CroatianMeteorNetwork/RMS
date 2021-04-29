@@ -28,8 +28,20 @@ from RMS.Formats.FFfile import getMiddleTimeFF, selectFFFrames
 from RMS.Formats.FRbin import read as readFR, validFRName
 from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
-from RMS.Routines.CustomPyqtgraphClasses import qmessagebox
 from RMS.Routines import Image
+
+
+# Try importaing a Qt message box if available
+try:
+    from RMS.Routines.CustomPyqtgraphClasses import qmessagebox as messagebox
+except:
+
+    # Otherwise import a tk message box
+    # tkinter import that works on both Python 2 and 3
+    try:
+        from tkinter import messagebox
+    except:
+        import tkMessageBox as messagebox
 
 
 # Import cython functions
@@ -196,7 +208,7 @@ class InputTypeFRFF(InputType):
 
         # Check that there are any FF files in the folder
         if not self.ff_list:
-            qmessagebox(title='File list warning', message='No FF files in the selected folder!')
+            messagebox(title='File list warning', message='No FF files in the selected folder!')
 
             sys.exit()
 
@@ -670,7 +682,7 @@ class InputTypeVideo(InputType):
                 self.beginning_datetime = datetime.datetime.strptime(file_name_noext, "%Y%m%d_%H%M%S.%f")
 
             except:
-                qmessagebox(title="Input error", \
+                messagebox(title="Input error", \
                 message="The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.")
 
                 sys.exit()
@@ -1239,7 +1251,7 @@ class InputTypeImages(object):
                     break
 
         if len(self.img_list) == 0:
-            qmessagebox(title='Input error',
+            messagebox(title='Input error',
             message="Can't find any images in the given directory! Only PNG, JPG and BMP are supported!")
             sys.exit()
 
@@ -1340,7 +1352,7 @@ class InputTypeImages(object):
                                                                      "%Y%m%d_%H%M%S.%f")
 
             except:
-                qmessagebox(title='Input error',
+                messagebox(title='Input error',
                 message='The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.')
                 sys.exit()
 
@@ -1862,7 +1874,7 @@ class InputTypeDFN(InputType):
                 self.beginning_datetime = beginning_datetime
 
             except:
-                qmessagebox(title='Input error', \
+                messagebox(title='Input error', \
                     message="Can't parse given DFN file name!")
                 sys.exit()
 
@@ -2049,7 +2061,7 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
 
 
         if skip_ff_dir:
-            qmessagebox(title='FF directory',
+            messagebox(title='FF directory',
             message='ManualReduction only works on individual FF files, and not directories with FF files!')
             return None
 
@@ -2114,7 +2126,7 @@ def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detec
         img_handle = InputTypeDFN(input_file, config, beginning_time=beginning_time, fps=fps)
 
     else:
-        qmessagebox(title="Input format error",
+        messagebox(title="Input format error",
                              message="Couldn\'t find the file type given")
         return None
 
