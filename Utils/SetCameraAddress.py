@@ -11,6 +11,20 @@ import ipaddress as ip
 import socket as mysocket
 
 
+def checkValidIPAddr(addr):
+    spls = addr.split('.')
+    if len(spls) != 4: 
+        return False
+    for s in spls:
+        try:
+            intv = int(s)
+        except:
+            return False
+        if intv < 1 or intv > 254:
+            return False
+    return True
+    
+
 def strIPtoHex(ip):
     a = binascii.hexlify(mysocket.inet_aton(ip)).decode().upper()
     addr='0x'+''.join([a[x:x+2] for x in range(0,len(a),2)][::-1])
@@ -229,6 +243,15 @@ if __name__ == '__main__':
 
     ipaddr = sys.argv[1]
     newaddr = sys.argv[2]
+
+    if not checkValidIPAddr(ipaddr) or not checkValidIPAddr(newaddr):
+        print('')
+        print('One or both IP Addresses seems invalid - check that they are correct and in ')
+        print('dotted form ie a.b.c.d where a,b,c and d are numbers between 1 and 254')
+        print('')
+        print('')
+        exit(0)
+
     cam=DVRIPCam(ipaddr)
     if cam.login():
 
