@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
-    extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo
+    extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo, getFOVSelectionRadius
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, raDec2AltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
@@ -38,20 +38,6 @@ from RMS.Routines import RollingShutterCorrection
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
-
-
-def qmessagebox(message="", title="Error", message_type="warning"):
-    msg = QtGui.QMessageBox()
-    if message_type == "warning":
-        msg.setIcon(QtGui.QMessageBox.Warning)
-    elif message_type == "error":
-        msg.setIcon(QtGui.QMessageBox.Critical)
-    else:
-        msg.setIcon(QtGui.QMessageBox.Information)
-    msg.setText(message)
-    msg.setWindowTitle(title)
-    msg.setStandardButtons(QtGui.QMessageBox.Ok)
-    msg.exec_()
 
 
 class QFOVinputDialog(QtWidgets.QDialog):
@@ -321,6 +307,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self.fit_only_pointing = False
 
         ###################################################################################################
+
+
+        # Detect data input type and init the image handle
+        self.detectInputType(load=True, beginning_time=beginning_time, use_fr_files=self.use_fr_files)
+
+        # Update the FPS if it's forced
+        self.setFPS()
+
+
+        ###################################################################################################
+
         # LOADING STARS
 
         # Load catalog stars
@@ -344,14 +341,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.calstars = {}
         self.loadCalstars()
-
-
-
-        # Detect data input type and init the image handle
-        self.detectInputType(load=True, beginning_time=beginning_time, use_fr_files=self.use_fr_files)
-
-        # Update the FPS if it's forced
-        self.setFPS()
 
 
         ###################################################################################################
@@ -1332,7 +1321,7 @@ class PlateTool(QtWidgets.QMainWindow):
         filtered_indices, _ = self.filterCatalogStarsInsideFOV(self.catalog_stars)
 
         # Create a mask to filter out all stars outside the image and the FOV
-        filter_indices_mask = np.zeros(len(cat_stars_xy), dtype=np.bool)
+        filter_indices_mask = np.zeros(len(cat_stars_xy), dtype=bool)
         filter_indices_mask[filtered_indices] = True
         filtered_indices_all = filter_indices_mask & (cat_stars_xy[:, 0] > 0) \
                                                 & (cat_stars_xy[:, 0] < self.platepar.X_res) \
@@ -1664,7 +1653,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     photom_resid_txt = "{:.2f}".format(fit_diff)
 
                     # Determine the size of the residual text, larger the residual, larger the text
-                    photom_resid_size = 8 + np.abs(fit_diff)/(np.max(np.abs(fit_resids))/5.0)
+                    photom_resid_size = int(8 + np.abs(fit_diff)/(np.max(np.abs(fit_resids))/5.0))
 
                     if self.stdev_text_filter*std <= abs(fit_diff):
                         text1 = TextItem(photom_resid_txt, anchor=(0.5, -0.5))
@@ -2170,12 +2159,12 @@ class PlateTool(QtWidgets.QMainWindow):
             if mp.x() > (range_[1] - range_[0])/2 + range_[0]:
                 self.v_zoom_left = True
                 if self.show_key_help != 2:
-                    self.v_zoom.move(QtCore.QPoint(self.label1.boundingRect().width(), 0))
+                    self.v_zoom.move(QtCore.QPoint(int(self.label1.boundingRect().width()), 0))
                 else:
                     self.v_zoom.move(QtCore.QPoint(0, 0))
             else:
                 self.v_zoom_left = False
-                self.v_zoom.move(QtCore.QPoint(self.img_frame.size().width() - self.show_zoom_window_size, 0))
+                self.v_zoom.move(QtCore.QPoint(int(self.img_frame.size().width() - self.show_zoom_window_size), 0))
 
             self.updateBottomLabel()
 
@@ -3307,8 +3296,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ra_centre, dec_centre = self.computeCentreRADec()
 
         # Calculate the FOV radius in degrees
-        fov_y, fov_x = computeFOVSize(self.platepar)
-        fov_radius = np.sqrt(fov_x**2 + fov_y**2)
+        fov_radius = getFOVSelectionRadius(self.platepar)
 
         # Compute the current Julian date
         jd = date2JD(*self.img_handle.currentTime())
@@ -3385,13 +3373,18 @@ class PlateTool(QtWidgets.QMainWindow):
         jd = date2JD(*self.img_handle.currentTime())
 
         # Compute the position angle from the orientation
-        pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, orientation)
+        #pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, orientation)
+
+        # Assume zero rotation wrt horizon
+        orientation = 0.0
+        pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, orientation)
 
         # Compute reference azimuth and altitude
         azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, self.platepar.lat, self.platepar.lon)
 
         # Set parameters to platepar
         self.platepar.pos_angle_ref = pos_angle_ref
+        self.platepar.rotation_from_horiz = orientation
         self.platepar.F_scale = scale
         self.platepar.az_centre = azim
         self.platepar.alt_centre = alt
@@ -3400,6 +3393,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Save the current rotation w.r.t horizon value
         self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
+
+        # Reset the distortion parameters
+        self.platepar.resetDistortionParameters()
 
         # Print estimated parameters
         print()
@@ -4595,7 +4591,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # If the platepar is available, compute the magnitudes, otherwise show the instrumental magnitude
         if self.platepar is not None:
 
-            time_data = [self.img.img_handle.currentFrameTime()]*len(intensities)
+            time_data = [self.img.img_handle.currentFrameTime(fr) for fr in frames]
 
             # Compute the magntiudes
             _, _, _, mag_data = xyToRaDecPP(time_data, x_centroids, y_centroids, intensities, self.platepar)
@@ -4784,8 +4780,12 @@ class PlateTool(QtWidgets.QMainWindow):
             if pick['mode'] == 0:
                 continue
 
+            # Normalize the frame number to the actual time
+            frame_dt = self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)
+            frame_no = (frame_dt - self.img_handle.beginning_datetime).total_seconds()*self.img_handle.fps
+
             # Get the rolling shutter corrected (or not, depending on the config) frame number
-            frame_no = self.getRollingShutterCorrectedFrameNo(frame, pick)
+            frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
 
             
             centroids.append([frame_no, pick['x_centroid'], pick['y_centroid'], pick['intensity_sum']])
@@ -4896,7 +4896,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 if self.meas_ground_points:
                     pp_tmp.switchToGroundPicks()
 
-                time_data = [self.img_handle.currentFrameTime()]
+                time_data = [self.img_handle.currentFrameTime(frame_no=frame)]
 
                 # Compute measured RA/Dec from image coordinates
                 _, ra_data, dec_data, mag_data = xyToRaDecPP(time_data, [pick['x_centroid']],
@@ -4909,8 +4909,12 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 ra = dec = mag = None
 
+            # Normalize the frame number to the actual time
+            frame_dt = self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)
+            frame_no = (frame_dt - self.img_handle.beginning_datetime).total_seconds()*self.img_handle.fps
+
             # Get the rolling shutter corrected (or not, depending on the config) frame number
-            frame_no = self.getRollingShutterCorrectedFrameNo(frame, pick)
+            frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
 
             # Compute the time relative to the reference JD
             t_rel = frame_no/self.img_handle.fps
@@ -5031,7 +5035,7 @@ class PlateTool(QtWidgets.QMainWindow):
             if self.meas_ground_points:
                 pp_tmp.switchToGroundPicks()
 
-            time_data = [self.img_handle.currentFrameTime()]
+            time_data = [self.img_handle.currentFrameTime(frame_no=frame)]
 
             # Compute measured RA/Dec from image coordinates
             jd_data, ra_data, dec_data, mag_data = xyToRaDecPP(time_data, [pick['x_centroid']],
@@ -5045,8 +5049,12 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute alt/az (topocentric, i.e. without refraction)
             azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, pp_tmp.lat, pp_tmp.lon, refraction=False)
 
+            # Normalize the frame number to the actual time
+            frame_dt = self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)
+            frame_no = (frame_dt - dt_ref).total_seconds()*self.img_handle.fps
+
             # Get the rolling shutter corrected (or not, depending on the config) frame number
-            frame_no = self.getRollingShutterCorrectedFrameNo(frame, pick)
+            frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
 
             # Compute the time relative to the reference JD
             t_rel = frame_no/self.img_handle.fps

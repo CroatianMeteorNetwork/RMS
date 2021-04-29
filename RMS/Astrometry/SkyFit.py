@@ -52,7 +52,8 @@ import scipy.ndimage
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
-    rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, extinctionCorrectionTrueToApparent
+    rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, extinctionCorrectionTrueToApparent,
+    getFOVSelectionRadius
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle
 import RMS.ConfigReader as cr
@@ -2222,8 +2223,7 @@ class PlateTool(object):
         ra_centre, dec_centre = self.computeCentreRADec()
 
         # Calculate the FOV radius in degrees
-        fov_y, fov_x = computeFOVSize(self.platepar)
-        fov_radius = np.sqrt(fov_x**2 + fov_y**2)
+        fov_radius = getFOVSelectionRadius(self.platepar)
 
         # Compute the current Julian date
         jd = date2JD(*self.img_handle.currentTime())

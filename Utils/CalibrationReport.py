@@ -10,7 +10,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, raDecToXYPP, \
-    photometryFitRobust, correctVignetting, photomLine, rotationWrtHorizon, extinctionCorrectionTrueToApparent
+    photometryFitRobust, correctVignetting, photomLine, rotationWrtHorizon, \
+    extinctionCorrectionTrueToApparent, getFOVSelectionRadius
 from RMS.Astrometry.CheckFit import matchStarsResiduals
 from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 from RMS.Formats.CALSTARS import readCALSTARS
@@ -352,7 +353,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     RA_c = RA_c[0]
     dec_c = dec_c[0]
 
-    fov_radius = np.hypot(*computeFOVSize(platepar))
+    fov_radius = getFOVSelectionRadius(platepar)
 
     # Get stars from the catalog around the defined center in a given radius
     _, extracted_catalog = subsetCatalog(catalog_stars, RA_c, dec_c, max_jd, platepar.lat, platepar.lon, \

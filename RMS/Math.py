@@ -108,8 +108,8 @@ def polarToCartesian(theta, phi):
     """ Converts 3D spherical coordinates to 3D cartesian coordinates. 
 
     Arguments:
-        theta: [float] Inclination in radians.
-        phi: [float] Azimuth angle in radians.
+        theta: [float] Longitude in radians.
+        phi: [float] Latitude in radians.
 
     Return:
         (x, y, z): [tuple of floats] Coordinates of the point in 3D cartiesian coordinates.
@@ -124,7 +124,7 @@ def polarToCartesian(theta, phi):
 
 
 def isAngleBetween(left, ang, right):
-    """ Checks if ang is between the angle on the left anf right. 
+    """ Checks if ang is between the angle on the left and right. 
     
     Arguments:
         left: [float] Left (counter-clockwise) angle (radians).
@@ -174,12 +174,10 @@ def sphericalPointFromHeadingAndDistance(ra1, dec1, heading, distance):
     # Compute the new declination
     dec = np.arcsin(np.sin(dec1)*np.cos(distance) + np.cos(dec1)*np.sin(distance)*np.cos(heading))
 
-    # Handle poles and compute right ascension
-    if np.cos(dec) == 0:
-       ra = ra1
-
-    else:
-       ra = (ra1 - np.arcsin(np.sin(heading)*np.sin(distance)/np.cos(dec)) + np.pi)% (2*np.pi) - np.pi
+    # Compute the new RA
+    dra = np.arctan2(np.sin(heading)*np.sin(distance)*np.cos(dec1), np.cos(distance) \
+        - np.sin(dec1)*np.sin(dec))
+    ra = (ra1 - dra + np.pi)%(2*np.pi) - np.pi
 
 
     return np.degrees(ra)%360, np.degrees(dec)
