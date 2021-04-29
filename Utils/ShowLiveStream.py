@@ -10,6 +10,16 @@ import RMS.ConfigReader as cr
 from RMS.Routines.Image import applyBrightnessAndContrast
 
 
+def get_device(config):
+    """ Get the video device """
+    if config.force_v4l2:
+        vcap = cv2.VideoCapture(config.deviceID, cv2.CAP_V4L2)
+        vcap.set(cv2.CAP_PROP_CONVERT_RGB, 0)
+    else:
+        vcap = cv2.VideoCapture(config.deviceID)
+
+    return vcap
+
 
 if __name__ == "__main__":
 
@@ -31,8 +41,7 @@ if __name__ == "__main__":
     config = cr.parse(".config")
 
     # Open video device
-    vcap = cv2.VideoCapture(config.deviceID)
-
+    vcap = get_device(config)
 
     t_prev = time.time()
     counter = 0
@@ -55,7 +64,7 @@ if __name__ == "__main__":
                 counter = 0
 
 
-                # If the FPS is lower than the onfigured value, this means that the video buffer is full and needs
+                # If the FPS is lower than the configured value, this means that the video buffer is full and needs
                 # to be emptied
                 if fps < config.fps:
                     for i in range(int(config.fps - fps) + 1):
@@ -82,7 +91,8 @@ if __name__ == "__main__":
                     time.sleep(5)
 
                     # Try reconnecting the device and getting a frame
-                    vcap = cv2.VideoCapture(config.deviceID)
+                    vcap = get_device(config)
+
                     ret, frame = vcap.read()
 
                     if ret:
@@ -98,6 +108,13 @@ if __name__ == "__main__":
             if not cml_args.novideo:
 
                 window_name = 'Live stream'
+                if len(frame.shape) == 3:
+                    if frame.shape[2] == 3:
+                        # Get green channel
+                        frame = frame[:, :, 2]
+                    else:
+                        frame = frame[:, :, 0]
+
                 cv2.imshow(window_name, frame)
 
                 # If this is the first image, move it to the upper left corner
@@ -110,4 +127,4 @@ if __name__ == "__main__":
                 cv2.waitKey(1)
 
     else:
-        print('Cant open video stream:', config.deviceID)
+        print("Can't open video stream:", config.deviceID)
