@@ -63,7 +63,7 @@ class DVRIPCam(object):
         self.alarm_func = None
         self.busy = threading.Condition()
 
-    def connect(self, timeout=10):
+    def connect(self, timeout=2):
         if self.proto == "tcp":
             self.socket_send = self.tcp_socket_send
             self.socket_recv = self.tcp_socket_recv
@@ -76,7 +76,6 @@ class DVRIPCam(object):
         else:
             raise 'Unsupported protocol {}'.format(self.proto)
 
-        # it's important to extend timeout for upgrade procedure
         self.timeout = timeout
         self.socket.settimeout(timeout)
 
@@ -255,17 +254,32 @@ if __name__ == '__main__':
     cam=DVRIPCam(ipaddr)
     if cam.login():
 
+        print('--------')
+        print('The process will appear to hang for several seconds then should print the ')
+        print('new address. ')
+        print('--------')
         nc=cam.get_info("NetWork.NetCommon.HostIP")
         dh=cam.get_info("NetWork.NetDHCP.[0].Enable")
         print('current address {}, dhcp enabled is {}'.format(iptoString(nc), dh))
 
         print('--------')
         print('setting address to {}'.format(newaddr))
+        print('--------')
         cam.set_info("NetWork.NetDHCP.[0].Enable", 0)
         hexval = strIPtoHex(newaddr)
-        cam.set_info("NetWork.NetCommon.HostIP", hexval)
-
-        print('--------')
-        cam.close()
+        try: 
+            # this wil actually succeed, but a timeout will occur once
+            # the camera address is changed.
+            cam.set_info("NetWork.NetCommon.HostIP", hexval)
+        except mysocket.timeout:
+            cam2=DVRIPCam(newaddr)
+            cam2.login()
+            nc=cam2.get_info("NetWork.NetCommon.HostIP")
+            dh=cam2.get_info("NetWork.NetDHCP.[0].Enable")
+            print('Address now {}, dhcp enabled is {}'.format(iptoString(nc), dh))
+            cam2.close()
+            cam.close()
+            print('--------')
+            exit(0)
     else:
         print('login failed')
