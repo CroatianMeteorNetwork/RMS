@@ -7,7 +7,8 @@ from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
 from RMS.Routines.Image import saveImage
 
-def batchFFtoImage(dir_path, fmt):
+
+def batchFFtoImage(dir_path, fmt, addtitle=False):
     # Go through all files in the given folder
     for file_name in os.listdir(dir_path):
 
@@ -27,22 +28,25 @@ def batchFFtoImage(dir_path, fmt):
             print('Saving: ', img_file_name)
 
             # Save the maxpixel to disk
-            saveImage(os.path.join(dir_path, img_file_name), ff.maxpixel)
+            saveImage(os.path.join(dir_path, img_file_name), ff.maxpixel, addtitle)
 
 
 if __name__ == "__main__":
 
-    ### COMMAND LINE ARGUMENTS
+    # COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Convert all FF files in a folder to images.")
 
-    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
+    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str,
         help='Path to directory with FF files.')
 
-    arg_parser.add_argument('file_format', nargs=1, metavar='FILE_FORMAT', type=str, \
+    arg_parser.add_argument('file_format', nargs=1, metavar='FILE_FORMAT', type=str,
         help='File format of the image, e.g. jpg or png.')
 
+    arg_parser.add_argument('-t', '--addtitle', action="store_true",
+        help="""Add a title to the image. """)
+        
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -50,6 +54,6 @@ if __name__ == "__main__":
 
 
     dir_path = cml_args.dir_path[0]
+    addtitle = cml_args.addtitle
 
-    batchFFtoImage(dir_path, cml_args.file_format[0])
-
+    batchFFtoImage(dir_path, cml_args.file_format[0], addtitle)
