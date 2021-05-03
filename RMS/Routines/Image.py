@@ -51,18 +51,18 @@ def loadImage(img_path, flatten=-1):
     return img
 
 
-def saveImage(img_path, img, addtitle=False):
+def saveImage(img_path, img, add_timestamp=False):
     """ Save image to disk.
 
     Arguments:
         img_path: [str] Image path.
         img: [ndarray] Image as numpy array.
-        addtitle: [boolean] optionally add a title to the image
+        add_timestamp: [boolean] optionally add a timestamp title to the image
 
     """
 
     imsave(img_path, img)
-    if addtitle is True: 
+    if add_timestamp is True: 
         my_image = Image.open(img_path)
         try:
             _, height = my_image.size

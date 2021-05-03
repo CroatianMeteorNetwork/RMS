@@ -44,7 +44,7 @@ if __name__ == "__main__":
     arg_parser.add_argument('file_format', nargs=1, metavar='FILE_FORMAT', type=str,
         help='File format of the image, e.g. jpg or png.')
 
-    arg_parser.add_argument('-t', '--addtitle', action="store_true",
+    arg_parser.add_argument('-t', '--add_timestamp', action="store_true",
         help="""Add a title to the image. """)
         
     # Parse the command line arguments
@@ -54,6 +54,6 @@ if __name__ == "__main__":
 
 
     dir_path = cml_args.dir_path[0]
-    addtitle = cml_args.addtitle
+    add_timestamp = cml_args.add_timestamp
 
-    batchFFtoImage(dir_path, cml_args.file_format[0], addtitle)
+    batchFFtoImage(dir_path, cml_args.file_format[0], add_timestamp)
