@@ -18,12 +18,14 @@ from __future__ import print_function, division, absolute_import
 
 import re
 import time
+import datetime
 import logging
 from multiprocessing import Process, Event
 
 import cv2
 
 from RMS.Misc import ping
+from RMS.TelemetryServer import TelemetryServer
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -34,6 +36,18 @@ class BufferedCapture(Process):
     """
     
     running = False
+    telemetry = None
+
+    telemetry_data = {
+        'status': 'init',
+        'fps_expected' : 0,
+        'fps_estimated' : 0,
+        'block_frames' : 0,
+        'dropped_frames' : 0,
+        'frame_time_average' : 0,
+        'capture_start_time' : '1900-01-01T00:00:00.000000',
+        'last_frame_block' : '1900-01-01T00:00:00.000000',
+        }
     
     def __init__(self, array1, startTime1, array2, startTime2, config, video_file=None):
         """ Populate arrays with (startTime, frames) after startCapture is called.
@@ -66,7 +80,25 @@ class BufferedCapture(Process):
         self.time_for_drop = 1.5*(1.0/config.fps)
 
         self.dropped_frames = 0
-    
+
+    def startTelemetry(self):
+        # Start telemetry web service
+        # TODO: put host and port on config file. Enable/disable on config file
+        try:
+            self.telemetry = TelemetryServer('localhost', 2100)
+            self.telemetry.set_data(self.telemetry_data)
+            self.telemetry.run()
+        except:
+            log.error('Error starting telemetry web service!')
+            self.telemetry = None
+
+    def stopTelemetry(self):
+        if self.telemetry is not None:
+            self.telemetry.shutdown()
+
+    def updateTelemetry(self):
+        if self.telemetry is not None:
+            self.telemetry.set_data(self.telemetry_data)
 
 
     def startCapture(self, cameraID=0):
@@ -185,6 +217,12 @@ class BufferedCapture(Process):
     def run(self):
         """ Capture frames.
         """
+
+        # number of frames in each capture block
+        block_frames = 256
+
+        # Start telemetry web service
+        self.startTelemetry()
         
         # Init the video device
         device = self.initVideoDevice()
@@ -216,6 +254,11 @@ class BufferedCapture(Process):
             log.info('Video device opened!')
 
 
+        self.telemetry_data['capture_start_time'] = datetime.datetime.utcnow().isoformat()
+        self.telemetry_data['block_frames'] = block_frames
+        self.telemetry_data['fps_expected'] = self.config.fps
+        self.telemetry_data['status'] = 'capturing'
+        self.updateTelemetry()
 
         # Throw away first 10 frame
         for i in range(10):
@@ -277,10 +320,10 @@ class BufferedCapture(Process):
 
 
             t_frame = 0
+            t_frame_total = 0
             t_assignment = 0
             t_convert = 0
             t_block = time.time()
-            block_frames = 256
 
             log.info('Grabbing a new block of {} frames...'.format(block_frames))
             for i in range(block_frames):
@@ -289,6 +332,7 @@ class BufferedCapture(Process):
                 t1_frame = time.time()
                 ret, frame = device.read()
                 t_frame = time.time() - t1_frame
+                t_frame_total += t_frame
 
 
                 # If the video device was disconnected, wait for reconnection
@@ -381,6 +425,20 @@ class BufferedCapture(Process):
 
 
 
+            estimated_fps = round(block_frames/(time.time() - t_block),1)
+            if self.config.report_dropped_frames:
+                log.info('Estimated FPS: {:.2f}'.format(estimated_fps))
+
+            # update telemetry web service data
+            self.telemetry_data['fps_estimated'] = estimated_fps
+            self.telemetry_data['dropped_frames'] = self.dropped_frames
+            self.telemetry_data['frame_time_average'] = round(t_frame_total/block_frames, 3)
+            self.telemetry_data['last_frame_block'] = datetime.datetime.utcnow().isoformat()
+            self.updateTelemetry()
+
+            # Switch the frame block buffer flags
+            first = not first
+
             if self.exit.is_set():
                 wait_for_reconnect = False
                 log.info('Capture exited!')
@@ -400,13 +458,12 @@ class BufferedCapture(Process):
                 log.info('New block of raw frames available for compression with starting time: {:s}'.format(str(startTime)))
 
             
-            # Switch the frame block buffer flags
-            first = not first
-            if self.config.report_dropped_frames:
-                log.info('Estimated FPS: {:.3f}'.format(block_frames/(time.time() - t_block)))
+
+
         
 
         log.info('Releasing video device...')
         device.release()
         log.info('Video device released!')
-    
+
+        self.stopTelemetry()
