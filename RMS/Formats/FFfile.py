@@ -1,4 +1,4 @@
-""" Functions for reading/writing FF files with respet to the rheir format (.bin for .fits). """
+""" Functions for reading/writing FF files with respect to their format (.bin for .fits). """
 
 
 from __future__ import print_function, division, absolute_import

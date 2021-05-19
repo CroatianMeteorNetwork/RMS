@@ -157,8 +157,9 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
             # Subtract average squared sum of all values (acc*mean = acc*acc/frames_num_minus_four)
             var -= acc*mean    
 
-            # Compute the standard deviation
-            var = <unsigned int> sqrt(var/frames_num_minus_five)
+            # Compute 10 times the standard deviation (to keep one decimal when rounding to uint8)
+            # In FFbin and FFfits, the standard deviation is divided by 10 again
+            var = <unsigned int> (10 * sqrt(var/frames_num_minus_five))
 
             # Make sure that the stddev is not 0, to prevent divide by zero afterwards
             if var == 0:
