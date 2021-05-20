@@ -3,7 +3,7 @@
 from __future__ import print_function, division, absolute_import
 
 import os
-
+import datetime
 
 
 def writeUFOOrbit(dir_path, file_name, data):
@@ -31,6 +31,14 @@ def writeUFOOrbit(dir_path, file_name, data):
             # Convert azimuths to the astronomical system (+W of due S)
             azim1 = (azim1 - 180)%360
             azim2 = (azim2 - 180)%360
+
+            # cater for the possibility that secs+microsecs > 59.99 and would round up to 60
+            # causing an invalid time to be written eg 20,55,60.00, instead of 20,56,0.00
+            secs = round(dt.second + dt.microsecond / 1000000, 2)
+            if secs > 59.99: 
+                tmpdt = datetime.datetime(dt.year, dt.month, dt.day, dt.hour, dt.minute, 0, 0)
+                # add 60 seconds on to the datetime
+                dt = tmpdt + datetime.timedelta(seconds = secs)
 
             f.write('{:s},{:4d},{:2d},{:2d},{:2d},{:2d},{:4.2f},{:.2f},{:.3f},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f},{:s},{:.6f},{:.6f},{:.1f},{:.1f},\n'.format(\
                 'R91', dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second + dt.microsecond/1000000, \

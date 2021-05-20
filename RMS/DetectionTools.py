@@ -118,6 +118,26 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
 
 
 
+def binImageCalibration(config, mask, dark, flat_struct):
+    """ Bin the calibration images. """
+
+    # Bin the mask
+    if mask is not None:
+        mask.img = Image.binImage(mask.img, config.detection_binning_factor, 'avg')
+
+    # Bin the dark
+    if dark is not None:
+        dark = Image.binImage(dark, config.detection_binning_factor, 'avg')
+
+    # Bin the flat
+    if flat_struct is not None:
+        flat_struct.binFlat(config.detection_binning_factor, 'avg')
+
+
+    return mask, dark, flat_struct
+
+
+
 def htLinePerpendicular(rho, theta, x_inters, y_inters, img_h, img_w):
     """ Compute a parpendicular line to the one given in Hough polar coordinates. The new line will intersect
         the given line in point (x_inters, y_inters).

@@ -4,7 +4,7 @@ from __future__ import print_function, division, absolute_import
 
 import numpy as np
 
-from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, computeFOVSize
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, computeFOVSize, getFOVSelectionRadius
 from RMS.Astrometry.Conversions import jd2Date, apparentAltAz2TrueRADec, trueRaDec2ApparentAltAz
 from RMS.Math import angularSeparation
 
@@ -31,12 +31,11 @@ def addEquatorialGrid(plt_handle, platepar, jd):
     azim_centre, alt_centre = trueRaDec2ApparentAltAz(RA_c, dec_c, jd, platepar.lat, platepar.lon)
 
     # Compute FOV size
-    fov_h, fov_v = computeFOVSize(platepar)
-    fov_radius = np.hypot(*computeFOVSize(platepar))
+    fov_radius = getFOVSelectionRadius(platepar)
 
     # Determine gridline frequency (double the gridlines if the number is < 4eN)
-    grid_freq = 10**np.floor(np.log10(fov_radius))
-    if 10**(np.log10(fov_radius) - np.floor(np.log10(fov_radius))) < 4:
+    grid_freq = 10**np.floor(np.log10(2*fov_radius))
+    if 10**(np.log10(2*fov_radius) - np.floor(np.log10(2*fov_radius))) < 4:
         grid_freq /= 2
 
     # Set a maximum grid frequency of 15 deg
@@ -48,11 +47,11 @@ def addEquatorialGrid(plt_handle, platepar, jd):
     plot_dens = grid_freq/100
 
     # Compute the range of declinations to consider
-    dec_min = platepar.dec_d - fov_radius/2
+    dec_min = platepar.dec_d - fov_radius
     if dec_min < -90:
         dec_min = -90
 
-    dec_max = platepar.dec_d + fov_radius/2
+    dec_max = platepar.dec_d + fov_radius
     if dec_max > 90:
         dec_max = 90
 
@@ -183,12 +182,12 @@ def updateRaDecGrid(grid, platepar):
 
 
     # Compute FOV size
-    fov_radius = np.hypot(*computeFOVSize(platepar))
+    fov_radius = getFOVSelectionRadius(platepar)
 
 
     # Determine gridline frequency (double the gridlines if the number is < 4eN)
-    grid_freq = 10**np.floor(np.log10(fov_radius))
-    if 10**(np.log10(fov_radius) - np.floor(np.log10(fov_radius))) < 4:
+    grid_freq = 10**np.floor(np.log10(2*fov_radius))
+    if 10**(np.log10(2*fov_radius) - np.floor(np.log10(2*fov_radius))) < 4:
         grid_freq /= 2
 
     # Set a maximum grid frequency of 15 deg
@@ -335,12 +334,12 @@ def updateAzAltGrid(grid, platepar):
     ### ###
 
     # Compute FOV size
-    fov_radius = np.hypot(*computeFOVSize(platepar))
+    fov_radius = getFOVSelectionRadius(platepar)
 
 
     # Determine gridline frequency (double the gridlines if the number is < 4eN)
-    grid_freq = 10**np.floor(np.log10(fov_radius))
-    if 10**(np.log10(fov_radius) - np.floor(np.log10(fov_radius))) < 4:
+    grid_freq = 10**np.floor(np.log10(2*fov_radius))
+    if 10**(np.log10(2*fov_radius) - np.floor(np.log10(2*fov_radius))) < 4:
         grid_freq /= 2
 
     # Set a maximum grid frequency of 15 deg

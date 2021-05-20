@@ -8,6 +8,9 @@ import math
 import numpy as np
 import scipy.misc
 
+from PIL import Image, ImageFont, ImageDraw 
+import datetime
+
 # Check which imread funtion to use
 try:
     imread = scipy.misc.imread
@@ -48,18 +51,33 @@ def loadImage(img_path, flatten=-1):
     return img
 
 
-def saveImage(img_path, img):
+def saveImage(img_path, img, add_timestamp=False):
     """ Save image to disk.
 
     Arguments:
         img_path: [str] Image path.
         img: [ndarray] Image as numpy array.
+        add_timestamp: [boolean] optionally add a timestamp title to the image
 
     """
 
     imsave(img_path, img)
-
-
+    if add_timestamp is True: 
+        my_image = Image.open(img_path)
+        try:
+            _, height = my_image.size
+            image_editable = ImageDraw.Draw(my_image)
+            _, fname = os.path.split(img_path)
+            splits = fname.split('_')
+            dtstr = splits[2] + '_' + splits[3] + '.' + splits[4]
+            imgdt = datetime.datetime.strptime(dtstr, '%Y%m%d_%H%M%S.%f')
+            title = splits[1] + ' ' + imgdt.strftime('%Y-%m-%d %H:%M:%S UTC') 
+            #fnt = ImageFont.truetype("arial.ttf", 15)
+            fnt = ImageFont.load_default()
+            image_editable.text((15,height-20), title, font=fnt, fill=(255))
+        except:
+            print('unable to add title')
+        my_image.save(img_path)
 
 
 def binImage(img, bin_factor, method='avg'):

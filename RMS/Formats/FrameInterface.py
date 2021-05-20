@@ -9,13 +9,6 @@ import copy
 import datetime
 
 
-# tkinter import that works on both Python 2 and 3
-try:
-    from tkinter import messagebox
-except:
-    import tkMessageBox as messagebox
-
-
 # Rawpy for DFN images
 try:
     import rawpy
@@ -25,6 +18,7 @@ except ImportError:
 
 import cv2
 import numpy as np
+from astropy.io import fits
 
 from RMS.Astrometry.Conversions import unixTime2Date, datetime2UnixTime
 from RMS.Formats.FFfile import read as readFF
@@ -35,6 +29,20 @@ from RMS.Formats.FRbin import read as readFR, validFRName
 from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
 from RMS.Routines import Image
+
+
+# Try importaing a Qt message box if available
+try:
+    from RMS.Routines.CustomPyqtgraphClasses import qmessagebox as messagebox
+except:
+
+    # Otherwise import a tk message box
+    # tkinter import that works on both Python 2 and 3
+    try:
+        from tkinter import messagebox
+    except:
+        import tkMessageBox as messagebox
+
 
 # Import cython functions
 import pyximport
@@ -200,7 +208,7 @@ class InputTypeFRFF(InputType):
 
         # Check that there are any FF files in the folder
         if not self.ff_list:
-            messagebox.showinfo(title='File list warning', message='No FF files in the selected folder!')
+            messagebox(title='File list warning', message='No FF files in the selected folder!')
 
             sys.exit()
 
@@ -674,8 +682,8 @@ class InputTypeVideo(InputType):
                 self.beginning_datetime = datetime.datetime.strptime(file_name_noext, "%Y%m%d_%H%M%S.%f")
 
             except:
-                messagebox.showerror('Input error',
-                                     'The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.')
+                messagebox(title="Input error", \
+                message="The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.")
 
                 sys.exit()
 
@@ -1206,20 +1214,27 @@ class InputTypeImages(object):
         self.ff = None
         self.cache = {}
 
+        self.dt_frame_time = None
+        self.frame_dt_list = None
+
         # This type of input probably won't have any calstars files
         self.require_calstars = False
 
         # Disctionary which holds the time of every frame, used for fast frame time lookup
-        self.uwo_png_dt_dict = {}
+        self.frame_dt_dict = {}
 
+        self.fripon_mode = False
+        self.fripon_header = None
+
+        img_types = ['.png', '.jpg', '.bmp', '.fit']
+
+        # Add raw formats if rawpy is installed
         if 'rawpy' in sys.modules:
-            ### Find images in the given folder ###
-            img_types = ['.png', '.jpg', '.bmp', '.nef', '.cr2']
-        else:
-            img_types = ['.png', '.jpg', '.bmp']
+            img_types += ['.nef', '.cr2']
 
         self.img_list = []
 
+        ### Find images in the given folder ###
         for file_name in sorted(os.listdir(self.dir_path)):
 
             # Check if the file ends with support file extensions
@@ -1236,11 +1251,21 @@ class InputTypeImages(object):
                     break
 
         if len(self.img_list) == 0:
-            messagebox.showerror('Input error',
-                                 "Can't find any images in the given directory! Only PNG, JPG and BMP are supported!")
+            messagebox(title='Input error',
+            message="Can't find any images in the given directory! Only PNG, JPG and BMP are supported!")
             sys.exit()
 
         ### ###
+
+        ### Filter the file list so only the images with most extension types are used ###
+
+        extensions = [entry.split('.')[-1] for entry in self.img_list]
+        unique = np.unique(extensions, return_counts=True)
+        most_common_extension = unique[0][np.argmax(unique[1])].lower()
+
+        self.img_list = [entry for entry in self.img_list if entry.lower().endswith(most_common_extension)]
+
+        ###
 
 
         # Compute the total number of used frames
@@ -1274,7 +1299,7 @@ class InputTypeImages(object):
 
             # Get the beginning time
             self.loadFrame(fr_no=0)
-            beginning_time = self.uwo_png_frame_time
+            beginning_time = self.dt_frame_time
 
             print('UWO PNG mode')
 
@@ -1287,8 +1312,36 @@ class InputTypeImages(object):
         else:
             self.byteswap = False
 
-        self.uwo_png_frame_time = None
-        self.uwo_png_dt_list = None
+
+        # Set the begin time if in the FRIPON mode
+        if self.fripon_mode:
+            beginning_time = self.dt_frame_time
+
+            # Set station parameters if in the FRIPON mode
+            self.config.stationID = self.fripon_header["TELESCOP"].strip()
+            self.config.latitude = self.fripon_header["SITELAT"]
+            self.config.longitude = self.fripon_header["SITELONG"]
+            self.config.elevation = self.fripon_header["SITEELEV"]
+
+            self.config.width = self.fripon_header["NAXIS1"]
+            self.config.height = self.fripon_header["NAXIS2"]
+            self.config.fps = self.fps
+
+            # Global shutter
+            self.config.deinterlace_order = -2
+
+            # Set the catalog to BSC5
+            self.config.star_catalog_path = os.path.join(self.config.rms_root_dir, "Catalogs")
+            self.config.star_catalog_file = "BSC5"
+
+            # Set approximate FOV
+            self.config.fov_h = 180
+            self.config.fov_w = 200
+
+            # Set magnitude limit
+            self.config.catalog_mag_limit = 3.5
+
+
 
         # Check if the beginning time was given (it will be read from the PNG if the UWO format is given)
         if beginning_time is None:
@@ -1299,8 +1352,8 @@ class InputTypeImages(object):
                                                                      "%Y%m%d_%H%M%S.%f")
 
             except:
-                messagebox.showerror('Input error',
-                                     'The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.')
+                messagebox(title='Input error',
+                message='The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.')
                 sys.exit()
 
         else:
@@ -1359,15 +1412,18 @@ class InputTypeImages(object):
         if self.uwo_png_mode and not self.single_image_mode:
 
             # Convert datetimes to Unix times
-            unix_times = [datetime2UnixTime(dt) for dt in self.uwo_png_dt_list]
+            unix_times = [datetime2UnixTime(dt) for dt in self.frame_dt_list]
 
             fps = 1/((unix_times[-1] - unix_times[0])/self.current_fr_chunk_size)
+
 
         # If FPS is not given, use one from the config file
         if fps is None:
 
-            self.fps = self.config.fps
-            print('Using FPS from config file: ', self.fps)
+            # Don't use the config file if FRIPON files are used
+            if not self.fripon_mode:
+                self.fps = self.config.fps
+                print('Using FPS from config file: ', self.fps)
 
         else:
 
@@ -1452,13 +1508,13 @@ class InputTypeImages(object):
 
         # Check if this chunk has been cached
         if cache_id in self.cache:
-            frame, self.uwo_png_dt_list, self.current_fr_chunk_size = self.cache[cache_id]
+            frame, self.frame_dt_list, self.current_fr_chunk_size = self.cache[cache_id]
             return frame
 
         # Init making the FF structure
         ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, self.img_dtype)
 
-        self.uwo_png_dt_list = []
+        self.frame_dt_list = []
 
         # Load the chunk of frames
         for i in range(frames_to_read):
@@ -1477,8 +1533,8 @@ class InputTypeImages(object):
             ff_struct_fake.addFrame(frame.astype(np.uint16))
 
             # Add the datetime of the frame to list of the UWO png is used
-            if self.uwo_png_mode:
-                self.uwo_png_dt_list.append(self.currentFrameTime(frame_no=img_indx, dt_obj=True))
+            if self.uwo_png_mode or self.fripon_mode:
+                self.frame_dt_list.append(self.currentFrameTime(frame_no=img_indx, dt_obj=True))
 
         self.current_fr_chunk_size = i
 
@@ -1488,7 +1544,7 @@ class InputTypeImages(object):
         # Store the FF struct to cache to avoid recomputing
         self.cache = {}
 
-        self.cache[cache_id] = [ff_struct_fake, self.uwo_png_dt_list, self.current_fr_chunk_size]
+        self.cache[cache_id] = [ff_struct_fake, self.frame_dt_list, self.current_fr_chunk_size]
 
         # Set the computed chunk as the current FF
         self.ff = ff_struct_fake
@@ -1559,7 +1615,7 @@ class InputTypeImages(object):
         # In the single image mode (but not for UWO), the frame will not change, so load it from the cache 
         #   if available
         single_image_key = "single_image"
-        if self.single_image_mode and not self.uwo_png_mode:
+        if self.single_image_mode and (not self.uwo_png_mode) and (not self.fripon_mode):
             if single_image_key in self.cache:
                 
                 # Load the frame from cache
@@ -1581,6 +1637,35 @@ class InputTypeImages(object):
 
             # Convert the image to grayscale
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+
+        # Load a FRIPON fit file
+        if current_img_file.lower().endswith('.fit'):
+
+            # Load the data from a fits file
+            with open(os.path.join(self.dir_path, current_img_file), 'rb') as f:
+
+                # Open the image data
+                fits_file = fits.open(f)
+                frame = fits_file[0].data
+
+                # Flip image vertically
+                frame = np.flipud(frame)
+
+                # Load the header
+                head = fits_file[0].header
+
+                # Save the FRIPON header
+                self.fripon_header = head
+
+                # Load the frame time
+                self.dt_frame_time = datetime.datetime.strptime(head["DATE-OBS"], "%Y-%m-%dT%H:%M:%S.%f")
+
+                # Load the FPS
+                self.fps = 1.0/head["EXPOSURE"]
+
+                # Indicate that a FRIPON fit file is read
+                self.fripon_mode = True
+
 
         # Load a normal image
         else:
@@ -1623,11 +1708,14 @@ class InputTypeImages(object):
 
             frame_dt = unixTime2Date(ts, tu, dt_obj=True)
 
-            self.uwo_png_frame_time = frame_dt
+            self.dt_frame_time = frame_dt
+
+
+        if self.uwo_png_mode or self.fripon_mode:
 
             # Save the frame time of the current frame
-            if fr_no not in self.uwo_png_dt_dict:
-                self.uwo_png_dt_dict[fr_no] = frame_dt
+            if fr_no not in self.frame_dt_dict:
+                self.frame_dt_dict[fr_no] = self.dt_frame_time
 
         # Bin the frame
         if self.detection and (self.config.detection_binning_factor > 1):
@@ -1661,10 +1749,10 @@ class InputTypeImages(object):
     def currentTime(self, dt_obj=False):
         """ Return the mean time of the current image. """
 
-        if self.uwo_png_mode:
+        if self.uwo_png_mode or self.fripon_mode:
 
             # Convert datetimes to Unix times
-            unix_times = [datetime2UnixTime(dt) for dt in self.uwo_png_dt_list]
+            unix_times = [datetime2UnixTime(dt) for dt in self.frame_dt_list]
 
             # Compute the mean of unix times
             unix_mean = np.mean(unix_times)
@@ -1695,20 +1783,20 @@ class InputTypeImages(object):
         if frame_no is None:
             frame_no = self.current_frame
 
-        # If the UWO png is used, return the time read from the PNG
-        if self.uwo_png_mode:
+        # If the UWO png or FRIPON fit is used, return the time read from the file
+        if self.uwo_png_mode or self.fripon_mode:
 
             # If the frame number is not given, return the time of the current frame
             if frame_no is None:
 
-                dt = self.uwo_png_frame_time
+                dt = self.dt_frame_time
 
 
             # Otherwise, load the frame time
             else:
 
                 # If the frame number is not in the dictionary, load the frame and read the time from it
-                if frame_no not in self.uwo_png_dt_dict:
+                if frame_no not in self.frame_dt_dict:
                     current_frame_backup = self.current_frame
 
                     # Load the time from the given frame
@@ -1718,7 +1806,7 @@ class InputTypeImages(object):
                     self.loadFrame(fr_no=current_frame_backup)
 
                 # Read the frame time from the dictionary
-                dt = self.uwo_png_dt_dict[frame_no]
+                dt = self.frame_dt_dict[frame_no]
 
 
         else:
@@ -1754,6 +1842,9 @@ class InputTypeDFN(InputType):
         self.dir_path, self.image_file = os.path.split(file_path)
         self.config = config
 
+        # Set the frames to a global shutter, so no correction is applied
+        self.config.deinterlace_order = -2
+
         # This type of input probably won't have any calstars files
         self.require_calstars = False
 
@@ -1769,14 +1860,22 @@ class InputTypeDFN(InputType):
         if self.beginning_datetime is None and \
                 any([self.image_file.lower().endswith(fextens) for fextens in img_types]):
             try:
+                
+                # Extract the DFN timestamp from the file name
+                image_filename_split = self.image_file.split("_")
+                date_str = image_filename_split[1]
+                time_str = image_filename_split[2]
+                datetime_str = date_str + "_" + time_str
+                
                 beginning_datetime = datetime.datetime.strptime(
-                    self.image_file[4:21],
+                    datetime_str,
                     "%Y-%m-%d_%H%M%S")
 
                 self.beginning_datetime = beginning_datetime
+
             except:
-                messagebox.showerror('Input error',
-                                     "Can't parse given DFN file name!")
+                messagebox(title='Input error', \
+                    message="Can't parse given DFN file name!")
                 sys.exit()
 
         print('Using folder:', self.dir_path)
@@ -1815,6 +1914,7 @@ class InputTypeDFN(InputType):
         else:
             self.fps = fps
             print('Using FPS:', self.fps)
+
 
     def loadImage(self):
 
@@ -1934,11 +2034,13 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
         use_fr_files: [bool] Include FR files together with FF files. False by default, only used in SkyFit.
 
     """
+
+    ### Find images in the given folder ###
+    img_types = ['.png', '.jpg', '.bmp', '.fit']
+
     if 'rawpy' in sys.modules:
-        ### Find images in the given folder ###
-        img_types = ['.png', '.jpg', '.bmp', '.nef', '.cr2']
-    else:
-        img_types = ['.png', '.jpg', '.bmp']
+        img_types += ['.nef', '.cr2']
+        
 
     img_handle = None
     
@@ -1959,8 +2061,8 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
 
 
         if skip_ff_dir:
-            messagebox.showinfo('FF directory',
-                                'ManualReduction only works on individual FF files, and not directories with FF files!')
+            messagebox(title='FF directory',
+            message='ManualReduction only works on individual FF files, and not directories with FF files!')
             return None
 
         else:
@@ -2024,8 +2126,8 @@ def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detec
         img_handle = InputTypeDFN(input_file, config, beginning_time=beginning_time, fps=fps)
 
     else:
-        messagebox.showerror(title='Input format error',
-                             message='Couldn\'t find the file type given')
+        messagebox(title="Input format error",
+                             message="Couldn\'t find the file type given")
         return None
 
     return img_handle

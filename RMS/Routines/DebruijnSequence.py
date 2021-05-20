@@ -103,9 +103,12 @@ def generateDeBruijnSequence(k, n):
 
 
 if __name__ == '__main__':
-    sequence = generateDeBruijnSequence(2, 4)
+
+    
+    sequence = generateDeBruijnSequence(2, 9)
     print(''.join([str(x) for x in sequence]))
-    print(''.join([str(x) for x in sequence[::-1]]))
+
+    #print(''.join([str(x) for x in sequence[::-1]]))
 
     # print(cyclicSubsequence([1, 2, None, 4, None, 5],
     #                         [5, 1, 2, 1, 4, 1], unknowns=True))

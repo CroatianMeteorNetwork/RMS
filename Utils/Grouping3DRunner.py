@@ -11,8 +11,10 @@ from RMS.Routines.Grouping3D import find3DLines, getAllPoints
 import os
 import sys
 import time
+
+
 import numpy as np
-import scipy
+import cv2
 
 
 from matplotlib import pyplot as plt
@@ -34,7 +36,7 @@ if __name__ == "__main__":
     print('Directory:', bin_dir)
 
     for ff_name in os.listdir(bin_dir):
-        if 'FF' in ff_name:
+        if FFfile.validFFName(ff_name):
 
             print(ff_name)
 
@@ -62,12 +64,11 @@ if __name__ == "__main__":
             truncated_filename = "".join(truncated_filename.split('.')[:-1])
             extract_obj.filename = truncated_filename
 
-            event_points = extract_obj.findPoints()
-
-            print('Points:', event_points)
-
             # Execute all
             extract_obj.executeAll()
+
+            event_points = extract_obj.findPoints()
+            print('Points:', event_points)
 
             # # Produce fake event points
             # event_points = []
@@ -94,8 +95,11 @@ if __name__ == "__main__":
                 img_y_size = int(np.floor(ff.maxpixel.shape[0]//config.f))
                 img_x_size = int(np.floor(ff.maxpixel.shape[1]//config.f))
                 y, x = np.mgrid[0:img_y_size, :img_x_size]
-                img_resize = scipy.misc.imresize(ff.maxpixel, (img_y_size, img_x_size), interp='lanczos').astype(np.float64)
-                ax.plot_surface(x, y, np.zeros_like(x), rstride=1, cstride=1, 
+
+                img_resize = cv2.resize(ff.maxpixel, (img_x_size, img_y_size), \
+                    interpolation=cv2.INTER_LANCZOS4).astype(np.float64)
+
+                ax.plot_surface(x, y, np.zeros_like(x), rstride=1, cstride=1, \
                     facecolors=cm.inferno(img_resize/np.max(img_resize)))
 
                 points = np.array(event_points, dtype = np.uint8)

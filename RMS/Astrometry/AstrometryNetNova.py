@@ -9,6 +9,7 @@ from __future__ import print_function
 
 import os
 import sys
+import copy
 import time
 import base64
 import json
@@ -338,6 +339,16 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     """
 
 
+    def _printWebLink(stat, first_status=None):
+
+        if first_status is not None:
+            if not len(stat.get("user_images", "")):
+                stat = first_status
+
+        if len(stat.get("user_images", "")):
+            print("Link to web page: http://nova.astrometry.net/user_images/{:d}".format(stat.get("user_images", "")[0]))
+
+
     # Read the FF file, if given
     if ff_file_path is not None:
         
@@ -355,7 +366,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
 
         # Save the avepixel as a memory file
         file_handle = BytesIO()
-        pil_img = Image.fromarray(img)
+        pil_img = Image.fromarray(img.T)
 
         # Save image to memory as JPG
         pil_img.save(file_handle, format='JPEG')
@@ -376,7 +387,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
 
     # Add keyword arguments
     kwargs = {}
-    kwargs['publicly_visible'] = 'n'
+    kwargs['publicly_visible'] = 'y'
     kwargs['crpix_center'] = True
     kwargs['tweak_order'] = 3
 
@@ -418,8 +429,9 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     tries = 0
     while True:
 
-        # Limit the number of checking if the fiels is solved, so the script does not get stuck
+        # Limit the number of checking if the field is solved, so the script does not get stuck
         if tries > solution_tries:
+            _printWebLink(stat)
             return None
         
         stat = c.sub_status(sub_id, justdict=True)
@@ -441,6 +453,9 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
 
         tries += 1
 
+
+    first_status = copy.deepcopy(stat)
+
     # Get results
     get_results_tries = 10
     get_solution_tries = 30
@@ -451,10 +466,12 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
         # Limit the number of tries of getting the results, so the script does not get stuck
         if results_tries > get_results_tries:
             print('Too many tries in getting the results!')
+            _printWebLink(stat, first_status=first_status)
             return None
 
         if solution_tries > get_solution_tries:
             print('Waiting too long for the solution!')
+            _printWebLink(stat, first_status=first_status)
             return None
 
         # Get the job status
@@ -470,6 +487,9 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
 
         elif stat.get('status','') in ['failure']:
             print('Failed to find a solution!')
+
+            _printWebLink(stat, first_status=first_status)
+
             return None
 
         # Wait until the job is solved

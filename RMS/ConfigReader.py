@@ -227,6 +227,7 @@ class Config:
         
         ##### Capture
         self.deviceID = 0
+        self.force_v4l2 = False
 
         self.width = 1280
         self.height = 720
@@ -276,6 +277,9 @@ class Config:
 
         # Automatically reprocess broken capture directories
         self.auto_reprocess = True
+
+        # Flag file which indicates that the previously processed files are loaded during capture resume
+        self.capture_resume_flag_file = ".capture_resuming"
 
         ##### Upload
 
@@ -761,6 +765,9 @@ def parseCapture(config, parser):
         # If it fails, it's probably a RTSP stream
         pass
 
+    if parser.has_option(section, "force_v4l2"):
+        config.force_v4l2 = parser.getboolean(section, "force_v4l2")
+
     if parser.has_option(section, "fps"):
         config.fps = parser.getfloat(section, "fps")
 
@@ -802,6 +809,16 @@ def parseCapture(config, parser):
     # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
     if parser.has_option(section, "slideshow_enable"):
         config.slideshow_enable = parser.getboolean(section, "slideshow_enable")
+
+
+    # Enable/disable auto reprocessing
+    if parser.has_option(section, "auto_reprocess"):
+        config.auto_reprocess = parser.getboolean(section, "auto_reprocess")
+
+
+    # Load name of the capture resume flag file
+    if parser.has_option(section, "capture_resume_flag_file"):
+        config.capture_resume_flag_file = parser.get(section, "capture_resume_flag_file")
 
 
 

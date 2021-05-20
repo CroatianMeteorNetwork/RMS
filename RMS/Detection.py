@@ -36,7 +36,7 @@ from mpl_toolkits.mplot3d import Axes3D
 # RMS imports
 from RMS.Astrometry.Conversions import jd2Date, raDec2AltAz
 import RMS.ConfigReader as cr
-from RMS.DetectionTools import getThresholdedStripe3DPoints, loadImageCalibration
+from RMS.DetectionTools import getThresholdedStripe3DPoints, loadImageCalibration, binImageCalibration
 from RMS.Formats.AsgardEv import writeEv
 from RMS.Formats.AST import xyToRaDecAST
 from RMS.Formats import FFfile
@@ -1086,17 +1086,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
     # Bin the mask, dark and flat, only when not running on FF files
     if (img_handle.input_type != 'ff') and (config.detection_binning_factor > 1):
 
-        # Bin the mask
-        if mask is not None:
-            mask.img = Image.binImage(mask.img, config.detection_binning_factor, 'avg')
-
-        # Bin the dark
-        if dark is not None:
-            dark = Image.binImage(dark, config.detection_binning_factor, 'avg')
-
-        # Bin the flat
-        if flat_struct is not None:
-            flat_struct.binFlat(config.detection_binning_factor, 'avg')
+        # Bin the calibration images
+        mask, dark, flat_struct = binImageCalibration(config, mask, dark, flat_struct)
 
 
     # Do all image processing on single FF file, if given

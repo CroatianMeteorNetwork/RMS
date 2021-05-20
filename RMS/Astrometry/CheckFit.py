@@ -20,7 +20,7 @@ from RMS.Formats import Platepar
 from RMS.Formats import CALSTARS
 from RMS.Formats import StarCatalog
 from RMS.Formats import FFfile
-from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP, rotationWrtHorizon
+from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP, rotationWrtHorizon, getFOVSelectionRadius
 from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 from RMS.Astrometry.FFTalign import alignPlatepar
 from RMS.Math import angularSeparation
@@ -78,15 +78,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
 
 
     # Estimate the FOV radius
-    fov_w = platepar.X_res/platepar.F_scale
-    fov_h = platepar.Y_res/platepar.F_scale
-
-    fov_radius = np.sqrt((fov_w/2)**2 + (fov_h/2)**2)
-
-    # print('fscale', platepar.F_scale)
-    # print('FOV w:', fov_w)
-    # print('FOV h:', fov_h)
-    # print('FOV radius:', fov_radius)
+    fov_radius = getFOVSelectionRadius(platepar)
 
 
     # Dictionary containing the matched stars, the keys are JDs of every image

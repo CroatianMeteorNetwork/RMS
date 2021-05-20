@@ -39,7 +39,7 @@ import scipy.optimize
 
 from RMS.Astrometry.Conversions import date2JD, jd2Date, trueRaDec2ApparentAltAz
 import RMS.Astrometry.ApplyAstrometry
-from RMS.Math import angularSeparation
+from RMS.Math import angularSeparation, sphericalPointFromHeadingAndDistance
 
 # Import Cython functions
 import pyximport
@@ -562,7 +562,6 @@ class Platepar(object):
 
                 # Compute the image fit error
                 dist_sum = np.sum((catalog_x - img_x)**2 + (catalog_y - img_y)**2)
-
 
 
             return dist_sum

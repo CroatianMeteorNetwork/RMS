@@ -9,8 +9,9 @@ scipy>=1.0.0
 Pillow>=4.3.0
 astropy>=2.0.3
 imreg_dft
-onvif_zeep
+onvif; python_version=='2.7'
+onvif_zeep; python_version>='3.6'
 configparser==4.0.2
 imageio==2.6.1
+git+https://github.com/NeiroNx/python-dvr@87924a5ee2a0b175e1af3f783b61b74b2904bc99#egg=python-dvr; python_version>='3.6'
 pyqtgraph @ git+https://github.com/pyqtgraph/pyqtgraph@develop#egg=pyqtgraph
-
