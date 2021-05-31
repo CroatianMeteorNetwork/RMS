@@ -633,17 +633,18 @@ class PlateTool(QtWidgets.QMainWindow):
         text_str = "STAR PICKING MODE\n"
         text_str += "LEFT CLICK - Centroid star\n"
         text_str += "CTRL + LEFT CLICK - Manual star position\n"
+        text_str += "RIGHT CLICK - Remove pair\n"
         text_str += "CTRL + SCROLL - Aperture radius adjust\n"
         text_str += "CTRL + Z - Fit stars\n"
         text_str += "CTRL + SHIFT + Z - Fit with initial distortion params set to 0\n"
         text_str += "L - Astrometry fit details\n"
         text_str += "P - Photometry fit"
-        self.star_pick_info = TextItem(text_str, anchor=(0.5, 0.5), color=(255, 255, 255))
+        self.star_pick_info = TextItem(text_str, anchor=(0.5, 0.75), color=(255, 255, 255))
         self.star_pick_info.setAlign(QtCore.Qt.AlignCenter)
         self.star_pick_info.hide()
         self.star_pick_info.setZValue(10)
         self.star_pick_info.setParentItem(self.img_frame)
-        self.star_pick_info.setPos(self.platepar.X_res/2, self.platepar.Y_res - 55)
+        self.star_pick_info.setPos(self.platepar.X_res/2, self.platepar.Y_res)
 
         # Default variables even when constructor isnt called
         self.star_pick_mode = False
@@ -877,6 +878,7 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str = "STAR PICKING MODE\n"
             text_str += "LEFT CLICK - Centroid star\n"
             text_str += "CTRL + LEFT CLICK - Manual star position\n"
+            text_str += "RIGHT CLICK - Remove pair\n"
             text_str += "CTRL + SCROLL - Aperture radius adjust\n"
             text_str += "CTRL + Z - Fit stars\n"
             text_str += "CTRL + SHIFT + Z - Fit with initial distortion params set to 0\n"
