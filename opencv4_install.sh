@@ -56,7 +56,7 @@ cmake -D CMAKE_BUILD_TYPE=DEBUG \
     -D BUILD_NEW_PYTHON_SUPPORT=ON \
     -D BUILD_opencv_python3=TRUE \
     -D WITH_GSTREAMER=ON \
-    -D WITH_FFMPEG=ON ..
+    -D WITH_FFMPEG=OFF ..
 
 # Check output cmake, it should include python 2
 # For more information check: http://www.pyimagesearch.com/2016/10/24/ubuntu-16-04-how-to-install-opencv/
