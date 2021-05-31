@@ -113,7 +113,7 @@ def generateMP4s(dir_path, ftpfile_name):
             root = os.path.dirname(__file__)
             ffmpeg_path = os.path.join(root, "ffmpeg.exe")
             # Construct the ecommand for ffmpeg           
-            com = ffmpeg_path + " -y -f image2 -pattern_type sequence -i " + temp_img_path +" " + mp4_path
+            com = ffmpeg_path + " -y -f image2 -pattern_type sequence -start_number " + str(first_frame) + " -i " + temp_img_path +" " + mp4_path
             print("Creating timelapse using ffmpeg...")
         else:
             # If avconv is not found, try using ffmpeg
@@ -122,12 +122,12 @@ def generateMP4s(dir_path, ftpfile_name):
             if os.system(software_name + " --help > /dev/null"):
                 software_name = "ffmpeg"
                 # Construct the ecommand for ffmpeg           
-                com = software_name + " -y -f image2 -pattern_type sequence -i " + temp_img_path +" " + mp4_path
+                com = software_name + " -y -f image2 -pattern_type sequence -start_number " + str(first_frame) + " -i " + temp_img_path +" " + mp4_path
                 print("Creating timelapse using ffmpeg...")
             else:
                 print("Creating timelapse using avconv...")
                 com = "cd " + dir_path + ";" \
-                    + software_name + " -v quiet -r 30 -y -i " + temp_img_path \
+                    + software_name + " -v quiet -r 30 -y -start_number " + str(first_frame) + " -i " + temp_img_path \
                     + " -vcodec libx264 -pix_fmt yuv420p -crf 25 -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.97)\" " \
                     + mp4_path
 
