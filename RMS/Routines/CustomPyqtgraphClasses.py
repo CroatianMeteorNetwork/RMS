@@ -1251,6 +1251,7 @@ class GeolocationWidget(QtWidgets.QWidget):
 
     sigLocationChanged = QtCore.pyqtSignal()
     sigReloadGeoPoints = QtCore.pyqtSignal()
+    sigFitPressed = QtCore.pyqtSignal()
 
     def __init__(self, gui):
         """ QWidget contains station information. """
@@ -1383,6 +1384,13 @@ class GeolocationWidget(QtWidgets.QWidget):
         full_layout.addWidget(self.reload_geo_points_button)
         if self.gui.geo_points_obj is None:
             self.reload_geo_points_button.hide()
+
+        # Fit astrometry with changed station
+        self.fit_astrometry_button = QtWidgets.QPushButton("Fit astrometry")
+        self.fit_astrometry_button.clicked.connect(self.sigFitPressed.emit)
+        full_layout.addWidget(self.fit_astrometry_button)
+        if self.gui.geo_points_obj is None:
+            self.fit_astrometry_button.hide()
 
 
         self.updatePlatepar()

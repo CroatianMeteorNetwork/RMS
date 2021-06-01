@@ -917,6 +917,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.tab.geolocation.sigLocationChanged.connect(self.onAzAltChanged)
         self.tab.geolocation.sigReloadGeoPoints.connect(self.reloadGeoPoints)
+        self.tab.geolocation.sigFitPressed.connect(lambda: self.fitPickedStars())
 
         self.tab.settings.sigMaxAveToggled.connect(self.toggleImageType)
         self.tab.settings.sigCatStarsToggled.connect(self.toggleShowCatStars)
