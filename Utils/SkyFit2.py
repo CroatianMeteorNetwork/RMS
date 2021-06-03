@@ -435,8 +435,12 @@ class PlateTool(QtWidgets.QMainWindow):
         # Flag indicating that the first platepar fit has to be done
         self.first_platepar_fit = True
 
-        # Flag indicating that 
+        # Flag indicating that only the pointing will be fit, not the distortion
         self.fit_only_pointing = False
+
+        # Flag indicating that the astrometry will be automatically re-fit when the station is moved (only 
+        #   when geopoints are available)
+        self.station_moved_auto_refit = False
 
         ###################################################################################################
 
@@ -2218,6 +2222,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update the possibly missing params
         if not hasattr(self, "fit_only_pointing"):
             self.fit_only_pointing = False
+
+        # Update the possibly missing params
+        if not hasattr(self, "station_moved_auto_refit"):
+            self.station_moved_auto_refit = False
 
         # Update the possibly missing params
         if not hasattr(self, "geo_points_obj"):

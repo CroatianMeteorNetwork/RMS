@@ -1266,7 +1266,6 @@ class GeolocationWidget(QtWidgets.QWidget):
         full_layout.addWidget(QtWidgets.QLabel("Press Esc to focus on image"))
 
 
-
         # Station geo position input boxes
         form = QtWidgets.QFormLayout()
         form.setLabelAlignment(QtCore.Qt.AlignRight)
@@ -1376,6 +1375,12 @@ class GeolocationWidget(QtWidgets.QWidget):
         box.addWidget(QtWidgets.QLabel("Press Enter to accept value"))
 
 
+        self.auto_fit_checkbox = QtWidgets.QCheckBox("Auto refit astrometry")
+        self.auto_fit_checkbox.released.connect(self.onAutoFitToggled)
+        box.addWidget(self.auto_fit_checkbox)
+        if self.gui.geo_points_obj is None:
+            self.auto_fit_checkbox.hide()
+
 
         # Reload geo points
         self.reload_geo_points_button = QtWidgets.QPushButton("Reload geo points")
@@ -1397,6 +1402,19 @@ class GeolocationWidget(QtWidgets.QWidget):
 
 
 
+    def onAutoFitToggled(self):
+        """ Refit astrometry once the station is moved. """
+        
+        self.gui.station_moved_auto_refit = self.auto_fit_checkbox.isChecked()
+        
+
+    def autoRefit(self):
+        """ Run auto refitting, if enabled. """
+
+        if self.gui.station_moved_auto_refit:
+            self.sigFitPressed.emit()
+
+
     def updateGeoCoordinatesFromAzimChange(self, azim):
         """ Given an azimuth, update the geo coordinates in the platepar by moving long the azimuth by the
             distance given in the GUI. 
@@ -1412,14 +1430,17 @@ class GeolocationWidget(QtWidgets.QWidget):
     def onLatChanged(self):
         self.gui.platepar.lat = self.lat.value()
         self.sigLocationChanged.emit()
+        self.autoRefit()
 
     def onLonChanged(self):
         self.gui.platepar.lon = self.lon.value()
         self.sigLocationChanged.emit()
+        self.autoRefit()
 
     def onElevChanged(self):
         self.gui.platepar.elev = self.elev.value()
         self.sigLocationChanged.emit()
+        self.autoRefit()
 
 
 
@@ -1503,6 +1524,8 @@ class GeolocationWidget(QtWidgets.QWidget):
         self.lat.setValue(self.gui.platepar.lat)
         self.lon.setValue(self.gui.platepar.lon)
         self.elev.setValue(self.gui.platepar.elev)
+
+        self.autoRefit()
 
 
 
