@@ -406,7 +406,7 @@ class Platepar(object):
                 self.vignetting_coeff = 0.001*np.hypot(1280, 720)/np.hypot(self.X_res, self.Y_res)
 
 
-    def fitPointing(self, jd, img_stars, catalog_stars):
+    def fitPointing(self, jd, img_stars, catalog_stars, fixed_scale=False):
         """ Fit pointing parameters to the list of star image and celectial catalog coordinates.
         At least 4 stars are needed to fit the rigid body parameters.
         
@@ -416,6 +416,9 @@ class Platepar(object):
             jd: [float] Julian date of the image.
             img_stars: [list] A list of (x, y, intensity_sum) entires for every star.
             catalog_stars: [list] A list of (ra, dec, mag) entries for every star (degrees).
+
+        Keyword arguments:
+            fixed_scale: [bool] Keep the scale fixed. False by default.
             
         """
 
@@ -426,16 +429,22 @@ class Platepar(object):
             """
 
             # Extract fitting parameters
-            ra_ref, dec_ref, pos_angle_ref, F_scale = params
+            ra_ref, dec_ref, pos_angle_ref = params[:3]
+            if not fixed_scale:
+                F_scale = params[3]
 
             img_x, img_y, _ = img_stars.T
 
             pp_copy = copy.deepcopy(platepar)
 
+            # Assign guessed parameters
             pp_copy.RA_d = ra_ref
             pp_copy.dec_d = dec_ref
             pp_copy.pos_angle_ref = pos_angle_ref
-            pp_copy.F_scale = abs(F_scale)
+
+            if not fixed_scale:
+                pp_copy.F_scale = abs(F_scale)
+
 
             # Get image coordinates of catalog stars
             catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy)
@@ -452,14 +461,23 @@ class Platepar(object):
             """
 
             # Extract fitting parameters
-            ra_ref, dec_ref, pos_angle_ref, F_scale = params
+            ra_ref, dec_ref, pos_angle_ref = params[:3]
+            if not fixed_scale:
+                F_scale = params[3]
+
+            img_x, img_y, _ = img_stars.T
 
             pp_copy = copy.deepcopy(platepar)
 
+            # Assign guessed parameters
             pp_copy.RA_d = ra_ref
             pp_copy.dec_d = dec_ref
             pp_copy.pos_angle_ref = pos_angle_ref
-            pp_copy.F_scale = abs(F_scale)
+
+            if not fixed_scale:
+                pp_copy.F_scale = abs(F_scale)
+
+                
 
             img_x, img_y, _ = img_stars.T
 
@@ -477,7 +495,11 @@ class Platepar(object):
 
 
         # Initial parameters for the astrometric fit
-        p0 = [self.RA_d, self.dec_d, self.pos_angle_ref, abs(self.F_scale)]
+        p0 = [self.RA_d, self.dec_d, self.pos_angle_ref]
+
+        # Add fitting scale if not fixed
+        if not fixed_scale:
+            p0 += [abs(self.F_scale)]
 
 
         # Fit the astrometric parameters using the reverse transform for reference        
@@ -490,7 +512,9 @@ class Platepar(object):
         #     catalog_stars, img_stars), method='Nelder-Mead')
 
         # Update fitted astrometric parameters
-        self.RA_d, self.dec_d, self.pos_angle_ref, self.F_scale = res.x
+        self.RA_d, self.dec_d, self.pos_angle_ref = res.x[:3]
+        if not fixed_scale:
+            self.F_scale = res.x[3]
 
 
         # Force scale to be positive
@@ -503,7 +527,8 @@ class Platepar(object):
 
 
 
-    def fitAstrometry(self, jd, img_stars, catalog_stars, first_platepar_fit=False, fit_only_pointing=False):
+    def fitAstrometry(self, jd, img_stars, catalog_stars, first_platepar_fit=False, fit_only_pointing=False,
+        fixed_scale=False):
         """ Fit astrometric parameters to the list of star image and celectial catalog coordinates.
         At least 4 stars are needed to fit the rigid body parameters.
         
@@ -517,6 +542,7 @@ class Platepar(object):
         Keyword arguments:
             first_platepar_fit: [bool] Fit a platepar from scratch. False by default.
             fit_only_pointing: [bool] Only fit the pointing parameters, and not distortion.
+            fixed_scale: [bool] Keep the scale fixed. False by default.
 
         """
 
@@ -713,7 +739,7 @@ class Platepar(object):
         if self.distortion_type.startswith("poly") \
             or (not self.distortion_type.startswith("poly") and first_platepar_fit) or fit_only_pointing:
 
-            self.fitPointing(jd, img_stars, catalog_stars)
+            self.fitPointing(jd, img_stars, catalog_stars, fixed_scale=fixed_scale)
 
         ### ###
 

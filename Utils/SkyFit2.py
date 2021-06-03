@@ -438,6 +438,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Flag indicating that only the pointing will be fit, not the distortion
         self.fit_only_pointing = False
 
+        # Flag indicating that the scale will not be fit
+        self.fixed_scale = False
+
         # Flag indicating that the astrometry will be automatically re-fit when the station is moved (only 
         #   when geopoints are available)
         self.station_moved_auto_refit = False
@@ -2222,6 +2225,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update the possibly missing params
         if not hasattr(self, "fit_only_pointing"):
             self.fit_only_pointing = False
+
+        # Update the possibly missing params
+        if not hasattr(self, "fixed_scale"):
+            self.fixed_scale = False
 
         # Update the possibly missing params
         if not hasattr(self, "station_moved_auto_refit"):
@@ -4325,7 +4332,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Fit the platepar to paired stars
         self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit,\
-            fit_only_pointing=self.fit_only_pointing)
+            fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale)
         self.first_platepar_fit = False
 
         # Show platepar parameters
@@ -4439,6 +4446,11 @@ class PlateTool(QtWidgets.QMainWindow):
             angular_error_label = 'arcmin'
 
         print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
+
+        # Update fit residuals in the station tab when geopoints are used
+        if self.geo_points_obj is not None:
+            self.tab.geolocation.residuals_label.setText("Residuals:\n{:.2f} px, {:.2f} {:s}".format(rmsd_img,\
+                rmsd_angular, angular_error_label))
 
         # Print the field of view size
         #print("FOV: {:.2f} x {:.2f} deg".format(*computeFOVSize(self.platepar))) 

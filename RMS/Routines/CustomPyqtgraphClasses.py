@@ -1374,12 +1374,19 @@ class GeolocationWidget(QtWidgets.QWidget):
         box.addLayout(hbox)
         box.addWidget(QtWidgets.QLabel("Press Enter to accept value"))
 
-
+        # Checkbox to auto refit astrometry when the station is moved
         self.auto_fit_checkbox = QtWidgets.QCheckBox("Auto refit astrometry")
         self.auto_fit_checkbox.released.connect(self.onAutoFitToggled)
         box.addWidget(self.auto_fit_checkbox)
         if self.gui.geo_points_obj is None:
             self.auto_fit_checkbox.hide()
+
+
+        # Label to show residuals
+        self.residuals_label = QtWidgets.QLabel("Residuals:\n")
+        box.addWidget(self.residuals_label)
+        if self.gui.geo_points_obj is None:
+            self.residuals_label.hide()
 
 
         # Reload geo points
@@ -1588,6 +1595,10 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.fit_only_pointing.released.connect(self.onFitOnlyPointingToggled)
         full_layout.addWidget(self.fit_only_pointing)
 
+        self.fixed_scale = QtWidgets.QCheckBox('Fixed scale')
+        self.fixed_scale.released.connect(self.onFixScaleToggled)
+        full_layout.addWidget(self.fixed_scale)
+
         self.refraction = QtWidgets.QCheckBox('Refraction')
         self.refraction.released.connect(self.onRefractionToggled)
         full_layout.addWidget(self.refraction)
@@ -1733,6 +1744,15 @@ class PlateparParameterManager(QtWidgets.QWidget):
     def onFitOnlyPointingToggled(self):
         self.gui.fit_only_pointing = self.fit_only_pointing.isChecked()
         self.sigFitOnlyPointingToggled.emit()
+
+    def onFixScaleToggled(self):
+        self.gui.fixed_scale = self.fixed_scale.isChecked()
+        self.sigFitOnlyPointingToggled.emit()
+
+        if self.gui.fixed_scale:
+            self.F_scale.setDisabled(True)
+        else:
+            self.F_scale.setDisabled(False)
 
     def onRefractionToggled(self):
         self.gui.platepar.refraction = self.refraction.isChecked()
