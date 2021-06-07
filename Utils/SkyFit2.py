@@ -2197,9 +2197,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self.dir_path = dir_path
 
 
-        # Update the dir path in the img_handle
+        # Update img_handle parameters
         if hasattr(self, "img_handle"):
+
+            # Update the dir path
             self.img_handle.dir_path = dir_path
+
+            # Make sure an option is not missing
+            if self.img_handle.input_type == 'images':
+                if not hasattr(self.img_handle, "fripon_mode"):
+                    self.img_handle.fripon_mode = False
+                    self.img_handle.fripon_header = None
 
         # Update possibly missing input_path variable
         if not hasattr(self, "input_path"):
