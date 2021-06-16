@@ -100,6 +100,10 @@ class BufferedCapture(Process):
         if self.telemetry is not None:
             self.telemetry.set_data(self.telemetry_data)
 
+    def updateTelemetryFrame(self, frame):
+        if self.telemetry is not None:
+            self.telemetry.set_data_frame(frame)
+
 
     def startCapture(self, cameraID=0):
         """ Start capture using specified camera.
@@ -435,6 +439,7 @@ class BufferedCapture(Process):
             self.telemetry_data['frame_time_average'] = round(t_frame_total/block_frames, 3)
             self.telemetry_data['last_frame_block'] = datetime.datetime.utcnow().isoformat()
             self.updateTelemetry()
+            self.updateTelemetryFrame(frame) # copy the latest frame read
 
             # Switch the frame block buffer flags
             first = not first
