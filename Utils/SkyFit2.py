@@ -396,6 +396,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Measure points on the ground, not on the sky
         self.meas_ground_points = False
 
+        # Do the astrometric pick and the photometry in a single click
+        self.single_click_photometry = False
+
         # Star picking mode variables
         self.star_aperature_radius = 5
         self.x_centroid = self.y_centroid = None
@@ -937,6 +940,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigMeasGroundPointsToggled.connect(self.toggleMeasGroundPoints)
         self.tab.settings.sigGridToggled.connect(self.onGridChanged)
         self.tab.settings.sigInvertToggled.connect(self.toggleInvertColours)
+        self.tab.settings.sigSingleClickPhotometryToggled.connect(self.toggleSingleClickPhotometry)
 
         layout.addWidget(self.tab, 0, 2)
 
@@ -2259,6 +2263,11 @@ class PlateTool(QtWidgets.QMainWindow):
             self.meas_ground_points = False
 
 
+        # Update possibly missing flag for measuring ground points
+        if not hasattr(self, "single_click_photometry"):
+            self.single_click_photometry = False
+
+
         # If the paired stars are a list (old version), reset it to a new version where it's an object
         if isinstance(self.paired_stars, list):
 
@@ -2482,6 +2491,14 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.addCentroid(self.img.getFrame(), self.x_centroid, self.y_centroid, mode=mode)
 
                         self.updatePicks()
+
+                        # Add photometry coloring if single-click photometry is turned on
+                        if self.single_click_photometry:
+                            
+                            self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
+                                              add_photometry=True)
+                            self.drawPhotometryColoring()
+
 
                     elif self.cursor.mode == 2:
                         self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
@@ -3432,6 +3449,9 @@ class PlateTool(QtWidgets.QMainWindow):
     def toggleInvertColours(self):
         self.img.invert()
         self.img_zoom.invert()
+
+    def toggleSingleClickPhotometry(self):
+        self.single_click_photometry = not self.single_click_photometry
 
 
     def updateMeasurementRefractionCorrection(self):

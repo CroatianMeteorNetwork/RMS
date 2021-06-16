@@ -1991,6 +1991,7 @@ class SettingsWidget(QtWidgets.QWidget):
     sigPicksToggled = QtCore.pyqtSignal()
     sigGreatCircleToggled = QtCore.pyqtSignal()
     sigRegionToggled = QtCore.pyqtSignal()
+    sigSingleClickPhotometryToggled = QtCore.pyqtSignal()
 
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
@@ -2048,6 +2049,11 @@ class SettingsWidget(QtWidgets.QWidget):
         self.region.hide()
         vbox.addWidget(self.region)
 
+        self.single_click_photometry = QtWidgets.QCheckBox('Single Click Photometry')
+        self.single_click_photometry.released.connect(self.sigSingleClickPhotometryToggled.emit)
+        self.updateSingleClickPhotometry()
+        vbox.addWidget(self.single_click_photometry)
+
         self.distortion = QtWidgets.QCheckBox('Show Distortion')
         self.distortion.released.connect(self.sigDistortionToggled.emit)
         self.updateShowDistortion()
@@ -2065,7 +2071,9 @@ class SettingsWidget(QtWidgets.QWidget):
         self.meas_ground_points = QtWidgets.QCheckBox('Measure ground points')
         self.meas_ground_points.released.connect(self.sigMeasGroundPointsToggled.emit)
         self.updateMeasGroundPoints()
+        self.meas_ground_points.hide()
         vbox.addWidget(self.meas_ground_points)
+
 
         hbox = QtWidgets.QHBoxLayout()
         grid_group = QtWidgets.QButtonGroup()
@@ -2106,7 +2114,7 @@ class SettingsWidget(QtWidgets.QWidget):
         self.std.setMinimum(0)
         self.std.setValue(self.gui.stdev_text_filter)
         self.std.valueModified.connect(self.onStdChanged)
-        self.std_label = QtWidgets.QLabel('Filter Res Std')
+        self.std_label = QtWidgets.QLabel('Filter Mag Err')
         form.addRow(self.std_label, self.std)
 
         form.addRow(QtWidgets.QLabel("Press Enter to accept value"))
@@ -2145,6 +2153,9 @@ class SettingsWidget(QtWidgets.QWidget):
 
     def updateInvertColours(self):
         self.invert.setChecked(self.gui.img.invert_img)
+
+    def updateSingleClickPhotometry(self):
+        self.single_click_photometry.setChecked(self.gui.single_click_photometry)
 
     def updateImageGamma(self):
         self.img_gamma.setValue(self.gui.img.gamma)
@@ -2188,6 +2199,7 @@ class SettingsWidget(QtWidgets.QWidget):
         self.picks.hide()
         self.great_circle.hide()
         self.region.hide()
+        self.single_click_photometry.hide()
 
         self.gui.selected_stars_visible = False
         self.sigSelStarsToggled.emit()  # toggle makes it true
@@ -2209,6 +2221,7 @@ class SettingsWidget(QtWidgets.QWidget):
         self.great_circle.show()
         if self.gui.img.img_handle.input_type != 'dfn':
             self.region.show()
+            self.single_click_photometry.show()
 
         self.gui.draw_distortion = True
         self.sigDistortionToggled.emit()  # toggle makes it false
