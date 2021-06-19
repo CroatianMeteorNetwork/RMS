@@ -234,6 +234,7 @@ class Config:
         self.width_device = self.width
         self.height_device = self.height
         self.fps = 25.0
+        self.uyvy_pixelformat = False
 
         self.report_dropped_frames = False
 
@@ -770,6 +771,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "fps"):
         config.fps = parser.getfloat(section, "fps")
+
+    if parser.has_option(section, "uyvy_pixelformat"):
+        config.uyvy_pixelformat = parser.getboolean(section, "uyvy_pixelformat")
 
     if parser.has_option(section, "ff_format"):
         config.ff_format = parser.get(section, "ff_format")

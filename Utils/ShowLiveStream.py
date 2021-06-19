@@ -112,6 +112,9 @@ if __name__ == "__main__":
                     if frame.shape[2] == 3:
                         # Get green channel
                         frame = frame[:, :, 1]
+                    # if UYVY image given, take luma (Y) channel
+                    elif frame.shape[2] == 2 and config.uyvy_pixelformat:
+                        frame = frame[:, :, 1]
                     else:
                         frame = frame[:, :, 0]
 
