@@ -174,7 +174,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
         # Generate detected thumbnails
         detected_mosaic_file = generateThumbnails(captured_path, config, 'DETECTED', \
-            file_list=sorted(file_list))
+            file_list=sorted(file_list), no_stack=True)
 
         # Add the detected mosaic file to the selected list
         file_list.append(captured_mosaic_file)
