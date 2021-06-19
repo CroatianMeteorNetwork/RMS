@@ -2177,10 +2177,6 @@ class PlateTool(QtWidgets.QMainWindow):
             # Update the array length if an old platepar version was loaded which was shorter
             self.platepar.padDictParams()
 
-            # Compute if the measurement should be post-corrected for refraction, because it was not
-            #   taken into account during the astrometry calibration procedure
-            self.updateMeasurementRefractionCorrection()
-
 
 
         # Update the platepar path
@@ -2282,6 +2278,14 @@ class PlateTool(QtWidgets.QMainWindow):
                 paired_stars_new.addPair(x, y, intens_acc, sky_obj)
 
             self.paired_stars = paired_stars_new
+
+
+
+        if self.platepar is not None:
+
+            # Compute if the measurement should be post-corrected for refraction, because it was not
+            #   taken into account during the astrometry calibration procedure
+            self.updateMeasurementRefractionCorrection()
 
 
         # If setupUI hasn't already been called, call it
