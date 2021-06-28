@@ -2209,6 +2209,11 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.img_handle.fripon_mode = False
                     self.img_handle.fripon_header = None
 
+            # Make sure an option is not missing
+            if self.img_handle.input_type == 'images':
+                if not hasattr(self.img_handle, "cabernet_status"):
+                    self.img_handle.cabernet_status = False
+
         # Update possibly missing input_path variable
         if not hasattr(self, "input_path"):
             self.input_path = dir_path
