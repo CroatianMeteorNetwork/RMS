@@ -1704,15 +1704,16 @@ class InputTypeImages(object):
                 self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S.%f")
 
                 # If CABERNET is used, set a fixed FPS
-                self.cabernet_status = bool(len([line for line in head["COMMENT"] if "CABERNET" in line]))
+                if "COMMENT" in head:
+                    self.cabernet_status = bool(len([line for line in head["COMMENT"] if "CABERNET" in line]))
+                else:
+                    self.cabernet_status = False
 
                 if self.cabernet_status:
                     self.fps = 95.129375951
 
                 # If not, read the FPS from the header
                 else:
-                    
-                    # Load the FPS
                     self.fps = 1.0/head["EXPOSURE"]
 
 
