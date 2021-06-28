@@ -120,8 +120,11 @@ class FluxConfig(object):
         # Height sampling delta (km).
         self.dht = 2
 
-        # Limit of elevation above horizon (deg). 10 degrees by default.
+        # Limit of meteor's elevation above horizon (deg). 10 degrees by default.
         self.elev_limit = 10
+
+        # Minimum radiant elevation in the time bin (deg). 15 degreees by default
+        self.rad_elev_limit = 15
 
 
 
@@ -707,43 +710,52 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
 
+
+            
+
+        jd_mean = (bin_jd_beg + bin_jd_end)/2
+
+        # Compute the mean solar longitude
+        sol_mean = np.degrees(jd2SolLonSteyaert(jd_mean))
+
+        ### Compute the radiant elevation at the middle of the time bin ###
+
+        # Compute the apparent radiant
+        ra, dec, v_init = shower.computeApparentRadiant(platepar.lat, platepar.lon, jd_mean)
+
+        # Compute the mean meteor height
+        meteor_ht_beg = heightModel(v_init, ht_type='beg')
+        meteor_ht_end = heightModel(v_init, ht_type='end')
+        meteor_ht = (meteor_ht_beg + meteor_ht_end)/2
+
+        # Compute the standard deviation of the height
+        meteor_ht_std = meteor_ht*ht_std_percent/100.0
+
+        # Init the Gaussian height distribution
+        meteor_ht_gauss = scipy.stats.norm(meteor_ht, meteor_ht_std)
+
+
+        # Compute the radiant elevation
+        radiant_azim, radiant_elev = raDec2AltAz(ra, dec, jd_mean, platepar.lat, platepar.lon)
+
+        ### ###
+
+        print()
+        print()
+        print("-- Bin information ---")
+        print("Bin beg:", bin_dt_beg)
+        print("Bin end:", bin_dt_end)
+        print("Sol mid: {:.5f}".format(sol_mean))
+        print("Radiant elevation: {:.2f} deg".format(radiant_elev))
+
+        # If the elevation of the radiant is below the limit, skip this bin
+        if radiant_elev < flux_config.rad_elev_limit:
+            print("!!! Mean radiant elevation below {:.2f} deg threshold, skipping time bin!".format(flux_config.rad_elev_limit))
+            continue
+
+
         if len(bin_meteors) > 0:
-
-
-            ### Compute the radiant elevation at the middle of the time bin ###
-
-            jd_mean = (bin_jd_beg + bin_jd_end)/2
-
-            # Compute the mean solar longitude
-            sol_mean = np.degrees(jd2SolLonSteyaert(jd_mean))
-
-            print()
-            print()
-            print("-- Bin information ---")
-            print("Bin beg:", bin_dt_beg)
-            print("Bin end:", bin_dt_end)
-            print("Sol mid: {:.5f}".format(sol_mean))
             print("Meteors:", len(bin_meteors))
-
-            # Compute the apparent radiant
-            ra, dec, v_init = shower.computeApparentRadiant(platepar.lat, platepar.lon, jd_mean)
-
-            # Compute the mean meteor height
-            meteor_ht_beg = heightModel(v_init, ht_type='beg')
-            meteor_ht_end = heightModel(v_init, ht_type='end')
-            meteor_ht = (meteor_ht_beg + meteor_ht_end)/2
-
-            # Compute the standard deviation of the height
-            meteor_ht_std = meteor_ht*ht_std_percent/100.0
-
-            # Init the Gaussian height distribution
-            meteor_ht_gauss = scipy.stats.norm(meteor_ht, meteor_ht_std)
-
-
-            # Compute the radiant elevation
-            radiant_azim, radiant_elev = raDec2AltAz(ra, dec, jd_mean, platepar.lat, platepar.lon)
-
-            ### ###
 
 
             ### Weight collection area by meteor height distribution ###

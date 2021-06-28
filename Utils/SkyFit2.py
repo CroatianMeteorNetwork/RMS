@@ -396,6 +396,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Measure points on the ground, not on the sky
         self.meas_ground_points = False
 
+        # Do the astrometric pick and the photometry in a single click
+        self.single_click_photometry = False
+
         # Star picking mode variables
         self.star_aperature_radius = 5
         self.x_centroid = self.y_centroid = None
@@ -435,8 +438,15 @@ class PlateTool(QtWidgets.QMainWindow):
         # Flag indicating that the first platepar fit has to be done
         self.first_platepar_fit = True
 
-        # Flag indicating that 
+        # Flag indicating that only the pointing will be fit, not the distortion
         self.fit_only_pointing = False
+
+        # Flag indicating that the scale will not be fit
+        self.fixed_scale = False
+
+        # Flag indicating that the astrometry will be automatically re-fit when the station is moved (only 
+        #   when geopoints are available)
+        self.station_moved_auto_refit = False
 
         ###################################################################################################
 
@@ -917,6 +927,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.tab.geolocation.sigLocationChanged.connect(self.onAzAltChanged)
         self.tab.geolocation.sigReloadGeoPoints.connect(self.reloadGeoPoints)
+        self.tab.geolocation.sigFitPressed.connect(lambda: self.fitPickedStars())
 
         self.tab.settings.sigMaxAveToggled.connect(self.toggleImageType)
         self.tab.settings.sigCatStarsToggled.connect(self.toggleShowCatStars)
@@ -929,6 +940,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigMeasGroundPointsToggled.connect(self.toggleMeasGroundPoints)
         self.tab.settings.sigGridToggled.connect(self.onGridChanged)
         self.tab.settings.sigInvertToggled.connect(self.toggleInvertColours)
+        self.tab.settings.sigSingleClickPhotometryToggled.connect(self.toggleSingleClickPhotometry)
 
         layout.addWidget(self.tab, 0, 2)
 
@@ -2165,10 +2177,6 @@ class PlateTool(QtWidgets.QMainWindow):
             # Update the array length if an old platepar version was loaded which was shorter
             self.platepar.padDictParams()
 
-            # Compute if the measurement should be post-corrected for refraction, because it was not
-            #   taken into account during the astrometry calibration procedure
-            self.updateMeasurementRefractionCorrection()
-
 
 
         # Update the platepar path
@@ -2189,9 +2197,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self.dir_path = dir_path
 
 
-        # Update the dir path in the img_handle
+        # Update img_handle parameters
         if hasattr(self, "img_handle"):
+
+            # Update the dir path
             self.img_handle.dir_path = dir_path
+
+            # Make sure an option is not missing
+            if self.img_handle.input_type == 'images':
+                if not hasattr(self.img_handle, "fripon_mode"):
+                    self.img_handle.fripon_mode = False
+                    self.img_handle.fripon_header = None
 
         # Update possibly missing input_path variable
         if not hasattr(self, "input_path"):
@@ -2219,6 +2235,14 @@ class PlateTool(QtWidgets.QMainWindow):
             self.fit_only_pointing = False
 
         # Update the possibly missing params
+        if not hasattr(self, "fixed_scale"):
+            self.fixed_scale = False
+
+        # Update the possibly missing params
+        if not hasattr(self, "station_moved_auto_refit"):
+            self.station_moved_auto_refit = False
+
+        # Update the possibly missing params
         if not hasattr(self, "geo_points_obj"):
             self.geo_points_obj = None
 
@@ -2235,6 +2259,11 @@ class PlateTool(QtWidgets.QMainWindow):
             self.meas_ground_points = False
 
 
+        # Update possibly missing flag for measuring ground points
+        if not hasattr(self, "single_click_photometry"):
+            self.single_click_photometry = False
+
+
         # If the paired stars are a list (old version), reset it to a new version where it's an object
         if isinstance(self.paired_stars, list):
 
@@ -2249,6 +2278,14 @@ class PlateTool(QtWidgets.QMainWindow):
                 paired_stars_new.addPair(x, y, intens_acc, sky_obj)
 
             self.paired_stars = paired_stars_new
+
+
+
+        if self.platepar is not None:
+
+            # Compute if the measurement should be post-corrected for refraction, because it was not
+            #   taken into account during the astrometry calibration procedure
+            self.updateMeasurementRefractionCorrection()
 
 
         # If setupUI hasn't already been called, call it
@@ -2458,6 +2495,14 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.addCentroid(self.img.getFrame(), self.x_centroid, self.y_centroid, mode=mode)
 
                         self.updatePicks()
+
+                        # Add photometry coloring if single-click photometry is turned on
+                        if self.single_click_photometry:
+                            
+                            self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
+                                              add_photometry=True)
+                            self.drawPhotometryColoring()
+
 
                     elif self.cursor.mode == 2:
                         self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
@@ -3409,6 +3454,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img.invert()
         self.img_zoom.invert()
 
+    def toggleSingleClickPhotometry(self):
+        self.single_click_photometry = not self.single_click_photometry
+
 
     def updateMeasurementRefractionCorrection(self):
 
@@ -4316,7 +4364,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Fit the platepar to paired stars
         self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit,\
-            fit_only_pointing=self.fit_only_pointing)
+            fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale)
         self.first_platepar_fit = False
 
         # Show platepar parameters
@@ -4430,6 +4478,11 @@ class PlateTool(QtWidgets.QMainWindow):
             angular_error_label = 'arcmin'
 
         print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
+
+        # Update fit residuals in the station tab when geopoints are used
+        if self.geo_points_obj is not None:
+            self.tab.geolocation.residuals_label.setText("Residuals:\n{:.2f} px, {:.2f} {:s}".format(rmsd_img,\
+                rmsd_angular, angular_error_label))
 
         # Print the field of view size
         #print("FOV: {:.2f} x {:.2f} deg".format(*computeFOVSize(self.platepar))) 
