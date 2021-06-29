@@ -1324,7 +1324,7 @@ class InputTypeImages(object):
 
                 # Try to get the station ID if present
                 if "SITE" in self.fripon_header:
-                    self.config.stationID = self.fripon_header["SITE"].strip()
+                    self.config.stationID = self.fripon_header["SITE"].strip("'").strip()
 
                 else:
 
@@ -1332,7 +1332,7 @@ class InputTypeImages(object):
                     station_comment = [line for line in self.fripon_header["COMMENT"] if "CABERNET at " in line]
 
                     if len(station_comment):
-                        station_id = " ".join(station_comment[0].split()[2:])
+                        station_id = " ".join(station_comment[0].split()[2:]).strip("'").strip()
                     else:
                         station_id = "CABERNET-STAT"
 
@@ -1838,7 +1838,7 @@ class InputTypeImages(object):
             frame_no = self.current_frame
 
         # If the UWO png or FRIPON fit is used, return the time read from the file
-        if self.uwo_png_mode or self.fripon_mode:
+        if (self.uwo_png_mode or self.fripon_mode) and (not self.cabernet_status):
 
             # If the frame number is not given, return the time of the current frame
             if frame_no is None:
@@ -1861,6 +1861,8 @@ class InputTypeImages(object):
 
                 # Read the frame time from the dictionary
                 dt = self.frame_dt_dict[frame_no]
+
+                print(frame_no, "FRAME TIME:", dt)
 
 
         else:
