@@ -905,7 +905,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if loaded_file:
             self.updatePairedStars()
 
-        # make connections to sidebar gui
+        # Make connections to sidebar gui
         #self.tab.param_manager.sigElevChanged.connect(self.onExtinctionChanged)
         self.tab.param_manager.sigLocationChanged.connect(self.onAzAltChanged)
         self.tab.param_manager.sigAzAltChanged.connect(self.onAzAltChanged)
@@ -913,11 +913,13 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigScaleChanged.connect(self.onScaleChanged)
         self.tab.param_manager.sigFitParametersChanged.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigExtinctionChanged.connect(self.onExtinctionChanged)
+        self.tab.param_manager.sigVignettingChanged.connect(self.onVignettingChanged)
 
         self.tab.param_manager.sigFitOnlyPointingToggled.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigRefractionToggled.connect(self.onRefractionChanged)
         self.tab.param_manager.sigEqAspectToggled.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigForceDistortionToggled.connect(self.onFitParametersChanged)
+        self.tab.param_manager.sigOnVignettingFixedToggled.connect(self.onVignettingChanged)
 
         # Connect astronmetry & photometry buttons to functions
         self.tab.param_manager.sigFitPressed.connect(lambda: self.fitPickedStars())
@@ -1147,6 +1149,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateLeftLabels()
 
     def onExtinctionChanged(self):
+        self.photometry()
+        self.updateLeftLabels()
+
+    def onVignettingChanged(self):
         self.photometry()
         self.updateLeftLabels()
 
@@ -1772,10 +1778,21 @@ class PlateTool(QtWidgets.QMainWindow):
                                                               date2JD(*self.img_handle.currentTime()),
                                                               self.platepar)
 
+
+            # Determine if the vignetting should be kept fixed. Only if:
+            # a) Explicitly kept fixed
+            # b) The flat is used, then the vignetting coeff is zero
+            fixed_vignetting = None
+            if self.flat_struct is not None:
+                fixed_vignetting = 0.0
+
+            elif self.platepar.vignetting_fixed:
+                fixed_vignetting = self.platepar.vignetting_coeff
+
+            
             # Fit the photometric offset (disable vignetting fit if a flat is used)
-            photom_params, fit_stddev, fit_resids = photometryFit(px_intens_list, radius_list,
-                                                                  catalog_mags, fixed_vignetting=(
-                    0.0 if self.flat_struct is not None else None))
+            photom_params, fit_stddev, fit_resids = photometryFit(px_intens_list, radius_list, catalog_mags, \
+                fixed_vignetting=fixed_vignetting)
 
             photom_offset, vignetting_coeff = photom_params
 
@@ -1784,6 +1801,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.mag_lev = photom_offset
             self.platepar.mag_lev_stddev = fit_stddev
             self.platepar.vignetting_coeff = vignetting_coeff
+
+            # Update the values in the platepar tab in the GUI
+            self.tab.param_manager.updatePlatepar()
 
             if self.selected_stars_visible:
 
@@ -2164,6 +2184,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             if not hasattr(self.platepar, "extinction_scale"):
                 self.platepar.extinction_scale = 1.0
+
+            if not hasattr(self.platepar, "vignetting_fixed"):
+                self.platepar.vignetting_fixed = False
 
 
             if not hasattr(self.platepar, "measurement_apparent_to_true_refraction"):

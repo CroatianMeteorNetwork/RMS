@@ -216,6 +216,7 @@ class Platepar(object):
         self.mag_lev_stddev = 0.0
         self.gamma = 1.0
         self.vignetting_coeff = 0.0
+        self.vignetting_fixed = False
 
         # Extinction correction scaling
         self.extinction_scale = 1.0
@@ -1027,6 +1028,10 @@ class Platepar(object):
 
             # Add the default vignetting coeff
             self.addVignettingCoeff(use_flat=use_flat)
+
+        # Add keeping the vignetting coefficient fixed
+        if not 'vignetting_fixed' in self.__dict__:
+            self.vignetting_fixed = False
 
         # Add extinction scale
         if not 'extinction_scale' in self.__dict__:

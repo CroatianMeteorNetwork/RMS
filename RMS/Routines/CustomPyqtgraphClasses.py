@@ -1547,6 +1547,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigFitParametersChanged = QtCore.pyqtSignal()
     sigLocationChanged = QtCore.pyqtSignal()
     sigExtinctionChanged = QtCore.pyqtSignal()
+    sigVignettingChanged = QtCore.pyqtSignal()
 
     sigFitPressed = QtCore.pyqtSignal()
     sigAstrometryPressed = QtCore.pyqtSignal()
@@ -1558,6 +1559,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigEqAspectToggled = QtCore.pyqtSignal()
     sigAsymmetryCorrToggled = QtCore.pyqtSignal()
     sigForceDistortionToggled = QtCore.pyqtSignal()
+    sigOnVignettingFixedToggled = QtCore.pyqtSignal()
 
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
@@ -1685,6 +1687,22 @@ class PlateparParameterManager(QtWidgets.QWidget):
         hbox.addWidget(self.extinction_scale)
         hbox.addWidget(QtWidgets.QLabel('', alignment=QtCore.Qt.AlignLeft))
         form.addRow(QtWidgets.QLabel('Extinction'), hbox)
+
+        hbox = QtWidgets.QHBoxLayout()
+        self.vignetting_coeff = DoubleSpinBox()
+        self.vignetting_coeff.setMinimum(0)
+        self.vignetting_coeff.setMaximum(0.1)
+        self.vignetting_coeff.setDecimals(8)
+        self.vignetting_coeff.setSingleStep(0.0001)
+        self.vignetting_coeff.setFixedWidth(100)
+        self.vignetting_coeff.valueModified.connect(self.onVignettingChanged)
+        hbox.addWidget(self.vignetting_coeff)
+        hbox.addWidget(QtWidgets.QLabel('rad/px', alignment=QtCore.Qt.AlignLeft))
+        form.addRow(QtWidgets.QLabel("Vignetting"), hbox)
+
+        self.vignetting_fixed = QtWidgets.QCheckBox('Fixed vignetting')
+        self.vignetting_fixed.released.connect(self.onVignettingFixedToggled)
+        form.addRow(self.vignetting_fixed)
 
         form.addRow(QtWidgets.QLabel("Press Enter to accept value"))
 
@@ -1814,6 +1832,17 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.gui.platepar.extinction_scale = self.extinction_scale.value()
         self.sigExtinctionChanged.emit()
 
+    def onVignettingChanged(self):
+        self.gui.platepar.vignetting_coeff = self.vignetting_coeff.value()
+        self.sigVignettingChanged.emit()
+
+    def onVignettingFixedToggled(self):
+        self.gui.platepar.vignetting_fixed = self.vignetting_fixed.isChecked()
+        self.sigOnVignettingFixedToggled.emit()
+
+        # If the vignetting is fixed, allow setting manual values
+        self.vignetting_coeff.setDisabled(not self.gui.platepar.vignetting_fixed)
+
     def onFitParametersChanged(self):
         # fit parameter object updates platepar by itself
         self.sigFitParametersChanged.emit()
@@ -1849,10 +1878,14 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.fit_parameters.updateValues()
         self.distortion_type.setCurrentIndex(
             self.gui.platepar.distortion_type_list.index(self.gui.platepar.distortion_type))
-        # self.lat.setValue(self.gui.platepar.lat)
-        # self.lon.setValue(self.gui.platepar.lon)
-        # self.elev.setValue(self.gui.platepar.elev)
         self.extinction_scale.setValue(self.gui.platepar.extinction_scale)
+        
+        self.vignetting_coeff.setValue(self.gui.platepar.vignetting_coeff)
+        self.vignetting_fixed.setChecked(self.gui.platepar.vignetting_fixed)
+
+        # If the vignetting is fixed, allow setting manual values
+        self.vignetting_coeff.setDisabled(not self.gui.platepar.vignetting_fixed)
+
         self.refraction.setChecked(self.gui.platepar.refraction)
         self.eqAspect.setChecked(self.gui.platepar.equal_aspect)
         self.asymmetryCorr.setChecked(self.gui.platepar.asymmetry_corr)
