@@ -956,6 +956,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img_frame.sigResized.connect(self.onFrameResize)
 
         self.setMinimumSize(1200, 800)
+
+        # Open in full screen
+        self.showMaximized()
+
+
         self.show()
 
         self.updateLeftLabels()

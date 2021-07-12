@@ -215,8 +215,8 @@ class Platepar(object):
         self.mag_lev = 1.0
         self.mag_lev_stddev = 0.0
         self.gamma = 1.0
-        self.vignetting_coeff = 0.0
-        self.vignetting_fixed = False
+        self.vignetting_coeff = 0.001
+        self.vignetting_fixed = True
 
         # Extinction correction scaling
         self.extinction_scale = 1.0
