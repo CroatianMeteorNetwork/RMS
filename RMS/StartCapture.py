@@ -196,6 +196,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             night_data_dir_name)
 
 
+    # Wait before the capture starts if a time has been given
+    if (not resume_capture) and (video_file is not None):
+        log.info("Waiting {:d} seconds before capture start...".format(int(config.capture_wait_seconds)))
+        time.sleep(config.capture_wait_seconds)
+
 
     # Make a directory for the night
     mkdirP(night_data_dir)
