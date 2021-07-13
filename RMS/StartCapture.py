@@ -197,7 +197,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # Wait before the capture starts if a time has been given
-    if (not resume_capture) and (video_file is not None):
+    if (not resume_capture) and (video_file is None):
         log.info("Waiting {:d} seconds before capture start...".format(int(config.capture_wait_seconds)))
         time.sleep(config.capture_wait_seconds)
 
