@@ -44,8 +44,11 @@ def selectFiles(config, dir_path, ff_detected):
     if config.upload_mode == 2:
         upload_ffs = False
 
-    if config.upload_mode == 3:
+    elif config.upload_mode == 3:
         upload_ffs = False
+        upload_frs = False
+
+    elif config.upload_mode == 4:
         upload_frs = False
 
     ### ###
