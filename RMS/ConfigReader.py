@@ -281,6 +281,10 @@ class Config:
         # Flag file which indicates that the previously processed files are loaded during capture resume
         self.capture_resume_flag_file = ".capture_resuming"
 
+        # Wait an additional time (seconds) after the capture is supposed to start. Used for multi-camera 
+        #   systems for a staggered capture start
+        self.capture_wait_seconds = 0
+
         ##### Upload
 
         # Flag determining if uploading is enabled or not
@@ -819,6 +823,11 @@ def parseCapture(config, parser):
     # Load name of the capture resume flag file
     if parser.has_option(section, "capture_resume_flag_file"):
         config.capture_resume_flag_file = parser.get(section, "capture_resume_flag_file")
+
+
+    # Load the time for waiting after the capture is supposed to start, to stagger multi-camera start times
+    if parser.has_option(section, "capture_wait_seconds"):
+        config.capture_wait_seconds = parser.getint(section, "capture_wait_seconds")
 
 
 
