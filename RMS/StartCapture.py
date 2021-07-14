@@ -949,7 +949,8 @@ if __name__ == "__main__":
 
         # Run capture and compression
         night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect, \
-            upload_manager=upload_manager, detect_end=cml_args.detectend, resume_capture=cml_args.resume)
+            upload_manager=upload_manager, detect_end=(cml_args.detectend or config.postprocess_at_end), \
+            resume_capture=cml_args.resume)
 
         # Indicate that the capture was done once
         ran_once = True

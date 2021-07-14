@@ -285,6 +285,9 @@ class Config:
         #   systems for a staggered capture start
         self.capture_wait_seconds = 0
 
+        # Run detection and the rest of postprocessing at the end of the night, instead of parallel to capture
+        self.postprocess_at_end = False
+
         ##### Upload
 
         # Flag determining if uploading is enabled or not
@@ -828,6 +831,11 @@ def parseCapture(config, parser):
     # Load the time for waiting after the capture is supposed to start, to stagger multi-camera start times
     if parser.has_option(section, "capture_wait_seconds"):
         config.capture_wait_seconds = parser.getint(section, "capture_wait_seconds")
+
+
+    # Run detection and the rest of postprocessing at the end of the night, instead of in parallel to capture
+    if parser.has_option(section, "postprocess_at_end"):
+        config.postprocess_at_end = parser.getboolean(section, "postprocess_at_end")
 
 
 
