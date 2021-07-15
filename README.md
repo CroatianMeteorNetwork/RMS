@@ -90,7 +90,7 @@ conda install -y -c astropy astropy
 pip install rawpy
 ```
 
-To install OpenCV, use the ```opencv4_install.sh``` script. This will build OpenCV with gstreamer support.
+To install OpenCV, use the ```opencv4_install.sh``` script. This will build OpenCV with gstreamer and ffmpeg support.
 
 
 ## Setting up
