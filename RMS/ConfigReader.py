@@ -288,6 +288,11 @@ class Config:
         # Run detection and the rest of postprocessing at the end of the night, instead of parallel to capture
         self.postprocess_at_end = False
 
+        # Wait an additional time (in seconds) to start the detection thread. If postprocess_at_end is set to 
+        #   false, the delay will occur after the beginning of capture, and if it's set to true, the delay 
+        #   will occur after the capture ends
+        self.postprocess_delay = 0
+
         ##### Upload
 
         # Flag determining if uploading is enabled or not
@@ -836,6 +841,10 @@ def parseCapture(config, parser):
     # Run detection and the rest of postprocessing at the end of the night, instead of in parallel to capture
     if parser.has_option(section, "postprocess_at_end"):
         config.postprocess_at_end = parser.getboolean(section, "postprocess_at_end")
+
+    # Load the time for waiting before postprocessing begins
+    if parser.has_option(section, "postprocess_delay"):
+        config.postprocess_delay = parser.getint(section, "postprocess_delay")
 
 
 

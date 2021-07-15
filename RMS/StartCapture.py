@@ -251,8 +251,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             delay_detection = duration
 
         else:
-            # Delay the detection for 2 minutes after capture start
+            # Delay the detection for 2 minutes after capture start (helps stability)
             delay_detection = 120
+
+
+        # Add an additional postprocessing delay
+        delay_detection += config.postprocess_delay
 
 
         # Set a flag file to indicate that previous files are being loaded (if any)
