@@ -188,6 +188,138 @@ class GeoPoints(object):
 
         
 
+class CatalogStar(object):
+    def __init__(self, ra, dec, mag):
+        """ Container for a catalog star. """
+
+        self.pick_type = "star"
+
+        self.ra = ra
+        self.dec = dec
+        self.mag = mag
+
+
+    def coords(self):
+        """ Return sky coordinates. """
+
+        return self.ra, self.dec, self.mag
+
+
+
+class GeoPoint(object):
+    def __init__(self, geo_points_obj, geo_point_index):
+        """ Container for a geo point. """
+
+        self.pick_type = "geopoint"
+
+        self.geo_points_obj = geo_points_obj
+        self.geo_point_index = geo_point_index
+
+
+    def coords(self):
+        """ Return sky coordinates. """
+
+        ra = self.geo_points_obj.ra_data[self.geo_point_index]
+        dec = self.geo_points_obj.dec_data[self.geo_point_index]
+        mag = 1.0
+
+        return ra, dec, mag
+
+
+
+
+class PairedStars(object):
+    def __init__(self):
+        """ Container for picked stars and geo points. """
+
+        self.paired_stars = []
+
+
+    def addPair(self, x, y, intens_acc, obj):
+        """ Add a pair between image coordinates and a star or a geo point. 
+    
+        Arguments:
+            x: [float] Image X coordiante.
+            y: [float] Image Y coordinate.
+            intens_acc: [float] Sum of pixel intensities.
+            obj: [object] Instance of CatalogStar or GeoPoint.
+
+        """
+
+        self.paired_stars.append([x, y, intens_acc, obj])
+
+
+    def removeGeoPoints(self):
+        """ Remove all geo points form the list of pairs. """
+
+        self.paired_stars = [entry for entry in self.paired_stars if entry[3].pick_type != "geopoint"]
+
+
+
+    def findClosestPickedStarIndex(self, pos_x, pos_y):
+        """ Finds the index of the closest picked star on the image to the given image position. """
+
+        min_index = 0
+        min_dist = np.inf
+
+        picked_x = [star[0] for star in self.paired_stars]
+        picked_y = [star[1] for star in self.paired_stars]
+
+        # Find the index of the closest catalog star to the given image coordinates
+        for i, (x, y) in enumerate(zip(picked_x, picked_y)):
+
+            dist = (pos_x - x)**2 + (pos_y - y)**2
+
+            if dist < min_dist:
+                min_dist = dist
+                min_index = i
+
+        return min_index
+
+
+    def removeClosestPair(self, pos_x, pos_y):
+        """ Remove pair closest to the given image coordinates. """
+
+        if not len(self.paired_stars):
+            return None
+
+        # Find the closest star to the coordiantes
+        min_index = self.findClosestPickedStarIndex(pos_x, pos_y)
+
+        # Remove the star from the list
+        self.paired_stars.pop(min_index)
+
+
+    def imageCoords(self):
+        """ Return a list of image coordinates of the pairs. """
+
+        img_coords = [(x, y, intens_acc) for x, y, intens_acc, _ in self.paired_stars]
+
+        return img_coords
+
+
+    def skyCoords(self):
+        """ Return a list of sky coordinates. """
+
+        return [obj.coords() for _, _, _, obj in self.paired_stars]
+
+
+    def allCoords(self):
+        """ Return all coordiantes, image and sky in the [(x, y, intens_acc), (ra, dec, mag)] list form 
+            for every entry. 
+        """
+
+        return [[(x, y, intens_acc), obj.coords()] for x, y, intens_acc, obj in self.paired_stars]
+
+
+
+
+    def __len__(self):
+        """ Return the total number of paired stars. """
+
+        return len(self.paired_stars)
+
+
 
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False, \
@@ -264,6 +396,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Measure points on the ground, not on the sky
         self.meas_ground_points = False
 
+        # Do the astrometric pick and the photometry in a single click
+        self.single_click_photometry = False
+
         # Star picking mode variables
         self.star_aperature_radius = 5
         self.x_centroid = self.y_centroid = None
@@ -272,7 +407,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # List of paired image and catalog stars
         self.pick_list = {}
-        self.paired_stars = []
+        self.paired_stars = PairedStars()
         self.residuals = None
 
         # Positions of the mouse cursor
@@ -303,8 +438,15 @@ class PlateTool(QtWidgets.QMainWindow):
         # Flag indicating that the first platepar fit has to be done
         self.first_platepar_fit = True
 
-        # Flag indicating that 
+        # Flag indicating that only the pointing will be fit, not the distortion
         self.fit_only_pointing = False
+
+        # Flag indicating that the scale will not be fit
+        self.fixed_scale = False
+
+        # Flag indicating that the astrometry will be automatically re-fit when the station is moved (only 
+        #   when geopoints are available)
+        self.station_moved_auto_refit = False
 
         ###################################################################################################
 
@@ -633,17 +775,18 @@ class PlateTool(QtWidgets.QMainWindow):
         text_str = "STAR PICKING MODE\n"
         text_str += "LEFT CLICK - Centroid star\n"
         text_str += "CTRL + LEFT CLICK - Manual star position\n"
+        text_str += "RIGHT CLICK - Remove pair\n"
         text_str += "CTRL + SCROLL - Aperture radius adjust\n"
         text_str += "CTRL + Z - Fit stars\n"
         text_str += "CTRL + SHIFT + Z - Fit with initial distortion params set to 0\n"
         text_str += "L - Astrometry fit details\n"
         text_str += "P - Photometry fit"
-        self.star_pick_info = TextItem(text_str, anchor=(0.5, 0.5), color=(255, 255, 255))
+        self.star_pick_info = TextItem(text_str, anchor=(0.5, 0.75), color=(255, 255, 255))
         self.star_pick_info.setAlign(QtCore.Qt.AlignCenter)
         self.star_pick_info.hide()
         self.star_pick_info.setZValue(10)
         self.star_pick_info.setParentItem(self.img_frame)
-        self.star_pick_info.setPos(self.platepar.X_res/2, self.platepar.Y_res - 55)
+        self.star_pick_info.setPos(self.platepar.X_res/2, self.platepar.Y_res)
 
         # Default variables even when constructor isnt called
         self.star_pick_mode = False
@@ -762,7 +905,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if loaded_file:
             self.updatePairedStars()
 
-        # make connections to sidebar gui
+        # Make connections to sidebar gui
         #self.tab.param_manager.sigElevChanged.connect(self.onExtinctionChanged)
         self.tab.param_manager.sigLocationChanged.connect(self.onAzAltChanged)
         self.tab.param_manager.sigAzAltChanged.connect(self.onAzAltChanged)
@@ -770,11 +913,13 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigScaleChanged.connect(self.onScaleChanged)
         self.tab.param_manager.sigFitParametersChanged.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigExtinctionChanged.connect(self.onExtinctionChanged)
+        self.tab.param_manager.sigVignettingChanged.connect(self.onVignettingChanged)
 
         self.tab.param_manager.sigFitOnlyPointingToggled.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigRefractionToggled.connect(self.onRefractionChanged)
         self.tab.param_manager.sigEqAspectToggled.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigForceDistortionToggled.connect(self.onFitParametersChanged)
+        self.tab.param_manager.sigOnVignettingFixedToggled.connect(self.onVignettingChanged)
 
         # Connect astronmetry & photometry buttons to functions
         self.tab.param_manager.sigFitPressed.connect(lambda: self.fitPickedStars())
@@ -784,6 +929,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.tab.geolocation.sigLocationChanged.connect(self.onAzAltChanged)
         self.tab.geolocation.sigReloadGeoPoints.connect(self.reloadGeoPoints)
+        self.tab.geolocation.sigFitPressed.connect(lambda: self.fitPickedStars())
 
         self.tab.settings.sigMaxAveToggled.connect(self.toggleImageType)
         self.tab.settings.sigCatStarsToggled.connect(self.toggleShowCatStars)
@@ -796,6 +942,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigMeasGroundPointsToggled.connect(self.toggleMeasGroundPoints)
         self.tab.settings.sigGridToggled.connect(self.onGridChanged)
         self.tab.settings.sigInvertToggled.connect(self.toggleInvertColours)
+        self.tab.settings.sigSingleClickPhotometryToggled.connect(self.toggleSingleClickPhotometry)
 
         layout.addWidget(self.tab, 0, 2)
 
@@ -809,6 +956,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img_frame.sigResized.connect(self.onFrameResize)
 
         self.setMinimumSize(1200, 800)
+
+        # Open in full screen
+        self.showMaximized()
+
+
         self.show()
 
         self.updateLeftLabels()
@@ -877,6 +1029,7 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str = "STAR PICKING MODE\n"
             text_str += "LEFT CLICK - Centroid star\n"
             text_str += "CTRL + LEFT CLICK - Manual star position\n"
+            text_str += "RIGHT CLICK - Remove pair\n"
             text_str += "CTRL + SCROLL - Aperture radius adjust\n"
             text_str += "CTRL + Z - Fit stars\n"
             text_str += "CTRL + SHIFT + Z - Fit with initial distortion params set to 0\n"
@@ -956,7 +1109,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
         self.img_frame.autoRange(padding=0)
 
-        self.paired_stars = []
+        self.paired_stars = PairedStars()
         self.updatePairedStars()
         self.pick_list = {}
         self.residuals = None
@@ -1001,6 +1154,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateLeftLabels()
 
     def onExtinctionChanged(self):
+        self.photometry()
+        self.updateLeftLabels()
+
+    def onVignettingChanged(self):
         self.photometry()
         self.updateLeftLabels()
 
@@ -1266,7 +1423,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.geo_points_obj.update(self.platepar, ff_jd)
 
             # RA, dec, and fake magnitude of geo points
-            geo_points = np.c_[self.geo_points_obj.ra_data, self.geo_points_obj.dec_data, \
+            self.geo_points = np.c_[self.geo_points_obj.ra_data, self.geo_points_obj.dec_data, \
                 np.ones_like(self.geo_points_obj.ra_data)]
 
 
@@ -1274,12 +1431,12 @@ class PlateTool(QtWidgets.QMainWindow):
             pp_noref = copy.deepcopy(self.platepar)
             pp_noref.refraction = False
             pp_noref.updateRefRADec(preserve_rotation=True)
-            self.geo_x, self.geo_y, _ = getCatalogStarsImagePositions(geo_points, ff_jd, pp_noref)
+            self.geo_x, self.geo_y, _ = getCatalogStarsImagePositions(self.geo_points, ff_jd, pp_noref)
 
             geo_xy = np.c_[self.geo_x, self.geo_y]
 
             # Get indices of points inside the fov
-            filtered_indices, _ = self.filterCatalogStarsInsideFOV(geo_points, remove_under_horizon=False)
+            filtered_indices, _ = self.filterCatalogStarsInsideFOV(self.geo_points, remove_under_horizon=False)
 
             # Create a mask to filter out all points outside the image and the FOV
             filter_indices_mask = np.zeros(len(geo_xy), dtype=np.bool)
@@ -1289,21 +1446,19 @@ class PlateTool(QtWidgets.QMainWindow):
                                                     & (geo_xy[:, 1] > 0) \
                                                     & (geo_xy[:, 1] < self.platepar.Y_res)
 
+            self.geo_filtered_indices = filtered_indices_all
 
-            geo_xy = geo_xy[filtered_indices_all]
-
-            self.geo_x, self.geo_y = geo_xy.T
 
             # Hold a list of geo points (equatorial coordiantes) which are visible inside the FOV (with a 
             #   fake magnitude)
-            self.geo_points_filtered = geo_points[filtered_indices_all]
+            geo_xy = geo_xy[self.geo_filtered_indices]
+            self.geo_x_filtered, self.geo_y_filtered = geo_xy.T
 
             # Plot geo points
             if self.catalog_stars_visible:
                 geo_size = 5
-                self.geo_markers.setData(x=self.geo_x, y=self.geo_y, size=geo_size)
-                self.geo_markers2.setData(x=self.geo_x, y=self.geo_y, size=geo_size)
-
+                self.geo_markers.setData(x=self.geo_x_filtered, y=self.geo_y_filtered, size=geo_size)
+                self.geo_markers2.setData(x=self.geo_x_filtered, y=self.geo_y_filtered, size=geo_size)
 
 
         ### Draw catalog stars on the image using the current platepar ###
@@ -1360,8 +1515,8 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Draws the stars that were picked for calibration as well as draw the residuals and star magnitude.
         """
         if len(self.paired_stars) > 0:
-            self.sel_cat_star_markers.setData(pos=[pair[0][:2] for pair in self.paired_stars])
-            self.sel_cat_star_markers2.setData(pos=[pair[0][:2] for pair in self.paired_stars])
+            self.sel_cat_star_markers.setData(pos=self.paired_stars.imageCoords())
+            self.sel_cat_star_markers2.setData(pos=self.paired_stars.imageCoords())
 
         else:
             self.sel_cat_star_markers.setData(pos=[])
@@ -1600,7 +1755,7 @@ class PlateTool(QtWidgets.QMainWindow):
         catalog_dec = []
         catalog_mags = []
 
-        for paired_star in self.paired_stars:
+        for paired_star in self.paired_stars.allCoords():
 
             img_star, catalog_star = paired_star
 
@@ -1628,10 +1783,21 @@ class PlateTool(QtWidgets.QMainWindow):
                                                               date2JD(*self.img_handle.currentTime()),
                                                               self.platepar)
 
+
+            # Determine if the vignetting should be kept fixed. Only if:
+            # a) Explicitly kept fixed
+            # b) The flat is used, then the vignetting coeff is zero
+            fixed_vignetting = None
+            if self.flat_struct is not None:
+                fixed_vignetting = 0.0
+
+            elif self.platepar.vignetting_fixed:
+                fixed_vignetting = self.platepar.vignetting_coeff
+
+            
             # Fit the photometric offset (disable vignetting fit if a flat is used)
-            photom_params, fit_stddev, fit_resids = photometryFit(px_intens_list, radius_list,
-                                                                  catalog_mags, fixed_vignetting=(
-                    0.0 if self.flat_struct is not None else None))
+            photom_params, fit_stddev, fit_resids = photometryFit(px_intens_list, radius_list, catalog_mags, \
+                fixed_vignetting=fixed_vignetting)
 
             photom_offset, vignetting_coeff = photom_params
 
@@ -1640,6 +1806,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.mag_lev = photom_offset
             self.platepar.mag_lev_stddev = fit_stddev
             self.platepar.vignetting_coeff = vignetting_coeff
+
+            # Update the values in the platepar tab in the GUI
+            self.tab.param_manager.updatePlatepar()
 
             if self.selected_stars_visible:
 
@@ -1851,7 +2020,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Reset paired stars
             self.pick_list = {}
-            self.paired_stars = []
+            self.paired_stars = PairedStars()
             self.residuals = None
             self.drawPhotometryColoring()
 
@@ -2007,7 +2176,7 @@ class PlateTool(QtWidgets.QMainWindow):
         for k, v in variables.items():
             setattr(self, k, v)
 
-        # updating old state files with new platepar variables
+        # Updating old state files with new platepar variables
         if self.platepar is not None:
             if not hasattr(self.platepar, "equal_aspect"):
                 self.platepar.equal_aspect = True
@@ -2021,6 +2190,9 @@ class PlateTool(QtWidgets.QMainWindow):
             if not hasattr(self.platepar, "extinction_scale"):
                 self.platepar.extinction_scale = 1.0
 
+            if not hasattr(self.platepar, "vignetting_fixed"):
+                self.platepar.vignetting_fixed = False
+
 
             if not hasattr(self.platepar, "measurement_apparent_to_true_refraction"):
                 self.platepar.measurement_apparent_to_true_refraction = False
@@ -2032,10 +2204,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Update the array length if an old platepar version was loaded which was shorter
             self.platepar.padDictParams()
-
-            # Compute if the measurement should be post-corrected for refraction, because it was not
-            #   taken into account during the astrometry calibration procedure
-            self.updateMeasurementRefractionCorrection()
 
 
 
@@ -2057,9 +2225,22 @@ class PlateTool(QtWidgets.QMainWindow):
         self.dir_path = dir_path
 
 
-        # Update the dir path in the img_handle
+        # Update img_handle parameters
         if hasattr(self, "img_handle"):
+
+            # Update the dir path
             self.img_handle.dir_path = dir_path
+
+            # Make sure an option is not missing
+            if self.img_handle.input_type == 'images':
+                if not hasattr(self.img_handle, "fripon_mode"):
+                    self.img_handle.fripon_mode = False
+                    self.img_handle.fripon_header = None
+
+            # Make sure an option is not missing
+            if self.img_handle.input_type == 'images':
+                if not hasattr(self.img_handle, "cabernet_status"):
+                    self.img_handle.cabernet_status = False
 
         # Update possibly missing input_path variable
         if not hasattr(self, "input_path"):
@@ -2087,6 +2268,14 @@ class PlateTool(QtWidgets.QMainWindow):
             self.fit_only_pointing = False
 
         # Update the possibly missing params
+        if not hasattr(self, "fixed_scale"):
+            self.fixed_scale = False
+
+        # Update the possibly missing params
+        if not hasattr(self, "station_moved_auto_refit"):
+            self.station_moved_auto_refit = False
+
+        # Update the possibly missing params
         if not hasattr(self, "geo_points_obj"):
             self.geo_points_obj = None
 
@@ -2101,6 +2290,35 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update possibly missing flag for measuring ground points
         if not hasattr(self, "meas_ground_points"):
             self.meas_ground_points = False
+
+
+        # Update possibly missing flag for measuring ground points
+        if not hasattr(self, "single_click_photometry"):
+            self.single_click_photometry = False
+
+
+        # If the paired stars are a list (old version), reset it to a new version where it's an object
+        if isinstance(self.paired_stars, list):
+
+            paired_stars_new = PairedStars()
+
+            for entry in self.paired_stars:
+                
+                img_coords, sky_coords = entry
+                x, y, intens_acc = img_coords
+                sky_obj = CatalogStar(*sky_coords)
+
+                paired_stars_new.addPair(x, y, intens_acc, sky_obj)
+
+            self.paired_stars = paired_stars_new
+
+
+
+        if self.platepar is not None:
+
+            # Compute if the measurement should be post-corrected for refraction, because it was not
+            #   taken into account during the astrometry calibration procedure
+            self.updateMeasurementRefractionCorrection()
 
 
         # If setupUI hasn't already been called, call it
@@ -2190,8 +2408,12 @@ class PlateTool(QtWidgets.QMainWindow):
             y_data = [self.catalog_y_filtered[self.closest_cat_star_indx]]
 
         else:
-            # Fetch the coordinates of the geo point
+
+            # Find the index among all geo points visible in the FOV of the one closest to the clicked 
+            #   position
             self.closest_geo_point_indx = closest_indx
+
+            # Fetch the coordinates of the geo point
             x_data = [self.geo_x[self.closest_geo_point_indx]]
             y_data = [self.geo_y[self.closest_geo_point_indx]]
 
@@ -2262,8 +2484,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     elif self.cursor.mode == 1:
 
                         # REMOVE marker for previously selected
-                        self.sel_cat_star_markers.setData(pos=[pair[0][:2] for pair in self.paired_stars])
-                        self.sel_cat_star_markers2.setData(pos=[pair[0][:2] for pair in self.paired_stars])
+                        self.sel_cat_star_markers.setData(pos=self.paired_stars.imageCoords())
+                        self.sel_cat_star_markers2.setData(pos=self.paired_stars.imageCoords())
 
 
                         # Find coordiantes of the star or geo points closest to the clicked point
@@ -2278,13 +2500,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 elif event.button() == QtCore.Qt.RightButton:
                     if self.cursor.mode == 0:
 
-                        # Find the closest picked star
-                        picked_indx = self.findClosestPickedStarIndex(self.mouse_x, self.mouse_y)
-
-                        if self.paired_stars:
-                            
-                            # Remove the picked star from the list
-                            self.paired_stars.pop(picked_indx)
+                        # Remove the closest picked star from the list
+                        self.paired_stars.removeClosestPair(self.mouse_x, self.mouse_y)
 
                         self.updatePairedStars()
                         self.updateFitResiduals()
@@ -2311,6 +2528,14 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.addCentroid(self.img.getFrame(), self.x_centroid, self.y_centroid, mode=mode)
 
                         self.updatePicks()
+
+                        # Add photometry coloring if single-click photometry is turned on
+                        if self.single_click_photometry:
+                            
+                            self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
+                                              add_photometry=True)
+                            self.drawPhotometryColoring()
+
 
                     elif self.cursor.mode == 2:
                         self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
@@ -2933,18 +3158,25 @@ class PlateTool(QtWidgets.QMainWindow):
                             selected_coords = self.catalog_stars_filtered[self.closest_cat_star_indx]
                             self.closest_cat_star_indx = None
 
+                            # Init a catalog star pair object
+                            pair_obj = CatalogStar(*selected_coords)
+
                         # Geo coordinates of the selected points
                         else:
-                            selected_coords = self.geo_points_filtered[self.closest_geo_point_indx]
-                            self.closest_geo_point_indx = None
+                            selected_coords = self.geo_points[self.closest_geo_point_indx]
 
                             # Set a fixed value for star intensity
                             self.star_intensity = 10.0
 
+                            # Init a geo point pair object
+                            pair_obj = GeoPoint(self.geo_points_obj, self.closest_geo_point_indx)
+
+                            self.closest_geo_point_indx = None
+
 
                         # Add the image/catalog pair to the list
-                        self.paired_stars.append([[self.x_centroid, self.y_centroid, self.star_intensity], \
-                                                  selected_coords])
+                        self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_intensity, \
+                            pair_obj)
 
                         # Switch back to centroiding mode
                         self.cursor.setMode(0)
@@ -3255,6 +3487,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img.invert()
         self.img_zoom.invert()
 
+    def toggleSingleClickPhotometry(self):
+        self.single_click_photometry = not self.single_click_photometry
+
 
     def updateMeasurementRefractionCorrection(self):
 
@@ -3536,6 +3771,9 @@ class PlateTool(QtWidgets.QMainWindow):
             if os.path.isfile(self.geo_points_input):
                 self.geo_points_obj = GeoPoints(self.geo_points_input)
 
+                # Remove all geo points from the picked list
+                self.paired_stars.removeGeoPoints()
+
                 self.updateStars()
 
 
@@ -3732,7 +3970,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.first_platepar_fit = True
 
         # Reset paired stars
-        self.paired_stars = []
+        self.paired_stars = PairedStars()
         self.residuals = None
 
         # Indicate that a new platepar is being made
@@ -3838,27 +4076,6 @@ class PlateTool(QtWidgets.QMainWindow):
                         message_type="error")
 
         return dark_file, dark
-
-
-    def findClosestPickedStarIndex(self, pos_x, pos_y):
-        """ Finds the index of the closest picked star on the image to the given image position. """
-
-        min_index = 0
-        min_dist = np.inf
-
-        picked_x = [star[0][0] for star in self.paired_stars]
-        picked_y = [star[0][1] for star in self.paired_stars]
-
-        # Find the index of the closest catalog star to the given image coordinates
-        for i, (x, y) in enumerate(zip(picked_x, picked_y)):
-
-            dist = (pos_x - x)**2 + (pos_y - y)**2
-
-            if dist < min_dist:
-                min_dist = dist
-                min_index = i
-
-        return min_index
 
 
     def addCentroid(self, frame, x_centroid, y_centroid, mode=1):
@@ -4140,6 +4357,10 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.geo_points_obj is not None:
             for i, (x, y) in enumerate(zip(self.geo_x, self.geo_y)):
 
+                # Only take the star if it's visible in the FOV
+                if not self.geo_filtered_indices[i]:
+                    continue
+
                 dist = (pos_x - x)**2 + (pos_y - y)**2
 
                 if dist < min_dist:
@@ -4168,15 +4389,15 @@ class PlateTool(QtWidgets.QMainWindow):
         print("Fitting platepar...")
 
         # Extract paired catalog stars and image coordinates separately
-        img_stars = np.array(self.paired_stars)[:, 0]
-        catalog_stars = np.array(self.paired_stars)[:, 1]
+        img_stars = np.array(self.paired_stars.imageCoords())
+        catalog_stars = np.array(self.paired_stars.skyCoords())
 
         # Get the Julian date of the image that's being fit
         jd = date2JD(*self.img_handle.currentTime())
 
         # Fit the platepar to paired stars
         self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit,\
-            fit_only_pointing=self.fit_only_pointing)
+            fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale)
         self.first_platepar_fit = False
 
         # Show platepar parameters
@@ -4291,6 +4512,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
         print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
 
+        # Update fit residuals in the station tab when geopoints are used
+        if self.geo_points_obj is not None:
+            self.tab.geolocation.residuals_label.setText("Residuals:\n{:.2f} px, {:.2f} {:s}".format(rmsd_img,\
+                rmsd_angular, angular_error_label))
+
         # Print the field of view size
         #print("FOV: {:.2f} x {:.2f} deg".format(*computeFOVSize(self.platepar))) 
 
@@ -4310,8 +4536,8 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Show window with astrometry fit details. """
 
         # Extract paired catalog stars and image coordinates separately
-        img_stars = np.array(self.paired_stars)[:, 0]
-        catalog_stars = np.array(self.paired_stars)[:, 1]
+        img_stars = np.array(self.paired_stars.imageCoords())
+        catalog_stars = np.array(self.paired_stars.skyCoords())
 
         # Get the Julian date of the image that's being fit
         jd = date2JD(*self.img_handle.currentTime())

@@ -52,8 +52,8 @@ import scipy.ndimage
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
-    rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, extinctionCorrectionTrueToApparent,
-    getFOVSelectionRadius
+    rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
+    extinctionCorrectionTrueToApparent, getFOVSelectionRadius
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle
 import RMS.ConfigReader as cr
