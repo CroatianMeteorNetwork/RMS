@@ -29,8 +29,16 @@ def loadShowers(dir_path, file_name):
     return shower_data
 
 
+def makeShowerColors(shower_data, color_map='gist_ncar'):
+    """ Generates a map of distinct colours indexed by shower name """
+    names = sorted([s[1] for s in shower_data])
+    cmap = plt.get_cmap(color_map)
+    colors = cmap(np.linspace(0, 1, len(names)))
+    colors_by_name = {n:colors[i] for i,n in enumerate(names)}
+    return colors_by_name
 
-def generateActivityDiagram(config, shower_data, ax_handle=None, sol_marker=None):
+
+def generateActivityDiagram(config, shower_data, ax_handle=None, sol_marker=None, colors=None):
     """ Generates a plot of shower activity across all solar longitudes. """
 
     shower_data = np.array(shower_data)
@@ -56,7 +64,7 @@ def generateActivityDiagram(config, shower_data, ax_handle=None, sol_marker=None
     code_name_dict = {}
 
     activity_stack = np.zeros((20, 360), dtype=np.uint16)
-    colors = cm.tab10(np.linspace(0, 1.0, 10))
+    if not colors: colors = makeShowerColors(shower_data)
     shower_index = 0
 
     for i in range(20):
@@ -122,7 +130,7 @@ def generateActivityDiagram(config, shower_data, ax_handle=None, sol_marker=None
                 if shower_active:
 
                     # Get shower color
-                    color = colors[shower_index%10]
+                    color = colors[name]
                     shower_index += 1
 
                     # Assign shower params

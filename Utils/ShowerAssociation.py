@@ -17,7 +17,7 @@ from RMS.Astrometry.Conversions import raDec2Vector, vector2RaDec, datetime2JD, 
     geocentricToApparentRadiantAndVelocity, EARTH_CONSTANTS
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
-from RMS.Formats.Showers import loadShowers, generateActivityDiagram
+from RMS.Formats.Showers import loadShowers, generateActivityDiagram, makeShowerColors
 from RMS.Math import vectNorm, angularSeparation, angularSeparationVect, isAngleBetween, \
     sphericalPointFromHeadingAndDistance, cartesianToPolar
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePhase
@@ -619,6 +619,8 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
     # Create a plot of showers
     if show_plot or save_plot:
+        # Generate consistent colours
+        colors_by_name = makeShowerColors(shower_list)
 
         # Init the figure
         plt.figure()
@@ -758,7 +760,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
 
             # Plot the shower circle
-            allsky_plot.plot(ra_circle, dec_circle)
+            allsky_plot.plot(ra_circle, dec_circle, color=colors_by_name[shower_name])
 
 
             # Plot the shower name
@@ -809,7 +811,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
                 # Plot the activity diagram
                 generateActivityDiagram(config, shower_list, ax_handle=ax_activity, \
-                    sol_marker=[sol_min, sol_max])
+                    sol_marker=[sol_min, sol_max], colors=colors_by_name)
 
 
         
