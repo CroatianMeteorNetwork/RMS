@@ -644,8 +644,8 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
 
             ### Plot the observed meteor points ###
-
-            allsky_plot.plot(meteor_obj.ra_array, meteor_obj.dec_array, color='r', linewidth=1, zorder=4)
+            color = colors_by_name[shower.name] if shower else "gray"
+            allsky_plot.plot(meteor_obj.ra_array, meteor_obj.dec_array, color=color, linewidth=1, zorder=4)
 
             # Plot the peak of shower meteors a different color
             peak_color = 'blue'
