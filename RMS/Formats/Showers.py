@@ -11,6 +11,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
+from random import Random
+
 from RMS.Astrometry.Conversions import datetime2JD
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
 
@@ -28,10 +30,13 @@ def loadShowers(dir_path, file_name):
 
     return shower_data
 
+# The seed ensures shower colours are the same each run
+rng = Random(1) 
 
 def makeShowerColors(shower_data, color_map='gist_ncar'):
     """ Generates a map of distinct colours indexed by shower name """
     names = sorted([s[1] for s in shower_data])
+    rng.shuffle(names) # so names close alphabetically get distinct colours  
     cmap = plt.get_cmap(color_map)
     colors = cmap(np.linspace(0, 1, len(names)))
     colors_by_name = {n:colors[i] for i,n in enumerate(names)}
