@@ -45,7 +45,7 @@ if __name__ == "__main__":
     log.info("Performing single station shower association...")
 
     data_dir = cml_args.dir_path[0]
-    log.info(f"data dir: {data_dir}")
+    log.info("data dir: {}".format(data_dir))
 
     FTPdetectinfo_files = glob.glob('{:s}/FTPdetectinfo_*.txt'.format(data_dir))
     ftpdetectinfo_name = None
