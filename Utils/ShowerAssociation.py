@@ -17,7 +17,7 @@ from RMS.Astrometry.Conversions import raDec2Vector, vector2RaDec, datetime2JD, 
     geocentricToApparentRadiantAndVelocity, EARTH_CONSTANTS
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
-from RMS.Formats.Showers import loadShowers, generateActivityDiagram
+from RMS.Formats.Showers import loadShowers, generateActivityDiagram, makeShowerColors
 from RMS.Math import vectNorm, angularSeparation, angularSeparationVect, isAngleBetween, \
     sphericalPointFromHeadingAndDistance, cartesianToPolar
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePhase
@@ -619,6 +619,13 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
     # Create a plot of showers
     if show_plot or save_plot:
+        # Generate consistent colours
+        colors_by_name = makeShowerColors(shower_list)
+        def get_shower_color(shower):
+            try:
+                return colors_by_name[shower.name] if shower else "white"
+            except KeyError:
+                return 'gray'
 
         # Init the figure
         plt.figure()
@@ -642,8 +649,8 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
 
             ### Plot the observed meteor points ###
-
-            allsky_plot.plot(meteor_obj.ra_array, meteor_obj.dec_array, color='r', linewidth=1, zorder=4)
+            color = get_shower_color(shower)
+            allsky_plot.plot(meteor_obj.ra_array, meteor_obj.dec_array, color=color, linewidth=1, zorder=4)
 
             # Plot the peak of shower meteors a different color
             peak_color = 'blue'
@@ -672,7 +679,6 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                     else:
                         gc_beg_phase -= 360
 
-                gc_color = 'purple'
                 gc_alpha = 1.0
 
 
@@ -689,7 +695,6 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                 else:
                     gc_end_phase = gc_beg_phase + 170
 
-                gc_color = 'green'
                 gc_alpha = 0.7
 
 
@@ -711,6 +716,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             ra_gc, dec_gc = temp_arr.T
 
             # Plot the great circle fitted on the radiant
+            gc_color = get_shower_color(shower)
             allsky_plot.plot(ra_gc, dec_gc, linestyle='dotted', color=gc_color, alpha=gc_alpha, linewidth=1)
 
             # Plot the point closest to the shower radiant
@@ -758,7 +764,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
 
             # Plot the shower circle
-            allsky_plot.plot(ra_circle, dec_circle)
+            allsky_plot.plot(ra_circle, dec_circle, color=colors_by_name[shower_name])
 
 
             # Plot the shower name
@@ -809,7 +815,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
                 # Plot the activity diagram
                 generateActivityDiagram(config, shower_list, ax_handle=ax_activity, \
-                    sol_marker=[sol_min, sol_max])
+                    sol_marker=[sol_min, sol_max], colors=colors_by_name)
 
 
         
