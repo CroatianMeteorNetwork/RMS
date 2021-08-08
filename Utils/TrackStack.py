@@ -309,8 +309,6 @@ def trackStack(dir_path, config, border=5, background_compensation=True):
     #   some matplotlib versions)
     plt.subplots_adjust(left=0, bottom=0, right=0.9999, top=0.9999, wspace=0, hspace=0)
 
-    # remove leading path separator if present
-    dir_path = dir_path.rstrip('/').rstrip('\\')
     filenam = os.path.join(dir_path, os.path.basename(dir_path) + "_track_stack.jpg")
     plt.savefig(filenam, bbox_inches='tight', pad_inches=0, dpi=dpi)
 
@@ -356,5 +354,6 @@ if __name__ == "__main__":
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
-
-    trackStack(cml_args.dir_path, config, background_compensation=(not cml_args.bkgnormoff))
+    
+    dir_path = os.path.normpath(cml_args.dir_path)
+    trackStack(dir_path, config, background_compensation=(not cml_args.bkgnormoff))
