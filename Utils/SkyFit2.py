@@ -4653,13 +4653,20 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_skyradius.set_ylabel("Radius error (arcmin)")
         ax_skyradius.set_xlim([0, np.hypot(*computeFOVSize(self.platepar))/2])
 
-        # Equalize Y limits, make them multiples of 5 arcmin, and set a minimum range of 5 arcmin
+        # Equalize Y limits, make them multiples of 5 arcmin, and set a minimum range of 5, 2, or 1 arcmin
         azim_max_ylim = np.max(np.abs(ax_azim.get_ylim()))
         elev_max_ylim = np.max(np.abs(ax_elev.get_ylim()))
         skyradius_max_ylim = np.max(np.abs(ax_skyradius.get_ylim()))
-        max_ylim = np.ceil(np.max([azim_max_ylim, elev_max_ylim, skyradius_max_ylim])/5)*5
-        if max_ylim < 5.0:
+        max_ylim = np.max([azim_max_ylim, elev_max_ylim, skyradius_max_ylim])
+        if max_ylim < 2.0:
+            max_ylim = 2.0
+        elif max_ylim < 5.0:
             max_ylim = 5.0
+        else:
+            # Make it a multiple of 5 arcmin if errors are large
+            max_ylim = np.ceil(max_ylim/5)*5
+
+        
         ax_azim.set_ylim([-max_ylim, max_ylim])
         ax_elev.set_ylim([-max_ylim, max_ylim])
         ax_skyradius.set_ylim([-max_ylim, max_ylim])
