@@ -120,8 +120,8 @@ class FluxConfig(object):
         # Height sampling delta (km).
         self.dht = 2
 
-        # Limit of meteor's elevation above horizon (deg). 10 degrees by default.
-        self.elev_limit = 10
+        # Limit of meteor's elevation above horizon (deg). 20 degrees by default.
+        self.elev_limit = 20
 
         # Minimum radiant elevation in the time bin (deg). 15 degreees by default
         self.rad_elev_limit = 15
@@ -552,8 +552,25 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
     # Perform shower association
-    associations, shower_counts = showerAssociation(config, [ftpdetectinfo_path], shower_code=shower_code, \
+    associations, _ = showerAssociation(config, [ftpdetectinfo_path], shower_code=shower_code, \
         show_plot=False, save_plot=False, plot_activity=False)
+
+    # Init the flux configuration
+    flux_config = FluxConfig()
+
+
+    # Remove all meteors which begin below the limit height
+    filtered_associations = {}
+    for key in associations:
+        meteor, shower = associations[key]
+
+        if meteor.beg_alt > flux_config.elev_limit:
+            print("Rejecting:", meteor.jdt_ref)
+            filtered_associations[key] = [meteor, shower]
+
+    associations = filtered_associations
+
+
 
     # If there are no shower association, return nothing
     if not associations:
@@ -576,10 +593,6 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             print("{:.6f}, {:3s}, {:+.2f}".format(meteor.jdt_ref, shower.name, peak_mag))
 
     print()
-
-
-    # Init the flux configuration
-    flux_config = FluxConfig()
 
 
 
