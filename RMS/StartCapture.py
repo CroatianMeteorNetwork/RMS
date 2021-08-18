@@ -312,7 +312,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
         live_jpg_path = os.path.join(config.data_dir, 'live.jpg')
 
-        live_view = LiveViewer(live_jpg_path, slideshow=False, banner_text="Live")
+        live_view = LiveViewer(live_jpg_path, image=True, slideshow=False, banner_text="Live")
         live_view.start()
 
     else:
