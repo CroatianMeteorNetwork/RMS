@@ -23,6 +23,7 @@ except:
 
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
+from RMS.Routines.Image import loadImage
 
 
 # Load the default font
@@ -222,6 +223,19 @@ class LiveViewer(multiprocessing.Process):
                 showing_empty = True
 
 
+    def showImage(self):
+        """ Show one image file on the screen and refresh it in a given interval. """
+
+        # Repeat until the process is killed from the outside
+        while not self.exit.is_set():
+
+            # Load the image
+            img = loadImage(self.dir_path)
+
+            self.updateImage(img, "", self.update_interval)
+
+
+
 
     def run(self):
         """ Main processing loop. """
@@ -234,11 +248,21 @@ class LiveViewer(multiprocessing.Process):
             print('Setting niceness failed with message:\n' + repr(e))
 
 
-        if self.slideshow:
-            self.startSlideshow()
+        # Show image if a file is given
+        if os.path.isfile(self.dir_path):
+            self.showImage()
+
+        elif os.path.isdir(self.dir_path):
+
+            if self.slideshow:
+                self.startSlideshow()
+
+            else:
+                self.monitorDir()
 
         else:
-            self.monitorDir()
+            self.exit.set()
+            return None
 
 
 
@@ -264,12 +288,16 @@ if __name__ == "__main__":
         help="Start a slide show (infinite repeat) of FF files in the given folder.")
 
     arg_parser.add_argument('-p', '--pause', metavar='SLIDESHOW_PAUSE', default=2, type=float, \
-        help="Pause between frames in slideshow. 2 seconds by deault.")
+        help="Pause between frames in slideshow. 2 seconds by default.")
+
+    arg_parser.add_argument('-u', '--update', metavar='UPDATE_INTERVAL', default=5, type=float, \
+        help="Time between image refreshes. 5 seconds by default.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
     #########################
 
-    lv = LiveViewer(cml_args.dir_path, slideshow=cml_args.slideshow, slideshow_pause=cml_args.pause)
+    lv = LiveViewer(cml_args.dir_path, slideshow=cml_args.slideshow, slideshow_pause=cml_args.pause, \
+        update_interval=cml_args.update)
     lv.start()
