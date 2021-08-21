@@ -28,7 +28,7 @@ def checkValidIPAddr(addr):
         return False
     
     ip_range = list(range(1, 255))
-    if (i0 not in ip_range) or (i1 not in ip_range) or (i2 not in ip_range) or (i3 not in ip_range):
+    if (i0 not in ip_range) or (i1 > 254) or (i2 > 254) or (i3 not in ip_range):
         return False
     
     return True
