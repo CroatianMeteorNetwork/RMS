@@ -22,13 +22,7 @@ def checkValidIPAddr(addr):
         i3 = int(spls[3])
     except:
         return False
-    if i0 < 1 or i0 > 254: 
-        return False
-    if i1 > 254: 
-        return False
-    if i2 > 254: 
-        return False
-    if i3 < 1 or i3 > 254: 
+    if i0 < 1 or i0 > 254 or i1 > 254 or i2 > 254 or i3 <1 or i3 > 254: 
         return False
     return True
     
