@@ -12,9 +12,13 @@ import socket as mysocket
 
 
 def checkValidIPAddr(addr):
+    """ Check if a given IP address is valid. All subnets need to be in the 1-254 range. """
+    
     spls = addr.split('.')
+    
     if len(spls) != 4: 
         return False
+    
     try:
         i0 = int(spls[0])
         i1 = int(spls[1])
@@ -22,21 +26,28 @@ def checkValidIPAddr(addr):
         i3 = int(spls[3])
     except:
         return False
-    if i0 < 1 or i0 > 254 or i1 > 254 or i2 > 254 or i3 <1 or i3 > 254: 
+    
+    ip_range = list(range(1, 255))
+    if (i0 not in ip_range) or (i1 not in ip_range) or (i2 not in ip_range) or (i3 not in ip_range):
         return False
+    
     return True
     
 
 def strIPtoHex(ip):
+    
     a = binascii.hexlify(mysocket.inet_aton(ip)).decode().upper()
-    addr='0x'+''.join([a[x:x+2] for x in range(0,len(a),2)][::-1])
+    
+    addr = '0x' + ''.join([a[x:x + 2] for x in range(0, len(a), 2)][::-1])
+    
     return addr
 
 
 def iptoString(s):
-    a=s[2:]
-    addr='0x'+''.join([a[x:x+2] for x in range(0,len(a),2)][::-1])
-    ipaddr=ip.IPv4Address(int(addr,16))
+    a = s[2:]
+    addr = '0x'+''.join([a[x:x + 2] for x in range(0, len(a), 2)][::-1])
+    ipaddr = ip.IPv4Address(int(addr, 16))
+    
     return ipaddr
 
 
