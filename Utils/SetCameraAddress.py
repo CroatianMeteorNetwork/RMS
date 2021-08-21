@@ -15,13 +15,21 @@ def checkValidIPAddr(addr):
     spls = addr.split('.')
     if len(spls) != 4: 
         return False
-    for s in spls:
-        try:
-            intv = int(s)
-        except:
-            return False
-        if intv < 1 or intv > 254:
-            return False
+    try:
+        i0 = int(spls[0])
+        i1 = int(spls[1])
+        i2 = int(spls[2])
+        i3 = int(spls[3])
+    except:
+        return False
+    if i0 < 1 or i0 > 254: 
+        return False
+    if i1 > 254: 
+        return False
+    if i2 > 254: 
+        return False
+    if i3 < 1 or i3 > 254: 
+        return False
     return True
     
 
