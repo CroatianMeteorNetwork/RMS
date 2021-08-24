@@ -51,7 +51,10 @@ def drawText(img_arr, img_text):
     except:
         im = im.convert('L')
 
-    return np.array(im)
+    im = np.array(im)
+    del draw
+
+    return im
 
 
 class LiveViewer(multiprocessing.Process):
