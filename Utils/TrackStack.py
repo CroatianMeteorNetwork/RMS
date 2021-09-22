@@ -151,7 +151,7 @@ def trackStack(dir_path, config, border=5, background_compensation=True, hide_pl
 
         for x_c, y_c in zip(x_corns, y_corns):
             _, ra_temp, dec_temp, _ = xyToRaDecPP(
-                [getMiddleTimeFF(ff_temp, config.fps, ret_milliseconds=True)], [x_c], [y_c], [1], pp_ref,
+                [getMiddleTimeFF(ff_temp, config.fps, ret_milliseconds=True)], [x_c], [y_c], [1], pp_ref, \
                 extinction_correction=False)
             ra_c, dec_c = ra_temp[0], dec_temp[0]
 
@@ -163,7 +163,7 @@ def trackStack(dir_path, config, border=5, background_compensation=True, hide_pl
     #   RA/Dec corner coordinates
     ang_sep_list = []
     for ra_c, dec_c in zip(ra_list, dec_list):
-        ang_sep = np.degrees(angularSeparation(np.radians(ra_mid), np.radians(dec_mid), np.radians(ra_c),
+        ang_sep = np.degrees(angularSeparation(np.radians(ra_mid), np.radians(dec_mid), np.radians(ra_c), \
             np.radians(dec_c)))
 
         ang_sep_list.append(ang_sep)
@@ -206,14 +206,14 @@ def trackStack(dir_path, config, border=5, background_compensation=True, hide_pl
         pp_temp.loadFromDict(recalibrated_platepars[ff_name], use_flat=config.use_flat)
 
         # Make a list of X and Y image coordinates
-        x_coords, y_coords = np.meshgrid(np.arange(border, pp_ref.X_res - border),
+        x_coords, y_coords = np.meshgrid(np.arange(border, pp_ref.X_res - border), \
                                          np.arange(border, pp_ref.Y_res - border))
         x_coords = x_coords.ravel()
         y_coords = y_coords.ravel()
 
         # Map image pixels to sky
         jd_arr, ra_coords, dec_coords, _ = xyToRaDecPP(
-            len(x_coords)*[getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)], x_coords, y_coords,
+            len(x_coords)*[getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)], x_coords, y_coords, \
             len(x_coords)*[1], pp_temp, extinction_correction=False)
 
         # Map sky coordinates to stack image coordinates
@@ -271,7 +271,7 @@ def trackStack(dir_path, config, border=5, background_compensation=True, hide_pl
         avg_stack_count[stack_y, stack_x] += ones_img[y_coords, x_coords]
 
         # Set pixel values to the stack, only take the max values
-        max_deaveraged[stack_y, stack_x] = np.max(np.dstack([max_deaveraged[stack_y, stack_x],
+        max_deaveraged[stack_y, stack_x] = np.max(np.dstack([max_deaveraged[stack_y, stack_x], \
                                                              max_deavg[y_coords, x_coords]]), axis=2)
 
 
@@ -341,10 +341,10 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('dir_path', type=str, help="Path to the folder of the night.")
 
-    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
 
-    arg_parser.add_argument('-b', '--bkgnormoff', action="store_true",
+    arg_parser.add_argument('-b', '--bkgnormoff', action="store_true", \
         help="""Disable background normalization.""")
 
     arg_parser.add_argument('-x', '--hideplot', action="store_true",
