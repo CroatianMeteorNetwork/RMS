@@ -17,7 +17,7 @@ from RMS.Math import angularSeparation
 from RMS.Routines.MaskImage import loadMask, MaskStructure
 
 
-def trackStack(dir_path, config, border=5, background_compensation=True):
+def trackStack(dir_path, config, border=5, background_compensation=True, hide_plot=False):
     """ Generate a stack with aligned stars, so the sky appears static. The folder should have a
         platepars_all_recalibrated.json file.
 
@@ -187,8 +187,8 @@ def trackStack(dir_path, config, border=5, background_compensation=True):
 
 
     # Init the image
-    avg_stack_sum = np.zeros((img_size, img_size), dtype=np.float)
-    avg_stack_count = np.zeros((img_size, img_size), dtype=np.int)
+    avg_stack_sum = np.zeros((img_size, img_size), dtype=float)
+    avg_stack_count = np.zeros((img_size, img_size), dtype=int)
     max_deaveraged = np.zeros((img_size, img_size), dtype=np.uint8)
 
 
@@ -219,13 +219,13 @@ def trackStack(dir_path, config, border=5, background_compensation=True):
         stack_x, stack_y = raDecToXYPP(ra_coords, dec_coords, jd_middle, pp_stack)
 
         # Round pixel coordinates
-        stack_x = np.round(stack_x, decimals=0).astype(np.int)
-        stack_y = np.round(stack_y, decimals=0).astype(np.int)
+        stack_x = np.round(stack_x, decimals=0).astype(int)
+        stack_y = np.round(stack_y, decimals=0).astype(int)
 
         # Cut the image to limits
         filter_arr = (stack_x > 0) & (stack_x < img_size) & (stack_y > 0) & (stack_y < img_size)
-        x_coords = x_coords[filter_arr].astype(np.int)
-        y_coords = y_coords[filter_arr].astype(np.int)
+        x_coords = x_coords[filter_arr].astype(int)
+        y_coords = y_coords[filter_arr].astype(int)
         stack_x = stack_x[filter_arr]
         stack_y = stack_y[filter_arr]
 
@@ -251,7 +251,7 @@ def trackStack(dir_path, config, border=5, background_compensation=True):
             avepixel_median[avepixel_median < 1] = 1
 
             # Normalize the avepixel by subtracting out the background brightness
-            avepixel = avepixel.astype(np.float)
+            avepixel = avepixel.astype(float)
             avepixel /= avepixel_median
             avepixel *= 50 # Normalize to a good background value, which is usually 50
             avepixel = np.clip(avepixel, 0, 255)
@@ -314,7 +314,8 @@ def trackStack(dir_path, config, border=5, background_compensation=True):
 
     #
 
-    plt.show()
+    if hide_plot is False:
+        plt.show()
 
 
 
@@ -345,6 +346,8 @@ if __name__ == "__main__":
     arg_parser.add_argument('-b', '--bkgnormoff', action="store_true",
         help="""Disable background normalization.""")
 
+    arg_parser.add_argument('-x', '--hideplot', action="store_true",
+        help="""Don't show the stack on the screen after stacking. """)
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -354,6 +357,7 @@ if __name__ == "__main__":
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
-    
-    dir_path = os.path.normpath(cml_args.dir_path)
-    trackStack(dir_path, config, background_compensation=(not cml_args.bkgnormoff))
+
+
+    trackStack(cml_args.dir_path, config, background_compensation=(not cml_args.bkgnormoff), 
+        hide_plot=cml_args.hideplot)
