@@ -392,10 +392,17 @@ class QueuedPool(object):
                     prev_output_qsize = self.output_queue.qsize()
                     output_qsize_last_change = time.time()
 
+                # If the output queue size is zero, meaning no jobs are done, increase the time by the delay
+                #   time
+                if prev_output_qsize == 0:
+                    worker_timeout = self.worker_timeout + self.delay_start
+
+                else:
+                    worker_timeout = self.worker_timeout
 
                 # If the queue has been idle for too long, kill it
-                if (time.time() - output_qsize_last_change) > self.worker_timeout:
-                    self.printAndLog('One of the workers got stuck longer then {:d} seconds, killing multiprocessing...'.format(self.worker_timeout))
+                if (time.time() - output_qsize_last_change) > worker_timeout:
+                    self.printAndLog('One of the workers got stuck longer then {:d} seconds, killing multiprocessing...'.format(worker_timeout))
 
                     self.printAndLog('Terminating pool...')
                     self.pool.terminate()

@@ -30,6 +30,7 @@ from RMS.Formats import Platepar
 from RMS.Formats import StarCatalog
 from RMS.Math import angularSeparation
 import Utils.RMS2UFO
+import Utils.CalibrationReport
 
 
 # Neighbourhood size around individual FFs with detections which will be takes for recalibration
@@ -762,6 +763,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
 
+    arg_parser.add_argument('-r', '--report', action="store_true", \
+        help="""Show the calibration report at the end.""")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -785,3 +789,9 @@ if __name__ == "__main__":
 
     # Run the recalibration and recomputation
     applyRecalibrate(ftpdetectinfo_path, config)
+
+
+    # Show the calibration report
+    if cml_args.report:
+
+        Utils.CalibrationReport.generateCalibrationReport(config, dir_path, show_graphs=True)

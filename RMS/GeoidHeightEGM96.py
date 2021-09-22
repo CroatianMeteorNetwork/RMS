@@ -96,7 +96,7 @@ def wgs84toMSLHeight(lat, lon, wgs84_height, config):
     Arguments:
         lat: [float] Latitude +N (rad).
         lon: [float] Longitude +E (rad).
-        wgs84_height: [float] Height above the WGS84 ellipsoid.
+        wgs84_height: [float] Height above the WGS84 ellipsoid (meters).
         config: Config instance with the path to EGM96 coefficients
 
     Return:

@@ -26,6 +26,14 @@ import argparse
 import numpy as np
 import cv2
 
+try:
+    import imageio
+    imwrite = imageio.imwrite
+    USING_IMAGEIO = True
+except ImportError:
+    imwrite = cv2.imwrite
+    USING_IMAGEIO = False
+
 
 import RMS.ConfigReader as cr
 import RMS.Formats.FFfile as FFfile
@@ -48,7 +56,7 @@ def stackIfLighter(arr1, arr2):
 
 
 
-def generateThumbnails(dir_path, config, mosaic_type, file_list=None):
+def generateThumbnails(dir_path, config, mosaic_type, file_list=None, no_stack=False):
     """ Generates a mosaic of thumbnails from all FF files in the given folder and saves it as a JPG image.
     
     Arguments:
@@ -62,6 +70,9 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None):
 
     Return:
         file_name: [str] Name of the thumbnail file.
+        no_stack: [bool] Don't stack the images using the config.thumb_stack option. A max of 1000 images
+            are supported with this option. If there are more, stacks will be done according to the 
+            config.thumb_stack option.
 
     """
 
@@ -88,12 +99,20 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None):
     timestamps = []
     stacked_imgs = []
 
-    for i in range(0, len(ff_list), config.thumb_stack):
+
+    thumb_stack = config.thumb_stack
+    
+    # Check if no stacks should be done (max 1000 images for no stack)
+    if no_stack and (len(ff_list) < 1000):
+        thumb_stack = 1
+
+
+    for i in range(0, len(ff_list), thumb_stack):
 
         img_stack = np.zeros((bin_h, bin_w))
 
         # Stack thumb_stack images using the 'if lighter' method
-        for j in range(config.thumb_stack):
+        for j in range(thumb_stack):
 
             if (i + j) < len(ff_list):
 
@@ -130,7 +149,6 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None):
         # cv2.destroyAllWindows()
 
 
-
     ##########################################################################################################
 
     ### ADD THUMBS TO ONE MOSAIC IMAGE ###
@@ -140,7 +158,7 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None):
     timestamp_height = 10
 
     # Calculate the number of rows for the thumbnail image
-    n_rows = int(np.ceil(float(len(ff_list))/config.thumb_stack/config.thumb_n_width))
+    n_rows = int(np.ceil(float(len(ff_list))/thumb_stack/config.thumb_n_width))
 
     # Calculate the size of the mosaic
     mosaic_w = int(config.thumb_n_width*bin_w)
@@ -193,8 +211,12 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None):
     thumb_name = "{:s}_{:s}_thumbs.jpg".format(prefix, mosaic_type)
 
     # Save the mosaic
-    cv2.imwrite(os.path.join(dir_path, thumb_name), mosaic_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-
+    if USING_IMAGEIO:
+        # Use imageio to write the image
+        imwrite(os.path.join(dir_path, thumb_name), mosaic_img, quality=80)
+    else:
+        # Use OpenCV to save the image
+        imwrite(os.path.join(dir_path, thumb_name), mosaic_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
 
     return thumb_name
     
@@ -219,6 +241,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
 
+    arg_parser.add_argument('-n', '--nostack', action="store_true", \
+        help="""Don't stack images.""")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -231,4 +256,4 @@ if __name__ == "__main__":
     # Read the argument as a path to the night directory
     dir_path = cml_args.dir_path[0]
 
-    generateThumbnails(dir_path, config, 'mosaic')
+    generateThumbnails(dir_path, config, 'mosaic', no_stack=cml_args.nostack)

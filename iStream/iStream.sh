@@ -173,7 +173,9 @@ function upload_fieldsums {
 
 function upload_report_astrometry {
 	REPORT_ASTROMETRY_FILE="$(ls $CAPTURED_DIR_NAME/*.jpg | grep 'report_astrometry.jpg')"
-	if [ -f "$REPORT_ASTROMETRY_FILE" ]; then			
+	TMP_REPORT_ASTROMETRY_FILE="$CAPTURED_DIR_NAME/report_astrometry.jpg"
+	if [ -f "$REPORT_ASTROMETRY_FILE" ]; then
+		cp $REPORT_ASTROMETRY_FILE $TMP_REPORT_ASTROMETRY_FILE
 		curl --user-agent $AGENT -F"operation=upload" -F"file=@$REPORT_ASTROMETRY_FILE" "$SERVER/$SYSTEM/?station_id=$STATION_ID&type=report_astrometry&action=upload&level=$ACTIVE_LEVEL"
 	else
 		curl --user-agent $AGENT "$SERVER/$SYSTEM/?station_id=$STATION_ID&type=no_report_astrometry&action=upload&level=$ACTIVE_LEVEL"

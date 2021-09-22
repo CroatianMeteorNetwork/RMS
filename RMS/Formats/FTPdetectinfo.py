@@ -99,15 +99,20 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
                 frame1, x1, y1 = first_centroid[:3]
                 frame2, x2, y2 = last_centroid[:3]
 
-                ang_vel = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)/float(frame2 - frame1)
+                # If the frames are the same, assume the angular velocity is zero
+                if frame1 == frame2:
+                    ang_vel = 0.0
+
+                else:
+                    ang_vel = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)/float(frame2 - frame1)
 
             else:
                 ang_vel = 0.0
 
             # Write detection header
-            ftpdetect_file.write(str(cam_code).zfill(4) + " " + str(int(meteor_No)).zfill(4) + " " + 
-                str(int(len(centroids))).zfill(4) + " " + "{:07.2f}".format(round(float(fps), 2)) + 
-                " 000.0 000.0  00.0 " + str(round(ang_vel, 1)).zfill(5) + " " + 
+            ftpdetect_file.write("{:>4s}".format(str(cam_code)) + " " + str(int(meteor_No)).zfill(4) + " " + \
+                str(int(len(centroids))).zfill(4) + " " + "{:07.2f}".format(round(float(fps), 2)) + \
+                " 000.0 000.0  00.0 " + str(round(ang_vel, 1)).zfill(5) + " " + \
                 "{:06.1f} {:06.1f}".format(round(rho, 1), round(theta, 1)) + "\n")
 
             # Write individual detection points

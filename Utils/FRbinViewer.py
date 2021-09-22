@@ -29,7 +29,8 @@ import RMS.ConfigReader as cr
 from RMS.Formats import FFfile, FRbin
 
 
-def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='png', hide=False):
+def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='png', hide=False,
+    avg_background=False):
     """ Shows the detected fireball stored in the FR file. 
     
     Arguments:
@@ -42,6 +43,8 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='
         save_frames: [bool] Save FR frames to disk. False by defualt.
         extract_format: [str] Format of saved images. png by default.
         hide: [bool] Don't show frames on the screen.
+        avg_background: [bool] Avepixel as background. False by default, in which case the maxpixel will be
+            used.
 
     """
 
@@ -68,7 +71,10 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='
         background = np.zeros((img_size, img_size), np.uint8)
 
     else:
-        background = FFfile.read(dir_path, ff_path).maxpixel
+        if avg_background:
+            background = FFfile.read(dir_path, ff_path).avepixel
+        else:
+            background = FFfile.read(dir_path, ff_path).maxpixel
     
     print("Number of lines:", fr.lines)
     
@@ -186,6 +192,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-e', '--extract', action="store_true", \
         help="Save frames from FR files to disk.")
 
+    arg_parser.add_argument('-a', '--avg', action="store_true", \
+        help="Average pixel as the background instead of maxpixel.")
+
     arg_parser.add_argument('-x', '--hide', action="store_true", \
         help="Do not show frames on the screen.")
     
@@ -245,7 +254,7 @@ if __name__ == "__main__":
         
         # View the fireball detection
         retval = view(dir_path, ff_match, fr, config, save_frames=cml_args.extract, \
-            extract_format=cml_args.extractformat, hide=cml_args.hide)
+            extract_format=cml_args.extractformat, hide=cml_args.hide, avg_background=cml_args.avg)
 
         # Return to previous file
         if retval == -1:
