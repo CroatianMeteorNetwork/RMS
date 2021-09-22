@@ -196,6 +196,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             night_data_dir_name)
 
 
+    # Wait before the capture starts if a time has been given
+    if (not resume_capture) and (video_file is None):
+        log.info("Waiting {:d} seconds before capture start...".format(int(config.capture_wait_seconds)))
+        time.sleep(config.capture_wait_seconds)
+
 
     # Make a directory for the night
     mkdirP(night_data_dir)
@@ -246,8 +251,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             delay_detection = duration
 
         else:
-            # Delay the detection for 2 minutes after capture start
+            # Delay the detection for 2 minutes after capture start (helps stability)
             delay_detection = 120
+
+
+        # Add an additional postprocessing delay
+        delay_detection += config.postprocess_delay
 
 
         # Set a flag file to indicate that previous files are being loaded (if any)
@@ -297,7 +306,13 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Initialize the live image viewer
     if config.live_maxpixel_enable:
-        live_view = LiveViewer(night_data_dir, slideshow=False, banner_text="Live")
+
+        # Enable showing the live JPG
+        config.live_jpg = True
+
+        live_jpg_path = os.path.join(config.data_dir, 'live.jpg')
+
+        live_view = LiveViewer(live_jpg_path, image=True, slideshow=False, banner_text="Live")
         live_view.start()
 
     else:
@@ -944,7 +959,8 @@ if __name__ == "__main__":
 
         # Run capture and compression
         night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect, \
-            upload_manager=upload_manager, detect_end=cml_args.detectend, resume_capture=cml_args.resume)
+            upload_manager=upload_manager, detect_end=(cml_args.detectend or config.postprocess_at_end), \
+            resume_capture=cml_args.resume)
 
         # Indicate that the capture was done once
         ran_once = True

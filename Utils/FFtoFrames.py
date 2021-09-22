@@ -159,7 +159,7 @@ def FFtoFrames(file_path, out_dir, file_format, deinterlace_mode, first_frame=0,
 
         # No deinterlace
         else:
-            frame_name, frame_dt = saveFrame(frame, i-first_frame, out_dir, file_name_saving, file_format, ff_dt, fps)
+            frame_name, frame_dt = saveFrame(frame, i, out_dir, file_name_saving, file_format, ff_dt, fps)
             frame_name_time_list.append([frame_name, frame_dt])
 
     # If the frames are saved for METAL, the times have to be given in a separate file
