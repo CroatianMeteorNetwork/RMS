@@ -7,6 +7,7 @@ import platform
 import sys
 import shutil
 import datetime
+import time
 
 import ephem
 
@@ -226,6 +227,7 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     # Intermittently delete captured and archived directories until there's enough free space
     prev_available_space = availableSpace(data_dir)
     nothing_deleted_count = 0
+    free_space_status = False
     while True:
 
         # Delete one captured directory
@@ -233,14 +235,16 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
         # Break the there's enough space
         if availableSpace(data_dir) > next_night_bytes:
+            free_space_status = True
             break
 
         # Delete one archived directory
         archived_dirs_remaining = deleteNightFolders(archived_dir, config)
 
 
-        # Break the there's enough space
+        # Break if there's enough space
         if availableSpace(data_dir) > next_night_bytes:
+            free_space_status = True
             break
 
         # If no folders left to delete, try to delete archived files
@@ -250,15 +254,17 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
             # If there's nothing left to delete, return False
             if len(archived_files_remaining) == 0:
-                return False
+                free_space_status = False
+                break
 
 
         # Break the there's enough space
         if availableSpace(data_dir) > next_night_bytes:
+            free_space_status = True
             break
 
 
-        # If nothing was deleted in this loop, 
+        # If nothing was deleted in this loop, count how may time this happened
         if availableSpace(data_dir) == prev_available_space:
             nothing_deleted_count += 1
 
@@ -268,9 +274,21 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
         # If nothing was deleted for 100 loops, indicate that no more space can be freed
         if nothing_deleted_count >= 100:
-            return False
+            free_space_status = False
+            break
 
         prev_available_space = availableSpace(data_dir)
+
+
+    # If there is still not enough space, wait 10 seconds to see if perhaps other users are clearing their
+    #   space if this is a multiuser setup
+    if free_space_status == False:
+
+        time.sleep(10)
+
+        # If there's still not enough space, return False
+        if availableSpace(data_dir) < next_night_bytes:
+            return False
 
 
     return True

@@ -147,7 +147,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     night_data_dir_name = os.path.basename(os.path.abspath(night_data_dir))
 
     platepar = None
-    kml_file = None
+    kml_files = []
     recalibrated_platepars = None
     
     # If the detection should be run
@@ -263,8 +263,22 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 if mask is not None:
                     log.info("Loaded mask: {:s}".format(mask_path))
 
-                # Generate the KML (only the FOV is shown, without the station)
-                kml_file = fovKML(config, night_data_dir, platepar, mask=mask, plot_station=False)
+                # Generate the KML (only the FOV is shown, without the station) - 100 km
+                kml_file100 = fovKML(config, night_data_dir, platepar, mask=mask, plot_station=False, \
+                    area_ht=100000)
+                kml_files.append(kml_file100)
+
+
+                # Generate the KML (only the FOV is shown, without the station) - 70 km
+                kml_file70 = fovKML(config, night_data_dir, platepar, mask=mask, plot_station=False, \
+                    area_ht=70000)
+                kml_files.append(kml_file70)
+
+                # Generate the KML (only the FOV is shown, without the station) - 25 km
+                kml_file25 = fovKML(config, night_data_dir, platepar, mask=mask, plot_station=False, \
+                    area_ht=25000)
+                kml_files.append(kml_file25)
+
 
 
             except Exception as e:
@@ -350,9 +364,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         if os.path.exists(recalibrated_platepars_path):
             extra_files.append(recalibrated_platepars_path)
 
-    # Add the FOV KML file
-    if kml_file is not None:
-        extra_files.append(kml_file)
+    # Add the FOV KML files
+    if len(kml_files):
+        extra_files += kml_files
 
 
 
