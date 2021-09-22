@@ -28,6 +28,7 @@ from RMS.Formats.FFfile import getMiddleTimeFF, selectFFFrames
 from RMS.Formats.FRbin import read as readFR, validFRName
 from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
+from RMS.GeoidHeightEGM96 import wgs84toMSLHeight
 from RMS.Routines import Image
 
 
@@ -1225,6 +1226,7 @@ class InputTypeImages(object):
 
         self.fripon_mode = False
         self.fripon_header = None
+        self.cabernet_status = False
 
         img_types = ['.png', '.jpg', '.bmp', '.fit']
 
@@ -1317,11 +1319,59 @@ class InputTypeImages(object):
         if self.fripon_mode:
             beginning_time = self.dt_frame_time
 
-            # Set station parameters if in the FRIPON mode
-            self.config.stationID = self.fripon_header["TELESCOP"].strip()
-            self.config.latitude = self.fripon_header["SITELAT"]
-            self.config.longitude = self.fripon_header["SITELONG"]
-            self.config.elevation = self.fripon_header["SITEELEV"]
+            # Load info for CABERNET
+            if self.cabernet_status:
+
+                # Try to get the station ID if present
+                if "SITE" in self.fripon_header:
+                    self.config.stationID = self.fripon_header["SITE"].strip("'").strip()
+
+                else:
+
+                    # Find comment line with station name
+                    station_comment = [line for line in self.fripon_header["COMMENT"] if "CABERNET at " in line]
+
+                    if len(station_comment):
+                        station_id = " ".join(station_comment[0].split()[2:]).strip("'").strip()
+                    else:
+                        station_id = "CABERNET-STAT"
+
+                    self.config.stationID = station_id
+
+                self.config.latitude = np.degrees(self.fripon_header["LATITUDE"])
+                self.config.longitude = np.degrees(self.fripon_header["LONGITUD"])
+                self.config.elevation = wgs84toMSLHeight(np.radians(self.config.latitude), 
+                    np.radians(self.config.longitude), self.fripon_header["ALTITUDE"], self.config) # WGS84 in fits
+
+                # Set approximate FOV
+                self.config.fov_w = 40
+                self.config.fov_h = 27
+
+                # Set magnitude limit
+                self.config.catalog_mag_limit = 6.0
+
+
+            # Load info for FRIPON all-sky cameras
+            else:
+
+                # Set station parameters if in the FRIPON mode
+                self.config.stationID = self.fripon_header["TELESCOP"].strip()
+                self.config.latitude = self.fripon_header["SITELAT"]
+                self.config.longitude = self.fripon_header["SITELONG"]
+                self.config.elevation = self.fripon_header["SITEELEV"] # MSL
+
+                # Set the catalog to BSC5
+                self.config.star_catalog_path = os.path.join(self.config.rms_root_dir, "Catalogs")
+                self.config.star_catalog_file = "BSC5"
+
+                # Set approximate FOV
+                self.config.fov_h = 180
+                self.config.fov_w = 200
+
+                # Set magnitude limit
+                self.config.catalog_mag_limit = 3.5
+
+
 
             self.config.width = self.fripon_header["NAXIS1"]
             self.config.height = self.fripon_header["NAXIS2"]
@@ -1330,16 +1380,7 @@ class InputTypeImages(object):
             # Global shutter
             self.config.deinterlace_order = -2
 
-            # Set the catalog to BSC5
-            self.config.star_catalog_path = os.path.join(self.config.rms_root_dir, "Catalogs")
-            self.config.star_catalog_file = "BSC5"
-
-            # Set approximate FOV
-            self.config.fov_h = 180
-            self.config.fov_w = 200
-
-            # Set magnitude limit
-            self.config.catalog_mag_limit = 3.5
+            
 
 
 
@@ -1648,8 +1689,9 @@ class InputTypeImages(object):
                 fits_file = fits.open(f)
                 frame = fits_file[0].data
 
-                # Flip image vertically
-                frame = np.flipud(frame)
+                # Flip image vertically for FRIPON (not CABERNET)
+                if not self.cabernet_status:
+                    frame = np.flipud(frame)
 
                 # Load the header
                 head = fits_file[0].header
@@ -1658,10 +1700,22 @@ class InputTypeImages(object):
                 self.fripon_header = head
 
                 # Load the frame time
-                self.dt_frame_time = datetime.datetime.strptime(head["DATE-OBS"], "%Y-%m-%dT%H:%M:%S.%f")
+                timestamp_stripped = head["DATE-OBS"].strip("=").strip("'").strip()
+                self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S.%f")
 
-                # Load the FPS
-                self.fps = 1.0/head["EXPOSURE"]
+                # If CABERNET is used, set a fixed FPS
+                if "COMMENT" in head:
+                    self.cabernet_status = bool(len([line for line in head["COMMENT"] if "CABERNET" in line]))
+                else:
+                    self.cabernet_status = False
+
+                if self.cabernet_status:
+                    self.fps = 95.129375951
+
+                # If not, read the FPS from the header
+                else:
+                    self.fps = 1.0/head["EXPOSURE"]
+
 
                 # Indicate that a FRIPON fit file is read
                 self.fripon_mode = True
@@ -1784,7 +1838,7 @@ class InputTypeImages(object):
             frame_no = self.current_frame
 
         # If the UWO png or FRIPON fit is used, return the time read from the file
-        if self.uwo_png_mode or self.fripon_mode:
+        if (self.uwo_png_mode or self.fripon_mode) and (not self.cabernet_status):
 
             # If the frame number is not given, return the time of the current frame
             if frame_no is None:
@@ -1807,6 +1861,8 @@ class InputTypeImages(object):
 
                 # Read the frame time from the dictionary
                 dt = self.frame_dt_dict[frame_no]
+
+                print(frame_no, "FRAME TIME:", dt)
 
 
         else:

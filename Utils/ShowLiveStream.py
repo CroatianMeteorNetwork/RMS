@@ -111,7 +111,7 @@ if __name__ == "__main__":
                 if len(frame.shape) == 3:
                     if frame.shape[2] == 3:
                         # Get green channel
-                        frame = frame[:, :, 2]
+                        frame = frame[:, :, 1]
                     else:
                         frame = frame[:, :, 0]
 

@@ -29,6 +29,18 @@ def qmessagebox(message="", title="Error", message_type="warning"):
     msg.exec_()
 
 
+class QHSeperationLine(QtWidgets.QFrame):
+  """ A horizontal separation line """
+  def __init__(self):
+    super().__init__()
+    self.setMinimumWidth(1)
+    self.setFixedHeight(20)
+    self.setFrameShape(QtWidgets.QFrame.HLine)
+    self.setFrameShadow(QtWidgets.QFrame.Sunken)
+    self.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Minimum)
+    return
+
+
 class Plus(QtGui.QPainterPath):
     """
     Used as a symbol for ScatterPlotItem
@@ -1251,6 +1263,7 @@ class GeolocationWidget(QtWidgets.QWidget):
 
     sigLocationChanged = QtCore.pyqtSignal()
     sigReloadGeoPoints = QtCore.pyqtSignal()
+    sigFitPressed = QtCore.pyqtSignal()
 
     def __init__(self, gui):
         """ QWidget contains station information. """
@@ -1263,7 +1276,6 @@ class GeolocationWidget(QtWidgets.QWidget):
         self.setLayout(full_layout)
 
         full_layout.addWidget(QtWidgets.QLabel("Press Esc to focus on image"))
-
 
 
         # Station geo position input boxes
@@ -1374,6 +1386,19 @@ class GeolocationWidget(QtWidgets.QWidget):
         box.addLayout(hbox)
         box.addWidget(QtWidgets.QLabel("Press Enter to accept value"))
 
+        # Checkbox to auto refit astrometry when the station is moved
+        self.auto_fit_checkbox = QtWidgets.QCheckBox("Auto refit astrometry")
+        self.auto_fit_checkbox.released.connect(self.onAutoFitToggled)
+        box.addWidget(self.auto_fit_checkbox)
+        if self.gui.geo_points_obj is None:
+            self.auto_fit_checkbox.hide()
+
+
+        # Label to show residuals
+        self.residuals_label = QtWidgets.QLabel("Residuals:\n")
+        box.addWidget(self.residuals_label)
+        if self.gui.geo_points_obj is None:
+            self.residuals_label.hide()
 
 
         # Reload geo points
@@ -1384,9 +1409,29 @@ class GeolocationWidget(QtWidgets.QWidget):
         if self.gui.geo_points_obj is None:
             self.reload_geo_points_button.hide()
 
+        # Fit astrometry with changed station
+        self.fit_astrometry_button = QtWidgets.QPushButton("Fit astrometry")
+        self.fit_astrometry_button.clicked.connect(self.sigFitPressed.emit)
+        full_layout.addWidget(self.fit_astrometry_button)
+        if self.gui.geo_points_obj is None:
+            self.fit_astrometry_button.hide()
+
 
         self.updatePlatepar()
 
+
+
+    def onAutoFitToggled(self):
+        """ Refit astrometry once the station is moved. """
+        
+        self.gui.station_moved_auto_refit = self.auto_fit_checkbox.isChecked()
+        
+
+    def autoRefit(self):
+        """ Run auto refitting, if enabled. """
+
+        if self.gui.station_moved_auto_refit:
+            self.sigFitPressed.emit()
 
 
     def updateGeoCoordinatesFromAzimChange(self, azim):
@@ -1404,14 +1449,17 @@ class GeolocationWidget(QtWidgets.QWidget):
     def onLatChanged(self):
         self.gui.platepar.lat = self.lat.value()
         self.sigLocationChanged.emit()
+        self.autoRefit()
 
     def onLonChanged(self):
         self.gui.platepar.lon = self.lon.value()
         self.sigLocationChanged.emit()
+        self.autoRefit()
 
     def onElevChanged(self):
         self.gui.platepar.elev = self.elev.value()
         self.sigLocationChanged.emit()
+        self.autoRefit()
 
 
 
@@ -1496,6 +1544,8 @@ class GeolocationWidget(QtWidgets.QWidget):
         self.lon.setValue(self.gui.platepar.lon)
         self.elev.setValue(self.gui.platepar.elev)
 
+        self.autoRefit()
+
 
 
 class PlateparParameterManager(QtWidgets.QWidget):
@@ -1509,6 +1559,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigFitParametersChanged = QtCore.pyqtSignal()
     sigLocationChanged = QtCore.pyqtSignal()
     sigExtinctionChanged = QtCore.pyqtSignal()
+    sigVignettingChanged = QtCore.pyqtSignal()
 
     sigFitPressed = QtCore.pyqtSignal()
     sigAstrometryPressed = QtCore.pyqtSignal()
@@ -1520,6 +1571,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigEqAspectToggled = QtCore.pyqtSignal()
     sigAsymmetryCorrToggled = QtCore.pyqtSignal()
     sigForceDistortionToggled = QtCore.pyqtSignal()
+    sigOnVignettingFixedToggled = QtCore.pyqtSignal()
 
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
@@ -1537,6 +1589,8 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.fit_astrometry_button.clicked.connect(self.sigFitPressed.emit)
         box.addWidget(self.fit_astrometry_button)
 
+        box.addWidget(QtWidgets.QLabel("Residuals:"))
+
         hbox = QtWidgets.QHBoxLayout()
         self.astrometry_button = QtWidgets.QPushButton('Astrometry')
         self.astrometry_button.clicked.connect(self.sigAstrometryPressed.emit)
@@ -1548,14 +1602,22 @@ class PlateparParameterManager(QtWidgets.QWidget):
         box.addLayout(hbox)
 
         self.updatePairedStars()
-        group = QtWidgets.QGroupBox('Photometry and Astrometry')
+        group = QtWidgets.QGroupBox("Calibration")
         group.setLayout(box)
         full_layout.addWidget(group)
+
+        hline = QHSeperationLine()
+        full_layout.addWidget(hline)
+        full_layout.addWidget(QtWidgets.QLabel("Astrometry parameters"))
 
         # check boxes
         self.fit_only_pointing = QtWidgets.QCheckBox('Only fit pointing')
         self.fit_only_pointing.released.connect(self.onFitOnlyPointingToggled)
         full_layout.addWidget(self.fit_only_pointing)
+
+        self.fixed_scale = QtWidgets.QCheckBox('Fixed scale')
+        self.fixed_scale.released.connect(self.onFixScaleToggled)
+        full_layout.addWidget(self.fixed_scale)
 
         self.refraction = QtWidgets.QCheckBox('Refraction')
         self.refraction.released.connect(self.onRefractionToggled)
@@ -1618,7 +1680,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.rotation_from_horiz.valueModified.connect(self.onRotChanged)
         hbox.addWidget(self.rotation_from_horiz)
         hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
-        form.addRow(QtWidgets.QLabel('Horz rot'), hbox)
+        form.addRow(QtWidgets.QLabel('Horiz rot'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
         self.F_scale = DoubleSpinBox()
@@ -1631,18 +1693,6 @@ class PlateparParameterManager(QtWidgets.QWidget):
         hbox.addWidget(self.F_scale)
         hbox.addWidget(QtWidgets.QLabel('\'/px', alignment=QtCore.Qt.AlignLeft))
         form.addRow(QtWidgets.QLabel('Scale'), hbox)
-
-        hbox = QtWidgets.QHBoxLayout()
-        self.extinction_scale = DoubleSpinBox()
-        self.extinction_scale.setMinimum(0)
-        self.extinction_scale.setMaximum(100)
-        self.extinction_scale.setDecimals(8)
-        self.extinction_scale.setSingleStep(0.1)
-        self.extinction_scale.setFixedWidth(100)
-        self.extinction_scale.valueModified.connect(self.onExtinctionChanged)
-        hbox.addWidget(self.extinction_scale)
-        hbox.addWidget(QtWidgets.QLabel('', alignment=QtCore.Qt.AlignLeft))
-        form.addRow(QtWidgets.QLabel('Extinction'), hbox)
 
         form.addRow(QtWidgets.QLabel("Press Enter to accept value"))
 
@@ -1696,12 +1746,55 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.fit_parameters.valueModified.connect(self.onFitParametersChanged)
         form.addRow(self.fit_parameters)
 
+
+        # Add horizontal line
+        hline = QHSeperationLine()
+        form.addRow(hline)
+        form.addRow(QtWidgets.QLabel("Photometry parameters"))
+
+        hbox = QtWidgets.QHBoxLayout()
+        self.extinction_scale = DoubleSpinBox()
+        self.extinction_scale.setMinimum(0)
+        self.extinction_scale.setMaximum(100)
+        self.extinction_scale.setDecimals(8)
+        self.extinction_scale.setSingleStep(0.1)
+        self.extinction_scale.setFixedWidth(100)
+        self.extinction_scale.valueModified.connect(self.onExtinctionChanged)
+        hbox.addWidget(self.extinction_scale)
+        hbox.addWidget(QtWidgets.QLabel('', alignment=QtCore.Qt.AlignLeft))
+        form.addRow(QtWidgets.QLabel('Extinction'), hbox)
+
+        hbox = QtWidgets.QHBoxLayout()
+        self.vignetting_coeff = DoubleSpinBox()
+        self.vignetting_coeff.setMinimum(0)
+        self.vignetting_coeff.setMaximum(0.1)
+        self.vignetting_coeff.setDecimals(8)
+        self.vignetting_coeff.setSingleStep(0.0001)
+        self.vignetting_coeff.setFixedWidth(100)
+        self.vignetting_coeff.valueModified.connect(self.onVignettingChanged)
+        hbox.addWidget(self.vignetting_coeff)
+        hbox.addWidget(QtWidgets.QLabel('r/px', alignment=QtCore.Qt.AlignLeft))
+        form.addRow(QtWidgets.QLabel("Vignetting"), hbox)
+
+        self.vignetting_fixed = QtWidgets.QCheckBox('Fixed vignetting')
+        self.vignetting_fixed.released.connect(self.onVignettingFixedToggled)
+        form.addRow(self.vignetting_fixed)
+
         self.updatePlatepar()
 
 
     def onFitOnlyPointingToggled(self):
         self.gui.fit_only_pointing = self.fit_only_pointing.isChecked()
         self.sigFitOnlyPointingToggled.emit()
+
+    def onFixScaleToggled(self):
+        self.gui.fixed_scale = self.fixed_scale.isChecked()
+        self.sigFitOnlyPointingToggled.emit()
+
+        if self.gui.fixed_scale:
+            self.F_scale.setDisabled(True)
+        else:
+            self.F_scale.setDisabled(False)
 
     def onRefractionToggled(self):
         self.gui.platepar.refraction = self.refraction.isChecked()
@@ -1763,6 +1856,17 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.gui.platepar.extinction_scale = self.extinction_scale.value()
         self.sigExtinctionChanged.emit()
 
+    def onVignettingChanged(self):
+        self.gui.platepar.vignetting_coeff = self.vignetting_coeff.value()
+        self.sigVignettingChanged.emit()
+
+    def onVignettingFixedToggled(self):
+        self.gui.platepar.vignetting_fixed = self.vignetting_fixed.isChecked()
+        self.sigOnVignettingFixedToggled.emit()
+
+        # If the vignetting is fixed, allow setting manual values
+        self.vignetting_coeff.setDisabled(not self.gui.platepar.vignetting_fixed)
+
     def onFitParametersChanged(self):
         # fit parameter object updates platepar by itself
         self.sigFitParametersChanged.emit()
@@ -1798,10 +1902,14 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.fit_parameters.updateValues()
         self.distortion_type.setCurrentIndex(
             self.gui.platepar.distortion_type_list.index(self.gui.platepar.distortion_type))
-        # self.lat.setValue(self.gui.platepar.lat)
-        # self.lon.setValue(self.gui.platepar.lon)
-        # self.elev.setValue(self.gui.platepar.elev)
         self.extinction_scale.setValue(self.gui.platepar.extinction_scale)
+        
+        self.vignetting_coeff.setValue(self.gui.platepar.vignetting_coeff)
+        self.vignetting_fixed.setChecked(self.gui.platepar.vignetting_fixed)
+
+        # If the vignetting is fixed, allow setting manual values
+        self.vignetting_coeff.setDisabled(not self.gui.platepar.vignetting_fixed)
+
         self.refraction.setChecked(self.gui.platepar.refraction)
         self.eqAspect.setChecked(self.gui.platepar.equal_aspect)
         self.asymmetryCorr.setChecked(self.gui.platepar.asymmetry_corr)
@@ -1940,6 +2048,7 @@ class SettingsWidget(QtWidgets.QWidget):
     sigPicksToggled = QtCore.pyqtSignal()
     sigGreatCircleToggled = QtCore.pyqtSignal()
     sigRegionToggled = QtCore.pyqtSignal()
+    sigSingleClickPhotometryToggled = QtCore.pyqtSignal()
 
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
@@ -1997,6 +2106,11 @@ class SettingsWidget(QtWidgets.QWidget):
         self.region.hide()
         vbox.addWidget(self.region)
 
+        self.single_click_photometry = QtWidgets.QCheckBox('Single Click Photometry')
+        self.single_click_photometry.released.connect(self.sigSingleClickPhotometryToggled.emit)
+        self.updateSingleClickPhotometry()
+        vbox.addWidget(self.single_click_photometry)
+
         self.distortion = QtWidgets.QCheckBox('Show Distortion')
         self.distortion.released.connect(self.sigDistortionToggled.emit)
         self.updateShowDistortion()
@@ -2014,7 +2128,9 @@ class SettingsWidget(QtWidgets.QWidget):
         self.meas_ground_points = QtWidgets.QCheckBox('Measure ground points')
         self.meas_ground_points.released.connect(self.sigMeasGroundPointsToggled.emit)
         self.updateMeasGroundPoints()
+        self.meas_ground_points.hide()
         vbox.addWidget(self.meas_ground_points)
+
 
         hbox = QtWidgets.QHBoxLayout()
         grid_group = QtWidgets.QButtonGroup()
@@ -2055,7 +2171,7 @@ class SettingsWidget(QtWidgets.QWidget):
         self.std.setMinimum(0)
         self.std.setValue(self.gui.stdev_text_filter)
         self.std.valueModified.connect(self.onStdChanged)
-        self.std_label = QtWidgets.QLabel('Filter Res Std')
+        self.std_label = QtWidgets.QLabel('Filter Mag Err')
         form.addRow(self.std_label, self.std)
 
         form.addRow(QtWidgets.QLabel("Press Enter to accept value"))
@@ -2094,6 +2210,9 @@ class SettingsWidget(QtWidgets.QWidget):
 
     def updateInvertColours(self):
         self.invert.setChecked(self.gui.img.invert_img)
+
+    def updateSingleClickPhotometry(self):
+        self.single_click_photometry.setChecked(self.gui.single_click_photometry)
 
     def updateImageGamma(self):
         self.img_gamma.setValue(self.gui.img.gamma)
@@ -2137,6 +2256,7 @@ class SettingsWidget(QtWidgets.QWidget):
         self.picks.hide()
         self.great_circle.hide()
         self.region.hide()
+        self.single_click_photometry.hide()
 
         self.gui.selected_stars_visible = False
         self.sigSelStarsToggled.emit()  # toggle makes it true
@@ -2158,6 +2278,7 @@ class SettingsWidget(QtWidgets.QWidget):
         self.great_circle.show()
         if self.gui.img.img_handle.input_type != 'dfn':
             self.region.show()
+            self.single_click_photometry.show()
 
         self.gui.draw_distortion = True
         self.sigDistortionToggled.emit()  # toggle makes it false

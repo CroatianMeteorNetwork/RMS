@@ -23,6 +23,7 @@ except:
 
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
+from RMS.Routines.Image import loadImage
 
 
 # Load the default font
@@ -50,11 +51,14 @@ def drawText(img_arr, img_text):
     except:
         im = im.convert('L')
 
-    return np.array(im)
+    im = np.array(im)
+    del draw
+
+    return im
 
 
 class LiveViewer(multiprocessing.Process):
-    def __init__(self, dir_path, slideshow=False, slideshow_pause=2.0, banner_text="", \
+    def __init__(self, dir_path, image=False, slideshow=False, slideshow_pause=2.0, banner_text="", \
         update_interval=5.0):
         """ Monitors a given directory for FF files, and shows them on the screen as new ones get created. It can
             also do slideshows. 
@@ -63,6 +67,7 @@ class LiveViewer(multiprocessing.Process):
             dir_path: [str] Directory to monitor for new FF files.
             
         Keyword arguments:
+            image: [bool] Monitor a single image file and show on the screen as it updates.
             slideshow: [bool] Start a slide show instead of monitoring the folder for new files.
             slideshow_pause: [float] Number of seconds between slideshow updated. 2 by default.
             banner_text: [str] Banner text that will be shown on the screen.
@@ -73,6 +78,7 @@ class LiveViewer(multiprocessing.Process):
 
         self.dir_path = dir_path
 
+        self.image = image
         self.slideshow = slideshow
         self.slideshow_pause = slideshow_pause
         self.banner_text = banner_text
@@ -222,6 +228,34 @@ class LiveViewer(multiprocessing.Process):
                 showing_empty = True
 
 
+    def showImage(self):
+        """ Show one image file on the screen and refresh it in a given interval. """
+
+        # Repeat until the process is killed from the outside
+        first_run = True
+        while not self.exit.is_set():
+
+            if os.path.isfile(self.dir_path):
+                
+                # Load the image
+                img = loadImage(self.dir_path)
+                text = ""
+
+            else:
+                # If an FF files could not be loaded on the first run, show an empty image
+                if first_run:
+                    img = np.zeros((720, 1280))
+                    text = "The image {:s} could not be loaded.".format(self.dir_path)
+
+                # Otherwise, just wait one more pause interval
+                else:
+                    time.sleep(self.slideshow_pause)
+                    continue
+
+            self.updateImage(img, text, self.update_interval)
+
+            first_run = False
+
 
     def run(self):
         """ Main processing loop. """
@@ -234,11 +268,21 @@ class LiveViewer(multiprocessing.Process):
             print('Setting niceness failed with message:\n' + repr(e))
 
 
-        if self.slideshow:
-            self.startSlideshow()
+        # Show image if a file is given
+        if os.path.isfile(self.dir_path) or self.image:
+            self.showImage()
+
+        elif os.path.isdir(self.dir_path):
+
+            if self.slideshow:
+                self.startSlideshow()
+
+            else:
+                self.monitorDir()
 
         else:
-            self.monitorDir()
+            self.exit.set()
+            return None
 
 
 
@@ -260,16 +304,23 @@ if __name__ == "__main__":
     arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
         help="Directory to monitor for FF files.")
 
+    arg_parser.add_argument('-i', '--image', action="store_true", \
+        help="Monitor an image file and show on the screen.")
+
     arg_parser.add_argument('-s', '--slideshow', action="store_true", \
         help="Start a slide show (infinite repeat) of FF files in the given folder.")
 
     arg_parser.add_argument('-p', '--pause', metavar='SLIDESHOW_PAUSE', default=2, type=float, \
-        help="Pause between frames in slideshow. 2 seconds by deault.")
+        help="Pause between frames in slideshow. 2 seconds by default.")
+
+    arg_parser.add_argument('-u', '--update', metavar='UPDATE_INTERVAL', default=5, type=float, \
+        help="Time between image refreshes. 5 seconds by default.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
     #########################
 
-    lv = LiveViewer(cml_args.dir_path, slideshow=cml_args.slideshow, slideshow_pause=cml_args.pause)
+    lv = LiveViewer(cml_args.dir_path, image=cml_args.image, slideshow=cml_args.slideshow, \
+        slideshow_pause=cml_args.pause, update_interval=cml_args.update)
     lv.start()

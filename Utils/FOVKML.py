@@ -129,7 +129,7 @@ def fovKML(config, dir_path, platepar, mask=None, area_ht=100000, side_points=10
 
 
     # Save the KML file to the directory with the platepar
-    kml_path = os.path.join(dir_path, "{:s}.kml".format(config.stationID))
+    kml_path = os.path.join(dir_path, "{:s}-{:d}km.kml".format(config.stationID, int(area_ht/1000)))
     with open(kml_path, 'w') as f:
         f.write(kml)
 
