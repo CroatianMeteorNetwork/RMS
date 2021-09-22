@@ -157,7 +157,6 @@ def trackStack(dir_path, config, border=5, background_compensation=True, hide_pl
             ra_list.append(ra_c)
             dec_list.append(dec_c)
 
-
     # Compute the angular separation from the middle equatorial coordinates of the reference image to all
     #   RA/Dec corner coordinates
     ang_sep_list = []
