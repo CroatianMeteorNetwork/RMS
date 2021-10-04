@@ -85,7 +85,7 @@ Alternatively, if you are using Anaconda Python on your Linux PC, you can instal
 
 ```
 conda install -y numpy scipy gitpython cython matplotlib
-conda install -y -c conda-forge pyephem Pillow imreg_dft imageio pyqtgraph
+conda install -y -c conda-forge pyephem Pillow imreg_dft imageio pyqtgraph'<=0.12.1'
 conda install -y -c astropy astropy
 pip install rawpy
 ```
@@ -267,4 +267,4 @@ where YYYMMDD_hhmmss_uuuuuu is the name of the night directory. This will take a
 ## Citations
 
 For academic use, please cite the paper:
->Vida, D., Zubović, D., Šegon, D., Gural, P., & Cupec, R. (2016). *Open-source meteor detection software for low-cost single-board computers*. **Proceedings of the IMC2016, Egmond, The Netherlands**, pp. 307-318
+>[Vida, D., Šegon, D., Gural, P.S., Brown, P.G., McIntyre, M.J., Dijkema, T.J., Pavletić, L., Kukić, P., Mazur, M.J., Eschman, P. and Roggemans, P., 2021. The Global Meteor Network–Methodology and first results. Monthly Notices of the Royal Astronomical Society, 506(4), pp.5046-5074.](https://academic.oup.com/mnras/article/506/4/5046/6347233)
