@@ -23,6 +23,7 @@ import argparse
 import time
 import datetime
 import signal
+import shutil
 import ctypes
 import logging
 import multiprocessing
@@ -206,6 +207,14 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     mkdirP(night_data_dir)
 
     log.info('Data directory: ' + night_data_dir)
+
+    # Copy the used config file to the capture directory
+    config_path = os.path.join(os.getcwd(), ".config")
+    if os.path.isfile(config_path):
+        try:
+            shutil.copy2(config_path, os.path.join(night_data_dir, ".config"))
+        except:
+            log.error("Cannot copy the config file to the capture directory!")
 
 
     # Get the platepar file
