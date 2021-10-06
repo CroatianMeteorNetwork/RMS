@@ -623,7 +623,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
         colors_by_name = makeShowerColors(shower_list)
         def get_shower_color(shower):
             try:
-                return colors_by_name[shower.name] if shower else "white"
+                return colors_by_name[shower.name] if shower else "0.4"
             except KeyError:
                 return 'gray'
 
