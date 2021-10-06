@@ -656,7 +656,8 @@ if __name__ == "__main__":
     log = logging.getLogger("logger")
 
 
-    log.info('Program start')
+    log.info("Program start")
+    log.info("Station code: {:s}".format(str(config.stationID)))
 
     # Change the Ctrl+C action to the special handle
     setSIGINT()
