@@ -3550,7 +3550,7 @@ class PlateTool(QtWidgets.QMainWindow):
         solution = None
 
         # Construct FOV width estimate
-        fov_w_range = [0.75*self.config.fov_w, 1.25*self.config.fov_w]
+        fov_w_range = [0.5*self.config.fov_w, 2*self.config.fov_w]
 
         # Check if the given FF files is in the calstars list
         if (self.img_handle.name() in self.calstars) and (not upload_image):
