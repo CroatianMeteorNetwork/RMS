@@ -1315,6 +1315,16 @@ class InputTypeImages(object):
             self.byteswap = False
 
 
+        # If the resolution differs from the one in the config file, change it and write out a warning
+        if (img.shape[0] != self.config.height) or (img.shape[1] != self.config.width):
+            self.config.height = img.shape[0]
+            self.config.width = img.shape[1]
+            print()
+            print("WARNING! The image resolution differs from the resolution set in the config file.")
+            print("Image resolution set to {:d} x {:d} px".format(self.config.width, self.config.height))
+            
+
+
         # Set the begin time if in the FRIPON mode
         if self.fripon_mode:
             beginning_time = self.dt_frame_time
