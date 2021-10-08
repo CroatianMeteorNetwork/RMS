@@ -3715,14 +3715,14 @@ class PlateTool(QtWidgets.QMainWindow):
             # If the data was not being able to load from the folder, choose a file to load
             if img_handle is None:
                 self.input_path = QtGui.QFileDialog.getOpenFileName(self, "Select image/video file to open",
-                    self.dir_path, "All readable files (*.fits *.bin *.mp4 *.avi *.mkv *.vid *.png *.jpg *.bmp *.nef);;" + \
+                    self.dir_path, "All readable files (*.fits *.bin *.mp4 *.avi *.mkv *.vid *.png *.jpg *.bmp *.nef *.tif);;" + \
                                    "All files (*);;" + \
                                    "FF and FR Files (*.fits;*.bin);;" + \
                                    "Video Files (*.mp4 *.avi *.mkv);;" + \
                                    "VID Files (*.vid);;" + \
                                    "FITS Files (*.fits);;" + \
                                    "BIN Files (*.bin);;" + \
-                                   "Image Files (*.png *.jpg *.bmp *.nef)")[0]
+                                   "Image Files (*.png *.jpg *.bmp *.nef *.tif)")[0]
 
 
         # If no previous ways of opening data was sucessful, open a file
