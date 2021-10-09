@@ -220,6 +220,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Get the platepar file
     platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir)
 
+    # If the platepar is not none, set the FOV from it
+    if platepar is not None:
+        config.fov_w = platepar.fov_h
+        config.fov_h = platepar.fov_v
+        
 
     log.info('Initializing frame buffers...')
     ### For some reason, the RPi 3 does not like memory chunks which size is the multipier of its L2
