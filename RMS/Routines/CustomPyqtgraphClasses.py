@@ -2257,6 +2257,7 @@ class SettingsWidget(QtWidgets.QWidget):
         self.great_circle.hide()
         self.region.hide()
         self.single_click_photometry.hide()
+        self.meas_ground_points.hide()
 
         self.gui.selected_stars_visible = False
         self.sigSelStarsToggled.emit()  # toggle makes it true
@@ -2279,6 +2280,8 @@ class SettingsWidget(QtWidgets.QWidget):
         if self.gui.img.img_handle.input_type != 'dfn':
             self.region.show()
             self.single_click_photometry.show()
+
+        self.meas_ground_points.show()
 
         self.gui.draw_distortion = True
         self.sigDistortionToggled.emit()  # toggle makes it false
