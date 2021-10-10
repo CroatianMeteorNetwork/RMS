@@ -1258,6 +1258,7 @@ class PlateTool(QtWidgets.QMainWindow):
     def updateLeftLabels(self):
         """ Update the two labels on the left with their information """
 
+        # Sky fit
         if self.mode == 'skyfit':
             ra_centre, dec_centre = self.computeCentreRADec()
 
@@ -1294,6 +1295,7 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'RA centre  = {:s}{:02d}h {:02d}m {:05.2f}s\n'.format(sign_str, hh, mm, ss)
             text_str += u'Dec centre = {:.3f}\N{DEGREE SIGN}'.format(dec_centre)
 
+        # Manual reduction
         else:
             text_str = "Station: {:s} \n".format(self.platepar.station_code)
             text_str += self.img_handle.name() + '\n\n'
@@ -1301,6 +1303,9 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += "Time  = {:s}\n".format(
                 self.img_handle.currentFrameTime(dt_obj=True).strftime("%Y/%m/%d %H:%M:%S.%f")[:-3])
             text_str += 'Frame = {:d}\n'.format(self.img.getFrame())
+            if self.img_handle.input_type == "ff":
+                if self.use_fr_files:
+                    text_str += 'Line = {:d}\n'.format(self.img_handle.current_line)
             text_str += 'Image gamma = {:.2f}\n'.format(self.img.gamma)
             text_str += 'Camera gamma = {:.2f}\n'.format(self.config.gamma)
             text_str += 'Refraction = {:s}'.format(str(self.platepar.refraction))

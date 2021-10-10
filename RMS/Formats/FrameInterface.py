@@ -524,13 +524,38 @@ class InputTypeFRFF(InputType):
         else:
             return getMiddleTimeFF(self.name(), self.fps, ret_milliseconds=True)
 
+    def nextLine(self):
+        self.current_line = (self.current_line + 1)%self.line_number[self.current_ff_index]
+
+    def prevLine(self):
+        self.current_line = (self.current_line - 1)%self.line_number[self.current_ff_index]
+
     def nextFrame(self):
-        self.current_frame = (self.current_frame + 1)%self.total_frames
+        self.current_frame = self.current_frame + 1
+
+        # Increment FR line index
+        if self.current_frame >= self.total_frames:
+            self.nextLine()
+
+        self.current_frame %= self.total_frames
 
     def prevFrame(self):
-        self.current_frame = (self.current_frame - 1)%self.total_frames
+        self.current_frame = self.current_frame - 1
+
+        # Decrement FR line index
+        if self.current_frame < 0:
+            self.prevLine()
+
+        self.current_frame %= self.total_frames
 
     def setFrame(self, fr_num):
+
+        # Increment/decrement line number in the FR file
+        if fr_num > self.total_frames:
+            self.nextLine()
+        elif fr_num < 0:
+            self.prevLine()
+
         self.current_frame = fr_num%self.total_frames
 
     def loadFrame(self, avepixel=False):
