@@ -5152,8 +5152,8 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute the time relative to the reference JD
             t_rel = frame_no/self.img_handle.fps
 
-            centroids.append([t_rel, pick['x_centroid'], pick['y_centroid'], ra, dec, pick['intensity_sum'], \
-                mag])
+            centroids.append([float(t_rel), float(pick['x_centroid']), float(pick['y_centroid']), float(ra), \
+                float(dec), float(pick['intensity_sum']), float(mag)])
 
         # Sort centroids by relative time
         centroids = sorted(centroids, key=lambda x: x[0])
