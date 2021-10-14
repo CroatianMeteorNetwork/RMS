@@ -219,7 +219,7 @@ class Platepar(object):
         self.vignetting_fixed = True
 
         # Extinction correction scaling
-        self.extinction_scale = 1.0
+        self.extinction_scale = 0.6
 
         self.station_code = "None"
 
