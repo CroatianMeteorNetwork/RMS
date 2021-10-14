@@ -4064,7 +4064,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             return False, None
 
-        dark = dark.astype(self.img.data.dtype)
+        dark = dark.astype(self.img.data.dtype).T
 
         # Check if the size of the file matches
         if self.img.data.shape != dark.shape:
