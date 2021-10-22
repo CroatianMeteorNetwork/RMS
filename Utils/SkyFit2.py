@@ -2538,7 +2538,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         if modifiers & QtCore.Qt.ControlModifier or \
                                 ((modifiers & QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and
                                  self.img.img_handle.input_type == 'dfn'):
-                            self.x_centroid, self.y_centroid = self.mouse_x, self.mouse_y
+                            self.x_centroid, self.y_centroid = self.mouse_x - 0.5, self.mouse_y - 0.5
                         else:
                             self.x_centroid, self.y_centroid, _ = self.centroid()
 
