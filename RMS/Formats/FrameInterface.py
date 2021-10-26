@@ -1705,14 +1705,10 @@ class InputTypeImages(object):
         if current_img_file.lower().endswith('.nef') or current_img_file.lower().endswith('.cr2'):
             
             # .nef files will not be brought here if rawpy is not installed
-            
-            # Get raw data from .nef file and get image from it
-            raw = rawpy.imread(os.path.join(self.dir_path, current_img_file))
-            frame = raw.postprocess(gamma=(1,1), output_bps=16, no_auto_bright=True, no_auto_scale=True, \
-                output_color=rawpy.ColorSpace.sRGB)
 
-            # Convert the image to grayscale
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+            # Load the raw image
+            frame = Image.loadRaw(os.path.join(self.dir_path, current_img_file))
+
 
         # Load a FRIPON fit file
         if current_img_file.lower().endswith('.fit'):
@@ -1932,6 +1928,8 @@ class InputTypeDFN(InputType):
 
         self.dir_path, self.image_file = os.path.split(file_path)
         self.config = config
+
+        self.byteswap = False
 
         # Set the frames to a global shutter, so no correction is applied
         self.config.deinterlace_order = -2

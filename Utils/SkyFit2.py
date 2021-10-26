@@ -3224,7 +3224,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Handle key presses in the manual reduction mode
         elif self.mode == 'manualreduction':
 
-            if (qmodifiers & QtCore.Qt.ShiftModifier) and (self.img.img_handle.input_type != 'dfn'):
+            # Set photometry mode
+            if (qmodifiers & QtCore.Qt.ShiftModifier):
                 self.cursor.setMode(2)
 
             if event.key() == QtCore.Qt.Key_P:
@@ -4060,7 +4061,7 @@ class PlateTool(QtWidgets.QMainWindow):
             initial_file = self.dir_path
 
         dark_file = QtGui.QFileDialog.getOpenFileName(self, "Select the dark frame file", initial_file,
-                                                      "Image files (*.png *.jpg *.bmp);;All files (*)")[0]
+                                                      "Image files (*.png *.jpg *.bmp *.nef *.cr2);;All files (*)")[0]
 
         if not dark_file:
             return False, None
@@ -4070,7 +4071,7 @@ class PlateTool(QtWidgets.QMainWindow):
         try:
 
             # Load the dark
-            dark = Image.loadDark(*os.path.split(dark_file), dtype=self.img.data.dtype,
+            dark = Image.loadDark(*os.path.split(dark_file), dtype=self.img.data.dtype, \
                                   byteswap=self.img_handle.byteswap)
 
         except:
@@ -4730,6 +4731,7 @@ class PlateTool(QtWidgets.QMainWindow):
         fig_a.tight_layout()
         fig_a.show()
 
+
     def computeIntensitySum(self):
         """ Compute the background subtracted sum of intensity of colored pixels. The background is estimated
             as the median of near pixels that are not colored.
@@ -4788,15 +4790,40 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute the median background
             background_lvl = np.ma.median(crop_bg)
 
+
+            # If the DFN image is used and a dark has been applied (i.e. the previous image is subtracted),
+            #   assume that the background is zero
+            if (self.img_handle.input_type == "dfn") and (self.dark is not None):
+                background_lvl = 0
+
+
             # Compute the background subtracted intensity sum
             pick['intensity_sum'] = np.ma.sum(crop_img - background_lvl)
+
+
+            # If the DFN image is used, correct intensity sum for exposure difference
+            # Of the total 27 second, the stars are exposed 4.31 seconds, and every fireball dot is exposed
+            #    a total of 0.01 seconds. Thus the correction factor is 431
+            if (self.img_handle.input_type == "dfn"):
+                pick['intensity_sum'] *= 431
+
 
             # Make sure the intensity sum is never 0
             if pick['intensity_sum'] <= 0:
                 pick['intensity_sum'] = 1
 
+
     def showLightcurve(self):
         """ Show the meteor lightcurve. """
+
+        # The DFN light curve can only be computed if the background image is subtracted
+        if (self.img_handle.input_type == "dfn") and (self.dark is None):
+            
+            qmessagebox(title='DFN light curve',
+                        message='The DFN light curve can only be computed if the background is subtracted! Load the previous or next image as a dark.',
+                        message_type="info")
+
+            return None
 
         # Compute the intensity sum done on the previous frame
         self.computeIntensitySum()
@@ -4807,6 +4834,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Skip None entries
             if (pick['x_centroid'] is None) or (pick['y_centroid'] is None):
+                continue
+
+            # Only show real picks, and not gaps
+            if pick['mode'] == 0:
                 continue
 
             centroids.append([frame, pick['x_centroid'], pick['y_centroid'], pick['intensity_sum']])
@@ -4883,6 +4914,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         fig_p.show()
 
+
     def changePhotometry(self, frame, photometry_pixels, add_photometry):
         """ Add/remove photometry pixels of the pick. """
         pick = self.getCurrentPick()
@@ -4909,11 +4941,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.pick_list[frame] = pick
 
+
     def getCurrentPick(self):
         try:
             return self.pick_list[self.img.getFrame()]
         except KeyError:
             return None
+
 
     def resetPickFrames(self, new_initial_frame, reverse=False):
         """

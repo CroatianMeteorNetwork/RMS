@@ -2277,9 +2277,8 @@ class SettingsWidget(QtWidgets.QWidget):
         self.selected_stars.hide()
         self.picks.show()
         self.great_circle.show()
-        if self.gui.img.img_handle.input_type != 'dfn':
-            self.region.show()
-            self.single_click_photometry.show()
+        self.region.show()
+        self.single_click_photometry.show()
 
         self.meas_ground_points.show()
 
