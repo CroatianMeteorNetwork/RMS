@@ -210,6 +210,9 @@ class Config:
         # Get the package root directory
         self.rms_root_dir = os.path.join(os.path.dirname(RMS.__file__), os.pardir)
 
+        # default config file absolute path
+        self.config_file_name = os.path.join(self.rms_root_dir, '.config')
+
         ##### System
         self.stationID = "XX0001"
         self.latitude = 0
@@ -554,6 +557,9 @@ def parse(path, strict=True):
     removeInlineComments(parser, delimiter)
     
     config = Config()
+
+    # Store parsed config file name
+    config.config_file_name = path
 
     # Parse an RMS config file
     if os.path.basename(path).endswith('.config'):
