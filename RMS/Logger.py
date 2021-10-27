@@ -41,7 +41,7 @@ def initLogging(config, log_file_prefix=""):
     mkdirP(log_path)
 
     # Generate a file name for the log file
-    log_file_name = log_file_prefix + "log_" + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + ".log"
+    log_file_name = config.stationID + "-" + log_file_prefix + "log_" + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + ".log"
         
     # Init logging
     log = logging.getLogger('logger')
