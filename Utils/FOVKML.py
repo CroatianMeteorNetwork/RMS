@@ -6,6 +6,8 @@ from __future__ import print_function, division, absolute_import, unicode_litera
 import os
 import sys
 
+import numpy as np
+
 import RMS.ConfigReader as cr
 from RMS.Formats.Platepar import Platepar
 from RMS.Routines.MaskImage import loadMask
@@ -34,6 +36,33 @@ def fovKML(config, dir_path, platepar, mask=None, area_ht=100000, side_points=10
 
     # Find lat/lon/elev describing the view area
     polygon_sides = fovArea(platepar, mask, area_ht, side_points)
+
+    # Make longitued in the same wrap region
+    lon_list = []
+    for side in polygon_sides:
+        side = np.array(side)
+        lat, lon, elev = side.T
+        lon_list += lon.tolist()
+    
+    # Unwrap longitudes
+    lon_list = np.degrees(np.unwrap(2*np.radians(lon_list))/2)
+
+    # Assign longitudes back to the proper sides
+    prev_len = 0
+    polygon_sides_lon_wrapped = []
+    for side in polygon_sides:
+        side = np.array(side)
+        lat, _, elev = side.T
+
+        # Extract the wrapped longitude
+        lon = lon_list[prev_len:prev_len + len(lat)]
+
+        side = np.c_[lat, lon, elev]
+        polygon_sides_lon_wrapped.append(side.tolist())
+
+        prev_len += len(lat)
+
+    polygon_sides = polygon_sides_lon_wrapped
 
 
     # List of polygons to plot
