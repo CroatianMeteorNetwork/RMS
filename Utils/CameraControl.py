@@ -695,7 +695,7 @@ if __name__ == '__main__':
         exit(1)
 
     # Load the config file
-    config = cr.loadConfigFromDirectory(cml_args.config, None)
+    config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
 
     cameraControlV2(config, cmd, opts)
     

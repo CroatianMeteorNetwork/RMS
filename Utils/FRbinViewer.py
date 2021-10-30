@@ -211,12 +211,7 @@ if __name__ == "__main__":
     dir_path = cml_args.dir_path[0]
 
     # Load the configuration file
-    if cml_args.config is not None: 
-        cfgdir, cfgfile = os.path.split(cml_args.config[0])
-    else:
-        cfgdir, cfgfile = '.', '.config'
-
-    config = cr.loadConfigFromDirectory(cfgfile, cfgdir)
+    config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
 
     
 

@@ -264,12 +264,7 @@ if __name__ == "__main__":
 
 
     # Load the configuration file
-    if cml_args.config is not None: 
-        cfgdir, cfgfile = os.path.split(cml_args.config[0])
-    else:
-        cfgdir, cfgfile = '.', '.config'
-
-    config = cr.loadConfigFromDirectory(cfgfile, cfgdir)
+    config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
 
     # Make the flat
     ff_median = makeFlat(dir_path, config, nostars=cml_args.nostars, use_images=cml_args.images)

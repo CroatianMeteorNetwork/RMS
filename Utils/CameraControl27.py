@@ -154,7 +154,7 @@ if __name__ == '__main__':
         print('Error: command "{}" not supported'.format(cmd))
         exit(1)
 
-    config = cr.loadConfigFromDirectory(args.config, None)
+    config = cr.loadConfigFromDirectory(args.config, 'notused')
 
     if str(config.deviceID).isdigit():
         print('Error: this utility only works with IP cameras')

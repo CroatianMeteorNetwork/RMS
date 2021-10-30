@@ -185,7 +185,7 @@ if __name__ == "__main__":
     cml_args = arg_parser.parse_args()
 
     # Load config file
-    config = cr.loadConfigFromDirectory(cml_args.config, None)
+    config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
 
 
     if len(sys.argv) < 2:

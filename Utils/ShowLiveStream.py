@@ -43,7 +43,7 @@ if __name__ == "__main__":
 
     # Load the configuration file
 
-    config = cr.loadConfigFromDirectory(cml_args.config, None)
+    config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
 
     # Open video device
     vcap = get_device(config)
