@@ -23,6 +23,7 @@ import argparse
 import time
 import datetime
 import signal
+import shutil
 import ctypes
 import logging
 import multiprocessing
@@ -207,10 +208,22 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     log.info('Data directory: ' + night_data_dir)
 
+    # Copy the used config file to the capture directory
+    if os.path.isfile(config.config_file_name):
+        try:
+            shutil.copy2(config.config_file_name, os.path.join(night_data_dir, ".config"))
+        except:
+            log.error("Cannot copy the config file to the capture directory!")
+
 
     # Get the platepar file
     platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir)
 
+    # If the platepar is not none, set the FOV from it
+    if platepar is not None:
+        config.fov_w = platepar.fov_h
+        config.fov_h = platepar.fov_v
+        
 
     log.info('Initializing frame buffers...')
     ### For some reason, the RPi 3 does not like memory chunks which size is the multipier of its L2
@@ -647,7 +660,8 @@ if __name__ == "__main__":
     log = logging.getLogger("logger")
 
 
-    log.info('Program start')
+    log.info("Program start")
+    log.info("Station code: {:s}".format(str(config.stationID)))
 
     # Change the Ctrl+C action to the special handle
     setSIGINT()

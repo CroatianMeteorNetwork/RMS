@@ -1228,7 +1228,7 @@ class InputTypeImages(object):
         self.fripon_header = None
         self.cabernet_status = False
 
-        img_types = ['.png', '.jpg', '.bmp', '.fit']
+        img_types = ['.png', '.jpg', '.bmp', '.fit', '.tif']
 
         # Add raw formats if rawpy is installed
         if 'rawpy' in sys.modules:
@@ -1313,6 +1313,16 @@ class InputTypeImages(object):
 
         else:
             self.byteswap = False
+
+
+        # If the resolution differs from the one in the config file, change it and write out a warning
+        if (img.shape[0] != self.config.height) or (img.shape[1] != self.config.width):
+            self.config.height = img.shape[0]
+            self.config.width = img.shape[1]
+            print()
+            print("WARNING! The image resolution differs from the resolution set in the config file.")
+            print("Image resolution set to {:d} x {:d} px".format(self.config.width, self.config.height))
+            
 
 
         # Set the begin time if in the FRIPON mode
@@ -1906,9 +1916,9 @@ class InputTypeDFN(InputType):
 
         if 'rawpy' in sys.modules:
             ### Find images in the given folder ###
-            img_types = ['.png', '.jpg', '.bmp', '.nef', '.cr2']
+            img_types = ['.png', '.jpg', '.bmp', '.tif', '.nef', '.cr2']
         else:
-            img_types = ['.png', '.jpg', '.bmp']
+            img_types = ['.png', '.jpg', '.bmp', '.tif']
 
         self.beginning_datetime = beginning_time
 
@@ -2092,7 +2102,7 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
     """
 
     ### Find images in the given folder ###
-    img_types = ['.png', '.jpg', '.bmp', '.fit']
+    img_types = ['.png', '.jpg', '.bmp', '.fit', '.tif']
 
     if 'rawpy' in sys.modules:
         img_types += ['.nef', '.cr2']

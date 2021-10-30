@@ -54,22 +54,50 @@ def writeCAL(night_dir, config, platepar):
     rot_std = rotationWrtStandard(platepar)
 
 
-    # Switch ry in Y coeffs
-    platepar.y_poly_fwd[11], platepar.y_poly_fwd[10] = platepar.y_poly_fwd[10], platepar.y_poly_fwd[11]
+    if platepar.distortion_type == "poly3+radial":
+
+        # CAMS code for the distortion type
+        distortion_code = "201"
+
+        # Switch ry in Y coeffs
+        platepar.y_poly_fwd[11], platepar.y_poly_fwd[10] = platepar.y_poly_fwd[10], platepar.y_poly_fwd[11]
 
 
-    # Correct distortion parameters so they are CAMS compatible
-    platepar.x_poly_fwd[ 1] = +platepar.x_poly_fwd[ 1] + 1.0
-    platepar.x_poly_fwd[ 2] = -platepar.x_poly_fwd[ 2]
-    platepar.x_poly_fwd[ 4] = -platepar.x_poly_fwd[ 4]
-    platepar.x_poly_fwd[ 7] = -platepar.x_poly_fwd[ 7]
-    platepar.x_poly_fwd[ 9] = -platepar.x_poly_fwd[ 9]
-    platepar.x_poly_fwd[11] = -platepar.x_poly_fwd[11]
-    platepar.y_poly_fwd[ 2] = -platepar.y_poly_fwd[ 2] - 1.0
-    platepar.y_poly_fwd[ 4] = -platepar.y_poly_fwd[ 4]
-    platepar.y_poly_fwd[ 7] = -platepar.y_poly_fwd[ 7]
-    platepar.y_poly_fwd[ 9] = -platepar.y_poly_fwd[ 9]
-    platepar.y_poly_fwd[11] = -platepar.y_poly_fwd[11]
+        # Correct distortion parameters so they are CAMS compatible
+        platepar.x_poly_fwd[ 1] = +platepar.x_poly_fwd[ 1] + 1.0
+        platepar.x_poly_fwd[ 2] = -platepar.x_poly_fwd[ 2]
+        platepar.x_poly_fwd[ 4] = -platepar.x_poly_fwd[ 4]
+        platepar.x_poly_fwd[ 7] = -platepar.x_poly_fwd[ 7]
+        platepar.x_poly_fwd[ 9] = -platepar.x_poly_fwd[ 9]
+        platepar.x_poly_fwd[11] = -platepar.x_poly_fwd[11]
+        platepar.y_poly_fwd[ 2] = -platepar.y_poly_fwd[ 2] - 1.0
+        platepar.y_poly_fwd[ 4] = -platepar.y_poly_fwd[ 4]
+        platepar.y_poly_fwd[ 7] = -platepar.y_poly_fwd[ 7]
+        platepar.y_poly_fwd[ 9] = -platepar.y_poly_fwd[ 9]
+        platepar.y_poly_fwd[11] = -platepar.y_poly_fwd[11]
+
+    else:
+
+        if platepar.distortion_type == "radial3-odd":
+            distortion_code = "203"
+        elif platepar.distortion_type == "radial3-all":
+            distortion_code = "204"
+        elif platepar.distortion_type == "radial5-odd":
+            distortion_code = "205"
+        elif platepar.distortion_type == "radial4-all":
+            distortion_code = "206"
+        elif platepar.distortion_type == "radial7-odd":
+            distortion_code = "207"
+        elif platepar.distortion_type == "radial5-all":
+            distortion_code = "208"
+        elif platepar.distortion_type == "radial9-odd":
+            distortion_code = "209"
+        else:
+            distortion_code = "201"
+        
+
+        # Reset the distortion to zero out all distortion params
+        platepar.setDistortionType("poly3+radial")
 
 
     # Compute scale in arcmin/px
@@ -118,7 +146,7 @@ def writeCAL(night_dir, config, platepar):
         s +=" Cal center Elev (deg)    = {:8.3f}\n".format(platepar.alt_centre)
         s +=" Cal center col (colcen)  = {:8.3f}\n".format(platepar.X_res/2)
         s +=" Cal center row (rowcen)  = {:8.3f}\n".format(platepar.Y_res/2)
-        s +=" Cal fit order            = 201\n" # 201 = RMS 3rd order poly with radial terms
+        s +=" Cal fit order            = {:>4s}\n".format(distortion_code)
         s +="\n"
         s +=" Camera description       = None\n"
         s +=" Lens description         = None\n"
@@ -180,20 +208,38 @@ def writeCAL(night_dir, config, platepar):
 
 if __name__ == "__main__":
 
+
+    import argparse
     import RMS.ConfigReader as cr
     from RMS.Formats.Platepar import Platepar
 
-    # Load the default configuration file
-    config = cr.parse(".config")
+
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Covert the RMS platepar to a CAMS-style CAL file.")
+
+    arg_parser.add_argument('platepar_path', metavar='PLATEPAR_PATH', type=str, \
+        help='Path to a platepar file.')
+
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+
+    # Extract parent directory
+    dir_path = os.path.dirname(cml_args.platepar_path)
+
+    # Load the config file
+    config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
     # Load a platepar file
     pp = Platepar()
-    pp.read("/home/dvida/Desktop/HR0010_20190216_170146_265550_detected/platepar_cmn2010.cal", \
-        use_flat=config.use_flat)
-
-
-    night_dir = "/home/dvida/Desktop/HR0010_20190216_170146_265550_detected"
-    #night_dir = "D:/Dropbox/RPi_Meteor_Station/data/CA0004_20180516_040459_588816_detected"
+    pp.read(cml_args.platepar_path, use_flat=config.use_flat)
 
     # Write the CAL file
-    writeCAL(night_dir, config, pp)
+    writeCAL(dir_path, config, pp)
