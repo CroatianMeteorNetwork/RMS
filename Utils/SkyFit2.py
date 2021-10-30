@@ -290,10 +290,18 @@ class PairedStars(object):
         self.paired_stars.pop(min_index)
 
 
-    def imageCoords(self):
-        """ Return a list of image coordinates of the pairs. """
+    def imageCoords(self, draw=False):
+        """ Return a list of image coordinates of the pairs. 
+    
+        Keyword arguments:
+            draw: [bool] Add an offset of 0.5 px for drwaing using pyqtgraph.
+        """
 
-        img_coords = [(x, y, intens_acc) for x, y, intens_acc, _ in self.paired_stars]
+        offset = 0
+        if draw:
+            offset = 0.5
+
+        img_coords = [(x + offset, y + offset, intens_acc) for x, y, intens_acc, _ in self.paired_stars]
 
         return img_coords
 
@@ -1258,6 +1266,7 @@ class PlateTool(QtWidgets.QMainWindow):
     def updateLeftLabels(self):
         """ Update the two labels on the left with their information """
 
+        # Sky fit
         if self.mode == 'skyfit':
             ra_centre, dec_centre = self.computeCentreRADec()
 
@@ -1294,6 +1303,7 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'RA centre  = {:s}{:02d}h {:02d}m {:05.2f}s\n'.format(sign_str, hh, mm, ss)
             text_str += u'Dec centre = {:.3f}\N{DEGREE SIGN}'.format(dec_centre)
 
+        # Manual reduction
         else:
             text_str = "Station: {:s} \n".format(self.platepar.station_code)
             text_str += self.img_handle.name() + '\n\n'
@@ -1301,6 +1311,9 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += "Time  = {:s}\n".format(
                 self.img_handle.currentFrameTime(dt_obj=True).strftime("%Y/%m/%d %H:%M:%S.%f")[:-3])
             text_str += 'Frame = {:d}\n'.format(self.img.getFrame())
+            if self.img_handle.input_type == "ff":
+                if self.use_fr_files:
+                    text_str += 'Line = {:d}\n'.format(self.img_handle.current_line)
             text_str += 'Image gamma = {:.2f}\n'.format(self.img.gamma)
             text_str += 'Camera gamma = {:.2f}\n'.format(self.config.gamma)
             text_str += 'Refraction = {:s}'.format(str(self.platepar.refraction))
@@ -1457,8 +1470,10 @@ class PlateTool(QtWidgets.QMainWindow):
             # Plot geo points
             if self.catalog_stars_visible:
                 geo_size = 5
-                self.geo_markers.setData(x=self.geo_x_filtered, y=self.geo_y_filtered, size=geo_size)
-                self.geo_markers2.setData(x=self.geo_x_filtered, y=self.geo_y_filtered, size=geo_size)
+                self.geo_markers.setData(x=self.geo_x_filtered + 0.5, y=self.geo_y_filtered + 0.5, \
+                    size=geo_size)
+                self.geo_markers2.setData(x=self.geo_x_filtered + 0.5, y=self.geo_y_filtered + 0.5, \
+                    size=geo_size)
 
 
         ### Draw catalog stars on the image using the current platepar ###
@@ -1503,10 +1518,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Plot catalog stars
                 size = ((4.0 + (cat_mag_faintest - catalog_mag_filtered))/2.0)**(2*2.512*0.5)
 
-                self.cat_star_markers.setData(x=self.catalog_x_filtered, y=self.catalog_y_filtered, \
-                    size=size)
-                self.cat_star_markers2.setData(x=self.catalog_x_filtered, y=self.catalog_y_filtered, \
-                    size=size)
+                self.cat_star_markers.setData(x=self.catalog_x_filtered + 0.5, \
+                    y=self.catalog_y_filtered + 0.5, size=size)
+                self.cat_star_markers2.setData(x=self.catalog_x_filtered + 0.5, \
+                    y=self.catalog_y_filtered + 0.5, size=size)
             else:
                 print('No catalog stars visible!')
 
@@ -1515,8 +1530,8 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Draws the stars that were picked for calibration as well as draw the residuals and star magnitude.
         """
         if len(self.paired_stars) > 0:
-            self.sel_cat_star_markers.setData(pos=self.paired_stars.imageCoords())
-            self.sel_cat_star_markers2.setData(pos=self.paired_stars.imageCoords())
+            self.sel_cat_star_markers.setData(pos=self.paired_stars.imageCoords(draw=True))
+            self.sel_cat_star_markers2.setData(pos=self.paired_stars.imageCoords(draw=True))
 
         else:
             self.sel_cat_star_markers.setData(pos=[])
@@ -1545,8 +1560,8 @@ class PlateTool(QtWidgets.QMainWindow):
             y = star_data[:, 0]
             x = star_data[:, 1]
 
-            self.calstar_markers.setData(x=x, y=y)
-            self.calstar_markers2.setData(x=x, y=y)
+            self.calstar_markers.setData(x=x + 0.5, y=y + 0.5)
+            self.calstar_markers2.setData(x=x + 0.5, y=y + 0.5)
 
         else:
 
@@ -1575,7 +1590,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Get the color of the current pick
                 if self.img.getFrame() == frame:
-                    current = [(pick['x_centroid'], pick['y_centroid'])]
+                    current = [(pick['x_centroid'] + 0.5, pick['y_centroid'] + 0.5)]
 
                     # Position picks
                     if pick['mode'] == 1:
@@ -1587,10 +1602,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Get colors for other picks
                 elif pick['mode'] == 1:
-                    data1.append([pick['x_centroid'], pick['y_centroid']])
+                    data1.append([pick['x_centroid'] + 0.5, pick['y_centroid'] + 0.5])
 
                 elif pick['mode'] == 0:
-                    data2.append([pick['x_centroid'], pick['y_centroid']])
+                    data2.append([pick['x_centroid'] + 0.5, pick['y_centroid'] + 0.5])
 
 
         ### Add markers to the screen ###
@@ -1686,8 +1701,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 x2.extend([img_x, res_x])
                 y2.extend([img_y, res_y])
 
-            self.residual_lines_img.setData(x=x1, y=y1)
-            self.residual_lines_astro.setData(x=x2, y=y2)
+            self.residual_lines_img.setData(x=np.array(x1) + 0.5, y=np.array(y1) + 0.5)
+            self.residual_lines_astro.setData(x=np.array(x2) + 0.5, y=np.array(y2) + 0.5)
         else:
             self.residual_lines_img.clear()
             self.residual_lines_astro.clear()
@@ -1733,7 +1748,7 @@ class PlateTool(QtWidgets.QMainWindow):
             y[::2] = y_arr
             y[1::2] = y_nodist
 
-            self.distortion_lines.setData(x=x, y=y)
+            self.distortion_lines.setData(x=np.array(x) + 0.5, y=np.array(y) + 0.5)
 
 
     def photometry(self, show_plot=False):
@@ -2443,8 +2458,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
                         # If CTRL is pressed, place the pick manually - NOTE: the intensity might be off then!!!
                         if modifiers & QtCore.Qt.ControlModifier:
-                            self.x_centroid = self.mouse_x
-                            self.y_centroid = self.mouse_y
+                            self.x_centroid = self.mouse_x - 0.5
+                            self.y_centroid = self.mouse_y - 0.5
 
                             # Compute the star intensity
                             _, _, self.star_intensity = self.centroid(prev_x_cent=self.x_centroid,
@@ -2465,8 +2480,10 @@ class PlateTool(QtWidgets.QMainWindow):
                                 return None
 
                         # Add the centroid to the plot
-                        self.centroid_star_markers.addPoints(x=[self.x_centroid], y=[self.y_centroid])
-                        self.centroid_star_markers2.addPoints(x=[self.x_centroid], y=[self.y_centroid])
+                        self.centroid_star_markers.addPoints(x=[self.x_centroid + 0.5], \
+                            y=[self.y_centroid + 0.5])
+                        self.centroid_star_markers2.addPoints(x=[self.x_centroid + 0.5], \
+                            y=[self.y_centroid + 0.5])
 
 
                         # Find coordiantes of the star or geo points closest to the clicked point
@@ -2474,8 +2491,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
                         # Add a star marker to the main and zoom windows
-                        self.sel_cat_star_markers.addPoints(x=x_data, y=y_data)
-                        self.sel_cat_star_markers2.addPoints(x=x_data, y=y_data)
+                        self.sel_cat_star_markers.addPoints(x=np.array(x_data) + 0.5, \
+                            y=np.array(y_data) + 0.5)
+                        self.sel_cat_star_markers2.addPoints(x=np.array(x_data) + 0.5, \
+                            y=np.array(y_data) + 0.5)
 
                         # Switch to the mode where the catalog star is selected
                         self.cursor.setMode(1)
@@ -2484,16 +2503,18 @@ class PlateTool(QtWidgets.QMainWindow):
                     elif self.cursor.mode == 1:
 
                         # REMOVE marker for previously selected
-                        self.sel_cat_star_markers.setData(pos=self.paired_stars.imageCoords())
-                        self.sel_cat_star_markers2.setData(pos=self.paired_stars.imageCoords())
+                        self.sel_cat_star_markers.setData(pos=self.paired_stars.imageCoords(draw=True))
+                        self.sel_cat_star_markers2.setData(pos=self.paired_stars.imageCoords(draw=True))
 
 
                         # Find coordiantes of the star or geo points closest to the clicked point
                         x_data, y_data = self.findClickedStarOrGeoPoint(self.mouse_x, self.mouse_y)
 
                         # Add the new point
-                        self.sel_cat_star_markers.addPoints(x=x_data, y=y_data)
-                        self.sel_cat_star_markers2.addPoints(x=x_data, y=y_data)
+                        self.sel_cat_star_markers.addPoints(x=np.array(x_data) + 0.5, \
+                            y=np.array(y_data) + 0.5)
+                        self.sel_cat_star_markers2.addPoints(x=np.array(x_data) + 0.5, \
+                            y=np.array(y_data) + 0.5)
 
 
                 # Remove star pair on right click
@@ -2517,7 +2538,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         if modifiers & QtCore.Qt.ControlModifier or \
                                 ((modifiers & QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and
                                  self.img.img_handle.input_type == 'dfn'):
-                            self.x_centroid, self.y_centroid = self.mouse_x, self.mouse_y
+                            self.x_centroid, self.y_centroid = self.mouse_x - 0.5, self.mouse_y - 0.5
                         else:
                             self.x_centroid, self.y_centroid, _ = self.centroid()
 
@@ -3203,7 +3224,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Handle key presses in the manual reduction mode
         elif self.mode == 'manualreduction':
 
-            if (qmodifiers & QtCore.Qt.ShiftModifier) and (self.img.img_handle.input_type != 'dfn'):
+            # Set photometry mode
+            if (qmodifiers & QtCore.Qt.ShiftModifier):
                 self.cursor.setMode(2)
 
             if event.key() == QtCore.Qt.Key_P:
@@ -3550,7 +3572,7 @@ class PlateTool(QtWidgets.QMainWindow):
         solution = None
 
         # Construct FOV width estimate
-        fov_w_range = [0.75*self.config.fov_w, 1.25*self.config.fov_w]
+        fov_w_range = [0.5*self.config.fov_w, 2*self.config.fov_w]
 
         # Check if the given FF files is in the calstars list
         if (self.img_handle.name() in self.calstars) and (not upload_image):
@@ -3715,14 +3737,14 @@ class PlateTool(QtWidgets.QMainWindow):
             # If the data was not being able to load from the folder, choose a file to load
             if img_handle is None:
                 self.input_path = QtGui.QFileDialog.getOpenFileName(self, "Select image/video file to open",
-                    self.dir_path, "All readable files (*.fits *.bin *.mp4 *.avi *.mkv *.vid *.png *.jpg *.bmp *.nef);;" + \
+                    self.dir_path, "All readable files (*.fits *.bin *.mp4 *.avi *.mkv *.vid *.png *.jpg *.bmp *.nef *.tif);;" + \
                                    "All files (*);;" + \
                                    "FF and FR Files (*.fits;*.bin);;" + \
                                    "Video Files (*.mp4 *.avi *.mkv);;" + \
                                    "VID Files (*.vid);;" + \
                                    "FITS Files (*.fits);;" + \
                                    "BIN Files (*.bin);;" + \
-                                   "Image Files (*.png *.jpg *.bmp *.nef)")[0]
+                                   "Image Files (*.png *.jpg *.bmp *.nef *.tif)")[0]
 
 
         # If no previous ways of opening data was sucessful, open a file
@@ -4039,7 +4061,7 @@ class PlateTool(QtWidgets.QMainWindow):
             initial_file = self.dir_path
 
         dark_file = QtGui.QFileDialog.getOpenFileName(self, "Select the dark frame file", initial_file,
-                                                      "Image files (*.png *.jpg *.bmp);;All files (*)")[0]
+                                                      "Image files (*.png *.jpg *.bmp *.nef *.cr2);;All files (*)")[0]
 
         if not dark_file:
             return False, None
@@ -4049,7 +4071,7 @@ class PlateTool(QtWidgets.QMainWindow):
         try:
 
             # Load the dark
-            dark = Image.loadDark(*os.path.split(dark_file), dtype=self.img.data.dtype,
+            dark = Image.loadDark(*os.path.split(dark_file), dtype=self.img.data.dtype, \
                                   byteswap=self.img_handle.byteswap)
 
         except:
@@ -4059,7 +4081,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             return False, None
 
-        dark = dark.astype(self.img.data.dtype)
+        dark = dark.astype(self.img.data.dtype).T
 
         # Check if the size of the file matches
         if self.img.data.shape != dark.shape:
@@ -4325,7 +4347,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     connect[break_indx-1] = 0
 
                 
-                self.great_circle_line.setData(x=x_array, y=y_array, connect=connect)
+                self.great_circle_line.setData(x=x_array + 0.5, y=y_array + 0.5, connect=connect)
 
 
                 ### ###
@@ -4709,6 +4731,7 @@ class PlateTool(QtWidgets.QMainWindow):
         fig_a.tight_layout()
         fig_a.show()
 
+
     def computeIntensitySum(self):
         """ Compute the background subtracted sum of intensity of colored pixels. The background is estimated
             as the median of near pixels that are not colored.
@@ -4767,15 +4790,40 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute the median background
             background_lvl = np.ma.median(crop_bg)
 
+
+            # If the DFN image is used and a dark has been applied (i.e. the previous image is subtracted),
+            #   assume that the background is zero
+            if (self.img_handle.input_type == "dfn") and (self.dark is not None):
+                background_lvl = 0
+
+
             # Compute the background subtracted intensity sum
             pick['intensity_sum'] = np.ma.sum(crop_img - background_lvl)
+
+
+            # If the DFN image is used, correct intensity sum for exposure difference
+            # Of the total 27 second, the stars are exposed 4.31 seconds, and every fireball dot is exposed
+            #    a total of 0.01 seconds. Thus the correction factor is 431
+            if (self.img_handle.input_type == "dfn"):
+                pick['intensity_sum'] *= 431
+
 
             # Make sure the intensity sum is never 0
             if pick['intensity_sum'] <= 0:
                 pick['intensity_sum'] = 1
 
+
     def showLightcurve(self):
         """ Show the meteor lightcurve. """
+
+        # The DFN light curve can only be computed if the background image is subtracted
+        if (self.img_handle.input_type == "dfn") and (self.dark is None):
+            
+            qmessagebox(title='DFN light curve',
+                        message='The DFN light curve can only be computed if the background is subtracted! Load the previous or next image as a dark.',
+                        message_type="info")
+
+            return None
 
         # Compute the intensity sum done on the previous frame
         self.computeIntensitySum()
@@ -4786,6 +4834,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Skip None entries
             if (pick['x_centroid'] is None) or (pick['y_centroid'] is None):
+                continue
+
+            # Only show real picks, and not gaps
+            if pick['mode'] == 0:
                 continue
 
             centroids.append([frame, pick['x_centroid'], pick['y_centroid'], pick['intensity_sum']])
@@ -4862,6 +4914,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         fig_p.show()
 
+
     def changePhotometry(self, frame, photometry_pixels, add_photometry):
         """ Add/remove photometry pixels of the pick. """
         pick = self.getCurrentPick()
@@ -4888,11 +4941,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.pick_list[frame] = pick
 
+
     def getCurrentPick(self):
         try:
             return self.pick_list[self.img.getFrame()]
         except KeyError:
             return None
+
 
     def resetPickFrames(self, new_initial_frame, reverse=False):
         """
@@ -5152,8 +5207,8 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute the time relative to the reference JD
             t_rel = frame_no/self.img_handle.fps
 
-            centroids.append([t_rel, pick['x_centroid'], pick['y_centroid'], ra, dec, pick['intensity_sum'], \
-                mag])
+            centroids.append([float(t_rel), float(pick['x_centroid']), float(pick['y_centroid']), float(ra), \
+                float(dec), float(pick['intensity_sum']), float(mag)])
 
         # Sort centroids by relative time
         centroids = sorted(centroids, key=lambda x: x[0])

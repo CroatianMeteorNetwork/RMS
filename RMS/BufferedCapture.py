@@ -159,6 +159,7 @@ class BufferedCapture(Process):
 
             # Init the video device
             log.info("Initializing the video device...")
+            log.info("Device: " + str(self.config.deviceID))
             if self.config.force_v4l2:
                 device = cv2.VideoCapture(self.config.deviceID, cv2.CAP_V4L2)
                 device.set(cv2.CAP_PROP_CONVERT_RGB, 0)
