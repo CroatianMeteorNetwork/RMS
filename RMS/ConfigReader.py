@@ -135,9 +135,6 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
     """
 
     # If the dir path is given as a string, use that dir path
-    #if dir_path is None:
-    #    pass
-    #el
     if isinstance(dir_path, str):
         pass
 
