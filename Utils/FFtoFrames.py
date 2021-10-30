@@ -204,12 +204,8 @@ if __name__ == "__main__":
     if cml_args.deinterlace is None:
         deinterlace_mode = 0
 
-    if cml_args.config is not None: 
-        cfgdir, cfgfile = os.path.split(cml_args.config[0])
-    else:
-        cfgdir, cfgfile = '.', '.config'
+    config = cr.loadConfigFromDirectory(cml_args.config, None)
 
-    config = cr.loadConfigFromDirectory(cfgfile, cfgdir)
     if cml_args.fps is None:
         cml_fps = config.fps
     else:

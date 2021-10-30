@@ -694,14 +694,8 @@ if __name__ == '__main__':
         print('Error: command "{}" not supported'.format(cmd))
         exit(1)
 
-    # print(cml_args.config)
     # Load the config file
-    if cml_args.config is not None: 
-        cfgdir, cfgfile = os.path.split(cml_args.config[0])
-    else:
-        cfgdir, cfgfile = '.', '.config'
-
-    config = cr.loadConfigFromDirectory(cfgfile, cfgdir)
+    config = cr.loadConfigFromDirectory(cml_args.config, None)
 
     cameraControlV2(config, cmd, opts)
     

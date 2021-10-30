@@ -251,6 +251,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-i', '--images', action="store_true", \
         help="""Use image files (bmp, png, jpg) for flat instead of FF files. Images of the file type with the higest frequency in the directory will be taken.""")
 
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -261,7 +264,12 @@ if __name__ == "__main__":
 
 
     # Load the configuration file
-    config = cr.parse(".config")
+    if cml_args.config is not None: 
+        cfgdir, cfgfile = os.path.split(cml_args.config[0])
+    else:
+        cfgdir, cfgfile = '.', '.config'
+
+    config = cr.loadConfigFromDirectory(cfgfile, cfgdir)
 
     # Make the flat
     ff_median = makeFlat(dir_path, config, nostars=cml_args.nostars, use_images=cml_args.images)

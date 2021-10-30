@@ -19,6 +19,7 @@
 
 import os
 import sys
+import argparse
 
 import numpy as np
 
@@ -175,9 +176,16 @@ def plotFieldsums(dir_path, config):
 
 if __name__ == "__main__":
 
+    arg_parser = argparse.ArgumentParser(description="Plot Fieldsums", formatter_class=argparse.RawTextHelpFormatter)
+
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
 
     # Load config file
-    config = cr.parse(".config")
+    config = cr.loadConfigFromDirectory(cml_args.config, None)
 
 
     if len(sys.argv) < 2:

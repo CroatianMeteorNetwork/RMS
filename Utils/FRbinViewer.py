@@ -200,6 +200,9 @@ if __name__ == "__main__":
     
     arg_parser.add_argument('-f', '--extractformat', metavar='EXTRACT_FORMAT', help="""Image format for extracted files. png by default. """)
 
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -208,7 +211,12 @@ if __name__ == "__main__":
     dir_path = cml_args.dir_path[0]
 
     # Load the configuration file
-    config = cr.parse(".config")
+    if cml_args.config is not None: 
+        cfgdir, cfgfile = os.path.split(cml_args.config[0])
+    else:
+        cfgdir, cfgfile = '.', '.config'
+
+    config = cr.loadConfigFromDirectory(cfgfile, cfgdir)
 
     
 

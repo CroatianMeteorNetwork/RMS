@@ -135,7 +135,9 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
     """
 
     # If the dir path is given as a string, use that dir path
-    if isinstance(dir_path, str):
+    if dir_path is None:
+        pass
+    elif isinstance(dir_path, str):
         pass
 
     # If dir path is a list with more than 1 entry, take the parent directory of the first directory in the 
@@ -152,8 +154,9 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
 
 
     # If the given path is a file, take the parent
-    if os.path.isfile(dir_path):
-        dir_path = os.path.dirname(dir_path)
+    if dir_path is not None: 
+        if os.path.isfile(dir_path):
+            dir_path = os.path.dirname(dir_path)
 
 
     if cml_args_config is not None:
