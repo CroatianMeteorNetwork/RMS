@@ -5,7 +5,6 @@
 from __future__ import print_function, division, absolute_import
 
 import os
-import sys
 import random
 import argparse
 
@@ -88,7 +87,7 @@ def makeFlat(dir_path, config, nostars=False, use_images=False):
         print('Using image type:', most_freq_type)
 
         # Take only files of that file type
-        ff_list = [file_name for file_name in sorted(os.listdir(dir_path)) \
+        ff_list = [file_name for file_name in sorted(os.listdir(dir_path))
             if file_name.lower().endswith(most_freq_type)]
 
 
@@ -237,21 +236,21 @@ def makeFlat(dir_path, config, nostars=False, use_images=False):
 
 if __name__ == "__main__":
 
-    ### COMMAND LINE ARGUMENTS
+    # COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Makes a flat from FF files in the given folder. Only those files with star detection are taken, but this can be disabled.")
 
-    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
+    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str,
         help='Path to directory with FF files.')
 
-    arg_parser.add_argument('-n', '--nostars', action="store_true", \
+    arg_parser.add_argument('-n', '--nostars', action="store_true",
         help="""Disable requiring stars on images for generating the flat field.""")
 
-    arg_parser.add_argument('-i', '--images', action="store_true", \
+    arg_parser.add_argument('-i', '--images', action="store_true",
         help="""Use image files (bmp, png, jpg) for flat instead of FF files. Images of the file type with the higest frequency in the directory will be taken.""")
 
-    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
         help="Path to a config file which will be used instead of the default one.")
 
     # Parse the command line arguments
@@ -281,4 +280,4 @@ if __name__ == "__main__":
         plt.show()
 
     else:
-        print('Flat filed could not be made!')
+        print('Flat file could not be made!')
