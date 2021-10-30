@@ -231,9 +231,17 @@ function upload_video_file {
 }
 
 function upload_kml_file {
-	KML_FILE="$CAPTURED_DIR_NAME/$STATION_ID.kml"	
-	if [ -f "$KML_FILE" ]; then		
-		curl --user-agent $AGENT -F"operation=upload" -F"file=@$KML_FILE" "$SERVER/$SYSTEM/?station_id=$STATION_ID&type=kml&action=upload&level=$ACTIVE_LEVEL"	
+	KML_FILE_100="$CAPTURED_DIR_NAME/$STATION_ID-100km.kml"	
+	if [ -f "$KML_FILE_100" ]; then		
+		curl --user-agent $AGENT -F"operation=upload" -F"file=@$KML_FILE_100" "$SERVER/$SYSTEM/?station_id=$STATION_ID&type=kml100&action=upload&level=$ACTIVE_LEVEL"	
+	fi	
+	KML_FILE_70="$CAPTURED_DIR_NAME/$STATION_ID-70km.kml"	
+	if [ -f "$KML_FILE_70" ]; then		
+		curl --user-agent $AGENT -F"operation=upload" -F"file=@$KML_FILE_70" "$SERVER/$SYSTEM/?station_id=$STATION_ID&type=kml70&action=upload&level=$ACTIVE_LEVEL"	
+	fi	
+	KML_FILE_25="$CAPTURED_DIR_NAME/$STATION_ID-25km.kml"	
+	if [ -f "$KML_FILE_25" ]; then		
+		curl --user-agent $AGENT -F"operation=upload" -F"file=@$KML_FILE_25" "$SERVER/$SYSTEM/?station_id=$STATION_ID&type=kml25&action=upload&level=$ACTIVE_LEVEL"	
 	fi	
 }
 

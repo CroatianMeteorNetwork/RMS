@@ -308,7 +308,7 @@ def updateRaDecGrid(grid, platepar):
         for i in cuts:
             connect[i] = 0
 
-    grid.setData(x=x, y=y, connect=connect)
+    grid.setData(x=np.array(x) + 0.5, y=np.array(y) + 0.5, connect=connect)
 
 
 def updateAzAltGrid(grid, platepar):
@@ -431,4 +431,4 @@ def updateAzAltGrid(grid, platepar):
     for i in cuts[:-1]:
         connect[i] = 0
 
-    grid.setData(x=x, y=y, connect=connect)
+    grid.setData(x=np.array(x) + 0.5, y=np.array(y) + 0.5, connect=connect)

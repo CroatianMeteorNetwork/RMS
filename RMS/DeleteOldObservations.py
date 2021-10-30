@@ -247,6 +247,10 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
             free_space_status = True
             break
 
+        # Wait 10 seconds between deletes. This helps to balance out the space distribution if multiple
+        #   instances of RMS are running on the same system
+        time.sleep(10)
+
         # If no folders left to delete, try to delete archived files
         if (len(captured_dirs_remaining) == 0) and (len(archived_dirs_remaining) == 0):
 
