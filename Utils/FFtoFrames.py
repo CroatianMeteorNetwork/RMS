@@ -204,7 +204,7 @@ if __name__ == "__main__":
     if cml_args.deinterlace is None:
         deinterlace_mode = 0
 
-    config = cr.loadConfigFromDirectory(cml_args.config, None)
+    config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
 
     if cml_args.fps is None:
         cml_fps = config.fps
