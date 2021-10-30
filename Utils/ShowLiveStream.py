@@ -5,7 +5,6 @@ from __future__ import print_function, division, absolute_import
 import cv2
 import time
 import argparse
-import os
 
 import RMS.ConfigReader as cr
 from RMS.Routines.Image import applyBrightnessAndContrast
@@ -33,7 +32,7 @@ if __name__ == "__main__":
     arg_parser.add_argument('-n', '--novideo', action="store_true", help="""Get the frames in the background,
         but don't show them on the screen. """)
 
-    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
         help="Path to a config file which will be used instead of the default one.")
 
     # Parse the command line arguments
