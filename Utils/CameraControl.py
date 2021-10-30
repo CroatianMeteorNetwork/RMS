@@ -679,10 +679,14 @@ if __name__ == '__main__':
         usage=usage)
     parser.add_argument('command', metavar='command', type=str, nargs=1, help=' | '.join(cmd_list))
     parser.add_argument('options', metavar='opts', type=str, nargs='*', help=opthelp)
-    args = parser.parse_args()
-    cmd = args.command[0]
-    if args.options is not None:
-        opts = args.options
+
+    parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
+        help="Path to a config file which will be used instead of the default one.")
+
+    cml_args = parser.parse_args()
+    cmd = cml_args.command[0]
+    if cml_args.options is not None:
+        opts = cml_args.options
     else:
         opts=''
         
@@ -690,7 +694,14 @@ if __name__ == '__main__':
         print('Error: command "{}" not supported'.format(cmd))
         exit(1)
 
-    config = cr.parse('.config')
+    # print(cml_args.config)
+    # Load the config file
+    if cml_args.config is not None: 
+        cfgdir, cfgfile = os.path.split(cml_args.config[0])
+    else:
+        cfgdir, cfgfile = '.', '.config'
+
+    config = cr.loadConfigFromDirectory(cfgfile, cfgdir)
 
     cameraControlV2(config, cmd, opts)
     

@@ -59,11 +59,8 @@ def saveFrame(frame, frame_no, out_dir, file_name, file_format, ff_dt, fps, half
     return file_name_saving, frame_dt
 
 
-def FFtoFrames(file_path, out_dir, file_format, deinterlace_mode, first_frame=0, last_frame=255) : 
+def FFtoFrames(file_path, out_dir, file_format, deinterlace_mode, first_frame=0, last_frame=255, cml_fps=25): 
     #########################
-
-    # Load the configuration file
-    config = cr.parse(".config")
 
     # Read the deinterlace
     #   -1 - no deinterlace
@@ -104,7 +101,7 @@ def FFtoFrames(file_path, out_dir, file_format, deinterlace_mode, first_frame=0,
 
     # Take the FPS from the config file, if it was not given as an argument
     if fps is None:
-        fps = config.fps
+        fps = cml_fps
 
     # Try to read the number of frames from the FF file itself
     if ff.nframes > 0:
@@ -194,6 +191,9 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float, help="Frames per second of the video. If not given, it will be read from a) the FF file if available, b) from the config file.")
 
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -204,7 +204,18 @@ if __name__ == "__main__":
     if cml_args.deinterlace is None:
         deinterlace_mode = 0
 
-    FFtoFrames(file_path, out_dir, file_format, deinterlace_mode)
+    if cml_args.config is not None: 
+        cfgdir, cfgfile = os.path.split(cml_args.config[0])
+    else:
+        cfgdir, cfgfile = '.', '.config'
+
+    config = cr.loadConfigFromDirectory(cfgfile, cfgdir)
+    if cml_args.fps is None:
+        cml_fps = config.fps
+    else:
+        cml_fps = cml_args.fps
+
+    FFtoFrames(file_path, out_dir, file_format, deinterlace_mode, cml_fps=cml_fps)
 
 
 
