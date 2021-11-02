@@ -5075,6 +5075,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # Get the rolling shutter corrected (or not, depending on the config) frame number
             frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
 
+            # If the global shutter is used, the frame number can only be an integer
+            if self.config.deinterlace_order == -2:
+                frame_no = int(frame_no)
             
             centroids.append([frame_no, pick['x_centroid'], pick['y_centroid'], pick['intensity_sum']])
 
@@ -5203,6 +5206,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Get the rolling shutter corrected (or not, depending on the config) frame number
             frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
+
+            # If the global shutter is used, the frame number can only be an integer
+            if self.config.deinterlace_order == -2:
+                frame_no = int(frame_no)
 
             # Compute the time relative to the reference JD
             t_rel = frame_no/self.img_handle.fps
@@ -5343,6 +5350,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Get the rolling shutter corrected (or not, depending on the config) frame number
             frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
+
+            # If the global shutter is used, the frame number can only be an integer
+            if self.config.deinterlace_order == -2:
+                frame_no = int(frame_no)
 
             # Compute the time relative to the reference JD
             t_rel = frame_no/self.img_handle.fps
