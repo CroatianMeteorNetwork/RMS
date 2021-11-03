@@ -783,6 +783,12 @@ def parseCapture(config, parser):
     if parser.has_option(section, "fps"):
         config.fps = parser.getfloat(section, "fps")
 
+        # Limit the FPS to 1 million, as the time precision of datetime is 1 us
+        if config.fps > 1000000:
+            config.fps = 1000000
+            print()
+            print("WARNING! The FPS has been limited to 1,000,000!")
+
     if parser.has_option(section, "ff_format"):
         config.ff_format = parser.get(section, "ff_format")
 
