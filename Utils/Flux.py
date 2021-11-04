@@ -407,7 +407,7 @@ def stellarLMModel(p0):
     """
 
     #lm_s = 0.639*p0 - 0.858 # old with 3 points
-    lm_s = 0.807*p0 - 2.304 # new on Nov 3, with 15 points
+    lm_s = 0.832*p0 - 2.585 # new on Nov 4, with 17 points
 
     return lm_s
 
