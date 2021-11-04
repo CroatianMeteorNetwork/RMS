@@ -125,6 +125,9 @@ class FluxConfig(object):
         # Minimum radiant elevation in the time bin (deg). 25 degreees by default
         self.rad_elev_limit = 25
 
+        # Minimum distance of the end of the meteor to the radiant (deg)
+        self.rad_dist_min = 15
+
         # Subdivide the time bin into the given number of subbins
         self.sub_time_bins = 2
 
@@ -769,22 +772,6 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             bin_jd_beg = datetime2JD(bin_dt_beg)
             bin_jd_end = datetime2JD(bin_dt_end)
 
-            # Only select meteors in this bin
-            bin_meteors = []
-            bin_ffs = []
-            for key in associations:
-                meteor, shower = associations[key]
-
-                if shower is not None:
-                    if (shower.name == shower_code) and (meteor.jdt_ref > bin_jd_beg) \
-                        and (meteor.jdt_ref <= bin_jd_end):
-                        
-                        bin_meteors.append([meteor, shower])
-                        bin_ffs.append(meteor.ff_name)
-
-
-
-
                 
 
             jd_mean = (bin_jd_beg + bin_jd_end)/2
@@ -812,6 +799,26 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             # Compute the radiant elevation
             radiant_azim, radiant_elev = raDec2AltAz(ra, dec, jd_mean, platepar.lat, platepar.lon)
 
+
+
+
+            # Only select meteors in this bin and not too close to the radiant
+            bin_meteors = []
+            bin_ffs = []
+            for key in associations:
+                meteor, shower = associations[key]
+
+                if shower is not None:
+                    if (shower.name == shower_code) and (meteor.jdt_ref > bin_jd_beg) \
+                        and (meteor.jdt_ref <= bin_jd_end):
+
+                        # Filter out meteors ending too close to the radiant
+                        if np.degrees(angularSeparation(np.radians(radiant_azim), np.radians(radiant_elev), \
+                            np.radians(meteor.end_azim), np.radians(meteor.end_alt))) >= flux_config.rad_dist_min:
+                        
+                            bin_meteors.append([meteor, shower])
+                            bin_ffs.append(meteor.ff_name)
+
             ### ###
 
             print()
@@ -821,10 +828,16 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             print("Bin end:", bin_dt_end)
             print("Sol mid: {:.5f}".format(sol_mean))
             print("Radiant elevation: {:.2f} deg".format(radiant_elev))
+            print("Apparent speed: {:.2f} km/s".format(v_init/1000))
 
             # If the elevation of the radiant is below the limit, skip this bin
             if radiant_elev < flux_config.rad_elev_limit:
                 print("!!! Mean radiant elevation below {:.2f} deg threshold, skipping time bin!".format(flux_config.rad_elev_limit))
+                continue
+
+            # The minimum duration of the time bin should be larger than 50% of the given dt
+            if bin_hours < 0.5*timebin:
+                print("!!! Time bin duration of {:.2f} h is shorter than 0.5x of the time bin!".format(bin_hours))
                 continue
 
 
@@ -932,6 +945,12 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                         ang_vel = v_init*np.sin(rad_dist)/r
 
 
+                        # If the angular distance from the radiant is less than 15 deg, don't use the block
+                        #   in the effective collection area
+                        if np.degrees(rad_dist) < flux_config.rad_dist_min:
+                            area = 0.0
+
+
                         # Compute the range correction
                         range_correction = (1e5/r)**2
 
@@ -1023,6 +1042,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 # plt.scatter(x_arr, y_arr, c=np.array(col_area_eff_block_arr)/1e6)
                 # #plt.pcolor(np.array(x_arr).reshape(len(x_unique), len(y_unique)), np.array(y_arr).reshape(len(x_unique), len(y_unique)), np.array(col_area_eff_block_arr).reshape(len(x_unique), len(y_unique))/1e6)
                 # plt.colorbar(label="km^2")
+                # plt.gca().invert_yaxis()
                 # plt.show()
 
                 # ###
