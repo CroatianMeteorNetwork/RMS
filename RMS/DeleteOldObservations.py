@@ -8,11 +8,14 @@ import sys
 import shutil
 import datetime
 import time
+import logging
 
 import ephem
 
 from RMS.CaptureDuration import captureDuration
 
+# Get the logger from the main module
+log = logging.getLogger("logger")
 
 
 def availableSpace(dirname):
@@ -218,6 +221,8 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
     ######
 
+    log.info("Need {:.2f} GB for next night".format(next_night_bytes/1024/1024/1024))
+
 
     # If there's enough free space, don't do anything
     if availableSpace(data_dir) > next_night_bytes:
@@ -226,12 +231,16 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
     # Intermittently delete captured and archived directories until there's enough free space
     prev_available_space = availableSpace(data_dir)
+    log.info("Available space before deleting: {:.2f} GB".format(prev_available_space/1024/1024/1024))
     nothing_deleted_count = 0
     free_space_status = False
     while True:
 
         # Delete one captured directory
         captured_dirs_remaining = deleteNightFolders(captured_dir, config)
+
+        log.info("Deleted captured directory: {:s}".format(captured_dir))
+        log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
 
         # Break the there's enough space
         if availableSpace(data_dir) > next_night_bytes:
@@ -241,6 +250,9 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
         # Delete one archived directory
         archived_dirs_remaining = deleteNightFolders(archived_dir, config)
 
+        log.info("Deleted archived directory: {:s}".format(archived_dir))
+        log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
+
 
         # Break if there's enough space
         if availableSpace(data_dir) > next_night_bytes:
@@ -249,10 +261,13 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
         # Wait 10 seconds between deletes. This helps to balance out the space distribution if multiple
         #   instances of RMS are running on the same system
+        log.info("Still not enough space, waiting 10 s...")
         time.sleep(10)
 
         # If no folders left to delete, try to delete archived files
         if (len(captured_dirs_remaining) == 0) and (len(archived_dirs_remaining) == 0):
+
+            log.info("Deleted all Capture and Archived directories, deleting archived bz2 files...")
 
             archived_files_remaining = deleteFiles(archived_dir, config)
 
@@ -270,6 +285,7 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
         # If nothing was deleted in this loop, count how may time this happened
         if availableSpace(data_dir) == prev_available_space:
+            log.info("Nothing got deleted...")
             nothing_deleted_count += 1
 
         else:
