@@ -239,7 +239,7 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
         # Delete one captured directory
         captured_dirs_remaining = deleteNightFolders(captured_dir, config)
 
-        log.info("Deleted captured directory: {:s}".format(captured_dir))
+        log.info("Deleted dir captured directory: {:s}".format(captured_dir))
         log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
 
         # Break the there's enough space
@@ -250,7 +250,7 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
         # Delete one archived directory
         archived_dirs_remaining = deleteNightFolders(archived_dir, config)
 
-        log.info("Deleted archived directory: {:s}".format(archived_dir))
+        log.info("Deleted dir in archived directory: {:s}".format(archived_dir))
         log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
 
 
