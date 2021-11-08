@@ -436,18 +436,21 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
         
         stat = c.sub_status(sub_id, justdict=True)
         print('Got status:', stat)
-        jobs = stat.get('jobs', [])
-        
-        if len(jobs):
 
-            for j in jobs:
+        if stat is not None:
+
+            jobs = stat.get('jobs', [])
+            
+            if len(jobs):
+
+                for j in jobs:
+                    if j is not None:
+                        break
+
                 if j is not None:
+                    print('Selecting job id', j)
+                    solved_id = j
                     break
-
-            if j is not None:
-                print('Selecting job id', j)
-                solved_id = j
-                break
 
         time.sleep(5)
 

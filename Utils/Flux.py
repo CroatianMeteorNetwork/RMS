@@ -15,7 +15,6 @@ import scipy.stats
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
 from RMS.Astrometry.ApplyRecalibrate import applyRecalibrate
 from RMS.Astrometry.Conversions import areaGeoPolygon, jd2Date, datetime2JD, J2000_JD, raDec2AltAz
-import RMS.ConfigReader as cr
 from RMS.ExtractStars import extractStarsAndSave
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats import FFfile
@@ -120,14 +119,20 @@ class FluxConfig(object):
         # Height sampling delta (km).
         self.dht = 2
 
-        # Limit of meteor's elevation above horizon (deg). 20 degrees by default.
-        self.elev_limit = 20
+        # Limit of meteor's elevation above horizon (deg). 25 degrees by default.
+        self.elev_limit = 25
 
-        # Minimum radiant elevation in the time bin (deg). 15 degreees by default
-        self.rad_elev_limit = 15
+        # Minimum radiant elevation in the time bin (deg). 25 degreees by default
+        self.rad_elev_limit = 25
+
+        # Minimum distance of the end of the meteor to the radiant (deg)
+        self.rad_dist_min = 15
 
         # Subdivide the time bin into the given number of subbins
         self.sub_time_bins = 2
+
+        # Minimum number of meteors in the time bin
+        self.meteros_min = 3
 
 
 
@@ -404,7 +409,8 @@ def stellarLMModel(p0):
         lm_s: [float] Stellar limiting magnitude.
     """
 
-    lm_s = 0.639*p0 - 0.858
+    #lm_s = 0.639*p0 - 0.858 # old with 3 points
+    lm_s = 0.832*p0 - 2.585 # new on Nov 4, with 17 points
 
     return lm_s
 
@@ -412,7 +418,7 @@ def stellarLMModel(p0):
 
 
 def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_end, timebin, mass_index, \
-    timebin_intdt=0.25, ht_std_percent=5.0, mask=None):
+    timebin_intdt=0.25, ht_std_percent=5.0, mask=None, show_plots=True):
     """ Compute flux using measurements in the given FTPdetectinfo file. 
     
     Arguments:
@@ -430,7 +436,13 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             default. If smaller than that, only one collection are will be computed.
         ht_std_percent: [float] Meteor height standard deviation in percent.
         mask: [Mask object] Mask object, None by default.
+        show_plots: [bool] Show flux plots. True by default.
 
+    Return:
+        [tuple] sol_data, flux_lm_6_5_data
+            - sol_data: [list] Array of solar longitudes (in degrees) of time bins.
+            - flux_lm6_5_data: [list] Array of meteoroid flux at the limiting magnitude of +6.5 in 
+                meteors/1000km^2/h.
     """
 
 
@@ -519,7 +531,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
     # Compute the population index using the classical equation
-    population_index = 10**((mass_index - 1)/2.5)
+    population_index = 10**((mass_index - 1)/2.5) # Found to be more consistent when comparing fluxes
     #population_index = 10**((mass_index - 1)/2.3) # TEST !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
 
 
@@ -760,22 +772,6 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             bin_jd_beg = datetime2JD(bin_dt_beg)
             bin_jd_end = datetime2JD(bin_dt_end)
 
-            # Only select meteors in this bin
-            bin_meteors = []
-            bin_ffs = []
-            for key in associations:
-                meteor, shower = associations[key]
-
-                if shower is not None:
-                    if (shower.name == shower_code) and (meteor.jdt_ref > bin_jd_beg) \
-                        and (meteor.jdt_ref <= bin_jd_end):
-                        
-                        bin_meteors.append([meteor, shower])
-                        bin_ffs.append(meteor.ff_name)
-
-
-
-
                 
 
             jd_mean = (bin_jd_beg + bin_jd_end)/2
@@ -803,6 +799,26 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             # Compute the radiant elevation
             radiant_azim, radiant_elev = raDec2AltAz(ra, dec, jd_mean, platepar.lat, platepar.lon)
 
+
+
+
+            # Only select meteors in this bin and not too close to the radiant
+            bin_meteors = []
+            bin_ffs = []
+            for key in associations:
+                meteor, shower = associations[key]
+
+                if shower is not None:
+                    if (shower.name == shower_code) and (meteor.jdt_ref > bin_jd_beg) \
+                        and (meteor.jdt_ref <= bin_jd_end):
+
+                        # Filter out meteors ending too close to the radiant
+                        if np.degrees(angularSeparation(np.radians(radiant_azim), np.radians(radiant_elev), \
+                            np.radians(meteor.end_azim), np.radians(meteor.end_alt))) >= flux_config.rad_dist_min:
+                        
+                            bin_meteors.append([meteor, shower])
+                            bin_ffs.append(meteor.ff_name)
+
             ### ###
 
             print()
@@ -812,14 +828,20 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             print("Bin end:", bin_dt_end)
             print("Sol mid: {:.5f}".format(sol_mean))
             print("Radiant elevation: {:.2f} deg".format(radiant_elev))
+            print("Apparent speed: {:.2f} km/s".format(v_init/1000))
 
             # If the elevation of the radiant is below the limit, skip this bin
             if radiant_elev < flux_config.rad_elev_limit:
                 print("!!! Mean radiant elevation below {:.2f} deg threshold, skipping time bin!".format(flux_config.rad_elev_limit))
                 continue
 
+            # The minimum duration of the time bin should be larger than 50% of the given dt
+            if bin_hours < 0.5*timebin:
+                print("!!! Time bin duration of {:.2f} h is shorter than 0.5x of the time bin!".format(bin_hours))
+                continue
 
-            if len(bin_meteors) > 0:
+
+            if len(bin_meteors) >= flux_config.meteros_min:
                 print("Meteors:", len(bin_meteors))
 
 
@@ -923,6 +945,12 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                         ang_vel = v_init*np.sin(rad_dist)/r
 
 
+                        # If the angular distance from the radiant is less than 15 deg, don't use the block
+                        #   in the effective collection area
+                        if np.degrees(rad_dist) < flux_config.rad_dist_min:
+                            area = 0.0
+
+
                         # Compute the range correction
                         range_correction = (1e5/r)**2
 
@@ -1014,6 +1042,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 # plt.scatter(x_arr, y_arr, c=np.array(col_area_eff_block_arr)/1e6)
                 # #plt.pcolor(np.array(x_arr).reshape(len(x_unique), len(y_unique)), np.array(y_arr).reshape(len(x_unique), len(y_unique)), np.array(col_area_eff_block_arr).reshape(len(x_unique), len(y_unique))/1e6)
                 # plt.colorbar(label="km^2")
+                # plt.gca().invert_yaxis()
                 # plt.show()
 
                 # ###
@@ -1067,83 +1096,91 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
     for sol, flux_lm_6_5 in zip(sol_data, flux_lm_6_5_data):
         print("{:9.5f}, {:8.4f}".format(sol, flux_lm_6_5))
 
-    # Plot a histogram of peak magnitudes
-    plt.hist(peak_mags, cumulative=True, log=True, bins=len(peak_mags), density=True)
 
-    # Plot population index
-    r_intercept = -0.7
-    x_arr = np.linspace(np.min(peak_mags), np.percentile(peak_mags, 60))
-    plt.plot(x_arr, 10**(np.log10(population_index)*x_arr + r_intercept))
+    if show_plots and len(sol_data):
 
-    plt.title("r = {:.2f}".format(population_index))
+        # Plot a histogram of peak magnitudes
+        plt.hist(peak_mags, cumulative=True, log=True, bins=len(peak_mags), density=True)
 
-    plt.show()
+        # Plot population index
+        r_intercept = -0.7
+        x_arr = np.linspace(np.min(peak_mags), np.percentile(peak_mags, 60))
+        plt.plot(x_arr, 10**(np.log10(population_index)*x_arr + r_intercept))
 
+        plt.title("r = {:.2f}".format(population_index))
 
-    # Plot how the derived values change throughout the night
-    fig, axes \
-        = plt.subplots(nrows=4, ncols=2, sharex=True, figsize=(10, 8))
-
-    ((ax_met,      ax_lm),
-     (ax_rad_elev, ax_corrs),
-     (ax_rad_dist, ax_col_area),
-     (ax_ang_vel,  ax_flux)) = axes
+        plt.show()
 
 
-    fig.suptitle("{:s}, s = {:.2f}, r = {:.2f}".format(shower_code, mass_index, population_index))
+        # Plot how the derived values change throughout the night
+        fig, axes \
+            = plt.subplots(nrows=4, ncols=2, sharex=True, figsize=(10, 8))
+
+        ((ax_met,      ax_lm),
+         (ax_rad_elev, ax_corrs),
+         (ax_rad_dist, ax_col_area),
+         (ax_ang_vel,  ax_flux)) = axes
 
 
-    ax_met.scatter(sol_data, meteor_num_data)
-    ax_met.set_ylabel("Meteors")
-
-    ax_rad_elev.plot(sol_data, radiant_elev_data)
-    ax_rad_elev.set_ylabel("Radiant elev (deg)")
-
-    ax_rad_dist.plot(sol_data, radiant_dist_mid_data)
-    ax_rad_dist.set_ylabel("Radiant dist (deg)")
-
-    ax_ang_vel.plot(sol_data, ang_vel_mid_data)
-    ax_ang_vel.set_ylabel("Ang vel (deg/s)")
-    ax_ang_vel.set_xlabel("La Sun (deg)")
+        fig.suptitle("{:s}, s = {:.2f}, r = {:.2f}".format(shower_code, mass_index, population_index))
 
 
-    ax_lm.plot(sol_data, lm_s_data, label="Stellar")
-    ax_lm.plot(sol_data, lm_m_data, label="Meteor")
-    ax_lm.set_ylabel("LM")
-    ax_lm.legend()
+        ax_met.scatter(sol_data, meteor_num_data)
+        ax_met.set_ylabel("Meteors")
 
-    ax_corrs.plot(sol_data, sensitivity_corr_data, label="Sensitivity")
-    ax_corrs.plot(sol_data, range_corr_data, label="Range")
-    ax_corrs.plot(sol_data, radiant_elev_corr_data, label="Rad elev")
-    ax_corrs.plot(sol_data, ang_vel_corr_data, label="Ang vel")
-    ax_corrs.plot(sol_data, total_corr_data, label="Total (median)")
-    ax_corrs.set_ylabel("Corrections")
-    ax_corrs.legend()
+        ax_rad_elev.plot(sol_data, radiant_elev_data)
+        ax_rad_elev.set_ylabel("Radiant elev (deg)")
 
-    
+        ax_rad_dist.plot(sol_data, radiant_dist_mid_data)
+        ax_rad_dist.set_ylabel("Radiant dist (deg)")
 
-    ax_col_area.plot(sol_data, np.array(effective_collection_area_data)/1e6)
-    ax_col_area.plot(sol_data, len(sol_data)*[col_area_100km_raw/1e6], color='k', \
-        label="Raw col area at 100 km")
-    ax_col_area.plot(sol_data, len(sol_data)*[col_area_meteor_ht_raw/1e6], color='k', linestyle='dashed', \
-        label="Raw col area at met ht")
-    ax_col_area.set_ylabel("Eff. col. area (km^2)")
-    ax_col_area.legend()
+        ax_ang_vel.plot(sol_data, ang_vel_mid_data)
+        ax_ang_vel.set_ylabel("Ang vel (deg/s)")
+        ax_ang_vel.set_xlabel("La Sun (deg)")
 
-    ax_flux.scatter(sol_data, flux_lm_6_5_data)
-    ax_flux.set_ylabel("Flux@+6.5M (met/1000km^2/h)")
-    ax_flux.set_xlabel("La Sun (deg)")
 
-    plt.tight_layout()
+        ax_lm.plot(sol_data, lm_s_data, label="Stellar")
+        ax_lm.plot(sol_data, lm_m_data, label="Meteor")
+        ax_lm.set_ylabel("LM")
+        ax_lm.legend()
 
-    plt.show()
-    
+        ax_corrs.plot(sol_data, sensitivity_corr_data, label="Sensitivity")
+        ax_corrs.plot(sol_data, range_corr_data, label="Range")
+        ax_corrs.plot(sol_data, radiant_elev_corr_data, label="Rad elev")
+        ax_corrs.plot(sol_data, ang_vel_corr_data, label="Ang vel")
+        ax_corrs.plot(sol_data, total_corr_data, label="Total (median)")
+        ax_corrs.set_ylabel("Corrections")
+        ax_corrs.legend()
+
+        
+
+        ax_col_area.plot(sol_data, np.array(effective_collection_area_data)/1e6)
+        ax_col_area.plot(sol_data, len(sol_data)*[col_area_100km_raw/1e6], color='k', \
+            label="Raw col area at 100 km")
+        ax_col_area.plot(sol_data, len(sol_data)*[col_area_meteor_ht_raw/1e6], color='k', linestyle='dashed', \
+            label="Raw col area at met ht")
+        ax_col_area.set_ylabel("Eff. col. area (km^2)")
+        ax_col_area.legend()
+
+        ax_flux.scatter(sol_data, flux_lm_6_5_data)
+        ax_flux.set_ylabel("Flux@+6.5M (met/1000km^2/h)")
+        ax_flux.set_xlabel("La Sun (deg)")
+
+        plt.tight_layout()
+
+        plt.show()
+
+
+    return sol_data, flux_lm_6_5_data
+        
 
 
 
 if __name__ == "__main__":
 
     import argparse
+
+    import RMS.ConfigReader as cr
 
     ### COMMAND LINE ARGUMENTS
 
@@ -1210,7 +1247,6 @@ if __name__ == "__main__":
         
 
     # Extract parent directory
-    #dir_path = os.path.dirname(ftpdetectinfo_path_list[0])
     dir_path = os.path.dirname(cml_args.ftpdetectinfo_path)
 
     # Load the config file

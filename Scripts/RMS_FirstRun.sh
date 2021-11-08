@@ -75,8 +75,11 @@ IMPORTANT! Before you proceed make sure you have the following:
    places. Be careful that the longitude of places in the western hemisphere
    is negative. E.g. if your camera was installed on the Statue of Libery,
    the latitude would be 40.689298 and the longitude would be -74.044479.
-   The elevation should be given in meters (NOT feet!)
-   The easiest way to deterine these values is by using a GPS app on your phone.
+   The elevation should be given in meters (NOT feet!) and in the mean sea level
+   (MSL) convention (not WGS84).
+   The easiest way to measure the coordinates is in Google Earth. Make sure to
+   pinpoint the actual location of the camera to within a precision of at least
+   10 meters.
 
  2. Unique station code. To obtain a station code, send an e-mail containing
     the following to Denis Vida ($RMSEMAIL):
@@ -86,7 +89,7 @@ IMPORTANT! Before you proceed make sure you have the following:
          e.g. Mike Henderson's camera in London, Ontario, Canada.
 
     You will then be given a unique station code which will look something
-    like this: US1234. The first two letters is the ISO code of the country,
+    like this: US01AB. The first two letters is the ISO code of the country,
     and the last 4 characters are the unique alphanumeric identifier.
 
 IMPORTANT: READ THE INSTRUCTIONS ABOVE BEFORE CONTINUING!
