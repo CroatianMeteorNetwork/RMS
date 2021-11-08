@@ -142,6 +142,11 @@ if __name__ == '__main__':
     # command line argument parser
     parser = argparse.ArgumentParser(description='Controls ONVIF-Compatible IP camera')
     parser.add_argument('command', metavar='command', type=str, nargs=1, help=' | '.join(cmd_list))
+
+    parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
+        help="Path to a config file which will be used instead of the default one.")
+
+
     args = parser.parse_args()
     cmd = args.command[0]
 
@@ -149,7 +154,7 @@ if __name__ == '__main__':
         print('Error: command "{}" not supported'.format(cmd))
         exit(1)
 
-    config = cr.parse('.config')
+    config = cr.loadConfigFromDirectory(args.config, 'notused')
 
     if str(config.deviceID).isdigit():
         print('Error: this utility only works with IP cameras')

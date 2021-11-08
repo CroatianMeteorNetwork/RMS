@@ -32,13 +32,17 @@ if __name__ == "__main__":
     arg_parser.add_argument('-n', '--novideo', action="store_true", help="""Get the frames in the background,
         but don't show them on the screen. """)
 
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
+        help="Path to a config file which will be used instead of the default one.")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
 
 
     # Load the configuration file
-    config = cr.parse(".config")
+
+    config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
 
     # Open video device
     vcap = get_device(config)

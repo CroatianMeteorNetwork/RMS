@@ -105,19 +105,3 @@ if __name__ == "__main__":
             fig.subplots_adjust(right=0.8, hspace=0)
 
             plt.show()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
