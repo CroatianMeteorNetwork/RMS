@@ -177,7 +177,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='
 
                 elif key == ord("q"): 
                     os._exit(0)
-                    
+
         if makevideo is True:
             root = os.path.dirname(__file__)
             ffmpeg_path = os.path.join(root, "ffmpeg.exe")
@@ -199,7 +199,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='
                         + software_name + " -v quiet -r 30 -y -start_number " + str(first_frame) + " -i " + img_patt \
                         + " -vcodec libx264 -pix_fmt yuv420p -crf 25 -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.97)\" " \
                         + mp4_path
-
+                subprocess.call(com, shell=True, cwd=dir_path)
             for frame in framefiles:
                 os.remove(os.path.join(dir_path, frame))
 
