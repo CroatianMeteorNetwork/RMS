@@ -343,7 +343,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     ### Add extra files to archive
 
     # Add the config file to the archive too
-    extra_files.append(os.path.join(os.getcwd(), '.config'))
+    extra_files.append(config.config_file_name)
 
     # Add the mask
     if (not nodetect):
