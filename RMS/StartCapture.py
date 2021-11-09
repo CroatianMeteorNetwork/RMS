@@ -209,10 +209,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     log.info('Data directory: ' + night_data_dir)
 
     # Copy the used config file to the capture directory
-    config_path = os.path.join(os.getcwd(), ".config")
-    if os.path.isfile(config_path):
+    if os.path.isfile(config.config_file_name):
         try:
-            shutil.copy2(config_path, os.path.join(night_data_dir, ".config"))
+            shutil.copy2(config.config_file_name, os.path.join(night_data_dir, ".config"))
         except:
             log.error("Cannot copy the config file to the capture directory!")
 
