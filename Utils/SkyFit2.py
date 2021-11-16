@@ -780,21 +780,23 @@ class PlateTool(QtWidgets.QMainWindow):
         self.zoom_window.addItem(self.pick_marker2)
 
         # Star pick info
-        text_str = "STAR PICKING MODE\n"
-        text_str += "LEFT CLICK - Centroid star\n"
-        text_str += "CTRL + LEFT CLICK - Manual star position\n"
-        text_str += "RIGHT CLICK - Remove pair\n"
-        text_str += "CTRL + SCROLL - Aperture radius adjust\n"
-        text_str += "CTRL + Z - Fit stars\n"
-        text_str += "CTRL + SHIFT + Z - Fit with initial distortion params set to 0\n"
-        text_str += "L - Astrometry fit details\n"
-        text_str += "P - Photometry fit"
-        self.star_pick_info = TextItem(text_str, anchor=(0.5, 0.75), color=(255, 255, 255))
-        self.star_pick_info.setAlign(QtCore.Qt.AlignCenter)
+        self.star_pick_info_text_str = "STAR PICKING MODE keys:\n"
+        self.star_pick_info_text_str += "LEFT CLICK - Centroid star\n"
+        self.star_pick_info_text_str += "CTRL + LEFT CLICK - Manual star position\n"
+        self.star_pick_info_text_str += "ENTER or SPACE - Accept pair\n"
+        self.star_pick_info_text_str += "RIGHT CLICK - Remove pair\n"
+        self.star_pick_info_text_str += "CTRL + SCROLL - Aperture radius adjust\n"
+        self.star_pick_info_text_str += "CTRL + Z - Fit stars\n"
+        self.star_pick_info_text_str += "CTRL + SHIFT + Z - Fit with initial distortion params set to 0\n"
+        self.star_pick_info_text_str += "L - Astrometry fit plot\n"
+        self.star_pick_info_text_str += "P - Photometry fit plot"
+        self.star_pick_info = TextItem(self.star_pick_info_text_str, anchor=(0.0, 0.75), color=(0, 0, 0), fill=(255, 255, 255, 100))
+        self.star_pick_info.setFont(QtGui.QFont('monospace', 8))
+        self.star_pick_info.setAlign(QtCore.Qt.AlignLeft)
         self.star_pick_info.hide()
         self.star_pick_info.setZValue(10)
         self.star_pick_info.setParentItem(self.img_frame)
-        self.star_pick_info.setPos(self.platepar.X_res/2, self.platepar.Y_res)
+        self.star_pick_info.setPos(0, self.platepar.Y_res)
 
         # Default variables even when constructor isnt called
         self.star_pick_mode = False
@@ -1034,16 +1036,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.view_menu.addActions([self.toggle_info_action,
                                        self.toggle_zoom_window])
 
-            text_str = "STAR PICKING MODE\n"
-            text_str += "LEFT CLICK - Centroid star\n"
-            text_str += "CTRL + LEFT CLICK - Manual star position\n"
-            text_str += "RIGHT CLICK - Remove pair\n"
-            text_str += "CTRL + SCROLL - Aperture radius adjust\n"
-            text_str += "CTRL + Z - Fit stars\n"
-            text_str += "CTRL + SHIFT + Z - Fit with initial distortion params set to 0\n"
-            text_str += "L - Astrometry fit details\n"
-            text_str += "P - Photometry fit"
-            self.star_pick_info.setText(text_str)
+            self.star_pick_info.setText(self.star_pick_info_text_str)
 
         else:
             self.mode = 'manualreduction'
@@ -1188,7 +1181,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.label_f1.setPos(self.img_frame.width() - self.label_f1.boundingRect().width(), \
             self.img_frame.height() - self.label_f1.boundingRect().height())
 
-        self.star_pick_info.setPos(self.img_frame.width()/2, self.img_frame.height() - 50)
+        self.star_pick_info.setPos(0, self.img_frame.height() - 50)
 
         if self.config.height/self.config.width < self.img_frame.height()/self.img_frame.width():
             self.img_frame.setLimits(xMin=0,
@@ -3165,8 +3158,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 # updates image automatically
 
 
-            # Save the point to the fit list by pression Enter
-            elif (event.key() == QtCore.Qt.Key_Return) or (event.key() == QtCore.Qt.Key_Enter):
+            # Save the point to the fit list by pressing Enter or Space
+            elif (event.key() == QtCore.Qt.Key_Return) or (event.key() == QtCore.Qt.Key_Enter) \
+                or (event.key() == QtCore.Qt.Key_Space):
                 
                 if self.star_pick_mode:
                     
@@ -5058,7 +5052,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Create the list of picks for saving
         centroids = []
-        for frame, pick in self.pick_list.items():
+        for frame, pick in sorted(self.pick_list.items(), key=lambda x: x[0]):
 
             # Make sure to centroid is picked and is not just the photometry
             if pick['x_centroid'] is None:
@@ -5169,7 +5163,7 @@ class PlateTool(QtWidgets.QMainWindow):
         json_dict['meastype'] = 1
 
         centroids = []
-        for frame, pick in self.pick_list.items():
+        for frame, pick in sorted(self.pick_list.items(), key=lambda x: x[0]):
 
             # Make sure to centroid is picked and is not just the photometry
             if pick['x_centroid'] is None:
@@ -5314,8 +5308,8 @@ class PlateTool(QtWidgets.QMainWindow):
         out_str += "# schema: astropy-2.0\n"
         out_str += "datetime,ra,dec,azimuth,altitude,mag_data,x_image,y_image\n"
 
-        # Add the data
-        for frame, pick in self.pick_list.items():
+        # Add the data (sort by frame)
+        for frame, pick in sorted(self.pick_list.items(), key=lambda x: x[0]):
 
             # Make sure to centroid is picked and is not just the photometry
             if pick['x_centroid'] is None:
