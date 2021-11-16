@@ -186,6 +186,16 @@ class GeoPoints(object):
             self.ra_data.append(np.degrees(ra))
             self.dec_data.append(np.degrees(dec))
 
+
+        self.ra_data = np.array(self.ra_data)
+        self.dec_data = np.array(self.dec_data)
+
+        # Sort geo points by descending declination (needed for fast filtering)
+        dec_sorted_ind = np.argsort(self.dec_data)[::-1]
+        self.ra_data = self.ra_data[dec_sorted_ind]
+        self.dec_data = self.dec_data[dec_sorted_ind]
+
+
         
 
 class CatalogStar(object):
@@ -1433,8 +1443,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.geo_points = np.c_[self.geo_points_obj.ra_data, self.geo_points_obj.dec_data, \
                 np.ones_like(self.geo_points_obj.ra_data)]
 
-            # Sort geo points by descending declination (needed for fast filtering)
-            self.geo_points = self.geo_points[np.argsort(self.geo_points_obj.dec_data)[::-1]]
 
             # Compute image coordiantes of geo points (always without refraction)
             pp_noref = copy.deepcopy(self.platepar)
