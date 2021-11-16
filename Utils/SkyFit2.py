@@ -1294,7 +1294,8 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 sign_str = ' '
             text_str += 'RA centre  = {:s}{:02d}h {:02d}m {:05.2f}s\n'.format(sign_str, hh, mm, ss)
-            text_str += u'Dec centre = {:.3f}\N{DEGREE SIGN}'.format(dec_centre)
+            text_str += u'Dec centre = {:.3f}\N{DEGREE SIGN}\n'.format(dec_centre)
+            text_str += 'FOV = {:.2f}x{:.2f}\N{DEGREE SIGN}'.format(*computeFOVSize(self.platepar))
 
         # Manual reduction
         else:
@@ -1432,6 +1433,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.geo_points = np.c_[self.geo_points_obj.ra_data, self.geo_points_obj.dec_data, \
                 np.ones_like(self.geo_points_obj.ra_data)]
 
+            # Sort geo points by descending declination (needed for fast filtering)
+            self.geo_points = self.geo_points[np.argsort(self.geo_points_obj.dec_data)[::-1]]
 
             # Compute image coordiantes of geo points (always without refraction)
             pp_noref = copy.deepcopy(self.platepar)
@@ -3535,6 +3538,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def filterCatalogStarsInsideFOV(self, catalog_stars, remove_under_horizon=True):
         """ Take only catalogs stars which are inside the FOV.
+
+        Arguments:
+            catalog_stars: [ndarray] 2D array where entries are (ra, dec, mag). Note that the array needs
+            to be sorted by descending declination!
 
         Keyword arguments:
             remove_under_horizon: [bool] Remove stars below the horizon (-5 deg below).
