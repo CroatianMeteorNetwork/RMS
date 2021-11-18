@@ -190,12 +190,6 @@ class GeoPoints(object):
         self.ra_data = np.array(self.ra_data)
         self.dec_data = np.array(self.dec_data)
 
-        # Sort geo points by descending declination (needed for fast filtering)
-        dec_sorted_ind = np.argsort(self.dec_data)[::-1]
-        self.ra_data = self.ra_data[dec_sorted_ind]
-        self.dec_data = self.dec_data[dec_sorted_ind]
-
-
         
 
 class CatalogStar(object):
@@ -1443,7 +1437,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.geo_points = np.c_[self.geo_points_obj.ra_data, self.geo_points_obj.dec_data, \
                 np.ones_like(self.geo_points_obj.ra_data)]
 
-
             # Compute image coordiantes of geo points (always without refraction)
             pp_noref = copy.deepcopy(self.platepar)
             pp_noref.refraction = False
@@ -1453,7 +1446,8 @@ class PlateTool(QtWidgets.QMainWindow):
             geo_xy = np.c_[self.geo_x, self.geo_y]
 
             # Get indices of points inside the fov
-            filtered_indices, _ = self.filterCatalogStarsInsideFOV(self.geo_points, remove_under_horizon=False)
+            filtered_indices, _ = self.filterCatalogStarsInsideFOV(self.geo_points, \
+                remove_under_horizon=False, sort_declination=True)
 
             # Create a mask to filter out all points outside the image and the FOV
             filter_indices_mask = np.zeros(len(geo_xy), dtype=np.bool)
@@ -3544,7 +3538,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return ra_centre, dec_centre
 
-    def filterCatalogStarsInsideFOV(self, catalog_stars, remove_under_horizon=True):
+    def filterCatalogStarsInsideFOV(self, catalog_stars, remove_under_horizon=True, sort_declination=False):
         """ Take only catalogs stars which are inside the FOV.
 
         Arguments:
@@ -3553,10 +3547,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
         Keyword arguments:
             remove_under_horizon: [bool] Remove stars below the horizon (-5 deg below).
-
-        Arguments:
-            catalog_stars: [list] A list of (ra, dec, mag) tuples of catalog stars.
+            sort_declination: [bool] Sort the stars by descending declination. Only needs to be done for geo
+                points.
         """
+
+        if sort_declination:
+            
+            # Sort by descending declination (needed for fast filtering)
+            dec_sorted_ind = np.argsort(catalog_stars[:, 1])[::-1]
+            dec_sorted_ind_inverse = np.argsort(dec_sorted_ind)
+            catalog_stars = catalog_stars[dec_sorted_ind]
+
 
         # Get RA/Dec of the FOV centre
         ra_centre, dec_centre = self.computeCentreRADec()
@@ -3572,7 +3573,16 @@ class PlateTool(QtWidgets.QMainWindow):
             jd, self.platepar.lat, self.platepar.lon, fov_radius, self.cat_lim_mag, \
             remove_under_horizon=remove_under_horizon)
 
-        return filtered_indices, np.array(filtered_catalog_stars)
+        filtered_catalog_stars = np.array(filtered_catalog_stars)
+
+        # Return original indexing if it was sorted by declination
+        if sort_declination and len(filtered_indices):
+            filtered_indices = filtered_indices[dec_sorted_ind_inverse]
+            filtered_catalog_stars = filtered_catalog_stars[dec_sorted_ind_inverse]
+
+
+        return filtered_indices, filtered_catalog_stars
+
 
     def getInitialParamsAstrometryNet(self, upload_image=True):
         """ Get the estimate of the initial astrometric parameters using astromety.net. """
