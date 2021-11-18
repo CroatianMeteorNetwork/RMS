@@ -3577,8 +3577,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Return original indexing if it was sorted by declination
         if sort_declination and len(filtered_indices):
-            filtered_indices = filtered_indices[dec_sorted_ind_inverse]
-            filtered_catalog_stars = filtered_catalog_stars[dec_sorted_ind_inverse]
+
+            # Cut indices to the available length received from the filtered list
+            dec_sorted_ind_inverse_filtered = dec_sorted_ind_inverse[dec_sorted_ind_inverse < len(filtered_indices)]
+
+            # Restore original indexing
+            filtered_indices = filtered_indices[dec_sorted_ind_inverse_filtered]
+            filtered_catalog_stars = filtered_catalog_stars[dec_sorted_ind_inverse_filtered]
 
 
         return filtered_indices, filtered_catalog_stars
