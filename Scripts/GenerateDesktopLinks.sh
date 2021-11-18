@@ -13,7 +13,7 @@ DIR=$(realpath $DIR)
 DESKTOP=$(realpath ~/Desktop)
 
 # Create links to scripts, so they can be updated
-ln -sf $DIR/CMNbinViewer.sh $DESKTOP/.
+ln -sf $DIR/CMNbinViewer_env.sh $DESKTOP/CMNbinViewer.sh
 ln -sf $DIR/DownloadOpenVPNconfig.sh $DESKTOP/.
 ln -sf $DIR/RMS_FirstRun.sh $DESKTOP/.
 ln -sf $DIR/RMS_ShowLiveStream.sh $DESKTOP/.
