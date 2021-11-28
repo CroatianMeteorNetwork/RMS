@@ -72,8 +72,8 @@ from time import sleep
 if sys.version_info.major > 2:
     import dvrip as dvr
 else:
-    # Python2 compatible version with much restricted capabilities
-    import Utils.CameraControl27 as cc27
+    # Python2 compatible version 
+    import Utils.CameraControl27 as dvr
 
 
 def rebootCamera(cam):
@@ -649,10 +649,10 @@ def cameraControlV2(config, cmd, opts=''):
     # extract IP from config file
     camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
 
-    if sys.version_info.major < 3:
-        cc27.onvifCommand(config, cmd)
-    else:
-        cameraControl(camera_ip, cmd, opts)
+    #if sys.version_info.major < 3:
+    #    cc27.onvifCommand(config, cmd)
+    #else:
+    cameraControl(camera_ip, cmd, opts)
 
 
 if __name__ == '__main__':
@@ -663,16 +663,16 @@ if __name__ == '__main__':
     """
 
     # list of supported commands
-    if sys.version_info.major < 3:
-        cmd_list = ['reboot', 'GetHostname', 'GetDeviceInformation']
-        opthelp=''
-    else:
-        cmd_list = ['reboot', 'GetHostname', 'GetSettings','GetDeviceInformation','GetNetConfig',
-            'GetCameraParams','GetEncodeParams','SetParam','SaveSettings', 'LoadSettings', 
-            'SetColor', 'SetOSD', 'SetAutoReboot', 'GetIP']
-        opthelp='optional parameters for SetParam for example Camera ElecLevel 70 \n' \
-            'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first. ' \
-            'Call a function with no parameters to see the possibilities'
+    #if sys.version_info.major < 3:
+    #    cmd_list = ['reboot', 'GetHostname', 'GetDeviceInformation']
+    #    opthelp=''
+    #else:
+    cmd_list = ['reboot', 'GetHostname', 'GetSettings','GetDeviceInformation','GetNetConfig',
+        'GetCameraParams','GetEncodeParams','SetParam','SaveSettings', 'LoadSettings', 
+        'SetColor', 'SetOSD', 'SetAutoReboot', 'GetIP']
+    opthelp='optional parameters for SetParam for example Camera ElecLevel 70 \n' \
+        'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first. ' \
+        'Call a function with no parameters to see the possibilities'
 
     usage = "Available commands " + str(cmd_list) + '\n' + opthelp
     parser = argparse.ArgumentParser(description='Controls CMS-Compatible IP camera',
