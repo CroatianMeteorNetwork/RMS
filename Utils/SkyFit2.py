@@ -1067,7 +1067,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.view_menu.addActions([self.toggle_info_action,
                                        self.toggle_zoom_window])
-            self.star_pick_info.setText('')
+            #self.star_pick_info.setText(self.star_pick_info_text_str)
 
             self.updateLeftLabels()
             # self.show_zoom_window = False
