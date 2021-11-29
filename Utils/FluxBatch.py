@@ -48,6 +48,8 @@ if __name__ == "__main__":
 
         output_data = []
 
+        color_cycle = [plt.get_cmap("tab10")(i) for i in range(10)]
+
         # Parse the batch entries
         for line in f:
 
@@ -93,22 +95,25 @@ if __name__ == "__main__":
             if config.stationID not in color_dict:
                 
                 # Generate a new color
-                color = plt.get_cmap("tab10")(len(color_dict)%10)
+                color = color_cycle[len(color_dict)%(len(color_cycle))]
                 label = str(config.stationID)
                 marker = markers[(len(marker_dict)//10)%(len(markers))]
+
+                # Assign plot color
+                color_dict[config.stationID] = color
+                marker_dict[config.stationID] = marker
 
             else:
                 color = color_dict[config.stationID]
                 marker = marker_dict[config.stationID]
+                #label = str(config.stationID)
                 label = None
 
 
-            # Plot the flux
-            plt.scatter(sol_data, flux_lm_6_5_data, label=label, c=color, marker=marker)
+            print(config.stationID, color)
 
-            # Assign plot color
-            color_dict[config.stationID] = color
-            marker_dict[config.stationID] = marker
+            # Plot the flux
+            plt.plot(sol_data, flux_lm_6_5_data, label=label, color=color, marker=marker, linestyle='dashed')
 
 
         # plt.gca().set_yscale('log')
