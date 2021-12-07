@@ -31,6 +31,7 @@ from RMS.Formats import FTPdetectinfo
 from RMS.Formats import CALSTARS
 from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FrameInterface import detectInputType
+from RMS.Formats.FFfile import filenameToDatetime
 from RMS.ExtractStars import extractStars
 from RMS.Detection import detectMeteors
 from RMS.DetectionTools import loadImageCalibration
@@ -94,7 +95,7 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=
 
         log.debug('More than ' + str(config.ff_min_stars) + ' stars, detecting meteors...')
 
-        # Runt the detection
+        # Run the detection
         meteor_list = detectMeteors(img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask)
 
         log.info(ff_name + ' detected meteors: ' + str(len(meteor_list)))
@@ -102,7 +103,13 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=
     else:
         meteor_list = []
 
-
+    # Save star and meteor count
+    sky_filename = "sky_{:s}.txt".format(os.path.basename(ff_directory.rstrip("/")))
+    obstime = filenameToDatetime(ff_name)
+    with open(os.path.join(ff_directory, sky_filename), "a") as f:
+        # Multiple processes can write to this file simultaneously, however since the
+        # writes are small, the file system guarantees them to be atomic.
+        print(str(obstime)[:22], len(star_list[1]), len(meteor_list), sep='\t', file=f)
 
     return ff_name, star_list, meteor_list
 
