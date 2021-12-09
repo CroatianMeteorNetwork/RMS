@@ -182,11 +182,15 @@ class Client(object):
     def login(self, apikey):
         args = { 'apikey' : apikey }
         result = self.send_request('login', args)
-        sess = result.get('session')
-        printDebug('Got session:', sess)
-        if not sess:
+        if result is not None:
+            sess = result.get('session')
+            printDebug('Got session:', sess)
+            if not sess:
+                raise RequestError('no session in result')
+            self.session = sess
+        else:
             raise RequestError('no session in result')
-        self.session = sess
+
 
     def _get_upload_args(self, **kwargs):
         args = {}
