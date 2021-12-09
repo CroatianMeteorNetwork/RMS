@@ -32,7 +32,7 @@ for requirement in requirements:
 ### Add rawpy is running on Windows or Linux (not the Pi) ###
 
 # Check if running on Windows
-if 'win' in sys.platform:
+if 'win' in sys.platform and "darwin" not in sys.platform:
     requirements.append("rawpy")
 
 # Check if running on Linux
