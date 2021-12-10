@@ -77,10 +77,17 @@ def loadImage(img_path, flatten=-1):
     """
 
     if USING_SCIPY_IMREAD:
-        img = imread(img_path, flatten)
-
+        try:
+              img = imread(img_path, flatten)
+        except:
+              print("Detected incomplete image, loading dummy one")
+              img = np.zeros((720,1280), dtype='uint8')
     else:
-        img = imread(img_path, as_gray=bool(flatten))
+        try:
+              img = imread(img_path, as_gray=bool(flatten))
+        except:
+              print("Detected incomplete image, loading dummy one")
+              img = np.zeros((720,1280), dtype='uint8')
 
     return img
 
