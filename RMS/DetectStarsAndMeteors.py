@@ -23,6 +23,8 @@ import datetime
 import logging
 import argparse
 
+import numpy as np
+
 # RMS imports
 import RMS.ConfigReader as cr
 from RMS.Formats import FTPdetectinfo
@@ -150,8 +152,9 @@ def saveDetections(detection_results, ff_dir, config):
 
         if len(star_data) == 4:
             x2, y2, background, intensity = star_data
+            fwhm = (np.zeros_like(x2) - 1).tolist()
         else:
-            _, x2, y2, background, intensity, _ = star_data
+            _, x2, y2, background, intensity, fwhm = star_data
             
 
         # Skip if no stars were found
@@ -159,7 +162,7 @@ def saveDetections(detection_results, ff_dir, config):
             continue
 
         # Construct the table of the star parameters
-        star_data = zip(x2, y2, background, intensity)
+        star_data = zip(x2, y2, background, intensity, fwhm)
 
         # Add star info to the star list
         star_list.append([ff_name, star_data])

@@ -87,20 +87,18 @@ def constructImage(img_size, point_list, dot_radius):
 
 def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_radius=2, show_plot=False):
     """ Given a list of reference and predicted star positions, return a transform (rotation, scale, \
-        translation) between the two lists using FFT image registration. This is achieved by creating a 
+        translation) between the two lists using FFT image registration. This is achieved by creating a
         synthetic star image using both lists and searching for the transform using phase correlation.
-    
+
     Arguments:
         config: [Config instance]
         reference_list: [2D list] A list of reference (x, y) star coordinates.
         moved_list: [2D list] A list of moved (x, y) star coordinates.
-
     Keyword arguments:
         img_size: [int] Power of 2 image size (e.g. 128, 256, etc.) which will be created and fed into the
             FFT registration algorithm.
         dot_radius: [int] The radius of the dot which will be drawn on the synthetic image.
         show_plot: [bool] Show the comparison between the reference and image synthetic images.
-
     Return:
         angle, scale, translation_x, translation_y:
             - angle: [float] Angle of rotation (deg).
@@ -143,7 +141,7 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
     img_ref = constructImage(img_size, reference_list, dot_radius)
     img_mov = constructImage(img_size, moved_list, dot_radius)
 
-    
+
     # Run the FFT registration
     try:
         res = imreg_dft.imreg.similarity(img_ref, img_mov)
@@ -201,18 +199,15 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
 
 def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update=False, show_plot=False):
     """ Align the platepar using FFT registration between catalog stars and the given list of image stars.
-
     Arguments:
         config:
         platepar: [Platepar instance] Initial platepar.
         calstars_time: [list] A list of (year, month, day, hour, minute, second, millisecond) of the middle of
             the FF file used for alignment.
         calstars_coords: [ndarray] A 2D numpy array of (x, y) coordinates of image stars.
-
     Keyword arguments:
         scale_update: [bool] Update the platepar scale. False by default.
         show_plot: [bool] Show the comparison between the reference and image synthetic images.
-
     Return:
         platepar_aligned: [Platepar instance] The aligned platepar.
     """
@@ -243,7 +238,7 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
         # Calculate the FOV radius in degrees
         fov_y, fov_x = ApplyAstrometry.computeFOVSize(platepar)
-        fov_radius = np.sqrt(fov_x**2 + fov_y**2)
+        fov_radius = ApplyAstrometry.getFOVSelectionRadius(platepar)
 
         # Take only those stars which are inside the FOV
         filtered_indices, _ = subsetCatalog(catalog_stars, ra_centre, dec_centre, jd, platepar.lat, \
@@ -385,11 +380,11 @@ if __name__ == "__main__":
 
     # Extract star list from CALSTARS file from FF file with most stars
     max_len_ff = max(calstars_dict, key=lambda k: len(calstars_dict[k]))
-    
+
     # Take only X, Y (change order so X is first)
     calstars_coords = np.array(calstars_dict[max_len_ff])[:, :2]
     calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
-        
+
     # Get the time of the FF file
     calstars_time = getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True)
 
@@ -422,10 +417,10 @@ if __name__ == "__main__":
 
     # # Generate some random points as stars
     # npoints = 100
-    # reference_list = np.c_[np.random.randint(-100, config.width + 100, size=npoints), 
+    # reference_list = np.c_[np.random.randint(-100, config.width + 100, size=npoints),
     #                        np.random.randint(-100, config.height + 100, size=npoints)]
 
-    
+
     # # Create a list of shifted stars
     # moved_list = np.copy(reference_list)
 

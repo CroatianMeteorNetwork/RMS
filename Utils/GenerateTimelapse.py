@@ -95,17 +95,20 @@ def generateTimelapse(dir_path, nodel) :
     # If running on Linux, use avconv
     if platform.system() == 'Linux':
 
-        # If avconv is not found, try using ffmpeg
+        # If avconv is not found, try using ffmpeg. In case of using ffmpeg,
+        # use parameter -nostdin to avoid it being stuck waiting for user input
         software_name = "avconv"
+        nostdin = ""
         print("Checking if avconv is available...")
         if os.system(software_name + " --help > /dev/null"):
             software_name = "ffmpeg"
+            nostdin =  " -nostdin "
         
         # Construct the command for avconv            
         mp4_path = os.path.join(dir_path, os.path.basename(dir_path) + ".mp4")
         temp_img_path = os.path.basename(dir_tmp_path) + os.sep + "temp_%04d.jpg"
         com = "cd " + dir_path + ";" \
-            + software_name + " -v quiet -r "+ str(fps) +" -y -i " + temp_img_path \
+            + software_name + nostdin + " -v quiet -r "+ str(fps) +" -y -i " + temp_img_path \
             + " -vcodec libx264 -pix_fmt yuv420p -crf 25 -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" " \
             + mp4_path
 

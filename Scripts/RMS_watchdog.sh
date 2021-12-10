@@ -11,8 +11,12 @@ tail -Fn0 /var/log/kern.log | \
       
       #sudo reboot
 
-      # Restart RMS
-      killall python
+      # Restart RMS. taking care not to kill other python apps
+      # and the watchdog itself
+      ps -ef | grep RMS_ | egrep -v "atch|data|grep"|awk '{print $2}' | while read i 
+      do 
+        kill $i
+      done
       sleep 2
       cd ~/source/RMS
       lxterminal -e Scripts/RMS_StartCapture.sh -r

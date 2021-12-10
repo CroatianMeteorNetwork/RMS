@@ -99,15 +99,20 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
                 frame1, x1, y1 = first_centroid[:3]
                 frame2, x2, y2 = last_centroid[:3]
 
-                ang_vel = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)/float(frame2 - frame1)
+                # If the frames are the same, assume the angular velocity is zero
+                if frame1 == frame2:
+                    ang_vel = 0.0
+
+                else:
+                    ang_vel = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)/float(frame2 - frame1)
 
             else:
                 ang_vel = 0.0
 
             # Write detection header
-            ftpdetect_file.write(str(cam_code).zfill(4) + " " + str(int(meteor_No)).zfill(4) + " " + 
-                str(int(len(centroids))).zfill(4) + " " + "{:07.2f}".format(round(float(fps), 2)) + 
-                " 000.0 000.0  00.0 " + str(round(ang_vel, 1)).zfill(5) + " " + 
+            ftpdetect_file.write("{:>4s}".format(str(cam_code)) + " " + str(int(meteor_No)).zfill(4) + " " + \
+                str(int(len(centroids))).zfill(4) + " " + "{:07.2f}".format(round(float(fps), 2)) + \
+                " 000.0 000.0  00.0 " + str(round(ang_vel, 1)).zfill(5) + " " + \
                 "{:06.1f} {:06.1f}".format(round(rho, 1), round(theta, 1)) + "\n")
 
             # Write individual detection points
@@ -121,6 +126,12 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
                     if np.isnan(x) or np.isnan(y) or np.isnan(mag):
                         continue
 
+                    # Check that level and magnitude are numbers
+                    if level is None:
+                        level = 1
+                    if mag is None:
+                        mag = 10.0
+
                     detection_line_str = "{:06.4f} {:07.2f} {:07.2f} {:08.4f} {:+08.4f} {:08.4f} {:+08.4f} {:06d} {:.2f}"
 
                     ftpdetect_file.write(detection_line_str.format(round(frame, 4), round(x, 2), \
@@ -131,12 +142,20 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
                     if len(line) == 9:
                         frame, x, y, ra, dec, azim, elev, level, mag = line
 
+                        if mag is None:
+                            mag = 10.0
+
                     else:
                         frame, x, y, level = line
 
                     # If the coordinates are NaN, skip this centroid
                     if np.isnan(x) or np.isnan(y):
                         continue
+
+
+                    # Check that level is a number
+                    if level is None:
+                        level = 1
 
                     ftpdetect_file.write("{:06.4f} {:07.2f} {:07.2f}".format(round(frame, 4), round(x, 2), \
                         round(y, 2)) + " 000.00 000.00 000.00 000.00 " + "{:06d}".format(int(level)) \

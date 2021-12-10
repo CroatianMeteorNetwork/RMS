@@ -3,10 +3,15 @@
 from __future__ import print_function, division, absolute_import
 
 import os
+import sys
 import math
 
 import numpy as np
 import scipy.misc
+import cv2
+
+from PIL import Image, ImageFont, ImageDraw 
+import datetime
 
 # Check which imread funtion to use
 try:
@@ -19,6 +24,14 @@ except AttributeError:
     imsave = imageio.imwrite
     USING_SCIPY_IMREAD = False
 
+
+# Rawpy for DFN images
+try:
+    import rawpy
+except ImportError:
+    pass
+
+
 from RMS.Decorators import memoizeSingle
 
 # Cython init
@@ -27,6 +40,30 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 import RMS.Routines.MorphCy as morph
 from RMS.Routines.BinImageCy import binImage as binImageCy
 
+
+def loadRaw(img_path):
+    """ Load a raw images such as the DFN NEF or Canon CR2 image. 
+    
+        Arguments:
+            img_path: [str] Path to the image.
+    """
+
+    if 'rawpy' in sys.modules:
+
+        # Get raw data from .nef file and get image from it
+        raw = rawpy.imread(img_path)
+        frame = raw.postprocess(gamma=(1,1), output_bps=16, no_auto_bright=True, no_auto_scale=True, \
+            output_color=rawpy.ColorSpace.sRGB)
+
+        # Convert the image to grayscale
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+
+        return frame
+
+    else:
+        print("WARNING! Rawpy not installed, cannot load raw images! To enable, run:\npip install rawpy")
+        print()
+        return None
 
 
 def loadImage(img_path, flatten=-1):
@@ -48,18 +85,33 @@ def loadImage(img_path, flatten=-1):
     return img
 
 
-def saveImage(img_path, img):
+def saveImage(img_path, img, add_timestamp=False):
     """ Save image to disk.
 
     Arguments:
         img_path: [str] Image path.
         img: [ndarray] Image as numpy array.
+        add_timestamp: [boolean] optionally add a timestamp title to the image
 
     """
 
     imsave(img_path, img)
-
-
+    if add_timestamp is True: 
+        my_image = Image.open(img_path)
+        try:
+            _, height = my_image.size
+            image_editable = ImageDraw.Draw(my_image)
+            _, fname = os.path.split(img_path)
+            splits = fname.split('_')
+            dtstr = splits[2] + '_' + splits[3] + '.' + splits[4]
+            imgdt = datetime.datetime.strptime(dtstr, '%Y%m%d_%H%M%S.%f')
+            title = splits[1] + ' ' + imgdt.strftime('%Y-%m-%d %H:%M:%S UTC') 
+            #fnt = ImageFont.truetype("arial.ttf", 15)
+            fnt = ImageFont.load_default()
+            image_editable.text((15,height-20), title, font=fnt, fill=(255))
+        except:
+            print('unable to add title')
+        my_image.save(img_path)
 
 
 def binImage(img, bin_factor, method='avg'):
@@ -513,8 +565,17 @@ def loadDark(dir_path, file_name, dtype=None, byteswap=False):
     """
 
     try:
-        # Load the dark
-        dark = loadImage(os.path.join(dir_path, file_name), -1)
+
+        # If the image is a raw file, load it as such
+        if file_name.lower().endswith(".nef") or file_name.lower().endswith(".cr2"):
+
+            # Load the dark from a raw file
+            dark = loadRaw(os.path.join(dir_path, file_name))
+
+        else:
+
+            # Load the dark image
+            dark = loadImage(os.path.join(dir_path, file_name), -1)
 
     except OSError as e:
         print('Dark could not be loaded:', e)

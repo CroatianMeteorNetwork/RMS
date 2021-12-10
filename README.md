@@ -1,6 +1,6 @@
 # RPi Meteor Station
 
-Open source powered meteor station. We are currently using the Raspberry Pi 3 (and 4!) as the main development platform and use digital IP cameras. **The code also works on Linux PCs, and everything but the detection works under Windows.** We are slowly phasing out the support for analog cameras, but they should work well regardless.
+Open source powered meteor station. We are currently using the Raspberry Pi 4 as the main development platform, and we use digital IP cameras. **The code also works on Linux PCs, and everything but the detection works under Windows.** We are slowly phasing out the support for analog cameras, but they should work well regardless.
 The software is still in the development phase, but here are the current features:
 
 1. Automated video capture - start at dusk, stop at dawn. **IP cameras with resolution of up to 720p supported on the Pi 3 and 4, and up to 1080p on Linux PCs.**
@@ -18,6 +18,17 @@ We are also selling Plug And Play meteor systems which run this code!
 
 Finally, if you decide to build one system from scratch, we strongly encourage you to look at our [Wiki page](https://globalmeteornetwork.org/wiki/index.php?title=Main_Page).
 
+
+# Table of Contents
+
+1. [Requirements](#requirements)
+    - [Hardware](#hardware)
+    - [Software](#software)
+1. [Setting Up](#setting-up)
+1. [Running the Code](#running-the-code)
+1. [Citations](#citations)
+
+
 ## Requirements
 This guide will assume basic knowledge of electronics, the Unix environment, and some minor experience with the Raspberry Pi platform itself.
 
@@ -25,8 +36,7 @@ This guide will assume basic knowledge of electronics, the Unix environment, and
 
 #### RPi control box
 
-1. **Raspberry Pi 3 B+ or 4 single-board computer.**
-The code will NOT work on Raspberry Pi 1.
+1. **Raspberry Pi 4 single-board computer.**
 
 1. **Class 10 microSD card, 64GB or higher.** 
 The recorded data takes up a lot of space, as much as several gigabytes per night. To be able to store at least one week of data on the system, a 64GB SD card is the minimum.
@@ -68,45 +78,19 @@ The code was designed to run on a RPi, but it will also run an some Linux distri
 
 The recording **will not** run on Windows, but most of other submodules will (astrometric calibration, viewing the data, manual reduction, etc.). The problem under Windows is that for some reason the logging module object cannot be pickled when parallelized by the multiprocessing library. **We weren't able to solve this issue, but we invite people to try to take a stab at it.**
 
-Here we provide installation instructions for the RPi, but the procedure should be the same for any Debian-based Linux distribution.
 
-Set up your Raspberry Pi 3B+ with Raspbian Jessie operating system (gstreamer does not really work on Stretch, and it's necessary if you want to run an IP camera). For the Pi 4, you need to install Raspbian Buster. Here's the guide which explains how to do just that: [Installing Raspbian](https://www.raspberrypi.org/documentation/installation/installing-images/).
+Here we provide installation instructions for the RPi, but the procedure should be the same for any Debian-based Linux distribution: [LINK](https://docs.google.com/document/d/19ImeNqBTD1ml2iisp5y7CjDrRV33wBeF9rtx3mIVjh4/edit)
 
-**RPi3/Jessie is stuck using Python 2 because of some memory assignment issues in Python 3.6. We were not able to install newer version of Python under Jessie. NOTE that Raspbian Buster can run Python 3.7 and everything works fine there.**
-
-Furthermore, you will need the following software and libraries to run the code:
-
-- git
-- mplayer
-- Python2.7 (or 3.7)
-- python2.7-dev (or 3.7)
-- libblas-dev liblapack-dev
-- libffi-dev libssl-dev
-- Python libraries:
-	- gitpython
-	- astropy
-	- OpenCV 3 for Python
-	- PIL (i.e. python-imaging-tk)
-	- numpy (1.14.0 or later)
-	- scipy (1.0.0 or later)
-	- matplotlib (2.0.0 or later)
-	- cython (0.25.2 or later)
-	- pyephem (3.7.6.0 or later)
-	- paramiko
-	- imageio
-
-	
-All python libraries will be installed when you run the setup.py script (instructions below). If you want use IP cameras, you need to install a special compilation of OpenCV that supports gstreamer. Run the opencv4_install.sh script that is provided in this repository to install this.
-
-Alternatively, if you are using Anaconda Python, you can install all libraries except OpenCV by running:
+Alternatively, if you are using Anaconda Python on your Linux PC, you can install all libraries except OpenCV by running:
 
 ```
 conda install -y numpy scipy gitpython cython matplotlib
-conda install -y -c conda-forge pyephem Pillow imreg_dft imageio
+conda install -y -c conda-forge pyephem Pillow imreg_dft imageio pyqtgraph'<=0.12.1'
 conda install -y -c astropy astropy
+pip install rawpy
 ```
 
-To install OpenCV, use the ```opencv4_install.sh``` script. This will build OpenCV with gstreamer support.
+To install OpenCV, use the ```opencv4_install.sh``` script. This will build OpenCV with gstreamer and ffmpeg support.
 
 
 ## Setting up
@@ -283,4 +267,4 @@ where YYYMMDD_hhmmss_uuuuuu is the name of the night directory. This will take a
 ## Citations
 
 For academic use, please cite the paper:
->Vida, D., Zubović, D., Šegon, D., Gural, P., & Cupec, R. (2016). *Open-source meteor detection software for low-cost single-board computers*. **Proceedings of the IMC2016, Egmond, The Netherlands**, pp. 307-318
+>[Vida, D., Šegon, D., Gural, P.S., Brown, P.G., McIntyre, M.J., Dijkema, T.J., Pavletić, L., Kukić, P., Mazur, M.J., Eschman, P. and Roggemans, P., 2021. The Global Meteor Network–Methodology and first results. Monthly Notices of the Royal Astronomical Society, 506(4), pp.5046-5074.](https://academic.oup.com/mnras/article/506/4/5046/6347233)

@@ -23,6 +23,7 @@ import argparse
 import time
 import datetime
 import signal
+import shutil
 import ctypes
 import logging
 import multiprocessing
@@ -82,21 +83,19 @@ def resetSIGINT():
 def wait(duration, compressor):
     """ The function will wait for the specified time, or it will stop when Enter is pressed. If no time was
         given (in seconds), it will wait until Enter is pressed. 
-
     Arguments:
         duration: [float] Time in seconds to wait
-
     """
 
     global STOP_CAPTURE
 
-    
+
     log.info('Press Ctrl+C to stop capturing...')
 
     # Get the time of capture start
     time_start = datetime.datetime.utcnow()
 
-    
+
     while True:
 
         # Sleep for a short interval
@@ -107,7 +106,7 @@ def wait(duration, compressor):
         if not compressor.is_alive():
             log.info('The compressor has died, restarting the capture!')
             break
-            
+
 
         # If some wait time was given, check if it passed
         if duration is not None:
@@ -128,7 +127,7 @@ def wait(duration, compressor):
 def runCapture(config, duration=None, video_file=None, nodetect=False, detect_end=False, \
     upload_manager=None, resume_capture=False):
     """ Run capture and compression for the given time.given
-
+    
     Arguments:
         config: [config object] Configuration read from the .config file.
 
@@ -136,7 +135,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         duration: [float] Time in seconds to capture. None by default.
         video_file: [str] Path to the video file, if it was given as the video source. None by default.
         nodetect: [bool] If True, detection will not be performed. False by defualt.
-        detect_end: [bool] If True, detection will be performed at the end of the night, when capture 
+        detect_end: [bool] If True, detection will be performed at the end of the night, when capture
             finishes. False by default.
         upload_manager: [UploadManager object] A handle to the UploadManager, which handles uploading files to
             the central server. None by default.
@@ -144,7 +143,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     Return:
         night_archive_dir: [str] Path to the archive folder of the processed night.
-
     """
 
     global STOP_CAPTURE
@@ -153,7 +151,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Check if resuming capture to the last capture directory
     night_data_dir_name = None
     if resume_capture:
-        
+
         log.info("Resuming capture in the last capture directory...")
 
         # Find the latest capture directory
@@ -203,16 +201,33 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             night_data_dir_name)
 
 
+    # Wait before the capture starts if a time has been given
+    if (not resume_capture) and (video_file is None):
+        log.info("Waiting {:d} seconds before capture start...".format(int(config.capture_wait_seconds)))
+        time.sleep(config.capture_wait_seconds)
+
 
     # Make a directory for the night
     mkdirP(night_data_dir)
 
     log.info('Data directory: ' + night_data_dir)
 
+    # Copy the used config file to the capture directory
+    if os.path.isfile(config.config_file_name):
+        try:
+            shutil.copy2(config.config_file_name, os.path.join(night_data_dir, ".config"))
+        except:
+            log.error("Cannot copy the config file to the capture directory!")
+
 
     # Get the platepar file
     platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir)
 
+    # If the platepar is not none, set the FOV from it
+    if platepar is not None:
+        config.fov_w = platepar.fov_h
+        config.fov_h = platepar.fov_v
+        
 
     log.info('Initializing frame buffers...')
     ### For some reason, the RPi 3 does not like memory chunks which size is the multipier of its L2
@@ -232,7 +247,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     sharedArray = np.ctypeslib.as_array(sharedArrayBase.get_obj())
     sharedArray = sharedArray.reshape(256, (config.height + array_pad), (config.width + array_pad))
     startTime = multiprocessing.Value('d', 0.0)
-    
+
     sharedArrayBase2 = multiprocessing.Array(ctypes.c_uint8, 256*(config.width + array_pad)*(config.height + array_pad))
     sharedArray2 = np.ctypeslib.as_array(sharedArrayBase2.get_obj())
     sharedArray2 = sharedArray2.reshape(256, (config.height + array_pad), (config.width + array_pad))
@@ -253,8 +268,18 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             delay_detection = duration
 
         else:
-            # Delay the detection for 2 minutes after capture start
+            # Delay the detection for 2 minutes after capture start (helps stability)
             delay_detection = 120
+
+
+        # Add an additional postprocessing delay
+        delay_detection += config.postprocess_delay
+
+
+        # Set a flag file to indicate that previous files are being loaded (if any)
+        capture_resume_file_path = os.path.join(config.data_dir, config.capture_resume_flag_file)
+        with open(capture_resume_file_path, 'w') as f:
+            pass
 
         # Initialize the detector
         detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log, delay_start=delay_detection, \
@@ -265,7 +290,14 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         # If the capture is being resumed into the directory, load all previously saved FF files
         if resume_capture:
 
-            for ff_name in sorted(os.listdir(night_data_dir)):
+            # Load all preocessed FF files
+            for i, ff_name in enumerate(sorted(os.listdir(night_data_dir))):
+
+                # Every 50 files loaded, update the flag file
+                if i%50 == 0:
+                    with open(capture_resume_file_path, 'a') as f:
+                        f.write("{:d}\n".format(i))
+                        
 
                 # Check if the file is a valid FF files
                 ff_path = os.path.join(night_data_dir, ff_name)
@@ -275,35 +307,50 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     detector.addJob([night_data_dir, ff_name, config], wait_time=0.005)
                     log.info("Added existing FF files for detection: {:s}".format(ff_name))
 
-    
+
+        # Remove the flag file
+        if os.path.isfile(capture_resume_file_path):
+            try:
+                os.remove(capture_resume_file_path)
+            except:
+                log.error("There was an error during removing the capture resume flag file: " \
+                    + capture_resume_file_path)
+
+
     # Initialize buffered capture
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file)
 
 
     # Initialize the live image viewer
     if config.live_maxpixel_enable:
-        live_view = LiveViewer(night_data_dir, slideshow=False, banner_text="Live")
+
+        # Enable showing the live JPG
+        config.live_jpg = True
+
+        live_jpg_path = os.path.join(config.data_dir, 'live.jpg')
+
+        live_view = LiveViewer(live_jpg_path, image=True, slideshow=False, banner_text="Live")
         live_view.start()
 
     else:
         live_view = None
 
-    
+
     # Initialize compression
-    compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config, 
+    compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config,
         detector=detector)
 
-    
+
     # Start buffered capture
     bc.startCapture()
 
     # Init and start the compression
     compressor.start()
 
-    
+
     # Capture until Ctrl+C is pressed
     wait(duration, compressor)
-        
+
     # If capture was manually stopped, end capture
     if STOP_CAPTURE:
         log.info('Ending capture...')
@@ -393,7 +440,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         except KeyboardInterrupt:
 
             log.info('Ctrl + C pressed, exiting...')
-                
+
             if upload_manager is not None:
 
                 # Stop the upload manager
@@ -401,7 +448,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     log.debug('Closing upload manager...')
                     upload_manager.stop()
                     del upload_manager
-                    
+
 
             # Terminate the detector
             if detector is not None:
@@ -428,7 +475,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
 
-    # Save detection to disk and archive detection    
+    # Save detection to disk and archive detection
     night_archive_dir, archive_name, _ = processNight(night_data_dir, config, \
         detection_results=detection_results, nodetect=nodetect)
 
@@ -456,7 +503,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Run the external script
     runExternalScript(night_data_dir, night_archive_dir, config)
-    
+
 
     # If capture was manually stopped, end program
     if STOP_CAPTURE:
@@ -478,12 +525,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 def processIncompleteCaptures(config, upload_manager):
     """ Reprocess broken capture folders.
-
     Arguments:
         config: [config object] Configuration read from the .config file.
         upload_manager: [UploadManager object] A handle to the UploadManager, which handles uploading files to
             the central server.
-
     """
 
     log.debug('Checking for folders containing partially-processed data')
@@ -519,7 +564,7 @@ def processIncompleteCaptures(config, upload_manager):
         if len(pickle_files) > 0:
             any_pickle_files = True
 
-        # Check if there is an FTPdetectinfo file in the directory, indicating the the folder was fully 
+        # Check if there is an FTPdetectinfo file in the directory, indicating the the folder was fully
         #   processed
         FTPdetectinfo_files = glob.glob('{:s}/FTPdetectinfo_*.txt'.format(captured_dir_path))
         any_ftpdetectinfo_files = False
@@ -619,7 +664,8 @@ if __name__ == "__main__":
     log = logging.getLogger("logger")
 
 
-    log.info('Program start')
+    log.info("Program start")
+    log.info("Station code: {:s}".format(str(config.stationID)))
 
     # Change the Ctrl+C action to the special handle
     setSIGINT()
@@ -645,9 +691,9 @@ if __name__ == "__main__":
 
 
         log.info('Freeing up disk space...')
-        
+
         # Free up disk space by deleting old files, if necessary
-        if not deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config, 
+        if not deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config,
             duration=duration):
 
             log.error('No more disk space can be freed up! Stopping capture...')
@@ -675,7 +721,7 @@ if __name__ == "__main__":
                 log.info('Closing upload manager...')
                 upload_manager.stop()
                 del upload_manager
-            
+
 
         sys.exit()
 
@@ -706,7 +752,7 @@ if __name__ == "__main__":
     ran_once = False
     slideshow_view = None
     while True:
-            
+
         # Calculate when and how should the capture run
         start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
 
@@ -742,7 +788,7 @@ if __name__ == "__main__":
                 if reboot_go:
 
                     log.info('Rebooting now!')
-                    
+
                     # Reboot the computer (script needs sudo priviledges, works only on Linux)
                     try:
                         os.system('sudo shutdown -r now')
@@ -752,7 +798,7 @@ if __name__ == "__main__":
                         log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
                 else:
-                    
+
                     # Wait one more minute and try again to reboot
                     time.sleep(60)
 
@@ -773,9 +819,9 @@ if __name__ == "__main__":
 
         # Don't start the capture if there's less than 15 minutes left
         if duration < 15*60:
-            
+
             log.debug('Less than 15 minues left to record, waiting for a new recording session tonight...')
-            
+
             # Reset the Ctrl+C to KeyboardInterrupt
             resetSIGINT()
 
@@ -786,7 +832,7 @@ if __name__ == "__main__":
             except KeyboardInterrupt:
 
                 log.info('Ctrl + C pressed, exiting...')
-                
+
                 if upload_manager is not None:
 
                     # Stop the upload manager
@@ -808,7 +854,7 @@ if __name__ == "__main__":
 
             # Run auto-reprocessing
             if config.auto_reprocess:
-                
+
                 # Check if there's a folder containing unprocessed data.
                 # This may happen if the system crashed during processing.
                 processIncompleteCaptures(config, upload_manager)
@@ -819,7 +865,7 @@ if __name__ == "__main__":
 
                 # Make a list of all archived directories previously generated
                 archive_dir_list = []
-                for archive_dir_name in sorted(os.listdir(os.path.join(config.data_dir, 
+                for archive_dir_name in sorted(os.listdir(os.path.join(config.data_dir,
                     config.archived_dir))):
 
                     if archive_dir_name.startswith(config.stationID):
@@ -853,6 +899,7 @@ if __name__ == "__main__":
                         log.info("No detections from the previous night to show as a slideshow!")
 
 
+
             # Update start time and duration
             start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
 
@@ -863,7 +910,7 @@ if __name__ == "__main__":
                 time_now = datetime.datetime.utcnow()
                 waiting_time = start_time - time_now
 
-                log.info('Waiting {:s} to start recording for {:.2f} hrs'.format(str(waiting_time), \
+                log.info('Waiting {:s} to start recording for {:.3f} hrs'.format(str(waiting_time), \
                     duration/60/60))
 
                 # Reset the Ctrl+C to KeyboardInterrupt
@@ -918,9 +965,9 @@ if __name__ == "__main__":
 
 
         log.info('Freeing up disk space...')
-        
+
         # Free up disk space by deleting old files, if necessary
-        if not deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config, 
+        if not deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config,
             duration=duration):
 
             log.error('No more disk space can be freed up! Stopping capture...')
@@ -930,12 +977,13 @@ if __name__ == "__main__":
         log.info('Starting capture for {:.2f} hours'.format(duration/60/60))
 
         # Run capture and compression
-        night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect, 
-            upload_manager=upload_manager, detect_end=cml_args.detectend, resume_capture=cml_args.resume)
+        night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect, \
+            upload_manager=upload_manager, detect_end=(cml_args.detectend or config.postprocess_at_end), \
+            resume_capture=cml_args.resume)
 
         # Indicate that the capture was done once
         ran_once = True
-            
+
 
 
     if upload_manager is not None:

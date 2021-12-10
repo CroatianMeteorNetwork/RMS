@@ -164,15 +164,15 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
         #   loaded only if there's one file with '.config' in the directory
         if cml_args_config[0] == '.':
 
-            # Locate all files in the data directory that start with '.config'
+            # Locate all files in the data directory that end with '.config'
             config_files = [file_name for file_name in os.listdir(dir_path) \
-                if file_name.startswith('.config')]
+                if file_name.endswith('.config') or file_name.endswith('dfnstation.cfg')]
 
             # If there is exactly one config file, use it
             if len(config_files) == 1:
                 config_file = os.path.join(os.path.abspath(dir_path), config_files[0])
 
-            else:
+            elif len(config_files) > 1:
                 print('There are several config files in the given directory, choose one and provide the full path to it:')
                 for cfile in config_files:
                     print('    {:s}'.format(os.path.join(dir_path, cfile)))
@@ -210,6 +210,9 @@ class Config:
         # Get the package root directory
         self.rms_root_dir = os.path.join(os.path.dirname(RMS.__file__), os.pardir)
 
+        # default config file absolute path
+        self.config_file_name = os.path.join(self.rms_root_dir, '.config')
+
         ##### System
         self.stationID = "XX0001"
         self.latitude = 0
@@ -227,6 +230,7 @@ class Config:
         
         ##### Capture
         self.deviceID = 0
+        self.force_v4l2 = False
 
         self.width = 1280
         self.height = 720
@@ -276,6 +280,21 @@ class Config:
 
         # Automatically reprocess broken capture directories
         self.auto_reprocess = True
+
+        # Flag file which indicates that the previously processed files are loaded during capture resume
+        self.capture_resume_flag_file = ".capture_resuming"
+
+        # Wait an additional time (seconds) after the capture is supposed to start. Used for multi-camera 
+        #   systems for a staggered capture start
+        self.capture_wait_seconds = 0
+
+        # Run detection and the rest of postprocessing at the end of the night, instead of parallel to capture
+        self.postprocess_at_end = False
+
+        # Wait an additional time (in seconds) to start the detection thread. If postprocess_at_end is set to 
+        #   false, the delay will occur after the beginning of capture, and if it's set to true, the delay 
+        #   will occur after the capture ends
+        self.postprocess_delay = 0
 
         ##### Upload
 
@@ -508,7 +527,17 @@ def removeInlineComments(cfgparser, delimiter):
 
 
 
-def parse(filename, strict=True):
+def parse(path, strict=True):
+    """ Parses config file at the given path and returns the corresponding Config object.
+
+    Arguments:
+        path: [str] path to file (.config or dfnstation.cfg)
+        strict: [bool]
+
+    Returns:
+        config: [Config]
+
+    """
 
     delimiter = ";"
 
@@ -520,20 +549,34 @@ def parse(filename, strict=True):
         # Python 2
         parser = RawConfigParser()
 
-    parser.read(filename)
+
+    parser.read(path)
+
 
     # Remove inline comments
-    removeInlineComments(parser, delimiter) 
+    removeInlineComments(parser, delimiter)
     
     config = Config()
-    
-    parseAllSections(config, parser)
+
+    # Store parsed config file name
+    config.config_file_name = path
+
+    # Parse an RMS config file
+    if os.path.basename(path).endswith('.config'):
+        parseConfigFile(config, parser)
+
+    # Parse a DFN config file
+    elif os.path.basename(path) == 'dfnstation.cfg':
+        parseDFNStation(config, parser)
+
+    else:
+        raise RuntimeError('Unknown config file name: {}'.format(os.path.basename(path)))
     
     return config
 
 
 
-def parseAllSections(config, parser):
+def parseConfigFile(config, parser):
     parseSystem(config, parser)
     parseCapture(config, parser)
     parseBuildArgs(config, parser)
@@ -546,6 +589,37 @@ def parseAllSections(config, parser):
     parseThumbnails(config, parser)
     parseStack(config, parser)
 
+
+def parseDFNStation(config, parser):
+    section = 'station'
+    if not parser.has_section(section):
+        return
+
+    if parser.has_option(section, "location"):
+        config.stationID = parser.get(section, "location").replace("_", "").replace(" ", "")
+
+    if parser.has_option(section, "lat"):
+        config.latitude = parser.getfloat(section, "lat")
+
+    if parser.has_option(section, "lon"):
+        config.longitude = parser.getfloat(section, "lon")
+
+    if parser.has_option(section, "altitude"):
+        config.elevation = parser.getfloat(section, "altitude")
+
+    config.fov_h = 150
+    config.fov_w = 200
+    config.width = 7360
+    config.height = 4912
+    config.fps = 20
+    config.gamma = 1
+    config.bit_depth = 16
+    config.catalog_mag_limit = 4.5
+
+    config.star_catalog_path = 'Catalogs'
+    config.star_catalog_file = 'BSC5'
+    config.platepar_name = 'platepar_cmn2010.cal'
+    config.deinterlace_order = -2
 
 
 def parseSystem(config, parser):
@@ -709,8 +783,17 @@ def parseCapture(config, parser):
         # If it fails, it's probably a RTSP stream
         pass
 
+    if parser.has_option(section, "force_v4l2"):
+        config.force_v4l2 = parser.getboolean(section, "force_v4l2")
+
     if parser.has_option(section, "fps"):
         config.fps = parser.getfloat(section, "fps")
+
+        # Limit the FPS to 1 million, as the time precision of datetime is 1 us
+        if config.fps > 1000000:
+            config.fps = 1000000
+            print()
+            print("WARNING! The FPS has been limited to 1,000,000!")
 
     if parser.has_option(section, "ff_format"):
         config.ff_format = parser.get(section, "ff_format")
@@ -750,6 +833,30 @@ def parseCapture(config, parser):
     # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
     if parser.has_option(section, "slideshow_enable"):
         config.slideshow_enable = parser.getboolean(section, "slideshow_enable")
+
+
+    # Enable/disable auto reprocessing
+    if parser.has_option(section, "auto_reprocess"):
+        config.auto_reprocess = parser.getboolean(section, "auto_reprocess")
+
+
+    # Load name of the capture resume flag file
+    if parser.has_option(section, "capture_resume_flag_file"):
+        config.capture_resume_flag_file = parser.get(section, "capture_resume_flag_file")
+
+
+    # Load the time for waiting after the capture is supposed to start, to stagger multi-camera start times
+    if parser.has_option(section, "capture_wait_seconds"):
+        config.capture_wait_seconds = parser.getint(section, "capture_wait_seconds")
+
+
+    # Run detection and the rest of postprocessing at the end of the night, instead of in parallel to capture
+    if parser.has_option(section, "postprocess_at_end"):
+        config.postprocess_at_end = parser.getboolean(section, "postprocess_at_end")
+
+    # Load the time for waiting before postprocessing begins
+    if parser.has_option(section, "postprocess_delay"):
+        config.postprocess_delay = parser.getint(section, "postprocess_delay")
 
 
 
@@ -1121,8 +1228,16 @@ def parseCalibration(config, parser):
 
 
     if parser.has_option(section, "star_catalog_path"):
-        config.star_catalog_path = parser.get(section, "star_catalog_path")
+
+        cat_path = parser.get(section, "star_catalog_path")
+
+        config.star_catalog_path = cat_path
         config.star_catalog_path = os.path.join(config.rms_root_dir, config.star_catalog_path)
+
+        # Use the whole catalog path if the resulting directory doesn't exist
+        if not os.path.exists(config.star_catalog_path):
+            config.star_catalog_path = cat_path
+            
 
     if parser.has_option(section, "star_catalog_file"):
         config.star_catalog_file = parser.get(section, "star_catalog_file")

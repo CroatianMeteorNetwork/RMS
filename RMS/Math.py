@@ -1,4 +1,4 @@
-""" Common math functins. """
+""" Common math functions. """
 
 import numpy as np
 from numpy.core.umath_tests import inner1d
@@ -17,7 +17,18 @@ def angularSeparation(ra1, dec1, ra2, dec2):
         [float] Angle between two coordinates (radians).
     """
 
+    # Classical method
     return np.arccos(np.sin(dec1)*np.sin(dec2) + np.cos(dec1)*np.cos(dec2)*np.cos(ra2 - ra1))
+
+    # # Compute the angular separation using the haversine formula
+    # #   Source: https://idlastro.gsfc.nasa.gov/ftp/pro/astro/gcirc.pro
+    # deldec2 = (dec2 - dec1)/2.0
+    # delra2 =  (ra2 - ra1)/2.0
+    # sindis = np.sqrt(np.sin(deldec2)*np.sin(deldec2) \
+    #     + np.cos(dec1)*np.cos(dec2)*np.sin(delra2)*np.sin(delra2))
+    # dis = 2.0*np.arcsin(sindis) 
+
+    # return dis
 
 
 def angularSeparationVect(vect1, vect2):
@@ -97,8 +108,8 @@ def polarToCartesian(theta, phi):
     """ Converts 3D spherical coordinates to 3D cartesian coordinates. 
 
     Arguments:
-        theta: [float] Inclination in radians.
-        phi: [float] Azimuth angle in radians.
+        theta: [float] Longitude in radians.
+        phi: [float] Latitude in radians.
 
     Return:
         (x, y, z): [tuple of floats] Coordinates of the point in 3D cartiesian coordinates.
@@ -113,7 +124,7 @@ def polarToCartesian(theta, phi):
 
 
 def isAngleBetween(left, ang, right):
-    """ Checks if ang is between the angle on the left anf right. 
+    """ Checks if ang is between the angle on the left and right. 
     
     Arguments:
         left: [float] Left (counter-clockwise) angle (radians).
@@ -163,13 +174,30 @@ def sphericalPointFromHeadingAndDistance(ra1, dec1, heading, distance):
     # Compute the new declination
     dec = np.arcsin(np.sin(dec1)*np.cos(distance) + np.cos(dec1)*np.sin(distance)*np.cos(heading))
 
-    # Handle poles and compute right ascension
-    if np.cos(dec) == 0:
-       ra = ra1
-
-    else:
-       ra = (ra1 - np.arcsin(np.sin(heading)*np.sin(distance)/np.cos(dec)) + np.pi)% (2*np.pi) - np.pi
+    # Compute the new RA
+    dra = np.arctan2(np.sin(heading)*np.sin(distance)*np.cos(dec1), np.cos(distance) \
+        - np.sin(dec1)*np.sin(dec))
+    ra = (ra1 - dra + np.pi)%(2*np.pi) - np.pi
 
 
     return np.degrees(ra)%360, np.degrees(dec)
     
+
+
+def RMSD(x, weights=None):
+    """ Root-mean-square deviation of measurements vs. model. 
+    
+    Arguments:
+        x: [ndarray] An array of model and measurement differences.
+
+    Return:
+        [float] RMSD
+    """
+
+    if isinstance(x, list):
+        x = np.array(x)
+
+    if weights is None:
+        weights = np.ones_like(x)
+
+    return np.sqrt(np.sum(weights*x**2)/np.sum(weights))

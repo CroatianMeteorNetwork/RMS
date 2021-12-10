@@ -41,7 +41,7 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols):
         star_file.write("==========================================================================\n")
         star_file.write("RMS star extractor" + "\n")
         star_file.write("Cal time = FF header time plus 255/(2*framerate_Hz) seconds" + "\n")
-        star_file.write("Row  Column  Intensity-Backgnd  Amplitude  (integrated values)" + "\n")
+        star_file.write("Row  Column  Intensity-Backgnd  Amplitude  (integrated values) FWHM" + "\n")
         star_file.write("==========================================================================\n")
         star_file.write("FF folder = " + ff_directory + "\n")
         star_file.write("Cam #  = " + str(cam_code) + "\n")
@@ -62,9 +62,9 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols):
             star_file.write("Integ pixels  = -1" + "\n")
 
             # Write every star to file
-            for x, y, amplitude, level in list(star_data):
-                star_file.write("{:7.2f} {:7.2f} {:6d} {:6d}".format(round(y, 2), round(x, 2), 
-                    int(level), int(amplitude)) + "\n")
+            for x, y, amplitude, level, fwhm in list(star_data):
+                star_file.write("{:7.2f} {:7.2f} {:6d} {:6d} {:5.2f}".format(round(y, 2), round(x, 2), 
+                    int(level), int(amplitude), fwhm) + "\n")
 
         # Write the end separator
         star_file.write("##########################################################################\n")
@@ -80,7 +80,7 @@ def readCALSTARS(file_path, file_name):
     @return star_list: [list] a list of star data, entries:
         ff_name, star_data
         star_data entries:
-            x, y, bg_level, level
+            x, y, bg_level, level, fwhm
     """
 
     
@@ -140,8 +140,14 @@ def readCALSTARS(file_path, file_name):
             except:
                 continue
 
+            # Read FWHM if given
+            if len(line) == 5:
+                fwhm = float(line[4])
+            else:
+                fwhm = -1.0
+
             # Save star data
-            star_data.append([float(line[0]), float(line[1]), int(line[2]), int(line[3])])
+            star_data.append([float(line[0]), float(line[1]), int(line[2]), int(line[3]), fwhm])
 
     
     return calibrationstars_list

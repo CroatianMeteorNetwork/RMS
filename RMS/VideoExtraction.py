@@ -24,7 +24,9 @@ from multiprocessing import Process, Event
 import numpy as np
 from scipy import stats
 
+from RMS.DetectionTools import loadImageCalibration, binImageCalibration
 from RMS.Routines import Grouping3D
+from RMS.Routines.MaskImage import maskImage
 from RMS.Formats import FRbin
 
 
@@ -50,6 +52,13 @@ class Extractor(Process):
         
         self.config = config
         self.data_dir = data_dir
+
+        # Load the calibration files (only the mask is used currently)
+        self.mask, self.dark, self.flat_struct = loadImageCalibration(self.data_dir, self.config)
+
+        # Bin the calibration images
+        self.mask, self.dark, self.flat_struct = binImageCalibration(self.config, self.mask, self.dark, \
+            self.flat_struct)
 
 
     
@@ -258,6 +267,12 @@ class Extractor(Process):
 
     def executeAll(self):
         """ Run the complete extraction procedure. """
+
+        # Apply the mask to the compressed frames (maxpixel, avepixel)
+        if self.mask is not None:
+            self.compressed[0] = maskImage(self.compressed[0], self.mask)
+            self.compressed[2] = maskImage(self.compressed[2], self.mask)
+        
 
         # Check if the average image is too white and skip it
         if np.average(self.compressed[2]) > self.config.white_avg_level:

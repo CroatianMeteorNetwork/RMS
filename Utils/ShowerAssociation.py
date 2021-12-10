@@ -14,10 +14,10 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
 from RMS.Astrometry.Conversions import raDec2Vector, vector2RaDec, datetime2JD, jd2Date, raDec2AltAz, \
-    raDec2AltAz_vect, geocentricToApparentRadiantAndVelocity, EARTH_CONSTANTS
+    geocentricToApparentRadiantAndVelocity, EARTH_CONSTANTS
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
-from RMS.Formats.Showers import loadShowers, generateActivityDiagram
+from RMS.Formats.Showers import loadShowers, generateActivityDiagram, makeShowerColors
 from RMS.Math import vectNorm, angularSeparation, angularSeparationVect, isAngleBetween, \
     sphericalPointFromHeadingAndDistance, cartesianToPolar
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePhase
@@ -29,18 +29,20 @@ EARTH = EARTH_CONSTANTS()
 
 
 class MeteorSingleStation(object):
-    def __init__(self, station_id, lat, lon):
+    def __init__(self, station_id, lat, lon, ff_name):
         """ Container for single station observations which enables great circle fitting. 
 
         Arguments:
             station_id: [str]
             lat: [float] +N latitude (deg).
             lon: [float] +E longitude (deg).
+            ff_name: [str] Name of the FF file on which the meteor was recorded.
         """
 
         self.station_id = station_id
         self.lat = lat
         self.lon = lon
+        self.ff_name = ff_name
 
         self.jd_array = []
         self.ra_array = []
@@ -240,6 +242,40 @@ class Shower(object):
         self.shower_vector = None
 
 
+    def computeApparentRadiant(self, latitude, longitude, jdt_ref, meteor_fixed_ht=100000):
+        """ Compute the apparent radiant of the shower at the given location and time.
+
+        Arguments:
+            latitude: [float] Latitude of the observer (deg).
+            longitude: [float] Longitude of the observer (deg).
+            jdt_ref: [float] Julian date.
+
+        Keyword arguments:
+            meteor_fixed_ht: [float] Assumed height of the meteor (m). 100 km by default.
+
+        Return;
+            ra, dec, v_init: [tuple of floats] Apparent radiant (deg and m/s).
+
+        """
+
+
+        # Compute the location of the radiant due to radiant drift
+        if not np.any(np.isnan([self.dra, self.ddec])):
+            
+            # Solar longitude difference form the peak
+            lasun_diff = (np.degrees(jd2SolLonSteyaert(jdt_ref)) - self.lasun_max + 180)%360 - 180
+
+            ra_g = self.ra_g + lasun_diff*self.dra
+            dec_g = self.dec_g + lasun_diff*self.ddec
+
+
+        # Compute the apparent radiant - assume that the meteor is directly above the station
+        self.ra, self.dec, self.v_init = geocentricToApparentRadiantAndVelocity(ra_g, \
+            dec_g, 1000*self.vg, latitude, longitude, meteor_fixed_ht, \
+            jdt_ref, include_rotation=True)
+
+        return self.ra, self.dec, self.v_init
+
 
 
 def heightModel(v_init, ht_type='beg'):
@@ -251,6 +287,9 @@ def heightModel(v_init, ht_type='beg'):
 
     Keyword arguments:
         ht_type: [str] 'beg' or 'end'
+
+    Return:
+        ht: [float] Height (m).
 
     """
 
@@ -407,7 +446,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
 
         # Init container for meteor observation
-        meteor_obj = MeteorSingleStation(cam_code, config.latitude, config.longitude)
+        meteor_obj = MeteorSingleStation(cam_code, config.latitude, config.longitude, ff_name)
 
         # Infill the meteor structure
         for entry in meteor_meas:
@@ -466,21 +505,10 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
             ### Radiant filter ###
 
-            # Compute the location of the radiant due to radiant drift
-            if not np.any(np.isnan([shower.dra, shower.ddec])):
-                
-                # Solar longitude difference form the peak
-                lasun_diff = (meteor_obj.lasun - shower.lasun_max + 180)%360 - 180
-
-                shower.ra_g = shower.ra_g + lasun_diff*shower.dra
-                shower.dec_g = shower.dec_g + lasun_diff*shower.ddec
-
-
-            # Compute the apparent radiant - assume that the meteor is directly above the station
+            # Assume a fixed meteor height for an approximate apparent radiant
             meteor_fixed_ht = 100000 # 100 km
-            shower.ra, shower.dec, shower.v_init = geocentricToApparentRadiantAndVelocity(shower.ra_g, \
-                shower.dec_g, 1000*shower.vg, config.latitude, config.longitude, meteor_fixed_ht, \
-                meteor_obj.jdt_ref, include_rotation=True)
+            shower.computeApparentRadiant(config.latitude, config.longitude, meteor_obj.jdt_ref, \
+                meteor_fixed_ht=meteor_fixed_ht)
 
             # Compute the angle between the meteor radiant and the great circle normal
             radiant_separation = meteor_obj.angularSeparationFromGC(shower.ra, shower.dec)
@@ -591,6 +619,13 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
     # Create a plot of showers
     if show_plot or save_plot:
+        # Generate consistent colours
+        colors_by_name = makeShowerColors(shower_list)
+        def get_shower_color(shower):
+            try:
+                return colors_by_name[shower.name] if shower else "0.4"
+            except KeyError:
+                return 'gray'
 
         # Init the figure
         plt.figure()
@@ -614,8 +649,8 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
 
             ### Plot the observed meteor points ###
-
-            allsky_plot.plot(meteor_obj.ra_array, meteor_obj.dec_array, color='r', linewidth=1, zorder=4)
+            color = get_shower_color(shower)
+            allsky_plot.plot(meteor_obj.ra_array, meteor_obj.dec_array, color=color, linewidth=1, zorder=4)
 
             # Plot the peak of shower meteors a different color
             peak_color = 'blue'
@@ -644,7 +679,6 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                     else:
                         gc_beg_phase -= 360
 
-                gc_color = 'purple'
                 gc_alpha = 1.0
 
 
@@ -661,7 +695,6 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                 else:
                     gc_end_phase = gc_beg_phase + 170
 
-                gc_color = 'green'
                 gc_alpha = 0.7
 
 
@@ -676,13 +709,14 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             ra_gc, dec_gc = meteor_obj.sampleGC(phase_angles)
 
             # Cull all points below the horizon
-            azim_gc, elev_gc = raDec2AltAz_vect(ra_gc, dec_gc, meteor_obj.jdt_ref, config.latitude, \
+            azim_gc, elev_gc = raDec2AltAz(ra_gc, dec_gc, meteor_obj.jdt_ref, config.latitude, \
                 config.longitude)
             temp_arr = np.c_[ra_gc, dec_gc]
             temp_arr = temp_arr[elev_gc > 0]
             ra_gc, dec_gc = temp_arr.T
 
             # Plot the great circle fitted on the radiant
+            gc_color = get_shower_color(shower)
             allsky_plot.plot(ra_gc, dec_gc, linestyle='dotted', color=gc_color, alpha=gc_alpha, linewidth=1)
 
             # Plot the point closest to the shower radiant
@@ -730,7 +764,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
 
             # Plot the shower circle
-            allsky_plot.plot(ra_circle, dec_circle)
+            allsky_plot.plot(ra_circle, dec_circle, color=colors_by_name[shower_name])
 
 
             # Plot the shower name
@@ -781,7 +815,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
                 # Plot the activity diagram
                 generateActivityDiagram(config, shower_list, ax_handle=ax_activity, \
-                    sol_marker=[sol_min, sol_max])
+                    sol_marker=[sol_min, sol_max], colors=colors_by_name)
 
 
         
@@ -937,9 +971,9 @@ if __name__ == "__main__":
         ftpdetectinfo_path_list += glob.glob(entry)
 
 
-    # If therea are files given, notify the user
+    # If there are no good files given, notify the user
     if len(ftpdetectinfo_path_list) == 0:
-        print('No valid FTPdetectinfo files given!')
+        print("No FTPdetectinfo files given!")
         sys.exit()
         
 

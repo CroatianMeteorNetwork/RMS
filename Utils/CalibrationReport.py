@@ -10,7 +10,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, raDecToXYPP, \
-    photometryFitRobust, correctVignetting, photomLine, rotationWrtHorizon, extinctionCorrectionTrueToApparent
+    photometryFitRobust, correctVignetting, photomLine, rotationWrtHorizon, \
+    extinctionCorrectionTrueToApparent, getFOVSelectionRadius
 from RMS.Astrometry.CheckFit import matchStarsResiduals
 from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 from RMS.Formats.CALSTARS import readCALSTARS
@@ -31,16 +32,14 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     """ Given the folder of the night, find the Calstars file, check the star fit and generate a report
         with the quality of the calibration. The report contains information about both the astrometry and
         the photometry calibration. Graphs will be saved in the given directory of the night.
-    
+
     Arguments:
         config: [Config instance]
         night_dir_path: [str] Full path to the directory of the night.
-
     Keyword arguments:
         match_radius: [float] Match radius for star matching between image and catalog stars (px).
         platepar: [Platepar instance] Use this platepar instead of finding one in the folder.
         show_graphs: [bool] Show the graphs on the screen. False by default.
-
     Return:
         None
     """
@@ -116,7 +115,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         config.star_catalog_path, config.star_catalog_file, lim_mag=lim_mag, \
         mag_band_ratios=config.star_catalog_band_ratios)
 
-    
+
     ### Take only those CALSTARS entires for which FF files exist in the folder ###
 
     # Get a list of FF files in the folder
@@ -231,7 +230,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
                 max_jd = jd
                 max_matched_stars = len(distances)
 
-        
+
         # If there are no matched stars, use the image with the largest number of detected stars
         if max_matched_stars <= 2:
             max_jd = max(star_dict, key=lambda x: len(star_dict[x]))
@@ -263,7 +262,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     # Plot detected stars
     for img_star in star_dict[max_jd]:
 
-        y, x, _, _ = img_star
+        y, x = img_star[:2]
 
         rect_side = 5*match_radius
         square_patch = plt.Rectangle((x - rect_side/2, y - rect_side/2), rect_side, rect_side, color='g', \
@@ -283,7 +282,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
         # Plot matched stars
         for img_star in image_stars:
-            x, y, _, _ = img_star
+            x, y = img_star[:2]
 
             circle_patch = plt.Circle((y, x), radius=3*match_radius, color='y', fill=False, \
                 label='Matched stars')
@@ -299,7 +298,8 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         x_predicted, y_predicted = raDecToXYPP(matched_catalog_stars[:, 0], \
             matched_catalog_stars[:, 1], max_jd, platepar)
 
-        img_y, img_x, _, _ = image_stars.T
+        img_y = image_stars[:, 0]
+        img_x = image_stars[:, 1]
 
         delta_x = x_predicted - img_x
         delta_y = y_predicted - img_y
@@ -329,7 +329,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     else:
 
         distances = [np.inf]
-        
+
         # If there are no matched stars, plot large text in the middle of the screen
         plt.text(img_w/2, img_h/2, "NO MATCHED STARS!", color='r', alpha=0.5, fontsize=20, ha='center',
             va='center')
@@ -353,7 +353,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     RA_c = RA_c[0]
     dec_c = dec_c[0]
 
-    fov_radius = np.hypot(*computeFOVSize(platepar))
+    fov_radius = getFOVSelectionRadius(platepar)
 
     # Get stars from the catalog around the defined center in a given radius
     _, extracted_catalog = subsetCatalog(catalog_stars, RA_c, dec_c, max_jd, platepar.lat, platepar.lon, \
@@ -411,7 +411,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
     # Compute the rotation wrt. horizon
     rot_horizon = rotationWrtHorizon(platepar)
-    
+
     fov_centre_text = "Azim  = {:6.2f}$\\degree$\n".format(azim_centre) \
                     + "Alt   = {:6.2f}$\\degree$\n".format(alt_centre) \
                     + "Rot h = {:6.2f}$\\degree$\n".format(rot_horizon) \
@@ -500,7 +500,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
         # If a flat is used, disregard the vignetting
         if not config.use_flat:
-            
+
             # Plot intensities of image stars corrected for vignetting
             lsp_corr_arr = np.log10(correctVignetting(star_intensities, radius_arr, \
                 platepar.vignetting_coeff))
@@ -563,7 +563,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         # Plot only when no flat is used
         if not config.use_flat:
 
-            #  Plot radius from centre vs. fit residual 
+            #  Plot radius from centre vs. fit residual
             fit_resids_novignetting = catalog_mags - photomLine((np.array(star_intensities), \
                 np.array(radius_arr)), photom_offset, 0.0)
             ax_r.scatter(radius_arr, fit_resids_novignetting, s=5, c='r', alpha=0.5, zorder=3)
@@ -637,6 +637,3 @@ if __name__ == "__main__":
 
 
     generateCalibrationReport(config, cml_args.dir_path, show_graphs=True)
-
-
-
