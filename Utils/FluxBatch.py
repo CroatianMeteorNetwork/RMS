@@ -5,6 +5,7 @@ import sys
 import shlex
 import datetime
 
+import numpy as np
 import matplotlib.pyplot as plt
 
 from Utils.Flux import computeFlux
@@ -84,7 +85,8 @@ if __name__ == "__main__":
             config = cr.loadConfigFromDirectory('.', ftp_dir_path)
 
             # Compute the flux
-            sol_data, flux_lm_6_5_data = computeFlux(config, ftp_dir_path, ftpdetectinfo_path, shower_code, \
+            sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, \
+                meteor_num_data = computeFlux(config, ftp_dir_path, ftpdetectinfo_path, shower_code, \
                 dt_beg, dt_end, dt, s, show_plots=False)
 
             # Add computed flux to the output list
@@ -114,6 +116,10 @@ if __name__ == "__main__":
 
             # Plot the flux
             plt.plot(sol_data, flux_lm_6_5_data, label=label, color=color, marker=marker, linestyle='dashed')
+
+            plt.errorbar(sol_data, flux_lm_6_5_data, color=color, alpha=0.5, capsize=5, zorder=3, linestyle='none', \
+            yerr=[np.array(flux_lm_6_5_data) - np.array(flux_lm_6_5_ci_lower_data), \
+                np.array(flux_lm_6_5_ci_upper_data) - np.array(flux_lm_6_5_data)])
 
 
         # plt.gca().set_yscale('log')

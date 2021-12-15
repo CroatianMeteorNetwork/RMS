@@ -418,7 +418,7 @@ def stellarLMModel(p0):
 
 
 def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_end, timebin, mass_index, \
-    timebin_intdt=0.25, ht_std_percent=5.0, mask=None, show_plots=True):
+    timebin_intdt=0.25, ht_std_percent=5.0, mask=None, show_plots=True, confidence_interval=0.95):
     """ Compute flux using measurements in the given FTPdetectinfo file. 
     
     Arguments:
@@ -437,12 +437,17 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         ht_std_percent: [float] Meteor height standard deviation in percent.
         mask: [Mask object] Mask object, None by default.
         show_plots: [bool] Show flux plots. True by default.
+        confidence_interval: [float] Confidence interval for error estimation using Poisson statistics.
+            0.95 by default (95% CI).
 
     Return:
         [tuple] sol_data, flux_lm_6_5_data
             - sol_data: [list] Array of solar longitudes (in degrees) of time bins.
             - flux_lm6_5_data: [list] Array of meteoroid flux at the limiting magnitude of +6.5 in 
                 meteors/1000km^2/h.
+            - flux_lm_6_5_ci_lower_data: [list] Flux, lower bound confidence interval.
+            - flux_lm_6_5_ci_upper_data: [list] Flux, upper bound confidence interval.
+            - meteor_num_data: [list] Number of meteors in every bin.
     """
 
 
@@ -715,7 +720,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
     # A meteor needs to be visible on at least 4 frames, thus it needs to have at least 4x the mass to produce
     #   that amount of light. 1 magnitude difference scales as -0.4 of log of mass, thus:
-    # frame_min_loss = np.log10(config.line_minimum_frame_range_det)/(-0.4)
+    #frame_min_loss = np.log10(config.line_minimum_frame_range_det)/(-0.4)
     frame_min_loss = 0.0 # TEST !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!11
 
     print("Frame min loss: {:.2} mag".format(frame_min_loss))
@@ -737,6 +742,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
     # Track values used for flux
     sol_data = []
     flux_lm_6_5_data = []
+    flux_lm_6_5_ci_lower_data = []
+    flux_lm_6_5_ci_upper_data = []
     meteor_num_data = []
     effective_collection_area_data = []
     radiant_elev_data = []
@@ -1048,14 +1055,26 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 # ###
 
 
-                # Compute the flux at the bin LM (meteors/1000km^2/h)
+                # Compute the nominal flux at the bin LM (meteors/1000km^2/h)
                 flux = 1e9*len(bin_meteors)/collection_area/bin_hours
+
+                # Compute confidence interval of the flux
+                ci = 1.0 - confidence_interval
+                num_ci_lower = scipy.stats.chi2.ppf(ci/2, 2*len(bin_meteors))/2
+                num_ci_upper = scipy.stats.chi2.ppf(1 - ci/2, 2*(len(bin_meteors) + 1))/2
+                flux_ci_lower = 1e9*num_ci_lower/collection_area/bin_hours
+                flux_ci_upper = 1e9*num_ci_upper/collection_area/bin_hours
 
                 # Compute the flux scaled to the nightly mean LM
                 flux_lm_nightly_mean = flux*population_index**(lm_m_nightly_mean - lm_m)
 
                 # Compute the flux scaled to +6.5M
                 flux_lm_6_5 = flux*population_index**(6.5 - lm_m)
+
+                # Compute scaled confidence intervals purely based on Poisson statistics (LM errors not 
+                #   taken into account yet)
+                flux_lm_6_5_ci_lower = flux_ci_lower*population_index**(6.5 - lm_m)
+                flux_lm_6_5_ci_upper = flux_ci_upper*population_index**(6.5 - lm_m)
 
 
 
@@ -1065,17 +1084,21 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 print("Photom ZP:  {:+6.2f} mag".format(mag_lev_bin_mean))
                 print("Stellar LM: {:+.2f} mag".format(lm_s))
                 print("-- Flux ---")
-                print("Meteors:  {:d}".format(len(bin_meteors)))
+                print("Meteors:  {:d}, {:.0f}% CI [{:.2f}, {:.2f}]".format(len(bin_meteors), \
+                    100*confidence_interval, num_ci_lower, num_ci_upper))
                 print("Col area: {:d} km^2".format(int(collection_area/1e6)))
                 print("Ang vel:  {:.2f} deg/s".format(np.degrees(ang_vel_mid)))
                 print("LM app:   {:+.2f} mag".format(lm_m))
                 print("Flux:     {:.2f} meteors/1000km^2/h".format(flux))
                 print("to {:+.2f}: {:.2f} meteors/1000km^2/h".format(lm_m_nightly_mean, flux_lm_nightly_mean))
-                print("to +6.50: {:.2f} meteors/1000km^2/h".format(flux_lm_6_5))
+                print("to +6.50: {:.2f}, {:.0f}% CI [{:.2f}, {:.2f}] meteors/1000km^2/h".format(flux_lm_6_5, \
+                    100*confidence_interval, flux_lm_6_5_ci_lower, flux_lm_6_5_ci_upper))
 
 
                 sol_data.append(sol_mean)
                 flux_lm_6_5_data.append(flux_lm_6_5)
+                flux_lm_6_5_ci_lower_data.append(flux_lm_6_5_ci_lower)
+                flux_lm_6_5_ci_upper_data.append(flux_lm_6_5_ci_upper)
                 meteor_num_data.append(len(bin_meteors))
                 effective_collection_area_data.append(collection_area)
                 radiant_elev_data.append(radiant_elev)
@@ -1162,7 +1185,12 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         ax_col_area.set_ylabel("Eff. col. area (km^2)")
         ax_col_area.legend()
 
-        ax_flux.scatter(sol_data, flux_lm_6_5_data)
+
+        ax_flux.scatter(sol_data, flux_lm_6_5_data, color='k', zorder=4)
+        ax_flux.errorbar(sol_data, flux_lm_6_5_data, color='grey', capsize=5, zorder=3, linestyle='none', \
+            yerr=[np.array(flux_lm_6_5_data) - np.array(flux_lm_6_5_ci_lower_data), \
+                np.array(flux_lm_6_5_ci_upper_data) - np.array(flux_lm_6_5_data)])
+
         ax_flux.set_ylabel("Flux@+6.5M (met/1000km^2/h)")
         ax_flux.set_xlabel("La Sun (deg)")
 
@@ -1171,7 +1199,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         plt.show()
 
 
-    return sol_data, flux_lm_6_5_data
+    return sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, meteor_num_data
         
 
 
