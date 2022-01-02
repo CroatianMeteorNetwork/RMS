@@ -62,11 +62,17 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
     # relase lock file so RMS is authorized to reboot, if needed
     os.remove(lockfile)
 
+    # Only reboot on the RPi, don't reboot Linux machines
+    import os
+    import pwd
+    username = pwd.getpwuid(os.getuid()).pw_name
 
-    # Reboot the computer (script needs sudo priviledges, works only on Linux)
-    try:
-        log.info("Rebooting system...")
-        os.system('sudo shutdown -r now')
-    except Exception as e:
-        log.debug('Rebooting failed with message:\n' + repr(e))
-        log.debug(repr(traceback.format_exception(*sys.exc_info())))
+    if username == 'pi':
+
+        # Reboot the computer (script needs sudo priviledges, works only on Linux)
+        try:
+            log.info("Rebooting system...")
+            os.system('sudo shutdown -r now')
+        except Exception as e:
+            log.debug('Rebooting failed with message:\n' + repr(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
