@@ -1,30 +1,30 @@
 """ Compute single-station meteor shower flux. """
 
-import os
-import sys
-import glob
+import collections
 import copy
 import datetime
+import glob
 import json
-import collections
+import os
+import sys
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import RMS.Formats.CALSTARS as CALSTARS
 import scipy.stats
-
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
 from RMS.Astrometry.ApplyRecalibrate import applyRecalibrate
-from RMS.Astrometry.Conversions import areaGeoPolygon, jd2Date, datetime2JD, J2000_JD, raDec2AltAz
+from RMS.Astrometry.Conversions import (J2000_JD, areaGeoPolygon, datetime2JD,
+                                        jd2Date, raDec2AltAz)
 from RMS.ExtractStars import extractStarsAndSave
-import RMS.Formats.CALSTARS as CALSTARS
-from RMS.Formats import FFfile
-from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
-from RMS.Formats import Platepar
+from RMS.Formats import FFfile, Platepar
+from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, readFTPdetectinfo
 from RMS.Math import angularSeparation
-from RMS.Routines.FOVArea import xyHt2Geo, fovArea
-from RMS.Routines.MaskImage import loadMask, MaskStructure
+from RMS.Routines.FOVArea import fovArea, xyHt2Geo
+from RMS.Routines.MaskImage import MaskStructure, loadMask
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
-from Utils.ShowerAssociation import showerAssociation, heightModel
+
+from Utils.ShowerAssociation import heightModel, showerAssociation
 
 
 def generateColAreaJSONFileName(station_code, side_points, ht_min, ht_max, dht, elev_limit):
@@ -564,7 +564,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
         # Run sensor characterization
         sensor_data = sensorCharacterization(config, dir_path)
-
+    
         # Save to file for posterior use
         with open(sensor_characterization_path, 'w') as f:
 
@@ -577,7 +577,6 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
             # Save to disk
             f.write(out_str)
-
 
 
     # Compute the nighly mean FWHM and noise stddev
@@ -1216,12 +1215,12 @@ if __name__ == "__main__":
     import RMS.ConfigReader as cr
 
     ### COMMAND LINE ARGUMENTS
-
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Compute single-station meteor shower flux.")
 
     arg_parser.add_argument("ftpdetectinfo_path", metavar="FTPDETECTINFO_PATH", type=str, \
-        help="Path to an FTPdetectinfo file. The directory also has to contain a platepar and mask file.")
+        help="Path to an FTPdetectinfo file or path to folder. The directory also has to contain" \
+        "a platepar and mask file.")
 
     arg_parser.add_argument("shower_code", metavar="SHOWER_CODE", type=str, \
         help="IAU shower code (e.g. ETA, PER, SDA).")
@@ -1249,6 +1248,7 @@ if __name__ == "__main__":
 
 
     ftpdetectinfo_path = cml_args.ftpdetectinfo_path
+    ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path)
 
     # # Apply wildcards to input
     # ftpdetectinfo_path_list = []
@@ -1268,8 +1268,8 @@ if __name__ == "__main__":
     #     print("No FTPdetectinfo files given!")
     #     sys.exit()
 
-    if not os.path.isfile(cml_args.ftpdetectinfo_path):
-        print("The FTPdetectinfo file does not exist:", cml_args.ftpdetectinfo_path)
+    if not os.path.isfile(ftpdetectinfo_path):
+        print("The FTPdetectinfo file does not exist:", ftpdetectinfo_path)
         print("Exiting...")
         sys.exit()
 
@@ -1280,12 +1280,12 @@ if __name__ == "__main__":
         
 
     # Extract parent directory
-    dir_path = os.path.dirname(cml_args.ftpdetectinfo_path)
+    dir_path = os.path.dirname(ftpdetectinfo_path)
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
 
     # Compute the flux
-    computeFlux(config, dir_path, cml_args.ftpdetectinfo_path, cml_args.shower_code, dt_beg, dt_end, \
+    computeFlux(config, dir_path, ftpdetectinfo_path, cml_args.shower_code, dt_beg, dt_end, \
         cml_args.dt, cml_args.s)
