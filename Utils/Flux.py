@@ -126,7 +126,7 @@ class FluxConfig(object):
         self.rad_elev_limit = 25
 
         # Minimum distance of the end of the meteor to the radiant (deg)
-        self.rad_dist_min = 15
+        self.rad_dist_min = 20
 
         # Subdivide the time bin into the given number of subbins
         self.sub_time_bins = 2
