@@ -885,6 +885,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 # Skip time bin if the radiant is very close to the centre of the image
                 if np.degrees(rad_dist_mid) < flux_config.rad_dist_min:
                     print("!!! Radiant too close to the centre of the image! {:.2f} < {:.2f}".format(np.degrees(rad_dist_mid), flux_config.rad_dist_min))
+                    continue
 
 
                 ### Compute the limiting magnitude ###
