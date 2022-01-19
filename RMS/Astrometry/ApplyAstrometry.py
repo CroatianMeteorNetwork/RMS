@@ -23,31 +23,34 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from __future__ import print_function, division, absolute_import, unicode_literals
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
 
-import os
-import sys
-import datetime
-import shutil
-import copy
 import argparse
+import copy
+import datetime
+import os
+import shutil
+import sys
 
 import numpy as np
-import scipy.optimize
-
-
-from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz, J2000_JD
-from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
-from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
-from RMS.Formats.FFfile import filenameToDatetime
-import RMS.Formats.Platepar
-from RMS.Math import angularSeparation, polarToCartesian, cartesianToPolar
-
 # Import Cython functions
 import pyximport
+import RMS.Formats.Platepar
+import scipy.optimize
+from RMS.Astrometry.AtmosphericExtinction import \
+    atmosphericExtinctionCorrection
+from RMS.Astrometry.Conversions import J2000_JD, date2JD, jd2Date, raDec2AltAz
+from RMS.Formats.FFfile import filenameToDatetime
+from RMS.Formats.FTPdetectinfo import (findFTPdetectinfoFile,
+                                       readFTPdetectinfo, writeFTPdetectinfo)
+from RMS.Math import angularSeparation, cartesianToPolar, polarToCartesian
+
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import cyraDecToXY, cyXYToRADec, equatorialCoordPrecession, \
-    cyTrueRaDec2ApparentAltAz, eqRefractionApparentToTrue
+from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
+                                        cyXYToRADec,
+                                        eqRefractionApparentToTrue,
+                                        equatorialCoordPrecession)
 
 # Handle Python 2/3 compability
 if sys.version_info.major == 3:
@@ -71,6 +74,23 @@ def correctVignetting(px_sum, radius, vignetting_coeff):
 
     return px_sum/(np.cos(vignetting_coeff*radius)**4)
 
+
+def correctVignettingTrueToApparent(catalog_mags, x, y, platepar):
+    """ Given a true star magnitude (can be corrected for extinction or not), correct the magnitude
+    for vignetting, which would make it darker near the edges
+    Arguments:
+        catalog_mags: [array] Magnitudes of stars
+        x: [array] X coordinate of star
+        y: [array] Y coordinate of star
+        platepar: [platepar object]
+        
+    Return:
+        corr_mag: [array] corrected magnitudes of stars
+    """
+    radius = np.sqrt((x-platepar.X_res/2)**2 + (y-platepar.Y_res/2)**2)
+    corr_mag = catalog_mags - 2.5 * np.log10(np.cos(platepar.vignetting_coeff*radius)**4)
+
+    return corr_mag
 
 
 def extinctionCorrectionTrueToApparent(catalog_mags, ra_data, dec_data, jd, platepar):
@@ -804,7 +824,6 @@ if __name__ == "__main__":
     import Utils.RMS2UFO
 
     ### COMMAND LINE ARGUMENTS
-
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Apply the platepar to the given FTPdetectinfo file.")
 
@@ -817,6 +836,7 @@ if __name__ == "__main__":
     #########################
 
     ftpdetectinfo_path = cml_args.ftpdetectinfo_path[0]
+    ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path)
 
     # Extract the directory path
     dir_path, ftp_detectinfo_file = os.path.split(os.path.abspath(ftpdetectinfo_path))

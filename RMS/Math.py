@@ -201,3 +201,52 @@ def RMSD(x, weights=None):
         weights = np.ones_like(x)
 
     return np.sqrt(np.sum(weights*x**2)/np.sum(weights))
+
+
+### 3D functions ###
+##############################################################################################################
+
+def sphericalToCartesian(r, theta, phi):
+    """ Convert spherical coordinates to cartesian coordinates. 
+        
+    Arguments:
+        r: [float] Radius
+        theta: [float] Inclination in radians.
+        phi: [float] Azimuth angle in radians.
+
+    Return:
+        (x, y, z): [tuple of floats] Coordinates of the point in 3D cartiesian coordinates.
+    """
+
+    x = r*np.sin(theta)*np.cos(phi)
+    y = r*np.sin(theta)*np.sin(phi)
+    z = r*np.cos(theta)
+
+    return x, y, z
+
+
+def pointInsideConvexPolygonSphere(points, vertices):
+    """
+    Polygon must be convex
+    https://math.stackexchange.com/questions/4012834/checking-that-a-point-is-in-a-spherical-polygon
+
+
+    Arguments:
+        points: [array] points with dimension (npoints, 2). The two dimensions are ra and dec
+        vertices: [array] vertices of convex polygon with dimension (nvertices, 2)
+        
+    Return:
+        filter: [array of bool] Array of booleans on whether a given point is inside the polygon on 
+        the sphere.
+    """
+    # convert ra dec to spherical
+    points = points[:, ::-1]
+    vertices = vertices[:, ::-1]
+    points[:, 0] = 90 - points[:, 0]
+    vertices[:, 0] = 90 - vertices[:, 0]
+    points = np.array(sphericalToCartesian(*np.hstack((np.ones((len(points), 1)), np.radians(points))).T))
+    vertices = np.array(sphericalToCartesian(*np.hstack((np.ones((len(vertices), 1)), np.radians(vertices))).T))
+    
+    great_circle_normal = np.cross(vertices, np.roll(vertices, 1, axis=1), axis=0)
+    dot_prod = great_circle_normal.T @ points
+    return np.sum(dot_prod < 0, axis=0, dtype=int) == 0  # inside if n . p < 0 for no n

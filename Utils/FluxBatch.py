@@ -1,18 +1,15 @@
 """ Batch run the flux code using a flux batch file. """
 
-import os
-import sys
-import shlex
 import datetime
+import os
+import shlex
+import sys
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile
 
-from Utils.Flux import computeFlux
-
-
-
-
+from Utils.Flux import computeFlux, computeTimeIntervals, detectClouds
 
 if __name__ == "__main__":
 
@@ -63,6 +60,7 @@ if __name__ == "__main__":
                 continue
 
             ftpdetectinfo_path, shower_code, tbeg, tend, dt, s = shlex.split(line)
+            ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path)
             dt = float(dt)
             s = float(s)
 
@@ -76,7 +74,7 @@ if __name__ == "__main__":
             # Parse the beg/end time
             dt_beg = datetime.datetime.strptime(tbeg, "%Y%m%d_%H%M%S")
             dt_end = datetime.datetime.strptime(tend, "%Y%m%d_%H%M%S")
-                
+
 
             # Extract parent directory
             ftp_dir_path = os.path.dirname(ftpdetectinfo_path)
@@ -84,13 +82,20 @@ if __name__ == "__main__":
             # Load the config file
             config = cr.loadConfigFromDirectory('.', ftp_dir_path)
 
+            # find time intervals to compute flux with
+            detect_clouds = detectClouds(config, dir_path)
+            time_intervals = computeTimeIntervals(detect_clouds)
+            
             # Compute the flux
-            sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, \
+            for interval in time_intervals:
+                print(f'Using interval: {interval}')
+                dt_beg, dt_end = interval
+                sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, \
                 meteor_num_data = computeFlux(config, ftp_dir_path, ftpdetectinfo_path, shower_code, \
-                dt_beg, dt_end, dt, s, show_plots=False)
+                    dt_beg, dt_end, dt, s, show_plots=False)
 
-            # Add computed flux to the output list
-            output_data += [[config.stationID, sol, flux] for (sol, flux) in zip(sol_data, flux_lm_6_5_data)]
+                # Add computed flux to the output list
+                output_data += [[config.stationID, sol, flux] for (sol, flux) in zip(sol_data, flux_lm_6_5_data)]
 
 
             # Make all stations the same color
