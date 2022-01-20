@@ -166,7 +166,7 @@ def computeTimeIntervals(cloud_ratio_dict, ratio_threshold=0.5, time_gap_thresho
 
         # make an interval if FF has a >10 min gap (suggests clouds in between) or if the ratio is too low.
         # However the interval must be at least an hour to be kept.
-        print((date - prev_date).total_seconds()/60, (prev_date - start_interval).total_seconds()/60, ratio)
+        # print((date - prev_date).total_seconds()/60, (prev_date - start_interval).total_seconds()/60, ratio)
         if ((date - prev_date).total_seconds()/60 > time_gap_threshold or ratio < ratio_threshold):
             if (prev_date - start_interval).total_seconds()/60 > 60:
                 intervals.append((start_interval, prev_date))
@@ -198,8 +198,9 @@ def detectMoon(file_list, platepar, config):
     o.lat = str(config.latitude)
     o.long = str(config.longitude)
     o.elevation = config.elevation
-    o.horizon = '-5:26'
+    o.horizon = '0:0'
 
+    radius = getFOVSelectionRadius(platepar)
     new_file_list = []
 
     # going through all dates to check if moon is in fov
@@ -217,14 +218,15 @@ def detectMoon(file_list, platepar, config):
         phase = (o.date - pnm) / (nnm - pnm)  # from 0 to 1 for 360 deg
         # using sawtooth function for fraction of moon visible
         lunar_area = 1 - np.abs(2 * phase - 1)
-
+        angular_distance = angularSeparation(ra_mid, dec_mid, m.ra, m.dec)
+        
         x, y = raDecToXYPP(np.array([np.degrees(m.ra)]), np.array([np.degrees(m.dec)]),
                            datetime2JD(o.date.datetime()), platepar)
 
         # an amount of pixels outside fov. It would be better if this exactly required the moon to be 3
         # degrees outside of fov, but that can be computationally intensive
-        if (x <= -30) or (x >= platepar.X_res + 30) or (y <= -50) or (y >= platepar.Y_res + 50) or \
-            (lunar_area < 0.25) or o.next_rising(m) < o.next_setting(m):
+        if ((x <= -30) or (x >= platepar.X_res + 30) or (y <= -50) or (y >= platepar.Y_res + 50) or \
+            (lunar_area < 0.25) or o.next_rising(m) < o.next_setting(m)) and angular_distance < radius:
             new_file_list.append(filename)
 
     return new_file_list
@@ -274,17 +276,16 @@ def detectClouds(config, dir_path, N=4, mask=None):
     starting_time = None
     recorded_files = []
     bin_used = -1
-    for ff_file_name in file_list:
-        if FFfile.validFFName(ff_file_name):
-            date = FFfile.filenameToDatetime(ff_file_name)
-            if starting_time is None:
-                starting_time = date
+    for ff_file_name in calstars_count.keys():
+        date = FFfile.filenameToDatetime(ff_file_name)
+        if starting_time is None:
+            starting_time = date
 
-            # store the first file of each bin
-            new_bin = int(((date - starting_time).total_seconds()/60) // N)
-            if new_bin > bin_used:
-                recorded_files.append(ff_file_name)
-                bin_used = new_bin
+        # store the first file of each bin
+        new_bin = int(((date - starting_time).total_seconds()/60) // N)
+        if new_bin > bin_used:
+            recorded_files.append(ff_file_name)
+            bin_used = new_bin
 
     # detect which images don't have a moon visible, and filter the file list based on this
     platepar = Platepar.Platepar()
@@ -323,8 +324,7 @@ def detectClouds(config, dir_path, N=4, mask=None):
                                        recalibrated_platepars[ff_file].auto_recalibrated else None)
                              for ff_file in recorded_files}
 
-    predicted_stars = predictStarNumberInFOV(
-        recalibrated_platepars, ff_limiting_magnitude, config, mask)
+    predicted_stars = predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config, mask)
     return {ff_file: (calstars_count[ff_file] / predicted_stars[ff_file] if ff_file in predicted_stars else 0)
             for ff_file in recorded_files}
 
@@ -356,8 +356,7 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
         lim_mag = ff_limiting_magnitude[ff_file]
         if lim_mag is None:
             continue
-        date = FFfile.getMiddleTimeFF(
-            ff_file, config.fps, ret_milliseconds=True)
+        date = FFfile.getMiddleTimeFF(ff_file, config.fps, ret_milliseconds=True)
         jd = date2JD(*date)
         _, ra_vertices, dec_vertices, _ = xyToRaDecPP([date, date, date, date],
                                                       [0, 0, platepar.X_res,
@@ -1405,18 +1404,16 @@ if __name__ == "__main__":
 
     arg_parser.add_argument("shower_code", metavar="SHOWER_CODE", type=str,
                             help="IAU shower code (e.g. ETA, PER, SDA).")
-    # TODO: remove this, this will be redundant due to it being automated.
-    arg_parser.add_argument("tbeg", metavar="BEG_TIME", type=str,
-                            help="Time of the observation beginning. YYYYMMDD_HHMMSS format.")
-
-    arg_parser.add_argument("tend", metavar="END_TIME", type=str,
-                            help="Time of the observation ending. YYYYMMDD_HHMMSS format.")
-
-    arg_parser.add_argument("dt", metavar="TIME_BIN", type=float,
-                            help="Time bin width in hours.")
-
+    
     arg_parser.add_argument("s", metavar="MASS_INDEX", type=float,
                             help="Mass index of the shower.")
+
+    group = arg_parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--binduration", type=float, metavar='DURATION',
+                            help="Time bin width in hours.")
+    group.add_argument("--binmeteors", type=int, metavar='COUNT',
+                            help="Number of meteors per bin")
+
 
     arg_parser.add_argument("-c", "--config", metavar="CONFIG_PATH", type=str,
                             help="Path to a config file which will be used instead of the default one."
@@ -1425,6 +1422,9 @@ if __name__ == "__main__":
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
+    if cml_args.binmeteors is not None:
+        raise NotImplementedError("--binmeteors not implemented") 
+    
     #########################
 
     ftpdetectinfo_path = cml_args.ftpdetectinfo_path
@@ -1452,10 +1452,6 @@ if __name__ == "__main__":
         print("Exiting...")
         sys.exit()
 
-    # Parse the beg/end time
-    dt_beg = datetime.datetime.strptime(cml_args.tbeg, "%Y%m%d_%H%M%S")
-    dt_end = datetime.datetime.strptime(cml_args.tend, "%Y%m%d_%H%M%S")
-
     # Extract parent directory
     dir_path = os.path.dirname(ftpdetectinfo_path)
 
@@ -1465,14 +1461,16 @@ if __name__ == "__main__":
     # find time intervals to compute flux with
     detect_clouds = detectClouds(config, dir_path)
     time_intervals = computeTimeIntervals(detect_clouds)
-    for interval in time_intervals:
-        print(f'interval: {interval}')
+    for i, interval in enumerate(time_intervals):
+        print(f'interval {i+1}/{len(time_intervals)}: {interval}')
         
     import matplotlib.dates as mdates
     fig, ax = plt.subplots()
     plot_format = mdates.DateFormatter('%H:%M')
     ax.xaxis.set_major_formatter(plot_format)
     ax.plot([FFfile.filenameToDatetime(x) for x in detect_clouds.keys()], list(detect_clouds.values()))
+    ax.set_xlabel("Time")
+    ax.set_ylabel("stars observed at LM-1/stars predicted")
     plt.show()
     
     print('display ff with clouds')
@@ -1484,4 +1482,4 @@ if __name__ == "__main__":
         print(f'Using interval: {interval}')
         dt_beg, dt_end = interval
         computeFlux(config, dir_path, ftpdetectinfo_path, cml_args.shower_code, dt_beg, dt_end,
-                    cml_args.dt, cml_args.s)
+                    cml_args.binduration, cml_args.s)

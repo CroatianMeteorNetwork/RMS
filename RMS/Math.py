@@ -237,7 +237,7 @@ def pointInsideConvexPolygonSphere(points, vertices):
         
     Return:
         filter: [array of bool] Array of booleans on whether a given point is inside the polygon on 
-        the sphere.
+            the sphere.
     """
     # convert ra dec to spherical
     points = points[:, ::-1]
@@ -250,3 +250,34 @@ def pointInsideConvexPolygonSphere(points, vertices):
     great_circle_normal = np.cross(vertices, np.roll(vertices, 1, axis=1), axis=0)
     dot_prod = great_circle_normal.T @ points
     return np.sum(dot_prod < 0, axis=0, dtype=int) == 0  # inside if n . p < 0 for no n
+
+
+##############################################################################################################
+
+def histogramEdgesEqualDataNumber(x, nbins):
+    """ Given the data, divide the histogram edges in such a way that every bin has the same number of
+        data points. 
+
+        Source: https://stackoverflow.com/questions/37649342/matplotlib-how-to-make-a-histogram-with-bins-of-equal-area/37667480
+
+    Arguments:
+        x: [list] Input data.
+        nbins: [int] Number of bins.
+
+    """
+
+    npt = len(x)
+    return np.interp(np.linspace(0, npt, nbins + 1), np.arange(npt), np.sort(x))
+
+
+def histogramEdgesDataNumber(x, points_per_bin):
+    """ Given the data, divides the histogram edges in such a way that every bin contains at least a
+    minimum number of points
+    
+    Arguments:
+        x: [list] Input data.
+        points_per_bin: [int] Number of point per bin
+    """
+    
+    nbins = len(x)//points_per_bin
+    return histogramEdgesEqualDataNumber(x, nbins)

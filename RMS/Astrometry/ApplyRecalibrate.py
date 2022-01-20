@@ -235,10 +235,19 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
 
 def recalibratePlateparsForFF(prev_platepar, ff_file_names, calstars, catalog_stars, config):
     """
-    Recalibrate platepars corresponding to ff files based on the stars.
+    Recalibrate platepars corresponding to ff files based on the stars. 
     
     Arguments:
-
+        prev_platepar: [platepar]
+        ff_file_names: [list] list of ff file names
+        calstars: [dict] A dictionary with only one entry, where the key is 'jd' and the value is the
+            list of star coordinates.
+        catalog_stars: [list] A list of entries [[ff_name, star_coordinates], ...].
+        config: [config]
+        
+    Returns:
+        recalibrated_platepars: [dict] A dictionary where one key is ff file name and the value is 
+            a calibrated corresponding platepar.
     """
     # Go through all FF files with detections, recalibrate and apply astrometry
     recalibrated_platepars = {}
