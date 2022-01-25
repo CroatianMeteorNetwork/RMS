@@ -1,5 +1,6 @@
 """ Compute single-station meteor shower flux. """
 
+import argparse
 import collections
 import copy
 import datetime
@@ -9,6 +10,7 @@ import os
 import sys
 
 import ephem
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import RMS.Formats.CALSTARS as CALSTARS
@@ -137,17 +139,19 @@ class FluxConfig(object):
         self.meteros_min = 3
 
 
-def computeTimeIntervals(cloud_ratio_dict, ratio_threshold=0.5, time_gap_threshold=15):
+def computeTimeIntervals(cloud_ratio_dict, ratio_threshold=0.2, time_gap_threshold=15, clearing_threshold=60):
     """
     Calculate sets of time intervals using the detected to predicted star ratios
 
     Arguments:
         cloud_ratio_dict: [dict] ff_file: ratio
-        ratio_threshold: [float] minimum ratio required to be above
+        ratio_threshold: [float] minimum ratio required to be above. 0.15 is reasonable but 0.2 is more safe
         time_gap_threshold: [float] maximum time gap between ff files from clodu_ratio_dict
             before it's used to stop an interval. This is because if there is a gap that's too large, it
             can be because there are clouds in between. And to not risk this affecting flux values
             this is cut out.
+        clearing_threshold: [float] The time (in hours) required for the ratio to be above the 
+            ratio threshold before it will be considered
 
     Return:
         intervals: [list of tuple of datetime] Structured like [(start_datetime, end_datetime), ...]
@@ -175,7 +179,7 @@ def computeTimeIntervals(cloud_ratio_dict, ratio_threshold=0.5, time_gap_thresho
         prev_date = date
 
     # if you run out of images, that counts as a cutoff
-    if (prev_date - start_interval).total_seconds()/60 > 60:
+    if (prev_date - start_interval).total_seconds()/60 > clearing_threshold:
         intervals.append((start_interval, prev_date))
     
     return intervals
@@ -194,6 +198,7 @@ def detectMoon(file_list, platepar, config):
     Returns:
         new_file_list: [list] FF file list which don't have a moon in it
     """
+    # setting up observer
     o = ephem.Observer()
     o.lat = str(config.latitude)
     o.long = str(config.longitude)
@@ -203,21 +208,24 @@ def detectMoon(file_list, platepar, config):
     radius = getFOVSelectionRadius(platepar)
     new_file_list = []
 
-    # going through all dates to check if moon is in fov
+    # going through all ff files to check if moon is in fov
     for filename in file_list:
+        # getting right ascension and declination of middle of fov
         _, ra_mid, dec_mid, _ = xyToRaDecPP([FFfile.getMiddleTimeFF(filename, config.fps)], [
             platepar.X_res/2], [platepar.Y_res/2], [1], platepar)
         ra_mid, dec_mid = np.radians(ra_mid[0]), np.radians(dec_mid[0])
+        
         o.date = FFfile.filenameToDatetime(filename)
-
         m = ephem.Moon()
         m.compute(o)
 
+        # calculating fraction of moon which is visible
         nnm = ephem.next_new_moon(o.date)
         pnm = ephem.previous_new_moon(o.date)
         phase = (o.date - pnm) / (nnm - pnm)  # from 0 to 1 for 360 deg
-        # using sawtooth function for fraction of moon visible
-        lunar_area = 1 - np.abs(2 * phase - 1)
+        lunar_area = 1 - np.abs(2 * phase - 1)  # using sawtooth function for fraction of moon visible
+        
+        # calculating angular distance from middle of fov to correct for checking after the xy mapping
         angular_distance = angularSeparation(ra_mid, dec_mid, m.ra, m.dec)
         
         x, y = raDecToXYPP(np.array([np.degrees(m.ra)]), np.array([np.degrees(m.dec)]),
@@ -232,7 +240,7 @@ def detectMoon(file_list, platepar, config):
     return new_file_list
 
 
-def detectClouds(config, dir_path, N=4, mask=None):
+def detectClouds(config, dir_path, N=5, mask=None):
     """ Detect clouds based on the number of stars detected in images compared to how many are
     predicted.
 
@@ -269,14 +277,12 @@ def detectClouds(config, dir_path, N=4, mask=None):
             break
     star_list = readCALSTARS(dir_path, calstars_file)
     print('CALSTARS file: ' + calstars_file + ' loaded!')
-    
-    calstars_count = {ff_file: len(star_data) for ff_file, star_data in star_list}
 
     # get FF file every N minute interval
     starting_time = None
     recorded_files = []
     bin_used = -1
-    for ff_file_name in calstars_count.keys():
+    for ff_file_name, _ in star_list:
         date = FFfile.filenameToDatetime(ff_file_name)
         if starting_time is None:
             starting_time = date
@@ -289,12 +295,7 @@ def detectClouds(config, dir_path, N=4, mask=None):
 
     # detect which images don't have a moon visible, and filter the file list based on this
     platepar = Platepar.Platepar()
-    platepar.read(os.path.join(dir_path, config.platepar_name),
-                  use_flat=config.use_flat)
-
-    platepar.lat = config.latitude
-    platepar.lon = config.longitude
-    platepar.elev = config.elevation
+    platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
     recorded_files = detectMoon(recorded_files, platepar, config)
 
     # Find and load recalibrated platepars
@@ -319,14 +320,74 @@ def detectClouds(config, dir_path, N=4, mask=None):
         recalibrated_platepars = recalibrateSelectedFF(dir_path, recorded_files, star_list, config)
         recorded_files = list(recalibrated_platepars.keys())
 
+    calstars_count = {ff: len(recalibrated_platepars[ff].star_list) for ff in recorded_files}
+    
+    min_lim_mag = {ff:np.percentile(xyToRaDecPP([FFfile.getMiddleTimeFF(ff, config.fps, ret_milliseconds=True)]*len(star_data),
+                        [star[1] for star in star_data],
+                        [star[0] for star in star_data],
+                        [star[3] for star in star_data],
+                        platepar)[3], 90) for ff, star_data in star_list if ff in recorded_files}
+    
+    min_lim_cat_mag = {ff: max(recalibrated_platepars[ff].star_list, key=lambda x: x[6])[6] for ff in recorded_files}
+    
+    
     # get limiting magnitude for each FF file (magitude is artificially decreased by 1, as a correction)
-    ff_limiting_magnitude = {ff_file: (stellarLMModel(recalibrated_platepars[ff_file].mag_lev) - 1 if
+    ff_limiting_magnitude = {ff_file: (min(stellarLMModel(recalibrated_platepars[ff_file].mag_lev), config.catalog_mag_limit+1) if
                                        recalibrated_platepars[ff_file].auto_recalibrated else None)
                              for ff_file in recorded_files}
+    # ff_limiting_magnitude = {ff_file: (min_lim_mag[ff_file] if
+    #                                    recalibrated_platepars[ff_file].auto_recalibrated else None) 
+    #                          for ff_file in recorded_files}
+    
+    fig, ax = plt.subplots(2)
+    plot_format = mdates.DateFormatter('%H:%M')
+    ax[0].xaxis.set_major_formatter(plot_format)
+    ax[0].scatter([FFfile.filenameToDatetime(ff) for ff in recorded_files if ff_limiting_magnitude[ff] is not None], 
+                [ff_limiting_magnitude[ff]/min_lim_cat_mag[ff] for ff in recorded_files if ff_limiting_magnitude[ff] is not None])
+    ax[0].set_ylabel('LM/min star magnitude')
+    ax[0].set_xlabel('Time')
+    
+    ax[1].xaxis.set_major_formatter(plot_format)
+    ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in recorded_files], 
+                [ff_limiting_magnitude[ff] for ff in recorded_files], label='empirical LM')
+    ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in recorded_files], 
+                [min_lim_mag[ff] for ff in recorded_files], label='faintest star star mag')
+    ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in recorded_files], 
+                [min_lim_cat_mag[ff] for ff in recorded_files], label='faintest star catalog mag')
+    ax[1].set_ylabel('Magnitude')
+    ax[1].set_xlabel('Time')
+    ax[1].legend()
+    plt.show()
 
     predicted_stars = predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config, mask)
-    return {ff_file: (calstars_count[ff_file] / predicted_stars[ff_file] if ff_file in predicted_stars else 0)
+    for ff in predicted_stars:
+        print(ff, calstars_count.get(ff), predicted_stars.get(ff), ff_limiting_magnitude.get(ff))
+
+    
+    ratio =  {ff_file: (calstars_count[ff_file] / predicted_stars[ff_file] if ff_file in predicted_stars else 0)
             for ff_file in recorded_files}
+    fig, ax = plt.subplots(2)
+    plot_format = mdates.DateFormatter('%H:%M')
+    ax[0].xaxis.set_major_formatter(plot_format)
+    ax[0].plot([FFfile.filenameToDatetime(x) for x in ratio.keys()], list(ratio.values()), marker='o')
+    ax[0].set_xlabel("Time")
+    ax[0].set_ylabel("stars observed at LM-1/stars predicted")
+    
+    ax[1].xaxis.set_major_formatter(plot_format)
+    ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in calstars_count], 
+                [calstars_count[ff] for ff in calstars_count], label='fitted count')
+    ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in predicted_stars], 
+                [predicted_stars[ff] for ff in predicted_stars], label='predicted count')
+    ax[1].set_xlabel("Time")
+    ax[1].set_ylabel("Count")
+    ax[1].legend()
+    plt.show()
+    
+    
+    
+    
+    # calculating the ratio of observed starts to the number of predicted stars        
+    return ratio
 
 
 def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config, mask=None):
@@ -344,13 +405,15 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
         pred_star_count: [dict] FF_file: number_of_stars_in_FOV
     """
     ff_files = list(recalibrated_platepars.keys())
+    
+    # using a blank mask if nothing is given
     if mask is None:
         mask = Object()
         mask.img = np.ones((recalibrated_platepars[ff_files[0]].Y_res,
                             recalibrated_platepars[ff_files[0]].X_res), dtype=bool)
 
     pred_star_count = {}
-
+    star_mag = {}
     for ff_file in ff_files:
         platepar = recalibrated_platepars[ff_file]
         lim_mag = ff_limiting_magnitude[ff_file]
@@ -358,28 +421,34 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             continue
         date = FFfile.getMiddleTimeFF(ff_file, config.fps, ret_milliseconds=True)
         jd = date2JD(*date)
-        _, ra_vertices, dec_vertices, _ = xyToRaDecPP([date, date, date, date],
-                                                      [0, 0, platepar.X_res,
-                                                      platepar.X_res],
-                                                      [0, platepar.Y_res,
-                                                      platepar.Y_res, 0],
-                                                      [1, 1, 1, 1], platepar,
+        
+        # make a polygon on a sphere out of 5 points on each side
+        n_points = 5
+        y_points = [platepar.Y_res * i/n_points for i in range(n_points)] + [platepar.Y_res]*n_points + \
+                    [platepar.Y_res * (1-i/n_points) for i in range(n_points)] + [0]*n_points
+        x_points = [0]*n_points + [platepar.X_res * i/n_points for i in range(n_points)] + \
+                    [platepar.X_res]*n_points + [platepar.X_res * (1-i/n_points) for i in range(n_points)]
+        _, ra_vertices, dec_vertices, _ = xyToRaDecPP([date]*n_points*4,
+                                                      x_points, y_points,
+                                                      [1]*n_points*4, platepar,
                                                       extinction_correction=False)
 
         # collect and filter catalog stars
         catalog_stars, _, _ = StarCatalog.readStarCatalog(
             config.star_catalog_path, config.star_catalog_file, lim_mag=lim_mag,
             mag_band_ratios=config.star_catalog_band_ratios)
-
+        # filter out stars that are outside of the polygon on the sphere made by the fov
         ra_catalog, dec_catalog, mag = catalog_stars.T
         inside = pointInsideConvexPolygonSphere(np.array([ra_catalog, dec_catalog]).T,
                                                 np.array([ra_vertices, dec_vertices]).T)
         x, y = raDecToXYPP(ra_catalog, dec_catalog, jd, platepar)
         x = x[inside]
         y = y[inside]
+        # correct for extinction and vignetting so that dim stars can be filtered
+        # mag = mag[inside]
         mag = extinctionCorrectionTrueToApparent(mag[inside], ra_catalog[inside], dec_catalog[inside], jd, platepar)
         mag = correctVignettingTrueToApparent(mag, x, y, platepar)
-        # filter coordinates to be in FOV
+        # filter coordinates to be in FOV and make sure that the stars that are too dim are filtered
         bounds = (mag <= lim_mag) & (y >= 0) & (y < platepar.Y_res) & (x >= 0) & (x < platepar.X_res)
         x = x[bounds]
         y = y[bounds]
@@ -392,6 +461,7 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
         # plt.scatter(x[mask_filter], y[mask_filter], c=mag[inside & (mag <= lim_mag)][bounds][mask_filter])
         # plt.show()
         pred_star_count[ff_file] = np.sum(mask_filter)
+        star_mag[ff_file] = mag
     return pred_star_count
 
 
@@ -481,8 +551,7 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
 
                 # Compute ratio of masked portion of the segment
                 mask_segment = mask.img[y0:ye, x0:xe]
-                unmasked_ratio = 1 - \
-                    np.count_nonzero(~mask_segment)/mask_segment.size
+                unmasked_ratio = 1 - np.count_nonzero(~mask_segment)/mask_segment.size
 
                 # Compute the pointing direction and the vignetting and extinction loss for the mean location
 
@@ -495,8 +564,7 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
                 # Compute the pointing direction and magnitude corrected for vignetting and extinction
                 _, ra, dec, mag = xyToRaDecPP([jd2Date(J2000_JD.days)], [x_mean], [y_mean], [test_px_sum],
                                               platepar)
-                azim, elev = raDec2AltAz(
-                    ra[0], dec[0], J2000_JD.days, platepar.lat, platepar.lon)
+                azim, elev = raDec2AltAz(ra[0], dec[0], J2000_JD.days, platepar.lat, platepar.lon)
 
                 # Compute the pixel sum back assuming no corrections
                 rev_level = 10**((mag[0] - platepar.mag_lev)/(-2.5))
@@ -652,8 +720,9 @@ def stellarLMModel(p0):
     return lm_s
 
 
-def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_end, timebin, mass_index,
-                timebin_intdt=0.25, ht_std_percent=5.0, mask=None, show_plots=True, confidence_interval=0.95):
+def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_end, mass_index, binduration=None,
+                binmeteors=None, timebin_intdt=0.25, ht_std_percent=5.0, mask=None, show_plots=True, 
+                confidence_interval=0.95):
     """ Compute flux using measurements in the given FTPdetectinfo file.
 
     Arguments:
@@ -729,8 +798,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             recalibrated_platepars = {}
             for ff_name in recalibrated_platepars_dict:
                 pp = Platepar.Platepar()
-                pp.loadFromDict(
-                    recalibrated_platepars_dict[ff_name], use_flat=config.use_flat)
+                pp.loadFromDict(recalibrated_platepars_dict[ff_name], use_flat=config.use_flat)
 
                 recalibrated_platepars[ff_name] = pp
 
@@ -821,7 +889,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
         if meteor.beg_alt > flux_config.elev_limit:
             print("Rejecting:", meteor.jdt_ref)
-            filtered_associations[key] = [meteor, shower]
+            filtered_associations[key] = (meteor, shower)
 
     associations = filtered_associations
 
@@ -832,9 +900,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
     # Print the list of used meteors
     peak_mags = []
-    for key in associations:
-        meteor, shower = associations[key]
-
+    for meteor, shower in associations.values():
         if shower is not None:
 
             # Compute peak magnitude
@@ -926,8 +992,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
     # A meteor needs to be visible on at least 4 frames, thus it needs to have at least 4x the mass to produce
     #   that amount of light. 1 magnitude difference scales as -0.4 of log of mass, thus:
-    frame_min_loss = np.log10(config.line_minimum_frame_range_det)/(-0.4)
-    # frame_min_loss = 0.0  # TEST !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!11
+    # frame_min_loss = np.log10(config.line_minimum_frame_range_det)/(-0.4)
+    frame_min_loss = 0.0  # TEST !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!11
 
     print("Frame min loss: {:.2} mag".format(frame_min_loss))
 
@@ -943,7 +1009,104 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
     print("Apparent meteor limiting magnitude:", lm_m_nightly_mean)
 
     ### Apply time-dependent corrections ###
+    
+    # Go through all time bins within the observation period
+    bin_meteor_information = [] # [[[meteor, ...], [meteor.ff_name, ...]], ...]
+    bin_intervals = [] # [(start_time, end_time), ...]
+    num_meteors = 0
+    shower_obj = shower
+    
+    print(((dt_end - dt_beg).total_seconds()/3600))
+    # if using fixed bins, generate them
+    if binduration is not None:
+        curr_bin_start = dt_beg
+        dt = datetime.timedelta(hours=(binduration / flux_config.sub_time_bins))
+        while curr_bin_start < dt_end:
+            bin_intervals.append((curr_bin_start, min(curr_bin_start + dt, dt_end)))
+            bin_meteor_information.append([[], []])
+            curr_bin_start += dt
 
+    # mapping meteors to bins
+    for meteor, shower in associations.values():
+        meteor_date = jd2Date(meteor.jdt_ref, dt_obj=True)
+
+        # Filter out meteors ending too close to the radiant
+        ra, dec, _ = shower.computeApparentRadiant(platepar.lat, platepar.lon, meteor.jdt_ref)
+        radiant_azim, radiant_elev = raDec2AltAz(ra, dec, meteor.jdt_ref, platepar.lat, platepar.lon)
+        if shower is None or (shower.name != shower_code) or (meteor_date < dt_beg) or (meteor_date > dt_end) \
+                          or np.degrees(angularSeparation(np.radians(radiant_azim),
+                                                          np.radians(radiant_elev),
+                                                          np.radians(meteor.end_azim),
+                                                          np.radians(meteor.end_alt))) < flux_config.rad_dist_min:
+            continue
+        
+        num_meteors += 1
+        # finding how to put the meteor in a bin
+        if binduration is not None:
+            bin_num = min(int(((meteor_date - dt_beg).total_seconds()/3600) / binduration * flux_config.sub_time_bins),
+                          len(bin_intervals) - 1)
+            for i in range(min(flux_config.sub_time_bins, bin_num)):
+                bin_meteor_information[bin_num - i][0].append(meteor)
+                bin_meteor_information[bin_num - i][1].append(meteor.ff_name)
+                
+        else: # meteor count
+            if ((num_meteors - 1) * flux_config.sub_time_bins) % binmeteors < flux_config.sub_time_bins:
+                for i in range(min(flux_config.sub_time_bins - 1, len(bin_meteor_information))):
+                    bin_meteor_information[-i - 1][0].append(meteor)
+                    bin_meteor_information[-i - 1][1].append(meteor.ff_name)
+                
+                bin_meteor_information.append([[meteor], [meteor.ff_name]])
+                
+                if len(bin_intervals) == 0:
+                    bin_intervals.append([dt_beg])
+                else:
+                    bin_intervals[-1].append(meteor_date)
+                    bin_intervals.append([meteor_date])
+                    
+            else:
+                for i in range(min(flux_config.sub_time_bins, len(bin_meteor_information))):
+                    bin_meteor_information[-i - 1][0].append(meteor)
+                    bin_meteor_information[-i - 1][1].append(meteor.ff_name)
+
+    # closing off all bin intervals
+    if binmeteors is not None:
+        for _bin in bin_intervals[-flux_config.sub_time_bins:]:
+            if len(_bin) == 1:
+                _bin.append(dt_end)
+
+    
+    ### ###
+    bin_information = []
+    for (bin_dt_beg, bin_dt_end) in bin_intervals:
+        # Convert to Julian date
+        bin_jd_beg = datetime2JD(bin_dt_beg)
+        bin_jd_end = datetime2JD(bin_dt_end)
+
+        jd_mean = (bin_jd_beg + bin_jd_end)/2
+
+        # Compute the mean solar longitude
+        sol_mean = np.degrees(jd2SolLonSteyaert(jd_mean))
+
+        ### Compute the radiant elevation at the middle of the time bin ###
+        radiant_azim, radiant_elev = raDec2AltAz(ra, dec, jd_mean, platepar.lat, platepar.lon)
+        
+        # Compute the mean meteor height
+        _, _, v_init = shower_obj.computeApparentRadiant(platepar.lat, platepar.lon, jd_mean)
+        meteor_ht_beg = heightModel(v_init, ht_type='beg')
+        meteor_ht_end = heightModel(v_init, ht_type='end')
+        meteor_ht = (meteor_ht_beg + meteor_ht_end)/2
+
+        # Compute the standard deviation of the height
+        meteor_ht_std = meteor_ht*ht_std_percent/100.0
+
+        # Init the Gaussian height distribution
+        meteor_ht_gauss = scipy.stats.norm(meteor_ht, meteor_ht_std)
+        bin_information.append((meteor_ht_gauss, sol_mean, radiant_azim, radiant_elev))
+    # Compute the radiant elevation
+
+
+
+    ### ###
     # Track values used for flux
     sol_data = []
     flux_lm_6_5_data = []
@@ -961,353 +1124,290 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
     radiant_elev_corr_data = []
     ang_vel_corr_data = []
     total_corr_data = []
+    mag_median_data = []
+    mag_90_perc_data = []
+    
+    for ((bin_meteor_list, bin_ffs), (meteor_ht_gauss, sol_mean, radiant_azim, radiant_elev),
+         (bin_dt_beg, bin_dt_end)) in zip(bin_meteor_information, bin_information, bin_intervals):
+        print()
+        print()
+        print("-- Bin information ---")
+        print("Bin beg:", bin_dt_beg)
+        print("Bin end:", bin_dt_end)
+        print("Sol mid: {:.5f}".format(sol_mean))
+        print("Radiant elevation: {:.2f} deg".format(radiant_elev))
+        print("Apparent speed: {:.2f} km/s".format(v_init/1000))
 
-    # Go through all time bins within the observation period
-    total_time_hrs = (dt_end - dt_beg).total_seconds()/3600
-    nbins = int(np.ceil(total_time_hrs/timebin))
-    for t_bin in range(nbins):
-        for subbin in range(flux_config.sub_time_bins):
+        # If the elevation of the radiant is below the limit, skip this bin
+        if radiant_elev < flux_config.rad_elev_limit:
+            print("!!! Mean radiant elevation below {:.2f} deg threshold, skipping time bin!".format(
+                flux_config.rad_elev_limit))
+            continue
+        
+        bin_hours = (bin_dt_end - bin_dt_beg).total_seconds()/3600
+        # The minimum duration of the time bin should be larger than 50% of the given dt
+        if binduration is not None and bin_hours < 0.5 * binduration:
+            print(f"!!! Time bin duration of {bin_hours:.2f} h is shorter than 0.5x of the inputted time bin!")
+            continue
 
-            # Compute bin start and end time
-            bin_dt_beg = dt_beg + \
-                datetime.timedelta(hours=(timebin * (t_bin + subbin / flux_config.sub_time_bins)))
-            bin_dt_end = bin_dt_beg + datetime.timedelta(hours=timebin)
+        if len(bin_meteor_list) >= flux_config.meteros_min:
+            print("Meteors:", len(bin_meteor_list))
 
-            if bin_dt_end > dt_end:
-                bin_dt_end = dt_end
+            ### Weight collection area by meteor height distribution ###
 
-            # Compute bin duration in hours
-            bin_hours = (bin_dt_end - bin_dt_beg).total_seconds()/3600
+            # Determine weights for each height
+            weight_sum = 0
+            weights = {}
+            for ht in col_areas_ht:
+                wt = meteor_ht_gauss.pdf(float(ht))
+                weight_sum += wt
+                weights[ht] = wt
 
-            # Convert to Julian date
-            bin_jd_beg = datetime2JD(bin_dt_beg)
-            bin_jd_end = datetime2JD(bin_dt_end)
-
-            jd_mean = (bin_jd_beg + bin_jd_end)/2
-
-            # Compute the mean solar longitude
-            sol_mean = np.degrees(jd2SolLonSteyaert(jd_mean))
-
-            ### Compute the radiant elevation at the middle of the time bin ###
-
-            # Compute the apparent radiant
-            ra, dec, v_init = shower.computeApparentRadiant(platepar.lat, platepar.lon, jd_mean)
-
-            # Compute the mean meteor height
-            meteor_ht_beg = heightModel(v_init, ht_type='beg')
-            meteor_ht_end = heightModel(v_init, ht_type='end')
-            meteor_ht = (meteor_ht_beg + meteor_ht_end)/2
-
-            # Compute the standard deviation of the height
-            meteor_ht_std = meteor_ht*ht_std_percent/100.0
-
-            # Init the Gaussian height distribution
-            meteor_ht_gauss = scipy.stats.norm(meteor_ht, meteor_ht_std)
-
-            # Compute the radiant elevation
-            radiant_azim, radiant_elev = raDec2AltAz(ra, dec, jd_mean, platepar.lat, platepar.lon)
-
-            # Only select meteors in this bin and not too close to the radiant
-            bin_meteors = []
-            bin_ffs = []
-            for key in associations:
-                meteor, shower = associations[key]
-
-                if shower is not None:
-                    if (shower.name == shower_code) and (meteor.jdt_ref > bin_jd_beg) \
-                            and (meteor.jdt_ref <= bin_jd_end):
-
-                        # Filter out meteors ending too close to the radiant
-                        if np.degrees(angularSeparation(np.radians(radiant_azim), np.radians(radiant_elev),
-                                                        np.radians(meteor.end_azim), 
-                                                        np.radians(meteor.end_alt))) >= flux_config.rad_dist_min:
-
-                            bin_meteors.append([meteor, shower])
-                            bin_ffs.append(meteor.ff_name)
+            # Normalize the weights so that the sum is 1
+            for ht in weights:
+                weights[ht] /= weight_sum
 
             ### ###
 
-            print()
-            print()
-            print("-- Bin information ---")
-            print("Bin beg:", bin_dt_beg)
-            print("Bin end:", bin_dt_end)
-            print("Sol mid: {:.5f}".format(sol_mean))
-            print("Radiant elevation: {:.2f} deg".format(radiant_elev))
-            print("Apparent speed: {:.2f} km/s".format(v_init/1000))
+            col_area_meteor_ht_raw = 0
+            for ht in col_areas_ht:
+                for block in col_areas_ht[ht]:
+                    col_area_meteor_ht_raw += weights[ht] * col_areas_ht[ht][block][0]
 
-            # If the elevation of the radiant is below the limit, skip this bin
-            if radiant_elev < flux_config.rad_elev_limit:
-                print("!!! Mean radiant elevation below {:.2f} deg threshold, skipping time bin!".format(
-                    flux_config.rad_elev_limit))
+            print("Raw collection area at meteor heights: {:.2f} km^2".format(
+                col_area_meteor_ht_raw/1e6))
+
+            # Compute the angular velocity in the middle of the FOV
+            rad_dist_mid = angularSeparation(np.radians(radiant_azim), np.radians(radiant_elev),
+                                                np.radians(azim_mid), np.radians(elev_mid))
+            ang_vel_mid = v_init*np.sin(rad_dist_mid)/r_mid
+
+            # Skip time bin if the radiant is very close to the centre of the image
+            if np.degrees(rad_dist_mid) < flux_config.rad_dist_min:
+                print("!!! Radiant too close to the centre of the image! {:.2f} < {:.2f}".format(
+                    np.degrees(rad_dist_mid), flux_config.rad_dist_min))
                 continue
 
-            # The minimum duration of the time bin should be larger than 50% of the given dt
-            if bin_hours < 0.5*timebin:
-                print("!!! Time bin duration of {:.2f} h is shorter than 0.5x of the inputted time bin!".format(
-                    bin_hours))
-                continue
+            ### Compute the limiting magnitude ###
 
-            if len(bin_meteors) >= flux_config.meteros_min:
-                print("Meteors:", len(bin_meteors))
+            # Compute the mean star FWHM in the given bin
+            fwhm_bin_mean = np.mean([sensor_data[ff_name][0] for ff_name in bin_ffs])
 
-                ### Weight collection area by meteor height distribution ###
+            # Compute the mean background stddev in the given bin
+            stddev_bin_mean = np.mean([sensor_data[ff_name][1] for ff_name in bin_ffs])
 
-                # Determine weights for each height
-                weight_sum = 0
-                weights = {}
-                for ht in col_areas_ht:
-                    wt = meteor_ht_gauss.pdf(float(ht))
-                    weight_sum += wt
-                    weights[ht] = wt
+            # Compute the mean photometric zero point in the given bin
+            mag_lev_bin_mean = np.mean(
+                [recalibrated_platepars[ff_name].mag_lev for ff_name in bin_ffs if ff_name in recalibrated_platepars])
 
-                # Normalize the weights so that the sum is 1
-                for ht in weights:
-                    weights[ht] /= weight_sum
+            # # Standard deviation of star PSF, nightly mean (px)
+            # star_stddev = fwhm_bin_mean/2.355
 
-                ### ###
+            # Compute the theoretical stellar limiting magnitude (bin average)
+            # star_sum = 2*np.pi*(config.k1_det*stddev_bin_mean + config.j1_det)*star_stddev**2
+            # lm_s = -2.5*np.log10(star_sum) + mag_lev_bin_mean
 
-                col_area_meteor_ht_raw = 0
-                for ht in col_areas_ht:
-                    for block in col_areas_ht[ht]:
-                        col_area_meteor_ht_raw += weights[ht] * \
-                            col_areas_ht[ht][block][0]
+            # Use empirical LM calculation
+            lm_s = stellarLMModel(mag_lev_bin_mean)
 
-                print("Raw collection area at meteor heights: {:.2f} km^2".format(
-                    col_area_meteor_ht_raw/1e6))
+            lm_s += frame_min_loss
 
-                # Compute the angular velocity in the middle of the FOV
-                rad_dist_mid = angularSeparation(np.radians(radiant_azim), np.radians(radiant_elev),
-                                                 np.radians(azim_mid), np.radians(elev_mid))
-                ang_vel_mid = v_init*np.sin(rad_dist_mid)/r_mid
+            # ### TEST !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!11
 
-                # Skip time bin if the radiant is very close to the centre of the image
-                if np.degrees(rad_dist_mid) < flux_config.rad_dist_min:
-                    print("!!! Radiant too close to the centre of the image! {:.2f} < {:.2f}".format(
-                        np.degrees(rad_dist_mid), flux_config.rad_dist_min))
-                    continue
+            # # Artificialy increase limiting magnitude
+            # lm_s += 1.2
 
-                ### Compute the limiting magnitude ###
+            # #####
 
-                # Compute the mean star FWHM in the given bin
-                fwhm_bin_mean = np.mean(
-                    [sensor_data[ff_name][0] for ff_name in bin_ffs])
+            # Compute apparent meteor magnitude
+            lm_m = lm_s - 5*np.log10(r_mid/1e5) - 2.5*np.log10(
+                np.degrees(platepar.F_scale*v_init*np.sin(rad_dist_mid)/(config.fps*r_mid*fwhm_bin_mean)))
 
-                # Compute the mean background stddev in the given bin
-                stddev_bin_mean = np.mean(
-                    [sensor_data[ff_name][1] for ff_name in bin_ffs])
+            ### ###
 
-                # Compute the mean photometric zero point in the given bin
-                mag_lev_bin_mean = np.mean(
-                    [recalibrated_platepars[ff_name].mag_lev for ff_name in bin_ffs if ff_name in recalibrated_platepars])
+            # Final correction area value (height-weightned)
+            collection_area = 0
 
-                # # Standard deviation of star PSF, nightly mean (px)
-                # star_stddev = fwhm_bin_mean/2.355
+            # Keep track of the corrections
+            sensitivity_corr_arr = []
+            range_corr_arr = []
+            radiant_elev_corr_arr = []
+            ang_vel_corr_arr = []
+            total_corr_arr = []
+            col_area_raw_arr = []
+            col_area_eff_arr = []
+            col_area_eff_block_dict = {}
 
-                # Compute the theoretical stellar limiting magnitude (bin average)
-                # star_sum = 2*np.pi*(config.k1_det*stddev_bin_mean + config.j1_det)*star_stddev**2
-                # lm_s = -2.5*np.log10(star_sum) + mag_lev_bin_mean
+            # Go through all heights and segment blocks
+            for ht in col_areas_ht:
+                for img_coords in col_areas_ht[ht]:
 
-                # Use empirical LM calculation
-                lm_s = stellarLMModel(mag_lev_bin_mean)
+                    x_mean, y_mean = img_coords
 
-                lm_s += frame_min_loss
+                    # Unpack precomputed values
+                    area, azim, elev, sensitivity_ratio, r = col_areas_ht[ht][img_coords]
 
-                # ### TEST !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!11
+                    # Compute the angular velocity (rad/s) in the middle of this block
+                    rad_dist = angularSeparation(np.radians(radiant_azim), np.radians(radiant_elev),
+                                                    np.radians(azim), np.radians(elev))
+                    ang_vel = v_init*np.sin(rad_dist)/r
 
-                # # Artificialy increase limiting magnitude
-                # lm_s += 1.2
+                    # If the angular distance from the radiant is less than 15 deg, don't use the block
+                    #   in the effective collection area
+                    if np.degrees(rad_dist) < flux_config.rad_dist_min:
+                        area = 0.0
 
-                # #####
+                    # Compute the range correction
+                    range_correction = (1e5/r)**2
 
-                # Compute apparent meteor magnitude
-                lm_m = lm_s - 5*np.log10(r_mid/1e5) - 2.5*np.log10(
-                    np.degrees(platepar.F_scale*v_init*np.sin(rad_dist_mid)/(config.fps*r_mid*fwhm_bin_mean)))
+                    # ang_vel_correction = ang_vel/ang_vel_mid
+                    # Compute angular velocity correction relative to the nightly mean
+                    ang_vel_correction = ang_vel/ang_vel_night_mid
 
-                ### ###
+                    # Apply corrections
 
-                # Final correction area value (height-weightned)
-                collection_area = 0
+                    correction_ratio = 1.0
 
-                # Keep track of the corrections
-                sensitivity_corr_arr = []
-                range_corr_arr = []
-                radiant_elev_corr_arr = []
-                ang_vel_corr_arr = []
-                total_corr_arr = []
-                col_area_raw_arr = []
-                col_area_eff_arr = []
-                col_area_eff_block_dict = {}
+                    # Correct the area for vignetting and extinction
+                    sensitivity_corr_arr.append(sensitivity_ratio)
+                    correction_ratio *= sensitivity_ratio
 
-                # Go through all heights and segment blocks
-                for ht in col_areas_ht:
-                    for img_coords in col_areas_ht[ht]:
+                    # Correct for the range (cap to an order of magnitude correction)
+                    range_correction = max(range_correction, 0.1)
+                    range_corr_arr.append(range_correction)
+                    correction_ratio *= range_correction
 
-                        x_mean, y_mean = img_coords
+                    # Correct for the radiant elevation (cap to an order of magnitude correction)
+                    radiant_elev_correction = np.sin(np.radians(radiant_elev))
+                    radiant_elev_correction = max(radiant_elev_correction, 0.1)
+                    radiant_elev_corr_arr.append(radiant_elev_correction)
+                    correction_ratio *= radiant_elev_correction
 
-                        # Unpack precomputed values
-                        area, azim, elev, sensitivity_ratio, r = col_areas_ht[ht][img_coords]
+                    # Correct for angular velocity (cap to an order of magnitude correction)
+                    ang_vel_correction = min(
+                        max(ang_vel_correction, 0.1), 10)
+                    correction_ratio *= ang_vel_correction
+                    ang_vel_corr_arr.append(ang_vel_correction)
 
-                        # Compute the angular velocity (rad/s) in the middle of this block
-                        rad_dist = angularSeparation(np.radians(radiant_azim), np.radians(radiant_elev),
-                                                     np.radians(azim), np.radians(elev))
-                        ang_vel = v_init*np.sin(rad_dist)/r
+                    # Add the collection area to the final estimate with the height weight
+                    #   Raise the correction to the mass index power
+                    total_correction = correction_ratio**(mass_index - 1)
+                    total_correction = min(max(total_correction, 0.1), 10)
+                    collection_area += weights[ht]*area*total_correction
+                    total_corr_arr.append(total_correction)
 
-                        # If the angular distance from the radiant is less than 15 deg, don't use the block
-                        #   in the effective collection area
-                        if np.degrees(rad_dist) < flux_config.rad_dist_min:
-                            area = 0.0
+                    col_area_raw_arr.append(weights[ht]*area)
+                    col_area_eff_arr.append(
+                        weights[ht]*area*total_correction)
 
-                        # Compute the range correction
-                        range_correction = (1e5/r)**2
+                    if img_coords not in col_area_eff_block_dict:
+                        col_area_eff_block_dict[img_coords] = []
 
-                        # ang_vel_correction = ang_vel/ang_vel_mid
-                        # Compute angular velocity correction relative to the nightly mean
-                        ang_vel_correction = ang_vel/ang_vel_night_mid
+                    col_area_eff_block_dict[img_coords].append(
+                        weights[ht]*area*total_correction)
 
-                        # Apply corrections
+            # Compute mean corrections
+            sensitivity_corr_avg = np.mean(sensitivity_corr_arr)
+            range_corr_avg = np.mean(range_corr_arr)
+            radiant_elev_corr_avg = np.mean(radiant_elev_corr_arr)
+            ang_vel_corr_avg = np.mean(ang_vel_corr_arr)
+            total_corr_avg = np.median(total_corr_arr)
+            col_area_raw_sum = np.sum(col_area_raw_arr)
+            col_area_eff_sum = np.sum(col_area_eff_arr)
 
-                        correction_ratio = 1.0
+            print("Raw collection area at meteor heights (CHECK): {:.2f} km^2".format(col_area_raw_sum/1e6))
+            print("Eff collection area at meteor heights (CHECK): {:.2f} km^2".format(col_area_eff_sum/1e6))
 
-                        # Correct the area for vignetting and extinction
-                        sensitivity_corr_arr.append(sensitivity_ratio)
-                        correction_ratio *= sensitivity_ratio
+            # ### PLOT HOW THE CORRECTION VARIES ACROSS THE FOV
+            # x_arr = []
+            # y_arr = []
+            # col_area_eff_block_arr = []
 
-                        # Correct for the range (cap to an order of magnitude correction)
-                        range_correction = max(range_correction, 0.1)
-                        range_corr_arr.append(range_correction)
-                        correction_ratio *= range_correction
+            # for img_coords in col_area_eff_block_dict:
 
-                        # Correct for the radiant elevation (cap to an order of magnitude correction)
-                        radiant_elev_correction = np.sin(
-                            np.radians(radiant_elev))
-                        radiant_elev_correction = max(
-                            radiant_elev_correction, 0.1)
-                        radiant_elev_corr_arr.append(radiant_elev_correction)
-                        correction_ratio *= radiant_elev_correction
+            #     x_mean, y_mean = img_coords
 
-                        # Correct for angular velocity (cap to an order of magnitude correction)
-                        ang_vel_correction = min(
-                            max(ang_vel_correction, 0.1), 10)
-                        correction_ratio *= ang_vel_correction
-                        ang_vel_corr_arr.append(ang_vel_correction)
+            #     #if x_mean not in x_arr:
+            #     x_arr.append(x_mean)
+            #     #if y_mean not in y_arr:
+            #     y_arr.append(y_mean)
 
-                        # Add the collection area to the final estimate with the height weight
-                        #   Raise the correction to the mass index power
-                        total_correction = correction_ratio**(mass_index - 1)
-                        total_correction = min(max(total_correction, 0.1), 10)
-                        collection_area += weights[ht]*area*total_correction
-                        total_corr_arr.append(total_correction)
+            #     col_area_eff_block_arr.append(np.sum(col_area_eff_block_dict[img_coords]))
 
-                        col_area_raw_arr.append(weights[ht]*area)
-                        col_area_eff_arr.append(
-                            weights[ht]*area*total_correction)
+            # x_unique = np.unique(x_arr)
+            # y_unique = np.unique(y_arr)
+            # # plt.pcolormesh(x_arr, y_arr, np.array(col_area_eff_block_arr).reshape(len(x_unique), len(y_unique)).T, shading='auto')
+            # plt.title("TOTAL = " + str(np.sum(col_area_eff_block_arr)/1e6))
+            # plt.scatter(x_arr, y_arr, c=np.array(col_area_eff_block_arr)/1e6)
+            # #plt.pcolor(np.array(x_arr).reshape(len(x_unique), len(y_unique)), np.array(y_arr).reshape(len(x_unique), len(y_unique)), np.array(col_area_eff_block_arr).reshape(len(x_unique), len(y_unique))/1e6)
+            # plt.colorbar(label="km^2")
+            # plt.gca().invert_yaxis()
+            # plt.show()
 
-                        if img_coords not in col_area_eff_block_dict:
-                            col_area_eff_block_dict[img_coords] = []
+            # ###
 
-                        col_area_eff_block_dict[img_coords].append(
-                            weights[ht]*area*total_correction)
+            # Compute the nominal flux at the bin LM (meteors/1000km^2/h)
+            flux = 1e9*len(bin_meteor_list)/collection_area/bin_hours
 
-                # Compute mean corrections
-                sensitivity_corr_avg = np.mean(sensitivity_corr_arr)
-                range_corr_avg = np.mean(range_corr_arr)
-                radiant_elev_corr_avg = np.mean(radiant_elev_corr_arr)
-                ang_vel_corr_avg = np.mean(ang_vel_corr_arr)
-                total_corr_avg = np.median(total_corr_arr)
-                col_area_raw_sum = np.sum(col_area_raw_arr)
-                col_area_eff_sum = np.sum(col_area_eff_arr)
+            # Compute confidence interval of the flux
+            ci = 1.0 - confidence_interval
+            num_ci_lower = scipy.stats.chi2.ppf(ci/2, 2*len(bin_meteor_list))/2
+            num_ci_upper = scipy.stats.chi2.ppf(1 - ci/2, 2*(len(bin_meteor_list) + 1))/2
+            flux_ci_lower = 1e9*num_ci_lower/collection_area/bin_hours
+            flux_ci_upper = 1e9*num_ci_upper/collection_area/bin_hours
 
-                print("Raw collection area at meteor heights (CHECK): {:.2f} km^2".format(
-                    col_area_raw_sum/1e6))
-                print("Eff collection area at meteor heights (CHECK): {:.2f} km^2".format(
-                    col_area_eff_sum/1e6))
+            # Compute the flux scaled to the nightly mean LM
+            flux_lm_nightly_mean = flux * population_index**(lm_m_nightly_mean - lm_m)
 
-                # ### PLOT HOW THE CORRECTION VARIES ACROSS THE FOV
-                # x_arr = []
-                # y_arr = []
-                # col_area_eff_block_arr = []
+            # Compute the flux scaled to +6.5M
+            flux_lm_6_5 = flux*population_index**(6.5 - lm_m)
 
-                # for img_coords in col_area_eff_block_dict:
+            # Compute scaled confidence intervals purely based on Poisson statistics (LM errors not
+            #   taken into account yet)
+            flux_lm_6_5_ci_lower = flux_ci_lower * population_index**(6.5 - lm_m)
+            flux_lm_6_5_ci_upper = flux_ci_upper * population_index**(6.5 - lm_m)
+            
+            mag_bin_median = np.median([np.min(meteor.mag_array) for meteor in bin_meteor_list])
+            mag_median_data.append(mag_bin_median)
+            mag_90_perc = np.percentile([np.min(meteor.mag_array) for meteor in bin_meteor_list], 90)
+            mag_90_perc_data.append(mag_90_perc)
 
-                #     x_mean, y_mean = img_coords
+            print("-- Sensor information ---")
+            print("Star FWHM:  {:5.2f} px".format(fwhm_bin_mean))
+            print("Bkg stddev: {:4.1f} ADU".format(stddev_bin_mean))
+            print("Photom ZP:  {:+6.2f} mag".format(mag_lev_bin_mean))
+            print("Stellar LM: {:+.2f} mag".format(lm_s))
+            print("-- Flux ---")
+            print("Meteors:  {:d}, {:.0f}% CI [{:.2f}, {:.2f}]".format(len(bin_meteor_list),
+                                                                        100*confidence_interval, num_ci_lower, num_ci_upper))
+            print("Col area: {:d} km^2".format(int(collection_area/1e6)))
+            print("Ang vel:  {:.2f} deg/s".format(np.degrees(ang_vel_mid)))
+            print("LM app:   {:+.2f} mag".format(lm_m))
+            print("Flux:     {:.2f} meteors/1000km^2/h".format(flux))
+            print("to {:+.2f}: {:.2f} meteors/1000km^2/h".format(lm_m_nightly_mean, flux_lm_nightly_mean))
+            print("to +6.50: {:.2f}, {:.0f}% CI [{:.2f}, {:.2f}] meteors/1000km^2/h".format(flux_lm_6_5,
+                                                                                            100*confidence_interval, flux_lm_6_5_ci_lower, flux_lm_6_5_ci_upper))
 
-                #     #if x_mean not in x_arr:
-                #     x_arr.append(x_mean)
-                #     #if y_mean not in y_arr:
-                #     y_arr.append(y_mean)
+            sol_data.append(sol_mean)
+            flux_lm_6_5_data.append(flux_lm_6_5)
+            flux_lm_6_5_ci_lower_data.append(flux_lm_6_5_ci_lower)
+            flux_lm_6_5_ci_upper_data.append(flux_lm_6_5_ci_upper)
+            meteor_num_data.append(len(bin_meteor_list))
+            effective_collection_area_data.append(collection_area)
+            radiant_elev_data.append(radiant_elev)
+            radiant_dist_mid_data.append(np.degrees(rad_dist_mid))
+            ang_vel_mid_data.append(np.degrees(ang_vel_mid))
+            lm_s_data.append(lm_s)
+            lm_m_data.append(lm_m)
 
-                #     col_area_eff_block_arr.append(np.sum(col_area_eff_block_dict[img_coords]))
-
-                # x_unique = np.unique(x_arr)
-                # y_unique = np.unique(y_arr)
-                # # plt.pcolormesh(x_arr, y_arr, np.array(col_area_eff_block_arr).reshape(len(x_unique), len(y_unique)).T, shading='auto')
-                # plt.title("TOTAL = " + str(np.sum(col_area_eff_block_arr)/1e6))
-                # plt.scatter(x_arr, y_arr, c=np.array(col_area_eff_block_arr)/1e6)
-                # #plt.pcolor(np.array(x_arr).reshape(len(x_unique), len(y_unique)), np.array(y_arr).reshape(len(x_unique), len(y_unique)), np.array(col_area_eff_block_arr).reshape(len(x_unique), len(y_unique))/1e6)
-                # plt.colorbar(label="km^2")
-                # plt.gca().invert_yaxis()
-                # plt.show()
-
-                # ###
-
-                # Compute the nominal flux at the bin LM (meteors/1000km^2/h)
-                flux = 1e9*len(bin_meteors)/collection_area/bin_hours
-
-                # Compute confidence interval of the flux
-                ci = 1.0 - confidence_interval
-                num_ci_lower = scipy.stats.chi2.ppf(ci/2, 2*len(bin_meteors))/2
-                num_ci_upper = scipy.stats.chi2.ppf(1 - ci/2, 2*(len(bin_meteors) + 1))/2
-                flux_ci_lower = 1e9*num_ci_lower/collection_area/bin_hours
-                flux_ci_upper = 1e9*num_ci_upper/collection_area/bin_hours
-
-                # Compute the flux scaled to the nightly mean LM
-                flux_lm_nightly_mean = flux * population_index**(lm_m_nightly_mean - lm_m)
-
-                # Compute the flux scaled to +6.5M
-                flux_lm_6_5 = flux*population_index**(6.5 - lm_m)
-
-                # Compute scaled confidence intervals purely based on Poisson statistics (LM errors not
-                #   taken into account yet)
-                flux_lm_6_5_ci_lower = flux_ci_lower * population_index**(6.5 - lm_m)
-                flux_lm_6_5_ci_upper = flux_ci_upper * population_index**(6.5 - lm_m)
-
-                print("-- Sensor information ---")
-                print("Star FWHM:  {:5.2f} px".format(fwhm_bin_mean))
-                print("Bkg stddev: {:4.1f} ADU".format(stddev_bin_mean))
-                print("Photom ZP:  {:+6.2f} mag".format(mag_lev_bin_mean))
-                print("Stellar LM: {:+.2f} mag".format(lm_s))
-                print("-- Flux ---")
-                print("Meteors:  {:d}, {:.0f}% CI [{:.2f}, {:.2f}]".format(len(bin_meteors),
-                                                                           100*confidence_interval, num_ci_lower, num_ci_upper))
-                print("Col area: {:d} km^2".format(int(collection_area/1e6)))
-                print("Ang vel:  {:.2f} deg/s".format(np.degrees(ang_vel_mid)))
-                print("LM app:   {:+.2f} mag".format(lm_m))
-                print("Flux:     {:.2f} meteors/1000km^2/h".format(flux))
-                print("to {:+.2f}: {:.2f} meteors/1000km^2/h".format(lm_m_nightly_mean, flux_lm_nightly_mean))
-                print("to +6.50: {:.2f}, {:.0f}% CI [{:.2f}, {:.2f}] meteors/1000km^2/h".format(flux_lm_6_5,
-                                                                                                100*confidence_interval, flux_lm_6_5_ci_lower, flux_lm_6_5_ci_upper))
-
-                sol_data.append(sol_mean)
-                flux_lm_6_5_data.append(flux_lm_6_5)
-                flux_lm_6_5_ci_lower_data.append(flux_lm_6_5_ci_lower)
-                flux_lm_6_5_ci_upper_data.append(flux_lm_6_5_ci_upper)
-                meteor_num_data.append(len(bin_meteors))
-                effective_collection_area_data.append(collection_area)
-                radiant_elev_data.append(radiant_elev)
-                radiant_dist_mid_data.append(np.degrees(rad_dist_mid))
-                ang_vel_mid_data.append(np.degrees(ang_vel_mid))
-                lm_s_data.append(lm_s)
-                lm_m_data.append(lm_m)
-
-                sensitivity_corr_data.append(sensitivity_corr_avg)
-                range_corr_data.append(range_corr_avg)
-                radiant_elev_corr_data.append(radiant_elev_corr_avg)
-                ang_vel_corr_data.append(ang_vel_corr_avg)
-                total_corr_data.append(total_corr_avg)
-                
-            else:
-                print(f'!!! Insufficient meteors in bin: {len(bin_meteors)} observed vs min {flux_config.meteros_min}')
+            sensitivity_corr_data.append(sensitivity_corr_avg)
+            range_corr_data.append(range_corr_avg)
+            radiant_elev_corr_data.append(radiant_elev_corr_avg)
+            ang_vel_corr_data.append(ang_vel_corr_avg)
+            total_corr_data.append(total_corr_avg)
+            
+        else:
+            print(f'!!! Insufficient meteors in bin: {len(bin_meteor_list)} observed vs min {flux_config.meteros_min}')
 
     # Print the results
     print("Solar longitude, Flux at LM +6.5:")
@@ -1353,6 +1453,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
         ax_lm.plot(sol_data, lm_s_data, label="Stellar")
         ax_lm.plot(sol_data, lm_m_data, label="Meteor")
+        ax_lm.plot(sol_data, mag_median_data, label='Median Meteor')
+        ax_lm.plot(sol_data, mag_90_perc_data, label='90 Percentile Meteor')
         ax_lm.set_ylabel("LM")
         ax_lm.legend()
 
@@ -1386,44 +1488,48 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
     return sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, meteor_num_data
 
+def fluxParser():
+    flux_parser = argparse.ArgumentParser(description="Compute single-station meteor shower flux.")
+
+    flux_parser.add_argument("ftpdetectinfo_path", metavar="FTPDETECTINFO_PATH", type=str,
+                            help="Path to an FTPdetectinfo file or path to folder. The directory also has to contain"
+                            "a platepar and mask file.")
+
+    flux_parser.add_argument("shower_code", metavar="SHOWER_CODE", type=str,
+                            help="IAU shower code (e.g. ETA, PER, SDA).")
+        
+    flux_parser.add_argument("s", metavar="MASS_INDEX", type=float,
+                            help="Mass index of the shower.")
+
+    # parser_group1 = flux_parser.add_mutually_exclusive_group()
+    flux_parser.add_argument("--timeinterval", nargs=2, metavar='INTERVAL', 
+                               help="Time of the observation start and ending. YYYYMMDD_HHMMSS format for each")
+    # parser_group1.add_argument("-autointerval", metavar='AUTOINTERVAL',
+    #                            help="Whether time bins should be found automatically. This is the default without the command")
+    
+    parser_group2 = flux_parser.add_mutually_exclusive_group(required=True)
+    parser_group2.add_argument("--binduration", type=float, metavar='DURATION',
+                            help="Time bin width in hours.")
+    parser_group2.add_argument("--binmeteors", type=int, metavar='COUNT',
+                            help="Number of meteors per bin")
+
+
+    flux_parser.add_argument("-c", "--config", metavar="CONFIG_PATH", type=str, default='.',
+                            help="Path to a config file which will be used instead of the default one."
+                                 " To load the .config file in the given data directory, write '.' (dot).")
+    return flux_parser
+
 
 if __name__ == "__main__":
-
-    import argparse
-
     import RMS.ConfigReader as cr
 
     # COMMAND LINE ARGUMENTS
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(
-        description="Compute single-station meteor shower flux.")
+    flux_parser = fluxParser()
+    cml_args = flux_parser.parse_args()
 
-    arg_parser.add_argument("ftpdetectinfo_path", metavar="FTPDETECTINFO_PATH", type=str,
-                            help="Path to an FTPdetectinfo file or path to folder. The directory also has to contain"
-                            "a platepar and mask file.")
-
-    arg_parser.add_argument("shower_code", metavar="SHOWER_CODE", type=str,
-                            help="IAU shower code (e.g. ETA, PER, SDA).")
-    
-    arg_parser.add_argument("s", metavar="MASS_INDEX", type=float,
-                            help="Mass index of the shower.")
-
-    group = arg_parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--binduration", type=float, metavar='DURATION',
-                            help="Time bin width in hours.")
-    group.add_argument("--binmeteors", type=int, metavar='COUNT',
-                            help="Number of meteors per bin")
-
-
-    arg_parser.add_argument("-c", "--config", metavar="CONFIG_PATH", type=str,
-                            help="Path to a config file which will be used instead of the default one."
-                                 " To load the .config file in the given data directory, write '.' (dot).")
-
-    # Parse the command line arguments
-    cml_args = arg_parser.parse_args()
-
-    if cml_args.binmeteors is not None:
-        raise NotImplementedError("--binmeteors not implemented") 
+    # if cml_args.binmeteors is not None:
+    #     raise NotImplementedError("--binmeteors not implemented") 
     
     #########################
 
@@ -1459,27 +1565,24 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
     # find time intervals to compute flux with
-    detect_clouds = detectClouds(config, dir_path)
-    time_intervals = computeTimeIntervals(detect_clouds)
-    for i, interval in enumerate(time_intervals):
-        print(f'interval {i+1}/{len(time_intervals)}: {interval}')
+    if cml_args.timeinterval is not None:
+        dt_beg = datetime.datetime.strptime(cml_args.timeinterval[0], "%Y%m%d_%H%M%S")
+        dt_end = datetime.datetime.strptime(cml_args.timeinterval[1], "%Y%m%d_%H%M%S")
+        time_intervals = [(dt_beg, dt_end)]
+    else:
+        detect_clouds = detectClouds(config, dir_path)
+        time_intervals = computeTimeIntervals(detect_clouds)
+        for i, interval in enumerate(time_intervals):
+            print(f'interval {i+1}/{len(time_intervals)}: {interval}')
+            
+
         
-    import matplotlib.dates as mdates
-    fig, ax = plt.subplots()
-    plot_format = mdates.DateFormatter('%H:%M')
-    ax.xaxis.set_major_formatter(plot_format)
-    ax.plot([FFfile.filenameToDatetime(x) for x in detect_clouds.keys()], list(detect_clouds.values()))
-    ax.set_xlabel("Time")
-    ax.set_ylabel("stars observed at LM-1/stars predicted")
-    plt.show()
-    
-    print('display ff with clouds')
-    for ff in detect_clouds:
-        print(ff, detect_clouds[ff])
-    
+        # print('display ff with clouds')
+        # for ff in detect_clouds:
+        #     print(ff, detect_clouds[ff])
+        
     # Compute the flux
-    for interval in time_intervals:
-        print(f'Using interval: {interval}')
-        dt_beg, dt_end = interval
+    for dt_beg, dt_end in time_intervals:
+        print(f'Using interval: {(dt_beg, dt_end)}')
         computeFlux(config, dir_path, ftpdetectinfo_path, cml_args.shower_code, dt_beg, dt_end,
-                    cml_args.binduration, cml_args.s)
+                    cml_args.s, cml_args.binduration, cml_args.binmeteors)

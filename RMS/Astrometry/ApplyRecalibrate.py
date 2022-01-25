@@ -65,8 +65,7 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
 
     # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
     # in the same regard as the cost function)
-    fatol, xatol_ang = CheckFit.computeMinimizationTolerances(
-        config, working_platepar, len(star_dict_ff))
+    fatol, xatol_ang = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
 
     ### If the initial match is good enough, do only quick recalibratoin ###
 
@@ -115,7 +114,7 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
             print('No stars matched, stopping the fit!')
             result = None
             break
-
+        print('NUMBER OF MATCHED', n_matched)
         ### Recalibrate the platepar just on these stars, use the default platepar for initial params ###
 
         # Init initial parameters
@@ -131,6 +130,7 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
                                       method='Nelder-Mead', options={'fatol': fatol, 'xatol': xatol_ang})
 
         ###
+        print('res', res.message)
 
         # Compute matched stars
         temp_platepar = copy.deepcopy(working_platepar)
@@ -143,7 +143,8 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
 
         n_matched, _, _, matched_stars = CheckFit.matchStarsResiduals(config, temp_platepar, catalog_stars,
                                                                       star_dict_ff, match_radius, ret_nmatch=True, verbose=False)
-
+        print('NUMBER OF MATCHED', n_matched)
+        print('------------------')
         # If the fit was not successful, stop further fitting on this FF file
         if (not res.success) or (n_matched < config.min_matched_stars):
 
@@ -165,8 +166,7 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
             # Keep track of the minimum match radius
             min_match_radius = match_radius
 
-            print('Astrometry fit successful with radius {:.1f} px!'.format(
-                match_radius))
+            print('Astrometry fit successful with radius {:.1f} px!'.format(match_radius))
 
     # Choose which radius will be chosen for the goodness of fit check
     if max_match_radius is None:
@@ -187,7 +187,7 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
         ra_catalog, dec_catalog, catalog_mags = matched_catalog_stars.T
 
         # Compute apparent star magnitudes by including extinction
-        catalog_mags = extinctionCorrectionTrueToApparent(catalog_mags, ra_catalog, dec_catalog, jd,
+        corrected_catalog_mags = extinctionCorrectionTrueToApparent(catalog_mags, ra_catalog, dec_catalog, jd,
                                                           working_platepar)
 
         # Compute radius of every star from image centre
@@ -196,7 +196,8 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
 
         # Fit the photometry on automated star intensities (use the fixed vignetting coeff, use robust fit)
         photom_params, fit_stddev, _, _, _, _ = photometryFitRobust(star_intensities, radius_arr,
-                                                                    catalog_mags, fixed_vignetting=working_platepar.vignetting_coeff)
+                                                                    corrected_catalog_mags, 
+                                                                    fixed_vignetting=working_platepar.vignetting_coeff)
         photom_offset = photom_params[0]
 
         # Store the fitted photometric offset and error
@@ -218,9 +219,9 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
 
         # Mark the platepar to indicate that it was automatically recalibrated on an individual FF file
         working_platepar.auto_recalibrated = True
-
-        # Reset the star list
         working_platepar.star_list = []
+        for star_vals, ra, dec, mag in zip(star_dict_ff[jd], ra_catalog, dec_catalog, catalog_mags):
+            working_platepar.star_list.append([jd] + star_vals[:3] + [ra, dec, mag])
 
         # Store the platepar to the list of recalibrated platepars
         result = working_platepar
@@ -361,9 +362,10 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config):
     calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
     config.catalog_mag_limit += 1
+    print('CONFIG recalibrateSelectedFF:', config.catalog_mag_limit)
     # load star catalog with increased catalog limiting magnitude
     star_catalog_status = StarCatalog.readStarCatalog(config.star_catalog_path,
-                                                      config.star_catalog_file, 
+                                                      config.star_catalog_file,
                                                       lim_mag=config.catalog_mag_limit,
                                                       mag_band_ratios=config.star_catalog_band_ratios)
 
@@ -373,7 +375,8 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config):
         return {}
 
     catalog_stars, _, config.star_catalog_band_ratios = star_catalog_status
-
+    print('MAX', np.max([np.max(data[2]) for data in catalog_stars]))
+    # print(catalog_stars)
     prev_platepar = Platepar.Platepar()
     prev_platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
 
@@ -466,7 +469,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
     # Globally increase catalog limiting magnitude
     config.catalog_mag_limit += 1
-
+    print('CONFIG recalibrateIndividualFFsAndApplyAstrometry:', config.catalog_mag_limit)
     # Load catalog stars (overwrite the mag band ratios if specific catalog is used)
     star_catalog_status = StarCatalog.readStarCatalog(config.star_catalog_path,
                                                       config.star_catalog_file, lim_mag=config.catalog_mag_limit,
@@ -478,7 +481,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         return {}
 
     catalog_stars, _, config.star_catalog_band_ratios = star_catalog_status
-
+    print('MAX', np.mean([np.percentile(data[1], 90) for data in catalog_stars]))
     # Update the platepar coordinates from the config file
     platepar.lat = config.latitude
     platepar.lon = config.longitude
@@ -602,8 +605,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
         ang_dists.append(ang_dist*60)
 
         # Compute rotation difference
-        rot_diff = (platepar.pos_angle_ref -
-                    pp_temp.pos_angle_ref + 180) % 360 - 180
+        rot_diff = (platepar.pos_angle_ref - pp_temp.pos_angle_ref + 180) % 360 - 180
         rot_angles.append(rot_diff*60)
 
         # Compute the hour of the FF used for recalibration

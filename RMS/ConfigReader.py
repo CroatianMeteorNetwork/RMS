@@ -197,6 +197,7 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
     else:
         # Load the default configuration file
         config = parse(".config")
+        print("HEY")
 
 
     return config

@@ -2,32 +2,28 @@
     refined by using all stars from a given night.
 """
 
-from __future__ import print_function, division, absolute_import
+from __future__ import absolute_import, division, print_function
 
-import os
-import sys
-import copy
-import shutil
-import random
 import argparse
+import copy
+import os
+import random
+import shutil
+import sys
 
-import numpy as np
-import scipy.optimize
 import matplotlib.pyplot as plt
-
-import RMS.ConfigReader as cr
-from RMS.Formats import Platepar
-from RMS.Formats import CALSTARS
-from RMS.Formats import StarCatalog
-from RMS.Formats import FFfile
-from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP, rotationWrtHorizon, getFOVSelectionRadius
-from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
-from RMS.Astrometry.FFTalign import alignPlatepar
-from RMS.Math import angularSeparation
-
-
+import numpy as np
 # Import Cython functions
 import pyximport
+import RMS.ConfigReader as cr
+import scipy.optimize
+from RMS.Astrometry.ApplyAstrometry import (getFOVSelectionRadius, raDecToXYPP,
+                                            rotationWrtHorizon, xyToRaDecPP)
+from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
+from RMS.Astrometry.FFTalign import alignPlatepar
+from RMS.Formats import CALSTARS, FFfile, Platepar, StarCatalog
+from RMS.Math import angularSeparation
+
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import matchStars, subsetCatalog
 
@@ -74,7 +70,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
 
 
     if lim_mag is None:
-        lim_mag = config.catalog_mag_limit
+        lim_mag = config.catalog_mag_limit + 1
 
 
     # Estimate the FOV radius
@@ -143,7 +139,6 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
 
         # Put the matched stars to a dictionary
         matched_stars[jd] = [matched_img_stars, matched_cat_stars, dist_list]
-
 
         # # Plot matched stars
         # im_y, im_x, _, _ = matched_img_stars.T

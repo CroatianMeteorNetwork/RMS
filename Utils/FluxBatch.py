@@ -9,7 +9,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile
 
-from Utils.Flux import computeFlux, computeTimeIntervals, detectClouds
+from Utils.Flux import (computeFlux, computeTimeIntervals, detectClouds,
+                        fluxParser)
 
 if __name__ == "__main__":
 
@@ -50,7 +51,6 @@ if __name__ == "__main__":
 
         # Parse the batch entries
         for line in f:
-
             line = line.replace("\n", "").replace("\r", "")
 
             if not len(line):
@@ -59,21 +59,15 @@ if __name__ == "__main__":
             if line.startswith("#"):
                 continue
 
-            ftpdetectinfo_path, shower_code, tbeg, tend, dt, s = shlex.split(line)
+            clm_args = fluxParser().parse_args(shlex.split(line))
+            ftpdetectinfo_path, shower_code, s, binduration, binmeteors, time_intervals = clm_args.ftpdetectinfo_path, \
+                    clm_args.shower_code, clm_args.s, clm_args.binduration, clm_args.binmeteors, clm_args.time_intervals
             ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path)
-            dt = float(dt)
-            s = float(s)
-
 
             if not os.path.isfile(ftpdetectinfo_path):
                 print("The FTPdetectinfo file does not exist:", ftpdetectinfo_path)
                 print("Exiting...")
                 sys.exit()
-
-
-            # Parse the beg/end time
-            dt_beg = datetime.datetime.strptime(tbeg, "%Y%m%d_%H%M%S")
-            dt_end = datetime.datetime.strptime(tend, "%Y%m%d_%H%M%S")
 
 
             # Extract parent directory
@@ -82,9 +76,12 @@ if __name__ == "__main__":
             # Load the config file
             config = cr.loadConfigFromDirectory('.', ftp_dir_path)
 
-            # find time intervals to compute flux with
-            detect_clouds = detectClouds(config, dir_path)
-            time_intervals = computeTimeIntervals(detect_clouds)
+            if time_intervals is None:
+                # find time intervals to compute flux with
+                detect_clouds = detectClouds(config, dir_path)
+                time_intervals = computeTimeIntervals(detect_clouds)
+            else:
+                time_intervals = [(*time_intervals,)]
             
             # Compute the flux
             for interval in time_intervals:
@@ -92,7 +89,7 @@ if __name__ == "__main__":
                 dt_beg, dt_end = interval
                 sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, \
                 meteor_num_data = computeFlux(config, ftp_dir_path, ftpdetectinfo_path, shower_code, \
-                    dt_beg, dt_end, dt, s, show_plots=False)
+                    dt_beg, dt_end, s, binduration, binmeteors, show_plots=False)
 
                 # Add computed flux to the output list
                 output_data += [[config.stationID, sol, flux] for (sol, flux) in zip(sol_data, flux_lm_6_5_data)]
