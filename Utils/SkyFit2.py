@@ -1445,15 +1445,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             geo_xy = np.c_[self.geo_x, self.geo_y]
 
-            print()
-            print("GEO UPDATE:")
-            print(np.c_[self.geo_points_obj.ra_data, self.geo_points_obj.dec_data, self.geo_x, self.geo_y])
-
             # Get indices of points inside the fov
             filtered_indices, _ = self.filterCatalogStarsInsideFOV(self.geo_points, \
                 remove_under_horizon=False, sort_declination=True)
-
-            print(sorted(filtered_indices))
 
             # Create a mask to filter out all points outside the image and the FOV
             filter_indices_mask = np.zeros(len(geo_xy), dtype=np.bool)
