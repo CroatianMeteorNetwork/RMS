@@ -1445,9 +1445,15 @@ class PlateTool(QtWidgets.QMainWindow):
 
             geo_xy = np.c_[self.geo_x, self.geo_y]
 
+            print()
+            print("GEO UPDATE:")
+            print(np.c_[self.geo_points_obj.ra_data, self.geo_points_obj.dec_data, self.geo_x, self.geo_y])
+
             # Get indices of points inside the fov
             filtered_indices, _ = self.filterCatalogStarsInsideFOV(self.geo_points, \
                 remove_under_horizon=False, sort_declination=True)
+
+            print(sorted(filtered_indices))
 
             # Create a mask to filter out all points outside the image and the FOV
             filter_indices_mask = np.zeros(len(geo_xy), dtype=np.bool)
@@ -3555,7 +3561,6 @@ class PlateTool(QtWidgets.QMainWindow):
             
             # Sort by descending declination (needed for fast filtering)
             dec_sorted_ind = np.argsort(catalog_stars[:, 1])[::-1]
-            dec_sorted_ind_inverse = np.argsort(dec_sorted_ind)
             catalog_stars = catalog_stars[dec_sorted_ind]
 
 
@@ -3575,15 +3580,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
         filtered_catalog_stars = np.array(filtered_catalog_stars)
 
+
         # Return original indexing if it was sorted by declination
         if sort_declination and len(filtered_indices):
 
-            # Cut indices to the available length received from the filtered list
-            dec_sorted_ind_inverse_filtered = dec_sorted_ind_inverse[dec_sorted_ind_inverse < len(filtered_indices)]
-
             # Restore original indexing
-            filtered_indices = filtered_indices[dec_sorted_ind_inverse_filtered]
-            filtered_catalog_stars = filtered_catalog_stars[dec_sorted_ind_inverse_filtered]
+            filtered_indices = dec_sorted_ind[filtered_indices]
 
 
         return filtered_indices, filtered_catalog_stars
