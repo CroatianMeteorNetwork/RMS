@@ -37,7 +37,7 @@ RECALIBRATE_NEIGHBOURHOOD_SIZE = 3
 
 
 def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max_match_radius=None,
-                  force_platepar_save=False):
+                  force_platepar_save=False, lim_mag=None):
     """ Given the platepar and a list of stars on one image, try to recalibrate the platepar to achieve
         the best match by brute force star matching.
     Arguments:
@@ -54,8 +54,7 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
     Return:
         result: [?] A Platepar instance if refinement is successful, None if it failed.
         min_match_radius: [float] Minimum radius that successfuly matched the stars (pixels).
-    """
-
+    """    
     working_platepar = copy.deepcopy(working_platepar)
 
     # A list of matching radiuses to try
@@ -71,21 +70,20 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
 
     # Match the stars and calculate the residuals
     n_matched, avg_dist, cost, _ = CheckFit.matchStarsResiduals(config, working_platepar, catalog_stars,
-                                                                star_dict_ff, min_radius, ret_nmatch=True)
+                                                                star_dict_ff, min_radius, ret_nmatch=True, 
+                                                                lim_mag=lim_mag)
 
     print('Initally match stars with {:.1f} px: {:d}/{:d}'.format(min_radius, n_matched,
                                                                   len(star_dict_ff[jd])))
 
     # If at least half the stars are matched with the smallest radius
-    if n_matched >= 0.5*len(star_dict_ff[jd]):
+    # Check if the average distance with the tightest radius is close
+    if n_matched >= 0.5*len(star_dict_ff[jd]) and avg_dist < config.dist_check_quick_threshold:
+        # Use a reduced set of initial radius values
+        radius_list = [1.5, min_radius]
 
-        # Check if the average distance with the tightest radius is close
-        if avg_dist < config.dist_check_quick_threshold:
+        print('Using a quick fit...')
 
-            # Use a reduced set of initial radius values
-            radius_list = [1.5, min_radius]
-
-            print('Using a quick fit...')
 
     ##########
 
@@ -108,13 +106,14 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
 
         # If there are no matched stars, give up
         n_matched, _, _, _ = CheckFit.matchStarsResiduals(config, working_platepar, catalog_stars,
-                                                          star_dict_ff, match_radius, ret_nmatch=True, verbose=False)
+                                                          star_dict_ff, match_radius, ret_nmatch=True, 
+                                                          verbose=False, lim_mag=lim_mag)
 
         if n_matched == 0:
             print('No stars matched, stopping the fit!')
             result = None
             break
-        print('NUMBER OF MATCHED', n_matched)
+
         ### Recalibrate the platepar just on these stars, use the default platepar for initial params ###
 
         # Init initial parameters
@@ -130,7 +129,6 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
                                       method='Nelder-Mead', options={'fatol': fatol, 'xatol': xatol_ang})
 
         ###
-        print('res', res.message)
 
         # Compute matched stars
         temp_platepar = copy.deepcopy(working_platepar)
@@ -141,19 +139,20 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
         temp_platepar.pos_angle_ref = pos_angle_ref
         temp_platepar.F_scale = F_scale_ref
 
-        n_matched, _, _, matched_stars = CheckFit.matchStarsResiduals(config, temp_platepar, catalog_stars,
-                                                                      star_dict_ff, match_radius, ret_nmatch=True, verbose=False)
-        print('NUMBER OF MATCHED', n_matched)
-        print('------------------')
+        n_matched, dist, cost, matched_stars = CheckFit.matchStarsResiduals(config, temp_platepar, catalog_stars,
+                                                                      star_dict_ff, match_radius, ret_nmatch=True, 
+                                                                      verbose=False, lim_mag=lim_mag)
+    
+                
         # If the fit was not successful, stop further fitting on this FF file
-        if (not res.success) or (n_matched < config.min_matched_stars):
+        if (not res.success) or (n_matched < config.min_matched_stars) or (dist > config.dist_check_threshold):
 
             if not res.success:
                 print('Astrometry fit failed!')
-
+            elif dist > config.dist_check_threshold:
+                print(f'Fitted star is farther from catalog star than necessary: {dist} > {config.dist_check_threshold}')
             else:
-                print('Number of matched stars after the fit is smaller than necessary: {:d} < {:d}'.format(n_matched,
-                                                                                                            config.min_matched_stars))
+                print(f'Number of matched stars after the fit is smaller than necessary: {n_matched:d} < {config.min_matched_stars:d}')
 
             # Indicate that the recalibration failed
             result = None
@@ -217,11 +216,20 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
 
         print('Saving improved platepar...')
 
+        ### plot for checking fit quality ###
+        # if date2JD(*FFfile.getMiddleTimeFF("FF_US0009_20201213_094432_813_0839680.fits", config.fps)) == jd:
+        #     plt.title(f'F_HR000K_20201213_225055_929_0631040.fits')
+        #     plt.scatter(*matched_stars[jd][0][:,:2].T[::-1], label='matched')
+        #     plt.scatter(*np.array(star_dict_ff[jd])[:,:2].T[::-1],c='r',s=1, label='detected')
+        #     plt.legend()
+        #     plt.show()
+        
+        
         # Mark the platepar to indicate that it was automatically recalibrated on an individual FF file
         working_platepar.auto_recalibrated = True
         working_platepar.star_list = []
-        for star_vals, ra, dec, mag in zip(star_dict_ff[jd], ra_catalog, dec_catalog, catalog_mags):
-            working_platepar.star_list.append([jd] + star_vals[:3] + [ra, dec, mag])
+        for star_vals, ra, dec, mag in zip(image_stars, ra_catalog, dec_catalog, catalog_mags):
+            working_platepar.star_list.append([jd] + list(star_vals[:3]) + [ra, dec, mag])
 
         # Store the platepar to the list of recalibrated platepars
         result = working_platepar
@@ -234,7 +242,7 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
     return result, min_match_radius
 
 
-def recalibratePlateparsForFF(prev_platepar, ff_file_names, calstars, catalog_stars, config):
+def recalibratePlateparsForFF(prev_platepar, ff_file_names, calstars, catalog_stars, config, lim_mag=None):
     """
     Recalibrate platepars corresponding to ff files based on the stars. 
     
@@ -276,7 +284,8 @@ def recalibratePlateparsForFF(prev_platepar, ff_file_names, calstars, catalog_st
         star_dict_ff = {jd: calstars[ff_name]}
 
         # Recalibrate the platepar using star matching
-        result, min_match_radius = recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars)
+        result, min_match_radius = recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, 
+                                                 lim_mag=lim_mag)
 
         # If the recalibration failed, try using FFT alignment
         if result is None:
@@ -292,7 +301,7 @@ def recalibratePlateparsForFF(prev_platepar, ff_file_names, calstars, catalog_st
                                           show_plot=False)
 
             # Try to recalibrate after FFT alignment
-            result, _ = recalibrateFF(config, test_platepar, jd, star_dict_ff, catalog_stars)
+            result, _ = recalibrateFF(config, test_platepar, jd, star_dict_ff, catalog_stars, lim_mag=lim_mag)
 
             # If the FFT alignment failed, align the original platepar using the smallest radius that matched
             #   and force save the the platepar
@@ -301,7 +310,8 @@ def recalibratePlateparsForFF(prev_platepar, ff_file_names, calstars, catalog_st
                 print("Using the old platepar with the minimum match radius of: {:.2f}".format(
                     min_match_radius))
                 result, _ = recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars,
-                                          max_match_radius=min_match_radius, force_platepar_save=True)
+                                          max_match_radius=min_match_radius, force_platepar_save=True,
+                                          lim_mag=lim_mag)
 
                 if result is not None:
                     working_platepar = result
@@ -347,7 +357,7 @@ def recalibratePlateparsForFF(prev_platepar, ff_file_names, calstars, catalog_st
     return recalibrated_platepars
 
 
-def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config):
+def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config, lim_mag):
     """ Recalibrate FF files, ignoring whether there are detections 
     Arguments:
         dir_path: [str] Path where the FF files are.
@@ -361,12 +371,10 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config):
     config = copy.deepcopy(config)
     calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
-    config.catalog_mag_limit += 1
-    print('CONFIG recalibrateSelectedFF:', config.catalog_mag_limit)
     # load star catalog with increased catalog limiting magnitude
     star_catalog_status = StarCatalog.readStarCatalog(config.star_catalog_path,
                                                       config.star_catalog_file,
-                                                      lim_mag=config.catalog_mag_limit,
+                                                      lim_mag=lim_mag,
                                                       mag_band_ratios=config.star_catalog_band_ratios)
 
     if not star_catalog_status:
@@ -375,7 +383,6 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config):
         return {}
 
     catalog_stars, _, config.star_catalog_band_ratios = star_catalog_status
-    print('MAX', np.max([np.max(data[2]) for data in catalog_stars]))
     # print(catalog_stars)
     prev_platepar = Platepar.Platepar()
     prev_platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
@@ -385,7 +392,8 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config):
     prev_platepar.lon = config.longitude
     prev_platepar.elev = config.elevation
     
-    recalibrated_platepars = recalibratePlateparsForFF(prev_platepar, ff_file_names, calstars, catalog_stars, config)
+    recalibrated_platepars = recalibratePlateparsForFF(prev_platepar, ff_file_names, calstars, catalog_stars, config,
+                                                       lim_mag=lim_mag)
 
     # # store recalibrated platepars in json
     all_pps = {}
@@ -469,7 +477,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(dir_path, ftpdetectinfo_path, cal
 
     # Globally increase catalog limiting magnitude
     config.catalog_mag_limit += 1
-    print('CONFIG recalibrateIndividualFFsAndApplyAstrometry:', config.catalog_mag_limit)
+    
     # Load catalog stars (overwrite the mag band ratios if specific catalog is used)
     star_catalog_status = StarCatalog.readStarCatalog(config.star_catalog_path,
                                                       config.star_catalog_file, lim_mag=config.catalog_mag_limit,

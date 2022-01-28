@@ -14,15 +14,15 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import division, absolute_import, print_function
+from __future__ import absolute_import, division, print_function
 
-import os
 import logging
+import os
+import zipfile
+from pathlib import Path
 
 import numpy as np
-
 from RMS.Routines.Image import loadImage
-
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -32,11 +32,28 @@ log = logging.getLogger("logger")
 class MaskStructure(object):
     def __init__(self, img):
         """ Structure for holding the mask. This is used so the mask can be hashed. """
-
         self.img = img
 
 
+def getMaskFile(dir_path, config, file_list=None):
+    """
+    From a directory, fine the mask file, load it and return it
+    """
+    if file_list is None:
+        file_list = os.listdir(dir_path)
+        
+    # Look through files and if there is mask.bmp or mask.zip, keep track of that then load it
+    mask = max(2 * (Path(config.mask_file).stem == Path(filename).stem) - filename.endswith('.zip')
+               for filename in file_list)
+    if mask > 0:
+        mask_path = os.path.join(dir_path, config.mask_file if mask == 2 else Path(config.mask_file).stem + '.zip')
+        mask = loadMask(mask_path)
+        print("Using mask:", mask_path)
 
+    else:
+        print("No mask used!")
+        mask = None
+    return mask
 
 def loadMask(mask_file):
     """ Load the mask image. """
@@ -47,6 +64,9 @@ def loadMask(mask_file):
 
     # Load the mask file
     try:
+        if mask_file.endswith('.zip'):
+            archive = zipfile.ZipFile(mask_file, 'r')
+            mask_file = archive.open('mask.bmp')
         mask = loadImage(mask_file, flatten=0)
         
     except:

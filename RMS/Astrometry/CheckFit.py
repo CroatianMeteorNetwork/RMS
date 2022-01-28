@@ -70,7 +70,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
 
 
     if lim_mag is None:
-        lim_mag = config.catalog_mag_limit + 1
+        lim_mag = config.catalog_mag_limit
 
 
     # Estimate the FOV radius
@@ -234,7 +234,8 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
     # Calculate the average distance
     avg_dist = np.median(global_dist_list)
 
-    cost = (avg_dist**2)*(1.0/np.sqrt(n_matched + 1))
+    cost = avg_dist**2/((n_matched+1)/len(ra_catalog))
+    # cost = avg_dist**2/np.sqrt(n_matched+1)
 
     if verbose:
 

@@ -9,8 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile
 
-from Utils.Flux import (computeFlux, computeTimeIntervals, detectClouds,
-                        fluxParser)
+from Utils.Flux import computeFlux, detectClouds, fluxParser
 
 if __name__ == "__main__":
 
@@ -60,8 +59,9 @@ if __name__ == "__main__":
                 continue
 
             clm_args = fluxParser().parse_args(shlex.split(line))
-            ftpdetectinfo_path, shower_code, s, binduration, binmeteors, time_intervals = clm_args.ftpdetectinfo_path, \
-                    clm_args.shower_code, clm_args.s, clm_args.binduration, clm_args.binmeteors, clm_args.time_intervals
+            ftpdetectinfo_path, shower_code, s, binduration, binmeteors, time_intervals, fwhm, ratio_threshold = \
+                    clm_args.ftpdetectinfo_path, clm_args.shower_code, clm_args.s, clm_args.binduration, \
+                    clm_args.binmeteors, clm_args.timeinterval, clm_args.fwhm, clm_args.ratiothres
             ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path)
 
             if not os.path.isfile(ftpdetectinfo_path):
@@ -78,23 +78,11 @@ if __name__ == "__main__":
 
             if time_intervals is None:
                 # find time intervals to compute flux with
-                detect_clouds = detectClouds(config, dir_path)
-                time_intervals = computeTimeIntervals(detect_clouds)
+                time_intervals = detectClouds(config, ftp_dir_path, show_plots=False, ratio_threshold=ratio_threshold)
             else:
                 time_intervals = [(*time_intervals,)]
             
-            # Compute the flux
-            for interval in time_intervals:
-                print(f'Using interval: {interval}')
-                dt_beg, dt_end = interval
-                sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, \
-                meteor_num_data = computeFlux(config, ftp_dir_path, ftpdetectinfo_path, shower_code, \
-                    dt_beg, dt_end, s, binduration, binmeteors, show_plots=False)
-
-                # Add computed flux to the output list
-                output_data += [[config.stationID, sol, flux] for (sol, flux) in zip(sol_data, flux_lm_6_5_data)]
-
-
+            
             # Make all stations the same color
             if config.stationID not in color_dict:
                 
@@ -112,16 +100,28 @@ if __name__ == "__main__":
                 marker = marker_dict[config.stationID]
                 #label = str(config.stationID)
                 label = None
+            
+            # Compute the flux
+            for interval in time_intervals:
+                print(f'Using interval: {interval}')
+                dt_beg, dt_end = interval
+                sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, \
+                meteor_num_data = computeFlux(config, ftp_dir_path, ftpdetectinfo_path, shower_code, \
+                    dt_beg, dt_end, s, binduration, binmeteors, show_plots=False, default_fwhm=fwhm)
+
+                # Add computed flux to the output list
+                output_data += [[config.stationID, sol, flux] for (sol, flux) in zip(sol_data, flux_lm_6_5_data)]
+                
+                plt.plot(sol_data, flux_lm_6_5_data, label=label, color=color, marker=marker, linestyle='dashed')
+
+                plt.errorbar(sol_data, flux_lm_6_5_data, color=color, alpha=0.5, capsize=5, zorder=3, linestyle='none', \
+                            yerr=[np.array(flux_lm_6_5_data) - np.array(flux_lm_6_5_ci_lower_data), \
+                            np.array(flux_lm_6_5_ci_upper_data) - np.array(flux_lm_6_5_data)])
 
 
             print(config.stationID, color)
 
             # Plot the flux
-            plt.plot(sol_data, flux_lm_6_5_data, label=label, color=color, marker=marker, linestyle='dashed')
-
-            plt.errorbar(sol_data, flux_lm_6_5_data, color=color, alpha=0.5, capsize=5, zorder=3, linestyle='none', \
-            yerr=[np.array(flux_lm_6_5_data) - np.array(flux_lm_6_5_ci_lower_data), \
-                np.array(flux_lm_6_5_ci_upper_data) - np.array(flux_lm_6_5_data)])
 
 
         # plt.gca().set_yscale('log')

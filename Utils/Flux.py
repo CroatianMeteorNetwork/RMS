@@ -8,6 +8,7 @@ import glob
 import json
 import os
 import sys
+from pathlib import Path
 
 import ephem
 import matplotlib.dates as mdates
@@ -31,7 +32,7 @@ from RMS.Formats.CALSTARS import readCALSTARS
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, readFTPdetectinfo
 from RMS.Math import angularSeparation, pointInsideConvexPolygonSphere
 from RMS.Routines.FOVArea import fovArea, xyHt2Geo
-from RMS.Routines.MaskImage import MaskStructure, loadMask
+from RMS.Routines.MaskImage import MaskStructure, getMaskFile, loadMask
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
 
 from Utils.ShowerAssociation import heightModel, showerAssociation
@@ -139,7 +140,7 @@ class FluxConfig(object):
         self.meteros_min = 3
 
 
-def computeTimeIntervals(cloud_ratio_dict, ratio_threshold=0.2, time_gap_threshold=15, clearing_threshold=60):
+def computeTimeIntervals(cloud_ratio_dict, ratio_threshold=0.4, time_gap_threshold=15, clearing_threshold=90):
     """
     Calculate sets of time intervals using the detected to predicted star ratios
 
@@ -163,23 +164,28 @@ def computeTimeIntervals(cloud_ratio_dict, ratio_threshold=0.2, time_gap_thresho
     for filename, ratio in cloud_ratio_dict.items():
         date = FFfile.filenameToDatetime(filename)
 
-        if start_interval is None:
-            start_interval = date
+        if prev_date is None:
             prev_date = date
-            continue
+        
+        if start_interval is None and ratio >= ratio_threshold:
+            start_interval = date
 
         # make an interval if FF has a >10 min gap (suggests clouds in between) or if the ratio is too low.
         # However the interval must be at least an hour to be kept.
-        # print((date - prev_date).total_seconds()/60, (prev_date - start_interval).total_seconds()/60, ratio)
         if ((date - prev_date).total_seconds()/60 > time_gap_threshold or ratio < ratio_threshold):
-            if (prev_date - start_interval).total_seconds()/60 > 60:
+            if start_interval is not None and (prev_date - start_interval).total_seconds()/60 > 60:
                 intervals.append((start_interval, prev_date))
-            start_interval = date
+                
+            # If ratio is less than threshold, you want to discard so it shouldn't be the start of an interval
+            if ratio < ratio_threshold:
+                start_interval = None
+            else:
+                start_interval = date
 
         prev_date = date
 
     # if you run out of images, that counts as a cutoff
-    if (prev_date - start_interval).total_seconds()/60 > clearing_threshold:
+    if start_interval is not None and (prev_date - start_interval).total_seconds()/60 > clearing_threshold:
         intervals.append((start_interval, prev_date))
     
     return intervals
@@ -240,7 +246,7 @@ def detectMoon(file_list, platepar, config):
     return new_file_list
 
 
-def detectClouds(config, dir_path, N=5, mask=None):
+def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, ratio_threshold=0.4):
     """ Detect clouds based on the number of stars detected in images compared to how many are
     predicted.
 
@@ -251,24 +257,16 @@ def detectClouds(config, dir_path, N=5, mask=None):
     keyword arguments:
         mask: [2d array]
         N: [float] Time duration of bins to separate FF files into
+        show_plots: [Bool] Whether to show plots (defaults to true)
 
     Return:
-        detection_ratio [dict]: FF_file: ratio
-        The ratio represents the ratio of stars detected to stars predicted to be in FOV. If the
-        ratio is smaller than a specific threshold then it has clouds.
+        time_intervals [list of tuple]: 
     """
     # collect detected stars
     file_list = sorted(os.listdir(dir_path))
 
     # Locate and load the mask file
-    if config.mask_file in file_list:
-        mask_path = os.path.join(dir_path, config.mask_file)
-        mask = loadMask(mask_path)
-        print("Using mask:", mask_path)
-
-    else:
-        print("No mask used!")
-        mask = None
+    mask = getMaskFile(dir_path, config, file_list=file_list)
 
     # get detected stars
     calstars_file = None
@@ -302,7 +300,6 @@ def detectClouds(config, dir_path, N=5, mask=None):
     if config.platepars_flux_recalibrated_name in file_list:
         with open(os.path.join(dir_path, config.platepars_flux_recalibrated_name)) as f:
             recalibrated_platepar_dict = json.load(f)
-
             # Convert the dictionary of recalibrated platepars to a dictionary of Platepar objects
             recalibrated_platepars = {}
             for ff_name in recalibrated_platepar_dict:
@@ -317,80 +314,94 @@ def detectClouds(config, dir_path, N=5, mask=None):
     else:
         print("Recalibrated platepar file not available!")
         print("Recalibrating...")
-        recalibrated_platepars = recalibrateSelectedFF(dir_path, recorded_files, star_list, config)
+        recalibrated_platepars = recalibrateSelectedFF(dir_path, recorded_files, star_list, config, stellarLMModel(platepar.mag_lev))
         recorded_files = list(recalibrated_platepars.keys())
 
-    calstars_count = {ff: len(recalibrated_platepars[ff].star_list) for ff in recorded_files}
+    matched_count = {ff: len(recalibrated_platepars[ff].star_list) for ff in recorded_files}
     
-    min_lim_mag = {ff:np.percentile(xyToRaDecPP([FFfile.getMiddleTimeFF(ff, config.fps, ret_milliseconds=True)]*len(star_data),
-                        [star[1] for star in star_data],
-                        [star[0] for star in star_data],
-                        [star[3] for star in star_data],
-                        platepar)[3], 90) for ff, star_data in star_list if ff in recorded_files}
-    
-    min_lim_cat_mag = {ff: max(recalibrated_platepars[ff].star_list, key=lambda x: x[6])[6] for ff in recorded_files}
-    
-    
-    # get limiting magnitude for each FF file (magitude is artificially decreased by 1, as a correction)
-    ff_limiting_magnitude = {ff_file: (min(stellarLMModel(recalibrated_platepars[ff_file].mag_lev), config.catalog_mag_limit+1) if
+    star_det_mag_corr = -2.5*np.log10(config.intensity_threshold/18) - 1 # correction for star detector LM
+    ff_limiting_magnitude = {ff_file: (stellarLMModel(recalibrated_platepars[ff_file].mag_lev) + star_det_mag_corr if
                                        recalibrated_platepars[ff_file].auto_recalibrated else None)
                              for ff_file in recorded_files}
-    # ff_limiting_magnitude = {ff_file: (min_lim_mag[ff_file] if
-    #                                    recalibrated_platepars[ff_file].auto_recalibrated else None) 
-    #                          for ff_file in recorded_files}
     
-    fig, ax = plt.subplots(2)
-    plot_format = mdates.DateFormatter('%H:%M')
-    ax[0].xaxis.set_major_formatter(plot_format)
-    ax[0].scatter([FFfile.filenameToDatetime(ff) for ff in recorded_files if ff_limiting_magnitude[ff] is not None], 
-                [ff_limiting_magnitude[ff]/min_lim_cat_mag[ff] for ff in recorded_files if ff_limiting_magnitude[ff] is not None])
-    ax[0].set_ylabel('LM/min star magnitude')
-    ax[0].set_xlabel('Time')
-    
-    ax[1].xaxis.set_major_formatter(plot_format)
-    ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in recorded_files], 
-                [ff_limiting_magnitude[ff] for ff in recorded_files], label='empirical LM')
-    ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in recorded_files], 
-                [min_lim_mag[ff] for ff in recorded_files], label='faintest star star mag')
-    ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in recorded_files], 
-                [min_lim_cat_mag[ff] for ff in recorded_files], label='faintest star catalog mag')
-    ax[1].set_ylabel('Magnitude')
-    ax[1].set_xlabel('Time')
-    ax[1].legend()
-    plt.show()
 
-    predicted_stars = predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config, mask)
+    
+    if show_plots:
+        matched_pred_LM = {ff:np.percentile(xyToRaDecPP([FFfile.getMiddleTimeFF(ff, config.fps, ret_milliseconds=True)]*len(star_data.star_list),
+                            [star[1] for star in star_data.star_list],
+                            [star[2] for star in star_data.star_list],
+                            [star[3] for star in star_data.star_list], 
+                            platepar)[3], 90) for ff, star_data in recalibrated_platepars.items() if len(star_data.star_list)}
+        
+        matched_star_LM = {ff: np.percentile(np.array(recalibrated_platepars[ff].star_list)[:,6], 90)
+                        for ff in recorded_files if len(recalibrated_platepars[ff].star_list)}
+
+        empirical_LM = {ff_file: (stellarLMModel(recalibrated_platepars[ff_file].mag_lev) if
+                                       recalibrated_platepars[ff_file].auto_recalibrated else None)
+                             for ff_file in recorded_files}
+            
+        fig, ax = plt.subplots(2)
+        plot_format = mdates.DateFormatter('%H:%M')
+        ax[0].xaxis.set_major_formatter(plot_format)
+        ax[0].scatter([FFfile.filenameToDatetime(ff) for ff in recorded_files if ff_limiting_magnitude[ff] is not None], 
+                    [ff_limiting_magnitude[ff]/matched_pred_LM[ff] for ff in recorded_files if ff_limiting_magnitude[ff] is not None])
+        ax[0].set_ylabel('LM/min star magnitude')
+        ax[0].set_xlabel('Time')
+        
+        ax[1].xaxis.set_major_formatter(plot_format)
+        ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in ff_limiting_magnitude],
+                    ff_limiting_magnitude.values(),marker='+', label='empirical LM or config mag')
+        ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in matched_pred_LM],
+                    matched_pred_LM.values(), label='faintest detected star mag (pred)')
+        ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in empirical_LM],
+                    empirical_LM.values(), label='empirical LM')
+        ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in matched_star_LM],
+                    matched_star_LM.values(),marker='x', label='faintest matched star mag (cat)')
+        # ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in recorded_files],
+        #             [empirical_LM[ff] for ff in recorded_files], label='empirical LM')
+        ax[1].set_ylabel('Magnitude')
+        ax[1].set_xlabel('Time')
+        ax[1].legend()
+        plt.show()
+
+    predicted_stars = predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config, mask, 
+                                             show_plot=show_plots)
     for ff in predicted_stars:
-        print(ff, calstars_count.get(ff), predicted_stars.get(ff), ff_limiting_magnitude.get(ff))
+        print(ff, matched_count.get(ff), predicted_stars.get(ff), ff_limiting_magnitude.get(ff))
 
     
-    ratio =  {ff_file: (calstars_count[ff_file] / predicted_stars[ff_file] if ff_file in predicted_stars else 0)
+    ratio = {ff_file: (matched_count[ff_file] / predicted_stars[ff_file] if ff_file in predicted_stars else 0)
             for ff_file in recorded_files}
-    fig, ax = plt.subplots(2)
-    plot_format = mdates.DateFormatter('%H:%M')
-    ax[0].xaxis.set_major_formatter(plot_format)
-    ax[0].plot([FFfile.filenameToDatetime(x) for x in ratio.keys()], list(ratio.values()), marker='o')
-    ax[0].set_xlabel("Time")
-    ax[0].set_ylabel("stars observed at LM-1/stars predicted")
+    time_intervals = computeTimeIntervals(ratio, ratio_threshold=ratio_threshold)
     
-    ax[1].xaxis.set_major_formatter(plot_format)
-    ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in calstars_count], 
-                [calstars_count[ff] for ff in calstars_count], label='fitted count')
-    ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in predicted_stars], 
-                [predicted_stars[ff] for ff in predicted_stars], label='predicted count')
-    ax[1].set_xlabel("Time")
-    ax[1].set_ylabel("Count")
-    ax[1].legend()
-    plt.show()
-    
-    
-    
-    
+    if show_plots:
+        fig, ax = plt.subplots(2)
+        plot_format = mdates.DateFormatter('%H:%M')
+        ax[0].xaxis.set_major_formatter(plot_format)
+        ax[0].plot([FFfile.filenameToDatetime(x) for x in ratio.keys()], list(ratio.values()), marker='o')
+        ax[0].set_xlabel("Time")
+        ax[0].set_ylabel("stars observed at LM-1/stars predicted")
+        ax[0].vlines(np.array(time_intervals).flatten(), 
+                    ymin=min(ratio.values()), ymax=max(ratio.values()), linestyles='dashed', colors='r')
+        
+        ax[1].xaxis.set_major_formatter(plot_format)
+        ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in matched_count], 
+                    [matched_count[ff] for ff in matched_count], label='fitted count')
+        ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in predicted_stars], 
+                    [predicted_stars[ff] for ff in predicted_stars], label='predicted count')
+        ax[1].set_xlabel("Time")
+        ax[1].set_ylabel("Count")
+        ax[1].legend()
+        ax[1].vlines(np.array(time_intervals).flatten(), 
+                    ymin=min(predicted_stars.values()), ymax=max(predicted_stars.values()), linestyles='dashed', colors='r')
+        plt.show()
+        
+
     # calculating the ratio of observed starts to the number of predicted stars        
-    return ratio
+    return time_intervals
 
 
-def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config, mask=None):
+def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config, mask=None, show_plot=True):
     """ Predicts the number of stars that should be in the FOV, considering limiting magnitude,
     FOV and mask, and returns a dictionary mapping FF files to the number of predicted stars
 
@@ -400,43 +411,46 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
         config: [Config object]
     Keyword Arguments:
         mask: [Mask object] Mask to filter stars to
+        show_plot: [Bool] Whether to show plots (defaults to true)
 
     Return:
         pred_star_count: [dict] FF_file: number_of_stars_in_FOV
     """
     ff_files = list(recalibrated_platepars.keys())
-    
+
     # using a blank mask if nothing is given
     if mask is None:
-        mask = Object()
-        mask.img = np.ones((recalibrated_platepars[ff_files[0]].Y_res,
-                            recalibrated_platepars[ff_files[0]].X_res), dtype=bool)
+        mask = MaskStructure(np.full((recalibrated_platepars[ff_files[0]].Y_res,
+                             recalibrated_platepars[ff_files[0]].X_res), 255, dtype=np.uint8))
 
     pred_star_count = {}
     star_mag = {}
-    for ff_file in ff_files:
+    for i, ff_file in enumerate(ff_files):
         platepar = recalibrated_platepars[ff_file]
         lim_mag = ff_limiting_magnitude[ff_file]
         if lim_mag is None:
             continue
+        
         date = FFfile.getMiddleTimeFF(ff_file, config.fps, ret_milliseconds=True)
         jd = date2JD(*date)
         
         # make a polygon on a sphere out of 5 points on each side
-        n_points = 5
-        y_points = [platepar.Y_res * i/n_points for i in range(n_points)] + [platepar.Y_res]*n_points + \
-                    [platepar.Y_res * (1-i/n_points) for i in range(n_points)] + [0]*n_points
-        x_points = [0]*n_points + [platepar.X_res * i/n_points for i in range(n_points)] + \
-                    [platepar.X_res]*n_points + [platepar.X_res * (1-i/n_points) for i in range(n_points)]
-        _, ra_vertices, dec_vertices, _ = xyToRaDecPP([date]*n_points*4,
-                                                      x_points, y_points,
-                                                      [1]*n_points*4, platepar,
+        # n_points = 5
+        # y_points = [platepar.Y_res * i/n_points for i in range(n_points)] + [platepar.Y_res]*n_points + \
+        #             [platepar.Y_res * (1-i/n_points) for i in range(n_points)] + [0]*n_points
+        # x_points = [0]*n_points + [platepar.X_res * i/n_points for i in range(n_points)] + \
+        #             [platepar.X_res]*n_points + [platepar.X_res * (1-i/n_points) for i in range(n_points)]
+        _, ra_vertices, dec_vertices, _ = xyToRaDecPP([date]*4,
+                                                      [0, 0, platepar.X_res, platepar.X_res],
+                                                      [0, platepar.Y_res, platepar.Y_res, 0],
+                                                      [1]*4, platepar,
                                                       extinction_correction=False)
 
         # collect and filter catalog stars
         catalog_stars, _, _ = StarCatalog.readStarCatalog(
             config.star_catalog_path, config.star_catalog_file, lim_mag=lim_mag,
             mag_band_ratios=config.star_catalog_band_ratios)
+        
         # filter out stars that are outside of the polygon on the sphere made by the fov
         ra_catalog, dec_catalog, mag = catalog_stars.T
         inside = pointInsideConvexPolygonSphere(np.array([ra_catalog, dec_catalog]).T,
@@ -444,22 +458,33 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
         x, y = raDecToXYPP(ra_catalog, dec_catalog, jd, platepar)
         x = x[inside]
         y = y[inside]
-        # correct for extinction and vignetting so that dim stars can be filtered
-        # mag = mag[inside]
-        mag = extinctionCorrectionTrueToApparent(mag[inside], ra_catalog[inside], dec_catalog[inside], jd, platepar)
-        mag = correctVignettingTrueToApparent(mag, x, y, platepar)
+        mag = mag[inside]
+        # correct for extinction and vignetting so that dim stars can be filtered 
+        # (not necessary since limiting magnitude already matches with matched star LM)
+        # mag = extinctionCorrectionTrueToApparent(mag[inside], ra_catalog[inside], dec_catalog[inside], jd, platepar)
+        # mag = correctVignettingTrueToApparent(mag, x, y, platepar)
         # filter coordinates to be in FOV and make sure that the stars that are too dim are filtered
         bounds = (mag <= lim_mag) & (y >= 0) & (y < platepar.Y_res) & (x >= 0) & (x < platepar.X_res)
         x = x[bounds]
         y = y[bounds]
+        mag = mag[bounds]
+        
         # filter stars with mask
         mask_filter = np.take(np.floor(mask.img/255),
                               np.ravel_multi_index(np.floor(np.array([y, x])).astype(int),
                                                    (platepar.Y_res, platepar.X_res))).astype(bool)
-        # print(np.sum(mask_filter))
-        # print(val[inside][bounds][mask_filter])
-        # plt.scatter(x[mask_filter], y[mask_filter], c=mag[inside & (mag <= lim_mag)][bounds][mask_filter])
-        # plt.show()
+        
+        if show_plot and i == int(len(ff_files)//2):
+            plt.title(f"{ff_file}, lim_mag={lim_mag:.2f}")
+            plt.scatter(*np.array(recalibrated_platepars[ff_file].star_list)[:,1:3].T[::-1],label='matched')
+            plt.scatter(x[mask_filter], y[mask_filter], c='r', marker='+', label='catalog')
+            plt.legend()
+            plt.show()
+
+            # print(np.sum(mask_filter))
+            # print(val[inside][bounds][mask_filter])
+            # plt.scatter(x[mask_filter], y[mask_filter], c=mag[inside & (mag <= lim_mag)][bounds][mask_filter])
+            # plt.show()
         pred_star_count[ff_file] = np.sum(mask_filter)
         star_mag[ff_file] = mag
     return pred_star_count
@@ -489,8 +514,7 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
 
     # If the mask is not given, make a dummy mask with all white pixels
     if mask is None:
-        mask = MaskStructure(
-            255 + np.zeros((platepar.Y_res, platepar.X_res), dtype=np.uint8))
+        mask = MaskStructure(np.full((platepar.Y_res, platepar.X_res), 255, dtype=np.uint8))
 
     # Compute the number of samples for every image axis
     longer_side_points = side_points
@@ -611,55 +635,51 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
     return col_areas_ht
 
 
-def sensorCharacterization(config, dir_path):
+def sensorCharacterization(config, dir_path, meteor_data, default_fwhm=None):
     """ Characterize the standard deviation of the background and the FWHM of stars on every image. """
+
+    exists_FF_files = any(FFfile.validFFName(filename) for filename in os.listdir(dir_path))
 
     # Find the CALSTARS file in the given folder that has FWHM information
     found_good_calstars = False
     for cal_file in os.listdir(dir_path):
         if ('CALSTARS' in cal_file) and ('.txt' in cal_file) and (not found_good_calstars):
-
             # Load the calstars file
             calstars_list = CALSTARS.readCALSTARS(dir_path, cal_file)
+            # Check that at least one image has good FWHM measurements
+            for ff_name, star_data in calstars_list:
+                if len(star_data) > 0 and star_data[0][4] > -1: # if stars were detected
+                    star_data = np.array(star_data)
 
-            if len(calstars_list) > 0:
+                    # Check if the calstars file have FWHM information
+                    fwhm = star_data[:, 4]
 
-                # Check that at least one image has good FWHM measurements
-                for ff_name, star_data in calstars_list:
-
-                    if len(star_data) > 1:
-
-                        star_data = np.array(star_data)
-
-                        # Check if the calstars file have FWHM information
-                        fwhm = star_data[:, 4]
-
-                        # Check that FWHM values have been computed well
-                        if np.all(fwhm > 1):
-
-                            found_good_calstars = True
-
-                            print('CALSTARS file: ' + cal_file + ' loaded!')
-
-                            break
+                    # Check that FWHM values have been computed well
+                    if np.all(fwhm > 1):
+                        found_good_calstars = True
+                        print('CALSTARS file: ' + cal_file + ' loaded!')
+                        break
+                elif not exists_FF_files and len(star_data) > 0 and star_data[0][4] == -1:
+                    if default_fwhm is not None:
+                        found_good_calstars = True
+                        print('CALSTARS file: ' + cal_file + ' loaded!')
+                        break
+                    else:
+                        raise Exception('CALSTARS file does not have fwhm and FF files do not exist in'
+                                        'directory. You must give a fwhm value with "--fwhm 3"')
+                            
 
     # If the FWHM information is not present, run the star extraction
-    if not found_good_calstars:
-
+    if not found_good_calstars and exists_FF_files:
         print()
         print("No FWHM information found in existing CALSTARS files!")
         print()
         print("Rerunning star detection...")
         print()
 
-        found_good_calstars = False
-
         # Run star extraction again, and now FWHM will be computed
         calstars_list = extractStarsAndSave(config, dir_path)
-
-        if len(calstars_list) == 0:
-            found_good_calstars = False
-
+        
         # Check for a minimum of detected stars
         for ff_name, star_data in calstars_list:
             if len(star_data) >= config.ff_min_stars:
@@ -675,30 +695,33 @@ def sensorCharacterization(config, dir_path):
 
     # Dictionary which holds information about FWHM and standard deviation of the image background
     sensor_data = {}
+    meteor_ff = [data[0] for data in meteor_data]
 
     # Compute median FWHM per FF file
     for ff_name, star_data in calstars_list:
 
         # Check that the FF file exists in the data directory
-        if ff_name not in os.listdir(dir_path):
+        if ff_name not in meteor_ff:
             continue
+        
+        if star_data[0][4] == -1 and default_fwhm is not None and not exists_FF_files: # data is old and fw
+            fwhm_median = default_fwhm # both these parameters are arbitrary
+            stddev_median = 4
+        else:
+            star_data = np.array(star_data)
 
-        star_data = np.array(star_data)
+            # Compute the median star FWHM
+            fwhm_median = np.median(star_data[:, 4])
 
-        # Compute the median star FWHM
-        fwhm_median = np.median(star_data[:, 4])
+            # Load the FF file and compute the standard deviation of the background
+            ff = FFfile.read(dir_path, ff_name)
 
-        # Load the FF file and compute the standard deviation of the background
-        ff = FFfile.read(dir_path, ff_name)
-
-        # Compute the median stddev of the background
-        stddev_median = np.median(ff.stdpixel)
+            # Compute the median stddev of the background
+            stddev_median = np.median(ff.stdpixel)
 
         # Store the values to the dictionary
         sensor_data[ff_name] = [fwhm_median, stddev_median]
-
-        print("{:s}, {:5.2f}, {:5.2f}".format(
-            ff_name, fwhm_median, stddev_median))
+        print("{:s}, {:5.2f}, {:5.2f}".format(ff_name, fwhm_median, stddev_median))
 
     return sensor_data
 
@@ -722,7 +745,7 @@ def stellarLMModel(p0):
 
 def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_end, mass_index, binduration=None,
                 binmeteors=None, timebin_intdt=0.25, ht_std_percent=5.0, mask=None, show_plots=True, 
-                confidence_interval=0.95):
+                confidence_interval=0.95, default_fwhm=None):
     """ Compute flux using measurements in the given FTPdetectinfo file.
 
     Arguments:
@@ -815,14 +838,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                                     for ff_name in recalibrated_platepars])
 
     # Locate and load the mask file
-    if config.mask_file in file_list:
-        mask_path = os.path.join(dir_path, config.mask_file)
-        mask = loadMask(mask_path)
-        print("Using mask:", mask_path)
-
-    else:
-        print("No mask used!")
-        mask = None
+    mask = getMaskFile(dir_path, config, file_list=file_list)
 
     # Compute the population index using the classical equation
     # Found to be more consistent when comparing fluxes
@@ -853,7 +869,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
     else:
 
         # Run sensor characterization
-        sensor_data = sensorCharacterization(config, dir_path)
+        sensor_data = sensorCharacterization(config, dir_path, meteor_data, default_fwhm=default_fwhm)
 
         # Save to file for posterior use
         with open(sensor_characterization_path, 'w') as f:
@@ -1022,7 +1038,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         curr_bin_start = dt_beg
         dt = datetime.timedelta(hours=(binduration / flux_config.sub_time_bins))
         while curr_bin_start < dt_end:
-            bin_intervals.append((curr_bin_start, min(curr_bin_start + dt, dt_end)))
+            bin_intervals.append((curr_bin_start, min(curr_bin_start + flux_config.sub_time_bins * dt, dt_end)))
             bin_meteor_information.append([[], []])
             curr_bin_start += dt
 
@@ -1517,6 +1533,12 @@ def fluxParser():
     flux_parser.add_argument("-c", "--config", metavar="CONFIG_PATH", type=str, default='.',
                             help="Path to a config file which will be used instead of the default one."
                                  " To load the .config file in the given data directory, write '.' (dot).")
+    flux_parser.add_argument("--fwhm", metavar="DEFAULT_FWHM", type=float,
+                            help="For old datasets fwhm was not measured for CALSTARS files, in these cases, "
+                                 "fwhm must be given (will be used only when necessary)")
+    flux_parser.add_argument("--ratiothres", metavar="RATIO", type=float, default=0.4,
+                            help="Define a specific ratio threshold that will decide whether there are clouds. "
+                                 "0.4 has been tested to be good and it is the default")
     return flux_parser
 
 
@@ -1570,8 +1592,7 @@ if __name__ == "__main__":
         dt_end = datetime.datetime.strptime(cml_args.timeinterval[1], "%Y%m%d_%H%M%S")
         time_intervals = [(dt_beg, dt_end)]
     else:
-        detect_clouds = detectClouds(config, dir_path)
-        time_intervals = computeTimeIntervals(detect_clouds)
+        time_intervals = detectClouds(config, dir_path, show_plots=True, ratio_threshold=cml_args.ratiothres)
         for i, interval in enumerate(time_intervals):
             print(f'interval {i+1}/{len(time_intervals)}: {interval}')
             
@@ -1585,4 +1606,4 @@ if __name__ == "__main__":
     for dt_beg, dt_end in time_intervals:
         print(f'Using interval: {(dt_beg, dt_end)}')
         computeFlux(config, dir_path, ftpdetectinfo_path, cml_args.shower_code, dt_beg, dt_end,
-                    cml_args.s, cml_args.binduration, cml_args.binmeteors)
+                    cml_args.s, cml_args.binduration, cml_args.binmeteors, default_fwhm=cml_args.fwhm)
