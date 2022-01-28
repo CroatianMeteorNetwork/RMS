@@ -13,6 +13,7 @@ import collections
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+import pyqtgraph as pg
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
@@ -889,8 +890,18 @@ class PlateTool(QtWidgets.QMainWindow):
         # adding img
         gamma = 1
         invert = False
+
+        # Add saturation mask (R, G, B, alpha) - alpha can only be 0 or 1
+        saturation_mask_img = np.zeros_like(self.img_handle.loadChunk().maxpixel).T
+        self.saturation_mask_img = np.zeros(saturation_mask_img.shape + (4, ), dtype='uint8')
+        self.saturation_mask = pg.ImageItem()
+        self.saturation_mask.setImage(self.saturation_mask_img)
+        self.saturation_mask.setZValue(1)
+        self.img_frame.addItem(self.saturation_mask)
+
+        # Add main image
         self.img_type_flag = 'avepixel'
-        self.img = ImageItem(img_handle=self.img_handle, gamma=gamma, invert=invert)
+        self.img = ImageItem(img_handle=self.img_handle, gamma=gamma, invert=invert, saturation_mask=self.saturation_mask)
         self.img_frame.addItem(self.img)
         self.img_frame.autoRange(padding=0)
 
