@@ -332,12 +332,13 @@ class ImageItem(pg.ImageItem):
     sigLevelsChanged = QtCore.pyqtSignal()
 
     # ImageItem that provides an interface around img_handle
-    def __init__(self, img_handle=None, **kwargs):
+    def __init__(self, img_handle=None, saturation_mask=None, **kwargs):
         """
         Makes an image item with img_handle, with the default image of avepixel
 
-        Arguments:
+        Keyword arguments:
             image_handle: [InputType]
+            saturation_mask: [ImageItem] Mask for painting saturation on the screen. None by default.
             invert: [boolean] whether to invert image when displaying
             gamma: [float]
             dark:
@@ -346,6 +347,8 @@ class ImageItem(pg.ImageItem):
         """
         self.img_handle = img_handle
         pg.ImageItem.__init__(self, image=None, **kwargs)
+
+        self.saturation_mask = saturation_mask
 
         if 'gamma' in kwargs.keys():
             self._gamma = kwargs['gamma']
@@ -367,7 +370,9 @@ class ImageItem(pg.ImageItem):
         else:
             self.flat_struct = None
 
-        self.avepixel()
+        if img_handle is not None:
+            self.avepixel()
+
         self.img_showing = 'avepixel'
 
     def maxpixel(self):
@@ -425,6 +430,37 @@ class ImageItem(pg.ImageItem):
 
         self.setImage(avepixel)
         self.img_showing = 'avepixel'
+
+
+    def setImage(self, *args, **kwargs):
+
+        # Set the saturation mask
+        if len(args) > 0:
+
+            img = args[0]
+
+            # Apply a saturation mask for 8-bit data only, if given
+            if self.saturation_mask is not None:
+                if 8*img.itemsize == 8:
+
+                    # Assume everything with levels > 250 saturates
+                    levels250 = img > 250
+
+                    self.saturation_mask.image[:, :] = 0
+                    
+                    # Set red colour on for saturation
+                    self.saturation_mask.image[levels250, 0] = 255
+                    self.saturation_mask.image[levels250, 1] = 0
+                    self.saturation_mask.image[levels250, 2] = 0
+
+                    # Set alpha on to turn on the mask, just a light shading
+                    self.saturation_mask.image[levels250, 3] = 32
+
+                    self.saturation_mask.setImage(self.saturation_mask.image)
+
+
+        super().setImage(*args, **kwargs)
+
 
     def reloadImage(self):
         """ If img_handle or the flats and darks was changed, reload the current image """

@@ -13,6 +13,7 @@ import collections
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+import pyqtgraph as pg
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
@@ -889,8 +890,18 @@ class PlateTool(QtWidgets.QMainWindow):
         # adding img
         gamma = 1
         invert = False
+
+        # Add saturation mask (R, G, B, alpha) - alpha can only be 0 or 1
+        saturation_mask_img = np.zeros_like(self.img_handle.loadChunk().maxpixel).T
+        self.saturation_mask_img = np.zeros(saturation_mask_img.shape + (4, ), dtype='uint8')
+        self.saturation_mask = pg.ImageItem()
+        self.saturation_mask.setImage(self.saturation_mask_img)
+        self.saturation_mask.setZValue(1)
+        self.img_frame.addItem(self.saturation_mask)
+
+        # Add main image
         self.img_type_flag = 'avepixel'
-        self.img = ImageItem(img_handle=self.img_handle, gamma=gamma, invert=invert)
+        self.img = ImageItem(img_handle=self.img_handle, gamma=gamma, invert=invert, saturation_mask=self.saturation_mask)
         self.img_frame.addItem(self.img)
         self.img_frame.autoRange(padding=0)
 
@@ -3555,7 +3566,6 @@ class PlateTool(QtWidgets.QMainWindow):
             
             # Sort by descending declination (needed for fast filtering)
             dec_sorted_ind = np.argsort(catalog_stars[:, 1])[::-1]
-            dec_sorted_ind_inverse = np.argsort(dec_sorted_ind)
             catalog_stars = catalog_stars[dec_sorted_ind]
 
 
@@ -3575,15 +3585,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
         filtered_catalog_stars = np.array(filtered_catalog_stars)
 
+
         # Return original indexing if it was sorted by declination
         if sort_declination and len(filtered_indices):
 
-            # Cut indices to the available length received from the filtered list
-            dec_sorted_ind_inverse_filtered = dec_sorted_ind_inverse[dec_sorted_ind_inverse < len(filtered_indices)]
-
             # Restore original indexing
-            filtered_indices = filtered_indices[dec_sorted_ind_inverse_filtered]
-            filtered_catalog_stars = filtered_catalog_stars[dec_sorted_ind_inverse_filtered]
+            filtered_indices = dec_sorted_ind[filtered_indices]
 
 
         return filtered_indices, filtered_catalog_stars
