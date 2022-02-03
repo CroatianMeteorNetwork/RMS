@@ -1,29 +1,31 @@
 """ Single station shower association. """
 
-from __future__ import print_function, division, absolute_import
+from __future__ import absolute_import, division, print_function
 
-
-import sys
-import os
-import glob
-import datetime
 import copy
+import datetime
+import glob
+import os
+import sys
 
-import numpy as np
-import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-
-from RMS.Astrometry.Conversions import raDec2Vector, vector2RaDec, datetime2JD, jd2Date, raDec2AltAz, \
-    geocentricToApparentRadiantAndVelocity, EARTH_CONSTANTS
+import matplotlib.pyplot as plt
+import numpy as np
+from RMS.Astrometry.Conversions import (EARTH_CONSTANTS, datetime2JD,
+                                        geocentricToApparentRadiantAndVelocity,
+                                        jd2Date, raDec2AltAz, raDec2Vector,
+                                        vector2RaDec)
 from RMS.Formats.FFfile import filenameToDatetime
-from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
-from RMS.Formats.Showers import loadShowers, generateActivityDiagram, makeShowerColors
-from RMS.Math import vectNorm, angularSeparation, angularSeparationVect, isAngleBetween, \
-    sphericalPointFromHeadingAndDistance, cartesianToPolar
-from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePhase
-from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
+from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, readFTPdetectinfo
+from RMS.Formats.Showers import (generateActivityDiagram, loadShowers,
+                                 makeShowerColors)
+from RMS.Math import (angularSeparation, angularSeparationVect,
+                      cartesianToPolar, isAngleBetween,
+                      sphericalPointFromHeadingAndDistance, vectNorm)
 from RMS.Routines.AllskyPlot import AllSkyPlot
-
+from RMS.Routines.GreatCircle import (fitGreatCircle, greatCircle,
+                                      greatCirclePhase)
+from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
 
 EARTH = EARTH_CONSTANTS()
 
@@ -565,7 +567,6 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
             ### ###
 
-            
             # If all heights (even those with +/- 1 frame) are outside the height range, reject the meteor
             if ((meteor_beg_ht_p1 < filter_end_ht) or (meteor_beg_ht_p1 > filter_beg_ht)) and \
                 ((meteor_beg_ht    < filter_end_ht) or (meteor_beg_ht    > filter_beg_ht)) and \
@@ -940,9 +941,7 @@ if __name__ == "__main__":
 
     import RMS.ConfigReader as cr
 
-
     ### COMMAND LINE ARGUMENTS
-
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Perform single-station established shower association on FTPdetectinfo files.")
 
@@ -964,6 +963,8 @@ if __name__ == "__main__":
     #########################
 
     ftpdetectinfo_path = cml_args.ftpdetectinfo_path
+    ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path)
+    
 
     # Apply wildcards to input
     ftpdetectinfo_path_list = []

@@ -14,21 +14,21 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import print_function, division, absolute_import
+from __future__ import absolute_import, division, print_function
 
+import math
 import os
 import sys
-import math
 
 import RMS
 
 try:
     # Python 3
-    from configparser import RawConfigParser, NoOptionError 
+    from configparser import NoOptionError, RawConfigParser 
 
 except:
     # Python 2
-    from ConfigParser import RawConfigParser, NoOptionError
+    from ConfigParser import NoOptionError, RawConfigParser
     
 
 
@@ -197,6 +197,7 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
     else:
         # Load the default configuration file
         config = parse(".config")
+        print("HEY")
 
 
     return config
@@ -437,6 +438,7 @@ class Config:
         self.star_catalog_band_ratios = [0.45, 0.70, 0.72, 0.50]
 
         self.platepar_name = 'platepar_cmn2010.cal'
+        self.platepars_flux_recalibrated_name = 'platepars_flux_recalibrated.json'
         self.platepars_recalibrated_name = 'platepars_all_recalibrated.json'
 
         # Name of the platepar file on the server
@@ -1253,8 +1255,11 @@ def parseCalibration(config, parser):
     if parser.has_option(section, "platepar_name"):
         config.platepar_name = parser.get(section, "platepar_name")
 
-    if parser.has_option(section, "platepars_all_recalibrated"):
-        config.platepars_all_recalibrated = parser.get(section, "platepars_all_recalibrated")
+    if parser.has_option(section, "platepars_flux_recalibrated_name"):
+        config.platepar_flux_recalibrated_name = parser.get(section, "platepars_flux_recalibrated_name")
+
+    if parser.has_option(section, "platepars_recalibrated_name"):
+        config.platepars_recalibrated_name = parser.get(section, "platepars_recalibrated_name")
 
     if parser.has_option(section, "platepar_remote_name"):
         config.platepar_remote_name = parser.get(section, "platepar_remote_name")
