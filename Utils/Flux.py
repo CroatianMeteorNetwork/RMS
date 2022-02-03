@@ -416,77 +416,85 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
     Return:
         pred_star_count: [dict] FF_file: number_of_stars_in_FOV
     """
-    ff_files = list(recalibrated_platepars.keys())
 
-    # using a blank mask if nothing is given
-    if mask is None:
-        mask = MaskStructure(np.full((recalibrated_platepars[ff_files[0]].Y_res,
-                             recalibrated_platepars[ff_files[0]].X_res), 255, dtype=np.uint8))
 
     pred_star_count = {}
-    star_mag = {}
-    for i, ff_file in enumerate(ff_files):
-        platepar = recalibrated_platepars[ff_file]
-        lim_mag = ff_limiting_magnitude[ff_file]
-        if lim_mag is None:
-            continue
-        
-        date = FFfile.getMiddleTimeFF(ff_file, config.fps, ret_milliseconds=True)
-        jd = date2JD(*date)
-        
-        # make a polygon on a sphere out of 5 points on each side
-        # n_points = 5
-        # y_points = [platepar.Y_res * i/n_points for i in range(n_points)] + [platepar.Y_res]*n_points + \
-        #             [platepar.Y_res * (1-i/n_points) for i in range(n_points)] + [0]*n_points
-        # x_points = [0]*n_points + [platepar.X_res * i/n_points for i in range(n_points)] + \
-        #             [platepar.X_res]*n_points + [platepar.X_res * (1-i/n_points) for i in range(n_points)]
-        _, ra_vertices, dec_vertices, _ = xyToRaDecPP([date]*4,
-                                                      [0, 0, platepar.X_res, platepar.X_res],
-                                                      [0, platepar.Y_res, platepar.Y_res, 0],
-                                                      [1]*4, platepar,
-                                                      extinction_correction=False)
 
-        # collect and filter catalog stars
-        catalog_stars, _, _ = StarCatalog.readStarCatalog(
-            config.star_catalog_path, config.star_catalog_file, lim_mag=lim_mag,
-            mag_band_ratios=config.star_catalog_band_ratios)
-        
-        # filter out stars that are outside of the polygon on the sphere made by the fov
-        ra_catalog, dec_catalog, mag = catalog_stars.T
-        inside = pointInsideConvexPolygonSphere(np.array([ra_catalog, dec_catalog]).T,
-                                                np.array([ra_vertices, dec_vertices]).T)
-        x, y = raDecToXYPP(ra_catalog, dec_catalog, jd, platepar)
-        x = x[inside]
-        y = y[inside]
-        mag = mag[inside]
-        # correct for extinction and vignetting so that dim stars can be filtered 
-        # (not necessary since limiting magnitude already matches with matched star LM)
-        # mag = extinctionCorrectionTrueToApparent(mag[inside], ra_catalog[inside], dec_catalog[inside], jd, platepar)
-        # mag = correctVignettingTrueToApparent(mag, x, y, platepar)
-        # filter coordinates to be in FOV and make sure that the stars that are too dim are filtered
-        bounds = (mag <= lim_mag) & (y >= 0) & (y < platepar.Y_res) & (x >= 0) & (x < platepar.X_res)
-        x = x[bounds]
-        y = y[bounds]
-        mag = mag[bounds]
-        
-        # filter stars with mask
-        mask_filter = np.take(np.floor(mask.img/255),
-                              np.ravel_multi_index(np.floor(np.array([y, x])).astype(int),
-                                                   (platepar.Y_res, platepar.X_res))).astype(bool)
-        
-        if show_plot and i == int(len(ff_files)//2):
-            plt.title(f"{ff_file}, lim_mag={lim_mag:.2f}")
-            plt.scatter(*np.array(recalibrated_platepars[ff_file].star_list)[:,1:3].T[::-1],label='matched')
-            plt.scatter(x[mask_filter], y[mask_filter], c='r', marker='+', label='catalog')
-            plt.legend()
-            plt.show()
 
-            # print(np.sum(mask_filter))
-            # print(val[inside][bounds][mask_filter])
-            # plt.scatter(x[mask_filter], y[mask_filter], c=mag[inside & (mag <= lim_mag)][bounds][mask_filter])
-            # plt.show()
-        pred_star_count[ff_file] = np.sum(mask_filter)
-        star_mag[ff_file] = mag
+    ff_files = list(recalibrated_platepars.keys())
+
+    if len(ff_files):
+
+        # using a blank mask if nothing is given
+        if mask is None:
+            mask = MaskStructure(np.full((recalibrated_platepars[ff_files[0]].Y_res,
+                                 recalibrated_platepars[ff_files[0]].X_res), 255, dtype=np.uint8))
+
+        
+        star_mag = {}
+        for i, ff_file in enumerate(ff_files):
+            platepar = recalibrated_platepars[ff_file]
+            lim_mag = ff_limiting_magnitude[ff_file]
+            if lim_mag is None:
+                continue
+            
+            date = FFfile.getMiddleTimeFF(ff_file, config.fps, ret_milliseconds=True)
+            jd = date2JD(*date)
+            
+            # make a polygon on a sphere out of 5 points on each side
+            # n_points = 5
+            # y_points = [platepar.Y_res * i/n_points for i in range(n_points)] + [platepar.Y_res]*n_points + \
+            #             [platepar.Y_res * (1-i/n_points) for i in range(n_points)] + [0]*n_points
+            # x_points = [0]*n_points + [platepar.X_res * i/n_points for i in range(n_points)] + \
+            #             [platepar.X_res]*n_points + [platepar.X_res * (1-i/n_points) for i in range(n_points)]
+            _, ra_vertices, dec_vertices, _ = xyToRaDecPP([date]*4,
+                                                          [0, 0, platepar.X_res, platepar.X_res],
+                                                          [0, platepar.Y_res, platepar.Y_res, 0],
+                                                          [1]*4, platepar,
+                                                          extinction_correction=False)
+
+            # collect and filter catalog stars
+            catalog_stars, _, _ = StarCatalog.readStarCatalog(
+                config.star_catalog_path, config.star_catalog_file, lim_mag=lim_mag,
+                mag_band_ratios=config.star_catalog_band_ratios)
+            
+            # filter out stars that are outside of the polygon on the sphere made by the fov
+            ra_catalog, dec_catalog, mag = catalog_stars.T
+            inside = pointInsideConvexPolygonSphere(np.array([ra_catalog, dec_catalog]).T,
+                                                    np.array([ra_vertices, dec_vertices]).T)
+            x, y = raDecToXYPP(ra_catalog, dec_catalog, jd, platepar)
+            x = x[inside]
+            y = y[inside]
+            mag = mag[inside]
+            # correct for extinction and vignetting so that dim stars can be filtered 
+            # (not necessary since limiting magnitude already matches with matched star LM)
+            # mag = extinctionCorrectionTrueToApparent(mag[inside], ra_catalog[inside], dec_catalog[inside], jd, platepar)
+            # mag = correctVignettingTrueToApparent(mag, x, y, platepar)
+            # filter coordinates to be in FOV and make sure that the stars that are too dim are filtered
+            bounds = (mag <= lim_mag) & (y >= 0) & (y < platepar.Y_res) & (x >= 0) & (x < platepar.X_res)
+            x = x[bounds]
+            y = y[bounds]
+            mag = mag[bounds]
+            
+            # filter stars with mask
+            mask_filter = np.take(np.floor(mask.img/255),
+                                  np.ravel_multi_index(np.floor(np.array([y, x])).astype(int),
+                                                       (platepar.Y_res, platepar.X_res))).astype(bool)
+            
+            if show_plot and i == int(len(ff_files)//2):
+                plt.title(f"{ff_file}, lim_mag={lim_mag:.2f}")
+                plt.scatter(*np.array(recalibrated_platepars[ff_file].star_list)[:,1:3].T[::-1],label='matched')
+                plt.scatter(x[mask_filter], y[mask_filter], c='r', marker='+', label='catalog')
+                plt.legend()
+                plt.show()
+
+                # print(np.sum(mask_filter))
+                # print(val[inside][bounds][mask_filter])
+                # plt.scatter(x[mask_filter], y[mask_filter], c=mag[inside & (mag <= lim_mag)][bounds][mask_filter])
+                # plt.show()
+            pred_star_count[ff_file] = np.sum(mask_filter)
+            star_mag[ff_file] = mag
+
     return pred_star_count
 
 
@@ -706,22 +714,15 @@ def sensorCharacterization(config, dir_path, meteor_data, default_fwhm=None):
         
         if star_data[0][4] == -1 and default_fwhm is not None and not exists_FF_files: # data is old and fw
             fwhm_median = default_fwhm # both these parameters are arbitrary
-            stddev_median = 4
         else:
             star_data = np.array(star_data)
 
             # Compute the median star FWHM
             fwhm_median = np.median(star_data[:, 4])
 
-            # Load the FF file and compute the standard deviation of the background
-            ff = FFfile.read(dir_path, ff_name)
-
-            # Compute the median stddev of the background
-            stddev_median = np.median(ff.stdpixel)
-
         # Store the values to the dictionary
-        sensor_data[ff_name] = [fwhm_median, stddev_median]
-        print("{:s}, {:5.2f}, {:5.2f}".format(ff_name, fwhm_median, stddev_median))
+        sensor_data[ff_name] = [fwhm_median]
+        print("{:s}, {:5.2f}".format(ff_name, fwhm_median))
 
     return sensor_data
 
@@ -843,7 +844,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
     # Compute the population index using the classical equation
     # Found to be more consistent when comparing fluxes
     population_index = 10**((mass_index - 1)/2.5)
-    # population_index = 10**((mass_index - 1)/2.3) # TEST !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
+    # population_index = 10**((mass_index - 1)/2.3) # TEST !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     ### SENSOR CHARACTERIZATION ###
     # Computes FWHM of stars and noise profile of the sensor
@@ -885,9 +886,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             # Save to disk
             f.write(out_str)
 
-    # Compute the nighly mean FWHM and noise stddev
+    # Compute the nighly mean FWHM
     fwhm_nightly_mean = np.mean([sensor_data[key][0] for key in sensor_data])
-    stddev_nightly_mean = np.mean([sensor_data[key][1] for key in sensor_data])
 
     ### ###
 
@@ -995,13 +995,6 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
     ###
 
     # Compute the average limiting magnitude to which all flux will be normalized
-
-    # Standard deviation of star PSF, nightly mean (px)
-    star_stddev = fwhm_nightly_mean/2.355
-
-    # # Compute the theoretical stellar limiting magnitude (nightly average)
-    # star_sum = 2*np.pi*(config.k1_det*stddev_nightly_mean + config.j1_det)*star_stddev**2
-    # lm_s_nightly_mean = -2.5*np.log10(star_sum) + mag_lev_nightly_mean
 
     # Compute the theoretical stellar limiting magnitude using an empirical model (nightly average)
     lm_s_nightly_mean = stellarLMModel(mag_lev_nightly_mean)
@@ -1209,19 +1202,12 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             # Compute the mean star FWHM in the given bin
             fwhm_bin_mean = np.mean([sensor_data[ff_name][0] for ff_name in bin_ffs])
 
-            # Compute the mean background stddev in the given bin
-            stddev_bin_mean = np.mean([sensor_data[ff_name][1] for ff_name in bin_ffs])
-
             # Compute the mean photometric zero point in the given bin
             mag_lev_bin_mean = np.mean(
                 [recalibrated_platepars[ff_name].mag_lev for ff_name in bin_ffs if ff_name in recalibrated_platepars])
 
             # # Standard deviation of star PSF, nightly mean (px)
             # star_stddev = fwhm_bin_mean/2.355
-
-            # Compute the theoretical stellar limiting magnitude (bin average)
-            # star_sum = 2*np.pi*(config.k1_det*stddev_bin_mean + config.j1_det)*star_stddev**2
-            # lm_s = -2.5*np.log10(star_sum) + mag_lev_bin_mean
 
             # Use empirical LM calculation
             lm_s = stellarLMModel(mag_lev_bin_mean)
@@ -1390,7 +1376,6 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
             print("-- Sensor information ---")
             print("Star FWHM:  {:5.2f} px".format(fwhm_bin_mean))
-            print("Bkg stddev: {:4.1f} ADU".format(stddev_bin_mean))
             print("Photom ZP:  {:+6.2f} mag".format(mag_lev_bin_mean))
             print("Stellar LM: {:+.2f} mag".format(lm_s))
             print("-- Flux ---")
