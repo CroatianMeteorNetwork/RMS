@@ -125,13 +125,13 @@ class FluxConfig(object):
         self.dht = 2
 
         # Limit of meteor's elevation above horizon (deg). 25 degrees by default.
-        self.elev_limit = 25
+        self.elev_limit = 20
 
         # Minimum radiant elevation in the time bin (deg). 25 degreees by default
-        self.rad_elev_limit = 25
+        self.rad_elev_limit = 15
 
         # Minimum distance of the end of the meteor to the radiant (deg)
-        self.rad_dist_min = 20
+        self.rad_dist_min = 15
 
         # Subdivide the time bin into the given number of subbins
         self.sub_time_bins = 2
@@ -318,8 +318,14 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, ratio_thresh
         recorded_files = list(recalibrated_platepars.keys())
 
     matched_count = {ff: len(recalibrated_platepars[ff].star_list) for ff in recorded_files}
-    
-    star_det_mag_corr = -2.5*np.log10(config.intensity_threshold/18) - 1 # correction for star detector LM
+        
+    # Compute the correction between the visible limiting magnitude and the LM produced by the star detector
+    #   - normalize the LM to the intensity threshold of 18
+    #   - correct for the sensitivity at intensity threshold of 18 (empirical)
+    star_det_mag_corr = -2.5*np.log10(config.intensity_threshold/18) - 1.3
+
+
+    # Compute the limiting magnitude of the star detector
     ff_limiting_magnitude = {ff_file: (stellarLMModel(recalibrated_platepars[ff_file].mag_lev) + star_det_mag_corr if
                                        recalibrated_platepars[ff_file].auto_recalibrated else None)
                              for ff_file in recorded_files}
@@ -333,6 +339,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, ratio_thresh
                             [star[3] for star in star_data.star_list], 
                             platepar)[3], 90) for ff, star_data in recalibrated_platepars.items() if len(star_data.star_list)}
         
+        # Compute the limiting magnitude of matched stars as the 90th percentile of the faintest matched stars
         matched_star_LM = {ff: np.percentile(np.array(recalibrated_platepars[ff].star_list)[:,6], 90)
                         for ff in recorded_files if len(recalibrated_platepars[ff].star_list)}
 
@@ -340,28 +347,38 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, ratio_thresh
                                        recalibrated_platepars[ff_file].auto_recalibrated else None)
                              for ff_file in recorded_files}
             
-        fig, ax = plt.subplots(2)
+        # fig, ax = plt.subplots(2)
         plot_format = mdates.DateFormatter('%H:%M')
-        ax[0].xaxis.set_major_formatter(plot_format)
-        ax[0].scatter([FFfile.filenameToDatetime(ff) for ff in recorded_files if ff_limiting_magnitude[ff] is not None], 
-                    [ff_limiting_magnitude[ff]/matched_pred_LM[ff] for ff in recorded_files if ff_limiting_magnitude[ff] is not None])
-        ax[0].set_ylabel('LM/min star magnitude')
-        ax[0].set_xlabel('Time')
+        # ax[0].xaxis.set_major_formatter(plot_format)
+
+        # ax[0].scatter([FFfile.filenameToDatetime(ff) for ff in recorded_files if ff_limiting_magnitude[ff] is not None], 
+        #             [ff_limiting_magnitude[ff] - matched_star_LM[ff] for ff in recorded_files if ff_limiting_magnitude[ff] is not None], marker='x', c='orange')
+        # ax[0].set_ylabel('$\\Delta$ Matched LM')
+        # ax[0].set_xlabel('Time')
         
-        ax[1].xaxis.set_major_formatter(plot_format)
-        ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in ff_limiting_magnitude],
-                    ff_limiting_magnitude.values(),marker='+', label='empirical LM or config mag')
-        ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in matched_pred_LM],
-                    matched_pred_LM.values(), label='faintest detected star mag (pred)')
-        ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in empirical_LM],
-                    empirical_LM.values(), label='empirical LM')
-        ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in matched_star_LM],
-                    matched_star_LM.values(),marker='x', label='faintest matched star mag (cat)')
-        # ax[1].scatter([FFfile.filenameToDatetime(ff) for ff in recorded_files],
+
+        plt.gca().xaxis.set_major_formatter(plot_format)
+
+        plt.gca().scatter([FFfile.filenameToDatetime(ff) for ff in empirical_LM],
+                    empirical_LM.values(), label='Stellar LM', s=5, c='k')
+
+        plt.gca().scatter([FFfile.filenameToDatetime(ff) for ff in ff_limiting_magnitude],
+                    ff_limiting_magnitude.values(), marker='+', label='Star detection LM', c='orange')
+
+        # plt.gca().scatter([FFfile.filenameToDatetime(ff) for ff in matched_pred_LM],
+        #             matched_pred_LM.values(), label='faintest detected star mag (pred)')
+
+        plt.gca().scatter([FFfile.filenameToDatetime(ff) for ff in matched_star_LM],
+                    matched_star_LM.values(), marker='x', label="90th percentile detected stars", c='green')
+
+        # plt.gca().scatter([FFfile.filenameToDatetime(ff) for ff in recorded_files],
         #             [empirical_LM[ff] for ff in recorded_files], label='empirical LM')
-        ax[1].set_ylabel('Magnitude')
-        ax[1].set_xlabel('Time')
-        ax[1].legend()
+
+        plt.gca().set_ylabel('Magnitude')
+        plt.gca().set_xlabel('Time')
+
+        plt.gca().legend()
+
         plt.show()
 
     predicted_stars = predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config, mask, 
