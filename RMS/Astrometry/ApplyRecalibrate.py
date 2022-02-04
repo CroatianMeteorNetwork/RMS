@@ -283,45 +283,51 @@ def recalibratePlateparsForFF(prev_platepar, ff_file_names, calstars, catalog_st
         jd = date2JD(*calstars_time)
         star_dict_ff = {jd: calstars[ff_name]}
 
-        # Recalibrate the platepar using star matching
-        result, min_match_radius = recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, 
-                                                 lim_mag=lim_mag)
+        result = None
 
-        # If the recalibration failed, try using FFT alignment
-        if result is None:
+        # Skip recalibration if less than a minimum number of stars were detected
+        if (len(calstars[ff_name]) >= config.ff_min_stars) and (len(calstars[ff_name]) >= config.min_matched_stars):
 
-            print()
-            print('Running FFT alignment...')
+            # Recalibrate the platepar using star matching
+            result, min_match_radius = recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, 
+                                                     lim_mag=lim_mag)
 
-            # Run FFT alignment
-            calstars_coords = np.array(star_dict_ff[jd])[:, :2]
-            calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
-            print(calstars_time)
-            test_platepar = alignPlatepar(config, prev_platepar, calstars_time, calstars_coords,
-                                          show_plot=False)
+            # If the recalibration failed, try using FFT alignment
+            if result is None:
 
-            # Try to recalibrate after FFT alignment
-            result, _ = recalibrateFF(config, test_platepar, jd, star_dict_ff, catalog_stars, lim_mag=lim_mag)
-
-            # If the FFT alignment failed, align the original platepar using the smallest radius that matched
-            #   and force save the the platepar
-            if (result is None) and (min_match_radius is not None):
                 print()
-                print("Using the old platepar with the minimum match radius of: {:.2f}".format(
-                    min_match_radius))
-                result, _ = recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars,
-                                          max_match_radius=min_match_radius, force_platepar_save=True,
-                                          lim_mag=lim_mag)
+                print('Running FFT alignment...')
 
-                if result is not None:
+                # Run FFT alignment
+                calstars_coords = np.array(star_dict_ff[jd])[:, :2]
+                calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
+                print(calstars_time)
+                test_platepar = alignPlatepar(config, prev_platepar, calstars_time, calstars_coords,
+                                              show_plot=False)
+
+                # Try to recalibrate after FFT alignment
+                result, _ = recalibrateFF(config, test_platepar, jd, star_dict_ff, catalog_stars, lim_mag=lim_mag)
+
+                # If the FFT alignment failed, align the original platepar using the smallest radius that matched
+                #   and force save the the platepar
+                if (result is None) and (min_match_radius is not None):
+                    print()
+                    print("Using the old platepar with the minimum match radius of: {:.2f}".format(
+                        min_match_radius))
+                    result, _ = recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars,
+                                              max_match_radius=min_match_radius, force_platepar_save=True,
+                                              lim_mag=lim_mag)
+
+                    if result is not None:
+                        working_platepar = result
+
+                # If the alignment succeeded, save the result
+                else:
                     working_platepar = result
 
-            # If the alignment succeeded, save the result
             else:
                 working_platepar = result
 
-        else:
-            working_platepar = result
 
         # Store the platepar if the fit succeeded
         if result is not None:
