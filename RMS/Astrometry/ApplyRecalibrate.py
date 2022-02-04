@@ -217,7 +217,7 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
         print('Saving improved platepar...')
 
         ### plot for checking fit quality ###
-        # if date2JD(*FFfile.getMiddleTimeFF("FF_US0009_20201213_094432_813_0839680.fits", config.fps)) == jd:
+        # if date2JD(*FFfile.getMiddleTimeFF("FF_HR000N_20201214_203429_089_0416000.fits", config.fps)) == jd:
         #     plt.title(f'F_HR000K_20201213_225055_929_0631040.fits')
         #     plt.scatter(*matched_stars[jd][0][:,:2].T[::-1], label='matched')
         #     plt.scatter(*np.array(star_dict_ff[jd])[:,:2].T[::-1],c='r',s=1, label='detected')
