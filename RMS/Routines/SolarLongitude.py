@@ -1,15 +1,12 @@
 """ Functions for calculating solar longitude from Julian date and vice versa. """
 
-from __future__ import print_function, division, absolute_import
+from __future__ import absolute_import, division, print_function
 
 import datetime
 
 import numpy as np
 import scipy.optimize
-
-
 from RMS.Astrometry.Conversions import date2JD, datetime2JD
-
 
 
 def jd2SolLonSteyaert(jd):
@@ -137,6 +134,10 @@ def _solLon2jd(solFunc, year, month, L):
 def solLon2jdSteyaert(*args):
     """ Convert the given solar longitude (J2000) to Julian date, J2000.0 epoch. Chris Steyaert method. 
     
+    Supposing L is in the middle of the month, the year and month can be a bit over a month before or a
+    bit over a month after L (year is paired with month properly) before jd will start being wrong. Within
+    that it is correct to 0.5 ms
+    
     Arguments:
         year: [int] Year of the event.
         month: [int] Month of the event.
@@ -149,8 +150,25 @@ def solLon2jdSteyaert(*args):
 
     return _solLon2jd(jd2SolLonSteyaert, *args)
 
-
-
+def unwrapSol(sol, first_sol, last_sol):
+    """ Given a solar longitude (J2000), and the range that it must be in, the value is unwrapped so that
+    any valid value of sol will keep increasing from first_sol until last_sol, even when it should otherwise
+    wrap back to 0.
+    
+    Arguments:
+        sol: [float or ndarray] Solar longitude (radians)
+        first_sol: [float] Starting solar longitude (radians) which sol must be later than in time
+        last_sol: [float] Ending solar longitude (radians) which sol must be be earlier in time
+        
+    Return:
+        unwrapped_sol: [float]
+    
+    """
+    val = (2*np.pi + first_sol + last_sol)/2
+    ret = np.where(first_sol < last_sol, sol, (sol-val)%(2*np.pi) + val)
+    if isinstance(sol, np.ndarray):
+        return ret
+    return ret.item()
 
 if __name__ == "__main__":
 
