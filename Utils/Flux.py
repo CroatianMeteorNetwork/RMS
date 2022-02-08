@@ -228,20 +228,61 @@ def detectMoon(file_list, platepar, config):
         # calculating fraction of moon which is visible
         nnm = ephem.next_new_moon(o.date)
         pnm = ephem.previous_new_moon(o.date)
-        phase = (o.date - pnm) / (nnm - pnm)  # from 0 to 1 for 360 deg
-        lunar_area = 1 - np.abs(2 * phase - 1)  # using sawtooth function for fraction of moon visible
+        phase = (o.date - pnm)/(nnm - pnm)  # from 0 to 1 for 360 deg
+        lunar_area = 1 - np.abs(2*phase - 1)  # using sawtooth function for fraction of moon visible
         
-        # calculating angular distance from middle of fov to correct for checking after the xy mapping
-        angular_distance = angularSeparation(ra_mid, dec_mid, m.ra, m.dec)
-        
-        x, y = raDecToXYPP(np.array([np.degrees(m.ra)]), np.array([np.degrees(m.dec)]),
-                           datetime2JD(o.date.datetime()), platepar)
+        # Calculating angular distance from middle of fov to correct for checking after the xy mapping
+        angular_distance = np.degrees(angularSeparation(ra_mid, dec_mid, float(m.ra), float(m.dec)))
 
-        # an amount of pixels outside fov. It would be better if this exactly required the moon to be 3
-        # degrees outside of fov, but that can be computationally intensive
-        if ((x <= -30) or (x >= platepar.X_res + 30) or (y <= -50) or (y >= platepar.Y_res + 50) or \
-            (lunar_area < 0.25) or o.next_rising(m) < o.next_setting(m)) and angular_distance < radius:
+        # print()
+        # print(filename)
+        # print("Area:", lunar_area)
+        # print(o.next_rising(m) < o.next_setting(m))
+        # print("Ang dist:", angular_distance, radius)
+
+        
+        # Always take observations if the Moon is at less than 25% illumination, regardless of where it is
+        if lunar_area < 0.25:
+            
             new_file_list.append(filename)
+            continue
+
+        # Always take observations if the Moon is not above the horizon
+        elif o.next_rising(m) < o.next_setting(m):
+            
+            new_file_list.append(filename)
+            continue
+
+        # If it's brighter and up, only take observations when the Moon is outside the FOV
+        elif angular_distance > radius:
+
+            new_file_list.append(filename)
+            continue
+
+
+        # If it's witin the radius, check that it's not within the actual FOV
+        else:
+            
+            # Compute X, Y coordinates of the Moon in the image
+            x, y = raDecToXYPP(np.array([np.degrees(m.ra)]), np.array([np.degrees(m.dec)]),
+                               datetime2JD(o.date.datetime()), platepar)
+
+            x = x[0]
+            y = y[0]
+
+            # print(x, y)
+
+            # Compute the exclusion border in pixels (always scale to 720p)
+            border = 100*platepar.Y_res/720
+
+            if not (((x > -border) and (x < platepar.X_res + border)) \
+                and ((y > -border) and (y < platepar.Y_res + border))):
+
+                new_file_list.append(filename)
+                continue
+        
+
+        print("Skipping {:s}, Moon in the FOV!".format(filename))
 
     return new_file_list
 
@@ -314,7 +355,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, ratio_thresh
     else:
         print("Recalibrated platepar file not available!")
         print("Recalibrating...")
-        recalibrated_platepars = recalibrateSelectedFF(dir_path, recorded_files, star_list, config, stellarLMModel(platepar.mag_lev))
+        recalibrated_platepars = recalibrateSelectedFF(dir_path, recorded_files, star_list, config, stellarLMModel(platepar.mag_lev), ignore_distance_threshold=True)
         recorded_files = list(recalibrated_platepars.keys())
 
     matched_count = {ff: len(recalibrated_platepars[ff].star_list) for ff in recorded_files}
@@ -1545,6 +1586,8 @@ def fluxParser():
 
 
 if __name__ == "__main__":
+
+
     import RMS.ConfigReader as cr
 
     # COMMAND LINE ARGUMENTS

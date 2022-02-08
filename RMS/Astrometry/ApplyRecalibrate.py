@@ -37,7 +37,7 @@ RECALIBRATE_NEIGHBOURHOOD_SIZE = 3
 
 
 def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max_match_radius=None,
-                  force_platepar_save=False, lim_mag=None):
+                  force_platepar_save=False, lim_mag=None, ignore_distance_threshold=False):
     """ Given the platepar and a list of stars on one image, try to recalibrate the platepar to achieve
         the best match by brute force star matching.
     Arguments:
@@ -51,6 +51,8 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
         max_radius: [float] Maximum radius used for star matching. None by default, which uses all hardcoded
             values.
         force_platepar_save: [bool] Skip the goodness of fit check and save the platepar.
+        ignore_distance_threshold: [bool] Don't consider the recalib as failed if the median distance
+            is larger than the threshold.
     Return:
         result: [?] A Platepar instance if refinement is successful, None if it failed.
         min_match_radius: [float] Minimum radius that successfuly matched the stars (pixels).
@@ -145,11 +147,11 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
     
                 
         # If the fit was not successful, stop further fitting on this FF file
-        if (not res.success) or (n_matched < config.min_matched_stars) or (dist > config.dist_check_threshold):
+        if (not res.success) or (n_matched < config.min_matched_stars) or (not ignore_distance_threshold and (dist > config.dist_check_threshold)):
 
             if not res.success:
                 print('Astrometry fit failed!')
-            elif dist > config.dist_check_threshold:
+            elif (dist > config.dist_check_threshold) and (not ignore_distance_threshold):
                 print(f'Fitted star is farther from catalog star than necessary: {dist} > {config.dist_check_threshold}')
             else:
                 print(f'Number of matched stars after the fit is smaller than necessary: {n_matched:d} < {config.min_matched_stars:d}')
@@ -242,7 +244,8 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
     return result, min_match_radius
 
 
-def recalibratePlateparsForFF(prev_platepar, ff_file_names, calstars, catalog_stars, config, lim_mag=None):
+def recalibratePlateparsForFF(prev_platepar, ff_file_names, calstars, catalog_stars, config, lim_mag=None, \
+    ignore_distance_threshold=False):
     """
     Recalibrate platepars corresponding to ff files based on the stars. 
     
@@ -289,8 +292,8 @@ def recalibratePlateparsForFF(prev_platepar, ff_file_names, calstars, catalog_st
         if (len(calstars[ff_name]) >= config.ff_min_stars) and (len(calstars[ff_name]) >= config.min_matched_stars):
 
             # Recalibrate the platepar using star matching
-            result, min_match_radius = recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, 
-                                                     lim_mag=lim_mag)
+            result, min_match_radius = recalibrateFF(config, working_platepar, jd, star_dict_ff, \
+                catalog_stars, lim_mag=lim_mag, ignore_distance_threshold=ignore_distance_threshold)
 
             # If the recalibration failed, try using FFT alignment
             if result is None:
@@ -363,7 +366,7 @@ def recalibratePlateparsForFF(prev_platepar, ff_file_names, calstars, catalog_st
     return recalibrated_platepars
 
 
-def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config, lim_mag):
+def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config, lim_mag, ignore_distance_threshold=False):
     """ Recalibrate FF files, ignoring whether there are detections 
     Arguments:
         dir_path: [str] Path where the FF files are.
@@ -398,8 +401,8 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config, lim_ma
     prev_platepar.lon = config.longitude
     prev_platepar.elev = config.elevation
     
-    recalibrated_platepars = recalibratePlateparsForFF(prev_platepar, ff_file_names, calstars, catalog_stars, config,
-                                                       lim_mag=lim_mag)
+    recalibrated_platepars = recalibratePlateparsForFF(prev_platepar, ff_file_names, calstars, catalog_stars,\
+        config, lim_mag=lim_mag, ignore_distance_threshold=ignore_distance_threshold)
 
     # # store recalibrated platepars in json
     all_pps = {}
