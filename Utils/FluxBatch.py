@@ -48,6 +48,7 @@ def combineFixedBinsAndComputeFlux(sol_bins, meteors, time_area_prod, min_meteor
     flux_upper_list = []
     flux_lower_list = []
     sol_list = []
+    sol_bin_list = []
     meteor_count_list = []
     area_time_product_list = []
 
@@ -55,7 +56,6 @@ def combineFixedBinsAndComputeFlux(sol_bins, meteors, time_area_prod, min_meteor
     for end_idx in range(1, len(meteors)):
         sl = slice(start_idx, end_idx)
         if np.sum(meteors[sl]) >= min_meteors and np.nansum(time_area_prod[sl]) / 1e9 >= min_tap:
-            start_idx = end_idx
             ta_prod = np.sum(time_area_prod[sl])
 
             num_meteors = np.sum(meteors[sl])
@@ -73,9 +73,13 @@ def combineFixedBinsAndComputeFlux(sol_bins, meteors, time_area_prod, min_meteor
                 flux_lower_list.append(1e9 * n_meteors_lower / ta_prod)
 
             sol_list.append(np.mean(middle_bin_sol[sl]))
+            sol_bin_list.append(sol_bins[start_idx])
+            start_idx = end_idx
+    sol_bin_list.append(sol_bins[start_idx])
 
     return (
         np.array(sol_list),
+        np.array(sol_bin_list),
         np.array(flux_list),
         np.array(flux_lower_list),
         np.array(flux_upper_list),
@@ -130,19 +134,27 @@ def calculateFixedBins(all_time_intervals, dir_list, bin_duration=5):
     # make sure that fixed bins fit with already existing bins saved
     existing_sol = []
     for _dir in dir_list:
-        if os.path.exists(os.path.join(_dir, 'fixedbinsflux.csv')):
-            existing_sol.append(loadForcedBinFluxData(_dir, 'fixedbinsflux.csv')[0])
+        loaded_sol = []
+        for filename in os.listdir(_dir):
+            if 'fixedbinsflux' in filename and filename.endswith('.csv'):
+                loaded_sol.append(loadForcedBinFluxData(_dir, filename)[0])
+        if loaded_sol:
+            existing_sol.append(loaded_sol)
+        # does not check to make sure that none of the intervals during a single night overlap. User must
+        # make sure of this
 
     ## calculating sol_bins
     if existing_sol:
+        # select a starting_sol to transform sol_bins to so that it matched what already exists
         if len(existing_sol) == 1:
-            starting_sol = existing_sol[0]
+            starting_sol = existing_sol[0][0]
         else:
             # if there's more than one array of sol values, make sure they all agree with each other and
             # take the first
             failed = False
-            comparison_sol = existing_sol[0]
-            for sol, _dir in zip(existing_sol[1:], dir_list[1:]):
+            comparison_sol = existing_sol[0][0]
+            for loaded_sol_list, _dir in zip(existing_sol[1:], dir_list[1:]):
+                sol = loaded_sol_list[0]  # take the first of the list and assume the others agree with it
                 min_len = min(len(comparison_sol), len(sol), 5)
                 a, b = (
                     (comparison_sol[:min_len], sol[:min_len])
@@ -172,7 +184,9 @@ def calculateFixedBins(all_time_intervals, dir_list, bin_duration=5):
                 )
             ]
 
-        sol_bins = starting_sol + np.mean(sol_bins[: len(starting_sol)] - starting_sol) % sol_delta
+        # adjust bins to fit existing bins
+        sol_bins += np.mean(starting_sol - sol_bins[: len(starting_sol)]) % sol_delta
+        # make sure that sol_bins satisfies the range even with the fit
         sol_bins = np.append(sol_bins[0] - sol_delta, sol_bins)  # assume that it doesn't wrap around
 
     ## calculating datetime corresponding to sol_bins for each year
@@ -279,7 +293,7 @@ if __name__ == "__main__":
 
     plot_info = StationPlotParams()
 
-    plt.figure(figsize=(15, 8))
+    fig, ax = plt.subplots(2, figsize=(15, 8), sharex=True)
     if not fluxbatch_cml_args.csv:
         with open(fluxbatch_cml_args.batch_path) as f:
             file_data = []
@@ -417,9 +431,9 @@ if __name__ == "__main__":
                     all_bin_information.append(bin_information)
 
                     plot_params = plot_info(config.stationID)
-                    line = plt.plot(sol_data, flux_lm_6_5_data, **plot_params, linestyle='dashed')
+                    line = ax[0].plot(sol_data, flux_lm_6_5_data, **plot_params, linestyle='dashed')
 
-                    plt.errorbar(
+                    ax[0].errorbar(
                         sol_data,
                         flux_lm_6_5_data,
                         color=plot_params['color'],
@@ -445,7 +459,7 @@ if __name__ == "__main__":
         for stationID, sol, flux, lower, upper in data:
             plot_params = plot_info(stationID)
 
-            plt.errorbar(
+            ax[0].errorbar(
                 sol,
                 flux,
                 **plot_params,
@@ -472,44 +486,88 @@ if __name__ == "__main__":
                     )
                 )
 
-    if all_bin_information:
-        num_meteors = sum(np.array(meteors) for meteors, _, _ in all_bin_information)
+    if not all_bin_information:
+        raise Exception("Fixed bins are empty.")
 
-        area_time_product = sum(np.array(area) * np.array(time) for _, area, time in all_bin_information)
-        sol, flux, flux_lower, flux_upper, num_meteors, ta_prod = combineFixedBinsAndComputeFlux(
-            sol_bins, num_meteors, area_time_product, ci=ci
-        )
+    num_meteors = sum(np.array(meteors) for meteors, _, _ in all_bin_information)
 
-        plt.errorbar(
-            np.degrees(sol) % 360,
-            flux,
-            yerr=[flux - flux_lower, flux_upper - flux],
-            label='weighted average flux',
-            c='k',
-            marker='o',
-            linestyle='none',
-        )
+    min_meteors = 50
+    min_tap = 2
+    area_time_product = sum(np.array(area) * np.array(time) for _, area, time in all_bin_information)
+    (
+        comb_sol,
+        comb_sol_bins,
+        comb_flux,
+        comb_flux_lower,
+        comb_flux_upper,
+        comb_num_meteors,
+        comb_ta_prod,
+    ) = combineFixedBinsAndComputeFlux(
+        sol_bins, num_meteors, area_time_product, ci=ci, min_tap=min_tap, min_meteors=min_meteors
+    )
 
-        if not fluxbatch_cml_args.csv:
-            data_out_path = os.path.join(dir_path, f"{fluxbatch_cml_args.output_filename}_2.csv")
-            with open(data_out_path, 'w') as fout:
-                fout.write(
-                    "Sol (rad), Flux@+6.5M (met/1000km^2/h), Flux lower bound, Flux upper bound, Area-time product (corrected to +6.5M) (m^3/h), Meteor Count\n"
-                )
-                for _sol, _flux, _flux_lower, _flux_upper, _at, _nmeteors in zip(
-                    sol, flux, flux_lower, flux_upper, ta_prod, num_meteors
-                ):
+    ax[0].errorbar(
+        np.degrees(comb_sol) % 360,
+        comb_flux,
+        yerr=[comb_flux - comb_flux_lower, comb_flux_upper - comb_flux],
+        label='weighted average flux',
+        c='k',
+        marker='o',
+        linestyle='none',
+    )
 
-                    fout.write(f"{_sol},{_flux},{_flux_lower},{_flux_upper},{_at},{_nmeteors}\n")
+    plot1 = ax[1].bar(
+        np.degrees((comb_sol_bins[1:] + comb_sol_bins[:-1]) / 2) % 360,
+        comb_ta_prod / 1e9,
+        np.degrees(comb_sol_bins[1:] - comb_sol_bins[:-1]),
+        label='Time-area product',
+    )
+    ax[1].hlines(
+        min_tap,
+        np.min(np.degrees(comb_sol) % 360),
+        np.max(np.degrees(comb_sol) % 360),
+        colors='b',
+        linestyles='--',
+    )
+    side_ax = ax[1].twinx()
+    plot2 = side_ax.scatter(np.degrees(comb_sol) % 360, comb_num_meteors, c='k', label='Num meteors')
+    side_ax.hlines(
+        min_meteors,
+        np.min(np.degrees(comb_sol) % 360),
+        np.max(np.degrees(comb_sol) % 360),
+        colors='k',
+        linestyles='--',
+    )
 
-            print("Data saved to:", data_out_path)
+    if not fluxbatch_cml_args.csv:
+        data_out_path = os.path.join(dir_path, f"{fluxbatch_cml_args.output_filename}_2.csv")
+        with open(data_out_path, 'w') as fout:
+            fout.write(
+                "Sol (rad), Sol bin start (rad), Flux@+6.5M (met/1000km^2/h), Flux lower bound, Flux upper bound, Area-time product (corrected to +6.5M) (m^3/h), Meteor Count\n"
+            )
+            for _sol_bins, _sol, _flux, _flux_lower, _flux_upper, _at, _nmeteors in zip(
+                comb_sol_bins,
+                comb_sol,
+                comb_flux,
+                comb_flux_lower,
+                comb_flux_upper,
+                comb_ta_prod,
+                num_meteors,
+            ):
+
+                fout.write(f"{_sol_bins},{_sol},{_flux},{_flux_lower},{_flux_upper},{_at},{_nmeteors}\n")
+            fout.write(f"{comb_sol_bins[-1]},,,,,,\n")
+        print("Data saved to:", data_out_path)
 
     # Show plot
-    plt.legend()
+    ax[0].legend()
 
-    plt.ylabel("Flux@+6.5M (met/1000km^2/h)")
-    plt.xlabel("La Sun (deg)")
-
+    ax[0].set_ylabel("Flux@+6.5M (met/1000km^2/h)")
+    ax[1].set_ylabel("Area-time product correct+6.5M (1000km^2h)")
+    ax[1].set_xlabel("La Sun (deg)")
+    side_ax.set_ylabel('Num meteors')
+    side_ax.set_ylim(bottom=0)
+    ax[1].legend([plot1, plot2], [plot1.get_label(), plot2.get_label()])
     # plt.tight_layout()
 
     fig_path = os.path.join(dir_path, f"{fluxbatch_cml_args.output_filename}.png")

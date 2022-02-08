@@ -17,15 +17,15 @@ import numpy as np
 import RMS.Formats.CALSTARS as CALSTARS
 import scipy.stats
 from git.objects.base import Object
-from RMS.Astrometry.ApplyAstrometry import (
-    correctVignettingTrueToApparent,
-    extinctionCorrectionTrueToApparent,
-    getFOVSelectionRadius,
-    raDecToXYPP,
-    xyToRaDecPP,
-)
-from RMS.Astrometry.ApplyRecalibrate import applyRecalibrate, getRecalibratedPlatepar, recalibrateSelectedFF
-from RMS.Astrometry.Conversions import J2000_JD, areaGeoPolygon, date2JD, datetime2JD, jd2Date, raDec2AltAz
+from RMS.Astrometry.ApplyAstrometry import (correctVignettingTrueToApparent,
+                                            extinctionCorrectionTrueToApparent,
+                                            getFOVSelectionRadius, raDecToXYPP,
+                                            xyToRaDecPP)
+from RMS.Astrometry.ApplyRecalibrate import (applyRecalibrate,
+                                             getRecalibratedPlatepar,
+                                             recalibrateSelectedFF)
+from RMS.Astrometry.Conversions import (J2000_JD, areaGeoPolygon, date2JD,
+                                        datetime2JD, jd2Date, raDec2AltAz)
 from RMS.Astrometry.CyFunctions import subsetCatalog
 from RMS.ExtractStars import extractStarsAndSave
 from RMS.Formats import FFfile, Platepar, StarCatalog
@@ -34,7 +34,8 @@ from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, readFTPdetectinfo
 from RMS.Math import angularSeparation, pointInsideConvexPolygonSphere
 from RMS.Routines.FOVArea import fovArea, xyHt2Geo
 from RMS.Routines.MaskImage import MaskStructure, getMaskFile, loadMask
-from RMS.Routines.SolarLongitude import jd2SolLonSteyaert, solLon2jdSteyaert, unwrapSol
+from RMS.Routines.SolarLongitude import (jd2SolLonSteyaert, solLon2jdSteyaert,
+                                         unwrapSol)
 
 from Utils.ShowerAssociation import heightModel, showerAssociation
 
@@ -118,8 +119,28 @@ def loadRawCollectionAreas(dir_path, file_name):
     return col_areas_ht
 
 
-def saveForcedBinFluxData(dir_path, file_name, sol_list, meteor_n_list, area_list, time_list, meter_lm_list):
-    """Save solar longitude, number of meteors, collecting area and time for fixed bins"""
+def saveForcedBinFluxData(
+    dir_path, file_name, sol_list, meteor_n_list, area_list, time_list, meter_lm_list, sol_range=None
+):
+    """Save solar longitude, number of meteors, collecting area and time for fixed bins
+
+    Keyword arguments:
+        sol_range: [tuple] lower, upper
+            - lower: [float] Minimum solar longitude which the loaded bins must contain
+            - upper: [float] Maximum solar longitude which the loaded bins must contain
+    """
+    if sol_range:
+        lower_i = np.searchsorted(sol_list, sol_range[0], side='left')
+        upper_i = np.searchsorted(sol_list, sol_range[1], side='right')
+        sol_list = sol_list[lower_i:upper_i]
+
+        sl = slice(lower_i, upper_i - 1)
+        meteor_n_list, area_list, time_list, meter_lm_list = (
+            meteor_n_list[sl],
+            area_list[sl],
+            time_list[sl],
+            meter_lm_list[sl],
+        )
     file_path = os.path.join(dir_path, f"{file_name}.csv")
     with open(file_path, 'w') as f:
         f.write('Sol (rad), Meteors, Area (m^2), Time (hours), Meteor LM (mag)\n')
@@ -128,7 +149,7 @@ def saveForcedBinFluxData(dir_path, file_name, sol_list, meteor_n_list, area_lis
         f.write(f'{sol_list[-1]},,,,')  # sol_list has one more element thatn meteor_list
 
 
-def loadForcedBinFluxData(dir_path, filename, sol_range=None):
+def loadForcedBinFluxData(dir_path, filename):
     """Load solar longitude, number of meteors, collecting area and time values for fixed bins
 
     Keyword arguments:
@@ -147,21 +168,12 @@ def loadForcedBinFluxData(dir_path, filename, sol_range=None):
     file_path = os.path.join(dir_path, filename)
 
     data = np.genfromtxt(file_path, delimiter=',', encoding=None, skip_header=1)
-    rows = len(data)
-    sol = data[:, 0]
-    if sol_range is not None:
-        lower_i = np.searchsorted(sol, sol_range[0], side='left')
-        upper_i = np.searchsorted(sol, sol_range[1], side='right')
-        sol = sol[lower_i:upper_i]
-        upper_i -= 1
-    else:
-        lower_i = 0
-        upper_i = -1
 
-    meteor_list = data[lower_i:upper_i, 1]
-    area_list = data[lower_i:upper_i, 2]
-    time_list = data[lower_i:upper_i, 3]
-    meteor_lm_list = data[lower_i:upper_i, 4]
+    sol = data[:, 0]
+    meteor_list = data[:-1, 1]
+    area_list = data[:-1, 2]
+    time_list = data[:-1, 3]
+    meteor_lm_list = data[:-1, 4]
 
     return sol, meteor_list, area_list, time_list, meteor_lm_list
 
@@ -199,7 +211,7 @@ class FluxConfig(object):
         self.meteors_min = 3
 
 
-def computeTimeIntervals(cloud_ratio_dict, ratio_threshold=0.4, time_gap_threshold=15, clearing_threshold=90):
+def computeTimeIntervals(cloud_ratio_dict, ratio_threshold=0.5, time_gap_threshold=15, clearing_threshold=90):
     """
     Calculate sets of time intervals using the detected to predicted star ratios
 
@@ -320,7 +332,7 @@ def detectMoon(file_list, platepar, config):
     return new_file_list
 
 
-def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, ratio_threshold=0.4):
+def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, ratio_threshold=0.5):
     """Detect clouds based on the number of stars detected in images compared to how many are
     predicted.
 
@@ -369,6 +381,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, ratio_thresh
     # detect which images don't have a moon visible, and filter the file list based on this
     platepar = Platepar.Platepar()
     platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
+
     recorded_files = detectMoon(recorded_files, platepar, config)
 
     # Find and load recalibrated platepars
@@ -492,7 +505,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, ratio_thresh
     time_intervals = computeTimeIntervals(ratio, ratio_threshold=ratio_threshold)
 
     if show_plots and predicted_stars:
-        fig, ax = plt.subplots(2)
+        fig, ax = plt.subplots(2, sharex=True)
         plot_format = mdates.DateFormatter('%H:%M')
         ax[0].xaxis.set_major_formatter(plot_format)
         ax[0].plot([FFfile.filenameToDatetime(x) for x in ratio.keys()], list(ratio.values()), marker='o')
@@ -1671,7 +1684,11 @@ def computeFlux(
         ending_sol = unwrapSol(jd2SolLonSteyaert(datetime2JD(dt_end)), sol_bins[0], sol_bins[-1])
 
         # if you can load data from a file, use those bins
-        if os.path.exists(os.path.join(dir_path, 'fixedbinsflux.csv')):
+        if os.path.exists(
+            os.path.join(
+                dir_path, f'fixedbinsflux_{config.stationID}_{starting_sol:.5f}_{ending_sol:.5f}.csv'
+            )
+        ):
             loaded_forced_bins = True
             (
                 forced_bins_sol,
@@ -1679,7 +1696,9 @@ def computeFlux(
                 _forced_bins_area,
                 _forced_bins_time,
                 _forced_bins_lm_m,
-            ) = loadForcedBinFluxData(dir_path, 'fixedbinsflux.csv', sol_range=(starting_sol, ending_sol))
+            ) = loadForcedBinFluxData(
+                dir_path, f'fixedbinsflux_{config.stationID}_{starting_sol:.5f}_{ending_sol:.5f}.csv'
+            )
             # if sol_bins wraps would wrap around but forced_bins_sol doesn't
             if sol_bins[0] > forced_bins_sol[0]:
                 i = np.argmax(sol_bins - (forced_bins_sol[0] + 360) > -1e-7)
@@ -1855,12 +1874,13 @@ def computeFlux(
             print('Finished computing collecting areas for fixed bins')
             saveForcedBinFluxData(
                 dir_path,
-                'fixedbinsflux',
+                f'fixedbinsflux_{config.stationID}_{starting_sol:.5f}_{ending_sol:.5f}',
                 sol_bins,
                 forced_bins_meteor_num,
                 forced_bins_area,
                 forced_bins_time,
                 forced_bins_lm_m,
+                sol_range=(starting_sol, ending_sol),
             )
 
         forced_bins_area = np.array(
@@ -2235,12 +2255,13 @@ def prepareFluxFiles(
     print('Finished computing collecting areas for fixed bins')
     saveForcedBinFluxData(
         dir_path,
-        'fixedbinsflux',
+        f'fixedbinsflux_{config.stationID}_{starting_sol:.5f}_{ending_sol:.5f}',
         sol_bins,
         forced_bins_meteor_num,
         forced_bins_area,
         forced_bins_time,
         forced_bins_lm_m,
+        sol_range=(starting_sol, ending_sol),
     )
 
 
@@ -2295,7 +2316,7 @@ def fluxParser():
         "--ratiothres",
         metavar="RATIO",
         type=float,
-        default=0.4,
+        default=0.5,
         help="Define a specific ratio threshold that will decide whether there are clouds. "
         "0.4 has been tested to be good and it is the default",
     )
