@@ -168,12 +168,31 @@ def findFTPdetectinfoFile(path):
         return path
 
     ftpdetectinfo_files = [filename for filename in os.listdir(path) if 'FTPdetectinfo_' in filename]
+
+
+    # Remove backup files from list
+    filtered_ftpdetectinfo_files = []
     for filename in ftpdetectinfo_files:
+
         if '_backup_' not in filename and os.path.basename(path).split('_')[0] in filename:
-            return os.path.join(path, filename)
+            filtered_ftpdetectinfo_files.append(filename)
+
+    
+    ftpdetectinfo_files = list(filtered_ftpdetectinfo_files)
+
+    # If there are CAMS-style FTPdetectinfo files, skip them
+    if len(ftpdetectinfo_files) > 1:
+
+        for filename in ftpdetectinfo_files:
+            try:
+                int(filename.split("_")[1])
+            except:
+                return os.path.join(path, filename)
+
 
     if len(ftpdetectinfo_files):
-        return ftpdetectinfo_files[0]
+        return os.path.join(path, ftpdetectinfo_files[0])
+
     raise FileNotFoundError("FTPdetectinfo file not found")
 
 

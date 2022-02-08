@@ -281,3 +281,33 @@ def histogramEdgesDataNumber(x, points_per_bin):
     
     nbins = len(x)//points_per_bin
     return histogramEdgesEqualDataNumber(x, nbins)
+
+#########
+
+def rollingAverage2d(x, y, x_window):
+    """
+    Rolling average where the window is on the x axis rather than index
+    
+    Arguments:
+        x: [list or ndarray] sorted x values
+        y: [list or ndarray] y values corresponding to x
+        x_window: [float]
+        
+    Returns:
+        output_x: [list]
+        output_y: [list]
+    """
+    assert len(x) == len(y)
+    cum_y = np.cumsum(np.insert(y, 0, 0))
+    output_y = []
+    output_x = []
+    j = 0
+    for i in range(len(y)):
+        for j in range(j, len(y)):
+            if x_window >= x[j] - x[i]:
+                output_y.append((cum_y[j + 1] - cum_y[i])/(j + 1 - i))
+                output_x.append((x[j] + x[i])/2)
+            if j > i and (j == len(x) - 1 or (x[j + 1] - x[i] > x_window and x[j] - x[i + 1] < x[j + 1] - x[i])):
+                break
+
+    return output_x, output_y
