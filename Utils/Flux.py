@@ -122,7 +122,7 @@ def loadRawCollectionAreas(dir_path, file_name):
     return col_areas_ht
 
 
-def saveForcedBinFluxData(dir_path, file_name, sol_list, meteor_n_list, area_list, time_list, meter_lm_list):
+def saveForcedBinFluxData(dir_path, file_name, sol_list, meteor_n_list, area_list, time_list, meteor_lm_list):
     """Save solar longitude and other parameters in a solar longitude range.
 
     Arguments:
@@ -130,12 +130,26 @@ def saveForcedBinFluxData(dir_path, file_name, sol_list, meteor_n_list, area_lis
             It is assumed that this value does not wrap around.
     """
 
-    file_path = os.path.join(dir_path, f"{file_name}.csv")
+    file_path = os.path.join(dir_path, file_name + ".csv")
+
     with open(file_path, 'w') as f:
-        f.write('Sol (rad), Meteors, Area (m^2), Time (hours), Meteor LM (mag)\n')
-        for sol, meteors, area, time, lm in zip(sol_list, meteor_n_list, area_list, time_list, meter_lm_list):
-            f.write(f"{sol},{meteors},{area},{time},{lm}\n")
-        f.write(f'{sol_list[-1]},,,,')  # sol_list has one more element thatn meteor_list
+
+        f.write('# Solar longitude (deg), Meteors, Collection area (km^2), Time (hours), Meteor LM (mag)\n')
+
+
+        for sol, meteors, area, time, lm in zip(sol_list, meteor_n_list, area_list, time_list, meteor_lm_list):
+
+            lm_str = "None"
+            if lm is not None:
+                lm_str = "{:.3f}".format(lm)
+
+            f.write("{:.8f}, {:d}, {:.6f}, {:.6f}, {:s}\n".format(np.degrees(sol), meteors, area/1e6, time, \
+                lm_str))
+
+
+        # sol_list has one more element than meteor_list
+        f.write("{:.8f},,,,".format(np.degrees(sol_list[-1])))
+
 
 
 def loadForcedBinFluxData(dir_path, filename):
@@ -153,9 +167,9 @@ def loadForcedBinFluxData(dir_path, filename):
 
     data = np.genfromtxt(file_path, delimiter=',', encoding=None, skip_header=1)
 
-    sol = data[:, 0]
+    sol = np.radians(data[:, 0])
     meteor_list = data[:-1, 1]
-    area_list = data[:-1, 2]
+    area_list = 1e6*data[:-1, 2]
     time_list = data[:-1, 3]
     meteor_lm_list = data[:-1, 4]
 
@@ -168,7 +182,7 @@ class FluxConfig(object):
 
         # How many points to use to evaluate the FOV on seach side of the image. Normalized to the longest
         #   side.
-        self.side_points = 20
+        self.side_points = 10
 
         # Minimum height (km).
         self.ht_min = 60
@@ -636,7 +650,7 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             ).astype(bool)
 
             if show_plot and i == int(len(ff_files) // 2):
-                plt.title(f"{ff_file}, lim_mag={lim_mag:.2f}")
+                plt.title("{:s}, LM = {:.2f}".format(ff_file, lim_mag))
                 plt.scatter(
                     *np.array(recalibrated_platepars[ff_file].star_list)[:, 1:3].T[::-1], label='matched'
                 )
@@ -1105,7 +1119,7 @@ def computeFluxCorrectionsOnBins(
         if binduration is not None and bin_hours < 0.5 * binduration:
             if print_info:
                 print(
-                    f"!!! Time bin duration of {bin_hours:.2f} h is shorter than 0.5x of the inputted time bin!"
+                    "!!! Time bin duration of {:.2f} h is shorter than 0.5x of the inputted time bin!".format(bin_hours)
                 )
             if no_skip:
                 meteor_num_data.append(0)
@@ -1413,7 +1427,7 @@ def computeFluxCorrectionsOnBins(
 
         elif print_info:
             print(
-                f'!!! Insufficient meteors in bin: {len(bin_meteor_list)} observed vs min {flux_config.meteors_min}'
+                '!!! Insufficient meteors in bin: {:d} observed vs min {:d}'.format(len(bin_meteor_list), flux_config.meteors_min)
             )
 
     if no_skip:
@@ -1698,7 +1712,7 @@ def computeFlux(
         # if you can load data from a file, use those bins
         if os.path.exists(
             os.path.join(
-                dir_path, f'fixedbinsflux_{config.stationID}_{starting_sol:.5f}_{ending_sol:.5f}.csv'
+                dir_path, 'fixedbinsflux_{:s}_{:.5f}_{:.5f}.csv'.format(config.stationID, starting_sol, ending_sol)
             )
         ):
             loaded_forced_bins = True  # skips area calculation
@@ -1709,7 +1723,7 @@ def computeFlux(
                 forced_bins_time,
                 forced_bins_lm_m,
             ) = loadForcedBinFluxData(
-                dir_path, f'fixedbinsflux_{config.stationID}_{starting_sol:.5f}_{ending_sol:.5f}.csv'
+                dir_path, 'fixedbinsflux_{:s}_{:.5f}_{:.5f}.csv'.format(config.stationID, starting_sol, ending_sol)
             )
 
         else:
@@ -1887,7 +1901,7 @@ def computeFlux(
             print('Finished computing collecting areas for fixed bins')
             saveForcedBinFluxData(
                 dir_path,
-                f'fixedbinsflux_{config.stationID}_{starting_sol:.5f}_{ending_sol:.5f}',
+                'fixedbinsflux_{:s}_{:.5f}_{:.5f}'.format(config.stationID, starting_sol, ending_sol),
                 sol_bins,
                 forced_bins_meteor_num,
                 forced_bins_area,
@@ -2277,7 +2291,7 @@ def prepareFluxFiles(
     print('Finished computing collecting areas for fixed bins')
     saveForcedBinFluxData(
         dir_path,
-        f'fixedbinsflux_{config.stationID}_{starting_sol:.5f}_{ending_sol:.5f}',
+        'fixedbinsflux_{:s}_{:.5f}_{:.5f}'.format(config.stationID, starting_sol, ending_sol),
         sol_bins,
         forced_bins_meteor_num,
         forced_bins_area,
@@ -2400,8 +2414,8 @@ if __name__ == "__main__":
         time_intervals = detectClouds(config, dir_path, show_plots=True, ratio_threshold=cml_args.ratiothres)
         for i, interval in enumerate(time_intervals):
             print(
-                f'interval {i+1}/{len(time_intervals)}: '
-                f'({interval[0].strftime(datetime_pattern)},{interval[1].strftime(datetime_pattern)})'
+                'interval {:d}/{:d}: '.format(i + 1, len(time_intervals)),
+                '({:s},{:s})'.format(interval[0].strftime(datetime_pattern), interval[1].strftime(datetime_pattern))
             )
 
         # print('display ff with clouds')
@@ -2410,7 +2424,7 @@ if __name__ == "__main__":
 
     # Compute the flux
     for dt_beg, dt_end in time_intervals:
-        print(f'Using interval: ({dt_beg.strftime(datetime_pattern)},{dt_end.strftime(datetime_pattern)})')
+        print('Using interval: ({:s},{:s})'.format(dt_beg.strftime(datetime_pattern), dt_end.strftime(datetime_pattern)))
         computeFlux(
             config,
             dir_path,
