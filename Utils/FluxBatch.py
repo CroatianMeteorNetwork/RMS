@@ -50,7 +50,9 @@ def addFixedBins(sol_bins, small_sol_bins, *params):
     return data_arrays
 
 
-def combineFixedBinsAndComputeFlux(sol_bins, meteors, time_area_prod, min_meteors=50, ci=0.95, min_tap=2):
+def combineFixedBinsAndComputeFlux(
+    sol_bins, meteors, time_area_prod, min_meteors=50, ci=0.95, min_tap=2, max_duration=6
+):
     """
     Computes flux values and their corresponding solar longitude based on bins containing
     number of meteors, and time-area product. Bins will be combined so that each bin has the
@@ -67,6 +69,8 @@ def combineFixedBinsAndComputeFlux(sol_bins, meteors, time_area_prod, min_meteor
         min_meteors: [int] Minimum number of meteors to have in a bin
         ci: [float] Confidence interval for calculating the flux error bars (from 0 to 1)
         min_tap: [float] Minimum time area product in 1000 km^2*h.
+        max_duration: [float] Maximum bin duration in hours
+
     Return:
         [tuple] sol, flux, flux_lower, flux_upper, meteors, ta_prod
             - sol: [ndarray] Solar longitude
@@ -110,6 +114,11 @@ def combineFixedBinsAndComputeFlux(sol_bins, meteors, time_area_prod, min_meteor
             sol_list.append(np.mean(middle_bin_sol[sl]))
             sol_bin_list.append(sol_bins[start_idx])
             start_idx = end_idx
+        elif (middle_bin_sol[end_idx] - middle_bin_sol[start_idx]) / (
+            2 * np.pi
+        ) * 24 * 365.24219 >= max_duration:
+            start_idx = end_idx
+
     sol_bin_list.append(sol_bins[start_idx])
 
     return (
@@ -291,7 +300,7 @@ if __name__ == "__main__":
 
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(
-        description="Compute single-station meteor shower flux from a batch file."
+        description="Compute multi-station and multi-year meteor shower flux from a batch file."
     )
 
     arg_parser.add_argument("batch_path", metavar="BATCH_PATH", type=str, help="Path to the flux batch file.")
@@ -306,6 +315,24 @@ if __name__ == "__main__":
         "-csv",
         action='store_true',
         help="If given, will read from the csv files defined with output_filename (defaults to fluxbatch_output)",
+    )
+    arg_parser.add_argument(
+        "--minmeteors",
+        type=int,
+        default=50,
+        help="Minimum meteors per bin. If this is not satisfied the bin will be made larger",
+    )
+    arg_parser.add_argument(
+        "--mintap",
+        type=float,
+        default=2,
+        help="Minimum time-area product per bin. If this is not satisfied the bin will be made larger",
+    )
+    arg_parser.add_argument(
+        "--maxduration",
+        type=float,
+        default=6,
+        help="Maximum time per bin. if this is not satisfied, the bin will be discarded.",
     )
 
     # Parse the command line arguments
@@ -328,8 +355,9 @@ if __name__ == "__main__":
     plot_info = StationPlotParams()
 
     bin_duration = 5
-    min_meteors = 50
-    min_tap = 2
+    min_meteors = fluxbatch_cml_args.minmeteors
+    min_tap = fluxbatch_cml_args.mintap
+    max_duration = fluxbatch_cml_args.maxduration
     fig, ax = plt.subplots(2, figsize=(15, 8), sharex=True)
     if not fluxbatch_cml_args.csv:
         # loading commands from batch file and collecting information to run computeflux, including
@@ -505,7 +533,13 @@ if __name__ == "__main__":
             comb_num_meteors,
             comb_ta_prod,
         ) = combineFixedBinsAndComputeFlux(
-            sol_bins, num_meteors, area_time_product, ci=ci, min_tap=min_tap, min_meteors=min_meteors
+            sol_bins,
+            num_meteors,
+            area_time_product,
+            ci=ci,
+            min_tap=min_tap,
+            min_meteors=min_meteors,
+            max_duration=max_duration,
         )
         comb_sol = np.degrees(comb_sol)
         comb_sol_bins = np.degrees(comb_sol_bins)
