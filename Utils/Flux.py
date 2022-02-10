@@ -17,15 +17,15 @@ import numpy as np
 import RMS.Formats.CALSTARS as CALSTARS
 import scipy.stats
 from git.objects.base import Object
-from RMS.Astrometry.ApplyAstrometry import (correctVignettingTrueToApparent,
-                                            extinctionCorrectionTrueToApparent,
-                                            getFOVSelectionRadius, raDecToXYPP,
-                                            xyToRaDecPP)
-from RMS.Astrometry.ApplyRecalibrate import (applyRecalibrate,
-                                             getRecalibratedPlatepar,
-                                             recalibrateSelectedFF)
-from RMS.Astrometry.Conversions import (J2000_JD, areaGeoPolygon, date2JD,
-                                        datetime2JD, jd2Date, raDec2AltAz)
+from RMS.Astrometry.ApplyAstrometry import (
+    correctVignettingTrueToApparent,
+    extinctionCorrectionTrueToApparent,
+    getFOVSelectionRadius,
+    raDecToXYPP,
+    xyToRaDecPP,
+)
+from RMS.Astrometry.ApplyRecalibrate import applyRecalibrate, loadRecalibratedPlatepar, recalibrateSelectedFF
+from RMS.Astrometry.Conversions import J2000_JD, areaGeoPolygon, date2JD, datetime2JD, jd2Date, raDec2AltAz
 from RMS.Astrometry.CyFunctions import subsetCatalog
 from RMS.ExtractStars import extractStarsAndSave
 from RMS.Formats import FFfile, Platepar, StarCatalog
@@ -34,10 +34,13 @@ from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, readFTPdetectinfo
 from RMS.Math import angularSeparation, pointInsideConvexPolygonSphere
 from RMS.Routines.FOVArea import fovArea, xyHt2Geo
 from RMS.Routines.MaskImage import MaskStructure, getMaskFile, loadMask
-from RMS.Routines.SolarLongitude import (jd2SolLonSteyaert, solLon2jdSteyaert,
-                                         unwrapSol)
+from RMS.Routines.SolarLongitude import jd2SolLonSteyaert, solLon2jdSteyaert, unwrapSol
 
 from Utils.ShowerAssociation import heightModel, showerAssociation
+
+
+def calculatePopulationIndex(mass_index):
+    return 10 ** ((mass_index - 1) / 2.5)
 
 
 def generateColAreaJSONFileName(station_code, side_points, ht_min, ht_max, dht, elev_limit):
@@ -119,28 +122,14 @@ def loadRawCollectionAreas(dir_path, file_name):
     return col_areas_ht
 
 
-def saveForcedBinFluxData(
-    dir_path, file_name, sol_list, meteor_n_list, area_list, time_list, meter_lm_list, sol_range=None
-):
-    """Save solar longitude, number of meteors, collecting area and time for fixed bins
+def saveForcedBinFluxData(dir_path, file_name, sol_list, meteor_n_list, area_list, time_list, meter_lm_list):
+    """Save solar longitude and other parameters in a solar longitude range.
 
-    Keyword arguments:
-        sol_range: [tuple] lower, upper
-            - lower: [float] Minimum solar longitude which the loaded bins must contain
-            - upper: [float] Maximum solar longitude which the loaded bins must contain
+    Arguments:
+        sol_list: [list] Solar longitude bin edges (length is one more than other lists) in radians.
+            It is assumed that this value does not wrap around.
     """
-    if sol_range:
-        lower_i = np.searchsorted(sol_list, sol_range[0], side='left')
-        upper_i = np.searchsorted(sol_list, sol_range[1], side='right')
-        sol_list = sol_list[lower_i:upper_i]
 
-        sl = slice(lower_i, upper_i - 1)
-        meteor_n_list, area_list, time_list, meter_lm_list = (
-            meteor_n_list[sl],
-            area_list[sl],
-            time_list[sl],
-            meter_lm_list[sl],
-        )
     file_path = os.path.join(dir_path, f"{file_name}.csv")
     with open(file_path, 'w') as f:
         f.write('Sol (rad), Meteors, Area (m^2), Time (hours), Meteor LM (mag)\n')
@@ -151,11 +140,6 @@ def saveForcedBinFluxData(
 
 def loadForcedBinFluxData(dir_path, filename):
     """Load solar longitude, number of meteors, collecting area and time values for fixed bins
-
-    Keyword arguments:
-        sol_range: [tuple] lower, upper
-            - lower: [float] Minimum solar longitude which the loaded bins must contain
-            - upper: [float] Maximum solar longitude which the loaded bins must contain
 
     Return:
         [tuple] sol, meteor_list, area_list, time_list, meteor_lm_list
@@ -211,7 +195,7 @@ class FluxConfig(object):
         self.meteors_min = 3
 
 
-def computeTimeIntervals(cloud_ratio_dict, ratio_threshold=0.5, time_gap_threshold=15, clearing_threshold=90):
+def computeTimeIntervals(cloud_ratio_dict, ratio_threshold=0.4, time_gap_threshold=15, clearing_threshold=90):
     """
     Calculate sets of time intervals using the detected to predicted star ratios
 
@@ -304,9 +288,9 @@ def detectMoon(file_list, platepar, config):
         # Calculating fraction of moon which is visible
         nnm = ephem.next_new_moon(o.date)
         pnm = ephem.previous_new_moon(o.date)
-        phase = (o.date - pnm)/(nnm - pnm)  # from 0 to 1 for 360 deg
-        lunar_area = 1 - np.abs(2*phase - 1)  # using sawtooth function for fraction of moon visible
-        
+        phase = (o.date - pnm) / (nnm - pnm)  # from 0 to 1 for 360 deg
+        lunar_area = 1 - np.abs(2 * phase - 1)  # using sawtooth function for fraction of moon visible
+
         # Calculating angular distance from middle of fov to correct for checking after the xy mapping
         angular_distance = np.degrees(angularSeparation(ra_mid, dec_mid, float(m.ra), float(m.dec)))
 
@@ -316,16 +300,15 @@ def detectMoon(file_list, platepar, config):
         # print(o.next_rising(m) < o.next_setting(m))
         # print("Ang dist:", angular_distance, radius)
 
-        
         # Always take observations if the Moon is at less than 25% illumination, regardless of where it is
         if lunar_area < 0.25:
-            
+
             new_file_list.append(filename)
             continue
 
         # Always take observations if the Moon is not above the horizon
         elif o.next_rising(m) < o.next_setting(m):
-            
+
             new_file_list.append(filename)
             continue
 
@@ -335,13 +318,16 @@ def detectMoon(file_list, platepar, config):
             new_file_list.append(filename)
             continue
 
-
         # If it's witin the radius, check that it's not within the actual FOV
         else:
-            
+
             # Compute X, Y coordinates of the Moon in the image
-            x, y = raDecToXYPP(np.array([np.degrees(m.ra)]), np.array([np.degrees(m.dec)]),
-                               datetime2JD(o.date.datetime()), platepar)
+            x, y = raDecToXYPP(
+                np.array([np.degrees(m.ra)]),
+                np.array([np.degrees(m.dec)]),
+                datetime2JD(o.date.datetime()),
+                platepar,
+            )
 
             x = x[0]
             y = y[0]
@@ -349,21 +335,22 @@ def detectMoon(file_list, platepar, config):
             # print(x, y)
 
             # Compute the exclusion border in pixels (always scale to 720p)
-            border = 100*platepar.Y_res/720
+            border = 100 * platepar.Y_res / 720
 
-            if not (((x > -border) and (x < platepar.X_res + border)) \
-                and ((y > -border) and (y < platepar.Y_res + border))):
+            if not (
+                ((x > -border) and (x < platepar.X_res + border))
+                and ((y > -border) and (y < platepar.Y_res + border))
+            ):
 
                 new_file_list.append(filename)
                 continue
-        
 
         print("Skipping {:s}, Moon in the FOV!".format(filename))
 
     return new_file_list
 
 
-def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, ratio_threshold=0.5):
+def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, ratio_threshold=0.4):
     """Detect clouds based on the number of stars detected in images compared to how many are
     predicted.
 
@@ -375,6 +362,8 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, ratio_thresh
         mask: [2d array]
         N: [float] Time duration of bins to separate FF files into
         show_plots: [Bool] Whether to show plots (defaults to true)
+        ratio_thresholds: [float] Number between 0 and around 1 to define whether or not there are clouds
+            in a frame
 
     Return:
         time_intervals [list of tuple]: list of datetime pairs in tuples, representing the starting
@@ -415,34 +404,28 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, ratio_thresh
 
     recorded_files = detectMoon(recorded_files, platepar, config)
 
-    # Find and load recalibrated platepars
-    if config.platepars_flux_recalibrated_name in file_list:
-        with open(os.path.join(dir_path, config.platepars_flux_recalibrated_name)) as f:
-            recalibrated_platepar_dict = json.load(f)
-            # Convert the dictionary of recalibrated platepars to a dictionary of Platepar objects
-            recalibrated_platepars = {}
-            for ff_name in recalibrated_platepar_dict:
-                pp = Platepar.Platepar()
-                pp.loadFromDict(recalibrated_platepar_dict[ff_name], use_flat=config.use_flat)
-
-                recalibrated_platepars[ff_name] = pp
-                recorded_files = list(recalibrated_platepars.keys())
-            print("Recalibrated platepars loaded!")
+    recalibrated_platepars = loadRecalibratedPlatepar(dir_path, config, file_list, type='flux')
 
     # If the file is not available, apply the recalibration procedure
-    else:
+    if not recalibrated_platepars:
         print("Recalibrated platepar file not available!")
         print("Recalibrating...")
-        recalibrated_platepars = recalibrateSelectedFF(dir_path, recorded_files, star_list, config, \
-            stellarLMModel(platepar.mag_lev), ignore_distance_threshold=True)
-        recorded_files = list(recalibrated_platepars.keys())
+        recalibrated_platepars = recalibrateSelectedFF(
+            dir_path,
+            recorded_files,
+            star_list,
+            config,
+            stellarLMModel(platepar.mag_lev),
+            ignore_distance_threshold=True,
+        )
+    recorded_files = list(recalibrated_platepars.keys())
 
     matched_count = {ff: len(recalibrated_platepars[ff].star_list) for ff in recorded_files}
 
     # Compute the correction between the visible limiting magnitude and the LM produced by the star detector
     #   - normalize the LM to the intensity threshold of 18
     #   - correct for the sensitivity at intensity threshold of 18 (empirical)
-    star_det_mag_corr = -2.5*np.log10(config.intensity_threshold/18) - 1.3
+    star_det_mag_corr = -2.5 * np.log10(config.intensity_threshold / 18) - 1.3
 
     # Compute the limiting magnitude of the star detector
     ff_limiting_magnitude = {
@@ -455,22 +438,6 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, ratio_thresh
     }
 
     if show_plots:
-        # matched_pred_LM = {
-        #     ff: np.percentile(
-        #         xyToRaDecPP(
-        #             [FFfile.getMiddleTimeFF(ff, config.fps, ret_milliseconds=True)]
-        #             * len(star_data.star_list),
-        #             [star[1] for star in star_data.star_list],
-        #             [star[2] for star in star_data.star_list],
-        #             [star[3] for star in star_data.star_list],
-        #             platepar,
-        #         )[3],
-        #         90,
-        #     )
-        #     for ff, star_data in recalibrated_platepars.items()
-        #     if len(star_data.star_list)
-        # }
-
         # Compute the limiting magnitude of matched stars as the 90th percentile of the faintest matched stars
         matched_star_LM = {
             ff: np.percentile(np.array(recalibrated_platepars[ff].star_list)[:, 6], 90)
@@ -1040,6 +1007,7 @@ def computeFluxCorrectionsOnBins(
     elev_mid,
     r_mid,
     recalibrated_platepars,
+    recalibrated_flux_platepars,
     platepar,
     frame_min_loss,
     ang_vel_night_mid,
@@ -1112,13 +1080,9 @@ def computeFluxCorrectionsOnBins(
             print("Radiant elevation: {:.2f} deg".format(radiant_elev))
             print("Apparent speed: {:.2f} km/s".format(v_init / 1000))
 
-        if not bin_ffs:
+        if not bin_ffs and not no_skip:
             if print_info:
                 print("!!! Bin doesn't have any meteors!")
-            if no_skip:
-                meteor_num_data.append(0)
-                lm_m_data.append(None)
-                effective_collection_area_data.append(0)
             continue
 
         # If the elevation of the radiant is below the limit, skip this bin
@@ -1202,22 +1166,31 @@ def computeFluxCorrectionsOnBins(
             ### Compute the limiting magnitude ###
 
             # Compute the mean star FWHM in the given bin
-            fwhm_bin_mean = np.mean([sensor_data[ff_name][0] for ff_name in bin_ffs])
-
-            # Compute the mean photometric zero point in the given bin
-            mag_lev_bin_mean = np.mean(
-                [
-                    recalibrated_platepars[ff_name].mag_lev
-                    for ff_name in bin_ffs
-                    if ff_name in recalibrated_platepars
-                ]
-            )
+            if bin_ffs:
+                fwhm_bin_mean = np.mean([sensor_data[ff_name][0] for ff_name in bin_ffs])
+                mag_lev_bin = np.mean(
+                    [
+                        recalibrated_platepars[ff_name].mag_lev
+                        for ff_name in bin_ffs
+                        if ff_name in recalibrated_platepars
+                    ]
+                )
+            else:
+                fwhm_bin_mean = min(
+                    sensor_data.items(),
+                    key=lambda x: np.abs(datetime2JD(FFfile.filenameToDatetime(x[0])) - jd_mean),
+                )[1][0]
+                # Compute the mean photometric zero point in the given bin
+                mag_lev_bin = min(
+                    recalibrated_flux_platepars.items(),
+                    key=lambda x: np.abs(datetime2JD(FFfile.filenameToDatetime(x[0])) - jd_mean),
+                )[1].mag_lev
 
             # # Standard deviation of star PSF, nightly mean (px)
             # star_stddev = fwhm_bin_mean/2.355
 
             # Use empirical LM calculation
-            lm_s = stellarLMModel(mag_lev_bin_mean)
+            lm_s = stellarLMModel(mag_lev_bin)
 
             lm_s += frame_min_loss
 
@@ -1401,7 +1374,7 @@ def computeFluxCorrectionsOnBins(
             if print_info:
                 print("-- Sensor information ---")
                 print("Star FWHM:  {:5.2f} px".format(fwhm_bin_mean))
-                print("Photom ZP:  {:+6.2f} mag".format(mag_lev_bin_mean))
+                print("Photom ZP:  {:+6.2f} mag".format(mag_lev_bin))
                 print("Stellar LM: {:+.2f} mag".format(lm_s))
                 print("-- Flux ---")
                 print(
@@ -1543,7 +1516,16 @@ def computeFlux(
         print("No meteors in the FTPdetectinfo file!")
         return None
 
-    platepar, recalibrated_platepars = getRecalibratedPlatepar(dir_path, config, file_list)
+    platepar = Platepar.Platepar()
+    platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
+
+    recalibrated_platepars = loadRecalibratedPlatepar(dir_path, config, file_list, type='meteor')
+    recalibrated_flux_platepars = loadRecalibratedPlatepar(dir_path, config, file_list, type='flux')
+
+    if not recalibrated_platepars:
+        print("Recalibrated platepar file not available!")
+        print("Recalibrating...")
+        recalibrated_platepars = applyRecalibrate(ftpdetectinfo_path, config)
 
     # Compute nighly mean of the photometric zero point
     mag_lev_nightly_mean = np.mean(
@@ -1555,7 +1537,7 @@ def computeFlux(
 
     # Compute the population index using the classical equation
     # Found to be more consistent when comparing fluxes
-    population_index = 10 ** ((mass_index - 1) / 2.5)
+    population_index = calculatePopulationIndex(mass_index)
     # population_index = 10**((mass_index - 1)/2.3) # TEST !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
 
     ### SENSOR CHARACTERIZATION ###
@@ -1687,9 +1669,9 @@ def computeFlux(
     print("Stellar lim mag using detection thresholds:", lm_s_nightly_mean)
     print("Apparent meteor limiting magnitude:", lm_m_nightly_mean)
 
-    ### Apply time-dependent corrections ###
+    ##### Apply time-dependent corrections #####
 
-    # Go through all time bins within the observation period
+    ### Go through all time bins within the observation period ###
     bin_meteor_information = []  # [[[meteor, ...], [meteor.ff_name, ...]], ...]
     bin_intervals = []  # [(start_time, end_time), ...]
     num_meteors = 0
@@ -1705,7 +1687,7 @@ def computeFlux(
             bin_meteor_information.append([[], []])
             curr_bin_start += dt
 
-    # generating forced bins to fill
+    ### generating forced bins to fill ###
     loaded_forced_bins = False
     if forced_bins:
         bin_datetime, sol_bins = forced_bins
@@ -1719,40 +1701,38 @@ def computeFlux(
                 dir_path, f'fixedbinsflux_{config.stationID}_{starting_sol:.5f}_{ending_sol:.5f}.csv'
             )
         ):
-            loaded_forced_bins = True
+            loaded_forced_bins = True  # skips area calculation
             (
-                forced_bins_sol,
-                _forced_bins_meteor_num,
-                _forced_bins_area,
-                _forced_bins_time,
-                _forced_bins_lm_m,
+                sol_bins,
+                forced_bins_meteor_num,
+                forced_bins_area,
+                forced_bins_time,
+                forced_bins_lm_m,
             ) = loadForcedBinFluxData(
                 dir_path, f'fixedbinsflux_{config.stationID}_{starting_sol:.5f}_{ending_sol:.5f}.csv'
             )
-            # if sol_bins wraps would wrap around but forced_bins_sol doesn't
-            if sol_bins[0] > forced_bins_sol[0]:
-                i = np.argmax(sol_bins - (forced_bins_sol[0] + 360) > -1e-7)
-            else:
-                i = np.argmax(sol_bins - forced_bins_sol[0] > -1e-7)  # index where they are equal
-
-            forced_bins_meteor_num = np.zeros(len(sol_bins) - 1)
-            forced_bins_meteor_num[i : i + len(_forced_bins_meteor_num)] = _forced_bins_meteor_num
-            forced_bins_area = np.zeros(len(sol_bins) - 1)
-            forced_bins_area[i : i + len(_forced_bins_area)] = _forced_bins_area
-            forced_bins_time = np.zeros(len(sol_bins) - 1)
-            forced_bins_time[i : i + len(_forced_bins_time)] = _forced_bins_time
-            forced_bins_lm_m = np.zeros(len(sol_bins) - 1)
-            forced_bins_lm_m[i : i + len(_forced_bins_lm_m)] = _forced_bins_lm_m
 
         else:
+            # filtering sol bins so that bin edges contain just starting_sol and ending_sol
+            sol_bins = sol_bins[
+                np.searchsorted(sol_bins, starting_sol, side='right')
+                - 1 : np.searchsorted(sol_bins, ending_sol, side='left')
+                + 1
+            ]
+            # time calculated as fraction of bin time that the starting_sol end ending_sol is
             forced_bins_time = np.array(
                 [
                     min(
-                        max(min(sol - starting_sol, ending_sol - sol) / (sol_bins[i + 1] - sol_bins[i]), 0), 1
+                        max(
+                            min(sol_bins[i + 1] - starting_sol, ending_sol - sol_bins[i])
+                            / (sol_bins[i + 1] - sol_bins[i]),
+                            0,
+                        ),
+                        1,
                     )
                     * (bin_datetime[i + 1] - bin_datetime[i]).total_seconds()
                     / 3600
-                    for i, sol in enumerate(sol_bins[:-1])
+                    for i in range(len(sol_bins[:-1]))
                 ]
             )
 
@@ -1761,13 +1741,14 @@ def computeFlux(
                 (bin_datetime[i], bin_datetime[i + 1]) for i in range(len(bin_datetime) - 1)
             ]
 
-    # mapping meteors to bins
+    ### mapping meteors to bins ###
     for meteor, shower in associations.values():
         meteor_date = jd2Date(meteor.jdt_ref, dt_obj=True)
 
         # Filter out meteors ending too close to the radiant
         ra, dec, _ = shower.computeApparentRadiant(platepar.lat, platepar.lon, meteor.jdt_ref)
         radiant_azim, radiant_elev = raDec2AltAz(ra, dec, meteor.jdt_ref, platepar.lat, platepar.lon)
+
         if (
             shower is None
             or (shower.name != shower_code)
@@ -1813,10 +1794,10 @@ def computeFlux(
 
                 bin_meteor_information.append([[meteor], [meteor.ff_name]])
 
-                if len(bin_intervals) == 0:
+                if len(bin_intervals) < flux_config.sub_time_bins:
                     bin_intervals.append([dt_beg])
                 else:
-                    bin_intervals[-1].append(meteor_date)
+                    bin_intervals[-flux_config.sub_time_bins].append(meteor_date)
                     bin_intervals.append([meteor_date])
 
             else:
@@ -1866,6 +1847,7 @@ def computeFlux(
         elev_mid,
         r_mid,
         recalibrated_platepars,
+        recalibrated_flux_platepars,
         platepar,
         frame_min_loss,
         ang_vel_night_mid,
@@ -1893,6 +1875,7 @@ def computeFlux(
                 elev_mid,
                 r_mid,
                 recalibrated_platepars,
+                recalibrated_flux_platepars,
                 platepar,
                 frame_min_loss,
                 ang_vel_night_mid,
@@ -1910,7 +1893,6 @@ def computeFlux(
                 forced_bins_area,
                 forced_bins_time,
                 forced_bins_lm_m,
-                sol_range=(starting_sol, ending_sol),
             )
 
         forced_bins_area = np.array(
@@ -2019,7 +2001,7 @@ def computeFlux(
             flux_lm_6_5_ci_upper_data,
             meteor_num_data,
             population_index,
-            (forced_bins_meteor_num, forced_bins_area, forced_bins_time),
+            (sol_bins, forced_bins_meteor_num, forced_bins_area, forced_bins_time),
         )
     return (
         sol_data,
@@ -2059,7 +2041,16 @@ def prepareFluxFiles(
         print("No meteors in the FTPdetectinfo file!")
         return None
 
-    platepar, recalibrated_platepars = getRecalibratedPlatepar(dir_path, config, file_list)
+    platepar = Platepar.Platepar()
+    platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
+
+    recalibrated_platepars = loadRecalibratedPlatepar(dir_path, config, file_list, type='meteor')
+    recalibrated_flux_platepars = loadRecalibratedPlatepar(dir_path, config, file_list, type='flux')
+
+    if not recalibrated_platepars:
+        print("Recalibrated platepar file not available!")
+        print("Recalibrating...")
+        recalibrated_platepars = applyRecalibrate(ftpdetectinfo_path, config)
 
     # Compute nighly mean of the photometric zero point
     mag_lev_nightly_mean = np.mean(
@@ -2071,7 +2062,7 @@ def prepareFluxFiles(
 
     # Compute the population index using the classical equation
     # Found to be more consistent when comparing fluxes
-    population_index = 10 ** ((mass_index - 1) / 2.5)
+    population_index = calculatePopulationIndex(mass_index)
     # population_index = 10**((mass_index - 1)/2.3) # TEST !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
 
     ### SENSOR CHARACTERIZATION ###
@@ -2274,6 +2265,7 @@ def prepareFluxFiles(
         elev_mid,
         r_mid,
         recalibrated_platepars,
+        recalibrated_flux_platepars,
         platepar,
         frame_min_loss,
         ang_vel_night_mid,
@@ -2346,7 +2338,7 @@ def fluxParser():
         "--ratiothres",
         metavar="RATIO",
         type=float,
-        default=0.5,
+        default=0.4,
         help="Define a specific ratio threshold that will decide whether there are clouds. "
         "0.4 has been tested to be good and it is the default",
     )
@@ -2354,7 +2346,6 @@ def fluxParser():
 
 
 if __name__ == "__main__":
-
 
     import RMS.ConfigReader as cr
 
