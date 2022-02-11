@@ -50,7 +50,9 @@ def addFixedBins(sol_bins, small_sol_bins, *params):
     return data_arrays
 
 
-def combineFixedBinsAndComputeFlux(sol_bins, meteors, time_area_prod, min_meteors=50, ci=0.95, min_tap=2):
+def combineFixedBinsAndComputeFlux(
+    sol_bins, meteors, time_area_prod, min_meteors=50, ci=0.95, min_tap=2, max_bin_duration=6
+):
     """
     Computes flux values and their corresponding solar longitude based on bins containing
     number of meteors, and time-area product. Bins will be combined so that each bin has the
@@ -67,6 +69,8 @@ def combineFixedBinsAndComputeFlux(sol_bins, meteors, time_area_prod, min_meteor
         min_meteors: [int] Minimum number of meteors to have in a bin
         ci: [float] Confidence interval for calculating the flux error bars (from 0 to 1)
         min_tap: [float] Minimum time area product in 1000 km^2*h.
+        max_bin_duration: [float] Maximum bin duration in hours.
+
     Return:
         [tuple] sol, flux, flux_lower, flux_upper, meteors, ta_prod
             - sol: [ndarray] Solar longitude
@@ -110,6 +114,11 @@ def combineFixedBinsAndComputeFlux(sol_bins, meteors, time_area_prod, min_meteor
             sol_list.append(np.mean(middle_bin_sol[sl]))
             sol_bin_list.append(sol_bins[start_idx])
             start_idx = end_idx
+        elif (middle_bin_sol[end_idx] - middle_bin_sol[start_idx]) / (
+            2 * np.pi
+        ) * 24 * 365.24219 >= max_bin_duration:
+            start_idx = end_idx
+
     sol_bin_list.append(sol_bins[start_idx])
 
     return (
@@ -196,7 +205,7 @@ def calculateFixedBins(all_time_intervals, dir_list, bin_duration=5):
                     if comparison_sol[0] > sol[0]
                     else (sol[:min_len], comparison_sol[:min_len])
                 )
-                epsilon = 1e-12
+                epsilon = 1e-7
                 goal = sol_delta / 2
                 val = (np.median(a - b if a[0] - b[0] < np.pi else b + 2 * np.pi - a) + goal) % sol_delta
                 if np.abs(goal - val) > epsilon:
@@ -291,7 +300,7 @@ if __name__ == "__main__":
 
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(
-        description="Compute single-station meteor shower flux from a batch file."
+        description="Compute multi-station and multi-year meteor shower flux from a batch file."
     )
 
     arg_parser.add_argument("batch_path", metavar="BATCH_PATH", type=str, help="Path to the flux batch file.")
@@ -307,6 +316,24 @@ if __name__ == "__main__":
         action='store_true',
         help="If given, will read from the csv files defined with output_filename (defaults to fluxbatch_output)",
     )
+    arg_parser.add_argument(
+        "--minmeteors",
+        type=int,
+        default=30,
+        help="Minimum meteors per bin. If this is not satisfied the bin will be made larger",
+    )
+    arg_parser.add_argument(
+        "--mintap",
+        type=float,
+        default=3,
+        help="Minimum time-area product per bin. If this is not satisfied the bin will be made larger",
+    )
+    arg_parser.add_argument(
+        "--maxduration",
+        type=float,
+        default=6,
+        help="Maximum time per bin in hours. If this is not satisfied, the bin will be discarded.",
+    )
 
     # Parse the command line arguments
     fluxbatch_cml_args = arg_parser.parse_args()
@@ -319,14 +346,17 @@ if __name__ == "__main__":
     # Confidence interval
     ci = 0.95
 
-    # Minimum bin duration
+    # Minimum bin duration (minutes)
     bin_duration = 5
 
     # Minimum number of meteors in the bin
-    min_meteors = 30
+    min_meteors = fluxbatch_cml_args.minmeteors
 
     # Minimum time-area product (1000 km^2 h)
-    min_tap = 5
+    min_tap = fluxbatch_cml_args.mintap
+
+    # Maximum bin duration
+    max_bin_duration = fluxbatch_cml_args.maxduration
 
     ### ###
 
@@ -343,7 +373,6 @@ if __name__ == "__main__":
     summary_population_index = []
 
     plot_info = StationPlotParams()
-
 
     fig, ax = plt.subplots(2, figsize=(15, 8), sharex=True)
 
@@ -485,9 +514,9 @@ if __name__ == "__main__":
                 # Add computed flux to the output list
                 summary_population_index.append(population_index)
                 output_data += [
-                    [config.stationID, sol, flux, lower, upper]
+                    [config.stationID, sol, flux, lower, upper, population_index]
                     for (sol, flux, lower, upper) in zip(
-                        sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, population_index
+                        sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data
                     )
                 ]
 
@@ -524,7 +553,13 @@ if __name__ == "__main__":
             comb_num_meteors,
             comb_ta_prod,
         ) = combineFixedBinsAndComputeFlux(
-            sol_bins, num_meteors, area_time_product, ci=ci, min_tap=min_tap, min_meteors=min_meteors
+            sol_bins,
+            num_meteors,
+            area_time_product,
+            ci=ci,
+            min_tap=min_tap,
+            min_meteors=min_meteors,
+            max_bin_duration=max_bin_duration,
         )
         comb_sol = np.degrees(comb_sol)
         comb_sol_bins = np.degrees(comb_sol_bins)
