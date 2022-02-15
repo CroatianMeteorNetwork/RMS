@@ -445,16 +445,19 @@ class Config:
         self.platepar_remote_name = 'platepar_latest.cal'
         self.remote_platepar_dir = 'platepars'
 
-        self.catalog_mag_limit = 4.5
+        self.catalog_mag_limit = 5.5
 
         self.calstars_files_N = 400 # How many calstars FF files to evaluate
 
         self.calstars_min_stars = 500 # Minimum number of stars to use
 
-        self.dist_check_threshold = 0.33 # Minimum acceptable calibration residual (px)
-        self.dist_check_quick_threshold = 0.4 # Threshold for quick recalibration
+        # Minimum acceptable calibration residual (px)
+        self.dist_check_threshold = 0.33 
 
-        self.min_matched_stars = 7
+        # Threshold for quick recalibration (px)
+        self.dist_check_quick_threshold = 0.4 
+
+        self.min_matched_stars = 20
 
 
         ##### Thumbnails
@@ -471,6 +474,10 @@ class Config:
         # Path to the shower file
         self.shower_path = 'share'
         self.shower_file_name = 'established_showers.csv'
+
+        # Path to flux showers
+        self.showers_flux_file_name = 'flux_showers.csv'
+
 
         #### EGM96 vs WGS84 heights file
 
