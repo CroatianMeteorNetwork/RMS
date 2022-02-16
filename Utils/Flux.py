@@ -2323,7 +2323,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
         ((ax_met, ax_lm), (ax_rad_elev, ax_corrs), (ax_rad_dist, ax_col_area), (ax_ang_vel, ax_flux)) = axes
 
-        fig.suptitle("{:s}, s = {:.2f}, r = {:.2f}".format(shower_code, mass_index, population_index))
+        fig.suptitle("{:s}, s = {:.2f}, r = {:.2f}, $\\gamma = {:.2f}$".format(shower_code, mass_index, \
+            population_index, flux_config.gamma))
 
         ax_met.scatter(sol_data, meteor_num_data)
         ax_met.set_ylabel("Meteors")
