@@ -2650,7 +2650,7 @@ if __name__ == "__main__":
             cml_args.shower_code,
             dt_beg,
             dt_end,
-            cml_args.s,
+            cml_args.massindex,
             cml_args.binduration,
             cml_args.binmeteors,
             default_fwhm=cml_args.fwhm,
