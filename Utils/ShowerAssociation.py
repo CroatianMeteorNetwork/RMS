@@ -12,13 +12,12 @@ import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 from RMS.Astrometry.Conversions import (EARTH_CONSTANTS, datetime2JD,
-                                        geocentricToApparentRadiantAndVelocity,
                                         jd2Date, raDec2AltAz, raDec2Vector,
                                         vector2RaDec)
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, readFTPdetectinfo
 from RMS.Formats.Showers import (generateActivityDiagram, loadShowers,
-                                 makeShowerColors)
+                                 makeShowerColors, Shower)
 from RMS.Math import (angularSeparation, angularSeparationVect,
                       cartesianToPolar, isAngleBetween,
                       sphericalPointFromHeadingAndDistance, vectNorm)
@@ -218,68 +217,6 @@ class MeteorSingleStation(object):
 
 
 
-
-class Shower(object):
-    def __init__(self, shower_entry):
-
-        self.iau_code = shower_entry[0]
-        self.name = shower_entry[1]
-        self.name_full = shower_entry[2]
-
-        self.lasun_beg = shower_entry[3] # deg
-        self.lasun_max = shower_entry[4] # deg
-        self.lasun_end = shower_entry[5] # deg
-        self.ra_g = shower_entry[6] # deg
-        self.dec_g = shower_entry[7] # deg
-        self.dra = shower_entry[8] # deg
-        self.ddec = shower_entry[9] # deg
-        self.vg = shower_entry[10] # km/s
-
-        # Apparent radiant
-        self.ra = None # deg
-        self.dec = None # deg
-        self.v_init = None # m/s
-        self.azim = None # deg
-        self.elev = None # deg
-        self.shower_vector = None
-
-
-    def computeApparentRadiant(self, latitude, longitude, jdt_ref, meteor_fixed_ht=100000):
-        """ Compute the apparent radiant of the shower at the given location and time.
-
-        Arguments:
-            latitude: [float] Latitude of the observer (deg).
-            longitude: [float] Longitude of the observer (deg).
-            jdt_ref: [float] Julian date.
-
-        Keyword arguments:
-            meteor_fixed_ht: [float] Assumed height of the meteor (m). 100 km by default.
-
-        Return;
-            ra, dec, v_init: [tuple of floats] Apparent radiant (deg and m/s).
-
-        """
-
-
-        # Compute the location of the radiant due to radiant drift
-        if not np.any(np.isnan([self.dra, self.ddec])):
-            
-            # Solar longitude difference form the peak
-            lasun_diff = (np.degrees(jd2SolLonSteyaert(jdt_ref)) - self.lasun_max + 180)%360 - 180
-
-            ra_g = self.ra_g + lasun_diff*self.dra
-            dec_g = self.dec_g + lasun_diff*self.ddec
-
-
-        # Compute the apparent radiant - assume that the meteor is directly above the station
-        self.ra, self.dec, self.v_init = geocentricToApparentRadiantAndVelocity(ra_g, \
-            dec_g, 1000*self.vg, latitude, longitude, meteor_fixed_ht, \
-            jdt_ref, include_rotation=True)
-
-        return self.ra, self.dec, self.v_init
-
-
-
 def heightModel(v_init, ht_type='beg'):
     """ Function that takes a velocity and returns an extreme begin/end meteor height that was fit on CAMS
         data.
@@ -399,8 +336,9 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
         ftpdetectinfo_list: [list] A list of paths to FTPdetectinfo files.
 
     Keyword arguments:
-        shower_code: [str] Only use this one shower for association (e.g. ETA, PER, SDA). None by default,
-            in which case all active showers will be associated.
+        shower_code: [str or Shower] Only use this one shower for association (e.g. ETA, PER, SDA). None by default,
+            in which case all active showers will be associated. It can either by the three letter shower
+            code or a Shower object.
         show_plot: [bool] Show the plot on the screen. False by default.
         save_plot: [bool] Save the plot in the folder with FTPdetectinfos. False by default.
         plot_activity: [bool] Whether to plot the shower activity plot of not. False by default.
@@ -412,8 +350,17 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             - shower_counts: [list] A list of shower code and shower count pairs.
     """
 
-    # Load the list of meteor showers
-    shower_list = loadShowers(config.shower_path, config.shower_file_name)
+    # If the shower code is given as the three letter code, load the shower list from disk
+    if isinstance(shower_code, str):
+
+        # Load the list of meteor showers
+        shower_table = loadShowers(config.shower_path, config.shower_file_name)
+        shower_list = [Shower(shower_entry) for shower_entry in shower_table]
+
+    # If the the Shower object was given, do with that
+    else:
+        shower_list = [shower_code]
+        shower_code = shower_code.name
 
 
     # Load FTPdetectinfos
@@ -473,11 +420,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
         # Go through all showers in the list and find the best match
         best_match_shower = None
         best_match_dist = np.inf
-        for shower_entry in shower_list:
-
-            # Extract shower parameters
-            shower = Shower(shower_entry)
-
+        for shower in shower_list:
 
             # If the shower code was given, only check this one shower
             if shower_code is not None:
