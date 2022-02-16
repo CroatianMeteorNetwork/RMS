@@ -38,7 +38,7 @@ class Shower(object):
         self.vg = float(shower_entry[10]) # km/s
 
         # Load parameters for flux, if that type of shower entry is loaded
-        if len(shower_entry) > 11:
+        if len(shower_entry) > 13:
 
             self.flux_entry = True
 

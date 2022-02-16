@@ -279,7 +279,7 @@ if __name__ == "__main__":
                 ) = (
                     flux_cml_args.ftpdetectinfo_path,
                     flux_cml_args.shower_code,
-                    flux_cml_args.s,
+                    flux_cml_args.massindex,
                     flux_cml_args.binduration,
                     flux_cml_args.binmeteors,
                     flux_cml_args.timeinterval,
