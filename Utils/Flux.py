@@ -458,6 +458,10 @@ class FluxConfig(object):
         # Minimum radiant elevation in the time bin (deg). 25 degreees by default
         self.rad_elev_limit = 15
 
+        # Radiant elevation correction exponent
+        # See: Molau & Barentsen (2013) - Meteoroid stream flux densities and the zenith exponent
+        self.gamma = 1.5
+
         # Minimum distance of the end of the meteor to the radiant (deg)
         self.rad_dist_min = 15
 
@@ -1645,7 +1649,8 @@ def computeFluxCorrectionsOnBins(
                     correction_ratio *= range_correction
 
                     # Correct for the radiant elevation (cap to an order of magnitude correction)
-                    radiant_elev_correction = np.sin(np.radians(radiant_elev))
+                    #   Apply the zenith exponent gamma
+                    radiant_elev_correction = np.sin(np.radians(radiant_elev))**flux_config.gamma
                     radiant_elev_correction = max(radiant_elev_correction, 0.1)
                     radiant_elev_corr_arr.append(radiant_elev_correction)
                     correction_ratio *= radiant_elev_correction

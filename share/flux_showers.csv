@@ -1,7 +1,7 @@
 # Meteor showers included in a NASA meteoroid Environment Office meteor shower forecast for near-Earth space||||||||||||||||
 #    |    |                          |  [    | -   | -   |Radiant|  -|-   | ]   |    |  [   |-      |Activity|-|-    |]
-# IAU|IAU |Shower                    |Sol    |Sol  |Sol  |RA   |Dec  |dRA |dDec |Vg  |Year  |Sol    |ZHR |Bp   |Bm   |r
-# No |Code|Name                      |beg    |max  |end  |     |     |    |     |    |      |peak   |peak|rise |down |
+# IAU|IAU |Shower                    |Sol    |Sol  |Sol  |RA   |Dec  |dRA |dDec |Vg  |Year  |Sol    |ZHR |Bp   |Bm   |r  
+# No |Code|Name                      |beg    |max  |end  |     |     |    |     |    |      |peak   |peak|rise |down |   
   1|CAP|alpha Capricornids           |  108  |123.1|140  |306.5| -9.2|0.66| 0.28|23  |annual|125.48 |  4 |0.059|0.091|2.3
   2|STA|Southern Taurids             |  173  |216  |230  | 47.9| 12.8|0.99| 0.26|26.6|annual|223    |  5 |0.026|0    |2.3
   4|GEM|Geminids                     |  240  |262  |273  |113.5| 32.3|1.15|-0.16|33.8|annual|262.23 |118 |0.15 |0.462|2.1
