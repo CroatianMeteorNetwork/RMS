@@ -1663,7 +1663,6 @@ def computeFluxCorrectionsOnBins(
                     # Add the collection area to the final estimate with the height weight
                     #   Raise the correction to the mass index power
                     total_correction = correction_ratio**(mass_index - 1)
-                    total_correction = min(max(total_correction, 0.1), 10)
                     collection_area += weights[ht]*area*total_correction
                     total_corr_arr.append(total_correction)
 
