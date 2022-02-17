@@ -43,7 +43,7 @@ def getMaskFile(dir_path, config, file_list=None):
         file_list = os.listdir(dir_path)
         
     # Look through files and if there is mask.bmp or mask.zip, keep track of that then load it
-    mask = max(2 * (Path(config.mask_file).stem == Path(filename).stem) - filename.endswith('.zip')
+    mask = max(2*(Path(config.mask_file).stem == Path(filename).stem) - filename.endswith('.zip')
                for filename in file_list)
     if mask > 0:
         mask_path = os.path.join(dir_path, config.mask_file if mask == 2 else Path(config.mask_file).stem + '.zip')
@@ -53,7 +53,9 @@ def getMaskFile(dir_path, config, file_list=None):
     else:
         print("No mask used!")
         mask = None
+
     return mask
+    
 
 def loadMask(mask_file):
     """ Load the mask image. """

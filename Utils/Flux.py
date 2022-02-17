@@ -209,7 +209,7 @@ def loadTimeInvervals(config, dir_path):
 
 
 
-def calculateFixedBins(all_time_intervals, dir_list, bin_duration=5):
+def calculateFixedBins(all_time_intervals, dir_list, shower, bin_duration=5):
     """
     Function to calculate the bins that any amount of stations over any number of years for one shower
     can be put into.
@@ -217,6 +217,7 @@ def calculateFixedBins(all_time_intervals, dir_list, bin_duration=5):
     Arguments:
         all_time_intervals: [list] A list of observing time intervals in the (dt_beg, dt_end) format.
         dir_list: [list] List of directories to check for existing flux fixed bin files.
+        shower: [Shower object]
 
     Keyword arguments:
         bin_duration: [float] Bin duration in minutes (this is only an approximation since the bins are
@@ -261,11 +262,16 @@ def calculateFixedBins(all_time_intervals, dir_list, bin_duration=5):
 
     # Make sure that fixed bins fit with already existing bins saved
     existing_sol = []
-    for _dir in dir_list:
+    dirs_with_found_files = []
+    for dir_name in dir_list:
         loaded_sol = []
-        for filename in os.listdir(_dir):
-            if FIXED_BINS_NAME in filename and filename.endswith('.csv'):
-                loaded_sol.append(loadForcedBinFluxData(_dir, filename)[0])
+        for file_name in sorted(os.listdir(dir_name)):
+
+            # Take precomputed time bins for the right shower and mass index
+            if checkFluxFixedBinsName(file_name, shower.name, shower.mass_index):
+
+                loaded_sol.append(loadForcedBinFluxData(dir_name, file_name)[0])
+                dirs_with_found_files.append(dir_name)
 
         if loaded_sol:
             existing_sol.append(loaded_sol)
@@ -284,21 +290,27 @@ def calculateFixedBins(all_time_intervals, dir_list, bin_duration=5):
             # take the first
             failed = False
             comparison_sol = existing_sol[0][0]
-            for loaded_sol_list, _dir in zip(existing_sol[1:], dir_list[1:]):
-                sol = loaded_sol_list[0]  # take the first of the list and assume the others agree with it
+            for loaded_sol_list, dir_name in zip(existing_sol[1:], dirs_with_found_files[1:]):
+
+                # Take the first of the list and assume the others agree with it
+                sol = loaded_sol_list[0]
                 min_len = min(len(comparison_sol), len(sol), 5)
+                
                 a, b = (
                     (comparison_sol[:min_len], sol[:min_len])
                     if comparison_sol[0] > sol[0]
                     else (sol[:min_len], comparison_sol[:min_len])
                 )
+
                 epsilon = 1e-7
                 goal = sol_delta/2
+                
                 val = (np.median(a - b if a[0] - b[0] < np.pi else b + 2*np.pi - a) + goal)%sol_delta
+
                 if np.abs(goal - val) > epsilon:
                     print(
-                        "!!! {:s}.csv in {:s} and {:s} don't match solar longitude values".format( \
-                            FIXED_BINS_NAME, dir_list[0], _dir)
+                        "!!! {:s} CSV in {:s} and {:s} don't match solar longitude values".format( \
+                            FIXED_BINS_NAME, dirs_with_found_files[0], dir_name)
                     )
                     print('\tSolar longitude difference:', np.abs(goal - val))
                     failed = True
@@ -306,8 +318,8 @@ def calculateFixedBins(all_time_intervals, dir_list, bin_duration=5):
             if failed:
                 print()
                 raise Exception(
-                    'Flux bin solar longitudes didn\'t match. To fix this, at least one of the'
-                    ' {:s} CSV file must be deleted.'.format(FIXED_BINS_NAME)
+                    "Flux bin solar longitudes didn't match. To fix this, at least one of the"
+                    " {:s} CSV files must be deleted.".format(FIXED_BINS_NAME)
                 )
             # filter only sol values that are inside the solar longitude
             starting_sol = comparison_sol
@@ -351,17 +363,29 @@ def calculateFixedBins(all_time_intervals, dir_list, bin_duration=5):
 
 
 
+def generateFluxPlotName(station_code, shower_code, mass_index, sol_beg, sol_end):
+    """ Generate a file name for the fixed bins flux file. """
+
+    return "flux_{:s}_{:s}_s={:.2f}_sol={:.6f}-{:.6f}.png".format(station_code, shower_code, \
+        mass_index, np.degrees(sol_beg), np.degrees(sol_end))
+
+
+
 def generateFluxFixedBinsName(station_code, shower_code, mass_index, sol_beg, sol_end):
     """ Generate a file name for the fixed bins flux file. """
 
     return FIXED_BINS_NAME + "_{:s}_{:s}_s={:.2f}_sol={:.6f}-{:.6f}.csv".format(station_code, shower_code, \
         mass_index, np.degrees(sol_beg), np.degrees(sol_end))
 
-def generateFluxPlotName(station_code, shower_code, mass_index, sol_beg, sol_end):
-    """ Generate a file name for the fixed bins flux file. """
 
-    return "flux_{:s}_{:s}_s={:.2f}_sol={:.6f}-{:.6f}.png".format(station_code, shower_code, \
-        mass_index, np.degrees(sol_beg), np.degrees(sol_end))
+def checkFluxFixedBinsName(file_name, shower_code, mass_index):
+
+    shower_string = "_{:s}_s={:.2f}".format(shower_code, mass_index)
+
+    if file_name.startswith(FIXED_BINS_NAME) and (shower_string in file_name):
+        return True
+    else:
+        return False
 
 
 def saveForcedBinFluxData(dir_path, file_name, sol_list, meteor_n_list, area_list, time_list, meteor_lm_list):
@@ -1838,7 +1862,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
     Keyword arguments:
         binduration: [float] Time in hours for each bin
-        binmeteors: [int] Number of meteors to have in each bin (cannot have both this and binduration)
+        binmeteors: [int] Number of meteors to have in each bin (cannot have both this and binduration).
+            If set to -1, determine the number of bins by using the Rice rule.
         timebin_intdt: [float] Time step for computing the integrated collection area in hours. 15 minutes by
             default. If smaller than that, only one collection are will be computed.
         ht_std_percent: [float] Meteor height standard deviation in percent.
@@ -1955,6 +1980,15 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             print("{:.6f}, {:3s}, {:+.2f}".format(meteor.jdt_ref, shower.name, peak_mag))
 
     print()
+
+    # Automatically deterine the number of meteors in the bin
+    if binmeteors < 0:
+
+        binmeteors = len(associations)/np.ceil(np.sqrt(len(associations)))
+
+        # Use a minimum of 5 meteors per bin
+        if binmeteors < 5:
+            binmeteors = 5
 
 
     ### COMPUTE COLLECTION AREAS ###
@@ -2486,27 +2520,29 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
     # Load the list of showers used for flux computation
     flux_showers = FluxShowers(config)
 
-
-    # Calculate fixed 5 minute bins
-    sol_bins, bin_datetime_dict = calculateFixedBins(time_intervals, [dir_path])
-
     # Check for active showers in the observation periods
     for interval in time_intervals:
             
         dt_beg, dt_end = interval
-
-        # Extract datetimes of forced bins relevant for this time interval
-        dt_bins = bin_datetime_dict[np.argmax([year_start < dt_beg < year_end \
-            for (year_start, year_end), _ in bin_datetime_dict])][1]
-        forced_bins = (dt_bins, sol_bins)
 
         # Get a list of active showers in the time interval
         active_showers = flux_showers.activeShowers(dt_beg, dt_end)
 
         # Compute the flux for all active showers
         for shower in active_showers:
+
+
+            # Calculate fixed 5 minute bins
+            sol_bins, bin_datetime_dict = calculateFixedBins(time_intervals, [dir_path], shower)
+
+            # Extract datetimes of forced bins relevant for this time interval
+            dt_bins = bin_datetime_dict[np.argmax([year_start < dt_beg < year_end \
+                for (year_start, year_end), _ in bin_datetime_dict])][1]
+            forced_bins = (dt_bins, sol_bins)
+
+
             computeFlux(config, dir_path, ftpdetectinfo_path, shower, dt_beg, dt_end, shower.mass_index, \
-                binmeteors=10, forced_bins=forced_bins, save_plots=True, show_plots=False)
+                binmeteors=-1, forced_bins=forced_bins, save_plots=True, show_plots=False)
 
 
     ###
@@ -2546,8 +2582,8 @@ def fluxParser():
     binning_group.add_argument(
         "--binduration", type=float, metavar='DURATION', help="Time bin width in hours."
     )
-    binning_group.add_argument("--binmeteors", type=int, metavar='COUNT', help="Number of meteors per bin", \
-        default=10)
+    binning_group.add_argument("--binmeteors", type=int, metavar='COUNT', help="Number of meteors per bin. Automatically determined by default.", \
+        default=-1)
 
     flux_parser.add_argument(
         "-c",

@@ -8,12 +8,9 @@ import sys
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy
-from RMS.Astrometry.Conversions import datetime2JD, jd2Date
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile
-from RMS.Routines.SolarLongitude import jd2SolLonSteyaert, solLon2jdSteyaert
-
-from Utils.Flux import FIXED_BINS_NAME, calculatePopulationIndex, computeFlux, detectClouds, fluxParser, \
-    loadForcedBinFluxData, calculateFixedBins
+from RMS.Formats.Showers import FluxShowers
+from Utils.Flux import calculatePopulationIndex, computeFlux, detectClouds, fluxParser, calculateFixedBins
 
 
 def addFixedBins(sol_bins, small_sol_bins, *params):
@@ -270,7 +267,7 @@ if __name__ == "__main__":
                 (
                     ftpdetectinfo_path,
                     shower_code,
-                    s,
+                    mass_index,
                     binduration,
                     binmeteors,
                     time_intervals,
@@ -320,18 +317,27 @@ if __name__ == "__main__":
                         ftpdetectinfo_path,
                         shower_code,
                         time_intervals,
-                        s,
+                        mass_index,
                         binduration,
                         binmeteors,
                         fwhm,
                     ]
                 )
 
+
+        # Fetch the shower from the flux list
+        flux_showers = FluxShowers(config)
+        shower = [sh for sh in flux_showers.showers if sh.name == shower_code][0]
+
+        # Override the mass index if given
+        if mass_index is not None:
+            shower.mass_index = mass_index
+
         sol_bins, bin_datetime_dict = calculateFixedBins(
             [time_interval for data in file_data for time_interval in data[4]],
             [data[1] for data in file_data],
-            bin_duration=bin_duration,
-        )
+            shower,
+            bin_duration=bin_duration)
 
         all_bin_information = []
 
