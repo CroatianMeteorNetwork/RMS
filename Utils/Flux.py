@@ -2353,9 +2353,13 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
         # Plot how the derived values change throughout the night
-        fig, axes = plt.subplots(nrows=4, ncols=2, sharex=True, figsize=(10, 8))
+        fig, axes = plt.subplots(nrows=4, ncols=2, figsize=(10, 8))
+        ((ax_met, ax_lm), (ax_rad, ax_corrs), (ax_ang_vel, ax_col_area), (ax_mag, ax_flux)) = axes
 
-        ((ax_met, ax_lm), (ax_rad_elev, ax_corrs), (ax_rad_dist, ax_col_area), (ax_ang_vel, ax_flux)) = axes
+        # Set up shared axes (all except the magnitude plot)
+        sharex_list = [ax_met, ax_lm, ax_rad, ax_corrs, ax_ang_vel, ax_col_area, ax_flux]
+        sharex_list[0].get_shared_x_axes().join(*sharex_list)
+
 
         fig.suptitle("{:s}, s = {:.2f}, r = {:.2f}, $\\gamma = {:.2f}$".format(shower_code, mass_index, \
             population_index, flux_config.gamma))
@@ -2363,15 +2367,41 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         ax_met.scatter(sol_data, meteor_num_data)
         ax_met.set_ylabel("Meteors")
 
-        ax_rad_elev.plot(sol_data, radiant_elev_data)
-        ax_rad_elev.set_ylabel("Radiant elev (deg)")
-
-        ax_rad_dist.plot(sol_data, radiant_dist_mid_data)
-        ax_rad_dist.set_ylabel("Radiant dist (deg)")
+        ax_rad.plot(sol_data, radiant_elev_data, label="Radiant elevation", color='k', linestyle='solid')
+        ax_rad.plot(sol_data, radiant_dist_mid_data, label="Radiant distance", color='k', linestyle='dashed')
+        ax_rad.legend()
+        ax_rad.set_ylabel("Angle (deg)")
 
         ax_ang_vel.plot(sol_data, ang_vel_mid_data)
         ax_ang_vel.set_ylabel("Ang vel (deg/s)")
         ax_ang_vel.set_xlabel("La Sun (deg)")
+
+
+
+        # Plot a histogram of peak magnitudes
+        nums, mag_bins, _ = ax_mag.hist(peak_mags, cumulative=True, log=True, bins=len(peak_mags), \
+            density=True)
+
+        # Constrain the intercept so that it matchs the median magnitude
+        median_mag = np.median(peak_mags)
+
+        # Find the bin closest to the median magnitude
+        median_bin = np.argmin(np.abs(mag_bins - median_mag))
+        median_mag_bin = mag_bins[median_bin]
+        median_value = nums[median_bin]
+
+        # Plot population index
+        #r_intercept = -0.7
+        r_intercept = np.log10(median_value) - np.log10(population_index)*median_mag_bin
+        x_arr = np.linspace(np.min(peak_mags), np.percentile(peak_mags, 90))
+        ax_mag.plot(x_arr, 10**(np.log10(population_index)*x_arr + r_intercept))
+
+        # Only show the portion between the edge percentiles
+        ax_mag.set_xlim(np.percentile(peak_mags, 10) - 1, np.percentile(peak_mags, 90) + 1)
+
+        ax_mag.set_xlabel("Magnitude")
+        ax_mag.set_ylabel("Density")
+
 
         ax_lm.plot(sol_data, lm_s_data, label="Stellar")
         ax_lm.plot(sol_data, lm_m_data, label="Meteor")
