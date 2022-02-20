@@ -15,7 +15,12 @@ mkdir -p $LOGPATH
 # Log the output to a file (warning: this breaks Ctrl+C passing to StartCapture)
 #python -m RMS.StartCapture 2>&1 | tee $LOGFILE
 
-python -m RMS.StartCapture "$@"
+# start a new tmux session if not already inside one and tmux is available
+if [ -z "$TMUX" ] && type tmux >/dev/null 2>&1; then
+  tmux new-session -s RMS python -m RMS.StartCapture "$@"
+else
+  python -m RMS.StartCapture "$@"
+fi
 
 read -p "Press any key to continue... "
 
