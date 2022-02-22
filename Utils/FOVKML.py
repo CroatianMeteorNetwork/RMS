@@ -14,11 +14,10 @@ from RMS.Routines.MaskImage import loadMask
 from RMS.Routines.FOVArea import fovArea
 
 
-def fovKML(config, dir_path, platepar, mask=None, area_ht=100000, side_points=10, plot_station=True):
+def fovKML(dir_path, platepar, mask=None, area_ht=100000, side_points=10, plot_station=True):
     """ Given a platepar file and a mask file, make a KML file outlining the camera FOV.
 
     Arguments:
-        config: [Config object]
         dir_path: [str] Path where the KML file will be saved.
         platepar: [Platepar object]
 
@@ -101,7 +100,7 @@ def fovKML(config, dir_path, platepar, mask=None, area_ht=100000, side_points=10
 
     ### MAKE A KML ###
 
-    kml = "<?xml version='1.0' encoding='UTF-8'?><kml xmlns='http://earth.google.com/kml/2.1'><Folder><name>{:s}</name><open>1</open><Placemark id='{:s}'>".format(config.stationID, config.stationID) \
+    kml = "<?xml version='1.0' encoding='UTF-8'?><kml xmlns='http://earth.google.com/kml/2.1'><Folder><name>{:s}</name><open>1</open><Placemark id='{:s}'>".format(platepar.station_code, platepar.station_code) \
         + """
                  <Style id='camera'>
                   <LineStyle>
@@ -112,7 +111,7 @@ def fovKML(config, dir_path, platepar, mask=None, area_ht=100000, side_points=10
                   </PolyStyle>
                 </Style>
                 <styleUrl>#camera</styleUrl>\n""" \
-        + "<name>{:s}</name>\n".format(config.stationID) \
+        + "<name>{:s}</name>\n".format(platepar.station_code) \
         + "                <description>Area height: {:d} km\n".format(int(area_ht/1000))
 
     # Only add station info if the station is plotted
@@ -158,7 +157,7 @@ def fovKML(config, dir_path, platepar, mask=None, area_ht=100000, side_points=10
 
 
     # Save the KML file to the directory with the platepar
-    kml_path = os.path.join(dir_path, "{:s}-{:d}km.kml".format(config.stationID, int(area_ht/1000)))
+    kml_path = os.path.join(dir_path, "{:s}-{:d}km.kml".format(platepar.station_code, int(area_ht/1000)))
     with open(kml_path, 'w') as f:
         f.write(kml)
 
@@ -260,5 +259,5 @@ if __name__ == "__main__":
 
 
     # Generate a KML file from the platepar
-    fovKML(config, dir_path, pp, mask, area_ht=1000*cml_args.elev, side_points=cml_args.pts, \
+    fovKML(dir_path, pp, mask, area_ht=1000*cml_args.elev, side_points=cml_args.pts, \
         plot_station=cml_args.station)
