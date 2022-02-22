@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile
-from RMS.Formats.Showers import FluxShowers
+from RMS.Formats.Showers import FluxShowers, loadRadiantShowers
 from Utils.Flux import calculatePopulationIndex, computeFlux, detectClouds, fluxParser, calculateFixedBins
 
 
@@ -325,9 +325,18 @@ if __name__ == "__main__":
                 )
 
 
-        # Fetch the shower from the flux list
-        flux_showers = FluxShowers(config)
-        shower = [sh for sh in flux_showers.showers if sh.name == shower_code][0]
+        # If the mass index was given, load all showers
+        if mass_index is not None:
+            
+            shower_list = loadRadiantShowers(config)
+
+        else:
+
+            # Fetch the shower from the flux list
+            shower_list = FluxShowers(config).showers
+
+        shower = [sh for sh in shower_list if sh.name == shower_code][0]
+
 
         # Override the mass index if given
         if mass_index is not None:

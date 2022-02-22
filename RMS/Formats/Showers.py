@@ -148,6 +148,11 @@ def loadShowers(dir_path, file_name):
     return shower_data
 
 
+def loadRadiantShowers(config):
+    """ Load showers for single-station shower association, not flux. """
+    
+    return [Shower(shower_entry) for shower_entry in loadShowers(config.shower_path, config.shower_file_name)]
+
 
 class FluxShowers(object):
     def __init__(self, config):
