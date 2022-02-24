@@ -75,24 +75,6 @@ def correctVignetting(px_sum, radius, vignetting_coeff):
     return px_sum/(np.cos(vignetting_coeff*radius)**4)
 
 
-def correctVignettingTrueToApparent(catalog_mags, x, y, platepar):
-    """ Given a true star magnitude (can be corrected for extinction or not), correct the magnitude
-    for vignetting, which would make it darker near the edges
-    Arguments:
-        catalog_mags: [array] Magnitudes of stars
-        x: [array] X coordinate of star
-        y: [array] Y coordinate of star
-        platepar: [platepar object]
-        
-    Return:
-        corr_mag: [array] corrected magnitudes of stars
-    """
-    radius = np.sqrt((x-platepar.X_res/2)**2 + (y-platepar.Y_res/2)**2)
-    corr_mag = catalog_mags - 2.5 * np.log10(np.cos(platepar.vignetting_coeff*radius)**4)
-
-    return corr_mag
-
-
 def extinctionCorrectionTrueToApparent(catalog_mags, ra_data, dec_data, jd, platepar):
     """ Compute apparent magnitudes by applying extinction correction to catalog magnitudes. 
 

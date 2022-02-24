@@ -365,10 +365,6 @@ if __name__ == "__main__":
 
                 forced_bins = (dt_bins, sol_bins)
 
-                print("FORCED BINS:")
-                print(forced_bins)
-
-
                 ret = computeFlux(
                     config,
                     ftp_dir_path,
