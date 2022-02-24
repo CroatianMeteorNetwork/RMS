@@ -247,6 +247,7 @@ if __name__ == "__main__":
 
 
     # Assign mask
+    mask_path = None
     if cml_args.mask is not None:
         mask_path = cml_args.mask
 

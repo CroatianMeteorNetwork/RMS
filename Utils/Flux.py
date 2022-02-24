@@ -18,15 +18,12 @@ import scipy.stats
 
 
 from RMS.Astrometry.ApplyAstrometry import (
-    correctVignettingTrueToApparent,
-    extinctionCorrectionTrueToApparent,
     getFOVSelectionRadius,
     raDecToXYPP,
     xyToRaDecPP,
 )
 from RMS.Astrometry.ApplyRecalibrate import applyRecalibrate, loadRecalibratedPlatepar, recalibrateSelectedFF
 from RMS.Astrometry.Conversions import J2000_JD, areaGeoPolygon, date2JD, datetime2JD, jd2Date, raDec2AltAz
-from RMS.Astrometry.CyFunctions import subsetCatalog
 from RMS.ExtractStars import extractStarsAndSave
 from RMS.Formats import FFfile, Platepar, StarCatalog
 from RMS.Formats.CALSTARS import readCALSTARS
@@ -35,7 +32,7 @@ from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, readFTPdetectinfo
 from RMS.Formats.Showers import FluxShowers
 from RMS.Math import angularSeparation, pointInsideConvexPolygonSphere
 from RMS.Routines.FOVArea import fovArea, xyHt2Geo
-from RMS.Routines.MaskImage import MaskStructure, getMaskFile, loadMask
+from RMS.Routines.MaskImage import MaskStructure, getMaskFile
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert, solLon2jdSteyaert, unwrapSol
 
 from Utils.ShowerAssociation import heightModel, showerAssociation
@@ -86,6 +83,9 @@ class FluxConfig(object):
 
         # Minimum number of meteors in the time bin
         self.meteors_min = 3
+
+        # Default star FWHM, it it's not available (pz)
+        self.default_fwhm = 3
 
 
 class FluxMeasurements(object):
@@ -899,9 +899,6 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
     # Collect detected stars
     file_list = sorted(os.listdir(dir_path))
 
-    # Locate and load the mask file
-    mask = getMaskFile(dir_path, config, file_list=file_list)
-
     # Get detected stars
     calstars_file = None
     for calstars_file in file_list:
@@ -927,8 +924,17 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             bin_used = new_bin
 
 
+    # Get the platepar
     platepar = Platepar.Platepar()
     platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
+
+
+    # Locate and load the mask file
+    mask = getMaskFile(dir_path, config, file_list=file_list)
+
+    if mask is not None:
+        mask.checkMask(platepar.X_res, platepar.Y_res)
+
 
     # Detect which images don't have a moon visible, and filter the file list based on this
     recorded_files = detectMoon(recorded_files, platepar, config)
@@ -1162,13 +1168,10 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
 
         # Using a blank mask if nothing is given
         if mask is None:
-            mask = MaskStructure(
-                np.full(
-                    (recalibrated_platepars[ff_files[0]].Y_res, recalibrated_platepars[ff_files[0]].X_res),
-                    255,
-                    dtype=np.uint8,
-                )
-            )
+            mask = MaskStructure(None)
+            mask.resetEmpty(recalibrated_platepars[ff_files[0]].X_res, \
+                recalibrated_platepars[ff_files[0]].Y_res)
+
 
         # Go through all FF files and compute the number of predicted stars
         star_mag = {}
@@ -1235,11 +1238,6 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             _, _, _, mag_corrected = xyToRaDecPP(len(x)*[date], x, y, star_levels, platepar, extinction_correction=True)
             mag_corrected = np.array(mag_corrected)
 
-            # correct for extinction and vignetting so that dim stars can be filtered
-            # (not necessary since limiting magnitude already matches with matched star LM)
-            # mag = extinctionCorrectionTrueToApparent(mag[inside], ra_catalog[inside], dec_catalog[inside], jd, platepar)
-            # mag = correctVignettingTrueToApparent(mag, x, y, platepar)
-
             # Filter coordinates to be in FOV and make sure that the stars that are too dim are filtered
             bounds = (mag_corrected <= lim_mag) & (y >= 0) & (y < platepar.Y_res) & (x >= 0) & (x < platepar.X_res)
             x = x[bounds]
@@ -1304,7 +1302,8 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
 
     # If the mask is not given, make a dummy mask with all white pixels
     if mask is None:
-        mask = MaskStructure(np.full((platepar.Y_res, platepar.X_res), 255, dtype=np.uint8))
+        mask = MaskStructure(None)
+        mask.resetEmpty(platepar.Y_res, platepar.X_res)
 
     # Compute the number of samples for every image axis
     longer_side_points = side_points
@@ -1322,8 +1321,6 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
 
         # Convert the height to meters
         ht = 1000*ht
-
-        print(ht/1000, "km")
 
         total_area = 0
 
@@ -1366,8 +1363,14 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
 
                 ### Apply sensitivity corrections to the area ###
 
-                # Compute ratio of masked portion of the segment
+                # Get the relevant mask segment
                 mask_segment = mask.img[y0:ye, x0:xe]
+
+                # If the mask segment is empty, skip this segment
+                if mask_segment.size == 0:
+                    continue
+
+                # Compute ratio of masked portion of the segment
                 unmasked_ratio = 1 - np.count_nonzero(~mask_segment)/mask_segment.size
 
                 # Compute the pointing direction and the vignetting and extinction loss for the mean location
@@ -1430,7 +1433,7 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
     return col_areas_ht
 
 
-def sensorCharacterization(config, dir_path, meteor_data, default_fwhm=None):
+def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_fwhm=None):
     """Characterize the standard deviation of the background and the FWHM of stars on every image."""
 
     exists_FF_files = any(FFfile.validFFName(filename) for filename in os.listdir(dir_path))
@@ -1438,11 +1441,15 @@ def sensorCharacterization(config, dir_path, meteor_data, default_fwhm=None):
     # Find the CALSTARS file in the given folder that has FWHM information
     found_good_calstars = False
     for cal_file in os.listdir(dir_path):
+
         if ('CALSTARS' in cal_file) and ('.txt' in cal_file) and (not found_good_calstars):
+
             # Load the calstars file
             calstars_list = CALSTARS.readCALSTARS(dir_path, cal_file)
+
             # Check that at least one image has good FWHM measurements
             for ff_name, star_data in calstars_list:
+
                 if len(star_data) > 0 and star_data[0][4] > -1:  # if stars were detected
                     star_data = np.array(star_data)
 
@@ -1454,16 +1461,24 @@ def sensorCharacterization(config, dir_path, meteor_data, default_fwhm=None):
                         found_good_calstars = True
                         print('CALSTARS file: ' + cal_file + ' loaded!')
                         break
+
                 elif not exists_FF_files and len(star_data) > 0 and star_data[0][4] == -1:
                     if default_fwhm is not None:
                         found_good_calstars = True
                         print('CALSTARS file: ' + cal_file + ' loaded!')
                         break
+
                     else:
-                        raise Exception(
-                            'CALSTARS file does not have fwhm and FF files do not exist in'
-                            'directory. You must give a fwhm value with "--fwhm 3"'
-                        )
+
+                        # Use the default FWHM from the config file
+                        fwhm = flux_config.default_fwhm
+
+                        found_good_calstars = True
+
+                        # raise Exception(
+                        #     'CALSTARS file does not have fwhm and FF files do not exist in'
+                        #     'directory. You must give a fwhm value with "--fwhm 3"'
+                        # )
 
     # If the FWHM information is not present, run the star extraction
     if not found_good_calstars and exists_FF_files:
@@ -1553,7 +1568,7 @@ def getCollectingArea(dir_path, config, flux_config, platepar, mask):
     return col_areas_ht, col_area_100km_raw
 
 
-def getSensorCharacterization(dir_path, config, meteor_data, default_fwhm=None):
+def getSensorCharacterization(dir_path, config, flux_config, meteor_data, default_fwhm=None):
     """ File which stores the sensor characterization profile. """
 
     sensor_characterization_file = "flux_sensor_characterization.json"
@@ -1575,7 +1590,8 @@ def getSensorCharacterization(dir_path, config, meteor_data, default_fwhm=None):
     else:
 
         # Run sensor characterization
-        sensor_data = sensorCharacterization(config, dir_path, meteor_data, default_fwhm=default_fwhm)
+        sensor_data = sensorCharacterization(config, flux_config, dir_path, meteor_data, \
+            default_fwhm=default_fwhm)
 
         # Save to file for posterior use
         with open(sensor_characterization_path, 'w') as f:
@@ -2161,6 +2177,10 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
     """
 
+    # Init the flux configuration
+    flux_config = FluxConfig()
+
+
     # Extract the shower code if the Shower object was given
     shower = shower_code
     if not isinstance(shower_code, str):
@@ -2195,13 +2215,18 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
     # Locate and load the mask file
     mask = getMaskFile(dir_path, config, file_list=file_list)
 
+    # If the resolution of the loaded mask doesn't match the resolution in the platepar, reset the mask
+    if mask is not None:
+        mask.checkMask(platepar.X_res, platepar.Y_res)
+
     # Compute the population index using the classical equation
     # Found to be more consistent when comparing fluxes
     population_index = calculatePopulationIndex(mass_index)
 
     ### SENSOR CHARACTERIZATION ###
     # Computes FWHM of stars and noise profile of the sensor
-    sensor_data = getSensorCharacterization(dir_path, config, meteor_data, default_fwhm=default_fwhm)
+    sensor_data = getSensorCharacterization(dir_path, config, flux_config, meteor_data, \
+        default_fwhm=default_fwhm)
 
     # Compute the nighly mean FWHM
     fwhm_nightly_mean = np.mean([sensor_data[key][0] for key in sensor_data])
@@ -2211,9 +2236,6 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
     # Perform shower association
     associations, _ = showerAssociation(config, [ftpdetectinfo_path], shower_code=shower, \
         show_plot=False, save_plot=False, plot_activity=False)
-
-    # Init the flux configuration
-    flux_config = FluxConfig()
 
 
     # Remove all meteors which begin below the limit height
@@ -2785,6 +2807,9 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
 
     """
 
+    # Init the flux configuration
+    flux_config = FluxConfig()
+
 
     file_list = sorted(os.listdir(dir_path))
 
@@ -2801,13 +2826,12 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
     # Locate and load the mask file
     mask = getMaskFile(dir_path, config, file_list=file_list)
 
+    if mask is not None:
+        mask.checkMask(platepar.X_res, platepar.Y_res)
+
 
     # Computes FWHM of stars
-    getSensorCharacterization(dir_path, config, meteor_data)
-
-
-    # Init the flux configuration
-    flux_config = FluxConfig()
+    getSensorCharacterization(dir_path, config, flux_config, meteor_data)
 
     # Compute collecting areas
     getCollectingArea(dir_path, config, flux_config, platepar, mask)
