@@ -7,12 +7,16 @@ import json
 import os
 import sys
 
+import astropy.table
+import astropy.units
+import astropy.coordinates
 import ephem
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
-import RMS.Formats.CALSTARS as CALSTARS
 import scipy.stats
+
+
 from RMS.Astrometry.ApplyAstrometry import (
     correctVignettingTrueToApparent,
     extinctionCorrectionTrueToApparent,
@@ -26,6 +30,7 @@ from RMS.Astrometry.CyFunctions import subsetCatalog
 from RMS.ExtractStars import extractStarsAndSave
 from RMS.Formats import FFfile, Platepar, StarCatalog
 from RMS.Formats.CALSTARS import readCALSTARS
+import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, readFTPdetectinfo
 from RMS.Formats.Showers import FluxShowers
 from RMS.Math import angularSeparation, pointInsideConvexPolygonSphere
@@ -44,6 +49,257 @@ FIXED_BINS_NAME = "flux_fixed_bins"
 FLUX_TIME_INTERVALS_JSON = "flux_time_intervals.json"
 
 #
+
+
+class FluxConfig(object):
+    def __init__(self):
+        """Container for flux calculations."""
+
+        # How many points to use to evaluate the FOV on seach side of the image. Normalized to the longest
+        #   side.
+        self.side_points = 20
+
+        # Minimum height (km).
+        self.ht_min = 60
+
+        # Maximum height (km).
+        self.ht_max = 130
+
+        # Height sampling delta (km).
+        self.dht = 2
+
+        # Limit of meteor's elevation above horizon (deg). 25 degrees by default.
+        self.elev_limit = 20
+
+        # Minimum radiant elevation in the time bin (deg). 25 degreees by default
+        self.rad_elev_limit = 15
+
+        # Radiant elevation correction exponent
+        # See: Molau & Barentsen (2013) - Meteoroid stream flux densities and the zenith exponent
+        self.gamma = 1.5
+
+        # Minimum distance of the end of the meteor to the radiant (deg)
+        self.rad_dist_min = 15
+
+        # Subdivide the time bin into the given number of subbins
+        self.sub_time_bins = 2
+
+        # Minimum number of meteors in the time bin
+        self.meteors_min = 3
+
+
+class FluxMeasurements(object):
+    def __init__(self, shower_code, mass_index, population_index, gamma, shower_velocity, shower_height, \
+        star_fwhm, mean_ang_vel, mean_sensitivity, mean_range, raw_col_area, ci):
+        """ Container for flux measurements. """
+
+        self.shower_code = shower_code
+        self.mass_index = mass_index
+        self.population_index = population_index
+        self.gamma = gamma
+        self.shower_velocity = shower_velocity
+        self.shower_height = shower_height
+        self.star_fwhm = star_fwhm
+        self.mean_ang_vel = mean_ang_vel
+        self.mean_sensitivity = mean_sensitivity
+        self.mean_range = mean_range
+        self.raw_col_area = raw_col_area
+        self.ci = ci
+
+
+        ### ECSV parameters ###
+
+        self.format_version = 1.0
+        self.format_date = "2022-02-24"
+        self.format_version_str = "{:.3f} ({:s})".format(self.format_version, self.format_date)
+
+        ### ###
+
+        # Init the data arrays
+        self.resetDataArrays()
+
+
+    def resetDataArrays(self):
+
+        # Init data arrays
+        self.sol_lon_data = []
+        self.times_data = []
+        self.meteors_data = []
+        self.rad_elev_data = []
+        self.rad_dist_data = []
+        self.ang_vel_data = []
+        self.total_corrections_data = []
+        self.eff_col_area_data = []
+        self.time_bin_data = []
+        self.stellar_lm_data = []
+        self.meteor_lm_data = []
+        self.flux_meteor_lm_data = []
+        self.flux_6_5_lm_data = []
+        self.flux_6_5_lm_ci_lower_data = []
+        self.flux_6_5_lm_ci_upper_data = []
+
+
+    def addEntry(self, sol_lon, times, meteors, rad_elev, rad_dist, ang_vel, total_corrections, \
+        eff_col_area, time_bin, stellar_lm, meteor_lm, flux_meteor_lm, flux_6_5_lm, flux_6_5_lm_ci_lower, \
+        flux_6_5_lm_ci_upper):
+        """ Add entry to the flux data. """
+
+
+        self.sol_lon_data.append(sol_lon)
+        self.times_data.append(times)
+        self.meteors_data.append(meteors)
+        self.rad_elev_data.append(rad_elev)
+        self.rad_dist_data.append(rad_dist)
+        self.ang_vel_data.append(ang_vel)
+        self.total_corrections_data.append(total_corrections)
+        self.eff_col_area_data.append(eff_col_area)
+        self.time_bin_data.append(time_bin)
+        self.stellar_lm_data.append(stellar_lm)
+        self.meteor_lm_data.append(meteor_lm)
+        self.flux_meteor_lm_data.append(flux_meteor_lm)
+        self.flux_6_5_lm_data.append(flux_6_5_lm)
+        self.flux_6_5_lm_ci_lower_data.append(flux_6_5_lm_ci_lower)
+        self.flux_6_5_lm_ci_upper_data.append(flux_6_5_lm_ci_upper)
+
+
+    def saveECSV(self, ecsv_file_path):
+        """ Save the ECSV file with flux data. """
+
+        # Initialize empty table
+        flux_table = astropy.table.QTable()
+
+        ### Initialize metadata ###
+
+        flux_table.meta['description'] = "Global Meteor Network flux measurements"
+        flux_table.meta['version'] = self.format_version_str
+        flux_table.meta['shower'] = str(self.shower_code)
+        flux_table.meta['mass_index'] = self.mass_index
+        flux_table.meta['population_index'] = self.population_index
+        flux_table.meta['gamma'] = self.gamma
+        flux_table.meta['shower_velocity'] = astropy.units.Quantity(self.shower_velocity, \
+            unit=astropy.units.km/astropy.units.s)
+        flux_table.meta['shower_height'] = astropy.units.Quantity(self.shower_height, unit=astropy.units.km)
+        flux_table.meta['star_fwhm'] = astropy.units.Quantity(self.star_fwhm, unit=astropy.units.pix)
+        flux_table.meta['mean_ang_vel'] = astropy.units.Quantity(self.mean_ang_vel, \
+            unit=astropy.units.deg/astropy.units.s)
+        flux_table.meta['mean_sensitivity'] = self.mean_sensitivity
+        flux_table.meta['mean_range'] = astropy.units.Quantity(self.mean_range, unit=astropy.units.km)
+        flux_table.meta['raw_col_area'] = astropy.units.Quantity(self.raw_col_area, unit=astropy.units.km**2)
+        flux_table.meta['confidence_interval'] = self.ci
+
+        ### ###
+
+        ### Initialize columns ###
+
+        formats = {}
+
+        # Solar longitude (deg)
+        sol_lon_col = astropy.coordinates.Angle(self.sol_lon_data, unit=astropy.units.deg)
+        sol_lon_col.info.description = "Solar longitude of bin edges"
+        flux_table['sol'] = sol_lon_col
+        formats['sol'] = "%.8f"
+
+        # Time (UTC)
+        time_col = astropy.time.Time(self.times_data, format='datetime')
+        time_col.info.description = "UTC time of bin edges"
+        flux_table['time'] = time_col
+
+        # Meteors
+        num_meteors_col = astropy.units.Quantity(self.meteors_data)
+        num_meteors_col.info.description = "Numer of meteors in the bin"
+        flux_table['meteors'] = num_meteors_col
+        formats['meteors'] = "%d"
+
+        # Radiant elevation
+        rad_elev_col = astropy.coordinates.Angle(self.rad_elev_data, unit=astropy.units.deg)
+        rad_elev_col.info.description = "Radiant elevation"
+        flux_table['rad_elev'] = rad_elev_col
+        formats['rad_elev'] = "%.3f"
+
+        # Radiant distance
+        rad_dist_col = astropy.coordinates.Angle(self.rad_dist_data, unit=astropy.units.deg)
+        rad_dist_col.info.description = "Radiant distance from the FOV center"
+        flux_table['rad_dist'] = rad_dist_col
+        formats['rad_dist'] = "%.3f"
+
+        # Angular velocity
+        ang_vel_col = astropy.units.Quantity(self.ang_vel_data, unit=astropy.units.deg/astropy.units.s)
+        ang_vel_col.info.description = "Angular velocity at the FOV center"
+        flux_table['ang_vel'] = ang_vel_col
+        formats['ang_vel'] = "%.3f"
+
+        # Total corrections
+        total_corrections_col = astropy.units.Quantity(self.total_corrections_data)
+        total_corrections_col.info.description = "Total correction applied to the raw collecting area"
+        flux_table['total_corrections'] = total_corrections_col
+        formats['total_corrections'] = "%.4f"
+
+        # Corrected effective collection area to +6.5M (km^2)
+        eff_col_area_col = astropy.units.Quantity(self.eff_col_area_data, unit=astropy.units.km**2)
+        eff_col_area_col.info.description = "Effective collecting area corrected to +6.5M meteor magnitude"
+        flux_table['eff_col_area'] = eff_col_area_col
+        formats['eff_col_area'] = "%.2f"
+
+        # Time bin (hours)
+        time_bin_col = astropy.units.Quantity(self.time_bin_data, unit=astropy.units.h)
+        time_bin_col.info.description = "Bin duration"
+        flux_table['time_bin'] = time_bin_col
+        formats['time_bin'] = "%.6f"
+
+        # Stellar LM
+        stellar_lm_col = astropy.units.Quantity(self.stellar_lm_data, unit=astropy.units.mag)
+        stellar_lm_col.info.description = "Stellar limiting magnitude"
+        flux_table['stellar_lm'] = stellar_lm_col
+        formats['stellar_lm'] = "%.3f"
+
+        # Meteor LM (mag)
+        meteor_lm_col = astropy.units.Quantity(self.meteor_lm_data, unit=astropy.units.mag)
+        meteor_lm_col.info.description = "Meteor limiting magnitude at the FOV center"
+        flux_table['meteor_lm'] = meteor_lm_col
+        formats['meteor_lm'] = "%.3f"
+
+        # Flux at meteor magnitude
+        flux_meteor_lm_col = astropy.units.Quantity(self.flux_meteor_lm_data, \
+            unit=1.0/((1000*astropy.units.km**2)*astropy.units.h))
+        flux_meteor_lm_col.info.description = "Flux at the meteor LM"
+        flux_table['flux_meteor_lm'] = flux_meteor_lm_col
+        formats['flux_meteor_lm'] = "%.3f"
+
+        # Flux at +6.5M
+        flux_6_5_lm_col = astropy.units.Quantity(self.flux_6_5_lm_data, \
+            unit=1.0/((1000*astropy.units.km**2)*astropy.units.h))
+        flux_6_5_lm_col.info.description = "Flux at +6.5M"
+        flux_table['flux_6_5_lm'] = flux_6_5_lm_col
+        formats['flux_6_5_lm'] = "%.3f"
+
+        # Flux at +6.5M, lower confidence interval limit
+        flux_6_5_lm_ci_lower_col = astropy.units.Quantity(self.flux_6_5_lm_ci_lower_data, \
+            unit=1.0/((1000*astropy.units.km**2)*astropy.units.h))
+        flux_6_5_lm_ci_lower_col.info.description = "Flux at +6.5M, lower confidence interval limit"
+        flux_table['flux_6_5_lm_ci_lower'] = flux_6_5_lm_ci_lower_col
+        formats['flux_6_5_lm_ci_lower'] = "%.3f"
+
+        # Flux at +6.5M, upper confidence interval limit
+        flux_6_5_lm_ci_upper_col = astropy.units.Quantity(self.flux_6_5_lm_ci_upper_data, \
+            unit=1.0/((1000*astropy.units.km**2)*astropy.units.h))
+        flux_6_5_lm_ci_upper_col.info.description = "Flux at +6.5M, upper confidence interval limit"
+        flux_table['flux_6_5_lm_ci_upper'] = flux_6_5_lm_ci_upper_col
+        formats['flux_6_5_lm_ci_upper'] = "%.3f"
+
+        ### ###
+
+
+        # Save the ECSV file to disk
+        flux_table.write(ecsv_file_path, format='ascii.ecsv', delimiter=',', overwrite=True, formats=formats)
+
+
+    def loadECSV(self, ecsv_file_path):
+
+        # Load the ECSV data
+        flux_table =  astropy.table.QTable.read(ecsv_file_path, delimiter=',', format='ascii.ecsv', \
+            guess=False)
+
+        return flux_table
 
 
 
@@ -457,43 +713,6 @@ def loadForcedBinFluxData(dir_path, filename):
     meteor_lm_list = data[:-1, 4]
 
     return sol, meteor_list, area_list, time_list, meteor_lm_list
-
-
-class FluxConfig(object):
-    def __init__(self):
-        """Container for flux calculations."""
-
-        # How many points to use to evaluate the FOV on seach side of the image. Normalized to the longest
-        #   side.
-        self.side_points = 20
-
-        # Minimum height (km).
-        self.ht_min = 60
-
-        # Maximum height (km).
-        self.ht_max = 130
-
-        # Height sampling delta (km).
-        self.dht = 2
-
-        # Limit of meteor's elevation above horizon (deg). 25 degrees by default.
-        self.elev_limit = 20
-
-        # Minimum radiant elevation in the time bin (deg). 25 degreees by default
-        self.rad_elev_limit = 15
-
-        # Radiant elevation correction exponent
-        # See: Molau & Barentsen (2013) - Meteoroid stream flux densities and the zenith exponent
-        self.gamma = 1.5
-
-        # Minimum distance of the end of the meteor to the radiant (deg)
-        self.rad_dist_min = 15
-
-        # Subdivide the time bin into the given number of subbins
-        self.sub_time_bins = 2
-
-        # Minimum number of meteors in the time bin
-        self.meteors_min = 3
 
 
 def computeClearSkyTimeIntervals(cloud_ratio_dict, ratio_threshold=0.5, time_gap_threshold=15, clearing_threshold=90):
@@ -1444,6 +1663,30 @@ def computeFluxCorrectionsOnBins(
     mag_90_perc_data = []
     col_area_meteor_ht_raw = 0
 
+
+    ### Init flux data container ###
+
+    # Compute the mean meteor height
+    meteor_ht_beg = heightModel(v_init, ht_type='beg')
+    meteor_ht_end = heightModel(v_init, ht_type='end')
+    meteor_ht = (meteor_ht_beg + meteor_ht_end)/2
+
+    # Compute the mean FWHM
+    all_ff_files = []
+    for _, bin_ffs in bin_meteor_information:
+        all_ff_files += bin_ffs
+
+    fwhm_mean = np.mean([sensor_data[ff_name][0] for ff_name in all_ff_files])
+
+    # Init the flux measurement table (sensitivity and the raw collection area are set to None, they have to
+    #   the computed below)
+    flux_table = FluxMeasurements(shower.name, mass_index, population_index, flux_config.gamma, v_init/1000, 
+        meteor_ht/1000, fwhm_mean, np.degrees(ang_vel_night_mid), None, r_mid/1000, None, confidence_interval)
+
+
+    ### ###
+
+
     for ((bin_meteor_list, bin_ffs), (bin_dt_beg, bin_dt_end)) in zip(bin_meteor_information, bin_intervals):
         bin_jd_beg = datetime2JD(bin_dt_beg)
         bin_jd_end = datetime2JD(bin_dt_end)
@@ -1815,14 +2058,34 @@ def computeFluxCorrectionsOnBins(
             ang_vel_corr_data.append(ang_vel_corr_avg)
             total_corr_data.append(total_corr_avg)
 
+
+            # Compute datetime of the mean
+            dt_mean = jd2Date(jd_mean, dt_obj=True)
+
+            # Compute the collection area scaled to meteor LM of +6.5M
+            collection_area_6_5_lm = collection_area*population_index**(6.5 - lm_m)
+
+            # Add entry to the flux data container
+            flux_table.addEntry(sol_mean, dt_mean, len(bin_meteor_list), radiant_elev, \
+                np.degrees(rad_dist_mid), np.degrees(ang_vel_mid), total_corr_avg, \
+                collection_area_6_5_lm/1e6, bin_hours, lm_s, lm_m, flux, flux_lm_6_5, flux_lm_6_5_ci_lower, \
+                flux_lm_6_5_ci_upper)
+
+
         elif print_info:
             print(
                 '!!! Insufficient meteors in bin: {:d} observed vs min {:d}'.format(len(bin_meteor_list), flux_config.meteors_min)
             )
 
+
+    # Add sensitivity and raw collection area to the flux table
+    flux_table.mean_sensitivity = np.mean(sensitivity_corr_data)
+    flux_table.raw_col_area = col_area_meteor_ht_raw/1e6
+
     if no_skip:
-        return meteor_num_data, effective_collection_area_data, lm_m_data
+        return flux_table, meteor_num_data, effective_collection_area_data, lm_m_data
     return (
+        flux_table,
         sol_data,
         flux_lm_6_5_data,
         flux_lm_6_5_ci_lower_data,
@@ -2231,7 +2494,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
     # Apply corrections and compute the flux
-    (
+    (   
+        flux_table,
         sol_data,
         flux_lm_6_5_data,
         flux_lm_6_5_ci_lower_data,
@@ -2276,6 +2540,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         binduration=binduration,
     )
 
+    flux_table.saveECSV(os.path.join(dir_path, "flux_table_test.ecsv"))
+
 
     # Compute ZHR (Rentdel & Koschak, 1990 paper 2 method)
     zhr_data = (np.array(flux_lm_6_5_data)/1000)*37200/((13.1*population_index - 16.5)*(population_index - 1.3)**0.748)
@@ -2283,7 +2549,12 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
     if forced_bins:
         if not loaded_forced_bins:
             print('Calculating collecting area for fixed bins')
-            forced_bins_meteor_num, forced_bins_area, forced_bins_lm_m = computeFluxCorrectionsOnBins(
+            (
+                flux_table, 
+                forced_bins_meteor_num, 
+                forced_bins_area, 
+                forced_bins_lm_m
+            ) = computeFluxCorrectionsOnBins(
                 forced_bin_meteor_information,
                 forced_bin_intervals,
                 mass_index,
