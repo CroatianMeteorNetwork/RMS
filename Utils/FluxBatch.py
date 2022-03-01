@@ -423,10 +423,13 @@ if __name__ == "__main__":
                     ],
                 )
 
-        # plotting data
+        # Sum meteors in every bin
         num_meteors = sum(np.array(meteors) for meteors, _, _ in all_bin_information)
 
+        # Compute time-area product in every  bin
         area_time_product = sum(np.array(area)*np.array(time) for _, area, time in all_bin_information)
+
+
         (
             comb_sol,
             comb_sol_bins,
