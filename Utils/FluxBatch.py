@@ -263,7 +263,7 @@ if __name__ == "__main__":
                 if line.startswith("#"):
                     continue
 
-                flux_cml_args = fluxParser().parse_args(shlex.split(line))
+                flux_cml_args = fluxParser().parse_args(shlex.split(line, posix=0))
                 (
                     ftpdetectinfo_path,
                     shower_code,
@@ -355,6 +355,7 @@ if __name__ == "__main__":
         for (config, ftp_dir_path, ftpdetectinfo_path, shower_code, time_intervals, s, binduration, \
             binmeteors, fwhm) in file_data:
 
+            # Compute the flux in every observing interval
             for interval in time_intervals:
 
                 dt_beg, dt_end = interval
@@ -460,7 +461,7 @@ if __name__ == "__main__":
                 if line.startswith("#"):
                     continue
 
-                flux_cml_args = fluxParser().parse_args(shlex.split(line))
+                flux_cml_args = fluxParser().parse_args(shlex.split(line, posix=0))
                 shower_code = flux_cml_args.shower_code
                 summary_population_index.append(calculatePopulationIndex(flux_cml_args.s))
 
