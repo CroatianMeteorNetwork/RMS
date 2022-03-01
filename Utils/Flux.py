@@ -727,10 +727,13 @@ def loadForcedBinFluxData(dir_path, file_name):
     # Add the ending bin to the solar longitdes
     sol_bins = np.append(np.radians(flux_table.table['sol']), [flux_table.table.meta['sol_range'][1]])
 
-    meteor_list = flux_table.table['meteors']
-    area_list = 1e6*flux_table.table['eff_col_area']
-    time_list = flux_table.table['time_bin']
-    meteor_lm_list = flux_table.table['meteor_lm']
+    meteor_list = flux_table.table['meteors'].data.tolist()
+    area_list = (1e6*flux_table.table['eff_col_area'].data).tolist()
+    time_list = flux_table.table['time_bin'].data.tolist()
+    meteor_lm_list = flux_table.table['meteor_lm'].data.tolist()
+
+    # Replace all NaNs with None
+    meteor_lm_list = [None if np.isnan(lm) else lm for lm in meteor_lm_list]
 
     ### ###
 
@@ -2753,6 +2756,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
 
+        # Scale the collecting area to +6.5M
         forced_bins_area = np.array(
             [
                 area/population_index**(6.5 - lm) if lm is not None and not np.isnan(lm) else 0
