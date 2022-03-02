@@ -2240,7 +2240,7 @@ def computeFluxCorrectionsOnBins(
 
 def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_end, mass_index, \
     binduration=None, binmeteors=None, timebin_intdt=0.25, ht_std_percent=5.0, mask=None, show_plots=True, \
-    save_plots=False, confidence_interval=0.95, default_fwhm=None, forced_bins=None):
+    save_plots=False, confidence_interval=0.95, default_fwhm=None, forced_bins=None, compute_single=True):
     """Compute flux using measurements in the given FTPdetectinfo file.
 
     Arguments:
@@ -2274,6 +2274,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             is 5ish minutes long. sol_bins also shouldn't wrap around once it hits 360.
             The extra parameter, bin_information, will be returned when this parameter is given. These bins
             are independent of the binduration and binmeteors parameters
+        compute_single: [bool] Only considered if forced bins are given. If False, single station flux will
+            not be computed. True by default.
 
     Return:
         [tuple] sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, bin_information
@@ -2381,6 +2383,12 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
     # If the flux file was already computed and the plots won't be shown, load the flux file from disk
     loaded_flux_computations = False
+    sol_data = []
+    flux_lm_6_5_data = []
+    flux_lm_6_5_ci_lower_data = []
+    flux_lm_6_5_ci_upper_data = []
+    meteor_num_data = []
+    population_index = calculatePopulationIndex(mass_index)
     if os.path.isfile(os.path.join(dir_path, ecsv_file_name)) and not (show_plots or save_plots):
         
         sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, meteor_num_data, \
@@ -2683,7 +2691,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         ### ###
 
 
-        if not loaded_flux_computations:
+        if (not forced_bins and not loaded_flux_computations) or (forced_bins and compute_single):
 
             # Apply corrections and compute the flux
             (   

@@ -204,6 +204,12 @@ if __name__ == "__main__":
     )
 
     arg_parser.add_argument(
+        "--single",
+        action='store_true',
+        help="Show single-station fluxes.",
+    )
+
+    arg_parser.add_argument(
         "--minmeteors",
         type=int,
         default=30,
@@ -276,6 +282,7 @@ if __name__ == "__main__":
     fig, ax = plt.subplots(2, figsize=(15, 8), sharex=True)
 
 
+    # If an input CSV file was not given, compute the data
     if not fluxbatch_cml_args.csv:
 
         # loading commands from batch file and collecting information to run computeflux, including
@@ -413,8 +420,9 @@ if __name__ == "__main__":
                     binmeteors,
                     show_plots=False,
                     default_fwhm=fwhm,
-                    forced_bins=forced_bins,
                     confidence_interval=ci,
+                    forced_bins=forced_bins,
+                    compute_single=fluxbatch_cml_args.single,
                 )
 
                 if ret is None:
@@ -433,34 +441,40 @@ if __name__ == "__main__":
                 if len(bin_information[0]) == 0:
                     continue
 
-                # Add computed flux to the output list
-                summary_population_index.append(population_index)
-                output_data += [
-                    [config.stationID, sol, flux, lower, upper, population_index]
-                    for (sol, flux, lower, upper) in zip(
-                        sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data
-                    )
-                ]
-
                 all_bin_information.append(addFixedBins(sol_bins, *bin_information))
+                summary_population_index.append(population_index)
 
-                # plot data for night and interval
-                plot_params = plot_info(config.stationID)
-                line = ax[0].plot(sol_data, flux_lm_6_5_data, **plot_params, linestyle='dashed')
 
-                ax[0].errorbar(
-                    sol_data,
-                    flux_lm_6_5_data,
-                    color=plot_params['color'],
-                    alpha=0.5,
-                    capsize=5,
-                    zorder=3,
-                    linestyle='none',
-                    yerr=[
-                        np.array(flux_lm_6_5_data) - np.array(flux_lm_6_5_ci_lower_data),
-                        np.array(flux_lm_6_5_ci_upper_data) - np.array(flux_lm_6_5_data),
-                    ],
-                )
+                # Store and plot single-station data
+                if fluxbatch_cml_args.single:
+
+                    # Add computed flux to the output list
+                    output_data += [
+                        [config.stationID, sol, flux, lower, upper, population_index]
+                        for (sol, flux, lower, upper) in zip(
+                            sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data
+                        )
+                    ]
+
+                    
+
+                    # plot data for night and interval
+                    plot_params = plot_info(config.stationID)
+                    line = ax[0].plot(sol_data, flux_lm_6_5_data, **plot_params, linestyle='dashed')
+
+                    ax[0].errorbar(
+                        sol_data,
+                        flux_lm_6_5_data,
+                        color=plot_params['color'],
+                        alpha=0.5,
+                        capsize=5,
+                        zorder=3,
+                        linestyle='none',
+                        yerr=[
+                            np.array(flux_lm_6_5_data) - np.array(flux_lm_6_5_ci_lower_data),
+                            np.array(flux_lm_6_5_ci_upper_data) - np.array(flux_lm_6_5_data),
+                        ],
+                    )
 
         # Sum meteors in every bin
         num_meteors = sum(np.array(meteors) for meteors, _, _ in all_bin_information)
@@ -490,6 +504,8 @@ if __name__ == "__main__":
         comb_sol = np.degrees(comb_sol)
         comb_sol_bins = np.degrees(comb_sol_bins)
 
+
+    # If a CSV files was given, load the fluxes from the disk
     else:
 
         # get list of directories so that fixedfluxbin csv files can be found
@@ -508,34 +524,35 @@ if __name__ == "__main__":
                 shower_code = flux_cml_args.shower_code
                 summary_population_index.append(calculatePopulationIndex(flux_cml_args.s))
 
-        # load data from .csv file and plot it
-        dirname = os.path.dirname(fluxbatch_cml_args.batch_path)
-        data1 = np.genfromtxt(
-            os.path.join(dirname, fluxbatch_cml_args.output_filename + "_1.csv"),
-            delimiter=',',
-            dtype=None,
-            encoding=None,
-            skip_header=1,
-        )
-
-        station_list = []
-        for stationID, sol, flux, lower, upper, _ in data1:
-            plot_params = plot_info(stationID)
-
-            ax[0].errorbar(
-                sol,
-                flux,
-                **plot_params,
-                alpha=0.5,
-                capsize=5,
-                zorder=3,
-                linestyle='none',
-                yerr=[[flux - lower], [upper - flux]],
+        # Load data from single-station .csv file and plot it
+        if fluxbatch_cml_args.single:
+            dirname = os.path.dirname(fluxbatch_cml_args.batch_path)
+            data1 = np.genfromtxt(
+                os.path.join(dirname, fluxbatch_cml_args.output_filename + "_single.csv"),
+                delimiter=',',
+                dtype=None,
+                encoding=None,
+                skip_header=1,
             )
 
-        if os.path.exists(os.path.join(dirname, fluxbatch_cml_args.output_filename + "_2.csv")):
+            station_list = []
+            for stationID, sol, flux, lower, upper, _ in data1:
+                plot_params = plot_info(stationID)
+
+                ax[0].errorbar(
+                    sol,
+                    flux,
+                    **plot_params,
+                    alpha=0.5,
+                    capsize=5,
+                    zorder=3,
+                    linestyle='none',
+                    yerr=[[flux - lower], [upper - flux]],
+                )
+
+        if os.path.exists(os.path.join(dirname, fluxbatch_cml_args.output_filename + "_combined.csv")):
             data2 = np.genfromtxt(
-                os.path.join(dirname, fluxbatch_cml_args.output_filename + "_2.csv"),
+                os.path.join(dirname, fluxbatch_cml_args.output_filename + "_combined.csv"),
                 delimiter=',',
                 encoding=None,
                 skip_header=1,
@@ -557,6 +574,8 @@ if __name__ == "__main__":
             comb_num_meteors = []
             comb_ta_prod = []
 
+
+    # If data was able to be combined, plot the weighted flux
     if len(comb_sol):
 
         # Plotting weigthed flux
@@ -613,39 +632,46 @@ if __name__ == "__main__":
 
     plt.show()
 
+
+    # Write the computed weigthed flux to disk
     if not fluxbatch_cml_args.csv:
+
         if len(comb_sol):
-            data_out_path = os.path.join(dir_path, fluxbatch_cml_args.output_filename + "_2.csv")
+
+            data_out_path = os.path.join(dir_path, fluxbatch_cml_args.output_filename + "_combined.csv")
             with open(data_out_path, 'w') as fout:
                 fout.write(
-                    "# Sol bin start (deg), Mean Sol (deg), Flux@+6.5M (met/1000km^2/h), Flux lower bound, Flux upper bound, Area-time product (corrected to +6.5M) (m^3/h), Meteor Count\n"
+                    "# Sol bin start (deg), Mean Sol (deg), Flux@+6.5M (met/1000km^2/h), Flux lower bound, Flux upper bound, Time-area product (corrected to +6.5M) (m^3/h), Meteor Count\n"
                 )
-                for _sol_bins, _sol, _flux, _flux_lower, _flux_upper, _at, _nmeteors in zip(
-                    comb_sol_bins,
-                    comb_sol,
-                    comb_flux,
-                    comb_flux_lower,
-                    comb_flux_upper,
-                    comb_ta_prod,
-                    comb_num_meteors,
-                ):
+                for _sol_bin_start, _mean_sol, _flux, _flux_lower, _flux_upper, _tap, _nmeteors in zip( \
+                    comb_sol_bins, comb_sol, comb_flux, comb_flux_lower, comb_flux_upper, comb_ta_prod, \
+                    comb_num_meteors):
 
-                    fout.write(f"{_sol_bins},{_sol},{_flux},{_flux_lower},{_flux_upper},{_at},{_nmeteors}\n")
-                fout.write(f"{comb_sol_bins[-1]},,,,,,\n")
+                    #fout.write(f"{_sol_bin_start},{_mean_sol},{_flux},{_flux_lower},{_flux_upper},{_tap},{_nmeteors}\n")
+                    fout.write("{:.8f},{:.8f},{:.3f},{:.3f},{:.3f},{:.2f},{:d}\n".format(_sol_bin_start, \
+                        _mean_sol, _flux, _flux_lower, _flux_upper, _tap, int(_nmeteors)))
+
+                fout.write("{:.8f},,,,,,\n".format(comb_sol_bins[-1]))
+
             print("Data saved to:", data_out_path)
 
-        data_out_path = os.path.join(dir_path, f"{fluxbatch_cml_args.output_filename}_1.csv")
-        with open(data_out_path, 'w') as fout:
-            fout.write(
-                "# Station, Sol (deg), Flux@+6.5M (met/1000km^2/h), Flux lower bound, Flux upper bound, Population Index\n"
-            )
-            for entry in output_data:
-                print(entry)
-                stationID, sol, flux, lower, upper, population_index = entry
 
+
+        # Save the single-station fluxes
+        if fluxbatch_cml_args.single:
+
+            data_out_path = os.path.join(dir_path, fluxbatch_cml_args.output_filename + "_single.csv")
+            with open(data_out_path, 'w') as fout:
                 fout.write(
-                    "{:s},{:.8f},{:.3f},{:.3f},{:.3f},{}\n".format(
-                        stationID, sol, flux, lower, upper, population_index
-                    )
+                    "# Station, Sol (deg), Flux@+6.5M (met/1000km^2/h), Flux lower bound, Flux upper bound, Population Index\n"
                 )
-        print("Data saved to:", data_out_path)
+                for entry in output_data:
+                    print(entry)
+                    stationID, sol, flux, lower, upper, population_index = entry
+
+                    fout.write(
+                        "{:s},{:.8f},{:.3f},{:.3f},{:.3f},{}\n".format(
+                            stationID, sol, flux, lower, upper, population_index
+                        )
+                    )
+            print("Data saved to:", data_out_path)
