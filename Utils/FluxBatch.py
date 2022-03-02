@@ -602,6 +602,7 @@ if __name__ == "__main__":
     ax[0].legend()
     ax[0].set_title('{:s} r = {:.2f}'.format(shower_code, np.mean(summary_population_index)))
     ax[0].set_ylabel("Flux (meteoroids / 1000km$^2$ h)")
+    ax[0].set_ylim(bottom=0)
     ax[1].set_ylabel("Time-area product +6.5M (1000 km$^2$ h)")
     ax[1].set_xlabel("Solar longitude (deg)")
     # plt.tight_layout()

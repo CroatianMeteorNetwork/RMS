@@ -546,7 +546,7 @@ def calculateFixedBins(all_time_intervals, dir_list, shower, bin_duration=5):
 
         if loaded_sol:
             existing_sol.append(loaded_sol)
-            
+
         # does not check to make sure that none of the intervals during a single night overlap. User must
         # make sure of this
 
@@ -2195,7 +2195,7 @@ def computeFluxCorrectionsOnBins(
             total_corr_data.append(total_corr_avg)
 
             # Compute the collection area scaled to meteor LM of +6.5M
-            collection_area_6_5_lm = collection_area*population_index**(6.5 - lm_m)
+            collection_area_6_5_lm = collection_area/population_index**(6.5 - lm_m)
 
             # Add entry to the flux data container
             flux_table.addEntry(sol_entry, dt_entry, len(bin_meteor_list), radiant_elev, \
