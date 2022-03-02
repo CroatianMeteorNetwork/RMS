@@ -1024,7 +1024,8 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
     recorded_files = list(recalibrated_platepars.keys())
 
     # Extract the number of matches stars between the catalog and the image
-    matched_count = {ff: len(recalibrated_platepars[ff].star_list) for ff in recorded_files}
+    matched_count = {ff: len(recalibrated_platepars[ff].star_list) \
+        if recalibrated_platepars[ff].star_list is not None else 0 for ff in recorded_files}
 
     # Compute the correction between the visible limiting magnitude and the LM produced by the star detector
     #   - normalize the LM to intensity_threshold of 18
@@ -1859,7 +1860,7 @@ def computeFluxCorrectionsOnBins(
                 effective_collection_area_data.append(0)
 
                 flux_table.addEntry(sol_entry, dt_entry, 0, radiant_elev, np.degrees(rad_dist_mid), \
-                    np.degrees(ang_vel_mid), 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
+                    np.degrees(ang_vel_mid), 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
 
             continue
 
@@ -1877,7 +1878,7 @@ def computeFluxCorrectionsOnBins(
                 effective_collection_area_data.append(0)
 
                 flux_table.addEntry(sol_entry, dt_entry, 0, radiant_elev, np.degrees(rad_dist_mid), \
-                    np.degrees(ang_vel_mid), 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
+                    np.degrees(ang_vel_mid), 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
 
             continue
 
@@ -1940,7 +1941,7 @@ def computeFluxCorrectionsOnBins(
                     effective_collection_area_data.append(0)
 
                     flux_table.addEntry(sol_entry, dt_entry, 0, radiant_elev, np.degrees(rad_dist_mid), \
-                    np.degrees(ang_vel_mid), 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
+                    np.degrees(ang_vel_mid), 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
 
 
                 continue
@@ -2370,6 +2371,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
     print("Flux ECSV file:", ecsv_file_name)
 
     # If the flux file was already computed and the plots won't be shown, load the flux file from disk
+    loaded_flux_computations = False
     if os.path.isfile(os.path.join(dir_path, ecsv_file_name)) and not (show_plots or save_plots):
         
         sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, meteor_num_data, \
@@ -2377,11 +2379,12 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
         print("   ... loaded!")
 
+        loaded_flux_computations = True
+
+
 
     # Compute the flux
-    else:
-
-
+    if (not loaded_flux_computations) or (forced_bins and loaded_flux_computations and not loaded_forced_bins):
 
         # Get a list of files in the night folder
         file_list = sorted(os.listdir(dir_path))
@@ -2658,62 +2661,63 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         ### ###
 
 
+        if not loaded_flux_computations:
 
-        # Apply corrections and compute the flux
-        (   
-            flux_table,
-            sol_data,
-            flux_lm_6_5_data,
-            flux_lm_6_5_ci_lower_data,
-            flux_lm_6_5_ci_upper_data,
-            meteor_num_data,
-            effective_collection_area_data,
-            radiant_elev_data,
-            radiant_dist_mid_data,
-            ang_vel_mid_data,
-            lm_s_data,
-            lm_m_data,
-            sensitivity_corr_data,
-            range_corr_data,
-            radiant_elev_corr_data,
-            ang_vel_corr_data,
-            total_corr_data,
-            col_area_meteor_ht_raw,
-            mag_median_data,
-            mag_90_perc_data,
-        ) = computeFluxCorrectionsOnBins(
-            bin_meteor_information,
-            bin_intervals,
-            mass_index,
-            population_index,
-            shower,
-            ht_std_percent,
-            flux_config,
-            config,
-            col_areas_ht,
-            v_init,
-            azim_mid,
-            elev_mid,
-            r_mid,
-            recalibrated_platepars,
-            recalibrated_flux_platepars,
-            platepar,
-            frame_min_loss,
-            ang_vel_night_mid,
-            sensor_data,
-            lm_m_nightly_mean,
-            confidence_interval=confidence_interval,
-            binduration=binduration,
-        )
-
-
-        # Save ECSV with flux measurements
-        flux_table.table.meta['fixed_bins'] = False
-        flux_table.table.meta['sol_range'] = [np.degrees(sol_beg), np.degrees(sol_end)]
+            # Apply corrections and compute the flux
+            (   
+                flux_table,
+                sol_data,
+                flux_lm_6_5_data,
+                flux_lm_6_5_ci_lower_data,
+                flux_lm_6_5_ci_upper_data,
+                meteor_num_data,
+                effective_collection_area_data,
+                radiant_elev_data,
+                radiant_dist_mid_data,
+                ang_vel_mid_data,
+                lm_s_data,
+                lm_m_data,
+                sensitivity_corr_data,
+                range_corr_data,
+                radiant_elev_corr_data,
+                ang_vel_corr_data,
+                total_corr_data,
+                col_area_meteor_ht_raw,
+                mag_median_data,
+                mag_90_perc_data,
+            ) = computeFluxCorrectionsOnBins(
+                bin_meteor_information,
+                bin_intervals,
+                mass_index,
+                population_index,
+                shower,
+                ht_std_percent,
+                flux_config,
+                config,
+                col_areas_ht,
+                v_init,
+                azim_mid,
+                elev_mid,
+                r_mid,
+                recalibrated_platepars,
+                recalibrated_flux_platepars,
+                platepar,
+                frame_min_loss,
+                ang_vel_night_mid,
+                sensor_data,
+                lm_m_nightly_mean,
+                confidence_interval=confidence_interval,
+                binduration=binduration,
+            )
 
 
-        # Save the flux table to disk
-        flux_table.saveECSV(os.path.join(dir_path, ecsv_file_name))
+            # Save ECSV with flux measurements
+            flux_table.table.meta['fixed_bins'] = False
+            flux_table.table.meta['sol_range'] = [np.degrees(sol_beg), np.degrees(sol_end)]
+
+
+            # Save the flux table to disk
+            flux_table.saveECSV(os.path.join(dir_path, ecsv_file_name))
 
 
     # Compute ZHR (Rentdel & Koschak, 1990 paper 2 method)
@@ -2789,20 +2793,21 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             forced_flux_table.saveECSV(os.path.join(dir_path, forced_bins_file))
 
 
-            ### TEST !!!!!1
+            # ### TEST !!!!!1
 
-            test_sol_bins, test_forced_bins_meteor_num, test_forced_bins_area, test_forced_bins_time, \
-                test_forced_bins_lm_m = loadForcedBinFluxData(dir_path, forced_bins_file)
+            # test_sol_bins, test_forced_bins_meteor_num, test_forced_bins_area, test_forced_bins_time, \
+            #     test_forced_bins_lm_m = loadForcedBinFluxData(dir_path, forced_bins_file)
 
-            print("sol bins", sol_bins, test_sol_bins)
-            print("bins_meteor_num", forced_bins_meteor_num, test_forced_bins_meteor_num)
-            print("bins_area", forced_bins_area, test_forced_bins_area)
-            print("time_bins", forced_bins_time, test_forced_bins_time)
-            print("bins_lm_m", forced_bins_lm_m, test_forced_bins_lm_m)
+            # print("sol bins", sol_bins, test_sol_bins)
+            # print("bins_meteor_num", forced_bins_meteor_num, test_forced_bins_meteor_num)
+            # print("bins_area", forced_bins_area, test_forced_bins_area)
+            # print("time_bins", forced_bins_time, test_forced_bins_time)
+            # print("bins_lm_m", forced_bins_lm_m, test_forced_bins_lm_m)
 
-            sys.exit()
+            # print()
+            # input("Press ENTER to continue...")
 
-            ### ###
+            # ### ###
 
 
 
