@@ -535,11 +535,18 @@ def calculateFixedBins(all_time_intervals, dir_list, shower, bin_duration=5):
             # Take precomputed time bins for the right shower and mass index
             if checkFluxFixedBinsName(file_name, shower.name, shower.mass_index):
 
-                loaded_sol.append(loadForcedBinFluxData(dir_name, file_name)[0])
-                dirs_with_found_files.append(dir_name)
+                # Load the solar longitude edges
+                sol_bins_loaded = loadForcedBinFluxData(dir_name, file_name)[0]
+
+                if len(sol_bins_loaded):
+
+                    loaded_sol.append(sol_bins_loaded)
+                    dirs_with_found_files.append(dir_name)
+
 
         if loaded_sol:
             existing_sol.append(loaded_sol)
+            
         # does not check to make sure that none of the intervals during a single night overlap. User must
         # make sure of this
 
@@ -756,8 +763,10 @@ def loadForcedBinFluxData(dir_path, file_name):
 
     ### Extract the data ###
 
-    # Add the ending bin to the solar longitdes
-    sol_bins = np.radians(np.append(flux_table.table['sol'].data, [flux_table.table.meta['sol_range'][1]]))
+    # Add the ending bin to the solar longitdes, so they represent bin edges
+    sol_bins = flux_table.table['sol'].data
+    if len(sol_bins):
+        sol_bins = np.radians(np.append(sol_bins, [flux_table.table.meta['sol_range'][1]]))
 
     meteor_list = flux_table.table['meteors'].data.astype(np.int).tolist()
     area_list = (1e6*flux_table.table['eff_col_area'].data).tolist()
@@ -2444,7 +2453,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             meteor, shower = associations[key]
 
             if meteor.beg_alt > flux_config.elev_limit:
-                print("Rejecting:", meteor.jdt_ref)
+                # print("Rejecting:", meteor.jdt_ref)
                 filtered_associations[key] = (meteor, shower)
 
         associations = filtered_associations
@@ -2452,6 +2461,19 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         # If there are no shower association, return nothing
         if not associations:
             print("No meteors associated with the shower!")
+
+            # Save empty flux files
+            flux_table = FluxMeasurements()
+            flux_table.initMetadata(shower_code, mass_index, calculatePopulationIndex(mass_index), \
+                flux_config.gamma, 0, 0, 0, 0, 0, 0, 0, confidence_interval)
+
+            flux_table.table.meta['fixed_bins'] = False
+            flux_table.table.meta['sol_range'] = [0, 0]
+            flux_table.saveECSV(os.path.join(dir_path, ecsv_file_name))
+
+            flux_table.table.meta['fixed_bins'] = True
+            flux_table.saveECSV(os.path.join(dir_path, forced_bins_file))
+
             return None
 
 
