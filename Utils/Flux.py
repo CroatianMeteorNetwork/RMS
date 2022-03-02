@@ -29,7 +29,7 @@ from RMS.Formats import FFfile, Platepar, StarCatalog
 from RMS.Formats.CALSTARS import readCALSTARS
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, readFTPdetectinfo
-from RMS.Formats.Showers import FluxShowers
+from RMS.Formats.Showers import FluxShowers, loadRadiantShowers
 from RMS.Math import angularSeparation, pointInsideConvexPolygonSphere
 from RMS.Routines.FOVArea import fovArea, xyHt2Geo
 from RMS.Routines.MaskImage import MaskStructure, getMaskFile
@@ -1490,7 +1490,7 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
         # Store segments to the height dictionary (save a copy so it doesn't get overwritten)
         col_areas_ht[float(ht)] = dict(col_areas_xy)
 
-        print("SUM:", total_area/1e6, "km^2")
+        # print("SUM:", total_area/1e6, "km^2")
 
         # Compare to total area computed from the whole area
         side_points_list = fovArea(
@@ -1503,7 +1503,7 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
                 lats.append(entry[0])
                 lons.append(entry[1])
 
-        print("DIR:", areaGeoPolygon(lats, lons, ht)/1e6)
+        # print("DIR:", areaGeoPolygon(lats, lons, ht)/1e6)
 
     return col_areas_ht
 
@@ -2300,8 +2300,12 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
     # Extract the shower code if the Shower object was given
     shower = shower_code
     if not isinstance(shower_code, str):
-        shower_code = shower.name
+        shower_code = shower_code.name
 
+    else:
+        # Otherwise, get the shower object
+        shower_list = loadRadiantShowers(config)
+        shower = [sh for sh in shower_list if sh.name == shower_code][0]
 
 
     ### Generate 5 minute bins ###
@@ -2451,7 +2455,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         ### ###
 
         # Perform shower association
-        associations, _ = showerAssociation(config, [ftpdetectinfo_path], shower_code=shower, \
+        associations, _ = showerAssociation(config, [ftpdetectinfo_path], shower_code=shower_code, \
             show_plot=False, save_plot=False, plot_activity=False)
 
 
@@ -2466,132 +2470,27 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
         associations = filtered_associations
 
-        # If there are no shower association, return nothing
-        if not associations:
-            print("No meteors associated with the shower!")
-
-            # Save empty flux files
-            flux_table = FluxMeasurements()
-            flux_table.initMetadata(shower_code, mass_index, calculatePopulationIndex(mass_index), \
-                flux_config.gamma, 0, 0, 0, 0, 0, 0, 0, confidence_interval)
-
-            flux_table.table.meta['fixed_bins'] = False
-            flux_table.table.meta['sol_range'] = [0, 0]
-            flux_table.saveECSV(os.path.join(dir_path, ecsv_file_name))
-
-            flux_table.table.meta['fixed_bins'] = True
-            flux_table.saveECSV(os.path.join(dir_path, forced_bins_file))
-
-            return None
 
 
-        # Print the list of used meteors
-        peak_mags = []
-        for meteor, shower in associations.values():
-            if shower is not None:
-                # Compute peak magnitude
-                peak_mag = np.min(meteor.mag_array)
-                peak_mags.append(peak_mag)
-                print("{:.6f}, {:3s}, {:+.2f}".format(meteor.jdt_ref, shower.name, peak_mag))
-
-        print()
-
-        # Automatically deterine the number of meteors in the bin
-        if binmeteors < 0:
-
-            binmeteors = len(associations)/np.ceil(np.sqrt(len(associations)))
-
-            # Use a minimum of 5 meteors per bin
-            if binmeteors < 5:
-                binmeteors = 5
-
-
-        ### COMPUTE COLLECTION AREAS ###
-
-        col_areas_ht, col_area_100km_raw = getCollectingArea(dir_path, config, flux_config, platepar, mask)
-
-        # Compute the pointing of the middle of the FOV
-        _, ra_mid, dec_mid, _ = xyToRaDecPP(
-            [jd2Date(J2000_JD.days)],
-            [platepar.X_res/2],
-            [platepar.Y_res/2],
-            [1],
-            platepar,
-            extinction_correction=False,
-        )
-        azim_mid, elev_mid = raDec2AltAz(ra_mid[0], dec_mid[0], J2000_JD.days, platepar.lat, platepar.lon)
-
-
-        # Compute the range to the middle point
-        ref_ht = 100000
-        r_mid, _, _, _ = xyHt2Geo(
-            platepar,
-            platepar.X_res/2,
-            platepar.Y_res/2,
-            ref_ht,
-            indicate_limit=True,
-            elev_limit=flux_config.elev_limit,
-        )
-
-        print("Range at 100 km in the middle of the image: {:.2f} km".format(r_mid/1000))
-
-
-
-        # Compute the average angular velocity to which the flux variation throught the night will be normalized
-        #   The ang vel is of the middle of the FOV in the middle of observations
-
-        # Middle Julian date of the night
-        jd_night_mid = (datetime2JD(dt_beg) + datetime2JD(dt_end))/2
-
-        # Compute the apparent radiant
-        ra, dec, v_init = shower.computeApparentRadiant(platepar.lat, platepar.lon, jd_night_mid)
-
-        # Compute the radiant elevation
-        radiant_azim, radiant_elev = raDec2AltAz(ra, dec, jd_night_mid, platepar.lat, platepar.lon)
-
-        # Compute the angular velocity in the middle of the FOV
-        rad_dist_night_mid = angularSeparation(
-            np.radians(radiant_azim), np.radians(radiant_elev), np.radians(azim_mid), np.radians(elev_mid)
-        )
-        ang_vel_night_mid = v_init*np.sin(rad_dist_night_mid)/r_mid
-
-        ###
-
-
-
-        # Compute the average limiting magnitude to which all flux will be normalized
-
-        # Compute the theoretical stellar limiting magnitude using an empirical model (nightly average)
-        lm_s_nightly_mean = stellarLMModel(mag_lev_nightly_mean)
-
-        # A meteor needs to be visible on at least 4 frames, thus it needs to have at least 4x the mass to produce
-        #   that amount of light. 1 magnitude difference scales as -0.4 of log of mass, thus:
-        # frame_min_loss = np.log10(config.line_minimum_frame_range_det)/(-0.4)
-        # However this makes the flux too high and is not consistent with other measurements (that doesn't make
-        #   those other measurements correct, something to be investiaged...)
-        frame_min_loss = 0.0 
-        # print("Frame min loss: {:.2} mag".format(frame_min_loss))
-        lm_s_nightly_mean += frame_min_loss
-
-
-        # Compute the nightly mean apparent meteor magnitude
-        lm_m_nightly_mean = (lm_s_nightly_mean - 5*np.log10(r_mid/1e5) - 2.5*np.log10(np.degrees(
-                    platepar.F_scale*v_init*np.sin(rad_dist_night_mid)
-                   /(config.fps*r_mid*fwhm_nightly_mean)
-                ))
-            )
-
-        print("Average stellar LM during the night: {:+.2f}".format(lm_s_nightly_mean))
-        print("        meteor  LM during the night: {:+.2f}".format(lm_m_nightly_mean))
-
-
-        ##### Apply time-dependent corrections #####
 
         ### Go through all time bins within the observation period ###
 
         bin_meteor_information = []  # [[[meteor, ...], [meteor.ff_name, ...]], ...]
         bin_intervals = []  # [(start_time, end_time), ...]
         num_meteors = 0
+
+
+        # Automatically deterine the number of meteors in the bin, if it's not given
+        if binmeteors < 0:
+
+            if len(associations) > 0:
+
+                binmeteors = len(associations)/np.ceil(np.sqrt(len(associations)))
+
+            # Use a minimum of 5 meteors per bin
+            if binmeteors < 5:
+                binmeteors = 5
+
 
         # If using fixed bins in time, generate them
         if binduration is not None:
@@ -2691,7 +2590,118 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         ### ###
 
 
-        if (not forced_bins and not loaded_flux_computations) or (forced_bins and compute_single):
+        
+
+        # Print the list of used meteors
+        peak_mags = []
+        for meteor, shower in associations.values():
+            if shower is not None:
+                # Compute peak magnitude
+                peak_mag = np.min(meteor.mag_array)
+                peak_mags.append(peak_mag)
+                print("{:.6f}, {:3s}, {:+.2f}".format(meteor.jdt_ref, shower.name, peak_mag))
+
+        print()
+
+
+        ### COMPUTE COLLECTION AREAS ###
+
+        col_areas_ht, col_area_100km_raw = getCollectingArea(dir_path, config, flux_config, platepar, mask)
+
+        # Compute the pointing of the middle of the FOV
+        _, ra_mid, dec_mid, _ = xyToRaDecPP(
+            [jd2Date(J2000_JD.days)],
+            [platepar.X_res/2],
+            [platepar.Y_res/2],
+            [1],
+            platepar,
+            extinction_correction=False,
+        )
+        azim_mid, elev_mid = raDec2AltAz(ra_mid[0], dec_mid[0], J2000_JD.days, platepar.lat, platepar.lon)
+
+
+        # Compute the range to the middle point
+        ref_ht = 100000
+        r_mid, _, _, _ = xyHt2Geo(
+            platepar,
+            platepar.X_res/2,
+            platepar.Y_res/2,
+            ref_ht,
+            indicate_limit=True,
+            elev_limit=flux_config.elev_limit,
+        )
+
+        print("Range at 100 km in the middle of the image: {:.2f} km".format(r_mid/1000))
+
+
+
+        # Compute the average angular velocity to which the flux variation throught the night will be normalized
+        #   The ang vel is of the middle of the FOV in the middle of observations
+
+        # Middle Julian date of the night
+        jd_night_mid = (datetime2JD(dt_beg) + datetime2JD(dt_end))/2
+
+        # Compute the apparent radiant
+        ra, dec, v_init = shower.computeApparentRadiant(platepar.lat, platepar.lon, jd_night_mid)
+
+        # Compute the radiant elevation
+        radiant_azim, radiant_elev = raDec2AltAz(ra, dec, jd_night_mid, platepar.lat, platepar.lon)
+
+        # Compute the angular velocity in the middle of the FOV
+        rad_dist_night_mid = angularSeparation(
+            np.radians(radiant_azim), np.radians(radiant_elev), np.radians(azim_mid), np.radians(elev_mid)
+        )
+        ang_vel_night_mid = v_init*np.sin(rad_dist_night_mid)/r_mid
+
+        ###
+
+
+
+        # Compute the average limiting magnitude to which all flux will be normalized
+
+        # Compute the theoretical stellar limiting magnitude using an empirical model (nightly average)
+        lm_s_nightly_mean = stellarLMModel(mag_lev_nightly_mean)
+
+        # A meteor needs to be visible on at least 4 frames, thus it needs to have at least 4x the mass to produce
+        #   that amount of light. 1 magnitude difference scales as -0.4 of log of mass, thus:
+        # frame_min_loss = np.log10(config.line_minimum_frame_range_det)/(-0.4)
+        # However this makes the flux too high and is not consistent with other measurements (that doesn't make
+        #   those other measurements correct, something to be investiaged...)
+        frame_min_loss = 0.0 
+        # print("Frame min loss: {:.2} mag".format(frame_min_loss))
+        lm_s_nightly_mean += frame_min_loss
+
+
+        # Compute the nightly mean apparent meteor magnitude
+        lm_m_nightly_mean = (lm_s_nightly_mean - 5*np.log10(r_mid/1e5) - 2.5*np.log10(np.degrees(
+                    platepar.F_scale*v_init*np.sin(rad_dist_night_mid)
+                   /(config.fps*r_mid*fwhm_nightly_mean)
+                ))
+            )
+
+        print("Average stellar LM during the night: {:+.2f}".format(lm_s_nightly_mean))
+        print("        meteor  LM during the night: {:+.2f}".format(lm_m_nightly_mean))
+
+
+        ##### Apply time-dependent corrections #####
+
+
+
+        # If there are no shower association, don't compute single-station flux
+        if not associations:
+            print("No meteors associated with the shower!")
+
+            # Save empty flux files
+            flux_table = FluxMeasurements()
+            flux_table.initMetadata(shower_code, mass_index, calculatePopulationIndex(mass_index), \
+                flux_config.gamma, 0, 0, 0, 0, 0, 0, 0, confidence_interval)
+
+            flux_table.table.meta['fixed_bins'] = False
+            flux_table.table.meta['sol_range'] = [0, 0]
+            flux_table.saveECSV(os.path.join(dir_path, ecsv_file_name))
+
+
+        elif (not forced_bins and not loaded_flux_computations) or (forced_bins and compute_single):
 
             # Apply corrections and compute the flux
             (   
@@ -2750,8 +2760,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             flux_table.saveECSV(os.path.join(dir_path, ecsv_file_name))
 
 
-    # Compute ZHR (Rentdel & Koschak, 1990 paper 2 method)
-    zhr_data = (np.array(flux_lm_6_5_data)/1000)*37200/((13.1*population_index - 16.5)*(population_index - 1.3)**0.748)
+    # # Compute ZHR (Rentdel & Koschak, 1990 paper 2 method)
+    # zhr_data = (np.array(flux_lm_6_5_data)/1000)*37200/((13.1*population_index - 16.5)*(population_index - 1.3)**0.748)
 
     if forced_bins:
 
