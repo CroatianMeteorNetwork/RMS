@@ -4,6 +4,7 @@ import datetime
 import os
 import shlex
 import sys
+import collections
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,10 +12,12 @@ import scipy
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile
 from RMS.Formats.Showers import FluxShowers, loadRadiantShowers
 from Utils.Flux import calculatePopulationIndex, computeFlux, detectClouds, fluxParser, calculateFixedBins
+from RMS.Routines.SolarLongitude import unwrapSol
 
 
-def addFixedBins(sol_bins, small_sol_bins, *params):
-    """
+def addFixedBins(sol_bins, small_sol_bins, meteor_num_arr, collecting_area_arr, obs_time_arr):
+    """ Sort data into fixed bins by solar longitude. 
+
     For a larger array of solar longitudes sol_bins, fits parameters to an empty array of its size (minus 1)
     so that small_sol_bins agrees with sol_bins
 
@@ -33,24 +36,44 @@ def addFixedBins(sol_bins, small_sol_bins, *params):
             - val: [ndarray] Array of where any index that used to correspond to a sol in small_sol_bins,
                 now corresponds to an index in sol_bins, padding all other values with zeros
     """
+
     # if sol_bins wraps would wrap around but forced_bins_sol doesn't
     if sol_bins[0] > small_sol_bins[0]:
         i = np.argmax(sol_bins - (small_sol_bins[0] + 360) > -1e-7)
     else:
         i = np.argmax(sol_bins - small_sol_bins[0] > -1e-7)  # index where they are equal
 
-    data_arrays = []
-    for p in params:
-        forced_bin_param = np.zeros(len(sol_bins) - 1)
-        forced_bin_param[i : i + len(p)] = p
-        data_arrays.append(forced_bin_param)
 
-    return data_arrays
+
+
+    # Sort collecting area into bins
+    collecting_area_binned = np.zeros(len(sol_bins) - 1)
+    collecting_area_binned[i:i + len(collecting_area_arr)] = collecting_area_arr
+
+    # Sort observation time into bins
+    obs_time_binned = np.zeros(len(sol_bins) - 1)
+    obs_time_binned[i:i + len(obs_time_arr)] = obs_time_arr
+
+
+    # Sort meteor numbers into bins
+    meteor_num_binned = np.zeros(len(sol_bins) - 1)
+    meteor_num_binned[i:i + len(meteor_num_arr)] = meteor_num_arr
+
+    # Set the number of meteors to zero where either the time or the collecting area is also zero
+    meteor_num_binned[(collecting_area_binned == 0) | (obs_time_binned == 0)] = 0
+
+    #data_arrays = []
+    # for p in params:
+    #     forced_bin_param = np.zeros(len(sol_bins) - 1)
+    #     forced_bin_param[i:i + len(p)] = p
+    #     data_arrays.append(forced_bin_param)
+
+    return [meteor_num_binned,  collecting_area_binned, obs_time_binned]
 
 
 def combineFixedBinsAndComputeFlux(
-    sol_bins, meteors, time_area_prod, min_meteors=50, ci=0.95, min_tap=2, min_bin_duration=0.5, \
-    max_bin_duration=12):
+    sol_bins, meteors, time_area_prod, min_meteors=50, ci=0.95, min_tap=2, \
+    min_bin_duration=0.5, max_bin_duration=12):
     """
     Computes flux values and their corresponding solar longitude based on bins containing
     number of meteors, and time-area product. Bins will be combined so that each bin has the
@@ -61,7 +84,6 @@ def combineFixedBinsAndComputeFlux(
         meteors: [ndarray] Number of meteors in a bin
         time_area_prod: [ndarray] Time multiplied by LM corrected collecting area added for each station
             which contains each bin
-        time: [ndarray]
 
     Keyword arguments:
         min_meteors: [int] Minimum number of meteors to have in a bin
@@ -174,6 +196,70 @@ class StationPlotParams:
             label = None
 
         return {'color': color, 'marker': marker, 'label': label}
+
+
+
+def cameraTally(comb_sol_bins, single_fixed_bin_information):
+    """ Tally contributions from individual cameras in every time bin. 
+    
+    comb_sol_bins: [list] List of combined solar longitue bin edges (degrees).
+    single_fixed_bin_information: [list] A list of [station, [sol (rad)], [meteor_num], [area (m^2)], 
+        [time_bin (hour)]]
+        entries for every station.
+    """
+
+    bin_tally = collections.OrderedDict()
+
+    # Go through all solar longitude bins
+    for i in range(len(comb_sol_bins) - 1):
+
+        sol_start = np.radians(comb_sol_bins[i])
+        sol_end   = np.radians(comb_sol_bins[i + 1])
+
+        # Add an entry for the bin
+        if np.degrees(sol_start) not in bin_tally:
+            bin_tally[np.degrees(sol_start)] = collections.OrderedDict()
+
+
+        # Compute station contributions
+        for station, (sol_arr, met_num, area, time_bin) in single_fixed_bin_information:
+
+            sol_arr = np.array(sol_arr)
+            met_num = np.array(met_num)
+            area = np.array(area)
+            time_bin = np.array(time_bin)
+
+            # Select data in the solar longitude range
+            sol_arr_unwrapped = unwrapSol(sol_arr[:-1], sol_start, sol_end)
+            mask_arr = (sol_arr_unwrapped >= sol_start) & (sol_arr_unwrapped <= sol_end)
+
+            # Set the number of meteors to 0 where the TAP or the observing duration are 0
+            met_num[(area == 0) | (time_bin == 0)] = 0
+
+            if np.any(mask_arr):
+
+                if station not in bin_tally[np.degrees(sol_start)]:
+                    
+                    # Add an entry for the station, if it doesn't exist
+                    bin_tally[np.degrees(sol_start)][station] = {'meteors': 0, 'tap': 0}
+
+                # Add numbers to the tally
+                bin_tally[np.degrees(sol_start)][station]['meteors'] += np.sum(met_num[mask_arr])
+                bin_tally[np.degrees(sol_start)][station]['tap'] += np.sum(area[mask_arr]*time_bin[mask_arr])
+
+
+        # Sort by the number of meteors
+        bin_cams = bin_tally[np.degrees(sol_start)]
+        bin_cams = collections.OrderedDict(sorted(bin_cams.items(), key=lambda item: item[1]['meteors'], \
+            reverse=True))
+        bin_tally[np.degrees(sol_start)] = bin_cams
+
+
+    return bin_tally
+
+
+
+
 
 
 if __name__ == "__main__":
@@ -390,8 +476,8 @@ if __name__ == "__main__":
             shower,
             bin_duration=bin_duration)
 
-        all_bin_information = []
-
+        all_fixed_bin_information = []
+        single_fixed_bin_information = []
 
         # Compute the flux
         for (config, ftp_dir_path, ftpdetectinfo_path, shower_code, time_intervals, s, binduration, \
@@ -441,7 +527,10 @@ if __name__ == "__main__":
                 if len(bin_information[0]) == 0:
                     continue
 
-                all_bin_information.append(addFixedBins(sol_bins, *bin_information))
+                # Sort measurements into fixed bins
+                all_fixed_bin_information.append(addFixedBins(sol_bins, *bin_information))
+
+                single_fixed_bin_information.append([config.stationID, bin_information])
                 summary_population_index.append(population_index)
 
 
@@ -476,11 +565,12 @@ if __name__ == "__main__":
                         ],
                     )
 
+
         # Sum meteors in every bin
-        num_meteors = sum(np.array(meteors) for meteors, _, _ in all_bin_information)
+        num_meteors = sum(np.array(meteors) for meteors, _, _ in all_fixed_bin_information)
 
         # Compute time-area product in every  bin
-        area_time_product = sum(np.array(area)*np.array(time) for _, area, time in all_bin_information)
+        area_time_product = sum(np.array(area)*np.array(time) for _, area, time in all_fixed_bin_information)
 
 
         (
@@ -503,6 +593,42 @@ if __name__ == "__main__":
         )
         comb_sol = np.degrees(comb_sol)
         comb_sol_bins = np.degrees(comb_sol_bins)
+
+
+        ### Print camera tally ###
+
+        # Tally up contributions from individual cameras in each bin
+        bin_tally = cameraTally(comb_sol_bins, single_fixed_bin_information)
+
+        print()
+        print("Camera tally per bin:")
+        print("---------------------")
+
+        # Print cameras with most meteors per bin
+        for sol_bin in bin_tally:
+
+            # Sort cameras by the meteor number
+            bin_cams = bin_tally[sol_bin]
+            #print(sol_bin, bin_cams.items())
+            #print()
+            #bin_cams = collections.OrderedDict(sorted(bin_cams.items(), key=lambda item: item[1]['meteors'], reverse=True))
+
+            print()
+            print("Sol = {:.8f} deg".format(sol_bin))
+
+            top_n_stations = 5
+            for i, station_id in enumerate(bin_cams):
+                station_data = bin_cams[station_id]
+                n_meteors = station_data['meteors']
+                tap = station_data['tap']/1e6
+                print("    {:s}, {:5d} meteors, TAP = {:10.2f} km^2 h".format(station_id, n_meteors, tap))
+
+                if i == top_n_stations - 1:
+                    break
+
+
+        ###
+
 
 
     # If a CSV files was given, load the fluxes from the disk
