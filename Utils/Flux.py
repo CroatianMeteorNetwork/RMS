@@ -2405,7 +2405,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
     # Compute the flux
-    if (not loaded_flux_computations) or (forced_bins and loaded_flux_computations and not loaded_forced_bins):
+    if (compute_single and not loaded_flux_computations) \
+        or (forced_bins and loaded_flux_computations and not loaded_forced_bins):
 
         # Get a list of files in the night folder
         file_list = sorted(os.listdir(dir_path))
