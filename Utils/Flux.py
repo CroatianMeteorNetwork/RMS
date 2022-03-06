@@ -890,6 +890,16 @@ def detectMoon(file_list, platepar, config):
         # Calculating angular distance from middle of fov to correct for checking after the xy mapping
         angular_distance = np.degrees(angularSeparation(ra_mid, dec_mid, float(m.ra), float(m.dec)))
 
+
+        # Determine if the Moon is above or below the horizon
+        moon_below_horizon = True
+        try:
+            # Compute the Moon rising and setting time - if it's setting next, it's up
+            moon_below_horizon = o.next_rising(m) < o.next_setting(m)
+        except ephem.AlwaysUpError:
+            moon_below_horizon = False
+
+
         # Always take observations if the Moon is at less than 25% illumination, regardless of where it is
         if lunar_area < 0.25:
 
@@ -897,7 +907,7 @@ def detectMoon(file_list, platepar, config):
             continue
 
         # Always take observations if the Moon is not above the horizon
-        elif o.next_rising(m) < o.next_setting(m):
+        elif moon_below_horizon:
 
             new_file_list.append(filename)
             continue
