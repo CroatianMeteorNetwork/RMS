@@ -5,14 +5,72 @@ import os
 import shlex
 import sys
 import collections
+    
 
-import matplotlib.pyplot as plt
 import numpy as np
 import scipy
+import matplotlib.pyplot as plt
+from matplotlib import scale as mscale
+from matplotlib import transforms as mtransforms
+from matplotlib.ticker import FixedLocator
+
+
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile
 from RMS.Formats.Showers import FluxShowers, loadRadiantShowers
-from Utils.Flux import calculatePopulationIndex, computeFlux, detectClouds, fluxParser, calculateFixedBins
+from Utils.Flux import calculatePopulationIndex, computeFlux, detectClouds, fluxParser, calculateFixedBins, \
+    calculateZHR
 from RMS.Routines.SolarLongitude import unwrapSol
+
+
+
+
+class SegmentedScale(mscale.ScaleBase):
+    """ Segmented scale used to defining flux and ZHR on the same graph. """
+    name = 'segmented'
+
+    def __init__(self, axis, **kwargs):
+        mscale.ScaleBase.__init__(self, axis)
+        self.points = kwargs.get('points', [0, 1])
+        self.lb = self.points[0]
+        self.ub = self.points[-1]
+
+    def get_transform(self):
+        return self.SegTrans(self.lb, self.ub, self.points)
+
+    def set_default_locators_and_formatters(self, axis):
+        axis.set_major_locator(FixedLocator(self.points))
+
+    def limit_range_for_scale(self, vmin, vmax, minpos):
+        return max(vmin, self.lb), min(vmax, self.ub)
+
+    class SegTrans(mtransforms.Transform):
+        input_dims = 1
+        output_dims = 1
+        is_separable = True
+
+        def __init__(self, lb, ub, points):
+            mtransforms.Transform.__init__(self)
+            self.lb = lb
+            self.ub = ub
+            self.points = points
+
+        def transform_non_affine(self, a):
+            masked = a # ma.masked_where((a < self.lb) | (a > self.ub), a)
+            return np.interp(masked, self.points, np.arange(len(self.points)))
+
+        def inverted(self):
+            return SegmentedScale.InvertedSegTrans(self.lb, self.ub, self.points)
+
+    class InvertedSegTrans(SegTrans):
+
+        def transform_non_affine(self, a):
+            return np.interp(a, np.arange(len(self.points)), self.points)
+        def inverted(self):
+            return SegmentedScale.SegTrans(self.lb, self.ub, self.points)
+
+# Now that the Scale class has been defined, it must be registered so
+# that ``matplotlib`` can find it.
+mscale.register_scale(SegmentedScale)
 
 
 def addFixedBins(sol_bins, small_sol_bins, meteor_num_arr, collecting_area_arr, obs_time_arr):
@@ -299,28 +357,28 @@ if __name__ == "__main__":
         "--minmeteors",
         type=int,
         default=30,
-        help="Minimum meteors per bin. If this is not satisfied the bin will be made larger.",
+        help="Minimum meteors per bin. If this is not satisfied the bin will be made larger. Default = 30 meteors.",
     )
 
     arg_parser.add_argument(
         "--mintap",
         type=float,
         default=3,
-        help="Minimum time-area product per bin. If this is not satisfied the bin will be made larger.",
+        help="Minimum time-area product per bin. If this is not satisfied the bin will be made larger. Default = 3 x 1000 km^2 h.",
     )
 
     arg_parser.add_argument(
         "--minduration",
         type=float,
         default=0.5,
-        help="Minimum time per bin in hours. If this is not satisfied the bin will be made larger.",
+        help="Minimum time per bin in hours. If this is not satisfied the bin will be made larger. Default = 0.5 h.",
     )
 
     arg_parser.add_argument(
         "--maxduration",
         type=float,
         default=12,
-        help="Maximum time per bin in hours. If this is not satisfied, the bin will be discarded.",
+        help="Maximum time per bin in hours. If this is not satisfied, the bin will be discarded. Default = 12 h.",
     )
 
     # Parse the command line arguments
@@ -716,6 +774,33 @@ if __name__ == "__main__":
             zorder=4,
         )
 
+        # Set the minimum flux to 0
+        ax[0].set_ylim(bottom=0)
+
+        # Add the grid
+        ax[0].grid(color='0.9')
+
+        # If single-station fluxes are not shown, plot the ZHR on another axis
+        if not fluxbatch_cml_args.single:
+
+            # Create the right axis
+            zhr_ax = ax[0].twinx()
+
+            population_index = np.mean(summary_population_index)
+
+            # Set the same range on the Y axis
+            y_min, y_max = ax[0].get_ylim()
+            zhr_min, zhr_max = calculateZHR([y_min, y_max], population_index)
+            zhr_ax.set_ylim(zhr_min, zhr_max)
+
+            # Get the flux ticks and set them to the zhr axis
+            flux_ticks = ax[0].get_yticks()
+            zhr_ax.set_yscale('segmented', points=calculateZHR(flux_ticks, population_index))
+
+            zhr_ax.set_ylabel("ZHR")
+
+
+        # Plot time-area product in the bottom plot
         plot1 = ax[1].bar(
             ((comb_sol_bins[1:] + comb_sol_bins[:-1])/2)%360,
             comb_ta_prod/1e9,
@@ -723,6 +808,7 @@ if __name__ == "__main__":
             label='Time-area product',
         )
 
+        # Plot the minimum time-area product as a horizontal line
         ax[1].hlines(
             min_tap,
             np.min(comb_sol%360),
@@ -730,6 +816,8 @@ if __name__ == "__main__":
             colors='b',
             linestyles='--',
         )
+
+        # Plot the number of meteors on the right axis
         side_ax = ax[1].twinx()
         plot2 = side_ax.scatter(comb_sol%360, comb_num_meteors, c='k', label='Num meteors')
         side_ax.hlines(
@@ -741,7 +829,10 @@ if __name__ == "__main__":
         )
         side_ax.set_ylabel('Num meteors')
         side_ax.set_ylim(bottom=0)
+
+
         ax[1].legend([plot1, plot2], [plot1.get_label(), plot2.get_label()])
+
 
     # Show plot
     ax[0].legend()

@@ -318,6 +318,28 @@ def calculatePopulationIndex(mass_index):
     return 10**((mass_index - 1)/2.5)
 
 
+
+def calculateZHR(flux_lm_6_5, population_index):
+    """ Compute the ZHR given the flux at +6.5 mag and the population index. 
+
+    Arguments:
+        flux_lm_6_5: [float or ndarray] Flux at +6.5M in meteors / 1000 km^2 h.
+        population_index: [float] Population index.
+
+    Return:
+        zhr: [float or ndarray]
+    """
+
+    if isinstance(flux_lm_6_5, list):
+        flux_lm_6_5 = np.array(flux_lm_6_5)
+
+    # Compute ZHR (Rentdel & Koschak, 1990 paper 2 method)
+    zhr = (flux_lm_6_5/1000)*37200/((13.1*population_index - 16.5)*(population_index - 1.3)**0.748)
+
+    return zhr
+
+
+
 def generateColAreaJSONFileName(station_code, side_points, ht_min, ht_max, dht, elev_limit):
     """Generate a file name for the collection area JSON file."""
 
