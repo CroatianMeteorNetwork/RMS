@@ -183,7 +183,7 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
 
 
         if config_file is None:
-            print('The config file could not be found!')
+            print('The config file could not be found in directory:', dir_path, cml_args_config)
             sys.exit()
 
 

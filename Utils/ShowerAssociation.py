@@ -350,14 +350,14 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             - shower_counts: [list] A list of shower code and shower count pairs.
     """
 
-    # If the shower code is given as the three letter code, load the shower list from disk
-    if isinstance(shower_code, str):
+    # If the shower code is given as the three letter code (or one at all), load the shower list from disk
+    if isinstance(shower_code, str) or (shower_code is None):
 
         # Load the list of meteor showers
         shower_table = loadShowers(config.shower_path, config.shower_file_name)
         shower_list = [Shower(shower_entry) for shower_entry in shower_table]
 
-    # If the the Shower object was given, do with that
+    # If the the Shower object was given, use it
     else:
         shower_list = [shower_code]
         shower_code = shower_code.name
@@ -563,6 +563,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
     # Create a plot of showers
     if show_plot or save_plot:
+
         # Generate consistent colours
         colors_by_name = makeShowerColors(shower_list)
         def get_shower_color(shower):
@@ -886,10 +887,10 @@ if __name__ == "__main__":
 
     ### COMMAND LINE ARGUMENTS
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Perform single-station established shower association on FTPdetectinfo files.")
+    arg_parser = argparse.ArgumentParser(description="Perform single-station established shower association on an FTPdetectinfo file.")
 
-    arg_parser.add_argument('ftpdetectinfo_path', nargs='+', metavar='FTPDETECTINFO_PATH', type=str, \
-        help='Path to one or more FTPdetectinfo files.')
+    arg_parser.add_argument('ftpdetectinfo_path', metavar='FTPDETECTINFO_PATH', type=str, \
+        help='Path to an FTPdetectinfo file or a directory with an FTPdetectinfo file.')
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
@@ -906,19 +907,28 @@ if __name__ == "__main__":
     #########################
 
     ftpdetectinfo_path = cml_args.ftpdetectinfo_path
-    ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path)
     
+    ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path)
+    ftpdetectinfo_path_list = [ftpdetectinfo_path]
 
-    # Apply wildcards to input
-    ftpdetectinfo_path_list = []
-    for entry in ftpdetectinfo_path:
-        ftpdetectinfo_path_list += glob.glob(entry)
+    # else:
+    
+    #     # Apply wildcards to input if more are given
+    #     ftpdetectinfo_path_list = []
+    #     for entry in ftpdetectinfo_path:
+    #         ftpdetectinfo_path_list += glob.glob(entry)
 
 
     # If there are no good files given, notify the user
     if len(ftpdetectinfo_path_list) == 0:
         print("No FTPdetectinfo files given!")
         sys.exit()
+
+    else:
+        print()
+        print("Using FTPdetectinfo files:")
+        for ftpdetectinfo_path in ftpdetectinfo_path_list:
+            print(ftpdetectinfo_path)
         
 
     # Extract parent directory

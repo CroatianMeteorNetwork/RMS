@@ -87,6 +87,10 @@ class FluxConfig(object):
         # Default star FWHM, it it's not available (pz)
         self.default_fwhm = 3
 
+        # Filter out nights which have too many detections - it is assumed that the false positives are
+        #   present if there are too many sporadic meteors
+        self.max_sporadics = 500
+
 
 class FluxMeasurements(object):
     def __init__(self):
@@ -105,7 +109,7 @@ class FluxMeasurements(object):
         ### ###
 
     def initMetadata(self, shower_code, mass_index, population_index, gamma, shower_velocity, shower_height, \
-        star_fwhm, mean_ang_vel, mean_sensitivity, mean_range, raw_col_area, ci):
+        star_fwhm, mean_sensitivity, mean_range, raw_col_area, ci):
 
         self.shower_code = shower_code
         self.mass_index = mass_index
@@ -114,7 +118,6 @@ class FluxMeasurements(object):
         self.shower_velocity = shower_velocity
         self.shower_height = shower_height
         self.star_fwhm = star_fwhm
-        self.mean_ang_vel = mean_ang_vel
         self.mean_sensitivity = mean_sensitivity
         self.mean_range = mean_range
         self.raw_col_area = raw_col_area
@@ -183,8 +186,6 @@ class FluxMeasurements(object):
             unit=astropy.units.km/astropy.units.s)
         self.table.meta['shower_height'] = astropy.units.Quantity(self.shower_height, unit=astropy.units.km)
         self.table.meta['star_fwhm'] = astropy.units.Quantity(self.star_fwhm, unit=astropy.units.pix)
-        self.table.meta['mean_ang_vel'] = astropy.units.Quantity(self.mean_ang_vel, \
-            unit=astropy.units.deg/astropy.units.s)
         self.table.meta['mean_sensitivity'] = self.mean_sensitivity
         self.table.meta['mean_range'] = astropy.units.Quantity(self.mean_range, unit=astropy.units.km)
         self.table.meta['raw_col_area'] = astropy.units.Quantity(self.raw_col_area, unit=1000*astropy.units.km**2)
@@ -309,6 +310,21 @@ class FluxMeasurements(object):
         # Load the ECSV data
         self.table =  astropy.table.Table.read(ecsv_file_path, delimiter=',', format='ascii.ecsv', \
             guess=False)
+
+
+
+def saveEmptyECSVTable(ecsv_file_path, shower_code, mass_index, flux_config, confidence_interval, \
+    fixed_bins=False):
+    """ Save an emply ECSV table, so nothing needs to be computed. """
+
+    # Save empty flux files
+    flux_table = FluxMeasurements()
+    flux_table.initMetadata(shower_code, mass_index, calculatePopulationIndex(mass_index), \
+        flux_config.gamma, 0, 0, 0, 0, 0, 0, confidence_interval)
+
+    flux_table.table.meta['fixed_bins'] = fixed_bins
+    flux_table.table.meta['sol_range'] = [0, 0]
+    flux_table.saveECSV(ecsv_file_path)
 
 
 
@@ -1750,9 +1766,7 @@ def computeFluxCorrectionsOnBins(
     recalibrated_flux_platepars,
     platepar,
     frame_min_loss,
-    ang_vel_night_mid,
     sensor_data,
-    lm_m_nightly_mean,
     confidence_interval=0.95,
     binduration=None,
     verbose=True,
@@ -1805,7 +1819,7 @@ def computeFluxCorrectionsOnBins(
     #   the computed below)
     flux_table = FluxMeasurements()
     flux_table.initMetadata(shower.name, mass_index, population_index, flux_config.gamma, v_init/1000, 
-        meteor_ht/1000, fwhm_mean, np.degrees(ang_vel_night_mid), None, r_mid/1000, None, confidence_interval)
+        meteor_ht/1000, fwhm_mean, None, r_mid/1000, None, confidence_interval)
 
 
     ### ###
@@ -2066,9 +2080,8 @@ def computeFluxCorrectionsOnBins(
                     # Compute the range correction
                     range_correction = (1e5/r)**2
 
-                    # ang_vel_correction = ang_vel/ang_vel_mid
                     # Compute angular velocity correction relative to the nightly mean
-                    ang_vel_correction = ang_vel/ang_vel_night_mid
+                    ang_vel_correction = ang_vel/ang_vel_mid
 
                     # Apply corrections
 
@@ -2079,19 +2092,19 @@ def computeFluxCorrectionsOnBins(
                     correction_ratio *= sensitivity_ratio
 
                     # Correct for the range (cap to an order of magnitude correction)
-                    range_correction = max(range_correction, 0.1)
+                    # range_correction = max(range_correction, 0.1)
                     range_corr_arr.append(range_correction)
                     correction_ratio *= range_correction
 
                     # Correct for the radiant elevation (cap to an order of magnitude correction)
                     #   Apply the zenith exponent gamma
                     radiant_elev_correction = np.sin(np.radians(radiant_elev))**flux_config.gamma
-                    radiant_elev_correction = max(radiant_elev_correction, 0.1)
+                    # radiant_elev_correction = max(radiant_elev_correction, 0.1)
                     radiant_elev_corr_arr.append(radiant_elev_correction)
                     correction_ratio *= radiant_elev_correction
 
                     # Correct for angular velocity (cap to an order of magnitude correction)
-                    ang_vel_correction = min(max(ang_vel_correction, 0.1), 10)
+                    # ang_vel_correction = min(max(ang_vel_correction, 0.1), 10)
                     correction_ratio *= ang_vel_correction
                     ang_vel_corr_arr.append(ang_vel_correction)
 
@@ -2159,11 +2172,9 @@ def computeFluxCorrectionsOnBins(
             # ###
 
             # Compute the nominal flux at the bin LM (meteors/1000km^2/h)
-            collection_area_lm_nightly = collection_area/population_index**(lm_m_nightly_mean - lm_m)
             collection_area_lm_6_5 = collection_area/population_index**(6.5 - lm_m)
 
             flux = 1e9*len(bin_meteor_list)/collection_area/bin_hours
-            flux_lm_nightly_mean = 1e9*len(bin_meteor_list)/collection_area_lm_nightly/bin_hours
             flux_lm_6_5 = 1e9*len(bin_meteor_list)/collection_area_lm_6_5/bin_hours
 
             # Compute confidence interval of the flux
@@ -2201,7 +2212,6 @@ def computeFluxCorrectionsOnBins(
                 print("Ang vel:  {:.2f} deg/s".format(np.degrees(ang_vel_mid)))
                 print("LM app:   {:+.2f} mag".format(lm_m))
                 print("Flux:     {:.2f} meteors/1000km^2/h".format(flux))
-                print("to {:+.2f}: {:.2f} meteors/1000km^2/h".format(lm_m_nightly_mean, flux_lm_nightly_mean))
                 print(
                     "to +6.50: {:.2f}, {:.0f}% CI [{:.2f}, {:.2f}] meteors/1000km^2/h".format(
                         flux_lm_6_5, 100*confidence_interval, flux_lm_6_5_ci_lower, flux_lm_6_5_ci_upper
@@ -2352,17 +2362,17 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         ending_sol = unwrapSol(jd2SolLonSteyaert(datetime2JD(dt_end)), sol_bins_all[0], sol_bins_all[-1])
 
         # Make a name for the forced bins file
-        forced_bins_file = generateFluxFixedBinsName(config.stationID, shower_code, mass_index, \
+        forced_bins_ecsv_file_name = generateFluxFixedBinsName(config.stationID, shower_code, mass_index, \
             starting_sol, ending_sol)
 
-        print("Forced bins file:", forced_bins_file)
+        print("Forced bins file:", forced_bins_ecsv_file_name)
 
         # Load previous computed bins, if available
-        if os.path.exists(os.path.join(dir_path, forced_bins_file)):
+        if os.path.exists(os.path.join(dir_path, forced_bins_ecsv_file_name)):
 
             # Load previously computed collection areas and flux metadata
             sol_bins, forced_bins_meteor_num, forced_bins_area, forced_bins_time, \
-                forced_bins_lm_m = loadForcedBinFluxData(dir_path, forced_bins_file)
+                forced_bins_lm_m = loadForcedBinFluxData(dir_path, forced_bins_ecsv_file_name)
 
             print("    ... loaded!")
 
@@ -2415,9 +2425,9 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
     # Make the name for the flux file
     sol_beg = jd2SolLonSteyaert(datetime2JD(dt_beg))
     sol_end = jd2SolLonSteyaert(datetime2JD(dt_end))
-    ecsv_file_name = generateFluxECSVName(config.stationID, shower_code, mass_index, sol_beg, sol_end)
+    flux_ecsv_file_name = generateFluxECSVName(config.stationID, shower_code, mass_index, sol_beg, sol_end)
 
-    print("Flux ECSV file:", ecsv_file_name)
+    print("Flux ECSV file:", flux_ecsv_file_name)
 
     # If the flux file was already computed and the plots won't be shown, load the flux file from disk
     loaded_flux_computations = False
@@ -2427,10 +2437,10 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
     flux_lm_6_5_ci_upper_data = []
     meteor_num_data = []
     population_index = calculatePopulationIndex(mass_index)
-    if os.path.isfile(os.path.join(dir_path, ecsv_file_name)) and not (show_plots or save_plots):
+    if os.path.isfile(os.path.join(dir_path, flux_ecsv_file_name)) and not (show_plots or save_plots):
         
         sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, meteor_num_data, \
-            population_index = loadFluxData(dir_path, ecsv_file_name)
+            population_index = loadFluxData(dir_path, flux_ecsv_file_name)
 
         print("   ... loaded!")
 
@@ -2483,14 +2493,50 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         sensor_data = getSensorCharacterization(dir_path, config, flux_config, meteor_data, \
             default_fwhm=default_fwhm)
 
-        # Compute the nighly mean FWHM
-        fwhm_nightly_mean = np.mean([sensor_data[key][0] for key in sensor_data])
+        # # Compute the nighly mean FWHM
+        # fwhm_nightly_mean = np.mean([sensor_data[key][0] for key in sensor_data])
 
         ### ###
 
-        # Perform shower association
-        associations, _ = showerAssociation(config, [ftpdetectinfo_path], shower_code=shower_code, \
+
+        ### Check if there are too many sporadics, i.e. false positives ###
+
+        # Associate all showers
+        print("Checking the number of sporadics...")
+        associations_check, _ = showerAssociation(config, [ftpdetectinfo_path], \
             show_plot=False, save_plot=False, plot_activity=False)
+
+        # Count up the sporadics
+        sporadic_count = 0
+        for key in associations_check:
+            _, shower_check = associations_check[key]
+
+            if shower_check is None:
+                sporadic_count += 1
+
+
+        # Only associate the target shower if there are less sporadics (possible false positives) than the 
+        #   maximum threshold
+        if sporadic_count < flux_config.max_sporadics:
+
+            # Perform shower association on the given shower
+            associations, _ = showerAssociation(config, [ftpdetectinfo_path], shower_code=shower_code, \
+                show_plot=False, save_plot=False, plot_activity=False)
+
+        else:
+
+            print("   ... too many sporadics: {:d} >= {:d} Skipping this data directory!".format(sporadic_count, \
+                flux_config.max_sporadics))
+
+            # Save empty tables so this is not attempted again
+            saveEmptyECSVTable(os.path.join(dir_path, flux_ecsv_file_name), shower_code, mass_index, 
+                flux_config, confidence_interval, fixed_bins=False)
+            saveEmptyECSVTable(os.path.join(dir_path, forced_bins_ecsv_file_name), shower_code, mass_index, 
+                flux_config, confidence_interval, fixed_bins=True)
+
+            return None
+
+        ### ###
 
 
         # Remove all meteors which begin below the limit height
@@ -2503,8 +2549,6 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 filtered_associations[key] = (meteor, shower)
 
         associations = filtered_associations
-
-
 
 
         ### Go through all time bins within the observation period ###
@@ -2681,11 +2725,13 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         # Compute the radiant elevation
         radiant_azim, radiant_elev = raDec2AltAz(ra, dec, jd_night_mid, platepar.lat, platepar.lon)
 
-        # Compute the angular velocity in the middle of the FOV
-        rad_dist_night_mid = angularSeparation(
-            np.radians(radiant_azim), np.radians(radiant_elev), np.radians(azim_mid), np.radians(elev_mid)
-        )
-        ang_vel_night_mid = v_init*np.sin(rad_dist_night_mid)/r_mid
+        # # Compute the mean nightly radiant distance
+        # rad_dist_night_mid = angularSeparation(
+        #     np.radians(radiant_azim), np.radians(radiant_elev), np.radians(azim_mid), np.radians(elev_mid)
+        # )
+
+        # # Compute the angular velocity in the middle of the FOV
+        # ang_vel_night_mid = v_init*np.sin(rad_dist_night_mid)/r_mid
 
         ###
 
@@ -2706,15 +2752,15 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         lm_s_nightly_mean += frame_min_loss
 
 
-        # Compute the nightly mean apparent meteor magnitude
-        lm_m_nightly_mean = (lm_s_nightly_mean - 5*np.log10(r_mid/1e5) - 2.5*np.log10(np.degrees(
-                    platepar.F_scale*v_init*np.sin(rad_dist_night_mid)
-                   /(config.fps*r_mid*fwhm_nightly_mean)
-                ))
-            )
+        # # Compute the nightly mean apparent meteor magnitude
+        # lm_m_nightly_mean = (lm_s_nightly_mean - 5*np.log10(r_mid/1e5) - 2.5*np.log10(np.degrees(
+        #             platepar.F_scale*v_init*np.sin(rad_dist_night_mid)
+        #            /(config.fps*r_mid*fwhm_nightly_mean)
+        #         ))
+        #     )
 
         print("Average stellar LM during the night: {:+.2f}".format(lm_s_nightly_mean))
-        print("        meteor  LM during the night: {:+.2f}".format(lm_m_nightly_mean))
+        # print("        meteor  LM during the night: {:+.2f}".format(lm_m_nightly_mean))
 
 
         ##### Apply time-dependent corrections #####
@@ -2726,13 +2772,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             print("No meteors associated with the shower!")
 
             # Save empty flux files
-            flux_table = FluxMeasurements()
-            flux_table.initMetadata(shower_code, mass_index, calculatePopulationIndex(mass_index), \
-                flux_config.gamma, 0, 0, 0, 0, 0, 0, 0, confidence_interval)
-
-            flux_table.table.meta['fixed_bins'] = False
-            flux_table.table.meta['sol_range'] = [0, 0]
-            flux_table.saveECSV(os.path.join(dir_path, ecsv_file_name))
+            saveEmptyECSVTable(os.path.join(dir_path, flux_ecsv_file_name), shower_code, mass_index, 
+                flux_config, confidence_interval, fixed_bins=False)
 
 
         elif (not forced_bins and not loaded_flux_computations) or (forced_bins and compute_single):
@@ -2777,9 +2818,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 recalibrated_flux_platepars,
                 platepar,
                 frame_min_loss,
-                ang_vel_night_mid,
                 sensor_data,
-                lm_m_nightly_mean,
                 confidence_interval=confidence_interval,
                 binduration=binduration,
             )
@@ -2791,7 +2830,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
             # Save the flux table to disk
-            flux_table.saveECSV(os.path.join(dir_path, ecsv_file_name))
+            flux_table.saveECSV(os.path.join(dir_path, flux_ecsv_file_name))
 
 
     # # Compute ZHR (Rentdel & Koschak, 1990 paper 2 method)
@@ -2843,9 +2882,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 recalibrated_flux_platepars,
                 platepar,
                 frame_min_loss,
-                ang_vel_night_mid,
                 sensor_data,
-                lm_m_nightly_mean,
                 confidence_interval=confidence_interval,
                 fixed_bins=True,
                 verbose=False
@@ -2864,13 +2901,13 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             forced_flux_table.sol_lon_data = np.degrees(np.array(sol_bins[:-1]))
 
             # Save the fixed bin as an ECSV table
-            forced_flux_table.saveECSV(os.path.join(dir_path, forced_bins_file))
+            forced_flux_table.saveECSV(os.path.join(dir_path, forced_bins_ecsv_file_name))
 
 
             # ### TEST !!!!!1
 
             # test_sol_bins, test_forced_bins_meteor_num, test_forced_bins_area, test_forced_bins_time, \
-            #     test_forced_bins_lm_m = loadForcedBinFluxData(dir_path, forced_bins_file)
+            #     test_forced_bins_lm_m = loadForcedBinFluxData(dir_path, forced_bins_ecsv_file_name)
 
             # print("sol bins", sol_bins, test_sol_bins)
             # print("bins_meteor_num", forced_bins_meteor_num, test_forced_bins_meteor_num)
@@ -2987,18 +3024,18 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
         # Plot the collection area
-        ax_col_area.plot(sol_data, np.array(effective_collection_area_data)/1e9)
+        ax_col_area.plot(sol_data, np.array(effective_collection_area_data)/1e9, label="Effective")
         ax_col_area.plot(
-            sol_data, len(sol_data)*[col_area_100km_raw/1e9], color='k', label="Raw col area at 100 km"
+            sol_data, len(sol_data)*[col_area_100km_raw/1e9], color='k', label="Raw at 100 km"
         )
         ax_col_area.plot(
             sol_data,
             len(sol_data)*[col_area_meteor_ht_raw/1e9],
             color='k',
             linestyle='dashed',
-            label="Raw col area at met ht",
+            label="Raw at meteor height",
         )
-        ax_col_area.set_ylabel("Eff. col. area (1000 km$^2$)")
+        ax_col_area.set_ylabel("Col. area (1000 km$^2$)")
         ax_col_area.legend()
 
         # Plot the flux

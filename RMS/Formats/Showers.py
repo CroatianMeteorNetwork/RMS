@@ -261,7 +261,8 @@ rng = Random(1)
 
 def makeShowerColors(shower_data, color_map='gist_ncar'):
     """ Generates a map of distinct colours indexed by shower name """
-    names = sorted([s[1] for s in shower_data])
+
+    names = sorted([s.name if isinstance(s, Shower) else s[1] for s in shower_data])
     rng.shuffle(names) # so names close alphabetically get distinct colours  
     cmap = plt.get_cmap(color_map)
     colors = cmap(np.linspace(0, 1, len(names)))
@@ -277,17 +278,17 @@ def generateActivityDiagram(config, shower_data, ax_handle=None, sol_marker=None
     # Fill in min/max solar longitudes if they are not present
     for shower in shower_data:
 
-        sol_min, sol_peak, sol_max = list(shower)[3:6]
+        sol_min, sol_peak, sol_max = shower.lasun_beg, shower.lasun_max, shower.lasun_end
 
         if np.isnan(sol_min):
-            shower[3] = (sol_peak - config.shower_lasun_threshold)%360
+            shower.lasun_beg = (sol_peak - config.shower_lasun_threshold)%360
 
         if np.isnan(sol_max):
-            shower[5] = (sol_peak + config.shower_lasun_threshold)%360
+            shower.lasun_end = (sol_peak + config.shower_lasun_threshold)%360
 
 
     # Sort showers by duration
-    durations = [(shower[5] - shower[3] + 180) % 360 - 180 for shower in shower_data]
+    durations = [(shower.lasun_end - shower.lasun_beg + 180) % 360 - 180 for shower in shower_data]
     shower_data = shower_data[np.argsort(durations)][::-1]
 
 
@@ -306,14 +307,14 @@ def generateActivityDiagram(config, shower_data, ax_handle=None, sol_marker=None
                 continue
 
             for shower in shower_data:
-                code = int(shower[0])
-                name = shower[1]
+                code = int(shower.iau_code)
+                name = shower.name
 
                 # Skip assigned showers
                 if code in code_name_dict:
                     continue
 
-                sol_min, sol_peak, sol_max = list(shower)[3:6]
+                sol_min, sol_peak, sol_max = shower.lasun_beg, shower.lasun_max, shower.lasun_end
                 sol_min = int(np.floor(sol_min))%360
                 sol_max = int(np.ceil(sol_max))%360
 
@@ -496,12 +497,13 @@ if __name__ == "__main__":
     import RMS.ConfigReader as cr
 
 
-    shower_data = loadShowers("share", "established_showers.csv")
+    shower_table = loadShowers("share", "established_showers.csv")
+    shower_list = [Shower(shower_entry) for shower_entry in shower_table]
 
 
     # Generate activity diagram
     config = cr.parse('.config')
-    generateActivityDiagram(config, shower_data, \
+    generateActivityDiagram(config, shower_list, \
         sol_marker=np.degrees(jd2SolLonSteyaert(datetime2JD(datetime.datetime.now()))))
 
     plt.show()
