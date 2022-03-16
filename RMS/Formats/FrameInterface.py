@@ -824,9 +824,11 @@ class InputTypeVideo(InputType):
         ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, np.uint8)
 
         # If there are no frames to read, return an empty array
-        if frames_to_read == 0:
+        if frames_to_read == 0 or frames_to_read == -1:
             print('There are no frames to read!')
             return ff_struct_fake
+
+        print('Frames to read: ' + str(frames_to_read))
 
         # Load the chunk of frames
         for i in range(frames_to_read):
