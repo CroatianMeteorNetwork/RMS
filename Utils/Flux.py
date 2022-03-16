@@ -324,6 +324,7 @@ def saveEmptyECSVTable(ecsv_file_path, shower_code, mass_index, flux_config, con
 
     flux_table.table.meta['fixed_bins'] = fixed_bins
     flux_table.table.meta['sol_range'] = [0, 0]
+    flux_table.table.meta['time_range'] = [None, None]
     flux_table.saveECSV(ecsv_file_path)
 
 
@@ -642,20 +643,20 @@ def calculateFixedBins(all_time_intervals, dir_list, shower, bin_duration=5):
         sol_bins = np.append(sol_bins[0] - sol_delta, sol_bins)  # assume that it doesn't wrap around
 
     ## calculating datetime corresponding to sol_bins for each year
-    bin_datetime_dict = []
+    bin_datetime_yearly = []
     bin_datetime = []
     for sol in sol_bins:
         curr_time = all_time_intervals[start_idx][0] + datetime.timedelta(
             minutes=(sol - sol_bins[0])/(2*np.pi)*365.24219*24*60
         )
         bin_datetime.append(jd2Date(solLon2jdSteyaert(curr_time.year, curr_time.month, sol), dt_obj=True))
-    bin_datetime_dict.append([(bin_datetime[0], bin_datetime[-1]), bin_datetime])
+    bin_datetime_yearly.append([(bin_datetime[0], bin_datetime[-1]), bin_datetime])
 
     for start_time, _ in all_time_intervals:
         if all(
             [
                 year_start > start_time or start_time > year_end
-                for (year_start, year_end), _ in bin_datetime_dict
+                for (year_start, year_end), _ in bin_datetime_yearly
             ]
         ):
             delta_years = int(
@@ -665,11 +666,11 @@ def calculateFixedBins(all_time_intervals, dir_list, shower, bin_duration=5):
             )
             bin_datetime = [
                 jd2Date(solLon2jdSteyaert(dt.year + delta_years, dt.month, sol), dt_obj=True)
-                for sol, dt in zip(sol_bins, bin_datetime_dict[0][1])
+                for sol, dt in zip(sol_bins, bin_datetime_yearly[0][1])
             ]
-            bin_datetime_dict.append([(bin_datetime[0], bin_datetime[-1]), bin_datetime])
+            bin_datetime_yearly.append([(bin_datetime[0], bin_datetime[-1]), bin_datetime])
 
-    return sol_bins, bin_datetime_dict
+    return sol_bins, bin_datetime_yearly
 
 
 
@@ -806,6 +807,11 @@ def loadForcedBinFluxData(dir_path, file_name):
     if len(sol_bins):
         sol_bins = np.radians(np.append(sol_bins, [flux_table.table.meta['sol_range'][1]]))
 
+    # Load the time bins
+    dt_bins = flux_table.table['time'].value
+    if len(dt_bins):
+        dt_bins = np.append(dt_bins, [flux_table.table.meta['time_range'][1]])
+
     meteor_list = flux_table.table['meteors'].data.astype(np.int).tolist()
     area_list = (1e6*flux_table.table['eff_col_area'].data).tolist()
     time_list = flux_table.table['time_bin'].data
@@ -824,7 +830,7 @@ def loadForcedBinFluxData(dir_path, file_name):
     # time_list = data[:-1, 3]
     # meteor_lm_list = data[:-1, 4]
 
-    return sol_bins, meteor_list, area_list, time_list, meteor_lm_list
+    return sol_bins, dt_bins, meteor_list, area_list, time_list, meteor_lm_list
 
 
 def computeClearSkyTimeIntervals(cloud_ratio_dict, ratio_threshold=0.5, time_gap_threshold=15, clearing_threshold=90):
@@ -2371,7 +2377,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         if os.path.exists(os.path.join(dir_path, forced_bins_ecsv_file_name)):
 
             # Load previously computed collection areas and flux metadata
-            sol_bins, forced_bins_meteor_num, forced_bins_area, forced_bins_time, \
+            sol_bins, dt_bins, forced_bins_meteor_num, forced_bins_area, forced_bins_time, \
                 forced_bins_lm_m = loadForcedBinFluxData(dir_path, forced_bins_ecsv_file_name)
 
             print("    ... loaded!")
@@ -2827,6 +2833,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             # Save ECSV with flux measurements
             flux_table.table.meta['fixed_bins'] = False
             flux_table.table.meta['sol_range'] = [np.degrees(sol_beg), np.degrees(sol_end)]
+            flux_table.table.meta['time_range'] = [dt_beg, dt_end]
 
 
             # Save the flux table to disk
@@ -2895,6 +2902,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             sol_beg = np.degrees(sol_bins[0])
             sol_end = np.degrees(sol_bins[-1])
             forced_flux_table.table.meta['sol_range'] = [sol_beg, sol_end]
+            forced_flux_table.table.meta['time_range'] = [dt_beg, dt_end]
             forced_flux_table.table.meta['fixed_bins'] = True
 
             # Override the original range of the solar longitudes (exclude the final bin)
@@ -3091,7 +3099,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             flux_lm_6_5_ci_upper_data,
             meteor_num_data,
             population_index,
-            (sol_bins, forced_bins_meteor_num, forced_bins_area, forced_bins_time),
+            (sol_bins, dt_bins, forced_bins_meteor_num, forced_bins_area, forced_bins_time, forced_bins_lm_m),
         )
     return (
         sol_data,
@@ -3168,11 +3176,11 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
         for shower in active_showers:
 
             # Calculate fixed 5 minute bins
-            sol_bins_all, bin_datetime_dict = calculateFixedBins(time_intervals, [dir_path], shower)
+            sol_bins_all, bin_datetime_list = calculateFixedBins(time_intervals, [dir_path], shower)
 
             # Extract datetimes of forced bins relevant for this time interval
-            dt_bins = bin_datetime_dict[np.argmax([year_start < dt_beg < year_end \
-                for (year_start, year_end), _ in bin_datetime_dict])][1]
+            dt_bins = bin_datetime_list[np.argmax([year_start < dt_beg < year_end \
+                for (year_start, year_end), _ in bin_datetime_list])][1]
             forced_bins = (dt_bins, sol_bins_all)
 
 

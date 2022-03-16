@@ -7,14 +7,17 @@ import sys
 import collections
     
 
+import ephem
 import numpy as np
 import scipy
 import matplotlib.pyplot as plt
 from matplotlib import scale as mscale
 from matplotlib import transforms as mtransforms
 from matplotlib.ticker import FixedLocator
+from cycler import cycler
 
 
+from RMS.Astrometry.Conversions import datetime2JD, jd2Date
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile
 from RMS.Formats.Showers import FluxShowers, loadRadiantShowers
 from Utils.Flux import calculatePopulationIndex, computeFlux, detectClouds, fluxParser, calculateFixedBins, \
@@ -73,7 +76,8 @@ class SegmentedScale(mscale.ScaleBase):
 mscale.register_scale(SegmentedScale)
 
 
-def addFixedBins(sol_bins, small_sol_bins, meteor_num_arr, collecting_area_arr, obs_time_arr):
+def addFixedBins(sol_bins, small_sol_bins, small_dt_bins, meteor_num_arr, collecting_area_arr, obs_time_arr, \
+    lm_m_arr):
     """ Sort data into fixed bins by solar longitude. 
 
     For a larger array of solar longitudes sol_bins, fits parameters to an empty array of its size (minus 1)
@@ -87,6 +91,7 @@ def addFixedBins(sol_bins, small_sol_bins, meteor_num_arr, collecting_area_arr, 
         small_sol_bins: [ndarray] Array of solar longitude bin edges which is smaller in length than
             sol_bins but can be transformed to sol_bins if shifted by a certain index. Does not wrap
             around.
+        small_dt_bins: [ndarray] Datetime objects corresponding to the small_sol_bins edges. NOT USED.
         *params: [ndarray] Physical quantities such as number of meteors, collecting area.
 
     Return:
@@ -102,7 +107,9 @@ def addFixedBins(sol_bins, small_sol_bins, meteor_num_arr, collecting_area_arr, 
         i = np.argmax(sol_bins - small_sol_bins[0] > -1e-7)  # index where they are equal
 
 
-
+    # # Sort datetime edges into bins
+    # dt_binned = np.zeros(len(sol_bins), dtype="datetime64[ms]")
+    # dt_binned[i:i + len(small_dt_bins)] = small_dt_bins
 
     # Sort collecting area into bins
     collecting_area_binned = np.zeros(len(sol_bins) - 1)
@@ -111,6 +118,10 @@ def addFixedBins(sol_bins, small_sol_bins, meteor_num_arr, collecting_area_arr, 
     # Sort observation time into bins
     obs_time_binned = np.zeros(len(sol_bins) - 1)
     obs_time_binned[i:i + len(obs_time_arr)] = obs_time_arr
+
+    # Sort meteor limiting magnitude into bins
+    lm_m_binned = np.zeros(len(sol_bins) - 1) + np.nan
+    lm_m_binned[i:i + len(obs_time_arr)] = lm_m_arr
 
 
     # Sort meteor numbers into bins
@@ -126,11 +137,11 @@ def addFixedBins(sol_bins, small_sol_bins, meteor_num_arr, collecting_area_arr, 
     #     forced_bin_param[i:i + len(p)] = p
     #     data_arrays.append(forced_bin_param)
 
-    return [meteor_num_binned,  collecting_area_binned, obs_time_binned]
+    return [meteor_num_binned, collecting_area_binned, obs_time_binned, lm_m_binned]
 
 
 def combineFixedBinsAndComputeFlux(
-    sol_bins, meteors, time_area_prod, min_meteors=50, ci=0.95, min_tap=2, \
+    sol_bins, meteors, time_area_prod, lm_m_data, min_meteors=50, ci=0.95, min_tap=2, \
     min_bin_duration=0.5, max_bin_duration=12):
     """
     Computes flux values and their corresponding solar longitude based on bins containing
@@ -168,7 +179,8 @@ def combineFixedBinsAndComputeFlux(
     sol_list = []
     sol_bin_list = []
     meteor_count_list = []
-    area_time_product_list = []
+    time_area_product_list = []
+    lm_m_list = []
 
     start_idx = 0
     for end_idx in range(1, len(meteors)):
@@ -183,16 +195,18 @@ def combineFixedBinsAndComputeFlux(
         if (np.sum(meteors[sl]) >= min_meteors) and (np.nansum(time_area_prod[sl])/1e9 >= min_tap) \
             and (bin_hours >= min_bin_duration):
 
+            # Sum up the values in the bin
             ta_prod = np.sum(time_area_prod[sl])
-
             num_meteors = np.sum(meteors[sl])
+
             meteor_count_list.append(num_meteors)
-            area_time_product_list.append(ta_prod)
+            time_area_product_list.append(ta_prod)
 
             if ta_prod == 0:
-                flux_list.append(0)
-                flux_upper_list.append(0)
-                flux_lower_list.append(0)
+                flux_list.append(np.nan)
+                flux_upper_list.append(np.nan)
+                flux_lower_list.append(np.nan)
+                lm_m_list.append(np.nan)
 
             else:
 
@@ -204,6 +218,12 @@ def combineFixedBinsAndComputeFlux(
                 flux_list.append(1e9*num_meteors/ta_prod)
                 flux_upper_list.append(1e9*n_meteors_upper/ta_prod)
                 flux_lower_list.append(1e9*n_meteors_lower/ta_prod)
+
+                # Compute the TAP-weighted meteor limiting magnitude
+                lm_m_select = lm_m_data[sl]*time_area_prod[sl]
+                lm_m_weighted = np.sum(lm_m_select[~np.isnan(lm_m_select)])/ta_prod
+                lm_m_list.append(lm_m_weighted)
+
 
             sol_list.append(np.mean(middle_bin_sol[sl]))
             sol_bin_list.append(sol_bins[start_idx])
@@ -222,7 +242,8 @@ def combineFixedBinsAndComputeFlux(
         np.array(flux_lower_list),
         np.array(flux_upper_list),
         np.array(meteor_count_list),
-        np.array(area_time_product_list),
+        np.array(time_area_product_list),
+        np.array(lm_m_list),
     )
 
 
@@ -280,7 +301,7 @@ def cameraTally(comb_sol_bins, single_fixed_bin_information):
 
 
         # Compute station contributions
-        for station, (sol_arr, met_num, area, time_bin) in single_fixed_bin_information:
+        for station, (sol_arr, _, met_num, area, time_bin, lm_m) in single_fixed_bin_information:
 
             sol_arr = np.array(sol_arr)
             met_num = np.array(met_num)
@@ -423,7 +444,8 @@ if __name__ == "__main__":
 
     plot_info = StationPlotParams()
 
-    fig, ax = plt.subplots(2, figsize=(15, 8), sharex=True)
+    # Init the plot
+    fig, ax = plt.subplots(nrows=3, figsize=(15, 10), sharex=True, gridspec_kw={'height_ratios': [2, 1, 1]})
 
 
     # If an input CSV file was not given, compute the data
@@ -528,11 +550,13 @@ if __name__ == "__main__":
         print()
         print("Calculating fixed bins...")
 
-        sol_bins, bin_datetime_dict = calculateFixedBins(
+        # Compute 5 minute bins of equivalent solar longitude every year
+        sol_bins, bin_datetime_yearly = calculateFixedBins(
             [time_interval for data in file_data for time_interval in data[4]],
             [data[1] for data in file_data],
             shower,
             bin_duration=bin_duration)
+
 
         all_fixed_bin_information = []
         single_fixed_bin_information = []
@@ -547,8 +571,8 @@ if __name__ == "__main__":
                 dt_beg, dt_end = interval
 
                 # Extract datetimes of forced bins relevant for this time interval
-                dt_bins = bin_datetime_dict[np.argmax([year_start < dt_beg < year_end \
-                    for (year_start, year_end), _ in bin_datetime_dict])][1]
+                dt_bins = bin_datetime_yearly[np.argmax([year_start < dt_beg < year_end \
+                    for (year_start, year_end), _ in bin_datetime_yearly])][1]
 
                 forced_bins = (dt_bins, sol_bins)
 
@@ -624,11 +648,23 @@ if __name__ == "__main__":
                     )
 
 
-        # Sum meteors in every bin
-        num_meteors = sum(np.array(meteors) for meteors, _, _ in all_fixed_bin_information)
+        # Sum meteors in every bin (this is a 2D along the first axis, producing an array)
+        num_meteors = sum(np.array(meteors) for meteors, _, _, _ in all_fixed_bin_information)
 
-        # Compute time-area product in every  bin
-        area_time_product = sum(np.array(area)*np.array(time) for _, area, time in all_fixed_bin_information)
+        # Compute time-area product in every bin
+        time_area_product = sum(np.array(area)*np.array(time) for _, area, time, _ in all_fixed_bin_information)
+
+        # Compute TAP-wieghted meteor limiting magnitude in every bin
+        lm_m_data = np.zeros_like(num_meteors)
+        for _, area, time, lm_m in all_fixed_bin_information:
+
+            lm_m_data[~np.isnan(lm_m)] += (
+                 np.array(lm_m[~np.isnan(lm_m)])
+                *np.array(area[~np.isnan(lm_m)])
+                *np.array(time[~np.isnan(lm_m)])
+                )
+
+        lm_m_data /= time_area_product
 
 
         (
@@ -639,10 +675,12 @@ if __name__ == "__main__":
             comb_flux_upper,
             comb_num_meteors,
             comb_ta_prod,
+            comb_lm_m,
         ) = combineFixedBinsAndComputeFlux(
             sol_bins,
             num_meteors,
-            area_time_product,
+            time_area_product,
+            lm_m_data,
             ci=ci,
             min_tap=min_tap,
             min_meteors=min_meteors,
@@ -806,6 +844,7 @@ if __name__ == "__main__":
             comb_ta_prod/1e9,
             comb_sol_bins[1:] - comb_sol_bins[:-1],
             label='Time-area product',
+            color='0.65',
         )
 
         # Plot the minimum time-area product as a horizontal line
@@ -813,35 +852,120 @@ if __name__ == "__main__":
             min_tap,
             np.min(comb_sol%360),
             np.max(comb_sol%360),
-            colors='b',
-            linestyles='--',
+            colors='k',
+            linestyles='solid',
+            label="Minimum TAP",
         )
 
         # Plot the number of meteors on the right axis
         side_ax = ax[1].twinx()
-        plot2 = side_ax.scatter(comb_sol%360, comb_num_meteors, c='k', label='Num meteors')
+        plot2 = side_ax.scatter(comb_sol%360, comb_num_meteors, c='k', label='Num meteors', s=8)
+
+        # Plot the minimum meteors line
         side_ax.hlines(
             min_meteors,
             np.min(comb_sol%360),
             np.max(comb_sol%360),
             colors='k',
             linestyles='--',
+            label="Minimum meteors"
         )
         side_ax.set_ylabel('Num meteors')
         side_ax.set_ylim(bottom=0)
 
 
-        ax[1].legend([plot1, plot2], [plot1.get_label(), plot2.get_label()])
+        # Add a combined legend
+        lines, labels = ax[1].get_legend_handles_labels()
+        lines2, labels2 = side_ax.get_legend_handles_labels()
+        ax[1].legend(lines + lines2, labels + labels2)
+
+
+
+        # Add a plot of:
+        # - lunar phase
+        # - weighted radiant elevation
+        # - weighted limiting meteor magnitude
+
+        ### Plot lunar phases per year ###
+
+
+        # Set line plot cycler
+        line_cycler   = (cycler(color=["#E69F00", "#56B4E9", "#009E73", "#0072B2", "#D55E00", "#CC79A7", "#F0E442"]) +
+                 cycler(linestyle=["-", "--", "-.", ":", "-", "--", "-."]))
+
+        ax[2].set_prop_cycle(line_cycler)
+
+
+        # Set up observer
+        o = ephem.Observer()
+        o.lat = str(0)
+        o.long = str(0)
+        o.elevation = 0
+        o.horizon = '0:0'
+
+        for dt_range, dt_arr in bin_datetime_yearly:
+
+            dt_bin_beg, dt_bin_end = dt_range
+            dt_mid = jd2Date((datetime2JD(dt_bin_beg) + datetime2JD(dt_bin_end))/2, dt_obj=True)
+
+            sol_moon_phase = []
+            moon_phases = []
+
+            for dt in dt_arr:
+
+                o.date = dt
+                m = ephem.Moon()
+                m.compute(o)
+
+                moon_phases.append(m.phase)
+
+            # Plot Moon phases
+            ax[2].plot(np.degrees(sol_bins), moon_phases, label="{:d} moon phase".format(dt_mid.year))
+
+
+        ax[2].set_ylabel("Moon phase")
+        ax[2].set_ylim([0, 100])
+        #ax[2].legend()
+
+        ### ###
+
+
+        ### Plot the TAP-weighted limiting magnitude ###
+
+        lm_ax = ax[2].twinx()
+
+        lm_ax.scatter(comb_sol%360, comb_lm_m, label="Meteor LM (TAP-weighted)", color='0.3', s=5)
+
+        lm_ax.invert_yaxis()
+        lm_ax.set_ylabel("Meteor LM")
+        #lm_ax.legend()
+
+        # Add one magnitude of buffer to every end, round to 0.5
+        lm_min, lm_max = lm_ax.get_ylim()
+        lm_ax.set_ylim(round(2*(lm_min + 0.5))/2, round(2*(lm_max - 0.5))/2)
+
+
+        ###
+
+        # Add a combined legend
+        lines, labels = ax[2].get_legend_handles_labels()
+        lines2, labels2 = lm_ax.get_legend_handles_labels()
+        ax[2].legend(lines + lines2, labels + labels2)
+
+        ax[2].set_xlabel("$\\lambda_\\odot$ (deg)")
+
+
+
 
 
     # Show plot
     ax[0].legend()
     ax[0].set_title('{:s} r = {:.2f}'.format(shower_code, np.mean(summary_population_index)))
-    ax[0].set_ylabel("Flux (meteoroids / 1000km$^2$ h)")
+    ax[0].set_ylabel("Flux @ +6.5$^\\mathrm{M}$ (meteoroids / 1000km$^2$ h)")
     ax[0].set_ylim(bottom=0)
-    ax[1].set_ylabel("Time-area product +6.5M (1000 km$^2$ h)")
-    ax[1].set_xlabel("Solar longitude (deg)")
-    # plt.tight_layout()
+    ax[1].set_ylabel("Time-area product (1000 km$^2$ h)")
+    
+    plt.tight_layout()
 
     fig_path = os.path.join(dir_path, fluxbatch_cml_args.output_filename + ".png")
     print("Figure saved to:", fig_path)
