@@ -274,7 +274,10 @@ class StationPlotParams:
             # label = str(config.stationID)
             label = None
 
-        return {'color': color, 'marker': marker, 'label': label}
+        #return {'color': color, 'marker': marker, 'label': label}
+
+        # Don't include the station name in the legend
+        return {'color': color, 'marker': marker}
 
 
 
@@ -631,8 +634,11 @@ if __name__ == "__main__":
 
                     # plot data for night and interval
                     plot_params = plot_info(config.stationID)
+
+                    # Plot the single-station flux line
                     line = ax[0].plot(sol_data, flux_lm_6_5_data, **plot_params, linestyle='dashed')
 
+                    # Plot single-station error bars
                     ax[0].errorbar(
                         sol_data,
                         flux_lm_6_5_data,
@@ -818,24 +824,26 @@ if __name__ == "__main__":
         # Add the grid
         ax[0].grid(color='0.9')
 
-        # If single-station fluxes are not shown, plot the ZHR on another axis
-        if not fluxbatch_cml_args.single:
 
-            # Create the right axis
-            zhr_ax = ax[0].twinx()
+        ### Plot the ZHR on another axis ###
 
-            population_index = np.mean(summary_population_index)
+        # Create the right axis
+        zhr_ax = ax[0].twinx()
 
-            # Set the same range on the Y axis
-            y_min, y_max = ax[0].get_ylim()
-            zhr_min, zhr_max = calculateZHR([y_min, y_max], population_index)
-            zhr_ax.set_ylim(zhr_min, zhr_max)
+        population_index = np.mean(summary_population_index)
 
-            # Get the flux ticks and set them to the zhr axis
-            flux_ticks = ax[0].get_yticks()
-            zhr_ax.set_yscale('segmented', points=calculateZHR(flux_ticks, population_index))
+        # Set the same range on the Y axis
+        y_min, y_max = ax[0].get_ylim()
+        zhr_min, zhr_max = calculateZHR([y_min, y_max], population_index)
+        zhr_ax.set_ylim(zhr_min, zhr_max)
 
-            zhr_ax.set_ylabel("ZHR")
+        # Get the flux ticks and set them to the zhr axis
+        flux_ticks = ax[0].get_yticks()
+        zhr_ax.set_yscale('segmented', points=calculateZHR(flux_ticks, population_index))
+
+        zhr_ax.set_ylabel("ZHR")
+
+        ### ###
 
 
         # Plot time-area product in the bottom plot
