@@ -77,7 +77,7 @@ mscale.register_scale(SegmentedScale)
 
 
 def addFixedBins(sol_bins, small_sol_bins, small_dt_bins, meteor_num_arr, collecting_area_arr, obs_time_arr, \
-    lm_m_arr):
+    lm_m_arr, rad_elev_arr, rad_dist_arr, ang_vel_arr):
     """ Sort data into fixed bins by solar longitude. 
 
     For a larger array of solar longitudes sol_bins, fits parameters to an empty array of its size (minus 1)
@@ -123,6 +123,18 @@ def addFixedBins(sol_bins, small_sol_bins, small_dt_bins, meteor_num_arr, collec
     lm_m_binned = np.zeros(len(sol_bins) - 1) + np.nan
     lm_m_binned[i:i + len(obs_time_arr)] = lm_m_arr
 
+    # Sort radiant elevation into bins
+    rad_elev_binned = np.zeros(len(sol_bins) - 1) + np.nan
+    rad_elev_binned[i:i + len(obs_time_arr)] = rad_elev_arr
+
+    # Sort radiant distance into bins
+    rad_dist_binned = np.zeros(len(sol_bins) - 1) + np.nan
+    rad_dist_binned[i:i + len(obs_time_arr)] = rad_dist_arr
+
+    # Sort angular velocity into bins
+    ang_vel_binned = np.zeros(len(sol_bins) - 1) + np.nan
+    ang_vel_binned[i:i + len(obs_time_arr)] = ang_vel_arr
+
 
     # Sort meteor numbers into bins
     meteor_num_binned = np.zeros(len(sol_bins) - 1)
@@ -137,12 +149,13 @@ def addFixedBins(sol_bins, small_sol_bins, small_dt_bins, meteor_num_arr, collec
     #     forced_bin_param[i:i + len(p)] = p
     #     data_arrays.append(forced_bin_param)
 
-    return [meteor_num_binned, collecting_area_binned, obs_time_binned, lm_m_binned]
+    return [meteor_num_binned, collecting_area_binned, obs_time_binned, lm_m_binned, rad_elev_binned, \
+        rad_dist_binned, ang_vel_binned]
 
 
 def combineFixedBinsAndComputeFlux(
-    sol_bins, meteors, time_area_prod, lm_m_data, min_meteors=50, ci=0.95, min_tap=2, \
-    min_bin_duration=0.5, max_bin_duration=12):
+    sol_bins, meteors, time_area_prod, lm_m_data, rad_elev_data, rad_dist_data, ang_vel_data, min_meteors=50,\
+    ci=0.95, min_tap=2, min_bin_duration=0.5, max_bin_duration=12):
     """
     Computes flux values and their corresponding solar longitude based on bins containing
     number of meteors, and time-area product. Bins will be combined so that each bin has the
@@ -153,6 +166,10 @@ def combineFixedBinsAndComputeFlux(
         meteors: [ndarray] Number of meteors in a bin
         time_area_prod: [ndarray] Time multiplied by LM corrected collecting area added for each station
             which contains each bin
+        lm_m_data: [ndarray]
+        rad_elev_data: [ndarray]
+        rad_dist_data: [ndarray]
+        ang_vel_data: [ndarray]
 
     Keyword arguments:
         min_meteors: [int] Minimum number of meteors to have in a bin
@@ -181,6 +198,9 @@ def combineFixedBinsAndComputeFlux(
     meteor_count_list = []
     time_area_product_list = []
     lm_m_list = []
+    rad_elev_list = []
+    rad_dist_list = []
+    ang_vel_list = []
 
     start_idx = 0
     for end_idx in range(1, len(meteors)):
@@ -207,6 +227,9 @@ def combineFixedBinsAndComputeFlux(
                 flux_upper_list.append(np.nan)
                 flux_lower_list.append(np.nan)
                 lm_m_list.append(np.nan)
+                rad_elev_list.append(np.nan)
+                rad_dist_list.append(np.nan)
+                ang_vel_list.append(np.nan)
 
             else:
 
@@ -223,6 +246,21 @@ def combineFixedBinsAndComputeFlux(
                 lm_m_select = lm_m_data[sl]*time_area_prod[sl]
                 lm_m_weighted = np.sum(lm_m_select[~np.isnan(lm_m_select)])/ta_prod
                 lm_m_list.append(lm_m_weighted)
+
+                # Compute the TAP-weighted radiant elevation
+                rad_elev_select = rad_elev_data[sl]*time_area_prod[sl]
+                rad_elev_weighted = np.sum(rad_elev_select[~np.isnan(rad_elev_select)])/ta_prod
+                rad_elev_list.append(rad_elev_weighted)
+
+                # Compute the TAP-weighted radiant distance
+                rad_dist_select = rad_dist_data[sl]*time_area_prod[sl]
+                rad_dist_weighted = np.sum(rad_dist_select[~np.isnan(rad_dist_select)])/ta_prod
+                rad_dist_list.append(rad_dist_weighted)
+
+                # Compute the TAP-weighted angular velocity
+                ang_vel_select = ang_vel_data[sl]*time_area_prod[sl]
+                ang_vel_weighted = np.sum(ang_vel_select[~np.isnan(ang_vel_select)])/ta_prod
+                ang_vel_list.append(ang_vel_weighted)
 
 
             sol_list.append(np.mean(middle_bin_sol[sl]))
@@ -244,6 +282,9 @@ def combineFixedBinsAndComputeFlux(
         np.array(meteor_count_list),
         np.array(time_area_product_list),
         np.array(lm_m_list),
+        np.array(rad_elev_list),
+        np.array(rad_dist_list),
+        np.array(ang_vel_list),
     )
 
 
@@ -304,7 +345,7 @@ def cameraTally(comb_sol_bins, single_fixed_bin_information):
 
 
         # Compute station contributions
-        for station, (sol_arr, _, met_num, area, time_bin, lm_m) in single_fixed_bin_information:
+        for station, (sol_arr, _, met_num, area, time_bin, lm_m, _, _, _) in single_fixed_bin_information:
 
             sol_arr = np.array(sol_arr)
             met_num = np.array(met_num)
@@ -448,7 +489,7 @@ if __name__ == "__main__":
     plot_info = StationPlotParams()
 
     # Init the plot
-    fig, ax = plt.subplots(nrows=3, figsize=(15, 10), sharex=True, gridspec_kw={'height_ratios': [2, 1, 1]})
+    fig, ax = plt.subplots(nrows=4, figsize=(15, 10), sharex=True, gridspec_kw={'height_ratios': [3, 1, 1, 1]})
 
 
     # If an input CSV file was not given, compute the data
@@ -655,14 +696,15 @@ if __name__ == "__main__":
 
 
         # Sum meteors in every bin (this is a 2D along the first axis, producing an array)
-        num_meteors = sum(np.array(meteors) for meteors, _, _, _ in all_fixed_bin_information)
+        num_meteors = sum(np.array(meteors) for meteors, _, _, _, _, _, _ in all_fixed_bin_information)
 
         # Compute time-area product in every bin
-        time_area_product = sum(np.array(area)*np.array(time) for _, area, time, _ in all_fixed_bin_information)
+        time_area_product = sum(np.array(area)*np.array(time) for _, area, time, _, _, _, \
+            _ in all_fixed_bin_information)
 
         # Compute TAP-wieghted meteor limiting magnitude in every bin
         lm_m_data = np.zeros_like(num_meteors)
-        for _, area, time, lm_m in all_fixed_bin_information:
+        for _, area, time, lm_m, _, _, _ in all_fixed_bin_information:
 
             lm_m_data[~np.isnan(lm_m)] += (
                  np.array(lm_m[~np.isnan(lm_m)])
@@ -671,6 +713,44 @@ if __name__ == "__main__":
                 )
 
         lm_m_data /= time_area_product
+
+        # Compute TAP-wieghted radiant elevation in every bin
+        rad_elev_data = np.zeros_like(num_meteors)
+        for _, area, time, _, rad_elev, _, _ in all_fixed_bin_information:
+
+            rad_elev_data[~np.isnan(rad_elev)] += (
+                 np.array(rad_elev[~np.isnan(rad_elev)])
+                *np.array(area[~np.isnan(rad_elev)])
+                *np.array(time[~np.isnan(rad_elev)])
+                )
+
+        rad_elev_data /= time_area_product
+
+
+        # Compute TAP-wieghted radiant distance in every bin
+        rad_dist_data = np.zeros_like(num_meteors)
+        for _, area, time, _, _, rad_dist, _ in all_fixed_bin_information:
+
+            rad_dist_data[~np.isnan(rad_dist)] += (
+                 np.array(rad_dist[~np.isnan(rad_dist)])
+                *np.array(area[~np.isnan(rad_dist)])
+                *np.array(time[~np.isnan(rad_dist)])
+                )
+
+        rad_dist_data /= time_area_product
+
+
+        # Compute TAP-wieghted angular velocity in every bin
+        ang_vel_data = np.zeros_like(num_meteors)
+        for _, area, time, _, _, _, ang_vel in all_fixed_bin_information:
+
+            ang_vel_data[~np.isnan(ang_vel)] += (
+                 np.array(ang_vel[~np.isnan(ang_vel)])
+                *np.array(area[~np.isnan(ang_vel)])
+                *np.array(time[~np.isnan(ang_vel)])
+                )
+
+        ang_vel_data /= time_area_product
 
 
         (
@@ -682,11 +762,17 @@ if __name__ == "__main__":
             comb_num_meteors,
             comb_ta_prod,
             comb_lm_m,
+            comb_rad_elev,
+            comb_rad_dist,
+            comb_ang_vel,
         ) = combineFixedBinsAndComputeFlux(
             sol_bins,
             num_meteors,
             time_area_product,
             lm_m_data,
+            rad_elev_data,
+            rad_dist_data,
+            ang_vel_data,
             ci=ci,
             min_tap=min_tap,
             min_meteors=min_meteors,
@@ -851,7 +937,7 @@ if __name__ == "__main__":
             ((comb_sol_bins[1:] + comb_sol_bins[:-1])/2)%360,
             comb_ta_prod/1e9,
             comb_sol_bins[1:] - comb_sol_bins[:-1],
-            label='Time-area product',
+            label='Time-area product (TAP)',
             color='0.65',
         )
 
@@ -862,12 +948,12 @@ if __name__ == "__main__":
             np.max(comb_sol%360),
             colors='k',
             linestyles='solid',
-            label="Minimum TAP",
+            label="Min. TAP",
         )
 
         # Plot the number of meteors on the right axis
         side_ax = ax[1].twinx()
-        plot2 = side_ax.scatter(comb_sol%360, comb_num_meteors, c='k', label='Num meteors', s=8)
+        plot2 = side_ax.scatter(comb_sol%360, comb_num_meteors, c='k', label='Meteors', s=8)
 
         # Plot the minimum meteors line
         side_ax.hlines(
@@ -876,7 +962,7 @@ if __name__ == "__main__":
             np.max(comb_sol%360),
             colors='k',
             linestyles='--',
-            label="Minimum meteors"
+            label="Min. meteors"
         )
         side_ax.set_ylabel('Num meteors')
         side_ax.set_ylim(bottom=0)
@@ -889,19 +975,23 @@ if __name__ == "__main__":
 
 
 
-        # Add a plot of:
-        # - lunar phase
-        # - weighted radiant elevation
-        # - weighted limiting meteor magnitude
+        # Plot the radiant elevation
+        ax[2].scatter(comb_sol%360, comb_rad_elev, label="Rad. elev. (TAP-weighted)", color='0.75', s=15, marker='s')
+
+        # Plot the radiant distance
+        ax[2].scatter(comb_sol%360, comb_rad_dist, label="Rad. dist.", color='0.25', s=20, marker='x')
+
+        ax[2].set_ylabel("Angle (deg)")
 
         ### Plot lunar phases per year ###
 
+        moon_ax = ax[2].twinx()
 
         # Set line plot cycler
         line_cycler   = (cycler(color=["#E69F00", "#56B4E9", "#009E73", "#0072B2", "#D55E00", "#CC79A7", "#F0E442"]) +
                  cycler(linestyle=["-", "--", "-.", ":", "-", "--", "-."]))
 
-        ax[2].set_prop_cycle(line_cycler)
+        moon_ax.set_prop_cycle(line_cycler)
 
 
         # Set up observer
@@ -928,21 +1018,30 @@ if __name__ == "__main__":
                 moon_phases.append(m.phase)
 
             # Plot Moon phases
-            ax[2].plot(np.degrees(sol_bins), moon_phases, label="{:d} moon phase".format(dt_mid.year))
+            moon_ax.plot(np.degrees(sol_bins), moon_phases, label="{:d} moon phase".format(dt_mid.year))
 
+        moon_ax.set_ylabel("Moon phase")
+        moon_ax.set_ylim([0, 100])
 
-        ax[2].set_ylabel("Moon phase")
-        ax[2].set_ylim([0, 100])
-        #ax[2].legend()
+        # Add a combined legend
+        lines, labels = ax[2].get_legend_handles_labels()
+        lines2, labels2 = moon_ax.get_legend_handles_labels()
+        ax[2].legend(lines + lines2, labels + labels2)
 
         ### ###
 
 
+
+        # Plot the angular velocity
+        ax[3].scatter(comb_sol%360, comb_ang_vel, label="Angular velocity", color='0.0', s=25, marker='+')
+        ax[3].set_ylabel("Ang. vel. (deg/s)")
+
+
         ### Plot the TAP-weighted limiting magnitude ###
 
-        lm_ax = ax[2].twinx()
+        lm_ax = ax[3].twinx()
 
-        lm_ax.scatter(comb_sol%360, comb_lm_m, label="Meteor LM (TAP-weighted)", color='0.3', s=5)
+        lm_ax.scatter(comb_sol%360, comb_lm_m, label="Meteor LM", color='0.5', s=20)
 
         lm_ax.invert_yaxis()
         lm_ax.set_ylabel("Meteor LM")
@@ -950,17 +1049,17 @@ if __name__ == "__main__":
 
         # Add one magnitude of buffer to every end, round to 0.5
         lm_min, lm_max = lm_ax.get_ylim()
-        lm_ax.set_ylim(round(2*(lm_min + 0.5))/2, round(2*(lm_max - 0.5))/2)
+        lm_ax.set_ylim(np.ceil(2*(lm_min))/2, np.floor(2*(lm_max))/2)
 
 
         ###
 
         # Add a combined legend
-        lines, labels = ax[2].get_legend_handles_labels()
+        lines, labels = ax[3].get_legend_handles_labels()
         lines2, labels2 = lm_ax.get_legend_handles_labels()
-        ax[2].legend(lines + lines2, labels + labels2)
+        ax[3].legend(lines + lines2, labels + labels2)
 
-        ax[2].set_xlabel("$\\lambda_\\odot$ (deg)")
+        ax[3].set_xlabel("$\\lambda_\\odot$ (deg)")
 
 
 
@@ -971,7 +1070,7 @@ if __name__ == "__main__":
     ax[0].set_title('{:s} r = {:.2f}'.format(shower_code, np.mean(summary_population_index)))
     ax[0].set_ylabel("Flux @ +6.5$^\\mathrm{M}$ (meteoroids / 1000km$^2$ h)")
     ax[0].set_ylim(bottom=0)
-    ax[1].set_ylabel("Time-area product (1000 km$^2$ h)")
+    ax[1].set_ylabel("TAP (1000 km$^2$ h)")
     
     plt.tight_layout()
 

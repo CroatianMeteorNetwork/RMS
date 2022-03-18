@@ -816,6 +816,9 @@ def loadForcedBinFluxData(dir_path, file_name):
     area_list = (1e6*flux_table.table['eff_col_area'].data).tolist()
     time_list = flux_table.table['time_bin'].data
     meteor_lm_list = flux_table.table['meteor_lm'].data.tolist()
+    rad_elev_list = flux_table.table['rad_elev'].data.tolist()
+    rad_dist_list = flux_table.table['rad_dist'].data.tolist()
+    ang_vel_list = flux_table.table['ang_vel'].data.tolist()
 
     ### ###
 
@@ -830,7 +833,9 @@ def loadForcedBinFluxData(dir_path, file_name):
     # time_list = data[:-1, 3]
     # meteor_lm_list = data[:-1, 4]
 
-    return sol_bins, dt_bins, meteor_list, area_list, time_list, meteor_lm_list
+    return sol_bins, dt_bins, meteor_list, area_list, time_list, meteor_lm_list, rad_elev_list, \
+        rad_dist_list, ang_vel_list
+
 
 
 def computeClearSkyTimeIntervals(cloud_ratio_dict, ratio_threshold=0.5, time_gap_threshold=15, clearing_threshold=90):
@@ -2378,7 +2383,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
             # Load previously computed collection areas and flux metadata
             sol_bins, dt_bins, forced_bins_meteor_num, forced_bins_area, forced_bins_time, \
-                forced_bins_lm_m = loadForcedBinFluxData(dir_path, forced_bins_ecsv_file_name)
+                forced_bins_lm_m, forced_radiant_elev, forced_radiant_dist, \
+                forced_ang_vel = loadForcedBinFluxData(dir_path, forced_bins_ecsv_file_name)
 
             print("    ... loaded!")
 
@@ -2849,7 +2855,6 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
             print("Calculating fixed bins...")
 
-
             (
                 forced_flux_table,
                 forced_sol_data,
@@ -2858,9 +2863,9 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 _,
                 forced_bins_meteor_num,
                 forced_bins_area,
-                _,
-                _,
-                _,
+                forced_radiant_elev,
+                forced_radiant_dist,
+                forced_ang_vel,
                 _,
                 forced_bins_lm_m,
                 _,
@@ -3099,7 +3104,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             flux_lm_6_5_ci_upper_data,
             meteor_num_data,
             population_index,
-            (sol_bins, dt_bins, forced_bins_meteor_num, forced_bins_area, forced_bins_time, forced_bins_lm_m),
+            (sol_bins, dt_bins, forced_bins_meteor_num, forced_bins_area, forced_bins_time, \
+                forced_bins_lm_m, forced_radiant_elev, forced_radiant_dist, forced_ang_vel),
         )
     return (
         sol_data,
