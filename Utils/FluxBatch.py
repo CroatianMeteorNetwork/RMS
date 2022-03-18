@@ -20,9 +20,10 @@ from cycler import cycler
 from RMS.Astrometry.Conversions import datetime2JD, jd2Date
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile
 from RMS.Formats.Showers import FluxShowers, loadRadiantShowers
-from Utils.Flux import calculatePopulationIndex, computeFlux, detectClouds, fluxParser, calculateFixedBins, \
-    calculateZHR, massVerniani
+from Utils.Flux import calculatePopulationIndex, calculateMassIndex, computeFlux, detectClouds, fluxParser, \
+    calculateFixedBins, calculateZHR, massVerniani
 from RMS.Routines.SolarLongitude import unwrapSol
+from RMS.Misc import formatScientific
 
 
 
@@ -936,8 +937,10 @@ if __name__ == "__main__":
         ax[0].grid(color='0.9')
 
         ax[0].legend()
-        ax[0].set_title("{:s}, v = {:.1f} km/s, r = {:.2f}".format(shower.name_full, v_init/1000, np.mean(summary_population_index)) 
-                      + ", $\\mathrm{m_{lim}} = $" + "{:.0e} g ".format(1000*mass_lim)
+        ax[0].set_title("{:s}, v = {:.1f} km/s, s = {:.2f}, r = {:.2f}".format(shower.name_full, 
+            v_init/1000, calculateMassIndex(np.mean(summary_population_index)), 
+            np.mean(summary_population_index)) 
+                      + ", $\\mathrm{m_{lim}} = $" + r"${:s}$ g ".format(formatScientific(1000*mass_lim, 0))
                       + "at LM = +6.5$^{\\mathrm{M}}$")
         ax[0].set_ylabel("Flux (meteoroids / 1000km$^2$ h)")
 

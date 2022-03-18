@@ -335,6 +335,12 @@ def calculatePopulationIndex(mass_index):
     return 10**((mass_index - 1)/2.5)
 
 
+def calculateMassIndex(population_index):
+    """ Compute the mass index given the population index. """
+
+    return 2.5*np.log10(population_index) + 1
+
+
 
 def calculateZHR(flux_lm_6_5, population_index):
     """ Compute the ZHR given the flux at +6.5 mag and the population index. 

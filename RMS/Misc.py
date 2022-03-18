@@ -354,3 +354,25 @@ def decimalDegreesToSexHours(val):
     ss = ((val - hh)*60 - mm)*60
 
     return sign, hh, mm, ss
+
+
+
+def formatScientific(val, dec_places):
+    """ Format a given number in the scientific notation such that it looks like e.g. 2.1 x 10^3. The
+        string is returned in the LaTex format that can be given to matplotlib.
+
+    Source: https://stackoverflow.com/questions/31453422/displaying-numbers-with-x-instead-of-e-scientific-notation-in-matplotlib/31453961
+
+    Arguments:
+        val: [float] Input value.
+        dec_places: [int] Number of decimal places.
+
+    Return:
+        [str] Formatted Latex string.
+
+    """
+    
+    s = '{val:0.{dec_places:d}e}'.format(val=val, dec_places=dec_places)
+    m, e = s.split('e')
+
+    return r'{m:s}\times 10^{{{e:d}}}'.format(m=m, e=int(e))
