@@ -99,7 +99,7 @@ class Shower(object):
 
 
     def computeZHRFloat(self, la_sun):
-        """ Compute the ZHR activity of the shower given the solar longitude. Only works for showres which
+        """ Compute the ZHR activity of the shower given the solar longitude. Only works for showers which
             have the flux parameters. Only takes floats!
 
         Arguments:

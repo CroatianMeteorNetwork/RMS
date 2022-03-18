@@ -356,6 +356,23 @@ def calculateZHR(flux_lm_6_5, population_index):
     return zhr
 
 
+def massVerniani(mag, vel):
+    """ Compute a limiting mass using the Verniani (1964) luminous efficiency and the Jacchia et al. (1967)
+        fit to Super-Schmidt meteors. The relation is found in Peterson (1999):
+        https://www.google.com/books/edition/Dynamics_of_Meteor_Outbursts_and_Satelli/RFNnwAxNcWQC?hl=en&gbpv=1&pg=PP1&printsec=frontcover
+
+    Arguments:
+        mag: [float] Limiting magnitude.
+        vel: [float] Shower velocity in km/s.
+
+    Return:
+        mass: [float] Mass in kilograms.
+    """
+
+
+    return 1e-3*10**((-8.75*np.log10(vel) - mag + 11.59)/2.25)
+
+
 
 def generateColAreaJSONFileName(station_code, side_points, ht_min, ht_max, dht, elev_limit):
     """Generate a file name for the collection area JSON file."""
