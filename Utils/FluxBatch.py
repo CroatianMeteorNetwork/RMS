@@ -809,6 +809,26 @@ if __name__ == "__main__":
         comb_sol_bins = np.degrees(comb_sol_bins)
 
 
+        # Compute the weighted mean meteor magnitude
+        lm_m_mean = np.sum(comb_lm_m*comb_ta_prod)/np.sum(comb_ta_prod)
+
+        # Compute the mass limit at the mean meteor LM
+        mass_lim_lm_m_mean = massVerniani(lm_m_mean, v_init/1000)
+
+        print("Mean TAP-weighted meteor limiting magnitude = {:.2f}M".format(lm_m_mean))
+        print("                         limiting mass      = {:.2e} g".format(1000*mass_lim_lm_m_mean))
+
+        # Compute the mean population index
+        population_index_mean = np.mean(summary_population_index)
+
+        # Compute the flux conversion factor
+        lm_m_to_6_5_factor = population_index_mean**(6.5 - lm_m_mean)
+
+        # Compute the flux to the mean meteor limiting magnitude
+        comb_flux_lm_m = comb_flux/lm_m_to_6_5_factor
+        comb_flux_lm_m_lower = comb_flux_lower/lm_m_to_6_5_factor
+        comb_flux_lm_m_upper = comb_flux_upper/lm_m_to_6_5_factor
+
         ### Print camera tally ###
 
         # Tally up contributions from individual cameras in each bin
@@ -923,8 +943,24 @@ if __name__ == "__main__":
             comb_sol%360,
             comb_flux,
             yerr=[comb_flux - comb_flux_lower, comb_flux_upper - comb_flux],
-            label='Weighted average flux',
+            label="Weighted average flux at:\n" + \
+                "LM = +6.5$^{\\mathrm{M}}$, " + \
+                "$\\mathrm{m_{lim}} = $" + r"${:s}$ g ".format(formatScientific(1000*mass_lim, 0)),
             c='k',
+            marker='o',
+            linestyle='none',
+            zorder=4,
+        )
+
+        # Plot the flux to the meteor LM
+        ax[0].errorbar(
+            comb_sol%360,
+            comb_flux_lm_m,
+            yerr=[comb_flux_lm_m - comb_flux_lm_m_lower, comb_flux_lm_m_upper - comb_flux_lm_m],
+            label="Flux (1/{:.2f}x) at:\n".format(lm_m_to_6_5_factor) +
+                "LM = {:+.2f}".format(lm_m_mean) + "$^{\\mathrm{M}}$, " + \
+                "$\\mathrm{m_{lim}} = $" + r"${:s}$ g ".format(formatScientific(1000*mass_lim_lm_m_mean, 0)),
+            c='0.5',
             marker='o',
             linestyle='none',
             zorder=4,
@@ -940,8 +976,9 @@ if __name__ == "__main__":
         ax[0].set_title("{:s}, v = {:.1f} km/s, s = {:.2f}, r = {:.2f}".format(shower.name_full, 
             v_init/1000, calculateMassIndex(np.mean(summary_population_index)), 
             np.mean(summary_population_index)) 
-                      + ", $\\mathrm{m_{lim}} = $" + r"${:s}$ g ".format(formatScientific(1000*mass_lim, 0))
-                      + "at LM = +6.5$^{\\mathrm{M}}$")
+                      # + ", $\\mathrm{m_{lim}} = $" + r"${:s}$ g ".format(formatScientific(1000*mass_lim, 0))
+                      # + "at LM = +6.5$^{\\mathrm{M}}$"
+                      )
         ax[0].set_ylabel("Flux (meteoroids / 1000km$^2$ h)")
 
 
@@ -961,12 +998,15 @@ if __name__ == "__main__":
         flux_ticks = ax[0].get_yticks()
         zhr_ax.set_yscale('segmented', points=calculateZHR(flux_ticks, population_index))
 
-        zhr_ax.set_ylabel("ZHR")
+        zhr_ax.set_ylabel("ZHR at +6.5$^{\\mathrm{M}}$")
 
         ### ###
 
 
         if not fluxbatch_cml_args.onlyflux:
+
+
+            ##### SUBPLOT 1 #####
 
             # Plot time-area product in the bottom plot
             plot1 = ax[1].bar(
@@ -1013,6 +1053,7 @@ if __name__ == "__main__":
             ax[1].legend(lines + lines2, labels + labels2)
 
 
+            ##### SUBPLOT 2 #####
 
             # Plot the radiant elevation
             ax[2].scatter(comb_sol%360, comb_rad_elev, label="Rad. elev. (TAP-weighted)", color='0.75', s=15, marker='s')
@@ -1070,11 +1111,7 @@ if __name__ == "__main__":
             ### ###
 
 
-
-            # Plot the angular velocity
-            ax[3].scatter(comb_sol%360, comb_ang_vel, label="Angular velocity", color='0.0', s=25, marker='+')
-            ax[3].set_ylabel("Ang. vel. (deg/s)")
-
+            ##### SUBPLOT 3 #####
 
             ### Plot the TAP-weighted limiting magnitude ###
 
@@ -1091,7 +1128,26 @@ if __name__ == "__main__":
             lm_ax.set_ylim(np.ceil(2*(lm_min))/2, np.floor(2*(lm_max))/2)
 
 
+            # Plot the TAP-weighted meteor LM
+
+            lm_ax.hlines(
+                lm_m_mean,
+                np.min(comb_sol%360),
+                np.max(comb_sol%360),
+                colors='k',
+                alpha=0.5,
+                linestyles='dashed',
+                label="Mean meteor LM = {:+.2f}".format(lm_m_mean) + "$^{\\mathrm{M}}$",
+            )
+
+
             ###
+
+            
+            # Plot the angular velocity
+            ax[3].scatter(comb_sol%360, comb_ang_vel, label="Angular velocity", color='0.0', s=30, marker='+')
+            ax[3].set_ylabel("Ang. vel. (deg/s)")
+
 
             # Add a combined legend
             lines, labels = ax[3].get_legend_handles_labels()
