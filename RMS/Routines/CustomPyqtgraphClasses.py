@@ -3,6 +3,13 @@ from __future__ import division, absolute_import, unicode_literals
 import pyqtgraph as pg
 import numpy as np
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
+
+# Import the correct version of pyqtgraph function module, depending on the version
+try:
+    import pyqtgraph.fn as pgfn
+    
+except ImportError:
+    import pyqtgraph.functions as pgfn
     
 from RMS.Astrometry.Conversions import AER2LatLonAlt
 from RMS.Formats.FFfile import reconstructFrame as reconstructFrameFF
@@ -656,8 +663,8 @@ class ImageItem(pg.ImageItem):
             xds = max(1, int(1.0/w))
             yds = max(1, int(1.0/h))
             axes = [1, 0] if self.axisOrder == 'row-major' else [0, 1]
-            image = pg.fn.downsample(self.image, xds, axis=axes[0])
-            image = pg.fn.downsample(image, yds, axis=axes[1])
+            image = pgfn.downsample(self.image, xds, axis=axes[0])
+            image = pgfn.downsample(image, yds, axis=axes[1])
             self._lastDownsample = (xds, yds)
         else:
             image = self.image
@@ -677,11 +684,11 @@ class ImageItem(pg.ImageItem):
                 levdiff = 1 if levdiff == 0 else levdiff  # don't allow division by 0
 
                 if lut is None:
-                    efflut = pg.fn.rescaleData(ind, scale=255./levdiff,
+                    efflut = pgfn.rescaleData(ind, scale=255./levdiff,
                                                offset=minlev, dtype=np.ubyte)
                 else:
                     lutdtype = np.min_scalar_type(lut.shape[0] - 1)
-                    efflut = pg.fn.rescaleData(ind, scale=(lut.shape[0] - 1)/levdiff, \
+                    efflut = pgfn.rescaleData(ind, scale=(lut.shape[0] - 1)/levdiff, \
                                                offset=minlev, dtype=lutdtype, clip=(0, lut.shape[0] - 1))
                     efflut = lut[efflut]
 
@@ -698,7 +705,7 @@ class ImageItem(pg.ImageItem):
             image = image.transpose((1, 0, 2)[:image.ndim])
 
         # Make an RGB image
-        argb, alpha = pg.fn.makeARGB(image, lut=lut, levels=levels)
+        argb, alpha = pgfn.makeARGB(image, lut=lut, levels=levels)
         
         # Perform gamma correction on only one channel to speed things up
         argb[:, :, 0] = np.clip(np.power(argb[:, :, 0]/255, 1/self._gamma)*255, 0, 255)
@@ -713,7 +720,7 @@ class ImageItem(pg.ImageItem):
             argb[:, :, 2] = argb[:, :, 0]
 
 
-        self.qimage = pg.fn.makeQImage(argb, alpha, transpose=False)
+        self.qimage = pgfn.makeQImage(argb, alpha, transpose=False)
 
 
 class CursorItem(pg.GraphicsObject):

@@ -4828,8 +4828,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 background_lvl = 0
 
 
-            # Compute the background subtracted intensity sum
-            pick['intensity_sum'] = np.ma.sum(crop_img - background_lvl)
+            # Compute the background subtracted intensity sum (do as a float to avoid artificially pumping
+            #   up the magnitude)
+            pick['intensity_sum'] = np.ma.sum(crop_img.astype(np.float) - background_lvl).astype(np.int)
 
 
             # If the DFN image is used, correct intensity sum for exposure difference
