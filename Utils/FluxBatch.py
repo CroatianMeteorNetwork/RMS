@@ -5,6 +5,7 @@ import os
 import shlex
 import sys
 import collections
+import copy
     
 
 import ephem
@@ -323,13 +324,14 @@ class StationPlotParams:
 
 
 
-def cameraTally(comb_sol_bins, single_fixed_bin_information):
+def cameraTally(comb_sol, comb_sol_bins, single_fixed_bin_information):
     """ Tally contributions from individual cameras in every time bin. 
-    
-    comb_sol_bins: [list] List of combined solar longitue bin edges (degrees).
-    single_fixed_bin_information: [list] A list of [station, [sol (rad)], [meteor_num], [area (m^2)], 
-        [time_bin (hour)]]
-        entries for every station.
+        
+    Arguments:
+        comb_sol: [list] List of combined mean solar longitues (degrees).
+        comb_sol_bins: [list] List of combined solar longitue bin edges (degrees).
+        single_fixed_bin_information: [list] A list of [station, [sol (rad)], [meteor_num], [area (m^2)], 
+            [time_bin (hour)]] entries for every station.
     """
 
     bin_tally = collections.OrderedDict()
@@ -339,10 +341,11 @@ def cameraTally(comb_sol_bins, single_fixed_bin_information):
 
         sol_start = np.radians(comb_sol_bins[i])
         sol_end   = np.radians(comb_sol_bins[i + 1])
+        sol_mean  = comb_sol[i]
 
         # Add an entry for the bin
-        if np.degrees(sol_start) not in bin_tally:
-            bin_tally[np.degrees(sol_start)] = collections.OrderedDict()
+        if sol_mean not in bin_tally:
+            bin_tally[sol_mean] = collections.OrderedDict()
 
 
         # Compute station contributions
@@ -362,24 +365,33 @@ def cameraTally(comb_sol_bins, single_fixed_bin_information):
 
             if np.any(mask_arr):
 
-                if station not in bin_tally[np.degrees(sol_start)]:
+                if station not in bin_tally[sol_mean]:
                     
                     # Add an entry for the station, if it doesn't exist
-                    bin_tally[np.degrees(sol_start)][station] = {'meteors': 0, 'tap': 0}
+                    bin_tally[sol_mean][station] = {'meteors': 0, 'tap': 0}
 
                 # Add numbers to the tally
-                bin_tally[np.degrees(sol_start)][station]['meteors'] += np.sum(met_num[mask_arr])
-                bin_tally[np.degrees(sol_start)][station]['tap'] += np.sum(area[mask_arr]*time_bin[mask_arr])
+                bin_tally[sol_mean][station]['meteors'] += np.sum(met_num[mask_arr])
+                bin_tally[sol_mean][station]['tap'] += np.sum(area[mask_arr]*time_bin[mask_arr])
 
 
         # Sort by the number of meteors
-        bin_cams = bin_tally[np.degrees(sol_start)]
+        bin_cams = bin_tally[sol_mean]
         bin_cams = collections.OrderedDict(sorted(bin_cams.items(), key=lambda item: item[1]['meteors'], \
             reverse=True))
-        bin_tally[np.degrees(sol_start)] = bin_cams
+        bin_tally[sol_mean] = bin_cams
+        bin_tally_topmeteors = copy.deepcopy(bin_tally)
+
+        # Sort by the TAP
+        bin_cams = bin_tally[sol_mean]
+        bin_cams = collections.OrderedDict(sorted(bin_cams.items(), key=lambda item: item[1]['tap'], \
+            reverse=True))
+        bin_tally[sol_mean] = bin_cams
+        bin_tally_toptap = copy.deepcopy(bin_tally)
 
 
-    return bin_tally
+
+    return bin_tally_topmeteors, bin_tally_toptap
 
 
 
@@ -829,30 +841,39 @@ if __name__ == "__main__":
         comb_flux_lm_m_lower = comb_flux_lower/lm_m_to_6_5_factor
         comb_flux_lm_m_upper = comb_flux_upper/lm_m_to_6_5_factor
 
+
+        # Compute the ZHR
+        comb_zhr = calculateZHR(comb_flux, population_index_mean)
+        comb_zhr_lower = calculateZHR(comb_flux_lower, population_index_mean)
+        comb_zhr_upper = calculateZHR(comb_flux_upper, population_index_mean)
+
+
         ### Print camera tally ###
 
         # Tally up contributions from individual cameras in each bin
-        bin_tally = cameraTally(comb_sol_bins, single_fixed_bin_information)
+        bin_tally_topmeteors, bin_tally_toptap = cameraTally(comb_sol, comb_sol_bins, \
+            single_fixed_bin_information)
 
         print()
         print("Camera tally per bin:")
         print("---------------------")
 
         # Print cameras with most meteors per bin
-        for sol_bin in bin_tally:
+        for sol_bin_mean in bin_tally_topmeteors:
 
-            # Sort cameras by the meteor number
-            bin_cams = bin_tally[sol_bin]
-            #print(sol_bin, bin_cams.items())
-            #print()
-            #bin_cams = collections.OrderedDict(sorted(bin_cams.items(), key=lambda item: item[1]['meteors'], reverse=True))
+            # Get cameras with most meteors
+            bin_cams_topmeteors = bin_tally_topmeteors[sol_bin_mean]
+
+            # Get cameras with the highest TAP
+            bin_cams_toptap = bin_tally_toptap[sol_bin_mean]
 
             print()
-            print("Sol = {:.8f} deg".format(sol_bin))
+            print("Sol = {:.4f} deg".format(sol_bin_mean))
 
             top_n_stations = 5
-            for i, station_id in enumerate(bin_cams):
-                station_data = bin_cams[station_id]
+            print("Top {:d} by meteor number:".format(top_n_stations))
+            for i, station_id in enumerate(bin_cams_topmeteors):
+                station_data = bin_cams_topmeteors[station_id]
                 n_meteors = station_data['meteors']
                 tap = station_data['tap']/1e6
                 print("    {:s}, {:5d} meteors, TAP = {:10.2f} km^2 h".format(station_id, n_meteors, tap))
@@ -860,6 +881,15 @@ if __name__ == "__main__":
                 if i == top_n_stations - 1:
                     break
 
+            print("Top {:d} by TAP:".format(top_n_stations))
+            for i, station_id in enumerate(bin_cams_toptap):
+                station_data = bin_cams_toptap[station_id]
+                n_meteors = station_data['meteors']
+                tap = station_data['tap']/1e6
+                print("    {:s}, {:5d} meteors, TAP = {:10.2f} km^2 h".format(station_id, n_meteors, tap))
+
+                if i == top_n_stations - 1:
+                    break
 
         ###
 
@@ -1015,6 +1045,7 @@ if __name__ == "__main__":
                 comb_sol_bins[1:] - comb_sol_bins[:-1],
                 label='Time-area product (TAP)',
                 color='0.65',
+                edgecolor='0.55'
             )
 
             # Plot the minimum time-area product as a horizontal line
@@ -1050,7 +1081,7 @@ if __name__ == "__main__":
             # Add a combined legend
             lines, labels = ax[1].get_legend_handles_labels()
             lines2, labels2 = side_ax.get_legend_handles_labels()
-            ax[1].legend(lines + lines2, labels + labels2)
+            side_ax.legend(lines + lines2, labels + labels2)
 
 
             ##### SUBPLOT 2 #####
@@ -1106,7 +1137,7 @@ if __name__ == "__main__":
             # Add a combined legend
             lines, labels = ax[2].get_legend_handles_labels()
             lines2, labels2 = moon_ax.get_legend_handles_labels()
-            ax[2].legend(lines + lines2, labels + labels2)
+            moon_ax.legend(lines + lines2, labels + labels2)
 
             ### ###
 
@@ -1152,7 +1183,7 @@ if __name__ == "__main__":
             # Add a combined legend
             lines, labels = ax[3].get_legend_handles_labels()
             lines2, labels2 = lm_ax.get_legend_handles_labels()
-            ax[3].legend(lines + lines2, labels + labels2)
+            lm_ax.legend(lines + lines2, labels + labels2)
 
 
         ax[subplot_rows-1].set_xlabel("$\\lambda_\\odot$ (deg)")
@@ -1179,18 +1210,70 @@ if __name__ == "__main__":
 
             data_out_path = os.path.join(dir_path, fluxbatch_cml_args.output_filename + "_combined.csv")
             with open(data_out_path, 'w') as fout:
+                fout.write("# Shower parameters:\n")
+                fout.write("# Shower  = {:s}\n".format(shower_code))
+                fout.write("# r       = {:.2f}\n".format(population_index_mean))
+                fout.write("# s       = {:.2f}\n".format(calculateMassIndex(population_index_mean)))
+                fout.write("# m lim.  = {:.2e} kg\n".format(mass_lim))
+                fout.write("# CI int. = {:.1f} %\n".format(100*ci))
+                fout.write("# Binning parameters:\n")
+                fout.write("# Min. meteors     = {:d}\n".format(min_meteors))
+                fout.write("# Min TAP          = {:d} x 1000 km^2 h\n".format(min_tap))
+                fout.write("# Min bin duration = {:.2f} h\n".format(min_bin_duration))
+                fout.write("# Max bin duration = {:.2f} h\n".format(max_bin_duration))
                 fout.write(
-                    "# Sol bin start (deg), Mean Sol (deg), Flux@+6.5M (met/1000km^2/h), Flux lower bound, Flux upper bound, Time-area product (corrected to +6.5M) (m^3/h), Meteor Count\n"
+                    "# Sol bin start (deg), Mean Sol (deg), Flux@+6.5M (met / 1000 km^2 h), Flux lower bound, Flux upper bound, ZHR, ZHR lower, ZHR upper, Meteor Count, Time-area product (corrected to +6.5M) (1000 km^2/h), Meteor LM, Radiant elev (deg), Radiat dist (deg), Ang vel (deg/s)\n"
                 )
-                for _sol_bin_start, _mean_sol, _flux, _flux_lower, _flux_upper, _tap, _nmeteors in zip( \
-                    comb_sol_bins, comb_sol, comb_flux, comb_flux_lower, comb_flux_upper, comb_ta_prod, \
-                    comb_num_meteors):
+                for (_sol_bin_start,
+                    _mean_sol,
+                    _flux,
+                    _flux_lower,
+                    _flux_upper,
+                    _zhr,
+                    _zhr_lower,
+                    _zhr_upper,
+                    _nmeteors,
+                    _tap,
+                    _lm_m,
+                    _rad_elev,
+                    _rad_dist,
+                    _ang_vel) \
+                in zip(
+                        comb_sol_bins,
+                        comb_sol,
+                        comb_flux,
+                        comb_flux_lower,
+                        comb_flux_upper,
+                        comb_zhr,
+                        comb_zhr_lower,
+                        comb_zhr_upper,
+                        comb_num_meteors,
+                        comb_ta_prod,
+                        comb_lm_m,
+                        comb_rad_elev,
+                        comb_rad_dist,
+                        comb_ang_vel
+                        ):
 
-                    #fout.write(f"{_sol_bin_start},{_mean_sol},{_flux},{_flux_lower},{_flux_upper},{_tap},{_nmeteors}\n")
-                    fout.write("{:.8f},{:.8f},{:.3f},{:.3f},{:.3f},{:.2f},{:d}\n".format(_sol_bin_start, \
-                        _mean_sol, _flux, _flux_lower, _flux_upper, _tap, int(_nmeteors)))
+                    fout.write(
+                        "{:.8f},{:.8f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:d},{:.3f},{:.2f},{:.2f},{:.2f},{:.2f}\n".format(
+                        _sol_bin_start,
+                        _mean_sol,
+                        _flux,
+                        _flux_lower,
+                        _flux_upper,
+                        _zhr,
+                        _zhr_lower,
+                        _zhr_upper,
+                        int(_nmeteors),
+                        _tap/1e9,
+                        _lm_m,
+                        _rad_elev,
+                        _rad_dist,
+                        _ang_vel,
+                        ))
 
-                fout.write("{:.8f},,,,,,\n".format(comb_sol_bins[-1]))
+                fout.write("{:.8f},,,,,,,,,,,,,\n".format(comb_sol_bins[-1]))
 
             print("Data saved to:", data_out_path)
 
