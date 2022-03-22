@@ -248,8 +248,8 @@ def pointInsideConvexPolygonSphere(points, vertices):
     vertices = np.array(sphericalToCartesian(*np.hstack((np.ones((len(vertices), 1)), np.radians(vertices))).T))
     
     great_circle_normal = np.cross(vertices, np.roll(vertices, 1, axis=1), axis=0)
-    matrix_prod = np.matmul(great_circle_normal.T, points)
-    return np.sum(matrix_prod < 0, axis=0, dtype=int) == 0  # inside if n . p < 0 for no n
+    dot_prod = np.dot(great_circle_normal.T, points)
+    return np.sum(dot_prod < 0, axis=0, dtype=int) == 0  # inside if n . p < 0 for no n
 
 
 ##############################################################################################################
