@@ -1390,6 +1390,7 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             print()
             print(ff_file)
             print(ra_catalog, dec_catalog, jd)
+            print(ra_vertices, dec_vertices)
             print(x, y)
             print(inside)
 
