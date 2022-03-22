@@ -235,12 +235,12 @@ def recalibrateFF(
                 print('Astrometry fit failed!')
             elif (dist > config.dist_check_threshold) and (not ignore_distance_threshold):
                 print(
-                    f'Fitted star is farther from catalog star than necessary: {dist} > {config.dist_check_threshold}'
+                    'Fitted star is farther from catalog star than necessary: {:.2f} > {:.2f} px'.format(dist, config.dist_check_threshold)
                 )
 
             else:
                 print(
-                    f'Number of matched stars after the fit is smaller than necessary: {n_matched:d} < {config.min_matched_stars:d}'
+                    'Number of matched stars after the fit is smaller than necessary: {:d} < {:d}'.format(n_matched < config.min_matched_stars)
                 )
 
             # Indicate that the recalibration failed
