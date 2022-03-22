@@ -1388,6 +1388,10 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             mag = mag[inside]
 
 
+            # Skip if there are no stars inside
+            if len(x) == 0:
+                continue
+
             # Compute star image levels from catalog magnitudes without any vignetting or extinction
             star_levels = 10**((mag - platepar.mag_lev)/(-2.5))
 
