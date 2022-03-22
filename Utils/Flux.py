@@ -1387,6 +1387,11 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             x, y = raDecToXYPP(ra_catalog[inside], dec_catalog[inside], jd, platepar)
             mag = mag[inside]
 
+            print()
+            print(ff_file)
+            print(ra_catalog, dec_catalog, jd)
+            print(x, y)
+            print(inside)
 
             # Skip if there are no stars inside
             if len(x) == 0:
