@@ -1390,6 +1390,7 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
 
             # Skip if there are no stars inside
             if len(x) == 0:
+                print("No predicted stars in {:s}!".format(ff_file))
                 continue
 
             # Compute star image levels from catalog magnitudes without any vignetting or extinction
