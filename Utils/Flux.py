@@ -1,6 +1,9 @@
 """ Compute single-station meteor shower flux. """
 
 # WARNING: This code will only run in Python 3+
+# Python 2 issues:
+#   - unexpcted behvaiour of the pointInsideConvexPolygonSphere (all points are always False)
+#   - pyYAML doesn't work on Python 2
 
 import argparse
 import collections

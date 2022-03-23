@@ -27,6 +27,7 @@ from RMS.UploadManager import UploadManager
 from RMS.Routines.Image import saveImage
 from RMS.Routines.MaskImage import loadMask
 from Utils.CalibrationReport import generateCalibrationReport
+from Utils.Flux import prepareFluxFiles
 from Utils.FOVKML import fovKML
 from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
@@ -286,6 +287,16 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
+
+            # Prepare the flux files
+            try:
+                prepareFluxFiles(config, night_data_dir, os.path.join(night_data_dir, ftpdetectinfo_name))
+
+            except Exception as e:
+                log.debug("Preparing flux files failed with the message:\n" + repr(e))
+                log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+
     else:
         ff_detected = []
         detector = None
@@ -368,6 +379,12 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     if len(kml_files):
         extra_files += kml_files
 
+
+    # Add all flux related files
+    if (not nodetect):
+        for file_name in sorted(os.path.listdir(night_data_dir)):
+            if ("flux" in file_name) and (file_name.endswith(".json") or file_name.endswith(".ecsv")):
+                extra_files.append(file_name)
 
 
     # If FFs are not uploaded, choose two to upload
