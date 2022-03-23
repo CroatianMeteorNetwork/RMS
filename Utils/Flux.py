@@ -971,6 +971,9 @@ def detectMoon(file_list, platepar, config):
         except ephem.AlwaysUpError:
             moon_below_horizon = False
 
+        except ephem.NeverUpError:
+            moon_below_horizon = True
+
 
         # Always take observations if the Moon is at less than 25% illumination, regardless of where it is
         if lunar_area < 0.25:
