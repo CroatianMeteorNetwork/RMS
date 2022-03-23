@@ -13,7 +13,7 @@ if sys.version_info[0] >= 3:
     import astropy.table
     import astropy.units
     import astropy.coordinates
-    
+
 import ephem
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -3182,11 +3182,6 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
 
     """
 
-    # Only run in Python 3+
-    if sys.version_info[0] < 3:
-        print("The flux code can only run in Python 3+ !")
-        return None
-
 
     # Init the flux configuration
     flux_config = FluxConfig()
@@ -3218,8 +3213,13 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
     getCollectingArea(dir_path, config, flux_config, platepar, mask)
 
     # Run cloud detection and store the approprite files
+    print("Detecting clouds...")
     time_intervals = detectClouds(config, dir_path, mask=mask, save_plots=True, show_plots=False)
 
+    # Skip the flux part if running Python 2
+    if sys.version_info[0] < 3:
+        print("The flux code can only run on Python 3+ !")
+        return None
 
     ### Go through every shower that was active and prepare compute the flux ###
 
@@ -3325,12 +3325,6 @@ if __name__ == "__main__":
     # COMMAND LINE ARGUMENTS
     # Init the command line arguments parser
 
-
-    # Only run in Python 3+
-    if sys.version_info[0] < 3:
-        print("The flux code can only run in Python 3+ !")
-        sys.exit()
-
     flux_parser = fluxParser()
     cml_args = flux_parser.parse_args()
 
@@ -3360,6 +3354,11 @@ if __name__ == "__main__":
 
         sys.exit()
 
+
+    # Only run in Python 3+
+    if sys.version_info[0] < 3:
+        print("The flux code can only run in Python 3+ !")
+        sys.exit()
 
 
     datetime_pattern = "%Y/%M/%d %H:%M:%S"
