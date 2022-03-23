@@ -1958,6 +1958,9 @@ def computeFluxCorrectionsOnBins(
                 meteor_num_data.append(0)
                 lm_m_data.append(None)
                 effective_collection_area_data.append(0)
+                radiant_elev_data.append(None)
+                radiant_dist_mid_data.append(None)
+                ang_vel_mid_data.append(None)
 
                 flux_table.addEntry(sol_entry, dt_entry, 0, radiant_elev, np.degrees(rad_dist_mid), \
                     np.degrees(ang_vel_mid), 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
@@ -1976,6 +1979,9 @@ def computeFluxCorrectionsOnBins(
                 meteor_num_data.append(0)
                 lm_m_data.append(None)
                 effective_collection_area_data.append(0)
+                radiant_elev_data.append(None)
+                radiant_dist_mid_data.append(None)
+                ang_vel_mid_data.append(None)
 
                 flux_table.addEntry(sol_entry, dt_entry, 0, radiant_elev, np.degrees(rad_dist_mid), \
                     np.degrees(ang_vel_mid), 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
@@ -2039,6 +2045,9 @@ def computeFluxCorrectionsOnBins(
                     meteor_num_data.append(0)
                     lm_m_data.append(None)
                     effective_collection_area_data.append(0)
+                    radiant_elev_data.append(None)
+                    radiant_dist_mid_data.append(None)
+                    ang_vel_mid_data.append(None)
 
                     flux_table.addEntry(sol_entry, dt_entry, 0, radiant_elev, np.degrees(rad_dist_mid), \
                     np.degrees(ang_vel_mid), 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
