@@ -1,5 +1,7 @@
 """ Compute single-station meteor shower flux. """
 
+# WARNING: This code will only run in Python 3+
+
 import argparse
 import collections
 import datetime
@@ -7,9 +9,11 @@ import json
 import os
 import sys
 
-import astropy.table
-import astropy.units
-import astropy.coordinates
+if sys.version_info[0] >= 3:
+    import astropy.table
+    import astropy.units
+    import astropy.coordinates
+    
 import ephem
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -3178,6 +3182,12 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
 
     """
 
+    # Only run in Python 3+
+    if sys.version_info[0] < 3:
+        print("The flux code can only run in Python 3+ !")
+        return None
+
+
     # Init the flux configuration
     flux_config = FluxConfig()
 
@@ -3314,6 +3324,12 @@ if __name__ == "__main__":
 
     # COMMAND LINE ARGUMENTS
     # Init the command line arguments parser
+
+
+    # Only run in Python 3+
+    if sys.version_info[0] < 3:
+        print("The flux code can only run in Python 3+ !")
+        sys.exit()
 
     flux_parser = fluxParser()
     cml_args = flux_parser.parse_args()

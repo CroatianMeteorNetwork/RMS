@@ -471,6 +471,12 @@ if __name__ == "__main__":
     #########################
 
 
+    # Only run in Python 3+
+    if sys.version_info[0] < 3:
+        print("The flux code can only run in Python 3+ !")
+        sys.exit()
+
+
     ### Binning parameters ###
 
     # Confidence interval
@@ -587,7 +593,10 @@ if __name__ == "__main__":
                     print()
 
                 else:
-                    time_intervals = [(*time_intervals,)]
+                    dt_beg_temp = datetime.datetime.strptime(time_intervals[0], "%Y%m%d_%H%M%S")
+                    dt_end_temp = datetime.datetime.strptime(time_intervals[1], "%Y%m%d_%H%M%S")
+                    time_intervals = [[dt_beg_temp, dt_end_temp]]
+
 
                 file_data.append(
                     [
@@ -715,7 +724,7 @@ if __name__ == "__main__":
                     plot_params = plot_info(config.stationID)
 
                     # Plot the single-station flux line
-                    line = ax[0].plot(sol_data, flux_lm_6_5_data, **plot_params, linestyle='dashed')
+                    line = ax[0].plot(sol_data, flux_lm_6_5_data, linestyle='dashed', **plot_params)
 
                     # Plot single-station error bars
                     ax[0].errorbar(
@@ -932,12 +941,12 @@ if __name__ == "__main__":
                 ax[0].errorbar(
                     sol,
                     flux,
-                    **plot_params,
                     alpha=0.5,
                     capsize=5,
                     zorder=3,
                     linestyle='none',
                     yerr=[[flux - lower], [upper - flux]],
+                    **plot_params
                 )
 
         if os.path.exists(os.path.join(dirname, fluxbatch_cml_args.output_filename + "_combined.csv")):
