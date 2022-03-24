@@ -335,6 +335,8 @@ def cameraTally(comb_sol, comb_sol_bins, single_fixed_bin_information):
     """
 
     bin_tally = collections.OrderedDict()
+    bin_tally_topmeteors = collections.OrderedDict()
+    bin_tally_toptap = collections.OrderedDict()
 
     # Go through all solar longitude bins
     for i in range(len(comb_sol_bins) - 1):
@@ -1227,7 +1229,7 @@ if __name__ == "__main__":
                 fout.write("# CI int. = {:.1f} %\n".format(100*ci))
                 fout.write("# Binning parameters:\n")
                 fout.write("# Min. meteors     = {:d}\n".format(min_meteors))
-                fout.write("# Min TAP          = {:d} x 1000 km^2 h\n".format(min_tap))
+                fout.write("# Min TAP          = {:.2f} x 1000 km^2 h\n".format(min_tap))
                 fout.write("# Min bin duration = {:.2f} h\n".format(min_bin_duration))
                 fout.write("# Max bin duration = {:.2f} h\n".format(max_bin_duration))
                 fout.write(
