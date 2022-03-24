@@ -1222,24 +1222,29 @@ if __name__ == "__main__":
             data_out_path = os.path.join(dir_path, fluxbatch_cml_args.output_filename + "_combined.csv")
             with open(data_out_path, 'w') as fout:
                 fout.write("# Shower parameters:\n")
-                fout.write("# Shower  = {:s}\n".format(shower_code))
-                fout.write("# r       = {:.2f}\n".format(population_index_mean))
-                fout.write("# s       = {:.2f}\n".format(calculateMassIndex(population_index_mean)))
-                fout.write("# m lim.  = {:.2e} kg\n".format(mass_lim))
-                fout.write("# CI int. = {:.1f} %\n".format(100*ci))
+                fout.write("# Shower         = {:s}\n".format(shower_code))
+                fout.write("# r              = {:.2f}\n".format(population_index_mean))
+                fout.write("# s              = {:.2f}\n".format(calculateMassIndex(population_index_mean)))
+                fout.write("# m_lim @ +6.5M  = {:.2e} kg\n".format(mass_lim))
+                fout.write("# Met LM mean    = {:.2e}\n".format(lm_m_mean))
+                fout.write("# m_lim @ {:+.2f}M = {:.2e} kg\n".format(lm_m_mean, mass_lim_lm_m_mean))
+                fout.write("# CI int.        = {:.1f} %\n".format(100*ci))
                 fout.write("# Binning parameters:\n")
                 fout.write("# Min. meteors     = {:d}\n".format(min_meteors))
                 fout.write("# Min TAP          = {:.2f} x 1000 km^2 h\n".format(min_tap))
                 fout.write("# Min bin duration = {:.2f} h\n".format(min_bin_duration))
                 fout.write("# Max bin duration = {:.2f} h\n".format(max_bin_duration))
                 fout.write(
-                    "# Sol bin start (deg), Mean Sol (deg), Flux@+6.5M (met / 1000 km^2 h), Flux lower bound, Flux upper bound, ZHR, ZHR lower, ZHR upper, Meteor Count, Time-area product (corrected to +6.5M) (1000 km^2/h), Meteor LM, Radiant elev (deg), Radiat dist (deg), Ang vel (deg/s)\n"
+                    "# Sol bin start (deg), Mean Sol (deg), Flux@+6.5M (met / 1000 km^2 h), Flux CI low, Flux CI high, Flux@+{:.2f}M (met / 1000 km^2 h), Flux CI low, Flux CI high, ZHR, ZHR lower, ZHR upper, Meteor Count, Time-area product (corrected to +6.5M) (1000 km^2/h), Meteor LM, Radiant elev (deg), Radiat dist (deg), Ang vel (deg/s)\n".format(lm_m_mean)
                 )
                 for (_sol_bin_start,
                     _mean_sol,
                     _flux,
                     _flux_lower,
                     _flux_upper,
+                    _flux_lm,
+                    _flux_lm_lower,
+                    _flux_lm_upper,
                     _zhr,
                     _zhr_lower,
                     _zhr_upper,
@@ -1255,6 +1260,9 @@ if __name__ == "__main__":
                         comb_flux,
                         comb_flux_lower,
                         comb_flux_upper,
+                        comb_flux_lm_m,
+                        comb_flux_lm_m_lower,
+                        comb_flux_lm_m_upper,
                         comb_zhr,
                         comb_zhr_lower,
                         comb_zhr_upper,
@@ -1267,12 +1275,15 @@ if __name__ == "__main__":
                         ):
 
                     fout.write(
-                        "{:.8f},{:.8f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:d},{:.3f},{:.2f},{:.2f},{:.2f},{:.2f}\n".format(
+                        "{:.8f},{:.8f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:d},{:.3f},{:.2f},{:.2f},{:.2f},{:.2f}\n".format(
                         _sol_bin_start,
                         _mean_sol,
                         _flux,
                         _flux_lower,
                         _flux_upper,
+                        _flux_lm,
+                        _flux_lm_lower,
+                        _flux_lm_upper,
                         _zhr,
                         _zhr_lower,
                         _zhr_upper,
@@ -1284,7 +1295,7 @@ if __name__ == "__main__":
                         _ang_vel,
                         ))
 
-                fout.write("{:.8f},,,,,,,,,,,,,\n".format(comb_sol_bins[-1]))
+                fout.write("{:.8f},,,,,,,,,,,,,,,,\n".format(comb_sol_bins[-1]))
 
             print("Data saved to:", data_out_path)
 
