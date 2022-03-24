@@ -382,7 +382,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     # Add all flux related files
     if (not nodetect):
-        for file_name in sorted(os.path.listdir(night_data_dir)):
+        for file_name in sorted(os.listdir(night_data_dir)):
             if ("flux" in file_name) and (file_name.endswith(".json") or file_name.endswith(".ecsv")):
                 extra_files.append(file_name)
 
