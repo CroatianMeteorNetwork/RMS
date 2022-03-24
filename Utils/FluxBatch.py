@@ -378,18 +378,16 @@ def cameraTally(comb_sol, comb_sol_bins, single_fixed_bin_information):
 
 
         # Sort by the number of meteors
-        bin_cams = bin_tally[sol_mean]
-        bin_cams = collections.OrderedDict(sorted(bin_cams.items(), key=lambda item: item[1]['meteors'], \
-            reverse=True))
-        bin_tally[sol_mean] = bin_cams
-        bin_tally_topmeteors = copy.deepcopy(bin_tally)
+        bin_cams_meteors = bin_tally[sol_mean]
+        bin_cams_meteors = collections.OrderedDict(sorted(bin_cams_meteors.items(), \
+            key=lambda item: item[1]['meteors'], reverse=True))
+        bin_tally_topmeteors[sol_mean] = bin_cams_meteors
 
         # Sort by the TAP
-        bin_cams = bin_tally[sol_mean]
-        bin_cams = collections.OrderedDict(sorted(bin_cams.items(), key=lambda item: item[1]['tap'], \
+        bin_cams_tap = bin_tally[sol_mean]
+        bin_cams_tap = collections.OrderedDict(sorted(bin_cams_tap.items(), key=lambda item: item[1]['tap'], \
             reverse=True))
-        bin_tally[sol_mean] = bin_cams
-        bin_tally_toptap = copy.deepcopy(bin_tally)
+        bin_tally_toptap[sol_mean] = bin_cams_tap
 
 
 

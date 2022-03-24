@@ -289,6 +289,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
 
             # Prepare the flux files
+            log.info("Preparing flux files...")
             try:
                 prepareFluxFiles(config, night_data_dir, os.path.join(night_data_dir, ftpdetectinfo_name))
 

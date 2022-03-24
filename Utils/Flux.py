@@ -96,7 +96,7 @@ class FluxConfig(object):
 
         # Filter out nights which have too many detections - it is assumed that the false positives are
         #   present if there are too many sporadic meteors
-        self.max_sporadics = 250
+        self.max_sporadics = 150
 
 
 class FluxMeasurements(object):
