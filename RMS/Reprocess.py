@@ -385,7 +385,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     if (not nodetect):
         for file_name in sorted(os.listdir(night_data_dir)):
             if ("flux" in file_name) and (file_name.endswith(".json") or file_name.endswith(".ecsv")):
-                extra_files.append(file_name)
+                extra_files.append(os.path.join(night_data_dir, file_name))
 
 
     # If FFs are not uploaded, choose two to upload
