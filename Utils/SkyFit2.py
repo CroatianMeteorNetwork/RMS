@@ -3404,7 +3404,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         if self.v_zoom_left:
             if self.show_key_help != 2:
-                self.v_zoom.move(QtCore.QPoint(self.label1.boundingRect().width(), 0))
+                self.v_zoom.move(QtCore.QPoint(int(self.label1.boundingRect().width()), 0))
             else:
                 self.v_zoom.move(QtCore.QPoint(0, 0))
 
