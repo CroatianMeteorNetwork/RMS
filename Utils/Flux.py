@@ -96,7 +96,7 @@ class FluxConfig(object):
 
         # Filter out nights which have too many detections - it is assumed that the false positives are
         #   present if there are too many sporadic meteors
-        self.max_sporadics = 150
+        self.max_sporadics_per_hr = 20
 
 
 class FluxMeasurements(object):
@@ -2567,15 +2567,23 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         # Count up the sporadics
         sporadic_count = 0
         for key in associations_check:
-            _, shower_check = associations_check[key]
+            meteor_check, shower_check = associations_check[key]
 
-            if shower_check is None:
-                sporadic_count += 1
+            # Only take meteors in the time bin
+            meteor_date = jd2Date(meteor_check.jdt_ref, dt_obj=True)
+            if dt_beg < meteor_date < dt_end:
+
+                if shower_check is None:
+                    sporadic_count += 1
 
 
-        # Only associate the target shower if there are less sporadics (possible false positives) than the 
-        #   maximum threshold
-        if sporadic_count < flux_config.max_sporadics:
+        # Compute the number of sporadics per hour
+        sporadics_per_hr = sporadic_count/((dt_end - dt_beg).total_seconds()/3600)
+
+
+        # Only associate the target shower if there are less sporadics per hour (possible false positives) 
+        #   than the maximum threshold
+        if sporadics_per_hr < flux_config.max_sporadics_per_hr:
 
             # Perform shower association on the given shower
             associations, _ = showerAssociation(config, [ftpdetectinfo_path], shower_code=shower_code, \
@@ -2583,8 +2591,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
         else:
 
-            print("   ... too many sporadics: {:d} >= {:d} Skipping this data directory!".format(sporadic_count, \
-                flux_config.max_sporadics))
+            print("   ... too many sporadics per hour: {:d} >= {:d} Skipping this data directory!".format(sporadics_per_hr, \
+                flux_config.max_sporadics_per_hr))
 
             # Save empty tables so this is not attempted again
             saveEmptyECSVTable(os.path.join(dir_path, flux_ecsv_file_name), shower_code, mass_index, 
