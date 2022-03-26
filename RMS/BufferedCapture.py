@@ -347,6 +347,11 @@ class BufferedCapture(Process):
 
                         gray = frame[:, :, 1]
 
+                    # If UYVY image given, take luma (Y) channel
+                    elif self.config.uyvy_pixelformat and (frame.shape[2] == 2):
+                        gray = frame[:, :, 1]
+
+                    # Otherwise, take the first available channel
                     else:
                         gray = frame[:, :, 0]
 
