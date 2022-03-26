@@ -166,7 +166,8 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
 
             # Locate all files in the data directory that end with '.config'
             config_files = [file_name for file_name in os.listdir(dir_path) \
-                if file_name.endswith('.config') or file_name.endswith('dfnstation.cfg')]
+                if (file_name.endswith('.config') or file_name.endswith('dfnstation.cfg')) \
+                and not (file_name == 'bak.config')]
 
             # If there is exactly one config file, use it
             if len(config_files) == 1:

@@ -2591,7 +2591,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
         else:
 
-            print("   ... too many sporadics per hour: {:d} >= {:d} Skipping this data directory!".format(sporadics_per_hr, \
+            print("   ... too many sporadics per hour: {:.1f} >= {:d} Skipping this data directory!".format(sporadics_per_hr, \
                 flux_config.max_sporadics_per_hr))
 
             # Save empty tables so this is not attempted again
