@@ -13,6 +13,7 @@ import collections
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+import pyqtgraph as pg
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
@@ -189,12 +190,6 @@ class GeoPoints(object):
 
         self.ra_data = np.array(self.ra_data)
         self.dec_data = np.array(self.dec_data)
-
-        # Sort geo points by descending declination (needed for fast filtering)
-        dec_sorted_ind = np.argsort(self.dec_data)[::-1]
-        self.ra_data = self.ra_data[dec_sorted_ind]
-        self.dec_data = self.dec_data[dec_sorted_ind]
-
 
         
 
@@ -895,8 +890,18 @@ class PlateTool(QtWidgets.QMainWindow):
         # adding img
         gamma = 1
         invert = False
+
+        # Add saturation mask (R, G, B, alpha) - alpha can only be 0 or 1
+        saturation_mask_img = np.zeros_like(self.img_handle.loadChunk().maxpixel).T
+        self.saturation_mask_img = np.zeros(saturation_mask_img.shape + (4, ), dtype='uint8')
+        self.saturation_mask = pg.ImageItem()
+        self.saturation_mask.setImage(self.saturation_mask_img)
+        self.saturation_mask.setZValue(1)
+        self.img_frame.addItem(self.saturation_mask)
+
+        # Add main image
         self.img_type_flag = 'avepixel'
-        self.img = ImageItem(img_handle=self.img_handle, gamma=gamma, invert=invert)
+        self.img = ImageItem(img_handle=self.img_handle, gamma=gamma, invert=invert, saturation_mask=self.saturation_mask)
         self.img_frame.addItem(self.img)
         self.img_frame.autoRange(padding=0)
 
@@ -1073,7 +1078,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.view_menu.addActions([self.toggle_info_action,
                                        self.toggle_zoom_window])
-            self.star_pick_info.setText('')
+            #self.star_pick_info.setText(self.star_pick_info_text_str)
 
             self.updateLeftLabels()
             # self.show_zoom_window = False
@@ -1443,7 +1448,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.geo_points = np.c_[self.geo_points_obj.ra_data, self.geo_points_obj.dec_data, \
                 np.ones_like(self.geo_points_obj.ra_data)]
 
-
             # Compute image coordiantes of geo points (always without refraction)
             pp_noref = copy.deepcopy(self.platepar)
             pp_noref.refraction = False
@@ -1453,7 +1457,8 @@ class PlateTool(QtWidgets.QMainWindow):
             geo_xy = np.c_[self.geo_x, self.geo_y]
 
             # Get indices of points inside the fov
-            filtered_indices, _ = self.filterCatalogStarsInsideFOV(self.geo_points, remove_under_horizon=False)
+            filtered_indices, _ = self.filterCatalogStarsInsideFOV(self.geo_points, \
+                remove_under_horizon=False, sort_declination=True)
 
             # Create a mask to filter out all points outside the image and the FOV
             filter_indices_mask = np.zeros(len(geo_xy), dtype=np.bool)
@@ -3544,7 +3549,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return ra_centre, dec_centre
 
-    def filterCatalogStarsInsideFOV(self, catalog_stars, remove_under_horizon=True):
+    def filterCatalogStarsInsideFOV(self, catalog_stars, remove_under_horizon=True, sort_declination=False):
         """ Take only catalogs stars which are inside the FOV.
 
         Arguments:
@@ -3553,10 +3558,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
         Keyword arguments:
             remove_under_horizon: [bool] Remove stars below the horizon (-5 deg below).
-
-        Arguments:
-            catalog_stars: [list] A list of (ra, dec, mag) tuples of catalog stars.
+            sort_declination: [bool] Sort the stars by descending declination. Only needs to be done for geo
+                points.
         """
+
+        if sort_declination:
+            
+            # Sort by descending declination (needed for fast filtering)
+            dec_sorted_ind = np.argsort(catalog_stars[:, 1])[::-1]
+            catalog_stars = catalog_stars[dec_sorted_ind]
+
 
         # Get RA/Dec of the FOV centre
         ra_centre, dec_centre = self.computeCentreRADec()
@@ -3572,7 +3583,18 @@ class PlateTool(QtWidgets.QMainWindow):
             jd, self.platepar.lat, self.platepar.lon, fov_radius, self.cat_lim_mag, \
             remove_under_horizon=remove_under_horizon)
 
-        return filtered_indices, np.array(filtered_catalog_stars)
+        filtered_catalog_stars = np.array(filtered_catalog_stars)
+
+
+        # Return original indexing if it was sorted by declination
+        if sort_declination and len(filtered_indices):
+
+            # Restore original indexing
+            filtered_indices = dec_sorted_ind[filtered_indices]
+
+
+        return filtered_indices, filtered_catalog_stars
+
 
     def getInitialParamsAstrometryNet(self, upload_image=True):
         """ Get the estimate of the initial astrometric parameters using astromety.net. """
@@ -4806,8 +4828,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 background_lvl = 0
 
 
-            # Compute the background subtracted intensity sum
-            pick['intensity_sum'] = np.ma.sum(crop_img - background_lvl)
+            # Compute the background subtracted intensity sum (do as a float to avoid artificially pumping
+            #   up the magnitude)
+            pick['intensity_sum'] = np.ma.sum(crop_img.astype(np.float) - background_lvl).astype(np.int)
 
 
             # If the DFN image is used, correct intensity sum for exposure difference

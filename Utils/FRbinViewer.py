@@ -21,6 +21,8 @@ from __future__ import print_function, absolute_import, division
 import os
 import sys
 import argparse
+import platform
+import subprocess
 
 import cv2
 import numpy as np
@@ -30,7 +32,7 @@ from RMS.Formats import FFfile, FRbin
 
 
 def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='png', hide=False,
-    avg_background=False):
+        avg_background=False):
     """ Shows the detected fireball stored in the FR file. 
     
     Arguments:
@@ -83,9 +85,16 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='
 
     pause_flag = False
 
+    # if the file format was mp4, lets make a video from the data
+    makevideo = False
+    if extract_format == 'mp4':
+        makevideo = True
+        extract_format = 'png'
+
     for current_line in range(fr.lines):
 
         print('Frame,  Y ,  X , size')
+        framefiles=[] # array to hold names of frames for later deletion 
 
         for z in range(fr.frameNum[current_line]):
 
@@ -105,7 +114,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='
             
             # Paste the frames onto the big image
             y_img = np.arange(yc - size//2, yc + size//2)
-            x_img = np.arange(xc - size//2,  xc + size//2)
+            x_img = np.arange(xc - size//2, xc + size//2)
 
             Y_img, X_img = np.meshgrid(y_img, x_img)
 
@@ -122,8 +131,9 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='
                 frame_file_name = fr_path.replace('.bin', '') \
                     + "_line_{:02d}_frame_{:03d}.{:s}".format(current_line, t, extract_format)
                 cv2.imwrite(os.path.join(dir_path, frame_file_name), img)
-
-
+                framefiles.append(frame_file_name)
+                img_patt = os.path.join(dir_path, fr_path.replace('.bin', '')
+                    + "_line_{:02d}_frame_%03d.{:s}".format(current_line, extract_format))
 
             if not hide:
             
@@ -165,9 +175,33 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='
                     # Pause/unpause video
                     pause_flag = not pause_flag
 
-                elif key == ord("q") : 
+                elif key == ord("q"): 
                     os._exit(0)
-                
+
+        if makevideo is True:
+            root = os.path.dirname(__file__)
+            ffmpeg_path = os.path.join(root, "ffmpeg.exe")
+            first_frame = min(fr.t[current_line])
+            mp4_path = os.path.join(dir_path, fr_path.replace('.bin', '') + '_line_{:02d}.mp4'.format(current_line))
+
+            # If running on Windows, use ffmpeg.exe
+            if platform.system() == 'Windows':
+                com = ffmpeg_path + " -y -f image2 -pattern_type sequence -start_number " + str(first_frame) + " -i " + img_patt +" " + mp4_path
+                subprocess.call(com, shell=True, cwd=dir_path)
+            else:
+                software_name = "avconv"
+                if os.system(software_name + " --help > /dev/null"):
+                    software_name = "ffmpeg"
+                    # Construct the ecommand for ffmpeg           
+                    com = software_name + " -y -f image2 -pattern_type sequence -start_number " + str(first_frame) + " -i " + img_patt +" " + mp4_path
+                else:
+                    com = "cd " + dir_path + ";" \
+                        + software_name + " -v quiet -r 30 -y -start_number " + str(first_frame) + " -i " + img_patt \
+                        + " -vcodec libx264 -pix_fmt yuv420p -crf 25 -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.97)\" " \
+                        + mp4_path
+                subprocess.call(com, shell=True, cwd=dir_path)
+            for frame in framefiles:
+                os.remove(os.path.join(dir_path, frame))
 
     if not hide:
         cv2.destroyWindow(name)
@@ -175,7 +209,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='
 
 if __name__ == "__main__":
 
-    ### COMMAND LINE ARGUMENTS
+    # COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="""Show reconstructed fireball detections from FR files.
@@ -186,19 +220,22 @@ if __name__ == "__main__":
             q: Quit.
             """, formatter_class=argparse.RawTextHelpFormatter)
 
-    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
+    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str,
         help='Path to the directory which contains FR bin files.')
 
-    arg_parser.add_argument('-e', '--extract', action="store_true", \
+    arg_parser.add_argument('-e', '--extract', action="store_true",
         help="Save frames from FR files to disk.")
 
-    arg_parser.add_argument('-a', '--avg', action="store_true", \
+    arg_parser.add_argument('-a', '--avg', action="store_true",
         help="Average pixel as the background instead of maxpixel.")
 
-    arg_parser.add_argument('-x', '--hide', action="store_true", \
+    arg_parser.add_argument('-x', '--hide', action="store_true",
         help="Do not show frames on the screen.")
     
     arg_parser.add_argument('-f', '--extractformat', metavar='EXTRACT_FORMAT', help="""Image format for extracted files. png by default. """)
+
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
+        help="Path to a config file which will be used instead of the default one.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -208,7 +245,7 @@ if __name__ == "__main__":
     dir_path = cml_args.dir_path[0]
 
     # Load the configuration file
-    config = cr.parse(".config")
+    config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
 
     
 
@@ -253,7 +290,7 @@ if __name__ == "__main__":
                 break
         
         # View the fireball detection
-        retval = view(dir_path, ff_match, fr, config, save_frames=cml_args.extract, \
+        retval = view(dir_path, ff_match, fr, config, save_frames=cml_args.extract,
             extract_format=cml_args.extractformat, hide=cml_args.hide, avg_background=cml_args.avg)
 
         # Return to previous file

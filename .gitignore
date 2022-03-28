@@ -90,3 +90,12 @@ target/
 .idea
 
 camerasettings/*.json
+
+# these files are created by cython and should not be tracked
+RMS/Astrometry/CyFunctions.c
+RMS/CompressionCy.c
+RMS/Routines/BinImageCy.c
+RMS/Routines/DynamicFTPCompressionCy.c
+RMS/Routines/Grouping3Dcy.c
+RMS/Routines/MorphCy.c
+Utils/SaturationTools.c

@@ -18,7 +18,7 @@
 
 
 import os
-import sys
+import argparse
 
 import numpy as np
 
@@ -81,7 +81,7 @@ def plotFieldsums(dir_path, config):
         return False
 
 
-    ### Plot the raw intensity over time ###
+    # Plot the raw intensity over time ###
     ##########################################################################################################
 
     plt.figure()
@@ -175,19 +175,22 @@ def plotFieldsums(dir_path, config):
 
 if __name__ == "__main__":
 
+    arg_parser = argparse.ArgumentParser(description="Plot Fieldsums", formatter_class=argparse.RawTextHelpFormatter)
+
+    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str,
+        help='Path to directory with FF files.')
+
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
+        help="Path to a config file which will be used instead of the default one.")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
 
     # Load config file
-    config = cr.parse(".config")
-
-
-    if len(sys.argv) < 2:
-        print('Usage: python -m Utils.PlotFieldsums /dir/with/FS/files')
-
-        sys.exit()
-
+    config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
 
     # Read the argument as a path to the night directory
-    dir_path = " ".join(sys.argv[1:])
+    #dir_path = " ".join(sys.argv[1:])
+    dir_path = cml_args.dir_path[0]
 
     plotFieldsums(dir_path, config)
-
