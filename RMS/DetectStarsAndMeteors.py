@@ -99,6 +99,19 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=
 
         log.info(ff_name + ' detected meteors: ' + str(len(meteor_list)))
 
+        # get max brightness info
+        maxlvl = 0
+        if len(meteor_list) > 0:
+            for meteor in meteor_list:
+                _, _, centroids = meteor
+                for line in centroids:
+                    if len(line) == 9:
+                        _, _, _, _, _, _, _, level, _ = line
+                    else:
+                        _, _, _, level = line
+                    maxlvl = max(maxlvl, level)
+            log.info(ff_name + ' max brightness level: ' + str(maxlvl))
+
     else:
         meteor_list = []
 
