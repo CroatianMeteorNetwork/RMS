@@ -1604,6 +1604,7 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
     return col_areas_ht
 
 
+
 def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_fwhm=None):
     """Characterize the standard deviation of the background and the FWHM of stars on every image."""
 
@@ -1633,7 +1634,7 @@ def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_f
                         print('CALSTARS file: ' + cal_file + ' loaded!')
                         break
 
-                elif not exists_FF_files and len(star_data) > 0 and star_data[0][4] == -1:
+                elif not exists_FF_files and (len(star_data) > 0) and (star_data[0][4] == -1):
                     if default_fwhm is not None:
                         found_good_calstars = True
                         print('CALSTARS file: ' + cal_file + ' loaded!')
@@ -1686,8 +1687,9 @@ def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_f
         if ff_name not in meteor_ff:
             continue
 
-        if star_data[0][4] == -1 and default_fwhm is not None and not exists_FF_files:  # data is old and fw
-            fwhm_median = default_fwhm  # both these parameters are arbitrary
+        # If data is old and fwhm was not computed, use the default value
+        if (star_data[0][4] == -1) and (default_fwhm is not None) and (not exists_FF_files):  
+            fwhm_median = default_fwhm
         else:
             star_data = np.array(star_data)
 
@@ -2396,6 +2398,10 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
     # Init the flux configuration
     flux_config = FluxConfig()
+
+    # If the default FWHM is not given, use the value from the config file
+    if default_fwhm is None:
+        default_fwhm = flux_config.default_fwhm
 
 
     # Extract the shower code if the Shower object was given
@@ -3211,7 +3217,7 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
 
 
     # Computes FWHM of stars
-    getSensorCharacterization(dir_path, config, flux_config, meteor_data)
+    getSensorCharacterization(dir_path, config, flux_config, meteor_data, default_fwhm=flux_config.default_fwhm)
 
     # Compute collecting areas
     getCollectingArea(dir_path, config, flux_config, platepar, mask)
