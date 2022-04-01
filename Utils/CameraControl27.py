@@ -14,195 +14,147 @@
 
 from __future__ import print_function
 
-import logging
-import threading
-from socket import socket, AF_INET, SOCK_STREAM, SOCK_DGRAM
-import json
-import time 
-import sys 
-import hashlib
-import struct
-
-if sys.version_info.major > 2:
-    print('use Utils.CameraControl with Python3')
-    exit(0)
+import argparse
+import re
+import RMS.ConfigReader as cr
+from onvif import ONVIFCamera
+import os
+import platform
 
 
-class DVRIPCam(object):
-    DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
-    OK_CODES = [100, 515]
-    PORTS = {
-        "tcp": 34567,
-        "udp": 34568,
-    }
+def getHostname(cam):
+    """get the hostname - seems pointless tbh 
 
-    def __init__(self, ip, **kwargs):
-        self.logger = logging.getLogger(__name__)
-        self.ip = ip
-        self.user = kwargs.get("user", "admin")
-        hash_pass = kwargs.get("hash_pass")
-        self.hash_pass = hash_pass or self.sofia_hash(kwargs.get("password", ""))
-        self.proto = kwargs.get("proto", "tcp")
-        self.port = kwargs.get("port", self.PORTS.get(self.proto))
-        self.socket = None
-        self.packet_count = 0
-        self.session = 0
-        self.alive_time = 20
-        self.alive = None
-        self.alarm = None
-        self.alarm_func = None
-        self.busy = threading.Condition()
+    Args:
+        cam : The camera
+    """
+    resp = cam.devicemgmt.GetHostname()
+    print('getHostname:\n' + str(resp))
 
-    def connect(self, timeout=2):
-        if self.proto == "tcp":
-            self.socket_send = self.tcp_socket_send
-            self.socket_recv = self.tcp_socket_recv
-            self.socket = socket(AF_INET, SOCK_STREAM)
-            self.socket.connect((self.ip, self.port))
-        elif self.proto == "udp":
-            self.socket_send = self.udp_socket_send
-            self.socket_recv = self.udp_socket_recv
-            self.socket = socket(AF_INET, SOCK_DGRAM)
-        else:
-            raise 'Unsupported protocol {}'.format(self.proto)
 
-        self.timeout = timeout
-        self.socket.settimeout(timeout)
+def getDeviceInformation(cam):
+    """get limited device information
 
-    def close(self):
-        self.alive.cancel()
-        self.socket.close()
-        self.socket = None
+    Args:
+        cam : The camera
+    """
+    resp = cam.devicemgmt.GetDeviceInformation()
+    print('getDeviceInformation:\n' + str(resp))
 
-    def udp_socket_send(self, bytes):
-        return self.socket.sendto(bytes, (self.ip, self.port))
 
-    def udp_socket_recv(self, bytes):
-        data, _ = self.socket.recvfrom(bytes)
-        return data
+def systemReboot(cam):
+    """Reboot the Camera
 
-    def tcp_socket_send(self, bytes):
-        return self.socket.sendall(bytes)
+    Args:
+        cam : The camera
+    """
+    resp = cam.devicemgmt.SystemReboot()
+    print('systemReboot: ' + str(resp))
 
-    def tcp_socket_recv(self, bufsize):
-        return self.socket.recv(bufsize)
 
-    def receive_with_timeout(self, length):
-        received = 0
-        buf = bytearray()
-        start_time = time.time()
+# function to find where your WSDL files are. 
+def getOnvifWsdlLocation():
+    """Locate the ONVIF WSDL files required to use this module
 
-        while True:
-            data = self.socket_recv(length - received)
-            buf.extend(data)
-            received += len(data)
-            if length == received:
-                break
-            elapsed_time = time.time() - start_time
-            if elapsed_time > self.timeout:
-                return None
-        return buf
+    """
 
-    def receive_json(self, length):
-        data = self.receive_with_timeout(length).decode('utf-8')
-        if data is None:
-            return {}
+    platf = platform.system()
+    if platf == 'Linux':
+        basedir=os.path.join(os.environ['HOME'],'vRMS/lib')
 
-        self.packet_count += 1
-        self.logger.debug("<= %s", data)
-        reply = json.loads(data[:-2])
-        return reply
+    elif platf == 'Windows':
+        # assumes you're using Anaconda
+        try:
+            condadir=os.environ['CONDA_PREFIX']
+        except:
+            print('I don\'t know how to find the WSDL files on your platform')
+            exit(1)
+        basedir=os.path.join(condadir, 'lib\\site-packages')
 
-    def send(self, msg, data={}, wait_response=True):
-        if self.socket is None:
-            return {"Ret": 101}
-        # self.busy.wait()
-        self.busy.acquire()
-        if hasattr(data, "__iter__"):
-            if sys.version_info[0] > 2:
-                data = bytes(json.dumps(data, ensure_ascii=False), "utf-8")
-            else:
-                data = json.dumps(data, ensure_ascii=False)
-        pkt = (
-            struct.pack(
-                "BB2xII2xHI",
-                255,
-                0,
-                self.session,
-                self.packet_count,
-                msg,
-                len(data) + 2,
-            )
-            + data
-            + b"\x0a\x00"
-        )
-        self.logger.debug("=> %s", pkt)
-        self.socket_send(pkt)
-        if wait_response:
-            reply = {"Ret": 101}
-            (
-                head,
-                version,
-                self.session,
-                sequence_number,
-                msgid,
-                len_data,
-            ) = struct.unpack("BB2xII2xHI", self.socket_recv(20))
-            reply = self.receive_json(len_data)
-            self.busy.release()
-            return reply
+    elif platf == 'Darwin':
+        # MacOS - should be the same as Linux i hope
+        basedir=os.path.join(os.environ['HOME'],'vRMS/lib/')
 
-    def sofia_hash(self, password=""):
-        if sys.version_info[0] > 2:
-            md5 = hashlib.md5(bytes(password, "utf-8")).digest()
-        else:
-            md5 = hashlib.md5(password.decode('utf-8')).digest()
-            md5=struct.unpack('>BBBBBBBBBBBBBBBB', md5)
+    else:
+        print('unknown platform {:s} - assuming linux-like' % platform)
+        basedir=os.path.join(os.environ['HOME'],'vRMS/lib')
 
-        chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-        return "".join([chars[sum(x) % 62] for x in zip(md5[::2], md5[1::2])])
+    wsdl_loc=''   
+    for root, dirs, _ in os.walk(basedir, topdown=False):
+        for name in dirs:
+            loc = os.path.join(root,name)
+            # on the Pi, the correct version is in an onvif-x.xx.x folder
+            if name =='wsdl' and 'onvif' in root:
+                return loc
+            if name == 'wsdl' and platf == 'Windows' and 'zeep' not in root:
+                return loc
+    if wsdl_loc == '':
+        print('Unable to find WSDL files, unable to continue')
+        exit(1)
+    return wsdl_loc
 
-    def login(self):
-        if self.socket is None:
-            self.connect()
-        data = self.send(
-            1000,
-            {
-                "EncryptType": "MD5",
-                "LoginType": "DVRIP-Web",
-                "PassWord": self.hash_pass,
-                "UserName": self.user,
-            },
-        )
-        if data["Ret"] not in self.OK_CODES:
-            return False
-        self.session = int(data["SessionID"], 16)
-        self.alive_time = data["AliveInterval"]
-        self.keep_alive()
-        return data["Ret"] in self.OK_CODES
 
-    def keep_alive(self):
-        self.send(
-            1006,
-            {"Name": "KeepAlive", "SessionID": "0x%08X" % self.session},
-        )
-        self.alive = threading.Timer(self.alive_time, self.keep_alive)
-        self.alive.start()
+def onvifCommand(config, cmd):
+    """ Execute ONVIF command to the IP camera.
 
-    def get_info(self, command):
-        return self.get_command(command, 1042)
+    Arguments:
+        config: [COnfiguration]
+        cmd: [str] Command:
+            - reboot
+            - GetHostname
+            - GetDeviceInformation
+    """
+
+    cam = None
     
-    def get_command(self, command, code):
-        data = self.send(code, {"Name": command, "SessionID": "0x%08X" % self.session})
-        if data["Ret"] in self.OK_CODES and command in data:
-            return data[command]
-        else:
-            return data
+    wsdl_loc = getOnvifWsdlLocation()
 
-    def set_info(self, command, data):
-        return self.set_command(command, data, 1040)
+    # extract IP from config file
+    camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
+    camera_onvif_port = 8899
 
-    def set_command(self, command, data, code):
-        return self.send(
-            code, {"Name": command, "SessionID": "0x%08X" % self.session, command: data}
-        )
+    try:
+        print('Connecting to {}:{}'.format(camera_ip, camera_onvif_port))
+        print('WSDL location is', wsdl_loc)
+        cam = ONVIFCamera(camera_ip, camera_onvif_port, 'admin', '', wsdl_loc)
+    except:
+        print('Could not connect to camera!')
+        exit(1)
+
+    print('Connected.')
+
+    # process commands
+    if cmd == 'reboot':
+        systemReboot(cam)
+
+    if cmd == 'GetHostname':
+        getHostname(cam)
+
+    if cmd == 'GetDeviceInformation':
+        getDeviceInformation(cam)
+
+
+if __name__ == '__main__':
+
+    # list of supported commands
+    cmd_list = ['reboot', 'GetHostname', 'GetDeviceInformation']
+
+    # command line argument parser
+    parser = argparse.ArgumentParser(description='Controls ONVIF-Compatible IP camera')
+    parser.add_argument('command', metavar='command', type=str, nargs=1, help=' | '.join(cmd_list))
+    args = parser.parse_args()
+    cmd = args.command[0]
+
+    if cmd not in cmd_list:
+        print('Error: command "{}" not supported'.format(cmd))
+        exit(1)
+
+    config = cr.parse('.config')
+
+    if str(config.deviceID).isdigit():
+        print('Error: this utility only works with IP cameras')
+        exit(1)
+    
+    
+    # Process the IP camera control command
+    onvifCommand(config, cmd)

@@ -72,8 +72,8 @@ from time import sleep
 if sys.version_info.major > 2:
     import dvrip as dvr
 else:
-    # Python2 compatible version 
-    import Utils.CameraControl27 as dvr
+    # Python2 compatible version with much restricted capabilities
+    import Utils.CameraControl27 as cc27
 
 
 def rebootCamera(cam):
@@ -649,10 +649,10 @@ def cameraControlV2(config, cmd, opts=''):
     # extract IP from config file
     camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
 
-    #if sys.version_info.major < 3:
-    #    cc27.onvifCommand(config, cmd)
-    #else:
-    cameraControl(camera_ip, cmd, opts)
+    if sys.version_info.major < 3:
+        cc27.onvifCommand(config, cmd)
+    else:
+        cameraControl(camera_ip, cmd, opts)
 
 
 if __name__ == '__main__':
@@ -663,30 +663,26 @@ if __name__ == '__main__':
     """
 
     # list of supported commands
-    #if sys.version_info.major < 3:
-    #    cmd_list = ['reboot', 'GetHostname', 'GetDeviceInformation']
-    #    opthelp=''
-    #else:
-    cmd_list = ['reboot', 'GetHostname', 'GetSettings','GetDeviceInformation','GetNetConfig',
-        'GetCameraParams','GetEncodeParams','SetParam','SaveSettings', 'LoadSettings', 
-        'SetColor', 'SetOSD', 'SetAutoReboot', 'GetIP']
-    opthelp='optional parameters for SetParam for example Camera ElecLevel 70 \n' \
-        'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first. ' \
-        'Call a function with no parameters to see the possibilities'
+    if sys.version_info.major < 3:
+        cmd_list = ['reboot', 'GetHostname', 'GetDeviceInformation']
+        opthelp=''
+    else:
+        cmd_list = ['reboot', 'GetHostname', 'GetSettings','GetDeviceInformation','GetNetConfig',
+            'GetCameraParams','GetEncodeParams','SetParam','SaveSettings', 'LoadSettings', 
+            'SetColor', 'SetOSD', 'SetAutoReboot', 'GetIP']
+        opthelp='optional parameters for SetParam for example Camera ElecLevel 70 \n' \
+            'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first. ' \
+            'Call a function with no parameters to see the possibilities'
 
     usage = "Available commands " + str(cmd_list) + '\n' + opthelp
     parser = argparse.ArgumentParser(description='Controls CMS-Compatible IP camera',
         usage=usage)
     parser.add_argument('command', metavar='command', type=str, nargs=1, help=' | '.join(cmd_list))
     parser.add_argument('options', metavar='opts', type=str, nargs='*', help=opthelp)
-
-    parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
-        help="Path to a config file which will be used instead of the default one.")
-
-    cml_args = parser.parse_args()
-    cmd = cml_args.command[0]
-    if cml_args.options is not None:
-        opts = cml_args.options
+    args = parser.parse_args()
+    cmd = args.command[0]
+    if args.options is not None:
+        opts = args.options
     else:
         opts=''
         
@@ -694,8 +690,7 @@ if __name__ == '__main__':
         print('Error: command "{}" not supported'.format(cmd))
         exit(1)
 
-    # Load the config file
-    config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
+    config = cr.parse('.config')
 
     cameraControlV2(config, cmd, opts)
     
