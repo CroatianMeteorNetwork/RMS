@@ -146,6 +146,7 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
         help="Path to a config file which will be used instead of the default one.")
 
+
     args = parser.parse_args()
     cmd = args.command[0]
 
