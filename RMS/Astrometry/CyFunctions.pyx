@@ -110,7 +110,8 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
     """ Make a subset of stars from the given star catalog around the given coordinates with a given radius.
     
     Arguments:
-        catalog_list: [ndarray] An array of (ra, dec, mag) pairs for stars (J2000, degrees).
+        catalog_list: [ndarray] An array of (ra, dec, mag) pairs for stars (J2000, degrees). Note that the 
+            array needs to be sorted by descending declination!
         ra_c: [float] Centre of extraction RA (degrees).
         dec_c: [float] Centre of extraction dec (degrees).
         jd: [float] Julian date of observations.

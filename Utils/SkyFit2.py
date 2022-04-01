@@ -13,6 +13,7 @@ import collections
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+import pyqtgraph as pg
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
@@ -185,6 +186,10 @@ class GeoPoints(object):
 
             self.ra_data.append(np.degrees(ra))
             self.dec_data.append(np.degrees(dec))
+
+
+        self.ra_data = np.array(self.ra_data)
+        self.dec_data = np.array(self.dec_data)
 
         
 
@@ -780,21 +785,23 @@ class PlateTool(QtWidgets.QMainWindow):
         self.zoom_window.addItem(self.pick_marker2)
 
         # Star pick info
-        text_str = "STAR PICKING MODE\n"
-        text_str += "LEFT CLICK - Centroid star\n"
-        text_str += "CTRL + LEFT CLICK - Manual star position\n"
-        text_str += "RIGHT CLICK - Remove pair\n"
-        text_str += "CTRL + SCROLL - Aperture radius adjust\n"
-        text_str += "CTRL + Z - Fit stars\n"
-        text_str += "CTRL + SHIFT + Z - Fit with initial distortion params set to 0\n"
-        text_str += "L - Astrometry fit details\n"
-        text_str += "P - Photometry fit"
-        self.star_pick_info = TextItem(text_str, anchor=(0.5, 0.75), color=(255, 255, 255))
-        self.star_pick_info.setAlign(QtCore.Qt.AlignCenter)
+        self.star_pick_info_text_str = "STAR PICKING MODE keys:\n"
+        self.star_pick_info_text_str += "LEFT CLICK - Centroid star\n"
+        self.star_pick_info_text_str += "CTRL + LEFT CLICK - Manual star position\n"
+        self.star_pick_info_text_str += "ENTER or SPACE - Accept pair\n"
+        self.star_pick_info_text_str += "RIGHT CLICK - Remove pair\n"
+        self.star_pick_info_text_str += "CTRL + SCROLL - Aperture radius adjust\n"
+        self.star_pick_info_text_str += "CTRL + Z - Fit stars\n"
+        self.star_pick_info_text_str += "CTRL + SHIFT + Z - Fit with initial distortion params set to 0\n"
+        self.star_pick_info_text_str += "L - Astrometry fit plot\n"
+        self.star_pick_info_text_str += "P - Photometry fit plot"
+        self.star_pick_info = TextItem(self.star_pick_info_text_str, anchor=(0.0, 0.75), color=(0, 0, 0), fill=(255, 255, 255, 100))
+        self.star_pick_info.setFont(QtGui.QFont('monospace', 8))
+        self.star_pick_info.setAlign(QtCore.Qt.AlignLeft)
         self.star_pick_info.hide()
         self.star_pick_info.setZValue(10)
         self.star_pick_info.setParentItem(self.img_frame)
-        self.star_pick_info.setPos(self.platepar.X_res/2, self.platepar.Y_res)
+        self.star_pick_info.setPos(0, self.platepar.Y_res)
 
         # Default variables even when constructor isnt called
         self.star_pick_mode = False
@@ -883,8 +890,18 @@ class PlateTool(QtWidgets.QMainWindow):
         # adding img
         gamma = 1
         invert = False
+
+        # Add saturation mask (R, G, B, alpha) - alpha can only be 0 or 1
+        saturation_mask_img = np.zeros_like(self.img_handle.loadChunk().maxpixel).T
+        self.saturation_mask_img = np.zeros(saturation_mask_img.shape + (4, ), dtype='uint8')
+        self.saturation_mask = pg.ImageItem()
+        self.saturation_mask.setImage(self.saturation_mask_img)
+        self.saturation_mask.setZValue(1)
+        self.img_frame.addItem(self.saturation_mask)
+
+        # Add main image
         self.img_type_flag = 'avepixel'
-        self.img = ImageItem(img_handle=self.img_handle, gamma=gamma, invert=invert)
+        self.img = ImageItem(img_handle=self.img_handle, gamma=gamma, invert=invert, saturation_mask=self.saturation_mask)
         self.img_frame.addItem(self.img)
         self.img_frame.autoRange(padding=0)
 
@@ -1034,16 +1051,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.view_menu.addActions([self.toggle_info_action,
                                        self.toggle_zoom_window])
 
-            text_str = "STAR PICKING MODE\n"
-            text_str += "LEFT CLICK - Centroid star\n"
-            text_str += "CTRL + LEFT CLICK - Manual star position\n"
-            text_str += "RIGHT CLICK - Remove pair\n"
-            text_str += "CTRL + SCROLL - Aperture radius adjust\n"
-            text_str += "CTRL + Z - Fit stars\n"
-            text_str += "CTRL + SHIFT + Z - Fit with initial distortion params set to 0\n"
-            text_str += "L - Astrometry fit details\n"
-            text_str += "P - Photometry fit"
-            self.star_pick_info.setText(text_str)
+            self.star_pick_info.setText(self.star_pick_info_text_str)
 
         else:
             self.mode = 'manualreduction'
@@ -1070,7 +1078,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.view_menu.addActions([self.toggle_info_action,
                                        self.toggle_zoom_window])
-            self.star_pick_info.setText('')
+            #self.star_pick_info.setText(self.star_pick_info_text_str)
 
             self.updateLeftLabels()
             # self.show_zoom_window = False
@@ -1188,7 +1196,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.label_f1.setPos(self.img_frame.width() - self.label_f1.boundingRect().width(), \
             self.img_frame.height() - self.label_f1.boundingRect().height())
 
-        self.star_pick_info.setPos(self.img_frame.width()/2, self.img_frame.height() - 50)
+        self.star_pick_info.setPos(0, self.img_frame.height() - 50)
 
         if self.config.height/self.config.width < self.img_frame.height()/self.img_frame.width():
             self.img_frame.setLimits(xMin=0,
@@ -1301,7 +1309,8 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 sign_str = ' '
             text_str += 'RA centre  = {:s}{:02d}h {:02d}m {:05.2f}s\n'.format(sign_str, hh, mm, ss)
-            text_str += u'Dec centre = {:.3f}\N{DEGREE SIGN}'.format(dec_centre)
+            text_str += u'Dec centre = {:.3f}\N{DEGREE SIGN}\n'.format(dec_centre)
+            text_str += 'FOV = {:.2f}x{:.2f}\N{DEGREE SIGN}'.format(*computeFOVSize(self.platepar))
 
         # Manual reduction
         else:
@@ -1439,7 +1448,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.geo_points = np.c_[self.geo_points_obj.ra_data, self.geo_points_obj.dec_data, \
                 np.ones_like(self.geo_points_obj.ra_data)]
 
-
             # Compute image coordiantes of geo points (always without refraction)
             pp_noref = copy.deepcopy(self.platepar)
             pp_noref.refraction = False
@@ -1449,7 +1457,8 @@ class PlateTool(QtWidgets.QMainWindow):
             geo_xy = np.c_[self.geo_x, self.geo_y]
 
             # Get indices of points inside the fov
-            filtered_indices, _ = self.filterCatalogStarsInsideFOV(self.geo_points, remove_under_horizon=False)
+            filtered_indices, _ = self.filterCatalogStarsInsideFOV(self.geo_points, \
+                remove_under_horizon=False, sort_declination=True)
 
             # Create a mask to filter out all points outside the image and the FOV
             filter_indices_mask = np.zeros(len(geo_xy), dtype=np.bool)
@@ -3165,8 +3174,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 # updates image automatically
 
 
-            # Save the point to the fit list by pression Enter
-            elif (event.key() == QtCore.Qt.Key_Return) or (event.key() == QtCore.Qt.Key_Enter):
+            # Save the point to the fit list by pressing Enter or Space
+            elif (event.key() == QtCore.Qt.Key_Return) or (event.key() == QtCore.Qt.Key_Enter) \
+                or (event.key() == QtCore.Qt.Key_Space):
                 
                 if self.star_pick_mode:
                     
@@ -3394,7 +3404,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         if self.v_zoom_left:
             if self.show_key_help != 2:
-                self.v_zoom.move(QtCore.QPoint(self.label1.boundingRect().width(), 0))
+                self.v_zoom.move(QtCore.QPoint(int(self.label1.boundingRect().width()), 0))
             else:
                 self.v_zoom.move(QtCore.QPoint(0, 0))
 
@@ -3539,15 +3549,25 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return ra_centre, dec_centre
 
-    def filterCatalogStarsInsideFOV(self, catalog_stars, remove_under_horizon=True):
+    def filterCatalogStarsInsideFOV(self, catalog_stars, remove_under_horizon=True, sort_declination=False):
         """ Take only catalogs stars which are inside the FOV.
+
+        Arguments:
+            catalog_stars: [ndarray] 2D array where entries are (ra, dec, mag). Note that the array needs
+            to be sorted by descending declination!
 
         Keyword arguments:
             remove_under_horizon: [bool] Remove stars below the horizon (-5 deg below).
-
-        Arguments:
-            catalog_stars: [list] A list of (ra, dec, mag) tuples of catalog stars.
+            sort_declination: [bool] Sort the stars by descending declination. Only needs to be done for geo
+                points.
         """
+
+        if sort_declination:
+            
+            # Sort by descending declination (needed for fast filtering)
+            dec_sorted_ind = np.argsort(catalog_stars[:, 1])[::-1]
+            catalog_stars = catalog_stars[dec_sorted_ind]
+
 
         # Get RA/Dec of the FOV centre
         ra_centre, dec_centre = self.computeCentreRADec()
@@ -3563,7 +3583,18 @@ class PlateTool(QtWidgets.QMainWindow):
             jd, self.platepar.lat, self.platepar.lon, fov_radius, self.cat_lim_mag, \
             remove_under_horizon=remove_under_horizon)
 
-        return filtered_indices, np.array(filtered_catalog_stars)
+        filtered_catalog_stars = np.array(filtered_catalog_stars)
+
+
+        # Return original indexing if it was sorted by declination
+        if sort_declination and len(filtered_indices):
+
+            # Restore original indexing
+            filtered_indices = dec_sorted_ind[filtered_indices]
+
+
+        return filtered_indices, filtered_catalog_stars
+
 
     def getInitialParamsAstrometryNet(self, upload_image=True):
         """ Get the estimate of the initial astrometric parameters using astromety.net. """
@@ -4797,8 +4828,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 background_lvl = 0
 
 
-            # Compute the background subtracted intensity sum
-            pick['intensity_sum'] = np.ma.sum(crop_img - background_lvl)
+            # Compute the background subtracted intensity sum (do as a float to avoid artificially pumping
+            #   up the magnitude)
+            pick['intensity_sum'] = np.ma.sum(crop_img.astype(np.float) - background_lvl).astype(np.int)
 
 
             # If the DFN image is used, correct intensity sum for exposure difference
@@ -5058,7 +5090,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Create the list of picks for saving
         centroids = []
-        for frame, pick in self.pick_list.items():
+        for frame, pick in sorted(self.pick_list.items(), key=lambda x: x[0]):
 
             # Make sure to centroid is picked and is not just the photometry
             if pick['x_centroid'] is None:
@@ -5169,7 +5201,7 @@ class PlateTool(QtWidgets.QMainWindow):
         json_dict['meastype'] = 1
 
         centroids = []
-        for frame, pick in self.pick_list.items():
+        for frame, pick in sorted(self.pick_list.items(), key=lambda x: x[0]):
 
             # Make sure to centroid is picked and is not just the photometry
             if pick['x_centroid'] is None:
@@ -5314,8 +5346,8 @@ class PlateTool(QtWidgets.QMainWindow):
         out_str += "# schema: astropy-2.0\n"
         out_str += "datetime,ra,dec,azimuth,altitude,mag_data,x_image,y_image\n"
 
-        # Add the data
-        for frame, pick in self.pick_list.items():
+        # Add the data (sort by frame)
+        for frame, pick in sorted(self.pick_list.items(), key=lambda x: x[0]):
 
             # Make sure to centroid is picked and is not just the photometry
             if pick['x_centroid'] is None:

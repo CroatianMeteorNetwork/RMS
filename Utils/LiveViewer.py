@@ -238,13 +238,18 @@ class LiveViewer(multiprocessing.Process):
             if os.path.isfile(self.dir_path):
                 
                 # Load the image
-                img = loadImage(self.dir_path)
-                text = ""
+                try:
+                    img = loadImage(self.dir_path)
+                    text = ""
+                    
+                except:
+                    img = np.zeros((720, 1280), dtype='uint8')
+                    text = "The image {:s} could not be loaded.".format(self.dir_path)
 
             else:
                 # If an FF files could not be loaded on the first run, show an empty image
                 if first_run:
-                    img = np.zeros((720, 1280))
+                    img = np.zeros((720, 1280), dtype='uint8')
                     text = "The image {:s} could not be loaded.".format(self.dir_path)
 
                 # Otherwise, just wait one more pause interval

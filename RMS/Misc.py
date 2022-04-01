@@ -172,7 +172,7 @@ def openFolderDialog(initialdir, title, mpl):
 
 
 
-def ping(host):
+def ping(host, count=1):
     """ Ping the host and return True if reachable. 
         Remember that a host may not respond to a ping (ICMP) request even if the host name is valid.
 
@@ -186,10 +186,10 @@ def ping(host):
     """
 
     # Ping command count option as function of OS
-    param = '-n 1' if platform.system().lower()=='windows' else '-c 1'
+    param = '-n' if platform.system().lower()=='windows' else '-c'
 
     # Building the command. Ex: "ping -c 1 google.com"
-    command = ['ping', param, host]
+    command = ['ping', param, str(count), host]
 
     # Pinging
     return subprocess.call(command) == 0
