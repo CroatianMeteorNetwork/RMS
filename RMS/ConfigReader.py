@@ -231,6 +231,7 @@ class Config:
         ##### Capture
         self.deviceID = 0
         self.force_v4l2 = False
+        self.uyvy_pixelformat = False
 
         self.width = 1280
         self.height = 720
@@ -785,6 +786,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "force_v4l2"):
         config.force_v4l2 = parser.getboolean(section, "force_v4l2")
+
+    if parser.has_option(section, "uyvy_pixelformat"):
+        config.uyvy_pixelformat = parser.getboolean(section, "uyvy_pixelformat")
 
     if parser.has_option(section, "fps"):
         config.fps = parser.getfloat(section, "fps")

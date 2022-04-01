@@ -78,7 +78,7 @@ def loadImage(img_path, flatten=-1):
 
     if USING_SCIPY_IMREAD:
         img = imread(img_path, flatten)
-
+        
     else:
         img = imread(img_path, as_gray=bool(flatten))
 

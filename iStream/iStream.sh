@@ -226,6 +226,15 @@ function upload_photometry_variation {
 	fi	
 }
 
+function update_calib_report_photometry_status {
+	CALIB_REPORT_PHOTOMETRY_FILE="$(find $CAPTURED_DIR_NAME -name '*.png' | grep 'calib_report_photometry.png')"	
+	if [ -f "$CALIB_REPORT_PHOTOMETRY_FILE" ]; then 	
+		curl --user-agent $AGENT "$SERVER/$SYSTEM/?station_id=$STATION_ID&type=calib_report_photometry&action=update&level=$ACTIVE_LEVEL"
+	else
+		curl --user-agent $AGENT "$SERVER/$SYSTEM/?station_id=$STATION_ID&type=no_calib_report_photometry&action=update&level=$ACTIVE_LEVEL"
+	fi	
+}
+
 function upload_video_file {	
 	curl --user-agent $AGENT -F"operation=upload" -F"file=@$VIDEO_FILE" "http://server.istrastream.com/?station_id=$STATION_ID&system=$SYSTEM&action=upload"	
 }
@@ -303,6 +312,10 @@ if [ $VAR_1 = $VAR_2 ]; then
 
 	echo "UPLOAD PHOTOMETRY VARIATION..."
 	upload_photometry_variation
+	echo ""
+
+	echo "UPDATE CALIB REPORT PHOTOMETRY STATUS..."
+	update_calib_report_photometry_status
 	echo ""
 	
 	echo "UPLOAD KML FILE..."
