@@ -4,11 +4,11 @@
 import ctypes
 import os
 import platform
-import sys
 import shutil
 import datetime
 import time
 import logging
+import glob
 
 import ephem
 
@@ -29,7 +29,7 @@ def availableSpace(dirname):
 
         free_bytes = ctypes.c_ulonglong(0)
 
-        ctypes.windll.kernel32.GetDiskFreeSpaceExW(ctypes.c_wchar_p(dirname), None, None, \
+        ctypes.windll.kernel32.GetDiskFreeSpaceExW(ctypes.c_wchar_p(dirname), None, None,
             ctypes.pointer(free_bytes))
 
         return free_bytes.value
@@ -184,8 +184,10 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     captured_dir = os.path.join(data_dir, captured_dir)
     archived_dir = os.path.join(data_dir, archived_dir)
 
+    # clear down logs first
+    deleteOldLogfiles(data_dir, config)
 
-    ### Calculate the approximate needed disk space for the next night
+    # Calculate the approximate needed disk space for the next night
 
     # If the duration of capture is not given
     if duration is None:
@@ -302,7 +304,7 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
     # If there is still not enough space, wait 10 seconds to see if perhaps other users are clearing their
     #   space if this is a multiuser setup
-    if free_space_status == False:
+    if free_space_status is False:
 
         time.sleep(10)
 
@@ -314,4 +316,26 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     return True
 
 
+def deleteOldLogfiles(data_dir, config, days_to_keep=None):
+    """ Deletes old observation directories to free up space for new ones.
+
+    Arguments:
+        data_dir: [str] Path to the RMS data directory which contains the Captured and Archived diretories
+        config: [Configuration object]
+        duration: [int] number of days to retain, default None means read from config file
+    """
+    log_dir = os.path.join(data_dir, config.log_dir)
     
+    # date to purge before
+    if days_to_keep is None:
+        days_to_keep = config.logdays_to_keep
+    date_to_purge_to = datetime.datetime.now() - datetime.timedelta(days=days_to_keep)
+    date_to_purge_to = date_to_purge_to.timestamp()
+
+    # only going to purge RMS log files
+    flist = glob.glob1(log_dir, 'log*.log*')
+    for fl in flist:
+        file_mtime = os.stat(os.path.join(log_dir, fl)).st_mtime
+        if file_mtime < date_to_purge_to:
+            log.info("deleted {}".format(fl))
+            os.remove(os.path.join(log_dir, fl))
