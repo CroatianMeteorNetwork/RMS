@@ -649,9 +649,6 @@ def cameraControlV2(config, cmd, opts=''):
     # extract IP from config file
     camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
 
-    #if sys.version_info.major < 3:
-    #    cc27.onvifCommand(config, cmd)
-    #else:
     cameraControl(camera_ip, cmd, opts)
 
 
@@ -663,10 +660,6 @@ if __name__ == '__main__':
     """
 
     # list of supported commands
-    #if sys.version_info.major < 3:
-    #    cmd_list = ['reboot', 'GetHostname', 'GetDeviceInformation']
-    #    opthelp=''
-    #else:
     cmd_list = ['reboot', 'GetHostname', 'GetSettings','GetDeviceInformation','GetNetConfig',
         'GetCameraParams','GetEncodeParams','SetParam','SaveSettings', 'LoadSettings', 
         'SetColor', 'SetOSD', 'SetAutoReboot', 'GetIP']
