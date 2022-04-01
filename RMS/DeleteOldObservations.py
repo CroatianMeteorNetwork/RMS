@@ -328,7 +328,7 @@ def deleteOldLogfiles(data_dir, config, days_to_keep=None):
     
     # date to purge before
     if days_to_keep is None:
-        days_to_keep = config.logdays_to_keep
+        days_to_keep = int(config.logdays_to_keep)
     date_to_purge_to = datetime.datetime.now() - datetime.timedelta(days=days_to_keep)
     date_to_purge_to = date_to_purge_to.timestamp()
 
