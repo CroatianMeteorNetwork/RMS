@@ -328,7 +328,7 @@ def estimateMeteorHeight(config, meteor_obj, shower):
 
 
 def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=False, save_plot=False, \
-    plot_activity=False):
+    plot_activity=False, flux_showers=False):
     """ Do single station shower association based on radiant direction and height. 
     
     Arguments:
@@ -342,6 +342,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
         show_plot: [bool] Show the plot on the screen. False by default.
         save_plot: [bool] Save the plot in the folder with FTPdetectinfos. False by default.
         plot_activity: [bool] Whether to plot the shower activity plot of not. False by default.
+        flux_showers: [bool] Use the set of showers for flux, not the default list. False by default.
 
     Return:
         associations, shower_counts: [tuple]
@@ -354,7 +355,11 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
     if isinstance(shower_code, str) or (shower_code is None):
 
         # Load the list of meteor showers
-        shower_table = loadShowers(config.shower_path, config.shower_file_name)
+        if flux_showers:
+            shower_table = loadShowers(config.shower_path, config.showers_flux_file_name)
+        else:
+            shower_table = loadShowers(config.shower_path, config.shower_file_name)
+
         shower_list = [Shower(shower_entry) for shower_entry in shower_table]
 
     # If the the Shower object was given, use it
@@ -577,7 +582,11 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
         # Init subplots depending on if the activity plot is done as well
         if plot_activity:
-            gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1])
+
+            # Scale the shower plot according to number
+            shower_ax_scale = np.sqrt(len(shower_list))/12 + 0.25
+
+            gs = gridspec.GridSpec(2, 1, height_ratios=[3, shower_ax_scale])
             ax_allsky = plt.subplot(gs[0], facecolor='black')
             ax_activity = plt.subplot(gs[1], facecolor='black')
         else:
@@ -597,13 +606,17 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             color = get_shower_color(shower)
             allsky_plot.plot(meteor_obj.ra_array, meteor_obj.dec_array, color=color, linewidth=1, zorder=4)
 
+            # Head color of sporadics
+            peak_color = '0.5'
+            peak_alpha = 0.5
+
             # Plot the peak of shower meteors a different color
-            peak_color = 'blue'
             if shower is not None:
                 peak_color = 'tomato'
+                peak_alpha = 0.8
 
             allsky_plot.scatter(meteor_obj.ra_array[-1], meteor_obj.dec_array[-1], c=peak_color, marker='+', \
-                s=5, zorder=5)
+                s=2, zorder=5, alpha=peak_alpha)
 
             ### ###
 
@@ -640,7 +653,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                 else:
                     gc_end_phase = gc_beg_phase + 170
 
-                gc_alpha = 0.7
+                gc_alpha = 0.5
 
 
             # Store great circle beginning and end phase
@@ -898,6 +911,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-s', '--shower', metavar='SHOWER', type=str, \
         help="Associate just this single shower given its code (e.g. PER, ORI, ETA).")
 
+    arg_parser.add_argument('-f', '--fluxshowers', action="store_true", \
+        help="""Only show shower association for showers used for flux estimation.""")
+
     arg_parser.add_argument('-x', '--hideplot', action="store_true", \
         help="""Do not show the plot on the screen.""")
 
@@ -940,7 +956,8 @@ if __name__ == "__main__":
 
     # Perform shower association
     associations, shower_counts = showerAssociation(config, ftpdetectinfo_path_list, \
-        shower_code=cml_args.shower, show_plot=(not cml_args.hideplot), save_plot=True, plot_activity=True)
+        shower_code=cml_args.shower, show_plot=(not cml_args.hideplot), save_plot=True, plot_activity=True,
+        flux_showers=cml_args.fluxshowers)
 
 
     # Print results to screen

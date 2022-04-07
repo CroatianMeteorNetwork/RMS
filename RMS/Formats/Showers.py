@@ -259,15 +259,140 @@ class FluxShowers(object):
 # The seed ensures shower colours are the same each run
 rng = Random(1) 
 
-def makeShowerColors(shower_data, color_map='gist_ncar'):
+
+def getColorList(num, color_map=None):
+    """ Return a list of colors for showers.
+
+    Arguments:
+        num: [int] Number of colors to return. 
+
+    Return:
+        colors: [list] A list of colors for matplotlib.
+
+    """
+
+    if color_map is None:
+        color_list = ["#E69F00", "#56B4E9", "#009E73", "#0072B2", "#D55E00", "#CC79A7", "#F0E442"]
+        colors = [color_list[i%len(color_list)] for i in range(num)]
+
+    else:
+        cmap = plt.get_cmap(color_map)
+        colors = cmap(np.linspace(0.1, 0.9, num))[::-1]
+
+    return colors
+
+
+def makeShowerColors(shower_data, color_map='viridis'):
     """ Generates a map of distinct colours indexed by shower name """
 
-    names = sorted([s.name if isinstance(s, Shower) else s[1] for s in shower_data])
-    rng.shuffle(names) # so names close alphabetically get distinct colours  
-    cmap = plt.get_cmap(color_map)
-    colors = cmap(np.linspace(0, 1, len(names)))
-    colors_by_name = {n:colors[i] for i,n in enumerate(names)}
+    # Sort showers into non-overlaping rows and assign them unique colors
+    _, code_name_dict = sortShowersIntoRows(shower_data)
+
+    # Assign each color to shower name
+    colors_by_name = {}
+    for code in code_name_dict:
+        name, sol_min, sol_peak, sol_max, color = code_name_dict[code]
+        colors_by_name[name] = color
+
     return colors_by_name
+
+
+
+def sortShowersIntoRows(shower_data):
+
+    # Generate an array of shower activity per 1 deg of solar longitude
+    code_name_list = []
+    activity_stack = np.zeros((20, 360), dtype=np.uint16)
+
+    for i in range(20):
+        for sol_plot in range(0, 360):
+
+            # If the cell is unassigned, check to see if a shower is active
+            if activity_stack[i, sol_plot] > 0:
+                continue
+
+            for shower in shower_data:
+                code = int(shower.iau_code)
+                name = shower.name
+
+                # Skip already assigned showers
+                if code in code_name_list:
+                    continue
+
+                sol_min, sol_peak, sol_max = shower.lasun_beg, shower.lasun_max, shower.lasun_end
+                sol_min = int(np.floor(sol_min))%360
+                sol_max = int(np.ceil(sol_max))%360
+
+                # If the shower is active at the given solar longitude and there aren't any other showers
+                # in the same activity period, assign shower code to this solar longitude
+                if (sol_max - sol_min) < 180:
+
+                    # Check if the shower is active
+                    if (sol_plot >= sol_min) and (sol_plot <= sol_max):
+
+                        # Leave a buffer of +/- 3 deg around the shower
+                        sol_min_check = sol_min - 3
+                        if sol_min_check < 0:
+                            sol_min_check = 0
+
+                        sol_max_check = sol_max + 3
+                        if sol_max_check > 360:
+                            sol_max_check = 360
+
+                        # Check if the solar longitue range is free of other showers
+                        if not np.any(activity_stack[i, sol_min_check:sol_max_check]):
+
+                            # Assign the shower code to activity stack
+                            activity_stack[i, sol_min:sol_max] = code
+                            code_name_list.append(code)
+
+                else:
+                    if (sol_plot >= sol_min) or (sol_plot <= sol_max):
+
+                        # Check if the solar longitue range is free of other showers
+                        if (not np.any(activity_stack[i, 0:sol_max])) and \
+                            (not np.any(activity_stack[i, sol_min:])):
+
+                            # Assign shower code to activity stack
+                            activity_stack[i, 0:sol_max] = code
+                            activity_stack[i, sol_min:] = code
+
+
+    # Count the number of populated rows in the activity stack
+    active_rows = np.count_nonzero([np.any(row) for row in activity_stack])
+
+    # Assign shower colors by row
+    row_colors = getColorList(active_rows, color_map='viridis')
+
+    # Assign a color to each shower
+    code_name_dict = {}
+    for shower in shower_data:
+        code = int(shower.iau_code)
+        name = shower.name
+
+        # Skip assigned showers
+        if code in code_name_dict:
+            continue
+
+        sol_min, sol_peak, sol_max = shower.lasun_beg, shower.lasun_max, shower.lasun_end
+        sol_min = int(np.floor(sol_min))%360
+        sol_max = int(np.ceil(sol_max))%360
+
+        for i, row in enumerate(activity_stack):
+
+            # Check if the shower is in the row
+            if code in row:
+
+                # Grab the color from the list
+                color = row_colors[i]
+
+                # Assign a color to the shower
+                code_name_dict[code] = [name, sol_min, sol_peak, sol_max, color]
+
+
+    return activity_stack, code_name_dict
+
+
 
 
 def generateActivityDiagram(config, shower_data, ax_handle=None, sol_marker=None, colors=None):
@@ -292,81 +417,9 @@ def generateActivityDiagram(config, shower_data, ax_handle=None, sol_marker=None
     shower_data = shower_data[np.argsort(durations)][::-1]
 
 
-    # Generate an array of shower activity per 1 deg of solar longitude
-    code_name_dict = {}
-
-    activity_stack = np.zeros((20, 360), dtype=np.uint16)
-    if not colors: colors = makeShowerColors(shower_data)
-    shower_index = 0
-
-    for i in range(20):
-        for sol_plot in range(0, 360):
-
-            # If the cell is unassigned, check to see if a shower is active
-            if activity_stack[i, sol_plot] > 0:
-                continue
-
-            for shower in shower_data:
-                code = int(shower.iau_code)
-                name = shower.name
-
-                # Skip assigned showers
-                if code in code_name_dict:
-                    continue
-
-                sol_min, sol_peak, sol_max = shower.lasun_beg, shower.lasun_max, shower.lasun_end
-                sol_min = int(np.floor(sol_min))%360
-                sol_max = int(np.ceil(sol_max))%360
-
-                # If the shower is active at the given solar longitude and there aren't any other showers
-                # in the same activity period, assign shower code to this solar longitude
-                shower_active = False
-                if (sol_max - sol_min) < 180:
-
-                    # Check if the shower is active
-                    if (sol_plot >= sol_min) and (sol_plot <= sol_max):
-
-                        # Leave a buffer of +/- 3 deg around the shower
-                        sol_min_check = sol_min - 3
-                        if sol_min_check < 0:
-                            sol_min_check = 0
-
-                        sol_max_check = sol_max + 3
-                        if sol_max_check > 360:
-                            sol_max_check = 360
-
-                        # Check if the solar longitue range is free of other showers
-                        if not np.any(activity_stack[i, sol_min_check:sol_max_check]):
-
-                            # Assign the shower code to activity stack
-                            activity_stack[i, sol_min:sol_max] = code
-                            code_name_dict[code] = [name, sol_peak]
-
-                            shower_active = True
-
-                else:
-                    if (sol_plot >= sol_min) or (sol_plot <= sol_max):
-
-                        # Check if the solar longitue range is free of other showers
-                        if (not np.any(activity_stack[i, 0:sol_max])) and \
-                            (not np.any(activity_stack[i, sol_min:])):
-
-                            # Assign shower code to activity stack
-                            activity_stack[i, 0:sol_max] = code
-                            activity_stack[i, sol_min:] = code
-
-                            shower_active = True
-                        
-
-
-                if shower_active:
-
-                    # Get shower color
-                    color = colors[name]
-                    shower_index += 1
-
-                    # Assign shower params
-                    code_name_dict[code] = [name, sol_min, sol_peak, sol_max, color]
+    # Sort showers into rows so that they do no overlap on the graph. This will also generate colors
+    #   for every shower, sorted per row
+    activity_stack, code_name_dict = sortShowersIntoRows(shower_data)
 
     
     # If no axis was given, crate one
@@ -393,7 +446,7 @@ def generateActivityDiagram(config, shower_data, ax_handle=None, sol_marker=None
     # Plot the activity graph
     active_shower = 0
     vertical_scale_line = 0.5
-    vertical_shift_text = 0.01
+    vertical_shift_text = 0.02
     text_size = 8
     for i, line in enumerate(activity_stack):
 
@@ -439,6 +492,9 @@ def generateActivityDiagram(config, shower_data, ax_handle=None, sol_marker=None
     # Get the plot Y limits
     y_min, y_max = ax_handle.get_ylim()
 
+    # Shift the plot maximum to accomodate the upper text
+    y_max *= 1.25
+
     # Plot a line with given solver longitude
     if sol_marker is not None:
 
@@ -481,7 +537,7 @@ def generateActivityDiagram(config, shower_data, ax_handle=None, sol_marker=None
         dt = datetime.datetime(curr_year + year_modifier, month_no, 1, 0, 0, 0)
         sol = np.degrees(jd2SolLonSteyaert(datetime2JD(dt)))%360
 
-        # Plot the manth beginning line
+        # Plot the month begin line
         y_arr = np.linspace(y_min, y_max, 5)
         plt.plot(np.zeros_like(y_arr) + sol, y_arr, linestyle='dotted', alpha=0.3, zorder=3, color='w')
     
@@ -497,6 +553,7 @@ if __name__ == "__main__":
     import RMS.ConfigReader as cr
 
 
+    # Load the list of all showers
     shower_table = loadShowers("share", "established_showers.csv")
     shower_list = [Shower(shower_entry) for shower_entry in shower_table]
 

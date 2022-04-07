@@ -30,7 +30,6 @@
 97|SCC|Southern delta Cancrids                 ||296||125|14.4|1|-0.23|27|Jenniskens et al., 2016, Icarus, 266, 331 
 110|AAN|alpha Antliids                          |295|312|332|157.2|-9.5|0.89|-0.37|45|Jenniskens et al., 2016, Icarus, 266, 331 
 145|ELY|eta Lyrids                              |42|49|53.6|289.9|43.4|0.56|0.14|43.7|Jenniskens et al., 2016, Icarus, 266, 331 
-151|EAU|epsilon Aquilids                        |51|54|55|278|13.4|1.1|0.23|31.4|Brown et al., 2008
 164|NZC|Northern June Aquilids                  |71|101|123|309.7|-5.3|0.95|0.26|38.3|Jenniskens et al., 2016, Icarus, 266, 331 
 165|SZC|Southern June Aquilids                  ||104||319.3|-27.6|1.05|0.3|39.2|Jenniskens et al., 2016, Icarus, 266, 331 
 171|ARI|Daytime Arietids                        |62|77|99|43.9|24.4|1.05|0.28|41.1|Jenniskens et al., 2016, Icarus, 266, 331 
@@ -48,14 +47,7 @@
 252|ALY|alpha Lyncids                           ||272||140.4|39.8|1.13|-0.31|49.5|Jenniskens et al., 2016, Icarus, 266, 331 
 257|ORS|Southern chi Orionids                   ||243||73|17.8|1.04|0.11|27.9|Jenniskens et al., 2016, Icarus, 266, 331 
 319|JLE|January Leonids                         |279|283|287|147.7|24.1|1.01|-0.34|51.4|Jenniskens et al., 2016, Icarus, 266, 331 
-322|LBO|lambda Bootids|290|296|297|221.5|42.4|1.04|-0.76|43.6|Brown et al., 2010
 323|XCB|xi Coronae Borealids                    |287|296|304|250.9|29.7|0.7|-0.13|45.1|Jenniskens et al., 2016, Icarus, 266, 331 
-324|EPR|epsilon Perseids                        |91|95.5|107|58.2|37.9|0.78|0.15|44.8|Brown et al., 2008
-325|DLT|Daytime lambda Taurids|71|86|98|57.3|11.4|0.85|0.33|35.6|Brown et al., 2010
-326|EPG|epsilon Pegasids                        |97|105.5|107|326.3|14.7|1.5|0.45|29.9|Brown et al., 2008
-327|BEQ|beta Equuleids                          |106|106.5|118|321.5|8.7|0.69|-0.28|31.6|Brown et al., 2008
-328|ALA|alpha Lacertids                         |100|105.5|115|343|49.6|0.7|0.37|38.9|Brown et al., 2008
-330|SSE|sigma Serpentids                        |255|276|291|245.4|-4.8|0.95|-0.16|45.5|Jenniskens et al., 2016, Icarus, 266, 331 
 331|AHY|alpha Hydrids                           |267|284|300|126.9|-8.7|0.87|-0.24|43.3|Jenniskens et al., 2016, Icarus, 266, 331 
 333|OCU|October Ursae Majorids                  |201|202|203|145|64.8|1.39|-0.33|55.6|Jenniskens et al., 2016, Icarus, 266, 331 
 334|DAD|December alpha Draconids                ||256||210.8|58.6|0.58|-0.34|40.8|Jenniskens et al., 2016, Icarus, 266, 331 
@@ -67,21 +59,10 @@
 341|XUM|January xi Ursae Majorids               ||298||168.7|33|0.97|-0.39|40.9|Jenniskens et al., 2016, Icarus, 266, 331 
 343|HVI|h Virginids                             ||38||204.8|-11.5|0.95|-0.36|17.2|Jenniskens et al., 2016, Icarus, 266, 355
 346|XHE|x Herculids                             ||350||253|49.2|0.48|-0.1|35.2|Jenniskens et al., 2016, Icarus, 266, 331 
-347|BPG|beta Pegasids |24|36|49|350.5|27.8|0.63|0.34|44.5|Brown et al., 2010
-348|ARC|April rho Cygnids                       |34|37|43|324.5|45.9|0.61|0.36|41.8|Brown et al., 2010
-349|LLY|lambda Lyrids|32|41|54|283.7|28.5|0.72|-0.15|33.4|Brown et al., 2010
-357|PHP|phi Pegazids|51|54|55|358.3|20.7|0.72|-0.01|30.4|Brown et al., 2010
 362|JMC|June mu Cassiopeiids                    |49|74|95|17.5|53.9|0.91|0.28|43.6|Brown et al., 2010
 372|PPS|phi Piscids                             |104|106|107|20.1|24.1|1.56|0.36|62.9|Brown et al., 2010
-376|ALN|August Lyncids|116|135|136|119.8|55.1|1.52|-0.23|41.7|Brown et al., 2010
-384|OLP|October Leporids|196|203|206|81.6|-13.8|1.08|0.26|25.5|Brown et al., 2010
-386|OBC|October beta Camelopardalids|200|214|215|66.8|56.2|1.45|0.3|47.6|Brown et al., 2010
 388|CTA|chi Taurids                             |194|220|227|63.2|24.7|0.96|0.19|42.1|Brown et al., 2010
 390|THA|November theta Aurigids                 |233|237|239|89|34.7|1.49|0.14|33.8|Brown et al., 2010
-392|NID|November I Draconids|221|241|264|200.1|64.5|0.72|-0.31|43|Brown et al., 2010
-394|ACA|Alpha Canis Majorids|247|247|265|100.2|-17.3|0.69|0.44|42|Brown et al., 2010
-395|GCM|gamma Canis Majorids|255|257|258|109.8|-11.3|0.43|-0.17|43.6|Brown et al., 2010
-398|DCM|December Canis Majorids|264|266|266|112.3|-14.6|0|0|42.8|Brown et al., 2010
 404|GUM|gamma Ursae Minorids                    |294|299|304|231.8|66.8|0.7|-0.57|31.8|Brown et al., 2010
 411|CAN|c Andromedids                           ||107||29.1|47.3|1.13|0.35|57.5|Jenniskens et al., 2016, Icarus, 266, 331 
 427|FED|February eta Draconids                  ||315||239.6|62.4|0.26|-0.2|35.1|Jenniskens et al., 2016, Icarus, 266, 331 
@@ -103,4 +84,3 @@
 569|OHY|omicron Hydrids                         ||309||176.3|-34.1|0.8|-0.38|59.1|Andreic et al., 2014
 680|JEA|June epsilon Arietids                   |80.0|83.8|87.0|47.6|27.6|0|0|39.1|Jenniskens et al., 2018 sub. to PSS
 1130|ARD|Arids                                  |184|193|194|262.7|-57.8|0|0|10.8|Jenniskens and Cooper, CBET
-
