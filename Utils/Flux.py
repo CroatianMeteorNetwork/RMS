@@ -874,7 +874,7 @@ def computeClearSkyTimeIntervals(cloud_ratio_dict, ratio_threshold=0.5, time_gap
     Arguments:
         cloud_ratio_dict: [dict] ff_file: ratio
         ratio_threshold: [float] Minimum ratio required for the FF file to be considered having clear skies.
-        time_gap_threshold: [float] Maximum time gap in seconds between ff files from cloud_ratio_dict
+        time_gap_threshold: [float] Maximum time gap (in minutes) between ff files from cloud_ratio_dict
             before it's used to stop an interval. This is because if there is a gap that's too large, it
             can be because there are clouds in between. And to not risk this affecting flux values
             this is cut out.
