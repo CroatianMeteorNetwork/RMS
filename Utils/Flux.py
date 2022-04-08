@@ -2180,6 +2180,7 @@ def computeFluxCorrectionsOnBins(
                         col_area_eff_block_dict[img_coords] = []
 
                     col_area_eff_block_dict[img_coords].append(weights[ht]*area*total_correction)
+                    
 
             # Compute mean corrections
             sensitivity_corr_avg = np.mean(sensitivity_corr_arr)
