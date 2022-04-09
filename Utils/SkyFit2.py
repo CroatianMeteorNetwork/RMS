@@ -901,7 +901,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Add main image
         self.img_type_flag = 'avepixel'
-        self.img = ImageItem(img_handle=self.img_handle, gamma=gamma, invert=invert, saturation_mask=self.saturation_mask)
+        self.img = ImageItem(img_handle=self.img_handle, gamma=gamma, invert=invert, \
+            saturation_mask=self.saturation_mask)
         self.img_frame.addItem(self.img)
         self.img_frame.autoRange(padding=0)
 
