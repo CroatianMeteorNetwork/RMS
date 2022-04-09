@@ -93,9 +93,9 @@ if __name__ == "__main__":
 
             # Extract the FF segment
             ff_xmin = max([xc - size//2, 0])
-            ff_xmax = min([xc + size//2, ff.ncols - 1])
+            ff_xmax = min([xc + size//2, ff.ncols])
             ff_ymin = max([yc - size//2, 0])
-            ff_ymax = min([yc + size//2, ff.nrows - 1])
+            ff_ymax = min([yc + size//2, ff.nrows])
             # ff_frame = reconstructFrame(ff, frame_index, avepixel=True)
             # crop_ff = ff_frame[ff_ymin:ff_ymax, ff_xmin:ff_xmax]
             crop_ave = ff.avepixel[ff_ymin:ff_ymax, ff_xmin:ff_xmax]
