@@ -3112,7 +3112,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         # Plot angular velocity
         ax_ang_vel.plot(sol_data, ang_vel_mid_data, color="#E69F00", linestyle='dashed', label='Ang. vel.')
         ax_ang_vel.set_ylabel("Ang. vel. (deg/s)")
-        ax_ang_vel.set_xlabel("La Sun (deg)")
+        ax_ang_vel.set_xlabel("Solar longitude (deg)")
 
         # Plot the limiting magnitudes
         ax_lm = ax_ang_vel.twinx()
@@ -3199,7 +3199,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         ax_flux_ymin, ax_flux_ymax = ax_flux.get_ylim()
         ax_flux.set_ylim(0, ax_flux_ymax)
         ax_flux.set_ylabel("Flux (met / 1000 $\\cdot$ km$^2$ $\\cdot$ h)")
-        ax_flux.set_xlabel("La Sun (deg)")
+        ax_flux.set_xlabel("Solar longitude (deg)")
 
         # ### Add a ZHR axis ###
         # ax_flux_zhr = ax_flux.twinx()
