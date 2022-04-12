@@ -134,9 +134,15 @@ if __name__ == "__main__":
                 # x_centroid = np.argmax(x_sum)
                 # y_centroid = np.argmax(y_sum)
                 x_max = np.argwhere(x_sum == np.amax(x_sum)).flatten()
-                x_centroid = x_max[int(round(len(x_max)/2))]
+                #x_centroid = x_max[int(round(len(x_max)/2))]
+                x_centroid = np.mean(x_max)
+                
                 y_max = np.argwhere(y_sum == np.amax(y_sum)).flatten()
-                y_centroid = y_max[int(round(len(y_max)/2))]
+                #y_centroid = y_max[int(round(len(y_max)/2))]
+                y_centroid = np.mean(y_max)
+
+                print(x_max, x_centroid)
+                print(y_max, y_centroid)
 
                 automated_x = x_centroid + xc - size/2
                 automated_y = y_centroid + yc - size/2
@@ -155,29 +161,29 @@ if __name__ == "__main__":
 
 
             
-            # if frame_no > 42:
-            #     plt.clf()
-            #     plt.plot(x_sum)
-            #     plt.plot(y_sum)
-            #     plt.vlines(x_centroid, np.min(x_sum), np.max(x_sum))
-            #     plt.vlines(y_centroid, np.min(y_sum), np.max(y_sum))
-            #     plt.show()
-            #     print(x_centroid, y_centroid)
+            if frame_index > 144:
+                plt.clf()
+                plt.plot(x_sum, color='b')
+                plt.plot(y_sum, color='r')
+                plt.vlines(x_centroid, np.min(x_sum), np.max(x_sum), color='b')
+                plt.vlines(y_centroid, np.min(y_sum), np.max(y_sum), color='r')
+                plt.show()
+                print(x_centroid, y_centroid)
 
-            #     plt.clf()
-            #     fig, (ax0, ax1, ax2, ax3, ax4, ax5) = plt.subplots(ncols=6, sharex=True, sharey=True)
-            #     ax0.imshow(crop, cmap='gray', vmin=0, vmax=255)
-            #     ax0.scatter(x_centroid, y_centroid, marker='x', c='blue')
-            #     ax1.imshow(crop_median, cmap='gray', vmin=0, vmax=255)
-            #     ax1.scatter(x_centroid, y_centroid, marker='x', c='blue')
-            #     ax2.imshow(crop_masked, cmap='gray', vmin=0, vmax=255)
-            #     ax2.scatter(x_centroid, y_centroid, marker='x', c='blue')
-            #     ax3.imshow(crop_median_masked, cmap='gray', vmin=0, vmax=255)
-            #     ax3.scatter(x_centroid, y_centroid, marker='x', c='blue')
+                plt.clf()
+                fig, (ax0, ax1, ax2, ax3, ax4, ax5) = plt.subplots(ncols=6, sharex=True, sharey=True)
+                ax0.imshow(crop, cmap='gray', vmin=0, vmax=255)
+                ax0.scatter(x_centroid, y_centroid, marker='x', c='blue')
+                ax1.imshow(crop_median, cmap='gray', vmin=0, vmax=255)
+                ax1.scatter(x_centroid, y_centroid, marker='x', c='blue')
+                ax2.imshow(crop_masked, cmap='gray', vmin=0, vmax=255)
+                ax2.scatter(x_centroid, y_centroid, marker='x', c='blue')
+                ax3.imshow(crop_median_masked, cmap='gray', vmin=0, vmax=255)
+                ax3.scatter(x_centroid, y_centroid, marker='x', c='blue')
 
-            #     ax4.imshow(crop_ave, cmap='gray', vmin=0, vmax=255)
-            #     ax5.imshow(crop_std, cmap='gray', vmin=0, vmax=255)
-            #     plt.show()
+                ax4.imshow(crop_ave, cmap='gray', vmin=0, vmax=255)
+                ax5.imshow(crop_std, cmap='gray', vmin=0, vmax=255)
+                plt.show()
 
 
             # Find FTPdetectinfo pick and plot it
