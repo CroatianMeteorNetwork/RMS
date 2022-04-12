@@ -23,6 +23,10 @@ except:
 
 import numpy as np
 
+from matplotlib import scale as mscale
+from matplotlib import transforms as mtransforms
+from matplotlib.ticker import FixedLocator
+
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -139,6 +143,51 @@ def openFileDialog(dir_path, initialfile, title, mpl, filetypes=()):
 
 
     return file_name
+
+
+class SegmentedScale(mscale.ScaleBase):
+    """ Segmented scale used to defining flux and ZHR on the same graph. """
+    name = 'segmented'
+
+    def __init__(self, axis, **kwargs):
+        mscale.ScaleBase.__init__(self, axis)
+        self.points = kwargs.get('points', [0, 1])
+        self.lb = self.points[0]
+        self.ub = self.points[-1]
+
+    def get_transform(self):
+        return self.SegTrans(self.lb, self.ub, self.points)
+
+    def set_default_locators_and_formatters(self, axis):
+        axis.set_major_locator(FixedLocator(self.points))
+
+    def limit_range_for_scale(self, vmin, vmax, minpos):
+        return max(vmin, self.lb), min(vmax, self.ub)
+
+    class SegTrans(mtransforms.Transform):
+        input_dims = 1
+        output_dims = 1
+        is_separable = True
+
+        def __init__(self, lb, ub, points):
+            mtransforms.Transform.__init__(self)
+            self.lb = lb
+            self.ub = ub
+            self.points = points
+
+        def transform_non_affine(self, a):
+            masked = a # ma.masked_where((a < self.lb) | (a > self.ub), a)
+            return np.interp(masked, self.points, np.arange(len(self.points)))
+
+        def inverted(self):
+            return SegmentedScale.InvertedSegTrans(self.lb, self.ub, self.points)
+
+    class InvertedSegTrans(SegTrans):
+
+        def transform_non_affine(self, a):
+            return np.interp(a, np.arange(len(self.points)), self.points)
+        def inverted(self):
+            return SegmentedScale.SegTrans(self.lb, self.ub, self.points)
 
 
 def openFolderDialog(initialdir, title, mpl):

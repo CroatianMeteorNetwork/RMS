@@ -19,6 +19,7 @@ if sys.version_info[0] >= 3:
 
 import ephem
 import matplotlib.dates as mdates
+from matplotlib import scale as mscale
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.stats
@@ -41,6 +42,11 @@ from RMS.Math import angularSeparation, pointInsideConvexPolygonSphere
 from RMS.Routines.FOVArea import fovArea, xyHt2Geo
 from RMS.Routines.MaskImage import MaskStructure, getMaskFile
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert, solLon2jdSteyaert, unwrapSol
+from RMS.Misc import SegmentedScale
+
+# Now that the Scale class has been defined, it must be registered so
+# that ``matplotlib`` can find it.
+mscale.register_scale(SegmentedScale)
 
 from Utils.ShowerAssociation import heightModel, showerAssociation
 
@@ -1760,6 +1766,13 @@ def getSensorCharacterization(dir_path, config, flux_config, meteor_data, defaul
             if '-1' in sensor_data:
                 del sensor_data['-1']
 
+            # If file FWHM is -1 and the default FWHM is not, override it
+            for key in sensor_data:
+                fwhm = sensor_data[key][0]
+                if (fwhm < 0) and (default_fwhm is not None) and (default_fwhm > 0):
+                    sensor_data[key][0] = default_fwhm
+
+
     else:
 
         # Run sensor characterization
@@ -1836,6 +1849,8 @@ def computeFluxCorrectionsOnBins(
     flux_lm_6_5_ci_upper_data = []
     meteor_num_data = []
     effective_collection_area_data = []
+    tap_data = []
+    bin_hour_data = []
     radiant_elev_data = []
     radiant_dist_mid_data = []
     ang_vel_mid_data = []
@@ -1848,7 +1863,6 @@ def computeFluxCorrectionsOnBins(
     total_corr_data = []
     mag_median_data = []
     mag_90_perc_data = []
-    tap_data = []
     col_area_meteor_ht_raw = 0
 
 
@@ -1964,10 +1978,12 @@ def computeFluxCorrectionsOnBins(
                 meteor_num_data.append(0)
                 lm_m_data.append(None)
                 effective_collection_area_data.append(0)
+                tap_data.append(0)
+                bin_hour_data.append(0)
                 radiant_elev_data.append(None)
                 radiant_dist_mid_data.append(None)
                 ang_vel_mid_data.append(None)
-                tap_data.append(0)
+                
 
                 flux_table.addEntry(sol_entry, dt_entry, 0, radiant_elev, np.degrees(rad_dist_mid), \
                     np.degrees(ang_vel_mid), 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
@@ -1986,10 +2002,12 @@ def computeFluxCorrectionsOnBins(
                 meteor_num_data.append(0)
                 lm_m_data.append(None)
                 effective_collection_area_data.append(0)
+                tap_data.append(0)
+                bin_hour_data.append(0)
                 radiant_elev_data.append(None)
                 radiant_dist_mid_data.append(None)
                 ang_vel_mid_data.append(None)
-                tap_data.append(0)
+                
 
                 flux_table.addEntry(sol_entry, dt_entry, 0, radiant_elev, np.degrees(rad_dist_mid), \
                     np.degrees(ang_vel_mid), 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
@@ -2053,10 +2071,12 @@ def computeFluxCorrectionsOnBins(
                     meteor_num_data.append(0)
                     lm_m_data.append(None)
                     effective_collection_area_data.append(0)
+                    tap_data.append(0)
+                    bin_hour_data.append(0)
                     radiant_elev_data.append(None)
                     radiant_dist_mid_data.append(None)
                     ang_vel_mid_data.append(None)
-                    tap_data.append(0)
+                    
 
                     flux_table.addEntry(sol_entry, dt_entry, 0, radiant_elev, np.degrees(rad_dist_mid), \
                     np.degrees(ang_vel_mid), 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
@@ -2307,6 +2327,8 @@ def computeFluxCorrectionsOnBins(
             tap = bin_hours*collection_area_6_5_lm/1e9
             tap_data.append(tap)
 
+            bin_hour_data.append(bin_hours)
+
             # Add entry to the flux data container
             flux_table.addEntry(sol_entry, dt_entry, len(bin_meteor_list), radiant_elev, \
                 np.degrees(rad_dist_mid), np.degrees(ang_vel_mid), total_corr_avg, \
@@ -2333,6 +2355,7 @@ def computeFluxCorrectionsOnBins(
         meteor_num_data,
         effective_collection_area_data,
         tap_data,
+        bin_hour_data,
         radiant_elev_data,
         radiant_dist_mid_data,
         ang_vel_mid_data,
@@ -2630,10 +2653,12 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 flux_config.max_sporadics_per_hr))
 
             # Save empty tables so this is not attempted again
-            saveEmptyECSVTable(os.path.join(dir_path, flux_ecsv_file_name), shower_code, mass_index, 
+            saveEmptyECSVTable(os.path.join(dir_path, flux_ecsv_file_name), shower_code, mass_index, \
                 flux_config, confidence_interval, fixed_bins=False)
-            saveEmptyECSVTable(os.path.join(dir_path, forced_bins_ecsv_file_name), shower_code, mass_index, 
-                flux_config, confidence_interval, fixed_bins=True)
+
+            if forced_bins:
+                saveEmptyECSVTable(os.path.join(dir_path, forced_bins_ecsv_file_name), shower_code, \
+                    mass_index, flux_config, confidence_interval, fixed_bins=True)
 
             return None
 
@@ -2889,6 +2914,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 meteor_num_data,
                 effective_collection_area_data,
                 tap_data,
+                bin_hour_data,
                 radiant_elev_data,
                 radiant_dist_mid_data,
                 ang_vel_mid_data,
@@ -2953,6 +2979,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 _,
                 forced_bins_meteor_num,
                 forced_bins_area,
+                _,
                 _,
                 forced_radiant_elev,
                 forced_radiant_dist,
@@ -3070,31 +3097,11 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
         # Plot how the derived values change throughout the night
         fig, axes = plt.subplots(nrows=3, ncols=2, figsize=(10, 8), sharex=True)
-        ((ax_met, ax_corrs), (ax_rad, ax_col_area), (ax_ang_vel, ax_flux)) = axes
+        ((ax_rad, ax_col_area), (ax_ang_vel, ax_met), (ax_corrs, ax_flux)) = axes
 
 
         fig.suptitle("{:s}, s = {:.2f}, r = {:.2f}, $\\gamma = {:.2f}$".format(shower_code, mass_index, \
             population_index, flux_config.gamma))
-
-
-
-        # Plot the number of meteors
-        ax_met.scatter(sol_data, meteor_num_data, label="Meteors", s=10, color='k', marker='o')
-        ax_met.set_ylabel("Meteors")
-        ax_met_ymin, ax_met_ymax = ax_met.get_ylim()
-        ax_met.set_ylim(0, ax_met_ymax*1.2)
-
-        # Plot the time-area product
-        ax_tap = ax_met.twinx()
-        ax_tap.step(sol_data, tap_data, where='mid', color='0.5', label="Time-area product")
-        ax_tap.set_ylabel("TAP (1000 km$^2$ h)")
-        ax_tap_ymin, ax_tap_ymax = ax_tap.get_ylim()
-        ax_tap.set_ylim(0, ax_tap_ymax*1.25)
-
-        # Add legends
-        lines, labels = ax_met.get_legend_handles_labels()
-        lines2, labels2 = ax_tap.get_legend_handles_labels()
-        ax_tap.legend(lines + lines2, labels + labels2, loc='lower left')
 
 
 
@@ -3112,7 +3119,6 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         # Plot angular velocity
         ax_ang_vel.plot(sol_data, ang_vel_mid_data, color="#E69F00", linestyle='dashed', label='Ang. vel.')
         ax_ang_vel.set_ylabel("Ang. vel. (deg/s)")
-        ax_ang_vel.set_xlabel("Solar longitude (deg)")
 
         # Plot the limiting magnitudes
         ax_lm = ax_ang_vel.twinx()
@@ -3168,6 +3174,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         ax_corrs_ymin, ax_corrs_ymax = ax_corrs.get_ylim()
         ax_corrs.set_ylim(0, ax_corrs_ymax)
         ax_corrs.legend()
+        ax_corrs.set_xlabel("Solar longitude (deg)")
+        ax_corrs.tick_params(axis='x', labelrotation=30)
 
 
         # Plot the collection area
@@ -3180,6 +3188,29 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
         ax_col_area.set_ylabel("Col. area (1000 km$^2$)")
         ax_col_area.legend()
+
+
+
+        # Plot the number of meteors
+        ax_met.scatter(sol_data, meteor_num_data, label="Meteors", s=10, color='k', marker='o')
+        ax_met.set_ylabel("Meteors")
+        ax_met_ymin, ax_met_ymax = ax_met.get_ylim()
+        ax_met.set_ylim(0, ax_met_ymax*1.2)
+
+        # Plot the time-area product
+        ax_tap = ax_met.twinx()
+        ax_tap.step(sol_data, tap_data, where='mid', color='0.5', label="Time-area product")
+        #ax_tap.bar(sol_data, tap_data, width=np.array(bin_hour_data)/24/365.24219*360, align='center')
+        ax_tap.set_ylabel("TAP (1000 km$^2$ h)")
+        ax_tap_ymin, ax_tap_ymax = ax_tap.get_ylim()
+        ax_tap.set_ylim(0, ax_tap_ymax*1.25)
+
+        # Add legends
+        lines, labels = ax_met.get_legend_handles_labels()
+        lines2, labels2 = ax_tap.get_legend_handles_labels()
+        ax_tap.legend(lines + lines2, labels + labels2, loc='lower left')
+
+
 
         # Plot the flux
         ax_flux.scatter(sol_data, flux_lm_6_5_data, color='k', zorder=4)
@@ -3200,6 +3231,25 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         ax_flux.set_ylim(0, ax_flux_ymax)
         ax_flux.set_ylabel("Flux (met / 1000 $\\cdot$ km$^2$ $\\cdot$ h)")
         ax_flux.set_xlabel("Solar longitude (deg)")
+        ax_flux.tick_params(axis='x', labelrotation=30)
+
+        ### Plot the ZHR on another axis ###
+
+        # Create the right axis
+        zhr_ax = ax_flux.twinx()
+
+        # Set the same range on the Y axis
+        y_min, y_max = ax_flux.get_ylim()
+        zhr_min, zhr_max = calculateZHR([y_min, y_max], population_index)
+        zhr_ax.set_ylim(zhr_min, zhr_max)
+
+        # Get the flux ticks and set them to the zhr axis
+        flux_ticks = ax_flux.get_yticks()
+        zhr_ax.set_yscale('segmented', points=calculateZHR(flux_ticks, population_index))
+
+        zhr_ax.set_ylabel("ZHR")
+
+        ### ###
 
         # ### Add a ZHR axis ###
         # ax_flux_zhr = ax_flux.twinx()
@@ -3212,6 +3262,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         # ### ###
 
         plt.tight_layout()
+        plt.subplots_adjust(hspace=0.05)
 
         if save_plots:
 

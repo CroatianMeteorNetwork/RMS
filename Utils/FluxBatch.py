@@ -13,8 +13,6 @@ import numpy as np
 import scipy
 import matplotlib.pyplot as plt
 from matplotlib import scale as mscale
-from matplotlib import transforms as mtransforms
-from matplotlib.ticker import FixedLocator
 from cycler import cycler
 
 
@@ -24,54 +22,7 @@ from RMS.Formats.Showers import FluxShowers, loadRadiantShowers
 from Utils.Flux import calculatePopulationIndex, calculateMassIndex, computeFlux, detectClouds, fluxParser, \
     calculateFixedBins, calculateZHR, massVerniani
 from RMS.Routines.SolarLongitude import unwrapSol
-from RMS.Misc import formatScientific
-
-
-
-
-class SegmentedScale(mscale.ScaleBase):
-    """ Segmented scale used to defining flux and ZHR on the same graph. """
-    name = 'segmented'
-
-    def __init__(self, axis, **kwargs):
-        mscale.ScaleBase.__init__(self, axis)
-        self.points = kwargs.get('points', [0, 1])
-        self.lb = self.points[0]
-        self.ub = self.points[-1]
-
-    def get_transform(self):
-        return self.SegTrans(self.lb, self.ub, self.points)
-
-    def set_default_locators_and_formatters(self, axis):
-        axis.set_major_locator(FixedLocator(self.points))
-
-    def limit_range_for_scale(self, vmin, vmax, minpos):
-        return max(vmin, self.lb), min(vmax, self.ub)
-
-    class SegTrans(mtransforms.Transform):
-        input_dims = 1
-        output_dims = 1
-        is_separable = True
-
-        def __init__(self, lb, ub, points):
-            mtransforms.Transform.__init__(self)
-            self.lb = lb
-            self.ub = ub
-            self.points = points
-
-        def transform_non_affine(self, a):
-            masked = a # ma.masked_where((a < self.lb) | (a > self.ub), a)
-            return np.interp(masked, self.points, np.arange(len(self.points)))
-
-        def inverted(self):
-            return SegmentedScale.InvertedSegTrans(self.lb, self.ub, self.points)
-
-    class InvertedSegTrans(SegTrans):
-
-        def transform_non_affine(self, a):
-            return np.interp(a, np.arange(len(self.points)), self.points)
-        def inverted(self):
-            return SegmentedScale.SegTrans(self.lb, self.ub, self.points)
+from RMS.Misc import formatScientific, SegmentedScale
 
 # Now that the Scale class has been defined, it must be registered so
 # that ``matplotlib`` can find it.
