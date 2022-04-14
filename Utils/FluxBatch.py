@@ -933,8 +933,8 @@ if __name__ == "__main__":
             comb_sol%360,
             comb_flux,
             yerr=[comb_flux - comb_flux_lower, comb_flux_upper - comb_flux],
-            label="Weighted average flux at:\n" + \
-                "LM = +6.5$^{\\mathrm{M}}$, " + \
+            label="Weighted average flux at:\n" \
+                + "LM = +6.5$^{\\mathrm{M}}$, " \
                 + r"(${:s}$ g)".format(formatScientific(1000*mass_lim, 0)),
             c='k',
             marker='o',
@@ -947,9 +947,9 @@ if __name__ == "__main__":
             comb_sol%360,
             comb_flux_lm_m,
             yerr=[comb_flux_lm_m - comb_flux_lm_m_lower, comb_flux_lm_m_upper - comb_flux_lm_m],
-            label="Flux (1/{:.2f}x) at:\n".format(lm_m_to_6_5_factor) +
-                "LM = {:+.2f}".format(lm_m_mean) + "$^{\\mathrm{M}}$, " + \
-                r"(${:s}$ g)".format(formatScientific(1000*mass_lim_lm_m_mean, 0)),
+            label="Flux (1/{:.2f}x) at:\n".format(lm_m_to_6_5_factor) \
+                + "LM = {:+.2f}".format(lm_m_mean) + "$^{\\mathrm{M}}$, " \
+                + r"(${:s}$ g)".format(formatScientific(1000*mass_lim_lm_m_mean, 0)),
             c='0.5',
             marker='o',
             linestyle='none',
@@ -969,7 +969,7 @@ if __name__ == "__main__":
                       # + ", $\\mathrm{m_{lim}} = $" + r"${:s}$ g ".format(formatScientific(1000*mass_lim, 0))
                       # + "at LM = +6.5$^{\\mathrm{M}}$"
                       )
-        ax[0].set_ylabel("Flux (meteoroids / 1000km$^2$ h)")
+        ax[0].set_ylabel("Flux (meteoroids / 1000 $\\cdot$ km$^2$ $\\cdot$ h)")
 
 
         ### Plot the ZHR on another axis ###
@@ -1018,7 +1018,7 @@ if __name__ == "__main__":
                 label="Min. TAP",
             )
 
-            ax[1].set_ylabel("TAP (1000 km$^2$ h)")
+            ax[1].set_ylabel("TAP (1000 $\\cdot$ km$^2$ $\\cdot$ h)")
 
 
             # Plot the number of meteors on the right axis
@@ -1146,7 +1146,7 @@ if __name__ == "__main__":
             lm_ax.legend(lines + lines2, labels + labels2)
 
 
-        ax[subplot_rows-1].set_xlabel("$\\lambda_\\odot$ (deg)")
+        ax[subplot_rows - 1].set_xlabel("Solar longitude (deg)")
 
 
 

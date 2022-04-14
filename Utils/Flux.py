@@ -370,7 +370,7 @@ def calculateZHR(flux_lm_6_5, population_index):
         flux_lm_6_5 = np.array(flux_lm_6_5)
 
     # Compute ZHR (Rentdel & Koschak, 1990 paper 2 method)
-    zhr = (flux_lm_6_5)*37.2/((13.1*population_index - 16.5)*(population_index - 1.3)**0.748)
+    zhr = flux_lm_6_5*37.2/((13.1*population_index - 16.5)*(population_index - 1.3)**0.748)
 
     return zhr
 
