@@ -1918,7 +1918,8 @@ def computeFluxCorrectionsOnBins(
 
 
         ### Compute the radiant elevation at the middle of the time bin ###
-        ra, dec, v_init = shower.computeApparentRadiant(platepar.lat, platepar.lon, jd_mean)
+        ra, dec, v_init = shower.computeApparentRadiant(platepar.lat, platepar.lon, jd_mean, \
+            meteor_fixed_ht=meteor_ht)
         radiant_azim, radiant_elev = raDec2AltAz(ra, dec, jd_mean, platepar.lat, platepar.lon)
 
         # Compute the mean meteor height
@@ -2713,6 +2714,11 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 curr_bin_start += dt
 
 
+        # Compute the mean meteor height
+        meteor_ht_beg = heightModel(1000*shower.vg, ht_type='beg')
+        meteor_ht_end = heightModel(1000*shower.vg, ht_type='end')
+        meteor_ht = (meteor_ht_beg + meteor_ht_end)/2
+
 
         ### Sort meteors into bins ###
 
@@ -2720,7 +2726,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             meteor_date = jd2Date(meteor.jdt_ref, dt_obj=True)
 
             # Filter out meteors ending too close to the radiant
-            ra, dec, _ = shower.computeApparentRadiant(platepar.lat, platepar.lon, meteor.jdt_ref)
+            ra, dec, _ = shower.computeApparentRadiant(platepar.lat, platepar.lon, meteor.jdt_ref, \
+                meteor_fixed_ht=meteor_ht)
             radiant_azim, radiant_elev = raDec2AltAz(ra, dec, meteor.jdt_ref, platepar.lat, platepar.lon)
 
             # Skip meteors don't belonging to the shower, outside the bin, and too close to the radiant
@@ -2823,14 +2830,12 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         )
         azim_mid, elev_mid = raDec2AltAz(ra_mid[0], dec_mid[0], J2000_JD.days, platepar.lat, platepar.lon)
 
-
-        # Compute the range to the middle point
-        ref_ht = 100000
+        # Compute the range to the middle point at the meteor layer
         r_mid, _, _, _ = xyHt2Geo(
             platepar,
             platepar.X_res/2,
             platepar.Y_res/2,
-            ref_ht,
+            meteor_ht,
             indicate_limit=True,
             elev_limit=flux_config.elev_limit,
         )
@@ -2846,7 +2851,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         jd_night_mid = (datetime2JD(dt_beg) + datetime2JD(dt_end))/2
 
         # Compute the apparent radiant
-        ra, dec, v_init = shower.computeApparentRadiant(platepar.lat, platepar.lon, jd_night_mid)
+        ra, dec, v_init = shower.computeApparentRadiant(platepar.lat, platepar.lon, jd_night_mid, \
+            meteor_fixed_ht=meteor_ht)
 
         # Compute the radiant elevation
         radiant_azim, radiant_elev = raDec2AltAz(ra, dec, jd_night_mid, platepar.lat, platepar.lon)
