@@ -52,6 +52,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='
 
     if extract_format is None:
         extract_format = 'png'
+        save_frames = True
     
     name = fr_path
     fr = FRbin.read(dir_path, fr_path)
