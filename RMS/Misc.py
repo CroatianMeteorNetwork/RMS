@@ -10,13 +10,14 @@ import subprocess
 import random
 import string
 import inspect
+import sys
 
 
 # tkinter import that works on both Python 2 and 3
-try:
+if sys.version_info[0] >= 3:
     import tkinter
     from tkinter import filedialog
-except:
+else:
     import Tkinter as tkinter
     import tkFileDialog as filedialog
 
@@ -186,10 +187,10 @@ def ping(host):
     """
 
     # Ping command count option as function of OS
-    param = '-n 1' if platform.system().lower()=='windows' else '-c 1'
-
-    # Building the command. Ex: "ping -c 1 google.com"
-    command = ['ping', param, host]
+    if platform.system().lower()=='windows':
+        command = ['ping', '-n', '1', host]
+    else:
+        command = ['ping', '-c', '1', host]
 
     # Pinging
     return subprocess.call(command) == 0
