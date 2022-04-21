@@ -936,6 +936,7 @@ if __name__ == "__main__":
             label="Weighted average flux at:\n" \
                 + "LM = +6.5$^{\\mathrm{M}}$, " \
                 + r"(${:s}$ g)".format(formatScientific(1000*mass_lim, 0)),
+                #+ "$m_{\\mathrm{lim}} = $" + "${:s}$".format(formatScientific(1000*mass_lim, 0)) + " g (+6.5$^{\\mathrm{M}}$)",
             c='k',
             marker='o',
             linestyle='none',
@@ -950,6 +951,7 @@ if __name__ == "__main__":
             label="Flux (1/{:.2f}x) at:\n".format(lm_m_to_6_5_factor) \
                 + "LM = {:+.2f}".format(lm_m_mean) + "$^{\\mathrm{M}}$, " \
                 + r"(${:s}$ g)".format(formatScientific(1000*mass_lim_lm_m_mean, 0)),
+                #+ "$m_{\\mathrm{lim}} = $" + "${:s}$".format(formatScientific(1000*mass_lim_lm_m_mean, 0)) + " g ({:+.2f}".format(lm_m_mean) + "$^{\\mathrm{M}}$) ", \
             c='0.5',
             marker='o',
             linestyle='none',
