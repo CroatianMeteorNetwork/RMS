@@ -308,12 +308,11 @@ def estimateMeteorHeight(config, meteor_obj, shower):
     # Compute the angle between the begin and the end point of the meteor (rad)
     ang_beg_end = np.arccos(np.dot(vectNorm(beg_vect_horiz), vectNorm(end_vect_horiz)))
 
-    # Compute the angle between the radiant vector and the begin point (rad)
-    ang_beg_rad = np.arccos(np.dot(vectNorm(radiant_vector_horiz), -vectNorm(beg_vect_horiz)))
-
+    # Compute the angle between the radiant vector and the end point (rad)
+    ang_end_rad = np.arccos(np.dot(vectNorm(radiant_vector_horiz), -vectNorm(end_vect_horiz)))
 
     # Compute the distance from the station to the begin point (meters)
-    dist_beg = dist*np.sin(ang_beg_rad)/np.sin(ang_beg_end)
+    dist_beg = dist*np.sin(ang_end_rad)/np.sin(ang_beg_end)
 
 
     # Compute the height using the law of cosines
