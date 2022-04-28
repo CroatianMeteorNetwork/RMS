@@ -266,7 +266,7 @@ def estimateMeteorHeight(config, meteor_obj, shower):
         shower: [Shower instance]
 
     Return:
-        ht: [float] Estimated height in meters.
+        (ht_b, ht_e): [tuple of floats] Estimated begin and end heights in meters.
     """
 
     ### Compute all needed values in alt/az coordinates ###
@@ -306,22 +306,34 @@ def estimateMeteorHeight(config, meteor_obj, shower):
     dist = shower.v_init*meteor_obj.duration
 
     # Compute the angle between the begin and the end point of the meteor (rad)
-    ang_beg_end = np.arccos(np.dot(vectNorm(beg_vect_horiz), vectNorm(end_vect_horiz)))
+    theta_met = np.arccos(np.dot(vectNorm(beg_vect_horiz), vectNorm(end_vect_horiz)))
 
     # Compute the angle between the radiant vector and the end point (rad)
-    ang_end_rad = np.arccos(np.dot(vectNorm(radiant_vector_horiz), -vectNorm(end_vect_horiz)))
+    theta_beg = np.arccos(np.dot(vectNorm(radiant_vector_horiz), -vectNorm(end_vect_horiz)))
+
+    # Compute the angle between the radiant vector and the begin point (rad)
+    theta_end = np.arccos(np.dot(-vectNorm(radiant_vector_horiz), -vectNorm(beg_vect_horiz)))
 
     # Compute the distance from the station to the begin point (meters)
-    dist_beg = dist*np.sin(ang_end_rad)/np.sin(ang_beg_end)
+    dist_beg = dist*np.sin(theta_beg)/np.sin(theta_met)
+
+    # Compute the distance from the station to the end point (meters)
+    dist_end = dist*np.sin(theta_end)/np.sin(theta_met)
 
 
-    # Compute the height using the law of cosines
-    ht  = np.sqrt(dist_beg**2 + re_dist**2 - 2*dist_beg*re_dist*np.cos(np.radians(90 + meteor_obj.beg_alt)))
-    ht -= earth_radius
-    ht  = abs(ht)
+    # Compute the height of the begin point using the law of cosines
+    ht_b  = np.sqrt(dist_beg**2 + re_dist**2 - 2*dist_beg*re_dist*np.cos(np.radians(90 + meteor_obj.beg_alt)))
+    ht_b -= earth_radius
+    ht_b  = abs(ht_b)
 
 
-    return ht
+    # Compute the height of the end point using the law of cosines
+    ht_e  = np.sqrt(dist_end**2 + re_dist**2 - 2*dist_end*re_dist*np.cos(np.radians(90 + meteor_obj.end_alt)))
+    ht_e -= earth_radius
+    ht_e  = abs(ht_e)
+
+
+    return ht_b, ht_e
 
 
 
@@ -498,15 +510,15 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             # Shorter
             meteor_obj_m1 = copy.deepcopy(meteor_obj_orig)
             meteor_obj_m1.duration -= 1.0/config.fps
-            meteor_beg_ht_m1 = estimateMeteorHeight(config, meteor_obj_m1, shower)
+            meteor_beg_ht_m1 = np.mean(estimateMeteorHeight(config, meteor_obj_m1, shower))
 
             # Nominal
-            meteor_beg_ht = estimateMeteorHeight(config, meteor_obj_orig, shower)
+            meteor_beg_ht = np.mean(estimateMeteorHeight(config, meteor_obj_orig, shower))
 
             # Longer
             meteor_obj_p1 = copy.deepcopy(meteor_obj_orig)
             meteor_obj_p1.duration += 1.0/config.fps
-            meteor_beg_ht_p1 = estimateMeteorHeight(config, meteor_obj_p1, shower)
+            meteor_beg_ht_p1 = np.mean(estimateMeteorHeight(config, meteor_obj_p1, shower))
 
 
             meteor_obj = meteor_obj_orig
