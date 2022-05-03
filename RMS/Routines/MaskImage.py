@@ -21,6 +21,8 @@ import os
 import zipfile
 
 import numpy as np
+import cv2
+
 from RMS.Routines.Image import loadImage
 
 # Get the logger from the main module
@@ -99,10 +101,18 @@ def loadMask(mask_file):
 
     # Load the mask file
     try:
+
+        # Load a mask from zip
         if mask_file.endswith('.zip'):
-            archive = zipfile.ZipFile(mask_file, 'r')
-            mask_file = archive.open('mask.bmp')
-        mask = loadImage(mask_file, flatten=0)
+
+            with zipfile.ZipFile(mask_file, 'r') as archive:
+                
+                data = archive.read('mask.bmp')
+                mask = cv2.imdecode(np.frombuffer(data, np.uint8), 1)
+
+        else:
+                
+            mask = loadImage(mask_file, flatten=0)
         
     except:
         print("WARNING! The mask file could not be loaded! File path: {:s}".format(mask_file))

@@ -510,15 +510,15 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             # Shorter
             meteor_obj_m1 = copy.deepcopy(meteor_obj_orig)
             meteor_obj_m1.duration -= 1.0/config.fps
-            meteor_beg_ht_m1 = np.mean(estimateMeteorHeight(config, meteor_obj_m1, shower))
+            meteor_ht_m1 = np.mean(estimateMeteorHeight(config, meteor_obj_m1, shower))
 
             # Nominal
-            meteor_beg_ht = np.mean(estimateMeteorHeight(config, meteor_obj_orig, shower))
+            meteor_ht = np.mean(estimateMeteorHeight(config, meteor_obj_orig, shower))
 
             # Longer
             meteor_obj_p1 = copy.deepcopy(meteor_obj_orig)
             meteor_obj_p1.duration += 1.0/config.fps
-            meteor_beg_ht_p1 = np.mean(estimateMeteorHeight(config, meteor_obj_p1, shower))
+            meteor_ht_p1 = np.mean(estimateMeteorHeight(config, meteor_obj_p1, shower))
 
 
             meteor_obj = meteor_obj_orig
@@ -527,9 +527,9 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             ### ###
 
             # If all heights (even those with +/- 1 frame) are outside the height range, reject the meteor
-            if ((meteor_beg_ht_p1 < filter_end_ht) or (meteor_beg_ht_p1 > filter_beg_ht)) and \
-                ((meteor_beg_ht    < filter_end_ht) or (meteor_beg_ht    > filter_beg_ht)) and \
-                ((meteor_beg_ht_m1 < filter_end_ht) or (meteor_beg_ht_m1 > filter_beg_ht)):
+            if ((meteor_ht_p1 < filter_end_ht) or (meteor_ht_p1 > filter_beg_ht)) and \
+                ((meteor_ht    < filter_end_ht) or (meteor_ht    > filter_beg_ht)) and \
+                ((meteor_ht_m1 < filter_end_ht) or (meteor_ht_m1 > filter_beg_ht)):
 
                 continue
 
