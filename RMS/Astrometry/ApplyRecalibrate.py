@@ -50,8 +50,8 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
             list of star coordinates.
         catalog_stars: [ndarray] A numpy array of catalog stars which should be on the image.
     Keyword argumnets:
-        max_radius: [float] Maximum radius used for star matching. None by default, which uses all hardcoded
-            values.
+        max_match_radius: [float] Maximum radius used for star matching. None by default, which uses all 
+            hardcoded values.
         force_platepar_save: [bool] Skip the goodness of fit check and save the platepar.
     Return:
         result: [?] A Platepar instance if refinement is successful, None if it failed.
@@ -64,6 +64,10 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
     min_radius = 0.5
     max_radius = 10
     radius_list = [max_radius, 5, 3, 1.5, min_radius]
+
+    # Scale these values to the image resolution, taking 720p as the base resolution
+    scaling_factor = np.hypot(config.width, config.height)/np.hypot(1280, 720)
+    radius_list = [scaling_factor*r for r in radius_list]
 
 
     # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
