@@ -67,6 +67,8 @@ def recalibrateFF(config, working_platepar, jd, star_dict_ff, catalog_stars, max
 
     # Scale these values to the image resolution, taking 720p as the base resolution
     scaling_factor = np.hypot(config.width, config.height)/np.hypot(1280, 720)
+    if scaling_factor < 1: 
+        scaling_factor = 1.0
     radius_list = [scaling_factor*r for r in radius_list]
 
 
