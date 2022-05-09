@@ -530,7 +530,13 @@ if __name__ == "__main__":
                 ftp_dir_path = os.path.dirname(ftpdetectinfo_path)
 
                 # Load the config file
-                config = cr.loadConfigFromDirectory('.', ftp_dir_path)
+                try:
+                    config = cr.loadConfigFromDirectory('.', ftp_dir_path)
+
+                except RuntimeError:
+                    print("The config file could not be loaded! Skipping...")
+                    continue
+
                 if time_intervals is None:
                     
                     # Find time intervals to compute flux with
