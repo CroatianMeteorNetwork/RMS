@@ -3321,6 +3321,11 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
 
     """
 
+    # Skip the flux part if running Python 2
+    if sys.version_info[0] < 3:
+        print("The flux code can only run on Python 3+ !")
+        return None
+
 
     # Init the flux configuration
     flux_config = FluxConfig()
@@ -3354,11 +3359,6 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
     # Run cloud detection and store the approprite files
     print("Detecting clouds...")
     time_intervals = detectClouds(config, dir_path, mask=mask, save_plots=True, show_plots=False)
-
-    # Skip the flux part if running Python 2
-    if sys.version_info[0] < 3:
-        print("The flux code can only run on Python 3+ !")
-        return None
 
     ### Go through every shower that was active and prepare compute the flux ###
 
