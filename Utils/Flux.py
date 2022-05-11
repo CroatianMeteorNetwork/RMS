@@ -1036,7 +1036,8 @@ def detectMoon(file_list, platepar, config):
     return new_file_list
 
 
-def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=False, ratio_threshold=0.5):
+def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=False, ratio_threshold=0.5, 
+    only_recalibrate_pp=False):
     """Detect clouds based on the number of stars detected in images compared to how many are
     predicted.
 
@@ -1051,6 +1052,8 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         save_plots: [bool] Save the plots to disk. False by default
         ratio_threshold: [float] If the ratio of matched/predicted number of stars below this threshold,
             it is assumed that the sky is cloudy.
+        only_recalibrate_pp: [bool] If True, only the platepar recalibration step will be completed, without
+            continuing further. False by default.
 
     Return:
         time_intervals [list of tuple]: list of datetime pairs in tuples, representing the starting
@@ -1120,15 +1123,25 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         print("Recalibrated platepar file not available!")
         print("Recalibrating...")
 
+        # Recalibrate the platepar and store the recalibrated files to disk
         recalibrated_platepars = recalibrateSelectedFF(
             dir_path,
             recorded_files,
             star_list,
             config,
             stellarLMModel(platepar.mag_lev),
+            config.platepars_flux_recalibrated_name,
             ignore_distance_threshold=True,
         )
+
+    # Skip the rest if this flag is on. This is used on Python 2 systems, as the rest of the code doesn't play
+    #   nice with anything except Python 3
+    if only_recalibrate_pp:
+        return None
+
+
     recorded_files = list(recalibrated_platepars.keys())
+
 
     # Extract the number of matches stars between the catalog and the image
     matched_count = {ff: len(recalibrated_platepars[ff].star_list) \
@@ -3321,11 +3334,6 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
 
     """
 
-    # Skip the flux part if running Python 2
-    if sys.version_info[0] < 3:
-        print("The flux code can only run on Python 3+ !")
-        return None
-
 
     # Init the flux configuration
     flux_config = FluxConfig()
@@ -3351,14 +3359,24 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
 
 
     # Computes FWHM of stars
-    getSensorCharacterization(dir_path, config, flux_config, meteor_data, default_fwhm=flux_config.default_fwhm)
+    getSensorCharacterization(dir_path, config, flux_config, meteor_data, \
+        default_fwhm=flux_config.default_fwhm)
 
     # Compute collecting areas
     getCollectingArea(dir_path, config, flux_config, platepar, mask)
 
-    # Run cloud detection and store the approprite files
+    # Run cloud detection and store the approprite files (don't finish if Python 2 is used, 
+    #   just recalibrate the platepar)
     print("Detecting clouds...")
-    time_intervals = detectClouds(config, dir_path, mask=mask, save_plots=True, show_plots=False)
+    time_intervals = detectClouds(config, dir_path, mask=mask, save_plots=True, show_plots=False, 
+        only_recalibrate_pp=(sys.version_info[0] < 3))
+
+
+    # Skip the flux part if running Python 2
+    if sys.version_info[0] < 3:
+        print("The flux code can only run on Python 3+ !")
+        return None
+
 
     ### Go through every shower that was active and prepare compute the flux ###
 

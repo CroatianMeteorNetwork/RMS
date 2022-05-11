@@ -360,6 +360,11 @@ def recalibratePlateparsForFF(
         catalog_stars: [list] A list of entries [[ff_name, star_coordinates], ...].
         config: [config]
 
+    Keyword arguments:
+        lim_mag: [float]
+        ignore_distance_threshold: [bool] Don't consider the recalib as failed if the median distance
+            is larger than the threshold.
+
     Returns:
         recalibrated_platepars: [dict] A dictionary where one key is ff file name and the value is
             a calibrated corresponding platepar.
@@ -491,16 +496,22 @@ def recalibratePlateparsForFF(
     return recalibrated_platepars
 
 
-def recalibrateSelectedFF(
-    dir_path, ff_file_names, calstars_list, config, lim_mag, ignore_distance_threshold=False
-):
-    """Recalibrate FF files, ignoring whether there are detections
+def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config, lim_mag, \
+    pp_recalib_name, ignore_distance_threshold=False):
+    """Recalibrate FF files, ignoring whether there are detections.
 
     Arguments:
         dir_path: [str] Path where the FF files are.
         ff_file_names: [str] List of ff files to recalibrate platepars to
         calstars_list: [list] A list of entries [[ff_name, star_coordinates], ...].
         config: [Config instance]
+        lim_mag: [float] Limiting magnitude for the catalog.
+        pp_recalib_name: [str] Name for the file where the recalibrated platepars will be stored as JSON.
+
+    Keyword arguments:
+        ignore_distance_threshold: [bool] Don't consider the recalib as failed if the median distance
+            is larger than the threshold.
+
     Return:
         recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are
             recalibrated platepar instances for every FF file.
@@ -541,13 +552,14 @@ def recalibrateSelectedFF(
         ignore_distance_threshold=ignore_distance_threshold,
     )
 
-    # # store recalibrated platepars in json
+    # Store recalibrated platepars in json
     all_pps = {}
     for ff_name in recalibrated_platepars:
         json_str = recalibrated_platepars[ff_name].jsonStr()
         all_pps[ff_name] = json.loads(json_str)
 
-    with open(os.path.join(dir_path, config.platepars_flux_recalibrated_name), 'w') as f:
+    with open(os.path.join(dir_path, pp_recalib_name), 'w') as f:
+        
         # Convert all platepars to a JSON file
         out_str = json.dumps(all_pps, default=lambda o: o.__dict__, indent=4, sort_keys=True)
         f.write(out_str)

@@ -1192,7 +1192,7 @@ if __name__ == "__main__":
                 fout.write("# Min bin duration = {:.2f} h\n".format(min_bin_duration))
                 fout.write("# Max bin duration = {:.2f} h\n".format(max_bin_duration))
                 fout.write(
-                    "# Sol bin start (deg), Mean Sol (deg), Flux@+6.5M (met / 1000 km^2 h), Flux CI low, Flux CI high, Flux@+{:.2f}M (met / 1000 km^2 h), Flux CI low, Flux CI high, ZHR, ZHR lower, ZHR upper, Meteor Count, Time-area product (corrected to +6.5M) (1000 km^2/h), Meteor LM, Radiant elev (deg), Radiat dist (deg), Ang vel (deg/s)\n".format(lm_m_mean)
+                    "# Sol bin start (deg), Mean Sol (deg), Flux@+6.5M (met / 1000 km^2 h), Flux CI low, Flux CI high, Flux@+{:.2f}M (met / 1000 km^2 h), Flux CI low, Flux CI high, ZHR, ZHR CI low, ZHR CI high, Meteor Count, Time-area product (corrected to +6.5M) (1000 km^2/h), Meteor LM, Radiant elev (deg), Radiat dist (deg), Ang vel (deg/s)\n".format(lm_m_mean)
                 )
                 for (_sol_bin_start,
                     _mean_sol,
