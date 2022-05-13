@@ -27,6 +27,7 @@ from RMS.UploadManager import UploadManager
 from RMS.Routines.Image import saveImage
 from RMS.Routines.MaskImage import loadMask
 from Utils.CalibrationReport import generateCalibrationReport
+from Utils.Flux import prepareFluxFiles
 from Utils.FOVKML import fovKML
 from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
@@ -264,18 +265,18 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                     log.info("Loaded mask: {:s}".format(mask_path))
 
                 # Generate the KML (only the FOV is shown, without the station) - 100 km
-                kml_file100 = fovKML(config, night_data_dir, platepar, mask=mask, plot_station=False, \
+                kml_file100 = fovKML(night_data_dir, platepar, mask=mask, plot_station=False, \
                     area_ht=100000)
                 kml_files.append(kml_file100)
 
 
                 # Generate the KML (only the FOV is shown, without the station) - 70 km
-                kml_file70 = fovKML(config, night_data_dir, platepar, mask=mask, plot_station=False, \
+                kml_file70 = fovKML(night_data_dir, platepar, mask=mask, plot_station=False, \
                     area_ht=70000)
                 kml_files.append(kml_file70)
 
                 # Generate the KML (only the FOV is shown, without the station) - 25 km
-                kml_file25 = fovKML(config, night_data_dir, platepar, mask=mask, plot_station=False, \
+                kml_file25 = fovKML(night_data_dir, platepar, mask=mask, plot_station=False, \
                     area_ht=25000)
                 kml_files.append(kml_file25)
 
@@ -283,6 +284,17 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
             except Exception as e:
                 log.debug("Generating a FOV KML file failed with the message:\n" + repr(e))
+                log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+
+
+            # Prepare the flux files
+            log.info("Preparing flux files...")
+            try:
+                prepareFluxFiles(config, night_data_dir, os.path.join(night_data_dir, ftpdetectinfo_name))
+
+            except Exception as e:
+                log.debug("Preparing flux files failed with the message:\n" + repr(e))
                 log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
@@ -368,6 +380,12 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     if len(kml_files):
         extra_files += kml_files
 
+
+    # Add all flux related files
+    if (not nodetect):
+        for file_name in sorted(os.listdir(night_data_dir)):
+            if ("flux" in file_name) and (file_name.endswith(".json") or file_name.endswith(".ecsv")):
+                extra_files.append(os.path.join(night_data_dir, file_name))
 
 
     # If FFs are not uploaded, choose two to upload

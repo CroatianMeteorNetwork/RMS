@@ -2,16 +2,12 @@
 
 import os
 
-
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.ndimage
 import scipy.optimize
-
-
 from RMS.Formats.FFfile import read as readFF
-from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
-
+from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, readFTPdetectinfo
 
 
 def mapCoordinatesToRotatedImage(img, x, y, rot):
@@ -55,7 +51,6 @@ if __name__ == "__main__":
     import argparse
 
     ### COMMAND LINE ARGUMENTS
-
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="""Plot the meteor PSF profile from the detection and FF file.""", \
         formatter_class=argparse.RawTextHelpFormatter)
@@ -91,7 +86,7 @@ if __name__ == "__main__":
 
 
     # Load the FTPdetectinfo file
-    meteor_list = readFTPdetectinfo(*os.path.split(cml_args.ftpdetectinfo[0]))
+    meteor_list = readFTPdetectinfo(*os.path.split(findFTPdetectinfoFile(cml_args.ftpdetectinfo[0])))
 
 
     # Find the FF file among the detections

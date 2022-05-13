@@ -1,8 +1,8 @@
-from __future__ import print_function, absolute_import
+from __future__ import absolute_import, print_function
 
-import ephem
 import datetime
 
+import ephem
 
 
 def captureDuration(lat, lon, elevation, current_time=None):
@@ -65,9 +65,7 @@ def captureDuration(lat, lon, elevation, current_time=None):
     duration = duration.total_seconds()
 
     return start_time, duration
-    
-
-
+        
 
 if __name__ == "__main__":
     

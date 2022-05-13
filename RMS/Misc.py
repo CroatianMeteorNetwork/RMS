@@ -23,6 +23,10 @@ except:
 
 import numpy as np
 
+from matplotlib import scale as mscale
+from matplotlib import transforms as mtransforms
+from matplotlib.ticker import FixedLocator
+
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -139,6 +143,51 @@ def openFileDialog(dir_path, initialfile, title, mpl, filetypes=()):
 
 
     return file_name
+
+
+class SegmentedScale(mscale.ScaleBase):
+    """ Segmented scale used to defining flux and ZHR on the same graph. """
+    name = 'segmented'
+
+    def __init__(self, axis, **kwargs):
+        mscale.ScaleBase.__init__(self, axis)
+        self.points = kwargs.get('points', [0, 1])
+        self.lb = self.points[0]
+        self.ub = self.points[-1]
+
+    def get_transform(self):
+        return self.SegTrans(self.lb, self.ub, self.points)
+
+    def set_default_locators_and_formatters(self, axis):
+        axis.set_major_locator(FixedLocator(self.points))
+
+    def limit_range_for_scale(self, vmin, vmax, minpos):
+        return max(vmin, self.lb), min(vmax, self.ub)
+
+    class SegTrans(mtransforms.Transform):
+        input_dims = 1
+        output_dims = 1
+        is_separable = True
+
+        def __init__(self, lb, ub, points):
+            mtransforms.Transform.__init__(self)
+            self.lb = lb
+            self.ub = ub
+            self.points = points
+
+        def transform_non_affine(self, a):
+            masked = a # ma.masked_where((a < self.lb) | (a > self.ub), a)
+            return np.interp(masked, self.points, np.arange(len(self.points)))
+
+        def inverted(self):
+            return SegmentedScale.InvertedSegTrans(self.lb, self.ub, self.points)
+
+    class InvertedSegTrans(SegTrans):
+
+        def transform_non_affine(self, a):
+            return np.interp(a, np.arange(len(self.points)), self.points)
+        def inverted(self):
+            return SegmentedScale.SegTrans(self.lb, self.ub, self.points)
 
 
 def openFolderDialog(initialdir, title, mpl):
@@ -354,3 +403,25 @@ def decimalDegreesToSexHours(val):
     ss = ((val - hh)*60 - mm)*60
 
     return sign, hh, mm, ss
+
+
+
+def formatScientific(val, dec_places):
+    """ Format a given number in the scientific notation such that it looks like e.g. 2.1 x 10^3. The
+        string is returned in the LaTex format that can be given to matplotlib.
+
+    Source: https://stackoverflow.com/questions/31453422/displaying-numbers-with-x-instead-of-e-scientific-notation-in-matplotlib/31453961
+
+    Arguments:
+        val: [float] Input value.
+        dec_places: [int] Number of decimal places.
+
+    Return:
+        [str] Formatted Latex string.
+
+    """
+    
+    s = '{val:0.{dec_places:d}e}'.format(val=val, dec_places=dec_places)
+    m, e = s.split('e')
+
+    return r'{m:s}\times 10^{{{e:d}}}'.format(m=m, e=int(e))
