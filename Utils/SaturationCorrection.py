@@ -1,28 +1,26 @@
 """ Given the FTPdetectinfo file (assuming FF files are available) and the stddev of Gaussian PSF of the image,
     correct the magnitudes and levels in the file for saturation. """
 
-from __future__ import print_function, division, absolute_import
+from __future__ import absolute_import, division, print_function
 
-import os
 import datetime
-
-import numpy as np
+import os
 
 import matplotlib.pyplot as plt
-
-from RMS.Formats.FFfile import validFFName
+import numpy as np
 from RMS.Formats.FFfile import read as readFF
-from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
-from RMS.Routines.Image import thickLine, loadFlat, applyFlat
-from Utils.SaturationSimulation import findUnsaturatedMagnitude
+from RMS.Formats.FFfile import validFFName
+from RMS.Formats.FTPdetectinfo import (findFTPdetectinfoFile,
+                                       readFTPdetectinfo, writeFTPdetectinfo)
+from RMS.Routines.Image import applyFlat, loadFlat, thickLine
 
+from Utils.SaturationSimulation import findUnsaturatedMagnitude
 
 if __name__ == "__main__":
 
     import argparse
 
     ### COMMAND LINE ARGUMENTS
-
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Correct the magnitudes in the FTPdetectinfo file for saturation.")
 
@@ -46,6 +44,7 @@ if __name__ == "__main__":
 
     # Read command line arguments
     ftpdetectinfo_path = cml_args.ftpdetectinfo_path[0]
+    ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path)
     dir_path, ftpdetectinfo_name = os.path.split(ftpdetectinfo_path)
 
     gauss_sigma = cml_args.psf_sigma[0]
