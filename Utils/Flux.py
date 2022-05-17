@@ -3450,6 +3450,7 @@ def fluxParser():
     flux_parser.add_argument(
         "-c",
         "--config",
+        nargs=1,
         metavar="CONFIG_PATH",
         type=str,
         default='.',
