@@ -1,6 +1,7 @@
 """ Freeing up space for new observations by deleting old files. """
 
 
+import sys
 import ctypes
 import os
 import platform
@@ -16,6 +17,20 @@ from RMS.CaptureDuration import captureDuration
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
+
+
+# Python 2 doesn't have the timestamp function, so make one
+if (sys.version_info[0] < 3) or (sys.version_info[1] < 4):
+    
+    # python version < 3.3
+    def timestamp(date):
+        return time.mktime(date.timetuple())
+
+else:
+
+    def timestamp(date):
+        return date.timestamp()
+
 
 
 def availableSpace(dirname):
@@ -326,13 +341,13 @@ def deleteOldLogfiles(data_dir, config, days_to_keep=None):
     """
     log_dir = os.path.join(data_dir, config.log_dir)
     
-    # date to purge before
+    # Date to purge before
     if days_to_keep is None:
         days_to_keep = int(config.logdays_to_keep)
     date_to_purge_to = datetime.datetime.now() - datetime.timedelta(days=days_to_keep)
-    date_to_purge_to = date_to_purge_to.timestamp()
+    date_to_purge_to = timestamp(date_to_purge_to)
 
-    # only going to purge RMS log files
+    # Only going to purge RMS log files
     flist = glob.glob1(log_dir, 'log*.log*')
     for fl in flist:
         file_mtime = os.stat(os.path.join(log_dir, fl)).st_mtime
