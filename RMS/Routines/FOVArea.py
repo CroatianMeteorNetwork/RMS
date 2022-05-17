@@ -83,7 +83,9 @@ def fovArea(platepar, mask=None, area_ht=100000, side_points=10, elev_limit=5):
     # If the mask has wrong dimensions, disregard it
     if mask is not None:
         if (mask.img.shape[0] != platepar.Y_res) or (mask.img.shape[1] != platepar.X_res):
-            print("The mask has the wrong shape: {:s}, so it will be ignored!".format(str(mask.img.shape[::-1])))
+            print("The mask has the wrong shape, so it will be ignored!")
+            print("    Mask     = {:d}x{:d}".format(mask.img.shape[1], mask.img.shape[0]))
+            print("    Platepar = {:d}x{:d}".format(platepar.X_res, platepar.Y_res))
             mask = None
 
     # If the mask is not given, make a dummy mask with all white pixels

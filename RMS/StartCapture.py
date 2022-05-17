@@ -690,6 +690,7 @@ if __name__ == "__main__":
 
         except:
             log.error('Given duration is not a proper number of hours!')
+            sys.exit()
 
 
 
