@@ -834,7 +834,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                             shower_name = shower.name
 
                             # Create link to the IAU database of showers
-                            iau_link = "https://www.ta3.sk/IAUC22DB/MDC2007/Roje/pojedynczy_obiekt.php?kodstrumienia={:05d}".format(shower.iau_code)
+                            iau_link = "https://www.ta3.sk/IAUC22DB/MDC2007/Roje/pojedynczy_obiekt.php?kodstrumienia={:05d}".format(shower.iau_code_int)
 
                         else:
                             shower_name = "..."
