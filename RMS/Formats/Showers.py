@@ -28,6 +28,20 @@ class Shower(object):
         self.name = shower_entry[1]
         self.name_full = shower_entry[2]
 
+        # Generate a unique integer code based on the IAU code (which may have letters)
+        self.iau_code_int_unique = ""
+        self.iau_code_int = ""
+        for c in str(self.iau_code):
+            if c.isdigit():
+                self.iau_code_int_unique += c
+                self.iau_code_int += c
+            else:
+                self.iau_code_int_unique += str(ord(c))
+
+        self.iau_code_int = int(self.iau_code_int)
+        self.iau_code_int_unique = int(self.iau_code_int_unique)
+        
+
         self.lasun_beg = float(shower_entry[3]) # deg
         self.lasun_max = float(shower_entry[4]) # deg
         self.lasun_end = float(shower_entry[5]) # deg
@@ -302,7 +316,7 @@ def sortShowersIntoRows(shower_data, color_map):
 
     # Generate an array of shower activity per 1 deg of solar longitude
     code_name_list = []
-    activity_stack = np.zeros((20, 360), dtype=np.uint16)
+    activity_stack = np.zeros((20, 360), dtype=np.uint32)
 
     for i in range(20):
         for sol_plot in range(0, 360):
@@ -312,7 +326,7 @@ def sortShowersIntoRows(shower_data, color_map):
                 continue
 
             for shower in shower_data:
-                code = int(shower.iau_code)
+                code = shower.iau_code_int_unique
                 name = shower.name
 
                 # Skip already assigned showers
@@ -371,7 +385,7 @@ def sortShowersIntoRows(shower_data, color_map):
     # Assign a color to each shower
     code_name_dict = {}
     for shower in shower_data:
-        code = int(shower.iau_code)
+        code = shower.iau_code_int_unique
         name = shower.name
 
         # Skip assigned showers
