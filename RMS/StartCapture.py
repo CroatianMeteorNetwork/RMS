@@ -203,6 +203,13 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         time.sleep(config.capture_wait_seconds)
 
 
+    # Add a note about Patreon supporters
+    print("################################################################")
+    print("Thanks to our Patreon supporters in the 'Dinosaur Killer' class:")
+    print("- Myron Valenta")
+    print("https://www.patreon.com/globalmeteornetwork")
+    print("################################################################")
+
     # Make a directory for the night
     mkdirP(night_data_dir)
 
@@ -683,6 +690,7 @@ if __name__ == "__main__":
 
         except:
             log.error('Given duration is not a proper number of hours!')
+            sys.exit()
 
 
 

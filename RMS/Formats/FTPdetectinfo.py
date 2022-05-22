@@ -14,12 +14,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import print_function, division, absolute_import
+from __future__ import absolute_import, division, print_function
 
-import os
 import datetime
-import git
+import os
 
+import git
 import numpy as np
 
 
@@ -161,6 +161,39 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
                         round(y, 2)) + " 000.00 000.00 000.00 000.00 " + "{:06d}".format(int(level)) \
                         + " 0.00\n")
 
+
+def findFTPdetectinfoFile(path):
+    """ Finds the FTPdetectinfo file in directory if path is a directory, otherwise will return the path """
+    if os.path.isfile(path):
+        return path
+
+    ftpdetectinfo_files = [filename for filename in os.listdir(path) if 'FTPdetectinfo_' in filename]
+
+
+    # Remove backup files from list
+    filtered_ftpdetectinfo_files = []
+    for filename in ftpdetectinfo_files:
+
+        if '_backup_' not in filename and os.path.basename(path).split('_')[0] in filename:
+            filtered_ftpdetectinfo_files.append(filename)
+
+    
+    ftpdetectinfo_files = list(filtered_ftpdetectinfo_files)
+
+    # If there are CAMS-style FTPdetectinfo files, skip them
+    if len(ftpdetectinfo_files) > 1:
+
+        for filename in ftpdetectinfo_files:
+            try:
+                int(filename.split("_")[1])
+            except:
+                return os.path.join(path, filename)
+
+
+    if len(ftpdetectinfo_files):
+        return os.path.join(path, ftpdetectinfo_files[0])
+
+    raise FileNotFoundError("FTPdetectinfo file not found")
 
 
 def readFTPdetectinfo(ff_directory, file_name, ret_input_format=False):

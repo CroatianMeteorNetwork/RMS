@@ -14,21 +14,21 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import print_function, division, absolute_import
+from __future__ import absolute_import, division, print_function
 
+import math
 import os
 import sys
-import math
 
 import RMS
 
 try:
     # Python 3
-    from configparser import RawConfigParser, NoOptionError 
+    from configparser import NoOptionError, RawConfigParser 
 
 except:
     # Python 2
-    from ConfigParser import RawConfigParser, NoOptionError
+    from ConfigParser import NoOptionError, RawConfigParser
     
 
 
@@ -166,7 +166,8 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
 
             # Locate all files in the data directory that end with '.config'
             config_files = [file_name for file_name in os.listdir(dir_path) \
-                if file_name.endswith('.config') or file_name.endswith('dfnstation.cfg')]
+                if (file_name.endswith('.config') or file_name.endswith('dfnstation.cfg')) \
+                and not (file_name == 'bak.config')]
 
             # If there is exactly one config file, use it
             if len(config_files) == 1:
@@ -183,7 +184,7 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
 
 
         if config_file is None:
-            print('The config file could not be found!')
+            print('The config file could not be found in directory:', dir_path, cml_args_config)
             sys.exit()
 
 
@@ -197,6 +198,7 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
     else:
         # Load the default configuration file
         config = parse(".config")
+        print("Loading the default config!")
 
 
     return config
@@ -441,22 +443,26 @@ class Config:
         self.star_catalog_band_ratios = [0.45, 0.70, 0.72, 0.50]
 
         self.platepar_name = 'platepar_cmn2010.cal'
+        self.platepars_flux_recalibrated_name = 'platepars_flux_recalibrated.json'
         self.platepars_recalibrated_name = 'platepars_all_recalibrated.json'
 
         # Name of the platepar file on the server
         self.platepar_remote_name = 'platepar_latest.cal'
         self.remote_platepar_dir = 'platepars'
 
-        self.catalog_mag_limit = 4.5
+        self.catalog_mag_limit = 5.5
 
         self.calstars_files_N = 400 # How many calstars FF files to evaluate
 
         self.calstars_min_stars = 500 # Minimum number of stars to use
 
-        self.dist_check_threshold = 0.33 # Minimum acceptable calibration residual (px)
-        self.dist_check_quick_threshold = 0.4 # Threshold for quick recalibration
+        # Minimum acceptable calibration residual (px)
+        self.dist_check_threshold = 0.33 
 
-        self.min_matched_stars = 7
+        # Threshold for quick recalibration (px)
+        self.dist_check_quick_threshold = 0.4 
+
+        self.min_matched_stars = 20
 
 
         ##### Thumbnails
@@ -473,6 +479,10 @@ class Config:
         # Path to the shower file
         self.shower_path = 'share'
         self.shower_file_name = 'established_showers.csv'
+
+        # Path to flux showers
+        self.showers_flux_file_name = 'flux_showers.csv'
+
 
         #### EGM96 vs WGS84 heights file
 
@@ -1263,8 +1273,11 @@ def parseCalibration(config, parser):
     if parser.has_option(section, "platepar_name"):
         config.platepar_name = parser.get(section, "platepar_name")
 
-    if parser.has_option(section, "platepars_all_recalibrated"):
-        config.platepars_all_recalibrated = parser.get(section, "platepars_all_recalibrated")
+    if parser.has_option(section, "platepars_flux_recalibrated_name"):
+        config.platepar_flux_recalibrated_name = parser.get(section, "platepars_flux_recalibrated_name")
+
+    if parser.has_option(section, "platepars_recalibrated_name"):
+        config.platepars_recalibrated_name = parser.get(section, "platepars_recalibrated_name")
 
     if parser.has_option(section, "platepar_remote_name"):
         config.platepar_remote_name = parser.get(section, "platepar_remote_name")
