@@ -479,6 +479,9 @@ class Config:
         # Path to flux showers
         self.showers_flux_file_name = 'flux_showers.csv'
 
+        # colour scheme to use for showers
+        self.shower_color_map = 'viridis'
+
 
         #### EGM96 vs WGS84 heights file
 
@@ -598,6 +601,7 @@ def parseConfigFile(config, parser):
     parseCalibration(config, parser)
     parseThumbnails(config, parser)
     parseStack(config, parser)
+    parseColors(config, parser)
 
 
 def parseDFNStation(config, parser):
@@ -1321,3 +1325,13 @@ def parseStack(config, parser):
 
     if parser.has_option(section, "stack_mask"):
         config.stack_mask = parser.getboolean(section, "stack_mask")
+
+
+def parseColors(config, parser):
+    section = "Colors"
+    
+    if not parser.has_section(section):
+        return
+
+    if parser.has_option(section, "shower_color_map"):
+        config.shower_color_map = parser.get(section, "shower_color_map")

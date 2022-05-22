@@ -339,7 +339,7 @@ def estimateMeteorHeight(config, meteor_obj, shower):
 
 
 def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=False, save_plot=False, \
-    plot_activity=False, flux_showers=False):
+    plot_activity=False, flux_showers=False, color_map='viridis'):
     """ Do single station shower association based on radiant direction and height. 
     
     Arguments:
@@ -581,7 +581,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
     if show_plot or save_plot:
 
         # Generate consistent colours
-        colors_by_name = makeShowerColors(shower_list)
+        colors_by_name = makeShowerColors(shower_list, color_map=color_map)
         def get_shower_color(shower):
             try:
                 return colors_by_name[shower.name] if shower else "0.4"
@@ -784,7 +784,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
                 # Plot the activity diagram
                 generateActivityDiagram(config, shower_list, ax_handle=ax_activity, \
-                    sol_marker=[sol_min, sol_max], colors=colors_by_name)
+                    sol_marker=[sol_min, sol_max], color_map=color_map)
 
 
         
@@ -928,6 +928,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-x', '--hideplot', action="store_true", \
         help="""Do not show the plot on the screen.""")
 
+    arg_parser.add_argument('-p', '--palette', metavar='PALETTE', type=str, \
+        help="color palette to use - one of viridis, gist_ncar, rainbow etc")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -964,11 +967,16 @@ if __name__ == "__main__":
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
     
+    # choose a colour scheme to use
+    if cml_args.palette is None:
+        color_map = config.shower_color_map
+    else:
+        color_map = cml_args.palette
 
     # Perform shower association
     associations, shower_counts = showerAssociation(config, ftpdetectinfo_path_list, \
         shower_code=cml_args.shower, show_plot=(not cml_args.hideplot), save_plot=True, plot_activity=True,
-        flux_showers=cml_args.fluxshowers)
+        flux_showers=cml_args.fluxshowers, color_map=color_map)
 
 
     # Print results to screen
