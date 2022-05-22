@@ -296,11 +296,11 @@ def getColorList(num, color_map=None):
     return colors
 
 
-def makeShowerColors(shower_data, color_map='viridis'):
+def makeShowerColors(shower_data, color_map):
     """ Generates a map of distinct colours indexed by shower name """
 
     # Sort showers into non-overlaping rows and assign them unique colors
-    _, code_name_dict = sortShowersIntoRows(shower_data)
+    _, code_name_dict = sortShowersIntoRows(shower_data, color_map)
 
     # Assign each color to shower name
     colors_by_name = {}
@@ -312,7 +312,7 @@ def makeShowerColors(shower_data, color_map='viridis'):
 
 
 
-def sortShowersIntoRows(shower_data):
+def sortShowersIntoRows(shower_data, color_map):
 
     # Generate an array of shower activity per 1 deg of solar longitude
     code_name_list = []
@@ -333,6 +333,10 @@ def sortShowersIntoRows(shower_data):
                 if code in code_name_list:
                     continue
 
+                # skip if shower doesn't have a stated start or end
+                if np.any(np.isnan([shower.lasun_beg, shower.lasun_end])):
+                    continue 
+                
                 sol_min, sol_peak, sol_max = shower.lasun_beg, shower.lasun_max, shower.lasun_end
                 sol_min = int(np.floor(sol_min))%360
                 sol_max = int(np.ceil(sol_max))%360
@@ -376,7 +380,7 @@ def sortShowersIntoRows(shower_data):
     active_rows = np.count_nonzero([np.any(row) for row in activity_stack])
 
     # Assign shower colors by row
-    row_colors = getColorList(active_rows, color_map='viridis')
+    row_colors = getColorList(active_rows, color_map)
 
     # Assign a color to each shower
     code_name_dict = {}
@@ -387,6 +391,10 @@ def sortShowersIntoRows(shower_data):
         # Skip assigned showers
         if code in code_name_dict:
             continue
+
+        # skip if shower doesn't have a stated start or end
+        if np.any(np.isnan([shower.lasun_beg, shower.lasun_end])):
+            continue 
 
         sol_min, sol_peak, sol_max = shower.lasun_beg, shower.lasun_max, shower.lasun_end
         sol_min = int(np.floor(sol_min))%360
@@ -409,7 +417,7 @@ def sortShowersIntoRows(shower_data):
 
 
 
-def generateActivityDiagram(config, shower_data, ax_handle=None, sol_marker=None, colors=None):
+def generateActivityDiagram(config, shower_data, ax_handle=None, sol_marker=None, color_map='viridis'):
     """ Generates a plot of shower activity across all solar longitudes. """
 
     shower_data = np.array(shower_data)
@@ -433,7 +441,7 @@ def generateActivityDiagram(config, shower_data, ax_handle=None, sol_marker=None
 
     # Sort showers into rows so that they do no overlap on the graph. This will also generate colors
     #   for every shower, sorted per row
-    activity_stack, code_name_dict = sortShowersIntoRows(shower_data)
+    activity_stack, code_name_dict = sortShowersIntoRows(shower_data, color_map=color_map)
 
     
     # If no axis was given, crate one
@@ -564,18 +572,42 @@ def generateActivityDiagram(config, shower_data, ax_handle=None, sol_marker=None
 
 if __name__ == "__main__":
 
+    import argparse
     import RMS.ConfigReader as cr
 
 
+    ###
+
+    arg_parser = argparse.ArgumentParser(description="Plot chart of showers by date.")
+
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
+    arg_parser.add_argument('-p', '--palette', metavar='PALETTE', type=str, \
+        help="color palette to use - one of viridis, gist_ncar, rainbow etc")
+
+    cml_args = arg_parser.parse_args()
+
+    ###
+
+    
+    # Load the config file
+    config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
+
+
     # Load the list of all showers
-    shower_table = loadShowers("share", "established_showers.csv")
+    shower_table = loadShowers(config.shower_path, config.shower_file_name)
     shower_list = [Shower(shower_entry) for shower_entry in shower_table]
 
+    if cml_args.palette is None:
+        color_map = config.shower_color_map
+    else:
+        color_map = cml_args.palette
 
-    # Generate activity diagram
-    config = cr.parse('.config')
+
     generateActivityDiagram(config, shower_list, \
-        sol_marker=np.degrees(jd2SolLonSteyaert(datetime2JD(datetime.datetime.now()))))
+        sol_marker=np.degrees(jd2SolLonSteyaert(datetime2JD(datetime.datetime.now()))), \
+        color_map=color_map)
 
     plt.show()
 

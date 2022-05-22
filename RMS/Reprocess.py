@@ -234,7 +234,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             log.info("Performing single station shower association...")
             try:
                 showerAssociation(config, [os.path.join(night_data_dir, ftpdetectinfo_name)], \
-                    save_plot=True, plot_activity=True)
+                    save_plot=True, plot_activity=True, color_map=config.shower_color_map)
 
             except Exception as e:
                 log.debug('Shower association failed with the message:\n' + repr(e))
