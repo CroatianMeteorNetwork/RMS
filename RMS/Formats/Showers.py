@@ -575,6 +575,9 @@ if __name__ == "__main__":
     import argparse
     import RMS.ConfigReader as cr
 
+
+    ###
+
     arg_parser = argparse.ArgumentParser(description="Plot chart of showers by date.")
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
@@ -585,19 +588,22 @@ if __name__ == "__main__":
 
     cml_args = arg_parser.parse_args()
 
-    # Load the list of all showers
-    shower_table = loadShowers("share", "established_showers.csv")
-    shower_list = [Shower(shower_entry) for shower_entry in shower_table]
+    ###
 
-
-    # Generate activity diagram
+    
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
+
+
+    # Load the list of all showers
+    shower_table = loadShowers(config.shower_path, config.shower_file_name)
+    shower_list = [Shower(shower_entry) for shower_entry in shower_table]
 
     if cml_args.palette is None:
         color_map = config.shower_color_map
     else:
         color_map = cml_args.palette
+
 
     generateActivityDiagram(config, shower_list, \
         sol_marker=np.degrees(jd2SolLonSteyaert(datetime2JD(datetime.datetime.now()))), \
