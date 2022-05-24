@@ -955,7 +955,7 @@ if __name__ == "__main__":
         # If a wildcard was given
         else:
             ftpdetectinfo_path_list = glob.glob(ftpdetectinfo_path[0])
-            
+
 
     # If multiple files are given, find them all
     else:
