@@ -20,7 +20,7 @@ from RMS.Astrometry.Conversions import datetime2JD, jd2Date
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile
 from RMS.Formats.Showers import FluxShowers, loadRadiantShowers
 from Utils.Flux import calculatePopulationIndex, calculateMassIndex, computeFlux, detectClouds, fluxParser, \
-    calculateFixedBins, calculateZHR, massVerniani
+    calculateFixedBins, calculateZHR, massVerniani, loadShower
 from RMS.Routines.SolarLongitude import unwrapSol
 from RMS.Misc import formatScientific, SegmentedScale
 
@@ -570,18 +570,8 @@ if __name__ == "__main__":
                 )
 
 
-        # If the mass index was given, load all showers
-        if mass_index is not None:
-            
-            shower_list = loadRadiantShowers(config)
-
-        else:
-
-            # Fetch the shower from the flux list
-            shower_list = FluxShowers(config).showers
-
-
-        shower = [sh for sh in shower_list if sh.name == shower_code][0]
+        # Load the shower object from the given shower code
+        shower = loadShower(config, shower_code, mass_index)
 
         # Init the apparent speed
         _, _, v_init = shower.computeApparentRadiant(0, 0, 2451545.0)
