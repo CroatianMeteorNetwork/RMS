@@ -940,11 +940,24 @@ if __name__ == "__main__":
 
 
     # Find an FTPdetectinfo file if only a directory is given
-    if os.path.isdir(ftpdetectinfo_path[0]):
-    
-        ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path[0])
-        ftpdetectinfo_path_list = [ftpdetectinfo_path]
+    if len(ftpdetectinfo_path) == 1:
 
+        # If a directory is given, find the FTPdetectinfo
+        if os.path.isdir(ftpdetectinfo_path[0]):
+        
+            ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path[0])
+            ftpdetectinfo_path_list = [ftpdetectinfo_path]
+
+        # If a file is given
+        elif os.path.isfile(ftpdetectinfo_path[0]):
+            ftpdetectinfo_path_list = ftpdetectinfo_path
+
+        # If a wildcard was given
+        else:
+            ftpdetectinfo_path_list = glob.glob(ftpdetectinfo_path[0])
+
+
+    # If multiple files are given, find them all
     else:
     
         # Apply wildcards to input if more are given

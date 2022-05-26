@@ -549,6 +549,39 @@ def loadTimeInvervals(config, dir_path):
 
 
 
+def loadShower(config, shower_code, mass_index):
+    """ Load parameters of a shower from a given shower code. """
+
+    shower_list_all = loadRadiantShowers(config)
+    shower_list_flux = FluxShowers(config).showers
+    
+    # If the mass index was given, load the default list of showers
+    if mass_index:
+        shower_list_primary = shower_list_all
+        shower_list_secondary = shower_list_flux
+        
+
+    # Otherwise, load the flux list and try reading the mass index
+    else:
+        shower_list_primary = shower_list_flux
+        shower_list_secondary = shower_list_all
+        
+
+    # Find the shower in the primary list
+    shower_filtered = [sh for sh in shower_list_primary if sh.name == shower_code]
+
+    # If none are found, find it in the secondary list
+    if len(shower_filtered) == 0:
+        shower_filtered = [sh for sh in shower_list_secondary if sh.name == shower_code]
+
+
+    shower = shower_filtered[0]
+
+
+    return shower
+
+
+
 def calculateFixedBins(all_time_intervals, dir_list, shower, bin_duration=5):
     """
     Function to calculate the bins that any amount of stations over any number of years for one shower
@@ -2457,17 +2490,9 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         shower_code = shower_code.name
 
     # Otherwise, get the shower object
-    else:
-        
-        # If the mass index was given, load the default list of showers
-        if mass_index:
-            shower_list = loadRadiantShowers(config)
+    else:   
 
-        # Otherwise, load the flux list and try reading the mass index
-        else:
-            shower_list = FluxShowers(config).showers
-
-        shower = [sh for sh in shower_list if sh.name == shower_code][0]
+        shower = loadShower(config, shower_code, mass_index)
 
 
     # If the mass index is not given, read if from the default list
@@ -2634,7 +2659,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         # Associate all showers
         print("Checking the number of sporadics...")
         associations_check, _ = showerAssociation(config, [ftpdetectinfo_path], \
-            show_plot=False, save_plot=False, plot_activity=False)
+            show_plot=False, save_plot=False, plot_activity=False, flux_showers=True)
 
         # Count up the sporadics
         sporadic_count = 0
@@ -2659,7 +2684,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
             # Perform shower association on the given shower
             associations, _ = showerAssociation(config, [ftpdetectinfo_path], shower_code=shower_code, \
-                show_plot=False, save_plot=False, plot_activity=False)
+                show_plot=False, save_plot=False, plot_activity=False, flux_showers=True)
 
         else:
 
