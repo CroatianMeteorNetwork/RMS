@@ -167,6 +167,11 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
             if (jd not in star_dict) or (jd not in ff_dict):
                 continue
 
+            # Make sure that the chosen file has been successfuly recalibrated
+            if "auto_recalibrated" in recalibrated_platepars[ff_name_temp]:
+                if not recalibrated_platepars[ff_name_temp]["auto_recalibrated"]:
+                    continue
+
             # Check if the number of stars on this FF file is larger than the before
             if len(star_dict[jd]) > max_stars:
                 max_jd = jd
