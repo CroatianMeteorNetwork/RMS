@@ -509,6 +509,7 @@ if __name__ == "__main__":
                     time_intervals,
                     fwhm,
                     ratio_threshold,
+                    ref_ht
                 ) = (
                     flux_cml_args.ftpdetectinfo_path,
                     flux_cml_args.shower_code,
@@ -518,6 +519,7 @@ if __name__ == "__main__":
                     flux_cml_args.timeinterval,
                     flux_cml_args.fwhm,
                     flux_cml_args.ratiothres,
+                    flux_cml_args.ht,
                 )
                 ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path)
 
@@ -566,6 +568,7 @@ if __name__ == "__main__":
                         binduration,
                         binmeteors,
                         fwhm,
+                        ref_ht
                     ]
                 )
 
@@ -601,7 +604,7 @@ if __name__ == "__main__":
 
         # Compute the flux
         for (config, ftp_dir_path, ftpdetectinfo_path, shower_code, time_intervals, s, binduration, \
-            binmeteors, fwhm) in file_data:
+            binmeteors, fwhm, ref_ht) in file_data:
 
             # Compute the flux in every observing interval
             for interval in time_intervals:
@@ -622,8 +625,9 @@ if __name__ == "__main__":
                     dt_beg,
                     dt_end,
                     s,
-                    binduration,
-                    binmeteors,
+                    binduration=binduration,
+                    binmeteors=binmeteors,
+                    ref_height=ref_ht,
                     show_plots=False,
                     default_fwhm=fwhm,
                     confidence_interval=ci,

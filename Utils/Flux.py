@@ -743,10 +743,14 @@ def calculateFixedBins(all_time_intervals, dir_list, shower, bin_duration=5):
 
 
 
-def generateFluxPlotName(station_code, shower_code, mass_index, sol_beg, sol_end):
+def generateFluxPlotName(station_code, shower_code, mass_index, sol_beg, sol_end, label=""):
     """ Generate a file name for the flux plot."""
 
-    return "flux_{:s}_{:s}_s={:.2f}_sol={:.6f}-{:.6f}.png".format(station_code, shower_code, \
+    label_str = ""
+    if len(label):
+        label_str = label + "_"
+
+    return "flux_{:s}{:s}_{:s}_s={:.2f}_sol={:.6f}-{:.6f}.png".format(label_str, station_code, shower_code, \
         mass_index, np.degrees(sol_beg), np.degrees(sol_end))
 
 
@@ -1876,6 +1880,7 @@ def computeFluxCorrectionsOnBins(
     platepar,
     frame_min_loss,
     sensor_data,
+    ref_height=None,
     confidence_interval=0.95,
     binduration=None,
     verbose=True,
@@ -1884,6 +1889,8 @@ def computeFluxCorrectionsOnBins(
     """
 
     Keyword arguments:
+        ref_height: [float] Manually defined reference height in km. If not given, the height model will be 
+            used.
         verbose: [bool] Whether to print info as function is running
         fixed_bins: [bool] Compute fixed bins.
 
@@ -1915,9 +1922,13 @@ def computeFluxCorrectionsOnBins(
     ### Init flux data container ###
 
     # Compute the mean meteor height
-    meteor_ht_beg = heightModel(v_init, ht_type='beg')
-    meteor_ht_end = heightModel(v_init, ht_type='end')
-    meteor_ht = (meteor_ht_beg + meteor_ht_end)/2
+    if ref_height is None:
+        meteor_ht_beg = heightModel(v_init, ht_type='beg')
+        meteor_ht_end = heightModel(v_init, ht_type='end')
+        meteor_ht = (meteor_ht_beg + meteor_ht_end)/2
+
+    else:
+        meteor_ht = 1000*ref_height
 
     # Compute the mean FWHM
     all_ff_files = []
@@ -1969,9 +1980,13 @@ def computeFluxCorrectionsOnBins(
         radiant_azim, radiant_elev = raDec2AltAz(ra, dec, jd_mean, platepar.lat, platepar.lon)
 
         # Compute the mean meteor height
-        meteor_ht_beg = heightModel(v_init, ht_type='beg')
-        meteor_ht_end = heightModel(v_init, ht_type='end')
-        meteor_ht = (meteor_ht_beg + meteor_ht_end)/2
+        if ref_height is None:
+            meteor_ht_beg = heightModel(v_init, ht_type='beg')
+            meteor_ht_end = heightModel(v_init, ht_type='end')
+            meteor_ht = (meteor_ht_beg + meteor_ht_end)/2
+
+        else:
+            meteor_ht = 1000*ref_height
 
         # Compute the standard deviation of the height
         meteor_ht_std = meteor_ht*ht_std_percent/100.0
@@ -2420,8 +2435,9 @@ def computeFluxCorrectionsOnBins(
 
 
 def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_end, mass_index, \
-    binduration=None, binmeteors=None, timebin_intdt=0.25, ht_std_percent=5.0, mask=None, show_plots=True, \
-    save_plots=False, confidence_interval=0.95, default_fwhm=None, forced_bins=None, compute_single=True):
+    binduration=None, binmeteors=None, timebin_intdt=0.25, ref_height=None, ht_std_percent=5.0, mask=None, \
+    show_plots=True, show_mags=False, save_plots=False, confidence_interval=0.95, default_fwhm=None, \
+    forced_bins=None, compute_single=True):
     """Compute flux using measurements in the given FTPdetectinfo file.
 
     Arguments:
@@ -2440,9 +2456,12 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             If set to -1, determine the number of bins by using the Rice rule.
         timebin_intdt: [float] Time step for computing the integrated collection area in hours. 15 minutes by
             default. If smaller than that, only one collection are will be computed.
+        ref_height: [float] Manually defined reference height in km. If not given, the height model will be 
+            used.
         ht_std_percent: [float] Meteor height standard deviation in percent.
         mask: [Mask object] Mask object, None by default.
         show_plots: [bool] Show flux plots. True by default.
+        show_mags: [bool] Show the magnitude distribution plot on the screen. False by default.
         save_plots: [bool] Save the plots to disk. False by default.
         confidence_interval: [float] Confidence interval for error estimation using Poisson statistics.
             0.95 by default (95% CI).
@@ -2504,6 +2523,10 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 os.path.join(config.shower_path, config.shower_file_name)))
             print("Please specify a mass index manually.")
             return None
+
+
+    if ref_height is not None:
+        print("Using a manually specificed reference height: {:.2f} km".format(ref_height))
 
 
     ### Generate 5 minute bins ###
@@ -2753,9 +2776,14 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
         # Compute the mean meteor height
-        meteor_ht_beg = heightModel(1000*shower.vg, ht_type='beg')
-        meteor_ht_end = heightModel(1000*shower.vg, ht_type='end')
-        meteor_ht = (meteor_ht_beg + meteor_ht_end)/2
+        if ref_height is None:
+
+            meteor_ht_beg = heightModel(1000*shower.vg, ht_type='beg')
+            meteor_ht_end = heightModel(1000*shower.vg, ht_type='end')
+            meteor_ht = (meteor_ht_beg + meteor_ht_end)/2
+
+        else:
+            meteor_ht = 1000*ref_height
 
 
         ### Sort meteors into bins ###
@@ -3117,17 +3145,76 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             print("{:9.5f}, {:8.4f}".format(sol, flux_lm_6_5))
 
 
-        # # Plot a histogram of peak magnitudes
-        # plt.hist(peak_mags, cumulative=True, log=True, bins=len(peak_mags), density=True)
 
-        # # Plot population index
-        # r_intercept = -0.7
-        # x_arr = np.linspace(np.min(peak_mags), np.percentile(peak_mags, 60))
-        # plt.plot(x_arr, 10**(np.log10(population_index)*x_arr + r_intercept))
+        if show_mags and (show_plots or save_plots):
 
-        # plt.title("r = {:.2f}".format(population_index))
+            # Normalize the observed peak meteor magnitudes to remove the LM observational bias
+            lm_m_mean = np.mean(lm_m_data)
 
-        # plt.show()
+
+            corrected_peak_mags = []
+            for meteor, shower in associations.values():
+                if shower is not None:
+
+                    # Compute peak magnitude
+                    peak_mag = np.min(meteor.mag_array)
+
+
+                    # Get the closest meteor LM measurement
+                    meteor_sol = jd2SolLonSteyaert(meteor.jdt_ref)
+                    closest_lm_m = lm_m_data[np.argmin(np.abs(sol_data - meteor_sol))]
+
+                    # Compute the corrected peak magnitude
+                    corr_peak_mag = peak_mag + (lm_m_mean - closest_lm_m)
+
+                    corrected_peak_mags.append(corr_peak_mag)
+
+            
+
+            # Plot a histogram of peak magnitudes
+            nums, mag_bins, _ = plt.hist(corrected_peak_mags, cumulative=True, log=True, \
+                bins=len(corrected_peak_mags), density=True, color='0.5')
+
+            # Constrain the intercept so that it matchs the median magnitude
+            median_mag = np.median(corrected_peak_mags)
+
+            # Find the bin closest to the median magnitude
+            median_bin = np.argmin(np.abs(mag_bins - median_mag))
+            median_mag_bin = mag_bins[median_bin]
+            median_value = nums[median_bin]
+
+            # Plot population index
+            #r_intercept = -0.7
+            r_intercept = np.log10(median_value) - np.log10(population_index)*median_mag_bin
+            x_arr = np.linspace(np.min(corrected_peak_mags), np.percentile(corrected_peak_mags, 90))
+            plt.plot(x_arr, 10**(np.log10(population_index)*x_arr + r_intercept), \
+                label="r = {:.2f}".format(population_index), color='k')
+
+            # Only show the portion between the edge percentiles
+            plt.xlim(np.percentile(corrected_peak_mags, 10) - 1, np.percentile(corrected_peak_mags, 90) + 1)
+
+            plt.title("{:s}, {:s}".format(config.stationID, shower_code))
+
+            plt.legend()
+
+            plt.xlabel("Magnitude")
+            plt.ylabel("Density")
+
+
+            if save_plots:
+
+                sol_beg = jd2SolLonSteyaert(datetime2JD(dt_beg))
+                sol_end = jd2SolLonSteyaert(datetime2JD(dt_end))
+
+                plt.savefig(os.path.join(dir_path, generateFluxPlotName(config.stationID, shower_code, \
+                    mass_index, sol_beg, sol_end, label="mag")), dpi=150)
+
+            if show_plots:
+                plt.show()
+            else:
+                plt.clf()
+                plt.close()
+
 
 
 
@@ -3429,7 +3516,8 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
 
 
             computeFlux(config, dir_path, ftpdetectinfo_path, shower, dt_beg, dt_end, shower.mass_index, \
-                binmeteors=-1, forced_bins=forced_bins, save_plots=True, show_plots=False)
+                ref_height=shower.ref_height, binmeteors=-1, forced_bins=forced_bins, save_plots=True, \
+                show_plots=False)
 
 
     ###
@@ -3458,6 +3546,14 @@ def fluxParser():
         help="Mass index of the shower. Only used when a specific shower is specified.")
 
     flux_parser.add_argument(
+        "--ht",
+        metavar="REFHT",
+        type=float,
+        help="Manually define the reference shower height (in km). If not given, the speed-dependent model will be used."
+    )
+
+
+    flux_parser.add_argument(
         "--timeinterval",
         nargs=2,
         metavar='INTERVAL',
@@ -3471,6 +3567,7 @@ def fluxParser():
     )
     binning_group.add_argument("--binmeteors", type=int, metavar='COUNT', help="Number of meteors per bin. Automatically determined by default.", \
         default=-1)
+
 
     flux_parser.add_argument(
         "-c",
@@ -3497,6 +3594,9 @@ def fluxParser():
         help="Define a specific ratio threshold that will decide whether there are clouds. "
         "0.5 has been tested to be good and it is the default",
     )
+
+    flux_parser.add_argument('-m', '--showmag', action="store_true", \
+        help="""Show the magnitude plot.""")
 
     return flux_parser
 
@@ -3571,7 +3671,10 @@ if __name__ == "__main__":
 
     # Compute the flux
     for dt_beg, dt_end in time_intervals:
-        print('Using interval: ({:s},{:s})'.format(dt_beg.strftime(datetime_pattern), dt_end.strftime(datetime_pattern)))
+
+        print('Using interval: ({:s},{:s})'.format(dt_beg.strftime(datetime_pattern), \
+            dt_end.strftime(datetime_pattern)))
+
         computeFlux(
             config,
             dir_path,
@@ -3580,8 +3683,10 @@ if __name__ == "__main__":
             dt_beg,
             dt_end,
             cml_args.massindex,
-            cml_args.binduration,
-            cml_args.binmeteors,
-            default_fwhm=cml_args.fwhm,
-            save_plots=True
+            binduration=cml_args.binduration,
+            binmeteors=cml_args.binmeteors,
+            ref_height=cml_args.ht,
+            save_plots=True,
+            show_mags=cml_args.showmag,
+            default_fwhm=cml_args.fwhm
         )
