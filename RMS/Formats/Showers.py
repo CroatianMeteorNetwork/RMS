@@ -51,6 +51,9 @@ class Shower(object):
         self.ddec = float(shower_entry[9]) # deg
         self.vg = float(shower_entry[10]) # km/s
 
+        # Reference height
+        self.ref_height = None
+
         # Load parameters for flux, if that type of shower entry is loaded
         if len(shower_entry) > 13:
 
@@ -61,8 +64,13 @@ class Shower(object):
             self.flux_zhr_peak = float(shower_entry[13])
             self.flux_bp = float(shower_entry[14])
             self.flux_bm = float(shower_entry[15])
+
             self.population_index = float(shower_entry[16])
             self.mass_index = 1 + 2.5*np.log10(self.population_index)
+
+            ref_ht = float(shower_entry[17])
+            if ref_ht > 0:
+                self.ref_height = ref_ht
 
         # Apparent radiant
         self.ra = None # deg

@@ -208,6 +208,16 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     print("Thanks to our Patreon supporters in the 'Dinosaur Killer' class:")
     print("- Myron Valenta")
     print("https://www.patreon.com/globalmeteornetwork")
+    print("\n\n\n" \
+        + "       .:'       .:'        .:'       .:'  \n"\
+        + "   _.::'     _.::'      _.::'     _.::'    \n"\
+        + "  (_.'      (_.'       (_.'      (_.'      \n"\
+        + "                         __                \n"\
+        + "                        / _)               \n"\
+        + "_\\/_          _/\\/\\/\\_/ /             _\\/_ \n"\
+        + "/o\\         _|         /              //o\\ \n"\
+        + " |         _|  (  | (  |                |  \n"\
+        + "_|____    /__.-'|_|--|_|          ______|__\n")
     print("################################################################")
 
     # Make a directory for the night
