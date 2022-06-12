@@ -1530,7 +1530,7 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
     # If the mask is not given, make a dummy mask with all white pixels
     if mask is None:
         mask = MaskStructure(None)
-        mask.resetEmpty(platepar.Y_res, platepar.X_res)
+        mask.resetEmpty(platepar.X_res, platepar.Y_res)
 
     # Compute the number of samples for every image axis
     longer_side_points = side_points
