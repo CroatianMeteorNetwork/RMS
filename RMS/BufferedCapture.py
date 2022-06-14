@@ -19,6 +19,8 @@ from __future__ import print_function, division, absolute_import
 import re
 import time
 import logging
+import datetime
+import os.path
 from multiprocessing import Process, Event
 
 import cv2
@@ -293,14 +295,20 @@ class BufferedCapture(Process):
 
 
                 # If the video device was disconnected, wait for reconnection
-                if not ret:
+                if (self.video_file is None) and (not ret):
 
                     log.info('Frame grabbing failed, video device is probably disconnected!')
 
                     wait_for_reconnect = True
                     break
 
-
+                if (self.video_file is None):
+                    t = time.time()
+                else:
+                    t = datetime.datetime.strptime(os.path.basename(self.video_file)[7:-4], "%Y%m%d_%H%M%S_%f").timestamp()
+                    
+                if i == 0: 
+                    startTime = t
 
                 # If the end of the file was reached, stop the capture
                 if (self.video_file is not None) and (frame is None):
@@ -313,11 +321,7 @@ class BufferedCapture(Process):
 
                     break
 
-                
-                t = time.time()
 
-                if i == 0: 
-                    startTime = t
 
                 # Check if frame is dropped if it has been more than 1.5 frames than the last frame
                 elif (t - lastTime) >= self.time_for_drop:

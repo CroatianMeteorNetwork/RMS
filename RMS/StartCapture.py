@@ -189,8 +189,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     if night_data_dir_name is None:
 
         # Create a directory for captured files
-        night_data_dir_name = str(config.stationID) + '_' \
-            + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
+        
+        if video_file is None:
+            night_data_dir_name = str(config.stationID) + '_' \
+                + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
+        else:
+            night_data_dir_name = os.path.basename(video_file[:-4])
 
         # Full path to the data directory
         night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, \
@@ -665,7 +669,7 @@ if __name__ == "__main__":
     cml_args = arg_parser.parse_args()
 
     ######
-
+    video_file = cml_args.input
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
@@ -748,9 +752,10 @@ if __name__ == "__main__":
         log.info('Video source: ' + cml_args.input)
 
         # Capture the video frames from the video file
-        runCapture(config, video_file=cml_args.input, nodetect=cml_args.nodetect,
+        runCapture(config, duration=60*2, video_file=video_file, nodetect=cml_args.nodetect,
             resume_capture=cml_args.resume)
-
+				
+        sys.exit()
 
     upload_manager = None
     if config.upload_enabled:

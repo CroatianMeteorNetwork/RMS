@@ -17,7 +17,7 @@ kht_module = Extension("kht_module",
                                "Native/Hough/subdivision.cpp",
                                "Native/Hough/voting.cpp"],
                     include_dirs = ["Native/Hough/"],
-                    extra_compile_args=["-O3", "-Wall"])
+                    extra_compile_args=["-O3", "-Wall"], extra_link_args=["-O3", "-Wall"])
 
 
 
