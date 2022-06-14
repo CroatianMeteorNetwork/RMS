@@ -188,11 +188,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Make a name for the capture data directory
     if night_data_dir_name is None:
 
-        # Create a directory for captured files
-        
+        # Create a directory for captured files based on the current time
         if video_file is None:
             night_data_dir_name = str(config.stationID) + '_' \
                 + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
+
+        # If a video file is given, take the folder name from the video file
         else:
             night_data_dir_name = os.path.basename(video_file[:-4])
 
@@ -653,7 +654,7 @@ if __name__ == "__main__":
         with the given duration in hours. """)
 
     arg_group.add_argument('-i', '--input', metavar='FILE_PATH', help="""Use video from the given file, 
-        not from a video device. """)
+        not from a video device. The name of the file needs to be in the following format: STATIONID_YYYYMMDD_HHMMSS_US.mp4, where the time is the UTC time of the first frame. Example: CZ0002_20210317_193338_404889.mp4.""")
 
     arg_parser.add_argument('-n', '--nodetect', action="store_true", help="""Do not perform star extraction 
         nor meteor detection. """)

@@ -219,13 +219,35 @@ class BufferedCapture(Process):
             log.info('Video device opened!')
 
 
-
-        # Throw away first 10 frame
-        for i in range(10):
-            device.read()
+        # Keep track of the total number of frames
+        total_frames = 0
 
 
-        first = True
+        # For video devices only (not files), throw away the first 10 frames
+        if self.video_file is None:
+
+            first_skipped_frames = 10
+            for i in range(first_skipped_frames):
+                device.read()
+
+            total_frames = first_skipped_frames
+
+
+        # If a video file was used, set the time of the first frame to the time read from the file name
+        if self.video_file is not None:
+            time_stamp = "_".join(os.path.basename(self.video_file).split("_")[1:4])
+            time_stamp = time_stamp.split(".")[0]
+            video_first_time = datetime.datetime.strptime(time_stamp, "%Y%m%d_%H%M%S_%f")
+            log.info("Using a video file: " + self.video_file)
+            log.info("Setting the time of the first frame to: " + str(video_first_time))
+
+            # Convert the first time to a UNIX timestamp
+            video_first_timestamp = (video_first_time - datetime.datetime(1970, 1, 1)).total_seconds()
+
+
+        # Use the first frame buffer to start - it will be flip-flopped between the first and the second
+        #   buffer during capture, to prevent any data loss
+        buffer_one = True
 
         wait_for_reconnect = False
         
@@ -233,9 +255,28 @@ class BufferedCapture(Process):
         while not self.exit.is_set():
 
 
-            lastTime = 0
+            # Wait until the compression is done (only when a video file is used)
+            if self.video_file is not None:
+                
+                wait_for_compression = False
+
+                if buffer_one:
+                    if self.startTime1.value == -1:
+                        wait_for_compression = True
+                else:
+                    if self.startTime2.value == -1:
+                        wait_for_compression = True
+
+                if wait_for_compression:
+                    log.debug("Waiting for the compression to finish...")
+                    time.sleep(0.1)
+                    continue
+
+
+
+            last_frame_timestamp = 0
             
-            if first:
+            if buffer_one:
                 self.startTime1.value = 0
             else:
                 self.startTime2.value = 0
@@ -283,12 +324,15 @@ class BufferedCapture(Process):
             t_assignment = 0
             t_convert = 0
             t_block = time.time()
+
+            # Capture a block of 256 frames
             block_frames = 256
 
-            log.info('Grabbing a new block of {} frames...'.format(block_frames))
+            log.info('Grabbing a new block of {:d} frames...'.format(block_frames))
             for i in range(block_frames):
 
-                # Read the frame
+
+                # Read the frame (keep track how long it took to grab it)
                 t1_frame = time.time()
                 ret, frame = device.read()
                 t_frame = time.time() - t1_frame
@@ -302,32 +346,42 @@ class BufferedCapture(Process):
                     wait_for_reconnect = True
                     break
 
-                if (self.video_file is None):
-                    t = time.time()
+
+                # If a video device is used, get the current time
+                if self.video_file is None:
+
+                    # Grab the current UNIX timestamp
+                    frame_timestamp = time.time()
+
+
+                # If a video file is used, compute the time using the time from the file timestamp
                 else:
-                    t = datetime.datetime.strptime(os.path.basename(self.video_file)[7:-4], "%Y%m%d_%H%M%S_%f").timestamp()
+                    frame_timestamp = video_first_timestamp + total_frames/self.config.fps
                     
+                    # print("tot={:6d}, i={:3d}, fps={:.2f}, t={:.8f}".format(total_frames, i, self.config.fps, frame_timestamp))
+
+                    
+                # Set the time of the first frame
                 if i == 0: 
-                    startTime = t
+                    first_frame_timestamp = frame_timestamp
 
-                # If the end of the file was reached, stop the capture
-                if (self.video_file is not None) and (frame is None):
 
-                    log.info('End of video file! Press Ctrl+C to finish.')
+                # If the end of the video file was reached, stop the capture
+                if self.video_file is not None: 
+                    if (frame is None) or (not device.isOpened()):
 
-                    self.exit.set()
-                    
-                    time.sleep(0.1)
+                        log.info('End of video file! Press Ctrl+C to finish.')
 
-                    break
-
+                        self.exit.set()
+                        time.sleep(0.1)
+                        break
 
 
                 # Check if frame is dropped if it has been more than 1.5 frames than the last frame
-                elif (t - lastTime) >= self.time_for_drop:
+                elif (frame_timestamp - last_frame_timestamp) >= self.time_for_drop:
                     
                     # Calculate the number of dropped frames
-                    n_dropped = int((t - lastTime)*self.config.fps)
+                    n_dropped = int((frame_timestamp - last_frame_timestamp)*self.config.fps)
                     
                     if self.config.report_dropped_frames:
                         log.info(str(n_dropped) + " frames dropped! Time for frame: {:.3f}, convert: {:.3f}, assignment: {:.3f}".format(t_frame, t_convert, t_assignment))
@@ -336,8 +390,13 @@ class BufferedCapture(Process):
 
                     
 
-                lastTime = t
+                last_frame_timestamp = frame_timestamp
                 
+
+
+
+                ### Convert the frame to grayscale ###
+
                 t1_convert = time.time()
 
                 # Convert the frame to grayscale
@@ -367,27 +426,29 @@ class BufferedCapture(Process):
                 gray = gray[self.config.roi_up:self.config.roi_down, \
                     self.config.roi_left:self.config.roi_right]
 
-
+                # Track time for frame conversion
                 t_convert = time.time() - t1_convert
 
 
-                # Assign the frame to shared memory
+                ### ###
+
+
+
+
+                # Assign the frame to shared memory (track time to do so)
                 t1_assign = time.time()
-                if first:
+                if buffer_one:
                     self.array1[i, :gray.shape[0], :gray.shape[1]] = gray
                 else:
                     self.array2[i, :gray.shape[0], :gray.shape[1]] = gray
 
                 t_assignment = time.time() - t1_assign
 
-                # If video is loaded from a file, simulate real FPS
-                if self.video_file is not None:
 
-                    time.sleep(1.0/self.config.fps)
 
-                    # If the video finished, stop the capture
-                    if not device.isOpened():
-                        self.exit.set()
+                # Keep track of all captured frames
+                total_frames += 1
+
 
 
 
@@ -401,17 +462,17 @@ class BufferedCapture(Process):
 
                 # Set the starting value of the frame block, which indicates to the compression that the
                 # block is ready for processing
-                if first:
-                    self.startTime1.value = startTime
+                if buffer_one:
+                    self.startTime1.value = first_frame_timestamp
 
                 else:
-                    self.startTime2.value = startTime
+                    self.startTime2.value = first_frame_timestamp
 
-                log.info('New block of raw frames available for compression with starting time: {:s}'.format(str(startTime)))
+                log.info('New block of raw frames available for compression with starting time: {:s}'.format(str(first_frame_timestamp)))
 
             
             # Switch the frame block buffer flags
-            first = not first
+            buffer_one = not buffer_one
             if self.config.report_dropped_frames:
                 log.info('Estimated FPS: {:.3f}'.format(block_frames/(time.time() - t_block)))
         
