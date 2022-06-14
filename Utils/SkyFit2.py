@@ -2474,19 +2474,62 @@ class PlateTool(QtWidgets.QMainWindow):
                             _, _, self.star_intensity = self.centroid(prev_x_cent=self.x_centroid,
                                                                       prev_y_cent=self.y_centroid)
                         else:
-                            # Perform centroiding with 2 iterations
-                            x_cent_tmp, y_cent_tmp, _ = self.centroid()
 
-                            # Check that the centroiding was successful
-                            if x_cent_tmp is not None:
+                            # Check if a star centroid is available from CALSTARS, and use it first becuase
+                            #   the PSF fit should result in a better centroid estimate
 
-                                # Centroid the star around the pressed coordinates
-                                self.x_centroid, self.y_centroid, self.star_intensity = self.centroid(
-                                    prev_x_cent=x_cent_tmp,
-                                    prev_y_cent=y_cent_tmp)
+                            # Check if the closest CALSTARS star is within the radius
 
-                            else:
-                                return None
+                            calstars_centroid = False
+                            if self.img_handle is not None:
+                                if self.img_handle.name() in self.calstars:
+
+                                    # Get the stars detected on this FF file
+                                    star_data = np.array(self.calstars[self.img_handle.name()])
+
+                                    if len(star_data):
+
+                                        # Get star coordinates
+                                        stars_x = star_data[:, 1]
+                                        stars_y = star_data[:, 0]
+
+                                        # Compute the distance from the mouse press
+                                        mouse_x = self.mouse_x - 0.5
+                                        mouse_y = self.mouse_y - 0.5
+                                        dist_arr = np.hypot(stars_x - mouse_x, stars_y - mouse_y)
+
+                                        # Find the closest distance
+                                        closest_dist_indx = np.argmin(dist_arr)
+
+                                        # If the CALSTARS entry is within the aperture radius, take that star
+                                        if dist_arr[closest_dist_indx] <= self.star_aperature_radius:
+
+                                            self.x_centroid = stars_x[closest_dist_indx]
+                                            self.y_centroid = stars_y[closest_dist_indx]
+
+                                            # Compute the star intensity
+                                            _, _, self.star_intensity = self.centroid(\
+                                                prev_x_cent=self.x_centroid, prev_y_cent=self.y_centroid)
+
+                                            calstars_centroid = True
+
+
+                            # If a CALSTARS star was not found, run a normal centroid
+                            if not calstars_centroid:
+
+                                # Perform centroiding with 2 iterations
+                                x_cent_tmp, y_cent_tmp, _ = self.centroid()
+
+                                # Check that the centroiding was successful
+                                if x_cent_tmp is not None:
+
+                                    # Centroid the star around the pressed coordinates
+                                    self.x_centroid, self.y_centroid, self.star_intensity = self.centroid(
+                                        prev_x_cent=x_cent_tmp,
+                                        prev_y_cent=y_cent_tmp)
+
+                                else:
+                                    return None
 
                         # Add the centroid to the plot
                         self.centroid_star_markers.addPoints(x=[self.x_centroid + 0.5], \
@@ -4190,8 +4233,8 @@ class PlateTool(QtWidgets.QMainWindow):
             mouse_y = prev_y_cent
 
         else:
-            mouse_x = self.mouse_x
-            mouse_y = self.mouse_y
+            mouse_x = self.mouse_x - 0.5
+            mouse_y = self.mouse_y - 0.5
 
         # Check if the mouse was pressed outside the FOV
         if mouse_x is None:
