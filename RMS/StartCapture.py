@@ -80,7 +80,7 @@ def resetSIGINT():
 
 
 
-def wait(duration, compressor):
+def wait(duration, compressor, buffered_capture, video_file):
     """ The function will wait for the specified time, or it will stop when Enter is pressed. If no time was
         given (in seconds), it will wait until Enter is pressed. 
     Arguments:
@@ -121,6 +121,11 @@ def wait(duration, compressor):
         if STOP_CAPTURE:
             break
 
+
+        # If a video is given, quit when the video is done
+        if video_file is not None:
+            if buffered_capture.exit.is_set():
+                break
 
 
 
@@ -367,7 +372,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # Capture until Ctrl+C is pressed
-    wait(duration, compressor)
+    wait(duration, compressor, bc, video_file)
 
     # If capture was manually stopped, end capture
     if STOP_CAPTURE:
@@ -753,7 +758,7 @@ if __name__ == "__main__":
         log.info('Video source: ' + cml_args.input)
 
         # Capture the video frames from the video file
-        runCapture(config, duration=60*2, video_file=video_file, nodetect=cml_args.nodetect,
+        runCapture(config, duration=None, video_file=video_file, nodetect=cml_args.nodetect,
             resume_capture=cml_args.resume)
 				
         sys.exit()

@@ -268,7 +268,7 @@ class BufferedCapture(Process):
                         wait_for_compression = True
 
                 if wait_for_compression:
-                    log.debug("Waiting for the compression to finish...")
+                    log.debug("Waiting for the {:d}. compression thread to finish...".format(int(not buffer_one) + 1))
                     time.sleep(0.1)
                     continue
 
@@ -357,7 +357,7 @@ class BufferedCapture(Process):
                 # If a video file is used, compute the time using the time from the file timestamp
                 else:
                     frame_timestamp = video_first_timestamp + total_frames/self.config.fps
-                    
+
                     # print("tot={:6d}, i={:3d}, fps={:.2f}, t={:.8f}".format(total_frames, i, self.config.fps, frame_timestamp))
 
                     
@@ -370,7 +370,10 @@ class BufferedCapture(Process):
                 if self.video_file is not None: 
                     if (frame is None) or (not device.isOpened()):
 
-                        log.info('End of video file! Press Ctrl+C to finish.')
+                        log.info("End of video file!")
+                        log.debug("Video end status:")
+                        log.debug("Frame:" + str(frame))
+                        log.debug("Device open:" + str(device.isOpened()))
 
                         self.exit.set()
                         time.sleep(0.1)
