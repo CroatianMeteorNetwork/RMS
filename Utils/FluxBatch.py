@@ -31,6 +31,41 @@ from RMS.Misc import formatScientific, SegmentedScale
 mscale.register_scale(SegmentedScale)
 
 
+
+class StationPlotParams:
+    '''Class to give plots specific appearances based on the station'''
+
+    def __init__(self):
+        self.color_dict = {}
+        self.marker_dict = {}
+        self.markers = ['o', 'x', '+']
+
+        self.color_cycle = [plt.get_cmap("tab10")(i) for i in range(10)]
+
+    def __call__(self, station):
+        if station not in self.color_dict:
+            # Generate a new color
+            color = self.color_cycle[len(self.color_dict)%(len(self.color_cycle))]
+            label = station
+            marker = self.markers[(len(self.marker_dict) // 10)%(len(self.markers))]
+
+            # Assign plot color
+            self.color_dict[station] = color
+            self.marker_dict[station] = marker
+
+        else:
+            color = self.color_dict[station]
+            marker = self.marker_dict[station]
+            # label = str(config.stationID)
+            label = None
+
+        #return {'color': color, 'marker': marker, 'label': label}
+
+        # Don't include the station name in the legend
+        return {'color': color, 'marker': marker}
+
+
+
 def addFixedBins(sol_bins, small_sol_bins, small_dt_bins, meteor_num_arr, collecting_area_arr, obs_time_arr, \
     lm_m_arr, rad_elev_arr, rad_dist_arr, ang_vel_arr):
     """ Sort data into fixed bins by solar longitude. 
@@ -243,39 +278,6 @@ def combineFixedBinsAndComputeFlux(
     )
 
 
-class StationPlotParams:
-    '''Class to give plots specific appearances based on the station'''
-
-    def __init__(self):
-        self.color_dict = {}
-        self.marker_dict = {}
-        self.markers = ['o', 'x', '+']
-
-        self.color_cycle = [plt.get_cmap("tab10")(i) for i in range(10)]
-
-    def __call__(self, station):
-        if station not in self.color_dict:
-            # Generate a new color
-            color = self.color_cycle[len(self.color_dict)%(len(self.color_cycle))]
-            label = station
-            marker = self.markers[(len(self.marker_dict) // 10)%(len(self.markers))]
-
-            # Assign plot color
-            self.color_dict[station] = color
-            self.marker_dict[station] = marker
-
-        else:
-            color = self.color_dict[station]
-            marker = self.marker_dict[station]
-            # label = str(config.stationID)
-            label = None
-
-        #return {'color': color, 'marker': marker, 'label': label}
-
-        # Don't include the station name in the legend
-        return {'color': color, 'marker': marker}
-
-
 
 def cameraTally(comb_sol, comb_sol_bins, single_fixed_bin_information):
     """ Tally contributions from individual cameras in every time bin. 
@@ -348,6 +350,309 @@ def cameraTally(comb_sol, comb_sol_bins, single_fixed_bin_information):
 
 
 
+def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, compute_single=False):
+    """ Compute flux by combining flux measurements from multiple stations.
+    
+    Arguments:
+        shower_code: [str] Three letter IAU shower code (or whatever is defined in the flux table).
+        mass_index: [float] Differential mass index of the shower.
+        dir_params: [list] A list of lists, per input directory:
+            (night_dir_path, time_intervals, binduration, binmeteors, fwhm)
+            - night_dir_path - path to the night directory
+            - time_intervals - (dt_beg, dt_end) pairs, if None automatically computed intervals will be taken
+            - binduration - for single-station fluxes only
+            - binmeteors - for single-station fluxes only
+            - fwhm - manual star FWHM, if not computed in CALSTARS files. None to take a default value
+
+    Keyword arguments:
+        ref_ht: [float] Reference height for the collection area (in km). If -1, a velocity dependent height
+            model will be used.
+    """
+
+    # Go through all directories containing the flux data
+    file_data = []
+    for night_dir_path, time_intervals, binduration, binmeteors, fwhm in dir_params:
+
+        # Find the FTPdetectinfo file
+        ftpdetectinfo_path = findFTPdetectinfoFile(night_dir_path)
+
+        if not os.path.isfile(ftpdetectinfo_path):
+            print("The FTPdetectinfo file does not exist:", ftpdetectinfo_path)
+            print("Exiting...")
+            sys.exit()
+
+        # Extract parent directory
+        ftp_dir_path = os.path.dirname(ftpdetectinfo_path)
+
+        # Load the config file
+        try:
+            config = cr.loadConfigFromDirectory('.', ftp_dir_path)
+
+        except RuntimeError:
+            print("The config file could not be loaded! Skipping...")
+            continue
+
+        if time_intervals is None:
+            
+            # Find time intervals to compute flux with
+            print('Detecting whether clouds are present...')
+
+            time_intervals = detectClouds(
+                config, ftp_dir_path, show_plots=False, ratio_threshold=ratio_threshold
+            )
+
+            print('Cloud detection complete!')
+            print()
+
+        else:
+            dt_beg_temp = datetime.datetime.strptime(time_intervals[0], "%Y%m%d_%H%M%S")
+            dt_end_temp = datetime.datetime.strptime(time_intervals[1], "%Y%m%d_%H%M%S")
+            time_intervals = [[dt_beg_temp, dt_end_temp]]
+
+
+        file_data.append(
+            [
+                config,
+                ftp_dir_path,
+                ftpdetectinfo_path,
+                shower_code,
+                time_intervals,
+                mass_index,
+                binduration,
+                binmeteors,
+                fwhm,
+                ref_ht
+            ]
+        )
+
+
+    # Load the shower object from the given shower code
+    shower = loadShower(config, shower_code, mass_index)
+
+    # Init the apparent speed
+    _, _, v_init = shower.computeApparentRadiant(0, 0, 2451545.0)
+
+    # Compute the mass limit at 6.5 mag
+    mass_lim = massVerniani(6.5, v_init/1000)
+
+    # Override the mass index if given
+    if mass_index is not None:
+        shower.mass_index = mass_index
+
+
+
+    print()
+    print("Calculating fixed bins...")
+
+    # Compute 5 minute bins of equivalent solar longitude every year
+    sol_bins, bin_datetime_yearly = calculateFixedBins(
+        [time_interval for data in file_data for time_interval in data[4]],
+        [data[1] for data in file_data],
+        shower,
+        bin_duration=bin_duration)
+
+
+    all_fixed_bin_information = []
+    single_fixed_bin_information = []
+    single_station_flux = []
+
+    # Compute the flux
+    for (config, ftp_dir_path, ftpdetectinfo_path, shower_code, time_intervals, s, binduration, \
+        binmeteors, fwhm, ref_ht) in file_data:
+
+        # Compute the flux in every observing interval
+        for interval in time_intervals:
+
+            dt_beg, dt_end = interval
+
+            # Extract datetimes of forced bins relevant for this time interval
+            dt_bins = bin_datetime_yearly[np.argmax([year_start < dt_beg < year_end \
+                for (year_start, year_end), _ in bin_datetime_yearly])][1]
+
+            forced_bins = (dt_bins, sol_bins)
+
+            ret = computeFlux(
+                config,
+                ftp_dir_path,
+                ftpdetectinfo_path,
+                shower_code,
+                dt_beg,
+                dt_end,
+                s,
+                binduration=binduration,
+                binmeteors=binmeteors,
+                ref_height=ref_ht,
+                show_plots=False,
+                default_fwhm=fwhm,
+                confidence_interval=ci,
+                forced_bins=forced_bins,
+                compute_single=fluxbatch_cml_args.single,
+            )
+
+            if ret is None:
+                continue
+            (
+                sol_data,
+                flux_lm_6_5_data,
+                flux_lm_6_5_ci_lower_data,
+                flux_lm_6_5_ci_upper_data,
+                meteor_num_data,
+                population_index,
+                bin_information,
+            ) = ret
+
+            # Skip observations with no computed fixed bins
+            if len(bin_information[0]) == 0:
+                continue
+
+            # Sort measurements into fixed bins
+            all_fixed_bin_information.append(addFixedBins(sol_bins, *bin_information))
+
+            single_fixed_bin_information.append([config.stationID, bin_information])
+            summary_population_index.append(population_index)
+
+
+            # Add computed single-station flux to the output list
+            single_station_flux += [
+                [config.stationID, sol, flux, lower, upper, population_index]
+                for (sol, flux, lower, upper) in zip(
+                    sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data
+                )
+            ]
+
+
+    # Sum meteors in every bin (this is a 2D along the first axis, producing an array)
+    num_meteors = sum(np.array(meteors) for meteors, _, _, _, _, _, _ in all_fixed_bin_information)
+
+    # Compute time-area product in every bin
+    time_area_product = sum(np.array(area)*np.array(time) for _, area, time, _, _, _, \
+        _ in all_fixed_bin_information)
+
+    # Compute TAP-wieghted meteor limiting magnitude in every bin
+    lm_m_data = np.zeros_like(num_meteors)
+    for _, area, time, lm_m, _, _, _ in all_fixed_bin_information:
+
+        lm_m_data[~np.isnan(lm_m)] += (
+             np.array(lm_m[~np.isnan(lm_m)])
+            *np.array(area[~np.isnan(lm_m)])
+            *np.array(time[~np.isnan(lm_m)])
+            )
+
+    lm_m_data /= time_area_product
+
+    # Compute TAP-wieghted radiant elevation in every bin
+    rad_elev_data = np.zeros_like(num_meteors)
+    for _, area, time, _, rad_elev, _, _ in all_fixed_bin_information:
+
+        rad_elev_data[~np.isnan(rad_elev)] += (
+             np.array(rad_elev[~np.isnan(rad_elev)])
+            *np.array(area[~np.isnan(rad_elev)])
+            *np.array(time[~np.isnan(rad_elev)])
+            )
+
+    rad_elev_data /= time_area_product
+
+
+    # Compute TAP-wieghted radiant distance in every bin
+    rad_dist_data = np.zeros_like(num_meteors)
+    for _, area, time, _, _, rad_dist, _ in all_fixed_bin_information:
+
+        rad_dist_data[~np.isnan(rad_dist)] += (
+             np.array(rad_dist[~np.isnan(rad_dist)])
+            *np.array(area[~np.isnan(rad_dist)])
+            *np.array(time[~np.isnan(rad_dist)])
+            )
+
+    rad_dist_data /= time_area_product
+
+
+    # Compute TAP-wieghted angular velocity in every bin
+    ang_vel_data = np.zeros_like(num_meteors)
+    for _, area, time, _, _, _, ang_vel in all_fixed_bin_information:
+
+        ang_vel_data[~np.isnan(ang_vel)] += (
+             np.array(ang_vel[~np.isnan(ang_vel)])
+            *np.array(area[~np.isnan(ang_vel)])
+            *np.array(time[~np.isnan(ang_vel)])
+            )
+
+    ang_vel_data /= time_area_product
+
+
+    (
+        comb_sol,
+        comb_sol_bins,
+        comb_flux,
+        comb_flux_lower,
+        comb_flux_upper,
+        comb_num_meteors,
+        comb_ta_prod,
+        comb_lm_m,
+        comb_rad_elev,
+        comb_rad_dist,
+        comb_ang_vel,
+    ) = combineFixedBinsAndComputeFlux(
+        sol_bins,
+        num_meteors,
+        time_area_product,
+        lm_m_data,
+        rad_elev_data,
+        rad_dist_data,
+        ang_vel_data,
+        ci=ci,
+        min_tap=min_tap,
+        min_meteors=min_meteors,
+        min_bin_duration=min_bin_duration,
+        max_bin_duration=max_bin_duration,
+    )
+    comb_sol = np.degrees(comb_sol)
+    comb_sol_bins = np.degrees(comb_sol_bins)
+
+
+    # Compute the weighted mean meteor magnitude
+    lm_m_mean = np.sum(comb_lm_m*comb_ta_prod)/np.sum(comb_ta_prod)
+
+    # Compute the mass limit at the mean meteor LM
+    mass_lim_lm_m_mean = massVerniani(lm_m_mean, v_init/1000)
+
+    print("Mean TAP-weighted meteor limiting magnitude = {:.2f}M".format(lm_m_mean))
+    print("                         limiting mass      = {:.2e} g".format(1000*mass_lim_lm_m_mean))
+
+    # Compute the mean population index
+    population_index_mean = np.mean(summary_population_index)
+
+    # Compute the flux conversion factor
+    lm_m_to_6_5_factor = population_index_mean**(6.5 - lm_m_mean)
+
+    # Compute the flux to the mean meteor limiting magnitude
+    comb_flux_lm_m = comb_flux/lm_m_to_6_5_factor
+    comb_flux_lm_m_lower = comb_flux_lower/lm_m_to_6_5_factor
+    comb_flux_lm_m_upper = comb_flux_upper/lm_m_to_6_5_factor
+
+
+    # Compute the ZHR
+    comb_zhr = calculateZHR(comb_flux, population_index_mean)
+    comb_zhr_lower = calculateZHR(comb_flux_lower, population_index_mean)
+    comb_zhr_upper = calculateZHR(comb_flux_upper, population_index_mean)
+
+
+    return (
+        # Shower object
+        shower,
+        # Solar longitude bins
+        sol_bins, bin_datetime_yearly, comb_sol, comb_sol_bins, 
+        # Flux data products
+        comb_flux, comb_flux_lower, comb_flux_upper, 
+        comb_flux_lm_m, comb_flux_lm_m_lower, comb_flux_lm_m_upper, 
+        comb_zhr, comb_zhr_lower, comb_zhr_upper,
+        # TAP-averaged parameters per bin
+        comb_ta_prod, comb_num_meteors, comb_rad_elev, comb_rad_dist, comb_lm_m, comb_ang_vel,
+        # Mag/mass limit information
+        lm_m_mean, lm_m_to_6_5_factor, mass_lim, mass_lim_lm_m_mean,
+        # Supplementary information
+        v_init, summary_population_index, population_index_mean, single_fixed_bin_information, 
+        single_station_flux,
+    )
 
 
 
@@ -372,11 +677,12 @@ if __name__ == "__main__":
         help="Filename to export images and data (exclude file extensions), defaults to fluxbatch_output",
     )
 
-    arg_parser.add_argument(
-        "-csv",
-        action='store_true',
-        help="If given, will read from the csv files defined with output_filename (defaults to fluxbatch_output)",
-    )
+    # NOTE: The CSV option is disabled for now, more work needs to be done to fully support it
+    # arg_parser.add_argument(
+    #     "-csv",
+    #     action='store_true',
+    #     help="If given, will read from the csv files defined with output_filename (defaults to fluxbatch_output)",
+    # )
 
     arg_parser.add_argument(
         "--single",
@@ -460,16 +766,17 @@ if __name__ == "__main__":
 
     dir_path = os.path.dirname(fluxbatch_cml_args.batch_path)
 
+
     output_data = []
     shower_code = None
     summary_population_index = []
 
 
 
+    ### Init the plot ###
+
     plot_info = StationPlotParams()
-
-
-    # Init the plot
+    
     if fluxbatch_cml_args.onlyflux:
         subplot_rows = 1
     else:
@@ -481,450 +788,224 @@ if __name__ == "__main__":
     if not isinstance(ax, np.ndarray):
         ax = [ax]
 
-
-    # If an input CSV file was not given, compute the data
-    if not fluxbatch_cml_args.csv:
-
-        # loading commands from batch file and collecting information to run computeflux, including
-        # detecting the clouds
-
-        file_data = []
-        with open(fluxbatch_cml_args.batch_path) as f:
-
-            # Parse the batch entries
-            for line in f:
-                line = line.replace("\n", "").replace("\r", "")
-
-                if not len(line):
-                    continue
-
-                if line.startswith("#"):
-                    continue
-
-                flux_cml_args = fluxParser().parse_args(shlex.split(line, posix=0))
-                (
-                    ftpdetectinfo_path,
-                    shower_code,
-                    mass_index,
-                    binduration,
-                    binmeteors,
-                    time_intervals,
-                    fwhm,
-                    ratio_threshold,
-                    ref_ht
-                ) = (
-                    flux_cml_args.ftpdetectinfo_path,
-                    flux_cml_args.shower_code,
-                    flux_cml_args.massindex,
-                    flux_cml_args.binduration,
-                    flux_cml_args.binmeteors,
-                    flux_cml_args.timeinterval,
-                    flux_cml_args.fwhm,
-                    flux_cml_args.ratiothres,
-                    flux_cml_args.ht,
-                )
-                ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path)
-
-                if not os.path.isfile(ftpdetectinfo_path):
-                    print("The FTPdetectinfo file does not exist:", ftpdetectinfo_path)
-                    print("Exiting...")
-                    sys.exit()
-
-                # Extract parent directory
-                ftp_dir_path = os.path.dirname(ftpdetectinfo_path)
-
-                # Load the config file
-                try:
-                    config = cr.loadConfigFromDirectory('.', ftp_dir_path)
-
-                except RuntimeError:
-                    print("The config file could not be loaded! Skipping...")
-                    continue
-
-                if time_intervals is None:
-                    
-                    # Find time intervals to compute flux with
-                    print('Detecting whether clouds are present...')
-
-                    time_intervals = detectClouds(
-                        config, ftp_dir_path, show_plots=False, ratio_threshold=ratio_threshold
-                    )
-
-                    print('Cloud detection complete!')
-                    print()
-
-                else:
-                    dt_beg_temp = datetime.datetime.strptime(time_intervals[0], "%Y%m%d_%H%M%S")
-                    dt_end_temp = datetime.datetime.strptime(time_intervals[1], "%Y%m%d_%H%M%S")
-                    time_intervals = [[dt_beg_temp, dt_end_temp]]
-
-
-                file_data.append(
-                    [
-                        config,
-                        ftp_dir_path,
-                        ftpdetectinfo_path,
-                        shower_code,
-                        time_intervals,
-                        mass_index,
-                        binduration,
-                        binmeteors,
-                        fwhm,
-                        ref_ht
-                    ]
-                )
-
-
-        # Load the shower object from the given shower code
-        shower = loadShower(config, shower_code, mass_index)
-
-        # Init the apparent speed
-        _, _, v_init = shower.computeApparentRadiant(0, 0, 2451545.0)
-
-        # Compute the mass limit at 6.5 mag
-        mass_lim = massVerniani(6.5, v_init/1000)
-
-        # Override the mass index if given
-        if mass_index is not None:
-            shower.mass_index = mass_index
-
-
-
-        print()
-        print("Calculating fixed bins...")
-
-        # Compute 5 minute bins of equivalent solar longitude every year
-        sol_bins, bin_datetime_yearly = calculateFixedBins(
-            [time_interval for data in file_data for time_interval in data[4]],
-            [data[1] for data in file_data],
-            shower,
-            bin_duration=bin_duration)
-
-
-        all_fixed_bin_information = []
-        single_fixed_bin_information = []
-
-        # Compute the flux
-        for (config, ftp_dir_path, ftpdetectinfo_path, shower_code, time_intervals, s, binduration, \
-            binmeteors, fwhm, ref_ht) in file_data:
-
-            # Compute the flux in every observing interval
-            for interval in time_intervals:
-
-                dt_beg, dt_end = interval
-
-                # Extract datetimes of forced bins relevant for this time interval
-                dt_bins = bin_datetime_yearly[np.argmax([year_start < dt_beg < year_end \
-                    for (year_start, year_end), _ in bin_datetime_yearly])][1]
-
-                forced_bins = (dt_bins, sol_bins)
-
-                ret = computeFlux(
-                    config,
-                    ftp_dir_path,
-                    ftpdetectinfo_path,
-                    shower_code,
-                    dt_beg,
-                    dt_end,
-                    s,
-                    binduration=binduration,
-                    binmeteors=binmeteors,
-                    ref_height=ref_ht,
-                    show_plots=False,
-                    default_fwhm=fwhm,
-                    confidence_interval=ci,
-                    forced_bins=forced_bins,
-                    compute_single=fluxbatch_cml_args.single,
-                )
-
-                if ret is None:
-                    continue
-                (
-                    sol_data,
-                    flux_lm_6_5_data,
-                    flux_lm_6_5_ci_lower_data,
-                    flux_lm_6_5_ci_upper_data,
-                    meteor_num_data,
-                    population_index,
-                    bin_information,
-                ) = ret
-
-                # Skip observations with no computed fixed bins
-                if len(bin_information[0]) == 0:
-                    continue
-
-                # Sort measurements into fixed bins
-                all_fixed_bin_information.append(addFixedBins(sol_bins, *bin_information))
-
-                single_fixed_bin_information.append([config.stationID, bin_information])
-                summary_population_index.append(population_index)
-
-
-                # Store and plot single-station data
-                if fluxbatch_cml_args.single:
-
-                    # Add computed flux to the output list
-                    output_data += [
-                        [config.stationID, sol, flux, lower, upper, population_index]
-                        for (sol, flux, lower, upper) in zip(
-                            sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data
-                        )
-                    ]
-
-                    
-
-                    # plot data for night and interval
-                    plot_params = plot_info(config.stationID)
-
-                    # Plot the single-station flux line
-                    line = ax[0].plot(sol_data, flux_lm_6_5_data, linestyle='dashed', **plot_params)
-
-                    # Plot single-station error bars
-                    ax[0].errorbar(
-                        sol_data,
-                        flux_lm_6_5_data,
-                        color=plot_params['color'],
-                        alpha=0.5,
-                        capsize=5,
-                        zorder=3,
-                        linestyle='none',
-                        yerr=[
-                            np.array(flux_lm_6_5_data) - np.array(flux_lm_6_5_ci_lower_data),
-                            np.array(flux_lm_6_5_ci_upper_data) - np.array(flux_lm_6_5_data),
-                        ],
-                    )
-
-
-        # Sum meteors in every bin (this is a 2D along the first axis, producing an array)
-        num_meteors = sum(np.array(meteors) for meteors, _, _, _, _, _, _ in all_fixed_bin_information)
-
-        # Compute time-area product in every bin
-        time_area_product = sum(np.array(area)*np.array(time) for _, area, time, _, _, _, \
-            _ in all_fixed_bin_information)
-
-        # Compute TAP-wieghted meteor limiting magnitude in every bin
-        lm_m_data = np.zeros_like(num_meteors)
-        for _, area, time, lm_m, _, _, _ in all_fixed_bin_information:
-
-            lm_m_data[~np.isnan(lm_m)] += (
-                 np.array(lm_m[~np.isnan(lm_m)])
-                *np.array(area[~np.isnan(lm_m)])
-                *np.array(time[~np.isnan(lm_m)])
-                )
-
-        lm_m_data /= time_area_product
-
-        # Compute TAP-wieghted radiant elevation in every bin
-        rad_elev_data = np.zeros_like(num_meteors)
-        for _, area, time, _, rad_elev, _, _ in all_fixed_bin_information:
-
-            rad_elev_data[~np.isnan(rad_elev)] += (
-                 np.array(rad_elev[~np.isnan(rad_elev)])
-                *np.array(area[~np.isnan(rad_elev)])
-                *np.array(time[~np.isnan(rad_elev)])
-                )
-
-        rad_elev_data /= time_area_product
-
-
-        # Compute TAP-wieghted radiant distance in every bin
-        rad_dist_data = np.zeros_like(num_meteors)
-        for _, area, time, _, _, rad_dist, _ in all_fixed_bin_information:
-
-            rad_dist_data[~np.isnan(rad_dist)] += (
-                 np.array(rad_dist[~np.isnan(rad_dist)])
-                *np.array(area[~np.isnan(rad_dist)])
-                *np.array(time[~np.isnan(rad_dist)])
-                )
-
-        rad_dist_data /= time_area_product
-
-
-        # Compute TAP-wieghted angular velocity in every bin
-        ang_vel_data = np.zeros_like(num_meteors)
-        for _, area, time, _, _, _, ang_vel in all_fixed_bin_information:
-
-            ang_vel_data[~np.isnan(ang_vel)] += (
-                 np.array(ang_vel[~np.isnan(ang_vel)])
-                *np.array(area[~np.isnan(ang_vel)])
-                *np.array(time[~np.isnan(ang_vel)])
-                )
-
-        ang_vel_data /= time_area_product
-
-
-        (
-            comb_sol,
-            comb_sol_bins,
-            comb_flux,
-            comb_flux_lower,
-            comb_flux_upper,
-            comb_num_meteors,
-            comb_ta_prod,
-            comb_lm_m,
-            comb_rad_elev,
-            comb_rad_dist,
-            comb_ang_vel,
-        ) = combineFixedBinsAndComputeFlux(
-            sol_bins,
-            num_meteors,
-            time_area_product,
-            lm_m_data,
-            rad_elev_data,
-            rad_dist_data,
-            ang_vel_data,
-            ci=ci,
-            min_tap=min_tap,
-            min_meteors=min_meteors,
-            min_bin_duration=min_bin_duration,
-            max_bin_duration=max_bin_duration,
-        )
-        comb_sol = np.degrees(comb_sol)
-        comb_sol_bins = np.degrees(comb_sol_bins)
-
-
-        # Compute the weighted mean meteor magnitude
-        lm_m_mean = np.sum(comb_lm_m*comb_ta_prod)/np.sum(comb_ta_prod)
-
-        # Compute the mass limit at the mean meteor LM
-        mass_lim_lm_m_mean = massVerniani(lm_m_mean, v_init/1000)
-
-        print("Mean TAP-weighted meteor limiting magnitude = {:.2f}M".format(lm_m_mean))
-        print("                         limiting mass      = {:.2e} g".format(1000*mass_lim_lm_m_mean))
-
-        # Compute the mean population index
-        population_index_mean = np.mean(summary_population_index)
-
-        # Compute the flux conversion factor
-        lm_m_to_6_5_factor = population_index_mean**(6.5 - lm_m_mean)
-
-        # Compute the flux to the mean meteor limiting magnitude
-        comb_flux_lm_m = comb_flux/lm_m_to_6_5_factor
-        comb_flux_lm_m_lower = comb_flux_lower/lm_m_to_6_5_factor
-        comb_flux_lm_m_upper = comb_flux_upper/lm_m_to_6_5_factor
-
-
-        # Compute the ZHR
-        comb_zhr = calculateZHR(comb_flux, population_index_mean)
-        comb_zhr_lower = calculateZHR(comb_flux_lower, population_index_mean)
-        comb_zhr_upper = calculateZHR(comb_flux_upper, population_index_mean)
-
-
-        ### Print camera tally ###
-
-        # Tally up contributions from individual cameras in each bin
-        bin_tally_topmeteors, bin_tally_toptap = cameraTally(comb_sol, comb_sol_bins, \
-            single_fixed_bin_information)
-
-        print()
-        print("Camera tally per bin:")
-        print("---------------------")
-
-        # Print cameras with most meteors per bin
-        for sol_bin_mean in bin_tally_topmeteors:
-
-            # Get cameras with most meteors
-            bin_cams_topmeteors = bin_tally_topmeteors[sol_bin_mean]
-
-            # Get cameras with the highest TAP
-            bin_cams_toptap = bin_tally_toptap[sol_bin_mean]
-
-            print()
-            print("Sol = {:.4f} deg".format(sol_bin_mean))
-
-            top_n_stations = 5
-            print("Top {:d} by meteor number:".format(top_n_stations))
-            for i, station_id in enumerate(bin_cams_topmeteors):
-                station_data = bin_cams_topmeteors[station_id]
-                n_meteors = station_data['meteors']
-                tap = station_data['tap']/1e6
-                print("    {:s}, {:5d} meteors, TAP = {:10.2f} km^2 h".format(station_id, n_meteors, tap))
-
-                if i == top_n_stations - 1:
-                    break
-
-            print("Top {:d} by TAP:".format(top_n_stations))
-            for i, station_id in enumerate(bin_cams_toptap):
-                station_data = bin_cams_toptap[station_id]
-                n_meteors = station_data['meteors']
-                tap = station_data['tap']/1e6
-                print("    {:s}, {:5d} meteors, TAP = {:10.2f} km^2 h".format(station_id, n_meteors, tap))
-
-                if i == top_n_stations - 1:
-                    break
-
-        ###
-
-
-
-    # If a CSV files was given, load the fluxes from the disk
-    else:
-
-        # get list of directories so that fixedfluxbin csv files can be found
-        with open(fluxbatch_cml_args.batch_path) as f:
-            # Parse the batch entries
-            for line in f:
-                line = line.replace("\n", "").replace("\r", "")
-
-                if not len(line):
-                    continue
-
-                if line.startswith("#"):
-                    continue
-
-                flux_cml_args = fluxParser().parse_args(shlex.split(line, posix=0))
-                shower_code = flux_cml_args.shower_code
-                summary_population_index.append(calculatePopulationIndex(flux_cml_args.s))
-
-        # Load data from single-station .csv file and plot it
-        if fluxbatch_cml_args.single:
-            dirname = os.path.dirname(fluxbatch_cml_args.batch_path)
-            data1 = np.genfromtxt(
-                os.path.join(dirname, fluxbatch_cml_args.output_filename + "_single.csv"),
-                delimiter=',',
-                dtype=None,
-                encoding=None,
-                skip_header=1,
+    ### ###
+
+
+    # NOTE: CSV option not supported
+    # # If an input CSV file was not given, compute the data
+    # if not fluxbatch_cml_args.csv:
+
+
+
+    # Loading commands from batch file and collecting information to run batchFlux
+    dir_params = []
+    with open(fluxbatch_cml_args.batch_path) as f:
+
+        # Parse the batch entries
+        for line in f:
+            line = line.replace("\n", "").replace("\r", "")
+
+            if not len(line):
+                continue
+
+            if line.startswith("#"):
+                continue
+
+            flux_cml_args = fluxParser().parse_args(shlex.split(line, posix=0))
+            (
+                ftpdetectinfo_path,
+                shower_code,
+                mass_index,
+                binduration,
+                binmeteors,
+                time_intervals,
+                fwhm,
+                ratio_threshold,
+                ref_ht
+            ) = (
+                flux_cml_args.ftpdetectinfo_path,
+                flux_cml_args.shower_code,
+                flux_cml_args.massindex,
+                flux_cml_args.binduration,
+                flux_cml_args.binmeteors,
+                flux_cml_args.timeinterval,
+                flux_cml_args.fwhm,
+                flux_cml_args.ratiothres,
+                flux_cml_args.ht,
             )
 
-            station_list = []
-            for stationID, sol, flux, lower, upper, _ in data1:
-                plot_params = plot_info(stationID)
+            dir_params.append([ftpdetectinfo_path, time_intervals, binduration, binmeteors, fwhm])
 
-                ax[0].errorbar(
-                    sol,
-                    flux,
-                    alpha=0.5,
-                    capsize=5,
-                    zorder=3,
-                    linestyle='none',
-                    yerr=[[flux - lower], [upper - flux]],
-                    **plot_params
-                )
 
-        if os.path.exists(os.path.join(dirname, fluxbatch_cml_args.output_filename + "_combined.csv")):
-            data2 = np.genfromtxt(
-                os.path.join(dirname, fluxbatch_cml_args.output_filename + "_combined.csv"),
-                delimiter=',',
-                encoding=None,
-                skip_header=1,
+
+
+    # Compute the batch flux
+    (   
+        # Shower object
+        shower,
+        # Solar longitude bins
+        sol_bins, bin_datetime_yearly, comb_sol, comb_sol_bins, 
+        # Flux data products
+        comb_flux, comb_flux_lower, comb_flux_upper, 
+        comb_flux_lm_m, comb_flux_lm_m_lower, comb_flux_lm_m_upper, 
+        comb_zhr, comb_zhr_lower, comb_zhr_upper,
+        # TAP-averaged parameters per bin
+        comb_ta_prod, comb_num_meteors, comb_rad_elev, comb_rad_dist, comb_lm_m, comb_ang_vel,
+        # Mag/mass limit information
+        lm_m_mean, lm_m_to_6_5_factor, mass_lim, mass_lim_lm_m_mean,
+        # Supplementary information
+        v_init, summary_population_index, population_index_mean, single_fixed_bin_information,
+        single_station_flux,
+    ) = fluxBatch(shower_code, mass_index, dir_params, ref_ht=ref_ht, \
+        compute_single=fluxbatch_cml_args.single)
+
+
+
+    ### Print camera tally ###
+
+    # Tally up contributions from individual cameras in each bin
+    bin_tally_topmeteors, bin_tally_toptap = cameraTally(comb_sol, comb_sol_bins, \
+        single_fixed_bin_information)
+
+    print()
+    print("Camera tally per bin:")
+    print("---------------------")
+
+    # Print cameras with most meteors per bin
+    for sol_bin_mean in bin_tally_topmeteors:
+
+        # Get cameras with most meteors
+        bin_cams_topmeteors = bin_tally_topmeteors[sol_bin_mean]
+
+        # Get cameras with the highest TAP
+        bin_cams_toptap = bin_tally_toptap[sol_bin_mean]
+
+        print()
+        print("Sol = {:.4f} deg".format(sol_bin_mean))
+
+        top_n_stations = 5
+        print("Top {:d} by meteor number:".format(top_n_stations))
+        for i, station_id in enumerate(bin_cams_topmeteors):
+            station_data = bin_cams_topmeteors[station_id]
+            n_meteors = station_data['meteors']
+            tap = station_data['tap']/1e6
+            print("    {:s}, {:5d} meteors, TAP = {:10.2f} km^2 h".format(station_id, n_meteors, tap))
+
+            if i == top_n_stations - 1:
+                break
+
+        print("Top {:d} by TAP:".format(top_n_stations))
+        for i, station_id in enumerate(bin_cams_toptap):
+            station_data = bin_cams_toptap[station_id]
+            n_meteors = station_data['meteors']
+            tap = station_data['tap']/1e6
+            print("    {:s}, {:5d} meteors, TAP = {:10.2f} km^2 h".format(station_id, n_meteors, tap))
+
+            if i == top_n_stations - 1:
+                break
+
+    ###
+
+
+
+    # NOTE: CSV option not supported
+    # # If a CSV files was given, load the fluxes from the disk
+    # else:
+
+    #     # get list of directories so that fixedfluxbin csv files can be found
+    #     with open(fluxbatch_cml_args.batch_path) as f:
+    #         # Parse the batch entries
+    #         for line in f:
+    #             line = line.replace("\n", "").replace("\r", "")
+
+    #             if not len(line):
+    #                 continue
+
+    #             if line.startswith("#"):
+    #                 continue
+
+    #             flux_cml_args = fluxParser().parse_args(shlex.split(line, posix=0))
+    #             shower_code = flux_cml_args.shower_code
+    #             summary_population_index.append(calculatePopulationIndex(flux_cml_args.s))
+
+    #     # Load data from single-station .csv file and plot it
+    #     if fluxbatch_cml_args.single:
+    #         dirname = os.path.dirname(fluxbatch_cml_args.batch_path)
+    #         data1 = np.genfromtxt(
+    #             os.path.join(dirname, fluxbatch_cml_args.output_filename + "_single.csv"),
+    #             delimiter=',',
+    #             dtype=None,
+    #             encoding=None,
+    #             skip_header=1,
+    #         )
+
+    #         station_list = []
+    #         for stationID, sol, flux, lower, upper, _ in data1:
+    #             plot_params = plot_info(stationID)
+
+    #             ax[0].errorbar(
+    #                 sol,
+    #                 flux,
+    #                 alpha=0.5,
+    #                 capsize=5,
+    #                 zorder=3,
+    #                 linestyle='none',
+    #                 yerr=[[flux - lower], [upper - flux]],
+    #                 **plot_params
+    #             )
+
+    #     if os.path.exists(os.path.join(dirname, fluxbatch_cml_args.output_filename + "_combined.csv")):
+    #         data2 = np.genfromtxt(
+    #             os.path.join(dirname, fluxbatch_cml_args.output_filename + "_combined.csv"),
+    #             delimiter=',',
+    #             encoding=None,
+    #             skip_header=1,
+    #         )
+
+    #         comb_sol_bins = data2[:, 0]
+    #         comb_sol = data2[:-1, 1]
+    #         comb_flux = data2[:-1, 2]
+    #         comb_flux_lower = data2[:-1, 3]
+    #         comb_flux_upper = data2[:-1, 4]
+    #         comb_ta_prod = data2[:-1, 5]
+    #         comb_num_meteors = data2[:-1, 6]
+    #     else:
+    #         comb_sol = []
+    #         comb_sol_bins = []
+    #         comb_flux = []
+    #         comb_flux_lower = []
+    #         comb_flux_upper = []
+    #         comb_num_meteors = []
+    #         comb_ta_prod = []
+
+
+
+    # Store and plot single-station data
+    if fluxbatch_cml_args.single:
+
+        for (station_id, sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, 
+            _) in single_station_flux:
+
+            # plot data for night and interval
+            plot_params = plot_info(station_id)
+
+            # Plot the single-station flux line
+            line = ax[0].plot(sol_data, flux_lm_6_5_data, linestyle='dashed', **plot_params)
+
+            # Plot single-station error bars
+            ax[0].errorbar(
+                sol_data,
+                flux_lm_6_5_data,
+                color=plot_params['color'],
+                alpha=0.5,
+                capsize=5,
+                zorder=3,
+                linestyle='none',
+                yerr=[
+                    np.array(flux_lm_6_5_data) - np.array(flux_lm_6_5_ci_lower_data),
+                    np.array(flux_lm_6_5_ci_upper_data) - np.array(flux_lm_6_5_data),
+                ],
             )
-
-            comb_sol_bins = data2[:, 0]
-            comb_sol = data2[:-1, 1]
-            comb_flux = data2[:-1, 2]
-            comb_flux_lower = data2[:-1, 3]
-            comb_flux_upper = data2[:-1, 4]
-            comb_ta_prod = data2[:-1, 5]
-            comb_num_meteors = data2[:-1, 6]
-        else:
-            comb_sol = []
-            comb_sol_bins = []
-            comb_flux = []
-            comb_flux_lower = []
-            comb_flux_upper = []
-            comb_num_meteors = []
-            comb_ta_prod = []
 
 
     # If data was able to be combined, plot the weighted flux
@@ -1167,30 +1248,69 @@ if __name__ == "__main__":
     plt.show()
 
 
+    # if not fluxbatch_cml_args.csv:
+
     # Write the computed weigthed flux to disk
-    if not fluxbatch_cml_args.csv:
+    if len(comb_sol):
 
-        if len(comb_sol):
+        data_out_path = os.path.join(dir_path, fluxbatch_cml_args.output_filename + "_combined.csv")
+        with open(data_out_path, 'w') as fout:
+            fout.write("# Shower parameters:\n")
+            fout.write("# Shower         = {:s}\n".format(shower_code))
+            fout.write("# r              = {:.2f}\n".format(population_index_mean))
+            fout.write("# s              = {:.2f}\n".format(calculateMassIndex(population_index_mean)))
+            fout.write("# m_lim @ +6.5M  = {:.2e} kg\n".format(mass_lim))
+            fout.write("# Met LM mean    = {:.2e}\n".format(lm_m_mean))
+            fout.write("# m_lim @ {:+.2f}M = {:.2e} kg\n".format(lm_m_mean, mass_lim_lm_m_mean))
+            fout.write("# CI int.        = {:.1f} %\n".format(100*ci))
+            fout.write("# Binning parameters:\n")
+            fout.write("# Min. meteors     = {:d}\n".format(min_meteors))
+            fout.write("# Min TAP          = {:.2f} x 1000 km^2 h\n".format(min_tap))
+            fout.write("# Min bin duration = {:.2f} h\n".format(min_bin_duration))
+            fout.write("# Max bin duration = {:.2f} h\n".format(max_bin_duration))
+            fout.write(
+                "# Sol bin start (deg), Mean Sol (deg), Flux@+6.5M (met / 1000 km^2 h), Flux CI low, Flux CI high, Flux@+{:.2f}M (met / 1000 km^2 h), Flux CI low, Flux CI high, ZHR, ZHR CI low, ZHR CI high, Meteor Count, Time-area product (corrected to +6.5M) (1000 km^2/h), Meteor LM, Radiant elev (deg), Radiat dist (deg), Ang vel (deg/s)\n".format(lm_m_mean)
+            )
+            for (_sol_bin_start,
+                _mean_sol,
+                _flux,
+                _flux_lower,
+                _flux_upper,
+                _flux_lm,
+                _flux_lm_lower,
+                _flux_lm_upper,
+                _zhr,
+                _zhr_lower,
+                _zhr_upper,
+                _nmeteors,
+                _tap,
+                _lm_m,
+                _rad_elev,
+                _rad_dist,
+                _ang_vel) \
+            in zip(
+                    comb_sol_bins,
+                    comb_sol,
+                    comb_flux,
+                    comb_flux_lower,
+                    comb_flux_upper,
+                    comb_flux_lm_m,
+                    comb_flux_lm_m_lower,
+                    comb_flux_lm_m_upper,
+                    comb_zhr,
+                    comb_zhr_lower,
+                    comb_zhr_upper,
+                    comb_num_meteors,
+                    comb_ta_prod,
+                    comb_lm_m,
+                    comb_rad_elev,
+                    comb_rad_dist,
+                    comb_ang_vel
+                    ):
 
-            data_out_path = os.path.join(dir_path, fluxbatch_cml_args.output_filename + "_combined.csv")
-            with open(data_out_path, 'w') as fout:
-                fout.write("# Shower parameters:\n")
-                fout.write("# Shower         = {:s}\n".format(shower_code))
-                fout.write("# r              = {:.2f}\n".format(population_index_mean))
-                fout.write("# s              = {:.2f}\n".format(calculateMassIndex(population_index_mean)))
-                fout.write("# m_lim @ +6.5M  = {:.2e} kg\n".format(mass_lim))
-                fout.write("# Met LM mean    = {:.2e}\n".format(lm_m_mean))
-                fout.write("# m_lim @ {:+.2f}M = {:.2e} kg\n".format(lm_m_mean, mass_lim_lm_m_mean))
-                fout.write("# CI int.        = {:.1f} %\n".format(100*ci))
-                fout.write("# Binning parameters:\n")
-                fout.write("# Min. meteors     = {:d}\n".format(min_meteors))
-                fout.write("# Min TAP          = {:.2f} x 1000 km^2 h\n".format(min_tap))
-                fout.write("# Min bin duration = {:.2f} h\n".format(min_bin_duration))
-                fout.write("# Max bin duration = {:.2f} h\n".format(max_bin_duration))
                 fout.write(
-                    "# Sol bin start (deg), Mean Sol (deg), Flux@+6.5M (met / 1000 km^2 h), Flux CI low, Flux CI high, Flux@+{:.2f}M (met / 1000 km^2 h), Flux CI low, Flux CI high, ZHR, ZHR CI low, ZHR CI high, Meteor Count, Time-area product (corrected to +6.5M) (1000 km^2/h), Meteor LM, Radiant elev (deg), Radiat dist (deg), Ang vel (deg/s)\n".format(lm_m_mean)
-                )
-                for (_sol_bin_start,
+                    "{:.8f},{:.8f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:d},{:.3f},{:.2f},{:.2f},{:.2f},{:.2f}\n".format(
+                    _sol_bin_start,
                     _mean_sol,
                     _flux,
                     _flux_lower,
@@ -1201,74 +1321,35 @@ if __name__ == "__main__":
                     _zhr,
                     _zhr_lower,
                     _zhr_upper,
-                    _nmeteors,
-                    _tap,
+                    int(_nmeteors),
+                    _tap/1e9,
                     _lm_m,
                     _rad_elev,
                     _rad_dist,
-                    _ang_vel) \
-                in zip(
-                        comb_sol_bins,
-                        comb_sol,
-                        comb_flux,
-                        comb_flux_lower,
-                        comb_flux_upper,
-                        comb_flux_lm_m,
-                        comb_flux_lm_m_lower,
-                        comb_flux_lm_m_upper,
-                        comb_zhr,
-                        comb_zhr_lower,
-                        comb_zhr_upper,
-                        comb_num_meteors,
-                        comb_ta_prod,
-                        comb_lm_m,
-                        comb_rad_elev,
-                        comb_rad_dist,
-                        comb_ang_vel
-                        ):
+                    _ang_vel,
+                    ))
 
-                    fout.write(
-                        "{:.8f},{:.8f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:d},{:.3f},{:.2f},{:.2f},{:.2f},{:.2f}\n".format(
-                        _sol_bin_start,
-                        _mean_sol,
-                        _flux,
-                        _flux_lower,
-                        _flux_upper,
-                        _flux_lm,
-                        _flux_lm_lower,
-                        _flux_lm_upper,
-                        _zhr,
-                        _zhr_lower,
-                        _zhr_upper,
-                        int(_nmeteors),
-                        _tap/1e9,
-                        _lm_m,
-                        _rad_elev,
-                        _rad_dist,
-                        _ang_vel,
-                        ))
+            fout.write("{:.8f},,,,,,,,,,,,,,,,\n".format(comb_sol_bins[-1]))
 
-                fout.write("{:.8f},,,,,,,,,,,,,,,,\n".format(comb_sol_bins[-1]))
-
-            print("Data saved to:", data_out_path)
+        print("Data saved to:", data_out_path)
 
 
 
-        # Save the single-station fluxes
-        if fluxbatch_cml_args.single:
+    # Save the single-station fluxes
+    if fluxbatch_cml_args.single:
 
-            data_out_path = os.path.join(dir_path, fluxbatch_cml_args.output_filename + "_single.csv")
-            with open(data_out_path, 'w') as fout:
+        data_out_path = os.path.join(dir_path, fluxbatch_cml_args.output_filename + "_single.csv")
+        with open(data_out_path, 'w') as fout:
+            fout.write(
+                "# Station, Sol (deg), Flux@+6.5M (met/1000km^2/h), Flux lower bound, Flux upper bound, Population Index\n"
+            )
+            for entry in output_data:
+                print(entry)
+                stationID, sol, flux, lower, upper, population_index = entry
+
                 fout.write(
-                    "# Station, Sol (deg), Flux@+6.5M (met/1000km^2/h), Flux lower bound, Flux upper bound, Population Index\n"
-                )
-                for entry in output_data:
-                    print(entry)
-                    stationID, sol, flux, lower, upper, population_index = entry
-
-                    fout.write(
-                        "{:s},{:.8f},{:.3f},{:.3f},{:.3f},{}\n".format(
-                            stationID, sol, flux, lower, upper, population_index
-                        )
+                    "{:s},{:.8f},{:.3f},{:.3f},{:.3f},{}\n".format(
+                        stationID, sol, flux, lower, upper, population_index
                     )
-            print("Data saved to:", data_out_path)
+                )
+        print("Data saved to:", data_out_path)
