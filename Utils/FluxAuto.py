@@ -1,10 +1,15 @@
 """ Automatically runs the flux code and produces graphs on available data from multiple stations. """
 
+import os
 
 import datetime
 
+import numpy as np
 
+from RMS.Astrometry.Conversions import datetime2JD
 from RMS.Formats.Showers import FluxShowers
+from RMS.Math import isAngleBetween
+from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
 
 
 def fluxAutoRun(config, data_path, ref_time, days_prev=2, days_next=1):
@@ -37,9 +42,54 @@ def fluxAutoRun(config, data_path, ref_time, days_prev=2, days_next=1):
     print([shower.name for shower in active_showers])
 
 
-    # Load all data folders
+    ### Load all data folders ###
 
     # Determine which data folders should be used for each shower
+    shower_dirs = {}
+    for entry in os.walk(data_path):
+
+        dir_path, _, file_list = entry
+
+        print("Inspecting:", dir_path)
+
+        # Check that the dir name is long enough to contain the station code and the timestamp
+        if len(dir_path) < 23:
+            continue
+
+        # Parse the timestamp from the directory name and determine the capture date
+        dir_split = os.path.basename(dir_path).split("_")
+        if len(dir_split) < 3:
+            continue
+
+        try:
+            dir_dt = datetime.datetime.strptime(dir_split[1] + "_" + dir_split[2], "%Y%m%d_%H%M%S")
+        except ValueError:
+            continue
+
+        # Make sure the directory time is after 2018 (to avoid 1970 unix time 0 dirs)
+        #   2018 is when the GMN was established
+        if dir_dt.year < 2018:
+            continue
+
+        # Compute the solar longitude of the directory time stamp
+        sol_dir = jd2SolLonSteyaert(datetime2JD(dir_dt))
+
+        # Go through all showers and take the appropriate directories
+        for shower in active_showers:
+
+            # Add a list for dirs for this shower, if it doesn't exist
+            if shower.name not in shower_dirs:
+                shower_dirs[shower.name] = []
+
+            # Check that the directory time is within the activity period of the shower (+/- 1 deg sol)
+            if isAngleBetween(np.radians(shower.lasun_beg - 1), sol_dir, np.radians(shower.lasun_end + 1)):
+
+                # Take the folder only if it has a platepar file inside it
+                if len([file_name for file_name in file_list if file_name == config.platepar_name]):
+                    shower_dirs[shower.name].append(dir_path)
+
+
+    ### ###
 
 
     # Process fluxes of active showers
