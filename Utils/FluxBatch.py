@@ -144,8 +144,8 @@ def addFixedBins(sol_bins, small_sol_bins, small_dt_bins, meteor_num_arr, collec
 
 
 def combineFixedBinsAndComputeFlux(
-    sol_bins, meteors, time_area_prod, lm_m_data, rad_elev_data, rad_dist_data, ang_vel_data, min_meteors=50,\
-    ci=0.95, min_tap=2, min_bin_duration=0.5, max_bin_duration=12):
+    sol_bins, meteors, time_area_prod, lm_m_data, rad_elev_data, rad_dist_data, ang_vel_data, ci=0.95,
+    min_meteors=50, min_tap=2, min_bin_duration=0.5, max_bin_duration=12):
     """
     Computes flux values and their corresponding solar longitude based on bins containing
     number of meteors, and time-area product. Bins will be combined so that each bin has the
@@ -162,8 +162,8 @@ def combineFixedBinsAndComputeFlux(
         ang_vel_data: [ndarray]
 
     Keyword arguments:
-        min_meteors: [int] Minimum number of meteors to have in a bin
         ci: [float] Confidence interval for calculating the flux error bars (from 0 to 1)
+        min_meteors: [int] Minimum number of meteors to have in a bin
         min_tap: [float] Minimum time area product in 1000 km^2*h.
         min_bin_duration: [float] Minimum bin duration in hours.
         max_bin_duration: [float] Maximum bin duration in hours.
@@ -350,7 +350,8 @@ def cameraTally(comb_sol, comb_sol_bins, single_fixed_bin_information):
 
 
 
-def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, compute_single=False):
+def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duration=5, ci=0.95, min_meteors=50, 
+    min_tap=2, min_bin_duration=0.5, max_bin_duration=12, compute_single=False):
     """ Compute flux by combining flux measurements from multiple stations.
     
     Arguments:
@@ -367,6 +368,13 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, compute_single=Fal
     Keyword arguments:
         ref_ht: [float] Reference height for the collection area (in km). If -1, a velocity dependent height
             model will be used.
+        atomic_bin_duration: [float] Duration of the elemental bins (in minutes). 5 minutes by default.
+        ci: [float] Confidence interval for calculating the flux error bars (from 0 to 1)
+        min_meteors: [int] Minimum number of meteors to have in a bin
+        min_tap: [float] Minimum time area product in 1000 km^2*h.
+        min_bin_duration: [float] Minimum bin duration in hours.
+        max_bin_duration: [float] Maximum bin duration in hours.
+        compute_single: [bool] Compute single-station flux. False by default.
     """
 
     # Go through all directories containing the flux data
@@ -449,7 +457,7 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, compute_single=Fal
         [time_interval for data in file_data for time_interval in data[4]],
         [data[1] for data in file_data],
         shower,
-        bin_duration=bin_duration)
+        atomic_bin_duration=atomic_bin_duration)
 
 
     all_fixed_bin_information = []
@@ -742,7 +750,7 @@ if __name__ == "__main__":
     ci = 0.95
 
     # Base bin duration (minutes)
-    bin_duration = 5
+    atomic_bin_duration = 5
 
     # Minimum number of meteors in the bin
     min_meteors = fluxbatch_cml_args.minmeteors
@@ -856,8 +864,10 @@ if __name__ == "__main__":
         # Supplementary information
         v_init, summary_population_index, population_index_mean, single_fixed_bin_information,
         single_station_flux,
-    ) = fluxBatch(shower_code, mass_index, dir_params, ref_ht=ref_ht, \
-        compute_single=fluxbatch_cml_args.single)
+    ) = fluxBatch(shower_code, mass_index, dir_params, ref_ht=ref_ht, ci=ci,
+            atomic_bin_duration=atomic_bin_duration, min_meteors=min_meteors, min_tap=min_tap, 
+            min_bin_duration=min_bin_duration, max_bin_duration=max_bin_duration, 
+            compute_single=fluxbatch_cml_args.single)
 
 
 

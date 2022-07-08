@@ -584,7 +584,7 @@ def loadShower(config, shower_code, mass_index):
 
 
 
-def calculateFixedBins(all_time_intervals, dir_list, shower, bin_duration=5):
+def calculateFixedBins(all_time_intervals, dir_list, shower, atomic_bin_duration=5):
     """
     Function to calculate the bins that any amount of stations over any number of years for one shower
     can be put into.
@@ -595,7 +595,7 @@ def calculateFixedBins(all_time_intervals, dir_list, shower, bin_duration=5):
         shower: [Shower object]
 
     Keyword arguments:
-        bin_duration: [float] Bin duration in minutes (this is only an approximation since the bins are
+        atomic_bin_duration: [float] Bin duration in minutes (this is only an approximation since the bins are
             fixed to solar longitude)
 
     Return:
@@ -614,7 +614,7 @@ def calculateFixedBins(all_time_intervals, dir_list, shower, bin_duration=5):
         return np.array([]), []
 
     # Compute the bin duration in solar longitudes
-    sol_delta = 2*np.pi/60/24/365.24219*bin_duration
+    sol_delta = 2*np.pi/60/24/365.24219*atomic_bin_duration
 
     # Convert begin and end of all time intervals into solar longitudes
     sol_beg = np.array([jd2SolLonSteyaert(datetime2JD(beg)) for beg, _ in all_time_intervals])
