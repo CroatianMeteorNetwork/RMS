@@ -19,6 +19,7 @@ from cycler import cycler
 
 
 from RMS.Astrometry.Conversions import datetime2JD, jd2Date
+import RMS.ConfigReader as cr
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile
 from RMS.Formats.Showers import FluxShowers, loadRadiantShowers
 from Utils.Flux import calculatePopulationIndex, calculateMassIndex, computeFlux, detectClouds, fluxParser, \
@@ -63,6 +64,93 @@ class StationPlotParams:
 
         # Don't include the station name in the legend
         return {'color': color, 'marker': marker}
+
+
+
+class FluxBatchResults(object):
+    def __init__(self, 
+        # Shower object
+        shower,
+        # Solar longitude bins
+        sol_bins, bin_datetime_yearly, comb_sol, comb_sol_bins, 
+        # Flux data products
+        comb_flux, comb_flux_lower, comb_flux_upper, 
+        comb_flux_lm_m, comb_flux_lm_m_lower, comb_flux_lm_m_upper, 
+        comb_zhr, comb_zhr_lower, comb_zhr_upper,
+        # TAP-averaged parameters per bin
+        comb_ta_prod, comb_num_meteors, comb_rad_elev, comb_rad_dist, comb_lm_m, comb_ang_vel,
+        # Mag/mass limit information
+        lm_m_mean, lm_m_to_6_5_factor, mass_lim, mass_lim_lm_m_mean,
+        # Supplementary information
+        v_init, summary_population_index, population_index_mean, single_fixed_bin_information,
+        single_station_flux
+        ):
+        """ Container for results computed by the flux batch script. """
+
+        # Shower object
+        self.shower = shower
+
+        # Solar longitude bins
+        self.sol_bins = sol_bins
+        self.bin_datetime_yearly = bin_datetime_yearly
+        self.comb_sol = comb_sol
+        self.comb_sol_bins = comb_sol_bins
+        
+        # Flux data products
+        self.comb_flux = comb_flux
+        self.comb_flux_lower = comb_flux_lower
+        self.comb_flux_upper = comb_flux_upper
+        self.comb_flux_lm_m = comb_flux_lm_m
+        self.comb_flux_lm_m_lower = comb_flux_lm_m_lower 
+        self.comb_flux_lm_m_upper = comb_flux_lm_m_upper
+        self.comb_zhr = comb_zhr
+        self.comb_zhr_lower = comb_zhr_lower
+        self.comb_zhr_upper = comb_zhr_upper
+
+        # TAP-averaged parameters per bin
+        self.comb_ta_prod = comb_ta_prod
+        self.comb_num_meteors = comb_num_meteors
+        self.comb_rad_elev = comb_rad_elev
+        self.comb_rad_dist = comb_rad_dist
+        self.comb_lm_m = comb_lm_m
+        self.comb_ang_vel = comb_ang_vel
+
+        # Mag/mass limit information
+        self.lm_m_mean = lm_m_mean
+        self.lm_m_to_6_5_factor = lm_m_to_6_5_factor
+        self.mass_lim = mass_lim
+        self.mass_lim_lm_m_mean = mass_lim_lm_m_mean
+
+        # Supplementary information
+        self.v_init = v_init
+        self.summary_population_index = summary_population_index
+        self.population_index_mean = population_index_mean
+        self.single_fixed_bin_information = single_fixed_bin_information
+        self.single_station_flux = single_station_flux
+
+
+    def unpack(self):
+        """ Return all parameters. """
+
+        (
+        # Shower object
+        self.shower,
+        # Solar longitude bins
+        self.sol_bins, self.bin_datetime_yearly, self.comb_sol, self.comb_sol_bins, 
+        # Flux data products
+        self.comb_flux, self.comb_flux_lower, self.comb_flux_upper, 
+        self.comb_flux_lm_m, self.comb_flux_lm_m_lower, self.comb_flux_lm_m_upper, 
+        self.comb_zhr, self.comb_zhr_lower, self.comb_zhr_upper,
+        # TAP-averaged parameters per bin
+        self.comb_ta_prod, self.comb_num_meteors, self.comb_rad_elev, self.comb_rad_dist, self.comb_lm_m, 
+        self.comb_ang_vel,
+        # Mag/mass limit information
+        self.lm_m_mean, self.lm_m_to_6_5_factor, self.mass_lim, self.mass_lim_lm_m_mean,
+        # Supplementary information
+        self.v_init, self.summary_population_index, self.population_index_mean, 
+        self.single_fixed_bin_information, self.single_station_flux,
+        )
+
 
 
 
@@ -364,6 +452,7 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
             - binduration - for single-station fluxes only
             - binmeteors - for single-station fluxes only
             - fwhm - manual star FWHM, if not computed in CALSTARS files. None to take a default value
+            - ratio_threshold - star match ratio for determining cloudiness. None to take a default value
 
     Keyword arguments:
         ref_ht: [float] Reference height for the collection area (in km). If -1, a velocity dependent height
@@ -379,7 +468,7 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
 
     # Go through all directories containing the flux data
     file_data = []
-    for night_dir_path, time_intervals, binduration, binmeteors, fwhm in dir_params:
+    for night_dir_path, time_intervals, binduration, binmeteors, fwhm, ratio_threshold in dir_params:
 
         # Find the FTPdetectinfo file
         ftpdetectinfo_path = findFTPdetectinfoFile(night_dir_path)
@@ -463,6 +552,7 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
     all_fixed_bin_information = []
     single_fixed_bin_information = []
     single_station_flux = []
+    summary_population_index = []
 
     # Compute the flux
     for (config, ftp_dir_path, ftpdetectinfo_path, shower_code, time_intervals, s, binduration, \
@@ -494,7 +584,7 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
                 default_fwhm=fwhm,
                 confidence_interval=ci,
                 forced_bins=forced_bins,
-                compute_single=fluxbatch_cml_args.single,
+                compute_single=compute_single,
             )
 
             if ret is None:
@@ -644,7 +734,8 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
     comb_zhr_upper = calculateZHR(comb_flux_upper, population_index_mean)
 
 
-    return (
+    # Store the results into a structure
+    flux_batch_results = FluxBatchResults(
         # Shower object
         shower,
         # Solar longitude bins
@@ -658,17 +749,16 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
         # Mag/mass limit information
         lm_m_mean, lm_m_to_6_5_factor, mass_lim, mass_lim_lm_m_mean,
         # Supplementary information
-        v_init, summary_population_index, population_index_mean, single_fixed_bin_information, 
-        single_station_flux,
-    )
+        v_init, summary_population_index, population_index_mean, single_fixed_bin_information,
+        single_station_flux)
+
+    return flux_batch_results
 
 
 
 if __name__ == "__main__":
 
     import argparse
-
-    import RMS.ConfigReader as cr
 
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(
@@ -774,12 +864,7 @@ if __name__ == "__main__":
 
     dir_path = os.path.dirname(fluxbatch_cml_args.batch_path)
 
-
-    output_data = []
     shower_code = None
-    summary_population_index = []
-
-
 
     ### Init the plot ###
 
@@ -842,29 +927,14 @@ if __name__ == "__main__":
                 flux_cml_args.ht,
             )
 
-            dir_params.append([ftpdetectinfo_path, time_intervals, binduration, binmeteors, fwhm])
+            dir_params.append([ftpdetectinfo_path, time_intervals, binduration, binmeteors, fwhm, 
+                ratio_threshold])
 
 
 
 
     # Compute the batch flux
-    (   
-        # Shower object
-        shower,
-        # Solar longitude bins
-        sol_bins, bin_datetime_yearly, comb_sol, comb_sol_bins, 
-        # Flux data products
-        comb_flux, comb_flux_lower, comb_flux_upper, 
-        comb_flux_lm_m, comb_flux_lm_m_lower, comb_flux_lm_m_upper, 
-        comb_zhr, comb_zhr_lower, comb_zhr_upper,
-        # TAP-averaged parameters per bin
-        comb_ta_prod, comb_num_meteors, comb_rad_elev, comb_rad_dist, comb_lm_m, comb_ang_vel,
-        # Mag/mass limit information
-        lm_m_mean, lm_m_to_6_5_factor, mass_lim, mass_lim_lm_m_mean,
-        # Supplementary information
-        v_init, summary_population_index, population_index_mean, single_fixed_bin_information,
-        single_station_flux,
-    ) = fluxBatch(shower_code, mass_index, dir_params, ref_ht=ref_ht, ci=ci,
+    fbr = fluxBatch(shower_code, mass_index, dir_params, ref_ht=ref_ht, ci=ci,
             atomic_bin_duration=atomic_bin_duration, min_meteors=min_meteors, min_tap=min_tap, 
             min_bin_duration=min_bin_duration, max_bin_duration=max_bin_duration, 
             compute_single=fluxbatch_cml_args.single)
@@ -874,8 +944,8 @@ if __name__ == "__main__":
     ### Print camera tally ###
 
     # Tally up contributions from individual cameras in each bin
-    bin_tally_topmeteors, bin_tally_toptap = cameraTally(comb_sol, comb_sol_bins, \
-        single_fixed_bin_information)
+    bin_tally_topmeteors, bin_tally_toptap = cameraTally(fbr.comb_sol, fbr.comb_sol_bins, \
+        fbr.single_fixed_bin_information)
 
     print()
     print("Camera tally per bin:")
@@ -994,7 +1064,7 @@ if __name__ == "__main__":
     if fluxbatch_cml_args.single:
 
         for (station_id, sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, 
-            _) in single_station_flux:
+            _) in fbr.single_station_flux:
 
             # plot data for night and interval
             plot_params = plot_info(station_id)
@@ -1019,16 +1089,16 @@ if __name__ == "__main__":
 
 
     # If data was able to be combined, plot the weighted flux
-    if len(comb_sol):
+    if len(fbr.comb_sol):
 
         # Plotting weigthed flux
         ax[0].errorbar(
-            comb_sol%360,
-            comb_flux,
-            yerr=[comb_flux - comb_flux_lower, comb_flux_upper - comb_flux],
+            fbr.comb_sol%360,
+            fbr.comb_flux,
+            yerr=[fbr.comb_flux - fbr.comb_flux_lower, fbr.comb_flux_upper - fbr.comb_flux],
             label="Weighted average flux at:\n" \
                 + "LM = +6.5$^{\\mathrm{M}}$, " \
-                + r"(${:s}$ g)".format(formatScientific(1000*mass_lim, 0)),
+                + r"(${:s}$ g)".format(formatScientific(1000*fbr.mass_lim, 0)),
                 #+ "$m_{\\mathrm{lim}} = $" + "${:s}$".format(formatScientific(1000*mass_lim, 0)) + " g (+6.5$^{\\mathrm{M}}$)",
             c='k',
             marker='o',
@@ -1038,12 +1108,13 @@ if __name__ == "__main__":
 
         # Plot the flux to the meteor LM
         ax[0].errorbar(
-            comb_sol%360,
-            comb_flux_lm_m,
-            yerr=[comb_flux_lm_m - comb_flux_lm_m_lower, comb_flux_lm_m_upper - comb_flux_lm_m],
-            label="Flux (1/{:.2f}x) at:\n".format(lm_m_to_6_5_factor) \
-                + "LM = {:+.2f}".format(lm_m_mean) + "$^{\\mathrm{M}}$, " \
-                + r"(${:s}$ g)".format(formatScientific(1000*mass_lim_lm_m_mean, 0)),
+            fbr.comb_sol%360,
+            fbr.comb_flux_lm_m,
+            yerr=[fbr.comb_flux_lm_m - fbr.comb_flux_lm_m_lower, 
+                  fbr.comb_flux_lm_m_upper - fbr.comb_flux_lm_m],
+            label="Flux (1/{:.2f}x) at:\n".format(fbr.lm_m_to_6_5_factor) \
+                + "LM = {:+.2f}".format(fbr.lm_m_mean) + "$^{\\mathrm{M}}$, " \
+                + r"(${:s}$ g)".format(formatScientific(1000*fbr.mass_lim_lm_m_mean, 0)),
                 #+ "$m_{\\mathrm{lim}} = $" + "${:s}$".format(formatScientific(1000*mass_lim_lm_m_mean, 0)) + " g ({:+.2f}".format(lm_m_mean) + "$^{\\mathrm{M}}$) ", \
             c='0.5',
             marker='o',
@@ -1058,9 +1129,9 @@ if __name__ == "__main__":
         ax[0].grid(color='0.9')
 
         ax[0].legend()
-        ax[0].set_title("{:s}, v = {:.1f} km/s, s = {:.2f}, r = {:.2f}".format(shower.name_full, 
-            v_init/1000, calculateMassIndex(np.mean(summary_population_index)), 
-            np.mean(summary_population_index)) 
+        ax[0].set_title("{:s}, v = {:.1f} km/s, s = {:.2f}, r = {:.2f}".format(fbr.shower.name_full, 
+            fbr.v_init/1000, calculateMassIndex(np.mean(fbr.summary_population_index)), 
+            np.mean(fbr.summary_population_index)) 
                       # + ", $\\mathrm{m_{lim}} = $" + r"${:s}$ g ".format(formatScientific(1000*mass_lim, 0))
                       # + "at LM = +6.5$^{\\mathrm{M}}$"
                       )
@@ -1072,7 +1143,7 @@ if __name__ == "__main__":
         # Create the right axis
         zhr_ax = ax[0].twinx()
 
-        population_index = np.mean(summary_population_index)
+        population_index = np.mean(fbr.summary_population_index)
 
         # Set the same range on the Y axis
         y_min, y_max = ax[0].get_ylim()
@@ -1095,9 +1166,9 @@ if __name__ == "__main__":
 
             # Plot time-area product in the bottom plot
             plot1 = ax[1].bar(
-                ((comb_sol_bins[1:] + comb_sol_bins[:-1])/2)%360,
-                comb_ta_prod/1e9,
-                comb_sol_bins[1:] - comb_sol_bins[:-1],
+                ((fbr.comb_sol_bins[1:] + fbr.comb_sol_bins[:-1])/2)%360,
+                fbr.comb_ta_prod/1e9,
+                fbr.comb_sol_bins[1:] - fbr.comb_sol_bins[:-1],
                 label='Time-area product (TAP)',
                 color='0.65',
                 edgecolor='0.55'
@@ -1106,8 +1177,8 @@ if __name__ == "__main__":
             # Plot the minimum time-area product as a horizontal line
             ax[1].hlines(
                 min_tap,
-                np.min(comb_sol%360),
-                np.max(comb_sol%360),
+                np.min(fbr.comb_sol%360),
+                np.max(fbr.comb_sol%360),
                 colors='k',
                 linestyles='solid',
                 label="Min. TAP",
@@ -1118,13 +1189,13 @@ if __name__ == "__main__":
 
             # Plot the number of meteors on the right axis
             side_ax = ax[1].twinx()
-            plot2 = side_ax.scatter(comb_sol%360, comb_num_meteors, c='k', label='Meteors', s=8)
+            plot2 = side_ax.scatter(fbr.comb_sol%360, fbr.comb_num_meteors, c='k', label='Meteors', s=8)
 
             # Plot the minimum meteors line
             side_ax.hlines(
                 min_meteors,
-                np.min(comb_sol%360),
-                np.max(comb_sol%360),
+                np.min(fbr.comb_sol%360),
+                np.max(fbr.comb_sol%360),
                 colors='k',
                 linestyles='--',
                 label="Min. meteors"
@@ -1142,10 +1213,10 @@ if __name__ == "__main__":
             ##### SUBPLOT 2 #####
 
             # Plot the radiant elevation
-            ax[2].scatter(comb_sol%360, comb_rad_elev, label="Rad. elev. (TAP-weighted)", color='0.75', s=15, marker='s')
+            ax[2].scatter(fbr.comb_sol%360, fbr.comb_rad_elev, label="Rad. elev. (TAP-weighted)", color='0.75', s=15, marker='s')
 
             # Plot the radiant distance
-            ax[2].scatter(comb_sol%360, comb_rad_dist, label="Rad. dist.", color='0.25', s=20, marker='x')
+            ax[2].scatter(fbr.comb_sol%360, fbr.comb_rad_dist, label="Rad. dist.", color='0.25', s=20, marker='x')
 
             ax[2].set_ylabel("Angle (deg)")
 
@@ -1167,7 +1238,7 @@ if __name__ == "__main__":
             o.elevation = 0
             o.horizon = '0:0'
 
-            for dt_range, dt_arr in bin_datetime_yearly:
+            for dt_range, dt_arr in fbr.bin_datetime_yearly:
 
                 dt_bin_beg, dt_bin_end = dt_range
                 dt_mid = jd2Date((datetime2JD(dt_bin_beg) + datetime2JD(dt_bin_end))/2, dt_obj=True)
@@ -1184,7 +1255,7 @@ if __name__ == "__main__":
                     moon_phases.append(m.phase)
 
                 # Plot Moon phases
-                moon_ax.plot(np.degrees(sol_bins), moon_phases, label="{:d} moon phase".format(dt_mid.year))
+                moon_ax.plot(np.degrees(fbr.sol_bins), moon_phases, label="{:d} moon phase".format(dt_mid.year))
 
             moon_ax.set_ylabel("Moon phase")
             moon_ax.set_ylim([0, 100])
@@ -1203,7 +1274,7 @@ if __name__ == "__main__":
 
             lm_ax = ax[3].twinx()
 
-            lm_ax.scatter(comb_sol%360, comb_lm_m, label="Meteor LM", color='0.5', s=20)
+            lm_ax.scatter(fbr.comb_sol%360, fbr.comb_lm_m, label="Meteor LM", color='0.5', s=20)
 
             lm_ax.invert_yaxis()
             lm_ax.set_ylabel("Meteor LM")
@@ -1217,13 +1288,13 @@ if __name__ == "__main__":
             # Plot the TAP-weighted meteor LM
 
             lm_ax.hlines(
-                lm_m_mean,
-                np.min(comb_sol%360),
-                np.max(comb_sol%360),
+                fbr.lm_m_mean,
+                np.min(fbr.comb_sol%360),
+                np.max(fbr.comb_sol%360),
                 colors='k',
                 alpha=0.5,
                 linestyles='dashed',
-                label="Mean meteor LM = {:+.2f}".format(lm_m_mean) + "$^{\\mathrm{M}}$",
+                label="Mean meteor LM = {:+.2f}".format(fbr.lm_m_mean) + "$^{\\mathrm{M}}$",
             )
 
 
@@ -1231,7 +1302,7 @@ if __name__ == "__main__":
 
             
             # Plot the angular velocity
-            ax[3].scatter(comb_sol%360, comb_ang_vel, label="Angular velocity", color='0.0', s=30, marker='+')
+            ax[3].scatter(fbr.comb_sol%360, fbr.comb_ang_vel, label="Angular velocity", color='0.0', s=30, marker='+')
             ax[3].set_ylabel("Ang. vel. (deg/s)")
 
 
@@ -1261,17 +1332,17 @@ if __name__ == "__main__":
     # if not fluxbatch_cml_args.csv:
 
     # Write the computed weigthed flux to disk
-    if len(comb_sol):
+    if len(fbr.comb_sol):
 
         data_out_path = os.path.join(dir_path, fluxbatch_cml_args.output_filename + "_combined.csv")
         with open(data_out_path, 'w') as fout:
             fout.write("# Shower parameters:\n")
             fout.write("# Shower         = {:s}\n".format(shower_code))
-            fout.write("# r              = {:.2f}\n".format(population_index_mean))
-            fout.write("# s              = {:.2f}\n".format(calculateMassIndex(population_index_mean)))
-            fout.write("# m_lim @ +6.5M  = {:.2e} kg\n".format(mass_lim))
-            fout.write("# Met LM mean    = {:.2e}\n".format(lm_m_mean))
-            fout.write("# m_lim @ {:+.2f}M = {:.2e} kg\n".format(lm_m_mean, mass_lim_lm_m_mean))
+            fout.write("# r              = {:.2f}\n".format(fbr.population_index_mean))
+            fout.write("# s              = {:.2f}\n".format(calculateMassIndex(fbr.population_index_mean)))
+            fout.write("# m_lim @ +6.5M  = {:.2e} kg\n".format(fbr.mass_lim))
+            fout.write("# Met LM mean    = {:.2e}\n".format(fbr.lm_m_mean))
+            fout.write("# m_lim @ {:+.2f}M = {:.2e} kg\n".format(fbr.lm_m_mean, fbr.mass_lim_lm_m_mean))
             fout.write("# CI int.        = {:.1f} %\n".format(100*ci))
             fout.write("# Binning parameters:\n")
             fout.write("# Min. meteors     = {:d}\n".format(min_meteors))
@@ -1279,7 +1350,7 @@ if __name__ == "__main__":
             fout.write("# Min bin duration = {:.2f} h\n".format(min_bin_duration))
             fout.write("# Max bin duration = {:.2f} h\n".format(max_bin_duration))
             fout.write(
-                "# Sol bin start (deg), Mean Sol (deg), Flux@+6.5M (met / 1000 km^2 h), Flux CI low, Flux CI high, Flux@+{:.2f}M (met / 1000 km^2 h), Flux CI low, Flux CI high, ZHR, ZHR CI low, ZHR CI high, Meteor Count, Time-area product (corrected to +6.5M) (1000 km^2/h), Meteor LM, Radiant elev (deg), Radiat dist (deg), Ang vel (deg/s)\n".format(lm_m_mean)
+                "# Sol bin start (deg), Mean Sol (deg), Flux@+6.5M (met / 1000 km^2 h), Flux CI low, Flux CI high, Flux@+{:.2f}M (met / 1000 km^2 h), Flux CI low, Flux CI high, ZHR, ZHR CI low, ZHR CI high, Meteor Count, Time-area product (corrected to +6.5M) (1000 km^2/h), Meteor LM, Radiant elev (deg), Radiat dist (deg), Ang vel (deg/s)\n".format(fbr.lm_m_mean)
             )
             for (_sol_bin_start,
                 _mean_sol,
@@ -1299,23 +1370,23 @@ if __name__ == "__main__":
                 _rad_dist,
                 _ang_vel) \
             in zip(
-                    comb_sol_bins,
-                    comb_sol,
-                    comb_flux,
-                    comb_flux_lower,
-                    comb_flux_upper,
-                    comb_flux_lm_m,
-                    comb_flux_lm_m_lower,
-                    comb_flux_lm_m_upper,
-                    comb_zhr,
-                    comb_zhr_lower,
-                    comb_zhr_upper,
-                    comb_num_meteors,
-                    comb_ta_prod,
-                    comb_lm_m,
-                    comb_rad_elev,
-                    comb_rad_dist,
-                    comb_ang_vel
+                    fbr.comb_sol_bins,
+                    fbr.comb_sol,
+                    fbr.comb_flux,
+                    fbr.comb_flux_lower,
+                    fbr.comb_flux_upper,
+                    fbr.comb_flux_lm_m,
+                    fbr.comb_flux_lm_m_lower,
+                    fbr.comb_flux_lm_m_upper,
+                    fbr.comb_zhr,
+                    fbr.comb_zhr_lower,
+                    fbr.comb_zhr_upper,
+                    fbr.comb_num_meteors,
+                    fbr.comb_ta_prod,
+                    fbr.comb_lm_m,
+                    fbr.comb_rad_elev,
+                    fbr.comb_rad_dist,
+                    fbr.comb_ang_vel
                     ):
 
                 fout.write(
@@ -1339,7 +1410,7 @@ if __name__ == "__main__":
                     _ang_vel,
                     ))
 
-            fout.write("{:.8f},,,,,,,,,,,,,,,,\n".format(comb_sol_bins[-1]))
+            fout.write("{:.8f},,,,,,,,,,,,,,,,\n".format(fbr.comb_sol_bins[-1]))
 
         print("Data saved to:", data_out_path)
 
@@ -1353,7 +1424,7 @@ if __name__ == "__main__":
             fout.write(
                 "# Station, Sol (deg), Flux@+6.5M (met/1000km^2/h), Flux lower bound, Flux upper bound, Population Index\n"
             )
-            for entry in output_data:
+            for entry in fbr.single_station_flux:
                 print(entry)
                 stationID, sol, flux, lower, upper, population_index = entry
 

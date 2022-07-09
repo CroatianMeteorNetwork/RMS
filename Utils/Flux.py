@@ -1075,7 +1075,7 @@ def detectMoon(file_list, platepar, config):
     return new_file_list
 
 
-def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=False, ratio_threshold=0.5, 
+def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=False, ratio_threshold=None, 
     only_recalibrate_pp=False):
     """Detect clouds based on the number of stars detected in images compared to how many are
     predicted.
@@ -1090,7 +1090,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         show_plots: [Bool] Whether to show plots (defaults to true)
         save_plots: [bool] Save the plots to disk. False by default
         ratio_threshold: [float] If the ratio of matched/predicted number of stars below this threshold,
-            it is assumed that the sky is cloudy.
+            it is assumed that the sky is cloudy. 0.5 by default (when None is passed)
         only_recalibrate_pp: [bool] If True, only the platepar recalibration step will be completed, without
             continuing further. False by default.
 
@@ -1098,6 +1098,11 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         time_intervals [list of tuple]: list of datetime pairs in tuples, representing the starting
             and ending times of a time interval
     """
+
+
+    # Take the default value of the ratio threshold
+    if ratio_threshold is None:
+        ratio_threshold = 0.5
 
 
     if not show_plots:
@@ -2749,7 +2754,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
         # Automatically deterine the number of meteors in the bin, if it's not given
-        if binmeteors < 0:
+        if binmeteors is None:
 
             if len(associations) > 0:
 
@@ -3518,7 +3523,7 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
 
 
             computeFlux(config, dir_path, ftpdetectinfo_path, shower, dt_beg, dt_end, shower.mass_index, \
-                ref_height=shower.ref_height, binmeteors=-1, forced_bins=forced_bins, save_plots=True, \
+                ref_height=shower.ref_height, binmeteors=None, forced_bins=forced_bins, save_plots=True, \
                 show_plots=False)
 
 
@@ -3567,8 +3572,7 @@ def fluxParser():
     binning_group.add_argument(
         "--binduration", type=float, metavar='DURATION', help="Time bin width in hours."
     )
-    binning_group.add_argument("--binmeteors", type=int, metavar='COUNT', help="Number of meteors per bin. Automatically determined by default.", \
-        default=-1)
+    binning_group.add_argument("--binmeteors", type=int, metavar='COUNT', help="Number of meteors per bin. Automatically determined by default.")
 
 
     flux_parser.add_argument(

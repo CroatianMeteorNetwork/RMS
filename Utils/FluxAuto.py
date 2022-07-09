@@ -10,6 +10,7 @@ from RMS.Astrometry.Conversions import datetime2JD
 from RMS.Formats.Showers import FluxShowers
 from RMS.Math import isAngleBetween
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
+from Utils.FluxBatch import fluxBatch
 
 
 def fluxAutoRun(config, data_path, ref_time, days_prev=2, days_next=1):
@@ -38,7 +39,7 @@ def fluxAutoRun(config, data_path, ref_time, days_prev=2, days_next=1):
 
     # Get a list of showers active now
     active_showers = flux_showers.activeShowers(dt_beg, dt_end)
-
+    active_showers_dict = {shower.name:shower for shower in active_showers}
     print([shower.name for shower in active_showers])
 
 
@@ -91,10 +92,28 @@ def fluxAutoRun(config, data_path, ref_time, days_prev=2, days_next=1):
 
     ### ###
 
+    # Process batch fluxes for all showers
+    for shower_code in shower_dirs:
+
+        shower = active_showers_dict[shower_code]
+        dir_list = shower_dirs[shower_code]
+
+        ref_height = -1
+        if shower.ref_height is not None:
+            ref_height = shower.ref_height
+
+        # Construct the dir input list
+        dir_params = [(night_dir_path, None, None, None, None, None) for night_dir_path in dir_list]
+
+        # Compute the batch flux
+        ret = fluxBatch(shower_code, shower.mass_index, dir_params, ref_ht=ref_height, min_meteors=50, 
+            min_tap=2, min_bin_duration=0.5, max_bin_duration=12, compute_single=False)
+
+        print(shower_code, ret)
+
 
     # Process fluxes of active showers
     #   - combine data from previous years, plot this year data separately
-
 
 
 if __name__ == "__main__":
