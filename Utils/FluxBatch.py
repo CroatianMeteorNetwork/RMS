@@ -71,6 +71,9 @@ class FluxBatchResults(object):
     def __init__(self, 
         # Shower object
         shower,
+        # Input parameters used to compute the flux
+        ref_ht, atomic_bin_duration, ci, min_meteors, min_tap, min_bin_duration, max_bin_duration, 
+        compute_single,
         # Solar longitude bins
         sol_bins, bin_datetime_yearly, comb_sol, comb_sol_bins, 
         # Flux data products
@@ -89,6 +92,16 @@ class FluxBatchResults(object):
 
         # Shower object
         self.shower = shower
+
+        # Input parameters used to compute the flux
+        self.ref_ht = ref_ht
+        self.atomic_bin_duration = atomic_bin_duration
+        self.ci = ci
+        self.min_meteors = min_meteors
+        self.min_tap = min_tap
+        self.min_bin_duration = min_bin_duration
+        self.max_bin_duration = max_bin_duration
+        self.compute_single = compute_single
 
         # Solar longitude bins
         self.sol_bins = sol_bins
@@ -738,6 +751,9 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
     flux_batch_results = FluxBatchResults(
         # Shower object
         shower,
+        # Input parameters used to compute the flux
+        ref_ht, atomic_bin_duration, ci, min_meteors, min_tap, min_bin_duration, max_bin_duration, 
+        compute_single,
         # Solar longitude bins
         sol_bins, bin_datetime_yearly, comb_sol, comb_sol_bins, 
         # Flux data products
@@ -753,6 +769,297 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
         single_station_flux)
 
     return flux_batch_results
+
+
+
+def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_single=False):
+    """ Make a plot showing the batch flux results. """
+
+
+    ### Init the plot ###
+
+    plot_info = StationPlotParams()
+    
+    if only_flux:
+        subplot_rows = 1
+    else:
+        subplot_rows = 4
+    fig, ax = plt.subplots(nrows=subplot_rows, figsize=(15, 10), sharex=True, \
+        gridspec_kw={'height_ratios': [3, 1, 1, 1][:subplot_rows]})
+
+
+    if not isinstance(ax, np.ndarray):
+        ax = [ax]
+
+    ### ###
+
+
+    # Plot single-station data
+    if compute_single:
+
+        for (station_id, sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, 
+            _) in fbr.single_station_flux:
+
+            # plot data for night and interval
+            plot_params = plot_info(station_id)
+
+            # Plot the single-station flux line
+            ax[0].plot(sol_data, flux_lm_6_5_data, linestyle='dashed', **plot_params)
+
+            # Plot single-station error bars
+            ax[0].errorbar(
+                sol_data,
+                flux_lm_6_5_data,
+                color=plot_params['color'],
+                alpha=0.5,
+                capsize=5,
+                zorder=3,
+                linestyle='none',
+                yerr=[
+                    np.array(flux_lm_6_5_data) - np.array(flux_lm_6_5_ci_lower_data),
+                    np.array(flux_lm_6_5_ci_upper_data) - np.array(flux_lm_6_5_data),
+                ],
+            )
+
+
+    # If data was able to be combined, plot the weighted flux
+    if len(fbr.comb_sol):
+
+        # Plotting weigthed flux
+        ax[0].errorbar(
+            fbr.comb_sol%360,
+            fbr.comb_flux,
+            yerr=[fbr.comb_flux - fbr.comb_flux_lower, fbr.comb_flux_upper - fbr.comb_flux],
+            label="Weighted average flux at:\n" \
+                + "LM = +6.5$^{\\mathrm{M}}$, " \
+                + r"(${:s}$ g)".format(formatScientific(1000*fbr.mass_lim, 0)),
+                #+ "$m_{\\mathrm{lim}} = $" + "${:s}$".format(formatScientific(1000*mass_lim, 0)) + " g (+6.5$^{\\mathrm{M}}$)",
+            c='k',
+            marker='o',
+            linestyle='none',
+            zorder=4,
+        )
+
+        # Plot the flux to the meteor LM
+        ax[0].errorbar(
+            fbr.comb_sol%360,
+            fbr.comb_flux_lm_m,
+            yerr=[fbr.comb_flux_lm_m - fbr.comb_flux_lm_m_lower, 
+                  fbr.comb_flux_lm_m_upper - fbr.comb_flux_lm_m],
+            label="Flux (1/{:.2f}x) at:\n".format(fbr.lm_m_to_6_5_factor) \
+                + "LM = {:+.2f}".format(fbr.lm_m_mean) + "$^{\\mathrm{M}}$, " \
+                + r"(${:s}$ g)".format(formatScientific(1000*fbr.mass_lim_lm_m_mean, 0)),
+                #+ "$m_{\\mathrm{lim}} = $" + "${:s}$".format(formatScientific(1000*mass_lim_lm_m_mean, 0)) + " g ({:+.2f}".format(lm_m_mean) + "$^{\\mathrm{M}}$) ", \
+            c='0.5',
+            marker='o',
+            linestyle='none',
+            zorder=4,
+        )
+
+        # Set the minimum flux to 0
+        ax[0].set_ylim(bottom=0)
+
+        # Add the grid
+        ax[0].grid(color='0.9')
+
+        ax[0].legend()
+        ax[0].set_title("{:s}, v = {:.1f} km/s, s = {:.2f}, r = {:.2f}".format(fbr.shower.name_full, 
+            fbr.v_init/1000, calculateMassIndex(np.mean(fbr.summary_population_index)), 
+            np.mean(fbr.summary_population_index)) 
+                      # + ", $\\mathrm{m_{lim}} = $" + r"${:s}$ g ".format(formatScientific(1000*mass_lim, 0))
+                      # + "at LM = +6.5$^{\\mathrm{M}}$"
+                      )
+        ax[0].set_ylabel("Flux (meteoroids / 1000 $\\cdot$ km$^2$ $\\cdot$ h)")
+
+
+        ### Plot the ZHR on another axis ###
+
+        # Create the right axis
+        zhr_ax = ax[0].twinx()
+
+        population_index = np.mean(fbr.summary_population_index)
+
+        # Set the same range on the Y axis
+        y_min, y_max = ax[0].get_ylim()
+        zhr_min, zhr_max = calculateZHR([y_min, y_max], population_index)
+        zhr_ax.set_ylim(zhr_min, zhr_max)
+
+        # Get the flux ticks and set them to the zhr axis
+        flux_ticks = ax[0].get_yticks()
+        zhr_ax.set_yscale('segmented', points=calculateZHR(flux_ticks, population_index))
+
+        zhr_ax.set_ylabel("ZHR at +6.5$^{\\mathrm{M}}$")
+
+        ### ###
+
+
+        if not only_flux:
+
+
+            ##### SUBPLOT 1 #####
+
+            # Plot time-area product in the bottom plot
+            ax[1].bar(
+                ((fbr.comb_sol_bins[1:] + fbr.comb_sol_bins[:-1])/2)%360,
+                fbr.comb_ta_prod/1e9,
+                fbr.comb_sol_bins[1:] - fbr.comb_sol_bins[:-1],
+                label='Time-area product (TAP)',
+                color='0.65',
+                edgecolor='0.55'
+            )
+
+            # Plot the minimum time-area product as a horizontal line
+            ax[1].hlines(
+                fbr.min_tap,
+                np.min(fbr.comb_sol%360),
+                np.max(fbr.comb_sol%360),
+                colors='k',
+                linestyles='solid',
+                label="Min. TAP",
+            )
+
+            ax[1].set_ylabel("TAP (1000 $\\cdot$ km$^2$ $\\cdot$ h)")
+
+
+            # Plot the number of meteors on the right axis
+            side_ax = ax[1].twinx()
+            side_ax.scatter(fbr.comb_sol%360, fbr.comb_num_meteors, c='k', label='Meteors', s=8)
+
+            # Plot the minimum meteors line
+            side_ax.hlines(
+                fbr.min_meteors,
+                np.min(fbr.comb_sol%360),
+                np.max(fbr.comb_sol%360),
+                colors='k',
+                linestyles='--',
+                label="Min. meteors"
+            )
+            side_ax.set_ylabel('Num meteors')
+            side_ax.set_ylim(bottom=0)
+
+
+            # Add a combined legend
+            lines, labels = ax[1].get_legend_handles_labels()
+            lines2, labels2 = side_ax.get_legend_handles_labels()
+            side_ax.legend(lines + lines2, labels + labels2)
+
+
+            ##### SUBPLOT 2 #####
+
+            # Plot the radiant elevation
+            ax[2].scatter(fbr.comb_sol%360, fbr.comb_rad_elev, label="Rad. elev. (TAP-weighted)", color='0.75', s=15, marker='s')
+
+            # Plot the radiant distance
+            ax[2].scatter(fbr.comb_sol%360, fbr.comb_rad_dist, label="Rad. dist.", color='0.25', s=20, marker='x')
+
+            ax[2].set_ylabel("Angle (deg)")
+
+            ### Plot lunar phases per year ###
+
+            moon_ax = ax[2].twinx()
+
+            # Set line plot cycler
+            line_cycler   = (cycler(color=["#E69F00", "#56B4E9", "#009E73", "#0072B2", "#D55E00", "#CC79A7", "#F0E442"]) +
+                     cycler(linestyle=["-", "--", "-.", ":", "-", "--", "-."]))
+
+            moon_ax.set_prop_cycle(line_cycler)
+
+
+            # Set up observer
+            o = ephem.Observer()
+            o.lat = str(0)
+            o.long = str(0)
+            o.elevation = 0
+            o.horizon = '0:0'
+
+            for dt_range, dt_arr in fbr.bin_datetime_yearly:
+
+                dt_bin_beg, dt_bin_end = dt_range
+                dt_mid = jd2Date((datetime2JD(dt_bin_beg) + datetime2JD(dt_bin_end))/2, dt_obj=True)
+
+                moon_phases = []
+
+                for dt in dt_arr:
+
+                    o.date = dt
+                    m = ephem.Moon()
+                    m.compute(o)
+
+                    moon_phases.append(m.phase)
+
+                # Plot Moon phases
+                moon_ax.plot(np.degrees(fbr.sol_bins), moon_phases, label="{:d} moon phase".format(dt_mid.year))
+
+            moon_ax.set_ylabel("Moon phase")
+            moon_ax.set_ylim([0, 100])
+
+            # Add a combined legend
+            lines, labels = ax[2].get_legend_handles_labels()
+            lines2, labels2 = moon_ax.get_legend_handles_labels()
+            moon_ax.legend(lines + lines2, labels + labels2)
+
+            ### ###
+
+
+            ##### SUBPLOT 3 #####
+
+            ### Plot the TAP-weighted limiting magnitude ###
+
+            lm_ax = ax[3].twinx()
+
+            lm_ax.scatter(fbr.comb_sol%360, fbr.comb_lm_m, label="Meteor LM", color='0.5', s=20)
+
+            lm_ax.invert_yaxis()
+            lm_ax.set_ylabel("Meteor LM")
+            #lm_ax.legend()
+
+            # Add one magnitude of buffer to every end, round to 0.5
+            lm_min, lm_max = lm_ax.get_ylim()
+            lm_ax.set_ylim(np.ceil(2*(lm_min))/2, np.floor(2*(lm_max))/2)
+
+
+            # Plot the TAP-weighted meteor LM
+
+            lm_ax.hlines(
+                fbr.lm_m_mean,
+                np.min(fbr.comb_sol%360),
+                np.max(fbr.comb_sol%360),
+                colors='k',
+                alpha=0.5,
+                linestyles='dashed',
+                label="Mean meteor LM = {:+.2f}".format(fbr.lm_m_mean) + "$^{\\mathrm{M}}$",
+            )
+
+
+            ###
+
+            
+            # Plot the angular velocity
+            ax[3].scatter(fbr.comb_sol%360, fbr.comb_ang_vel, label="Angular velocity", color='0.0', s=30, marker='+')
+            ax[3].set_ylabel("Ang. vel. (deg/s)")
+
+
+            # Add a combined legend
+            lines, labels = ax[3].get_legend_handles_labels()
+            lines2, labels2 = lm_ax.get_legend_handles_labels()
+            lm_ax.legend(lines + lines2, labels + labels2)
+
+
+        ax[subplot_rows - 1].set_xlabel("Solar longitude (deg)")
+
+
+
+    # Show plot
+    
+    plt.tight_layout()
+
+    fig_path = os.path.join(dir_path, output_filename + ".png")
+    print("Figure saved to:", fig_path)
+    plt.savefig(fig_path, dpi=300)
+
+    plt.show()
+
+
 
 
 
@@ -866,23 +1173,6 @@ if __name__ == "__main__":
 
     shower_code = None
 
-    ### Init the plot ###
-
-    plot_info = StationPlotParams()
-    
-    if fluxbatch_cml_args.onlyflux:
-        subplot_rows = 1
-    else:
-        subplot_rows = 4
-    fig, ax = plt.subplots(nrows=subplot_rows, figsize=(15, 10), sharex=True, \
-        gridspec_kw={'height_ratios': [3, 1, 1, 1][:subplot_rows]})
-
-
-    if not isinstance(ax, np.ndarray):
-        ax = [ax]
-
-    ### ###
-
 
     # NOTE: CSV option not supported
     # # If an input CSV file was not given, compute the data
@@ -987,6 +1277,15 @@ if __name__ == "__main__":
     ###
 
 
+    # Show and save the batch flux plot
+    plotBatchFlux(
+        fbr, 
+        dir_path,
+        fluxbatch_cml_args.output_filename, 
+        only_flux=fluxbatch_cml_args.onlyflux, 
+        compute_single=fluxbatch_cml_args.single
+        )
+
 
     # NOTE: CSV option not supported
     # # If a CSV files was given, load the fluxes from the disk
@@ -1058,275 +1357,6 @@ if __name__ == "__main__":
     #         comb_num_meteors = []
     #         comb_ta_prod = []
 
-
-
-    # Store and plot single-station data
-    if fluxbatch_cml_args.single:
-
-        for (station_id, sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, 
-            _) in fbr.single_station_flux:
-
-            # plot data for night and interval
-            plot_params = plot_info(station_id)
-
-            # Plot the single-station flux line
-            line = ax[0].plot(sol_data, flux_lm_6_5_data, linestyle='dashed', **plot_params)
-
-            # Plot single-station error bars
-            ax[0].errorbar(
-                sol_data,
-                flux_lm_6_5_data,
-                color=plot_params['color'],
-                alpha=0.5,
-                capsize=5,
-                zorder=3,
-                linestyle='none',
-                yerr=[
-                    np.array(flux_lm_6_5_data) - np.array(flux_lm_6_5_ci_lower_data),
-                    np.array(flux_lm_6_5_ci_upper_data) - np.array(flux_lm_6_5_data),
-                ],
-            )
-
-
-    # If data was able to be combined, plot the weighted flux
-    if len(fbr.comb_sol):
-
-        # Plotting weigthed flux
-        ax[0].errorbar(
-            fbr.comb_sol%360,
-            fbr.comb_flux,
-            yerr=[fbr.comb_flux - fbr.comb_flux_lower, fbr.comb_flux_upper - fbr.comb_flux],
-            label="Weighted average flux at:\n" \
-                + "LM = +6.5$^{\\mathrm{M}}$, " \
-                + r"(${:s}$ g)".format(formatScientific(1000*fbr.mass_lim, 0)),
-                #+ "$m_{\\mathrm{lim}} = $" + "${:s}$".format(formatScientific(1000*mass_lim, 0)) + " g (+6.5$^{\\mathrm{M}}$)",
-            c='k',
-            marker='o',
-            linestyle='none',
-            zorder=4,
-        )
-
-        # Plot the flux to the meteor LM
-        ax[0].errorbar(
-            fbr.comb_sol%360,
-            fbr.comb_flux_lm_m,
-            yerr=[fbr.comb_flux_lm_m - fbr.comb_flux_lm_m_lower, 
-                  fbr.comb_flux_lm_m_upper - fbr.comb_flux_lm_m],
-            label="Flux (1/{:.2f}x) at:\n".format(fbr.lm_m_to_6_5_factor) \
-                + "LM = {:+.2f}".format(fbr.lm_m_mean) + "$^{\\mathrm{M}}$, " \
-                + r"(${:s}$ g)".format(formatScientific(1000*fbr.mass_lim_lm_m_mean, 0)),
-                #+ "$m_{\\mathrm{lim}} = $" + "${:s}$".format(formatScientific(1000*mass_lim_lm_m_mean, 0)) + " g ({:+.2f}".format(lm_m_mean) + "$^{\\mathrm{M}}$) ", \
-            c='0.5',
-            marker='o',
-            linestyle='none',
-            zorder=4,
-        )
-
-        # Set the minimum flux to 0
-        ax[0].set_ylim(bottom=0)
-
-        # Add the grid
-        ax[0].grid(color='0.9')
-
-        ax[0].legend()
-        ax[0].set_title("{:s}, v = {:.1f} km/s, s = {:.2f}, r = {:.2f}".format(fbr.shower.name_full, 
-            fbr.v_init/1000, calculateMassIndex(np.mean(fbr.summary_population_index)), 
-            np.mean(fbr.summary_population_index)) 
-                      # + ", $\\mathrm{m_{lim}} = $" + r"${:s}$ g ".format(formatScientific(1000*mass_lim, 0))
-                      # + "at LM = +6.5$^{\\mathrm{M}}$"
-                      )
-        ax[0].set_ylabel("Flux (meteoroids / 1000 $\\cdot$ km$^2$ $\\cdot$ h)")
-
-
-        ### Plot the ZHR on another axis ###
-
-        # Create the right axis
-        zhr_ax = ax[0].twinx()
-
-        population_index = np.mean(fbr.summary_population_index)
-
-        # Set the same range on the Y axis
-        y_min, y_max = ax[0].get_ylim()
-        zhr_min, zhr_max = calculateZHR([y_min, y_max], population_index)
-        zhr_ax.set_ylim(zhr_min, zhr_max)
-
-        # Get the flux ticks and set them to the zhr axis
-        flux_ticks = ax[0].get_yticks()
-        zhr_ax.set_yscale('segmented', points=calculateZHR(flux_ticks, population_index))
-
-        zhr_ax.set_ylabel("ZHR at +6.5$^{\\mathrm{M}}$")
-
-        ### ###
-
-
-        if not fluxbatch_cml_args.onlyflux:
-
-
-            ##### SUBPLOT 1 #####
-
-            # Plot time-area product in the bottom plot
-            plot1 = ax[1].bar(
-                ((fbr.comb_sol_bins[1:] + fbr.comb_sol_bins[:-1])/2)%360,
-                fbr.comb_ta_prod/1e9,
-                fbr.comb_sol_bins[1:] - fbr.comb_sol_bins[:-1],
-                label='Time-area product (TAP)',
-                color='0.65',
-                edgecolor='0.55'
-            )
-
-            # Plot the minimum time-area product as a horizontal line
-            ax[1].hlines(
-                min_tap,
-                np.min(fbr.comb_sol%360),
-                np.max(fbr.comb_sol%360),
-                colors='k',
-                linestyles='solid',
-                label="Min. TAP",
-            )
-
-            ax[1].set_ylabel("TAP (1000 $\\cdot$ km$^2$ $\\cdot$ h)")
-
-
-            # Plot the number of meteors on the right axis
-            side_ax = ax[1].twinx()
-            plot2 = side_ax.scatter(fbr.comb_sol%360, fbr.comb_num_meteors, c='k', label='Meteors', s=8)
-
-            # Plot the minimum meteors line
-            side_ax.hlines(
-                min_meteors,
-                np.min(fbr.comb_sol%360),
-                np.max(fbr.comb_sol%360),
-                colors='k',
-                linestyles='--',
-                label="Min. meteors"
-            )
-            side_ax.set_ylabel('Num meteors')
-            side_ax.set_ylim(bottom=0)
-
-
-            # Add a combined legend
-            lines, labels = ax[1].get_legend_handles_labels()
-            lines2, labels2 = side_ax.get_legend_handles_labels()
-            side_ax.legend(lines + lines2, labels + labels2)
-
-
-            ##### SUBPLOT 2 #####
-
-            # Plot the radiant elevation
-            ax[2].scatter(fbr.comb_sol%360, fbr.comb_rad_elev, label="Rad. elev. (TAP-weighted)", color='0.75', s=15, marker='s')
-
-            # Plot the radiant distance
-            ax[2].scatter(fbr.comb_sol%360, fbr.comb_rad_dist, label="Rad. dist.", color='0.25', s=20, marker='x')
-
-            ax[2].set_ylabel("Angle (deg)")
-
-            ### Plot lunar phases per year ###
-
-            moon_ax = ax[2].twinx()
-
-            # Set line plot cycler
-            line_cycler   = (cycler(color=["#E69F00", "#56B4E9", "#009E73", "#0072B2", "#D55E00", "#CC79A7", "#F0E442"]) +
-                     cycler(linestyle=["-", "--", "-.", ":", "-", "--", "-."]))
-
-            moon_ax.set_prop_cycle(line_cycler)
-
-
-            # Set up observer
-            o = ephem.Observer()
-            o.lat = str(0)
-            o.long = str(0)
-            o.elevation = 0
-            o.horizon = '0:0'
-
-            for dt_range, dt_arr in fbr.bin_datetime_yearly:
-
-                dt_bin_beg, dt_bin_end = dt_range
-                dt_mid = jd2Date((datetime2JD(dt_bin_beg) + datetime2JD(dt_bin_end))/2, dt_obj=True)
-
-                sol_moon_phase = []
-                moon_phases = []
-
-                for dt in dt_arr:
-
-                    o.date = dt
-                    m = ephem.Moon()
-                    m.compute(o)
-
-                    moon_phases.append(m.phase)
-
-                # Plot Moon phases
-                moon_ax.plot(np.degrees(fbr.sol_bins), moon_phases, label="{:d} moon phase".format(dt_mid.year))
-
-            moon_ax.set_ylabel("Moon phase")
-            moon_ax.set_ylim([0, 100])
-
-            # Add a combined legend
-            lines, labels = ax[2].get_legend_handles_labels()
-            lines2, labels2 = moon_ax.get_legend_handles_labels()
-            moon_ax.legend(lines + lines2, labels + labels2)
-
-            ### ###
-
-
-            ##### SUBPLOT 3 #####
-
-            ### Plot the TAP-weighted limiting magnitude ###
-
-            lm_ax = ax[3].twinx()
-
-            lm_ax.scatter(fbr.comb_sol%360, fbr.comb_lm_m, label="Meteor LM", color='0.5', s=20)
-
-            lm_ax.invert_yaxis()
-            lm_ax.set_ylabel("Meteor LM")
-            #lm_ax.legend()
-
-            # Add one magnitude of buffer to every end, round to 0.5
-            lm_min, lm_max = lm_ax.get_ylim()
-            lm_ax.set_ylim(np.ceil(2*(lm_min))/2, np.floor(2*(lm_max))/2)
-
-
-            # Plot the TAP-weighted meteor LM
-
-            lm_ax.hlines(
-                fbr.lm_m_mean,
-                np.min(fbr.comb_sol%360),
-                np.max(fbr.comb_sol%360),
-                colors='k',
-                alpha=0.5,
-                linestyles='dashed',
-                label="Mean meteor LM = {:+.2f}".format(fbr.lm_m_mean) + "$^{\\mathrm{M}}$",
-            )
-
-
-            ###
-
-            
-            # Plot the angular velocity
-            ax[3].scatter(fbr.comb_sol%360, fbr.comb_ang_vel, label="Angular velocity", color='0.0', s=30, marker='+')
-            ax[3].set_ylabel("Ang. vel. (deg/s)")
-
-
-            # Add a combined legend
-            lines, labels = ax[3].get_legend_handles_labels()
-            lines2, labels2 = lm_ax.get_legend_handles_labels()
-            lm_ax.legend(lines + lines2, labels + labels2)
-
-
-        ax[subplot_rows - 1].set_xlabel("Solar longitude (deg)")
-
-
-
-
-
-    # Show plot
-    
-    plt.tight_layout()
-
-    fig_path = os.path.join(dir_path, fluxbatch_cml_args.output_filename + ".png")
-    print("Figure saved to:", fig_path)
-    plt.savefig(fig_path, dpi=300)
-
-    plt.show()
 
 
     # if not fluxbatch_cml_args.csv:

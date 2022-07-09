@@ -10,7 +10,7 @@ from RMS.Astrometry.Conversions import datetime2JD
 from RMS.Formats.Showers import FluxShowers
 from RMS.Math import isAngleBetween
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
-from Utils.FluxBatch import fluxBatch
+from Utils.FluxBatch import fluxBatch, plotBatchFlux
 
 
 def fluxAutoRun(config, data_path, ref_time, days_prev=2, days_next=1):
@@ -106,10 +106,22 @@ def fluxAutoRun(config, data_path, ref_time, days_prev=2, days_next=1):
         dir_params = [(night_dir_path, None, None, None, None, None) for night_dir_path in dir_list]
 
         # Compute the batch flux
-        ret = fluxBatch(shower_code, shower.mass_index, dir_params, ref_ht=ref_height, min_meteors=50, 
+        fbr = fluxBatch(shower_code, shower.mass_index, dir_params, ref_ht=ref_height, min_meteors=50, 
             min_tap=2, min_bin_duration=0.5, max_bin_duration=12, compute_single=False)
 
-        print(shower_code, ret)
+
+        # Make a name for the plot to save
+        bath_flux_plot_file_name = "flux_{:s}_sol={:.6f}-{:.6f}.png".format(shower_code, 
+            fbr.comb_sol_bins[0], fbr.comb_sol_bins[-1])
+
+        # Show and save the batch flux plot
+        plotBatchFlux(
+            fbr, 
+            data_path,
+            bath_flux_plot_file_name,
+            only_flux=False,
+            compute_single=False
+        )
 
 
     # Process fluxes of active showers
