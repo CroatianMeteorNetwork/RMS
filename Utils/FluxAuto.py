@@ -111,7 +111,7 @@ def fluxAutoRun(config, data_path, ref_time, days_prev=2, days_next=1):
 
 
         # Make a name for the plot to save
-        bath_flux_plot_file_name = "flux_{:s}_sol={:.6f}-{:.6f}.png".format(shower_code, 
+        bath_flux_plot_file_name = "flux_{:s}_sol={:.6f}-{:.6f}".format(shower_code, 
             fbr.comb_sol_bins[0], fbr.comb_sol_bins[-1])
 
         # Show and save the batch flux plot
