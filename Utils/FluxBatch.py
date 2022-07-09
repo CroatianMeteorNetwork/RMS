@@ -772,7 +772,7 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
 
 
 
-def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_single=False):
+def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_single=False, show_plot=True):
     """ Make a plot showing the batch flux results. """
 
 
@@ -1057,7 +1057,12 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
     print("Figure saved to:", fig_path)
     plt.savefig(fig_path, dpi=300)
 
-    plt.show()
+    if show_plot:
+        plt.show()
+
+    else:
+        plt.clf()
+        plt.close()
 
 
 

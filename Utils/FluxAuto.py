@@ -13,13 +13,13 @@ from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
 from Utils.FluxBatch import fluxBatch, plotBatchFlux
 
 
-def fluxAutoRun(config, data_path, ref_time, days_prev=2, days_next=1):
+def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1):
     """
 
     Arguments:
         config: [Config]
         data_path: [str] Path to the directory with the data used for flux computation.
-        ref_file: [datetime] Reference time to compute the flux for all active showers. E.g. this can be now,
+        ref_dt: [datetime] Reference time to compute the flux for all active showers. E.g. this can be now,
             or some manually specified point in time.
 
     Keyword arguments:
@@ -32,21 +32,39 @@ def fluxAutoRun(config, data_path, ref_time, days_prev=2, days_next=1):
     # Load the showers for flux
     flux_showers = FluxShowers(config)
 
+    # Compute the solar longitude of the reference time
+    sol_ref = np.degrees(jd2SolLonSteyaert(datetime2JD(ref_dt)))
+
 
     # Determine the time range for shower activity check
-    dt_beg = ref_time - datetime.timedelta(days=days_prev)
-    dt_end = ref_time + datetime.timedelta(days=days_next)
+    dt_beg = ref_dt - datetime.timedelta(days=days_prev)
+    dt_end = ref_dt + datetime.timedelta(days=days_next)
 
     # Get a list of showers active now
-    active_showers = flux_showers.activeShowers(dt_beg, dt_end)
+    active_showers = flux_showers.activeShowers(dt_beg, dt_end, use_zhr_threshold=False)
     active_showers_dict = {shower.name:shower for shower in active_showers}
     print([shower.name for shower in active_showers])
+
+
+    # Compute the range of dates for this year's activity of every active shower
+    for shower in active_showers:
+
+        # Compute the date range for this year's activity
+        sol_diff_beg = abs((shower.lasun_beg - sol_ref + 180)%360 - 180)
+        sol_diff_end = abs((sol_ref - shower.lasun_end + 180)%360 - 180)
+        sol_diff_max = (shower.lasun_max - sol_ref + 180)%360 - 180
+
+        # Add activity during the given year
+        shower.dt_beg_ref_year = ref_dt - datetime.timedelta(days=sol_diff_beg*360/365.24219)
+        shower.dt_end_ref_year = ref_dt + datetime.timedelta(days=sol_diff_end*360/365.24219)
+        shower.dt_max_ref_year = ref_dt + datetime.timedelta(days=sol_diff_max*360/365.24219)
 
 
     ### Load all data folders ###
 
     # Determine which data folders should be used for each shower
     shower_dirs = {}
+    shower_dirs_ref_year = {}
     for entry in os.walk(data_path):
 
         dir_path, _, file_list = entry
@@ -81,6 +99,7 @@ def fluxAutoRun(config, data_path, ref_time, days_prev=2, days_next=1):
             # Add a list for dirs for this shower, if it doesn't exist
             if shower.name not in shower_dirs:
                 shower_dirs[shower.name] = []
+                shower_dirs_ref_year[shower.name] = []
 
             # Check that the directory time is within the activity period of the shower (+/- 1 deg sol)
             if isAngleBetween(np.radians(shower.lasun_beg - 1), sol_dir, np.radians(shower.lasun_end + 1)):
@@ -90,38 +109,58 @@ def fluxAutoRun(config, data_path, ref_time, days_prev=2, days_next=1):
                     shower_dirs[shower.name].append(dir_path)
 
 
+                    print("Ref year check:")
+                    print(dir_dt, shower.dt_beg_ref_year - datetime.timedelta(days=1)) 
+                    print(dir_dt, shower.dt_end_ref_year + datetime.timedelta(days=1))
+                    print()
+
+                    # Store only the given year's directories, to generate the plot of the latest activity
+                    if (dir_dt >= shower.dt_beg_ref_year - datetime.timedelta(days=1)) and \
+                       (dir_dt <= shower.dt_end_ref_year + datetime.timedelta(days=1)):
+
+                       shower_dirs_ref_year[shower.name].append(dir_path)
+
+
     ### ###
 
+
     # Process batch fluxes for all showers
-    for shower_code in shower_dirs:
+    for shower_dir_dict, plot_suffix_status in [[shower_dirs, "ALL"], [shower_dirs_ref_year, "REF"]]:
+        for shower_code in shower_dir_dict:
 
-        shower = active_showers_dict[shower_code]
-        dir_list = shower_dirs[shower_code]
+            shower = active_showers_dict[shower_code]
+            dir_list = shower_dir_dict[shower_code]
 
-        ref_height = -1
-        if shower.ref_height is not None:
-            ref_height = shower.ref_height
+            ref_height = -1
+            if shower.ref_height is not None:
+                ref_height = shower.ref_height
 
-        # Construct the dir input list
-        dir_params = [(night_dir_path, None, None, None, None, None) for night_dir_path in dir_list]
+            # Construct the dir input list
+            dir_params = [(night_dir_path, None, None, None, None, None) for night_dir_path in dir_list]
 
-        # Compute the batch flux
-        fbr = fluxBatch(shower_code, shower.mass_index, dir_params, ref_ht=ref_height, min_meteors=50, 
-            min_tap=2, min_bin_duration=0.5, max_bin_duration=12, compute_single=False)
+            # Compute the batch flux
+            fbr = fluxBatch(shower_code, shower.mass_index, dir_params, ref_ht=ref_height, min_meteors=50, 
+                min_tap=2, min_bin_duration=0.5, max_bin_duration=12, compute_single=False)
 
 
-        # Make a name for the plot to save
-        bath_flux_plot_file_name = "flux_{:s}_sol={:.6f}-{:.6f}".format(shower_code, 
-            fbr.comb_sol_bins[0], fbr.comb_sol_bins[-1])
+            if plot_suffix_status == "ALL":
+                plot_suffix = "all_years"
+            else:
+                plot_suffix = "year_{:d}".format(shower.dt_max_ref_year.year)
 
-        # Show and save the batch flux plot
-        plotBatchFlux(
-            fbr, 
-            data_path,
-            bath_flux_plot_file_name,
-            only_flux=False,
-            compute_single=False
-        )
+            # Make a name for the plot to save
+            bath_flux_plot_file_name = "flux_{:s}_sol={:.6f}-{:.6f}_{:s}".format(shower_code, 
+                fbr.comb_sol_bins[0], fbr.comb_sol_bins[-1], plot_suffix)
+
+            # Show and save the batch flux plot
+            plotBatchFlux(
+                fbr, 
+                data_path,
+                bath_flux_plot_file_name,
+                only_flux=False,
+                compute_single=False,
+                show_plot=False,
+            )
 
 
     # Process fluxes of active showers
@@ -169,14 +208,14 @@ if __name__ == "__main__":
     config = cr.parse(config.config_file_name)
 
     if cml_args.time is not None:
-        ref_time = datetime.datetime.strptime(cml_args.time[0], "%Y%m%d_%H%M%S.%f")
+        ref_dt = datetime.datetime.strptime(cml_args.time[0], "%Y%m%d_%H%M%S.%f")
 
     # If no manual time was given, use current time.
     else:
-        ref_time = datetime.datetime.utcnow()
+        ref_dt = datetime.datetime.utcnow()
 
 
-    print("Computing flux using reference time:", ref_time)
+    print("Computing flux using reference time:", ref_dt)
 
     # Run auto flux
-    fluxAutoRun(config, cml_args.dir_path, ref_time)
+    fluxAutoRun(config, cml_args.dir_path, ref_dt)
