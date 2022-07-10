@@ -10,7 +10,7 @@ from RMS.Astrometry.Conversions import datetime2JD
 from RMS.Formats.Showers import FluxShowers
 from RMS.Math import isAngleBetween
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
-from Utils.FluxBatch import fluxBatch, plotBatchFlux
+from Utils.FluxBatch import fluxBatch, plotBatchFlux, FluxBatchBinningParams
 
 
 def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1):
@@ -65,7 +65,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1):
     # Determine which data folders should be used for each shower
     shower_dirs = {}
     shower_dirs_ref_year = {}
-    for entry in os.walk(data_path):
+    for entry in sorted(os.walk(data_path)):
 
         dir_path, _, file_list = entry
 
@@ -123,9 +123,28 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1):
 
     ### ###
 
+    # Define binning parameters for all years, and individual years
+    fluxbatch_binning_params_all_years = FluxBatchBinningParams(
+        min_meteors=100, 
+        min_tap=20, 
+        min_bin_duration=0.5, 
+        max_bin_duration=24
+        )
+
+    fluxbatch_binning_params_one_year = FluxBatchBinningParams(
+        min_meteors=20,
+        min_tap=5, 
+        min_bin_duration=0.5, 
+        max_bin_duration=12
+        )
+
 
     # Process batch fluxes for all showers
-    for shower_dir_dict, plot_suffix_status in [[shower_dirs, "ALL"], [shower_dirs_ref_year, "REF"]]:
+    for shower_dir_dict, plot_suffix_status, fb_bin_params in [
+        [shower_dirs, "ALL", fluxbatch_binning_params_all_years], 
+        [shower_dirs_ref_year, "REF", fluxbatch_binning_params_one_year]
+        ]:
+        
         for shower_code in shower_dir_dict:
 
             shower = active_showers_dict[shower_code]
@@ -139,8 +158,12 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1):
             dir_params = [(night_dir_path, None, None, None, None, None) for night_dir_path in dir_list]
 
             # Compute the batch flux
-            fbr = fluxBatch(shower_code, shower.mass_index, dir_params, ref_ht=ref_height, min_meteors=50, 
-                min_tap=2, min_bin_duration=0.5, max_bin_duration=12, compute_single=False)
+            fbr = fluxBatch(shower_code, shower.mass_index, dir_params, ref_ht=ref_height, 
+                min_meteors=fb_bin_params.min_meteors, 
+                min_tap=fb_bin_params.min_tap, 
+                min_bin_duration=fb_bin_params.min_bin_duration, 
+                max_bin_duration=fb_bin_params.max_bin_duration, 
+                compute_single=False)
 
 
             if plot_suffix_status == "ALL":

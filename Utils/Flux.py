@@ -632,7 +632,11 @@ def calculateFixedBins(all_time_intervals, dir_list, shower, atomic_bin_duration
 
     min_sol = sol_beg[start_idx]
     max_sol = sol_end[end_idx] if sol_beg[start_idx] < sol_end[end_idx] else sol_end[end_idx] + 2*np.pi
-    sol_bins = np.arange(min_sol, max_sol, sol_delta)
+
+    # Make fixed subdivisions of the solar longitude (so the time range doesn't matter, and it's fixed every
+    #   year)
+    sol_bins_all = np.arange(0, 2*np.pi, sol_delta)
+    sol_bins = sol_bins_all[(sol_bins_all >= min_sol) & (sol_bins_all <= max_sol)]
     sol_bins = np.append(sol_bins, sol_bins[-1] + sol_delta)  # all events should be within the bins
 
     # Make sure that fixed bins fit with already existing bins saved
@@ -2600,10 +2604,11 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 [dt_bins[i], dt_bins[i + 1]] for i in range(len(dt_bins) - 1)
             ]
 
-            # Change the begin and end times of the fixed intervals to correspond to the orbserving period 
+            # Change the begin and end times of the fixed intervals to correspond to the observing period 
             #   range
-            forced_bin_intervals[0][0] = dt_beg
-            forced_bin_intervals[-1][-1] = dt_end
+            if len(forced_bin_intervals):
+                forced_bin_intervals[0][0] = dt_beg
+                forced_bin_intervals[-1][-1] = dt_end
 
 
 
@@ -2631,6 +2636,19 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
         loaded_flux_computations = True
 
+
+    # If there are no bins to process, skip
+    if not len(sol_bins):
+
+        # Save empty tables so this is not attempted again
+        saveEmptyECSVTable(os.path.join(dir_path, flux_ecsv_file_name), shower_code, mass_index, \
+            flux_config, confidence_interval, fixed_bins=False)
+
+        if forced_bins:
+            saveEmptyECSVTable(os.path.join(dir_path, forced_bins_ecsv_file_name), shower_code, \
+                mass_index, flux_config, confidence_interval, fixed_bins=True)
+
+        return None
 
 
     # Compute the flux
@@ -2759,6 +2777,9 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             if len(associations) > 0:
 
                 binmeteors = len(associations)/np.ceil(np.sqrt(len(associations)))
+
+            else:
+                binmeteors = 5
 
             # Use a minimum of 5 meteors per bin
             if binmeteors < 5:

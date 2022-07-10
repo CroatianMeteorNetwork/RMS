@@ -66,6 +66,31 @@ class StationPlotParams:
         return {'color': color, 'marker': marker}
 
 
+class FluxBatchBinningParams(object):
+    def __init__(self, min_meteors=None, min_tap=None, min_bin_duration=None, max_bin_duration=None):
+        """ Container for fluxBatch binning parameters. """
+
+        if min_meteors is None:
+            self.min_meteors = 50
+        else:
+            self.min_meteors = min_meteors
+
+        if min_tap is None:            
+            self.min_tap = 2
+        else:
+            self.min_tap = min_tap
+
+        if min_bin_duration is None:        
+            self.min_bin_duration = 0.5
+        else:
+            self.min_bin_duration = min_bin_duration
+
+        if max_bin_duration is None:        
+            self.max_bin_duration = 12
+        else:
+            self.max_bin_duration = max_bin_duration
+
+
 
 class FluxBatchResults(object):
     def __init__(self, 
