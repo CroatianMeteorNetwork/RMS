@@ -510,7 +510,7 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
     if metadata_dir is not None:
         if not os.path.exists(metadata_dir):
             mkdirP(metadata_dir)
-            
+
 
     # Go through all directories containing the flux data
     file_data = []
@@ -1267,7 +1267,7 @@ if __name__ == "__main__":
         help="Maximum time per bin in hours. If this is not satisfied, the bin will be discarded. Default = 12 h.",
     )
 
-    arg_parser.add_argument('-m', '--metadir', nargs=1, metavar='FLUX_METADATA_DIRECTORY', type=str,
+    arg_parser.add_argument('-m', '--metadir', metavar='FLUX_METADATA_DIRECTORY', type=str,
         help="Path to a directory with flux metadata (ECSV files). If not given, the data directory will be used.")
 
     # Parse the command line arguments

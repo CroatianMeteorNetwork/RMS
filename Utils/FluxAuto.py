@@ -220,7 +220,7 @@ if __name__ == "__main__":
     arg_parser.add_argument('-t', '--time', nargs=1, metavar='TIME', type=str,
         help="Give the time in the YYYYMMDD_hhmmss.uuuuuu format at which the flux will be computed (instead of now).")
 
-    arg_parser.add_argument('-m', '--metadir', nargs=1, metavar='FLUX_METADATA_DIRECTORY', type=str,
+    arg_parser.add_argument('-m', '--metadir', metavar='FLUX_METADATA_DIRECTORY', type=str,
         help="Path to a directory with flux metadata (ECSV files). If not given, the data directory will be used.")
 
     # arg_parser.add_argument(
