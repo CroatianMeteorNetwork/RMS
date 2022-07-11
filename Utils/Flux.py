@@ -44,7 +44,7 @@ from RMS.Math import angularSeparation, pointInsideConvexPolygonSphere
 from RMS.Routines.FOVArea import fovArea, xyHt2Geo
 from RMS.Routines.MaskImage import MaskStructure, getMaskFile
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert, solLon2jdSteyaert, unwrapSol
-from RMS.Misc import SegmentedScale
+from RMS.Misc import SegmentedScale, mkdirP
 
 # Now that the Scale class has been defined, it must be registered so
 # that ``matplotlib`` can find it.
@@ -783,52 +783,6 @@ def checkFluxFixedBinsName(file_name, shower_code, mass_index):
         return True
     else:
         return False
-
-
-# def saveForcedBinFluxData(dir_path, file_name, sol_list, meteor_n_list, area_list, time_list, meteor_lm_list):
-#     """Save solar longitude and other parameters in a solar longitude range.
-
-#     Arguments:
-#         sol_list: [list] Solar longitude bin edges (length is one more than other lists) in radians.
-#             It is assumed that this value does not wrap around.
-#     """
-
-#     # TO DO:
-#     # Add to header:
-#     #   shower
-#     #   station code 
-#     #   lat/lon/elev
-#     #   used mass and population indices
-#     #   star FWHM
-
-#     file_path = os.path.join(dir_path, file_name)
-
-#     with open(file_path, 'w') as f:
-
-#         # TO DO:
-#         # Add entires
-#         #   Stellar LM
-#         #   raw collection area
-#         #   corrections before scaling with mass index
-#         #   radiant elevation
-#         #   radiant distance
-
-#         f.write('# Solar longitude (deg), Meteors, Corrected collection area to +6.5M (km^2), Time (hours), Meteor LM (mag)\n')
-
-
-#         for sol, meteors, area, time, lm in zip(sol_list, meteor_n_list, area_list, time_list, meteor_lm_list):
-
-#             lm_str = "None"
-#             if lm is not None:
-#                 lm_str = "{:.3f}".format(lm)
-
-#             f.write("{:.8f}, {:d}, {:.6f}, {:.6f}, {:s}\n".format(np.degrees(sol), meteors, area/1e6, time, \
-#                 lm_str))
-
-
-#         # sol_list has one more element than meteor_list
-#         f.write("{:.8f},,,,".format(np.degrees(sol_list[-1])))
-
 
 
 def loadFluxData(dir_path, file_name):
@@ -2448,7 +2402,7 @@ def computeFluxCorrectionsOnBins(
 def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_end, mass_index, \
     binduration=None, binmeteors=None, timebin_intdt=0.25, ref_height=None, ht_std_percent=5.0, mask=None, \
     show_plots=True, show_mags=False, save_plots=False, confidence_interval=0.95, default_fwhm=None, \
-    forced_bins=None, compute_single=True):
+    forced_bins=None, compute_single=True, metadata_dir=None):
     """Compute flux using measurements in the given FTPdetectinfo file.
 
     Arguments:
@@ -2487,6 +2441,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             are independent of the binduration and binmeteors parameters
         compute_single: [bool] Only considered if forced bins are given. If False, single station flux will
             not be computed. True by default.
+        metadata_dir: [str] A separate directory for flux metadata. If not given, the data directory will be
+            used.
 
     Return:
         [tuple] sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, bin_information
@@ -2505,6 +2461,16 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
     """
 
     print()
+
+    # If the metadata directory is not given, use the data directory
+    if metadata_dir is None:
+        metadata_dir = dir_path
+
+    else:
+        # If the metadata directory is given, make a new directory for this station
+        data_dir_name = os.path.basename(dir_path)
+        metadata_dir = os.path.join(metadata_dir, data_dir_name)
+        mkdirP(metadata_dir)
 
     # Init the flux configuration
     flux_config = FluxConfig()
@@ -2556,12 +2522,12 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         print("Forced bins file:", forced_bins_ecsv_file_name)
 
         # Load previous computed bins, if available
-        if os.path.exists(os.path.join(dir_path, forced_bins_ecsv_file_name)):
+        if os.path.exists(os.path.join(metadata_dir, forced_bins_ecsv_file_name)):
 
             # Load previously computed collection areas and flux metadata
             sol_bins, dt_bins, forced_bins_meteor_num, forced_bins_area, forced_bins_time, \
                 forced_bins_lm_m, forced_radiant_elev, forced_radiant_dist, \
-                forced_ang_vel = loadForcedBinFluxData(dir_path, forced_bins_ecsv_file_name)
+                forced_ang_vel = loadForcedBinFluxData(metadata_dir, forced_bins_ecsv_file_name)
 
             print("    ... loaded!")
 
@@ -2627,10 +2593,10 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
     flux_lm_6_5_ci_upper_data = []
     meteor_num_data = []
     population_index = calculatePopulationIndex(mass_index)
-    if os.path.isfile(os.path.join(dir_path, flux_ecsv_file_name)) and not (show_plots or save_plots):
+    if os.path.isfile(os.path.join(metadata_dir, flux_ecsv_file_name)) and not (show_plots or save_plots):
         
         sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, meteor_num_data, \
-            population_index = loadFluxData(dir_path, flux_ecsv_file_name)
+            population_index = loadFluxData(metadata_dir, flux_ecsv_file_name)
 
         print("   ... loaded!")
 
@@ -2641,11 +2607,11 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
     if not len(sol_bins):
 
         # Save empty tables so this is not attempted again
-        saveEmptyECSVTable(os.path.join(dir_path, flux_ecsv_file_name), shower_code, mass_index, \
+        saveEmptyECSVTable(os.path.join(metadata_dir, flux_ecsv_file_name), shower_code, mass_index, \
             flux_config, confidence_interval, fixed_bins=False)
 
         if forced_bins:
-            saveEmptyECSVTable(os.path.join(dir_path, forced_bins_ecsv_file_name), shower_code, \
+            saveEmptyECSVTable(os.path.join(metadata_dir, forced_bins_ecsv_file_name), shower_code, \
                 mass_index, flux_config, confidence_interval, fixed_bins=True)
 
         return None
@@ -2740,11 +2706,11 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 flux_config.max_sporadics_per_hr))
 
             # Save empty tables so this is not attempted again
-            saveEmptyECSVTable(os.path.join(dir_path, flux_ecsv_file_name), shower_code, mass_index, \
+            saveEmptyECSVTable(os.path.join(metadata_dir, flux_ecsv_file_name), shower_code, mass_index, \
                 flux_config, confidence_interval, fixed_bins=False)
 
             if forced_bins:
-                saveEmptyECSVTable(os.path.join(dir_path, forced_bins_ecsv_file_name), shower_code, \
+                saveEmptyECSVTable(os.path.join(metadata_dir, forced_bins_ecsv_file_name), shower_code, \
                     mass_index, flux_config, confidence_interval, fixed_bins=True)
 
             return None
@@ -2998,7 +2964,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             print("No meteors associated with the shower!")
 
             # Save empty flux files
-            saveEmptyECSVTable(os.path.join(dir_path, flux_ecsv_file_name), shower_code, mass_index, 
+            saveEmptyECSVTable(os.path.join(metadata_dir, flux_ecsv_file_name), shower_code, mass_index, 
                 flux_config, confidence_interval, fixed_bins=False)
 
 
@@ -3059,7 +3025,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
             # Save the flux table to disk
-            flux_table.saveECSV(os.path.join(dir_path, flux_ecsv_file_name))
+            flux_table.saveECSV(os.path.join(metadata_dir, flux_ecsv_file_name))
 
 
     # # Compute ZHR (Rentdel & Koschak, 1990 paper 2 method)
@@ -3132,13 +3098,13 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             forced_flux_table.sol_lon_data = np.degrees(np.array(sol_bins[:-1]))
 
             # Save the fixed bin as an ECSV table
-            forced_flux_table.saveECSV(os.path.join(dir_path, forced_bins_ecsv_file_name))
+            forced_flux_table.saveECSV(os.path.join(metadata_dir, forced_bins_ecsv_file_name))
 
 
             # ### TEST !!!!!1
 
             # test_sol_bins, test_forced_bins_meteor_num, test_forced_bins_area, test_forced_bins_time, \
-            #     test_forced_bins_lm_m = loadForcedBinFluxData(dir_path, forced_bins_ecsv_file_name)
+            #     test_forced_bins_lm_m = loadForcedBinFluxData(metadata_dir, forced_bins_ecsv_file_name)
 
             # print("sol bins", sol_bins, test_sol_bins)
             # print("bins_meteor_num", forced_bins_meteor_num, test_forced_bins_meteor_num)
@@ -3234,7 +3200,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 sol_beg = jd2SolLonSteyaert(datetime2JD(dt_beg))
                 sol_end = jd2SolLonSteyaert(datetime2JD(dt_end))
 
-                plt.savefig(os.path.join(dir_path, generateFluxPlotName(config.stationID, shower_code, \
+                plt.savefig(os.path.join(metadata_dir, generateFluxPlotName(config.stationID, shower_code, \
                     mass_index, sol_beg, sol_end, label="mag")), dpi=150)
 
             if show_plots:
@@ -3428,7 +3394,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             sol_beg = jd2SolLonSteyaert(datetime2JD(dt_beg))
             sol_end = jd2SolLonSteyaert(datetime2JD(dt_end))
 
-            plt.savefig(os.path.join(dir_path, generateFluxPlotName(config.stationID, shower_code, \
+            plt.savefig(os.path.join(metadata_dir, generateFluxPlotName(config.stationID, shower_code, \
                 mass_index, sol_beg, sol_end)), dpi=150)
 
         if show_plots:

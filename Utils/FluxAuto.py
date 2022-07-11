@@ -13,8 +13,9 @@ from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
 from Utils.FluxBatch import fluxBatch, plotBatchFlux, FluxBatchBinningParams, saveBatchFluxCSV
 
 
-def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1):
-    """
+def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_dir=None, output_dir=None):
+    """ Given the reference time, automatically identify active showers and produce the flux graphs and
+        CSV files.
 
     Arguments:
         config: [Config]
@@ -25,8 +26,15 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1):
     Keyword arguments:
         days_prev: [int] Produce graphs for showers active N days before.
         days_next: [int] Produce graphs for showers active N days in the future.
-
+        metadata_dir: [str] A separate directory for flux metadata. If not given, the data directory will be
+            used.
+        output_dir: [str] Directory where the final data products will be saved. If None, data_path directory
+            will be used.
     """
+
+
+    if output_dir is None:
+        output_dir = data_path
 
 
     # Load the showers for flux
@@ -165,7 +173,9 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1):
                 min_tap=fb_bin_params.min_tap, 
                 min_bin_duration=fb_bin_params.min_bin_duration, 
                 max_bin_duration=fb_bin_params.max_bin_duration, 
-                compute_single=False)
+                compute_single=False,
+                metadata_dir=metadata_dir,
+                )
 
 
             if plot_suffix_status == "ALL":
@@ -180,7 +190,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1):
             # Show and save the batch flux plot
             plotBatchFlux(
                 fbr, 
-                data_path,
+                output_dir,
                 batch_flux_output_filename,
                 only_flux=False,
                 compute_single=False,
@@ -188,7 +198,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1):
             )
 
             # Save the results to a CSV file
-            saveBatchFluxCSV(fbr, data_path, batch_flux_output_filename)
+            saveBatchFluxCSV(fbr, output_dir, batch_flux_output_filename)
 
 
 if __name__ == "__main__":
@@ -209,6 +219,9 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-t', '--time', nargs=1, metavar='TIME', type=str,
         help="Give the time in the YYYYMMDD_hhmmss.uuuuuu format at which the flux will be computed (instead of now).")
+
+    arg_parser.add_argument('-m', '--metadir', nargs=1, metavar='FLUX_METADATA_DIRECTORY', type=str,
+        help="Path to a directory with flux metadata (ECSV files). If not given, the data directory will be used.")
 
     # arg_parser.add_argument(
     #     "-c",
@@ -242,4 +255,4 @@ if __name__ == "__main__":
     print("Computing flux using reference time:", ref_dt)
 
     # Run auto flux
-    fluxAutoRun(config, cml_args.dir_path, ref_dt)
+    fluxAutoRun(config, cml_args.dir_path, ref_dt, metadata_dir=cml_args.metadir)

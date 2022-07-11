@@ -477,7 +477,7 @@ def cameraTally(comb_sol, comb_sol_bins, single_fixed_bin_information):
 
 
 def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duration=5, ci=0.95, min_meteors=50, 
-    min_tap=2, min_bin_duration=0.5, max_bin_duration=12, compute_single=False):
+    min_tap=2, min_bin_duration=0.5, max_bin_duration=12, compute_single=False, metadata_dir=None):
     """ Compute flux by combining flux measurements from multiple stations.
     
     Arguments:
@@ -502,6 +502,8 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
         min_bin_duration: [float] Minimum bin duration in hours.
         max_bin_duration: [float] Maximum bin duration in hours.
         compute_single: [bool] Compute single-station flux. False by default.
+        metadata_dir: [str] A separate directory for flux metadata. If not given, the data directory will be
+            used.
     """
 
     # Go through all directories containing the flux data
@@ -623,6 +625,7 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
                 confidence_interval=ci,
                 forced_bins=forced_bins,
                 compute_single=compute_single,
+                metadata_dir=metadata_dir,
             )
 
             if ret is None:
@@ -1108,7 +1111,7 @@ def saveBatchFluxCSV(fbr, dir_path, output_filename):
     # Write the computed weigthed flux to disk
     if len(fbr.comb_sol):
 
-        data_out_path = os.path.join(dir_path, output_filename + "_combined.csv")
+        data_out_path = os.path.join(dir_path, output_filename + ".csv")
         with open(data_out_path, 'w') as fout:
             fout.write("# Shower parameters:\n")
             fout.write("# Shower         = {:s}\n".format(fbr.shower.name))
@@ -1258,6 +1261,9 @@ if __name__ == "__main__":
         help="Maximum time per bin in hours. If this is not satisfied, the bin will be discarded. Default = 12 h.",
     )
 
+    arg_parser.add_argument('-m', '--metadir', nargs=1, metavar='FLUX_METADATA_DIRECTORY', type=str,
+        help="Path to a directory with flux metadata (ECSV files). If not given, the data directory will be used.")
+
     # Parse the command line arguments
     fluxbatch_cml_args = arg_parser.parse_args()
 
@@ -1364,7 +1370,8 @@ if __name__ == "__main__":
     fbr = fluxBatch(shower_code, mass_index, dir_params, ref_ht=ref_ht, ci=ci,
             atomic_bin_duration=atomic_bin_duration, min_meteors=fb_bin_params.min_meteors, 
             min_tap=fb_bin_params.min_tap, min_bin_duration=fb_bin_params.min_bin_duration, 
-            max_bin_duration=fb_bin_params.max_bin_duration, compute_single=fluxbatch_cml_args.single)
+            max_bin_duration=fb_bin_params.max_bin_duration, compute_single=fluxbatch_cml_args.single,
+            metadata_dir=fluxbatch_cml_args.metadir)
 
 
 
