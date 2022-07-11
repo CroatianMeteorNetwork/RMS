@@ -25,7 +25,7 @@ from RMS.Formats.Showers import FluxShowers, loadRadiantShowers
 from Utils.Flux import calculatePopulationIndex, calculateMassIndex, computeFlux, detectClouds, fluxParser, \
     calculateFixedBins, calculateZHR, massVerniani, loadShower
 from RMS.Routines.SolarLongitude import unwrapSol
-from RMS.Misc import formatScientific, SegmentedScale
+from RMS.Misc import formatScientific, SegmentedScale, mkdirP
 
 # Now that the Scale class has been defined, it must be registered so
 # that ``matplotlib`` can find it.
@@ -505,6 +505,12 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
         metadata_dir: [str] A separate directory for flux metadata. If not given, the data directory will be
             used.
     """
+
+    # Make the metadata directory, if given
+    if metadata_dir is not None:
+        if not os.path.exists(metadata_dir):
+            mkdirP(metadata_dir)
+            
 
     # Go through all directories containing the flux data
     file_data = []
