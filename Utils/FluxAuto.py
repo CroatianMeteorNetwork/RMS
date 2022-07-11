@@ -10,7 +10,7 @@ from RMS.Astrometry.Conversions import datetime2JD
 from RMS.Formats.Showers import FluxShowers
 from RMS.Math import isAngleBetween
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
-from Utils.FluxBatch import fluxBatch, plotBatchFlux, FluxBatchBinningParams
+from Utils.FluxBatch import fluxBatch, plotBatchFlux, FluxBatchBinningParams, saveBatchFluxCSV
 
 
 def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1):
@@ -140,6 +140,8 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1):
 
 
     # Process batch fluxes for all showers
+    #   2 sets of plots and CSV files will be saved: one set with all years combined, and one set with the
+    #   reference year
     for shower_dir_dict, plot_suffix_status, fb_bin_params in [
         [shower_dirs, "ALL", fluxbatch_binning_params_all_years], 
         [shower_dirs_ref_year, "REF", fluxbatch_binning_params_one_year]
@@ -172,22 +174,21 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1):
                 plot_suffix = "year_{:d}".format(shower.dt_max_ref_year.year)
 
             # Make a name for the plot to save
-            bath_flux_plot_file_name = "flux_{:s}_sol={:.6f}-{:.6f}_{:s}".format(shower_code, 
+            batch_flux_output_filename = "flux_{:s}_sol={:.6f}-{:.6f}_{:s}".format(shower_code, 
                 fbr.comb_sol_bins[0], fbr.comb_sol_bins[-1], plot_suffix)
 
             # Show and save the batch flux plot
             plotBatchFlux(
                 fbr, 
                 data_path,
-                bath_flux_plot_file_name,
+                batch_flux_output_filename,
                 only_flux=False,
                 compute_single=False,
                 show_plot=False,
             )
 
-
-    # Process fluxes of active showers
-    #   - combine data from previous years, plot this year data separately
+            # Save the results to a CSV file
+            saveBatchFluxCSV(fbr, data_path, batch_flux_output_filename)
 
 
 if __name__ == "__main__":

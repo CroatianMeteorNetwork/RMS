@@ -798,7 +798,18 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
 
 
 def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_single=False, show_plot=True):
-    """ Make a plot showing the batch flux results. """
+    """ Make a plot showing the batch flux results. 
+    
+    Arguments:
+        fbr: [FluxBatchResults object]
+        dir_path: [str] Path to where the plot will be saved.
+        output_filename: [str] Plot file name. .png will be added to it.
+
+    Keyword arguments:
+        only_flux: [bool] Only plot the flux graph, skip other metadata. False by default.
+        compute_single: [bool] Also plot per-station single-station fluxes. False by default.
+        show_plot: [bool] Show the plot on the screen. True by default.
+    """
 
 
     ### Init the plot ###
@@ -1091,6 +1102,94 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
 
 
 
+def saveBatchFluxCSV(fbr, dir_path, output_filename):
+    """ Save the binned flux batch results to a CSV file. """
+
+    # Write the computed weigthed flux to disk
+    if len(fbr.comb_sol):
+
+        data_out_path = os.path.join(dir_path, output_filename + "_combined.csv")
+        with open(data_out_path, 'w') as fout:
+            fout.write("# Shower parameters:\n")
+            fout.write("# Shower         = {:s}\n".format(fbr.shower.name))
+            fout.write("# r              = {:.2f}\n".format(fbr.population_index_mean))
+            fout.write("# s              = {:.2f}\n".format(calculateMassIndex(fbr.population_index_mean)))
+            fout.write("# m_lim @ +6.5M  = {:.2e} kg\n".format(fbr.mass_lim))
+            fout.write("# Met LM mean    = {:.2e}\n".format(fbr.lm_m_mean))
+            fout.write("# m_lim @ {:+.2f}M = {:.2e} kg\n".format(fbr.lm_m_mean, fbr.mass_lim_lm_m_mean))
+            fout.write("# CI int.        = {:.1f} %\n".format(100*fbr.ci))
+            fout.write("# Binning parameters:\n")
+            fout.write("# Min. meteors     = {:d}\n".format(fbr.min_meteors))
+            fout.write("# Min TAP          = {:.2f} x 1000 km^2 h\n".format(fbr.min_tap))
+            fout.write("# Min bin duration = {:.2f} h\n".format(fbr.min_bin_duration))
+            fout.write("# Max bin duration = {:.2f} h\n".format(fbr.max_bin_duration))
+            fout.write(
+                "# Sol bin start (deg), Mean Sol (deg), Flux@+6.5M (met / 1000 km^2 h), Flux CI low, Flux CI high, Flux@+{:.2f}M (met / 1000 km^2 h), Flux CI low, Flux CI high, ZHR, ZHR CI low, ZHR CI high, Meteor Count, Time-area product (corrected to +6.5M) (1000 km^2/h), Meteor LM, Radiant elev (deg), Radiat dist (deg), Ang vel (deg/s)\n".format(fbr.lm_m_mean)
+            )
+            for (_sol_bin_start,
+                _mean_sol,
+                _flux,
+                _flux_lower,
+                _flux_upper,
+                _flux_lm,
+                _flux_lm_lower,
+                _flux_lm_upper,
+                _zhr,
+                _zhr_lower,
+                _zhr_upper,
+                _nmeteors,
+                _tap,
+                _lm_m,
+                _rad_elev,
+                _rad_dist,
+                _ang_vel) \
+            in zip(
+                    fbr.comb_sol_bins,
+                    fbr.comb_sol,
+                    fbr.comb_flux,
+                    fbr.comb_flux_lower,
+                    fbr.comb_flux_upper,
+                    fbr.comb_flux_lm_m,
+                    fbr.comb_flux_lm_m_lower,
+                    fbr.comb_flux_lm_m_upper,
+                    fbr.comb_zhr,
+                    fbr.comb_zhr_lower,
+                    fbr.comb_zhr_upper,
+                    fbr.comb_num_meteors,
+                    fbr.comb_ta_prod,
+                    fbr.comb_lm_m,
+                    fbr.comb_rad_elev,
+                    fbr.comb_rad_dist,
+                    fbr.comb_ang_vel
+                    ):
+
+                fout.write(
+                    "{:.8f},{:.8f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:d},{:.3f},{:.2f},{:.2f},{:.2f},{:.2f}\n".format(
+                    _sol_bin_start,
+                    _mean_sol,
+                    _flux,
+                    _flux_lower,
+                    _flux_upper,
+                    _flux_lm,
+                    _flux_lm_lower,
+                    _flux_lm_upper,
+                    _zhr,
+                    _zhr_lower,
+                    _zhr_upper,
+                    int(_nmeteors),
+                    _tap/1e9,
+                    _lm_m,
+                    _rad_elev,
+                    _rad_dist,
+                    _ang_vel,
+                    ))
+
+            fout.write("{:.8f},,,,,,,,,,,,,,,,\n".format(fbr.comb_sol_bins[-1]))
+
+
+        return data_out_path
+
+
 
 
 if __name__ == "__main__":
@@ -1191,6 +1290,14 @@ if __name__ == "__main__":
     # Maximum bin duration (hours)
     max_bin_duration = fluxbatch_cml_args.maxduration
 
+    # Init the binning parametrs into a container
+    fb_bin_params = FluxBatchBinningParams(
+        min_meteors=min_meteors, 
+        min_tap=min_tap, 
+        min_bin_duration=min_bin_duration, 
+        max_bin_duration=max_bin_duration,
+        )
+
     ### ###
 
 
@@ -1255,9 +1362,9 @@ if __name__ == "__main__":
 
     # Compute the batch flux
     fbr = fluxBatch(shower_code, mass_index, dir_params, ref_ht=ref_ht, ci=ci,
-            atomic_bin_duration=atomic_bin_duration, min_meteors=min_meteors, min_tap=min_tap, 
-            min_bin_duration=min_bin_duration, max_bin_duration=max_bin_duration, 
-            compute_single=fluxbatch_cml_args.single)
+            atomic_bin_duration=atomic_bin_duration, min_meteors=fb_bin_params.min_meteors, 
+            min_tap=fb_bin_params.min_tap, min_bin_duration=fb_bin_params.min_bin_duration, 
+            max_bin_duration=fb_bin_params.max_bin_duration, compute_single=fluxbatch_cml_args.single)
 
 
 
@@ -1315,6 +1422,10 @@ if __name__ == "__main__":
         only_flux=fluxbatch_cml_args.onlyflux, 
         compute_single=fluxbatch_cml_args.single
         )
+
+    # Save the results to a CSV file
+    data_out_path = saveBatchFluxCSV(fbr, dir_path, fluxbatch_cml_args.output_filename)
+    print("Data saved to:", data_out_path)
 
 
     # NOTE: CSV option not supported
@@ -1386,94 +1497,6 @@ if __name__ == "__main__":
     #         comb_flux_upper = []
     #         comb_num_meteors = []
     #         comb_ta_prod = []
-
-
-
-    # if not fluxbatch_cml_args.csv:
-
-    # Write the computed weigthed flux to disk
-    if len(fbr.comb_sol):
-
-        data_out_path = os.path.join(dir_path, fluxbatch_cml_args.output_filename + "_combined.csv")
-        with open(data_out_path, 'w') as fout:
-            fout.write("# Shower parameters:\n")
-            fout.write("# Shower         = {:s}\n".format(shower_code))
-            fout.write("# r              = {:.2f}\n".format(fbr.population_index_mean))
-            fout.write("# s              = {:.2f}\n".format(calculateMassIndex(fbr.population_index_mean)))
-            fout.write("# m_lim @ +6.5M  = {:.2e} kg\n".format(fbr.mass_lim))
-            fout.write("# Met LM mean    = {:.2e}\n".format(fbr.lm_m_mean))
-            fout.write("# m_lim @ {:+.2f}M = {:.2e} kg\n".format(fbr.lm_m_mean, fbr.mass_lim_lm_m_mean))
-            fout.write("# CI int.        = {:.1f} %\n".format(100*ci))
-            fout.write("# Binning parameters:\n")
-            fout.write("# Min. meteors     = {:d}\n".format(min_meteors))
-            fout.write("# Min TAP          = {:.2f} x 1000 km^2 h\n".format(min_tap))
-            fout.write("# Min bin duration = {:.2f} h\n".format(min_bin_duration))
-            fout.write("# Max bin duration = {:.2f} h\n".format(max_bin_duration))
-            fout.write(
-                "# Sol bin start (deg), Mean Sol (deg), Flux@+6.5M (met / 1000 km^2 h), Flux CI low, Flux CI high, Flux@+{:.2f}M (met / 1000 km^2 h), Flux CI low, Flux CI high, ZHR, ZHR CI low, ZHR CI high, Meteor Count, Time-area product (corrected to +6.5M) (1000 km^2/h), Meteor LM, Radiant elev (deg), Radiat dist (deg), Ang vel (deg/s)\n".format(fbr.lm_m_mean)
-            )
-            for (_sol_bin_start,
-                _mean_sol,
-                _flux,
-                _flux_lower,
-                _flux_upper,
-                _flux_lm,
-                _flux_lm_lower,
-                _flux_lm_upper,
-                _zhr,
-                _zhr_lower,
-                _zhr_upper,
-                _nmeteors,
-                _tap,
-                _lm_m,
-                _rad_elev,
-                _rad_dist,
-                _ang_vel) \
-            in zip(
-                    fbr.comb_sol_bins,
-                    fbr.comb_sol,
-                    fbr.comb_flux,
-                    fbr.comb_flux_lower,
-                    fbr.comb_flux_upper,
-                    fbr.comb_flux_lm_m,
-                    fbr.comb_flux_lm_m_lower,
-                    fbr.comb_flux_lm_m_upper,
-                    fbr.comb_zhr,
-                    fbr.comb_zhr_lower,
-                    fbr.comb_zhr_upper,
-                    fbr.comb_num_meteors,
-                    fbr.comb_ta_prod,
-                    fbr.comb_lm_m,
-                    fbr.comb_rad_elev,
-                    fbr.comb_rad_dist,
-                    fbr.comb_ang_vel
-                    ):
-
-                fout.write(
-                    "{:.8f},{:.8f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:d},{:.3f},{:.2f},{:.2f},{:.2f},{:.2f}\n".format(
-                    _sol_bin_start,
-                    _mean_sol,
-                    _flux,
-                    _flux_lower,
-                    _flux_upper,
-                    _flux_lm,
-                    _flux_lm_lower,
-                    _flux_lm_upper,
-                    _zhr,
-                    _zhr_lower,
-                    _zhr_upper,
-                    int(_nmeteors),
-                    _tap/1e9,
-                    _lm_m,
-                    _rad_elev,
-                    _rad_dist,
-                    _ang_vel,
-                    ))
-
-            fout.write("{:.8f},,,,,,,,,,,,,,,,\n".format(fbr.comb_sol_bins[-1]))
-
-        print("Data saved to:", data_out_path)
-
 
 
     # Save the single-station fluxes
