@@ -131,7 +131,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
 
     ### ###
 
-    # Define binning parameters for all years, and individual years
+    # Define binning parameters for all years
     fluxbatch_binning_params_all_years = FluxBatchBinningParams(
         min_meteors=100, 
         min_tap=20, 
@@ -139,6 +139,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
         max_bin_duration=24
         )
 
+    # Define binning parameters for individual years
     fluxbatch_binning_params_one_year = FluxBatchBinningParams(
         min_meteors=20,
         min_tap=5, 
