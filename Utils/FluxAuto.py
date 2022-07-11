@@ -223,6 +223,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-m', '--metadir', metavar='FLUX_METADATA_DIRECTORY', type=str,
         help="Path to a directory with flux metadata (ECSV files). If not given, the data directory will be used.")
 
+    arg_parser.add_argument('-o', '--outdir', metavar='FLUX_METADATA_DIRECTORY', type=str,
+        help="Path to a directory where the plots and CSVs will be saved. If not given, the data directory will be used.")
+
     # arg_parser.add_argument(
     #     "-c",
     #     "--config",
@@ -255,4 +258,4 @@ if __name__ == "__main__":
     print("Computing flux using reference time:", ref_dt)
 
     # Run auto flux
-    fluxAutoRun(config, cml_args.dir_path, ref_dt, metadata_dir=cml_args.metadir)
+    fluxAutoRun(config, cml_args.dir_path, ref_dt, metadata_dir=cml_args.metadir, output_dir=cml_args.outdir)
