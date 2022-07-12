@@ -1,8 +1,9 @@
 """ Automatically runs the flux code and produces graphs on available data from multiple stations. """
 
 import os
-
+import time
 import datetime
+import copy
 
 import numpy as np
 
@@ -227,16 +228,10 @@ if __name__ == "__main__":
     arg_parser.add_argument('-o', '--outdir', metavar='FLUX_METADATA_DIRECTORY', type=str,
         help="Path to a directory where the plots and CSVs will be saved. If not given, the data directory will be used.")
 
-    # arg_parser.add_argument(
-    #     "-c",
-    #     "--config",
-    #     nargs=1,
-    #     metavar="CONFIG_PATH",
-    #     type=str,
-    #     default='.',
-    #     help="Path to a config file which will be used instead of the default one."
-    #     " To load the .config file in the given data directory, write '.' (dot).",
-    # )
+    arg_parser.add_argument('-a', '--auto', metavar='H_FREQ', type=float, default=None, const=1.0, 
+        nargs='?',
+        help="""Run continously every H_FREQ hours. If argument not given, the code will run every hour."""
+        )
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -248,15 +243,60 @@ if __name__ == "__main__":
     config = cr.Config()
     config = cr.parse(config.config_file_name)
 
-    if cml_args.time is not None:
-        ref_dt = datetime.datetime.strptime(cml_args.time[0], "%Y%m%d_%H%M%S.%f")
-
-    # If no manual time was given, use current time.
-    else:
-        ref_dt = datetime.datetime.utcnow()
 
 
-    print("Computing flux using reference time:", ref_dt)
+    previous_start_time = None
+    while True:
 
-    # Run auto flux
-    fluxAutoRun(config, cml_args.dir_path, ref_dt, metadata_dir=cml_args.metadir, output_dir=cml_args.outdir)
+        # Clock for measuring script time
+        t1 = datetime.datetime.utcnow()
+
+
+        if cml_args.time is not None:
+            ref_dt = datetime.datetime.strptime(cml_args.time[0], "%Y%m%d_%H%M%S.%f")
+
+        # If no manual time was given, use current time.
+        else:
+            ref_dt = datetime.datetime.utcnow()
+
+
+        print("Computing flux using reference time:", ref_dt)
+
+        # Run auto flux
+        fluxAutoRun(config, cml_args.dir_path, ref_dt, metadata_dir=cml_args.metadir, \
+            output_dir=cml_args.outdir)
+
+
+        ### <// DETERMINE NEXT RUN TIME ###
+
+        # Store the previous start time
+        previous_start_time = copy.deepcopy(t1)
+
+        # Break if only running once or a specific time was given
+        if (cml_args.auto is None) or (cml_args.time is not None):
+            break
+
+        else:
+
+            # Otherwise wait to run
+            wait_time = (datetime.timedelta(hours=cml_args.auto) \
+                - (datetime.datetime.utcnow() - t1)).total_seconds()
+
+            # Run immediately if the wait time has elapsed
+            if wait_time < 0:
+                continue
+
+            # Otherwise wait to run
+            else:
+
+                # Compute next run time
+                next_run_time = datetime.datetime.now() + datetime.timedelta(seconds=wait_time)
+
+                # Wait to run
+                while next_run_time > datetime.datetime.now():
+                    print("Waiting {:s} to run the fluxes...                ".format(str(next_run_time \
+                        - datetime.datetime.now())), end='\r')
+                    time.sleep(2)
+
+
+        ### DETERMINE NEXT RUN TIME //> ###
