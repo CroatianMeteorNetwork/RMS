@@ -518,12 +518,15 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
     for night_dir_path, time_intervals, binduration, binmeteors, fwhm, ratio_threshold in dir_params:
 
         # Find the FTPdetectinfo file
-        ftpdetectinfo_path = findFTPdetectinfoFile(night_dir_path)
+        try:
+            ftpdetectinfo_path = findFTPdetectinfoFile(night_dir_path)
+        except FileNotFoundError:
+            print("An FTPdetectinfo file could not be found! Skipping...")
+            continue
 
         if not os.path.isfile(ftpdetectinfo_path):
-            print("The FTPdetectinfo file does not exist:", ftpdetectinfo_path)
-            print("Exiting...")
-            sys.exit()
+            print("The FTPdetectinfo file does not exist:", ftpdetectinfo_path, "Skipping...")
+            continue
 
         # Extract parent directory
         ftp_dir_path = os.path.dirname(ftpdetectinfo_path)
