@@ -131,7 +131,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
 
     ### ###
 
-    # Define binning parameters for all years, and individual years
+    # Define binning parameters for all years
     fluxbatch_binning_params_all_years = FluxBatchBinningParams(
         min_meteors=100, 
         min_tap=20, 
@@ -139,6 +139,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
         max_bin_duration=24
         )
 
+    # Define binning parameters for individual years
     fluxbatch_binning_params_one_year = FluxBatchBinningParams(
         min_meteors=20,
         min_tap=5, 
@@ -223,6 +224,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-m', '--metadir', metavar='FLUX_METADATA_DIRECTORY', type=str,
         help="Path to a directory with flux metadata (ECSV files). If not given, the data directory will be used.")
 
+    arg_parser.add_argument('-o', '--outdir', metavar='FLUX_METADATA_DIRECTORY', type=str,
+        help="Path to a directory where the plots and CSVs will be saved. If not given, the data directory will be used.")
+
     # arg_parser.add_argument(
     #     "-c",
     #     "--config",
@@ -255,4 +259,4 @@ if __name__ == "__main__":
     print("Computing flux using reference time:", ref_dt)
 
     # Run auto flux
-    fluxAutoRun(config, cml_args.dir_path, ref_dt, metadata_dir=cml_args.metadir)
+    fluxAutoRun(config, cml_args.dir_path, ref_dt, metadata_dir=cml_args.metadir, output_dir=cml_args.outdir)
