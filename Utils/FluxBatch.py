@@ -8,6 +8,7 @@ import shlex
 import sys
 import collections
 import copy
+import configparser
     
 
 import ephem
@@ -532,6 +533,10 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
             config = cr.loadConfigFromDirectory('.', ftp_dir_path)
 
         except RuntimeError:
+            print("The config file could not be loaded! Skipping...")
+            continue
+
+        except configparser.MissingSectionHeaderError:
             print("The config file could not be loaded! Skipping...")
             continue
 
