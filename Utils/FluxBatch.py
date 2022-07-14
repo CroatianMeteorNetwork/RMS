@@ -477,6 +477,54 @@ def cameraTally(comb_sol, comb_sol_bins, single_fixed_bin_information):
 
 
 
+def reportCameraTally(fbr, top_n_stations=5):
+    """ Generate string report of top N stations per number of meteors and TAP from the camera tally results. """
+
+    # Tally up contributions from individual cameras in each bin
+    bin_tally_topmeteors, bin_tally_toptap = cameraTally(fbr.comb_sol, fbr.comb_sol_bins, \
+        fbr.single_fixed_bin_information)
+
+    out_str = ""
+
+    out_str += "Camera tally per bin:\n"
+    out_str += "---------------------\n"
+
+    # Print cameras with most meteors per bin
+    for sol_bin_mean in bin_tally_topmeteors:
+
+        # Get cameras with most meteors
+        bin_cams_topmeteors = bin_tally_topmeteors[sol_bin_mean]
+
+        # Get cameras with the highest TAP
+        bin_cams_toptap = bin_tally_toptap[sol_bin_mean]
+
+        out_str += "\n"
+        out_str += "Sol = {:.4f} deg\n".format(sol_bin_mean)
+
+        out_str += "Top {:d} by meteor number:\n".format(top_n_stations)
+        for i, station_id in enumerate(bin_cams_topmeteors):
+            station_data = bin_cams_topmeteors[station_id]
+            n_meteors = station_data['meteors']
+            tap = station_data['tap']/1e6
+            out_str += "    {:s}, {:5d} meteors, TAP = {:10.2f} km^2 h\n".format(station_id, n_meteors, tap)
+
+            if i == top_n_stations - 1:
+                break
+
+        out_str += "Top {:d} by TAP:\n".format(top_n_stations)
+        for i, station_id in enumerate(bin_cams_toptap):
+            station_data = bin_cams_toptap[station_id]
+            n_meteors = station_data['meteors']
+            tap = station_data['tap']/1e6
+            out_str += "    {:s}, {:5d} meteors, TAP = {:10.2f} km^2 h\n".format(station_id, n_meteors, tap)
+
+            if i == top_n_stations - 1:
+                break
+
+    return out_str
+
+
+
 def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duration=5, ci=0.95, min_meteors=50, 
     min_tap=2, min_bin_duration=0.5, max_bin_duration=12, compute_single=False, metadata_dir=None):
     """ Compute flux by combining flux measurements from multiple stations.
@@ -1209,6 +1257,8 @@ def saveBatchFluxCSV(fbr, dir_path, output_filename):
 
 
 
+
+
 if __name__ == "__main__":
 
     import argparse
@@ -1388,52 +1438,9 @@ if __name__ == "__main__":
             metadata_dir=fluxbatch_cml_args.metadir)
 
 
-
-    ### Print camera tally ###
-
-    # Tally up contributions from individual cameras in each bin
-    bin_tally_topmeteors, bin_tally_toptap = cameraTally(fbr.comb_sol, fbr.comb_sol_bins, \
-        fbr.single_fixed_bin_information)
-
+    # Print camera tally #
     print()
-    print("Camera tally per bin:")
-    print("---------------------")
-
-    # Print cameras with most meteors per bin
-    for sol_bin_mean in bin_tally_topmeteors:
-
-        # Get cameras with most meteors
-        bin_cams_topmeteors = bin_tally_topmeteors[sol_bin_mean]
-
-        # Get cameras with the highest TAP
-        bin_cams_toptap = bin_tally_toptap[sol_bin_mean]
-
-        print()
-        print("Sol = {:.4f} deg".format(sol_bin_mean))
-
-        top_n_stations = 5
-        print("Top {:d} by meteor number:".format(top_n_stations))
-        for i, station_id in enumerate(bin_cams_topmeteors):
-            station_data = bin_cams_topmeteors[station_id]
-            n_meteors = station_data['meteors']
-            tap = station_data['tap']/1e6
-            print("    {:s}, {:5d} meteors, TAP = {:10.2f} km^2 h".format(station_id, n_meteors, tap))
-
-            if i == top_n_stations - 1:
-                break
-
-        print("Top {:d} by TAP:".format(top_n_stations))
-        for i, station_id in enumerate(bin_cams_toptap):
-            station_data = bin_cams_toptap[station_id]
-            n_meteors = station_data['meteors']
-            tap = station_data['tap']/1e6
-            print("    {:s}, {:5d} meteors, TAP = {:10.2f} km^2 h".format(station_id, n_meteors, tap))
-
-            if i == top_n_stations - 1:
-                break
-
-    ###
-
+    print(reportCameraTally(fbr, top_n_stations=5))
 
     # Show and save the batch flux plot
     plotBatchFlux(

@@ -11,7 +11,8 @@ from RMS.Astrometry.Conversions import datetime2JD
 from RMS.Formats.Showers import FluxShowers
 from RMS.Math import isAngleBetween
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
-from Utils.FluxBatch import fluxBatch, plotBatchFlux, FluxBatchBinningParams, saveBatchFluxCSV
+from Utils.FluxBatch import fluxBatch, plotBatchFlux, FluxBatchBinningParams, saveBatchFluxCSV, \
+    reportCameraTally
 
 
 def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_dir=None, output_dir=None):
@@ -201,6 +202,11 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
 
             # Save the results to a CSV file
             saveBatchFluxCSV(fbr, output_dir, batch_flux_output_filename)
+
+            # Save the per-camera tally results
+            tally_string = reportCameraTally(fbr, top_n_stations=5)
+            with open(os.path.join(output_dir, batch_flux_output_filename + "_camera_tally.txt"), 'w') as f:
+                f.write(tally_string)
 
 
 if __name__ == "__main__":
