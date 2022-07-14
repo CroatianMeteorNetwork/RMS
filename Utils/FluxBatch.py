@@ -486,6 +486,20 @@ def reportCameraTally(fbr, top_n_stations=5):
 
     out_str = ""
 
+    out_str += "# Shower parameters:\n"
+    out_str += "# Shower         = {:s}\n".format(fbr.shower.name)
+    out_str += "# r              = {:.2f}\n".format(fbr.population_index_mean)
+    out_str += "# s              = {:.2f}\n".format(calculateMassIndex(fbr.population_index_mean))
+    out_str += "# m_lim @ +6.5M  = {:.2e} kg\n".format(fbr.mass_lim)
+    out_str += "# Met LM mean    = {:.2e}\n".format(fbr.lm_m_mean)
+    out_str += "# m_lim @ {:+.2f}M = {:.2e} kg\n".format(fbr.lm_m_mean, fbr.mass_lim_lm_m_mean)
+    out_str += "# CI int.        = {:.1f} %\n".format(100*fbr.ci)
+    out_str += "# Binning parameters:\n"
+    out_str += "# Min. meteors     = {:d}\n".format(fbr.min_meteors)
+    out_str += "# Min TAP          = {:.2f} x 1000 km^2 h\n".format(fbr.min_tap)
+    out_str += "# Min bin duration = {:.2f} h\n".format(fbr.min_bin_duration)
+    out_str += "# Max bin duration = {:.2f} h\n".format(fbr.max_bin_duration)
+
     out_str += "Camera tally per bin:\n"
     out_str += "---------------------\n"
 

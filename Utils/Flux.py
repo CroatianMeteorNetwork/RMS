@@ -2469,7 +2469,14 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
     else:
         # If the metadata directory is given, make a new directory for this station
         data_dir_name = os.path.basename(dir_path)
-        metadata_dir = os.path.join(metadata_dir, data_dir_name)
+
+        # Station directory
+        station_dir = data_dir_name.split('_')[0]
+        station_dir = os.path.join(metadata_dir, station_dir)
+        mkdirP(station_dir)
+
+        # Final metadata directory
+        metadata_dir = os.path.join(station_dir, data_dir_name)
         mkdirP(metadata_dir)
 
     # Init the flux configuration
