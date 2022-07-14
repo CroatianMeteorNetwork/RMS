@@ -13,9 +13,190 @@ from RMS.Math import isAngleBetween
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
 from Utils.FluxBatch import fluxBatch, plotBatchFlux, FluxBatchBinningParams, saveBatchFluxCSV, \
     reportCameraTally
+from RMS.Misc import mkdirP
 
 
-def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_dir=None, output_dir=None):
+def generateWebsite(output_dir, flux_showers, ref_dt, fbr_results_all_years, fbr_results_ref_year, 
+    website_plot_url):
+    
+
+    # Decide which joining function to use, considering the given website URL or local path
+    if os.path.isdir(website_plot_url):
+        joinFunc = os.path.join
+
+    else:
+        joinFunc = lambda *pieces: '/'.join(s.strip('/') for s in pieces)
+
+    html_code = ""
+
+    # Define the website header
+    website_header = """
+<!DOCTYPE html>
+<html>
+<center>
+<head>
+        <meta charset="utf-8">
+        <title>NASA flux</title>
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" />
+</head>
+
+<body>
+
+
+  <div class="container">
+      <div class="row">
+
+        <div class="col-xs-3">
+          <img class="logo-imgl" src="https://fireballs.ndc.nasa.gov/static/nasa_logo.png" height="126" width="157" />
+        </div>
+        <div class="col-xs-6" >
+        <div class="row-fluid">
+        <div class="centering text-center">
+        <br />
+          <p><h1 class="heading">NASA Meteor Shower <br> Flux Monitoring</h1></p>
+                Supporting data supplied by the <a href="https://globalmeteornetwork.org/" target="_blank">Global Meteor Network</a>
+        </div>
+    </div>
+
+
+        </div>
+        <div class="col-xs-3">
+          <a href="https://globalmeteornetwork.org/" target="_blank"><img class="logo-imgl" src="https://globalmeteornetwork.org/static/images/GMN_logo_white_text_dark_transparent_small.png" height="126" width="216" /></a>
+        </div>
+   
+      </div>
+    </div>
+"""
+    html_code += website_header
+
+
+    html_code += """
+<h1> Currently active showers </h1>
+    """
+
+    # Add the time of latest update (UTC) and solar longitude
+    sol_ref = np.degrees(jd2SolLonSteyaert(datetime2JD(ref_dt)))
+    update_time_str = """
+<p><b>Last update: </b>
+<br>{:s} UTC 
+<br>Solar longitude {:.4f} deg
+</p>""".format(
+        ref_dt.strftime("%Y-%m-%d %H:%M:%S"), 
+        sol_ref
+    )
+    html_code += update_time_str
+
+    html_code += """
+<br>
+<p> 
+Previous plots can be found here: <a href="{:s}">Archival data</a>
+</p>
+    """.format(website_plot_url)
+
+    # Generate HTML with the latest results
+    for shower_code in fbr_results_ref_year:
+
+        # Extract reference year results object and name of the plot file
+        fbr_ref, _, plot_name_ref = fbr_results_ref_year[shower_code]
+
+        # Print shower name
+        shower_info = "<br><h2>#{:d} {:s} - {:s}</h2>".format(
+            fbr_ref.shower.iau_code_int, 
+            fbr_ref.shower.name, 
+            fbr_ref.shower.name_full
+            )
+        html_code += shower_info
+
+        # Add the image with latest flux
+        img_ref_html = """
+        <h3>Year {:d}</h3>
+        <img src="{:s}" style="width: 80%; height: auto;"/>""".format(ref_dt.year, joinFunc(website_plot_url, plot_name_ref))
+        html_code += img_ref_html
+
+        # Extract reference year results object and name of the plot file
+        fbr_all, dir_list_all, plot_name_all = fbr_results_all_years[shower_code]
+
+        # Determine the range of used years
+        dt_list = [dt for _, dt in dir_list_all]
+        year_min = min(dt_list).year
+        year_max = max(dt_list).year
+
+        # Add image with all years combined
+        img_all_html = """
+        <br>
+        <h3>Years {:d} - {:d}</h3>
+        <img src="{:s}" style="width: 80%; height: auto;"/>""".format(year_min, year_max, joinFunc(website_plot_url, plot_name_all))
+        html_code += img_all_html
+
+    
+    ### Generate a table with the used showers ###
+    shower_table_html = """
+<h1>Operational shower table</h1>
+<div style="width: 1000px; margin: 0px auto;">
+<div class="table-container">
+    <table class="table table-striped table-responsive">
+    <thead class="thead-default" >
+        <tr>
+        <th class="desc orderable">IAU #</th> 
+        <th class="desc orderable">IAU code</th> 
+        <th class="desc orderable">Name </th> 
+        <th class="desc orderable"> Sol begin </th> 
+        <th class="desc orderable"> Sol max </th> 
+        <th class="desc orderable"> Sol end </th> 
+        <th class="desc orderable"> Year </th> 
+        <th class="desc orderable"> Population index </th>
+        </tr>
+    </thead>
+<tbody>
+    """
+
+    for i, shower in enumerate(flux_showers.showers):
+
+        if i%2 == 0:
+            tr_class = "even"
+        else:
+            tr_class = "odd"
+
+        shower_table_html += """<tr scope="row" class="{:s}">""".format(tr_class)
+        #               <td>IAU #</td> <td>IAU code</td> <td>Name </td> <td> Sol begin </td> <td> Sol max </td> <td> Sol end </td> <td> Population index </td>
+        shower_table_html += "<td>{:d}</td> <td>{:s}</td> <td>{:s}</td> <td> {:.2f} </td> <td> {:.2f} </td> <td> {:.2f} </td> <td> {:s} </td> <td> {:.2f} </td>".format(
+            shower.iau_code_int, shower.name, shower.name_full, shower.lasun_beg, shower.lasun_max, 
+            shower.lasun_end, shower.flux_year, shower.population_index)
+        shower_table_html += "</tr>"
+
+    shower_table_html += """
+</tbody>
+</table>
+</div>
+</div>
+    """
+
+    html_code += shower_table_html
+
+    ###
+
+
+    # Define the website footer
+    website_footer = """
+<footer>
+<center>Supporting data supplied by the <a href="https://globalmeteornetwork.org/" target="_blank">Global Meteor Network</a>
+    <br>    
+For more information, please email <a href="mailto:MSFC-fireballs@mail.nasa.gov?Subject=Flux%20Webpage" target="_top">MSFC-fireballs@mail.nasa.gov</a></center>
+</footer>
+</body>
+</center>
+</html>
+    """
+    html_code += website_footer
+
+
+    # Save the HTML file
+    with open(os.path.join(output_dir, "index.html"), 'w') as f:
+        f.write(html_code)
+
+
+def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_dir=None, output_dir=None, 
+    generate_website=False, website_plot_url=None):
     """ Given the reference time, automatically identify active showers and produce the flux graphs and
         CSV files.
 
@@ -32,11 +213,20 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
             used.
         output_dir: [str] Directory where the final data products will be saved. If None, data_path directory
             will be used.
+        generate_website: [bool] Generate HTML code for the website. It will be saved in the output dir.
+        website_plot_url: [str] Public URL to the plots, so they can be accessed online.
     """
 
 
     if output_dir is None:
         output_dir = data_path
+
+    else:
+        if not os.path.exists(output_dir):
+            mkdirP(output_dir)
+
+    if website_plot_url is None:
+        website_plot_url = output_dir
 
 
     # Load the showers for flux
@@ -116,7 +306,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
 
                 # Take the folder only if it has a platepar file inside it
                 if len([file_name for file_name in file_list if file_name == config.platepar_name]):
-                    shower_dirs[shower.name].append(dir_path)
+                    shower_dirs[shower.name].append([dir_path, dir_dt])
 
 
                     print("Ref year check:")
@@ -128,7 +318,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
                     if (dir_dt >= shower.dt_beg_ref_year - datetime.timedelta(days=1)) and \
                        (dir_dt <= shower.dt_end_ref_year + datetime.timedelta(days=1)):
 
-                       shower_dirs_ref_year[shower.name].append(dir_path)
+                       shower_dirs_ref_year[shower.name].append([dir_path, dir_dt])
 
 
     ### ###
@@ -150,10 +340,14 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
         )
 
 
+    # Store results in a dictionary where the keys are shower codes
+    fbr_results_all_years = {}
+    fbr_results_ref_year = {}
+
     # Process batch fluxes for all showers
     #   2 sets of plots and CSV files will be saved: one set with all years combined, and one set with the
     #   reference year
-    for shower_dir_dict, plot_suffix_status, fb_bin_params in [
+    for shower_dir_dict, time_extent_flag, fb_bin_params in [
         [shower_dirs, "ALL", fluxbatch_binning_params_all_years], 
         [shower_dirs_ref_year, "REF", fluxbatch_binning_params_one_year]
         ]:
@@ -168,7 +362,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
                 ref_height = shower.ref_height
 
             # Construct the dir input list
-            dir_params = [(night_dir_path, None, None, None, None, None) for night_dir_path in dir_list]
+            dir_params = [(night_dir_path, None, None, None, None, None) for night_dir_path, _ in dir_list]
 
             # Compute the batch flux
             fbr = fluxBatch(shower_code, shower.mass_index, dir_params, ref_ht=ref_height, 
@@ -181,7 +375,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
                 )
 
 
-            if plot_suffix_status == "ALL":
+            if time_extent_flag == "ALL":
                 plot_suffix = "all_years"
             else:
                 plot_suffix = "year_{:d}".format(shower.dt_max_ref_year.year)
@@ -189,6 +383,13 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
             # Make a name for the plot to save
             batch_flux_output_filename = "flux_{:s}_sol={:.6f}-{:.6f}_{:s}".format(shower_code, 
                 fbr.comb_sol_bins[0], fbr.comb_sol_bins[-1], plot_suffix)
+
+            # Save the results to a dictionary
+            if time_extent_flag == "ALL":
+                fbr_results_all_years[shower_code] = [fbr, dir_list, batch_flux_output_filename + '.png']
+
+            else:
+                fbr_results_ref_year[shower_code] = [fbr, dir_list, batch_flux_output_filename + '.png']
 
             # Show and save the batch flux plot
             plotBatchFlux(
@@ -207,6 +408,15 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
             tally_string = reportCameraTally(fbr, top_n_stations=5)
             with open(os.path.join(output_dir, batch_flux_output_filename + "_camera_tally.txt"), 'w') as f:
                 f.write(tally_string)
+
+
+    # Generate the website HTML code
+    if generate_website:
+        print("Generating website...")
+        generateWebsite(output_dir, flux_showers, ref_dt, fbr_results_all_years, fbr_results_ref_year, 
+            website_plot_url)
+        print("   ... done!")
+
 
 
 if __name__ == "__main__":
@@ -233,6 +443,9 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-o', '--outdir', metavar='FLUX_METADATA_DIRECTORY', type=str,
         help="Path to a directory where the plots and CSVs will be saved. If not given, the data directory will be used.")
+
+    arg_parser.add_argument('-w', '--weburl', metavar='WEBSITE_PLOT_PUBLIC_URL', type=str,
+        help="Public URL to where the plots are stored on the website.")
 
     arg_parser.add_argument('-a', '--auto', metavar='H_FREQ', type=float, default=None, const=1.0, 
         nargs='?',
@@ -270,7 +483,7 @@ if __name__ == "__main__":
 
         # Run auto flux
         fluxAutoRun(config, cml_args.dir_path, ref_dt, metadata_dir=cml_args.metadir, \
-            output_dir=cml_args.outdir)
+            output_dir=cml_args.outdir, generate_website=True, website_plot_url=cml_args.weburl)
 
 
         ### <// DETERMINE NEXT RUN TIME ###
