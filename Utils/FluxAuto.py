@@ -13,7 +13,7 @@ from RMS.Math import isAngleBetween
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
 from Utils.FluxBatch import fluxBatch, plotBatchFlux, FluxBatchBinningParams, saveBatchFluxCSV, \
     reportCameraTally
-from RMS.Misc import mkdirP
+from RMS.Misc import mkdirP, walkDirsToDepth
 
 
 def generateWebsite(output_dir, index_dir, flux_showers, ref_dt, fbr_results_all_years, fbr_results_ref_year, 
@@ -282,63 +282,73 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
 
     ### Load all data folders ###
 
-    # Determine which data folders should be used for each shower
+    # Determine which data folders should be used for each shower (don't search deeper than a depth of 2)
     shower_dirs = {}
     shower_dirs_ref_year = {}
-    for entry in sorted(os.walk(data_path)):
+    for entry in walkDirsToDepth(data_path, depth=2):
 
-        dir_path, _, file_list = entry
+        dir_entry, dir_list, file_list = entry
 
-        print("Inspecting:", dir_path)
+        # Go though all directories
+        for dir_name in dir_list:
 
-        # Check that the dir name is long enough to contain the station code and the timestamp
-        if len(dir_path) < 23:
-            continue
+            dir_path = os.path.join(dir_entry, dir_name)
 
-        # Parse the timestamp from the directory name and determine the capture date
-        dir_split = os.path.basename(dir_path).split("_")
-        if len(dir_split) < 3:
-            continue
+            print("Inspecting:", dir_path)
 
-        try:
-            dir_dt = datetime.datetime.strptime(dir_split[1] + "_" + dir_split[2], "%Y%m%d_%H%M%S")
-        except ValueError:
-            continue
+            # Check that the dir name is long enough to contain the station code and the timestamp
+            if len(dir_path) < 23:
+                continue
 
-        # Make sure the directory time is after 2018 (to avoid 1970 unix time 0 dirs)
-        #   2018 is when the GMN was established
-        if dir_dt.year < 2018:
-            continue
+            # Parse the timestamp from the directory name and determine the capture date
+            dir_split = os.path.basename(dir_path).split("_")
+            if len(dir_split) < 3:
+                continue
 
-        # Compute the solar longitude of the directory time stamp
-        sol_dir = jd2SolLonSteyaert(datetime2JD(dir_dt))
+            try:
+                dir_dt = datetime.datetime.strptime(dir_split[1] + "_" + dir_split[2], "%Y%m%d_%H%M%S")
+            except ValueError:
+                continue
 
-        # Go through all showers and take the appropriate directories
-        for shower in active_showers:
+            # Make sure the directory time is after 2018 (to avoid 1970 unix time 0 dirs)
+            #   2018 is when the GMN was established
+            if dir_dt.year < 2018:
+                continue
 
-            # Add a list for dirs for this shower, if it doesn't exist
-            if shower.name not in shower_dirs:
-                shower_dirs[shower.name] = []
-                shower_dirs_ref_year[shower.name] = []
+            # Compute the solar longitude of the directory time stamp
+            sol_dir = jd2SolLonSteyaert(datetime2JD(dir_dt))
 
-            # Check that the directory time is within the activity period of the shower (+/- 1 deg sol)
-            if isAngleBetween(np.radians(shower.lasun_beg - 1), sol_dir, np.radians(shower.lasun_end + 1)):
+            # Go through all showers and take the appropriate directories
+            for shower in active_showers:
 
-                # Take the folder only if it has a platepar file inside it
-                if len([file_name for file_name in file_list if file_name == config.platepar_name]):
-                    shower_dirs[shower.name].append([dir_path, dir_dt])
+                # Add a list for dirs for this shower, if it doesn't exist
+                if shower.name not in shower_dirs:
+                    shower_dirs[shower.name] = []
+                    shower_dirs_ref_year[shower.name] = []
 
+                # Check that the directory time is within the activity period of the shower (+/- 1 deg sol)
+                if isAngleBetween(np.radians(shower.lasun_beg - 1), sol_dir, np.radians(shower.lasun_end + 1)):
 
-                    print("Ref year check:")
-                    print(dir_dt, shower.dt_beg_ref_year - datetime.timedelta(days=1)) 
-                    print(dir_dt, shower.dt_end_ref_year + datetime.timedelta(days=1))
-                    print()
+                    # Take the folder only if it has a platepar file inside it
+                    if len([file_name for file_name in os.listdir(dir_path)
+                            if file_name == config.platepar_name]):
 
-                    # Store only the given year's directories, to generate the plot of the latest activity
-                    if (dir_dt >= shower.dt_beg_ref_year - datetime.timedelta(days=1)) and \
-                       (dir_dt <= shower.dt_end_ref_year + datetime.timedelta(days=1)):
+                        # Add the directory to the list if it doesn't exist already
+                        shower_dirs_entry = [dir_path, dir_dt]
 
-                       shower_dirs_ref_year[shower.name].append([dir_path, dir_dt])
+                        if shower_dirs_entry not in shower_dirs[shower.name]:
+                            shower_dirs[shower.name].append(shower_dirs_entry)
+
+                            # print("Ref year check:")
+                            # print(dir_dt, shower.dt_beg_ref_year - datetime.timedelta(days=1)) 
+                            # print(dir_dt, shower.dt_end_ref_year + datetime.timedelta(days=1))
+                            # print()
+
+                            # Store the reference year's directories separately
+                            if (dir_dt >= shower.dt_beg_ref_year - datetime.timedelta(days=1)) and \
+                               (dir_dt <= shower.dt_end_ref_year + datetime.timedelta(days=1)):
+
+                               shower_dirs_ref_year[shower.name].append([dir_path, dir_dt])
 
 
     ### ###
