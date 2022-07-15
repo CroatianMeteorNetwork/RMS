@@ -157,7 +157,8 @@ class QueuedPool(object):
         self.bkup_dict = {}
 
         # Load all previous backup files in the given directory, if any
-        self.loadBackupFiles()
+        if self.bkup_dir is not None:
+            self.loadBackupFiles()
 
         ### ###
 
@@ -335,7 +336,7 @@ class QueuedPool(object):
             time.sleep(0.1)
 
             # Back up the result to disk, if it was not already in the backup
-            if not read_from_backup:
+            if (not read_from_backup) and (self.bkup_dir is not None):
                 self.saveBackupFile(args, result)
 
             # Exit if exit is requested

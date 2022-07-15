@@ -27,6 +27,7 @@ from Utils.Flux import calculatePopulationIndex, calculateMassIndex, computeFlux
     calculateFixedBins, calculateZHR, massVerniani, loadShower
 from RMS.Routines.SolarLongitude import unwrapSol
 from RMS.Misc import formatScientific, SegmentedScale, mkdirP
+from RMS.QueuedPool import QueuedPool
 
 # Now that the Scale class has been defined, it must be registered so
 # that ``matplotlib`` can find it.
@@ -539,8 +540,134 @@ def reportCameraTally(fbr, top_n_stations=5):
 
 
 
-def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duration=5, ci=0.95, min_meteors=50, 
-    min_tap=2, min_bin_duration=0.5, max_bin_duration=12, compute_single=False, metadata_dir=None):
+def computeFluxPerStation(file_entry, bin_datetime_yearly, sol_bins, ci, compute_single, metadata_dir):
+    """ Compute the flux for individual stations. """
+
+    all_fixed_bin_information = []
+    single_fixed_bin_information = []
+    single_station_flux = []
+    summary_population_index = []
+
+    ## Compute the flux
+
+    # Unpack the data
+    config, ftp_dir_path, ftpdetectinfo_path, shower_code, time_intervals, s, binduration, \
+        binmeteors, fwhm, ref_ht = file_entry
+
+    # Compute the flux in every observing interval
+    for interval in time_intervals:
+
+        dt_beg, dt_end = interval
+
+        # Extract datetimes of forced bins relevant for this time interval
+        dt_bins = bin_datetime_yearly[np.argmax([year_start < dt_beg < year_end \
+            for (year_start, year_end), _ in bin_datetime_yearly])][1]
+
+        forced_bins = (dt_bins, sol_bins)
+
+        ret = computeFlux(
+            config,
+            ftp_dir_path,
+            ftpdetectinfo_path,
+            shower_code,
+            dt_beg,
+            dt_end,
+            s,
+            binduration=binduration,
+            binmeteors=binmeteors,
+            ref_height=ref_ht,
+            show_plots=False,
+            default_fwhm=fwhm,
+            confidence_interval=ci,
+            forced_bins=forced_bins,
+            compute_single=compute_single,
+            metadata_dir=metadata_dir,
+        )
+
+        if ret is None:
+            continue
+        (
+            sol_data,
+            flux_lm_6_5_data,
+            flux_lm_6_5_ci_lower_data,
+            flux_lm_6_5_ci_upper_data,
+            meteor_num_data,
+            population_index,
+            bin_information,
+        ) = ret
+
+        # Skip observations with no computed fixed bins
+        if len(bin_information[0]) == 0:
+            continue
+
+        # Sort measurements into fixed bins
+        all_fixed_bin_information.append(addFixedBins(sol_bins, *bin_information))
+
+        single_fixed_bin_information.append([config.stationID, bin_information])
+        summary_population_index.append(population_index)
+
+
+        # Add computed single-station flux to the output list
+        single_station_flux += [
+            [config.stationID, sol, flux, lower, upper, population_index]
+            for (sol, flux, lower, upper) in zip(
+                sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data
+            )
+        ]
+
+    return all_fixed_bin_information, single_fixed_bin_information, single_station_flux, \
+        summary_population_index
+
+
+
+def computeBatchFluxParallel(file_data, bin_datetime_yearly, sol_bins, ci, compute_single, metadata_dir, 
+    cpu_cores=-1):
+    """ Compute flux in batch by distributing the computations on multiple CPU cores. """
+
+
+    # Run the QueuedPool for detection
+    workpool = QueuedPool(computeFluxPerStation, cores=cpu_cores, backup_dir=None)
+
+    # Add jobs for the pool
+    for file_entry in file_data:
+        workpool.addJob([file_entry, bin_datetime_yearly, sol_bins, ci, compute_single, metadata_dir])
+
+
+    print('Starting pool...')
+
+    # Start the detection
+    workpool.startPool()
+
+
+    print('Waiting for the detection to finish...')
+
+    # Wait for the detector to finish and close it
+    workpool.closePool()
+
+    total_all_fixed_bin_information = []
+    total_single_fixed_bin_information = []
+    total_single_station_flux = []
+    total_summary_population_index = []
+
+    # Get extraction results
+    for result in workpool.getResults():
+
+        all_fixed_bin_information, single_fixed_bin_information, single_station_flux, \
+            summary_population_index = result
+
+        total_all_fixed_bin_information += all_fixed_bin_information
+        total_single_fixed_bin_information += single_fixed_bin_information
+        total_single_station_flux += single_station_flux
+        total_summary_population_index += summary_population_index
+
+
+    return total_all_fixed_bin_information, total_single_fixed_bin_information, total_single_station_flux, \
+        total_summary_population_index
+
+
+def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duration=5, ci=0.95, min_meteors=50, 
+    min_tap=2, min_bin_duration=0.5, max_bin_duration=12, compute_single=False, metadata_dir=None, 
+    cpu_cores=1):
     """ Compute flux by combining flux measurements from multiple stations.
     
     Arguments:
@@ -567,6 +694,7 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
         compute_single: [bool] Compute single-station flux. False by default.
         metadata_dir: [str] A separate directory for flux metadata. If not given, the data directory will be
             used.
+        cpu_cores: [int] Number of CPU cores to use. If -1, all availabe cores will be used. 1 by default.
     """
 
     # Make the metadata directory, if given
@@ -595,7 +723,7 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
 
         # Load the config file
         try:
-            config = cr.loadConfigFromDirectory('.', ftp_dir_path)
+            config_station = cr.loadConfigFromDirectory('.', ftp_dir_path)
 
         except RuntimeError:
             print("The config file could not be loaded! Skipping...")
@@ -611,7 +739,7 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
             print('Detecting whether clouds are present...')
 
             time_intervals = detectClouds(
-                config, ftp_dir_path, show_plots=False, ratio_threshold=ratio_threshold
+                config_station, ftp_dir_path, show_plots=False, ratio_threshold=ratio_threshold
             )
 
             print('Cloud detection complete!')
@@ -625,7 +753,7 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
 
         file_data.append(
             [
-                config,
+                config_station,
                 ftp_dir_path,
                 ftpdetectinfo_path,
                 shower_code,
@@ -667,76 +795,21 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
         )
 
 
-    all_fixed_bin_information = []
-    single_fixed_bin_information = []
-    single_station_flux = []
-    summary_population_index = []
-
-    # Compute the flux
-    for (config, ftp_dir_path, ftpdetectinfo_path, shower_code, time_intervals, s, binduration, \
-        binmeteors, fwhm, ref_ht) in file_data:
-
-        # Compute the flux in every observing interval
-        for interval in time_intervals:
-
-            dt_beg, dt_end = interval
-
-            # Extract datetimes of forced bins relevant for this time interval
-            dt_bins = bin_datetime_yearly[np.argmax([year_start < dt_beg < year_end \
-                for (year_start, year_end), _ in bin_datetime_yearly])][1]
-
-            forced_bins = (dt_bins, sol_bins)
-
-            ret = computeFlux(
-                config,
-                ftp_dir_path,
-                ftpdetectinfo_path,
-                shower_code,
-                dt_beg,
-                dt_end,
-                s,
-                binduration=binduration,
-                binmeteors=binmeteors,
-                ref_height=ref_ht,
-                show_plots=False,
-                default_fwhm=fwhm,
-                confidence_interval=ci,
-                forced_bins=forced_bins,
-                compute_single=compute_single,
-                metadata_dir=metadata_dir,
-            )
-
-            if ret is None:
-                continue
-            (
-                sol_data,
-                flux_lm_6_5_data,
-                flux_lm_6_5_ci_lower_data,
-                flux_lm_6_5_ci_upper_data,
-                meteor_num_data,
-                population_index,
-                bin_information,
-            ) = ret
-
-            # Skip observations with no computed fixed bins
-            if len(bin_information[0]) == 0:
-                continue
-
-            # Sort measurements into fixed bins
-            all_fixed_bin_information.append(addFixedBins(sol_bins, *bin_information))
-
-            single_fixed_bin_information.append([config.stationID, bin_information])
-            summary_population_index.append(population_index)
-
-
-            # Add computed single-station flux to the output list
-            single_station_flux += [
-                [config.stationID, sol, flux, lower, upper, population_index]
-                for (sol, flux, lower, upper) in zip(
-                    sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data
-                )
-            ]
-
+    # Compute the batch flux using multiple CPU cores
+    (
+        all_fixed_bin_information, 
+        single_fixed_bin_information, 
+        single_station_flux, 
+        summary_population_index,
+    ) = computeBatchFluxParallel(
+        file_data, 
+        bin_datetime_yearly, 
+        sol_bins, 
+        ci, 
+        compute_single, 
+        metadata_dir, 
+        cpu_cores=cpu_cores
+        )
 
     # Sum meteors in every bin (this is a 2D along the first axis, producing an array)
     num_meteors = sum(np.array(meteors) for meteors, _, _, _, _, _, _ in all_fixed_bin_information)
@@ -1349,6 +1422,13 @@ if __name__ == "__main__":
     arg_parser.add_argument('-m', '--metadir', metavar='FLUX_METADATA_DIRECTORY', type=str,
         help="Path to a directory with flux metadata (ECSV files). If not given, the data directory will be used.")
 
+    arg_parser.add_argument(
+        "--cpucores",
+        type=int,
+        default=1,
+        help="Number of CPU codes to use for computation. -1 to use all cores. 1 by default.",
+    )
+
     # Parse the command line arguments
     fluxbatch_cml_args = arg_parser.parse_args()
 
@@ -1401,6 +1481,10 @@ if __name__ == "__main__":
 
     shower_code = None
 
+    # Load the default config file
+    config = cr.Config()
+    config = cr.parse(config.config_file_name)
+
 
     # NOTE: CSV option not supported
     # # If an input CSV file was not given, compute the data
@@ -1452,11 +1536,11 @@ if __name__ == "__main__":
 
 
     # Compute the batch flux
-    fbr = fluxBatch(shower_code, mass_index, dir_params, ref_ht=ref_ht, ci=ci,
+    fbr = fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=ref_ht, ci=ci,
             atomic_bin_duration=atomic_bin_duration, min_meteors=fb_bin_params.min_meteors, 
             min_tap=fb_bin_params.min_tap, min_bin_duration=fb_bin_params.min_bin_duration, 
             max_bin_duration=fb_bin_params.max_bin_duration, compute_single=fluxbatch_cml_args.single,
-            metadata_dir=fluxbatch_cml_args.metadir)
+            metadata_dir=fluxbatch_cml_args.metadir, cpu_cores=fluxbatch_cml_args.cpucores)
 
 
     # Print camera tally #

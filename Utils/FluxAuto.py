@@ -197,7 +197,7 @@ For more information, please email <a href="mailto:MSFC-fireballs@mail.nasa.gov?
 
 
 def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_dir=None, output_dir=None, 
-    csv_dir=None, index_dir=None, generate_website=False, website_plot_url=None):
+    csv_dir=None, index_dir=None, generate_website=False, website_plot_url=None, cpu_cores=1):
     """ Given the reference time, automatically identify active showers and produce the flux graphs and
         CSV files.
 
@@ -218,6 +218,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
         index_dir: [str] Directory where index.html will be placed. If None, output_dir will be used.
         generate_website: [bool] Generate HTML code for the website. It will be saved in the output dir.
         website_plot_url: [str] Public URL to the plots, so they can be accessed online.
+        cpu_cores: [int] Number of CPU cores to use. If -1, all availabe cores will be used. 1 by default.
     """
 
 
@@ -395,13 +396,14 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
             dir_params = [(night_dir_path, None, None, None, None, None) for night_dir_path, _ in dir_list]
 
             # Compute the batch flux
-            fbr = fluxBatch(shower_code, shower.mass_index, dir_params, ref_ht=ref_height, 
+            fbr = fluxBatch(config, shower_code, shower.mass_index, dir_params, ref_ht=ref_height, 
                 min_meteors=fb_bin_params.min_meteors, 
                 min_tap=fb_bin_params.min_tap, 
                 min_bin_duration=fb_bin_params.min_bin_duration, 
                 max_bin_duration=fb_bin_params.max_bin_duration, 
                 compute_single=False,
                 metadata_dir=metadata_dir,
+                cpu_cores=cpu_cores,
                 )
 
 
@@ -489,6 +491,13 @@ if __name__ == "__main__":
         help="""Run continously every H_FREQ hours. If argument not given, the code will run every hour."""
         )
 
+    arg_parser.add_argument(
+        "--cpucores",
+        type=int,
+        default=1,
+        help="Number of CPU codes to use for computation. -1 to use all cores. 1 by default.",
+    )
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -521,7 +530,7 @@ if __name__ == "__main__":
         # Run auto flux
         fluxAutoRun(config, cml_args.dir_path, ref_dt, metadata_dir=cml_args.metadir,
             output_dir=cml_args.outdir, csv_dir=cml_args.csvdir, generate_website=True, 
-            index_dir=cml_args.indexdir, website_plot_url=cml_args.weburl)
+            index_dir=cml_args.indexdir, website_plot_url=cml_args.weburl, cpu_cores=cml_args.cpucores)
 
 
         ### <// DETERMINE NEXT RUN TIME ###
