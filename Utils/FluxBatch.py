@@ -662,7 +662,9 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
         [time_interval for data in file_data for time_interval in data[4]],
         [data[1] for data in file_data],
         shower,
-        atomic_bin_duration=atomic_bin_duration)
+        atomic_bin_duration=atomic_bin_duration,
+        metadata_dir=metadata_dir
+        )
 
 
     all_fixed_bin_information = []

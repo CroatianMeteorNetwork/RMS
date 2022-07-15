@@ -583,7 +583,7 @@ def loadShower(config, shower_code, mass_index, force_flux_list=False):
 
 
 
-def calculateFixedBins(all_time_intervals, dir_list, shower, atomic_bin_duration=5):
+def calculateFixedBins(all_time_intervals, dir_list, shower, atomic_bin_duration=5, metadata_dir=None):
     """
     Function to calculate the bins that any amount of stations over any number of years for one shower
     can be put into.
@@ -596,6 +596,8 @@ def calculateFixedBins(all_time_intervals, dir_list, shower, atomic_bin_duration
     Keyword arguments:
         atomic_bin_duration: [float] Bin duration in minutes (this is only an approximation since the bins are
             fixed to solar longitude)
+        metadata_dir: [str] A separate directory for flux metadata. If not given, the data directory will be
+            used.
 
     Return:
         [tuple] sol_bins, bin_datetime_dict
@@ -643,6 +645,14 @@ def calculateFixedBins(all_time_intervals, dir_list, shower, atomic_bin_duration
     dirs_with_found_files = []
     for dir_name in dir_list:
         loaded_sol = []
+
+        # Open the alternate path, if given
+        if metadata_dir is not None:
+            
+            # Make open the metadata directory and create it if it doesn't exist
+            dir_name = createMetadataDir(dir_name, metadata_dir)
+
+
         for file_name in sorted(os.listdir(dir_name)):
 
             # Take precomputed time bins for the right shower and mass index
@@ -703,8 +713,8 @@ def calculateFixedBins(all_time_intervals, dir_list, shower, atomic_bin_duration
             if failed:
                 print()
                 raise Exception(
-                    "Flux bin solar longitudes didn't match. To fix this, at least one of the"
-                    " {:s} CSV files must be deleted.".format(FIXED_BINS_NAME)
+                    "Flux bin solar longitudes didn't match for the {:s} shower. To fix this, at least one of"
+                    " the {:s} CSV files must be deleted.".format(shower.name, FIXED_BINS_NAME)
                 )
             # filter only sol values that are inside the solar longitude
             starting_sol = comparison_sol
@@ -2397,6 +2407,29 @@ def computeFluxCorrectionsOnBins(
         mag_90_perc_data,
     )
 
+def createMetadataDir(dir_path, metadata_dir):
+    """ Prepare the metadata directory.
+    
+    Arguments:
+        dir_path: [str] Path to the working directory.
+        metadata_dir: [str] A separate directory for flux metadata. If not given, the data directory will be
+            used.
+    """
+
+    # If the metadata directory is given, make a new directory for this station
+    data_dir_name = os.path.basename(dir_path)
+
+    # Station directory
+    station_dir = data_dir_name.split('_')[0]
+    station_dir = os.path.join(metadata_dir, station_dir)
+    mkdirP(station_dir)
+
+    # Final metadata directory
+    metadata_dir = os.path.join(station_dir, data_dir_name)
+    mkdirP(metadata_dir)
+
+    return metadata_dir
+
 
 def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_end, mass_index, \
     binduration=None, binmeteors=None, timebin_intdt=0.25, ref_height=None, ht_std_percent=5.0, mask=None, \
@@ -2466,17 +2499,9 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         metadata_dir = dir_path
 
     else:
-        # If the metadata directory is given, make a new directory for this station
-        data_dir_name = os.path.basename(dir_path)
 
-        # Station directory
-        station_dir = data_dir_name.split('_')[0]
-        station_dir = os.path.join(metadata_dir, station_dir)
-        mkdirP(station_dir)
-
-        # Final metadata directory
-        metadata_dir = os.path.join(station_dir, data_dir_name)
-        mkdirP(metadata_dir)
+        # Make open the metadata directory and create it if it doesn't exist
+        metadata_dir = createMetadataDir(dir_path, metadata_dir)
 
     # Init the flux configuration
     flux_config = FluxConfig()
