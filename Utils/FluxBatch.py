@@ -640,7 +640,7 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
 
 
     # Load the shower object from the given shower code
-    shower = loadShower(config, shower_code, mass_index)
+    shower = loadShower(config, shower_code, mass_index, force_flux_list=True)
 
     # Init the apparent speed
     _, _, v_init = shower.computeApparentRadiant(0, 0, 2451545.0)
@@ -876,7 +876,8 @@ def fluxBatch(shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duratio
 
 
 
-def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_single=False, show_plot=True):
+def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_single=False, show_plot=True,
+    xlim_shower_limits=False):
     """ Make a plot showing the batch flux results. 
     
     Arguments:
@@ -888,6 +889,8 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
         only_flux: [bool] Only plot the flux graph, skip other metadata. False by default.
         compute_single: [bool] Also plot per-station single-station fluxes. False by default.
         show_plot: [bool] Show the plot on the screen. True by default.
+        xlim_shower_limits: [bool] If True, set the plot x axis limits to the shower activity extent. False
+            by default.
     """
 
 
@@ -1163,8 +1166,10 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
         ax[subplot_rows - 1].set_xlabel("Solar longitude (deg)")
 
 
+    # Set X axis limits
+    if xlim_shower_limits:
+        ax[0].set_xlim(fbr.shower.lasun_beg, fbr.shower.lasun_end)
 
-    # Show plot
     
     plt.tight_layout()
 

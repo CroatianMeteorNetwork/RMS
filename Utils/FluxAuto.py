@@ -16,7 +16,7 @@ from Utils.FluxBatch import fluxBatch, plotBatchFlux, FluxBatchBinningParams, sa
 from RMS.Misc import mkdirP
 
 
-def generateWebsite(output_dir, flux_showers, ref_dt, fbr_results_all_years, fbr_results_ref_year, 
+def generateWebsite(output_dir, index_dir, flux_showers, ref_dt, fbr_results_all_years, fbr_results_ref_year, 
     website_plot_url):
     
 
@@ -192,12 +192,12 @@ For more information, please email <a href="mailto:MSFC-fireballs@mail.nasa.gov?
 
 
     # Save the HTML file
-    with open(os.path.join(output_dir, "index.html"), 'w') as f:
+    with open(os.path.join(index_dir, "index.html"), 'w') as f:
         f.write(html_code)
 
 
 def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_dir=None, output_dir=None, 
-    csv_dir=None, generate_website=False, website_plot_url=None):
+    csv_dir=None, index_dir=None, generate_website=False, website_plot_url=None):
     """ Given the reference time, automatically identify active showers and produce the flux graphs and
         CSV files.
 
@@ -215,6 +215,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
         output_dir: [str] Directory where the final data products will be saved. If None, data_path directory
             will be used.
         csv_dir: [str] Directory where the CSV files will be save. If None, output_dir will be used.
+        index_dir: [str] Directory where index.html will be placed. If None, output_dir will be used.
         generate_website: [bool] Generate HTML code for the website. It will be saved in the output dir.
         website_plot_url: [str] Public URL to the plots, so they can be accessed online.
     """
@@ -227,12 +228,22 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
         if not os.path.exists(output_dir):
             mkdirP(output_dir)
 
+
     if csv_dir is None:
         csv_dir = output_dir
 
     else:
         if not os.path.exists(csv_dir):
             mkdirP(csv_dir)
+
+
+    if index_dir is None:
+        index_dir = output_dir
+
+    else:
+        if not os.path.exists(index_dir):
+            mkdirP(index_dir)
+
 
     if website_plot_url is None:
         website_plot_url = output_dir
@@ -408,6 +419,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
                 only_flux=False,
                 compute_single=False,
                 show_plot=False,
+                xlim_shower_limits=True,
             )
 
             # Save the results to a CSV file
@@ -422,8 +434,8 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
     # Generate the website HTML code
     if generate_website:
         print("Generating website...")
-        generateWebsite(output_dir, flux_showers, ref_dt, fbr_results_all_years, fbr_results_ref_year, 
-            website_plot_url)
+        generateWebsite(output_dir, index_dir, flux_showers, ref_dt, fbr_results_all_years, 
+            fbr_results_ref_year, website_plot_url)
         print("   ... done!")
 
 
@@ -455,6 +467,9 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-c', '--csvdir', metavar='CSV_DIRECTORY', type=str,
         help="Path to a directory where the CSV files will be saved. If not given, the output directory will be used.")
+
+    arg_parser.add_argument('-i', '--indexdir', metavar='INDEX_DIRECTORY', type=str,
+        help="Path to the directory where index.html will be placed. If not given, the output directory will be used.")
 
     arg_parser.add_argument('-w', '--weburl', metavar='WEBSITE_PLOT_PUBLIC_URL', type=str,
         help="Public URL to where the plots are stored on the website.")
@@ -496,7 +511,7 @@ if __name__ == "__main__":
         # Run auto flux
         fluxAutoRun(config, cml_args.dir_path, ref_dt, metadata_dir=cml_args.metadir,
             output_dir=cml_args.outdir, csv_dir=cml_args.csvdir, generate_website=True, 
-            website_plot_url=cml_args.weburl)
+            index_dir=cml_args.indexdir, website_plot_url=cml_args.weburl)
 
 
         ### <// DETERMINE NEXT RUN TIME ###

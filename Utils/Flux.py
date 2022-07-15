@@ -551,18 +551,17 @@ def loadTimeInvervals(config, dir_path):
 
 
 
-def loadShower(config, shower_code, mass_index):
+def loadShower(config, shower_code, mass_index, force_flux_list=False):
     """ Load parameters of a shower from a given shower code. """
 
     shower_list_all = loadRadiantShowers(config)
     shower_list_flux = FluxShowers(config).showers
     
     # If the mass index was given, load the default list of showers
-    if mass_index:
+    if mass_index and (not force_flux_list):
         shower_list_primary = shower_list_all
         shower_list_secondary = shower_list_flux
         
-
     # Otherwise, load the flux list and try reading the mass index
     else:
         shower_list_primary = shower_list_flux
