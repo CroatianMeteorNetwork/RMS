@@ -540,7 +540,116 @@ def reportCameraTally(fbr, top_n_stations=5):
 
 
 
-def computeFluxPerStation(file_entry, bin_datetime_yearly, sol_bins, ci, compute_single, metadata_dir):
+def computeTimeIntervalsPerStation(night_dir_path, time_intervals, binduration, binmeteors, fwhm, \
+    ratio_threshold):
+    """ Go though the given data folder and compute the time intervals when the flux should be computed.
+
+    Arguments:
+        night_dir_path: [str] Path to the night directory
+        time_intervals: [tuple] (dt_beg, dt_end) pairs, if None automatically computed intervals will be taken
+        binduration: [float] For single-station fluxes only
+        binmeteors: [int] For single-station fluxes only
+        fwhm: [float] Manual star FWHM, if not computed in CALSTARS files. None to take a default value
+        ratio_threshold: [float] Star match ratio for determining cloudiness. None to take a default value
+    """
+
+    # Find the FTPdetectinfo file
+    try:
+        ftpdetectinfo_path = findFTPdetectinfoFile(night_dir_path)
+    except FileNotFoundError:
+        print("An FTPdetectinfo file could not be found! Skipping...")
+        return None
+
+    if not os.path.isfile(ftpdetectinfo_path):
+        print("The FTPdetectinfo file does not exist:", ftpdetectinfo_path, "Skipping...")
+        return None
+
+    # Extract parent directory
+    ftp_dir_path = os.path.dirname(ftpdetectinfo_path)
+
+    # Load the config file
+    try:
+        config_station = cr.loadConfigFromDirectory('.', ftp_dir_path)
+
+    except RuntimeError:
+        print("The config file could not be loaded! Skipping...")
+        return None
+
+    except configparser.MissingSectionHeaderError:
+        print("The config file could not be loaded! Skipping...")
+        return None
+
+    if time_intervals is None:
+        
+        # Find time intervals to compute flux with
+        print('Detecting whether clouds are present...')
+
+        time_intervals = detectClouds(
+            config_station, ftp_dir_path, show_plots=False, ratio_threshold=ratio_threshold
+        )
+
+        print('Cloud detection complete!')
+        print()
+
+    else:
+        dt_beg_temp = datetime.datetime.strptime(time_intervals[0], "%Y%m%d_%H%M%S")
+        dt_end_temp = datetime.datetime.strptime(time_intervals[1], "%Y%m%d_%H%M%S")
+        time_intervals = [[dt_beg_temp, dt_end_temp]]
+
+
+    return config_station, ftp_dir_path, ftpdetectinfo_path, time_intervals, binduration, binmeteors, fwhm
+
+
+
+def computeTimeIntervalsParallel(dir_params, cpu_cores=1):
+    """ Find time intervals for given folders, using multiple CPUs.
+    Arguments:
+        dir_params: [list] A list of lists, per input directory:
+            (night_dir_path, time_intervals, binduration, binmeteors, fwhm)
+            - night_dir_path - path to the night directory
+            - time_intervals - (dt_beg, dt_end) pairs, if None automatically computed intervals will be taken
+            - binduration - for single-station fluxes only
+            - binmeteors - for single-station fluxes only
+            - fwhm - manual star FWHM, if not computed in CALSTARS files. None to take a default value
+            - ratio_threshold - star match ratio for determining cloudiness. None to take a default value
+
+    Keyword arguments:
+        cpu_cores: [int] Number of CPU cores to use. If -1, all availabe cores will be used. 1 by default.
+    """
+
+    # Run the QueuedPool for detection
+    workpool = QueuedPool(computeTimeIntervalsPerStation, cores=cpu_cores, backup_dir=None)
+
+    # Add jobs for the pool
+    for night_dir_path, time_intervals, binduration, binmeteors, fwhm, ratio_threshold in dir_params:
+
+        workpool.addJob([night_dir_path, time_intervals, binduration, binmeteors, fwhm, ratio_threshold], \
+            wait_time=0)
+
+
+    print('Starting pool...')
+
+    # Start the detection
+    workpool.startPool()
+
+
+    print('Waiting for the time interval computation to finish...')
+
+    # Wait for the detector to finish and close it
+    workpool.closePool()
+
+    # Get extraction results
+    file_data = []
+    for entry in workpool.getResults():
+        if entry is not None:
+            file_data.append(entry)
+
+    return file_data
+
+
+
+def computeFluxPerStation(file_entry, shower_code, mass_index, ref_ht, bin_datetime_yearly, sol_bins, ci, \
+    compute_single, metadata_dir):
     """ Compute the flux for individual stations. """
 
     all_fixed_bin_information = []
@@ -551,8 +660,8 @@ def computeFluxPerStation(file_entry, bin_datetime_yearly, sol_bins, ci, compute
     ## Compute the flux
 
     # Unpack the data
-    config, ftp_dir_path, ftpdetectinfo_path, shower_code, time_intervals, s, binduration, \
-        binmeteors, fwhm, ref_ht = file_entry
+    config_station, ftp_dir_path, ftpdetectinfo_path, time_intervals, binduration, \
+        binmeteors, fwhm = file_entry
 
     # Compute the flux in every observing interval
     for interval in time_intervals:
@@ -566,13 +675,13 @@ def computeFluxPerStation(file_entry, bin_datetime_yearly, sol_bins, ci, compute
         forced_bins = (dt_bins, sol_bins)
 
         ret = computeFlux(
-            config,
+            config_station,
             ftp_dir_path,
             ftpdetectinfo_path,
             shower_code,
             dt_beg,
             dt_end,
-            s,
+            mass_index,
             binduration=binduration,
             binmeteors=binmeteors,
             ref_height=ref_ht,
@@ -603,13 +712,13 @@ def computeFluxPerStation(file_entry, bin_datetime_yearly, sol_bins, ci, compute
         # Sort measurements into fixed bins
         all_fixed_bin_information.append(addFixedBins(sol_bins, *bin_information))
 
-        single_fixed_bin_information.append([config.stationID, bin_information])
+        single_fixed_bin_information.append([config_station.stationID, bin_information])
         summary_population_index.append(population_index)
 
 
         # Add computed single-station flux to the output list
         single_station_flux += [
-            [config.stationID, sol, flux, lower, upper, population_index]
+            [config_station.stationID, sol, flux, lower, upper, population_index]
             for (sol, flux, lower, upper) in zip(
                 sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data
             )
@@ -620,9 +729,10 @@ def computeFluxPerStation(file_entry, bin_datetime_yearly, sol_bins, ci, compute
 
 
 
-def computeBatchFluxParallel(file_data, bin_datetime_yearly, sol_bins, ci, compute_single, metadata_dir, 
-    cpu_cores=-1):
-    """ Compute flux in batch by distributing the computations on multiple CPU cores. """
+def computeBatchFluxParallel(file_data, shower_code, mass_index, ref_ht, bin_datetime_yearly, sol_bins, ci, \
+    compute_single, metadata_dir, cpu_cores=1):
+    """ Compute flux in batch by distributing the computations on multiple CPU cores. 
+    """
 
 
     # Run the QueuedPool for detection
@@ -630,7 +740,8 @@ def computeBatchFluxParallel(file_data, bin_datetime_yearly, sol_bins, ci, compu
 
     # Add jobs for the pool
     for file_entry in file_data:
-        workpool.addJob([file_entry, bin_datetime_yearly, sol_bins, ci, compute_single, metadata_dir])
+        workpool.addJob([file_entry, shower_code, mass_index, ref_ht, bin_datetime_yearly, sol_bins, ci, \
+            compute_single, metadata_dir], wait_time=0)
 
 
     print('Starting pool...')
@@ -639,7 +750,7 @@ def computeBatchFluxParallel(file_data, bin_datetime_yearly, sol_bins, ci, compu
     workpool.startPool()
 
 
-    print('Waiting for the detection to finish...')
+    print('Waiting for the batch flux computation to finish...')
 
     # Wait for the detector to finish and close it
     workpool.closePool()
@@ -703,69 +814,9 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
             mkdirP(metadata_dir)
 
 
-    # Go through all directories containing the flux data
-    file_data = []
-    for night_dir_path, time_intervals, binduration, binmeteors, fwhm, ratio_threshold in dir_params:
-
-        # Find the FTPdetectinfo file
-        try:
-            ftpdetectinfo_path = findFTPdetectinfoFile(night_dir_path)
-        except FileNotFoundError:
-            print("An FTPdetectinfo file could not be found! Skipping...")
-            continue
-
-        if not os.path.isfile(ftpdetectinfo_path):
-            print("The FTPdetectinfo file does not exist:", ftpdetectinfo_path, "Skipping...")
-            continue
-
-        # Extract parent directory
-        ftp_dir_path = os.path.dirname(ftpdetectinfo_path)
-
-        # Load the config file
-        try:
-            config_station = cr.loadConfigFromDirectory('.', ftp_dir_path)
-
-        except RuntimeError:
-            print("The config file could not be loaded! Skipping...")
-            continue
-
-        except configparser.MissingSectionHeaderError:
-            print("The config file could not be loaded! Skipping...")
-            continue
-
-        if time_intervals is None:
-            
-            # Find time intervals to compute flux with
-            print('Detecting whether clouds are present...')
-
-            time_intervals = detectClouds(
-                config_station, ftp_dir_path, show_plots=False, ratio_threshold=ratio_threshold
-            )
-
-            print('Cloud detection complete!')
-            print()
-
-        else:
-            dt_beg_temp = datetime.datetime.strptime(time_intervals[0], "%Y%m%d_%H%M%S")
-            dt_end_temp = datetime.datetime.strptime(time_intervals[1], "%Y%m%d_%H%M%S")
-            time_intervals = [[dt_beg_temp, dt_end_temp]]
-
-
-        file_data.append(
-            [
-                config_station,
-                ftp_dir_path,
-                ftpdetectinfo_path,
-                shower_code,
-                time_intervals,
-                mass_index,
-                binduration,
-                binmeteors,
-                fwhm,
-                ref_ht
-            ]
-        )
-
+    # Go through all directories containing the flux data and prepare the time intervals
+    print("Computing time intervals...")
+    file_data = computeTimeIntervalsParallel(dir_params, cpu_cores=cpu_cores)
 
     # Load the shower object from the given shower code
     shower = loadShower(config, shower_code, mass_index, force_flux_list=True)
@@ -787,7 +838,7 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
 
     # Compute 5 minute bins of equivalent solar longitude every year
     sol_bins, bin_datetime_yearly = calculateFixedBins(
-        [time_interval for data in file_data for time_interval in data[4]],
+        [time_interval for data in file_data for time_interval in data[3]],
         [data[1] for data in file_data],
         shower,
         atomic_bin_duration=atomic_bin_duration,
@@ -803,6 +854,9 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
         summary_population_index,
     ) = computeBatchFluxParallel(
         file_data, 
+        shower_code, 
+        mass_index, 
+        ref_ht,
         bin_datetime_yearly, 
         sol_bins, 
         ci, 
