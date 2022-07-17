@@ -413,8 +413,8 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
                 plot_suffix = "year_{:d}".format(shower.dt_max_ref_year.year)
 
             # Make a name for the plot to save
-            batch_flux_output_filename = "flux_{:s}_sol={:.6f}-{:.6f}_{:s}".format(shower_code, 
-                fbr.comb_sol_bins[0], fbr.comb_sol_bins[-1], plot_suffix)
+            batch_flux_output_filename = "flux_{:s}_sol={:.2f}-{:.2f}_{:s}".format(shower_code, 
+                fbr.shower.lasun_beg, fbr.shower.lasun_end, plot_suffix)
 
             # Save the results to a dictionary
             if time_extent_flag == "ALL":
