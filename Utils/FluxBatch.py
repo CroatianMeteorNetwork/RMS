@@ -648,8 +648,8 @@ def computeTimeIntervalsParallel(dir_params, cpu_cores=1):
 
 
 
-def computeFluxPerStation(file_entry, shower_code, mass_index, ref_ht, bin_datetime_yearly, sol_bins, ci, \
-    compute_single, metadata_dir):
+def computeFluxPerStation(file_entry, metadata_dir, shower_code, mass_index, ref_ht, bin_datetime_yearly, \
+    sol_bins, ci, compute_single):
     """ Compute the flux for individual stations. """
 
     all_fixed_bin_information = []
@@ -736,12 +736,13 @@ def computeBatchFluxParallel(file_data, shower_code, mass_index, ref_ht, bin_dat
 
 
     # Run the QueuedPool for detection
-    workpool = QueuedPool(computeFluxPerStation, cores=cpu_cores, backup_dir=None)
+    workpool = QueuedPool(computeFluxPerStation, cores=cpu_cores, backup_dir=None, \
+        func_extra_args=(shower_code, mass_index, ref_ht, bin_datetime_yearly, sol_bins, ci, compute_single)
+        )
 
     # Add jobs for the pool
     for file_entry in file_data:
-        workpool.addJob([file_entry, shower_code, mass_index, ref_ht, bin_datetime_yearly, sol_bins, ci, \
-            compute_single, metadata_dir], wait_time=0)
+        workpool.addJob([file_entry, metadata_dir], wait_time=0)
 
 
     print('Starting pool...')

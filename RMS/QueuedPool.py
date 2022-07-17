@@ -83,7 +83,7 @@ class BackupContainer(object):
 
 class QueuedPool(object):
     def __init__(self, func, cores=None, log=None, delay_start=0, worker_timeout=2000, backup_dir='.', \
-        low_priority=False):
+        low_priority=False, func_extra_args=None, func_kwargs=None):
         """ Provides capability of creating a pool of workers which will process jobs in a given queue, and 
         the input queue can be updated in another thread. 
 
@@ -105,6 +105,12 @@ class QueuedPool(object):
             backup_dir: [str] Path to the directory where result backups will be held.
             low_priority: [bool] If True, the child processess will run with a lower priority, i.e. larger
                 'niceness' (available only on Unix).
+            func_extra_args: [tuple] Extra arguments for the worker function. Can be used when there
+                arguments are the same for all function calls to conserve memory if they are large. None by
+                default.
+            func_kwargs: [dict] Extra keyword arguments for the worker function. Can be used when there
+                arguments are the same for all function calls to conserve memory if they are large. None by
+                default.
         """
 
 
@@ -125,6 +131,13 @@ class QueuedPool(object):
                 cores = multiprocessing.cpu_count()
 
 
+        if func_extra_args is None:
+            func_extra_args = ()
+
+        if func_kwargs is None:
+            func_kwargs = {}
+
+
         self.cores = SafeValue(cores, minval=1, maxval=multiprocessing.cpu_count())
         self.log = log
 
@@ -132,6 +145,8 @@ class QueuedPool(object):
         self.delay_start = delay_start
         self.worker_timeout = worker_timeout
         self.low_priority = low_priority
+        self.func_extra_args = func_extra_args
+        self.func_kwargs = func_kwargs
 
         # Initialize queues (for some reason queues from Manager need to be created, otherwise they are 
         # blocking when using get_nowait)
@@ -319,7 +334,8 @@ class QueuedPool(object):
                 try:
 
                     # Call the original worker function and collect results
-                    result = func(*args)
+                    all_args = tuple(args) + tuple(self.func_extra_args)
+                    result = func(*all_args, **self.func_kwargs)
 
                 except:
                     tb = traceback.format_exc()
