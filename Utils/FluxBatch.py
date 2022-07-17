@@ -847,6 +847,7 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
 
 
     # Compute the batch flux using multiple CPU cores
+    print("Computing flux...")
     (
         all_fixed_bin_information, 
         single_fixed_bin_information, 
