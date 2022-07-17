@@ -644,6 +644,7 @@ def computeTimeIntervalsParallel(dir_params, cpu_cores=1):
         if entry is not None:
             file_data.append(entry)
 
+    # Free up memory
     del workpool
 
     return file_data
@@ -775,6 +776,7 @@ def computeBatchFluxParallel(file_data, shower_code, mass_index, ref_ht, bin_dat
         total_summary_population_index += summary_population_index
 
 
+    # Free up memory
     del workpool
 
     return total_all_fixed_bin_information, total_single_fixed_bin_information, total_single_station_flux, \
