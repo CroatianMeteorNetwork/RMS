@@ -376,8 +376,13 @@ class QueuedPool(object):
         self.printAndLog('Using {:d} cores'.format(self.cores.value()))
 
         # Initialize the pool of workers with the given number of worker cores
+        # The 'spawn' method is forced for stability on Linux
         # Comma in the argument list is a must!
-        self.pool = multiprocessing.Pool(self.cores.value(), self._workerFunc, (self.func, ))
+        self.pool = multiprocessing.get_context('spawn').Pool(
+            self.cores.value(), 
+            self._workerFunc, 
+            (self.func, )
+            )
 
 
 
