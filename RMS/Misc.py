@@ -204,7 +204,13 @@ class SegmentedScale(mscale.ScaleBase):
     name = 'segmented'
 
     def __init__(self, axis, **kwargs):
-        mscale.ScaleBase.__init__(self, axis)
+
+        # Handle different matplotlib versions
+        try:
+            mscale.ScaleBase.__init__(self, axis)
+        except TypeError:
+            mscale.ScaleBase.__init__(axis)
+
         self.points = kwargs.get('points', [0, 1])
         self.lb = self.points[0]
         self.ub = self.points[-1]
