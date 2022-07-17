@@ -253,11 +253,13 @@ class QueuedPool(object):
     def deleteBackupFiles(self):
         """ Delete all backup files in the backup folder. """
 
-        # Go though all backup files
-        for file_name in self._listBackupFiles():
+        if self.bkup_dir is not None:
 
-            # Remove the backup file
-            os.remove(os.path.join(self.bkup_dir, file_name))
+            # Go though all backup files
+            for file_name in self._listBackupFiles():
+
+                # Remove the backup file
+                os.remove(os.path.join(self.bkup_dir, file_name))
 
 
 
