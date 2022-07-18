@@ -9,7 +9,7 @@ import sys
 import collections
 import copy
 import configparser
-    
+import multiprocessing    
 
 import ephem
 import numpy as np
@@ -601,6 +601,13 @@ def computeTimeIntervalsPerStation(night_dir_path, time_intervals, binduration, 
 
 
 
+def computeTimeIntervalsPerStationPoolFunc(args):
+    """ Modify to one argument so the function works with the multiprocessing Pool. """
+
+    return computeTimeIntervalsPerStation(*args)
+
+
+
 def computeTimeIntervalsParallel(dir_params, cpu_cores=1):
     """ Find time intervals for given folders, using multiple CPUs.
     Arguments:
@@ -617,35 +624,16 @@ def computeTimeIntervalsParallel(dir_params, cpu_cores=1):
         cpu_cores: [int] Number of CPU cores to use. If -1, all availabe cores will be used. 1 by default.
     """
 
-    # Run the QueuedPool for detection
-    workpool = QueuedPool(computeTimeIntervalsPerStation, cores=cpu_cores, backup_dir=None)
-
-    # Add jobs for the pool
-    for night_dir_path, time_intervals, binduration, binmeteors, fwhm, ratio_threshold in dir_params:
-
-        workpool.addJob([night_dir_path, time_intervals, binduration, binmeteors, fwhm, ratio_threshold], \
-            wait_time=0)
-
-
-    print('Starting pool...')
-
-    # Start the detection
-    workpool.startPool()
-
-
-    print('Waiting for the time interval computation to finish...')
-
-    # Wait for the detector to finish and close it
-    workpool.closePool()
-
-    # Get extraction results
+    # Compute the time intervals using the given number of CPU cores
     file_data = []
-    for entry in workpool.getResults():
-        if entry is not None:
-            file_data.append(entry)
+    with multiprocessing.Pool(cpu_cores) as pool:
 
-    # Free up memory
-    del workpool
+        results = pool.map(computeTimeIntervalsPerStationPoolFunc, dir_params)
+
+        # Ignore entries for which there were no good time intervals
+        for entry in results:
+            if entry is not None:
+                file_data.append(entry)
 
     return file_data
 
