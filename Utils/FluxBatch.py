@@ -1230,10 +1230,17 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
             o.elevation = 0
             o.horizon = '0:0'
 
+            year_list = []
             for dt_range, dt_arr in fbr.bin_datetime_yearly:
 
                 dt_bin_beg, dt_bin_end = dt_range
                 dt_mid = jd2Date((datetime2JD(dt_bin_beg) + datetime2JD(dt_bin_end))/2, dt_obj=True)
+
+                # Make sure the years are not repeated
+                if dt_mid.year in year_list:
+                    continue
+
+                year_list.append(dt_mid.year)
 
                 moon_phases = []
 
