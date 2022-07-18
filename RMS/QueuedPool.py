@@ -84,7 +84,8 @@ class BackupContainer(object):
 
 class QueuedPool(object):
     def __init__(self, func, cores=None, log=None, delay_start=0, worker_timeout=2000, backup_dir='.', \
-        low_priority=False, func_extra_args=None, func_kwargs=None):
+        input_queue_maxsize=None, low_priority=False, func_extra_args=None, func_kwargs=None, 
+        worker_wait_inbetween_jobs=0.1):
         """ Provides capability of creating a pool of workers which will process jobs in a given queue, and 
         the input queue can be updated in another thread. 
 
@@ -104,6 +105,8 @@ class QueuedPool(object):
             worker_timeout: [int] Number of seconds to wait before the queue is killed due to a worker getting 
                 stuck.
             backup_dir: [str] Path to the directory where result backups will be held.
+            input_queue_maxsize: [int] Maximum size of the input queue. Used to conserve memory. Can be set
+                to the number of cores, optimally. None by default, meaning there is no size limit.
             low_priority: [bool] If True, the child processess will run with a lower priority, i.e. larger
                 'niceness' (available only on Unix).
             func_extra_args: [tuple] Extra arguments for the worker function. Can be used when there
@@ -112,6 +115,8 @@ class QueuedPool(object):
             func_kwargs: [dict] Extra keyword arguments for the worker function. Can be used when there
                 arguments are the same for all function calls to conserve memory if they are large. None by
                 default.
+            worker_wait_inbetween_jobs: [float] Wait this number of seconds after finished a job and putting
+                the result in the output queue. 0.1 s by default.
         """
 
 
@@ -148,11 +153,12 @@ class QueuedPool(object):
         self.low_priority = low_priority
         self.func_extra_args = func_extra_args
         self.func_kwargs = func_kwargs
+        self.worker_wait_inbetween_jobs = worker_wait_inbetween_jobs
 
         # Initialize queues (for some reason queues from Manager need to be created, otherwise they are 
         # blocking when using get_nowait)
         manager = multiprocessing.Manager()
-        self.input_queue = manager.Queue()
+        self.input_queue = manager.Queue(maxsize=input_queue_maxsize)
         self.output_queue = manager.Queue()
 
         self.func = func
@@ -352,7 +358,7 @@ class QueuedPool(object):
             self.output_queue.put(result)
             self.results_counter.increment()
             self.available_workers.increment()
-            time.sleep(0.1)
+            time.sleep(self.worker_wait_inbetween_jobs)
 
             # Back up the result to disk, if it was not already in the backup
             if (not read_from_backup) and (self.bkup_dir is not None):

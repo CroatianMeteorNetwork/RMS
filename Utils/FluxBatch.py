@@ -582,7 +582,7 @@ def computeTimeIntervalsPerStation(night_dir_path, time_intervals, binduration, 
     except configparser.DuplicateOptionError:
         print("The config file could not be loaded! Skipping...")
         return None
-        
+
 
     if time_intervals is None:
         
@@ -730,21 +730,25 @@ def computeBatchFluxParallel(file_data, shower_code, mass_index, ref_ht, bin_dat
     """ Compute flux in batch by distributing the computations on multiple CPU cores. 
     """
 
+    if cpu_cores < 0:
+        cpu_cores = multiprocessing.cpu_count()
 
-    # Run the QueuedPool for detection
+    # Run the QueuedPool for detection (limit the input queue size for better memory management)
     workpool = QueuedPool(computeFluxPerStation, cores=cpu_cores, backup_dir=None, \
-        func_extra_args=(shower_code, mass_index, ref_ht, bin_datetime_yearly, sol_bins, ci, compute_single)
+        func_extra_args=(shower_code, mass_index, ref_ht, bin_datetime_yearly, sol_bins, ci, compute_single),
+        input_queue_maxsize=2*cpu_cores, worker_wait_inbetween_jobs=0.01,
         )
-
-    # Add jobs for the pool
-    for file_entry in file_data:
-        workpool.addJob([file_entry, metadata_dir], wait_time=0)
-
 
     print('Starting pool...')
 
     # Start the detection
     workpool.startPool()
+
+    print('Adding jobs...')
+
+    # Add jobs for the pool
+    for file_entry in file_data:
+        workpool.addJob([file_entry, metadata_dir], wait_time=0)
 
 
     print('Waiting for the batch flux computation to finish...')
