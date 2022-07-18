@@ -30,7 +30,7 @@ def generateWebsite(output_dir, index_dir, flux_showers, ref_dt, fbr_results_all
     html_code = ""
 
     # Define the website header
-    website_header = """
+    website_header = r"""
 <!DOCTYPE html>
 <html>
 <center>
@@ -67,6 +67,42 @@ def generateWebsite(output_dir, index_dir, flux_showers, ref_dt, fbr_results_all
       </div>
     </div>
     <hr>
+
+<div style="max-width: 800px; margin: 0px auto; text-align: left;">
+    <p>
+        The following plots show near-real time flux estimates computed as part of a collaboration between the NASA Meteoroid Environment Office and the Western University Meteor Physics group for major meteor showers. These data are gathered by video cameras of the Global Meteor Network - the hardware, software and flux methodology background are provided in the references below.
+    </p>
+
+    <p>
+        For each shower plot, the top inset shows the measured physical meteor flux (left hand axis) while the equivalent Zenithal Hourly Rate (number of meteors an observer would see under ideal skies with the radiant overhead in an hour) is shown on the right axis as a function of solar longitude (J2000). The assumed population index (which is used to convert flux to ZHR) is assumed constant over the duration of the shower is shown in the header. The equivalent flux to a limiting meteor absolute magnitude of +6.5 and the average limiting meteor magnitude for the measurements are shown, where the equivalent meteoroid mass uses the Mass-Magnitude-Velocity relationship of Verniani (1973). Uncertainties reflect Poisson statistics only.
+    </p>
+
+    <p>
+        The second inset per shower shows the number of single station meteors associated to the shower by all cameras in varying time bins (black dots). The per bin equivalent time-area-product (TAP) of coverage in the atmosphere (in units of 1000 km<sup>2</sup> hr) is also shown. The time bin sizes are computed by requiring each bin to contain a minimum number of meteors (min meteors) and a minimum TAP.
+    </p>
+
+    <p>
+        The third inset per shower shows the average radiant distance from the cameras center field of view, the apparent elevation of the radiant (weighted by the TAP) and the moon phase (0 = new and 100 = full).
+    </p>
+
+    <p>
+    Finally, the fourth inset shows the average meteor angular velocity (in degrees per second) measured in the cameras field center (black crosses) and the theoretical limiting detectable meteor magnitude taking all corrections into account also at the field center.
+    </p>
+
+    <p>
+        Data are updated once per day on a global basis.
+    </p>
+     
+
+    <b>References</b>
+    <ul>
+    <li>Verniani, F., 1973. An analysis of the physical parameters of 5759 faint radio meteors. <i>Journal of Geophysical Research</i>, 78(35), pp.8429-8462.</li>
+    
+    <li>Vida, D., Erskine, R.C.B., Brown, P.G., Kambulow, J., Campbell-Brown, M. and Mazur, M.J., 2022. Computing optical meteor flux using global meteor network data. <i>Monthly Notices of the Royal Astronomical Society</i>, in press. <a href="https://doi.org/10.1093/mnras/stac1766" target="_blank">MNRAS</a>, <a href="https://arxiv.org/abs/2206.11365" target="_blank">arxiv</a>.</li>
+    
+    <li>Vida, D., Segon, D., Gural, P.S., Brown, P.G., McIntyre, M.J., Dijkema, T.J., Pavletic, L., Kukic, P., Mazur, M.J., Eschman, P. and Roggemans, P., 2021. The Global Meteor Network - Methodology and first results. <i>Monthly Notices of the Royal Astronomical Society</i>, 506(4), pp.5046-5074. <a href="https://academic.oup.com/mnras/article-abstract/506/4/5046/6347233" target="_blank">MNRAS</a>, <a href="https://arxiv.org/abs/2107.12335" target="_blank">arxiv</a>.</li>
+    </ul>
+</div>
 """
     html_code += website_header
 
@@ -81,6 +117,7 @@ def generateWebsite(output_dir, index_dir, flux_showers, ref_dt, fbr_results_all
 <p><b>Last update: </b>
 <br>{:s} UTC 
 <br>Solar longitude {:.4f} deg
+<br>(indicated by a red vertical line on the flux plots)
 </p>""".format(
         ref_dt.strftime("%Y-%m-%d %H:%M:%S"), 
         sol_ref
@@ -432,6 +469,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
                 compute_single=False,
                 show_plot=False,
                 xlim_shower_limits=True,
+                sol_marker=sol_ref
             )
 
             # Save the results to a CSV file

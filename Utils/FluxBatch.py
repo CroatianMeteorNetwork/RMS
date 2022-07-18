@@ -1011,7 +1011,7 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
 
 
 def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_single=False, show_plot=True,
-    xlim_shower_limits=False):
+    xlim_shower_limits=False, sol_marker=None):
     """ Make a plot showing the batch flux results. 
     
     Arguments:
@@ -1025,6 +1025,8 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
         show_plot: [bool] Show the plot on the screen. True by default.
         xlim_shower_limits: [bool] If True, set the plot x axis limits to the shower activity extent. False
             by default.
+        sol_marker: [float] Plot a red vertical line on the flux plot at the given solar longitude (deg).
+            None by default, in which case the marker will not be plotted.
     """
 
 
@@ -1122,6 +1124,10 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
                       # + "at LM = +6.5$^{\\mathrm{M}}$"
                       )
         ax[0].set_ylabel("Flux (meteoroids / 1000 $\\cdot$ km$^2$ $\\cdot$ h)")
+
+        # Plot the marker
+        if sol_marker is not None:
+            ax[0].axvline(x=sol_marker, color='r', linewidth=1)
 
 
         ### Plot the ZHR on another axis ###
