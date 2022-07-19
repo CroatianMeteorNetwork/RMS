@@ -198,15 +198,15 @@ Information about the data is provided in a section below: <a href="#about">Abou
     </p>
 
     <p>
-        For each shower plot, the top inset shows the measured physical meteor flux (left hand axis) while the equivalent Zenithal Hourly Rate (number of meteors an observer would see under ideal skies with the radiant overhead in an hour) is shown on the right axis as a function of solar longitude (J2000). The assumed population index (which is used to convert flux to ZHR) is assumed constant over the duration of the shower is shown in the header. The equivalent flux to a limiting meteor absolute magnitude of +6.5 and the average limiting meteor magnitude for the measurements are shown, where the equivalent meteoroid mass uses the Mass-Magnitude-Velocity relationship of Verniani (1973). Uncertainties reflect Poisson statistics only.
+        The plots show the measured physical meteor flux (left hand axis) while the equivalent Zenithal Hourly Rate (number of meteors an observer would see under ideal skies with the radiant overhead in an hour) is shown on the right axis as a function of solar longitude (J2000). The assumed population index (which is used to convert flux to ZHR) is assumed constant over the duration of the shower is shown in the header. The equivalent flux to a limiting meteor absolute magnitude of +6.5 and the average limiting meteor magnitude for the measurements are shown, where the equivalent meteoroid mass uses the Mass-Magnitude-Velocity relationship of Verniani (1973). Uncertainties reflect Poisson statistics only (95% confidence interval).
     </p>
 
     <p>
-        The second inset per shower shows the number of single station meteors associated to the shower by all cameras in varying time bins (black dots). The per bin equivalent time-area-product (TAP) of coverage in the atmosphere (in units of 1000 km<sup>2</sup> hr) is also shown. The time bin sizes are computed by requiring each bin to contain a minimum number of meteors (min meteors) and a minimum TAP.
+        When a plot on the front page is clicked, a full plot including additional metadata will open. The second inset in the full plot shows the number of single station meteors associated to the shower by all cameras in varying time bins (black dots). The per bin equivalent time-area-product (TAP) of coverage in the atmosphere (in units of 1000 km<sup>2</sup> hr) is also shown. The time bin sizes are computed by requiring each bin to contain a minimum number of meteors (min meteors) and a minimum TAP.
     </p>
 
     <p>
-        The third inset per shower shows the average radiant distance from the cameras center field of view, the apparent elevation of the radiant (weighted by the TAP) and the moon phase (0 = new and 100 = full).
+        The third inset in the full plot show the average radiant distance from the cameras center field of view, the apparent elevation of the radiant (weighted by the TAP) and the moon phase (0 = new and 100 = full).
     </p>
 
     <p>
