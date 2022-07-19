@@ -1036,9 +1036,12 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
     
     if only_flux:
         subplot_rows = 1
+        figsize = (15, 5)
     else:
         subplot_rows = 4
-    fig, ax = plt.subplots(nrows=subplot_rows, figsize=(15, 10), sharex=True, \
+        figsize = (15, 10)
+
+    fig, ax = plt.subplots(nrows=subplot_rows, figsize=figsize, sharex=True, \
         gridspec_kw={'height_ratios': [3, 1, 1, 1][:subplot_rows]})
 
 

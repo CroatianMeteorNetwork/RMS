@@ -67,42 +67,6 @@ def generateWebsite(output_dir, index_dir, flux_showers, ref_dt, fbr_results_all
       </div>
     </div>
     <hr>
-
-<div style="max-width: 800px; margin: 0px auto; text-align: left;">
-    <p>
-        The following plots show near-real time flux estimates computed as part of a collaboration between the NASA Meteoroid Environment Office and the Western University Meteor Physics group for major meteor showers. These data are gathered by video cameras of the Global Meteor Network - the hardware, software and flux methodology background are provided in the references below.
-    </p>
-
-    <p>
-        For each shower plot, the top inset shows the measured physical meteor flux (left hand axis) while the equivalent Zenithal Hourly Rate (number of meteors an observer would see under ideal skies with the radiant overhead in an hour) is shown on the right axis as a function of solar longitude (J2000). The assumed population index (which is used to convert flux to ZHR) is assumed constant over the duration of the shower is shown in the header. The equivalent flux to a limiting meteor absolute magnitude of +6.5 and the average limiting meteor magnitude for the measurements are shown, where the equivalent meteoroid mass uses the Mass-Magnitude-Velocity relationship of Verniani (1973). Uncertainties reflect Poisson statistics only.
-    </p>
-
-    <p>
-        The second inset per shower shows the number of single station meteors associated to the shower by all cameras in varying time bins (black dots). The per bin equivalent time-area-product (TAP) of coverage in the atmosphere (in units of 1000 km<sup>2</sup> hr) is also shown. The time bin sizes are computed by requiring each bin to contain a minimum number of meteors (min meteors) and a minimum TAP.
-    </p>
-
-    <p>
-        The third inset per shower shows the average radiant distance from the cameras center field of view, the apparent elevation of the radiant (weighted by the TAP) and the moon phase (0 = new and 100 = full).
-    </p>
-
-    <p>
-    Finally, the fourth inset shows the average meteor angular velocity (in degrees per second) measured in the cameras field center (black crosses) and the theoretical limiting detectable meteor magnitude taking all corrections into account also at the field center.
-    </p>
-
-    <p>
-        Data are updated once per day on a global basis.
-    </p>
-     
-
-    <b>References</b>
-    <ul>
-    <li>Verniani, F., 1973. An analysis of the physical parameters of 5759 faint radio meteors. <i>Journal of Geophysical Research</i>, 78(35), pp.8429-8462.</li>
-    
-    <li>Vida, D., Erskine, R.C.B., Brown, P.G., Kambulow, J., Campbell-Brown, M. and Mazur, M.J., 2022. Computing optical meteor flux using global meteor network data. <i>Monthly Notices of the Royal Astronomical Society</i>, in press. <a href="https://doi.org/10.1093/mnras/stac1766" target="_blank">MNRAS</a>, <a href="https://arxiv.org/abs/2206.11365" target="_blank">arxiv</a>.</li>
-    
-    <li>Vida, D., Segon, D., Gural, P.S., Brown, P.G., McIntyre, M.J., Dijkema, T.J., Pavletic, L., Kukic, P., Mazur, M.J., Eschman, P. and Roggemans, P., 2021. The Global Meteor Network - Methodology and first results. <i>Monthly Notices of the Royal Astronomical Society</i>, 506(4), pp.5046-5074. <a href="https://academic.oup.com/mnras/article-abstract/506/4/5046/6347233" target="_blank">MNRAS</a>, <a href="https://arxiv.org/abs/2107.12335" target="_blank">arxiv</a>.</li>
-    </ul>
-</div>
 """
     html_code += website_header
 
@@ -129,13 +93,16 @@ def generateWebsite(output_dir, index_dir, flux_showers, ref_dt, fbr_results_all
 <p> 
 Previous plots can be found here: <a href="{:s}">Archival data</a>
 </p>
+<p> 
+Information about the data is provided in a section below: <a href="#about">About</a>
+</p>
     """.format(website_plot_url)
 
     # Generate HTML with the latest results
     for shower_code in fbr_results_ref_year:
 
-        # Extract reference year results object and name of the plot file
-        fbr_ref, _, plot_name_ref = fbr_results_ref_year[shower_code]
+        # Extract reference year results object and names of the plots files
+        fbr_ref, _, plot_name_ref, plot_name_ref_full = fbr_results_ref_year[shower_code]
 
         # Print shower name
         shower_info = "<br><h2>#{:d} {:s} - {:s}</h2>".format(
@@ -148,11 +115,15 @@ Previous plots can be found here: <a href="{:s}">Archival data</a>
         # Add the image with latest flux
         img_ref_html = """
         <h3>Year {:d}</h3>
-        <img src="{:s}" style="width: 80%; height: auto;"/>""".format(ref_dt.year, joinFunc(website_plot_url, plot_name_ref))
+        <a href="{:s}" target="_blank"><img src="{:s}" style="width: 80%; height: auto;"/></a>""".format(
+            ref_dt.year, 
+            joinFunc(website_plot_url, plot_name_ref_full), 
+            joinFunc(website_plot_url, plot_name_ref)
+            )
         html_code += img_ref_html
 
         # Extract reference year results object and name of the plot file
-        fbr_all, dir_list_all, plot_name_all = fbr_results_all_years[shower_code]
+        fbr_all, dir_list_all, plot_name_all, plot_name_all_full = fbr_results_all_years[shower_code]
 
         # Determine the range of used years
         dt_list = [dt for _, dt in dir_list_all]
@@ -163,7 +134,11 @@ Previous plots can be found here: <a href="{:s}">Archival data</a>
         img_all_html = """
         <br>
         <h3>Years {:d} - {:d}</h3>
-        <img src="{:s}" style="width: 80%; height: auto;"/>""".format(year_min, year_max, joinFunc(website_plot_url, plot_name_all))
+        <a href="{:s}" target="_blank"><img src="{:s}" style="width: 80%; height: auto;"/></a>""".format(
+            year_min, year_max, 
+            joinFunc(website_plot_url, plot_name_all_full),
+            joinFunc(website_plot_url, plot_name_all)
+            )
         html_code += img_all_html
 
     
@@ -216,6 +191,43 @@ Previous plots can be found here: <a href="{:s}">Archival data</a>
 
     # Define the website footer
     website_footer = """
+<h1 id="about">About</h1>
+<div style="max-width: 800px; margin: 0px auto; text-align: left;">
+    <p>
+        The plots above show near-real time flux estimates computed as part of a collaboration between the NASA Meteoroid Environment Office and the Western University Meteor Physics group for major meteor showers. These data are gathered by video cameras of the Global Meteor Network - the hardware, software and flux methodology background are provided in the references below.
+    </p>
+
+    <p>
+        For each shower plot, the top inset shows the measured physical meteor flux (left hand axis) while the equivalent Zenithal Hourly Rate (number of meteors an observer would see under ideal skies with the radiant overhead in an hour) is shown on the right axis as a function of solar longitude (J2000). The assumed population index (which is used to convert flux to ZHR) is assumed constant over the duration of the shower is shown in the header. The equivalent flux to a limiting meteor absolute magnitude of +6.5 and the average limiting meteor magnitude for the measurements are shown, where the equivalent meteoroid mass uses the Mass-Magnitude-Velocity relationship of Verniani (1973). Uncertainties reflect Poisson statistics only.
+    </p>
+
+    <p>
+        The second inset per shower shows the number of single station meteors associated to the shower by all cameras in varying time bins (black dots). The per bin equivalent time-area-product (TAP) of coverage in the atmosphere (in units of 1000 km<sup>2</sup> hr) is also shown. The time bin sizes are computed by requiring each bin to contain a minimum number of meteors (min meteors) and a minimum TAP.
+    </p>
+
+    <p>
+        The third inset per shower shows the average radiant distance from the cameras center field of view, the apparent elevation of the radiant (weighted by the TAP) and the moon phase (0 = new and 100 = full).
+    </p>
+
+    <p>
+    Finally, the fourth inset shows the average meteor angular velocity (in degrees per second) measured in the cameras field center (black crosses) and the theoretical limiting detectable meteor magnitude taking all corrections into account also at the field center.
+    </p>
+
+    <p>
+        Data are updated once per day on a global basis.
+    </p>
+     
+
+    <b>References</b>
+    <ul>
+    <li>Verniani, F., 1973. An analysis of the physical parameters of 5759 faint radio meteors. <i>Journal of Geophysical Research</i>, 78(35), pp.8429-8462.</li>
+    
+    <li>Vida, D., Erskine, R.C.B., Brown, P.G., Kambulow, J., Campbell-Brown, M. and Mazur, M.J., 2022. Computing optical meteor flux using global meteor network data. <i>Monthly Notices of the Royal Astronomical Society</i>, in press. <a href="https://doi.org/10.1093/mnras/stac1766" target="_blank">MNRAS</a>, <a href="https://arxiv.org/abs/2206.11365" target="_blank">arxiv</a>.</li>
+    
+    <li>Vida, D., Segon, D., Gural, P.S., Brown, P.G., McIntyre, M.J., Dijkema, T.J., Pavletic, L., Kukic, P., Mazur, M.J., Eschman, P. and Roggemans, P., 2021. The Global Meteor Network - Methodology and first results. <i>Monthly Notices of the Royal Astronomical Society</i>, 506(4), pp.5046-5074. <a href="https://academic.oup.com/mnras/article-abstract/506/4/5046/6347233" target="_blank">MNRAS</a>, <a href="https://arxiv.org/abs/2107.12335" target="_blank">arxiv</a>.</li>
+    </ul>
+</div>
+<hr>
 <footer>
 <center>Supporting data supplied by the <a href="https://globalmeteornetwork.org/" target="_blank">Global Meteor Network</a>
     <br>    
@@ -449,27 +461,50 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
             else:
                 plot_suffix = "year_{:d}".format(shower.dt_max_ref_year.year)
 
-            # Make a name for the plot to save
+            # Make a name for the plots to save (only flux + full metadata plot)
             batch_flux_output_filename = "flux_{:s}_sol={:.2f}-{:.2f}_{:s}".format(shower_code, 
                 fbr.shower.lasun_beg, fbr.shower.lasun_end, plot_suffix)
+            batch_flux_output_filename_full = batch_flux_output_filename + "_full"
 
             # Save the results to a dictionary
             if time_extent_flag == "ALL":
-                fbr_results_all_years[shower_code] = [fbr, dir_list, batch_flux_output_filename + '.png']
+                fbr_results_all_years[shower_code] = [
+                    fbr, 
+                    dir_list, 
+                    batch_flux_output_filename + '.png',
+                    batch_flux_output_filename_full + '.png'
+                    ]
 
             else:
-                fbr_results_ref_year[shower_code] = [fbr, dir_list, batch_flux_output_filename + '.png']
+                fbr_results_ref_year[shower_code] = [
+                    fbr, 
+                    dir_list, 
+                    batch_flux_output_filename + '.png',
+                    batch_flux_output_filename_full + '.png'
+                    ]
 
-            # Show and save the batch flux plot
+            # Save the batch flux plot (only flux)
             plotBatchFlux(
                 fbr, 
                 output_dir,
                 batch_flux_output_filename,
-                only_flux=False,
+                only_flux=True,
                 compute_single=False,
                 show_plot=False,
                 xlim_shower_limits=True,
                 sol_marker=sol_ref
+            )
+
+            # Save the batch flux plot (full metadata)
+            plotBatchFlux(
+                fbr, 
+                output_dir,
+                batch_flux_output_filename_full,
+                only_flux=False,
+                compute_single=False,
+                show_plot=False,
+                xlim_shower_limits=True,
+                sol_marker=None
             )
 
             # Save the results to a CSV file
