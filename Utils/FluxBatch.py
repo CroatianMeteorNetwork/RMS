@@ -583,6 +583,10 @@ def computeTimeIntervalsPerStation(night_dir_path, time_intervals, binduration, 
         print("The config file could not be loaded! Skipping...")
         return None
 
+    except configparser.ParsingError:
+        print("The config file could not be loaded! Skipping...")
+        return None
+
 
     if time_intervals is None:
         
