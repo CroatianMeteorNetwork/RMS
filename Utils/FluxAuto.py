@@ -460,7 +460,6 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
 
             if skip_dir:
                 print("Excluding:", dir_name)
-                5/0
                 continue
 
 
