@@ -1,6 +1,7 @@
 """ Automatically runs the flux code and produces graphs on available data from multiple stations. """
 
 import os
+import ast
 import time
 import datetime
 import copy
@@ -245,8 +246,59 @@ For more information, please email <a href="mailto:MSFC-fireballs@mail.nasa.gov?
         f.write(html_code)
 
 
+def loadExcludedStations(dir_path, excluded_stations_file="excluded_stations.txt"):
+    """ Load a list  of stations and dates to exclude from flux calculations. """
+
+    # A dictionary where the keys are stations codes and the values are lists of periods of exclusion
+    excluded_stations = {}
+    with open(os.path.join(dir_path, excluded_stations_file)) as f:
+        for line in f:
+
+            # Skip comments
+            if line.startswith("#"):
+                continue
+
+            line = line.replace("\n", "").replace("\r", "").strip()
+
+            # Skip empty lines
+            if not len(line):
+                continue
+
+            line = line.split("#", 1)[0]
+            line = line.split(";")
+
+            if len(line) < 2:
+                continue
+
+            station_code, exclusion_periods_temp = line
+            exclusion_periods_temp = ast.literal_eval(exclusion_periods_temp)
+
+            exclusion_periods = []
+            for exclusion_range in exclusion_periods_temp:
+
+                beg, end = exclusion_range
+
+                # Convert time to string
+                entries = []
+                for entry in [beg, end]:
+                    if entry is None:
+                        entries.append(entry)
+                    else:
+                        time_str = "{:06d}_{:06d}.0".format(int(entry/1e6), int(entry%1e6))
+                        entries.append(datetime.datetime.strptime(time_str, "%Y%m%d_%H%M%S.%f"))
+
+                exclusion_periods.append(entries)
+
+            excluded_stations[station_code] = exclusion_periods
+
+
+        return excluded_stations
+
+
+
 def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_dir=None, output_dir=None, 
-    csv_dir=None, index_dir=None, generate_website=False, website_plot_url=None, cpu_cores=1):
+    csv_dir=None, index_dir=None, generate_website=False, website_plot_url=None, cpu_cores=1,
+    excluded_stations_file="excluded_stations.txt"):
     """ Given the reference time, automatically identify active showers and produce the flux graphs and
         CSV files.
 
@@ -268,6 +320,8 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
         generate_website: [bool] Generate HTML code for the website. It will be saved in the output dir.
         website_plot_url: [str] Public URL to the plots, so they can be accessed online.
         cpu_cores: [int] Number of CPU cores to use. If -1, all availabe cores will be used. 1 by default.
+        excluded_stations_file: [str] File with excluded stations and periods. It should be in the metadata
+            directory.
     """
 
 
@@ -301,6 +355,19 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
 
     # Load the showers for flux
     flux_showers = FluxShowers(config)
+
+
+    # Load excluded stations
+    excluded_stations = {}
+    excluded_stations_dir = metadata_dir
+    if metadata_dir is None:
+        excluded_stations_dir = data_path
+    if os.path.isfile(os.path.join(excluded_stations_dir, excluded_stations_file)):
+        excluded_stations = loadExcludedStations(
+            excluded_stations_dir, 
+            excluded_stations_file=excluded_stations_file
+            )
+
 
     # Compute the solar longitude of the reference time
     sol_ref = np.degrees(jd2SolLonSteyaert(datetime2JD(ref_dt)))
@@ -359,6 +426,44 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
                 dir_dt = datetime.datetime.strptime(dir_split[1] + "_" + dir_split[2], "%Y%m%d_%H%M%S")
             except ValueError:
                 continue
+
+
+            # Check if the station should be excluded at this time, according to the station exclusion file
+            station_code = dir_split[0]
+            skip_dir = False
+            if station_code in excluded_stations:
+
+                # Check all exclusion periods
+                for excluded_period in excluded_stations[station_code]:
+
+                    beg, end = excluded_period
+
+                    # Skip if the station is always excluded
+                    if (beg is None) and (end is None):
+                        skip_dir = True
+                        break
+
+                    elif (beg is None):
+                        if dir_dt < end:
+                            skip_dir = True
+                            break
+
+                    elif (end is None):
+                        if dir_dt > beg:
+                            skip_dir = True
+                            break
+
+                    else:
+                        if (dir_dt > beg) and (dir_dt < end):
+                            skip_dir = True
+                            break
+
+            if skip_dir:
+                print("Excluding:", dir_name)
+                5/0
+                continue
+
+
 
             # Make sure the directory time is after 2018 (to avoid 1970 unix time 0 dirs)
             #   2018 is when the GMN was established
