@@ -48,7 +48,7 @@ def generateWebsite(output_dir, index_dir, flux_showers, ref_dt, fbr_results_all
       <div class="row">
 
         <div class="col-xs-3">
-          <img class="logo-imgl" src="https://fireballs.ndc.nasa.gov/static/nasa_logo.png" height="126" width="157" />
+          <a href="https://www.nasa.gov/offices/meo/home/index.html" target="_blank"><img class="logo-imgl" src="https://fireballs.ndc.nasa.gov/static/nasa_logo.png" height="126" width="157" /></a>
         </div>
         <div class="col-xs-6" >
         <div class="row-fluid">
