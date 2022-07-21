@@ -44,29 +44,36 @@ def generateWebsite(output_dir, index_dir, flux_showers, ref_dt, fbr_results_all
 <body>
 
 
-  <div class="container">
-      <div class="row">
+<body>
 
-        <div class="col-xs-3">
-          <a href="https://www.nasa.gov/offices/meo/home/index.html" target="_blank"><img class="logo-imgl" src="https://fireballs.ndc.nasa.gov/static/nasa_logo.png" height="126" width="157" /></a>
-        </div>
-        <div class="col-xs-6" >
-        <div class="row-fluid">
-        <div class="centering text-center">
-        <br />
-          <p><h1 class="heading">NASA Meteor Shower <br> Flux Monitoring</h1></p>
+<table class="paddingBetweenCols">
+<tbody>
+<tr>
+    <td>
+        <a href="https://www.nasa.gov/offices/meo/home/index.html" target="_blank"><img class="logo-imgl" src="https://fireballs.ndc.nasa.gov/static/nasa_logo.png" height="126" width="157" /></a>
+    </td>
+    <td>
+        <a href="https://uwo.ca/" target="_blank"><img class="logo-imgl" src="https://globalmeteornetwork.org/static/images/uwo_logo_stacked_small.png" height="126" width="119" /></a> &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; 
+    </td>
+
+    <td>
+        <center>
+        <p><h1 class="heading">NASA Meteor Shower <br> Flux Monitoring</h1></p>
                 Supporting data supplied by the <a href="https://globalmeteornetwork.org/" target="_blank">Global Meteor Network</a>
-        </div>
-    </div>
+        </center>
+    </td>
 
+    <td>
+        &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; 
+        <a href="https://aquarid.physics.uwo.ca/index.html" target="_blank"><img class="logo-imgl" src="https://globalmeteornetwork.org/static/images/wmpg_banner_small.png" height="126" width="126" /></a>
+    </td>
+    <td>
+        <a href="https://globalmeteornetwork.org/" target="_blank"><img class="logo-imgl" src="https://globalmeteornetwork.org/static/images/GMN_logo_white_text_dark_transparent_small.png" height="126" width="216" /></a>
+    </td>
+</tr>
+</tbody>
+</table>
 
-        </div>
-        <div class="col-xs-3">
-          <a href="https://globalmeteornetwork.org/" target="_blank"><img class="logo-imgl" src="https://globalmeteornetwork.org/static/images/GMN_logo_white_text_dark_transparent_small.png" height="126" width="216" /></a>
-        </div>
-   
-      </div>
-    </div>
     <hr>
 """
     html_code += website_header
