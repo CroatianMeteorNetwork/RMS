@@ -201,3 +201,113 @@ def RMSD(x, weights=None):
         weights = np.ones_like(x)
 
     return np.sqrt(np.sum(weights*x**2)/np.sum(weights))
+
+
+### 3D functions ###
+##############################################################################################################
+
+def sphericalToCartesian(r, theta, phi):
+    """ Convert spherical coordinates to cartesian coordinates. 
+        
+    Arguments:
+        r: [float] Radius
+        theta: [float] Inclination in radians.
+        phi: [float] Azimuth angle in radians.
+
+    Return:
+        (x, y, z): [tuple of floats] Coordinates of the point in 3D cartiesian coordinates.
+    """
+
+    x = r*np.sin(theta)*np.cos(phi)
+    y = r*np.sin(theta)*np.sin(phi)
+    z = r*np.cos(theta)
+
+    return x, y, z
+
+
+def pointInsideConvexPolygonSphere(points, vertices):
+    """
+    Polygon must be convex
+    https://math.stackexchange.com/questions/4012834/checking-that-a-point-is-in-a-spherical-polygon
+
+
+    Arguments:
+        points: [array] points with dimension (npoints, 2). The two dimensions are ra and dec
+        vertices: [array] vertices of convex polygon with dimension (nvertices, 2)
+        
+    Return:
+        filter: [array of bool] Array of booleans on whether a given point is inside the polygon on 
+            the sphere.
+    """
+    # convert ra dec to spherical
+    points = points[:, ::-1]
+    vertices = vertices[:, ::-1]
+    points[:, 0] = 90 - points[:, 0]
+    vertices[:, 0] = 90 - vertices[:, 0]
+    points = np.array(sphericalToCartesian(*np.hstack((np.ones((len(points), 1)), np.radians(points))).T))
+    vertices = np.array(sphericalToCartesian(*np.hstack((np.ones((len(vertices), 1)), np.radians(vertices))).T))
+    
+    great_circle_normal = np.cross(vertices, np.roll(vertices, 1, axis=1), axis=0)
+    dot_prod = np.dot(great_circle_normal.T, points)
+    return np.sum(dot_prod < 0, axis=0, dtype=int) == 0  # inside if n . p < 0 for no n
+
+
+##############################################################################################################
+
+def histogramEdgesEqualDataNumber(x, nbins):
+    """ Given the data, divide the histogram edges in such a way that every bin has the same number of
+        data points. 
+
+        Source: https://stackoverflow.com/questions/37649342/matplotlib-how-to-make-a-histogram-with-bins-of-equal-area/37667480
+
+    Arguments:
+        x: [list] Input data.
+        nbins: [int] Number of bins.
+
+    """
+
+    npt = len(x)
+    return np.interp(np.linspace(0, npt, nbins + 1), np.arange(npt), np.sort(x))
+
+
+def histogramEdgesDataNumber(x, points_per_bin):
+    """ Given the data, divides the histogram edges in such a way that every bin contains at least a
+    minimum number of points
+    
+    Arguments:
+        x: [list] Input data.
+        points_per_bin: [int] Number of point per bin
+    """
+    
+    nbins = len(x)//points_per_bin
+    return histogramEdgesEqualDataNumber(x, nbins)
+
+#########
+
+def rollingAverage2d(x, y, x_window):
+    """
+    Rolling average where the window is on the x axis rather than index
+    
+    Arguments:
+        x: [list or ndarray] sorted x values
+        y: [list or ndarray] y values corresponding to x
+        x_window: [float]
+        
+    Returns:
+        output_x: [list]
+        output_y: [list]
+    """
+    assert len(x) == len(y)
+    cum_y = np.cumsum(np.insert(y, 0, 0))
+    output_y = []
+    output_x = []
+    j = 0
+    for i in range(len(y)):
+        for j in range(j, len(y)):
+            if x_window >= x[j] - x[i]:
+                output_y.append((cum_y[j + 1] - cum_y[i])/(j + 1 - i))
+                output_x.append((x[j] + x[i])/2)
+            if j > i and (j == len(x) - 1 or (x[j + 1] - x[i] > x_window and x[j] - x[i + 1] < x[j + 1] - x[i])):
+                break
+
+    return output_x, output_y

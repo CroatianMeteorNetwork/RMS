@@ -31,7 +31,7 @@ import RMS.ConfigReader as cr
 from RMS.Formats import FFfile, FRbin
 
 
-def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='png', hide=False,
+def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=None, hide=False,
         avg_background=False):
     """ Shows the detected fireball stored in the FR file. 
     
@@ -43,7 +43,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='
 
     Keyword arguments:
         save_frames: [bool] Save FR frames to disk. False by defualt.
-        extract_format: [str] Format of saved images. png by default.
+        extract_format: [str] Format of saved images. E.g. png, jpg, mp4.
         hide: [bool] Don't show frames on the screen.
         avg_background: [bool] Avepixel as background. False by default, in which case the maxpixel will be
             used.
@@ -52,6 +52,9 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format='
 
     if extract_format is None:
         extract_format = 'png'
+
+    else:
+        save_frames = True
     
     name = fr_path
     fr = FRbin.read(dir_path, fr_path)
