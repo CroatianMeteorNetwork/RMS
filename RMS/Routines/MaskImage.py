@@ -14,15 +14,16 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import division, absolute_import, print_function
+from __future__ import absolute_import, division, print_function
 
-import os
 import logging
+import os
+import zipfile
 
 import numpy as np
+import cv2
 
 from RMS.Routines.Image import loadImage
-
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -32,11 +33,64 @@ log = logging.getLogger("logger")
 class MaskStructure(object):
     def __init__(self, img):
         """ Structure for holding the mask. This is used so the mask can be hashed. """
-
+        
         self.img = img
 
+    def resetEmpty(self, x_res, y_res):
+        """ Reset the mask to an empty array. """
+
+        self.img = np.full((y_res, x_res), 255, dtype=np.uint8)
 
 
+    def checkResolution(self, x_res, y_res):
+        """ Check if the mask has the given resolution. """
+
+        if self.img is not None:
+
+            if (self.img.shape[0] == y_res) and (self.img.shape[1] == x_res):
+
+                return True
+
+            else:
+
+                return False
+
+        return None
+
+
+    def checkMask(self, x_res, y_res):
+        """ Check the if the mask resolution matches and reset it if it doesn't. """
+
+        if self.img is None:
+            self.resetEmpty(x_res, y_res)
+
+        elif not self.checkResolution(x_res, y_res):
+            print("MASK RESET because the resolution didn't match!")
+            self.resetEmpty(x_res, y_res)
+
+
+
+def getMaskFile(dir_path, config, file_list=None):
+    """
+    From a directory, fine the mask file, load it and return it
+    """
+    if file_list is None:
+        file_list = os.listdir(dir_path)
+
+    # Look through files and if there is mask.bmp or mask.zip, keep track of that then load it
+    mask = max(2*(os.path.splitext(os.path.basename(config.mask_file))[0] == os.path.splitext(os.path.basename(filename))[0]) - filename.endswith('.zip')
+               for filename in file_list)
+    if mask > 0:
+        mask_path = os.path.join(dir_path, config.mask_file if mask == 2 else os.path.splitext(os.path.basename(config.mask_file))[0] + '.zip')
+        mask = loadMask(mask_path)
+        print("Using mask:", mask_path)
+
+    else:
+        print("No mask used!")
+        mask = None
+
+    return mask
+    
 
 def loadMask(mask_file):
     """ Load the mask image. """
@@ -47,7 +101,18 @@ def loadMask(mask_file):
 
     # Load the mask file
     try:
-        mask = loadImage(mask_file, flatten=0)
+
+        # Load a mask from zip
+        if mask_file.endswith('.zip'):
+
+            with zipfile.ZipFile(mask_file, 'r') as archive:
+                
+                data = archive.read('mask.bmp')
+                mask = cv2.imdecode(np.frombuffer(data, np.uint8), 1)
+
+        else:
+                
+            mask = loadImage(mask_file, flatten=0)
         
     except:
         print("WARNING! The mask file could not be loaded! File path: {:s}".format(mask_file))

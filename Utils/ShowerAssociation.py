@@ -913,7 +913,7 @@ if __name__ == "__main__":
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Perform single-station established shower association on an FTPdetectinfo file.")
 
-    arg_parser.add_argument('ftpdetectinfo_path', metavar='FTPDETECTINFO_PATH', type=str, \
+    arg_parser.add_argument('ftpdetectinfo_path', metavar='FTPDETECTINFO_PATH', nargs='+', type=str, \
         help='Path to an FTPdetectinfo file or a directory with an FTPdetectinfo file.')
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
@@ -941,12 +941,32 @@ if __name__ == "__main__":
     #ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path)
     ftpdetectinfo_path = [ftpdetectinfo_path]
 
-    # else:
+
+    # Find an FTPdetectinfo file if only a directory is given
+    if len(ftpdetectinfo_path) == 1:
+
+        # If a directory is given, find the FTPdetectinfo
+        if os.path.isdir(ftpdetectinfo_path[0]):
+        
+            ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path[0])
+            ftpdetectinfo_path_list = [ftpdetectinfo_path]
+
+        # If a file is given
+        elif os.path.isfile(ftpdetectinfo_path[0]):
+            ftpdetectinfo_path_list = ftpdetectinfo_path
+
+        # If a wildcard was given
+        else:
+            ftpdetectinfo_path_list = glob.glob(ftpdetectinfo_path[0])
+
+
+    # If multiple files are given, find them all
+    else:
     
-    #     # Apply wildcards to input if more are given
-    ftpdetectinfo_path_list = []
-    for entry in ftpdetectinfo_path:
-        ftpdetectinfo_path_list += glob.glob(entry)
+        # Apply wildcards to input if more are given
+        ftpdetectinfo_path_list = []
+        for entry in ftpdetectinfo_path:
+            ftpdetectinfo_path_list += glob.glob(entry)
 
 
     # If there are no good files given, notify the user
@@ -994,6 +1014,3 @@ if __name__ == "__main__":
 
     else:
         print("No meteors!")
-
-
-
