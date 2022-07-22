@@ -1,5 +1,5 @@
 gitpython>=2.1.8
-paramiko==2.4.0,<=2.8.1; python_version=='2.7'
+paramiko==2.4.0; python_version=='2.7'
 paramiko>=2.4.2,<=2.8.1; python_version>='3.6'
 numpy>=1.13.3
 matplotlib>=2.1.1
