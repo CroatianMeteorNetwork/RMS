@@ -879,7 +879,8 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
         )
 
     # Sum meteors in every bin (this is a 2D along the first axis, producing an array)
-    num_meteors = sum(np.array(meteors) for meteors, _, _, _, _, _, _ in all_fixed_bin_information)
+    num_meteors = sum(np.array(meteors, dtype=np.float) \
+        for meteors, _, _, _, _, _, _ in all_fixed_bin_information)
 
     # Compute time-area product in every bin
     time_area_product = sum(np.array(area, dtype=np.float)*np.array(time, dtype=np.float) \
@@ -898,7 +899,7 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
     lm_m_data /= time_area_product
 
     # Compute TAP-wieghted radiant elevation in every bin
-    rad_elev_data = np.zeros_like(num_meteors)
+    rad_elev_data = np.zeros_like(num_meteors, dtype=np.float)
     for _, area, time, _, rad_elev, _, _ in all_fixed_bin_information:
 
         rad_elev_data[~np.isnan(rad_elev)] += (
@@ -911,7 +912,7 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
 
 
     # Compute TAP-wieghted radiant distance in every bin
-    rad_dist_data = np.zeros_like(num_meteors)
+    rad_dist_data = np.zeros_like(num_meteors, dtype=np.float)
     for _, area, time, _, _, rad_dist, _ in all_fixed_bin_information:
 
         rad_dist_data[~np.isnan(rad_dist)] += (
@@ -924,7 +925,7 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
 
 
     # Compute TAP-wieghted angular velocity in every bin
-    ang_vel_data = np.zeros_like(num_meteors)
+    ang_vel_data = np.zeros_like(num_meteors, dtype=np.float)
     for _, area, time, _, _, _, ang_vel in all_fixed_bin_information:
 
         ang_vel_data[~np.isnan(ang_vel)] += (
