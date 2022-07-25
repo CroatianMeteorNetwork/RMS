@@ -772,6 +772,9 @@ def computeBatchFluxParallel(file_data, shower_code, mass_index, ref_ht, bin_dat
     # Get extraction results
     for result in workpool.getResults():
 
+        if result is None:
+            continue
+
         all_fixed_bin_information, single_fixed_bin_information, single_station_flux, \
             summary_population_index = result
 
