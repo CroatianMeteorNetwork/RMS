@@ -882,11 +882,11 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
     num_meteors = sum(np.array(meteors) for meteors, _, _, _, _, _, _ in all_fixed_bin_information)
 
     # Compute time-area product in every bin
-    time_area_product = sum(np.array(area)*np.array(time) for _, area, time, _, _, _, \
-        _ in all_fixed_bin_information)
+    time_area_product = sum(np.array(area, dtype=np.float)*np.array(time, dtype=np.float) \
+        for _, area, time, _, _, _, _ in all_fixed_bin_information)
 
     # Compute TAP-wieghted meteor limiting magnitude in every bin
-    lm_m_data = np.zeros_like(num_meteors)
+    lm_m_data = np.zeros_like(num_meteors, dtype=np.float)
     for _, area, time, lm_m, _, _, _ in all_fixed_bin_information:
 
         lm_m_data[~np.isnan(lm_m)] += (
