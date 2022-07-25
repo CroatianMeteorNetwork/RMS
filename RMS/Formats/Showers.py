@@ -186,6 +186,26 @@ class FluxShowers(object):
         self.showers = [Shower(entry) for entry in shower_data]
 
 
+    def showerObjectFromCode(self, shower_code):
+        """ Return a shower object given the 3-letter IAU code. 
+        
+        Arguments:
+            shower_code: [str] 3-letter IAU shower code.
+
+        Return:
+            shower: [Shower object] Object will be returned if the shower is found, None otherwise.
+
+        """
+
+        shower = None
+        for sh in self.showers:
+            if sh.name.lower() == shower_code.lower():
+                shower = sh
+                break
+
+        return shower
+
+
     def activeShowers(self, dt_beg, dt_end, use_zhr_threshold=False, min_zhr=1):
         """ Return a list of active showers given a range of dates. 
     

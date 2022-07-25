@@ -1,6 +1,7 @@
 """ Automatically runs the flux code and produces graphs on available data from multiple stations. """
 
 import os
+import sys
 import ast
 import time
 import datetime
@@ -304,8 +305,8 @@ def loadExcludedStations(dir_path, excluded_stations_file="excluded_stations.txt
 
 
 def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_dir=None, output_dir=None, 
-    csv_dir=None, index_dir=None, generate_website=False, website_plot_url=None, cpu_cores=1,
-    excluded_stations_file="excluded_stations.txt"):
+    csv_dir=None, index_dir=None, generate_website=False, website_plot_url=None, shower_code=None, \
+    cpu_cores=1, excluded_stations_file="excluded_stations.txt"):
     """ Given the reference time, automatically identify active showers and produce the flux graphs and
         CSV files.
 
@@ -326,6 +327,8 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
         index_dir: [str] Directory where index.html will be placed. If None, output_dir will be used.
         generate_website: [bool] Generate HTML code for the website. It will be saved in the output dir.
         website_plot_url: [str] Public URL to the plots, so they can be accessed online.
+        shower_code: [str] Force a specific shower. None by default, in which case active showers will be
+            automatically determined.
         cpu_cores: [int] Number of CPU cores to use. If -1, all availabe cores will be used. 1 by default.
         excluded_stations_file: [str] File with excluded stations and periods. It should be in the metadata
             directory.
@@ -376,32 +379,69 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
             )
 
 
-    # Compute the solar longitude of the reference time
-    sol_ref = np.degrees(jd2SolLonSteyaert(datetime2JD(ref_dt)))
+
+    # If a specific shower was given, load it
+    if shower_code is not None:
+
+        # Find the given shower
+        shower = flux_showers.showerObjectFromCode(shower_code)
+
+        if shower is None:
+            print("The shower {:s} could not be found in the list of showers for flux!")
+            sys.exit()
 
 
-    # Determine the time range for shower activity check
-    dt_beg = ref_dt - datetime.timedelta(days=days_prev)
-    dt_end = ref_dt + datetime.timedelta(days=days_next)
+        # Take the peak of the shower as reference
+        sol_ref = shower.lasun_max
 
-    # Get a list of showers active now
-    active_showers = flux_showers.activeShowers(dt_beg, dt_end, use_zhr_threshold=False)
-    active_showers_dict = {shower.name:shower for shower in active_showers}
-    print([shower.name for shower in active_showers])
+        # Compute the solar longitude of the reference time
+        sol_ref_time = np.degrees(jd2SolLonSteyaert(datetime2JD(ref_dt)))
 
-
-    # Compute the range of dates for this year's activity of every active shower
-    for shower in active_showers:
-
-        # Compute the date range for this year's activity
-        sol_diff_beg = abs((shower.lasun_beg - sol_ref + 180)%360 - 180)
-        sol_diff_end = abs((sol_ref - shower.lasun_end + 180)%360 - 180)
-        sol_diff_max = (shower.lasun_max - sol_ref + 180)%360 - 180
-
-        # Add activity during the given year
-        shower.dt_beg_ref_year = ref_dt - datetime.timedelta(days=sol_diff_beg*360/365.24219)
+        # Compute the range of datetimes for the activity closest to the reference time
+        sol_diff_beg = (shower.lasun_beg - sol_ref_time + 180)%360 - 180
+        sol_diff_end = (shower.lasun_end - sol_ref_time + 180)%360 - 180
+        sol_diff_max = (shower.lasun_max - sol_ref_time + 180)%360 - 180
+        shower.dt_beg_ref_year = ref_dt + datetime.timedelta(days=sol_diff_beg*360/365.24219)
         shower.dt_end_ref_year = ref_dt + datetime.timedelta(days=sol_diff_end*360/365.24219)
         shower.dt_max_ref_year = ref_dt + datetime.timedelta(days=sol_diff_max*360/365.24219)
+
+        # Add the shower to active showers
+        active_showers = [shower]
+
+
+    else:
+
+        # Compute the solar longitude of the reference time
+        sol_ref = np.degrees(jd2SolLonSteyaert(datetime2JD(ref_dt)))
+
+
+        # Determine the time range for shower activity check
+        dt_beg = ref_dt - datetime.timedelta(days=days_prev)
+        dt_end = ref_dt + datetime.timedelta(days=days_next)
+
+        # Get a list of showers active now
+        active_showers = flux_showers.activeShowers(dt_beg, dt_end, use_zhr_threshold=False)
+
+        print("Active showers:")
+        print([shower.name for shower in active_showers])
+
+
+        # Compute the range of dates for this year's activity of every active shower
+        for shower in active_showers:
+
+            # Compute the date range for this year's activity
+            sol_diff_beg = abs((shower.lasun_beg - sol_ref + 180)%360 - 180)
+            sol_diff_end = abs((sol_ref - shower.lasun_end + 180)%360 - 180)
+            sol_diff_max = (shower.lasun_max - sol_ref + 180)%360 - 180
+
+            # Add activity during the given year
+            shower.dt_beg_ref_year = ref_dt - datetime.timedelta(days=sol_diff_beg*360/365.24219)
+            shower.dt_end_ref_year = ref_dt + datetime.timedelta(days=sol_diff_end*360/365.24219)
+            shower.dt_max_ref_year = ref_dt + datetime.timedelta(days=sol_diff_max*360/365.24219)
+
+
+    # Create a dictionary of active showers where the shower codes are the key
+    active_showers_dict = {shower.name:shower for shower in active_showers}
 
 
     ### Load all data folders ###
@@ -670,6 +710,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-w', '--weburl', metavar='WEBSITE_PLOT_PUBLIC_URL', type=str,
         help="Public URL to where the plots are stored on the website.")
 
+    arg_parser.add_argument('-s', '--shower', metavar='SHOWER', type=str,
+        help="Force a specific shower. 3-letter IAU shower code is expected.")
+
     arg_parser.add_argument('-a', '--auto', metavar='H_FREQ', type=float, default=None, const=1.0, 
         nargs='?',
         help="""Run continously every H_FREQ hours. If argument not given, the code will run every hour."""
@@ -714,7 +757,8 @@ if __name__ == "__main__":
         # Run auto flux
         fluxAutoRun(config, cml_args.dir_path, ref_dt, metadata_dir=cml_args.metadir,
             output_dir=cml_args.outdir, csv_dir=cml_args.csvdir, generate_website=True, 
-            index_dir=cml_args.indexdir, website_plot_url=cml_args.weburl, cpu_cores=cml_args.cpucores)
+            index_dir=cml_args.indexdir, website_plot_url=cml_args.weburl, shower_code=cml_args.shower,
+            cpu_cores=cml_args.cpucores)
 
 
         ### <// DETERMINE NEXT RUN TIME ###
@@ -722,8 +766,8 @@ if __name__ == "__main__":
         # Store the previous start time
         previous_start_time = copy.deepcopy(t1)
 
-        # Break if only running once or a specific time was given
-        if (cml_args.auto is None) or (cml_args.time is not None):
+        # Break if only running once or a specific time or shower was given
+        if (cml_args.auto is None) or (cml_args.time is not None) or (cml_args.shower is not None):
             break
 
         else:
