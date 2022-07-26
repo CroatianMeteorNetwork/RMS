@@ -320,76 +320,79 @@ def combineFixedBinsAndComputeFlux(
     rad_dist_list = []
     ang_vel_list = []
 
-    start_idx = 0
-    for end_idx in range(1, len(meteors)):
+    # In some cases meteors can be an integer and the program crashes, so we need to check
+    if not isinstance(meteors, int):
 
-        sl = slice(start_idx, end_idx)
+        start_idx = 0
+        for end_idx in range(1, len(meteors)):
 
-        # Compute the total duration of the bin (convert from solar longitude)
-        bin_hours = (middle_bin_sol[end_idx] - middle_bin_sol[start_idx])/(2*np.pi)*24*365.24219
+            sl = slice(start_idx, end_idx)
 
-        # If the number of meteors, time-area product, and duration are larger than the limits, add this as 
-        #   a new bin
-        if (np.sum(meteors[sl]) >= min_meteors) and (np.nansum(time_area_prod[sl])/1e9 >= min_tap) \
-            and (bin_hours >= min_bin_duration):
+            # Compute the total duration of the bin (convert from solar longitude)
+            bin_hours = (middle_bin_sol[end_idx] - middle_bin_sol[start_idx])/(2*np.pi)*24*365.24219
 
-            # Sum up the values in the bin
-            ta_prod = np.sum(time_area_prod[sl])
-            num_meteors = np.sum(meteors[sl])
+            # If the number of meteors, time-area product, and duration are larger than the limits, add this  
+            #   as a new bin
+            if (np.sum(meteors[sl]) >= min_meteors) and (np.nansum(time_area_prod[sl])/1e9 >= min_tap) \
+                and (bin_hours >= min_bin_duration):
 
-            meteor_count_list.append(num_meteors)
-            time_area_product_list.append(ta_prod)
+                # Sum up the values in the bin
+                ta_prod = np.sum(time_area_prod[sl])
+                num_meteors = np.sum(meteors[sl])
 
-            if ta_prod == 0:
-                flux_list.append(np.nan)
-                flux_upper_list.append(np.nan)
-                flux_lower_list.append(np.nan)
-                lm_m_list.append(np.nan)
-                rad_elev_list.append(np.nan)
-                rad_dist_list.append(np.nan)
-                ang_vel_list.append(np.nan)
+                meteor_count_list.append(num_meteors)
+                time_area_product_list.append(ta_prod)
 
-            else:
+                if ta_prod == 0:
+                    flux_list.append(np.nan)
+                    flux_upper_list.append(np.nan)
+                    flux_lower_list.append(np.nan)
+                    lm_m_list.append(np.nan)
+                    rad_elev_list.append(np.nan)
+                    rad_dist_list.append(np.nan)
+                    ang_vel_list.append(np.nan)
 
-                # Compute Poisson errors
-                n_meteors_upper = scipy.stats.chi2.ppf(0.5 + ci/2, 2*(num_meteors + 1))/2
-                n_meteors_lower = scipy.stats.chi2.ppf(0.5 - ci/2, 2*num_meteors)/2
+                else:
 
-                # Compute the flux
-                flux_list.append(1e9*num_meteors/ta_prod)
-                flux_upper_list.append(1e9*n_meteors_upper/ta_prod)
-                flux_lower_list.append(1e9*n_meteors_lower/ta_prod)
+                    # Compute Poisson errors
+                    n_meteors_upper = scipy.stats.chi2.ppf(0.5 + ci/2, 2*(num_meteors + 1))/2
+                    n_meteors_lower = scipy.stats.chi2.ppf(0.5 - ci/2, 2*num_meteors)/2
 
-                # Compute the TAP-weighted meteor limiting magnitude
-                lm_m_select = lm_m_data[sl]*time_area_prod[sl]
-                lm_m_weighted = np.sum(lm_m_select[~np.isnan(lm_m_select)])/ta_prod
-                lm_m_list.append(lm_m_weighted)
+                    # Compute the flux
+                    flux_list.append(1e9*num_meteors/ta_prod)
+                    flux_upper_list.append(1e9*n_meteors_upper/ta_prod)
+                    flux_lower_list.append(1e9*n_meteors_lower/ta_prod)
 
-                # Compute the TAP-weighted radiant elevation
-                rad_elev_select = rad_elev_data[sl]*time_area_prod[sl]
-                rad_elev_weighted = np.sum(rad_elev_select[~np.isnan(rad_elev_select)])/ta_prod
-                rad_elev_list.append(rad_elev_weighted)
+                    # Compute the TAP-weighted meteor limiting magnitude
+                    lm_m_select = lm_m_data[sl]*time_area_prod[sl]
+                    lm_m_weighted = np.sum(lm_m_select[~np.isnan(lm_m_select)])/ta_prod
+                    lm_m_list.append(lm_m_weighted)
 
-                # Compute the TAP-weighted radiant distance
-                rad_dist_select = rad_dist_data[sl]*time_area_prod[sl]
-                rad_dist_weighted = np.sum(rad_dist_select[~np.isnan(rad_dist_select)])/ta_prod
-                rad_dist_list.append(rad_dist_weighted)
+                    # Compute the TAP-weighted radiant elevation
+                    rad_elev_select = rad_elev_data[sl]*time_area_prod[sl]
+                    rad_elev_weighted = np.sum(rad_elev_select[~np.isnan(rad_elev_select)])/ta_prod
+                    rad_elev_list.append(rad_elev_weighted)
 
-                # Compute the TAP-weighted angular velocity
-                ang_vel_select = ang_vel_data[sl]*time_area_prod[sl]
-                ang_vel_weighted = np.sum(ang_vel_select[~np.isnan(ang_vel_select)])/ta_prod
-                ang_vel_list.append(ang_vel_weighted)
+                    # Compute the TAP-weighted radiant distance
+                    rad_dist_select = rad_dist_data[sl]*time_area_prod[sl]
+                    rad_dist_weighted = np.sum(rad_dist_select[~np.isnan(rad_dist_select)])/ta_prod
+                    rad_dist_list.append(rad_dist_weighted)
+
+                    # Compute the TAP-weighted angular velocity
+                    ang_vel_select = ang_vel_data[sl]*time_area_prod[sl]
+                    ang_vel_weighted = np.sum(ang_vel_select[~np.isnan(ang_vel_select)])/ta_prod
+                    ang_vel_list.append(ang_vel_weighted)
 
 
-            sol_list.append(np.mean(middle_bin_sol[sl]))
-            sol_bin_list.append(sol_bins[start_idx])
-            start_idx = end_idx
+                sol_list.append(np.mean(middle_bin_sol[sl]))
+                sol_bin_list.append(sol_bins[start_idx])
+                start_idx = end_idx
 
-        # If the total duration is over the maximum duration, skip the bin
-        elif bin_hours >= max_bin_duration:
-            start_idx = end_idx
+            # If the total duration is over the maximum duration, skip the bin
+            elif bin_hours >= max_bin_duration:
+                start_idx = end_idx
 
-    sol_bin_list.append(sol_bins[start_idx])
+        sol_bin_list.append(sol_bins[start_idx])
 
     return (
         np.array(sol_list),
