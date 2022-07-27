@@ -374,10 +374,10 @@ def filterFTPdetectinfo(file_path):
       i += 1
       
     log.info("Modifying FTPdetectinfo file for meteors only...")
-    #os.rename(file_path, os.path.join(dir_path, Path(file_name).stem) + '_unfiltered.txt')
+    os.rename(file_path, os.path.join(dir_path, Path(file_name).stem) + '_unfiltered.txt')
  
     # save a new FTPdetectinfo file containing meteors only
-    FTPdetectinfo.writeFTPdetectinfo(meteor_list=FTPFiltered, ff_directory=dir_path, file_name=file_name+'.new', cal_directory='', cam_code=config.stationID, fps=config.fps, calibration="Filtered by RMS on: " + str(datetime.datetime.now()), celestial_coords_given=True)
+    FTPdetectinfo.writeFTPdetectinfo(meteor_list=FTPFiltered, ff_directory=dir_path, file_name=file_name, cal_directory='', cam_code=config.stationID, fps=config.fps, calibration="Filtered by RMS on: " + str(datetime.datetime.now()), celestial_coords_given=True)
     log.info("FTPdetectinfo modified, excluded " + str(len(FTP[2])-len(FTPFiltered)) + "/" + str(len(FTP[2])) + " records as artefacts")
     
     return(len(FTPFiltered), len(FTP[2]))
