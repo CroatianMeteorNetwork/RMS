@@ -351,7 +351,7 @@ def filterFTPdetectinfo(file_path):
     pred_list = cust_predict(os.path.join(png_dir), model_path)
     
     # remove PNG temporary files
-    #shutil.rmtree(os.path.abspath(os.path.join(png_dir, os.pardir)))
+    shutil.rmtree(os.path.abspath(os.path.join(png_dir, os.pardir)))
     
     # load FTPdetectioninfo file containing unfiltered detections
     FTP = FTPdetectinfo.readFTPdetectinfo(dir_path, file_name, True)
