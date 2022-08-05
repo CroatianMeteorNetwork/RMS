@@ -340,7 +340,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         # Enable showing the live JPG
         config.live_jpg = True
 
-        live_jpg_path = os.path.join(config.data_dir, 'live.jpg')
+        live_jpg_path = os.path.join(config.data_dir, config.stationID, '_live.jpg')
 
         live_view = LiveViewer(live_jpg_path, image=True, slideshow=False, banner_text="Live")
         live_view.start()
