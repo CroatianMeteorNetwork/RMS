@@ -462,7 +462,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
 
 
-    night_archive_dir = night_archive_dir = os.path.join(os.path.dirname(os.path.dirname(night_data_dir)), 'ArchivedFiles', night_data_dir_name)
+    night_archive_dir = os.path.join(os.path.dirname(os.path.dirname(night_data_dir)), 'ArchivedFiles', night_data_dir_name)
 
 
     log.info('Archiving detections to ' + night_archive_dir)
