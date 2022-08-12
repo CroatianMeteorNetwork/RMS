@@ -255,7 +255,7 @@ class Compressor(multiprocessing.Process):
         while not self.exit.is_set():
 
             # Block until frames are available
-            while self.startTime1.value == 0 and self.startTime2.value == 0: 
+            while (self.startTime1.value == 0) and (self.startTime2.value == 0):
 
                 # Exit function if process was stopped from the outside
                 if self.exit.is_set():
@@ -272,23 +272,37 @@ class Compressor(multiprocessing.Process):
             t = time.time()
 
             
-            if self.startTime1.value != 0:
+            buffer_one = True
+            if self.startTime1.value > 0:
 
                 # Retrieve time of first frame
                 startTime = float(self.startTime1.value)
 
                 # Copy frames
                 frames = self.array1
-                self.startTime1.value = 0
 
-            else:
+                # Tell the capture thread to wait until the compression is completed by setting this to -1
+                self.startTime1.value = -1
+                buffer_one = True
+
+            elif self.startTime2.value > 0:
 
                 # Retrieve time of first frame
                 startTime = float(self.startTime2.value)
 
                 # Copy frames
                 frames = self.array2
-                self.startTime2.value = 0
+
+                # Tell the capture thread to wait until the compression is completed
+                self.startTime2.value = -1
+                buffer_one = False
+
+            else:
+
+                # Wait until data is available
+                log.debug("Compression waiting for frames...")
+                time.sleep(0.1)
+                continue
 
             
             log.debug("Compressing frame block with start time at: {:s}".format(str(startTime)))
@@ -296,8 +310,18 @@ class Compressor(multiprocessing.Process):
             #log.debug("memory copy: " + str(time.time() - t) + "s")
             t = time.time()
             
+            
             # Run the compression
             compressed, field_intensities = self.compress(frames)
+
+            
+            # Once the compression is done, tell the capture thread to keep filling the buffer
+            if buffer_one:
+                self.startTime1.value = 0
+
+            else:
+                self.startTime2.value = 0
+
 
             # Cut out the compressed frames to the proper size
             compressed = compressed[:, :self.config.height, :self.config.width]
