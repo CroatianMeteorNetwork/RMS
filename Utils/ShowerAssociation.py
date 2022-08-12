@@ -937,9 +937,6 @@ if __name__ == "__main__":
     #########################
 
     ftpdetectinfo_path = cml_args.ftpdetectinfo_path
-    
-    #ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path)
-    ftpdetectinfo_path = [ftpdetectinfo_path]
 
 
     # Find an FTPdetectinfo file if only a directory is given
@@ -1014,3 +1011,6 @@ if __name__ == "__main__":
 
     else:
         print("No meteors!")
+
+
+
