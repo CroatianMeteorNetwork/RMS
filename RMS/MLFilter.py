@@ -278,13 +278,13 @@ def crop_detections(detection_info, fits_dir):
 
 def gen_pngs(FTP_path, FF_dir_path):
 
-    os.chdir(FF_dir_path)
+    #os.chdir(FF_dir_path)
 
     #creating new directories for the png versions of ConfirmedFiles and RejectedFiles
     if "temp_png_dir" not in FF_dir_path:
         try:
-            os.mkdir("temp_png_dir")
-            os.mkdir("temp_png_dir/1")
+            os.mkdir(os.path.join(FFdir_path, "temp_png_dir"))
+            os.mkdir(os.path.join(FFdir_path, "temp_png_dir/1"))
         except:
             pass
 
@@ -319,7 +319,7 @@ def gen_pngs(FTP_path, FF_dir_path):
     return(temp_png_dir)
 
 
-def filterFTPdetectinfo(file_path, threshold=0.95, keep_pngs=1):
+def filterFTPdetectinfo(file_path, threshold=0.85, keep_pngs=1):
     """ filters meteors from artefacts
 
     ARGUMENTS:
@@ -359,7 +359,7 @@ def filterFTPdetectinfo(file_path, threshold=0.95, keep_pngs=1):
     log.info("Creating images for inference...")
     png_dir = gen_pngs(file_path, dir_path)
     
-    # run inference and return propabilities along with file names
+    # run inference and return probabilities along with file names
     log.info("Inference starting...")
     pred_list = cust_predict(png_dir, model_path)
     
@@ -371,14 +371,8 @@ def filterFTPdetectinfo(file_path, threshold=0.95, keep_pngs=1):
     else:
         FTP = FTPdetectinfo.readFTPdetectinfo(dir_path, file_name, True)
     
-    # simple check if both counts fit, so we can use the indexing
-    if (len(pred_list) != len(FTP[2])):
-        print("Error! Detection count check failed")
-    else:
-        exit
 
-
-    # create list of PNG images to be moved into subdirs later on    
+    # create list of PNG images to be moved into subdirs later on
     png_list = []
     for f in sorted(os.listdir(png_dir)):
         png_list.append(f)
@@ -394,12 +388,17 @@ def filterFTPdetectinfo(file_path, threshold=0.95, keep_pngs=1):
         shutil.rmtree(os.path.abspath(os.path.join(png_dir, os.pardir)))
 
     i = 0
-    FTPFiltered = []
+    FF_Filtered = []
+    FTP_Filtered = []
     for obs in FTP[2]:
         #print(i, obs[0], Path(obs[0]).stem)
+        # if there are any FITS missing, then exclude detections
+        if obs[0][:37] != pred_list[i][1][:37]:
+            continue
         if (float(pred_list[i][0]) > threshold):
             print(Path(png_list[i]).stem + "  " + str("{0:.1%}".format(float(pred_list[i][0]))) + "  identified as meteor...")
-            FTPFiltered.append(obs)
+            FTP_Filtered.append(obs)
+            FF_Filtered.append(obs[0])
             if keep_pngs == 1:
                 os.replace(os.path.join(png_dir, png_list[i]), os.path.join(meteors_dir, Path(png_list[i]).stem + '_' + pred_list[i][0].replace('.','') + '.png'))
         else:
@@ -415,17 +414,17 @@ def filterFTPdetectinfo(file_path, threshold=0.95, keep_pngs=1):
     if os.path.isfile(os.path.join(dir_path, fltr_name)):
         log.info('Unfiltered FTPdetectinfo file already exists, not overwriting it')
         # save a new FTPdetectinfo file containing meteors only
-        FTPdetectinfo.writeFTPdetectinfo(meteor_list=FTPFiltered, ff_directory=dir_path, file_name=orig_name, cal_directory='', cam_code=config.stationID, fps=config.fps, calibration="Filtered by RMS on: " + str(datetime.datetime.now()), celestial_coords_given=True)
+        FTPdetectinfo.writeFTPdetectinfo(meteor_list=FTP_Filtered, ff_directory=dir_path, file_name=orig_name, cal_directory='', cam_code=config.stationID, fps=config.fps, calibration="Filtered by RMS on: " + str(datetime.datetime.now()), celestial_coords_given=True)
         shutil.copy2(os.path.join(dir_path, orig_name), os.path.join(dir_path, thr_name))
     else:
         os.rename(file_path, os.path.join(dir_path, fltr_name))
-        FTPdetectinfo.writeFTPdetectinfo(meteor_list=FTPFiltered, ff_directory=dir_path, file_name=file_name, cal_directory='', cam_code=config.stationID, fps=config.fps, calibration="Filtered by RMS on: " + str(datetime.datetime.now()), celestial_coords_given=True)
+        FTPdetectinfo.writeFTPdetectinfo(meteor_list=FTP_Filtered, ff_directory=dir_path, file_name=file_name, cal_directory='', cam_code=config.stationID, fps=config.fps, calibration="Filtered by RMS on: " + str(datetime.datetime.now()), celestial_coords_given=True)
         shutil.copy2(file_path, os.path.join(dir_path, thr_name))
 
     # save a new FTPdetectinfo file containing meteors only
-    log.info("FTPdetectinfo modified, excluded " + str(len(FTP[2])-len(FTPFiltered)) + "/" + str(len(FTP[2])) + " records as artefacts")
+    log.info("FTPdetectinfo modified, excluded " + str(len(FTP[2])-len(FTP_Filtered)) + "/" + str(len(FTP[2])) + " records as artefacts")
     
-    return(len(FTPFiltered), len(FTP[2]))
+    return(FF_Filtered)
      
     
 if __name__ == "__main__":
