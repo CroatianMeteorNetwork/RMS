@@ -283,8 +283,8 @@ def gen_pngs(FTP_path, FF_dir_path):
     #creating new directories for the png versions of ConfirmedFiles and RejectedFiles
     if "temp_png_dir" not in FF_dir_path:
         try:
-            os.mkdir(os.path.join(FFdir_path, "temp_png_dir"))
-            os.mkdir(os.path.join(FFdir_path, "temp_png_dir/1"))
+            os.mkdir(os.path.join(FF_dir_path, "temp_png_dir"))
+            os.mkdir(os.path.join(FF_dir_path, "temp_png_dir/1"))
         except:
             pass
 
