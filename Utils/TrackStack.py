@@ -71,7 +71,11 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         associations = {}
         # Get FTP file so we can filter by shower
         for dir_path in dir_paths: 
-            ftp_list = glob(os.path.join(dir_path, 'FTPdetectinfo_{}*.txt'.format(config.stationID)))
+            if os.path.isfile(os.path.join(dir_path,'.config')):
+                tmpcfg = cr.loadConfigFromDirectory('.config', dir_path)
+            else:
+                tmpcfg = config
+            ftp_list = glob(os.path.join(dir_path, 'FTPdetectinfo_{}*.txt'.format(tmpcfg.stationID)))
             ftp_list = [x for x in ftp_list if 'backup' not in x and 'unfiltered' not in x]
             ftp_list.sort() 
             if len(ftp_list) < 1:
@@ -431,5 +435,5 @@ if __name__ == "__main__":
 
     dir_paths = [os.path.normpath(dir_path) for dir_path in cml_args.dir_paths]
     trackStack(dir_paths, config, background_compensation=(not cml_args.bkgnormoff),
-        hide_plot=cml_args.hideplot, showers=cml_args.showers, 
+        hide_plot=cml_args.hideplot, showers=showers, 
         darkbackground=cml_args.darkbackground, out_dir=cml_args.output)
