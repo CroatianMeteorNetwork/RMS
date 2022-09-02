@@ -33,6 +33,7 @@ from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 from Utils.ShowerAssociation import showerAssociation
+from RMS.MLFilter import filterFTPdetectinfo
 
 
 # Get the logger from the main module
@@ -211,7 +212,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             recalibrated_platepars = recalibrateIndividualFFsAndApplyAstrometry(night_data_dir, \
                 os.path.join(night_data_dir, ftpdetectinfo_name), calstars_list, config, platepar)
 
-            
+            if config.ml_filter:
+                ff_detected = filterFTPdetectinfo(os.path.join(night_data_dir, ftpdetectinfo_name), config.ml_filter, True)
 
             log.info("Converting RMS format to UFOOrbit format...")
 
@@ -461,10 +463,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                     celestial_coords_given=(platepar is not None))
 
 
-
     night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir, 
         night_data_dir_name)
-
 
     log.info('Archiving detections to ' + night_archive_dir)
     
