@@ -409,6 +409,9 @@ class Config:
         # By default the peak of the meteor should be at least 16x brighter than the background. This is the multiplier that scales this number (1.0 = 16x).
         self.min_patch_intensity_multiplier = 1.0
 
+        # Filtering by machine learning
+        self.ml_filter = 0.85
+
         ##### StarExtraction
 
         # Extraction parameters
@@ -1182,6 +1185,8 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "min_patch_intensity_multiplier"):
         config.min_patch_intensity_multiplier = parser.getfloat(section, "min_patch_intensity_multiplier")
 
+    if parser.has_option(section, "ml_filter"):
+        config.ml_filter = parser.getfloat(section, "ml_filter")
 
 
 
