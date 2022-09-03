@@ -409,8 +409,8 @@ class Config:
         # By default the peak of the meteor should be at least 16x brighter than the background. This is the multiplier that scales this number (1.0 = 16x).
         self.min_patch_intensity_multiplier = 1.0
 
-        # Filtering by machine learning
-        self.ml_filter = 0.85
+        # Filtering by machine learning (disabled by default)
+        self.ml_filter = 0.0
 
         ##### StarExtraction
 
