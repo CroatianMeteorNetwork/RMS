@@ -191,7 +191,7 @@ if [[ "$key" = "" ]]; then
   yes y | ssh-keygen -t rsa -m PEM -N "" -f ~/.ssh/id_rsa >/dev/null
 
   # Copy the public SSH key to desktop
-  cp ~/.ssh/id_rsa.pub ~/Desktop/.
+  ln -s ~/.ssh/id_rsa.pub ~/Desktop/id_rsa.pub
 
   echo ""
   echo "A file called id_rsa.pub appeared on Desktop, please send this file to Denis "

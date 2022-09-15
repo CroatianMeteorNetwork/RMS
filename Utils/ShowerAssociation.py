@@ -1,29 +1,30 @@
 """ Single station shower association. """
 
-from __future__ import print_function, division, absolute_import
+from __future__ import absolute_import, division, print_function
 
-
-import sys
-import os
-import glob
-import datetime
 import copy
+import datetime
+import glob
+import os
+import sys
 
-import numpy as np
-import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-
-from RMS.Astrometry.Conversions import raDec2Vector, vector2RaDec, datetime2JD, jd2Date, raDec2AltAz, \
-    geocentricToApparentRadiantAndVelocity, EARTH_CONSTANTS
+import matplotlib.pyplot as plt
+import numpy as np
+from RMS.Astrometry.Conversions import (EARTH_CONSTANTS, datetime2JD,
+                                        jd2Date, raDec2AltAz, raDec2Vector,
+                                        vector2RaDec)
 from RMS.Formats.FFfile import filenameToDatetime
-from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
-from RMS.Formats.Showers import loadShowers, generateActivityDiagram, makeShowerColors
-from RMS.Math import vectNorm, angularSeparation, angularSeparationVect, isAngleBetween, \
-    sphericalPointFromHeadingAndDistance, cartesianToPolar
-from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePhase
-from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
+from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, readFTPdetectinfo
+from RMS.Formats.Showers import (generateActivityDiagram, loadShowers,
+                                 makeShowerColors, Shower)
+from RMS.Math import (angularSeparation, angularSeparationVect,
+                      cartesianToPolar, isAngleBetween,
+                      sphericalPointFromHeadingAndDistance, vectNorm)
 from RMS.Routines.AllskyPlot import AllSkyPlot
-
+from RMS.Routines.GreatCircle import (fitGreatCircle, greatCircle,
+                                      greatCirclePhase)
+from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
 
 EARTH = EARTH_CONSTANTS()
 
@@ -216,68 +217,6 @@ class MeteorSingleStation(object):
 
 
 
-
-class Shower(object):
-    def __init__(self, shower_entry):
-
-        self.iau_code = shower_entry[0]
-        self.name = shower_entry[1]
-        self.name_full = shower_entry[2]
-
-        self.lasun_beg = shower_entry[3] # deg
-        self.lasun_max = shower_entry[4] # deg
-        self.lasun_end = shower_entry[5] # deg
-        self.ra_g = shower_entry[6] # deg
-        self.dec_g = shower_entry[7] # deg
-        self.dra = shower_entry[8] # deg
-        self.ddec = shower_entry[9] # deg
-        self.vg = shower_entry[10] # km/s
-
-        # Apparent radiant
-        self.ra = None # deg
-        self.dec = None # deg
-        self.v_init = None # m/s
-        self.azim = None # deg
-        self.elev = None # deg
-        self.shower_vector = None
-
-
-    def computeApparentRadiant(self, latitude, longitude, jdt_ref, meteor_fixed_ht=100000):
-        """ Compute the apparent radiant of the shower at the given location and time.
-
-        Arguments:
-            latitude: [float] Latitude of the observer (deg).
-            longitude: [float] Longitude of the observer (deg).
-            jdt_ref: [float] Julian date.
-
-        Keyword arguments:
-            meteor_fixed_ht: [float] Assumed height of the meteor (m). 100 km by default.
-
-        Return;
-            ra, dec, v_init: [tuple of floats] Apparent radiant (deg and m/s).
-
-        """
-
-
-        # Compute the location of the radiant due to radiant drift
-        if not np.any(np.isnan([self.dra, self.ddec])):
-            
-            # Solar longitude difference form the peak
-            lasun_diff = (np.degrees(jd2SolLonSteyaert(jdt_ref)) - self.lasun_max + 180)%360 - 180
-
-            ra_g = self.ra_g + lasun_diff*self.dra
-            dec_g = self.dec_g + lasun_diff*self.ddec
-
-
-        # Compute the apparent radiant - assume that the meteor is directly above the station
-        self.ra, self.dec, self.v_init = geocentricToApparentRadiantAndVelocity(ra_g, \
-            dec_g, 1000*self.vg, latitude, longitude, meteor_fixed_ht, \
-            jdt_ref, include_rotation=True)
-
-        return self.ra, self.dec, self.v_init
-
-
-
 def heightModel(v_init, ht_type='beg'):
     """ Function that takes a velocity and returns an extreme begin/end meteor height that was fit on CAMS
         data.
@@ -327,7 +266,7 @@ def estimateMeteorHeight(config, meteor_obj, shower):
         shower: [Shower instance]
 
     Return:
-        ht: [float] Estimated height in meters.
+        (ht_b, ht_e): [tuple of floats] Estimated begin and end heights in meters.
     """
 
     ### Compute all needed values in alt/az coordinates ###
@@ -367,29 +306,40 @@ def estimateMeteorHeight(config, meteor_obj, shower):
     dist = shower.v_init*meteor_obj.duration
 
     # Compute the angle between the begin and the end point of the meteor (rad)
-    ang_beg_end = np.arccos(np.dot(vectNorm(beg_vect_horiz), vectNorm(end_vect_horiz)))
+    theta_met = np.arccos(np.dot(vectNorm(beg_vect_horiz), vectNorm(end_vect_horiz)))
+
+    # Compute the angle between the radiant vector and the end point (rad)
+    theta_beg = np.arccos(np.dot(vectNorm(radiant_vector_horiz), -vectNorm(end_vect_horiz)))
 
     # Compute the angle between the radiant vector and the begin point (rad)
-    ang_beg_rad = np.arccos(np.dot(vectNorm(radiant_vector_horiz), -vectNorm(beg_vect_horiz)))
-
+    theta_end = np.arccos(np.dot(-vectNorm(radiant_vector_horiz), -vectNorm(beg_vect_horiz)))
 
     # Compute the distance from the station to the begin point (meters)
-    dist_beg = dist*np.sin(ang_beg_rad)/np.sin(ang_beg_end)
+    dist_beg = dist*np.sin(theta_beg)/np.sin(theta_met)
+
+    # Compute the distance from the station to the end point (meters)
+    dist_end = dist*np.sin(theta_end)/np.sin(theta_met)
 
 
-    # Compute the height using the law of cosines
-    ht  = np.sqrt(dist_beg**2 + re_dist**2 - 2*dist_beg*re_dist*np.cos(np.radians(90 + meteor_obj.beg_alt)))
-    ht -= earth_radius
-    ht  = abs(ht)
+    # Compute the height of the begin point using the law of cosines
+    ht_b  = np.sqrt(dist_beg**2 + re_dist**2 - 2*dist_beg*re_dist*np.cos(np.radians(90 + meteor_obj.beg_alt)))
+    ht_b -= earth_radius
+    ht_b  = abs(ht_b)
 
 
-    return ht
+    # Compute the height of the end point using the law of cosines
+    ht_e  = np.sqrt(dist_end**2 + re_dist**2 - 2*dist_end*re_dist*np.cos(np.radians(90 + meteor_obj.end_alt)))
+    ht_e -= earth_radius
+    ht_e  = abs(ht_e)
+
+
+    return ht_b, ht_e
 
 
 
 
 def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=False, save_plot=False, \
-    plot_activity=False):
+    plot_activity=False, flux_showers=False, color_map='viridis'):
     """ Do single station shower association based on radiant direction and height. 
     
     Arguments:
@@ -397,11 +347,13 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
         ftpdetectinfo_list: [list] A list of paths to FTPdetectinfo files.
 
     Keyword arguments:
-        shower_code: [str] Only use this one shower for association (e.g. ETA, PER, SDA). None by default,
-            in which case all active showers will be associated.
+        shower_code: [str or Shower] Only use this one shower for association (e.g. ETA, PER, SDA). None by default,
+            in which case all active showers will be associated. It can either by the three letter shower
+            code or a Shower object.
         show_plot: [bool] Show the plot on the screen. False by default.
         save_plot: [bool] Save the plot in the folder with FTPdetectinfos. False by default.
         plot_activity: [bool] Whether to plot the shower activity plot of not. False by default.
+        flux_showers: [bool] Use the set of showers for flux, not the default list. False by default.
 
     Return:
         associations, shower_counts: [tuple]
@@ -410,8 +362,21 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             - shower_counts: [list] A list of shower code and shower count pairs.
     """
 
-    # Load the list of meteor showers
-    shower_list = loadShowers(config.shower_path, config.shower_file_name)
+    # If the shower code is given as the three letter code (or one at all), load the shower list from disk
+    if isinstance(shower_code, str) or (shower_code is None):
+
+        # Load the list of meteor showers
+        if flux_showers:
+            shower_table = loadShowers(config.shower_path, config.showers_flux_file_name)
+        else:
+            shower_table = loadShowers(config.shower_path, config.shower_file_name)
+
+        shower_list = [Shower(shower_entry) for shower_entry in shower_table]
+
+    # If the the Shower object was given, use it
+    else:
+        shower_list = [shower_code]
+        shower_code = shower_code.name
 
 
     # Load FTPdetectinfos
@@ -471,11 +436,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
         # Go through all showers in the list and find the best match
         best_match_shower = None
         best_match_dist = np.inf
-        for shower_entry in shower_list:
-
-            # Extract shower parameters
-            shower = Shower(shower_entry)
-
+        for shower in shower_list:
 
             # If the shower code was given, only check this one shower
             if shower_code is not None:
@@ -549,15 +510,15 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             # Shorter
             meteor_obj_m1 = copy.deepcopy(meteor_obj_orig)
             meteor_obj_m1.duration -= 1.0/config.fps
-            meteor_beg_ht_m1 = estimateMeteorHeight(config, meteor_obj_m1, shower)
+            meteor_ht_m1 = np.mean(estimateMeteorHeight(config, meteor_obj_m1, shower))
 
             # Nominal
-            meteor_beg_ht = estimateMeteorHeight(config, meteor_obj_orig, shower)
+            meteor_ht = np.mean(estimateMeteorHeight(config, meteor_obj_orig, shower))
 
             # Longer
             meteor_obj_p1 = copy.deepcopy(meteor_obj_orig)
             meteor_obj_p1.duration += 1.0/config.fps
-            meteor_beg_ht_p1 = estimateMeteorHeight(config, meteor_obj_p1, shower)
+            meteor_ht_p1 = np.mean(estimateMeteorHeight(config, meteor_obj_p1, shower))
 
 
             meteor_obj = meteor_obj_orig
@@ -565,11 +526,10 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
             ### ###
 
-            
             # If all heights (even those with +/- 1 frame) are outside the height range, reject the meteor
-            if ((meteor_beg_ht_p1 < filter_end_ht) or (meteor_beg_ht_p1 > filter_beg_ht)) and \
-                ((meteor_beg_ht    < filter_end_ht) or (meteor_beg_ht    > filter_beg_ht)) and \
-                ((meteor_beg_ht_m1 < filter_end_ht) or (meteor_beg_ht_m1 > filter_beg_ht)):
+            if ((meteor_ht_p1 < filter_end_ht) or (meteor_ht_p1 > filter_beg_ht)) and \
+                ((meteor_ht    < filter_end_ht) or (meteor_ht    > filter_beg_ht)) and \
+                ((meteor_ht_m1 < filter_end_ht) or (meteor_ht_m1 > filter_beg_ht)):
 
                 continue
 
@@ -619,8 +579,9 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
     # Create a plot of showers
     if show_plot or save_plot:
+
         # Generate consistent colours
-        colors_by_name = makeShowerColors(shower_list)
+        colors_by_name = makeShowerColors(shower_list, color_map=color_map)
         def get_shower_color(shower):
             try:
                 return colors_by_name[shower.name] if shower else "0.4"
@@ -632,7 +593,11 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
         # Init subplots depending on if the activity plot is done as well
         if plot_activity:
-            gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1])
+
+            # Scale the shower plot according to number
+            shower_ax_scale = np.sqrt(len(shower_list))/12 + 0.25
+
+            gs = gridspec.GridSpec(2, 1, height_ratios=[3, shower_ax_scale])
             ax_allsky = plt.subplot(gs[0], facecolor='black')
             ax_activity = plt.subplot(gs[1], facecolor='black')
         else:
@@ -652,13 +617,17 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             color = get_shower_color(shower)
             allsky_plot.plot(meteor_obj.ra_array, meteor_obj.dec_array, color=color, linewidth=1, zorder=4)
 
+            # Head color of sporadics
+            peak_color = '0.5'
+            peak_alpha = 0.5
+
             # Plot the peak of shower meteors a different color
-            peak_color = 'blue'
             if shower is not None:
                 peak_color = 'tomato'
+                peak_alpha = 0.8
 
             allsky_plot.scatter(meteor_obj.ra_array[-1], meteor_obj.dec_array[-1], c=peak_color, marker='+', \
-                s=5, zorder=5)
+                s=2, zorder=5, alpha=peak_alpha)
 
             ### ###
 
@@ -695,7 +664,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                 else:
                     gc_end_phase = gc_beg_phase + 170
 
-                gc_alpha = 0.7
+                gc_alpha = 0.5
 
 
             # Store great circle beginning and end phase
@@ -815,7 +784,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
                 # Plot the activity diagram
                 generateActivityDiagram(config, shower_list, ax_handle=ax_activity, \
-                    sol_marker=[sol_min, sol_max], colors=colors_by_name)
+                    sol_marker=[sol_min, sol_max], color_map=color_map)
 
 
         
@@ -865,7 +834,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                             shower_name = shower.name
 
                             # Create link to the IAU database of showers
-                            iau_link = "https://www.ta3.sk/IAUC22DB/MDC2007/Roje/pojedynczy_obiekt.php?kodstrumienia={:05d}".format(shower.iau_code)
+                            iau_link = "https://www.ta3.sk/IAUC22DB/MDC2007/Roje/pojedynczy_obiekt.php?kodstrumienia={:05d}".format(shower.iau_code_int)
 
                         else:
                             shower_name = "..."
@@ -940,14 +909,12 @@ if __name__ == "__main__":
 
     import RMS.ConfigReader as cr
 
-
     ### COMMAND LINE ARGUMENTS
-
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Perform single-station established shower association on FTPdetectinfo files.")
+    arg_parser = argparse.ArgumentParser(description="Perform single-station established shower association on an FTPdetectinfo file.")
 
-    arg_parser.add_argument('ftpdetectinfo_path', nargs='+', metavar='FTPDETECTINFO_PATH', type=str, \
-        help='Path to one or more FTPdetectinfo files.')
+    arg_parser.add_argument('ftpdetectinfo_path', metavar='FTPDETECTINFO_PATH', nargs='+', type=str, \
+        help='Path to an FTPdetectinfo file or a directory with an FTPdetectinfo file.')
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
@@ -955,8 +922,14 @@ if __name__ == "__main__":
     arg_parser.add_argument('-s', '--shower', metavar='SHOWER', type=str, \
         help="Associate just this single shower given its code (e.g. PER, ORI, ETA).")
 
+    arg_parser.add_argument('-f', '--fluxshowers', action="store_true", \
+        help="""Only show shower association for showers used for flux estimation.""")
+
     arg_parser.add_argument('-x', '--hideplot', action="store_true", \
         help="""Do not show the plot on the screen.""")
+
+    arg_parser.add_argument('-p', '--palette', metavar='PALETTE', type=str, \
+        help="color palette to use - one of viridis, gist_ncar, rainbow etc")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -965,16 +938,44 @@ if __name__ == "__main__":
 
     ftpdetectinfo_path = cml_args.ftpdetectinfo_path
 
-    # Apply wildcards to input
-    ftpdetectinfo_path_list = []
-    for entry in ftpdetectinfo_path:
-        ftpdetectinfo_path_list += glob.glob(entry)
+
+    # Find an FTPdetectinfo file if only a directory is given
+    if len(ftpdetectinfo_path) == 1:
+
+        # If a directory is given, find the FTPdetectinfo
+        if os.path.isdir(ftpdetectinfo_path[0]):
+        
+            ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path[0])
+            ftpdetectinfo_path_list = [ftpdetectinfo_path]
+
+        # If a file is given
+        elif os.path.isfile(ftpdetectinfo_path[0]):
+            ftpdetectinfo_path_list = ftpdetectinfo_path
+
+        # If a wildcard was given
+        else:
+            ftpdetectinfo_path_list = glob.glob(ftpdetectinfo_path[0])
+
+
+    # If multiple files are given, find them all
+    else:
+    
+        # Apply wildcards to input if more are given
+        ftpdetectinfo_path_list = []
+        for entry in ftpdetectinfo_path:
+            ftpdetectinfo_path_list += glob.glob(entry)
 
 
     # If there are no good files given, notify the user
     if len(ftpdetectinfo_path_list) == 0:
         print("No FTPdetectinfo files given!")
         sys.exit()
+
+    else:
+        print()
+        print("Using FTPdetectinfo files:")
+        for ftpdetectinfo_path in ftpdetectinfo_path_list:
+            print(ftpdetectinfo_path)
         
 
     # Extract parent directory
@@ -983,10 +984,16 @@ if __name__ == "__main__":
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
     
+    # choose a colour scheme to use
+    if cml_args.palette is None:
+        color_map = config.shower_color_map
+    else:
+        color_map = cml_args.palette
 
     # Perform shower association
     associations, shower_counts = showerAssociation(config, ftpdetectinfo_path_list, \
-        shower_code=cml_args.shower, show_plot=(not cml_args.hideplot), save_plot=True, plot_activity=True)
+        shower_code=cml_args.shower, show_plot=(not cml_args.hideplot), save_plot=True, plot_activity=True,
+        flux_showers=cml_args.fluxshowers, color_map=color_map)
 
 
     # Print results to screen
