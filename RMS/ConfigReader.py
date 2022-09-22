@@ -290,6 +290,9 @@ class Config:
         #   systems for a staggered capture start
         self.capture_wait_seconds = 0
 
+        # Randomize the wait time between 0 and capture_wait_seconds. Used for multi-camera systems
+        self.capture_wait_randomize = False
+
         # Run detection and the rest of postprocessing at the end of the night, instead of parallel to capture
         self.postprocess_at_end = False
 
@@ -862,6 +865,10 @@ def parseCapture(config, parser):
     # Load the time for waiting after the capture is supposed to start, to stagger multi-camera start times
     if parser.has_option(section, "capture_wait_seconds"):
         config.capture_wait_seconds = parser.getint(section, "capture_wait_seconds")
+
+    # Load if the capture time should be randomized
+    if parser.has_option(section, "capture_wait_randomize"):
+        config.capture_wait_randomize = parser.getboolean(section, "capture_wait_randomize")
 
 
     # Run detection and the rest of postprocessing at the end of the night, instead of in parallel to capture
