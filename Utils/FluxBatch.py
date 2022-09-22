@@ -1635,7 +1635,12 @@ if __name__ == "__main__":
 
     # Print camera tally #
     print()
-    print(reportCameraTally(fbr, top_n_stations=5))
+
+    # Save the per-camera tally results
+    tally_string = reportCameraTally(fbr, top_n_stations=5)
+    print(tally_string)
+    with open(os.path.join(dir_path, fluxbatch_cml_args.output_filename + "_camera_tally.txt"), 'w') as f:
+        f.write(tally_string)
 
     # Show and save the batch flux plot
     plotBatchFlux(
