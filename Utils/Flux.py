@@ -2187,19 +2187,49 @@ def computeFluxCorrectionsOnBins(
                 )[1].mag_lev
 
 
+
+
             # Use empirical LM calculation
             lm_s = stellarLMModel(mag_lev_bin)
 
             # Add a loss due to minimum number of frames used
             lm_s += frame_min_loss
 
-            # Compute apparent meteor magnitude
-            lm_m = (
-                lm_s - 5*np.log10(r_mid/1e5) - 2.5*np.log10(
+
+
+            ## Compute apparent meteor magnitude ##
+
+            # Compute the magnitude loss due to range
+            d_m_range = -5*np.log10(r_mid/1e5)
+
+
+            # Compute the angular velocity loss
+            d_m_ang_vel_loss = (
+                -2.5*np.log10(
                     np.degrees(
                         platepar.F_scale*v_init*np.sin(rad_dist_mid)
                             /(config.fps*r_mid*fwhm_bin_mean)
-                    )))
+                    )
+                )
+            )
+
+            # If the angular velocity is very low, the meteor will dwell inside one pixel and the perceived
+            #   magnitude would increase with the blind application of the formula.
+            #   Source: (Gural & Jenniskens, 2000, Leonid paper)
+
+            # Limit the magnitude only to brightness loss and don't allow increase
+            if d_m_ang_vel_loss > 0:
+                d_m_ang_vel_loss = 0
+
+
+            # Add all magnitude losses and compute the apparent magnitude
+            lm_m = lm_s + d_m_range + d_m_ang_vel_loss
+
+
+            ## ##
+
+
+
 
             ### ###
 
