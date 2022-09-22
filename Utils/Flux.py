@@ -93,6 +93,9 @@ class FluxConfig(object):
         # Minimum distance of the end of the meteor to the radiant (deg)
         self.rad_dist_min = 15
 
+        # Minimum meteor angular velocity in the middle of the FOV (deg/s)
+        self.ang_vel_min = 4.0
+
         # Subdivide the time bin into the given number of subbins
         self.sub_time_bins = 2
 
@@ -1996,10 +1999,12 @@ def computeFluxCorrectionsOnBins(
             print("Radiant elevation: {:.2f} deg".format(radiant_elev))
             print("Apparent speed: {:.2f} km/s".format(v_init/1000))
 
+
         if (not bin_ffs) and (not fixed_bins):
             if verbose:
                 print("!!! Bin doesn't have any meteors!")
             continue
+
 
         # If the elevation of the radiant is below the limit, skip this bin
         if radiant_elev < flux_config.rad_elev_limit:
@@ -2029,6 +2034,38 @@ def computeFluxCorrectionsOnBins(
 
             continue
 
+
+
+        # If the angular velocity in the middle of the FOV is too small, skip the bin
+        if np.degrees(ang_vel_mid) < flux_config.ang_vel_min:
+
+            if verbose:
+                print(
+                    "!!! Ang. vel in the middel of the FOV below the {:.2f} deg/s threshold, skipping time bin!".format(
+                        flux_config.ang_vel_min
+                    )
+                )
+
+
+            # Add zeros to the flux table
+            if fixed_bins:
+                meteor_num_data.append(0)
+                lm_m_data.append(None)
+                effective_collection_area_data.append(0)
+                tap_data.append(0)
+                bin_hour_data.append(0)
+                radiant_elev_data.append(None)
+                radiant_dist_mid_data.append(None)
+                ang_vel_mid_data.append(None)
+                
+
+                flux_table.addEntry(sol_entry, dt_entry, 0, radiant_elev, np.degrees(rad_dist_mid), \
+                    np.degrees(ang_vel_mid), 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
+
+            continue
+
+
+
         # The minimum duration of the time bin should be larger than 50% of the given dt
         if (binduration is not None) and (bin_hours < 0.5*binduration):
 
@@ -2052,6 +2089,8 @@ def computeFluxCorrectionsOnBins(
                     np.degrees(ang_vel_mid), 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
 
             continue
+
+
 
         # Continue running if there are enough meteors
         if fixed_bins or (len(bin_meteor_list) >= flux_config.meteors_min):
@@ -2638,7 +2677,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
     # If there are no bins to process, skip
-    if not len(sol_bins):
+    if len(sol_bins) < 2:
 
         # Save empty tables so this is not attempted again
         saveEmptyECSVTable(os.path.join(metadata_dir, flux_ecsv_file_name), shower_code, mass_index, \
@@ -2740,8 +2779,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
         else:
 
-            print("   ... too many sporadics per hour: {:.1f} >= {:d} Skipping this data directory!".format(sporadics_per_hr, \
-                flux_config.max_sporadics_per_hr))
+            print("   ... too many sporadics per hour: {:.1f} >= {:d} Skipping this data directory!".format( \
+                sporadics_per_hr, flux_config.max_sporadics_per_hr))
 
             # Save empty tables so this is not attempted again
             saveEmptyECSVTable(os.path.join(metadata_dir, flux_ecsv_file_name), shower_code, mass_index, \
