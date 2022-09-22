@@ -168,8 +168,8 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
 
 
     log.info('Platepar correction:')
-    log.info('    Rotation: {:.2f} deg'.format(angle))
-    log.info('    Scale: {:.2f}'.format(scale))
+    log.info('    Rotation: {:.5f} deg'.format(angle))
+    log.info('    Scale: {:.5f}'.format(scale))
     log.info('    Translation X, Y: ({:.2f}, {:.2f}) px'.format(translation_x, translation_y))
 
 
