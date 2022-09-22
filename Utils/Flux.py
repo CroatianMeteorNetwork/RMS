@@ -1803,6 +1803,9 @@ def getSensorCharacterization(dir_path, config, flux_config, meteor_data, defaul
         sensor_data = sensorCharacterization(config, flux_config, dir_path, meteor_data, \
             default_fwhm=default_fwhm)
 
+        if sensor_data is False:
+            return None
+
         # Save to file for posterior use
         with open(sensor_characterization_path, 'w') as f:
 
@@ -2692,6 +2695,10 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         # Computes FWHM of stars and noise profile of the sensor
         sensor_data = getSensorCharacterization(dir_path, config, flux_config, meteor_data, \
             default_fwhm=default_fwhm)
+
+        if sensor_data is None:
+            print("No sensor characterization could be loaded!")
+            return None
 
         # # Compute the nighly mean FWHM
         # fwhm_nightly_mean = np.mean([sensor_data[key][0] for key in sensor_data])
