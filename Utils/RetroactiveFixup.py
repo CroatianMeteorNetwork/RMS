@@ -127,7 +127,6 @@ if __name__ == "__main__":
             # Find FTPdetectinfo
             if file_name.startswith("FTPdetectinfo") and file_name.endswith('.txt') and \
                 (not "backup" in file_name) and (not "uncalibrated" in file_name):
-
                 ftpdetectinfo_name = file_name
                 break
 
