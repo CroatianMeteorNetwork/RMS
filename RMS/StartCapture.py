@@ -204,7 +204,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         capture_wait_time = random.randint(0, config.capture_wait_randomize)
 
     # Wait before the capture starts if a time has been given
-    if (not resume_capture) and (video_file is None) and (capture_wait_time > 0):
+    if (not resume_capture) and (video_file is None) and ((capture_wait_time > 0) or config.capture_wait_randomize):
 
         rand_str = ""
         if config.capture_wait_randomize:
