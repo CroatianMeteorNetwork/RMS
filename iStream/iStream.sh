@@ -77,7 +77,7 @@ VIDEO_FILE="$CAPTURED_DIR_NAME/${STATION_ID}_${DATE_NOW}.mp4"
 FTP_SERVER="server.istrastream.com"
 SERVER="http://istrastream.com"
 AGENT="$SYSTEM-$STATION_ID"
-FTP_DETECT_INFO="$(ls $CAPTURED_DIR_NAME/*.txt | grep 'FTPdetectinfo' | grep -vE "uncalibrated" | grep -vE "unfiltered")"
+FTP_DETECT_INFO="$(ls $CAPTURED_DIR_NAME/*.txt | grep 'FTPdetectinfo' | grep -vE "uncalibrated")"
 
 #Thanks to Alfredo Dal'Ava Junior :)
 if [[ -z "$FTP_DETECT_INFO" ]]; then
