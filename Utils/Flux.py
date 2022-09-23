@@ -2254,6 +2254,7 @@ def computeFluxCorrectionsOnBins(
                     continue
 
                 for img_coords in col_areas_ht[ht]:
+
                     # Unpack precomputed values
                     area, azim, elev, sensitivity_ratio, r = col_areas_ht[ht][img_coords]
 
@@ -2266,6 +2267,10 @@ def computeFluxCorrectionsOnBins(
                     # If the angular distance from the radiant is less than 15 deg, don't use the block
                     #   in the effective collection area
                     if np.degrees(rad_dist) < flux_config.rad_dist_min:
+                        area = 0.0
+
+                    # If the angular velocity of the block is too low, don't the use block
+                    if np.degrees(ang_vel) < flux_config.ang_vel_min:
                         area = 0.0
 
                     # Compute the range correction
