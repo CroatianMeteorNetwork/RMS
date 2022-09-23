@@ -210,7 +210,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         if config.capture_wait_randomize:
             rand_str = " (randomized between 0 and {:d})".format(config.capture_wait_seconds)
 
-        log.info("Waiting {:d} seconds{:s} before capture start...".format(int(capture_wait_time)), rand_str)
+        log.info("Waiting {:d} seconds{:s} before capture start...".format(int(capture_wait_time), rand_str))
         time.sleep(capture_wait_time)
 
 
