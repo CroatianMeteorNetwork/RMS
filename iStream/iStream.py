@@ -2,7 +2,6 @@
 import os
 import pwd
 import sys
-import pwd
 import traceback
 import subprocess
 import datetime
