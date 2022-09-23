@@ -50,6 +50,60 @@ def mkdirP(path):
         raise 
 
 
+def walkDirsToDepth(dir_path, depth=-1):
+    """ Mimic os.walk, but define the maximum depth. 
+    
+    Arguments:
+        dir_path: [str] Path to the directory.
+
+    Keyword arguments:
+        depth: [int] Maximum depth. Use -1 for no limit, in which case the function behaves the same as
+            os.walk.
+
+    Return:
+        file_list: [list] List where the elements are:
+            - dir_path - path to the directory
+            - dir_list - list of directories in the path
+            - file_list - list of files in the path
+    """
+    
+    final_list = []
+    dir_list = []
+    file_list = []
+
+    # Find all files and directories in the given path and sort them accordingly
+    for entry in sorted(os.listdir(dir_path)):
+
+        entry_path = os.path.join(dir_path, entry)
+
+        if os.path.isdir(entry_path):
+            dir_list.append(entry)
+
+        else:
+            file_list.append(entry)
+
+
+    # Mimic the output of os.walk
+    final_list.append([dir_path, dir_list, file_list])
+
+
+    # Decrement depth for the next recursion
+    depth -= 1
+
+    # Stop the recursion if the final depth has been reached
+    if depth != 0:
+
+        # Do this recursively for all directories up to a certain depth
+        for dir_name in dir_list:
+
+            final_list_rec = walkDirsToDepth(os.path.join(dir_path, dir_name), depth=depth)
+
+            # Add the list to the total list
+            final_list += final_list_rec
+
+
+    return final_list
+
 
 def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=False, extra_files=None):
     """ Move the given file list from the source directory to the destination directory, compress the 
@@ -150,7 +204,13 @@ class SegmentedScale(mscale.ScaleBase):
     name = 'segmented'
 
     def __init__(self, axis, **kwargs):
-        mscale.ScaleBase.__init__(self, axis)
+
+        # Handle different matplotlib versions
+        try:
+            mscale.ScaleBase.__init__(self, axis)
+        except TypeError:
+            mscale.ScaleBase.__init__(axis)
+
         self.points = kwargs.get('points', [0, 1])
         self.lb = self.points[0]
         self.ub = self.points[-1]

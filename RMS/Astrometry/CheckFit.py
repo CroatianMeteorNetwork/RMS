@@ -101,6 +101,10 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
         stars_list = star_dict[jd]
         stars_list = np.array(stars_list)
 
+        # If the type is not float, it means something went wrong, so skip this
+        if not (stars_list.dtype == np.float64):
+            continue
+
         # Convert all catalog stars to image coordinates
         cat_x_array, cat_y_array = raDecToXYPP(ra_catalog, dec_catalog, jd, platepar)
 
