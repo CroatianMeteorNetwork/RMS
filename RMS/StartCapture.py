@@ -699,7 +699,7 @@ if __name__ == "__main__":
     ### TEMPORARY - Run the openvpn config fixup script ###
     
     import subprocess
-    subprocess.call(['sh', 'Scripts/openvpn_update_gmn_client.sh'])
+    subprocess.Popen(['sh', 'Scripts/openvpn_update_gmn_client.sh'])
 
     ### ###
 
