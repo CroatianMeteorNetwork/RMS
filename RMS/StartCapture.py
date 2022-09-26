@@ -695,6 +695,16 @@ if __name__ == "__main__":
     setSIGINT()
 
 
+
+    ### TEMPORARY - Run the openvpn config fixup script ###
+    
+    import subprocess
+    subprocess.call(['sh', 'Scripts/openvpn_update_gmn_client.sh'])
+
+    ### ###
+
+
+
     # Make the data directories
     root_dir = os.path.abspath(config.data_dir)
     mkdirP(root_dir)
