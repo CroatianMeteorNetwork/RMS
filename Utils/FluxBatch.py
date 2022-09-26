@@ -103,6 +103,8 @@ class FluxBatchResults(object):
         compute_single,
         # Solar longitude bins
         sol_bins, bin_datetime_yearly, comb_sol, comb_sol_bins, 
+        # Per fixed bin numers and TAP
+        num_meteors, time_area_product,
         # Flux data products
         comb_flux, comb_flux_lower, comb_flux_upper, 
         comb_flux_lm_m, comb_flux_lm_m_lower, comb_flux_lm_m_upper, 
@@ -135,6 +137,10 @@ class FluxBatchResults(object):
         self.bin_datetime_yearly = bin_datetime_yearly
         self.comb_sol = comb_sol
         self.comb_sol_bins = comb_sol_bins
+
+        # Per fixed bin numers and TAP
+        self.num_meteors = num_meteors
+        self.time_area_product = time_area_product
         
         # Flux data products
         self.comb_flux = comb_flux
@@ -1009,6 +1015,8 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
         compute_single,
         # Solar longitude bins
         sol_bins, bin_datetime_yearly, comb_sol, comb_sol_bins, 
+        # Per fixed bin numers and TAP
+        num_meteors, time_area_product,
         # Flux data products
         comb_flux, comb_flux_lower, comb_flux_upper, 
         comb_flux_lm_m, comb_flux_lm_m_lower, comb_flux_lm_m_upper, 
@@ -1181,8 +1189,38 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
                 fbr.comb_sol_bins[1:] - fbr.comb_sol_bins[:-1],
                 label='Time-area product (TAP)',
                 color='0.65',
-                edgecolor='0.55'
+                edgecolor='0.45'
             )
+
+
+
+            # Plot TAP distribution within individual bins
+            for i, sol_end_temp in enumerate(fbr.comb_sol_bins[1:]):
+
+                sol_beg_temp = fbr.comb_sol_bins[i]
+
+                # Select the current TAP height
+                tap_temp = fbr.comb_ta_prod[i]/1e9
+
+                # Select the range of sols for the current bar
+                selection_mask = (np.degrees(fbr.sol_bins) >= sol_beg_temp) \
+                                    & (np.degrees(fbr.sol_bins) <= sol_end_temp)
+
+                sol_range = np.degrees(fbr.sol_bins[selection_mask])
+                tap_range = fbr.time_area_product[selection_mask[1:]]
+
+                if len(sol_range) > len(tap_range):
+                    sol_range = sol_range[(len(sol_range) - len(tap_range)):]
+
+                ax[1].bar(
+                    ((sol_range[1:] + sol_range[:-1])/2)%360,
+                    tap_range[1:]/np.max(tap_range)*tap_temp,
+                    sol_range[1:] - sol_range[:-1],
+                    color='0.35',
+                    edgecolor='none',
+                    alpha=0.5
+                )
+
 
             # Plot the minimum time-area product as a horizontal line
             ax[1].hlines(
