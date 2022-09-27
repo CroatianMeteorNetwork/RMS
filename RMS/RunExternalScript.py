@@ -78,11 +78,15 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description=""" Run external script.
         """)
 
-    arg_parser.add_argument('captured_path', nargs=1, metavar='CAPTURED_PATH', type=str, \
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
+        help="Path to a config file which will be used instead of the default one.")
+
+    arg_parser.add_argument('captured_path', nargs=1, metavar='CAPTURED_PATH', type=str,
         help='Path to Captured night directory.')
 
-    arg_parser.add_argument('archived_path', nargs=1, metavar='ARCHIVED_PATH', type=str, \
+    arg_parser.add_argument('archived_path', nargs=1, metavar='ARCHIVED_PATH', type=str,
         help='Path to Archived night directory.')
+
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -94,7 +98,11 @@ if __name__ == "__main__":
     log.addHandler(out_hdlr)
 
     # Load config file
-    config = cr.parse(".config")
+    try:
+        config = cr.loadConfigFromDirectory(cml_args.config, cml_args.captured_path[0])
+    except FileNotFoundError as e:
+        print('ERROR: ' + str(e))
+        exit(1)
 
     # Run the external script
     runExternalScript(cml_args.captured_path[0], cml_args.archived_path[0], config)
