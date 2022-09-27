@@ -182,10 +182,9 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
             # Load the config file from the full path
             config_file = os.path.abspath(cml_args_config[0].replace('"', ''))
 
-
-        if config_file is None:
+        if config_file is None or os.path.exists(config_file) is False:
             raise FileNotFoundError("A config file could not be found in directory: {:s}, {:s}".format(
-                dir_path, cml_args_config
+                dir_path, cml_args_config[0]
                 )
             )
 
