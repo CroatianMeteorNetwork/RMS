@@ -102,7 +102,7 @@ class FluxBatchResults(object):
         ref_ht, atomic_bin_duration, ci, min_meteors, min_tap, min_bin_duration, max_bin_duration, 
         compute_single,
         # Solar longitude bins
-        sol_bins, bin_datetime_yearly, comb_sol, comb_sol_bins, 
+        sol_bins, bin_datetime_yearly, comb_sol, comb_sol_tap_weighted, comb_sol_bins, 
         # Per fixed bin numers and TAP
         num_meteors, time_area_product,
         # Flux data products
@@ -136,6 +136,7 @@ class FluxBatchResults(object):
         self.sol_bins = sol_bins
         self.bin_datetime_yearly = bin_datetime_yearly
         self.comb_sol = comb_sol
+        self.comb_sol_tap_weighted = comb_sol_tap_weighted
         self.comb_sol_bins = comb_sol_bins
 
         # Per fixed bin numers and TAP
@@ -283,7 +284,7 @@ def combineFixedBinsAndComputeFlux(
     """
     Computes flux values and their corresponding solar longitude based on bins containing
     number of meteors, and time-area product. Bins will be combined so that each bin has the
-    minimum number of meteors
+    minimum number of meteors, minimum TAP, and that other conditions are met.
 
     Arguments:
         sol_bins: [ndarray] Solar longitude of bins start and end (the length must be 1 more than meteors)
@@ -318,6 +319,7 @@ def combineFixedBinsAndComputeFlux(
     flux_upper_list = []
     flux_lower_list = []
     sol_list = []
+    sol_tap_weighted_list = []
     sol_bin_list = []
     meteor_count_list = []
     time_area_product_list = []
@@ -391,6 +393,7 @@ def combineFixedBinsAndComputeFlux(
 
 
                 sol_list.append(np.mean(middle_bin_sol[sl]))
+                sol_tap_weighted_list.append(np.average(middle_bin_sol[sl], weights=time_area_prod[sl]))
                 sol_bin_list.append(sol_bins[start_idx])
                 start_idx = end_idx
 
@@ -402,6 +405,7 @@ def combineFixedBinsAndComputeFlux(
 
     return (
         np.array(sol_list),
+        np.array(sol_tap_weighted_list),
         np.array(sol_bin_list),
         np.array(flux_list),
         np.array(flux_lower_list),
@@ -951,6 +955,7 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
 
     (
         comb_sol,
+        comb_sol_tap_weighted,
         comb_sol_bins,
         comb_flux,
         comb_flux_lower,
@@ -976,6 +981,7 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
         max_bin_duration=max_bin_duration,
     )
     comb_sol = np.degrees(comb_sol)
+    comb_sol_tap_weighted = np.degrees(comb_sol_tap_weighted)
     comb_sol_bins = np.degrees(comb_sol_bins)
 
 
@@ -1014,7 +1020,7 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
         ref_ht, atomic_bin_duration, ci, min_meteors, min_tap, min_bin_duration, max_bin_duration, 
         compute_single,
         # Solar longitude bins
-        sol_bins, bin_datetime_yearly, comb_sol, comb_sol_bins, 
+        sol_bins, bin_datetime_yearly, comb_sol, comb_sol_tap_weighted, comb_sol_bins, 
         # Per fixed bin numers and TAP
         num_meteors, time_area_product,
         # Flux data products
@@ -1107,7 +1113,7 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
 
         # Plotting weigthed flux
         ax[0].errorbar(
-            fbr.comb_sol%360,
+            fbr.comb_sol_tap_weighted%360,
             fbr.comb_flux,
             yerr=[fbr.comb_flux - fbr.comb_flux_lower, fbr.comb_flux_upper - fbr.comb_flux],
             label="Weighted average flux at:\n" \
@@ -1122,7 +1128,7 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
 
         # Plot the flux to the meteor LM
         ax[0].errorbar(
-            fbr.comb_sol%360,
+            fbr.comb_sol_tap_weighted%360,
             fbr.comb_flux_lm_m,
             yerr=[fbr.comb_flux_lm_m - fbr.comb_flux_lm_m_lower, 
                   fbr.comb_flux_lm_m_upper - fbr.comb_flux_lm_m],
@@ -1237,7 +1243,7 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
 
             # Plot the number of meteors on the right axis
             side_ax = ax[1].twinx()
-            side_ax.scatter(fbr.comb_sol%360, fbr.comb_num_meteors, c='k', label='Meteors', s=8)
+            side_ax.scatter(fbr.comb_sol_tap_weighted%360, fbr.comb_num_meteors, c='k', label='Meteors', s=8)
 
             # Plot the minimum meteors line
             side_ax.hlines(
@@ -1261,10 +1267,12 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
             ##### SUBPLOT 2 #####
 
             # Plot the radiant elevation
-            ax[2].scatter(fbr.comb_sol%360, fbr.comb_rad_elev, label="Rad. elev. (TAP-weighted)", color='0.75', s=15, marker='s')
+            ax[2].scatter(fbr.comb_sol_tap_weighted%360, fbr.comb_rad_elev, \
+                label="Rad. elev. (TAP-weighted)", color='0.75', s=15, marker='s')
 
             # Plot the radiant distance
-            ax[2].scatter(fbr.comb_sol%360, fbr.comb_rad_dist, label="Rad. dist.", color='0.25', s=20, marker='x')
+            ax[2].scatter(fbr.comb_sol_tap_weighted%360, fbr.comb_rad_dist, \
+                label="Rad. dist.", color='0.25', s=20, marker='x')
 
             ax[2].set_ylabel("Angle (deg)")
 
@@ -1273,8 +1281,10 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
             moon_ax = ax[2].twinx()
 
             # Set line plot cycler
-            line_cycler   = (cycler(color=["#E69F00", "#56B4E9", "#009E73", "#0072B2", "#D55E00", "#CC79A7", "#F0E442"]) +
-                     cycler(linestyle=["-", "--", "-.", ":", "-", "--", "-."]))
+            line_cycler   = (
+                cycler(color=["#E69F00", "#56B4E9", "#009E73", "#0072B2", "#D55E00", "#CC79A7", "#F0E442"]) +
+                cycler(linestyle=["-", "--", "-.", ":", "-", "--", "-."])
+                )
 
             moon_ax.set_prop_cycle(line_cycler)
 
@@ -1328,7 +1338,7 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
 
             lm_ax = ax[3].twinx()
 
-            lm_ax.scatter(fbr.comb_sol%360, fbr.comb_lm_m, label="Meteor LM", color='0.5', s=20)
+            lm_ax.scatter(fbr.comb_sol_tap_weighted%360, fbr.comb_lm_m, label="Meteor LM", color='0.5', s=20)
 
             lm_ax.invert_yaxis()
             lm_ax.set_ylabel("Meteor LM")
@@ -1356,7 +1366,8 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
 
             
             # Plot the angular velocity
-            ax[3].scatter(fbr.comb_sol%360, fbr.comb_ang_vel, label="Angular velocity", color='0.0', s=30, marker='+')
+            ax[3].scatter(fbr.comb_sol_tap_weighted%360, fbr.comb_ang_vel, \
+                label="Angular velocity", color='0.0', s=30, marker='+')
             ax[3].set_ylabel("Ang. vel. (deg/s)")
 
 
@@ -1411,9 +1422,11 @@ def saveBatchFluxCSV(fbr, dir_path, output_filename):
             fout.write("# Min bin duration = {:.2f} h\n".format(fbr.min_bin_duration))
             fout.write("# Max bin duration = {:.2f} h\n".format(fbr.max_bin_duration))
             fout.write(
-                "# Sol bin start (deg), Mean Sol (deg), Flux@+6.5M (met / 1000 km^2 h), Flux CI low, Flux CI high, Flux@+{:.2f}M (met / 1000 km^2 h), Flux CI low, Flux CI high, ZHR, ZHR CI low, ZHR CI high, Meteor Count, Time-area product (corrected to +6.5M) (1000 km^2/h), Meteor LM, Radiant elev (deg), Radiat dist (deg), Ang vel (deg/s)\n".format(fbr.lm_m_mean)
+                "# Sol bin start (deg), Mean Sol (deg), TAP-weighted Sol (deg), Flux@+6.5M (met / 1000 km^2 h), Flux CI low, Flux CI high, Flux@+{:.2f}M (met / 1000 km^2 h), Flux CI low, Flux CI high, ZHR, ZHR CI low, ZHR CI high, Meteor Count, Time-area product (corrected to +6.5M) (1000 km^2/h), Meteor LM, Radiant elev (deg), Radiat dist (deg), Ang vel (deg/s)\n".format(fbr.lm_m_mean)
             )
-            for (_sol_bin_start,
+            for (
+                _sol_bin_start,
+                _tap_weighted_sol,
                 _mean_sol,
                 _flux,
                 _flux_lower,
@@ -1433,6 +1446,7 @@ def saveBatchFluxCSV(fbr, dir_path, output_filename):
             in zip(
                     fbr.comb_sol_bins,
                     fbr.comb_sol,
+                    fbr.comb_sol_tap_weighted,
                     fbr.comb_flux,
                     fbr.comb_flux_lower,
                     fbr.comb_flux_upper,
@@ -1451,9 +1465,10 @@ def saveBatchFluxCSV(fbr, dir_path, output_filename):
                     ):
 
                 fout.write(
-                    "{:.8f},{:.8f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:d},{:.3f},{:.2f},{:.2f},{:.2f},{:.2f}\n".format(
+                    "{:.8f},{:.8f},{:.8f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:d},{:.3f},{:.2f},{:.2f},{:.2f},{:.2f}\n".format(
                     _sol_bin_start,
                     _mean_sol,
+                    _tap_weighted_sol,
                     _flux,
                     _flux_lower,
                     _flux_upper,
