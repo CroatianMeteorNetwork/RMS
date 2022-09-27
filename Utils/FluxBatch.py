@@ -26,7 +26,7 @@ from RMS.Formats.Showers import FluxShowers, loadRadiantShowers
 from Utils.Flux import calculatePopulationIndex, calculateMassIndex, computeFlux, detectClouds, fluxParser, \
     calculateFixedBins, calculateZHR, massVerniani, loadShower
 from RMS.Routines.SolarLongitude import unwrapSol
-from RMS.Misc import formatScientific, SegmentedScale, mkdirP
+from RMS.Misc import formatScientific, roundToSignificantDigits, SegmentedScale, mkdirP
 from RMS.QueuedPool import QueuedPool
 
 # Now that the Scale class has been defined, it must be registered so
@@ -1176,7 +1176,8 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
 
         # Get the flux ticks and set them to the zhr axis
         flux_ticks = ax[0].get_yticks()
-        zhr_ax.set_yscale('segmented', points=calculateZHR(flux_ticks, population_index))
+        zhr_ax.set_yscale('segmented', 
+            points=roundToSignificantDigits(calculateZHR(flux_ticks, population_index), n=2))
 
         zhr_ax.set_ylabel("ZHR at +6.5$^{\\mathrm{M}}$")
 
