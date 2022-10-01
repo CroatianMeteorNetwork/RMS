@@ -468,13 +468,11 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
         # Extract the prediction score
         pred_score = prediction_dict[png_name]
 
-        print(png_name + " - " + str("Score: {:6.1%}".format(pred_score)), end='')
-
 
         # If the ML model thinks the detection is a meteor, keep it
         if pred_score > threshold:
 
-            print(" - meteor")
+            status_str = "meteor"
 
             # Add the FF file to the filtered list
             FTP_Filtered.append(meteor_entry)
@@ -484,10 +482,13 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
                 keep_png_dir = meteors_dir
 
         else:
-            print(" - artefact")
+            status_str = "artefact"
 
             if keep_pngs:
                 keep_png_dir = artefacts_dir
+
+
+        log.info(png_name + " - " + "Score: {:6.1%} - {:s}".format(pred_score, status_str))
 
 
         # Sort into PNG dir, if they are kept
