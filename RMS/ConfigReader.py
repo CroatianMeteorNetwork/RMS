@@ -415,6 +415,10 @@ class Config:
         # Filtering by machine learning (disabled by default)
         self.ml_filter = 0.0
 
+        # Path to the ML model
+        self.ml_model_path = os.path.join(self.rms_root_dir, "share", "meteorml32.tflite")
+
+
         ##### StarExtraction
 
         # Extraction parameters

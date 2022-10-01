@@ -26,6 +26,10 @@ import RMS.ConfigReader as cr
 log = logging.getLogger("logger")
 
 
+# Suffix for unfiltered FTPdetectinfo files
+FTPDETECTINFO_UNFILTERED_SUFFIX = '_unfiltered.txt'
+
+
 def standardize_me1(a, axis=None): 
     # axis param denotes axes along which mean & std reductions are to be performed
     mean = np.mean(a, axis=axis, keepdims=True)
@@ -68,27 +72,43 @@ def classify_image(interpreter, image, top_k=1):
     return output    
 
 
-def cust_predict(file_dir, model_path):
+def classifyPNGs(file_dir, model_path):
+    """ Given a directory with PNG files of meteors, classify them into meteors vs artefacts using the ML 
+        model. 
+    """
+
+    # Load the model
     interpreter = Interpreter(model_path)
     #input_details = interpreter.get_input_details()
     #output_details = interpreter.get_output_details()
+
+    # Define the input image parameters
     interpreter.allocate_tensors()
     _, height, width, _ = interpreter.get_input_details()[0]['shape']
+
     #print("Input Shape (", width, ",", height, ")")
     # PNG images are in the '1' subfolder
     #file_dir = file_dir + '/1/'
-    prediction_list = []
-    
+
+
+    # Run predictions for every meteor detection
+    prediction_dict = {}
     for f in sorted(os.listdir(file_dir)):
+
         image = Image.open(os.path.join(file_dir, f))
+
         # rescale image size to fit the model 32x32 pixels input
         image = image.resize((width, height))
+
         # convert image to numpy array
         image = np.asarray(image, dtype=np.float32)
+
         # rescale values to (0;1)
         image = rescale_me1(image)
+
         # normalize min and max values
         image = normalize_me1(image)
+
         #image = standardize_me1(image)
         
         # Classify the image and mesaure the time
@@ -98,9 +118,12 @@ def cust_predict(file_dir, model_path):
         #classification_time = np.round(time2-time1, 3)
         #print(f'{prob:.3f}' + "\t" + Path(f).stem)
         # + "\t" + str(classification_time), " seconds.")
-        prediction_list.append((f'{prob:.3f}', Path(f).stem))
 
-    return prediction_list
+        # Save the file name and the predicted classification probability
+        prediction_dict[Path(f).stem] = prob
+
+
+    return prediction_dict
 
 
 
@@ -279,7 +302,18 @@ def crop_detections(detection_info, fits_dir):
         return None
 
 
-def gen_pngs(FTP_path, FF_dir_path):
+
+def makePNGname(fits_file_name, meteor_num):
+    """ Make a PNG name unique for each detection. """
+
+    return fits_file_name.strip('.fits').strip('.bin') + "_" + str(int(meteor_num))
+
+
+
+def makePNGCrops(FTP_path, FF_dir_path):
+    """ Take the FTPdetectinfo file and the FF files in the directory, and make PNG crops centered around
+        the detection. These will be fed into the ML algorithm.
+    """
 
     #os.chdir(FF_dir_path)
 
@@ -297,21 +331,28 @@ def gen_pngs(FTP_path, FF_dir_path):
     try:
         #read data from FTPdetectinfo file
         
-        FTP_file = FTPdetectinfo.readFTPdetectinfo(os.path.dirname(FTP_path), os.path.basename(FTP_path))
+        meteor_list = FTPdetectinfo.readFTPdetectinfo(os.path.dirname(FTP_path), os.path.basename(FTP_path))
         fits_file_list = os.listdir(FF_dir_path)
 
         #loop through each image entry in the FTPdetectinfo file and analyse each image
-        for detection_entry in FTP_file:
+        for detection_entry in meteor_list:
+
+            # Read FTPdetectinfo name and meteor number
             fits_file_name = detection_entry[0]
             meteor_num = detection_entry[2]
 
+            # Make the output PNG name
+            png_name = makePNGname(fits_file_name, meteor_num)
+
+            # If the FF file is found in the directory, make a PNG cutout
             if fits_file_name in fits_file_list:
+
                 square_crop_image = crop_detections(detection_entry, FF_dir_path)
 
                 #save the Numpy array as a png using PIL
                 im = Image.fromarray(square_crop_image)
                 im = im.convert("L")    #converts to grescale
-                im.save(os.path.join(temp_png_dir, fits_file_name[:-5] + "_" + str(int(meteor_num)) + ".png"))
+                im.save(os.path.join(temp_png_dir, png_name + ".png"))
 
             else:
                 print(f"file: {fits_file_name} not found")
@@ -319,172 +360,209 @@ def gen_pngs(FTP_path, FF_dir_path):
     except:
         print(traceback.format_exc())
 
-    return(temp_png_dir)
+    return temp_png_dir
 
 
-def filterFTPdetectinfo(file_path, threshold=0.85, keep_pngs=1):
-    """ filters meteors from artefacts
 
-    ARGUMENTS:
-        file_path: path of FTPDetectinfo file
-        threshold: threshold meteor/non-meteor classification
-        keep_pngs: whether to keep or delete the temporary PNGs
+def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=False):
+    """ Using machine learning, reject false positivies and only keep real meteors. An updated FTPdetectinfo
+        file will be saved.
+
+    Arguments:
+        ftpdetectinfo_path: [str] Path of FTPDetectinfo file.
+
+    Keyword arguments:
+        threshold: [float] Threshold meteor/non-meteor classification (0-1 range).
+        keep_pngs: [bool] Whether to keep or delete the temporary PNGs.
     
-    RETURNS:
+    Return:
         unfiltered count, filtered count
     
     """
-    # better to use __file__ to determine as the user may not be running it from
-    # the RMS folder, and concatenating paths with + is not robust on all platforms. 
-    #model_path = os.getcwd() + '/share/meteorml32.tflite'
 
-    rms_path = os.path.split(os.path.abspath(__file__))[0]
-    model_path = os.path.join(rms_path,'..','share/meteorml32.tflite')
+    # Get file name and dir path
+    dir_path, file_name = os.path.split(ftpdetectinfo_path)
 
-    # gets file name and dir path
-    dir_path, file_name = os.path.split(file_path)
 
-    config = cr.loadConfigFromDirectory('.config', os.path.abspath(dir_path))
     log.info("ML filtering starting...")
 
-    # check if the module has already been run
-    fltr_name = Path(file_name).stem + '_unfiltered.txt'
+
+    # Check if the module has already been run (the _unfiltered file already exists)
+    unfiltered_name = Path(file_name).stem + FTPDETECTINFO_UNFILTERED_SUFFIX
     orig_name = file_name
-    if os.path.isfile(os.path.join(dir_path, fltr_name)):
-        log.info('Module was previously run, using original FTPdetect file')
-        file_path = os.path.join(dir_path, fltr_name)
-        file_name = fltr_name
+
+    if os.path.isfile(os.path.join(dir_path, unfiltered_name)):
+        
+        ftpdetectinfo_path = os.path.join(dir_path, unfiltered_name)
+        file_name = unfiltered_name
+
+        log.info("Module was previously run, using the original unfiltered FTPdetect file: " \
+            + ftpdetectinfo_path)
+
     
-    # create cropped images from observations in FTPdetectinfo file
+    # Create cropped images from observations in FTPdetectinfo file
     log.info("Creating images for inference...")
-    png_dir = gen_pngs(file_path, dir_path)
+    png_dir = makePNGCrops(ftpdetectinfo_path, dir_path)
     
-    # run inference and return probabilities along with file names
+    # Run inference and return probabilities along with file names
     log.info("Inference starting...")
-    pred_list = cust_predict(png_dir, model_path)
+    prediction_dict = classifyPNGs(png_dir, config.ml_model_path)
     
     
-    # load FTPdetectioninfo file containing unfiltered detections
-    if os.path.isfile(os.path.join(dir_path, fltr_name)):
-        log.info('Unfiltered FTPdetectinfo file exists, using that')
-        FTP = FTPdetectinfo.readFTPdetectinfo(dir_path, fltr_name, True)
-    else:
-        FTP = FTPdetectinfo.readFTPdetectinfo(dir_path, file_name, True)
+    # Load the appropriate FTPdetectioninfo file containing unfiltered detections
+    cam_code, fps, meteor_list = FTPdetectinfo.readFTPdetectinfo(dir_path, file_name, ret_input_format=True)
     
 
     # create list of PNG images to be moved into subdirs later on
     png_list = []
     for f in sorted(os.listdir(png_dir)):
         png_list.append(f)
-    # create specific subdirs for easier manual confirmation
-    if keep_pngs == 1:
+
+
+    # Create meteor/artefact subdirs for easier manual confirmation
+    if keep_pngs:
+
         meteors_dir = os.path.abspath(os.path.join(png_dir, os.pardir, 'meteors'))
         artefacts_dir = os.path.abspath(os.path.join(png_dir, os.pardir, 'artefacts'))
+
         if not os.path.exists(meteors_dir):
             os.mkdir(meteors_dir)
+
         if not os.path.exists(artefacts_dir):
             os.mkdir(artefacts_dir)
+
+    # Otherwise remove any PNG directories that might already exist
     else:
         shutil.rmtree(os.path.abspath(os.path.join(png_dir, os.pardir)))
 
-    # main filtering code
-    i = 0
+
+    # Generate a list of FF files in the data directory
+    ff_list = [ff_name for ff_name in sorted(os.listdir(dir_path)) if FFfile.validFFName(ff_name)]
+
+    # Main filtering code
     FF_Filtered = []
     FTP_Filtered = []
-    for obs in FTP[2]:
-        # if there are any FITS missing, then exclude detections
-        if (i >= len(pred_list)):
-            continue
-        if obs[0][:37] != pred_list[i][1][:37]:
+    for meteor_entry in meteor_list:
+
+
+        # Get the PNG name of the meteor detection
+        png_name = makePNGname(meteor_entry[0], meteor_entry[1])
+
+
+        # If the detection doesn't have a local FF file, keep it
+        if meteor_entry[0] not in ff_list:
+
+            FTP_Filtered.append(meteor_entry)
+            FF_Filtered.append(meteor_entry[0])
+
+            log.info("A local FF file not found, keeping the detection {:s}".format(png_name))
+
             continue
 
-        # if detected as meteor or triggered by fireball detector
-        if (float(pred_list[i][0]) > threshold):
-            print(Path(png_list[i]).stem + "  " + str("{0:.1%}".format(float(pred_list[i][0]))) + ' identified as meteor...')
-            FTP_Filtered.append(obs)
-            FF_Filtered.append(obs[0])
-            if keep_pngs == 1:
-                os.replace(os.path.join(png_dir, png_list[i]), os.path.join(meteors_dir, Path(png_list[i]).stem + '_' + \
-                                                                            pred_list[i][0].replace('.','') + '.png'))
 
-        # include fireball detections
-        #elif os.path.isfile(os.path.join(dir_path, 'FR' + obs[0][2:37] + '.bin')):
-        #    print(Path(png_list[i]).stem + "  " + str("{0:.1%}".format(float(pred_list[i][0]))) + ' detected by fireball detector...')
-        #    FTP_Filtered.append(obs)
-        #    FF_Filtered.append(obs[0])
-        #    if keep_pngs == 1:
-        #        os.replace(os.path.join(png_dir, png_list[i]), os.path.join(meteors_dir, Path(png_list[i]).stem + '_' + \
-        #                                                                    pred_list[i][0].replace('.','') + '.png'))
+        # If the FF file is not classified as a meteor list, skip it
+        if png_name not in prediction_dict:
+            continue
+
+
+        # Extract the prediction score
+        pred_score = prediction_dict[png_name]
+
+        print(png_name + " - " + str("Score: {:6.1%}".format(pred_score)), end='')
+
+
+        # If the ML model thinks the detection is a meteor, keep it
+        if pred_score > threshold:
+
+            print(" - meteor")
+
+            # Add the FF file to the filtered list
+            FTP_Filtered.append(meteor_entry)
+            FF_Filtered.append(meteor_entry[0])
+
+            if keep_pngs:
+                keep_png_dir = meteors_dir
 
         else:
-            print(Path(png_list[i]).stem + "  " + str("{0:.1%}".format(float(pred_list[i][0]))) + ' identified as artefact...')
-            if keep_pngs == 1:
-                os.replace(os.path.join(png_dir, png_list[i]), os.path.join(artefacts_dir, Path(png_list[i]).stem + '_' + \
-                                                                            pred_list[i][0].replace('.','') + '.png'))
-        i += 1
-      
-    # save a copy using the threshold
-    thr_name = orig_name[:-4] + f'_{threshold:0.3f}.txt'
+            print(" - artefact")
 
-    log.info("Modifying FTPdetectinfo file for meteors only...")
-    if os.path.isfile(os.path.join(dir_path, fltr_name)):
-        log.info('Unfiltered FTPdetectinfo file already exists, not overwriting it')
-        # save a new FTPdetectinfo file containing meteors only
-        FTPdetectinfo.writeFTPdetectinfo(meteor_list=FTP_Filtered, ff_directory=dir_path, file_name=orig_name, \
-                                         cal_directory='', cam_code=config.stationID, fps=config.fps, \
-                                         calibration="Filtered by RMS on: " + str(datetime.datetime.now()), \
-                                         celestial_coords_given=True)
-        shutil.copy2(os.path.join(dir_path, orig_name), os.path.join(dir_path, thr_name))
-    else:
-        os.rename(file_path, os.path.join(dir_path, fltr_name))
-        FTPdetectinfo.writeFTPdetectinfo(meteor_list=FTP_Filtered, ff_directory=dir_path, file_name=file_name, \
-                                         cal_directory='', cam_code=config.stationID, fps=config.fps, \
-                                         calibration="Filtered by RMS on: " + str(datetime.datetime.now()), \
-                                         celestial_coords_given=True)
-        shutil.copy2(file_path, os.path.join(dir_path, thr_name))
+            if keep_pngs:
+                keep_png_dir = artefacts_dir
 
-    # save a new FTPdetectinfo file containing meteors only
-    log.info("FTPdetectinfo modified, excluded " + str(len(FTP[2])-len(FTP_Filtered)) + "/" + str(len(FTP[2])) + \
-             " records as artefacts")
+
+        # Sort into PNG dir, if they are kept
+        if keep_pngs:
+            os.replace(
+                os.path.join(png_dir, png_name + '.png'), 
+                os.path.join(
+                    keep_png_dir, 
+                    Path(png_name).stem + '_pred={:.3f}'.format(prediction_dict[png_name]) + '.png'
+                    )
+                )
+    
+
+    # Backup the original unfiltered file if it doesn't exist
+    if not os.path.isfile(os.path.join(dir_path, unfiltered_name)):
+
+        shutil.copy2(ftpdetectinfo_path, os.path.join(dir_path, unfiltered_name))
+
+
+    log.info("Saving a filtered FTPdetectinfo file...")
+
+
+
+    # Save a new FTPdetectinfo file containing meteors only
+    FTPdetectinfo.writeFTPdetectinfo(
+        meteor_list=FTP_Filtered, ff_directory=dir_path, file_name=orig_name, cal_directory='', \
+        cam_code=cam_code, fps=fps, 
+        calibration="Filtered by RMS on: " + str(datetime.datetime.now()), celestial_coords_given=True)
+        
+
+    log.info("FTPdetectinfo filtered, {:d}/{:d} detections classified as real meteors".format(
+                         len(FTP_Filtered), len(meteor_list)
+        )
+    )
 
     
-    return(FF_Filtered)
+    return FF_Filtered
      
     
 if __name__ == "__main__":
       
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Reads and filters meteors from FTPdetectInfo file.")
-    arg_parser.add_argument('file_path', nargs=1, metavar='FILE_PATH', type=str,
+
+    arg_parser.add_argument('ftpdetectinfo_path', metavar='FILE_PATH', type=str,
         help='Path to the FTPDetectInfo file.')
+
     arg_parser.add_argument('--threshold', '-t', metavar='THRESHOLD', type=float,
-        help='threshold for meteor/non-meteor classification')
-    arg_parser.add_argument('--keep_pngs', '-p', metavar='KEEPPNGS', type=int,
-        help='keep pngs (1) or delete them (0)')
+        help='threshold for meteor/non-meteor classification', default=0.85)
+
+    arg_parser.add_argument('--keep_pngs', '-p', action="store_true",
+        help='Keep the temporary PNG crops on which the ML filter is run pngs. They will be deleted by default.')
+
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
+                            help="Path to a config file which will be used instead of the default one."
+                            " To load the .config file in the given data directory, write '.' (dot).")
+
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
+
     
     #########################
 
-    dir_path = os.path.split(cml_args.file_path[0])[0]
-    config = cr.loadConfigFromDirectory('.config', dir_path)
+    # Read the config file
+    dir_path = os.path.dirname(cml_args.ftpdetectinfo_path)
+    config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
     ### Init the logger
-    from RMS.Logger import initLogging
     initLogging(config, 'reprocess_')
     log = logging.getLogger("logger")
-    
-    # threshold for filtering meteor/non-meteor detections, depends on particular model properties
-    ML_threshold = 0.95
-    if cml_args.threshold is not None: 
-        ML_threshold = cml_args.threshold
-
-    keep_pngs = 1
-    if cml_args.keep_pngs is not None:
-        keep_pngs = cml_args.keep_pngs
 
     #########################
 
-    file_path = os.path.abspath(cml_args.file_path[0])
-    filterFTPdetectinfo(file_path, ML_threshold, keep_pngs)
+
+    # Run ML filtering
+    ftpdetectinfo_path = os.path.abspath(cml_args.ftpdetectinfo_path)
+    filterFTPdetectinfoML(config, ftpdetectinfo_path, cml_args.threshold, cml_args.keep_pngs)
