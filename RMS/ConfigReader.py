@@ -1330,8 +1330,11 @@ def parseStack(config, parser):
     if not parser.has_section(section):
         return
 
-    if parser.has_option(section, "stack_mask"):
-        config.stack_mask = parser.getboolean(section, "stack_mask")
+    try:
+        if parser.has_option(section, "stack_mask"):
+            config.stack_mask = parser.getboolean(section, "stack_mask")
+    except ValueError:
+        config.stack_mask = False
 
 
 def parseColors(config, parser):
