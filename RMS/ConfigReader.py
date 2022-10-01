@@ -184,10 +184,10 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
 
 
         if config_file is None:
-            print('The config file could not be found in directory:', dir_path, cml_args_config)
-            sys.exit()
-
-
+            raise FileNotFoundError("A config file could not be found in directory: {:s}, {:s}".format(
+                dir_path, cml_args_config
+                )
+            )
 
         print('Loading config file:', config_file)
 
@@ -289,6 +289,9 @@ class Config:
         # Wait an additional time (seconds) after the capture is supposed to start. Used for multi-camera 
         #   systems for a staggered capture start
         self.capture_wait_seconds = 0
+
+        # Randomize the wait time between 0 and capture_wait_seconds. Used for multi-camera systems
+        self.capture_wait_randomize = False
 
         # Run detection and the rest of postprocessing at the end of the night, instead of parallel to capture
         self.postprocess_at_end = False
@@ -866,6 +869,10 @@ def parseCapture(config, parser):
     if parser.has_option(section, "capture_wait_seconds"):
         config.capture_wait_seconds = parser.getint(section, "capture_wait_seconds")
 
+    # Load if the capture time should be randomized
+    if parser.has_option(section, "capture_wait_randomize"):
+        config.capture_wait_randomize = parser.getboolean(section, "capture_wait_randomize")
+
 
     # Run detection and the rest of postprocessing at the end of the night, instead of in parallel to capture
     if parser.has_option(section, "postprocess_at_end"):
@@ -1328,8 +1335,11 @@ def parseStack(config, parser):
     if not parser.has_section(section):
         return
 
-    if parser.has_option(section, "stack_mask"):
-        config.stack_mask = parser.getboolean(section, "stack_mask")
+    try:
+        if parser.has_option(section, "stack_mask"):
+            config.stack_mask = parser.getboolean(section, "stack_mask")
+    except ValueError:
+        config.stack_mask = False
 
 
 def parseColors(config, parser):
