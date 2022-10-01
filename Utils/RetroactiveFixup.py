@@ -10,6 +10,7 @@ import shutil
 import datetime
 
 from RMS.Astrometry.ApplyRecalibrate import applyRecalibrate
+from RMS.Formats.FTPdetectinfo import validDefaultFTPdetectinfo
 from RMS.ConfigReader import parse as parseConfig
 
 
@@ -124,10 +125,8 @@ if __name__ == "__main__":
         ftpdetectinfo_name = None
         for file_name in sorted(os.listdir(dir_path)):
 
-            # Find FTPdetectinfo
-            if file_name.startswith("FTPdetectinfo") and file_name.endswith('.txt') and \
-                (not "backup" in file_name) and (not "uncalibrated" in file_name) and \
-                (not "unfiltered" in file_name):
+            # Find the defualt FTPdetectinfo file
+            if validDefaultFTPdetectinfo(file_name):
 
                 ftpdetectinfo_name = file_name
                 break
