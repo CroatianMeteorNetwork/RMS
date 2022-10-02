@@ -158,7 +158,13 @@ class QueuedPool(object):
         # Initialize queues (for some reason queues from Manager need to be created, otherwise they are 
         # blocking when using get_nowait)
         manager = multiprocessing.Manager()
-        self.input_queue = manager.Queue(maxsize=input_queue_maxsize)
+
+        # Only init with maxsize if given, otherwise it return a TypeErorr when fed data from Compressor
+        if input_queue_maxsize is None:
+            self.input_queue = manager.Queue()
+        else:
+            self.input_queue = manager.Queue(maxsize=input_queue_maxsize)
+
         self.output_queue = manager.Queue()
 
         self.func = func
