@@ -38,7 +38,7 @@ def generateWebsite(output_dir, index_dir, flux_showers, ref_dt, fbr_results_all
 <center>
 <head>
         <meta charset="utf-8">
-        <title>NASA flux</title>
+        <title>Meteor shower flux</title>
         <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" />
 </head>
 
@@ -51,7 +51,7 @@ def generateWebsite(output_dir, index_dir, flux_showers, ref_dt, fbr_results_all
 <tbody>
 <tr>
     <td>
-        <a href="https://www.nasa.gov/offices/meo/home/index.html" target="_blank"><img class="logo-imgl" src="https://fireballs.ndc.nasa.gov/static/nasa_logo.png" height="126" width="157" /></a>
+        <!--<a href="https://www.nasa.gov/offices/meo/home/index.html" target="_blank"><img class="logo-imgl" src="https://fireballs.ndc.nasa.gov/static/nasa_logo.png" height="126" width="157" /></a>-->
     </td>
     <td>
         <a href="https://uwo.ca/" target="_blank"><img class="logo-imgl" src="https://globalmeteornetwork.org/static/images/uwo_logo_stacked_small.png" height="126" width="119" /></a> &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; 
@@ -59,7 +59,7 @@ def generateWebsite(output_dir, index_dir, flux_showers, ref_dt, fbr_results_all
 
     <td>
         <center>
-        <p><h1 class="heading">NASA Meteor Shower <br> Flux Monitoring</h1></p>
+        <p><h1 class="heading">Meteor Shower <br> Flux Monitoring</h1></p>
                 Supporting data supplied by the <a href="https://globalmeteornetwork.org/" target="_blank">Global Meteor Network</a>
         </center>
     </td>
