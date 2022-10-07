@@ -240,7 +240,7 @@ Information about the data is provided in a section below: <a href="#about">Abou
 <footer>
 <center>Supporting data supplied by the <a href="https://globalmeteornetwork.org/" target="_blank">Global Meteor Network</a>
     <br>    
-For more information, please email <a href="mailto:MSFC-fireballs@mail.nasa.gov?Subject=Flux%20Webpage" target="_top">MSFC-fireballs@mail.nasa.gov</a></center>
+<!--For more information, please email <a href="mailto:MSFC-fireballs@mail.nasa.gov?Subject=Flux%20Webpage" target="_top">MSFC-fireballs@mail.nasa.gov</a></center>-->
 </footer>
 </body>
 </center>
