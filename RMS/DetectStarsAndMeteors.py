@@ -232,11 +232,11 @@ def detectStarsAndMeteorsDirectory(dir_path, config):
     # Check if there are any file in the directory
     if not len(ff_list):
 
-        print("No files for processing found!")
+        log.info("No files for processing found!")
         return None, None, None, None
 
 
-    print('Starting detection...')
+    log.info('Starting detection...')
 
     # Initialize the detector
     detector = QueuedPool(detectStarsAndMeteors, cores=-1, log=log, backup_dir=ff_dir)
@@ -251,7 +251,7 @@ def detectStarsAndMeteorsDirectory(dir_path, config):
             
             # Add a job as long as there are available workers to receive it
             if detector.available_workers.value() > 0:
-                print('Adding for detection:', ff_name)
+                log.info('Adding for detection: {}'.format(ff_name))
                 detector.addJob([ff_dir, ff_name, config], wait_time=0)
                 break
             else:
@@ -323,4 +323,4 @@ if __name__ == "__main__":
     # Delete backup files
     detector.deleteBackupFiles()
 
-    print('Total time taken: ', datetime.datetime.utcnow() - time_start)
+    log.info('Total time taken: {}'.format(datetime.datetime.utcnow() - time_start))
