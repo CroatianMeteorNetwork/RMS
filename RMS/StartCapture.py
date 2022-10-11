@@ -22,6 +22,7 @@ import glob
 import argparse
 import time
 import datetime
+import random
 import signal
 import shutil
 import ctypes
@@ -197,10 +198,20 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             night_data_dir_name)
 
 
+    # Determine how long to wait before the capture stars (include randomization if set)
+    capture_wait_time = config.capture_wait_seconds
+    if config.capture_wait_randomize and (config.capture_wait_seconds > 0):
+        capture_wait_time = random.randint(0, config.capture_wait_seconds)
+
     # Wait before the capture starts if a time has been given
-    if (not resume_capture) and (video_file is None):
-        log.info("Waiting {:d} seconds before capture start...".format(int(config.capture_wait_seconds)))
-        time.sleep(config.capture_wait_seconds)
+    if (not resume_capture) and (video_file is None) and ((capture_wait_time > 0) or config.capture_wait_randomize):
+
+        rand_str = ""
+        if config.capture_wait_randomize:
+            rand_str = " (randomized between 0 and {:d})".format(config.capture_wait_seconds)
+
+        log.info("Waiting {:d} seconds{:s} before capture start...".format(int(capture_wait_time), rand_str))
+        time.sleep(capture_wait_time)
 
 
     # Add a note about Patreon supporters
@@ -296,7 +307,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
         # Initialize the detector
         detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log, delay_start=delay_detection, \
-            backup_dir=night_data_dir)
+            backup_dir=night_data_dir, input_queue_maxsize=None)
         detector.startPool()
 
 
