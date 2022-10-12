@@ -588,9 +588,26 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
             shower = active_showers_dict[shower_code]
             dir_list = shower_dir_dict[shower_code]
 
+            # Load the reference height if given
             ref_height = -1
             if shower.ref_height is not None:
                 ref_height = shower.ref_height
+
+
+            # Load the binning parameters if given
+            if shower.flux_binning_params is not None:
+
+                # Select multi-year plotting options
+                if time_extent_flag == "ALL":
+                    if 'all_years' in shower.flux_binning_params:
+                        fb_bin_params = FluxBatchBinningParams(**shower.flux_binning_params['all_years'])
+
+                else:
+                    if 'yearly' in shower.flux_binning_params:
+                        fb_bin_params = FluxBatchBinningParams(**shower.flux_binning_params['yearly'])
+
+                
+
 
             # Construct the dir input list
             dir_params = [(night_dir_path, None, None, None, None, None) for night_dir_path, _ in dir_list]
