@@ -1,6 +1,7 @@
 """ Automatically runs the flux code and produces graphs on available data from multiple stations. """
 
 import os
+import gc
 import sys
 import ast
 import time
@@ -690,6 +691,12 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
         generateWebsite(output_dir, index_dir, flux_showers, ref_dt, fbr_results_all_years, 
             fbr_results_ref_year, website_plot_url)
         print("   ... done!")
+
+
+    # Free up memory
+    del fbr_results_all_years
+    del fbr_results_ref_year
+    gc.collect()
 
 
 
