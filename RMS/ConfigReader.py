@@ -50,7 +50,7 @@ def choosePlatform(win_conf, rpi_conf, linux_pc_conf):
 
 
 
-def findBinaryPath(dir_path, binary_name, binary_extension):
+def findBinaryPath(config, dir_path, binary_name, binary_extension):
     """ Given the path of the build directory and the name of the binary (without the extension!), the
         function will find the path to the binary file.
 
@@ -66,6 +66,11 @@ def findBinaryPath(dir_path, binary_name, binary_extension):
 
     if binary_extension is not None:
         binary_extension = '.' + binary_extension
+
+
+    # If the directory path from the config file doesn't exist, use the default path
+    if not os.path.exists(dir_path):
+        dir_path = config.rms_root_dir
 
 
     file_candidates = []
@@ -383,7 +388,7 @@ class Config:
         self.max_lines_det = 30 # maximum number of lines to be found on the time segment with KHT
         self.line_min_dist = 40 # Minimum distance between KHT lines in Cartesian space to merge them (used for merging similar lines after KHT)
         self.stripe_width = 20 # width of the stripe around the line
-        self.kht_build_dir = 'build'
+        self.kht_build_dir = os.path.join(self.rms_root_dir, 'RMS', 'build')
         self.kht_binary_name = 'kht_module'
         self.kht_binary_extension = 'so'
 
@@ -1161,7 +1166,7 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "kht_binary_extension"):
         config.kht_binary_extension = parser.get(section, "kht_binary_extension")
 
-    config.kht_lib_path = findBinaryPath(config.kht_build_dir, config.kht_binary_name, \
+    config.kht_lib_path = findBinaryPath(config, config.kht_build_dir, config.kht_binary_name, \
         config.kht_binary_extension)
 
 
