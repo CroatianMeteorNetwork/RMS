@@ -210,7 +210,7 @@ class Config:
     def __init__(self):
 
         # Get the package root directory
-        self.rms_root_dir = os.path.join(os.path.dirname(RMS.__file__), os.pardir)
+        self.rms_root_dir = os.path.abspath(os.path.join(os.path.dirname(RMS.__file__), os.pardir))
 
         # default config file absolute path
         self.config_file_name = os.path.join(self.rms_root_dir, '.config')
@@ -476,7 +476,7 @@ class Config:
         #### Shower association
 
         # Path to the shower file
-        self.shower_path = 'share'
+        self.shower_path = os.path.join(self.rms_root_dir, 'share')
         self.shower_file_name = 'established_showers.csv'
 
         # Path to flux showers
@@ -488,7 +488,7 @@ class Config:
 
         #### EGM96 vs WGS84 heights file
 
-        self.egm96_path = 'share'
+        self.egm96_path = os.path.join(self.rms_root_dir, 'share')
         self.egm96_file_name = 'WW15MGH.DAC'
 
         # How many degrees in solar longitude to check from the shower peak for showers that don't have
