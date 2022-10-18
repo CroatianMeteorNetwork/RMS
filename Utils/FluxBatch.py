@@ -797,9 +797,6 @@ def computeBatchFluxParallel(file_data, shower_code, mass_index, ref_ht, bin_dat
         total_summary_population_index += summary_population_index
 
 
-    # Free up memory
-    del workpool
-
     return total_all_fixed_bin_information, total_single_fixed_bin_information, total_single_station_flux, \
         total_summary_population_index
 
