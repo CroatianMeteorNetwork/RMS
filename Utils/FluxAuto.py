@@ -9,6 +9,12 @@ import copy
 
 import numpy as np
 
+
+# TEST
+from pympler import asizeof
+from pympler import tracker
+#
+
 from RMS.Astrometry.Conversions import datetime2JD
 from RMS.Formats.Showers import FluxShowers
 from RMS.Math import isAngleBetween
@@ -690,6 +696,25 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
         generateWebsite(output_dir, index_dir, flux_showers, ref_dt, fbr_results_all_years, 
             fbr_results_ref_year, website_plot_url)
         print("   ... done!")
+
+
+    ## TEST - memory
+    print("MEMORY USAGE (all years):")
+    for shower_code in fbr_results_all_years:
+        fbr = fbr_results_all_years[shower_code][0]
+        print()
+        print(shower_code)
+        print("Total size:", asizeof.asizeof(fbr)/(1024**2), "MB")
+        for key in fbr.__dict__:
+            value = fbr.__dict__[key]
+            print(key, asizeof.asizeof(value)/(1024**2), "MB")
+
+
+    # Information about all objects
+    tr = tracker.SummaryTracker()
+    tr.print_diff()  
+
+    ##
 
 
 
