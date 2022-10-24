@@ -22,6 +22,7 @@ import glob
 import argparse
 import time
 import datetime
+import random
 import signal
 import shutil
 import ctypes
@@ -190,6 +191,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         # Resume run is finished now, reset resume flag
         cml_args.resume = False
 
+
     # Make a name for the capture data directory
     if night_data_dir_name is None:
 
@@ -206,11 +208,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, \
             night_data_dir_name)
 
-
-    # Wait before the capture starts if a time has been given
-    if (not resume_capture) and (video_file is None):
-        log.info("Waiting {:d} seconds before capture start...".format(int(config.capture_wait_seconds)))
-        time.sleep(config.capture_wait_seconds)
 
 
     # Add a note about Patreon supporters
@@ -306,7 +303,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
         # Initialize the detector
         detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log, delay_start=delay_detection, \
-            backup_dir=night_data_dir)
+            backup_dir=night_data_dir, input_queue_maxsize=None)
         detector.startPool()
 
 
@@ -986,6 +983,24 @@ if __name__ == "__main__":
             slideshow_view.join()
             del slideshow_view
             slideshow_view = None
+
+
+
+        # Determine how long to wait before the capture stars (include randomization if set)
+        capture_wait_time = config.capture_wait_seconds
+        if config.capture_wait_randomize and (config.capture_wait_seconds > 0):
+            capture_wait_time = random.randint(0, config.capture_wait_seconds)
+
+        # Wait before the capture starts if a time has been given
+        if (not cml_args.resume) and ((capture_wait_time > 0) or config.capture_wait_randomize):
+
+            rand_str = ""
+            if config.capture_wait_randomize:
+                rand_str = " (randomized between 0 and {:d})".format(config.capture_wait_seconds)
+
+            log.info("Waiting {:d} seconds{:s} before capture start...".format(int(capture_wait_time), rand_str))
+            time.sleep(capture_wait_time)
+
 
 
         log.info('Freeing up disk space...')

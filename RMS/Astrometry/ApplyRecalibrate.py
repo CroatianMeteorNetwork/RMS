@@ -70,7 +70,13 @@ def loadRecalibratedPlatepar(dir_path, config, file_list=None, type='meteor'):
     # Find and load recalibrated platepars
     if platepar_file_name in file_list:
         with open(os.path.join(dir_path, platepar_file_name)) as f:
-            recalibrated_platepars_dict = json.load(f)
+
+            try:
+                # Load the JSON file with recalibrated platepars
+                recalibrated_platepars_dict = json.load(f)
+            
+            except json.decoder.JSONDecodeError:
+                return None
 
             log.info("Recalibrated platepars loaded!")
             # Convert the dictionary of recalibrated platepars to a dictionary of Platepar objects

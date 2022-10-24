@@ -40,40 +40,6 @@ from RMS.CompressionCy import compressFrames
 log = logging.getLogger("logger")
 
 
-# class CompressorHandler(object):
-#     def __init__(self, data_dir, array1, startTime1, array2, startTime2, config, detector=None, 
-#         flat_struct=None):
-#         """ Handles starting and restarting compressor objects. See the Compressor class for details. 
-            
-#             This object had a 'compressor' property which is the Compressor class instance once it has been
-#             started.
-#         """
-
-#         self.data_dir = data_dir
-#         self.array1 = array1
-#         self.startTime1 = startTime1
-#         self.array2 = array2
-#         self.startTime2 = startTime2
-#         self.config = config
-
-#         self.detector = detector
-#         self.flat_struct = flat_struct
-
-#         self.compressor = None
-
-
-#     def init_compressor(self):
-#         """ Starts a compressor instance with the inited parameters. """
-
-#         self.compressor = Compressor(self.data_dir, self.array1, self.startTime1, self.array2, \
-#             self.startTime2, self.config, detector=self.detector, \
-#             flat_struct=self.flat_struct)
-
-#         return self.compressor
-
-
-
-
 class Compressor(multiprocessing.Process):
     """Compress list of numpy arrays (video frames).
 
