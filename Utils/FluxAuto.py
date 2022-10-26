@@ -13,6 +13,8 @@ import numpy as np
 # TEST
 from pympler import asizeof
 from pympler import tracker
+
+from memory_profiler import profile
 #
 
 from RMS.Astrometry.Conversions import datetime2JD
@@ -309,7 +311,7 @@ def loadExcludedStations(dir_path, excluded_stations_file="excluded_stations.txt
         return excluded_stations
 
 
-
+#@profile
 def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_dir=None, output_dir=None, 
     csv_dir=None, index_dir=None, generate_website=False, website_plot_url=None, shower_code=None, \
     cpu_cores=1, excluded_stations_file="excluded_stations.txt"):
@@ -713,6 +715,10 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
     # Information about all objects
     tr = tracker.SummaryTracker()
     tr.print_diff()  
+
+
+    # Wait so the memory can be quantified
+    input()
 
     ##
 

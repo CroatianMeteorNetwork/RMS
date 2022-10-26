@@ -11,6 +11,14 @@ import copy
 import configparser
 import multiprocessing    
 
+
+# TEST
+from memory_profiler import profile
+import resource
+from pympler import asizeof
+import gc
+#
+
 import ephem
 import numpy as np
 import scipy
@@ -746,6 +754,7 @@ def computeFluxPerStation(file_entry, metadata_dir, shower_code, mass_index, ref
 
 
 
+#@profile
 def computeBatchFluxParallel(file_data, shower_code, mass_index, ref_ht, bin_datetime_yearly, sol_bins, ci, \
     compute_single, metadata_dir, cpu_cores=1):
     """ Compute flux in batch by distributing the computations on multiple CPU cores. 
@@ -754,47 +763,121 @@ def computeBatchFluxParallel(file_data, shower_code, mass_index, ref_ht, bin_dat
     if cpu_cores < 0:
         cpu_cores = multiprocessing.cpu_count()
 
-    # Run the QueuedPool for detection (limit the input queue size for better memory management)
-    workpool = QueuedPool(computeFluxPerStation, cores=cpu_cores, backup_dir=None, \
-        func_extra_args=(shower_code, mass_index, ref_ht, bin_datetime_yearly, sol_bins, ci, compute_single),
-        input_queue_maxsize=2*cpu_cores, worker_wait_inbetween_jobs=0.01,
-        )
 
-    print('Starting pool...')
-
-    # Start the detection
-    workpool.startPool()
-
-    print('Adding jobs...')
-
-    # Add jobs for the pool
-    for file_entry in file_data:
-        workpool.addJob([file_entry, metadata_dir], wait_time=0)
+    # If only one core is given, don't use multiprocessing
+    if cpu_cores == 1:
 
 
-    print('Waiting for the batch flux computation to finish...')
+        # TEST
+        prev_proc_memory = 0
+        prev_lists_memory = 0
 
-    # Wait for the detector to finish and close it
-    workpool.closePool()
+        # Total memory usage at the beginning
+        gc.collect()
+        first_proc_memory = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024
 
-    total_all_fixed_bin_information = []
-    total_single_fixed_bin_information = []
-    total_single_station_flux = []
-    total_summary_population_index = []
+        #
 
-    # Get extraction results
-    for result in workpool.getResults():
+        total_all_fixed_bin_information = []
+        total_single_fixed_bin_information = []
+        total_single_station_flux = []
+        total_summary_population_index = []
 
-        if result is None:
-            continue
+        for file_entry in file_data:
 
-        all_fixed_bin_information, single_fixed_bin_information, single_station_flux, \
-            summary_population_index = result
+            # Compute the flux per each station
+            (
+                all_fixed_bin_information, 
+                single_fixed_bin_information, 
+                single_station_flux,
+                summary_population_index
+            ) = computeFluxPerStation(
+                file_entry, 
+                metadata_dir, 
+                shower_code, 
+                mass_index, 
+                ref_ht, 
+                bin_datetime_yearly, 
+                sol_bins, 
+                ci, 
+                compute_single
+                )
 
-        total_all_fixed_bin_information += all_fixed_bin_information
-        total_single_fixed_bin_information += single_fixed_bin_information
-        total_single_station_flux += single_station_flux
-        total_summary_population_index += summary_population_index
+            total_all_fixed_bin_information += all_fixed_bin_information
+            total_single_fixed_bin_information += single_fixed_bin_information
+            total_single_station_flux += single_station_flux
+            total_summary_population_index += summary_population_index
+
+
+            # TEST
+
+            # Print the total process memory usage in MB
+            print()
+            proc_memory = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024
+            print("PROCESS MEMORY  = {:.2f} MB".format(proc_memory))
+            print("loop difference = {:.2f} MB".format(proc_memory - prev_proc_memory))
+            print("since beginning = {:.2f} MB".format(proc_memory - first_proc_memory))
+            prev_proc_memory = proc_memory
+
+            # Compute the size of all lists
+            lists_memory = sum([asizeof.asizeof(lst)/(1024**2) for lst in [total_all_fixed_bin_information, total_single_fixed_bin_information, total_single_station_flux, total_summary_population_index]])
+            print("LISTS MEMORY    = {:.2f} MB".format(lists_memory))
+            print("    difference  = {:.2f} MB".format(lists_memory - prev_lists_memory))
+            prev_lists_memory = lists_memory
+
+
+        # Total memory difference from the beginning
+        gc.collect()
+        print("FINAL")
+        print("proc difference = {:.2f} MB".format(proc_memory - first_proc_memory))
+        print("list size       = {:.2f} MB".format(lists_memory))
+        #
+
+
+    # Use multiple cores
+    else:
+
+        # Run the QueuedPool for detection (limit the input queue size for better memory management)
+        workpool = QueuedPool(computeFluxPerStation, cores=cpu_cores, backup_dir=None, \
+            func_extra_args=(shower_code, mass_index, ref_ht, bin_datetime_yearly, sol_bins, ci, compute_single),
+            input_queue_maxsize=2*cpu_cores, worker_wait_inbetween_jobs=0.01,
+            )
+
+        print('Starting pool...')
+
+        # Start the detection
+        workpool.startPool()
+
+        print('Adding jobs...')
+
+        # Add jobs for the pool
+        for file_entry in file_data:
+            workpool.addJob([file_entry, metadata_dir], wait_time=0)
+
+
+        print('Waiting for the batch flux computation to finish...')
+
+        # Wait for the detector to finish and close it
+        workpool.closePool()
+
+        total_all_fixed_bin_information = []
+        total_single_fixed_bin_information = []
+        total_single_station_flux = []
+        total_summary_population_index = []
+
+        # Get extraction results
+        for result in workpool.getResults():
+
+            if result is None:
+                continue
+
+            all_fixed_bin_information, single_fixed_bin_information, single_station_flux, \
+                summary_population_index = result
+
+            total_all_fixed_bin_information += all_fixed_bin_information
+            total_single_fixed_bin_information += single_fixed_bin_information
+            total_single_station_flux += single_station_flux
+            total_summary_population_index += summary_population_index
 
 
     return total_all_fixed_bin_information, total_single_fixed_bin_information, total_single_station_flux, \
@@ -1687,11 +1770,17 @@ if __name__ == "__main__":
     # Print camera tally #
     print()
 
-    # Save the per-camera tally results
-    tally_string = reportCameraTally(fbr, top_n_stations=5)
-    print(tally_string)
-    with open(os.path.join(dir_path, fluxbatch_cml_args.output_filename + "_camera_tally.txt"), 'w') as f:
-        f.write(tally_string)
+
+    ### TEST - disabed!
+
+    # # Save the per-camera tally results
+    # tally_string = reportCameraTally(fbr, top_n_stations=5)
+    # print(tally_string)
+    # with open(os.path.join(dir_path, fluxbatch_cml_args.output_filename + "_camera_tally.txt"), 'w') as f:
+    #     f.write(tally_string)
+
+
+    ###
 
     # Show and save the batch flux plot
     plotBatchFlux(
