@@ -50,7 +50,7 @@ def choosePlatform(win_conf, rpi_conf, linux_pc_conf):
 
 
 
-def findBinaryPath(dir_path, binary_name, binary_extension):
+def findBinaryPath(config, dir_path, binary_name, binary_extension):
     """ Given the path of the build directory and the name of the binary (without the extension!), the
         function will find the path to the binary file.
 
@@ -66,6 +66,11 @@ def findBinaryPath(dir_path, binary_name, binary_extension):
 
     if binary_extension is not None:
         binary_extension = '.' + binary_extension
+
+
+    # If the directory path from the config file doesn't exist, use the default path
+    if not os.path.exists(dir_path):
+        dir_path = config.rms_root_dir
 
 
     file_candidates = []
@@ -184,10 +189,10 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
 
 
         if config_file is None:
-            print('The config file could not be found in directory:', dir_path, cml_args_config)
-            sys.exit()
-
-
+            raise FileNotFoundError("A config file could not be found in directory: {:s}, {:s}".format(
+                dir_path, cml_args_config
+                )
+            )
 
         print('Loading config file:', config_file)
 
@@ -210,7 +215,7 @@ class Config:
     def __init__(self):
 
         # Get the package root directory
-        self.rms_root_dir = os.path.join(os.path.dirname(RMS.__file__), os.pardir)
+        self.rms_root_dir = os.path.abspath(os.path.join(os.path.dirname(RMS.__file__), os.pardir))
 
         # default config file absolute path
         self.config_file_name = os.path.join(self.rms_root_dir, '.config')
@@ -293,6 +298,9 @@ class Config:
         # Wait an additional time (seconds) after the capture is supposed to start. Used for multi-camera 
         #   systems for a staggered capture start
         self.capture_wait_seconds = 0
+
+        # Randomize the wait time between 0 and capture_wait_seconds. Used for multi-camera systems
+        self.capture_wait_randomize = False
 
         # Run detection and the rest of postprocessing at the end of the night, instead of parallel to capture
         self.postprocess_at_end = False
@@ -384,7 +392,7 @@ class Config:
         self.max_lines_det = 30 # maximum number of lines to be found on the time segment with KHT
         self.line_min_dist = 40 # Minimum distance between KHT lines in Cartesian space to merge them (used for merging similar lines after KHT)
         self.stripe_width = 20 # width of the stripe around the line
-        self.kht_build_dir = 'build'
+        self.kht_build_dir = os.path.join(self.rms_root_dir, 'RMS', 'build')
         self.kht_binary_name = 'kht_module'
         self.kht_binary_extension = 'so'
 
@@ -477,7 +485,7 @@ class Config:
         #### Shower association
 
         # Path to the shower file
-        self.shower_path = 'share'
+        self.shower_path = os.path.join(self.rms_root_dir, 'share')
         self.shower_file_name = 'established_showers.csv'
 
         # Path to flux showers
@@ -489,7 +497,7 @@ class Config:
 
         #### EGM96 vs WGS84 heights file
 
-        self.egm96_path = 'share'
+        self.egm96_path = os.path.join(self.rms_root_dir, 'share')
         self.egm96_file_name = 'WW15MGH.DAC'
 
         # How many degrees in solar longitude to check from the shower peak for showers that don't have
@@ -873,6 +881,10 @@ def parseCapture(config, parser):
     if parser.has_option(section, "capture_wait_seconds"):
         config.capture_wait_seconds = parser.getint(section, "capture_wait_seconds")
 
+    # Load if the capture time should be randomized
+    if parser.has_option(section, "capture_wait_randomize"):
+        config.capture_wait_randomize = parser.getboolean(section, "capture_wait_randomize")
+
 
     # Run detection and the rest of postprocessing at the end of the night, instead of in parallel to capture
     if parser.has_option(section, "postprocess_at_end"):
@@ -1164,7 +1176,7 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "kht_binary_extension"):
         config.kht_binary_extension = parser.get(section, "kht_binary_extension")
 
-    config.kht_lib_path = findBinaryPath(config.kht_build_dir, config.kht_binary_name, \
+    config.kht_lib_path = findBinaryPath(config, config.kht_build_dir, config.kht_binary_name, \
         config.kht_binary_extension)
 
 
@@ -1333,8 +1345,11 @@ def parseStack(config, parser):
     if not parser.has_section(section):
         return
 
-    if parser.has_option(section, "stack_mask"):
-        config.stack_mask = parser.getboolean(section, "stack_mask")
+    try:
+        if parser.has_option(section, "stack_mask"):
+            config.stack_mask = parser.getboolean(section, "stack_mask")
+    except ValueError:
+        config.stack_mask = False
 
 
 def parseColors(config, parser):

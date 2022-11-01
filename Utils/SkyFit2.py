@@ -4720,7 +4720,12 @@ class PlateTool(QtWidgets.QMainWindow):
         ) = plt.subplots(ncols=3, nrows=2, facecolor=None, figsize=(12, 6))
 
         # Set figure title
-        fig_a.canvas.set_window_title("Astrometry fit")
+        try:
+            fig_a.canvas.set_window_title("Astrometry fit")
+
+        except AttributeError:
+            # Handle FigureCanvasQTAgg error on some versions of Qt
+            print("Failed to set the window title!")
 
         # Plot azimuth vs azimuth error
         ax_azim.scatter(azim_list, 60*np.array(azim_residuals), s=2, c='k', zorder=3)
