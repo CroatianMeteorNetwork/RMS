@@ -497,7 +497,7 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
                 os.path.join(png_dir, png_name + '.png'), 
                 os.path.join(
                     keep_png_dir, 
-                    Path(png_name).stem + '_pred={:.3f}'.format(prediction_dict[png_name]) + '.png'
+                    Path(png_name).stem + '_p-{:.3f}'.format(prediction_dict[png_name]) + '.png'
                     )
                 )
     
