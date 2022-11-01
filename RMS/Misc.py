@@ -485,3 +485,55 @@ def formatScientific(val, dec_places):
     m, e = s.split('e')
 
     return r'{m:s}\times 10^{{{e:d}}}'.format(m=m, e=int(e))
+
+
+
+def roundToSignificantDigits(x, n=2):
+    """ Round the number to N significant digits. """
+
+    def _decimalPlace(x, n):
+        return -int(np.floor(np.log10(x))) + (n - 1)
+
+    def _round(x, n, dec_place=None):
+
+        # Don't try to round zeros
+        if x == 0:
+            return x
+
+        # Compute the decimal place if not given
+        if dec_place is None:
+            dec_place = _decimalPlace(x, n)
+
+
+        return np.round(x, dec_place)
+
+
+    ### Compute the decimal place to round to ###
+
+    # Run on only one number
+    if np.isscalar(x):
+        out = _round(x, n)
+
+    else:
+        out = []
+
+        # If a list is given, determine the smallest decimal place for all numbers
+        for num in x:
+            dec_places = [_decimalPlace(num, n) for num in x if num != 0]
+
+        # Handle the cases when all numbers are 0
+        if len(dec_places):
+            # Compute the smallest decimal place
+            common_dec_place = np.max(dec_places)
+        else:
+            common_dec_place = 0
+
+        # Compute the rounded numbers
+        for num in x:
+            out.append(_round(num, n, dec_place=common_dec_place))
+
+        out = np.array(out)
+
+    ### ###
+
+    return out
