@@ -23,6 +23,7 @@ from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2Apparent
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
 import RMS.ConfigReader as cr
+from RMS.ExtractStars import extractStarsAndSave
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
 from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
@@ -39,6 +40,16 @@ from RMS.Routines import RollingShutterCorrection
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
+
+
+
+def convertFRNameToFF(fr_name):
+    """ Convert the FR name format to an FF format. """
+
+    if fr_name.startswith("FR_") and fr_name.endswith(".bin"):
+        fr_name = fr_name.replace("FR_", "FF_", 1).replace(".bin", ".fits")
+
+    return fr_name
 
 
 class QFOVinputDialog(QtWidgets.QDialog):
@@ -1559,11 +1570,14 @@ class PlateTool(QtWidgets.QMainWindow):
     def updateCalstars(self):
         """ Draw extracted stars on the current image. """
 
+        # Handle using FR files
+        ff_name_c = convertFRNameToFF(self.img_handle.name())
+
         # Check if the given FF files is in the calstars list
-        if self.img_handle.name() in self.calstars:
+        if ff_name_c in self.calstars:
 
             # Get the stars detected on this FF file
-            star_data = np.array(self.calstars[self.img_handle.name()])
+            star_data = np.array(self.calstars[ff_name_c])
 
             # Get star coordinates
             y = star_data[:, 0]
@@ -2482,10 +2496,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
                             calstars_centroid = False
                             if self.img_handle is not None:
-                                if self.img_handle.name() in self.calstars:
+
+                                # Handle using FR files too
+                                ff_name_c = convertFRNameToFF(self.img_handle.name())
+
+                                if ff_name_c in self.calstars:
 
                                     # Get the stars detected on this FF file
-                                    star_data = np.array(self.calstars[self.img_handle.name()])
+                                    star_data = np.array(self.calstars[ff_name_c])
 
                                     if len(star_data):
 
@@ -3648,11 +3666,14 @@ class PlateTool(QtWidgets.QMainWindow):
         # Construct FOV width estimate
         fov_w_range = [0.5*self.config.fov_w, 2*self.config.fov_w]
 
+        # Handle using FR files too
+        ff_name_c = convertFRNameToFF(self.img_handle.name())
+
         # Check if the given FF files is in the calstars list
-        if (self.img_handle.name() in self.calstars) and (not upload_image):
+        if (ff_name_c in self.calstars) and (not upload_image):
 
             # Get the stars detected on this FF file
-            star_data = np.array(self.calstars[self.img_handle.name()])
+            star_data = np.array(self.calstars[ff_name_c])
 
             # Make sure that there are at least 10 stars
             if len(star_data) < 10:
@@ -3847,17 +3868,28 @@ class PlateTool(QtWidgets.QMainWindow):
                             message='CALSTARS file could not be found in the given directory!',
                             message_type="info")
 
-            self.calstars = {}
+                self.calstars = {}
+
+                return None
+
+
+            # Try generating CALSTARS automatically
+            else:
+
+                print("The CALSTARS file is missing, trying to generate it automatically...")
+                calstars_list = extractStarsAndSave(self.config, self.dir_path)
+
 
         else:
 
             # Load the calstars file
             calstars_list = CALSTARS.readCALSTARS(self.dir_path, calstars_file)
 
-            # Convert the list to a dictionary
-            self.calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
-
             print('CALSTARS file: ' + calstars_file + ' loaded!')
+
+
+        # Convert the list to a dictionary
+        self.calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
 
     def reloadGeoPoints(self):
