@@ -45,7 +45,7 @@ def plotFOVSkyMap(platepars, out_dir, masks=None):
         print("Computing FOV for {:s}".format(pp.station_code))
 
         # Compute the edges of the
-        side_points_latlon = fovArea(pp, mask=mask, area_ht=ref_ht, side_points=10, elev_limit=0)
+        side_points_latlon = fovArea(pp, mask=mask, area_ht=ref_ht, side_points=50, elev_limit=0)
 
         # Convert the station location to ECEF
         s_vect = np.array(latLonAlt2ECEF(np.radians(pp.lat), np.radians(pp.lon), pp.elev))
