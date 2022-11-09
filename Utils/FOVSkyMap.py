@@ -76,6 +76,9 @@ def plotFOVSkyMap(platepars, out_dir, masks=None):
         # Plot the FOV alt/az
         line_handle, = ax.plot(np.radians(azims), alts, alpha=0.75)
 
+        # Fill the FOV
+        ax.fill(np.radians(azims), alts, color='0.5', alpha=0.3)
+
 
         # Plot the station name at the middle of the FOV
         ax.text(np.radians(pp.az_centre), pp.alt_centre, pp.station_code, va='center', ha='center', 
