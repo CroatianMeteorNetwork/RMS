@@ -1,23 +1,27 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.ticker import StrMethodFormatter
 
 from RMS.Routines.FOVArea import fovArea
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, ECEF2AltAz
 
 
-def plotFOVSkyMap(platepars, masks=None):
+def plotFOVSkyMap(platepars, out_dir, masks=None):
     """ Plot all given platepar files on an Alt/Az sky map. 
     
 
     Arguments:
         platepars: [dict] A dictionary of Platepar objects where keys are station codes.
+        out_dir: [str] Path to where the graph will be saved.
 
     Keyword arguments:
         masks: [dict] A dictionary of mask objects where keys are station codes.
 
     """
 
+    # Change plotting style
+    plt.style.use('ggplot')
 
     # Init an alt/az polar plot
     fig, ax = plt.subplots(subplot_kw={'projection': 'polar'}, figsize=(8, 8))
@@ -63,21 +67,34 @@ def plotFOVSkyMap(platepars, masks=None):
                 alts.append(alt)
 
 
+        # If the polygon is not closed, close it
+        if (azims[0] != azims[-1]) or (alts[0] != alts[-1]):
+            azims.append(azims[0])
+            alts.append(alts[0])
+
+
+        # Plot the FOV alt/az
+        line_handle, = ax.plot(np.radians(azims), alts, alpha=0.75)
+
 
         # Plot the station name at the middle of the FOV
         ax.text(np.radians(pp.az_centre), pp.alt_centre, pp.station_code, va='center', ha='center', 
-            color='k', alpha=0.75)
-
-        # Plot the FOV alt/az
-        ax.plot(np.radians(azims), alts, alpha=0.75)
+            color=line_handle.get_color(), weight='bold', size=8)
 
 
-    ax.grid(True, color='0.9')
+    ax.grid(True, color='0.98')
     ax.set_xlabel("Azimuth (deg)")
+    ax.yaxis.set_major_formatter(StrMethodFormatter(u"{x:.0f}°"))
+    ax.tick_params(axis='y', which='major', labelsize=8, direction='out')
 
     plt.tight_layout()
 
-    plt.show()
+
+    # Save the plot to disk
+    plot_file_name = "fov_sky_map.png"
+    plot_path = os.path.join(out_dir, plot_file_name)
+    plt.savefig(plot_path, dpi=150)
+    print("FOV sky map saved to: {:s}".format(plot_path))
 
 
 
@@ -147,7 +164,7 @@ if __name__ == "__main__":
 
 
     # Plot all plateaprs on an alt/az sky map
-    plotFOVSkyMap(platepars, masks=masks)
+    plotFOVSkyMap(platepars, cml_args.dir_path, masks=masks)
 
             
 
