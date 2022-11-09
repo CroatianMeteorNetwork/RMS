@@ -304,9 +304,9 @@ def loadExcludedStations(dir_path, excluded_stations_file="excluded_stations.txt
 
 
 
-def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_dir=None, output_dir=None, 
-    csv_dir=None, index_dir=None, generate_website=False, website_plot_url=None, shower_code=None, \
-    cpu_cores=1, excluded_stations_file="excluded_stations.txt"):
+def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_year_limit=3, \
+    metadata_dir=None, output_dir=None, csv_dir=None, index_dir=None, generate_website=False, 
+    website_plot_url=None, shower_code=None, cpu_cores=1, excluded_stations_file="excluded_stations.txt"):
     """ Given the reference time, automatically identify active showers and produce the flux graphs and
         CSV files.
 
@@ -319,6 +319,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
     Keyword arguments:
         days_prev: [int] Produce graphs for showers active N days before.
         days_next: [int] Produce graphs for showers active N days in the future.
+        all_prev_year_limit: [int] Only go back N years for the all data plot.
         metadata_dir: [str] A separate directory for flux metadata. If not given, the data directory will be
             used.
         output_dir: [str] Directory where the final data products will be saved. If None, data_path directory
@@ -514,6 +515,11 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
             # Make sure the directory time is after 2018 (to avoid 1970 unix time 0 dirs)
             #   2018 is when the GMN was established
             if dir_dt.year < 2018:
+                continue
+
+            # Skip dirs that are too old to add to the all year plot
+            if (ref_dt.year - dir_dt.year) > all_prev_year_limit:
+                print("Skipping due to {:d} year limit: {:s}".format(all_prev_year_limit))
                 continue
 
             # Compute the solar longitude of the directory time stamp
