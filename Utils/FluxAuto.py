@@ -518,7 +518,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
                 continue
 
             # Skip dirs that are too old to add to the all year plot
-            if (ref_dt.year - dir_dt.year) > all_prev_year_limit:
+            if (ref_dt.year - dir_dt.year) >= all_prev_year_limit:
                 print("Skipping due to {:d} year limit: {:s}".format(all_prev_year_limit))
                 continue
 
