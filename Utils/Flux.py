@@ -1694,7 +1694,8 @@ def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_f
         print()
 
         # Run star extraction again, and now FWHM will be computed
-        calstars_list = extractStarsAndSave(config, dir_path)
+        _, calstars_name = extractStarsAndSave(config, dir_path)
+        calstars_list = CALSTARS.readCALSTARS(dir_path, calstars_name)
 
         # Check for a minimum of detected stars
         for ff_name, star_data in calstars_list:

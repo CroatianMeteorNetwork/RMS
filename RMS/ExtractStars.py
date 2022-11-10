@@ -524,7 +524,7 @@ def extractStarsAndSave(config, ff_dir):
     print('Total time taken: {:.2f} s'.format(time.time() - time_start))
 
 
-    return star_list
+    return star_list, calstars_name
 
 
 
@@ -565,7 +565,7 @@ if __name__ == "__main__":
 
 
     # Run extraction and save the resulting CALSTARS file
-    star_list = extractStarsAndSave(config, ff_dir)
+    star_list, calstars_name = extractStarsAndSave(config, ff_dir)
 
 
     fwhm_list = []
