@@ -498,7 +498,7 @@ def extractStarsAndSave(config, ff_dir):
 
 
         # Construct the table of the star parameters
-        star_data = list(zip(x2, y2, amplitude, intensity, fwhm_data))
+        star_data = list(zip(y2, x2, amplitude, intensity, fwhm_data))
 
         # Add star info to the star list
         star_list.append([ff_name, star_data])
@@ -524,7 +524,7 @@ def extractStarsAndSave(config, ff_dir):
     print('Total time taken: {:.2f} s'.format(time.time() - time_start))
 
 
-    return star_list, calstars_name
+    return star_list
 
 
 
@@ -565,7 +565,7 @@ if __name__ == "__main__":
 
 
     # Run extraction and save the resulting CALSTARS file
-    star_list, calstars_name = extractStarsAndSave(config, ff_dir)
+    star_list = extractStarsAndSave(config, ff_dir)
 
 
     fwhm_list = []

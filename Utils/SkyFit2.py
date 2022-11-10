@@ -3877,8 +3877,7 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
 
                 print("The CALSTARS file is missing, trying to generate it automatically...")
-                _, calstars_name = extractStarsAndSave(self.config, self.dir_path)
-                calstars_list = CALSTARS.readCALSTARS(self.dir_path, calstars_name)
+                calstars_list = extractStarsAndSave(self.config, self.dir_path)
 
 
         else:
