@@ -204,6 +204,7 @@ class UploadManager(multiprocessing.Process):
         self.config = config
 
         self.file_queue = Queue.Queue()
+        self.queue_lock = multiprocessing.Lock()
         self.exit = multiprocessing.Event()
         self.upload_in_progress = multiprocessing.Value(ctypes.c_bool, False)
 
@@ -329,6 +330,28 @@ class UploadManager(multiprocessing.Process):
                         f.write(file_name + '\n')
 
 
+        def removeFromQueue(self, item):
+            """ Remove a specific entry from the file upload queue. """
+
+            with self.queue_lock:
+
+                temp_list = []
+                while self.file_queue.qsize() > 0:
+
+                    # Get a file from the queue
+                    file_name = self.file_queue.get()
+
+                    # If the file is identical to the given item, skip it
+                    if file_name == item:
+                        continue
+
+                    # Store the non-matching names
+                    temp_list.append(file_name)
+
+                # Put all other entries back into the file queue
+                for entry in reversed(temp_list):
+                    self.file_queue.put(entry)
+
 
 
     def uploadData(self, retries=5):
@@ -365,9 +388,17 @@ class UploadManager(multiprocessing.Process):
             upload_status = uploadSFTP(self.config.hostname, self.config.stationID.lower(), data_path, \
                 self.config.remote_dir, [f_name], rsa_private_key=self.config.rsa_private_key)
 
+            # Reload the queue, in case the file took very long to upload and more were added
+            self.loadQueue()
+
             # If the upload was successful, rewrite the holding file, which will remove the uploaded file
             if upload_status:
                 log.info('Upload successful!')
+
+                # Remove the uploaded file from the queue
+                self.removeFromQueue(file_name)
+
+                # Save the updated queue
                 self.saveQueue(overwrite=True)
                 tries = 0
 
