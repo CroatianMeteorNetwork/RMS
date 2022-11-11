@@ -683,6 +683,18 @@ if __name__ == "__main__":
     setSIGINT()
 
 
+
+    ### Istrastream reboot flag fix ###
+
+    # If the Istrastream script is used as an external script, force a reboot after it's done even if
+    #   the reboot flag is disabled in the config file
+    if "iStream.py" in config.external_script_path:
+        print("Forcing reboot after the Istrastream script...")
+        config.reboot_after_processing = True
+
+    ### ###
+
+
     # Make the data directories
     root_dir = os.path.abspath(config.data_dir)
     mkdirP(root_dir)
