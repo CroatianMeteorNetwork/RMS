@@ -29,6 +29,20 @@ from RMS.Misc import mkdirP
 log = logging.getLogger("logger")
 
 
+def checkremote(size, file_size):
+    """ try a stat on remote file, if it fails then something is wrong
+
+    Arguments:
+       size: [int] bytes transferred so far
+       file_size: [int] bytes to be transferred
+    """
+    try:
+        #if this succeeds all is well
+        sftp.lstat(remote_file)
+    except:
+        log.error('Transfer of ' + remote_file +  ' has failed. Suspect remote file moved or deleted.')
+        t.close()
+
 def _agentAuth(transport, username, rsa_private_key):
     """ Attempt to authenticate to the given transport using any of the private keys available from an SSH 
         agent or from a local private RSA key file (assumes no pass phrase).
@@ -106,7 +120,9 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
 
         log.info('Establishing SSH connection to: ' + hostname + ':' + str(port) + '...')
 
+
         # Connect to host
+        global t
         t = paramiko.Transport((hostname, port))
         t.start_client()
 
@@ -116,6 +132,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
             return False
 
         # Open new SFTP connection
+        global sftp
         sftp = paramiko.SFTPClient.from_transport(t)
 
         # Check that the remote directory exists
@@ -135,7 +152,8 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
             # Get the size of the local file
             local_file_size = os.lstat(local_file).st_size
 
-            # Path to the remove file
+            # Path to the remote file
+            global remote_file
             remote_file = dir_remote + '/' + os.path.basename(fname)
 
             # Check if the remote file already exists and skip it if it has the same size as the local file
@@ -154,8 +172,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
             
             # Upload the file to the server if it isn't already there
             log.info('Copying ' + local_file + ' to ' + remote_file)
-            sftp.put(local_file, remote_file)
-
+            sftp.put(local_file, remote_file, callback=checkremote)
 
             # Check that the size of the remote file is correct, indicating a successful upload
             try:
@@ -228,6 +245,7 @@ class UploadManager(multiprocessing.Process):
         """ Starts the upload manager. """
 
         super(UploadManager, self).start()
+        # Declare the counter
 
 
 
