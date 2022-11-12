@@ -174,6 +174,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
             log.info('Copying ' + local_file + ' to ' + remote_file)
             sftp.put(local_file, remote_file, callback=checkremote)
 
+
             # Check that the size of the remote file is correct, indicating a successful upload
             try:
                 remote_info = sftp.lstat(remote_file)
@@ -245,7 +246,6 @@ class UploadManager(multiprocessing.Process):
         """ Starts the upload manager. """
 
         super(UploadManager, self).start()
-        # Declare the counter
 
 
 
