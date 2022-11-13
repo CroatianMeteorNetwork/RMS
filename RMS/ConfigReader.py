@@ -1204,6 +1204,10 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "ml_filter"):
         config.ml_filter = parser.getfloat(section, "ml_filter")
 
+        # Disable the min_patch_intensity filter if the ML filter is used
+        if config.ml_filter > 0:
+            config.min_patch_intensity_multiplier = 0
+
 
 
 def parseStarExtraction(config, parser):
