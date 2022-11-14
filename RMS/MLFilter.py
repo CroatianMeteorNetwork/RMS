@@ -16,7 +16,13 @@ from pathlib import Path
 import logging
 import datetime
 import shutil
-from tflite_runtime.interpreter import Interpreter
+
+try:
+    from tflite_runtime.interpreter import Interpreter
+    TFLITE_AVAILABLE = True
+except ImportError:
+    TFLITE_AVAILABLE = False
+
 from RMS.Formats import FFfile
 from RMS.Formats import FTPdetectinfo
 from RMS.Logger import initLogging
@@ -380,6 +386,7 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
     
     """
 
+
     # Get file name and dir path
     dir_path, file_name = os.path.split(ftpdetectinfo_path)
 
@@ -398,8 +405,22 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
 
         log.info("Module was previously run, using the original unfiltered FTPdetect file: " \
             + ftpdetectinfo_path)
-
     
+    
+    # Load the appropriate FTPdetectioninfo file containing unfiltered detections
+    cam_code, fps, meteor_list = FTPdetectinfo.readFTPdetectinfo(dir_path, file_name, ret_input_format=True)
+
+
+    # Check if tflite is available
+    if not TFLITE_AVAILABLE:
+        log.warning("The package tflite_runtime is not installed! This package is not available on Python 2.")
+        log.warning("ML filtering skipped...")
+
+        # Return a full list of FF files
+        return [meteor_entry[0] for meteor_entry in meteor_list]
+
+
+
     # Create cropped images from observations in FTPdetectinfo file
     log.info("Creating images for inference...")
     png_dir = makePNGCrops(ftpdetectinfo_path, dir_path)
@@ -407,10 +428,6 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
     # Run inference and return probabilities along with file names
     log.info("Inference starting...")
     prediction_dict = classifyPNGs(png_dir, config.ml_model_path)
-    
-    
-    # Load the appropriate FTPdetectioninfo file containing unfiltered detections
-    cam_code, fps, meteor_list = FTPdetectinfo.readFTPdetectinfo(dir_path, file_name, ret_input_format=True)
     
 
     # create list of PNG images to be moved into subdirs later on
@@ -440,8 +457,8 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
     ff_list = [ff_name for ff_name in sorted(os.listdir(dir_path)) if FFfile.validFFName(ff_name)]
 
     # Main filtering code
-    FF_Filtered = []
-    FTP_Filtered = []
+    ff_filtered = []
+    ftp_filtered = []
     for meteor_entry in meteor_list:
 
 
@@ -452,8 +469,8 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
         # If the detection doesn't have a local FF file, keep it
         if meteor_entry[0] not in ff_list:
 
-            FTP_Filtered.append(meteor_entry)
-            FF_Filtered.append(meteor_entry[0])
+            ftp_filtered.append(meteor_entry)
+            ff_filtered.append(meteor_entry[0])
 
             log.info("A local FF file not found, keeping the detection {:s}".format(png_name))
 
@@ -475,8 +492,8 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
             status_str = "meteor"
 
             # Add the FF file to the filtered list
-            FTP_Filtered.append(meteor_entry)
-            FF_Filtered.append(meteor_entry[0])
+            ftp_filtered.append(meteor_entry)
+            ff_filtered.append(meteor_entry[0])
 
             if keep_pngs:
                 keep_png_dir = meteors_dir
@@ -514,18 +531,18 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
 
     # Save a new FTPdetectinfo file containing meteors only
     FTPdetectinfo.writeFTPdetectinfo(
-        meteor_list=FTP_Filtered, ff_directory=dir_path, file_name=orig_name, cal_directory='', \
+        meteor_list=ftp_filtered, ff_directory=dir_path, file_name=orig_name, cal_directory='', \
         cam_code=cam_code, fps=fps, 
         calibration="Filtered by RMS on: " + str(datetime.datetime.now()), celestial_coords_given=True)
         
 
     log.info("FTPdetectinfo filtered, {:d}/{:d} detections classified as real meteors".format(
-                         len(FTP_Filtered), len(meteor_list)
+                         len(ftp_filtered), len(meteor_list)
         )
     )
 
     
-    return FF_Filtered
+    return ff_filtered
      
     
 if __name__ == "__main__":
