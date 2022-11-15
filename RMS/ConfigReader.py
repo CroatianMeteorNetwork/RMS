@@ -29,7 +29,14 @@ try:
 except:
     # Python 2
     from ConfigParser import NoOptionError, RawConfigParser
-    
+
+
+# Used to determine detection parametrs which will change in ML filtering is available
+try:
+    from tflite_runtime.interpreter import Interpreter
+    TFLITE_AVAILABLE = True
+except ImportError:
+    TFLITE_AVAILABLE = False    
 
 
 
@@ -1204,8 +1211,8 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "ml_filter"):
         config.ml_filter = parser.getfloat(section, "ml_filter")
 
-        # Disable the min_patch_intensity filter if the ML filter is used
-        if config.ml_filter > 0:
+        # Disable the min_patch_intensity filter if the ML filter is used and the ML library is available
+        if TFLITE_AVAILABLE and (config.ml_filter > 0):
             config.min_patch_intensity_multiplier = 0
 
 
