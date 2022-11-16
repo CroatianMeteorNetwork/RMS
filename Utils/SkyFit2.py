@@ -5184,12 +5184,14 @@ class PlateTool(QtWidgets.QMainWindow):
             frame_dt = self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)
             frame_no = (frame_dt - self.img_handle.beginning_datetime).total_seconds()*self.img_handle.fps
 
+
             # Get the rolling shutter corrected (or not, depending on the config) frame number
-            frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
+            if self.config.deinterlace_order == -1:
+                frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
 
             # If the global shutter is used, the frame number can only be an integer
             if self.config.deinterlace_order == -2:
-                frame_no = int(frame_no)
+                frame_no = round(frame_no, 0)
             
             centroids.append([frame_no, pick['x_centroid'], pick['y_centroid'], pick['intensity_sum']])
 
@@ -5235,119 +5237,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
             print('Platepar applied to manual picks!')
 
-
-    def saveJSON(self):
-        """ Save the picks in a JSON file. """
-
-        # Compute the intensity sum done on the previous frame
-        self.computeIntensitySum()
-
-        json_dict = {}
-
-        # If the platepar was loaded, save the station info
-        station_dict = {}
-        if self.platepar is not None:
-
-            station_dict['station_id'] = self.platepar.station_code
-            station_dict['lat'] = self.platepar.lat
-            station_dict['lon'] = self.platepar.lon
-            station_dict['elev'] = self.platepar.elev
-
-            station_name = self.platepar.station_code
-
-        else:
-
-            station_dict['station_id'] = self.config.stationID
-            station_dict['lat'] = self.config.latitude
-            station_dict['lon'] = self.config.longitude
-            station_dict['elev'] = self.config.elevation
-
-            station_name = self.station_name
-
-        # Add station data to JSON file
-        json_dict['station'] = station_dict
-
-        jdt_ref = datetime2JD(self.img_handle.beginning_datetime)
-
-        # Set the reference JD
-        json_dict['jdt_ref'] = jdt_ref
-
-        # Set the frames per second
-        json_dict['fps'] = self.img_handle.fps
-
-        ### Save picks to JSON file ###
-
-        # Set measurement type to RA/Dec (meastype = 1)
-        json_dict['meastype'] = 1
-
-        centroids = []
-        for frame, pick in sorted(self.pick_list.items(), key=lambda x: x[0]):
-
-            # Make sure to centroid is picked and is not just the photometry
-            if pick['x_centroid'] is None:
-                continue
-
-            # Only store real picks, and not gaps
-            if pick['mode'] == 0:
-                continue
-
-            # Compute RA/Dec of the pick if the platepar is available
-            if self.platepar is not None:
-
-                # Use a modified platepar if ground points are being picked
-                pp_tmp = copy.deepcopy(self.platepar)
-                if self.meas_ground_points:
-                    pp_tmp.switchToGroundPicks()
-
-                time_data = [self.img_handle.currentFrameTime(frame_no=frame)]
-
-                # Compute measured RA/Dec from image coordinates
-                _, ra_data, dec_data, mag_data = xyToRaDecPP(time_data, [pick['x_centroid']],
-                    [pick['y_centroid']], [pick['intensity_sum']], pp_tmp, measurement=True)
-
-                ra = ra_data[0]
-                dec = dec_data[0]
-                mag = mag_data[0]
-
-            else:
-                ra = dec = mag = None
-
-            # Normalize the frame number to the actual time
-            frame_dt = self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)
-            frame_no = (frame_dt - self.img_handle.beginning_datetime).total_seconds()*self.img_handle.fps
-
-            # Get the rolling shutter corrected (or not, depending on the config) frame number
-            frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
-
-            # If the global shutter is used, the frame number can only be an integer
-            if self.config.deinterlace_order == -2:
-                frame_no = int(frame_no)
-
-            # Compute the time relative to the reference JD
-            t_rel = frame_no/self.img_handle.fps
-
-            centroids.append([float(t_rel), float(pick['x_centroid']), float(pick['y_centroid']), float(ra), \
-                float(dec), float(pick['intensity_sum']), float(mag)])
-
-        # Sort centroids by relative time
-        centroids = sorted(centroids, key=lambda x: x[0])
-
-        json_dict['centroids_labels'] = ['Time (s)', 'X (px)', 'Y (px)', 'RA (deg)', 'Dec (deg)',
-                                         'Summed intensity', 'Magnitude']
-        json_dict['centroids'] = centroids
-
-        ### ###
-
-        # Create a name for the JSON file
-        json_file_name = jd2Date(jdt_ref, dt_obj=True).strftime('%Y%m%d_%H%M%S.%f') + '_' \
-                         + station_name + '_picks.json'
-
-        json_file_path = os.path.join(self.dir_path, json_file_name)
-
-        with open(json_file_path, 'w') as f:
-            json.dump(json_dict, f, indent=4, sort_keys=True)
-
-        print('JSON with picks saved to:', json_file_path)
 
 
     def saveECSV(self):
@@ -5461,11 +5350,12 @@ class PlateTool(QtWidgets.QMainWindow):
             frame_no = (frame_dt - dt_ref).total_seconds()*self.img_handle.fps
 
             # Get the rolling shutter corrected (or not, depending on the config) frame number
-            frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
+            if self.config.deinterlace_order == -1:
+                frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
 
             # If the global shutter is used, the frame number can only be an integer
             if self.config.deinterlace_order == -2:
-                frame_no = int(frame_no)
+                frame_no = round(frame_no, 0)
 
             # Compute the time relative to the reference JD
             t_rel = frame_no/self.img_handle.fps
