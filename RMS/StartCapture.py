@@ -507,8 +507,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         detector.deleteBackupFiles()
 
 
-    # If the capture was run for a limited time, run the upload right away
-    if fixed_duration and (upload_manager is not None):
+    # !!! Currenty under testing
+    # # If the capture was run for a limited time, run the upload right away
+    # if fixed_duration and (upload_manager is not None):
+
+    if upload_manager is not None: # temporary code, will make the script upload after each capture
         log.info('Uploading data before exiting...')
         upload_manager.uploadData()
 
