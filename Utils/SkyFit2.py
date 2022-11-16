@@ -577,7 +577,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.save_reduction_action.setShortcut('Ctrl+S')
         self.save_reduction_action.triggered.connect(lambda: [self.saveState(),
                                                               self.saveFTPdetectinfo(),
-                                                              self.saveJSON(),
                                                               self.saveECSV()])
 
         self.save_current_frame_action = QtWidgets.QAction('Save current frame')
