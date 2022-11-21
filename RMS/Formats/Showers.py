@@ -6,6 +6,7 @@ from __future__ import print_function, division, absolute_import
 import os
 import copy
 import datetime
+import json
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -54,6 +55,10 @@ class Shower(object):
         # Reference height
         self.ref_height = None
 
+        # Binning parameters for combined flux
+        self.flux_binning_params = None
+
+
         # Load parameters for flux, if that type of shower entry is loaded
         if len(shower_entry) > 13:
 
@@ -71,6 +76,17 @@ class Shower(object):
             ref_ht = float(shower_entry[17])
             if ref_ht > 0:
                 self.ref_height = ref_ht
+
+            # Load the flux binning parameters
+            flux_binning_params = shower_entry[18].strip()
+            if len(flux_binning_params) > 0:
+
+                # Replace all apostrophes with double quotes
+                flux_binning_params = flux_binning_params.replace("'", '"')
+
+                # Load JSON as dictionary
+                self.flux_binning_params = json.loads(flux_binning_params)
+
 
         # Apparent radiant
         self.ra = None # deg

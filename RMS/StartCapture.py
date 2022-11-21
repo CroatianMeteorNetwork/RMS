@@ -126,7 +126,7 @@ def wait(duration, compressor):
 
 
 def runCapture(config, duration=None, video_file=None, nodetect=False, detect_end=False, \
-    upload_manager=None, resume_capture=False):
+    upload_manager=None, resume_capture=False, fixed_duration=False):
     """ Run capture and compression for the given time.given
     
     Arguments:
@@ -141,6 +141,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         upload_manager: [UploadManager object] A handle to the UploadManager, which handles uploading files to
             the central server. None by default.
         resume_capture: [bool] Resume capture in the last data directory in CapturedFiles.
+        fixed_duration: [bool] The capture is run with a given fixed duration and not automatically 
+            determined.
 
     Return:
         night_archive_dir: [str] Path to the archive folder of the processed night.
@@ -186,6 +188,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         # Resume run is finished now, reset resume flag
         cml_args.resume = False
 
+
     # Make a name for the capture data directory
     if night_data_dir_name is None:
 
@@ -197,21 +200,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, \
             night_data_dir_name)
 
-
-    # Determine how long to wait before the capture stars (include randomization if set)
-    capture_wait_time = config.capture_wait_seconds
-    if config.capture_wait_randomize and (config.capture_wait_seconds > 0):
-        capture_wait_time = random.randint(0, config.capture_wait_seconds)
-
-    # Wait before the capture starts if a time has been given
-    if (not resume_capture) and (video_file is None) and ((capture_wait_time > 0) or config.capture_wait_randomize):
-
-        rand_str = ""
-        if config.capture_wait_randomize:
-            rand_str = " (randomized between 0 and {:d})".format(config.capture_wait_seconds)
-
-        log.info("Waiting {:d} seconds{:s} before capture start...".format(int(capture_wait_time), rand_str))
-        time.sleep(capture_wait_time)
 
 
     # Add a note about Patreon supporters
@@ -520,7 +508,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # If the capture was run for a limited time, run the upload right away
-    if (duration is not None) and (upload_manager is not None):
+    if fixed_duration and (upload_manager is not None):
         log.info('Uploading data before exiting...')
         upload_manager.uploadData()
 
@@ -738,7 +726,7 @@ if __name__ == "__main__":
 
         # Run the capture for the given number of hours
         runCapture(config, duration=duration, nodetect=cml_args.nodetect, upload_manager=upload_manager, \
-            detect_end=cml_args.detectend, resume_capture=cml_args.resume)
+            detect_end=cml_args.detectend, resume_capture=cml_args.resume, fixed_duration=True)
 
         if upload_manager is not None:
             # Stop the upload manager
@@ -986,6 +974,24 @@ if __name__ == "__main__":
             slideshow_view.join()
             del slideshow_view
             slideshow_view = None
+
+
+
+        # Determine how long to wait before the capture stars (include randomization if set)
+        capture_wait_time = config.capture_wait_seconds
+        if config.capture_wait_randomize and (config.capture_wait_seconds > 0):
+            capture_wait_time = random.randint(0, config.capture_wait_seconds)
+
+        # Wait before the capture starts if a time has been given
+        if (not cml_args.resume) and ((capture_wait_time > 0) or config.capture_wait_randomize):
+
+            rand_str = ""
+            if config.capture_wait_randomize:
+                rand_str = " (randomized between 0 and {:d})".format(config.capture_wait_seconds)
+
+            log.info("Waiting {:d} seconds{:s} before capture start...".format(int(capture_wait_time), rand_str))
+            time.sleep(capture_wait_time)
+
 
 
         log.info('Freeing up disk space...')

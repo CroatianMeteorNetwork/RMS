@@ -29,7 +29,14 @@ try:
 except:
     # Python 2
     from ConfigParser import NoOptionError, RawConfigParser
-    
+
+
+# Used to determine detection parametrs which will change in ML filtering is available
+try:
+    from tflite_runtime.interpreter import Interpreter
+    TFLITE_AVAILABLE = True
+except ImportError:
+    TFLITE_AVAILABLE = False    
 
 
 
@@ -50,7 +57,7 @@ def choosePlatform(win_conf, rpi_conf, linux_pc_conf):
 
 
 
-def findBinaryPath(dir_path, binary_name, binary_extension):
+def findBinaryPath(config, dir_path, binary_name, binary_extension):
     """ Given the path of the build directory and the name of the binary (without the extension!), the
         function will find the path to the binary file.
 
@@ -66,6 +73,11 @@ def findBinaryPath(dir_path, binary_name, binary_extension):
 
     if binary_extension is not None:
         binary_extension = '.' + binary_extension
+
+
+    # If the directory path from the config file doesn't exist, use the default path
+    if not os.path.exists(dir_path):
+        dir_path = config.rms_root_dir
 
 
     file_candidates = []
@@ -210,7 +222,7 @@ class Config:
     def __init__(self):
 
         # Get the package root directory
-        self.rms_root_dir = os.path.join(os.path.dirname(RMS.__file__), os.pardir)
+        self.rms_root_dir = os.path.abspath(os.path.join(os.path.dirname(RMS.__file__), os.pardir))
 
         # default config file absolute path
         self.config_file_name = os.path.join(self.rms_root_dir, '.config')
@@ -383,7 +395,7 @@ class Config:
         self.max_lines_det = 30 # maximum number of lines to be found on the time segment with KHT
         self.line_min_dist = 40 # Minimum distance between KHT lines in Cartesian space to merge them (used for merging similar lines after KHT)
         self.stripe_width = 20 # width of the stripe around the line
-        self.kht_build_dir = 'build'
+        self.kht_build_dir = os.path.join(self.rms_root_dir, 'RMS', 'build')
         self.kht_binary_name = 'kht_module'
         self.kht_binary_extension = 'so'
 
@@ -410,10 +422,10 @@ class Config:
         self.ang_vel_max = 35.0
 
         # By default the peak of the meteor should be at least 16x brighter than the background. This is the multiplier that scales this number (1.0 = 16x).
-        self.min_patch_intensity_multiplier = 1.0
+        self.min_patch_intensity_multiplier = 0.0
 
-        # Filtering by machine learning (disabled by default)
-        self.ml_filter = 0.0
+        # Filtering by machine learning
+        self.ml_filter = 0.85
 
         # Path to the ML model
         self.ml_model_path = os.path.join(self.rms_root_dir, "share", "meteorml32.tflite")
@@ -483,7 +495,7 @@ class Config:
         #### Shower association
 
         # Path to the shower file
-        self.shower_path = 'share'
+        self.shower_path = os.path.join(self.rms_root_dir, 'share')
         self.shower_file_name = 'established_showers.csv'
 
         # Path to flux showers
@@ -495,7 +507,7 @@ class Config:
 
         #### EGM96 vs WGS84 heights file
 
-        self.egm96_path = 'share'
+        self.egm96_path = os.path.join(self.rms_root_dir, 'share')
         self.egm96_file_name = 'WW15MGH.DAC'
 
         # How many degrees in solar longitude to check from the shower peak for showers that don't have
@@ -1168,7 +1180,7 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "kht_binary_extension"):
         config.kht_binary_extension = parser.get(section, "kht_binary_extension")
 
-    config.kht_lib_path = findBinaryPath(config.kht_build_dir, config.kht_binary_name, \
+    config.kht_lib_path = findBinaryPath(config, config.kht_build_dir, config.kht_binary_name, \
         config.kht_binary_extension)
 
 
@@ -1198,6 +1210,10 @@ def parseMeteorDetection(config, parser):
 
     if parser.has_option(section, "ml_filter"):
         config.ml_filter = parser.getfloat(section, "ml_filter")
+
+        # Disable the min_patch_intensity filter if the ML filter is used and the ML library is available
+        if TFLITE_AVAILABLE and (config.ml_filter > 0):
+            config.min_patch_intensity_multiplier = 0
 
 
 
