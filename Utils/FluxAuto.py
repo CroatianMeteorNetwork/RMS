@@ -731,7 +731,7 @@ if __name__ == "__main__":
         help="Path to the directory where index.html will be placed. If not given, the output directory will be used.")
 
     arg_parser.add_argument('-w', '--weburl', metavar='WEBSITE_PLOT_PUBLIC_URL', type=str,
-        help="Public URL to where the plots are stored on the website.")
+        help="Generate a website HTML with the given public URL to where the plots are stored on the website.")
 
     arg_parser.add_argument('-s', '--shower', metavar='SHOWER', type=str,
         help="Force a specific shower. 3-letter IAU shower code is expected.")
@@ -779,9 +779,9 @@ if __name__ == "__main__":
 
         # Run auto flux
         fluxAutoRun(config, cml_args.dir_path, ref_dt, metadata_dir=cml_args.metadir,
-            output_dir=cml_args.outdir, csv_dir=cml_args.csvdir, generate_website=True, 
-            index_dir=cml_args.indexdir, website_plot_url=cml_args.weburl, shower_code=cml_args.shower,
-            cpu_cores=cml_args.cpucores)
+            output_dir=cml_args.outdir, csv_dir=cml_args.csvdir, 
+            generate_website=(cml_args.weburl is not None), index_dir=cml_args.indexdir, 
+            website_plot_url=cml_args.weburl, shower_code=cml_args.shower, cpu_cores=cml_args.cpucores)
 
 
         ### <// DETERMINE NEXT RUN TIME ###
