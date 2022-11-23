@@ -604,13 +604,14 @@ cpdef (double, double) cyTrueRaDec2ApparentAltAz(double ra, double dec, double j
 @cython.boundscheck(False)
 @cython.wraparound(False)
 def cyTrueRaDec2ApparentAltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr, \
-    np.ndarray[FLOAT_TYPE_t, ndim=1] dec_arr, double jd, double lat, double lon, bool refraction=True):
+    np.ndarray[FLOAT_TYPE_t, ndim=1] dec_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] jd_arr, \
+    double lat, double lon, bool refraction=True):
     """ Convert the true right ascension and declination in J2000 to azimuth (+East of due North) and 
         altitude in the epoch of date. The correction for refraction is performed.
     Arguments:
-        ra: [ndarray] Right ascension in radians (J2000).
-        dec: [ndarray] Declination in radians (J2000).
-        jd: [float] Julian date.
+        ra_arr: [ndarray] Right ascension in radians (J2000).
+        dec:_arr [ndarray] Declination in radians (J2000).
+        jd_arr: [ndarray] Julian date.
         lat: [float] Latitude in radians.
         lon: [float] Longitude in radians.
     Keyword arguments:
@@ -631,7 +632,7 @@ def cyTrueRaDec2ApparentAltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr, \
     for i in range(len(ra_arr)):
 
         # Compute alt/az
-        azim, elev = cyTrueRaDec2ApparentAltAz(ra_arr[i], dec_arr[i], jd, lat, lon, \
+        azim, elev = cyTrueRaDec2ApparentAltAz(ra_arr[i], dec_arr[i], jd_arr[i], lat, lon, \
             refraction=refraction)
 
         # Assign alt/az to array

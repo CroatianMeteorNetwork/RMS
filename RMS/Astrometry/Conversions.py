@@ -915,6 +915,10 @@ def trueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True):
 
     elif isinstance(ra, np.ndarray):
 
+        # Convert JD to appropriate format
+        if isinstance(jd, float):
+            jd = np.zeros_like(ra) + jd
+
         # Compute it for numpy arrays
         azim, elev = cyTrueRaDec2ApparentAltAz_vect(ra, dec, jd, lat, lon, refraction)
 
