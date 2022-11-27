@@ -304,9 +304,9 @@ def loadExcludedStations(dir_path, excluded_stations_file="excluded_stations.txt
 
 
 
-def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_dir=None, output_dir=None, 
-    csv_dir=None, index_dir=None, generate_website=False, website_plot_url=None, shower_code=None, \
-    cpu_cores=1, excluded_stations_file="excluded_stations.txt"):
+def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_year_limit=3, \
+    metadata_dir=None, output_dir=None, csv_dir=None, index_dir=None, generate_website=False, 
+    website_plot_url=None, shower_code=None, cpu_cores=1, excluded_stations_file="excluded_stations.txt"):
     """ Given the reference time, automatically identify active showers and produce the flux graphs and
         CSV files.
 
@@ -319,6 +319,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
     Keyword arguments:
         days_prev: [int] Produce graphs for showers active N days before.
         days_next: [int] Produce graphs for showers active N days in the future.
+        all_prev_year_limit: [int] Only go back N years for the all data plot.
         metadata_dir: [str] A separate directory for flux metadata. If not given, the data directory will be
             used.
         output_dir: [str] Directory where the final data products will be saved. If None, data_path directory
@@ -514,6 +515,11 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, metadata_di
             # Make sure the directory time is after 2018 (to avoid 1970 unix time 0 dirs)
             #   2018 is when the GMN was established
             if dir_dt.year < 2018:
+                continue
+
+            # Skip dirs that are too old to add to the all year plot
+            if (ref_dt.year - dir_dt.year) >= all_prev_year_limit:
+                print("Skipping due to {:d} year limit!".format(all_prev_year_limit))
                 continue
 
             # Compute the solar longitude of the directory time stamp
@@ -725,7 +731,7 @@ if __name__ == "__main__":
         help="Path to the directory where index.html will be placed. If not given, the output directory will be used.")
 
     arg_parser.add_argument('-w', '--weburl', metavar='WEBSITE_PLOT_PUBLIC_URL', type=str,
-        help="Public URL to where the plots are stored on the website.")
+        help="Generate a website HTML with the given public URL to where the plots are stored on the website.")
 
     arg_parser.add_argument('-s', '--shower', metavar='SHOWER', type=str,
         help="Force a specific shower. 3-letter IAU shower code is expected.")
@@ -773,9 +779,9 @@ if __name__ == "__main__":
 
         # Run auto flux
         fluxAutoRun(config, cml_args.dir_path, ref_dt, metadata_dir=cml_args.metadir,
-            output_dir=cml_args.outdir, csv_dir=cml_args.csvdir, generate_website=True, 
-            index_dir=cml_args.indexdir, website_plot_url=cml_args.weburl, shower_code=cml_args.shower,
-            cpu_cores=cml_args.cpucores)
+            output_dir=cml_args.outdir, csv_dir=cml_args.csvdir, 
+            generate_website=(cml_args.weburl is not None), index_dir=cml_args.indexdir, 
+            website_plot_url=cml_args.weburl, shower_code=cml_args.shower, cpu_cores=cml_args.cpucores)
 
 
         ### <// DETERMINE NEXT RUN TIME ###

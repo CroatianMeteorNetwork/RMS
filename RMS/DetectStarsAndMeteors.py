@@ -162,7 +162,7 @@ def saveDetections(detection_results, ff_dir, config):
             continue
 
         # Construct the table of the star parameters
-        star_data = zip(x2, y2, background, intensity, fwhm)
+        star_data = zip(y2, x2, background, intensity, fwhm)
 
         # Add star info to the star list
         star_list.append([ff_name, star_data])
