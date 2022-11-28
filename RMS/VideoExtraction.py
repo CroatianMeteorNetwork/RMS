@@ -22,7 +22,6 @@ import logging
 from multiprocessing import Process, Event
 
 import numpy as np
-from scipy import stats
 
 from RMS.DetectionTools import loadImageCalibration, binImageCalibration
 from RMS.Routines import Grouping3D
@@ -80,7 +79,7 @@ class Extractor(Process):
 
         
         # Return list with the number of occurence of each frame number (Z axis)
-        freq = stats.itemfreq(z) 
+        freq = np.array(np.unique(z, return_counts=True)).T
         
 
         # Reject the image if there are too little event frames

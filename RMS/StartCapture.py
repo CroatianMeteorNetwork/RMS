@@ -131,7 +131,7 @@ def wait(duration, compressor, buffered_capture, video_file):
 
 
 def runCapture(config, duration=None, video_file=None, nodetect=False, detect_end=False, \
-    upload_manager=None, resume_capture=False):
+    upload_manager=None, resume_capture=False, fixed_duration=False):
     """ Run capture and compression for the given time.given
     
     Arguments:
@@ -146,6 +146,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         upload_manager: [UploadManager object] A handle to the UploadManager, which handles uploading files to
             the central server. None by default.
         resume_capture: [bool] Resume capture in the last data directory in CapturedFiles.
+        fixed_duration: [bool] The capture is run with a given fixed duration and not automatically 
+            determined.
 
     Return:
         night_archive_dir: [str] Path to the archive folder of the processed night.
@@ -515,8 +517,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         detector.deleteBackupFiles()
 
 
-    # If the capture was run for a limited time, run the upload right away
-    if (duration is not None) and (upload_manager is not None):
+    # !!! Currenty under testing
+    # # If the capture was run for a limited time, run the upload right away
+    # if fixed_duration and (upload_manager is not None):
+
+    if upload_manager is not None: # temporary code, will make the script upload after each capture
         log.info('Uploading data before exiting...')
         upload_manager.uploadData()
 
@@ -734,7 +739,7 @@ if __name__ == "__main__":
 
         # Run the capture for the given number of hours
         runCapture(config, duration=duration, nodetect=cml_args.nodetect, upload_manager=upload_manager, \
-            detect_end=cml_args.detectend, resume_capture=cml_args.resume)
+            detect_end=cml_args.detectend, resume_capture=cml_args.resume, fixed_duration=True)
 
         if upload_manager is not None:
             # Stop the upload manager
