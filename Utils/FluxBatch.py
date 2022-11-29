@@ -488,11 +488,6 @@ def cameraTally(comb_sol, comb_sol_bins, single_fixed_bin_information):
             if lm_m is None:
                 continue
 
-            try:
-                np.count_nonzero(~np.isnan(lm_m))
-            except:
-                print("LM_M value:", lm_m)
-
             if np.count_nonzero(~np.isnan(lm_m)) == 0:
                 continue
 
