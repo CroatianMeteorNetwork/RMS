@@ -488,6 +488,10 @@ def cameraTally(comb_sol, comb_sol_bins, single_fixed_bin_information):
             sol_arr_unwrapped = unwrapSol(sol_arr[:-1], sol_start, sol_end)
             mask_arr = (sol_arr_unwrapped >= sol_start) & (sol_arr_unwrapped <= sol_end) & ~np.isnan(lm_m)
 
+            # If there are no bins, skip this
+            if np.count_nonzero(mask_arr) == 0:
+                continue
+
             # Set the number of meteors to 0 where the TAP or the observing duration are 0
             met_num[(area == 0) | (time_bin == 0)] = 0
 
