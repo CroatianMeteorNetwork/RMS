@@ -484,13 +484,13 @@ def cameraTally(comb_sol, comb_sol_bins, single_fixed_bin_information):
             rad_dist = np.array(rad_dist)
             ang_vel  = np.array(ang_vel)
 
+            # If there are no good bins, skip this
+            if np.count_nonzero(~np.isnan(lm_m)) == 0:
+                continue
+
             # Select data in the solar longitude range and with non-nan limiting magnitude
             sol_arr_unwrapped = unwrapSol(sol_arr[:-1], sol_start, sol_end)
             mask_arr = (sol_arr_unwrapped >= sol_start) & (sol_arr_unwrapped <= sol_end) & ~np.isnan(lm_m)
-
-            # If there are no bins, skip this
-            if np.count_nonzero(mask_arr) == 0:
-                continue
 
             # Set the number of meteors to 0 where the TAP or the observing duration are 0
             met_num[(area == 0) | (time_bin == 0)] = 0
