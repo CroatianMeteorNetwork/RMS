@@ -11,14 +11,6 @@ import copy
 import configparser
 import multiprocessing    
 
-
-# TEST
-from memory_profiler import profile
-import resource
-from pympler import asizeof
-import gc
-#
-
 import ephem
 import numpy as np
 import scipy
@@ -754,7 +746,6 @@ def computeFluxPerStation(file_entry, metadata_dir, shower_code, mass_index, ref
 
 
 
-#@profile
 def computeBatchFluxParallel(file_data, shower_code, mass_index, ref_ht, bin_datetime_yearly, sol_bins, ci, \
     compute_single, metadata_dir, cpu_cores=1):
     """ Compute flux in batch by distributing the computations on multiple CPU cores. 
@@ -766,17 +757,6 @@ def computeBatchFluxParallel(file_data, shower_code, mass_index, ref_ht, bin_dat
 
     # If only one core is given, don't use multiprocessing
     if cpu_cores == 1:
-
-
-        # TEST
-        prev_proc_memory = 0
-        prev_lists_memory = 0
-
-        # Total memory usage at the beginning
-        gc.collect()
-        first_proc_memory = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024
-
-        #
 
         total_all_fixed_bin_information = []
         total_single_fixed_bin_information = []
@@ -807,31 +787,6 @@ def computeBatchFluxParallel(file_data, shower_code, mass_index, ref_ht, bin_dat
             total_single_fixed_bin_information += single_fixed_bin_information
             total_single_station_flux += single_station_flux
             total_summary_population_index += summary_population_index
-
-
-            # TEST
-
-            # Print the total process memory usage in MB
-            print()
-            proc_memory = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024
-            print("PROCESS MEMORY  = {:.2f} MB".format(proc_memory))
-            print("loop difference = {:.2f} MB".format(proc_memory - prev_proc_memory))
-            print("since beginning = {:.2f} MB".format(proc_memory - first_proc_memory))
-            prev_proc_memory = proc_memory
-
-            # Compute the size of all lists
-            lists_memory = sum([asizeof.asizeof(lst)/(1024**2) for lst in [total_all_fixed_bin_information, total_single_fixed_bin_information, total_single_station_flux, total_summary_population_index]])
-            print("LISTS MEMORY    = {:.2f} MB".format(lists_memory))
-            print("    difference  = {:.2f} MB".format(lists_memory - prev_lists_memory))
-            prev_lists_memory = lists_memory
-
-
-        # Total memory difference from the beginning
-        gc.collect()
-        print("FINAL")
-        print("proc difference = {:.2f} MB".format(proc_memory - first_proc_memory))
-        print("list size       = {:.2f} MB".format(lists_memory))
-        #
 
 
     # Use multiple cores
