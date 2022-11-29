@@ -479,7 +479,7 @@ def cameraTally(comb_sol, comb_sol_bins, single_fixed_bin_information):
             met_num  = np.array(met_num)
             area     = np.array(area)
             time_bin = np.array(time_bin)
-            lm_m     = np.array(lm_m)
+            lm_m     = np.array([np.nan if lm_tmp is None else lm_tmp for lm_tmp in lm_m])
             rad_elev = np.array(rad_elev)
             rad_dist = np.array(rad_dist)
             ang_vel  = np.array(ang_vel)
