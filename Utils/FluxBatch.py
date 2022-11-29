@@ -430,9 +430,34 @@ def cameraTally(comb_sol, comb_sol_bins, single_fixed_bin_information):
             [time_bin (hour)]] entries for every station.
     """
 
+    def _sortByParam(bin_tally, sol_bin, param, reverse=True):
+        """ Compute top stations by the given parameter. """
+
+        # Extract the stations in the given bin
+        bin_cams_sorted = bin_tally[sol_bin]
+
+        # Skip stations with a zero TAP
+        bin_cams_sorted = {key:bin_cams_sorted[key] for key in bin_cams_sorted if bin_cams_sorted[key]['tap'] > 0}
+
+        # Sort the stations in the given bin by the given parameter
+        bin_cams_sorted = collections.OrderedDict(sorted(bin_cams_sorted.items(),
+            key=lambda item: item[1][param], reverse=reverse))
+        
+        return bin_cams_sorted
+
+
+
     bin_tally = collections.OrderedDict()
-    bin_tally_topmeteors = collections.OrderedDict()
-    bin_tally_toptap = collections.OrderedDict()
+    bin_tally_top_meteors      = collections.OrderedDict()
+    bin_tally_top_tap          = collections.OrderedDict()
+    bin_tally_faintest_lm      = collections.OrderedDict()
+    bin_tally_brightest_lm     = collections.OrderedDict()
+    bin_tally_highest_rad_elev = collections.OrderedDict()
+    bin_tally_lowest_rad_elev  = collections.OrderedDict()
+    bin_tally_highest_rad_dist = collections.OrderedDict()
+    bin_tally_lowest_rad_dist  = collections.OrderedDict()
+    bin_tally_highest_ang_vel  = collections.OrderedDict()
+    bin_tally_lowest_ang_vel   = collections.OrderedDict()
 
     # Go through all solar longitude bins
     for i in range(len(comb_sol_bins) - 1):
@@ -447,16 +472,21 @@ def cameraTally(comb_sol, comb_sol_bins, single_fixed_bin_information):
 
 
         # Compute station contributions
-        for station, (sol_arr, _, met_num, area, time_bin, lm_m, _, _, _) in single_fixed_bin_information:
+        for station, (sol_arr, _,
+                met_num, area, time_bin, lm_m, rad_elev, rad_dist, ang_vel) in single_fixed_bin_information:
 
-            sol_arr = np.array(sol_arr)
-            met_num = np.array(met_num)
-            area = np.array(area)
+            sol_arr  = np.array(sol_arr)
+            met_num  = np.array(met_num)
+            area     = np.array(area)
             time_bin = np.array(time_bin)
+            lm_m     = np.array(lm_m)
+            rad_elev = np.array(rad_elev)
+            rad_dist = np.array(rad_dist)
+            ang_vel  = np.array(ang_vel)
 
-            # Select data in the solar longitude range
+            # Select data in the solar longitude range and with non-nan limiting magnitude
             sol_arr_unwrapped = unwrapSol(sol_arr[:-1], sol_start, sol_end)
-            mask_arr = (sol_arr_unwrapped >= sol_start) & (sol_arr_unwrapped <= sol_end)
+            mask_arr = (sol_arr_unwrapped >= sol_start) & (sol_arr_unwrapped <= sol_end) & ~np.isnan(lm_m)
 
             # Set the number of meteors to 0 where the TAP or the observing duration are 0
             met_num[(area == 0) | (time_bin == 0)] = 0
@@ -466,37 +496,101 @@ def cameraTally(comb_sol, comb_sol_bins, single_fixed_bin_information):
                 if station not in bin_tally[sol_mean]:
                     
                     # Add an entry for the station, if it doesn't exist
-                    bin_tally[sol_mean][station] = {'meteors': 0, 'tap': 0}
+                    bin_tally[sol_mean][station] = {
+                        'meteors':  0, 
+                        'tap':      0, 
+                        'lm_m':     0, 
+                        'rad_elev': 0, 
+                        'rad_dist': 0, 
+                        'ang_vel':  0, 
+                        'tap_sum':  0
+                    }
 
-                # Add numbers to the tally
-                bin_tally[sol_mean][station]['meteors'] += np.sum(met_num[mask_arr])
-                bin_tally[sol_mean][station]['tap'] += np.sum(area[mask_arr]*time_bin[mask_arr])
+                # Add meteors and TAP numbers to the tally
+                bin_tally[sol_mean][station]['meteors']  += np.sum(met_num[mask_arr])
+                bin_tally[sol_mean][station]['tap']      += np.sum(area[mask_arr]*time_bin[mask_arr])
 
+                # Add radiant information to compute TAP-weighted values
+                tap_weight = area[mask_arr]*time_bin[mask_arr]
+                bin_tally[sol_mean][station]['lm_m']     += np.sum(tap_weight*lm_m[mask_arr])
+                bin_tally[sol_mean][station]['rad_elev'] += np.sum(tap_weight*rad_elev[mask_arr])
+                bin_tally[sol_mean][station]['rad_dist'] += np.sum(tap_weight*rad_dist[mask_arr])
+                bin_tally[sol_mean][station]['ang_vel']  += np.sum(tap_weight*ang_vel[mask_arr])
+                bin_tally[sol_mean][station]['tap_sum']  += np.sum(tap_weight)
+
+
+        # Compute the TAP-weighted radiant information values
+        for station in bin_tally[sol_mean]:
+            bin_tally[sol_mean][station]['lm_m']     /= bin_tally[sol_mean][station]['tap_sum']
+            bin_tally[sol_mean][station]['rad_elev'] /= bin_tally[sol_mean][station]['tap_sum']
+            bin_tally[sol_mean][station]['rad_dist'] /= bin_tally[sol_mean][station]['tap_sum']
+            bin_tally[sol_mean][station]['ang_vel']  /= bin_tally[sol_mean][station]['tap_sum']
 
         # Sort by the number of meteors
-        bin_cams_meteors = bin_tally[sol_mean]
-        bin_cams_meteors = collections.OrderedDict(sorted(bin_cams_meteors.items(), \
-            key=lambda item: item[1]['meteors'], reverse=True))
-        bin_tally_topmeteors[sol_mean] = bin_cams_meteors
+        bin_tally_top_meteors[sol_mean]      = _sortByParam(bin_tally, sol_mean, 'meteors', reverse=True)
+        bin_tally_top_tap[sol_mean]          = _sortByParam(bin_tally, sol_mean, 'tap', reverse=True)
+        bin_tally_faintest_lm[sol_mean]      = _sortByParam(bin_tally, sol_mean, 'lm_m', reverse=True)
+        bin_tally_brightest_lm[sol_mean]     = _sortByParam(bin_tally, sol_mean, 'lm_m', reverse=False)
+        bin_tally_highest_rad_elev[sol_mean] = _sortByParam(bin_tally, sol_mean, 'rad_elev', reverse=True)
+        bin_tally_lowest_rad_elev[sol_mean]  = _sortByParam(bin_tally, sol_mean, 'rad_elev', reverse=False)
+        bin_tally_highest_rad_dist[sol_mean] = _sortByParam(bin_tally, sol_mean, 'rad_dist', reverse=True)
+        bin_tally_lowest_rad_dist[sol_mean]  = _sortByParam(bin_tally, sol_mean, 'rad_dist', reverse=False)
+        bin_tally_highest_ang_vel[sol_mean]  = _sortByParam(bin_tally, sol_mean, 'ang_vel', reverse=True)
+        bin_tally_lowest_ang_vel[sol_mean]   = _sortByParam(bin_tally, sol_mean, 'ang_vel', reverse=False)
 
-        # Sort by the TAP
-        bin_cams_tap = bin_tally[sol_mean]
-        bin_cams_tap = collections.OrderedDict(sorted(bin_cams_tap.items(), key=lambda item: item[1]['tap'], \
-            reverse=True))
-        bin_tally_toptap[sol_mean] = bin_cams_tap
 
-
-
-    return bin_tally_topmeteors, bin_tally_toptap
+    return (
+        bin_tally_top_meteors, 
+        bin_tally_top_tap, 
+        bin_tally_faintest_lm, 
+        bin_tally_brightest_lm, 
+        bin_tally_highest_rad_elev, 
+        bin_tally_lowest_rad_elev, 
+        bin_tally_highest_rad_dist, 
+        bin_tally_lowest_rad_dist, 
+        bin_tally_highest_ang_vel, 
+        bin_tally_lowest_ang_vel
+        )
 
 
 
 def reportCameraTally(fbr, top_n_stations=5):
     """ Generate string report of top N stations per number of meteors and TAP from the camera tally results. """
 
+
+    def _formatResults(bin_cams_top, station_id):
+        """ Format a line given a sorted dictionary of station information. """
+
+        station_data = bin_cams_top[station_id]
+
+        n_meteors = station_data['meteors']
+        tap       = station_data['tap']/1e6
+        lm_m      = station_data['lm_m']
+        rad_elev  = station_data['rad_elev']
+        rad_dist  = station_data['rad_dist']
+        ang_vel   = station_data['ang_vel']
+
+        return "    {:s}, {:5d} meteors, TAP = {:10.2f} km^2 h, lm_m = {:+6.2f} M, rad elev = {:5.1f} deg, rad dist = {:6.1f} deg, ang vel = {:5.1f} deg/s\n".format(station_id, n_meteors, tap, lm_m, rad_elev, rad_dist, ang_vel)
+
+
+
     # Tally up contributions from individual cameras in each bin
-    bin_tally_topmeteors, bin_tally_toptap = cameraTally(fbr.comb_sol, fbr.comb_sol_bins, \
-        fbr.single_fixed_bin_information)
+    (
+        bin_tally_top_meteors, 
+        bin_tally_top_tap, 
+        bin_tally_faintest_lm, 
+        bin_tally_brightest_lm, 
+        bin_tally_highest_rad_elev, 
+        bin_tally_lowest_rad_elev, 
+        bin_tally_highest_rad_dist, 
+        bin_tally_lowest_rad_dist, 
+        bin_tally_highest_ang_vel, 
+        bin_tally_lowest_ang_vel
+    ) = cameraTally(
+        fbr.comb_sol, 
+        fbr.comb_sol_bins,
+        fbr.single_fixed_bin_information
+        )
 
     out_str = ""
 
@@ -518,36 +612,124 @@ def reportCameraTally(fbr, top_n_stations=5):
     out_str += "---------------------\n"
 
     # Print cameras with most meteors per bin
-    for sol_bin_mean in bin_tally_topmeteors:
+    for sol_bin_mean in bin_tally_top_meteors:
 
         # Get cameras with most meteors
-        bin_cams_topmeteors = bin_tally_topmeteors[sol_bin_mean]
+        bin_cams_topmeteors = bin_tally_top_meteors[sol_bin_mean]
 
         # Get cameras with the highest TAP
-        bin_cams_toptap = bin_tally_toptap[sol_bin_mean]
+        bin_cams_toptap = bin_tally_top_tap[sol_bin_mean]
+
+        # Extract radiant information
+        bin_cams_faintest_lm      = bin_tally_faintest_lm[sol_bin_mean]
+        bin_cams_brightest_lm     = bin_tally_brightest_lm[sol_bin_mean]
+        bin_cams_highest_rad_elev = bin_tally_highest_rad_elev[sol_bin_mean]
+        bin_cams_lowest_rad_elev  = bin_tally_lowest_rad_elev[sol_bin_mean]
+        bin_cams_highest_rad_dist = bin_tally_highest_rad_dist[sol_bin_mean]
+        bin_cams_lowest_rad_dist  = bin_tally_lowest_rad_dist[sol_bin_mean]
+        bin_cams_highest_ang_vel  = bin_tally_highest_ang_vel[sol_bin_mean]
+        bin_cams_lowest_ang_vel   = bin_tally_lowest_ang_vel[sol_bin_mean]
+
+
+        ### Write the string
 
         out_str += "\n"
         out_str += "Sol = {:.4f} deg\n".format(sol_bin_mean)
 
+        # Write stations with the most number of meteors
         out_str += "Top {:d} by meteor number:\n".format(top_n_stations)
         for i, station_id in enumerate(bin_cams_topmeteors):
-            station_data = bin_cams_topmeteors[station_id]
-            n_meteors = station_data['meteors']
-            tap = station_data['tap']/1e6
-            out_str += "    {:s}, {:5d} meteors, TAP = {:10.2f} km^2 h\n".format(station_id, n_meteors, tap)
+            
+            # Add a line for the top number of meteors
+            out_str += _formatResults(bin_cams_topmeteors, station_id)
 
             if i == top_n_stations - 1:
                 break
 
+        # Write stations with the highest TAP
         out_str += "Top {:d} by TAP:\n".format(top_n_stations)
         for i, station_id in enumerate(bin_cams_toptap):
-            station_data = bin_cams_toptap[station_id]
-            n_meteors = station_data['meteors']
-            tap = station_data['tap']/1e6
-            out_str += "    {:s}, {:5d} meteors, TAP = {:10.2f} km^2 h\n".format(station_id, n_meteors, tap)
+
+            # Add a line for the top TAP
+            out_str += _formatResults(bin_cams_toptap, station_id)
 
             if i == top_n_stations - 1:
                 break
+
+        out_str += "Top {:d} by faintest meteor LM:\n".format(top_n_stations)
+        for i, station_id in enumerate(bin_cams_faintest_lm):
+
+            # Add a line for the top TAP
+            out_str += _formatResults(bin_cams_faintest_lm, station_id)
+
+            if i == top_n_stations - 1:
+                break
+
+        out_str += "Top {:d} by brightest meteor LM:\n".format(top_n_stations)
+        for i, station_id in enumerate(bin_cams_brightest_lm):
+
+            # Add a line for the top TAP
+            out_str += _formatResults(bin_cams_brightest_lm, station_id)
+
+            if i == top_n_stations - 1:
+                break
+
+        out_str += "Top {:d} by highest radiant elevation:\n".format(top_n_stations)
+        for i, station_id in enumerate(bin_cams_highest_rad_elev):
+
+            # Add a line for the top TAP
+            out_str += _formatResults(bin_cams_highest_rad_elev, station_id)
+
+            if i == top_n_stations - 1:
+                break
+
+        out_str += "Top {:d} by lowest radiant elevation:\n".format(top_n_stations)
+        for i, station_id in enumerate(bin_cams_lowest_rad_elev):
+
+            # Add a line for the top TAP
+            out_str += _formatResults(bin_cams_lowest_rad_elev, station_id)
+
+            if i == top_n_stations - 1:
+                break
+
+        out_str += "Top {:d} by highest radiant distance:\n".format(top_n_stations)
+        for i, station_id in enumerate(bin_cams_highest_rad_dist):
+
+            # Add a line for the top TAP
+            out_str += _formatResults(bin_cams_highest_rad_dist, station_id)
+
+            if i == top_n_stations - 1:
+                break
+
+        out_str += "Top {:d} by lowest radiant distance:\n".format(top_n_stations)
+        for i, station_id in enumerate(bin_cams_lowest_rad_dist):
+
+            # Add a line for the top TAP
+            out_str += _formatResults(bin_cams_lowest_rad_dist, station_id)
+
+            if i == top_n_stations - 1:
+                break
+
+        out_str += "Top {:d} by highest angular velocity:\n".format(top_n_stations)
+        for i, station_id in enumerate(bin_cams_highest_ang_vel):
+
+            # Add a line for the top TAP
+            out_str += _formatResults(bin_cams_highest_ang_vel, station_id)
+
+            if i == top_n_stations - 1:
+                break
+
+        out_str += "Top {:d} by lowest angular velocity:\n".format(top_n_stations)
+        for i, station_id in enumerate(bin_cams_lowest_ang_vel):
+
+            # Add a line for the top TAP
+            out_str += _formatResults(bin_cams_lowest_ang_vel, station_id)
+
+            if i == top_n_stations - 1:
+                break
+
+
+        ###
 
     return out_str
 
@@ -1722,18 +1904,14 @@ if __name__ == "__main__":
             metadata_dir=fluxbatch_cml_args.metadir, cpu_cores=fluxbatch_cml_args.cpucores)
 
 
-    # Print camera tally #
+    ### Print camera tally
     print()
 
-
-    ### TEST - disabed!
-
-    # # Save the per-camera tally results
-    # tally_string = reportCameraTally(fbr, top_n_stations=5)
+    # Save the per-camera tally results
+    tally_string = reportCameraTally(fbr, top_n_stations=5)
     # print(tally_string)
-    # with open(os.path.join(dir_path, fluxbatch_cml_args.output_filename + "_camera_tally.txt"), 'w') as f:
-    #     f.write(tally_string)
-
+    with open(os.path.join(dir_path, fluxbatch_cml_args.output_filename + "_camera_tally.txt"), 'w') as f:
+        f.write(tally_string)
 
     ###
 
