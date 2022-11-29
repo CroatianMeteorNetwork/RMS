@@ -485,6 +485,9 @@ def cameraTally(comb_sol, comb_sol_bins, single_fixed_bin_information):
             ang_vel  = np.array(ang_vel)
 
             # If there are no good bins, skip this
+            if lm_m is None:
+                continue
+                
             if np.count_nonzero(~np.isnan(lm_m)) == 0:
                 continue
 
