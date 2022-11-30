@@ -303,7 +303,6 @@ def loadExcludedStations(dir_path, excluded_stations_file="excluded_stations.txt
         return excluded_stations
 
 
-
 def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_year_limit=3, \
     metadata_dir=None, output_dir=None, csv_dir=None, index_dir=None, generate_website=False, 
     website_plot_url=None, shower_code=None, cpu_cores=1, excluded_stations_file="excluded_stations.txt"):
