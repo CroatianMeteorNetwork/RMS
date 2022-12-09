@@ -2712,17 +2712,17 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
     # If there are no bins to process, skip
-    if len(sol_bins) < 2:
+    if forced_bins:
+        if len(sol_bins) < 2:
 
-        # Save empty tables so this is not attempted again
-        saveEmptyECSVTable(os.path.join(metadata_dir, flux_ecsv_file_name), shower_code, mass_index, \
-            flux_config, confidence_interval, fixed_bins=False)
+            # Save empty tables so this is not attempted again
+            saveEmptyECSVTable(os.path.join(metadata_dir, flux_ecsv_file_name), shower_code, mass_index, \
+                flux_config, confidence_interval, fixed_bins=False)
 
-        if forced_bins:
             saveEmptyECSVTable(os.path.join(metadata_dir, forced_bins_ecsv_file_name), shower_code, \
                 mass_index, flux_config, confidence_interval, fixed_bins=True)
 
-        return None
+            return None
 
 
     # Compute the flux
@@ -2780,39 +2780,40 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         ### ###
 
 
-        ### Check if there are too many sporadics, i.e. false positives ###
+        ### Associate showers and check if there are too many sporadics, i.e. false positives ###
 
         # Associate all showers
         print("Checking the number of sporadics...")
         associations_check, _ = showerAssociation(config, [ftpdetectinfo_path], \
             show_plot=False, save_plot=False, plot_activity=False, flux_showers=True)
 
-        # Count up the sporadics
+        # Keep track of the actual shower members
+        associations = {}
+
+        # Go though all associations and separate target shower members from sporadics
         sporadic_count = 0
         for key in associations_check:
             meteor_check, shower_check = associations_check[key]
 
-            # Only take meteors in the time bin
+            # Check that the meteor is in the time bin
             meteor_date = jd2Date(meteor_check.jdt_ref, dt_obj=True)
             if dt_beg < meteor_date < dt_end:
 
-                if shower_check is None:
+                # Count the sporadics (they don't have the shower object)
+                if shower_check is None:    
                     sporadic_count += 1
+
+                # Keep track of the target shower members
+                elif shower_check.name == shower_code:
+                    associations[key] = associations_check[key]
 
 
         # Compute the number of sporadics per hour
         sporadics_per_hr = sporadic_count/((dt_end - dt_beg).total_seconds()/3600)
 
 
-        # Only associate the target shower if there are less sporadics per hour (possible false positives) 
-        #   than the maximum threshold
-        if sporadics_per_hr < flux_config.max_sporadics_per_hr:
-
-            # Perform shower association on the given shower
-            associations, _ = showerAssociation(config, [ftpdetectinfo_path], shower_code=shower_code, \
-                show_plot=False, save_plot=False, plot_activity=False, flux_showers=True)
-
-        else:
+        # Skip the data if there are too many sporadics
+        if sporadics_per_hr >= flux_config.max_sporadics_per_hr:
 
             print("   ... too many sporadics per hour: {:.1f} >= {:d} Skipping this data directory!".format( \
                 sporadics_per_hr, flux_config.max_sporadics_per_hr))
