@@ -329,6 +329,71 @@ class FluxMeasurements(object):
         self.table =  astropy.table.Table.read(ecsv_file_path, delimiter=',', format='ascii.ecsv', \
             guess=False)
 
+        # Remove unnecessary rows
+        self.stripNans()
+
+
+    def stripNans(self):
+        """ Trims entries with NaN values for meteor meteor LM from the top and bottom of the table to 
+            conserve memory. 
+        """
+
+        # Make a copy of the table and empty it
+        table_filtered = self.table.copy()
+        table_filtered.remove_rows(range(len(table_filtered)))
+
+        # Go though all rows of the original table
+        data_hit = False
+        for row in self.table:
+
+            # Skip rows from the beginning that have a NaN meteor_lm magntiude
+            if np.isnan(row['meteor_lm']) and (not data_hit):
+                continue
+
+            else:
+                # Add the row to the new table
+                table_filtered.add_row(row)
+                data_hit = True
+
+
+        # Keep track of the bin edges
+        first_sol = self.table.meta['sol_range'][0]
+        last_sol = self.table.meta['sol_range'][1]
+        first_dt = self.table.meta['time_range'][0]
+        last_dt  = self.table.meta['time_range'][1]
+
+        # Go though all rows of the table in reverse order
+        for row_index in reversed(range(len(table_filtered))):
+
+            # Get the row
+            row = table_filtered[row_index]
+            
+            # Skip rows from the end that have a NaN meteor_lm magntiude
+            if np.isnan(row['meteor_lm']):
+
+                # Keep track of the edge of the time bin
+                last_sol = row['sol']
+                last_dt  = row['time']
+
+                # Remove the nan row
+                table_filtered.remove_row(row_index)
+
+            else:
+                break
+
+        # Update the sol range in the metadata
+        table_filtered.meta['sol_range'] = [first_sol, last_sol]
+
+        # Update the time range in the metadata
+        if (not isinstance(last_dt, datetime.datetime)) and (last_dt is not None):
+            last_dt = last_dt.datetime
+        table_filtered.meta['time_range'] = [first_dt, last_dt]
+
+        # Replace the table with the filtered table
+        self.table = table_filtered
+
+        
+
 
 
 def saveEmptyECSVTable(ecsv_file_path, shower_code, mass_index, flux_config, confidence_interval, \
