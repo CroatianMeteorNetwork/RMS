@@ -3278,22 +3278,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             # Save the fixed bin as an ECSV table
             forced_flux_table.saveECSV(os.path.join(metadata_dir, forced_bins_ecsv_file_name))
 
-
-            # ### TEST !!!!!1
-
-            # test_sol_bins, test_forced_bins_meteor_num, test_forced_bins_area, test_forced_bins_time, \
-            #     test_forced_bins_lm_m = loadForcedBinFluxData(metadata_dir, forced_bins_ecsv_file_name)
-
-            # print("sol bins", sol_bins, test_sol_bins)
-            # print("bins_meteor_num", forced_bins_meteor_num, test_forced_bins_meteor_num)
-            # print("bins_area", forced_bins_area, test_forced_bins_area)
-            # print("time_bins", forced_bins_time, test_forced_bins_time)
-            # print("bins_lm_m", forced_bins_lm_m, test_forced_bins_lm_m)
-
-            # print()
-            # input("Press ENTER to continue...")
-
-            # ### ###
+            # Strip NaN values from the flux table to make it smaller
+            forced_flux_table.stripNans()
 
 
 

@@ -642,7 +642,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
             # Save the results metadata to a dictionary
             if time_extent_flag == "ALL":
                 results_all_years[shower_code] = [
-                    fbr.shower, 
+                    shower, 
                     dir_list, 
                     batch_flux_output_filename + '.png',
                     batch_flux_output_filename_full + '.png'
@@ -650,7 +650,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
 
             else:
                 results_ref_year[shower_code] = [
-                    fbr.shower, 
+                    shower, 
                     dir_list, 
                     batch_flux_output_filename + '.png',
                     batch_flux_output_filename_full + '.png'
