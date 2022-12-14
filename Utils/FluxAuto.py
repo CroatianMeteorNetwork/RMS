@@ -584,8 +584,8 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
     #   2 sets of plots and CSV files will be saved: one set with all years combined, and one set with the
     #   reference year
     for shower_dir_dict, time_extent_flag, fb_bin_params in [
-        [shower_dirs, "ALL", fluxbatch_binning_params_all_years], 
-        [shower_dirs_ref_year, "REF", fluxbatch_binning_params_one_year]
+        [shower_dirs_ref_year, "REF", fluxbatch_binning_params_one_year],
+        [shower_dirs, "ALL", fluxbatch_binning_params_all_years]
         ]:
         
         for shower_code in shower_dir_dict:
