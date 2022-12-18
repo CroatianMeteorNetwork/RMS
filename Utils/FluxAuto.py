@@ -18,7 +18,7 @@ from Utils.FluxBatch import fluxBatch, plotBatchFlux, FluxBatchBinningParams, sa
 from RMS.Misc import mkdirP, walkDirsToDepth
 
 
-def generateWebsite(output_dir, index_dir, flux_showers, ref_dt, fbr_results_all_years, fbr_results_ref_year, 
+def generateWebsite(index_dir, flux_showers, ref_dt, results_all_years, results_ref_year, 
     website_plot_url):
     
 
@@ -108,16 +108,16 @@ Information about the data is provided in a section below: <a href="#about">Abou
     """.format(website_plot_url)
 
     # Generate HTML with the latest results
-    for shower_code in fbr_results_ref_year:
+    for shower_code in results_ref_year:
 
         # Extract reference year results object and names of the plots files
-        fbr_ref, _, plot_name_ref, plot_name_ref_full = fbr_results_ref_year[shower_code]
+        shower_ref, _, plot_name_ref, plot_name_ref_full = results_ref_year[shower_code]
 
         # Print shower name
         shower_info = "<br><h2>#{:d} {:s} - {:s}</h2>".format(
-            fbr_ref.shower.iau_code_int, 
-            fbr_ref.shower.name, 
-            fbr_ref.shower.name_full
+            shower_ref.iau_code_int, 
+            shower_ref.name, 
+            shower_ref.name_full
             )
         html_code += shower_info
 
@@ -132,7 +132,7 @@ Information about the data is provided in a section below: <a href="#about">Abou
         html_code += img_ref_html
 
         # Extract reference year results object and name of the plot file
-        fbr_all, dir_list_all, plot_name_all, plot_name_all_full = fbr_results_all_years[shower_code]
+        shower_all, dir_list_all, plot_name_all, plot_name_all_full = results_all_years[shower_code]
 
         # Determine the range of used years
         dt_list = [dt for _, dt in dir_list_all]
@@ -301,7 +301,6 @@ def loadExcludedStations(dir_path, excluded_stations_file="excluded_stations.txt
 
 
         return excluded_stations
-
 
 
 def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_year_limit=3, \
@@ -578,15 +577,15 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
 
 
     # Store results in a dictionary where the keys are shower codes
-    fbr_results_all_years = {}
-    fbr_results_ref_year = {}
+    results_all_years = {}
+    results_ref_year = {}
 
     # Process batch fluxes for all showers
     #   2 sets of plots and CSV files will be saved: one set with all years combined, and one set with the
     #   reference year
     for shower_dir_dict, time_extent_flag, fb_bin_params in [
-        [shower_dirs, "ALL", fluxbatch_binning_params_all_years], 
-        [shower_dirs_ref_year, "REF", fluxbatch_binning_params_one_year]
+        [shower_dirs_ref_year, "REF", fluxbatch_binning_params_one_year],
+        [shower_dirs, "ALL", fluxbatch_binning_params_all_years]
         ]:
         
         for shower_code in shower_dir_dict:
@@ -640,18 +639,18 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
                 fbr.shower.lasun_beg, fbr.shower.lasun_end, plot_suffix)
             batch_flux_output_filename_full = batch_flux_output_filename + "_full"
 
-            # Save the results to a dictionary
+            # Save the results metadata to a dictionary
             if time_extent_flag == "ALL":
-                fbr_results_all_years[shower_code] = [
-                    fbr, 
+                results_all_years[shower_code] = [
+                    shower, 
                     dir_list, 
                     batch_flux_output_filename + '.png',
                     batch_flux_output_filename_full + '.png'
                     ]
 
             else:
-                fbr_results_ref_year[shower_code] = [
-                    fbr, 
+                results_ref_year[shower_code] = [
+                    shower, 
                     dir_list, 
                     batch_flux_output_filename + '.png',
                     batch_flux_output_filename_full + '.png'
@@ -689,12 +688,18 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
             with open(os.path.join(output_dir, batch_flux_output_filename + "_camera_tally.txt"), 'w') as f:
                 f.write(tally_string)
 
+            # Delete the flux results object to free up memory
+            del fbr
+
 
     # Generate the website HTML code
     if generate_website:
+
         print("Generating website...")
-        generateWebsite(output_dir, index_dir, flux_showers, ref_dt, fbr_results_all_years, 
-            fbr_results_ref_year, website_plot_url)
+
+        generateWebsite(index_dir, flux_showers, ref_dt, results_all_years, results_ref_year, 
+            website_plot_url)
+
         print("   ... done!")
 
 
@@ -731,7 +736,7 @@ if __name__ == "__main__":
         help="Path to the directory where index.html will be placed. If not given, the output directory will be used.")
 
     arg_parser.add_argument('-w', '--weburl', metavar='WEBSITE_PLOT_PUBLIC_URL', type=str,
-        help="Public URL to where the plots are stored on the website.")
+        help="Generate a website HTML with the given public URL to where the plots are stored on the website.")
 
     arg_parser.add_argument('-s', '--shower', metavar='SHOWER', type=str,
         help="Force a specific shower. 3-letter IAU shower code is expected.")
@@ -779,9 +784,9 @@ if __name__ == "__main__":
 
         # Run auto flux
         fluxAutoRun(config, cml_args.dir_path, ref_dt, metadata_dir=cml_args.metadir,
-            output_dir=cml_args.outdir, csv_dir=cml_args.csvdir, generate_website=True, 
-            index_dir=cml_args.indexdir, website_plot_url=cml_args.weburl, shower_code=cml_args.shower,
-            cpu_cores=cml_args.cpucores)
+            output_dir=cml_args.outdir, csv_dir=cml_args.csvdir, 
+            generate_website=(cml_args.weburl is not None), index_dir=cml_args.indexdir, 
+            website_plot_url=cml_args.weburl, shower_code=cml_args.shower, cpu_cores=cml_args.cpucores)
 
 
         ### <// DETERMINE NEXT RUN TIME ###
