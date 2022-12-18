@@ -5259,6 +5259,13 @@ class PlateTool(QtWidgets.QMainWindow):
         # Compute FOV size
         fov_horiz, fov_vert = computeFOVSize(self.platepar)
 
+        if self.img_handle.input_type == 'ff':
+            ff_name = self.img_handle.current_ff_file
+        else:
+            ff_name = "FF_{:s}_".format(self.platepar.station_code) \
+                          + self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_") \
+                          + "{:03d}".format(int(self.img_handle.beginning_datetime.microsecond//1000)) \
+                          + "_0000000.fits"
 
         # Write the meta header
         meta_dict = {
@@ -5270,7 +5277,7 @@ class PlateTool(QtWidgets.QMainWindow):
             'cx' : self.platepar.X_res,                               # Horizontal camera resolution in pixels
             'cy' : self.platepar.Y_res,                               # Vertical camera resolution in pixels
             'photometric_band' : self.mag_band_string,                # The photometric band of the star catalogue
-            'image_file' : os.path.basename(self.input_path),         # The name of the original image or video
+            'image_file' : ff_name,                                   # The name of the original image or video
             'isodate_start_obs': str(dt_ref.strftime(isodate_format_entry)),               # The date and time of the start of the video or exposure
             'astrometry_number_stars' : len(self.platepar.star_list), # The number of stars identified and used in the astrometric calibration
             'mag_label': 'mag',                                       # The label of the Magnitude column in the Point Observation data
