@@ -12,5 +12,5 @@ imreg_dft
 configparser==4.0.2
 imageio==2.6.1
 python-dvr
-pyqtgraph @ git+https://github.com/pyqtgraph/pyqtgraph@develop#egg=pyqtgraph
+pyqtgraph>=0.12
 pyyaml; python_version>='3.6'
