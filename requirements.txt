@@ -11,6 +11,7 @@ astropy>=2.0.3
 imreg_dft
 configparser==4.0.2
 imageio==2.6.1
-python-dvr
-pyqtgraph>=0.12
+python-dvr>=0.0.1 ; python_version >='3.6'
+pyqtgraph @ git+https://github.com/pyqtgraph/pyqtgraph@develop#egg=pyqtgraph ; python_version=='2.7'
+pyqtgraph>=0.12 ; python_version >='3.6'
 pyyaml; python_version>='3.6'
