@@ -43,14 +43,15 @@ class Shower(object):
         self.iau_code_int_unique = int(self.iau_code_int_unique)
         
 
-        self.lasun_beg = float(shower_entry[3]) # deg
-        self.lasun_max = float(shower_entry[4]) # deg
-        self.lasun_end = float(shower_entry[5]) # deg
-        self.ra_g = float(shower_entry[6]) # deg
-        self.dec_g = float(shower_entry[7]) # deg
-        self.dra = float(shower_entry[8]) # deg
-        self.ddec = float(shower_entry[9]) # deg
-        self.vg = float(shower_entry[10]) # km/s
+        self.lasun_beg = float(shower_entry[3])  # deg
+        self.lasun_max = float(shower_entry[4])  # deg
+        self.lasun_end = float(shower_entry[5])  # deg
+        self.ra_g      = float(shower_entry[6])  # deg
+        self.dra       = float(shower_entry[7])  # deg/day
+        self.dec_g     = float(shower_entry[8])  # deg
+        self.ddec      = float(shower_entry[9])  # deg/day
+        self.vg        = float(shower_entry[10]) # km/s
+        self.dvg       = float(shower_entry[11]) # km/s/day
 
         # Reference height
         self.ref_height = None
@@ -64,21 +65,21 @@ class Shower(object):
 
             self.flux_entry = True
 
-            self.flux_year = shower_entry[11]
-            self.flux_lasun_peak = float(shower_entry[12])
-            self.flux_zhr_peak = float(shower_entry[13])
-            self.flux_bp = float(shower_entry[14])
-            self.flux_bm = float(shower_entry[15])
+            self.flux_year = shower_entry[12]
+            self.flux_lasun_peak = float(shower_entry[13])
+            self.flux_zhr_peak = float(shower_entry[14])
+            self.flux_bp = float(shower_entry[15])
+            self.flux_bm = float(shower_entry[16])
 
-            self.population_index = float(shower_entry[16])
+            self.population_index = float(shower_entry[17])
             self.mass_index = 1 + 2.5*np.log10(self.population_index)
 
-            ref_ht = float(shower_entry[17])
+            ref_ht = float(shower_entry[18])
             if ref_ht > 0:
                 self.ref_height = ref_ht
 
             # Load the flux binning parameters
-            flux_binning_params = shower_entry[18].strip()
+            flux_binning_params = shower_entry[19].strip()
             if len(flux_binning_params) > 0:
 
                 # Replace all apostrophes with double quotes
@@ -117,20 +118,27 @@ class Shower(object):
 
         """
 
+        # Solar longitude difference form the peak
+        lasun_diff = (np.degrees(jd2SolLonSteyaert(jdt_ref)) - self.lasun_max + 180)%360 - 180
 
         # Compute the location of the radiant due to radiant drift
-        if not np.any(np.isnan([self.dra, self.ddec])):
-            
-            # Solar longitude difference form the peak
-            lasun_diff = (np.degrees(jd2SolLonSteyaert(jdt_ref)) - self.lasun_max + 180)%360 - 180
+        ra_g  = self.ra_g
+        dec_g = self.dec_g
+        vg    = self.vg
 
+        if not np.isnan(self.dra):
             ra_g = self.ra_g + lasun_diff*self.dra
+
+        if not np.isnan(self.ddec):
             dec_g = self.dec_g + lasun_diff*self.ddec
+
+        if not np.isnan(self.dvg):
+            vg = self.vg + lasun_diff*self.dvg
 
 
         # Compute the apparent radiant - assume that the meteor is directly above the station
         self.ra, self.dec, self.v_init = geocentricToApparentRadiantAndVelocity(ra_g, \
-            dec_g, 1000*self.vg, latitude, longitude, meteor_fixed_ht, \
+            dec_g, 1000*vg, latitude, longitude, meteor_fixed_ht, \
             jdt_ref, include_rotation=True)
 
         return self.ra, self.dec, self.v_init
