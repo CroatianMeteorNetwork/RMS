@@ -1,5 +1,7 @@
 """ Automatically runs the flux code and produces graphs on available data from multiple stations. """
 
+from __future__ import print_function, division, absolute_import
+
 import os
 import sys
 import ast
