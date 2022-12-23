@@ -125,9 +125,8 @@ if __name__ == "__main__":
         ftpdetectinfo_name = None
         for file_name in sorted(os.listdir(dir_path)):
 
-            # Find the defualt FTPdetectinfo file
+            # Find the default FTPdetectinfo file
             if validDefaultFTPdetectinfo(file_name):
-
                 ftpdetectinfo_name = file_name
                 break
 

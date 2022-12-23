@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 
 import platform
 import os
+import sys
 import shutil
 import errno
 import logging
@@ -13,12 +14,12 @@ import inspect
 
 
 # tkinter import that works on both Python 2 and 3
-try:
-    import tkinter
-    from tkinter import filedialog
-except:
+if sys.version_info[0] < 3:
     import Tkinter as tkinter
     import tkFileDialog as filedialog
+else:
+    import tkinter
+    from tkinter import filedialog
 
 
 import numpy as np
@@ -281,7 +282,7 @@ def openFolderDialog(initialdir, title, mpl):
 
 
 
-def ping(host):
+def ping(host, count=1):
     """ Ping the host and return True if reachable. 
         Remember that a host may not respond to a ping (ICMP) request even if the host name is valid.
 
@@ -295,10 +296,10 @@ def ping(host):
     """
 
     # Ping command count option as function of OS
-    param = '-n 1' if platform.system().lower()=='windows' else '-c 1'
+    param = '-n' if platform.system().lower()=='windows' else '-c'
 
     # Building the command. Ex: "ping -c 1 google.com"
-    command = ['ping', param, host]
+    command = ['ping', param, str(count), host]
 
     # Pinging
     return subprocess.call(command) == 0

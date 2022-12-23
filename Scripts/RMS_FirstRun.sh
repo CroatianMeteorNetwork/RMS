@@ -1,8 +1,10 @@
 #!/bin/bash
 
-echo "First run script"
 echo "Waiting 10 seconds to init the Pi..."
-sleep 10
+echo ""
+echo "IMPORTANT: RMS will first update itself."
+echo "Do not touch any file during the update and do not close this window until RMS starts."
+sleep 12
 
 # Google DNS server IP
 IP='8.8.8.8'

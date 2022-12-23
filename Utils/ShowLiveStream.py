@@ -113,9 +113,16 @@ if __name__ == "__main__":
 
                 window_name = 'Live stream'
                 if len(frame.shape) == 3:
+                    
                     if frame.shape[2] == 3:
+
                         # Get green channel
                         frame = frame[:, :, 1]
+
+                    # If UYVY image given, take luma (Y) channel
+                    elif config.uyvy_pixelformat and (frame.shape[2] == 2):
+                        frame = frame[:, :, 1]
+
                     else:
                         frame = frame[:, :, 0]
 
