@@ -483,6 +483,11 @@ def formatScientific(val, dec_places):
     """
     
     s = '{val:0.{dec_places:d}e}'.format(val=val, dec_places=dec_places)
+
+    # Handle NaN values
+    if 'nan' in s:
+        return 'NaN'
+
     m, e = s.split('e')
 
     return r'{m:s}\times 10^{{{e:d}}}'.format(m=m, e=int(e))
