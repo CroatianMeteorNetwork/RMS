@@ -1,5 +1,6 @@
 #!/usr/bin/python
 import os
+import pwd
 import sys
 import traceback
 import subprocess
@@ -7,6 +8,7 @@ import datetime
 import logging
 from RMS.CaptureDuration import captureDuration
 from RMS.Logger import initLogging
+
 
 def rmsExternal(captured_night_dir, archived_night_dir, config):
     initLogging(config, 'iStream_')
@@ -25,7 +27,7 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
     remaining_seconds = 0
 
     # Compute how long to wait before capture
-    if start_time != True:
+    if start_time is not True:
         waitingtime = start_time - timenow
         remaining_seconds = int(waitingtime.total_seconds())		
 
@@ -34,17 +36,17 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
     log.info('Calling {}'.format(script_path))
 
     command = [
-            script_path,
-            config.stationID,
-            captured_night_dir,
-            archived_night_dir,
-            '{:.6f}'.format(config.latitude),
-            '{:.6f}'.format(config.longitude),
-            '{:.1f}'.format(config.elevation),
-            str(config.width),
-            str(config.height),
-            str(remaining_seconds)
-            ]
+        script_path,
+        config.stationID,
+        captured_night_dir,
+        archived_night_dir,
+        '{:.6f}'.format(config.latitude),
+        '{:.6f}'.format(config.longitude),
+        '{:.1f}'.format(config.elevation),
+        str(config.width),
+        str(config.height),
+        str(remaining_seconds)
+    ]
 
     proc = subprocess.Popen(command,stdout=subprocess.PIPE)
    
@@ -63,8 +65,6 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
     os.remove(lockfile)
 
     # Only reboot on the RPi, don't reboot Linux machines
-    import os
-    import pwd
     username = pwd.getpwuid(os.getuid()).pw_name
 
     if username == 'pi':

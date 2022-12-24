@@ -12,8 +12,12 @@ LOGFILE=$LOGPATH$LOGDATE$LOGSUFFIX
 
 mkdir -p $LOGPATH
 
-# Log the output to a file (warning: this breaks Ctrl+C passing to StartCapture)
-#python -m RMS.StartCapture 2>&1 | tee $LOGFILE
+echo ""
+echo ""
+echo "If you need to update the RMS config file, you can do it now."
+echo "Any changes to the config file will be read only after this script is started again or the Pi is rebooted."
+echo ""
+sleep 5
 
 python -m RMS.StartCapture "$@"
 

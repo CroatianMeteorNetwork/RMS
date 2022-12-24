@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 
 import platform
 import os
+import sys
 import shutil
 import errno
 import logging
@@ -13,12 +14,12 @@ import inspect
 
 
 # tkinter import that works on both Python 2 and 3
-try:
-    import tkinter
-    from tkinter import filedialog
-except:
+if sys.version_info[0] < 3:
     import Tkinter as tkinter
     import tkFileDialog as filedialog
+else:
+    import tkinter
+    from tkinter import filedialog
 
 
 import numpy as np
