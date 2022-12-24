@@ -10,8 +10,9 @@ import os
 import random
 import shutil
 import sys
+import logging
 
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt # 
 import numpy as np
 # Import Cython functions
 import pyximport
@@ -23,9 +24,14 @@ from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 from RMS.Astrometry.FFTalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, Platepar, StarCatalog
 from RMS.Math import angularSeparation
+from RMS.Logger import initLogging
 
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import matchStars, subsetCatalog
+
+
+# Get the logger from the main module
+log = logging.getLogger("logger")
 
 
 def computeMinimizationTolerances(config, platepar, star_dict_len):
@@ -227,7 +233,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
     if n_matched == 0:
 
         if verbose:
-            print('No matched stars with radius {:.1f} px!'.format(match_radius))
+            log.info('No matched stars with radius {:.1f} px!'.format(match_radius))
 
         if ret_nmatch:
             return 0, 9999.0, 9999.0, {}
@@ -243,10 +249,10 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
 
     if verbose:
 
-        print()
-        print("Matched {:d} stars with radius of {:.1f} px".format(n_matched, match_radius))
-        print("    Average distance = {:.3f} {:s}".format(avg_dist, unit_label))
-        print("    Cost function    = {:.5f}".format(cost))
+        log.info("")
+        log.info("Matched {:d} stars with radius of {:.1f} px".format(n_matched, match_radius))
+        log.info("    Average distance = {:.3f} {:s}".format(avg_dist, unit_label))
+        log.info("    Cost function    = {:.5f}".format(cost))
 
 
     if ret_nmatch:
@@ -277,8 +283,8 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius, v
     """
 
     if verbose:
-        print()
-        print("CHECK FIT GOODNESS:")
+        log.info("")
+        log.info("CHECK FIT GOODNESS:")
 
     # Match the stars and calculate the residuals
     n_matched, avg_dist, cost, matched_stars = matchStarsResiduals(config, platepar, catalog_stars, \
@@ -321,8 +327,8 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius, v
     if avg_dist <= config.dist_check_threshold:
 
         if verbose:
-            print()
-            print('The minimum residual is satisfied!')
+            log.info("")
+            log.info('The minimum residual is satisfied!')
 
         # Check that the minimum number of stars is matched per every image
         if n_matched >= len(star_dict)*1:
@@ -331,7 +337,7 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius, v
 
         else:
             if verbose:
-                print('But there are not enough stars on every image, recalibrating...')
+                log.info('But there are not enough stars on every image, recalibrating...')
 
 
     return False
@@ -442,10 +448,10 @@ def autoCheckFit(config, platepar, calstars_list, _fft_refinement=False):
 
         if not _fft_refinement:
 
-            print()
-            print("-------------------------------------------------------------------------------")
-            print('The initial platepar is bad, trying to refine it using FFT phase correlation...')
-            print()
+            log.info("")
+            log.info("-------------------------------------------------------------------------------")
+            log.info('The initial platepar is bad, trying to refine it using FFT phase correlation...')
+            log.info("")
 
             # Prepare data for FFT image registration
 
@@ -465,8 +471,6 @@ def autoCheckFit(config, platepar, calstars_list, _fft_refinement=False):
             # Try aligning the platepar using FFT image registration
             platepar_refined = alignPlatepar(config, platepar, calstars_time, calstars_coords)
 
-            print()
-
 
             ### If there are still not enough stars matched, try FFT again ###
             min_radius = 10
@@ -483,12 +487,12 @@ def autoCheckFit(config, platepar, calstars_list, _fft_refinement=False):
 
             # Realign again if necessary
             if n_matched < config.min_matched_stars:
-                print()
-                print("-------------------------------------------------------------------------------")
-                print('Doing a second FFT pass as the number of matched stars was too small...')
-                print()
+                log.info('')
+                log.info("-------------------------------------------------------------------------------")
+                log.info('Doing a second FFT pass as the number of matched stars was too small...')
+                log.info('')
                 platepar_refined = alignPlatepar(config, platepar_refined, calstars_time, calstars_coords)
-                print()
+                log.info('')
 
             ### ###
 
@@ -497,12 +501,12 @@ def autoCheckFit(config, platepar, calstars_list, _fft_refinement=False):
             return autoCheckFit(config, platepar_refined, calstars_list, _fft_refinement=True)
 
         else:
-            print('Auto Check Fit failed completely, please redo the plate manually!')
+            log.info('Auto Check Fit failed completely, please redo the plate manually!')
             return platepar, False
 
 
     if _fft_refinement:
-        print('Second ACF run with an updated platepar via FFT phase correlation...')
+        log.info('Second ACF run with an updated platepar via FFT phase correlation...')
 
 
     # Load catalog stars (overwrite the mag band ratios if specific catalog is used)
@@ -516,20 +520,17 @@ def autoCheckFit(config, platepar, calstars_list, _fft_refinement=False):
 
     # There has to be a minimum of 200 FF files for star fitting
     if len(star_dict) < config.calstars_files_N:
-        print('Not enough FF files in CALSTARS for ACF!')
+        log.info('Not enough FF files in CALSTARS for ACF!')
         return platepar, False
 
 
     # Calculate the total number of calibration stars used
     total_calstars = sum([len(star_dict[key]) for key in star_dict])
-    print('Total calstars:', total_calstars)
+    log.info('Total calstars: {:d}'.format(total_calstars))
 
     if total_calstars < config.calstars_min_stars:
-        print('Not enough calibration stars, need at least', config.calstars_min_stars)
+        log.info('Not enough calibration stars, need at least {}'.format(config.calstars_min_stars))
         return platepar, False
-
-
-    print()
 
 
     # A list of matching radiuses to try
@@ -553,7 +554,7 @@ def autoCheckFit(config, platepar, calstars_list, _fft_refinement=False):
         # Check if the average distance with the tightest radius is close
         if avg_dist < config.dist_check_quick_threshold:
 
-            print("Using quick fit with smaller radiia...")
+            log.info("Using quick fit with smaller radiia...")
 
             # Use a reduced set of initial radius values
             radius_list = [1.5, min_radius]
@@ -568,18 +569,18 @@ def autoCheckFit(config, platepar, calstars_list, _fft_refinement=False):
         n_matched, avg_dist, cost, _ = matchStarsResiduals(config, platepar, catalog_stars, star_dict, \
             match_radius, ret_nmatch=True)
 
-        print()
-        print("-------------------------------------------------------------")
-        print("Refining camera pointing with max pixel deviation = {:.1f} px".format(match_radius))
-        print("Initial values:")
-        print("    Matched stars     = {:>6d}".format(n_matched))
-        print("    Average deviation = {:>6.2f} px".format(avg_dist))
+        log.info('')
+        log.info("-------------------------------------------------------------")
+        log.info("Refining camera pointing with max pixel deviation = {:.1f} px".format(match_radius))
+        log.info("Initial values:")
+        log.info("    Matched stars     = {:>6d}".format(n_matched))
+        log.info("    Average deviation = {:>6.2f} px".format(avg_dist))
 
 
         # The initial number of matched stars has to be at least the number of FF imaages, otherwise it means
         #   that the initial platepar is no good
         if n_matched < config.calstars_files_N:
-            print("The total number of initially matched stars is too small! Please manually redo the plate or make sure there are enough calibration stars.")
+            log.info("The total number of initially matched stars is too small! Please manually redo the plate or make sure there are enough calibration stars.")
 
             # Try to refine the platepar with FFT phase correlation and redo the ACF
             return _handleFailure(config, platepar, calstars_list, catalog_stars, _fft_refinement)
@@ -590,7 +591,7 @@ def autoCheckFit(config, platepar, calstars_list, _fft_refinement=False):
 
             # Print out notice only if the platepar is good right away
             if i == 0:
-                print("Initial platepar is good enough!")
+                log.info("Initial platepar is good enough!")
 
             return platepar, True
 
@@ -603,7 +604,7 @@ def autoCheckFit(config, platepar, calstars_list, _fft_refinement=False):
             star_dict, match_radius), method='Nelder-Mead', \
             options={'fatol': fatol, 'xatol': xatol_ang})
 
-        print(res)
+        log.info(res)
 
         # If the fit was not successful, stop further fitting
         if not res.success:
@@ -633,9 +634,9 @@ def autoCheckFit(config, platepar, calstars_list, _fft_refinement=False):
     n_matched, avg_dist, cost, matched_stars = matchStarsResiduals(config, platepar, catalog_stars, \
         star_dict, min_radius, ret_nmatch=True)
 
-    print("FINAL SOLUTION with radius {:.1} px:".format(min_radius))
-    print("    Matched stars     = {:>6d}".format(n_matched))
-    print("    Average deviation = {:>6.2f} px".format(avg_dist))
+    log.info("FINAL SOLUTION with radius {:.1} px:".format(min_radius))
+    log.info("    Matched stars     = {:>6d}".format(n_matched))
+    log.info("    Average deviation = {:>6.2f} px".format(avg_dist))
 
 
     # Mark the platepar to indicate that it was automatically refined with CheckFit
@@ -678,13 +679,19 @@ if __name__ == "__main__":
 
     # Check if the given directory is OK
     if not os.path.exists(dir_path):
-        print('No such directory:', dir_path)
+        log.info('No such directory: {}'.format(dir_path))
         sys.exit()
 
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
+    # Initialize the logger
+    initLogging(config, 'checkfit_')
+
+    # Get the logger handle
+    log = logging.getLogger("logger")
+    log.setLevel(logging.INFO)
 
     # Get a list of files in the night folder
     file_list = os.listdir(dir_path)
@@ -699,7 +706,7 @@ if __name__ == "__main__":
         platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
 
     else:
-        print('Cannot find the platepar file in the night directory: ', config.platepar_name)
+        log.info('Cannot find the platepar file in the night directory: {}'.format(config.platepar_name))
         sys.exit()
 
 
@@ -710,13 +717,13 @@ if __name__ == "__main__":
             break
 
     if calstars_file is None:
-        print('CALSTARS file could not be found in the given directory!')
+        log.info('CALSTARS file could not be found in the given directory!')
         sys.exit()
 
     # Load the calstars file
     calstars_list = CALSTARS.readCALSTARS(dir_path, calstars_file)
 
-    print('CALSTARS file: ' + calstars_file + ' loaded!')
+    log.info('CALSTARS file: ' + calstars_file + ' loaded!')
 
 
 
@@ -728,7 +735,7 @@ if __name__ == "__main__":
     # If the fit suceeded, save the platepar
     if fit_status:
 
-        print('ACF sucessful!')
+        log.info('ACF sucessful!')
 
         # Save the old platepar
         shutil.move(os.path.join(dir_path, config.platepar_name), os.path.join(dir_path, 

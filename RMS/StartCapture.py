@@ -81,7 +81,7 @@ def resetSIGINT():
 
 
 
-def wait(duration, compressor):
+def wait(duration, compressor, buffered_capture, video_file):
     """ The function will wait for the specified time, or it will stop when Enter is pressed. If no time was
         given (in seconds), it will wait until Enter is pressed. 
     Arguments:
@@ -122,6 +122,11 @@ def wait(duration, compressor):
         if STOP_CAPTURE:
             break
 
+
+        # If a video is given, quit when the video is done
+        if video_file is not None:
+            if buffered_capture.exit.is_set():
+                break
 
 
 
@@ -192,9 +197,14 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Make a name for the capture data directory
     if night_data_dir_name is None:
 
-        # Create a directory for captured files
-        night_data_dir_name = str(config.stationID) + '_' \
-            + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
+        # Create a directory for captured files based on the current time
+        if video_file is None:
+            night_data_dir_name = str(config.stationID) + '_' \
+                + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
+
+        # If a video file is given, take the folder name from the video file
+        else:
+            night_data_dir_name = os.path.basename(video_file[:-4])
 
         # Full path to the data directory
         night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, \
@@ -361,7 +371,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # Capture until Ctrl+C is pressed
-    wait(duration, compressor)
+    wait(duration, compressor, bc, video_file)
 
     # If capture was manually stopped, end capture
     if STOP_CAPTURE:
@@ -507,8 +517,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         detector.deleteBackupFiles()
 
 
-    # If the capture was run for a limited time, run the upload right away
-    if fixed_duration and (upload_manager is not None):
+    # !!! Currenty under testing
+    # # If the capture was run for a limited time, run the upload right away
+    # if fixed_duration and (upload_manager is not None):
+
+    if upload_manager is not None: # temporary code, will make the script upload after each capture
         log.info('Uploading data before exiting...')
         upload_manager.uploadData()
 
@@ -648,7 +661,7 @@ if __name__ == "__main__":
         with the given duration in hours. """)
 
     arg_group.add_argument('-i', '--input', metavar='FILE_PATH', help="""Use video from the given file, 
-        not from a video device. """)
+        not from a video device. The name of the file needs to be in the following format: STATIONID_YYYYMMDD_HHMMSS_US.mp4, where the time is the UTC time of the first frame. Example: CZ0002_20210317_193338_404889.mp4.""")
 
     arg_parser.add_argument('-n', '--nodetect', action="store_true", help="""Do not perform star extraction 
         nor meteor detection. """)
@@ -664,7 +677,7 @@ if __name__ == "__main__":
     cml_args = arg_parser.parse_args()
 
     ######
-
+    video_file = cml_args.input
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
@@ -747,9 +760,10 @@ if __name__ == "__main__":
         log.info('Video source: ' + cml_args.input)
 
         # Capture the video frames from the video file
-        runCapture(config, video_file=cml_args.input, nodetect=cml_args.nodetect,
+        runCapture(config, duration=None, video_file=video_file, nodetect=cml_args.nodetect,
             resume_capture=cml_args.resume)
-
+				
+        sys.exit()
 
     upload_manager = None
     if config.upload_enabled:

@@ -245,6 +245,7 @@ class Config:
         ##### Capture
         self.deviceID = 0
         self.force_v4l2 = False
+        self.uyvy_pixelformat = False
 
         self.width = 1280
         self.height = 720
@@ -277,6 +278,9 @@ class Config:
         self.log_dir = "logs"
         self.captured_dir = "CapturedFiles"
         self.archived_dir = "ArchivedFiles"
+
+        # days of logfiles to keep
+        self.logdays_to_keep = 30
 
         # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
         #   into account
@@ -732,6 +736,9 @@ def parseCapture(config, parser):
     if parser.has_option(section, "log_dir"):
         config.log_dir = parser.get(section, "log_dir")
 
+    if parser.has_option(section, "logdays_to_keep"):
+        config.logdays_to_keep = parser.get(section, "logdays_to_keep")
+
     if parser.has_option(section, "captured_dir"):
         config.captured_dir = parser.get(section, "captured_dir")
     
@@ -821,6 +828,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "force_v4l2"):
         config.force_v4l2 = parser.getboolean(section, "force_v4l2")
+
+    if parser.has_option(section, "uyvy_pixelformat"):
+        config.uyvy_pixelformat = parser.getboolean(section, "uyvy_pixelformat")
 
     if parser.has_option(section, "fps"):
         config.fps = parser.getfloat(section, "fps")

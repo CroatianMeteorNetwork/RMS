@@ -531,19 +531,19 @@ if __name__ == "__main__":
     if config.upload_enabled:
 
         # Init the upload manager
-        print('Starting the upload manager...')
+        log.info('Starting the upload manager...')
 
         upload_manager = UploadManager(config)
         upload_manager.start()
 
         # Add file for upload
-        print('Adding file to upload list: ' + archive_name)
+        log.info('Adding file to upload list: ' + archive_name)
         upload_manager.addFiles([archive_name])
 
         # Stop the upload manager
         if upload_manager.is_alive():
             upload_manager.stop()
-            print('Closing upload manager...')
+            log.info('Closing upload manager...')
 
 
         # Delete detection backup files
