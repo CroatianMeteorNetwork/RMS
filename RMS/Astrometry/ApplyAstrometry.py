@@ -551,12 +551,14 @@ def calculateMagnitudes(px_sum_arr, radius_arr, photom_offset, vignetting_coeff)
 
 
 def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_correction=True, \
-    measurement=False):
+    measurement=False, jd_time=False):
     """ Converts image XY to RA,Dec, but it takes a platepar instead of individual parameters. 
 
     Arguments:
-        time_data: [2D ndarray] Numpy array containing time tuples of each data point (year, month, day,
-            hour, minute, second, millisecond).
+        time_data: [2D ndarray] Numpy array containing either: 
+            if jd_time is False - time tuples of each data point (year, month, day,hour, minute, second, 
+                millisecond).
+            if jd_time is True - Julian dates.
         X_data: [ndarray] 1D numpy array containing the image X component.
         Y_data: [ndarray] 1D numpy array containing the image Y component.
         level_data: [ndarray] Levels of the meteor centroid.
@@ -568,6 +570,7 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
         measurement: [bool] Indicates if the given images values are image measurements. Used for correcting
             celestial coordinates for refraction if the refraction was not taken into account during
             plate fitting.
+        jd_time: [bool] If True, time_data is expected as a list of Julian dates. False by default.
 
     Return:
         (JD_data, RA_data, dec_data, magnitude_data): [tuple of ndarrays]
@@ -579,7 +582,10 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
 
 
     # Convert time to Julian date
-    JD_data = np.array([date2JD(*time_data_entry) for time_data_entry in time_data], dtype=np.float64)
+    if jd_time:
+        JD_data = np.array(time_data)
+    else:
+        JD_data = np.array([date2JD(*time_data_entry) for time_data_entry in time_data], dtype=np.float64)
 
     # Convert x,y to RA/Dec using a fast cython function
     RA_data, dec_data = cyXYToRADec(JD_data, np.array(X_data, dtype=np.float64), \

@@ -434,6 +434,49 @@ def ecef2LatLonAlt(x, y, z):
 
 
 
+def ECEF2AltAz(s_vect, p_vect):
+    """ Given two sets of ECEF coordinates, compute alt/az which point from the point S to the point P.
+
+    Source: https://gis.stackexchange.com/a/58926
+    
+    Arguments:
+        s_vect: [ndarray] sx, sy, sz - S point ECEF coordiantes
+        p_vect: [ndarray] px, py, pz - P point ECEF coordiantes
+
+    Return:
+        (azim, alt): Horizontal coordiantes in degrees.
+
+    """
+
+
+    sx, sy, sz = s_vect
+    px, py, pz = p_vect
+
+    # Compute the pointing vector from S to P
+    dx = px - sx
+    dy = py - sy
+    dz = pz - sz
+
+    # Compute the elevation
+    alt = np.degrees(
+        np.pi/2 - np.arccos((sx*dx + sy*dy + sz*dz)/np.sqrt((sx**2 + sy**2 + sz**2)*(dx**2 + dy**2 + dz**2)))
+        )
+
+    # Compute the azimuth
+    
+    cos_az = (-sz*sx*dx - sz*sy*dy + (sx**2 + sy**2)*dz)/np.sqrt(
+                                            (sx**2 + sy**2)*(sx**2 + sy**2 + sz**2)*(dx**2 + dy**2 + dz**2)
+                                            )
+    
+    sin_az = (-sy*dx + sx*dy)/np.sqrt((sx**2 + sy**2)*(dx**2 + dy**2 + dz**2))
+
+    azim = np.degrees(np.arctan2(sin_az, cos_az))%360
+
+
+    return azim, alt
+
+
+
 def AER2ECEF(azim, elev, r, lat, lon, alt):
     """ Given an azimuth, altitude, and range, compute the ECEF coordinate of that point given a location
         of the observer by lat, lon, alt.
@@ -871,6 +914,10 @@ def trueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True):
         azim, elev = cyTrueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction)
 
     elif isinstance(ra, np.ndarray):
+
+        # Convert JD to appropriate format
+        if isinstance(jd, float):
+            jd = np.zeros_like(ra) + jd
 
         # Compute it for numpy arrays
         azim, elev = cyTrueRaDec2ApparentAltAz_vect(ra, dec, jd, lat, lon, refraction)
