@@ -29,7 +29,14 @@ try:
 except:
     # Python 2
     from ConfigParser import NoOptionError, RawConfigParser
-    
+
+
+# Used to determine detection parametrs which will change in ML filtering is available
+try:
+    from tflite_runtime.interpreter import Interpreter
+    TFLITE_AVAILABLE = True
+except ImportError:
+    TFLITE_AVAILABLE = False    
 
 
 
@@ -419,7 +426,14 @@ class Config:
         self.ang_vel_max = 35.0
 
         # By default the peak of the meteor should be at least 16x brighter than the background. This is the multiplier that scales this number (1.0 = 16x).
-        self.min_patch_intensity_multiplier = 1.0
+        self.min_patch_intensity_multiplier = 0.0
+
+        # Filtering by machine learning
+        self.ml_filter = 0.85
+
+        # Path to the ML model
+        self.ml_model_path = os.path.join(self.rms_root_dir, "share", "meteorml32.tflite")
+
 
         ##### StarExtraction
 
@@ -1204,6 +1218,12 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "min_patch_intensity_multiplier"):
         config.min_patch_intensity_multiplier = parser.getfloat(section, "min_patch_intensity_multiplier")
 
+    if parser.has_option(section, "ml_filter"):
+        config.ml_filter = parser.getfloat(section, "ml_filter")
+
+        # Disable the min_patch_intensity filter if the ML filter is used and the ML library is available
+        if TFLITE_AVAILABLE and (config.ml_filter > 0):
+            config.min_patch_intensity_multiplier = 0
 
 
 

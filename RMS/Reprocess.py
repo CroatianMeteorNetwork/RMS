@@ -33,6 +33,7 @@ from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 from Utils.ShowerAssociation import showerAssociation
+from RMS.MLFilter import filterFTPdetectinfoML
 
 
 # Get the logger from the main module
@@ -172,6 +173,16 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             detector = None
 
 
+
+        # Filter out detections using machine learning
+        if config.ml_filter > 0:
+
+            log.info("Filtering out detections using machine learning...")
+            
+            ff_detected = filterFTPdetectinfoML(config, os.path.join(night_data_dir, ftpdetectinfo_name), \
+                threshold=config.ml_filter, keep_pngs=False)
+
+
         # Get the platepar file
         platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir)
 
@@ -182,8 +193,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             # Read in the CALSTARS file
             calstars_list = CALSTARS.readCALSTARS(night_data_dir, calstars_name)
 
+
             # Run astrometry check and refinement
             platepar, fit_status = autoCheckFit(config, platepar, calstars_list)
+
 
             # If the fit was sucessful, apply the astrometry to detected meteors
             if fit_status:
@@ -198,12 +211,12 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 log.info('Astrometric calibration FAILED!, Using old platepar for calibration...')
 
 
-            # # Calculate astrometry for meteor detections
-            # applyAstrometryFTPdetectinfo(night_data_dir, ftpdetectinfo_name, platepar_path)
 
             # If a flat is used, disable vignetting correction
             if config.use_flat:
                 platepar.vignetting_coeff = 0.0
+
+
 
             log.info("Recalibrating astrometry on FF files with detections...")
 
@@ -211,7 +224,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             recalibrated_platepars = recalibrateIndividualFFsAndApplyAstrometry(night_data_dir, \
                 os.path.join(night_data_dir, ftpdetectinfo_name), calstars_list, config, platepar)
 
-            
+
+
 
             log.info("Converting RMS format to UFOOrbit format...")
 
@@ -228,6 +242,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             except Exception as e:
                 log.debug('Generating calibration report failed with the message:\n' + repr(e))
                 log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
 
 
             # Perform single station shower association
@@ -461,10 +476,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                     celestial_coords_given=(platepar is not None))
 
 
-
     night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir, 
         night_data_dir_name)
-
 
     log.info('Archiving detections to ' + night_archive_dir)
     
