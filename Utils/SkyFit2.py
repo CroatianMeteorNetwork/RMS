@@ -1115,8 +1115,8 @@ class PlateTool(QtWidgets.QMainWindow):
         Opens folder explorer window for user to select new station folder, then loads a platepar from that
         folder, and reads the config file, updating the gui to show what it should
         """
-        dir_path = str(QtGui.QFileDialog.getExistingDirectory(self, "Select new station folder",
-                                                              self.dir_path, QtGui.QFileDialog.ShowDirsOnly))
+        dir_path = str(QtWidgets.QFileDialog.getExistingDirectory(self, "Select new station folder",
+                                                              self.dir_path, QtWidgets.QFileDialog.ShowDirsOnly))
 
         if not dir_path:
             return
@@ -2184,7 +2184,7 @@ class PlateTool(QtWidgets.QMainWindow):
     def findLoadState(self):
         """ Opens file dialog to find .state file to load then calls loadState """
 
-        file_ = QtGui.QFileDialog.getOpenFileName(self, "Load .state file", self.dir_path,
+        file_ = QtWidgets.QFileDialog.getOpenFileName(self, "Load .state file", self.dir_path,
                                                       "State file (*.state);;All files (*)")[0]
 
         if file_:
@@ -3830,7 +3830,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # If the data was not being able to load from the folder, choose a file to load
             if img_handle is None:
-                self.input_path = QtGui.QFileDialog.getOpenFileName(self, "Select image/video file to open",
+                self.input_path = QtWidgets.QFileDialog.getOpenFileName(self, "Select image/video file to open",
                     self.dir_path, "All readable files (*.fits *.bin *.mp4 *.avi *.mkv *.vid *.png *.jpg *.bmp *.nef *.tif);;" + \
                                    "All files (*);;" + \
                                    "FF and FR Files (*.fits;*.bin);;" + \
@@ -3938,7 +3938,7 @@ class PlateTool(QtWidgets.QMainWindow):
             initial_file = self.dir_path
 
         # Load the platepar file
-        platepar_file = QtGui.QFileDialog.getOpenFileName(self, "Select the platepar file", initial_file,
+        platepar_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the platepar file", initial_file,
                                                           "Platepar files (*.cal);;All files (*)")[0]
 
         if platepar_file == '':
@@ -4119,7 +4119,7 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             initial_file = self.dir_path
 
-        flat_file = QtGui.QFileDialog.getOpenFileName(self, "Select the flat field file", initial_file,
+        flat_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the flat field file", initial_file,
                                                       "Image files (*.png *.jpg *.bmp);;All files (*)")[0]
 
         if not flat_file:
@@ -4165,7 +4165,7 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             initial_file = self.dir_path
 
-        dark_file = QtGui.QFileDialog.getOpenFileName(self, "Select the dark frame file", initial_file,
+        dark_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the dark frame file", initial_file,
                                                       "Image files (*.png *.jpg *.bmp *.nef *.cr2);;All files (*)")[0]
 
         if not dark_file:
@@ -4909,7 +4909,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute the background subtracted intensity sum (do as a float to avoid artificially pumping
             #   up the magnitude)
-            pick['intensity_sum'] = np.ma.sum(crop_img.astype(np.float) - background_lvl).astype(np.int)
+            pick['intensity_sum'] = np.ma.sum(crop_img.astype(float) - background_lvl).astype(int)
 
 
             # If the DFN image is used, correct intensity sum for exposure difference
