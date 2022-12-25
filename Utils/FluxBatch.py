@@ -202,7 +202,7 @@ class FluxBatchResults(object):
 
 
 def addFixedBins(sol_bins, small_sol_bins, small_dt_bins, meteor_num_arr, collecting_area_arr, obs_time_arr, \
-    lm_m_arr, rad_elev_arr, rad_dist_arr, ang_vel_arr):
+    lm_m_arr, rad_elev_arr, rad_dist_arr, ang_vel_arr, v_init_arr):
     """ Sort data into fixed bins by solar longitude. 
 
     For a larger array of solar longitudes sol_bins, fits parameters to an empty array of its size (minus 1)
@@ -260,6 +260,10 @@ def addFixedBins(sol_bins, small_sol_bins, small_dt_bins, meteor_num_arr, collec
     ang_vel_binned = np.zeros(len(sol_bins) - 1) + np.nan
     ang_vel_binned[i:i + len(obs_time_arr)] = ang_vel_arr
 
+    # Sort initial velocity into bins
+    v_init_binned = np.zeros(len(sol_bins) - 1) + np.nan
+    v_init_binned[i:i + len(obs_time_arr)] = v_init_arr
+
 
     # Sort meteor numbers into bins
     meteor_num_binned = np.zeros(len(sol_bins) - 1)
@@ -275,11 +279,12 @@ def addFixedBins(sol_bins, small_sol_bins, small_dt_bins, meteor_num_arr, collec
     #     data_arrays.append(forced_bin_param)
 
     return [meteor_num_binned, collecting_area_binned, obs_time_binned, lm_m_binned, rad_elev_binned, \
-        rad_dist_binned, ang_vel_binned]
+        rad_dist_binned, ang_vel_binned, v_init_binned]
 
 
 def combineFixedBinsAndComputeFlux(
-    sol_bins, meteors, time_area_prod, lm_m_data, rad_elev_data, rad_dist_data, ang_vel_data, ci=0.95,
+    sol_bins, meteors, time_area_prod, lm_m_data, rad_elev_data, rad_dist_data, ang_vel_data, v_init_data,
+    ci=0.95,
     min_meteors=50, min_tap=2, min_bin_duration=0.5, max_bin_duration=12):
     """
     Computes flux values and their corresponding solar longitude based on bins containing
@@ -295,6 +300,7 @@ def combineFixedBinsAndComputeFlux(
         rad_elev_data: [ndarray]
         rad_dist_data: [ndarray]
         ang_vel_data: [ndarray]
+        v_init_data: [ndarray]
 
     Keyword arguments:
         ci: [float] Confidence interval for calculating the flux error bars (from 0 to 1)
@@ -327,6 +333,7 @@ def combineFixedBinsAndComputeFlux(
     rad_elev_list = []
     rad_dist_list = []
     ang_vel_list = []
+    v_init_list = []
 
     # In some cases meteors can be an integer and the program crashes, so we need to check
     if not isinstance(meteors, int):
@@ -359,6 +366,7 @@ def combineFixedBinsAndComputeFlux(
                     rad_elev_list.append(np.nan)
                     rad_dist_list.append(np.nan)
                     ang_vel_list.append(np.nan)
+                    v_init_list.append(np.nan)
 
                 else:
 
@@ -391,6 +399,11 @@ def combineFixedBinsAndComputeFlux(
                     ang_vel_weighted = np.sum(ang_vel_select[~np.isnan(ang_vel_select)])/ta_prod
                     ang_vel_list.append(ang_vel_weighted)
 
+                    # Compute the TAP-weighted initial velocity
+                    v_init_select = v_init_data[sl]*time_area_prod[sl]
+                    v_init_weighted = np.sum(v_init_select[~np.isnan(v_init_select)])/ta_prod
+                    v_init_list.append(v_init_weighted)
+
 
                 sol_list.append(np.mean(middle_bin_sol[sl]))
                 sol_tap_weighted_list.append(np.average(middle_bin_sol[sl], weights=time_area_prod[sl]))
@@ -416,6 +429,7 @@ def combineFixedBinsAndComputeFlux(
         np.array(rad_elev_list),
         np.array(rad_dist_list),
         np.array(ang_vel_list),
+        np.array(v_init_list)
     )
 
 
@@ -472,8 +486,19 @@ def cameraTally(comb_sol, comb_sol_bins, single_fixed_bin_information):
 
 
         # Compute station contributions
-        for station, (sol_arr, _,
-                met_num, area, time_bin, lm_m, rad_elev, rad_dist, ang_vel) in single_fixed_bin_information:
+        for station, (
+                sol_arr, 
+                _, 
+                met_num, 
+                area, 
+                time_bin, 
+                lm_m, 
+                rad_elev, 
+                rad_dist, 
+                ang_vel, 
+                _
+                ) in single_fixed_bin_information:
+
 
             sol_arr  = np.array(sol_arr)
             met_num  = np.array(met_num)
@@ -1073,11 +1098,8 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
     # Load the shower object from the given shower code
     shower = loadShower(config, shower_code, mass_index, force_flux_list=True)
 
-    # Init the apparent speed
-    _, _, v_init = shower.computeApparentRadiant(0, 0, 2451545.0)
-
-    # Compute the mass limit at 6.5 mag
-    mass_lim = massVerniani(6.5, v_init/1000)
+    # # Init the apparent speed
+    # _, _, v_init = shower.computeApparentRadiant(0, 0, 2451545.0)
 
     # Override the mass index if given
     if mass_index is not None:
@@ -1120,15 +1142,15 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
 
     # Sum meteors in every bin (this is a 2D along the first axis, producing an array)
     num_meteors = np.sum(np.array(meteors, dtype=np.float) \
-        for meteors, _, _, _, _, _, _ in all_fixed_bin_information)
+        for meteors, _, _, _, _, _, _, _ in all_fixed_bin_information)
 
     # Compute time-area product in every bin
     time_area_product = np.sum(np.array(area, dtype=np.float)*np.array(time, dtype=np.float) \
-        for _, area, time, _, _, _, _ in all_fixed_bin_information)
+        for _, area, time, _, _, _, _, _ in all_fixed_bin_information)
 
     # Compute TAP-weighted meteor limiting magnitude in every bin
     lm_m_data = np.zeros_like(num_meteors, dtype=np.float)
-    for _, area, time, lm_m, _, _, _ in all_fixed_bin_information:
+    for _, area, time, lm_m, _, _, _, _ in all_fixed_bin_information:
 
         lm_m_data[~np.isnan(lm_m)] += (
              np.array(lm_m[~np.isnan(lm_m)])
@@ -1140,7 +1162,7 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
 
     # Compute TAP-weighted radiant elevation in every bin
     rad_elev_data = np.zeros_like(num_meteors, dtype=np.float)
-    for _, area, time, _, rad_elev, _, _ in all_fixed_bin_information:
+    for _, area, time, _, rad_elev, _, _, _ in all_fixed_bin_information:
 
         rad_elev_data[~np.isnan(rad_elev)] += (
              np.array(rad_elev[~np.isnan(rad_elev)])
@@ -1153,7 +1175,7 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
 
     # Compute TAP-weighted radiant distance in every bin
     rad_dist_data = np.zeros_like(num_meteors, dtype=np.float)
-    for _, area, time, _, _, rad_dist, _ in all_fixed_bin_information:
+    for _, area, time, _, _, rad_dist, _, _ in all_fixed_bin_information:
 
         rad_dist_data[~np.isnan(rad_dist)] += (
              np.array(rad_dist[~np.isnan(rad_dist)])
@@ -1166,7 +1188,7 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
 
     # Compute TAP-weighted angular velocity in every bin
     ang_vel_data = np.zeros_like(num_meteors, dtype=np.float)
-    for _, area, time, _, _, _, ang_vel in all_fixed_bin_information:
+    for _, area, time, _, _, _, ang_vel, _ in all_fixed_bin_information:
 
         ang_vel_data[~np.isnan(ang_vel)] += (
              np.array(ang_vel[~np.isnan(ang_vel)])
@@ -1175,6 +1197,19 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
             )
 
     ang_vel_data /= time_area_product
+
+    # Compute the TAP-weighted initial velocity across all bins
+    v_init_data = np.zeros_like(num_meteors, dtype=np.float)
+    for _, area, time, _, _, _, _, v0 in all_fixed_bin_information:
+            
+        v_init_data[~np.isnan(v0)] += (
+             np.array(v0[~np.isnan(v0)])
+            *np.array(area[~np.isnan(v0)])
+            *np.array(time[~np.isnan(v0)])
+            )
+
+    v_init_data /= time_area_product
+
 
 
     (
@@ -1190,6 +1225,7 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
         comb_rad_elev,
         comb_rad_dist,
         comb_ang_vel,
+        comb_v_init,
     ) = combineFixedBinsAndComputeFlux(
         sol_bins,
         num_meteors,
@@ -1198,6 +1234,7 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
         rad_elev_data,
         rad_dist_data,
         ang_vel_data,
+        v_init_data,
         ci=ci,
         min_tap=min_tap,
         min_meteors=min_meteors,
@@ -1208,12 +1245,24 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
     comb_sol_tap_weighted = np.degrees(comb_sol_tap_weighted)
     comb_sol_bins = np.degrees(comb_sol_bins)
 
+    # Computed the weidghted mean initial velocity
+    summary_v_init = np.sum(
+        comb_v_init[~np.isnan(comb_v_init)]*comb_ta_prod[~np.isnan(comb_v_init)]) \
+            /np.sum(comb_ta_prod[~np.isnan(comb_v_init)]
+            )
+
+
+    # Compute the mass limit at 6.5 mag
+    mass_lim = massVerniani(6.5, summary_v_init/1000)
 
     # Compute the weighted mean meteor magnitude
-    lm_m_mean = np.sum(comb_lm_m*comb_ta_prod)/np.sum(comb_ta_prod)
+    lm_m_mean = np.sum(
+        comb_lm_m[~np.isnan(comb_lm_m)]*comb_ta_prod[~np.isnan(comb_lm_m)]) \
+            /np.sum(comb_ta_prod[~np.isnan(comb_lm_m)]
+        )
 
     # Compute the mass limit at the mean meteor LM
-    mass_lim_lm_m_mean = massVerniani(lm_m_mean, v_init/1000)
+    mass_lim_lm_m_mean = massVerniani(lm_m_mean, summary_v_init/1000)
 
     print("Mean TAP-weighted meteor limiting magnitude = {:.2f}M".format(lm_m_mean))
     print("                         limiting mass      = {:.2e} g".format(1000*mass_lim_lm_m_mean))
@@ -1256,7 +1305,7 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
         # Mag/mass limit information
         lm_m_mean, lm_m_to_6_5_factor, mass_lim, mass_lim_lm_m_mean,
         # Supplementary information
-        v_init, summary_population_index, population_index_mean, single_fixed_bin_information,
+        summary_v_init, summary_population_index, population_index_mean, single_fixed_bin_information,
         single_station_flux)
 
     return flux_batch_results
