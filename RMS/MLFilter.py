@@ -13,7 +13,6 @@ import math
 import numpy as np
 from PIL import Image
 import traceback
-from pathlib import Path
 #import time
 import logging
 import datetime
@@ -124,11 +123,11 @@ def classifyPNGs(file_dir, model_path):
         prob = classify_image(interpreter, image)
         #time2 = time.time()
         #classification_time = np.round(time2-time1, 3)
-        #print(f'{prob:.3f}' + "\t" + Path(f).stem)
+        #print("{:.3f}".format(prob) + "\t" + os.path.splitext(os.path.basename(f))[0])
         # + "\t" + str(classification_time), " seconds.")
 
         # Save the file name and the predicted classification probability
-        prediction_dict[Path(f).stem] = prob
+        prediction_dict[os.path.splitext(os.path.basename(f))[0]] = prob
 
 
     return prediction_dict
@@ -400,7 +399,7 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
 
 
     # Check if the module has already been run (the _unfiltered file already exists)
-    unfiltered_name = Path(file_name).stem + FTPDETECTINFO_UNFILTERED_SUFFIX
+    unfiltered_name = os.path.splitext(os.path.basename(file_name))[0] + FTPDETECTINFO_UNFILTERED_SUFFIX
     orig_name = file_name
 
     if os.path.isfile(os.path.join(dir_path, unfiltered_name)):
@@ -519,7 +518,8 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
                 os.path.join(png_dir, png_name + '.png'), 
                 os.path.join(
                     keep_png_dir, 
-                    Path(png_name).stem + '_p-{:.3f}'.format(prediction_dict[png_name]) + '.png'
+                    os.path.splitext(os.path.basename(png_name))[0] \
+                        + '_p-{:.3f}'.format(prediction_dict[png_name]) + '.png'
                     )
                 )
     
