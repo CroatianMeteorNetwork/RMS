@@ -236,20 +236,23 @@ def crop_detections(detection_info, fits_dir):
     last_frame_no = last_frame_info[1]
 
     try:
-        #read the fits_file
-        # print(f"fits_dir: {fits_dir}\nfits_file_name: {fits_file_name}")
+        # Read the fits_file
+        # print("fits_dir:", fits_dir)
+        # print("fits_file_name:", fits_file_name)
         fits_file = FFfile.read(fits_dir, fits_file_name, fmt="fits")
-        #image array with background set to 0 so detections stand out more
-        #TODO inlcude code to use mask for the camera, currently masks not available on the data given to me, Fiachra Feehilly (2021)
+
+        # image array with background set to 0 so detections stand out more
+        # TODO inlcude code to use mask for the camera, currently masks not available on the data given to me, Fiachra Feehilly (2021)
         detect_only = fits_file.maxpixel - fits_file.avepixel
-        #set image to only include frames where detection occurs, reduces likelihood that there will then be multiple detections in the same cropped image
+
+        # set image to only include frames where detection occurs, reduces likelihood that there will then be multiple detections in the same cropped image
         detect_only_frames = FFfile.selectFFFrames(detect_only, fits_file, first_frame_no, last_frame_no)
 
-        #get size of the image
+        # get size of the image
         row_size = detect_only_frames.shape[0]
         col_size = detect_only_frames.shape[1]
 
-        #side 1, 2 are the left and right sides but still need to determine which is which
+        # side 1, 2 are the left and right sides but still need to determine which is which
         # left side will be the lesser value as the value represents column number
         side_1 = first_frame_info[2]
         side_2 = last_frame_info[2]
@@ -306,7 +309,7 @@ def crop_detections(detection_info, fits_dir):
         return square_crop_image
 
     except Exception:
-        print(f"error: {traceback.format_exc()}")
+        print("error: ", traceback.format_exc())
         return None
 
 
@@ -363,7 +366,7 @@ def makePNGCrops(FTP_path, FF_dir_path):
                 im.save(os.path.join(temp_png_dir, png_name + ".png"))
 
             else:
-                print(f"file: {fits_file_name} not found")
+                print("file:", fits_file_name, " not found")
 
     except:
         print(traceback.format_exc())
