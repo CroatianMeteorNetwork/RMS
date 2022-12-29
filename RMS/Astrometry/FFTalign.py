@@ -121,8 +121,8 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
 
 
     # Set input types
-    reference_list = np.array(reference_list).astype(np.float)
-    moved_list = np.array(moved_list).astype(np.float)
+    reference_list = np.array(reference_list).astype(float)
+    moved_list = np.array(moved_list).astype(float)
 
     # Rescale the coordinates so the whole image fits inside the square (rescale by the smaller image axis)
     rescale_factor = min(config.width, config.height)/img_size

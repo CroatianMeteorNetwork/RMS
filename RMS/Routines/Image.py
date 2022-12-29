@@ -280,7 +280,7 @@ def applyBrightnessAndContrast(img, brightness, contrast):
     img_type = img.dtype
 
     # Convert image to float
-    img = img.astype(np.float)
+    img = img.astype(float)
 
     # Apply brightness
     img = img + brightness
