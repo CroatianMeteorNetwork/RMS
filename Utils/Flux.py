@@ -1612,8 +1612,8 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
         col_areas_xy = collections.OrderedDict()
 
         # Sample the image
-        for x0 in np.linspace(0, platepar.X_res, longer_side_points, dtype=np.int, endpoint=False):
-            for y0 in np.linspace(0, platepar.Y_res, shorter_side_points, dtype=np.int, endpoint=False):
+        for x0 in np.linspace(0, platepar.X_res, longer_side_points, dtype=int, endpoint=False):
+            for y0 in np.linspace(0, platepar.Y_res, shorter_side_points, dtype=int, endpoint=False):
 
                 # Compute lower right corners of the segment
                 xe = x0 + longer_dpx

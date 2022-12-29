@@ -48,7 +48,7 @@ def addPoint(img, xc, yc, radius):
     sigma, mu = 1.0, 0.0
 
     # Generate a small array with a gaussian
-    grid_arr = np.linspace(-radius, radius, 2*radius + 1, dtype=np.int)
+    grid_arr = np.linspace(-radius, radius, 2*radius + 1, dtype=int)
     x, y = np.meshgrid(grid_arr, grid_arr)
     d = np.sqrt(x**2 + y**2)
     gauss = 255*np.exp(-((d - mu)**2/(2.0*sigma**2)))
