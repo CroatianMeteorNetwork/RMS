@@ -187,7 +187,7 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
         ax3.imshow(res['timg'], cmap='gray')
         ax3.set_title('Transformed')
 
-        ax4.imshow(np.abs(res['timg'].astype(np.int) - img_ref.astype(np.int)).astype(np.uint8), cmap='gray')
+        ax4.imshow(np.abs(res['timg'].astype(int) - img_ref.astype(int)).astype(np.uint8), cmap='gray')
         ax4.set_title('Difference')
 
         plt.tight_layout()

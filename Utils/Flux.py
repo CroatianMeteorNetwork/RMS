@@ -930,7 +930,7 @@ def loadForcedBinFluxData(dir_path, file_name):
     if len(dt_bins):
         dt_bins = np.append(dt_bins, [flux_table.table.meta['time_range'][1]])
 
-    meteor_list = flux_table.table['meteors'].data.astype(np.int).tolist()
+    meteor_list = flux_table.table['meteors'].data.astype(int).tolist()
     area_list = (1e6*flux_table.table['eff_col_area'].data).tolist()
     time_list = flux_table.table['time_bin'].data
     meteor_lm_list = flux_table.table['meteor_lm'].data.tolist()
