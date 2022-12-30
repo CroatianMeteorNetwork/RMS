@@ -543,3 +543,23 @@ def roundToSignificantDigits(x, n=2):
     ### ###
 
     return out
+
+
+def isRaspberryPi():
+    """ Check if the code is running on a Raspberry Pi. 
+    
+    Return:
+        [bool] True if the code is running on a Raspberry Pi, False otherwise.
+    """
+
+    try:
+        # Open a file with the RPi model name
+        with open('/sys/firmware/devicetree/base/model', 'r') as m:
+
+            if 'raspberry pi' in m.read().lower(): 
+                return True               
+
+    except FileNotFoundError:
+        pass
+
+    return False
