@@ -74,12 +74,18 @@ class Shower(object):
             self.population_index = float(shower_entry[17])
             self.mass_index = 1 + 2.5*np.log10(self.population_index)
 
+            # Reference meteor height in km
             ref_ht = float(shower_entry[18])
             if ref_ht > 0:
                 self.ref_height = ref_ht
 
+            # Shower association radius in deg
+            self.association_radius = float(shower_entry[19])
+            if self. association_radius < 0:
+                self.association_radius = 3.0
+
             # Load the flux binning parameters
-            flux_binning_params = shower_entry[19].strip()
+            flux_binning_params = shower_entry[20].strip()
             if len(flux_binning_params) > 0:
 
                 # Replace all apostrophes with double quotes
