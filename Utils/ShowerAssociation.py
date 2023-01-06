@@ -507,9 +507,14 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             # Compute the angle between the meteor radiant and the great circle normal
             radiant_separation = meteor_obj.angularSeparationFromGC(shower.ra, shower.dec)
 
+            # Load the appropriate association radius
+            if hasattr(shower, 'association_radius'):
+                association_radius = shower.association_radius
+            else:
+                association_radius = config.shower_max_radiant_separation
 
             # Make sure the meteor is within the radiant distance threshold
-            if radiant_separation > config.shower_max_radiant_separation:
+            if radiant_separation > association_radius:
                 continue
 
 
@@ -787,9 +792,15 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
             heading_arr = np.linspace(0, 360, 50)
 
+            # Load the appropriate association radius
+            if hasattr(shower, 'association_radius'):
+                association_radius = shower.association_radius
+            else:
+                association_radius = config.shower_max_radiant_separation
+
             # Compute coordinates on a circle around the given RA, Dec
             ra_circle, dec_circle = sphericalPointFromHeadingAndDistance(shower.ra, shower.dec, \
-                heading_arr, config.shower_max_radiant_separation)
+                heading_arr, association_radius)
 
 
             # Plot the shower circle

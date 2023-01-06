@@ -443,7 +443,7 @@ class InputTypeFRFF(InputType):
                         for i in range(min_frame, max_frame + 1):
 
                             # Init an empty image
-                            img = np.zeros((self.ncols, self.nrows), np.float)
+                            img = np.zeros((self.ncols, self.nrows), float)
 
                             # Compute indices on the image where the FR file will be pasted
                             x_img = np.arange(int(fr_files[fr].xc[line][i] - fr_files[fr].size[line][i]//2),

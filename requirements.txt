@@ -1,8 +1,8 @@
 gitpython>=2.1.8
 paramiko==2.4.0,<=2.8.1; python_version=='2.7'
 paramiko>=2.4.2,<=2.8.1; python_version>='3.6'
-numpy>=1.13.3 ; python_version=='2.7'
-numpy>=1.21.0 ; python_version>='3.6'
+numpy>=1.13.3,<1.24.0 ; python_version=='2.7'
+numpy>=1.21.0,<1.24.0 ; python_version>='3.6'
 matplotlib>=2.1.1
 pyephem>=3.7.6.0
 cython>=0.27.3
@@ -14,5 +14,6 @@ configparser==4.0.2
 imageio==2.6.1
 python-dvr>=0.0.1 ; python_version >='3.6'
 pyqtgraph @ git+https://github.com/pyqtgraph/pyqtgraph@develop#egg=pyqtgraph ; python_version=='2.7'
-pyqtgraph>=0.12 ; python_version >='3.6'
+pyqtgraph>=0.12,<0.13 ; python_version >='3.6'
 pyyaml; python_version>='3.6'
+tflite-runtime; python_version>='3.6'

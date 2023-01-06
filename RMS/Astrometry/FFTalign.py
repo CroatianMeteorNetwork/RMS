@@ -48,7 +48,7 @@ def addPoint(img, xc, yc, radius):
     sigma, mu = 1.0, 0.0
 
     # Generate a small array with a gaussian
-    grid_arr = np.linspace(-radius, radius, 2*radius + 1, dtype=np.int)
+    grid_arr = np.linspace(-radius, radius, 2*radius + 1, dtype=int)
     x, y = np.meshgrid(grid_arr, grid_arr)
     d = np.sqrt(x**2 + y**2)
     gauss = 255*np.exp(-((d - mu)**2/(2.0*sigma**2)))
@@ -121,8 +121,8 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
 
 
     # Set input types
-    reference_list = np.array(reference_list).astype(np.float)
-    moved_list = np.array(moved_list).astype(np.float)
+    reference_list = np.array(reference_list).astype(float)
+    moved_list = np.array(moved_list).astype(float)
 
     # Rescale the coordinates so the whole image fits inside the square (rescale by the smaller image axis)
     rescale_factor = min(config.width, config.height)/img_size
@@ -187,7 +187,7 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
         ax3.imshow(res['timg'], cmap='gray')
         ax3.set_title('Transformed')
 
-        ax4.imshow(np.abs(res['timg'].astype(np.int) - img_ref.astype(np.int)).astype(np.uint8), cmap='gray')
+        ax4.imshow(np.abs(res['timg'].astype(int) - img_ref.astype(int)).astype(np.uint8), cmap='gray')
         ax4.set_title('Difference')
 
         plt.tight_layout()
