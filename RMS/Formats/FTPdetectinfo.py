@@ -23,6 +23,20 @@ import git
 import numpy as np
 
 
+def validDefaultFTPdetectinfo(file_name):
+    """ Given a name of a file, check if it's the defualt FTPdetectinfo file (without any extensions). 
+    """
+
+    if file_name.startswith("FTPdetectinfo") and file_name.endswith('.txt') and \
+        (not "backup" in file_name) and (not "uncalibrated" in file_name) and \
+        (not "unfiltered" in file_name):
+
+        return True
+
+
+    return False
+
+
 def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_code, fps, calibration=None,
     celestial_coords_given=False):
     """ Writes a FTPdetectinfo file from the list of detected meteors. 

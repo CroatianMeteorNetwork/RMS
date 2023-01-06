@@ -153,6 +153,7 @@ class FluxMeasurements(object):
         self.rad_elev_data = []
         self.rad_dist_data = []
         self.ang_vel_data = []
+        self.v_init_data = []
         self.total_corrections_data = []
         self.eff_col_area_data = []
         self.eff_col_area_6_5_lm_data = []
@@ -165,7 +166,7 @@ class FluxMeasurements(object):
         self.flux_6_5_lm_ci_upper_data = []
 
 
-    def addEntry(self, sol_lon, times, meteors, rad_elev, rad_dist, ang_vel, total_corrections, \
+    def addEntry(self, sol_lon, times, meteors, rad_elev, rad_dist, ang_vel, v_init, total_corrections, \
         eff_col_area, eff_col_area_6_5_lm, time_bin, stellar_lm, meteor_lm, flux_meteor_lm, flux_6_5_lm, \
         flux_6_5_lm_ci_lower, flux_6_5_lm_ci_upper):
         """ Add entry to the flux data. """
@@ -177,6 +178,7 @@ class FluxMeasurements(object):
         self.rad_elev_data.append(rad_elev)
         self.rad_dist_data.append(rad_dist)
         self.ang_vel_data.append(ang_vel)
+        self.v_init_data.append(v_init)
         self.total_corrections_data.append(total_corrections)
         self.eff_col_area_data.append(eff_col_area)
         self.eff_col_area_6_5_lm_data.append(eff_col_area_6_5_lm)
@@ -249,6 +251,12 @@ class FluxMeasurements(object):
         ang_vel_col.info.description = "Angular velocity at the FOV center"
         self.table['ang_vel'] = ang_vel_col
         formats['ang_vel'] = "%.3f"
+
+        # Shower initial velocity
+        v_init_col = astropy.units.Quantity(self.v_init_data, unit=astropy.units.km/astropy.units.s)
+        v_init_col.info.description = "Aparent meteor velocity in the middle of the time bin"
+        self.table['v_init'] = v_init_col
+        formats['v_init'] = "%.3f"
 
         # Total corrections
         total_corrections_col = astropy.units.Quantity(self.total_corrections_data)
@@ -922,13 +930,20 @@ def loadForcedBinFluxData(dir_path, file_name):
     if len(dt_bins):
         dt_bins = np.append(dt_bins, [flux_table.table.meta['time_range'][1]])
 
-    meteor_list = flux_table.table['meteors'].data.astype(np.int).tolist()
+    meteor_list = flux_table.table['meteors'].data.astype(int).tolist()
     area_list = (1e6*flux_table.table['eff_col_area'].data).tolist()
     time_list = flux_table.table['time_bin'].data
     meteor_lm_list = flux_table.table['meteor_lm'].data.tolist()
     rad_elev_list = flux_table.table['rad_elev'].data.tolist()
     rad_dist_list = flux_table.table['rad_dist'].data.tolist()
     ang_vel_list = flux_table.table['ang_vel'].data.tolist()
+
+    # Check if the v_init column exists, if not, create a list of a fixed initial velocity
+    if 'v_init' in flux_table.table.colnames:
+        v_init_list = (1000*flux_table.table['v_init'].data).tolist()
+    else:
+        v_init_list = [1000*flux_table.table.meta['shower_velocity'].value]*len(meteor_list)
+
 
     ### ###
 
@@ -944,7 +959,7 @@ def loadForcedBinFluxData(dir_path, file_name):
     # meteor_lm_list = data[:-1, 4]
 
     return sol_bins, dt_bins, meteor_list, area_list, time_list, meteor_lm_list, rad_elev_list, \
-        rad_dist_list, ang_vel_list
+        rad_dist_list, ang_vel_list, v_init_list
 
 
 
@@ -1597,8 +1612,8 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
         col_areas_xy = collections.OrderedDict()
 
         # Sample the image
-        for x0 in np.linspace(0, platepar.X_res, longer_side_points, dtype=np.int, endpoint=False):
-            for y0 in np.linspace(0, platepar.Y_res, shorter_side_points, dtype=np.int, endpoint=False):
+        for x0 in np.linspace(0, platepar.X_res, longer_side_points, dtype=int, endpoint=False):
+            for y0 in np.linspace(0, platepar.Y_res, shorter_side_points, dtype=int, endpoint=False):
 
                 # Compute lower right corners of the segment
                 xe = x0 + longer_dpx
@@ -1952,6 +1967,7 @@ def computeFluxCorrectionsOnBins(
     radiant_elev_data = []
     radiant_dist_mid_data = []
     ang_vel_mid_data = []
+    v_init_data = []
     lm_s_data = []
     lm_m_data = []
     sensitivity_corr_data = []
@@ -2092,10 +2108,11 @@ def computeFluxCorrectionsOnBins(
                 radiant_elev_data.append(None)
                 radiant_dist_mid_data.append(None)
                 ang_vel_mid_data.append(None)
-                
+                v_init_data.append(None)
 
                 flux_table.addEntry(sol_entry, dt_entry, 0, radiant_elev, np.degrees(rad_dist_mid), \
-                    np.degrees(ang_vel_mid), 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
+                    np.degrees(ang_vel_mid), v_init/1000, 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, \
+                    np.nan)
 
             continue
 
@@ -2122,10 +2139,12 @@ def computeFluxCorrectionsOnBins(
                 radiant_elev_data.append(None)
                 radiant_dist_mid_data.append(None)
                 ang_vel_mid_data.append(None)
+                v_init_data.append(None)
                 
 
                 flux_table.addEntry(sol_entry, dt_entry, 0, radiant_elev, np.degrees(rad_dist_mid), \
-                    np.degrees(ang_vel_mid), 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
+                    np.degrees(ang_vel_mid), v_init/1000, 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, \
+                    np.nan, np.nan)
 
             continue
 
@@ -2148,10 +2167,12 @@ def computeFluxCorrectionsOnBins(
                 radiant_elev_data.append(None)
                 radiant_dist_mid_data.append(None)
                 ang_vel_mid_data.append(None)
+                v_init_data.append(None)
                 
 
                 flux_table.addEntry(sol_entry, dt_entry, 0, radiant_elev, np.degrees(rad_dist_mid), \
-                    np.degrees(ang_vel_mid), 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
+                    np.degrees(ang_vel_mid), v_init/1000, 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, \
+                    np.nan, np.nan)
 
             continue
 
@@ -2219,10 +2240,12 @@ def computeFluxCorrectionsOnBins(
                     radiant_elev_data.append(None)
                     radiant_dist_mid_data.append(None)
                     ang_vel_mid_data.append(None)
+                    v_init_data.append(None)
                     
 
                     flux_table.addEntry(sol_entry, dt_entry, 0, radiant_elev, np.degrees(rad_dist_mid), \
-                    np.degrees(ang_vel_mid), 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
+                    np.degrees(ang_vel_mid), v_init/1000, 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, \
+                    np.nan, np.nan)
 
 
                 continue
@@ -2489,6 +2512,7 @@ def computeFluxCorrectionsOnBins(
             radiant_elev_data.append(radiant_elev)
             radiant_dist_mid_data.append(np.degrees(rad_dist_mid))
             ang_vel_mid_data.append(np.degrees(ang_vel_mid))
+            v_init_data.append(v_init)
             lm_s_data.append(lm_s)
             lm_m_data.append(lm_m)
 
@@ -2509,7 +2533,7 @@ def computeFluxCorrectionsOnBins(
 
             # Add entry to the flux data container
             flux_table.addEntry(sol_entry, dt_entry, len(bin_meteor_list), radiant_elev, \
-                np.degrees(rad_dist_mid), np.degrees(ang_vel_mid), total_corr_avg, \
+                np.degrees(rad_dist_mid), np.degrees(ang_vel_mid), v_init/1000, total_corr_avg, \
                 collection_area/1e6, collection_area_6_5_lm/1e6, bin_hours, lm_s, lm_m, flux, flux_lm_6_5, 
                 flux_lm_6_5_ci_lower, flux_lm_6_5_ci_upper)
 
@@ -2537,6 +2561,7 @@ def computeFluxCorrectionsOnBins(
         radiant_elev_data,
         radiant_dist_mid_data,
         ang_vel_mid_data,
+        v_init_data,
         lm_s_data,
         lm_m_data,
         sensitivity_corr_data,
@@ -2698,9 +2723,13 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         if os.path.exists(os.path.join(metadata_dir, forced_bins_ecsv_file_name)):
 
             # Load previously computed collection areas and flux metadata
-            sol_bins, dt_bins, forced_bins_meteor_num, forced_bins_area, forced_bins_time, \
-                forced_bins_lm_m, forced_radiant_elev, forced_radiant_dist, \
-                forced_ang_vel = loadForcedBinFluxData(metadata_dir, forced_bins_ecsv_file_name)
+            (
+                sol_bins, dt_bins, 
+                forced_bins_meteor_num, forced_bins_area, forced_bins_time,
+                forced_bins_lm_m, 
+                forced_radiant_elev, forced_radiant_dist,
+                forced_ang_vel, forced_v_init
+                ) = loadForcedBinFluxData(metadata_dir, forced_bins_ecsv_file_name)
 
             print("    ... loaded!")
 
@@ -3162,6 +3191,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 radiant_elev_data,
                 radiant_dist_mid_data,
                 ang_vel_mid_data,
+                v_init_data,
                 lm_s_data,
                 lm_m_data,
                 sensitivity_corr_data,
@@ -3228,6 +3258,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 forced_radiant_elev,
                 forced_radiant_dist,
                 forced_ang_vel,
+                forced_v_init,
                 _,
                 forced_bins_lm_m,
                 _,
@@ -3577,7 +3608,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             meteor_num_data,
             population_index,
             (sol_bins, dt_bins, forced_bins_meteor_num, forced_bins_area, forced_bins_time, \
-                forced_bins_lm_m, forced_radiant_elev, forced_radiant_dist, forced_ang_vel),
+                forced_bins_lm_m, forced_radiant_elev, forced_radiant_dist, forced_ang_vel, forced_v_init),
         )
     return (
         sol_data,

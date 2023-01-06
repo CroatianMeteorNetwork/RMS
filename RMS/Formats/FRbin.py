@@ -77,7 +77,7 @@ class fr_struct:
         if self.__maxpixel is None:
 
             # Init an empty image
-            img = np.zeros((self.ncols, self.nrows), np.float)
+            img = np.zeros((self.ncols, self.nrows), float)
 
             # Crease a maxpixel using all lines
             for line in range(self.lines):

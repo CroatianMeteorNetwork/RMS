@@ -72,7 +72,7 @@ def readBSC(file_path, file_name, years_from_J2000=0):
             RA = np.fromfile(fid, dtype=float_64d, count=1)[0]
             dec = np.fromfile(fid, dtype=float_64d, count=1)[0]
             spectral = np.fromfile(fid, dtype=char_8d, count=1)[0]
-            mag = np.fromfile(fid, dtype=int_8d, count=1)[0].astype(np.float)/100
+            mag = np.fromfile(fid, dtype=int_8d, count=1)[0].astype(float)/100
             RA_proper = np.fromfile(fid, dtype=float_32d, count=1)[0]
             dec_proper = np.fromfile(fid, dtype=float_32d, count=1)[0]
 

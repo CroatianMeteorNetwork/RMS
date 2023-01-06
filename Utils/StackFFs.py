@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
+from RMS.Formats.FTPdetectinfo import validDefaultFTPdetectinfo, readFTPdetectinfo
 from RMS.Routines.Image import deinterlaceBlend, blendLighten, loadFlat, applyFlat, adjustLevels, saveImage
 from RMS.Routines import MaskImage
 
@@ -181,7 +182,7 @@ if __name__ == '__main__':
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Stacks all maxpixles in the given folder to one image.")
 
-    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
+    arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
         help='Path to directory with FF files.')
 
     arg_parser.add_argument('file_format', nargs=1, metavar='FILE_FORMAT', type=str, \
@@ -205,6 +206,9 @@ if __name__ == '__main__':
     arg_parser.add_argument('-m', '--mask', metavar='MASK_PATH', type=str, 
         help="Apply a given mask. If no path to the mask is given, mask.bmp from the folder will be taken.")
 
+    arg_parser.add_argument('--ftpdetectinfo', action="store_true", \
+        help="""Only stack FF files given in the FTPdetectinfo file. """)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -220,10 +224,33 @@ if __name__ == '__main__':
             mask = MaskImage.loadMask(mask_path)
 
 
+    # If the FTPdetectinfo parameter is given, find the FTPdetectinfo file and only select those FF files
+    # in it
+    ff_list = None
+    if cml_args.ftpdetectinfo:
+
+        # Get a list of files in the directory
+        dir_file_list = os.listdir(cml_args.dir_path)
+
+        # Try to find the FTPdetectinfo file
+        ftpdetectinfo_list = [fn for fn in dir_file_list if validDefaultFTPdetectinfo(fn)]
+
+        if len(ftpdetectinfo_list) > 0:
+
+            print("Using FTPdetectinfo for stacking!")
+
+            ftpdetectinfo_name = ftpdetectinfo_list[0]
+
+            # Load the FTPdetectinfo file
+            meteor_list = readFTPdetectinfo(cml_args.dir_path, ftpdetectinfo_name)
+            ff_list = [entry[0] for entry in meteor_list if entry[0] in dir_file_list]
+
+
+
     # Run stacking
-    stack_path, merge_img = stackFFs(cml_args.dir_path[0], cml_args.file_format[0], \
+    stack_path, merge_img = stackFFs(cml_args.dir_path, cml_args.file_format[0], \
         deinterlace=cml_args.deinterlace, subavg=cml_args.subavg, filter_bright=cml_args.brightfilt, \
-        flat_path=cml_args.flat, mask=mask)
+        flat_path=cml_args.flat, file_list=ff_list, mask=mask)
 
 
 

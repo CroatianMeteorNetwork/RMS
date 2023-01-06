@@ -1471,7 +1471,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 remove_under_horizon=False, sort_declination=True)
 
             # Create a mask to filter out all points outside the image and the FOV
-            filter_indices_mask = np.zeros(len(geo_xy), dtype=np.bool)
+            filter_indices_mask = np.zeros(len(geo_xy), dtype=bool)
             filter_indices_mask[filtered_indices] = True
             filtered_indices_all = filter_indices_mask & (geo_xy[:, 0] > 0) \
                                                     & (geo_xy[:, 0] < self.platepar.X_res) \
