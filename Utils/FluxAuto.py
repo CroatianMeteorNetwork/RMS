@@ -307,7 +307,8 @@ def loadExcludedStations(dir_path, excluded_stations_file="excluded_stations.txt
 
 def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_year_limit=3, \
     metadata_dir=None, output_dir=None, csv_dir=None, index_dir=None, generate_website=False, 
-    website_plot_url=None, shower_code=None, cpu_cores=1, excluded_stations_file="excluded_stations.txt"):
+    website_plot_url=None, shower_code=None, cpu_cores=1, excluded_stations_file="excluded_stations.txt",
+    skip_allyear=False):
     """ Given the reference time, automatically identify active showers and produce the flux graphs and
         CSV files.
 
@@ -334,6 +335,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
         cpu_cores: [int] Number of CPU cores to use. If -1, all availabe cores will be used. 1 by default.
         excluded_stations_file: [str] File with excluded stations and periods. It should be in the metadata
             directory.
+        skip_allyear: [bool] Skip computing the flux with all years.
     """
 
 
@@ -582,18 +584,34 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
     results_all_years = {}
     results_ref_year = {}
 
+
+    # Make a list of shower parameters
+    shower_params = []
+    
+    # Add yearly data
+    shower_params.append([shower_dirs_ref_year, "REF", fluxbatch_binning_params_one_year])
+
+    # Add all year data
+    if not skip_allyear:
+        shower_params.append([     shower_dirs, "ALL", fluxbatch_binning_params_all_years])
+
+
     # Process batch fluxes for all showers
     #   2 sets of plots and CSV files will be saved: one set with all years combined, and one set with the
     #   reference year
-    for shower_dir_dict, time_extent_flag, fb_bin_params in [
-        [shower_dirs_ref_year, "REF", fluxbatch_binning_params_one_year],
-        [shower_dirs, "ALL", fluxbatch_binning_params_all_years]
-        ]:
+    for shower_dir_dict, time_extent_flag, fb_bin_params in shower_params:
         
         for shower_code in shower_dir_dict:
 
             shower = active_showers_dict[shower_code]
             dir_list = shower_dir_dict[shower_code]
+
+
+            # Skip all-year fluxes if a one-year outburst way given
+            if time_extent_flag == "ALL":
+                if not shower.isAnnual():
+                    continue
+
 
             # Load the reference height if given
             ref_height = -1
@@ -755,6 +773,10 @@ if __name__ == "__main__":
         help="Number of CPU codes to use for computation. -1 to use all cores. 1 by default.",
     )
 
+    arg_parser.add_argument('--skipallyear', action="store_true", \
+        help="""Skip computing multi-year fluxes. Only compute fluxes for the given year.""")
+
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -788,7 +810,8 @@ if __name__ == "__main__":
         fluxAutoRun(config, cml_args.dir_path, ref_dt, metadata_dir=cml_args.metadir,
             output_dir=cml_args.outdir, csv_dir=cml_args.csvdir, 
             generate_website=(cml_args.weburl is not None), index_dir=cml_args.indexdir, 
-            website_plot_url=cml_args.weburl, shower_code=cml_args.shower, cpu_cores=cml_args.cpucores)
+            website_plot_url=cml_args.weburl, shower_code=cml_args.shower, cpu_cores=cml_args.cpucores,
+            skip_allyear=cml_args.skipallyear)
 
 
         ### <// DETERMINE NEXT RUN TIME ###
