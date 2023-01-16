@@ -1955,6 +1955,7 @@ def computeFluxCorrectionsOnBins(
         fixed_bins: [bool] Compute fixed bins.
 
     """
+
     # Track values used for flux
     sol_data = []
     flux_lm_6_5_data = []
@@ -2601,7 +2602,7 @@ def createMetadataDir(dir_path, metadata_dir):
 def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_end, mass_index, \
     binduration=None, binmeteors=None, timebin_intdt=0.25, ref_height=None, ht_std_percent=5.0, mask=None, \
     show_plots=True, show_mags=False, save_plots=False, confidence_interval=0.95, default_fwhm=None, \
-    forced_bins=None, compute_single=True, metadata_dir=None):
+    forced_bins=None, compute_single=True, metadata_dir=None, verbose=False):
     """Compute flux using measurements in the given FTPdetectinfo file.
 
     Arguments:
@@ -2642,6 +2643,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             not be computed. True by default.
         metadata_dir: [str] A separate directory for flux metadata. If not given, the data directory will be
             used.
+        verbose: [bool] Print additional debug information. False by default.
 
     Return:
         [tuple] sol_data, flux_lm_6_5_data, flux_lm_6_5_ci_lower_data, flux_lm_6_5_ci_upper_data, bin_information
@@ -3223,6 +3225,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 sensor_data,
                 confidence_interval=confidence_interval,
                 binduration=binduration,
+                verbose=verbose
             )
 
 
@@ -3290,7 +3293,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 sensor_data,
                 confidence_interval=confidence_interval,
                 fixed_bins=True,
-                verbose=False
+                verbose=verbose
             )
             
             print('Finished computing collecting areas for fixed bins')
@@ -3786,6 +3789,9 @@ def fluxParser():
     flux_parser.add_argument('-m', '--showmag', action="store_true", \
         help="""Show the magnitude plot.""")
 
+    flux_parser.add_argument('--verbose', action="store_true", \
+        help="""Print debug information. """)
+
     return flux_parser
 
 
@@ -3876,5 +3882,6 @@ if __name__ == "__main__":
             ref_height=cml_args.ht,
             save_plots=True,
             show_mags=cml_args.showmag,
-            default_fwhm=cml_args.fwhm
+            default_fwhm=cml_args.fwhm,
+            verbose=cml_args.verbose
         )
