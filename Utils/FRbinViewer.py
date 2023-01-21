@@ -109,17 +109,18 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
         
         for current_line in range(fr.lines):
             for z in range(fr.frameNum[current_line]):
-                if not z in clips:
-                    clips[z] = []
-                clips[z].append((current_line, z))
-                start = min(start, z)
-                end = max(end, z)
+                t = fr.t[current_line][z]
+                if not t in clips:
+                    clips[t] = []
+                clips[t].append((current_line, z))
+                start = min(start, t)
+                end = max(end, t)
 
         videos.append([])
         
-        for z in range(start, end + 1):
-            if z in clips:
-                videos[0].append(clips[z])
+        for t in range(start, end + 1):
+            if t in clips:
+                videos[0].append(clips[t])
 
     video_num = 0
 
