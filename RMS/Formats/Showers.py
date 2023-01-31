@@ -186,6 +186,18 @@ class Shower(object):
         return zhr
 
 
+    def isAnnual(self):
+        """ Check whether this is an annual shower, as specified in the table. """
+
+        # Check if this is a yearly shower
+        if hasattr(self, "flux_year"):
+            if self.flux_year != "annual":
+                return False
+
+        
+        return True
+
+
 def loadShowers(dir_path, file_name):
     """ Loads the given shower CSV file. """
 
@@ -279,7 +291,7 @@ class FluxShowers(object):
         for shower in self.showers:
 
             # Only take the shower if it's annual, or the year the correct
-            if not shower.flux_year == "annual":
+            if not shower.isAnnual():
                 if not (int(shower.flux_year) == dt_beg.year) and not (int(shower.flux_year) == dt_end.year):
                     continue
 
