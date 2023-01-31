@@ -483,6 +483,11 @@ def formatScientific(val, dec_places):
     """
     
     s = '{val:0.{dec_places:d}e}'.format(val=val, dec_places=dec_places)
+
+    # Handle NaN values
+    if 'nan' in s:
+        return 'NaN'
+
     m, e = s.split('e')
 
     return r'{m:s}\times 10^{{{e:d}}}'.format(m=m, e=int(e))
@@ -538,3 +543,23 @@ def roundToSignificantDigits(x, n=2):
     ### ###
 
     return out
+
+
+def isRaspberryPi():
+    """ Check if the code is running on a Raspberry Pi. 
+    
+    Return:
+        [bool] True if the code is running on a Raspberry Pi, False otherwise.
+    """
+
+    try:
+        # Open a file with the RPi model name
+        with open('/sys/firmware/devicetree/base/model', 'r') as m:
+
+            if 'raspberry pi' in m.read().lower(): 
+                return True               
+
+    except FileNotFoundError:
+        pass
+
+    return False

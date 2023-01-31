@@ -74,12 +74,18 @@ class Shower(object):
             self.population_index = float(shower_entry[17])
             self.mass_index = 1 + 2.5*np.log10(self.population_index)
 
+            # Reference meteor height in km
             ref_ht = float(shower_entry[18])
             if ref_ht > 0:
                 self.ref_height = ref_ht
 
+            # Shower association radius in deg
+            self.association_radius = float(shower_entry[19])
+            if self. association_radius < 0:
+                self.association_radius = 3.0
+
             # Load the flux binning parameters
-            flux_binning_params = shower_entry[19].strip()
+            flux_binning_params = shower_entry[20].strip()
             if len(flux_binning_params) > 0:
 
                 # Replace all apostrophes with double quotes
@@ -180,6 +186,18 @@ class Shower(object):
         return zhr
 
 
+    def isAnnual(self):
+        """ Check whether this is an annual shower, as specified in the table. """
+
+        # Check if this is a yearly shower
+        if hasattr(self, "flux_year"):
+            if self.flux_year != "annual":
+                return False
+
+        
+        return True
+
+
 def loadShowers(dir_path, file_name):
     """ Loads the given shower CSV file. """
 
@@ -273,7 +291,7 @@ class FluxShowers(object):
         for shower in self.showers:
 
             # Only take the shower if it's annual, or the year the correct
-            if not shower.flux_year == "annual":
+            if not shower.isAnnual():
                 if not (int(shower.flux_year) == dt_beg.year) and not (int(shower.flux_year) == dt_end.year):
                     continue
 

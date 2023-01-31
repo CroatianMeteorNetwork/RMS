@@ -610,7 +610,14 @@ def parse(path, strict=True):
 
     else:
         raise RuntimeError('Unknown config file name: {}'.format(os.path.basename(path)))
+
+
+    # Disable upload if the default station name is used
+    if config.stationID == "XX0001":
+        print("Disabled upload becuase the default station code is used!")
+        config.upload_enabled = False
     
+
     return config
 
 

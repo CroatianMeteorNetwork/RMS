@@ -121,7 +121,7 @@ if __name__ == "__main__":
 
                 # Get the mask for the background as a 3 sigma streak around the meteor, but using avepixel
                 mask = thickLine(avepixel.shape[0], avepixel.shape[1], x, y, px_fm, phi - 90, \
-                    3*gauss_sigma).astype(np.bool)
+                    3*gauss_sigma).astype(bool)
 
                 img = np.ma.masked_array(avepixel, ~mask)
                     

@@ -144,16 +144,16 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
         matched_img_inds, matched_cat_inds, dist_list = matched_indices.T
 
         # Extract data from matched stars
-        matched_img_stars = stars_list[matched_img_inds.astype(np.int)]
-        matched_cat_stars = extracted_catalog[matched_cat_inds.astype(np.int)]
+        matched_img_stars = stars_list[matched_img_inds.astype(int)]
+        matched_cat_stars = extracted_catalog[matched_cat_inds.astype(int)]
 
         # Put the matched stars to a dictionary
         matched_stars[jd] = [matched_img_stars, matched_cat_stars, dist_list]
 
         # # Plot matched stars
         # im_y, im_x, _, _ = matched_img_stars.T
-        # cat_y = cat_y_array[matched_cat_inds.astype(np.int)]
-        # cat_x = cat_x_array[matched_cat_inds.astype(np.int)]
+        # cat_y = cat_y_array[matched_cat_inds.astype(int)]
+        # cat_x = cat_x_array[matched_cat_inds.astype(int)]
 
         # plt.scatter(im_x, im_y, c='r', s=5)
         # plt.scatter(cat_x, cat_y, facecolors='none', edgecolor='g')

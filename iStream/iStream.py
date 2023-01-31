@@ -1,6 +1,5 @@
 #!/usr/bin/python
 import os
-import pwd
 import sys
 import traceback
 import subprocess
@@ -8,14 +7,26 @@ import datetime
 import logging
 from RMS.CaptureDuration import captureDuration
 from RMS.Logger import initLogging
+from RMS.Misc import isRaspberryPi
 
 
 def rmsExternal(captured_night_dir, archived_night_dir, config):
+    """ This function is called by RMS when the capture is finished. It is used to run external scripts
+        after the capture is finished.
+
+    Arguments:
+        captured_night_dir: [str] Path to the directory where the captured night is stored.
+        archived_night_dir: [str] Path to the directory where the archived night is stored.
+        config: [Config] Configuration object.
+    """
+
+
+    # Initialize the logger
     initLogging(config, 'iStream_')
     log = logging.getLogger("logger")
     log.info('iStream external script started')
 
-    # create lock file to avoid RMS rebooting the system
+    # Create lock file to avoid RMS rebooting the system
     lockfile = os.path.join(config.data_dir, config.reboot_lock_file)
     with open(lockfile, 'w') as _:
         pass
@@ -61,18 +72,17 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
     log.info('Exit status: {}'.format(exit_code))
     log.info('iStream external script finished')
 
-    # relase lock file so RMS is authorized to reboot, if needed
+    # Relase lock file so RMS is authorized to reboot, if needed
     os.remove(lockfile)
 
-    # Only reboot on the RPi, don't reboot Linux machines
-    username = pwd.getpwuid(os.getuid()).pw_name
+    # Only reboot RPis, don't reboot Linux machines
+    if isRaspberryPi():
 
-    if username == 'pi':
-
-        # Reboot the computer (script needs sudo priviledges, works only on Linux)
+        # Reboot the computer (script needs sudo priviledges, works only on Pis)
         try:
             log.info("Rebooting system...")
             os.system('sudo shutdown -r now')
+            
         except Exception as e:
             log.debug('Rebooting failed with message:\n' + repr(e))
             log.debug(repr(traceback.format_exception(*sys.exc_info())))
