@@ -232,7 +232,6 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     avg_stack_count = np.zeros((img_size, img_size), dtype=int)
     max_deaveraged = np.zeros((img_size, img_size), dtype=np.uint8)
 
-    print(f'stacksize {len(avg_stack_sum)}')
 
     # get number of images to include
     num_ffs = len(ff_found_list)
