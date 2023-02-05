@@ -206,7 +206,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
 
 
     # Find the maximum angular separation and compute the image size using the plate scale
-    #   The image size will be resampled to 1/scalefactor of the original size to avoid interpolation
+    #   The image size will be resampled to 1/2 of the original size to avoid interpolation
     scale = 0.5
     ang_sep_max = np.max(ang_sep_list)
     # scalefactor is a fudge factor to make the canvas large enough in some edge cases
