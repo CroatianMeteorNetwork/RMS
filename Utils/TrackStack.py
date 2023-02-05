@@ -29,7 +29,8 @@ from RMS.Routines.MaskImage import loadMask, MaskStructure
 
 
 def trackStack(dir_paths, config, border=5, background_compensation=True, 
-        hide_plot=False, showers=None, darkbackground=False, out_dir=None):
+        hide_plot=False, showers=None, darkbackground=False, out_dir=None,
+        scalefactor=None):
     """ Generate a stack with aligned stars, so the sky appears static. The folder should have a
         platepars_all_recalibrated.json file.
 
@@ -45,6 +46,8 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         showers: [list[str]] List of showers to include, as code. E.g. or ["GEM","URS"].
             As a code for sporadics, use "..."
         darkbackground: [bool] force the sky background to be dark
+        out_dir: target folder to save into
+        scalefactor: factor to scale the canvas by; default 1, increase if image cropped
     """
     # normalise the path in a platform neutral way
     # done here so that trackStack() can be called from other modules
@@ -206,7 +209,11 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     #   The image size will be resampled to 1/2 of the original size to avoid interpolation
     scale = 0.5
     ang_sep_max = np.max(ang_sep_list)
-    img_size = int(scale*2*ang_sep_max*pp_ref.F_scale)
+    # scalefactor is a fudge factor to make the canvas large enough in some edge cases
+    # default 1 works in most cases but multi-camera configs may need 2 or 3
+    if scalefactor is None:
+        scalefactor = 1
+    img_size = int(scale*2*ang_sep_max*pp_ref.F_scale)*scalefactor
 
     #
 
@@ -224,6 +231,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     avg_stack_sum = np.zeros((img_size, img_size), dtype=float)
     avg_stack_count = np.zeros((img_size, img_size), dtype=int)
     max_deaveraged = np.zeros((img_size, img_size), dtype=np.uint8)
+
 
     # get number of images to include
     num_ffs = len(ff_found_list)
@@ -413,6 +421,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-o', '--output', type=str,
         help="""folder to save the image in.""")
 
+    arg_parser.add_argument('-f', '--scalefactor', type=int,
+        help="""scale factor to apply. Increase if image is cropped""")
+
     arg_parser.add_argument('-s', '--showers', type=str,
         help="Show only meteors from specific showers (e.g. URS, PER, GEM, ... for sporadic). Comma-separated list. \
             Note that an RMS config file that matches the data is required for this option.")
@@ -436,4 +447,4 @@ if __name__ == "__main__":
     dir_paths = [os.path.normpath(dir_path) for dir_path in cml_args.dir_paths]
     trackStack(dir_paths, config, background_compensation=(not cml_args.bkgnormoff),
         hide_plot=cml_args.hideplot, showers=showers, 
-        darkbackground=cml_args.darkbackground, out_dir=cml_args.output)
+        darkbackground=cml_args.darkbackground, out_dir=cml_args.output, scalefactor=cml_args.scalefactor)
