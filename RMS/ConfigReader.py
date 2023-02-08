@@ -614,7 +614,7 @@ def parse(path, strict=True):
 
     # Disable upload if the default station name is used
     if config.stationID == "XX0001":
-        print("Disabled upload becuase the default station code is used!")
+        print("Disabled upload because the default station code is used!")
         config.upload_enabled = False
     
 
