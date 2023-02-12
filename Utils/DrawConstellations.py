@@ -18,11 +18,12 @@ from Utils.ShowerAssociation import showerAssociation
 from RMS.Routines.MaskImage import loadMask, MaskStructure
 
 
-def drawConstellations(platepar, ff_file, separation_deg=90, color_bgr=None):
-    if not color_bgr:
-        color_bgr = [255, 0, 0]
-    img = np.zeros((platepar.Y_res, platepar.X_res, 3), dtype=np.uint8)
-    fps = 25 # TODO get from config
+def drawConstellations(platepar, ff_file, separation_deg=90, color_bgra=None):
+    if not color_bgra:
+        color_bgr = [255, 0, 0, 192]
+    img = np.zeros((platepar.Y_res, platepar.X_res, 4), dtype=np.uint8)
+    img[:, :, 3] = 0  # Fully transparent
+    fps = 25  # TODO get from config
     fftime_jd = date2JD(*getMiddleTimeFF(os.path.basename(ff_file), fps))
     constellations_path = os.path.join(os.path.dirname(__file__), "../share/constellation_lines.csv")
     lines = np.loadtxt(constellations_path, delimiter=",")
@@ -52,9 +53,9 @@ if __name__ == "__main__":
 
     cml_args = arg_parser.parse_args()
 
-    outfilename = args.output
+    outfilename = cml_args.output
     if outfilename is None:
-        outfilename = ff_file.rstrip(".fits") + "_constellations.png"
+        outfilename = cml_args.ff_file.rstrip(".fits") + "_constellations.png"
 
     with open(cml_args.platepars_file, 'r') as f:
         platepars = json.load(f)
@@ -63,13 +64,17 @@ if __name__ == "__main__":
     platepar = Platepar()
     platepar.loadFromDict(platepar_dict)
 
-    if args.resolution is not None:
-        platepar.X_res = args.resolution
-        platepar.Y_res = args.resolution
+    if cml_args.resolution is not None:
+        platepar.X_res = cml_args.resolution
+        platepar.Y_res = cml_args.resolution
         platepar.F_scale *= 0.5
         platepar.refraction = False
         platepar.resetDistortionParameters()
 
     img = drawConstellations(platepar, cml_args.ff_file)
 
-    cv2.imwrite(out_path, img)
+    print(img.shape)
+    print(np.sum(img[:,:,3]))
+    print(np.sum(img[:,:,0]))
+    cv2.imwrite(outfilename, img)
+    print("Wrote", outfilename)
