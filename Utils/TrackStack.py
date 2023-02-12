@@ -355,7 +355,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
 
     # Draw constellations
     if draw_constellations:
-        constellations_img = drawConstellations(pp_ref, ff_mid)
+        constellations_img = drawConstellations(pp_stack, ff_mid)
 
 
     # Crop image
@@ -379,9 +379,8 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         vmin = np.quantile(stack_img[stack_img>0], 0.05)
     plt.imshow(stack_img, cmap='gray', vmin=vmin, vmax=256, interpolation='nearest')
     if draw_constellations:
-        constellations_img = stack_img[crop_box[0]:crop_box[1]+1, crop_box[2]:crop_box[3]+1]
+        constellations_img = constellations_img[crop_box[0]:crop_box[1]+1, crop_box[2]:crop_box[3]+1]
         plt.imshow(constellations_img)
-        # FIXME does not work yet
 
     ax.set_axis_off()
 
