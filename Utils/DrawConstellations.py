@@ -2,18 +2,10 @@
 
 import os
 import json
-import copy
-from glob import glob
-import sys
 
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-
-from tqdm import tqdm
-
-import locale
-from datetime import datetime
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP
 from RMS.Astrometry.Conversions import date2JD, jd2Date
@@ -42,8 +34,8 @@ def drawConstellations(platepar, ff_file, separation_deg=90, color_bgr=None):
     for i in range(len(to_x)):
         if ang_sep[i] < separation_deg:
             cv2.line(img, (round(from_x[i]), round(from_y[i])), (round(to_x[i]), round(to_y[i])), color_bgr, 1)
-    out_path = "constellations.png" # TODO make option
-    cv2.imwrite(out_path, img)
+
+    return img
 
 
 if __name__ == "__main__":
@@ -54,10 +46,15 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="""Draw constellations""")
 
     arg_parser.add_argument('platepars_file', help='Full path to a platepars_recalibrated file')
-
     arg_parser.add_argument('ff_file', help='Full path to an FF file')
+    arg_parser.add_argument('-o', '--output', help='Output filename (default: deduce from FF filename)')
+    arg_parser.add_argument('-r', '--resolution', help='Resolution (override platepar; this also resets all other platepar parameters)')
 
     cml_args = arg_parser.parse_args()
+
+    outfilename = args.output
+    if outfilename is None:
+        outfilename = ff_file.rstrip(".fits") + "_constellations.png"
 
     with open(cml_args.platepars_file, 'r') as f:
         platepars = json.load(f)
@@ -65,10 +62,14 @@ if __name__ == "__main__":
     platepar_dict = platepars[os.path.basename(cml_args.ff_file)]
     platepar = Platepar()
     platepar.loadFromDict(platepar_dict)
-    #platepar.X_res = 1376 # TODO make option (or call this from TrackStack)
-    #platepar.Y_res = 1376
-    #platepar.F_scale *= 0.5
-    #platepar.refraction = False
-    #platepar.resetDistortionParameters()
 
-    drawConstellations(platepar, cml_args.ff_file)
+    if args.resolution is not None:
+        platepar.X_res = args.resolution
+        platepar.Y_res = args.resolution
+        platepar.F_scale *= 0.5
+        platepar.refraction = False
+        platepar.resetDistortionParameters()
+
+    img = drawConstellations(platepar, cml_args.ff_file)
+
+    cv2.imwrite(out_path, img)
