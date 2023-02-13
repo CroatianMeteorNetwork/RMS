@@ -2201,7 +2201,8 @@ def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detec
 
     # Check if the given file is a video file
     elif file_name.lower().endswith('.mp4') or file_name.lower().endswith('.avi') \
-            or file_name.lower().endswith('.mkv') or file_name.lower().endswith('.wmv'):
+            or file_name.lower().endswith('.mkv') or file_name.lower().endswith('.wmv') \
+            or file_name.lower().endswith('.mov'):
 
         # Init the image hadle for video files
         img_handle = InputTypeVideo(input_file, config, beginning_time=beginning_time,
