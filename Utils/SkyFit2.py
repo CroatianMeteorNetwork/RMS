@@ -5267,6 +5267,12 @@ class PlateTool(QtWidgets.QMainWindow):
                           + "{:03d}".format(int(self.img_handle.beginning_datetime.microsecond//1000)) \
                           + "_0000000.fits"
 
+        # Get the number of stars in the list
+        if self.platepar.star_list is not None:
+            n_stars = len(self.platepar.star_list)
+        else:
+            n_stars = 0
+
         # Write the meta header
         meta_dict = {
             'obs_latitude': self.platepar.lat,                        # Decimal signed latitude (-90 S to +90 N)
@@ -5278,8 +5284,8 @@ class PlateTool(QtWidgets.QMainWindow):
             'cy' : self.platepar.Y_res,                               # Vertical camera resolution in pixels
             'photometric_band' : self.mag_band_string,                # The photometric band of the star catalogue
             'image_file' : ff_name,                                   # The name of the original image or video
-            'isodate_start_obs': str(dt_ref.strftime(isodate_format_entry)),               # The date and time of the start of the video or exposure
-            'astrometry_number_stars' : len(self.platepar.star_list), # The number of stars identified and used in the astrometric calibration
+            'isodate_start_obs': str(dt_ref.strftime(isodate_format_entry)), # The date and time of the start of the video or exposure
+            'astrometry_number_stars' : n_stars,                      # The number of stars identified and used in the astrometric calibration
             'mag_label': 'mag',                                       # The label of the Magnitude column in the Point Observation data
             'no_frags': 1,                                            # The number of meteoroid fragments described in this data
             'obs_az': azim,                                           # The azimuth of the centre of the field of view in decimal degrees. North = 0, increasing to the East
