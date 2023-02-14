@@ -4,6 +4,37 @@ import numpy as np
 from numpy.core.umath_tests import inner1d
 
 
+
+def lineFunc(x, m, k):
+    """ Linear function.
+    
+    Arguments:
+        x: [float or ndarray] Independant variable.
+        m: [float] Slope.
+        k: [float] Y-intercept.
+
+    Return:
+        y: [float or ndarray] Dependant variable.
+    """
+
+    return m*x + k
+
+
+def logLineFunc(x, m, k):
+    """ Logarithmic linear function.
+
+    Arguments:
+        x: [float or ndarray] Independant variable.
+        m: [float] Slope.
+        k: [float] Y-intercept.
+
+    Return:
+        y: [float or ndarray] Dependant variable.
+    """
+
+    return 10**lineFunc(x, m, k)
+
+
 def angularSeparation(ra1, dec1, ra2, dec2):
     """ Calculates the angle between two points on a sphere. 
     
