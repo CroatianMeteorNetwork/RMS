@@ -29,7 +29,7 @@ def drawConstellations(platepar, ff_file, separation_deg=90, color_bgra=None):
     lines = np.loadtxt(constellations_path, delimiter=",")
     from_ra, from_dec = lines[:, 0], lines[:, 1]
     to_ra, to_dec = lines[:, 2], lines[:, 3]
-    from_x, from_y = raDecToXYPP(np.array(from_ra), from_dec, fftime_jd, platepar)
+    from_x, from_y = raDecToXYPP(np.array(from_ra), np.array(from_dec), fftime_jd, platepar)
     ang_sep = np.rad2deg(angularSeparation(np.deg2rad(platepar.RA_d), np.deg2rad(platepar.dec_d), np.deg2rad(from_ra), np.deg2rad(from_dec)))
     to_x, to_y = raDecToXYPP(np.array(to_ra), to_dec, fftime_jd, platepar)
     for i in range(len(to_x)):
