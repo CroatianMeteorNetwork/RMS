@@ -3,34 +3,21 @@
 import os
 import json
 import copy
-from glob import glob
-import argparse
-
 
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 
-try:
-    from tqdm import tqdm
-    got_tqdm = True
-except:
-    got_tqdm = False
-
-import RMS.ConfigReader as cr
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Formats.FFfile import validFFName, getMiddleTimeFF
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.Platepar import Platepar
 from RMS.Math import angularSeparation
-from Utils.ShowerAssociation import showerAssociation
 from RMS.Routines.MaskImage import loadMask, MaskStructure
 
 
-def trackStack(dir_paths, config, border=5, background_compensation=True, 
-        hide_plot=False, showers=None, darkbackground=False, out_dir=None,
-        scalefactor=None):
+def trackStack(dir_path, config, border=5, background_compensation=True, hide_plot=False):
     """ Generate a stack with aligned stars, so the sky appears static. The folder should have a
         platepars_all_recalibrated.json file.
 
@@ -43,75 +30,51 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         background_compensation: [bool] Normalize the background by applying a median filter to avepixel and
             use it as a flat field. Slows down the procedure and may sometimes introduce artifacts. True
             by default.
-        showers: [list[str]] List of showers to include, as code. E.g. or ["GEM","URS"].
-            As a code for sporadics, use "..."
-        darkbackground: [bool] force the sky background to be dark
-        out_dir: target folder to save into
-        scalefactor: factor to scale the canvas by; default 1, increase if image cropped
     """
-    # normalise the path in a platform neutral way
-    # done here so that trackStack() can be called from other modules
-    dir_paths = [os.path.normpath(dir_path) for dir_path in dir_paths]
+
+
+    # Load recalibrated platepars, if they exist ###
 
     # Find recalibrated platepars file per FF file
-    recalibrated_platepars = {}
-    for dir_path in dir_paths: 
-        platepars_recalibrated_file = glob(os.path.join(dir_path, config.platepars_recalibrated_name))
-        if len(platepars_recalibrated_file) != 1:
-            print('unable to find a unique platepars file in {}'.format(dir_path))
-            return False
-        print('loading {}'.format(platepars_recalibrated_file[0]))
-        with open(platepars_recalibrated_file[0]) as f:
-            pp_per_dir = json.load(f)
-            # Put the full path in all the keys
-            for key in pp_per_dir:
-                recalibrated_platepars[os.path.join(os.path.dirname(platepars_recalibrated_file[0]), key)] = pp_per_dir[key]
-    print('Loaded recalibrated platepars JSON file for the calibration report...')
+    platepars_recalibrated_file = None
+    for file_name in os.listdir(dir_path):
+        if file_name == config.platepars_recalibrated_name:
+            platepars_recalibrated_file = file_name
+            break
+
+
+    # Load all recalibrated platepars if the file is available
+    recalibrated_platepars = None
+    if platepars_recalibrated_file is not None:
+        with open(os.path.join(dir_path, platepars_recalibrated_file)) as f:
+            recalibrated_platepars = json.load(f)
+            print('Loaded recalibrated platepars JSON file for the calibration report...')
 
     # ###
 
-    if showers is not None:
-        associations = {}
-        # Get FTP file so we can filter by shower
-        for dir_path in dir_paths: 
-            if os.path.isfile(os.path.join(dir_path,'.config')):
-                tmpcfg = cr.loadConfigFromDirectory('.config', dir_path)
-            else:
-                tmpcfg = config
-            ftp_list = glob(os.path.join(dir_path, 'FTPdetectinfo_{}*.txt'.format(tmpcfg.stationID)))
-            ftp_list = [x for x in ftp_list if 'backup' not in x and 'unfiltered' not in x]
-            ftp_list.sort() 
-            if len(ftp_list) < 1:
-                print('unable to find FTPdetect file in {}'.format(dir_path))
-                return False
-            ftp_file = ftp_list[0] 
-            print('Determining shower details from {}'.format(ftp_file))
-            associations_per_dir, _ = showerAssociation(config, [ftp_file], 
-                shower_code=None, show_plot=False, save_plot=False, plot_activity=False)
-            associations.update(associations_per_dir)
 
-        # Get a list of FF files in the folder
-        ff_list = []
-        for key in associations:
-            ff_list.append(key[0])
-    else:
-        # Get a list of FF files in the folder
-        ff_list = []
-        for dir_path in dir_paths: 
-            for file_name in os.listdir(dir_path):
-                if validFFName(file_name):
-                    ff_list.append(file_name)    
-    ff_list = list(set(ff_list))
+    # If the recalib platepars is not found, stop
+    if recalibrated_platepars is None:
+        print("The {:s} file was not found!".format(config.platepars_recalibrated_name))
+        return False
+
+
+    # Get a list of FF files in the folder
+    ff_list = []
+    for file_name in os.listdir(dir_path):
+        if validFFName(file_name):
+            ff_list.append(file_name)
+
 
     # Take the platepar with the middle time as the reference one
     ff_found_list = []
     jd_list = []
     for ff_name_temp in recalibrated_platepars:
 
-        if os.path.basename(ff_name_temp) in ff_list:
+        if ff_name_temp in ff_list:
 
             # Compute the Julian date of the FF middle
-            dt = getMiddleTimeFF(os.path.basename(ff_name_temp), config.fps, ret_milliseconds=True)
+            dt = getMiddleTimeFF(ff_name_temp, config.fps, ret_milliseconds=True)
             jd = date2JD(*dt)
 
             jd_list.append(jd)
@@ -139,8 +102,8 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
 
     # Try loading the mask
     mask_path = None
-    if os.path.exists(os.path.join(dir_paths[0], config.mask_file)):
-        mask_path = os.path.join(dir_paths[0], config.mask_file)
+    if os.path.exists(os.path.join(dir_path, config.mask_file)):
+        mask_path = os.path.join(dir_path, config.mask_file)
 
     # Try loading the default mask
     elif os.path.exists(config.mask_file):
@@ -187,7 +150,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
 
         for x_c, y_c in zip(x_corns, y_corns):
             _, ra_temp, dec_temp, _ = xyToRaDecPP(
-                [getMiddleTimeFF(os.path.basename(ff_temp), config.fps, ret_milliseconds=True)], [x_c], [y_c], [1], pp_ref,
+                [getMiddleTimeFF(ff_temp, config.fps, ret_milliseconds=True)], [x_c], [y_c], [1], pp_ref,
                 extinction_correction=False)
             ra_c, dec_c = ra_temp[0], dec_temp[0]
 
@@ -209,11 +172,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     #   The image size will be resampled to 1/2 of the original size to avoid interpolation
     scale = 0.5
     ang_sep_max = np.max(ang_sep_list)
-    # scalefactor is a fudge factor to make the canvas large enough in some edge cases
-    # default 1 works in most cases but multi-camera configs may need 2 or 3
-    if scalefactor is None:
-        scalefactor = 1
-    img_size = int(scale*2*ang_sep_max*pp_ref.F_scale)*scalefactor
+    img_size = int(scale*2*ang_sep_max*pp_ref.F_scale)
 
     #
 
@@ -233,42 +192,13 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     max_deaveraged = np.zeros((img_size, img_size), dtype=np.uint8)
 
 
-    # get number of images to include
-    num_ffs = len(ff_found_list)
-    if showers is not None:
-        num_ffs = 0
-        for acc in associations:
-            shower = associations[acc][1]
-            if shower is not None and shower.name in showers:
-                num_ffs += 1
-
     # Load individual FFs and map them to the stack
-    num_plotted = 0
-    if got_tqdm is True:
-        enumlist = tqdm(ff_found_list)
-    else:
-        enumlist = ff_found_list
-    for i, ff_name in enumerate(enumlist):
-        ff_basename = os.path.basename(ff_name)
-        if showers is not None:
-            try:
-                shower = associations[(ff_basename, 1.0)][1]
-            except:
-                shower = None
-            if shower is None:
-                showername = "..."
-            else:
-                showername = shower.name
+    for i, ff_name in enumerate(ff_found_list):
 
-        if showers is not None and showername not in showers:
-            #print("Skipping, showername =", showername)
-            continue
-        num_plotted += 1
-        if not got_tqdm:
-            print("Stacking {:s}, {:.1f}% done".format(ff_basename, 100*num_plotted/num_ffs))
+        print("Stacking {:s}, {:.1f}% done".format(ff_name, 100*i/len(ff_found_list)))
 
         # Read the FF file
-        ff = readFF(*os.path.split(ff_name))
+        ff = readFF(dir_path, ff_name)
 
         # Load the recalibrated platepar
         pp_temp = Platepar()
@@ -282,7 +212,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
 
         # Map image pixels to sky
         jd_arr, ra_coords, dec_coords, _ = xyToRaDecPP(
-            len(x_coords)*[getMiddleTimeFF(ff_basename, config.fps, ret_milliseconds=True)], x_coords, y_coords,
+            len(x_coords)*[getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)], x_coords, y_coords,
             len(x_coords)*[1], pp_temp, extinction_correction=False)
 
         # Map sky coordinates to stack image coordinates
@@ -364,50 +294,51 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     # Plot and save the stack ###
 
     dpi = 200
-    extrapix = 80 # space for annotations across the bottom (not handled by this module)
-    fig = plt.figure(figsize=(stack_img.shape[1]/dpi, (stack_img.shape[0]+extrapix)/dpi), dpi=dpi)
-    fig.patch.set_facecolor("black")
-    ax = fig.add_axes([0, 0, 1, 1])
+    plt.figure(figsize=(stack_img.shape[1]/dpi, stack_img.shape[0]/dpi), dpi=dpi)
 
-    vmin = 0 
-    if darkbackground is True:
-        vmin = np.quantile(stack_img[stack_img>0], 0.05)
-    plt.imshow(stack_img, cmap='gray', vmin=vmin, vmax=256, interpolation='nearest')
+    plt.imshow(stack_img, cmap='gray', vmin=0, vmax=256, interpolation='nearest')
 
-    ax.set_axis_off()
+    plt.axis('off')
+    plt.gca().get_xaxis().set_visible(False)
+    plt.gca().get_yaxis().set_visible(False)
 
-    ax.set_xlim([0, stack_img.shape[1]])
-    ax.set_ylim([stack_img.shape[0]+extrapix, 0])
-
-    if showers is not None: 
-        msg = 'Filtered for {}'.format(showers)
-        ax.text(10, stack_img.shape[0] - 10, msg, color='gray', fontsize=6, fontname='Source Sans Pro', weight='ultralight')
+    plt.xlim([0, stack_img.shape[1]])
+    plt.ylim([stack_img.shape[0], 0])
 
     # Remove the margins (top and right are set to 0.9999, as setting them to 1.0 makes the image blank in 
     #   some matplotlib versions)
     plt.subplots_adjust(left=0, bottom=0, right=0.9999, top=0.9999, wspace=0, hspace=0)
 
-    if out_dir is not None:
-        filenam = os.path.join(out_dir, os.path.basename(dir_path) + "_track_stack.jpg")
-    else:
-        filenam = os.path.join(dir_path, os.path.basename(dir_path) + "_track_stack.jpg")
-    plt.savefig(filenam, bbox_inches='tight', pad_inches=0, dpi=dpi, facecolor='k', edgecolor='k')
-    print('saved to {}'.format(filenam))
+    filenam = os.path.join(dir_path, os.path.basename(dir_path) + "_track_stack.jpg")
+    plt.savefig(filenam, bbox_inches='tight', pad_inches=0, dpi=dpi)
+
     #
 
     if hide_plot is False:
         plt.show()
 
-    return True
+
+
+
+
+
 
 
 if __name__ == "__main__":
+
+
+    import argparse
+
+    import RMS.ConfigReader as cr
+
+
     # ## PARSE INPUT ARGUMENTS ###
+
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description=""" Generate a stack with aligned stars.
         """)
 
-    arg_parser.add_argument('dir_paths', nargs='+', type=str, help="Path to the folder of the night.")
+    arg_parser.add_argument('dir_path', type=str, help="Path to the folder of the night.")
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
         help="Path to a config file which will be used instead of the default one.")
@@ -418,33 +349,15 @@ if __name__ == "__main__":
     arg_parser.add_argument('-x', '--hideplot', action="store_true",
         help="""Don't show the stack on the screen after stacking. """)
 
-    arg_parser.add_argument('-o', '--output', type=str,
-        help="""folder to save the image in.""")
-
-    arg_parser.add_argument('-f', '--scalefactor', type=int,
-        help="""scale factor to apply. Increase if image is cropped""")
-
-    arg_parser.add_argument('-s', '--showers', type=str,
-        help="Show only meteors from specific showers (e.g. URS, PER, GEM, ... for sporadic). Comma-separated list. \
-            Note that an RMS config file that matches the data is required for this option.")
-
-    arg_parser.add_argument('-d', '--darkbackground', action="store_true",
-        help="""Darken the background. """)
-
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
     #############################
 
+
     # Load the config file
-    config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_paths[0])
+    config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
 
-    showers = cml_args.showers
-    if showers is not None:
-        showers = showers.split(",")
-        showers = [s.upper() for s in showers]
 
-    dir_paths = [os.path.normpath(dir_path) for dir_path in cml_args.dir_paths]
-    trackStack(dir_paths, config, background_compensation=(not cml_args.bkgnormoff),
-        hide_plot=cml_args.hideplot, showers=showers, 
-        darkbackground=cml_args.darkbackground, out_dir=cml_args.output, scalefactor=cml_args.scalefactor)
+    trackStack(cml_args.dir_path, config, background_compensation=(not cml_args.bkgnormoff), 
+        hide_plot=cml_args.hideplot)
