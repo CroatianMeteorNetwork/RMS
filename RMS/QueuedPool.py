@@ -1,6 +1,7 @@
 from __future__ import print_function
 
 import os
+import sys
 import logging
 import traceback
 import time
@@ -83,7 +84,8 @@ class BackupContainer(object):
 
 class QueuedPool(object):
     def __init__(self, func, cores=None, log=None, delay_start=0, worker_timeout=2000, backup_dir='.', \
-        low_priority=False):
+        input_queue_maxsize=None, low_priority=False, func_extra_args=None, func_kwargs=None, 
+        worker_wait_inbetween_jobs=0.1):
         """ Provides capability of creating a pool of workers which will process jobs in a given queue, and 
         the input queue can be updated in another thread. 
 
@@ -103,8 +105,18 @@ class QueuedPool(object):
             worker_timeout: [int] Number of seconds to wait before the queue is killed due to a worker getting 
                 stuck.
             backup_dir: [str] Path to the directory where result backups will be held.
+            input_queue_maxsize: [int] Maximum size of the input queue. Used to conserve memory. Can be set
+                to the number of cores, optimally. None by default, meaning there is no size limit.
             low_priority: [bool] If True, the child processess will run with a lower priority, i.e. larger
                 'niceness' (available only on Unix).
+            func_extra_args: [tuple] Extra arguments for the worker function. Can be used when there
+                arguments are the same for all function calls to conserve memory if they are large. None by
+                default.
+            func_kwargs: [dict] Extra keyword arguments for the worker function. Can be used when there
+                arguments are the same for all function calls to conserve memory if they are large. None by
+                default.
+            worker_wait_inbetween_jobs: [float] Wait this number of seconds after finished a job and putting
+                the result in the output queue. 0.1 s by default.
         """
 
 
@@ -125,6 +137,13 @@ class QueuedPool(object):
                 cores = multiprocessing.cpu_count()
 
 
+        if func_extra_args is None:
+            func_extra_args = ()
+
+        if func_kwargs is None:
+            func_kwargs = {}
+
+
         self.cores = SafeValue(cores, minval=1, maxval=multiprocessing.cpu_count())
         self.log = log
 
@@ -132,11 +151,20 @@ class QueuedPool(object):
         self.delay_start = delay_start
         self.worker_timeout = worker_timeout
         self.low_priority = low_priority
+        self.func_extra_args = func_extra_args
+        self.func_kwargs = func_kwargs
+        self.worker_wait_inbetween_jobs = worker_wait_inbetween_jobs
 
         # Initialize queues (for some reason queues from Manager need to be created, otherwise they are 
         # blocking when using get_nowait)
         manager = multiprocessing.Manager()
-        self.input_queue = manager.Queue()
+
+        # Only init with maxsize if given, otherwise it return a TypeErorr when fed data from Compressor
+        if input_queue_maxsize is None:
+            self.input_queue = manager.Queue()
+        else:
+            self.input_queue = manager.Queue(maxsize=input_queue_maxsize)
+
         self.output_queue = manager.Queue()
 
         self.func = func
@@ -157,7 +185,8 @@ class QueuedPool(object):
         self.bkup_dict = {}
 
         # Load all previous backup files in the given directory, if any
-        self.loadBackupFiles()
+        if self.bkup_dir is not None:
+            self.loadBackupFiles()
 
         ### ###
 
@@ -237,11 +266,13 @@ class QueuedPool(object):
     def deleteBackupFiles(self):
         """ Delete all backup files in the backup folder. """
 
-        # Go though all backup files
-        for file_name in self._listBackupFiles():
+        if self.bkup_dir is not None:
 
-            # Remove the backup file
-            os.remove(os.path.join(self.bkup_dir, file_name))
+            # Go though all backup files
+            for file_name in self._listBackupFiles():
+
+                # Remove the backup file
+                os.remove(os.path.join(self.bkup_dir, file_name))
 
 
 
@@ -318,7 +349,8 @@ class QueuedPool(object):
                 try:
 
                     # Call the original worker function and collect results
-                    result = func(*args)
+                    all_args = tuple(args) + tuple(self.func_extra_args)
+                    result = func(*all_args, **self.func_kwargs)
 
                 except:
                     tb = traceback.format_exc()
@@ -332,10 +364,10 @@ class QueuedPool(object):
             self.output_queue.put(result)
             self.results_counter.increment()
             self.available_workers.increment()
-            time.sleep(0.1)
+            time.sleep(self.worker_wait_inbetween_jobs)
 
             # Back up the result to disk, if it was not already in the backup
-            if not read_from_backup:
+            if (not read_from_backup) and (self.bkup_dir is not None):
                 self.saveBackupFile(args, result)
 
             # Exit if exit is requested

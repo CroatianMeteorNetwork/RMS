@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 
 import platform
 import os
+import sys
 import shutil
 import errno
 import logging
@@ -13,12 +14,12 @@ import inspect
 
 
 # tkinter import that works on both Python 2 and 3
-try:
-    import tkinter
-    from tkinter import filedialog
-except:
+if sys.version_info[0] < 3:
     import Tkinter as tkinter
     import tkFileDialog as filedialog
+else:
+    import tkinter
+    from tkinter import filedialog
 
 
 import numpy as np
@@ -49,6 +50,60 @@ def mkdirP(path):
     except:
         raise 
 
+
+def walkDirsToDepth(dir_path, depth=-1):
+    """ Mimic os.walk, but define the maximum depth. 
+    
+    Arguments:
+        dir_path: [str] Path to the directory.
+
+    Keyword arguments:
+        depth: [int] Maximum depth. Use -1 for no limit, in which case the function behaves the same as
+            os.walk.
+
+    Return:
+        file_list: [list] List where the elements are:
+            - dir_path - path to the directory
+            - dir_list - list of directories in the path
+            - file_list - list of files in the path
+    """
+    
+    final_list = []
+    dir_list = []
+    file_list = []
+
+    # Find all files and directories in the given path and sort them accordingly
+    for entry in sorted(os.listdir(dir_path)):
+
+        entry_path = os.path.join(dir_path, entry)
+
+        if os.path.isdir(entry_path):
+            dir_list.append(entry)
+
+        else:
+            file_list.append(entry)
+
+
+    # Mimic the output of os.walk
+    final_list.append([dir_path, dir_list, file_list])
+
+
+    # Decrement depth for the next recursion
+    depth -= 1
+
+    # Stop the recursion if the final depth has been reached
+    if depth != 0:
+
+        # Do this recursively for all directories up to a certain depth
+        for dir_name in dir_list:
+
+            final_list_rec = walkDirsToDepth(os.path.join(dir_path, dir_name), depth=depth)
+
+            # Add the list to the total list
+            final_list += final_list_rec
+
+
+    return final_list
 
 
 def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=False, extra_files=None):
@@ -150,7 +205,13 @@ class SegmentedScale(mscale.ScaleBase):
     name = 'segmented'
 
     def __init__(self, axis, **kwargs):
-        mscale.ScaleBase.__init__(self, axis)
+
+        # Handle different matplotlib versions
+        try:
+            mscale.ScaleBase.__init__(self, axis)
+        except TypeError:
+            mscale.ScaleBase.__init__(axis)
+
         self.points = kwargs.get('points', [0, 1])
         self.lb = self.points[0]
         self.ub = self.points[-1]
@@ -221,7 +282,7 @@ def openFolderDialog(initialdir, title, mpl):
 
 
 
-def ping(host):
+def ping(host, count=1):
     """ Ping the host and return True if reachable. 
         Remember that a host may not respond to a ping (ICMP) request even if the host name is valid.
 
@@ -235,10 +296,10 @@ def ping(host):
     """
 
     # Ping command count option as function of OS
-    param = '-n 1' if platform.system().lower()=='windows' else '-c 1'
+    param = '-n' if platform.system().lower()=='windows' else '-c'
 
     # Building the command. Ex: "ping -c 1 google.com"
-    command = ['ping', param, host]
+    command = ['ping', param, str(count), host]
 
     # Pinging
     return subprocess.call(command) == 0
@@ -422,6 +483,83 @@ def formatScientific(val, dec_places):
     """
     
     s = '{val:0.{dec_places:d}e}'.format(val=val, dec_places=dec_places)
+
+    # Handle NaN values
+    if 'nan' in s:
+        return 'NaN'
+
     m, e = s.split('e')
 
     return r'{m:s}\times 10^{{{e:d}}}'.format(m=m, e=int(e))
+
+
+
+def roundToSignificantDigits(x, n=2):
+    """ Round the number to N significant digits. """
+
+    def _decimalPlace(x, n):
+        return -int(np.floor(np.log10(x))) + (n - 1)
+
+    def _round(x, n, dec_place=None):
+
+        # Don't try to round zeros
+        if x == 0:
+            return x
+
+        # Compute the decimal place if not given
+        if dec_place is None:
+            dec_place = _decimalPlace(x, n)
+
+
+        return np.round(x, dec_place)
+
+
+    ### Compute the decimal place to round to ###
+
+    # Run on only one number
+    if np.isscalar(x):
+        out = _round(x, n)
+
+    else:
+        out = []
+
+        # If a list is given, determine the smallest decimal place for all numbers
+        for num in x:
+            dec_places = [_decimalPlace(num, n) for num in x if num != 0]
+
+        # Handle the cases when all numbers are 0
+        if len(dec_places):
+            # Compute the smallest decimal place
+            common_dec_place = np.max(dec_places)
+        else:
+            common_dec_place = 0
+
+        # Compute the rounded numbers
+        for num in x:
+            out.append(_round(num, n, dec_place=common_dec_place))
+
+        out = np.array(out)
+
+    ### ###
+
+    return out
+
+
+def isRaspberryPi():
+    """ Check if the code is running on a Raspberry Pi. 
+    
+    Return:
+        [bool] True if the code is running on a Raspberry Pi, False otherwise.
+    """
+
+    try:
+        # Open a file with the RPi model name
+        with open('/sys/firmware/devicetree/base/model', 'r') as m:
+
+            if 'raspberry pi' in m.read().lower(): 
+                return True               
+
+    except FileNotFoundError:
+        pass
+
+    return False

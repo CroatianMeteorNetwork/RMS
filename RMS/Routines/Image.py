@@ -78,16 +78,9 @@ def loadImage(img_path, flatten=-1):
 
     if USING_SCIPY_IMREAD:
         img = imread(img_path, flatten)
-        print("Loading image with scipy...")
 
     else:
         img = imread(img_path, as_gray=bool(flatten))
-        print("Loading image with imageio...")
-
-    try:
-        print("Image size:", img.shape)
-    except:
-        pass
 
     return img
 
@@ -287,7 +280,7 @@ def applyBrightnessAndContrast(img, brightness, contrast):
     img_type = img.dtype
 
     # Convert image to float
-    img = img.astype(np.float)
+    img = img.astype(float)
 
     # Apply brightness
     img = img + brightness

@@ -6,6 +6,7 @@ from __future__ import print_function, division, absolute_import
 import os
 import copy
 import datetime
+import json
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -42,35 +43,57 @@ class Shower(object):
         self.iau_code_int_unique = int(self.iau_code_int_unique)
         
 
-        self.lasun_beg = float(shower_entry[3]) # deg
-        self.lasun_max = float(shower_entry[4]) # deg
-        self.lasun_end = float(shower_entry[5]) # deg
-        self.ra_g = float(shower_entry[6]) # deg
-        self.dec_g = float(shower_entry[7]) # deg
-        self.dra = float(shower_entry[8]) # deg
-        self.ddec = float(shower_entry[9]) # deg
-        self.vg = float(shower_entry[10]) # km/s
+        self.lasun_beg = float(shower_entry[3])  # deg
+        self.lasun_max = float(shower_entry[4])  # deg
+        self.lasun_end = float(shower_entry[5])  # deg
+        self.ra_g      = float(shower_entry[6])  # deg
+        self.dra       = float(shower_entry[7])  # deg/day
+        self.dec_g     = float(shower_entry[8])  # deg
+        self.ddec      = float(shower_entry[9])  # deg/day
+        self.vg        = float(shower_entry[10]) # km/s
+        self.dvg       = float(shower_entry[11]) # km/s/day
 
         # Reference height
         self.ref_height = None
+
+        # Binning parameters for combined flux
+        self.flux_binning_params = None
+
 
         # Load parameters for flux, if that type of shower entry is loaded
         if len(shower_entry) > 13:
 
             self.flux_entry = True
 
-            self.flux_year = shower_entry[11]
-            self.flux_lasun_peak = float(shower_entry[12])
-            self.flux_zhr_peak = float(shower_entry[13])
-            self.flux_bp = float(shower_entry[14])
-            self.flux_bm = float(shower_entry[15])
+            self.flux_year = shower_entry[12]
+            self.flux_lasun_peak = float(shower_entry[13])
+            self.flux_zhr_peak = float(shower_entry[14])
+            self.flux_bp = float(shower_entry[15])
+            self.flux_bm = float(shower_entry[16])
 
-            self.population_index = float(shower_entry[16])
+            self.population_index = float(shower_entry[17])
             self.mass_index = 1 + 2.5*np.log10(self.population_index)
 
-            ref_ht = float(shower_entry[17])
+            # Reference meteor height in km
+            ref_ht = float(shower_entry[18])
             if ref_ht > 0:
                 self.ref_height = ref_ht
+
+            # Shower association radius in deg
+            self.association_radius = float(shower_entry[19])
+            if self. association_radius < 0:
+                self.association_radius = 3.0
+
+            # Load the flux binning parameters
+            flux_binning_params = shower_entry[20].strip()
+            if len(flux_binning_params) > 0:
+
+                # Replace all apostrophes with double quotes
+                flux_binning_params = flux_binning_params.replace("'", '"')
+
+                # Load JSON as dictionary
+                self.flux_binning_params = json.loads(flux_binning_params)
+
 
         # Apparent radiant
         self.ra = None # deg
@@ -101,20 +124,27 @@ class Shower(object):
 
         """
 
+        # Solar longitude difference form the peak
+        lasun_diff = (np.degrees(jd2SolLonSteyaert(jdt_ref)) - self.lasun_max + 180)%360 - 180
 
         # Compute the location of the radiant due to radiant drift
-        if not np.any(np.isnan([self.dra, self.ddec])):
-            
-            # Solar longitude difference form the peak
-            lasun_diff = (np.degrees(jd2SolLonSteyaert(jdt_ref)) - self.lasun_max + 180)%360 - 180
+        ra_g  = self.ra_g
+        dec_g = self.dec_g
+        vg    = self.vg
 
+        if not np.isnan(self.dra):
             ra_g = self.ra_g + lasun_diff*self.dra
+
+        if not np.isnan(self.ddec):
             dec_g = self.dec_g + lasun_diff*self.ddec
+
+        if not np.isnan(self.dvg):
+            vg = self.vg + lasun_diff*self.dvg
 
 
         # Compute the apparent radiant - assume that the meteor is directly above the station
         self.ra, self.dec, self.v_init = geocentricToApparentRadiantAndVelocity(ra_g, \
-            dec_g, 1000*self.vg, latitude, longitude, meteor_fixed_ht, \
+            dec_g, 1000*vg, latitude, longitude, meteor_fixed_ht, \
             jdt_ref, include_rotation=True)
 
         return self.ra, self.dec, self.v_init
@@ -156,6 +186,18 @@ class Shower(object):
         return zhr
 
 
+    def isAnnual(self):
+        """ Check whether this is an annual shower, as specified in the table. """
+
+        # Check if this is a yearly shower
+        if hasattr(self, "flux_year"):
+            if self.flux_year != "annual":
+                return False
+
+        
+        return True
+
+
 def loadShowers(dir_path, file_name):
     """ Loads the given shower CSV file. """
 
@@ -186,23 +228,55 @@ class FluxShowers(object):
         self.showers = [Shower(entry) for entry in shower_data]
 
 
-    def activeShowers(self, dt_beg, dt_end, min_zhr=1):
-        """ Return a list of active showers given a range of solar longitudes. 
+    def showerObjectFromCode(self, shower_code):
+        """ Return a shower object given the 3-letter IAU code. 
+        
+        Arguments:
+            shower_code: [str] 3-letter IAU shower code.
+
+        Return:
+            shower: [Shower object] Object will be returned if the shower is found, None otherwise.
+
+        """
+
+        shower = None
+        for sh in self.showers:
+            if sh.name.lower() == shower_code.lower():
+                shower = sh
+                break
+
+        return shower
+
+
+    def activeShowers(self, dt_beg, dt_end, use_zhr_threshold=False, min_zhr=1):
+        """ Return a list of active showers given a range of dates. 
     
         Arguments:
             dt_beg: [float] Starting datetime.
             dt_end: [float] End datetime.
 
         Keyword arguments:
+            use_zhr_threshold: [bool] If True, the activity period will be computed in the range given
+                by min_zhr and as defined by the B activity parameters. If False, the activity period
+                specified in the table will be used. False by default.
             min_zhr: [float] Minimum ZHR for the shower to be considered active.
 
         Return:
-            [list] A list of Shower objects with the modified activity period according to the ZHR threshold.
+            [list] A list of Shower objects.
         """
 
         # Convert dates to solar longitudes
         la_sun_beg = np.degrees(jd2SolLonSteyaert(datetime2JD(dt_beg)))
         la_sun_end = np.degrees(jd2SolLonSteyaert(datetime2JD(dt_end)))
+
+        # Set the minimum range to 0.05 deg solar longitude
+        la_sun_diff = np.abs(la_sun_end - la_sun_beg)
+        if la_sun_diff < 0.05:
+            la_sun_beg -= la_sun_diff/2 + 0.025
+            la_sun_end += la_sun_diff/2 + 0.025
+
+        la_sun_beg %= 360
+        la_sun_end %= 360
 
 
         # Sample the range with a 0.02 deg delta in sol (~30 minutes)
@@ -217,41 +291,68 @@ class FluxShowers(object):
         for shower in self.showers:
 
             # Only take the shower if it's annual, or the year the correct
-            if not shower.flux_year == "annual":
+            if not shower.isAnnual():
                 if not (int(shower.flux_year) == dt_beg.year) and not (int(shower.flux_year) == dt_end.year):
                     continue
 
-            # Compute the ZHR profile
-            zhr_arr = shower.computeZHR(sol_array)
 
-            # Add the profile to the shower dictionary
-            shower_zhrs[shower.name] += zhr_arr
+            # If the classification will be determined by the ZHR threshold
+            if use_zhr_threshold:
+
+                # Compute the ZHR profile
+                zhr_arr = shower.computeZHR(sol_array)
+
+                # Add the profile to the shower dictionary
+                shower_zhrs[shower.name] += zhr_arr
 
 
-        # List of showers with a total ZHR above the threshold
+        # List of active showers
         active_showers = []
 
-        # Go through all showers and deterine if they were active or not
+        # Go through all showers and determine if they were active or not
         for shower in self.showers:
 
             # Don't add already added showers
             if shower.name not in [shower.name for shower in active_showers]:
+
+                # If the classification will be determined by the ZHR threshold
+                if use_zhr_threshold:
                 
-                # Determine the activity period
-                activity_above_threshold = shower_zhrs[shower.name] > min_zhr
+                    # Determine the activity period
+                    activity_above_threshold = shower_zhrs[shower.name] > min_zhr
 
-                if np.any(activity_above_threshold):
+                    if np.any(activity_above_threshold):
 
-                    # Determine the activity period within the given range of solar longitudes
-                    la_sun_min = np.min(sol_array[activity_above_threshold])%360
-                    la_sun_max = np.max(sol_array[activity_above_threshold])%360
+                        # Determine the activity period within the given range of solar longitudes
+                        la_sun_min = np.min(sol_array[activity_above_threshold])%360
+                        la_sun_max = np.max(sol_array[activity_above_threshold])%360
 
-                    # Create a copy of the shower object with the modified activity period
-                    shower_active = copy.deepcopy(shower)
-                    shower_active.lasun_beg = la_sun_min
-                    shower_active.lasun_end = la_sun_max
+                        # Create a copy of the shower object with the modified activity period
+                        shower_active = copy.deepcopy(shower)
+                        shower_active.lasun_beg = la_sun_min
+                        shower_active.lasun_end = la_sun_max
 
-                    active_showers.append(shower_active)
+                        active_showers.append(shower_active)
+
+                # Use shower activity as specified in the shower table
+                else:
+
+                    shower_lasun_beg = shower.lasun_beg
+                    shower_lasun_end = shower.lasun_end
+
+                    if shower_lasun_beg > shower_lasun_end:
+                        shower_lasun_beg -= 360
+
+                    # Check if there are any solar longitudes within the activity period
+                    activity_within_bounds = sol_array[
+                        (sol_array >= shower_lasun_beg) & (sol_array <= shower_lasun_end)]
+
+                    # Add shower to active list if any activity is covered by the period
+                    if np.any(activity_within_bounds):
+                        active_showers.append(shower)
+
+
+
 
 
         return active_showers

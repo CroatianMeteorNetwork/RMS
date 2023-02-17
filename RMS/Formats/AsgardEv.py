@@ -65,10 +65,10 @@ class AsgardEv(object):
         fr_arr, time_arr, sum_arr, seq_arr, cx_arr, cy_arr, th_arr, phi_arr, lsp_arr, mag_arr, flag_arr, \
             bak_arr, max_arr = self.data.T
 
-        fr_arr = fr_arr.astype(np.int)
-        sum_arr = sum_arr.astype(np.int)
-        seq_arr = seq_arr.astype(np.int)
-        flag_arr = flag_arr.astype(np.int)
+        fr_arr = fr_arr.astype(int)
+        sum_arr = sum_arr.astype(int)
+        seq_arr = seq_arr.astype(int)
+        flag_arr = flag_arr.astype(int)
 
         for i in range(len(self.data)):
             out_str += "{:5d} {:10.6f} {:6d} {:7d} {:11.6f} {:11.6f} {:10.6f} {:11.6f} {:7.3f} {:6.2f}  {:04d} {:5.1f} {:6.1f}\n".format(\

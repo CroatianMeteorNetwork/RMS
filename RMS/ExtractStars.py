@@ -465,7 +465,7 @@ def extractStarsAndSave(config, ff_dir):
 
 
     # Run the QueuedPool for detection
-    workpool = QueuedPool(extractStars, cores=-1, backup_dir=ff_dir)
+    workpool = QueuedPool(extractStars, cores=-1, backup_dir=ff_dir, input_queue_maxsize=None)
 
 
     # Add jobs for the pool
@@ -498,7 +498,7 @@ def extractStarsAndSave(config, ff_dir):
 
 
         # Construct the table of the star parameters
-        star_data = list(zip(x2, y2, amplitude, intensity, fwhm_data))
+        star_data = list(zip(y2, x2, amplitude, intensity, fwhm_data))
 
         # Add star info to the star list
         star_list.append([ff_name, star_data])

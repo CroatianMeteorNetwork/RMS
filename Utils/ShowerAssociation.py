@@ -206,7 +206,7 @@ class MeteorSingleStation(object):
             dec: [float] Declination (deg).
 
         Return:
-            ang_separation: [float] Radiant dsitance (deg).
+            ang_separation: [float] Radiant distance (deg).
         """
 
         ang_separation = np.degrees(abs(np.pi/2 - angularSeparation(np.radians(ra), \
@@ -336,6 +336,26 @@ def estimateMeteorHeight(config, meteor_obj, shower):
     return ht_b, ht_e
 
 
+def showerMatchScore(radiant_distance, height_difference):
+    """ Given the distance of the great circle from the reference radiant and the difference in height,
+        compute the match score.
+
+    Arguments:
+        radiant_distance: [float] Distance of the great circle from the reference radiant in degrees.
+        height_difference: [float] Difference in height in meters.
+
+    Return:
+        score: [float] Match score.
+    """
+
+    # Add the radiant distance as is
+    score = radiant_distance
+
+    # Add the height difference in km with a weight
+    ht_weight = 0.1
+    score += ht_weight*(height_difference/1000.0)
+
+    return score
 
 
 def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=False, save_plot=False, \
@@ -435,7 +455,8 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
         
         # Go through all showers in the list and find the best match
         best_match_shower = None
-        best_match_dist = np.inf
+        # best_match_dist = np.inf
+        best_match_score = np.inf
         for shower in shower_list:
 
             # If the shower code was given, only check this one shower
@@ -466,17 +487,34 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
             ### Radiant filter ###
 
-            # Assume a fixed meteor height for an approximate apparent radiant
-            meteor_fixed_ht = 100000 # 100 km
+            # Get the reference height for the given shower
+            if shower.ref_height is not None:
+
+                # Read from table if given
+                meteor_fixed_ht = 1000*shower.ref_height
+
+            else:
+
+                # Otherwise compute the height from the model
+                meteor_ht_beg = heightModel(1000*shower.vg, ht_type='beg')
+                meteor_ht_end = heightModel(1000*shower.vg, ht_type='end')
+                meteor_fixed_ht = (meteor_ht_beg + meteor_ht_end)/2
+
+            # Compute the apparent radiant
             shower.computeApparentRadiant(config.latitude, config.longitude, meteor_obj.jdt_ref, \
                 meteor_fixed_ht=meteor_fixed_ht)
 
             # Compute the angle between the meteor radiant and the great circle normal
             radiant_separation = meteor_obj.angularSeparationFromGC(shower.ra, shower.dec)
 
+            # Load the appropriate association radius
+            if hasattr(shower, 'association_radius'):
+                association_radius = shower.association_radius
+            else:
+                association_radius = config.shower_max_radiant_separation
 
             # Make sure the meteor is within the radiant distance threshold
-            if radiant_separation > config.shower_max_radiant_separation:
+            if radiant_separation > association_radius:
                 continue
 
 
@@ -500,6 +538,17 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             # Estimate the limiting meteor height from the velocity (meters)
             filter_beg_ht = heightModel(shower.v_init, ht_type='beg')
             filter_end_ht = heightModel(shower.v_init, ht_type='end')
+
+            # Get the reference meteor height
+            if shower.ref_height is not None:
+
+                # Read from table if given
+                ref_height = 1000*shower.ref_height
+
+            else:
+
+                # Otherwise compute from the model
+                ref_height = (filter_beg_ht + filter_end_ht)/2
 
 
             ### Estimate the meteor beginning height with +/- 1 frame, otherwise some short meteor may get
@@ -541,10 +590,26 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                 config.latitude, config.longitude)
 
 
-            # Take the shower that's closest to the great circle if there are multiple candidates
-            if radiant_separation < best_match_dist:
-                best_match_dist = radiant_separation
+            ### Compute the association score ###
+
+            # Compute the difference between the observed and thoretical height
+            meteor_ht_diff = abs(meteor_ht - ref_height)
+
+            # Compute the association score
+            association_score = showerMatchScore(radiant_separation, meteor_ht_diff)
+
+            ### ###
+
+
+            # Take the shower with the smallest match score if there are multiple candidates
+            if association_score < best_match_score:
+                best_match_score = association_score
                 best_match_shower = copy.deepcopy(shower)
+
+            # # Take the shower that's closest to the great circle if there are multiple candidates
+            # if radiant_separation < best_match_dist:
+            #     best_match_dist = radiant_separation
+            #     best_match_shower = copy.deepcopy(shower)
 
 
         # If a shower is given and the match is not this shower, skip adding the meteor to the list
@@ -727,9 +792,15 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
             heading_arr = np.linspace(0, 360, 50)
 
+            # Load the appropriate association radius
+            if hasattr(shower, 'association_radius'):
+                association_radius = shower.association_radius
+            else:
+                association_radius = config.shower_max_radiant_separation
+
             # Compute coordinates on a circle around the given RA, Dec
             ra_circle, dec_circle = sphericalPointFromHeadingAndDistance(shower.ra, shower.dec, \
-                heading_arr, config.shower_max_radiant_separation)
+                heading_arr, association_radius)
 
 
             # Plot the shower circle

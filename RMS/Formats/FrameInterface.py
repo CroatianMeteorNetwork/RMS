@@ -443,7 +443,7 @@ class InputTypeFRFF(InputType):
                         for i in range(min_frame, max_frame + 1):
 
                             # Init an empty image
-                            img = np.zeros((self.ncols, self.nrows), np.float)
+                            img = np.zeros((self.ncols, self.nrows), float)
 
                             # Compute indices on the image where the FR file will be pasted
                             x_img = np.arange(int(fr_files[fr].xc[line][i] - fr_files[fr].size[line][i]//2),
@@ -824,9 +824,11 @@ class InputTypeVideo(InputType):
         ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, np.uint8)
 
         # If there are no frames to read, return an empty array
-        if frames_to_read == 0:
+        if frames_to_read == 0 or frames_to_read == -1:
             print('There are no frames to read!')
             return ff_struct_fake
+
+        print('Frames to read: ' + str(frames_to_read))
 
         # Load the chunk of frames
         for i in range(frames_to_read):
@@ -2199,7 +2201,8 @@ def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detec
 
     # Check if the given file is a video file
     elif file_name.lower().endswith('.mp4') or file_name.lower().endswith('.avi') \
-            or file_name.lower().endswith('.mkv') or file_name.lower().endswith('.wmv'):
+            or file_name.lower().endswith('.mkv') or file_name.lower().endswith('.wmv') \
+            or file_name.lower().endswith('.mov'):
 
         # Init the image hadle for video files
         img_handle = InputTypeVideo(input_file, config, beginning_time=beginning_time,

@@ -15,7 +15,7 @@ import sys
 import copy
 import shutil
 import argparse
-
+import logging
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -28,12 +28,15 @@ from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Formats import Platepar
 from RMS.Formats import StarCatalog
 from RMS.Math import rotatePoint
+from RMS.Logger import initLogging
 
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog
 
+
+log = logging.getLogger('logger')
 
 
 def addPoint(img, xc, yc, radius):
@@ -45,7 +48,7 @@ def addPoint(img, xc, yc, radius):
     sigma, mu = 1.0, 0.0
 
     # Generate a small array with a gaussian
-    grid_arr = np.linspace(-radius, radius, 2*radius + 1, dtype=np.int)
+    grid_arr = np.linspace(-radius, radius, 2*radius + 1, dtype=int)
     x, y = np.meshgrid(grid_arr, grid_arr)
     d = np.sqrt(x**2 + y**2)
     gauss = 255*np.exp(-((d - mu)**2/(2.0*sigma**2)))
@@ -109,17 +112,17 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
 
     # If the image registration library is not installed, return nothing
     if not IMREG_INSTALLED:
-        print("WARNING:")
-        print('The imreg_dft library is not installed! Install it by running either:')
-        print(' a) pip install imreg_dft')
-        print(' b) conda install -c conda-forge imreg_dft')
+        log.warning("WARNING:")
+        log.warning('The imreg_dft library is not installed! Install it by running either:')
+        log.warning(' a) pip install imreg_dft')
+        log.warning(' b) conda install -c conda-forge imreg_dft')
 
         return 0.0, 1.0, 0.0, 0.0
 
 
     # Set input types
-    reference_list = np.array(reference_list).astype(np.float)
-    moved_list = np.array(moved_list).astype(np.float)
+    reference_list = np.array(reference_list).astype(float)
+    moved_list = np.array(moved_list).astype(float)
 
     # Rescale the coordinates so the whole image fits inside the square (rescale by the smaller image axis)
     rescale_factor = min(config.width, config.height)/img_size
@@ -147,11 +150,11 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
         res = imreg_dft.imreg.similarity(img_ref, img_mov)
 
     except ValueError:
-        print('imreg_dft error: The scale correction is too high!')
+        log.warning('imreg_dft error: The scale correction is too high!')
         return 0.0, 1.0, 0.0, 0.0
 
     except IndexError:
-        print('imreg_dft error: Index out of bounds!')
+        log.warning('imreg_dft error: Index out of bounds!')
         return 0.0, 1.0, 0.0, 0.0
 
 
@@ -164,10 +167,10 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
     translation_y = rescale_factor*translate[0]
 
 
-    print('Platepar correction:')
-    print('    Rotation:', angle, 'deg')
-    print('    Scale:', scale)
-    print('    Translation X, Y: ({:.2f}, {:.2f}) px'.format(translation_x, translation_y))
+    log.info('Platepar correction:')
+    log.info('    Rotation: {:.5f} deg'.format(angle))
+    log.info('    Scale: {:.5f}'.format(scale))
+    log.info('    Translation X, Y: ({:.2f}, {:.2f}) px'.format(translation_x, translation_y))
 
 
     # Plot comparison
@@ -184,7 +187,7 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
         ax3.imshow(res['timg'], cmap='gray')
         ax3.set_title('Transformed')
 
-        ax4.imshow(np.abs(res['timg'].astype(np.int) - img_ref.astype(np.int)).astype(np.uint8), cmap='gray')
+        ax4.imshow(np.abs(res['timg'].astype(int) - img_ref.astype(int)).astype(np.uint8), cmap='gray')
         ax4.set_title('Difference')
 
         plt.tight_layout()
@@ -274,7 +277,7 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         else:
             config.catalog_mag_limit -= mag_step
 
-    print('Final catalog limiting magnitude:', config.catalog_mag_limit)
+    log.info('Final catalog limiting magnitude: {:.3f}'.format(config.catalog_mag_limit))
 
 
     # Find the transform between the image coordinates and predicted platepar coordinates
@@ -345,6 +348,12 @@ if __name__ == "__main__":
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
+    # Initialize the logger
+    initLogging(config, 'fftalign_')
+
+    # Get the logger handle
+    log = logging.getLogger("logger")
+    log.setLevel(logging.INFO)
 
     # Get a list of files in the night folder
     file_list = os.listdir(dir_path)
@@ -358,7 +367,7 @@ if __name__ == "__main__":
         platepar.read(platepar_path, use_flat=config.use_flat)
 
     else:
-        print('Cannot find the platepar file in the night directory: ', config.platepar_name)
+        log.error('Cannot find the platepar file in the night directory: {}'.format(config.platepar_name))
         sys.exit()
 
 
@@ -369,14 +378,14 @@ if __name__ == "__main__":
             break
 
     if calstars_file is None:
-        print('CALSTARS file could not be found in the given directory!')
+        log.error('CALSTARS file could not be found in the given directory!')
         sys.exit()
 
     # Load the calstars file
     calstars_list = CALSTARS.readCALSTARS(dir_path, calstars_file)
     calstars_dict = {ff_file: star_data for ff_file, star_data in calstars_list}
 
-    print('CALSTARS file: ' + calstars_file + ' loaded!')
+    log.info('CALSTARS file: ' + calstars_file + ' loaded!')
 
     # Extract star list from CALSTARS file from FF file with most stars
     max_len_ff = max(calstars_dict, key=lambda k: len(calstars_dict[k]))
