@@ -65,16 +65,13 @@ if __name__ == "__main__":
     platepar.loadFromDict(platepar_dict)
 
     if cml_args.resolution is not None:
-        platepar.X_res = cml_args.resolution
-        platepar.Y_res = cml_args.resolution
+        platepar.X_res = int(cml_args.resolution)
+        platepar.Y_res = int(cml_args.resolution)
         platepar.F_scale *= 0.5
         platepar.refraction = False
         platepar.resetDistortionParameters()
 
     img = drawConstellations(platepar, cml_args.ff_file)
 
-    print(img.shape)
-    print(np.sum(img[:,:,3]))
-    print(np.sum(img[:,:,0]))
     cv2.imwrite(outfilename, img)
     print("Wrote", outfilename)
