@@ -356,7 +356,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     # Draw constellations
     if draw_constellations:
         constellations_img = drawConstellations(pp_stack, ff_mid,
-                                                separation_deg=ang_sep_max)
+                                                separation_deg=175)
 
 
     # Crop image
