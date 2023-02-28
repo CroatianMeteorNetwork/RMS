@@ -10,6 +10,15 @@ from astropy.io import fits
 from RMS.Formats.FFStruct import FFStruct
 
 
+# Any change to either FFStruct or FFfits.py must be reflected in the version number.
+# If you're making non-breaking changes/fixes, increase minor version.
+# For format changes make sure to increase major version, and add backwards-compatible
+# handling of previous major version.
+
+# current version (as of 28th Feb 2023) is 1.0
+VERSION_MAJ = 1
+VERSION_MIN = 0
+
 
 def read(directory, filename, array=False, full_filename=False):
     """ Read a FF structure from a FITS file. 
@@ -43,28 +52,35 @@ def read(directory, filename, array=False, full_filename=False):
     # Read the header
     head = hdulist[0].header
 
-    # Read in the data from the header
-    ff.nrows = head['NROWS']
-    ff.ncols = head['NCOLS']
-    ff.nbits = head['NBITS']
-    ff.nframes = head['NFRAMES']
-    ff.first = head['FIRST']
-    ff.camno = head['CAMNO']
-    ff.fps = head['FPS']
+    # Read version number
+    ff.versionmajor = head.get('VERMAJ', 0)
+    ff.versionminor = head.get('VERMIN', 0)
 
-    # Read in the image data
-    ff.maxpixel = hdulist[1].data
-    ff.maxframe = hdulist[2].data
-    ff.avepixel = hdulist[3].data
-    ff.stdpixel = hdulist[4].data
+    if ff.versionmajor == 0 or ff.versionmajor == 1:
+        # Read in the data from the header
+        ff.nrows = head['NROWS']
+        ff.ncols = head['NCOLS']
+        ff.nbits = head['NBITS']
+        ff.nframes = head['NFRAMES']
+        ff.first = head['FIRST']
+        ff.camno = head['CAMNO']
+        ff.fps = head['FPS']
 
-    if array:
-        ff.array = np.dstack([ff.maxpixel, ff.maxframe, ff.avepixel, ff.stdpixel])
+        # Read in the image data
+        ff.maxpixel = hdulist[1].data
+        ff.maxframe = hdulist[2].data
+        ff.avepixel = hdulist[3].data
+        ff.stdpixel = hdulist[4].data
 
-        ff.array = np.swapaxes(ff.array, 0, 1)
-        ff.array = np.swapaxes(ff.array, 0, 2)
+        if array:
+            ff.array = np.dstack([ff.maxpixel, ff.maxframe, ff.avepixel, ff.stdpixel])
 
-    # CLose the FITS file
+            ff.array = np.swapaxes(ff.array, 0, 1)
+            ff.array = np.swapaxes(ff.array, 0, 2)
+    else:
+        print("Unable to read unknown FF file version " + str(ff.versionmajor) + "." + str(ff.versionminor) + " in " + filename)
+
+    # Close the FITS file
     hdulist.close()
 
     return ff
@@ -102,6 +118,8 @@ def write(ff, directory, filename):
     head['FIRST'] = ff.first
     head['CAMNO'] = ff.camno
     head['FPS'] = ff.fps
+    head['VERMAJ'] = VERSION_MAJ
+    head['VERMIN'] = VERSION_MIN
 
     # Deconstruct the 3D array into individual images
     if ff.array is not None:
@@ -111,7 +129,7 @@ def write(ff, directory, filename):
         ff.avepixel = ff.avepixel[0]
         ff.stdpixel = ff.stdpixel[0]
 
-    # Add the maxpixle to the list
+    # Add the maxpixel to the list
     maxpixel_hdu = fits.ImageHDU(ff.maxpixel, name='MAXPIXEL')
     maxframe_hdu = fits.ImageHDU(ff.maxframe, name='MAXFRAME')
     avepixel_hdu = fits.ImageHDU(ff.avepixel, name='AVEPIXEL')

@@ -9,6 +9,9 @@ class FFStruct:
     def __init__(self):
         self.nrows = 0
         self.ncols = 0
+
+        self.versionmajor = 0
+        self.versionminor = 0
         
         # 2*nbits compressed frames (OLD format)
         self.nbits = 0
