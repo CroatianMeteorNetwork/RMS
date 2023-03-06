@@ -166,7 +166,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
             # Save frame to disk
             if save_frames:
                 frame_file_name = fr_path.replace('.bin', '') \
-                    + "_line_{:02d}_frame_{:03d}.{:s}".format(video_num, frame[0][1] if split else frame_num, extract_format)
+                    + "_line_{:02d}_frame_{:03d}.{:s}".format(video_num, t, extract_format)
                 cv2.imwrite(os.path.join(dir_path, frame_file_name), img)
                 framefiles.append(frame_file_name)
                 img_patt = os.path.join(dir_path, fr_path.replace('.bin', '')
