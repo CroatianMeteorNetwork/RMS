@@ -1352,8 +1352,25 @@ class InputTypeImages(object):
             
 
 
-        # Set the begin time if in the FRIPON mode
+        # If during the frame loading it was deterined that the images are in the FRIPON format
         if self.fripon_mode:
+
+            ### Sort the frames according to the fits header time ###
+            
+            frame_time_list = []
+            for i in range(self.total_frames):
+                self.loadFrame(fr_no=i)
+                frame_time_list.append(self.dt_frame_time)
+
+            # Sort the image list according to the frame time
+            self.img_list = [x for _, x in sorted(zip(frame_time_list, self.img_list))]
+
+            # Load the first frame to get the beginning time
+            self.loadFrame(fr_no=0)
+
+            ### ###
+
+            # Set the begin time if in the FRIPON mode
             beginning_time = self.dt_frame_time
 
             # Load info for CABERNET
@@ -1894,8 +1911,6 @@ class InputTypeImages(object):
 
                 # Read the frame time from the dictionary
                 dt = self.frame_dt_dict[frame_no]
-
-                print(frame_no, "FRAME TIME:", dt)
 
 
         else:
