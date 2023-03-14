@@ -96,8 +96,15 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=
 
         # Runt the detection
         meteor_list = detectMeteors(img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask)
+        
 
         log.info(ff_name + ' detected meteors: ' + str(len(meteor_list)))
+        if len(meteor_list) > 0:
+            max_intensity = 0.0
+            for met in meteor_list:
+                for cen in met[2]:
+                    max_intensity = max(max_intensity, cen[4])
+            log.info('{} max intensity {:.4f}'.format(ff_name, max_intensity))
 
     else:
         meteor_list = []
