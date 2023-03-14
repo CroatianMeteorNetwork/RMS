@@ -189,10 +189,10 @@ if [[ "$key" = "" ]]; then
   echo ""
   echo "Generating a new SSH key..."
 
-  # Generate an SSH key wihtout a passphrase
+  # Generate an SSH key without a passphrase
   yes y | ssh-keygen -t rsa -m PEM -N "" -f ~/.ssh/id_rsa >/dev/null
 
-  # Copy the public SSH key to desktop
+  # Link the public SSH key to desktop
   ln -s ~/.ssh/id_rsa.pub ~/Desktop/id_rsa.pub
 
   echo ""

@@ -793,14 +793,14 @@ def recalibrateIndividualFFsAndApplyAstrometry(
                 np.radians(pp_temp.dec_d),
             )
         )
-        ang_dists.append(ang_dist * 60)
+        ang_dists.append(ang_dist*60)
 
         # Compute rotation difference
-        rot_diff = (platepar.pos_angle_ref - pp_temp.pos_angle_ref + 180) % 360 - 180
-        rot_angles.append(rot_diff * 60)
+        rot_diff = (platepar.rotationWrtHorizon() - pp_temp.rotationWrtHorizon() + 180)%360 - 180
+        rot_angles.append(rot_diff*60)
 
         # Compute the hour of the FF used for recalibration
-        hour_list.append((ff_dt - first_dt).total_seconds() / 3600)
+        hour_list.append((ff_dt - first_dt).total_seconds()/3600)
 
         # Add the photometric offset to the list
         photom_offset_list.append(pp_temp.mag_lev)

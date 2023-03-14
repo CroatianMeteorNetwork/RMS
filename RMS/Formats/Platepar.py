@@ -1321,6 +1321,13 @@ class Platepar(object):
 
             self.updateRefRADec(preserve_rotation=True)
 
+
+    def rotationWrtHorizon(self):
+        """Return the rotation of the camera wrt horizon in degrees."""
+
+        # Compute the rotation of the camera wrt horizon
+        return RMS.Astrometry.ApplyAstrometry.rotationWrtHorizon(self)
+
     def __repr__(self):
 
         # Compute alt/az pointing
