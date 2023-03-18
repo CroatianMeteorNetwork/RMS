@@ -58,6 +58,18 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('ftpdetectinfo', metavar='FTP_FILE', type=str, nargs=1, \
                     help='FTPdetectinfo file with meteor detections.')
+    
+    arg_parser.add_argument('-s', '--sigma', metavar='SIGMA', type=float, default=-1, \
+                    help='Force sigma for fitting the Gaussian PSF (disable with -1). You can take this from the FWHM estiamted in the CALSTARS file. Sigma = FWHM/1.55.')
+    
+    arg_parser.add_argument("--strip_width", metavar="STRIP_WIDTH", type=int, default=10, \
+                            help="Width of the strip around the meteor. Default: 10")
+    
+    arg_parser.add_argument("--n_profiles", metavar="N_PROFILES", type=int, default=20, \
+                            help="Number of meteor profiles to plot. Default: 20")
+    
+    arg_parser.add_argument("--vert_step_off", metavar="VERT_STEP_OFF", type=int, default=70, \
+                            help="Difference in Y coordinates between every profile. Default: 70")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -65,16 +77,16 @@ if __name__ == "__main__":
     #########################
 
     # Width of the strip around the meteor
-    strip_width = 10
+    strip_width = cml_args.strip_width
 
     # Number of meteor profiles to plot
-    n_profiles = 20
+    n_profiles = cml_args.n_profiles
 
     # Difference in Y coordinates between every profile
-    vertical_step_offset = 70
+    vertical_step_offset = cml_args.vert_step_off
 
     # Force sigma for fitting the Gaussian PSF (disable with -1)
-    force_sigma = -1
+    force_sigma = cml_args.sigma
 
     # Modify the gauss1D function to include the forced sigma
     gauss1D_mod = partial(gauss1D, force_sigma=force_sigma)
@@ -177,16 +189,25 @@ if __name__ == "__main__":
                     # Define the bounds
                     bounds = (
                         #     A,       mu, sigma,  bg
-                        [0,             0,     0,   0], # min
-                        [np.inf, len(row),    10, 255] # max
+                        [0,             0,   0.8,   0], # min
+                        [np.inf, len(row),   5.0, 255] # max
                         )
 
                     # Run the fit
-                    popt, _ = scipy.optimize.curve_fit(gauss1D_mod, x_arr, row.astype(np.float64), p0=p0, 
-                                                       bounds=bounds)
+                    try:
+                        popt, _ = scipy.optimize.curve_fit(gauss1D_mod, x_arr, row.astype(np.float64), p0=p0, 
+                                                       bounds=bounds, maxfev=5000)
+                    except RuntimeError:
+                        print("Row = {:4d} - unable to fit".format(i))
+                        count += 1
+                        continue
 
                     # Extract the fit parametrs
                     A, mu, sigma, bg = popt
+                    if force_sigma > 0:
+                        sigma = force_sigma
+                    popt = [A, mu, sigma, bg]
+
                     print("Row = {:4d}, A = {:4d}, mu = {:6.2f}, sigma = {:5.2f}, bg = {:6.2f}".format(i, int(A), mu, sigma, bg))
                     
                     sigma_list.append(popt[2])
