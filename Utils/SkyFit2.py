@@ -30,7 +30,7 @@ from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFil
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
 from RMS.Pickling import loadPickle, savePickle
-from RMS.Math import angularSeparation, RMSD, vectNorm
+from RMS.Math import angularSeparation, RMSD, vectNorm, cartesianToPolar
 from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.CustomPyqtgraphClasses import *
@@ -4356,7 +4356,8 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Fits great circle to observations. """
 
         # Extract picked points
-        good_picks = collections.OrderedDict((frame, pick) for frame, pick in self.pick_list.items() if (pick['mode'] == 1) and (pick['x_centroid'] is not None))
+        good_picks = collections.OrderedDict((frame, pick) for frame, pick in self.pick_list.items() 
+                                             if (pick['mode'] == 1) and (pick['x_centroid'] is not None))
 
         # Remove the old great circle
         self.great_circle_line.clear()
@@ -4388,7 +4389,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 cartesian_points = []
 
-                # Convert equatorial coordinates to a unit directon vector in the ECI frame
+                # Convert equatorial coordinates to a unit direction vector in the ECI frame
                 for ra, dec in zip(ra_data, dec_data):
 
                     vect = vectNorm(raDec2Vector(ra, dec))
@@ -4404,9 +4405,19 @@ class PlateTool(QtWidgets.QMainWindow):
                 x_arr, y_arr, z_arr = cartesian_points.T
                 coeffs, theta0, phi0 = fitGreatCircle(x_arr, y_arr, z_arr)
 
+
+                # Find the great circle phase angle at the middle of the observation
+                ra_mid = np.mean(ra_data)
+                dec_mid = np.mean(dec_data)
+                x, y, z = raDec2Vector(ra_mid, dec_mid)
+                theta, phi = cartesianToPolar(x, y, z)
+                gc_phase_mid = np.degrees(greatCirclePhase(theta, phi, theta0, phi0)[0])%360
+
+                # Generate a list of phase angles which are +/- 45 degrees from the middle phase
+                phase_angles = np.linspace(gc_phase_mid - 45, gc_phase_mid + 45, 1000)
+
                 
                 # Sample the great circle
-                phase_angles = np.linspace(0, 360, 1000)
                 x_array, y_array, z_array = greatCircle(np.radians(phase_angles), theta0, phi0)
 
                 if isinstance(x_array, float):
