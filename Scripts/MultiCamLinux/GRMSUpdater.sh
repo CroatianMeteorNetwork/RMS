@@ -16,6 +16,8 @@
 
 #!/bin/bash
 #
+# Version 1.4 fixed path issue in Run/Pid list variables
+#
 # Version 1.3 moved codebase into RMS/Scripts/MultiCamLinux
 #
 # Version 1.2 numerous fixes -
@@ -32,9 +34,9 @@
 
 
 UserDisp=($(w -h | awk '/xdm/ {print $1,$2}')) # grab the RMS username and current display number
-RunList=( $(ps -ef|grep -E -w -o '\/home\/.*\/source\/RMS\/Scripts\/MultiCamLinux\/StartCapture.sh\ [[:alnum:]]{6}'|awk '{print $NF}'|sort -u )) # create an array of the running station names
+RunList=( $(ps -ef|grep -E -w -o '~\/source\/RMS\/Scripts\/MultiCamLinux\/StartCapture.sh\ [[:alnum:]]{6}'|awk '{print $NF}'|sort -u )) # create an array of the running station names
 
-PidList=( $(ps -ef|awk '/\/home\/.*\/source\/RMS\/Scripts\/MultiCamLinux\/StartCapture.sh/ {print $2}') ) 	# create an array of the running RMS processes
+PidList=( $(ps -ef|awk '~\/source\/RMS\/Scripts\/MultiCamLinux\/StartCapture.sh/ {print $2}') ) 	# create an array of the running RMS processes
 
         for Pid in "${PidList[@]}"
                 do
