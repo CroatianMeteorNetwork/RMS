@@ -16,7 +16,7 @@
 
 #!/bin/bash
 #
-# Version 1.5 fixed bugs introduced by version 1.4 changes
+# Version 1.5 fixed bugs introduced by version 1.4 changes.
 #
 # Version 1.4 fixed path issue in Run/Pid list variables
 #
