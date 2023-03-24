@@ -1560,10 +1560,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.centroid_star_markers2.setData(pos=[])
 
         # Draw photometry
-        if len(self.paired_stars) > 2:
+        if len(self.paired_stars) >= 2:
             self.photometry()
 
-        self.tab.param_manager.updatePairedStars()
+        self.tab.param_manager.updatePairedStars(min_fit_stars=self.getMinFitStars())
 
 
     def updateCalstars(self):
@@ -1811,9 +1811,9 @@ class PlateTool(QtWidgets.QMainWindow):
             catalog_dec.append(star_dec)
             catalog_mags.append(star_mag)
 
-        # Make sure there are more than 3 stars picked
+        # Make sure there are at least 2 stars picked
         self.residual_text.clear()
-        if len(px_intens_list) > 3:
+        if len(px_intens_list) >= 2:
 
             # Compute apparent magnitude corrected for extinction
             catalog_mags = extinctionCorrectionTrueToApparent(catalog_mags, catalog_ra, catalog_dec,
@@ -4530,6 +4530,21 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return min_type, min_index
 
+    def getMinFitStars(self):
+        """ Returns the minimum number of stars needed for the fit. """
+
+        #   - if fitting only the pointing and no scale and no distortion, then require 2 stars
+        #   - if the scale is also to be fitted but no distortion, then require 3 stars
+        #   - if the distortion is also to be fitted, then require 5 stars
+        if self.fit_only_pointing and self.fixed_scale:
+            min_stars = 2
+        elif self.fit_only_pointing and not self.fixed_scale:
+            min_stars = 3
+        else:
+            min_stars = 5
+
+        return min_stars
+
 
     def fitPickedStars(self):
         """ Fit stars that are manually picked. The function first only estimates the astrometry parameters
@@ -4537,9 +4552,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
         """
 
-        # Fit the astrometry parameters, at least 5 stars are needed
-        if len(self.paired_stars) < 4:
-            qmessagebox(title='Number of stars', message="At least 5 paired stars are needed to do the fit!", message_type="warning")
+        # Check if there are enough stars for the fit
+        min_stars = self.getMinFitStars()
+        if len(self.paired_stars) < min_stars:
+
+            qmessagebox(title='Number of stars', 
+                        message="At least {:d} paired stars are needed to do the fit!".format(min_stars), 
+                        message_type="warning")
 
             return self.platepar
 
