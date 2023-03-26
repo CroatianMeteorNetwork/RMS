@@ -30,7 +30,7 @@ from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFil
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
 from RMS.Pickling import loadPickle, savePickle
-from RMS.Math import angularSeparation, RMSD, vectNorm
+from RMS.Math import angularSeparation, RMSD, vectNorm, cartesianToPolar, isAngleBetween
 from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.CustomPyqtgraphClasses import *
@@ -1560,10 +1560,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.centroid_star_markers2.setData(pos=[])
 
         # Draw photometry
-        if len(self.paired_stars) > 2:
+        if len(self.paired_stars) >= 2:
             self.photometry()
 
-        self.tab.param_manager.updatePairedStars()
+        self.tab.param_manager.updatePairedStars(min_fit_stars=self.getMinFitStars())
 
 
     def updateCalstars(self):
@@ -1811,9 +1811,9 @@ class PlateTool(QtWidgets.QMainWindow):
             catalog_dec.append(star_dec)
             catalog_mags.append(star_mag)
 
-        # Make sure there are more than 3 stars picked
+        # Make sure there are at least 2 stars picked
         self.residual_text.clear()
-        if len(px_intens_list) > 3:
+        if len(px_intens_list) >= 2:
 
             # Compute apparent magnitude corrected for extinction
             catalog_mags = extinctionCorrectionTrueToApparent(catalog_mags, catalog_ra, catalog_dec,
@@ -4356,7 +4356,8 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Fits great circle to observations. """
 
         # Extract picked points
-        good_picks = collections.OrderedDict((frame, pick) for frame, pick in self.pick_list.items() if (pick['mode'] == 1) and (pick['x_centroid'] is not None))
+        good_picks = collections.OrderedDict((frame, pick) for frame, pick in self.pick_list.items() 
+                                             if (pick['mode'] == 1) and (pick['x_centroid'] is not None))
 
         # Remove the old great circle
         self.great_circle_line.clear()
@@ -4388,7 +4389,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 cartesian_points = []
 
-                # Convert equatorial coordinates to a unit directon vector in the ECI frame
+                # Convert equatorial coordinates to a unit direction vector in the ECI frame
                 for ra, dec in zip(ra_data, dec_data):
 
                     vect = vectNorm(raDec2Vector(ra, dec))
@@ -4404,10 +4405,41 @@ class PlateTool(QtWidgets.QMainWindow):
                 x_arr, y_arr, z_arr = cartesian_points.T
                 coeffs, theta0, phi0 = fitGreatCircle(x_arr, y_arr, z_arr)
 
+                # Find the great circle phase angle at the middle of the observation
+                ra_mid = np.mean(ra_data)
+                dec_mid = np.mean(dec_data)
+                ra_list_temp = [ra_data[0], ra_mid, ra_data[-1]]
+                dec_list_temp = [dec_data[0], dec_mid, dec_data[-1]]
+                gc_phases = []
+
+                for ra, dec in zip(ra_list_temp, dec_list_temp):
+                    x, y, z = raDec2Vector(ra, dec)
+                    theta, phi = cartesianToPolar(x, y, z)
+                    gc_phase = (greatCirclePhase(theta, phi, theta0, phi0)[0])%(2*np.pi)
+
+                    gc_phases.append(gc_phase)
+
+                gc_phase_first, gc_phase_mid, gc_phase_last = gc_phases
+
+                # Get the correct angle order (in the clockwise order: first, mid, last)
+                if isAngleBetween(gc_phase_first, gc_phase_last, gc_phase_mid):
+                    gc_phase_first, gc_phase_last = gc_phase_last, gc_phase_first
+
+                # Generate a list of phase angles which are +/- 45 degrees from the middle phase and at least
+                # 15 deg from the start and end phases
+                gc_phase_min = gc_phase_mid - np.radians(45)
+                gc_phase_max = gc_phase_mid + np.radians(45)
+                if isAngleBetween(gc_phase_first, gc_phase_min, gc_phase_mid):
+                    gc_phase_min = gc_phase_first - np.radians(15)
+                if isAngleBetween(gc_phase_mid, gc_phase_max, gc_phase_last):
+                    gc_phase_max = gc_phase_last + np.radians(15)
+
+                # Generate a list of phase angles
+                phase_angles = np.linspace(gc_phase_min, gc_phase_max, 1000)
+
                 
                 # Sample the great circle
-                phase_angles = np.linspace(0, 360, 1000)
-                x_array, y_array, z_array = greatCircle(np.radians(phase_angles), theta0, phi0)
+                x_array, y_array, z_array = greatCircle(phase_angles, theta0, phi0)
 
                 if isinstance(x_array, float):
                     x_array = [x_array]
@@ -4498,6 +4530,21 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return min_type, min_index
 
+    def getMinFitStars(self):
+        """ Returns the minimum number of stars needed for the fit. """
+
+        #   - if fitting only the pointing and no scale and no distortion, then require 2 stars
+        #   - if the scale is also to be fitted but no distortion, then require 3 stars
+        #   - if the distortion is also to be fitted, then require 5 stars
+        if self.fit_only_pointing and self.fixed_scale:
+            min_stars = 2
+        elif self.fit_only_pointing and not self.fixed_scale:
+            min_stars = 3
+        else:
+            min_stars = 5
+
+        return min_stars
+
 
     def fitPickedStars(self):
         """ Fit stars that are manually picked. The function first only estimates the astrometry parameters
@@ -4505,9 +4552,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
         """
 
-        # Fit the astrometry parameters, at least 5 stars are needed
-        if len(self.paired_stars) < 4:
-            qmessagebox(title='Number of stars', message="At least 5 paired stars are needed to do the fit!", message_type="warning")
+        # Check if there are enough stars for the fit
+        min_stars = self.getMinFitStars()
+        if len(self.paired_stars) < min_stars:
+
+            qmessagebox(title='Number of stars', 
+                        message="At least {:d} paired stars are needed to do the fit!".format(min_stars), 
+                        message_type="warning")
 
             return self.platepar
 
