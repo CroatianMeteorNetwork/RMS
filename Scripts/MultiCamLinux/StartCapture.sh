@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # This software is part of the Linux port of RMS
 # Copyright (C) 2023  Ed Harman
 # 
@@ -13,8 +15,8 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-#!/bin/bash
+#
+# Version 1.2 - fixed bug whereby crontab runs this script under /bin/sh instead of /bin/bash
 #
 # Version 1.1
 # Changes - added station and delay arguments
