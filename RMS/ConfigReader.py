@@ -234,6 +234,14 @@ class Config:
         self.elevation = 0
         self.cams_code = 0
 
+
+        # Show this camera on the GMN weblog
+        self.weblog_enable = True
+
+        # The description that will be shown on the weblog (e.g. location, pointing direction)
+        self.weblog_description = ""
+
+
         self.external_script_run = False
         self.auto_reprocess_external_script_run = False
         self.external_script_path = None
@@ -614,7 +622,7 @@ def parse(path, strict=True):
 
     # Disable upload if the default station name is used
     if config.stationID == "XX0001":
-        print("Disabled upload becuase the default station code is used!")
+        # print("Disabled upload becuase the default station code is used!")
         config.upload_enabled = False
     
 
@@ -693,6 +701,13 @@ def parseSystem(config, parser):
 
     if parser.has_option(section, "cams_code"):
         config.cams_code = parser.getint(section, "cams_code")
+
+
+    if parser.has_option(section, "weblog_enable"):
+        config.weblog_enable = parser.getboolean(section, "weblog_enable")
+
+    if parser.has_option(section, "weblog_description"):
+        config.weblog_description = parser.get(section, "weblog_description")
 
     if parser.has_option(section, "external_script_run"):
         config.external_script_run = parser.getboolean(section, "external_script_run")
