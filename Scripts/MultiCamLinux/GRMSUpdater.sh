@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # This software is part of the Linux port of RMS
 # Copyright (C) 2023  Ed Harman
 # 
@@ -14,7 +16,15 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#!/bin/bash
+#
+# Version 1.6 bug fixes -
+# fixed this script failing when run under cron
+# changed behaviour to allow for consistent run-line parsing irrespective of how a capture was initiated
+# be it autostart, desktop icon or this script itself
+#
+# Version 1.5 fixed bugs introduced by version 1.4 changes.
+#
+# Version 1.5 fixed untested issue introduced by 1.4
 #
 # Version 1.4 fixed path issue in Run/Pid list variables
 #
@@ -34,9 +44,11 @@
 
 
 UserDisp=($(w -h | awk '/xdm/ {print $1,$2}')) # grab the RMS username and current display number
-RunList=( $(ps -ef|grep -E -w -o '~\/source\/RMS\/Scripts\/MultiCamLinux\/StartCapture.sh\ [[:alnum:]]{6}'|awk '{print $NF}'|sort -u )) # create an array of the running station names
+RunList=( $( ps -ef|grep -E -w -o '\/bin\/bash .*\/source\/RMS\/Scripts\/MultiCamLinux\/StartCapture.sh\ [[:alnum:]]{6}'| awk '{print $NF}' | sort -u )) # create an array of the running station names
 
-PidList=( $(ps -ef|awk '~\/source\/RMS\/Scripts\/MultiCamLinux\/StartCapture.sh/ {print $2}') ) 	# create an array of the running RMS processes
+
+PidList=( $(ps -ef|awk '/\/bin\/bash .*\/source\/RMS\/Scripts\/MultiCamLinux\/StartCapture.sh/ {print $2}') ) 	# create an array of the running RMS processes
+
 
         for Pid in "${PidList[@]}"
                 do
