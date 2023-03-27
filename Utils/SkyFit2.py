@@ -4405,37 +4405,40 @@ class PlateTool(QtWidgets.QMainWindow):
                 x_arr, y_arr, z_arr = cartesian_points.T
                 coeffs, theta0, phi0 = fitGreatCircle(x_arr, y_arr, z_arr)
 
-                # Find the great circle phase angle at the middle of the observation
-                ra_mid = np.mean(ra_data)
-                dec_mid = np.mean(dec_data)
-                ra_list_temp = [ra_data[0], ra_mid, ra_data[-1]]
-                dec_list_temp = [dec_data[0], dec_mid, dec_data[-1]]
-                gc_phases = []
+                # # Find the great circle phase angle at the middle of the observation
+                # ra_mid = np.mean(ra_data)
+                # dec_mid = np.mean(dec_data)
+                # ra_list_temp = [ra_data[0], ra_mid, ra_data[-1]]
+                # dec_list_temp = [dec_data[0], dec_mid, dec_data[-1]]
+                # gc_phases = []
 
-                for ra, dec in zip(ra_list_temp, dec_list_temp):
-                    x, y, z = raDec2Vector(ra, dec)
-                    theta, phi = cartesianToPolar(x, y, z)
-                    gc_phase = (greatCirclePhase(theta, phi, theta0, phi0)[0])%(2*np.pi)
+                # for ra, dec in zip(ra_list_temp, dec_list_temp):
+                #     x, y, z = raDec2Vector(ra, dec)
+                #     theta, phi = cartesianToPolar(x, y, z)
+                #     gc_phase = (greatCirclePhase(theta, phi, theta0, phi0)[0])%(2*np.pi)
 
-                    gc_phases.append(gc_phase)
+                #     gc_phases.append(gc_phase)
 
-                gc_phase_first, gc_phase_mid, gc_phase_last = gc_phases
+                # gc_phase_first, gc_phase_mid, gc_phase_last = gc_phases
 
-                # Get the correct angle order (in the clockwise order: first, mid, last)
-                if isAngleBetween(gc_phase_first, gc_phase_last, gc_phase_mid):
-                    gc_phase_first, gc_phase_last = gc_phase_last, gc_phase_first
+                # # Get the correct angle order (in the clockwise order: first, mid, last)
+                # if isAngleBetween(gc_phase_first, gc_phase_last, gc_phase_mid):
+                #     gc_phase_first, gc_phase_last = gc_phase_last, gc_phase_first
 
-                # Generate a list of phase angles which are +/- 45 degrees from the middle phase and at least
-                # 15 deg from the start and end phases
-                gc_phase_min = gc_phase_mid - np.radians(45)
-                gc_phase_max = gc_phase_mid + np.radians(45)
-                if isAngleBetween(gc_phase_first, gc_phase_min, gc_phase_mid):
-                    gc_phase_min = gc_phase_first - np.radians(15)
-                if isAngleBetween(gc_phase_mid, gc_phase_max, gc_phase_last):
-                    gc_phase_max = gc_phase_last + np.radians(15)
+                # # Generate a list of phase angles which are +/- 45 degrees from the middle phase and at least
+                # # 15 deg from the start and end phases
+                # gc_phase_min = gc_phase_mid - np.radians(45)
+                # gc_phase_max = gc_phase_mid + np.radians(45)
+                # if isAngleBetween(gc_phase_first, gc_phase_min, gc_phase_mid):
+                #     gc_phase_min = gc_phase_first - np.radians(15)
+                # if isAngleBetween(gc_phase_mid, gc_phase_max, gc_phase_last):
+                #     gc_phase_max = gc_phase_last + np.radians(15)
 
-                # Generate a list of phase angles
-                phase_angles = np.linspace(gc_phase_min, gc_phase_max, 1000)
+                # # Generate a list of phase angles
+                # phase_angles = np.linspace(gc_phase_min, gc_phase_max, 1000)
+
+                # Generate a list of phase angles (full circle)
+                phase_angles = np.linspace(0, 2*np.pi, 1000)
 
                 
                 # Sample the great circle
