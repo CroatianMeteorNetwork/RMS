@@ -57,6 +57,38 @@ if sys.version_info.major == 3:
     unicode = str
 
 
+def limitVignettingCoefficient(x_res, y_res, vignetting_coeff, delta_mag=2.5):
+    """ Limit the vignetting coefficient so that the drop in brigness in the corner of the image is not
+        does not exceed delta_mag magnitudes.
+        
+    Arguments:
+        x_res: [int] Image width (px).
+        y_res: [int] Image height (px).
+        vignetting_coeff: [float] Vignetting coefficient (rad/px).
+
+    Keyword arguments:
+        delta_mag: [float] Maximum drop in brightness in the corner of the image (magnitudes). Default: 2.5.
+
+    Return:
+        vignetting_coeff: [float] Limited vignetting coefficient (rad/px).
+
+    """
+
+    # Compute the distance from the center to the corner of the image
+    radius = np.sqrt((x_res/2)**2 + (y_res/2)**2)
+
+    # Restrict the vignetting coefficient to have a maximum drop of delta_mag magnitudes in the corner of 
+    # the image
+    vignetting_coeff_max = np.arccos((10**(-0.4*delta_mag))**(1/4))/radius
+
+    # Limit the vignetting coefficient
+    if vignetting_coeff > vignetting_coeff_max:
+        vignetting_coeff = vignetting_coeff_max
+
+    return vignetting_coeff
+
+
+
 def correctVignetting(px_sum, radius, vignetting_coeff):
     """ Given a pixel sum, radius from focal plane centre and the vignetting coefficient, correct the pixel
         sum for the vignetting effect.
