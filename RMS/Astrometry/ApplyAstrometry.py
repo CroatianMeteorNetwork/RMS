@@ -74,6 +74,9 @@ def limitVignettingCoefficient(x_res, y_res, vignetting_coeff, delta_mag=2.5):
 
     """
 
+    # Take an absolute value of the vignetting coefficient to make sure it is positive
+    vignetting_coeff = abs(vignetting_coeff)
+
     # Compute the distance from the center to the corner of the image
     radius = np.sqrt((x_res/2)**2 + (y_res/2)**2)
 
