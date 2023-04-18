@@ -17,6 +17,7 @@
 
 #!/bin/bash
 #
+# Version 1.1   - fixed bug introduced during testing
 # Version 1.0	- initial release
 
 
@@ -34,7 +35,7 @@ unset Ans
 mkdir ~/source
 cd ~/source
 sudo apt-get install -y git
-# git clone https://github.com/CroatianMeteorNetwork/RMS.git
+git clone https://github.com/CroatianMeteorNetwork/RMS.git
 source ~/source/RMS/Scripts/MultiCamLinux/RMSInstaller.sh
 ln -s ~/source/RMS/Scripts/MultiCamLinux/icon.png ~/source/cmn_binviewer
 echo -e "\n\n\nDo you wish to configure some stations?\n"

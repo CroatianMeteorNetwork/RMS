@@ -1255,7 +1255,7 @@ class InputTypeImages(object):
         self.fripon_header = None
         self.cabernet_status = False
 
-        img_types = ['.png', '.jpg', '.bmp', '.fit', '.tif']
+        img_types = ['.png', '.jpg', '.bmp', '.fit', '.fits', '.tif']
 
         # Add raw formats if rawpy is installed
         if 'rawpy' in sys.modules:
@@ -1770,6 +1770,18 @@ class InputTypeImages(object):
                 # Indicate that a FRIPON fit file is read
                 self.fripon_mode = True
 
+        # Loads a non-FRIPON FITS image
+        if current_img_file.lower().endswith('.fits'):
+            
+            # Load the data from a fits file
+            with open(os.path.join(self.dir_path, current_img_file), 'rb') as f:
+
+                # Open the image data
+                fits_file = fits.open(f)
+                frame = fits_file[0].data
+
+                # # Flip image vertically
+                # frame = np.flipud(frame)
 
         # Load a normal image
         else:
@@ -1956,9 +1968,9 @@ class InputTypeDFN(InputType):
 
         if 'rawpy' in sys.modules:
             ### Find images in the given folder ###
-            img_types = ['.png', '.jpg', '.bmp', '.tif', '.nef', '.cr2']
+            img_types = ['.png', '.jpg', '.bmp', '.tif', '.fits', '.nef', '.cr2']
         else:
-            img_types = ['.png', '.jpg', '.bmp', '.tif']
+            img_types = ['.png', '.jpg', '.bmp', '.tif', '.fits']
 
         self.beginning_datetime = beginning_time
 
@@ -2142,7 +2154,7 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
     """
 
     ### Find images in the given folder ###
-    img_types = ['.png', '.jpg', '.bmp', '.fit', '.tif']
+    img_types = ['.png', '.jpg', '.bmp', '.fit', '.tif', '.fits']
 
     if 'rawpy' in sys.modules:
         img_types += ['.nef', '.cr2']

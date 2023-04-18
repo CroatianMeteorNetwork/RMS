@@ -32,7 +32,7 @@ from RMS.Formats import FFfile, FRbin
 
 
 def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=None, hide=False,
-        avg_background=False, split=False):
+        avg_background=False, split=False, add_timestamp=False):
     """ Shows the detected fireball stored in the FR file. 
     
     Arguments:
@@ -47,6 +47,8 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
         hide: [bool] Don't show frames on the screen.
         avg_background: [bool] Avepixel as background. False by default, in which case the maxpixel will be
             used.
+        split: [bool] Split the video into multiple videos, one for each line. False by default.
+        add_timestamp: [bool] Add timestamp to the image. False by default.
 
     """
 
@@ -165,6 +167,18 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
                 Y_frame, X_frame = np.meshgrid(y_frame, x_frame)                
 
                 img[Y_img, X_img] = fr.frames[current_line][z][Y_frame, X_frame]
+
+            # Add timestamp
+            if add_timestamp:
+
+                # Put the name of the FR file, followed by the frame number
+                # Put a black shadow
+                cv2.putText(img, fr_path + " frame = {:3d}".format(t), (10, 20), 
+                            fontFace=cv2.FONT_HERSHEY_SIMPLEX , fontScale=0.5, color=[0, 0, 0], 
+                            lineType=cv2.LINE_AA, thickness=2)
+                cv2.putText(img, fr_path + " frame = {:3d}".format(t), (10, 20), 
+                            fontFace=cv2.FONT_HERSHEY_SIMPLEX , fontScale=0.5, color=[255, 255, 255], 
+                            lineType=cv2.LINE_AA, thickness=1)
 
 
             # Save frame to disk
@@ -296,6 +310,8 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-s', '--split', action="store_true", help="Use legacy mode where lines are displayed one-by-one.")
 
+    arg_parser.add_argument("-t", "--timestamp", action="store_true", help="Show timestamp on the image.")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -350,7 +366,8 @@ if __name__ == "__main__":
         
         # View the fireball detection
         retval = view(dir_path, ff_match, fr, config, save_frames=cml_args.extract,
-            extract_format=cml_args.extractformat, hide=cml_args.hide, avg_background=cml_args.avg, split=cml_args.split)
+            extract_format=cml_args.extractformat, hide=cml_args.hide, avg_background=cml_args.avg, 
+            split=cml_args.split, add_timestamp=cml_args.timestamp)
 
         # Return to previous file
         if retval == -1:
