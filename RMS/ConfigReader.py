@@ -883,7 +883,7 @@ def parseCapture(config, parser):
         config.deinterlace_order = parser.getint(section, "deinterlace_order")
 
     if parser.has_option(section, "mask"):
-        config.mask_file = parser.get(section, "mask")
+        config.mask_file = os.path.basename(parser.get(section, "mask"))
 
 
     if parser.has_option(section, "extra_space_gb"):
@@ -1329,7 +1329,7 @@ def parseCalibration(config, parser):
 
 
     if parser.has_option(section, "platepar_name"):
-        config.platepar_name = parser.get(section, "platepar_name")
+        config.platepar_name = os.path.basename(parser.get(section, "platepar_name"))
 
     if parser.has_option(section, "platepars_flux_recalibrated_name"):
         config.platepar_flux_recalibrated_name = parser.get(section, "platepars_flux_recalibrated_name")
