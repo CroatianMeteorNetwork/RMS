@@ -235,6 +235,14 @@ class Config:
         self.elevation = 0
         self.cams_code = 0
 
+
+        # Show this camera on the GMN weblog
+        self.weblog_enable = True
+
+        # The description that will be shown on the weblog (e.g. location, pointing direction)
+        self.weblog_description = ""
+
+
         self.external_script_run = False
         self.auto_reprocess_external_script_run = False
         self.external_script_path = None
@@ -696,6 +704,13 @@ def parseSystem(config, parser):
     if parser.has_option(section, "cams_code"):
         config.cams_code = parser.getint(section, "cams_code")
 
+
+    if parser.has_option(section, "weblog_enable"):
+        config.weblog_enable = parser.getboolean(section, "weblog_enable")
+
+    if parser.has_option(section, "weblog_description"):
+        config.weblog_description = parser.get(section, "weblog_description")
+
     if parser.has_option(section, "external_script_run"):
         config.external_script_run = parser.getboolean(section, "external_script_run")
 
@@ -870,7 +885,7 @@ def parseCapture(config, parser):
         config.deinterlace_order = parser.getint(section, "deinterlace_order")
 
     if parser.has_option(section, "mask"):
-        config.mask_file = parser.get(section, "mask")
+        config.mask_file = os.path.basename(parser.get(section, "mask"))
 
 
     if parser.has_option(section, "extra_space_gb"):
@@ -1316,7 +1331,7 @@ def parseCalibration(config, parser):
 
 
     if parser.has_option(section, "platepar_name"):
-        config.platepar_name = parser.get(section, "platepar_name")
+        config.platepar_name = os.path.basename(parser.get(section, "platepar_name"))
 
     if parser.has_option(section, "platepars_flux_recalibrated_name"):
         config.platepar_flux_recalibrated_name = parser.get(section, "platepars_flux_recalibrated_name")

@@ -1255,7 +1255,7 @@ class InputTypeImages(object):
         self.fripon_header = None
         self.cabernet_status = False
 
-        img_types = ['.png', '.jpg', '.bmp', '.fit', '.tif']
+        img_types = ['.png', '.jpg', '.bmp', '.fit', '.fits', '.tif']
 
         # Add raw formats if rawpy is installed
         if 'rawpy' in sys.modules:
@@ -1352,8 +1352,25 @@ class InputTypeImages(object):
             
 
 
-        # Set the begin time if in the FRIPON mode
+        # If during the frame loading it was deterined that the images are in the FRIPON format
         if self.fripon_mode:
+
+            ### Sort the frames according to the fits header time ###
+            
+            frame_time_list = []
+            for i in range(self.total_frames):
+                self.loadFrame(fr_no=i)
+                frame_time_list.append(self.dt_frame_time)
+
+            # Sort the image list according to the frame time
+            self.img_list = [x for _, x in sorted(zip(frame_time_list, self.img_list))]
+
+            # Load the first frame to get the beginning time
+            self.loadFrame(fr_no=0)
+
+            ### ###
+
+            # Set the begin time if in the FRIPON mode
             beginning_time = self.dt_frame_time
 
             # Load info for CABERNET
@@ -1753,6 +1770,18 @@ class InputTypeImages(object):
                 # Indicate that a FRIPON fit file is read
                 self.fripon_mode = True
 
+        # Loads a non-FRIPON FITS image
+        if current_img_file.lower().endswith('.fits'):
+            
+            # Load the data from a fits file
+            with open(os.path.join(self.dir_path, current_img_file), 'rb') as f:
+
+                # Open the image data
+                fits_file = fits.open(f)
+                frame = fits_file[0].data
+
+                # # Flip image vertically
+                # frame = np.flipud(frame)
 
         # Load a normal image
         else:
@@ -1895,8 +1924,6 @@ class InputTypeImages(object):
                 # Read the frame time from the dictionary
                 dt = self.frame_dt_dict[frame_no]
 
-                print(frame_no, "FRAME TIME:", dt)
-
 
         else:
 
@@ -1941,9 +1968,9 @@ class InputTypeDFN(InputType):
 
         if 'rawpy' in sys.modules:
             ### Find images in the given folder ###
-            img_types = ['.png', '.jpg', '.bmp', '.tif', '.nef', '.cr2']
+            img_types = ['.png', '.jpg', '.bmp', '.tif', '.fits', '.nef', '.cr2']
         else:
-            img_types = ['.png', '.jpg', '.bmp', '.tif']
+            img_types = ['.png', '.jpg', '.bmp', '.tif', '.fits']
 
         self.beginning_datetime = beginning_time
 
@@ -2127,7 +2154,7 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
     """
 
     ### Find images in the given folder ###
-    img_types = ['.png', '.jpg', '.bmp', '.fit', '.tif']
+    img_types = ['.png', '.jpg', '.bmp', '.fit', '.tif', '.fits']
 
     if 'rawpy' in sys.modules:
         img_types += ['.nef', '.cr2']

@@ -29,7 +29,7 @@ def drawConstellations(platepar, ff_file, separation_deg=90, color_bgra=None):
     lines = np.loadtxt(constellations_path, delimiter=",")
     from_ra, from_dec = lines[:, 0], lines[:, 1]
     to_ra, to_dec = lines[:, 2], lines[:, 3]
-    from_x, from_y = raDecToXYPP(np.array(from_ra), from_dec, fftime_jd, platepar)
+    from_x, from_y = raDecToXYPP(np.array(from_ra), np.array(from_dec), fftime_jd, platepar)
     ang_sep = np.rad2deg(angularSeparation(np.deg2rad(platepar.RA_d), np.deg2rad(platepar.dec_d), np.deg2rad(from_ra), np.deg2rad(from_dec)))
     to_x, to_y = raDecToXYPP(np.array(to_ra), to_dec, fftime_jd, platepar)
     for i in range(len(to_x)):
@@ -65,16 +65,13 @@ if __name__ == "__main__":
     platepar.loadFromDict(platepar_dict)
 
     if cml_args.resolution is not None:
-        platepar.X_res = cml_args.resolution
-        platepar.Y_res = cml_args.resolution
+        platepar.X_res = int(cml_args.resolution)
+        platepar.Y_res = int(cml_args.resolution)
         platepar.F_scale *= 0.5
         platepar.refraction = False
         platepar.resetDistortionParameters()
 
     img = drawConstellations(platepar, cml_args.ff_file)
 
-    print(img.shape)
-    print(np.sum(img[:,:,3]))
-    print(np.sum(img[:,:,0]))
     cv2.imwrite(outfilename, img)
     print("Wrote", outfilename)
