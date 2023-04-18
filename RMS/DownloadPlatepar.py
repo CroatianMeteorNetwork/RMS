@@ -72,7 +72,7 @@ def downloadNewPlatepar(config, port=22):
 
 
     # Download the remote platepar
-    sftp.get(remote_platepar, config.platepar_name)
+    sftp.get(remote_platepar, os.path.join(config.config_file_path, config.platepar_name))
 
     log.info('Latest platepar downloaded!')
 

@@ -4009,7 +4009,7 @@ class PlateTool(QtWidgets.QMainWindow):
         print('Platepar written to:', self.platepar_file)
 
     def saveDefaultPlatepar(self):
-        platepar_default_path = os.path.join(os.getcwd(), self.config.platepar_name)
+        platepar_default_path = os.path.join(self.config.config_file_path, self.config.platepar_name)
 
         # Save the platepar file
         self.platepar.write(platepar_default_path, fmt=self.platepar_fmt)

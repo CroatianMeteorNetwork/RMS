@@ -48,7 +48,7 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
     if os.path.exists(os.path.join(dir_path, config.mask_file)):
         mask_path = os.path.join(dir_path, config.mask_file)
 
-    # Try loading the mask from config file directory
+    # Try loading the default mask
     elif os.path.exists(os.path.join(config.config_file_path, config.mask_file)):
         mask_path = os.path.join(config.config_file_path, config.mask_file)
 
