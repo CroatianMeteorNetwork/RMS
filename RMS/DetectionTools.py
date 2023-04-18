@@ -44,11 +44,15 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
     mask_path = None
     mask = None
 
-    # Try loading the mask
+    # Try loading the mask from CaptureFiles directory
     if os.path.exists(os.path.join(dir_path, config.mask_file)):
         mask_path = os.path.join(dir_path, config.mask_file)
 
-    # Try loading the default mask
+    # Try loading the mask from config file directory
+    elif os.path.exists(os.path.join(config.config_file_path, config.mask_file)):
+        mask_path = os.path.join(config.config_file_path, config.mask_file)
+
+    # Try loading the default mask from sources directory
     elif os.path.exists(config.mask_file):
         mask_path = os.path.abspath(config.mask_file)
 
@@ -59,6 +63,8 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
     if mask is not None:
         print('Loaded mask:', mask_path)
         log.info('Loaded mask: {:s}'.format(mask_path))
+    else:
+        log.info('No mask file has been found.')
 
 
 

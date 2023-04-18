@@ -226,6 +226,7 @@ class Config:
 
         # default config file absolute path
         self.config_file_name = os.path.join(self.rms_root_dir, '.config')
+        self.config_file_path = os.path.dirname(self.config_file_name)
 
         ##### System
         self.stationID = "XX0001"
@@ -607,6 +608,7 @@ def parse(path, strict=True):
 
     # Store parsed config file name
     config.config_file_name = path
+    config.config_file_path = os.path.dirname(path)
 
     # Parse an RMS config file
     if os.path.basename(path).endswith('.config'):
@@ -622,7 +624,7 @@ def parse(path, strict=True):
 
     # Disable upload if the default station name is used
     if config.stationID == "XX0001":
-        # print("Disabled upload becuase the default station code is used!")
+        print("Disabled upload because the default station code is used!")
         config.upload_enabled = False
     
 
