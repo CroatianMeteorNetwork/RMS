@@ -377,7 +377,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     # Add the mask
     if (not nodetect):
-        mask_path_default = os.path.join(config.config.config_file_path, config.mask_file)
+        mask_path_default = os.path.join(config.config_file_path, config.mask_file)
         if os.path.exists(mask_path_default):
             mask_path = os.path.abspath(mask_path_default)
             extra_files.append(mask_path)
