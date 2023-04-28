@@ -10,6 +10,7 @@ import traceback
 import argparse
 import logging
 import random
+import shutil
 
 from RMS.ArchiveDetections import archiveDetections, archiveFieldsums
 # from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo
@@ -373,7 +374,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     ### Add extra files to archive
 
     # Add the config file to the archive too
-    extra_files.append(config.config_file_name)
+    config_file_copy = os.path.join(night_data_dir, ".config")
+    shutil.copy2(config.config_file_name, config_file_copy)
+    extra_files.append(config_file_copy)
+
 
     # Add the mask
     if (not nodetect):
