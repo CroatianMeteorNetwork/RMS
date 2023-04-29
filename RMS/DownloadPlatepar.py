@@ -97,7 +97,6 @@ def downloadNewPlatepar(config, port=22):
 
 if __name__ == "__main__":
 
-    import os
     from RMS.Logger import initLogging
 
     # Set up a fake config file
