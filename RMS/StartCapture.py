@@ -216,6 +216,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     print("################################################################")
     print("Thanks to our Patreon supporters in the 'Dinosaur Killer' class:")
     print("- Myron Valenta")
+    print("And thanks to our Patreon supporters in the 'Bolide' class:")
+    print("- David Attreed")
     print("https://www.patreon.com/globalmeteornetwork")
     print("\n\n\n" \
         + "       .:'       .:'        .:'       .:'  \n"\

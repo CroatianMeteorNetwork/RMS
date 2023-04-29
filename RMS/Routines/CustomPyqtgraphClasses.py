@@ -1828,11 +1828,13 @@ class PlateparParameterManager(QtWidgets.QWidget):
 
     def onFitOnlyPointingToggled(self):
         self.gui.fit_only_pointing = self.fit_only_pointing.isChecked()
+        self.updatePairedStars(min_fit_stars=self.gui.getMinFitStars())
         self.sigFitOnlyPointingToggled.emit()
 
     def onFixScaleToggled(self):
         self.gui.fixed_scale = self.fixed_scale.isChecked()
         self.sigFitOnlyPointingToggled.emit()
+        self.updatePairedStars(min_fit_stars=self.gui.getMinFitStars())
 
         if self.gui.fixed_scale:
             self.F_scale.setDisabled(True)
@@ -1967,14 +1969,14 @@ class PlateparParameterManager(QtWidgets.QWidget):
             self.asymmetryCorr.hide()
             self.fdistortion.hide()
 
-    def updatePairedStars(self):
+    def updatePairedStars(self, min_fit_stars=4):
         """
         Updates QPushButtons to be enabled/disabled based on the number of paired stars
         Call whenever paired_stars is changed
         """
         self.astrometry_button.setEnabled(len(self.gui.paired_stars) > 0)
-        self.photometry_button.setEnabled(len(self.gui.paired_stars) > 3)
-        self.fit_astrometry_button.setEnabled(len(self.gui.paired_stars) > 3)
+        self.photometry_button.setEnabled(len(self.gui.paired_stars) >= 2)
+        self.fit_astrometry_button.setEnabled(len(self.gui.paired_stars) >= min_fit_stars)
 
 
 class ArrayTabWidget(QtWidgets.QTabWidget):

@@ -63,7 +63,7 @@ def getPlatepar(config, night_data_dir):
     # Load the default platepar from the RMS if it is available
     platepar = None
     platepar_fmt = None
-    platepar_path = os.path.join(os.getcwd(), config.platepar_name)
+    platepar_path = os.path.join(config.config_file_path, config.platepar_name)
     if os.path.exists(platepar_path):
         platepar = Platepar()
         platepar_fmt = platepar.read(platepar_path, use_flat=config.use_flat)
@@ -264,13 +264,16 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 mask_path = None
                 mask = None
 
-                # Try loading the mask
+                # Get the path to the default mask
+                mask_path_default = os.path.join(config.config_file_path, config.mask_file)
+
+                # Try loading the mask from the night directory
                 if os.path.exists(os.path.join(night_data_dir, config.mask_file)):
                     mask_path = os.path.join(night_data_dir, config.mask_file)
 
-                # Try loading the default mask
-                elif os.path.exists(config.mask_file):
-                    mask_path = os.path.abspath(config.mask_file)
+                # Try loading the default mask if the mask is not in the night directory
+                elif os.path.exists(mask_path_default):
+                    mask_path = os.path.abspath(mask_path_default)
 
                 # Load the mask if given
                 if mask_path:
@@ -374,8 +377,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     # Add the mask
     if (not nodetect):
-        if os.path.exists(config.mask_file):
-            mask_path = os.path.abspath(config.mask_file)
+        mask_path_default = os.path.join(config.config_file_path, config.mask_file)
+        if os.path.exists(mask_path_default):
+            mask_path = os.path.abspath(mask_path_default)
             extra_files.append(mask_path)
 
 

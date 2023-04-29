@@ -195,8 +195,9 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
         # Load the mask for stack
         mask = None
-        if os.path.exists(config.mask_file) and config.stack_mask:
-            mask_path = os.path.abspath(config.mask_file)
+        mask_path_default = os.path.join(config.config_file_path, config.mask_file)
+        if os.path.exists(mask_path_default) and config.stack_mask:
+            mask_path = os.path.abspath(mask_path_default)
             mask = MaskImage.loadMask(mask_path)
 
 
