@@ -4,6 +4,7 @@ from __future__ import print_function, division, absolute_import
 
 import datetime
 import logging
+import os
 from os.path import exists as file_exists
 
 import paramiko
@@ -96,7 +97,6 @@ def downloadNewPlatepar(config, port=22):
 
 if __name__ == "__main__":
 
-    import os
     from RMS.Logger import initLogging
 
     # Set up a fake config file
