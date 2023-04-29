@@ -226,6 +226,7 @@ class Config:
 
         # default config file absolute path
         self.config_file_name = os.path.join(self.rms_root_dir, '.config')
+        self.config_file_path = os.path.dirname(self.config_file_name)
 
         ##### System
         self.stationID = "XX0001"
@@ -233,6 +234,14 @@ class Config:
         self.longitude = 0
         self.elevation = 0
         self.cams_code = 0
+
+
+        # Show this camera on the GMN weblog
+        self.weblog_enable = True
+
+        # The description that will be shown on the weblog (e.g. location, pointing direction)
+        self.weblog_description = ""
+
 
         self.external_script_run = False
         self.auto_reprocess_external_script_run = False
@@ -599,6 +608,7 @@ def parse(path, strict=True):
 
     # Store parsed config file name
     config.config_file_name = path
+    config.config_file_path = os.path.dirname(path)
 
     # Parse an RMS config file
     if os.path.basename(path).endswith('.config'):
@@ -614,7 +624,7 @@ def parse(path, strict=True):
 
     # Disable upload if the default station name is used
     if config.stationID == "XX0001":
-        print("Disabled upload becuase the default station code is used!")
+        print("Disabled upload because the default station code is used!")
         config.upload_enabled = False
     
 
@@ -693,6 +703,13 @@ def parseSystem(config, parser):
 
     if parser.has_option(section, "cams_code"):
         config.cams_code = parser.getint(section, "cams_code")
+
+
+    if parser.has_option(section, "weblog_enable"):
+        config.weblog_enable = parser.getboolean(section, "weblog_enable")
+
+    if parser.has_option(section, "weblog_description"):
+        config.weblog_description = parser.get(section, "weblog_description")
 
     if parser.has_option(section, "external_script_run"):
         config.external_script_run = parser.getboolean(section, "external_script_run")
@@ -868,7 +885,7 @@ def parseCapture(config, parser):
         config.deinterlace_order = parser.getint(section, "deinterlace_order")
 
     if parser.has_option(section, "mask"):
-        config.mask_file = parser.get(section, "mask")
+        config.mask_file = os.path.basename(parser.get(section, "mask"))
 
 
     if parser.has_option(section, "extra_space_gb"):
@@ -1314,7 +1331,7 @@ def parseCalibration(config, parser):
 
 
     if parser.has_option(section, "platepar_name"):
-        config.platepar_name = parser.get(section, "platepar_name")
+        config.platepar_name = os.path.basename(parser.get(section, "platepar_name"))
 
     if parser.has_option(section, "platepars_flux_recalibrated_name"):
         config.platepar_flux_recalibrated_name = parser.get(section, "platepars_flux_recalibrated_name")

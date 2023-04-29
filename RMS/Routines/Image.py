@@ -833,8 +833,8 @@ if __name__ == "__main__":
 
     ff = FFfile.read(dir_path, file_name)
 
-    # Load the flat
-    flat_struct = loadFlat(os.getcwd(), config.flat_file)
+    # Load the default flat
+    flat_struct = loadFlat(config.config_file_path, config.flat_file)
 
 
     t1 = time.clock()

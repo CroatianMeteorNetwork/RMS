@@ -4,6 +4,7 @@ from __future__ import print_function, division, absolute_import
 
 import datetime
 import logging
+from os.path import exists as file_exists
 
 import paramiko
 
@@ -21,6 +22,10 @@ def downloadNewPlatepar(config, port=22):
     """ Connect to the central server and download a new platepar calibration file, if available. """
 
     log.info('Checking for new platepar on the server...')
+    if file_exists(config.rsa_private_key) is False:
+        log.debug("Can't contact the server: RSA private key file not found.")
+        return False
+
     log.debug('Establishing SSH connection to: ' + config.hostname + ':' + str(port) + '...')
 
     try:
@@ -67,7 +72,7 @@ def downloadNewPlatepar(config, port=22):
 
 
     # Download the remote platepar
-    sftp.get(remote_platepar, config.platepar_name)
+    sftp.get(remote_platepar, os.path.join(config.config_file_path, config.platepar_name))
 
     log.info('Latest platepar downloaded!')
 

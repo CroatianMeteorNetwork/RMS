@@ -140,12 +140,13 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
 
     # Try loading the mask
     mask_path = None
+    mask_path_default = os.path.join(config.config_file_path, config.mask_file)
     if os.path.exists(os.path.join(dir_paths[0], config.mask_file)):
         mask_path = os.path.join(dir_paths[0], config.mask_file)
 
     # Try loading the default mask
-    elif os.path.exists(config.mask_file):
-        mask_path = os.path.abspath(config.mask_file)
+    elif os.path.exists(mask_path_default):
+        mask_path = os.path.abspath(mask_path_default)
 
     # Load the mask if given
     mask = None

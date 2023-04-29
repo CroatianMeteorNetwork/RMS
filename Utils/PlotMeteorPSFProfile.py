@@ -1,6 +1,7 @@
 """ Plot the meteor PSF profile from the detection and FF file. """
 
 import os
+from functools import partial
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -25,12 +26,9 @@ def mapCoordinatesToRotatedImage(img, x, y, rot):
 
 
 
-def gauss1D(params, A, mu, sigma, bg, saturation=255):
+def gauss1D(x, A, mu, sigma, bg, saturation=255, force_sigma=-1):
 
-
-    x, force_sigma = params
-
-    if force_sigma:
+    if force_sigma > 0:
         sigma = force_sigma
         
     # Compute values of a gaussian
@@ -60,6 +58,18 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('ftpdetectinfo', metavar='FTP_FILE', type=str, nargs=1, \
                     help='FTPdetectinfo file with meteor detections.')
+    
+    arg_parser.add_argument('-s', '--sigma', metavar='SIGMA', type=float, default=-1, \
+                    help='Force sigma for fitting the Gaussian PSF (disable with -1). You can take this from the FWHM estiamted in the CALSTARS file. Sigma = FWHM/1.55.')
+    
+    arg_parser.add_argument("--strip_width", metavar="STRIP_WIDTH", type=int, default=10, \
+                            help="Width of the strip around the meteor. Default: 10")
+    
+    arg_parser.add_argument("--n_profiles", metavar="N_PROFILES", type=int, default=20, \
+                            help="Number of meteor profiles to plot. Default: 20")
+    
+    arg_parser.add_argument("--vert_step_off", metavar="VERT_STEP_OFF", type=int, default=70, \
+                            help="Difference in Y coordinates between every profile. Default: 70")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -67,16 +77,19 @@ if __name__ == "__main__":
     #########################
 
     # Width of the strip around the meteor
-    strip_width = 10
+    strip_width = cml_args.strip_width
 
     # Number of meteor profiles to plot
-    n_profiles = 20
+    n_profiles = cml_args.n_profiles
 
     # Difference in Y coordinates between every profile
-    vertical_step_offset = 70
+    vertical_step_offset = cml_args.vert_step_off
 
     # Force sigma for fitting the Gaussian PSF (disable with -1)
-    force_sigma = 1.3
+    force_sigma = cml_args.sigma
+
+    # Modify the gauss1D function to include the forced sigma
+    gauss1D_mod = partial(gauss1D, force_sigma=force_sigma)
 
 
     dir_path, ff_name = os.path.split(cml_args.ff_file[0])
@@ -147,6 +160,8 @@ if __name__ == "__main__":
                 step = 1
                 n_profiles = img_crop.shape[0]
 
+
+            print('N profiles:', n_profiles)
             print('Step:', step)
             print('Rot angle:', rot_angle)
 
@@ -158,24 +173,42 @@ if __name__ == "__main__":
             count = 0
             sigma_list = []
             max_row = 0
+            
+            print()
+            print("Gaussian fit parameters:")
             for i, row in enumerate(np.flipud(img_crop)):
 
                 if i%step == 0:
 
-
-                    x_arr = np.linspace(0, len(row) - 1, len(row))
+                    x_arr = np.linspace(0, len(row) - 1, len(row), dtype=np.float64)
 
                     # Fit a Gaussian to the meteor profile
                     p0 = [255., len(row)/2., 1.0, np.min(row)]
+                    p0 = np.array(p0).astype(np.float64)
 
+                    # Define the bounds
+                    bounds = (
+                        #     A,       mu, sigma,  bg
+                        [0,             0,   0.8,   0], # min
+                        [np.inf, len(row),   5.0, 255] # max
+                        )
 
+                    # Run the fit
                     try:
-                        popt, _ = scipy.optimize.curve_fit(gauss1D, (x_arr, force_sigma), row, p0=p0)
-                    except:
-                        # If the profile can't be fitted, skip it
+                        popt, _ = scipy.optimize.curve_fit(gauss1D_mod, x_arr, row.astype(np.float64), p0=p0, 
+                                                       bounds=bounds, maxfev=5000)
+                    except RuntimeError:
+                        print("Row = {:4d} - unable to fit".format(i))
                         count += 1
                         continue
 
+                    # Extract the fit parametrs
+                    A, mu, sigma, bg = popt
+                    if force_sigma > 0:
+                        sigma = force_sigma
+                    popt = [A, mu, sigma, bg]
+
+                    print("Row = {:4d}, A = {:4d}, mu = {:6.2f}, sigma = {:5.2f}, bg = {:6.2f}".format(i, int(A), mu, sigma, bg))
                     
                     sigma_list.append(popt[2])
 
@@ -199,7 +232,7 @@ if __name__ == "__main__":
 
                     # Plot the fitted Gaussian
                     x_arr_plot = np.linspace(0, len(row) - 1, 10*len(row))
-                    ax2.plot(x_arr_plot, gauss1D((x_arr_plot, force_sigma), *popt, saturation=-1) + offset - np.min(row), \
+                    ax2.plot(x_arr_plot, gauss1D_mod(x_arr_plot, *popt, saturation=-1) + offset - np.min(row), \
                         color=color_list[count], linestyle='dotted', zorder=n_profiles-count)
 
                     count += 1
