@@ -19,9 +19,34 @@ from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
 from RMS.Misc import mkdirP
 
-fps=10
 
-def generateTimelapse(dir_path, nodel) :   
+
+def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None):
+    """ Generate an High Quality MP4 movie from FF files. 
+    
+    Arguments:
+        dir_path: [str] Path to the directory containing the FF files.
+
+    Keyword arguments:
+        keep_images: [bool] Keep the temporary images. False by default.
+        fps: [int] Frames per second. 30 by default.
+        output_file: [str] Output file name. If None, the file name will be the same as the directory name.
+    """
+
+    # Set the default FPS if not given
+    if fps is None:
+        fps = 30
+
+
+    # Make the name of the output file if not given
+    if output_file is None:
+        mp4_path = os.path.join(dir_path, os.path.basename(dir_path) + ".mp4")
+
+    else:
+        mp4_path = os.path.join(dir_path, os.path.basename(output_file))
+
+
+
 
     t1 = datetime.datetime.utcnow()
 
@@ -43,6 +68,7 @@ def generateTimelapse(dir_path, nodel) :
     
     print("Preparing files for the timelapse...")
     c = 0
+
 
     ff_list = [ff_name for ff_name in sorted(os.listdir(dir_path)) if validFFName(ff_name)]
 
@@ -105,7 +131,6 @@ def generateTimelapse(dir_path, nodel) :
             nostdin =  " -nostdin "
         
         # Construct the command for avconv            
-        mp4_path = os.path.join(dir_path, os.path.basename(dir_path) + ".mp4")
         temp_img_path = os.path.basename(dir_tmp_path) + os.sep + "temp_%04d.jpg"
         com = "cd " + dir_path + ";" \
             + software_name + nostdin + " -v quiet -r "+ str(fps) +" -y -i " + temp_img_path \
@@ -124,10 +149,11 @@ def generateTimelapse(dir_path, nodel) :
         root = os.path.dirname(__file__)
         ffmpeg_path = os.path.join(root, "ffmpeg.exe")
 	
-        # Construct the ecommand for ffmpeg           
-        mp4_path = os.path.basename(dir_path) + ".mp4"
+        # Construct the ecommand for ffmpeg
         temp_img_path = os.path.join(os.path.basename(dir_tmp_path), "temp_%04d.jpg")
-        com = ffmpeg_path + " -v quiet -r " + str(fps) + " -i " + temp_img_path + " -c:v libx264 -pix_fmt yuv420p -an -crf 25 -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" -movflags faststart -y " + mp4_path
+        com = ffmpeg_path + " -v quiet -r " + str(fps) + " -i " + temp_img_path \
+            + " -c:v libx264 -pix_fmt yuv420p -an -crf 25 -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" -movflags faststart -y " \
+            + mp4_path
 		
         print("Creating timelapse using ffmpeg...")
         print(com)
@@ -137,7 +163,7 @@ def generateTimelapse(dir_path, nodel) :
         print ("generateTimelapse only works on Linux or Windows the video could not be encoded")
 
     #Delete temporary directory and files inside
-    if os.path.exists(dir_tmp_path) and not nodel:
+    if os.path.exists(dir_tmp_path) and not keep_images:
         shutil.rmtree(dir_tmp_path)
         print("Deleted temporary directory : " + dir_tmp_path)
 		
@@ -159,17 +185,17 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-x', '--nodel', action="store_true", \
         help="""Do not delete generated JPG file.""")
+    
+    arg_parser.add_argument('-o', '--output', metavar='OUTPUT', type=str, \
+        help='Output video file name.')
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
     #########################
+
+
     dir_path = os.path.normpath(cml_args.dir_path)
-    if platform.system() == 'Linux':
-        fps=30
-    else:
-        fps=10
-    if cml_args.fps is not None:
-        fps=cml_args.fps
-    #print('fps is', fps)
-    generateTimelapse(dir_path, cml_args.nodel)
+
+    # Generate the timelapse
+    generateTimelapse(dir_path, keep_images=cml_args.nodel, fps=cml_args.fps, output_file=cml_args.output)
