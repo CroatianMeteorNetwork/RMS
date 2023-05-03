@@ -384,8 +384,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             # Generate the timelapse
             generateTimelapse(night_data_dir, output_file=timelapse_file_name)
 
+            timelapse_path = os.path.join(night_data_dir, timelapse_file_name)
+
             # Add the timelapse to the extra files
-            extra_files.append(timelapse_file_name)
+            extra_files.append(timelapse_path)
 
         except Exception as e:
             log.debug('Generating a timelapse failed with message:\n' + repr(e))
