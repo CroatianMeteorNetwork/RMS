@@ -505,6 +505,10 @@ class Config:
         self.stack_mask = False
 
 
+        ##### Timelapse
+        self.timelapse_generate_captured = True
+
+
         #### Shower association
 
         # Path to the shower file
@@ -644,6 +648,7 @@ def parseConfigFile(config, parser):
     parseCalibration(config, parser)
     parseThumbnails(config, parser)
     parseStack(config, parser)
+    parseTimelapse(config, parser)
     parseColors(config, parser)
 
 
@@ -1394,6 +1399,16 @@ def parseStack(config, parser):
             config.stack_mask = parser.getboolean(section, "stack_mask")
     except ValueError:
         config.stack_mask = False
+
+
+def parseTimelapse(config, parser):
+    section = "Timelapse"
+
+    if not parser.has_section(section):
+        return
+    
+    if parser.has_option(section, "timelapse_generate_captured"):
+        config.timelapse_generate_captured = parser.getboolean(section, "timelapse_generate_captured")
 
 
 def parseColors(config, parser):

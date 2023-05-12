@@ -23,17 +23,18 @@ from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats import CALSTARS
+from RMS.MLFilter import filterFTPdetectinfoML
 from RMS.UploadManager import UploadManager
 from RMS.Routines.Image import saveImage
 from RMS.Routines.MaskImage import loadMask
 from Utils.CalibrationReport import generateCalibrationReport
 from Utils.Flux import prepareFluxFiles
 from Utils.FOVKML import fovKML
+from Utils.GenerateTimelapse import generateTimelapse
 from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 from Utils.ShowerAssociation import showerAssociation
-from RMS.MLFilter import filterFTPdetectinfoML
 
 
 # Get the logger from the main module
@@ -368,6 +369,30 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     else:
         log.info('Making flat image FAILED!')
+
+
+
+    # Generate a timelapse
+    if config.timelapse_generate_captured:
+        
+        log.info('Generating a timelapse...')
+        try:
+
+            # Make the name of the timelapse file
+            timelapse_file_name = night_data_dir_name.replace("_detected", "") + "_timelapse.mp4"
+
+            # Generate the timelapse
+            generateTimelapse(night_data_dir, output_file=timelapse_file_name)
+
+            timelapse_path = os.path.join(night_data_dir, timelapse_file_name)
+
+            # Add the timelapse to the extra files
+            extra_files.append(timelapse_path)
+
+        except Exception as e:
+            log.debug('Generating a timelapse failed with message:\n' + repr(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
 
 
     ### Add extra files to archive

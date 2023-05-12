@@ -252,9 +252,9 @@ VAR_2="1"
 
 if [ $VAR_1 = $VAR_2 ]; then	
 	
-	echo "GENERATE TIMELAPSE VIDEO..."
-	generate_timelapse
-	echo ""
+	# echo "GENERATE TIMELAPSE VIDEO..."
+	# generate_timelapse
+	# echo ""
 	
 	echo "UPLOAD INFO..."
 	upload_info

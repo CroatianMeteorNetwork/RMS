@@ -7,7 +7,7 @@ from RMS.Routines.FOVArea import fovArea
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, ECEF2AltAz
 
 
-def plotFOVSkyMap(platepars, out_dir, masks=None):
+def plotFOVSkyMap(platepars, out_dir, north_up=False,  masks=None):
     """ Plot all given platepar files on an Alt/Az sky map. 
     
 
@@ -25,6 +25,9 @@ def plotFOVSkyMap(platepars, out_dir, masks=None):
 
     # Init an alt/az polar plot
     fig, ax = plt.subplots(subplot_kw={'projection': 'polar'}, figsize=(8, 8))
+    if north_up:
+        ax.set_theta_zero_location("N")
+        ax.set_theta_direction(-1)
 
     # Set up elevation limits
     ax.set_rlim(bottom=90, top=0)
@@ -121,6 +124,11 @@ if __name__ == "__main__":
     arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
                     help="Path to the directory with platepar files. All platepar files will be found recursively.")
 
+    arg_parser.add_argument('-n', '--northup', dest='north_up', default=False, action="store_true", \
+                    help="Plot the chart with north up, azimuth increasing clockwise.")
+
+
+
     ###
 
     # Parse the command line arguments
@@ -167,7 +175,7 @@ if __name__ == "__main__":
 
 
     # Plot all plateaprs on an alt/az sky map
-    plotFOVSkyMap(platepars, cml_args.dir_path, masks=masks)
+    plotFOVSkyMap(platepars, cml_args.dir_path, cml_args.north_up, masks=masks)
 
             
 
