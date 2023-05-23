@@ -49,7 +49,7 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
         sys.path.insert(0, external_script_dir)
 
         # Import the function from the external script
-        module = importlib.import_module(external_script_file.strip('.py').strip('.PY'))
+        module = importlib.import_module(external_script_file.replace('.py', '').replace('.PY', ''))
         externalFunction = getattr(module, config.external_function_name)
 
         log.info('Starting function "{}" from external script "{}"'.format(externalFunction, module))
