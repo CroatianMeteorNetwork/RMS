@@ -1888,7 +1888,10 @@ class PlateTool(QtWidgets.QMainWindow):
                                                    gridspec_kw={'height_ratios': [2, 1]})
 
                 # Set photometry window title
-                fig_p.canvas.set_window_title('Photometry')
+                try:
+                    fig_p.canvas.set_window_title('Photometry')
+                except AttributeError:
+                    print("Warning: Could not set window title for photometry plot.")
 
                 # Plot catalog magnitude vs. raw logsum of pixel intensities
                 lsp_arr = np.log10(np.array(px_intens_list))
