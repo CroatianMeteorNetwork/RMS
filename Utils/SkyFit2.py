@@ -1890,7 +1890,11 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Set photometry window title
                 try:
                     fig_p.canvas.set_window_title('Photometry')
+
                 except AttributeError:
+                    fig_p.canvas.manager.window.setWindowTitle('Photometry')
+                
+                except:
                     print("Warning: Could not set window title for photometry plot.")
 
                 # Plot catalog magnitude vs. raw logsum of pixel intensities
@@ -4812,6 +4816,11 @@ class PlateTool(QtWidgets.QMainWindow):
             fig_a.canvas.set_window_title("Astrometry fit")
 
         except AttributeError:
+
+            fig_a.canvas.manager.window.setWindowTitle("Astrometry fit")
+
+        except:
+
             # Handle FigureCanvasQTAgg error on some versions of Qt
             print("Failed to set the window title!")
 
