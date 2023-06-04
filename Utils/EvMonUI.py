@@ -161,7 +161,7 @@ def search(event_time,timetolerance):
     print("Following candidate trajectories were identified")
     trajectorycounter = 1
     for traj in candidatetrajectories:
-        print(traj)
+
 
         print("Trajectory {}".format(trajectorycounter))
         print("Date {}, Stations".format(traj[2]), traj[85].strip())
