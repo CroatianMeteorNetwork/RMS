@@ -598,7 +598,7 @@ class EventMonitor(multiprocessing.Process):
                 if "END" in line:
                     events.append(copy.copy(event))  # copy, because these are references, not objects
                     event = EventContainer(0, 0, 0, 0)  # Initialise it empty
-        log.info("Read {} events from {}".format(len(events), self.syscon.event_monitor_webpage))
+        #log.info("Read {} events from {}".format(len(events), self.syscon.event_monitor_webpage))
         return events
 
     def getUnprocessedEventsfromDB(self):
@@ -1106,9 +1106,9 @@ class EventMonitor(multiprocessing.Process):
         time.sleep(10)
         while not self.exit.is_set():
 
-            log.info("EventMonitor webpage check starting")
+            #log.info("EventMonitor webpage check starting")
             self.geteventsandcheck()
-            log.info("EventMonitor webpage check completed")
+            #log.info("EventMonitor webpage check completed")
             # Wait for the next check
             self.exit.wait(60 * self.config.event_monitor_check_interval)
 
