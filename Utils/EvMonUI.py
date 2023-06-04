@@ -157,7 +157,6 @@ def addeventtoFTP(eventinstruction):
 def search(event_time,timetolerance):
 
     candidatetrajectories = gettrajectoriesfromgmn(event_time, timetolerance)
-    print("Candidate Trajectories {}".format(candidatetrajectories))
     print("Following candidate trajectories were identified")
     trajectorycounter = 1
     for traj in candidatetrajectories:
