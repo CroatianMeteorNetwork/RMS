@@ -479,7 +479,7 @@ class EventMonitor(multiprocessing.Process):
             log.info("Added event at {} to the database".format(event.dt))
             return True
         else:
-            log.info("Event at {} already in the database".format(event.dt))
+            #log.info("Event at {} already in the database".format(event.dt))
             return False
 
     def markeventasprocessed(self, event):
@@ -1106,9 +1106,9 @@ class EventMonitor(multiprocessing.Process):
         time.sleep(10)
         while not self.exit.is_set():
 
-            log.info("EventMonitor period check starting")
+            log.info("EventMonitor webpage check starting")
             self.geteventsandcheck()
-            log.info("EventMonitor period check completed")
+            log.info("EventMonitor webpage check completed")
             # Wait for the next check
             self.exit.wait(60 * self.config.event_monitor_check_interval)
 
