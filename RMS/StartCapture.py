@@ -1088,4 +1088,3 @@ if __name__ == "__main__":
              log.debug('Closing eventmonitor...')
              eventmonitor.stop()
              del upload_manager
-

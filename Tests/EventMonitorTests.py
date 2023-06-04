@@ -707,7 +707,3 @@ if __name__ == "__main__":
 
 
     functiontest(config,em)
-
-
-
-
