@@ -476,7 +476,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             if eventmonitor is not None:
 
-                # Stop the upload manager
+                # Stop the eventmonitor manager
                 if eventmonitor.is_alive():
                     log.debug('Closing eventmonitor...')
                     eventmonitor.stop()
@@ -753,8 +753,6 @@ if __name__ == "__main__":
             upload_manager.start()
 
 
-
-
         log.info("Running for " + str(duration/60/60) + ' hours...')
 
         # Run the capture for the given number of hours
@@ -1002,7 +1000,7 @@ if __name__ == "__main__":
 
                     if eventmonitor is not None:
 
-                        # Stop the event monitor
+                        # Stop the eventmonitor
                         if eventmonitor.is_alive():
                              log.debug('Closing eventmonitor...')
                              eventmonitor.stop()
@@ -1010,6 +1008,7 @@ if __name__ == "__main__":
 
                         # Stop the slideshow if it was on
                         if slideshow_view is not None:
+
                             log.info("Stopping slideshow...")
                             slideshow_view.stop()
                             slideshow_view.join()
