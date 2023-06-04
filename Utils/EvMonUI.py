@@ -114,7 +114,7 @@ def gettrajectoriesfromgmn(etime,tolerance):
         if 0 > (((linetime - dt).total_seconds())/3600/24) > -2   :
 
             filetodownload = line.split(" ")[0]
-            print("Downloading {}".format(filetodownload))
+
             trajectories = urllib.request.urlopen(os.path.join("https://globalmeteornetwork.org/data/traj_summary_data/daily/",filetodownload)).read().decode("utf-8").splitlines()
             for trajectory in trajectories:
 
@@ -125,7 +125,6 @@ def gettrajectoriesfromgmn(etime,tolerance):
                     trajectorytime = parser.parse(trajectorysplit[2])
 
                     if abs((trajectorytime-dt).total_seconds()) < int(tolerance):
-                        print(trajectory)
                         candidatetrajectories.append(trajectorysplit)
     return candidatetrajectories
 
