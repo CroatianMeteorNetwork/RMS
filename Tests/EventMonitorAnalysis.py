@@ -56,7 +56,7 @@ def analysetestresults(config):
     with open(os.path.expanduser(os.path.join(config.data_dir, "testlog")), 'rt') as logfile:
         readingheader=True
         body = header = ""
-        for line in logfile:
+        for line in tqdm(logfile):
 
 
             # Populate used not predicted
