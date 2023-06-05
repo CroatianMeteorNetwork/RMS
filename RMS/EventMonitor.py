@@ -59,8 +59,8 @@ class EventContainer(object):
         self.dt,self.timetolerance = dt, 0
 
         self.lat, self.latstd, self.lon, self.lonstd, self.ht, self.htstd = lat, 0, lon, 0, ht,0
-        self.closeradius, self.farradius = 0,0
         self.lat2, self.lat2std, self.lon2, self.lon2std, self.ht2, self.ht2std = 0,0,0,0,0,0
+        self.closeradius, self.farradius = 0,0
 
         # Or trajectory information from the first point
         self.azim, self.azimstd, self.elev, self.elevstd, self.elevismax = 0,0,0,0,False
@@ -92,7 +92,7 @@ class EventContainer(object):
         Return:
             Nothing
         """
-
+        # Extract the variable name, truncate before any '(' used for units
         variable_name = variable_name.strip().split('(')[0].strip()
 
         if value == "":
@@ -265,6 +265,7 @@ class EventMonitor(multiprocessing.Process):
         # Load the event monitor database. Any problems, delete and recreate.
         self.db_conn = self.getconnectiontoEventMonitorDB()
         self.exit = multiprocessing.Event()
+        self.event_monitor_db_name = "event_monitor.db"
 
         # todo: remove this before rolling out
         try:
@@ -273,15 +274,19 @@ class EventMonitor(multiprocessing.Process):
             self.syscon.event_monitor_webpage = self.syscon.event_monitor_webpage.replace("https://globalmeteornetwork.org",
                                                                                   "http://58.84.202.15:8244")
 
-        log.info("Started EventMonitor, monitoring {} at {} minute intervals.".format(self.syscon.event_monitor_webpage,
-                                                                                      self.syscon.event_monitor_check_interval))
+        log.info("Started EventMonitor")
+        log.info("Database {}".format(self.syscon.event_monitor_db_name))
+        log.info("Monitoring {} at {} minute intervals".format(self.syscon.event_monitor_webpage,self.syscon.event_monitor_check_interval))
+        log.info("Local db path name {}".format(self.syscon.event_monitor_db_name))
+        log.info("Reporting data to {}{}".format(self.syscon.event_monitor_remote_server, self.syscon.event_monitor_remote_dir))
+
 
     def createEventMonitorDB(self, testmode = False):
         """ Creates the event monitor database. """
 
         # Create the event monitor database
         if testmode:
-            self.event_monitor_db_path = os.path.expanduser(os.path.join(self.syscon.data_dir, "event_monitor.db"))
+            self.event_monitor_db_path = os.path.expanduser(os.path.join(self.syscon.data_dir, self.event_monitor_db_name))
             if os.path.exists(self.event_monitor_db_path):
                 os.unlink(self.event_monitor_db_path)
 
@@ -322,6 +327,7 @@ class EventMonitor(multiprocessing.Process):
                             EventElevStd REAL NOT NULL,
                             EventElevIsMax BOOL,
                             filesuploaded TEXT,
+                            timeadded TEXT,
                             timecompleted TEXT,
                             observedstatus BOOL,
                             processedstatus BOOL,
@@ -336,7 +342,7 @@ class EventMonitor(multiprocessing.Process):
         # Close the connection
         self.db_conn = conn
 
-    def db_delete(self):
+    def delEventMonitorDB(self):
 
         """ Delete the event monitor database.
 
@@ -381,6 +387,12 @@ class EventMonitor(multiprocessing.Process):
         except:
             return False
 
+    def deleteDBoldrecords(self):
+
+        SQLCommand = ""
+        SQLCommand += "DELETE FROM event_monitor \n "
+        SQLCommand += "WHERE \n "
+        SQLCommand += "timecompleted "
     def getconnectiontoEventMonitorDB(self):
         """ Loads the event monitor database
 
@@ -429,9 +441,43 @@ class EventMonitor(multiprocessing.Process):
         SQLStatement += "RespondTo = '{}'                  \n".format(event.respondto)
 
         # does a similar event exist
+        # query gets the number of rows matching, not the actual rows
 
-        return (self.db_conn.cursor().execute(SQLStatement).fetchone())[0] != 0
+        try:
+         return (self.db_conn.cursor().execute(SQLStatement).fetchone())[0] != 0
+        except:
+         log.info("Check for event exists failed")
+         return False
 
+
+    def deleteoldrecords(self):
+
+        """
+
+        Remove old record from the database, notional time of 14 days selected.
+        The deletion is made on the criteria of when the record was added to the database, not the event date
+        If the event is is still listed on the website, then it will be added, and uploaded.
+
+        """
+
+
+
+        SQLStatement = ""
+        SQLStatement += "DELETE from event_monitor \n"
+        SQLStatement += "WHERE                     \n"
+        SQLStatement += "timeadded < date('now', '-14 day')"
+
+
+
+        try:
+            cursor = self.db_conn.cursor()
+            cursor.execute(SQLStatement)
+            self.db_conn.commit()
+
+        except:
+            log.info("Database purge failed")
+
+        return None
 
     def addevent(self, event):
 
@@ -447,6 +493,8 @@ class EventMonitor(multiprocessing.Process):
 
             """
 
+        self.deleteoldrecords()
+
         if not self.eventexists(event):
             SQLStatement = ""
             SQLStatement += "INSERT INTO event_monitor \n"
@@ -456,7 +504,7 @@ class EventMonitor(multiprocessing.Process):
             SQLStatement += "CloseRadius, FarRadius,                     \n"
             SQLStatement += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std,      \n"
             SQLStatement += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax,    \n"
-            SQLStatement += "processedstatus, uuid, RespondTo            \n"
+            SQLStatement += "processedstatus, uuid, RespondTo, timeadded \n"
             SQLStatement += ")                                           \n"
 
             SQLStatement += "VALUES "
@@ -470,12 +518,17 @@ class EventMonitor(multiprocessing.Process):
             SQLStatement += "{},  {}, {}, {}, {} ,        \n".format(event.azim, event.azimstd, event.elev,
                                                                      event.elevstd,
                                                                      event.elevismax)
-            SQLStatement += "{}, '{}', '{}'               \n".format(0, uuid.uuid4(), event.respondto)
-            SQLStatement += ") \n"
+            SQLStatement += "{}, '{}', '{}',              \n".format(0, uuid.uuid4(), event.respondto)
+            SQLStatement += "CURRENT_TIMESTAMP ) \n"
 
-            cursor = self.db_conn.cursor()
-            cursor.execute(SQLStatement)
-            self.db_conn.commit()
+            try:
+                cursor = self.db_conn.cursor()
+                cursor.execute(SQLStatement)
+                self.db_conn.commit()
+
+            except:
+                log.info("Add event failed")
+
             log.info("Added event at {} to the database".format(event.dt))
             return True
         else:
@@ -493,13 +546,13 @@ class EventMonitor(multiprocessing.Process):
         """
 
         SQLStatement = ""
-        SQLStatement += "UPDATE event_monitor    \n"
-        SQLStatement += "SET                     \n"
-        SQLStatement += "processedstatus = 1,    \n"
-        SQLStatement += "timecompleted   = '{}'  \n".format(datetime.now())
-        SQLStatement += "                        \n"
-        SQLStatement += "WHERE                   \n"
-        SQLStatement += "uuid = '{}'             \n".format(event.uuid)
+        SQLStatement += "UPDATE event_monitor                 \n"
+        SQLStatement += "SET                                  \n"
+        SQLStatement += "processedstatus = 1,                 \n"
+        SQLStatement += "timecompleted   = CURRENT_TIMESTAMP  \n".format(datetime.now())
+        SQLStatement += "                                     \n"
+        SQLStatement += "WHERE                                \n"
+        SQLStatement += "uuid = '{}'                          \n".format(event.uuid)
         self.db_conn.cursor().execute(SQLStatement)
         self.db_conn.commit()
         log.info("Event at {} marked as processed".format(event.dt))
@@ -1103,7 +1156,7 @@ class EventMonitor(multiprocessing.Process):
 
 
         # Delay to get everything else done first
-        time.sleep(10)
+        time.sleep(20)
         while not self.exit.is_set():
 
             #log.info("EventMonitor webpage check starting")
@@ -1213,15 +1266,6 @@ if __name__ == "__main__":
                                                                               "http://58.84.202.15:8244")
 
     # Name of the event monitor data base (sqlite3)
-    syscon.event_monitor_db_name = os.path.expanduser("~/RMS_data/event_monitor.db")
-
-    # Minutes to wait between website checks
-    syscon.event_monitor_check_interval = 5
-
-    # Name of the directory on the server where the event files will be uploaded
-    syscon.event_monitor_remote_dir = "event_monitor"
-
-
     em = EventMonitor(syscon)
 
 

@@ -234,7 +234,7 @@ class Config:
         self.longitude = 0
         self.elevation = 0
         self.cams_code = 0
-        self.event_monitor_db_name = "event_monitor.db"
+
 
 
         # Show this camera on the GMN weblog
@@ -354,9 +354,14 @@ class Config:
         self.upload_mode = 1
 
         self.event_monitor_enabled = False
+        self.event_monitor_db_name = "event_monitor.db"
         self.event_monitor_webpage = "https://globalmeteornetwork.org/data/event_watchlist.txt"
-        self.event_monitor_check_interval = 5
+        self.event_monitor_remote_server = "https://globalmeteornetwork.org/"
         self.event_monitor_remote_dir = "event_monitor"
+        self.event_monitor_check_interval = 5
+
+
+
 
         ##### Weave compilation arguments
         self.extra_compile_args = ["-O3"]
@@ -949,8 +954,6 @@ def parseCapture(config, parser):
     if parser.has_option(section, "postprocess_delay"):
         config.postprocess_delay = parser.getint(section, "postprocess_delay")
 
-
-
 def parseUpload(config, parser):
     section = "Upload"
     
@@ -993,6 +996,11 @@ def parseUpload(config, parser):
     if parser.has_option(section, "event_monitor_enabled"):
         config.event_monitor_enabled = parser.getboolean(section, "event_monitor_enabled")
 
+
+    # Name to use for eventmonitor database
+    if parser.has_option(section, "event_monitor_db_name"):
+        config.event_monitor_webpage = parser.get(section, "event_monitor_db_name")
+
     # Address to look for watchlist
     if parser.has_option(section, "event_monitor_webpage"):
         config.event_monitor_webpage = parser.get(section, "event_monitor_webpage")
@@ -1003,7 +1011,6 @@ def parseUpload(config, parser):
 
     if parser.has_option(section, "event_monitor_check_interval"):
         config.event_monitor_check_interval = parser.getint(section, "event_monitor_check_interval")
-
 
 def parseBuildArgs(config, parser):
     section = "Build"
