@@ -33,7 +33,7 @@ import numpy as np
 import datetime
 import argparse
 import math
-
+import paramiko
 
 
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, latLonAlt2ECEF, vectNorm
@@ -1029,7 +1029,6 @@ class EventMonitor(multiprocessing.Process):
                                                                            event.respondto, self.syscon.event_monitor_remote_dir,
                                                                            uploadfilename)
             #os.system(shellcommand)
-
 
             uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),eventmonitordirectory,self.syscon.event_monitor_remote_dir,[archive_name],rsa_private_key=self.config.rsa_private_key)
 
