@@ -1075,7 +1075,7 @@ class EventMonitor(multiprocessing.Process):
 
             # If trajectory outside the farradius, do nothing, and mark as processed
             if min_dist > event.farradius * 1000 and not testmode:
-                log.info("Event at {} was {:4.1f}km away, so was ignored".format(event.dt,min_dist/1000))
+                log.info("Event at {} was {:4.1f}km away, outside {}km, so was ignored".format(event.dt,event.farradius,min_dist/1000))
                 self.markeventasprocessed(event)
                 # Do no more work
                 continue
@@ -1084,7 +1084,7 @@ class EventMonitor(multiprocessing.Process):
 
             if min_dist < event.closeradius * 1000 and not testmode:
                 # this is just for info
-                log.info("Event at {} was {:4.1f}km away, so is uploaded with no further checks.".format(event.dt, min_dist / 1000))
+                log.info("Event at {} was {:4.1f}km away, inside {}km so is uploaded with no further checks.".format(event.dt, event.close_radius,min_dist / 1000))
                 count, event.startdistance, event.startangle, event.enddistance, event.endangle, event.fovra, event.fovdec = self.trajectorythroughfov(
                     event)
                 self.doupload(event, evcon, file_list, testmode)
