@@ -1029,6 +1029,7 @@ class EventMonitor(multiprocessing.Process):
                                                                            uploadfilename)
             #os.system(shellcommand)
 
+            print(self.syscon.event_monitor_remote_dir)
             uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),eventmonitordirectory,self.syscon.event_monitor_remote_dir,[archive_name],rsa_private_key=self.config.rsa_private_key)
 
 
