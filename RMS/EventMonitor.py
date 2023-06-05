@@ -1090,7 +1090,7 @@ class EventMonitor(multiprocessing.Process):
                 self.markeventasprocessed(event)
                 if len(file_list) > 0:
                     self.markeventasuploaded(event, file_list)
-
+                continue
 
             # If trajectory inside the farradius, then check if the trajectory went through the FoV
             # The returned count is the number of 100th parts of the trajectory observed through the FoV
