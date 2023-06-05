@@ -1055,7 +1055,7 @@ class EventMonitor(multiprocessing.Process):
 
             # If there are no files, then mark as processed and continue
             if (len(file_list) == 0 or file_list == [None]) and not testmode:
-                log.info("No files foud for dvent at {}".format(event.dt))
+                log.info("No files for event at {}".format(event.dt))
                 self.markeventasprocessed(event)
                 continue
 
