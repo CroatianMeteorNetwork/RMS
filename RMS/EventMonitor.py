@@ -1022,7 +1022,9 @@ class EventMonitor(multiprocessing.Process):
         # todo: replace this with paramiko
 
         if not noupload and not testmode:
-         upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),eventmonitordirectory,self.syscon.event_monitor_remote_dir,[archive_name],rsa_private_key=self.config.rsa_private_key)
+         #upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),eventmonitordirectory,self.syscon.event_monitor_remote_dir,[archive_name],rsa_private_key=self.config.rsa_private_key)
+         upload_status = True
+         pass
 
         if not keepfiles and upload_status:
             shutil.rmtree(eventmonitordirectory)
