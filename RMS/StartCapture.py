@@ -480,7 +480,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 if eventmonitor.is_alive():
                     log.debug('Closing eventmonitor...')
                     eventmonitor.stop()
-                    del upload_manager
+                    del eventmonitor
 
 
             # Terminate the detector
@@ -557,7 +557,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             if eventmonitor.is_alive():
                 log.debug('Closing eventmonitor...')
                 eventmonitor.stop()
-                del upload_manager
+                del eventmonitor
 
         sys.exit()
 
@@ -898,7 +898,7 @@ if __name__ == "__main__":
                     if eventmonitor.is_alive():
                         log.debug('Closing eventmonitor...')
                         eventmonitor.stop()
-                        del upload_manager
+                        del eventmonitor
 
 
 
@@ -1002,7 +1002,7 @@ if __name__ == "__main__":
                         if eventmonitor.is_alive():
                              log.debug('Closing eventmonitor...')
                              eventmonitor.stop()
-                             del upload_manager
+                             del eventmonitor
 
                         # Stop the slideshow if it was on
                         if slideshow_view is not None:
