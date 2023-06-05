@@ -8,17 +8,11 @@ from RMS.EventMonitor import EventContainer, EventMonitor, convertgmntimetoposix
 import RMS.ConfigReader as cr
 
 import os
-import json
-import time
-import datetime
+
 import argparse
-import pathlib
-from RMS.Formats.Platepar import Platepar
-from datetime import datetime
-from dateutil import parser
+
 from tqdm import tqdm
 import pandas as pd
-import numpy as np
 
 def analysetestresults(config):
 

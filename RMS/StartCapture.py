@@ -1087,4 +1087,4 @@ if __name__ == "__main__":
         if eventmonitor.is_alive():
              log.debug('Closing eventmonitor...')
              eventmonitor.stop()
-             del upload_manager
+             del eventmonitor

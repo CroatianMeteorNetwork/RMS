@@ -1034,15 +1034,12 @@ class EventMonitor(multiprocessing.Process):
     def checkevents(self, evcon,  testmode = False):
 
         """
-
-
         Args:
             evcon: configuration object at the time of this event
 
         Returns:
             Nothing
         """
-
 
         # Get the work to be done
         unprocessed = self.getUnprocessedEventsfromDB()
@@ -1079,7 +1076,7 @@ class EventMonitor(multiprocessing.Process):
                 continue
 
 
-            # If trajectory inside the event all radius, then do the upload and mark as processed
+            # If trajectory inside the closeradius, then do the upload and mark as processed
             if min_dist < event.closeradius * 1000 and not testmode:
                 # this is just for info
                 log.info("Event at {} was {:4.1f}km away, inside {:4.1f}km so is uploaded with no further checks.".format(event.dt, min_dist / 1000, event.closeradius))
