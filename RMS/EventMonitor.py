@@ -33,7 +33,6 @@ import numpy as np
 import datetime
 import argparse
 import math
-import paramiko
 
 
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, latLonAlt2ECEF, vectNorm
@@ -44,7 +43,7 @@ from dateutil import parser
 from Utils.StackFFs import stackFFs
 from Utils.BatchFFtoImage import batchFFtoImage
 from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
-from UploadManager import uploadSFTP
+from RMS.UploadManager import uploadSFTP
 import logging
 
 
