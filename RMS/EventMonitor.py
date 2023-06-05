@@ -1055,15 +1055,14 @@ class EventMonitor(multiprocessing.Process):
 
             # If there are no files, then mark as processed and continue
             if (len(file_list) == 0 or file_list == [None]) and not testmode:
+                log.info("No files foud for dvent at {}".format(event.dt))
                 self.markeventasprocessed(event)
                 continue
-
 
             # If there is a .config file then parse it as evcon - not the station config
             for file in file_list:
                 if file.endswith(".config"):
                     evcon = cr.parse(file)
-
 
             # From the infinitely extended trajectory, work out the closest point to the camera
             start_dist, end_dist, atmos_dist = self.calculateclosestpoint(event.lat, event.lon, event.ht * 1000,
@@ -1072,19 +1071,18 @@ class EventMonitor(multiprocessing.Process):
                                                                           evcon.longitude, evcon.elevation)
             min_dist = min([start_dist, end_dist, atmos_dist])
 
-
             # If trajectory outside the farradius, do nothing, and mark as processed
             if min_dist > event.farradius * 1000 and not testmode:
-                log.info("Event at {} was {:4.1f}km away, outside {}km, so was ignored".format(event.dt,event.farradius,min_dist/1000))
+                log.info("Event at {} was {:4.1f}km away, outside {:4.1f}km, so was ignored".format(event.dt,min_dist/1000, event.farradius))
                 self.markeventasprocessed(event)
                 # Do no more work
                 continue
 
-            # If trajectory inside the event all radius, then do the upload and mark as processed
 
+            # If trajectory inside the event all radius, then do the upload and mark as processed
             if min_dist < event.closeradius * 1000 and not testmode:
                 # this is just for info
-                log.info("Event at {} was {:4.1f}km away, inside {}km so is uploaded with no further checks.".format(event.dt, event.closeradius,min_dist / 1000))
+                log.info("Event at {} was {:4.1f}km away, inside {:4.1f}km so is uploaded with no further checks.".format(event.dt, min_dist / 1000, event.closeradius))
                 count, event.startdistance, event.startangle, event.enddistance, event.endangle, event.fovra, event.fovdec = self.trajectorythroughfov(
                     event)
                 self.doupload(event, evcon, file_list, testmode)
@@ -1094,23 +1092,19 @@ class EventMonitor(multiprocessing.Process):
                 # Do no more work
                 continue
 
+
             # If trajectory inside the farradius, then check if the trajectory went through the FoV
             # The returned count is the number of 100th parts of the trajectory observed through the FoV
-
             if min_dist < event.farradius * 1000 or testmode:
-                log.info("Event at {} was {:4.1f}km away,  inside {}, so check if passed through FOV.".format(event.dt, event.farradius, min_dist / 1000 ))
+                log.info("Event at {} was {:4.1f}km away, inside {:4.1f}, consider FOV.".format(event.dt, event.farradius, min_dist / 1000 ))
                 count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectorythroughfov(event)
-
                 if count != 0:
-                    log.info("Event at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(event.dt,
-                                                                                                          count))
+                    log.info("Event at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(event.dt, count))
                     self.doupload(event, evcon, file_list, testmode = testmode)
                     self.markeventasuploaded(event, file_list)
-
                     if testmode:
                         rp = Platepar()
                         rp.read(self.getplateparfilepath(event))
-
                         with open(os.path.expanduser(os.path.join(self.syscon.data_dir, "testlog")), 'at') as logfile:
                             logfile.write(
                                 "{} LOC {} Az:{:3.1f} El:{:3.1f} sta_lat:{:3.4f} sta_lon:{:3.4f} sta_dist:{:3.0f} end_dist:{:3.0f} fov_h:{:3.1f} fov_v:{:3.1f} sa:{:3.1f} ea::{:3.1f} \n".format(
@@ -1123,8 +1117,6 @@ class EventMonitor(multiprocessing.Process):
                     self.markeventasprocessed(event)
                 # Do no more work
                 continue
-
-
         return None
 
     def start(self):
