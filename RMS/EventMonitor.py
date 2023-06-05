@@ -44,6 +44,7 @@ from dateutil import parser
 from Utils.StackFFs import stackFFs
 from Utils.BatchFFtoImage import batchFFtoImage
 from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
+from UploadManager import uploadSFTP
 import logging
 
 
@@ -1022,11 +1023,17 @@ class EventMonitor(multiprocessing.Process):
         # todo: replace this with paramiko
 
         if not noupload and not testmode:
+
             shellcommand = ""
             shellcommand = "rsync -avzq {}/{}.* {}:~/{}/".format(eventmonitordirectory, uploadfilename,
                                                                            event.respondto, self.syscon.event_monitor_remote_dir,
                                                                            uploadfilename)
-            os.system(shellcommand)
+            #os.system(shellcommand)
+
+
+            uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),eventmonitordirectory,self.syscon.event_monitor_remote_dir,[archive_name],rsa_private_key=self.config.rsa_private_key)
+
+
 
         if not keepfiles:
             shutil.rmtree(eventmonitordirectory)
