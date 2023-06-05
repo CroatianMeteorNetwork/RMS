@@ -51,7 +51,7 @@ def analysetestresults(config):
         df[category] = 0
 
 
-    trajectoriesanalysed = 0
+    trajectoriesanalysed = observations = 0
     predictedcameras = usedcameras =  []
     with open(os.path.expanduser(os.path.join(config.data_dir, "testlog")), 'rt') as logfile:
         readingheader=True
@@ -67,7 +67,8 @@ def analysetestresults(config):
                     if camera not in predictedcameras:
 
                         df.loc[df['Camera'].isin([camera]), 'Used not Predicted'] += 1  # df.loc[df['Camera'].isin([predictedcamera]), 'Predicted and used'] + 1
-
+            else:
+                observations += 1
 
             readingheader = True if 'GMN' in line else False
             header = line.replace("'","").replace(" ","") if readingheader else header
@@ -107,7 +108,7 @@ def analysetestresults(config):
 
 
     print("Results")
-    print("{} trajectories were analysed".format(trajectoriesanalysed))
+    print("{} trajectories and {} observations were analysed".format(trajectoriesanalysed, observations))
     print(df.to_string())
 
 if __name__ == "__main__":
