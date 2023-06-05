@@ -476,6 +476,7 @@ class EventMonitor(multiprocessing.Process):
 
         except:
             log.info("Database purge failed")
+            self.delEventMonitorDB()
             self.createEventMonitorDB()
         return None
 
