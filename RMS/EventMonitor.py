@@ -476,7 +476,7 @@ class EventMonitor(multiprocessing.Process):
 
         except:
             log.info("Database purge failed")
-
+            self.createEventMonitorDB()
         return None
 
     def addevent(self, event):

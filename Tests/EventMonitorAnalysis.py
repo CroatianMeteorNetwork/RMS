@@ -42,8 +42,7 @@ def analysetestresults(config):
 
     allcameras.sort()
 
-    catlist = ['Used', 'Predicted', 'Predicted and used', 'Predicted not used', 'Used not Predicted',
-               'Not used Not predicted']
+    catlist = ['Used', 'Predicted', 'Predicted and used', 'Predicted not used', 'Used not Predicted']
 
     df = pd.DataFrame(data = allcameras)
     df.rename(columns={0:'Camera'}, inplace=True)
