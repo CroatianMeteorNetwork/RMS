@@ -1022,19 +1022,9 @@ class EventMonitor(multiprocessing.Process):
         # todo: replace this with paramiko
 
         if not noupload and not testmode:
+         upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),eventmonitordirectory,self.syscon.event_monitor_remote_dir,[archive_name],rsa_private_key=self.config.rsa_private_key)
 
-            shellcommand = ""
-            shellcommand = "rsync -avzq {}/{}.* {}:~/{}/".format(eventmonitordirectory, uploadfilename,
-                                                                           event.respondto, self.syscon.event_monitor_remote_dir,
-                                                                           uploadfilename)
-            #os.system(shellcommand)
-
-            print(self.syscon.event_monitor_remote_dir)
-            uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),eventmonitordirectory,self.syscon.event_monitor_remote_dir,[archive_name],rsa_private_key=self.config.rsa_private_key)
-
-
-
-        if not keepfiles:
+        if not keepfiles and upload_status:
             shutil.rmtree(eventmonitordirectory)
 
     def checkevents(self, evcon,  testmode = False):
