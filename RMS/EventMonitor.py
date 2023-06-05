@@ -1265,7 +1265,7 @@ if __name__ == "__main__":
         web_page = urllib.request.urlopen(syscon.event_monitor_web_page).read().decode("utf-8").splitlines()
     except:
         # todo: remove this before rolling out
-        syscon.event_monitor_web_page = syscon.event_monitor_web_page.replace("https://globalmeteornetwork.org",
+        syscon.event_monitor_webpage = syscon.event_monitor_webpage.replace("https://globalmeteornetwork.org",
                                                                               "http://58.84.202.15:8244")
 
     # Name of the event monitor data base (sqlite3)
