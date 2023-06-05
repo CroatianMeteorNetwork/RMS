@@ -615,9 +615,6 @@ def fullsystemtest(config,em):
         #need to open as write so that we overwrite any previous trajectories
 
 
-
-
-
         t = traj.split(';')
         eventtime, trajcam   = t[2] , t[85].strip().split(",")
         latbeg,lonbeg, htbeg = t[63], t[65], t[67]
@@ -650,20 +647,29 @@ def fullsystemtest(config,em):
 
                                  relevanttrajectory = True
 
-         #For every camera, we need to check whether it saw the trajectory
-                    if relevanttrajectory:
-                      evcon = cr.Config()
-                      evcon.data_dir = os.path.join(pathtoplatepars,"archives",camera.lower(),"RMS_data")
-                      em.config.data_dir = os.path.join(pathtoplatepars,"archives",camera.lower(),"RMS_data")
-                      #and write the camera name
-                      evcon.stationID = camera.upper()
-                      # set the system config in eventmonitor
-                      em.syscon.data_dir = "~/RMS_data"
-                      em.geteventsandcheck(testmode=True)
+        # For every camera, we need to check whether it saw the trajectory
+        # This can't be a subsection of main loop, otherwise we only check for cameras that were used in the solver
+        for camera in cameradataavailable:
+
+         if relevanttrajectory:
+          print(camera)
+          evcon = cr.Config()
+          evcon.data_dir = os.path.join(pathtoplatepars,"archives",camera.lower(),"RMS_data")
+          em.config.data_dir = os.path.join(pathtoplatepars,"archives",camera.lower(),"RMS_data")
+          #and write the camera name
+          evcon.stationID = camera.upper()
+          # set the system config in eventmonitor
+          em.syscon.data_dir = "~/RMS_data"
+          em.geteventsandcheck(testmode=True)
+
         unprocessedevents = em.getUnprocessedEventsfromDB()
         # because we are in testmode, the events do not get marked as processed,
         for unprocessedevent in unprocessedevents:
             em.markeventasprocessed(unprocessedevent)
+
+
+
+
 
 
 

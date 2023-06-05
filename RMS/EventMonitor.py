@@ -553,9 +553,13 @@ class EventMonitor(multiprocessing.Process):
         SQLStatement += "                                     \n"
         SQLStatement += "WHERE                                \n"
         SQLStatement += "uuid = '{}'                          \n".format(event.uuid)
-        self.db_conn.cursor().execute(SQLStatement)
-        self.db_conn.commit()
-        log.info("Event at {} marked as processed".format(event.dt))
+        try:
+         self.db_conn.cursor().execute(SQLStatement)
+         self.db_conn.commit()
+         log.info("Event at {} marked as processed".format(event.dt))
+        except:
+         log.info("Database error")
+
 
     def markeventasuploaded(self, event, file_list):
 
@@ -580,10 +584,13 @@ class EventMonitor(multiprocessing.Process):
         SQLStatement += "WHERE                \n"
         SQLStatement += "uuid = '{}'          \n".format(event.uuid)
 
-        cursor = self.db_conn.cursor()
-        cursor.execute(SQLStatement)
-        self.db_conn.commit()
-        log.info("Event at {} marked as uploaded".format(event.dt))
+        try:
+         cursor = self.db_conn.cursor()
+         cursor.execute(SQLStatement)
+         self.db_conn.commit()
+         log.info("Event at {} marked as uploaded".format(event.dt))
+        except:
+         log.info("Database error")
 
     def markeventasreceivedbyserver(self, uuid):
 
@@ -1046,7 +1053,7 @@ class EventMonitor(multiprocessing.Process):
             file_list = self.getfilelist(event)
 
             # If there are no files, then mark as processed and continue
-            if len(file_list) == 0 or file_list == [None] and not testmode:
+            if (len(file_list) == 0 or file_list == [None]) and not testmode:
                 self.markeventasprocessed(event)
                 continue
 
@@ -1066,7 +1073,7 @@ class EventMonitor(multiprocessing.Process):
 
 
             # If trajectory outside the farradius, do nothing, and mark as processed
-            if min_dist > event.farradius * 1000:
+            if min_dist > event.farradius * 1000 and not testmode:
                 log.info("Event at {} was {:4.1f}km away, so was ignored".format(event.dt,min_dist/1000))
                 self.markeventasprocessed(event)
                 continue

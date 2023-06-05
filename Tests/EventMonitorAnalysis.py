@@ -51,28 +51,57 @@ def analysetestresults(config):
     for category in catlist:
         df[category] = 0
 
-    print(df)
 
-    allcameras= []
+
+    predictedcameras = usedcameras =  []
     with open(os.path.expanduser(os.path.join(config.data_dir, "testlog")), 'rt') as logfile:
         readingheader=True
         body = header = ""
         for line in logfile:
+
+
+            # Populate used not predicted
+            if 'GMN' in line and not readingheader:
+
+                for camera in usedcameras:
+
+                    if camera not in predictedcameras:
+                        print("Used cameras {} Predicted Cameras {}".format(usedcameras, predictedcameras))
+                        df.loc[df['Camera'].isin([camera]), 'Used not Predicted'] += 1  # df.loc[df['Camera'].isin([predictedcamera]), 'Predicted and used'] + 1
+
+
             readingheader = True if 'GMN' in line else False
             header = line.replace("'","").replace(" ","") if readingheader else header
             body = line if not readingheader else body
+
+            # Populate the Used column
             if readingheader:
                 predictedcameras = []
-                usedcameralist = header.split('[')[1].split(']')[0].split(',')
-                df.loc[df['Camera'].isin(usedcameralist), 'Used'] = df.loc[df['Camera'].isin(usedcameralist), 'Used'] + 1
+                usedcameras = header.split('[')[1].split(']')[0].split(',')
+                df.loc[df['Camera'].isin(usedcameras), 'Used'] += 1  #df.loc[df['Camera'].isin(usedcameralist), 'Used'] + 1
+
+            # Build up the predicted camera list
+            if not readingheader:
+                predictedcamera = body.split(" ")[3]
+                predictedcameras.append(predictedcamera)
+
+            # Populate the Predicted column - the camera was in the prediction
+            if not readingheader:
+                predictedcamera = body.split(" ")[3]
+                df.loc[df['Camera'].isin([predictedcamera]), 'Predicted'] += 1   #df.loc[df['Camera'].isin([predictedcamera]), 'Predicted'] + 1
+
+            # Populate the Predicted and used
 
             if not readingheader:
+                if predictedcamera in usedcameras:
+                  df.loc[df['Camera'].isin([predictedcamera]), 'Predicted and used'] += 1 #df.loc[df['Camera'].isin([predictedcamera]), 'Predicted and used'] + 1
 
-                predictedcamera = body.split(" ")[3]
+            # Populate predicted not used
 
-                df.loc[df['Camera'].isin([predictedcamera]), 'Predicted'] = df.loc[df['Camera'].isin([predictedcamera]), 'Predicted'] + 1
+            if not readingheader:
+                if predictedcamera not in usedcameras:
+                  df.loc[df['Camera'].isin([predictedcamera]), 'Predicted not used'] += 1 #df.loc[df['Camera'].isin([predictedcamera]), 'Predicted and used'] + 1
 
-                pass
 
 
 
