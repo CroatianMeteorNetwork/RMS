@@ -66,7 +66,7 @@ def analysetestresults(config):
                 for camera in usedcameras:
 
                     if camera not in predictedcameras:
-                        print("Used cameras {} Predicted Cameras {}".format(usedcameras, predictedcameras))
+
                         df.loc[df['Camera'].isin([camera]), 'Used not Predicted'] += 1  # df.loc[df['Camera'].isin([predictedcamera]), 'Predicted and used'] + 1
 
 

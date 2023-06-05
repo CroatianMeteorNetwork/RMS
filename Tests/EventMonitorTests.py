@@ -652,7 +652,7 @@ def fullsystemtest(config,em):
         for camera in cameradataavailable:
 
          if relevanttrajectory:
-          print(camera)
+
           evcon = cr.Config()
           evcon.data_dir = os.path.join(pathtoplatepars,"archives",camera.lower(),"RMS_data")
           em.config.data_dir = os.path.join(pathtoplatepars,"archives",camera.lower(),"RMS_data")
