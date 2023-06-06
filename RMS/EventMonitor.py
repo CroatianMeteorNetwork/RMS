@@ -863,12 +863,15 @@ class EventMonitor(multiprocessing.Process):
         start_vec, end_vec = (ref_ecef - beg_ecef), (ref_ecef - end_ecef)
         start_dist, end_dist = (np.sqrt((np.sum(start_vec ** 2)))), (np.sqrt((np.sum(end_vec ** 2))))
 
-        # Calculate the projection of the reference vector onto the trajectory vector
-        proj_vec = beg_ecef + np.dot(start_vec, traj_vec) * traj_vec
+        if [beg_lat, beg_lon, beg_ele] != [end_lat, end_lon, end_ele]:
+         # Calculate the projection of the reference vector onto the trajectory vector
+         proj_vec = beg_ecef + np.dot(start_vec, traj_vec) * traj_vec
 
-        # Hence, calculate the vector at the nearest point, and the closest distance
-        closest_vec = ref_ecef - proj_vec
-        closest_dist = (np.sqrt(np.sum(closest_vec ** 2)))
+         # Hence, calculate the vector at the nearest point, and the closest distance
+         closest_vec = ref_ecef - proj_vec
+         closest_dist = (np.sqrt(np.sum(closest_vec ** 2)))
+        else:
+         closest_dist = start_dist
 
         return start_dist, end_dist, closest_dist
 
@@ -1015,17 +1018,18 @@ class EventMonitor(multiprocessing.Process):
         archive_name = shutil.make_archive(os.path.join(eventmonitordirectory, uploadfilename), 'bztar',
                                            eventmonitordirectory)
 
+        # Remove the sub-directory where the files were assembled
         if not keepfiles:
             if os.path.exists(thiseventdirectory) and thiseventdirectory != "":
                 shutil.rmtree(thiseventdirectory)
 
-        # todo: replace this with paramiko
 
         if not noupload and not testmode:
          #upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),eventmonitordirectory,self.syscon.event_monitor_remote_dir,[archive_name],rsa_private_key=self.config.rsa_private_key)
          upload_status = True
          pass
 
+        # Remove the directory
         if not keepfiles and upload_status:
             shutil.rmtree(eventmonitordirectory)
 
