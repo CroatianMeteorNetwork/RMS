@@ -33,6 +33,7 @@ import numpy as np
 import datetime
 import argparse
 import math
+from glob import glob
 
 
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, latLonAlt2ECEF, vectNorm
@@ -1023,10 +1024,14 @@ class EventMonitor(multiprocessing.Process):
             if os.path.exists(thiseventdirectory) and thiseventdirectory != "":
                 shutil.rmtree(thiseventdirectory)
 
+        #todo: remove this for normal use
+        self.syscon.hostname = "192.168.1.241"
+
 
         if not noupload and not testmode:
-         #upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),eventmonitordirectory,self.syscon.event_monitor_remote_dir,[archive_name],rsa_private_key=self.config.rsa_private_key)
-         upload_status = True
+         archives = glob(eventmonitordirecory)
+         print("uploading {}".format(archives))
+         upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),eventmonitordirectory,self.syscon.event_monitor_remote_dir,archives,rsa_private_key=self.config.rsa_private_key)
          pass
 
         # Remove the directory
