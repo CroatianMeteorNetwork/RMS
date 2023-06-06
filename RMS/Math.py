@@ -4,6 +4,7 @@ import numpy as np
 from numpy.core.umath_tests import inner1d
 
 
+
 def lineFunc(x, m, k):
     """ Linear function.
     
@@ -64,8 +65,7 @@ def angularSeparation(ra1, dec1, ra2, dec2):
 
 
 def angularSeparationVect(vect1, vect2):
-    """ Calculates angle between vectors in radians.
-        Must use vectNorm before calling """
+    """ Calculates angle between vectors in radians."""
 
     return np.abs(np.arccos(np.dot(vect1, vect2)))
 
