@@ -49,7 +49,7 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
 
     # Set the CRF value for the video compression depending on the resolution
     if hires:
-        crf = 25
+        crf = 26
 
     else:
         crf = 30
