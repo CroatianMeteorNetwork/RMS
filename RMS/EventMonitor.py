@@ -1033,6 +1033,9 @@ class EventMonitor(multiprocessing.Process):
          print("uploading {}".format(archives))
          upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),eventmonitordirectory,self.syscon.event_monitor_remote_dir,archives,rsa_private_key=self.config.rsa_private_key)
          pass
+        else:
+         upload_status = False
+
 
         # Remove the directory
         if not keepfiles and upload_status:
