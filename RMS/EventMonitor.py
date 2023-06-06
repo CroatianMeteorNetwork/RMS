@@ -1029,7 +1029,7 @@ class EventMonitor(multiprocessing.Process):
 
 
         if not noupload and not testmode:
-         archives = glob(eventmonitordirectory)
+         archives = glob(os.path.join(eventmonitordirectory,"*.bz2")
          print("uploading {}".format(archives))
          upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),eventmonitordirectory,self.syscon.event_monitor_remote_dir,archives,rsa_private_key=self.config.rsa_private_key)
          pass
