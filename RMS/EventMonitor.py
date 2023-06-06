@@ -37,7 +37,7 @@ from glob import glob
 
 
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, latLonAlt2ECEF, vectNorm
-from RMS.Math import angleBetweenVectors
+from RMS.Math import angularSeparationVect
 from RMS.Formats.Platepar import Platepar
 from datetime import datetime
 from dateutil import parser
@@ -660,7 +660,8 @@ class EventMonitor(multiprocessing.Process):
                 if "END" in line:
                     events.append(copy.copy(event))  # copy, because these are references, not objects
                     event = EventContainer(0, 0, 0, 0)  # Initialise it empty
-        #log.info("Read {} events from {}".format(len(events), self.syscon.event_monitor_webpage))
+        log.info("Read {} events from {}".format(len(events), self.syscon.event_monitor_webpage))
+        print("Read {} events from {}".format(len(events), self.syscon.event_monitor_webpage))
         return events
 
     def getUnprocessedEventsfromDB(self):
@@ -928,15 +929,15 @@ class EventMonitor(multiprocessing.Process):
         pointsinfov = 0
         for i in range(0, 100):
             point = (stapt_rel + i * traj_inc)
-            point_fov = np.degrees(angleBetweenVectors(point, fovvec))
+            point_fov = np.degrees(angularSeparationVect(vectNorm(point), vectNorm(fovvec)))
             if point_fov < diagonal_fov / 2:
                 pointsinfov += 1
 
         # calculate some additional information for confidence
         startdistance = (np.sqrt(np.sum(stapt_rel ** 2)))
-        startangle = math.degrees(angleBetweenVectors(vectNorm(stapt_rel), vectNorm(fovvec)))
+        startangle = math.degrees(angularSeparationVect(vectNorm(stapt_rel), vectNorm(fovvec)))
         enddistance = (np.sqrt(np.sum(endpt_rel ** 2)))
-        endangle = math.degrees(angleBetweenVectors(vectNorm(endpt_rel), vectNorm(fovvec)))
+        endangle = math.degrees(angularSeparationVect(vectNorm(endpt_rel), vectNorm(fovvec)))
 
         return pointsinfov, startdistance, startangle, enddistance, endangle, fovra, fovdec
 
@@ -1007,7 +1008,6 @@ class EventMonitor(multiprocessing.Process):
             batchFFtoImage(os.path.join(eventmonitordirectory, uploadfilename), "jpg", add_timestamp=True,
                            ff_component='maxpixel')
 
-
         with open(os.path.join(eventmonitordirectory, uploadfilename, "event_report.txt"), "w") as info:
             info.write(event.eventtostring())
 
@@ -1019,7 +1019,7 @@ class EventMonitor(multiprocessing.Process):
         archive_name = shutil.make_archive(os.path.join(eventmonitordirectory, uploadfilename), 'bztar',
                                            eventmonitordirectory)
 
-        # Remove the sub-directory where the files were assembled
+        # Remove the directory where the files were assembled
         if not keepfiles:
             if os.path.exists(thiseventdirectory) and thiseventdirectory != "":
                 shutil.rmtree(thiseventdirectory)
@@ -1266,14 +1266,17 @@ if __name__ == "__main__":
 
 
     try:
-        web_page = urllib.request.urlopen(syscon.event_monitor_web_page).read().decode("utf-8").splitlines()
+        web_page = urllib.request.urlopen(syscon.event_monitor_webpage).read().decode("utf-8").splitlines()
     except:
         # todo: remove this before rolling out
-        syscon.event_monitor_webpage = syscon.event_monitor_webpage.replace("https://globalmeteornetwork.org",
-                                                                              "http://58.84.202.15:8244")
+        log.info("Nothing found at {}".format(syscon.event_monitor_webpage))
 
-    # Name of the event monitor data base (sqlite3)
+
+    if cml_args.delete_db and os.path.isfile(os.path.expanduser("~/RMS_data/event_monitor.db")):
+        os.unlink(os.path.expanduser("~/RMS_data/event_monitor.db"))
+
     em = EventMonitor(syscon)
+
 
 
     if cml_args.one_shot:
