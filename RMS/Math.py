@@ -65,7 +65,7 @@ def angularSeparation(ra1, dec1, ra2, dec2):
 
 
 def angularSeparationVect(vect1, vect2):
-    """ Calculates angle between vectors in radians."""
+    """ Calculates angle between vectors in radians. """
 
     return np.abs(np.arccos(np.dot(vect1, vect2)))
 
