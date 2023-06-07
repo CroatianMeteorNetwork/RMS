@@ -1014,7 +1014,7 @@ def parseUpload(config, parser):
         config.event_monitor_check_interval = parser.getint(section, "event_monitor_check_interval")
 
     if parser.has_option(section, "event_monitor_check_interval_fast"):
-        config.event_monitor_check_interval = parser.getint(section, "event_monitor_check_interval_fast")
+        config.event_monitor_check_interval_fast = parser.getint(section, "event_monitor_check_interval_fast")
 
 
 def parseBuildArgs(config, parser):
