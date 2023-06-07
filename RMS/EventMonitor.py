@@ -1025,7 +1025,7 @@ class EventMonitor(multiprocessing.Process):
                 shutil.rmtree(thiseventdirectory)
 
         #todo: remove this for normal use
-        self.syscon.hostname = "192.168.1.241"
+        #self.syscon.hostname = "192.168.1.241"
 
 
         if not noupload and not testmode:
