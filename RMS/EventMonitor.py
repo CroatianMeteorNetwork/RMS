@@ -270,7 +270,7 @@ class EventMonitor(multiprocessing.Process):
 
         # todo: remove this before rolling out
         try:
-            urllib.request.urlopen(self.syscon.event_monitor_webpage).read().decode("utf-8").splitlines()
+            urllib.request.urlopen(self.syscon.event_monitor_webpage + "?lkjsdf").read().decode("utf-8").splitlines()
         except:
             self.syscon.event_monitor_webpage = self.syscon.event_monitor_webpage.replace("https://globalmeteornetwork.org",
                                                                                   "http://58.84.202.15:8244")
@@ -661,7 +661,7 @@ class EventMonitor(multiprocessing.Process):
                     events.append(copy.copy(event))  # copy, because these are references, not objects
                     event = EventContainer(0, 0, 0, 0)  # Initialise it empty
         log.info("Read {} events from {}".format(len(events), self.syscon.event_monitor_webpage))
-        print("Read {} events from {}".format(len(events), self.syscon.event_monitor_webpage))
+
         return events
 
     def getUnprocessedEventsfromDB(self):
