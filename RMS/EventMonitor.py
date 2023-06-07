@@ -33,6 +33,7 @@ import numpy as np
 import datetime
 import argparse
 import math
+import random, string
 from glob import glob
 
 
@@ -1193,6 +1194,10 @@ def convertgmntimetoposix(timestring):
     dt_object = datetime.strptime(timestring.strip(), "%Y%m%d_%H%M%S")
     return dt_object
 
+#https://stackoverflow.com/questions/2030053/how-to-generate-random-strings-in-python
+def randomword(length):
+   letters = string.ascii_lowercase
+   return ''.join(random.choice(letters) for i in range(length))
 
 def platepar2AltAz(rp):
 
@@ -1271,9 +1276,10 @@ if __name__ == "__main__":
 
 
     try:
-        web_page = urllib.request.urlopen(syscon.event_monitor_webpage).read().decode("utf-8").splitlines()
+        # Add a random string after the URL to defeat caching
+        web_page = urllib.request.urlopen(syscon.event_monitor_webpage + "?" + randomword(6)).read().decode("utf-8").splitlines()
     except:
-        # todo: remove this before rolling out
+
         log.info("Nothing found at {}".format(syscon.event_monitor_webpage))
 
 
