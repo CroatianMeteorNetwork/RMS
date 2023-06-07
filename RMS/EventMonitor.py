@@ -1174,7 +1174,7 @@ class EventMonitor(multiprocessing.Process):
             self.exit.wait(60 * self.check_interval)
             #We are running fast, but have not made an upload, then check more slowly next time
             if self.check_interval < self.syscon.event_monitor_check_interval:
-                self.check_interval = self.checkinterval * 1.1
+                self.check_interval = self.check_interval * 1.1
             log.info("Next check in {:2.2f} minutes".format(self.check_interval))
 
 
