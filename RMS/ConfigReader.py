@@ -358,7 +358,8 @@ class Config:
         self.event_monitor_webpage = "https://globalmeteornetwork.org/data/event_watchlist.txt"
         self.event_monitor_remote_server = "https://globalmeteornetwork.org/"
         self.event_monitor_remote_dir = "files/event_monitor"
-        self.event_monitor_check_interval = 5
+        self.event_monitor_check_interval = 30
+        self.event_monitor_check_interval_fast = 5
 
 
 
@@ -1011,6 +1012,10 @@ def parseUpload(config, parser):
 
     if parser.has_option(section, "event_monitor_check_interval"):
         config.event_monitor_check_interval = parser.getint(section, "event_monitor_check_interval")
+
+    if parser.has_option(section, "event_monitor_check_interval_fast"):
+        config.event_monitor_check_interval = parser.getint(section, "event_monitor_check_interval_fast")
+
 
 def parseBuildArgs(config, parser):
     section = "Build"

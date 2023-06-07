@@ -268,12 +268,8 @@ class EventMonitor(multiprocessing.Process):
         self.exit = multiprocessing.Event()
         self.event_monitor_db_name = "event_monitor.db"
 
-        # todo: remove this before rolling out
-        try:
-            urllib.request.urlopen(self.syscon.event_monitor_webpage + "?lkjsdf").read().decode("utf-8").splitlines()
-        except:
-            self.syscon.event_monitor_webpage = self.syscon.event_monitor_webpage.replace("https://globalmeteornetwork.org",
-                                                                                  "http://58.84.202.15:8244")
+        self.check_interval = self.syscon.event_monitor_check_interval
+
 
         log.info("Started EventMonitor")
         log.info("Database {}".format(self.syscon.event_monitor_db_name))
@@ -1030,8 +1026,10 @@ class EventMonitor(multiprocessing.Process):
 
         if not noupload and not testmode:
          archives = glob(os.path.join(eventmonitordirectory,"*.bz2"))
-         print("uploading {}".format(archives))
          upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),eventmonitordirectory,self.syscon.event_monitor_remote_dir,archives,rsa_private_key=self.config.rsa_private_key)
+         # set to the fast check rate after an upload
+         self.check_interval = self.syscon.event_monitor_check_interval_fast
+         log.info("Now checking at {:2.2f} minute intervals".format(self.check_interval))
          pass
         else:
          upload_status = False
@@ -1169,11 +1167,15 @@ class EventMonitor(multiprocessing.Process):
         time.sleep(20)
         while not self.exit.is_set():
 
-            #log.info("EventMonitor webpage check starting")
+            log.info("EventMonitor webpage check starting")
             self.geteventsandcheck()
-            #log.info("EventMonitor webpage check completed")
+            log.info("EventMonitor webpage check completed")
             # Wait for the next check
-            self.exit.wait(60 * self.config.event_monitor_check_interval)
+            self.exit.wait(60 * self.check_interval)
+            #We are running fast, but have not made an upload, then check more slowly next time
+            if self.check_interval < self.syscon.event_monitor_check_interval:
+                self.check_interval = self.checkinterval * 1.1
+            log.info("Next check in {:2.2f} minutes".format(self.check_interval))
 
 
 
