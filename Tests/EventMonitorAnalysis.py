@@ -1,4 +1,4 @@
-""""" Automatically uploads data files based on time and trajectory information given on a website. """
+""""" Test routines for EventMonitor """
 
 from __future__ import print_function, division, absolute_import
 
