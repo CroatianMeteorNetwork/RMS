@@ -1022,10 +1022,6 @@ class EventMonitor(multiprocessing.Process):
             if os.path.exists(thiseventdirectory) and thiseventdirectory != "":
                 shutil.rmtree(thiseventdirectory)
 
-        #todo: remove this for normal use
-        #self.syscon.hostname = "192.168.1.241"
-
-
         if not noupload and not testmode:
          archives = glob(os.path.join(eventmonitordirectory,"*.bz2"))
          upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),eventmonitordirectory,self.syscon.event_monitor_remote_dir,archives,rsa_private_key=self.config.rsa_private_key)
@@ -1107,7 +1103,7 @@ class EventMonitor(multiprocessing.Process):
                 count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectorythroughfov(event)
                 if count != 0:
                     log.info("Event at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(event.dt, count))
-                    self.doupload(event, evcon, file_list, testmode)
+                    self.doupload(event, evcon, file_list, testmode=testmode)
                     self.markeventasuploaded(event, file_list)
                     if testmode:
                         rp = Platepar()
@@ -1160,7 +1156,7 @@ class EventMonitor(multiprocessing.Process):
                 self.addevent(event)
 
         # Go through all events and check if they need to be uploaded - this iterates through the database
-        self.checkevents(self.config, testmode = testmode)
+        self.checkevents(self.config, testmode=testmode)
 
     def run(self):
 
