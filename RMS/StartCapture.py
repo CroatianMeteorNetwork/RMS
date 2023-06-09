@@ -552,7 +552,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 upload_manager.stop()
                 log.info('Closing upload manager...')
 
-        if eventmonitor is not None:
+        if 'eventmonitor' in locals():
+         if eventmonitor is not None:
             # Stop the eventmonitor
             if eventmonitor.is_alive():
                 log.debug('Closing eventmonitor...')
