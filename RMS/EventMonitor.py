@@ -1106,7 +1106,7 @@ class EventMonitor(multiprocessing.Process):
                 count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectorythroughfov(event)
                 if count != 0:
                     log.info("Event at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(event.dt, count))
-                    self.doupload(event, evcon, file_list, testmode = testmode)
+                    self.doupload(event, evcon, file_list, testmode)
                     self.markeventasuploaded(event, file_list)
                     if testmode:
                         rp = Platepar()
