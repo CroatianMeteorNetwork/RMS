@@ -356,7 +356,6 @@ class Config:
         self.event_monitor_enabled = False
         self.event_monitor_db_name = "event_monitor.db"
         self.event_monitor_webpage = "https://globalmeteornetwork.org/data/event_watchlist.txt"
-        self.event_monitor_remote_server = "https://globalmeteornetwork.org/"
         self.event_monitor_remote_dir = "files/event_monitor"
         self.event_monitor_check_interval = 30
         self.event_monitor_check_interval_fast = 5
