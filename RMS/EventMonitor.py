@@ -982,10 +982,8 @@ class EventMonitor(multiprocessing.Process):
         """
 
         eventmonitordirectory = os.path.expanduser(os.path.join(self.syscon.data_dir, "EventMonitor"))
-        print("Event monitor directory {}".format(eventmonitordirectory))
         uploadfilename = "{}_{}".format(evcon.stationID, event.dt)
         thiseventdirectory = os.path.join(eventmonitordirectory, uploadfilename)
-        print("This event directory {}".format(thiseventdirectory))
 
         # get rid of the eventdirectory, should never be needed
         if not keepfiles:
