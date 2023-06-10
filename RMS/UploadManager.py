@@ -153,7 +153,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
 
             
             # Upload the file to the server if it isn't already there
-            log.info('Copying ' + local_file + ' ({:3.2f})MB to '.format(int(local_file_size)/ (1024*1024)) + remote_file)
+            log.info('Copying ' + local_file + ' ({:3.2f}MB) to '.format(int(local_file_size)/ (1024*1024)) + remote_file)
             sftp.put(local_file, remote_file)
 
 
