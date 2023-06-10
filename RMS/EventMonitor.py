@@ -276,7 +276,7 @@ class EventMonitor(multiprocessing.Process):
         log.info("Database {}".format(self.syscon.event_monitor_db_name))
         log.info("Monitoring {} at {} minute intervals".format(self.syscon.event_monitor_webpage,self.syscon.event_monitor_check_interval))
         log.info("Local db path name {}".format(self.syscon.event_monitor_db_name))
-        log.info("Reporting data to {}{}".format(self.syscon.hostname, self.syscon.event_monitor_remote_dir))
+        log.info("Reporting data to {}/{}".format(self.syscon.hostname, self.syscon.event_monitor_remote_dir))
 
 
     def createEventMonitorDB(self, testmode = False):
@@ -1019,10 +1019,12 @@ class EventMonitor(multiprocessing.Process):
                 os.remove(os.path.join(eventmonitordirectory, "{}.tar.bz2".format(uploadfilename)))
 
         if not testmode:
-            log.info("Making archive of {}".format(os.path.join(eventmonitordirectory, uploadfilename)))
-            archive_name = shutil.make_archive(os.path.join(eventmonitordirectory, uploadfilename), 'bztar',
+            if os.path.isdir(eventmonitordirectory) and uploadfilename != "":
+             log.info("Making archive of {}".format(os.path.join(eventmonitordirectory, uploadfilename)))
+             archive_name = shutil.make_archive(os.path.join(eventmonitordirectory, uploadfilename), 'b"ztar',
                                            eventmonitordirectory)
-
+            else:
+             log.info("Not making an archive of {}, not sensible.".format(os.path.join(eventmonitordirectory, uploadfilename)))
 
         # Remove the directory where the files were assembled
         if not keepfiles:
