@@ -1019,8 +1019,10 @@ class EventMonitor(multiprocessing.Process):
                 os.remove(os.path.join(eventmonitordirectory, "{}.tar.bz2".format(uploadfilename)))
 
         if not testmode:
+            log.info("Making archive of {}".format(os.path.join(eventmonitordirectory, uploadfilename)))
             archive_name = shutil.make_archive(os.path.join(eventmonitordirectory, uploadfilename), 'bztar',
                                            eventmonitordirectory)
+
 
         # Remove the directory where the files were assembled
         if not keepfiles:
