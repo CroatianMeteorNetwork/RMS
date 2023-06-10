@@ -1020,10 +1020,13 @@ class EventMonitor(multiprocessing.Process):
         if not testmode:
             if os.path.isdir(eventmonitordirectory) and uploadfilename != "":
              log.info("Making archive of {}".format(os.path.join(eventmonitordirectory, uploadfilename)))
+             base_name = os.path.join(eventmonitordirectory,uploadfilename)
+             root_dir = os.path.join(eventmonitordirectory,uploadfilename)
+             base_dir = os.path.join(eventmonitordirectory,uploadfilename)
              log.info("Base name : {}".format(uploadfilename))
-             log.info("Root dir  : {}".format(eventmonitordirectory))
-             log.info("Base dir  : {}".format(os.path.join(eventmonitordirectory,uploadfilename)))
-             archive_name = shutil.make_archive(uploadfilename, 'bztar', eventmonitordirectory, os.path.join(eventmonitordirectory,uploadfilename))
+             log.info("Root dir  : {}".format(root_dir))
+             log.info("Base dir  : {}".format(base_dir))
+             archive_name = shutil.make_archive(base_name, 'bztar', root_dir, base_dir)
             else:
              log.info("Not making an archive of {}, not sensible.".format(os.path.join(eventmonitordirectory, uploadfilename)))
 
