@@ -273,8 +273,7 @@ class EventMonitor(multiprocessing.Process):
 
 
         log.info("Started EventMonitor")
-        log.info("Database {}".format(self.syscon.event_monitor_db_name))
-        log.info("Monitoring {} at {} minute intervals".format(self.syscon.event_monitor_webpage,self.syscon.event_monitor_check_interval))
+        log.info("Monitoring {} at {:3.2f} minute intervals".format(self.syscon.event_monitor_webpage,self.syscon.event_monitor_check_interval))
         log.info("Local db path name {}".format(self.syscon.event_monitor_db_name))
         log.info("Reporting data to {}/{}".format(self.syscon.hostname, self.syscon.event_monitor_remote_dir))
 
