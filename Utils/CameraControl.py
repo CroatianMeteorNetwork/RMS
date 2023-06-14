@@ -531,6 +531,24 @@ def setAutoReboot(cam, opts):
     cam.set_info("General.AutoMaintain", info)
 
 
+def manageCloudConnection(cam, opts):
+    if len(opts) < 1 or opts[0] not in ['on','off','get']: 
+        print('usage: CloudConnection on|off|get')
+        return
+
+    info = cam.get_info("NetWork.Nat") 
+    if opts[0] == 'get':
+        print('Enabled', info['NatEnable'])
+        return 
+    if opts[0] == 'on': 
+        info["NatEnable"] = True
+    else:
+        info["NatEnable"] = False
+    cam.set_info("NetWork.Nat", info) 
+    info = cam.get_info("NetWork.Nat") 
+    print('Enabled', info['NatEnable'])
+
+
 def setParameter(cam, opts):
     """ Set a parameter in various sections of the camera config
 
@@ -571,6 +589,12 @@ def dvripCall(cam, cmd, opts):
     elif cmd == 'GetIP':
         getIP(cam)
 
+    elif cmd == 'GetAutoReboot':
+        getAutoRebootParams(cam, True)
+
+    elif cmd == 'CloudConnection':
+        manageCloudConnection(cam, opts)
+    
     elif cmd == 'GetCameraParams':
         getCameraParams(cam, True)
     
@@ -583,6 +607,7 @@ def dvripCall(cam, cmd, opts):
         getEncodeParams(cam, True)
         getGuiParams(cam, True)
         getColorParams(cam, True)
+        getAutoRebootParams(cam, True)
 
     elif cmd =='SaveSettings':
         nc, dh = getNetworkParams(cam, False)
@@ -662,7 +687,7 @@ if __name__ == '__main__':
     # list of supported commands
     cmd_list = ['reboot', 'GetHostname', 'GetSettings','GetDeviceInformation','GetNetConfig',
         'GetCameraParams','GetEncodeParams','SetParam','SaveSettings', 'LoadSettings', 
-        'SetColor', 'SetOSD', 'SetAutoReboot', 'GetIP']
+        'SetColor', 'SetOSD', 'SetAutoReboot', 'GetIP','GetAutoReboot', 'CloudConnection']
     opthelp='optional parameters for SetParam for example Camera ElecLevel 70 \n' \
         'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first. ' \
         'Call a function with no parameters to see the possibilities'
