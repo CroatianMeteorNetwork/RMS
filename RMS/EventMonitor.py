@@ -163,7 +163,7 @@ class EventContainer(object):
         self.uuid = str(value) if "uuid" == variable_name else self.uuid
         self.respond_to = str(value) if "RespondTo" == variable_name else self.respond_to
 
-    def eventtostring(self):
+    def eventToString(self):
 
         """ Turn an event into a string
 
@@ -220,7 +220,7 @@ class EventContainer(object):
 
         return output
 
-    def checkreasonable(self):
+    def checkReasonable(self):
 
         """ Receive an event, check if it is reasonable, and optionally try to fix it up
             Crucially, this function prevents any excessive requests being made that may compromise capture
@@ -1035,7 +1035,7 @@ class EventMonitor(multiprocessing.Process):
                            ff_component='maxpixel')
 
         with open(os.path.join(event_monitor_directory, upload_filename, "event_report.txt"), "w") as info:
-            info.write(event.eventtostring())
+            info.write(event.eventToString())
 
         # remove any leftover .bz2 files
         if not keep_files:
@@ -1175,7 +1175,7 @@ class EventMonitor(multiprocessing.Process):
         self.join()
         log.info("EventMonitor has stopped")
 
-    def geteventsandcheck(self, testmode=False):
+    def getEventsAndCheck(self, testmode=False):
         """
         Gets event(s) from the webpage, or a local file.
         Calls self.addevent to add them to the database
@@ -1190,7 +1190,7 @@ class EventMonitor(multiprocessing.Process):
 
         events = self.getEventsfromWebPage(testmode)
         for event in events:
-            if event.checkreasonable():
+            if event.checkReasonable():
                 self.addEvent(event)
 
         # Go through all events and check if they need to be uploaded - this iterates through the database
@@ -1204,7 +1204,7 @@ class EventMonitor(multiprocessing.Process):
         while not self.exit.is_set():
 
             log.info("EventMonitor webpage check starting")
-            self.geteventsandcheck()
+            self.getEventsAndCheck()
             log.info("EventMonitor webpage check completed")
             # Wait for the next check
             self.exit.wait(60 * self.check_interval)
@@ -1327,7 +1327,7 @@ if __name__ == "__main__":
 
     if cml_args.one_shot:
         print("EventMonitor running once")
-        em.geteventsandcheck()
+        em.getEventsAndCheck()
 
     else:
         print("EventMonitor running indefinitely")
