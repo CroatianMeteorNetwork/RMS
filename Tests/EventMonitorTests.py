@@ -256,14 +256,14 @@ def testdatabasefunctions(em):
     operationalconfig = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath(''))
 
 
-    em.createEventMonitorDB(testmode = True)
+    em.createEventMonitorDB(test_mode = True)
     #test calling twice
-    em.createEventMonitorDB(testmode = True)
+    em.createEventMonitorDB(test_mode = True)
     dbpath = (os.path.expanduser( os.path.join(operationalconfig.data_dir, operationalconfig.event_monitor_db_name)))
     dbfile = pathlib.Path(dbpath)
     if os.path.exists(dbfile):
       dbfile.unlink()
-    em.createEventMonitorDB(testmode = True)
+    em.createEventMonitorDB(test_mode = True)
     em.addEvent(createatestevent02())
     expectedresult = ['# Required ',
                       'EventTime                : 20230522_183958',
