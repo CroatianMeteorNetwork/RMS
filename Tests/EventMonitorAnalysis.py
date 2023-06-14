@@ -4,7 +4,7 @@ from __future__ import print_function, division, absolute_import
 
 import numpy as np
 
-from RMS.EventMonitor import EventContainer, EventMonitor, convertgmntimetoposix
+from RMS.EventMonitor import EventContainer, EventMonitor, convertGMNTimeToPOSIX
 import RMS.ConfigReader as cr
 
 import os

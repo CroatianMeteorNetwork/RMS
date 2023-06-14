@@ -2,7 +2,7 @@
 
 from __future__ import print_function, division, absolute_import
 
-from RMS.EventMonitor import EventContainer, EventMonitor, convertgmntimetoposix
+from RMS.EventMonitor import EventContainer, EventMonitor, convertGMNTimeToPOSIX
 import RMS.ConfigReader as cr
 
 import os
@@ -24,78 +24,78 @@ filename = "platepars.tar.bz2"
 def createatestevent02():
 
     testevent = EventContainer("", 0, 0, 0)
-    testevent.setvalue("EventTime", "20230522_183958")
-    testevent.setvalue("TimeTolerance", 60)
-    testevent.setvalue("EventLat", -33.681098)
-    testevent.setvalue("EventLatStd", 0.31)
-    testevent.setvalue("EventLon", 116.346892)
-    testevent.setvalue("EventLonStd", 0.32)
-    testevent.setvalue("EventHt", 109.6105)
-    testevent.setvalue("EventHtStd", 15)
-    testevent.setvalue("CloseRadius", 152)
-    testevent.setvalue("FarRadius", 153)
+    testevent.setValue("EventTime", "20230522_183958")
+    testevent.setValue("TimeTolerance", 60)
+    testevent.setValue("EventLat", -33.681098)
+    testevent.setValue("EventLatStd", 0.31)
+    testevent.setValue("EventLon", 116.346892)
+    testevent.setValue("EventLonStd", 0.32)
+    testevent.setValue("EventHt", 109.6105)
+    testevent.setValue("EventHtStd", 15)
+    testevent.setValue("CloseRadius", 152)
+    testevent.setValue("FarRadius", 153)
 
-    testevent.setvalue("EventLat2", -33.790603)
-    testevent.setvalue("EventLat2Std", 0.33)
-    testevent.setvalue("EventLon2", 115.533457)
-    testevent.setvalue("EventLon2Std", 0.34)
-    testevent.setvalue("EventHt2", 72.9885)
-    testevent.setvalue("EventHt2Std", 0.35)
+    testevent.setValue("EventLat2", -33.790603)
+    testevent.setValue("EventLat2Std", 0.33)
+    testevent.setValue("EventLon2", 115.533457)
+    testevent.setValue("EventLon2Std", 0.34)
+    testevent.setValue("EventHt2", 72.9885)
+    testevent.setValue("EventHt2Std", 0.35)
 
     testuuid = "27e4a2d7-4111-4a72-8a30-969f71fc9207"
-    testevent.setvalue("uuid", testuuid)
+    testevent.setValue("uuid", testuuid)
 
     return testevent
 
 def createatestevent03():
 
     testevent = EventContainer("", 0, 0, 0)
-    testevent.setvalue("EventTime", "20230525_190849")
-    testevent.setvalue("TimeTolerance", 60)
-    testevent.setvalue("EventLat", -33.558046)
-    testevent.setvalue("EventLatStd", 0.31)
-    testevent.setvalue("EventLon", 114.99615)
-    testevent.setvalue("EventLonStd", 0.32)
-    testevent.setvalue("EventHt", 92.2191)
-    testevent.setvalue("EventHtStd", 15)
-    testevent.setvalue("CloseRadius", 152)
-    testevent.setvalue("FarRadius", 153)
+    testevent.setValue("EventTime", "20230525_190849")
+    testevent.setValue("TimeTolerance", 60)
+    testevent.setValue("EventLat", -33.558046)
+    testevent.setValue("EventLatStd", 0.31)
+    testevent.setValue("EventLon", 114.99615)
+    testevent.setValue("EventLonStd", 0.32)
+    testevent.setValue("EventHt", 92.2191)
+    testevent.setValue("EventHtStd", 15)
+    testevent.setValue("CloseRadius", 152)
+    testevent.setValue("FarRadius", 153)
 
-    testevent.setvalue("EventLat2", -33.564671)
-    testevent.setvalue("EventLat2Std", 0.33)
-    testevent.setvalue("EventLon2", 115.039056)
-    testevent.setvalue("EventLon2Std", 0.34)
-    testevent.setvalue("EventHt2", 79.9325)
-    testevent.setvalue("EventHt2Std", 0.35)
+    testevent.setValue("EventLat2", -33.564671)
+    testevent.setValue("EventLat2Std", 0.33)
+    testevent.setValue("EventLon2", 115.039056)
+    testevent.setValue("EventLon2Std", 0.34)
+    testevent.setValue("EventHt2", 79.9325)
+    testevent.setValue("EventHt2Std", 0.35)
 
     testuuid = "28e4a2d7-4111-4a72-8a30-969f71fc9207"
-    testevent.setvalue("uuid", testuuid)
+    testevent.setValue("uuid", testuuid)
 
     return testevent
 
 def createatestevent04():
 
     testevent = EventContainer("", 0, 0, 0)
-    testevent.setvalue("EventTime", "20230525_190849")
-    testevent.setvalue("TimeTolerance", 60)
-    testevent.setvalue("EventLat", -33.558046)
-    testevent.setvalue("EventLatStd", 0.31)
-    testevent.setvalue("EventLon", 114.99615)
-    testevent.setvalue("EventLonStd", 0.32)
-    testevent.setvalue("EventHt", 92.2191)
-    testevent.setvalue("EventHtStd", 15)
-    testevent.setvalue("CloseRadius", 152)
-    testevent.setvalue("FarRadius", 153)
+    testevent.setValue("EventTime", "20230525_190849")
+    testevent.setValue("TimeTolerance", 60)
+    testevent.setValue("EventLat", -33.558046)
+    testevent.setValue("EventLatStd", 0.31)
+    testevent.setValue("EventLon", 114.99615)
+    testevent.setValue("EventLonStd", 0.32)
+    testevent.setValue("EventHt", 92.2191)
+    testevent.setValue("EventHtStd", 15)
+    testevent.setValue("CloseRadius", 152)
+    testevent.setValue("FarRadius", 153)
 
-    testevent.setvalue("EventLat2", -33.564671)
-    testevent.setvalue("EventLat2Std", 0.33)
-    testevent.setvalue("EventLon2", 115.039056)
-    testevent.setvalue("EventLon2Std", 0.34)
-    testevent.setvalue("EventHt2", 79.9325)
-    testevent.setvalue("EventHt2Std", 0.35)
+    testevent.setValue("EventLat2", -33.564671)
+    testevent.setValue("EventLat2Std", 0.33)
+    testevent.setValue("EventLon2", 115.039056)
+    testevent.setValue("EventLon2Std", 0.34)
+    testevent.setValue("EventHt2", 79.9325)
+    testevent.setValue("EventHt2Std", 0.35)
 
     testuuid = "28e4a2d7-4111-4a72-8a30-969f71fc9207"
-    testevent.setvalue("uuid", testuuid)
+    testevent.setValue("uuid", testuuid)
 
     return testevent
 
@@ -103,78 +103,78 @@ def createatestevent04():
 def createatestevent05():
 
     testevent = EventContainer("", 0, 0, 0)
-    testevent.setvalue("EventTime", "20230517_111327")
-    testevent.setvalue("TimeTolerance", 60)
-    testevent.setvalue("EventLat", -33.478619)
-    testevent.setvalue("EventLatStd", 0.31)
-    testevent.setvalue("EventLon", 115.785164)
-    testevent.setvalue("EventLonStd", 0.32)
-    testevent.setvalue("EventHt", 97.5045)
-    testevent.setvalue("EventHtStd", 15)
-    testevent.setvalue("CloseRadius", 152)
-    testevent.setvalue("FarRadius", 153)
+    testevent.setValue("EventTime", "20230517_111327")
+    testevent.setValue("TimeTolerance", 60)
+    testevent.setValue("EventLat", -33.478619)
+    testevent.setValue("EventLatStd", 0.31)
+    testevent.setValue("EventLon", 115.785164)
+    testevent.setValue("EventLonStd", 0.32)
+    testevent.setValue("EventHt", 97.5045)
+    testevent.setValue("EventHtStd", 15)
+    testevent.setValue("CloseRadius", 152)
+    testevent.setValue("FarRadius", 153)
 
-    testevent.setvalue("EventLat2", -32.694214)
-    testevent.setvalue("EventLat2Std", 0.33)
-    testevent.setvalue("EventLon2", 115.708743)
-    testevent.setvalue("EventLon2Std", 0.34)
-    testevent.setvalue("EventHt2", 81.0418)
-    testevent.setvalue("EventHt2Std", 0.35)
+    testevent.setValue("EventLat2", -32.694214)
+    testevent.setValue("EventLat2Std", 0.33)
+    testevent.setValue("EventLon2", 115.708743)
+    testevent.setValue("EventLon2Std", 0.34)
+    testevent.setValue("EventHt2", 81.0418)
+    testevent.setValue("EventHt2Std", 0.35)
 
     testuuid = "28e4a2d7-4111-4a72-8a30-969f71fc9207"
-    testevent.setvalue("uuid", testuuid)
+    testevent.setValue("uuid", testuuid)
 
     return testevent
 
 def createatestevent06():
 
     testevent = EventContainer("", 0, 0, 0)
-    testevent.setvalue("EventTime", "20230526_115827")
-    testevent.setvalue("TimeTolerance", 60)
-    testevent.setvalue("EventLat", -31.797397)
-    testevent.setvalue("EventLatStd", 0.31)
-    testevent.setvalue("EventLon", 118.132762)
-    testevent.setvalue("EventLonStd", 0.32)
-    testevent.setvalue("EventHt", 94.2331)
-    testevent.setvalue("EventHtStd", 15)
-    testevent.setvalue("CloseRadius", 152)
-    testevent.setvalue("FarRadius", 153)
+    testevent.setValue("EventTime", "20230526_115827")
+    testevent.setValue("TimeTolerance", 60)
+    testevent.setValue("EventLat", -31.797397)
+    testevent.setValue("EventLatStd", 0.31)
+    testevent.setValue("EventLon", 118.132762)
+    testevent.setValue("EventLonStd", 0.32)
+    testevent.setValue("EventHt", 94.2331)
+    testevent.setValue("EventHtStd", 15)
+    testevent.setValue("CloseRadius", 152)
+    testevent.setValue("FarRadius", 153)
 
-    testevent.setvalue("EventLat2", -32.657057)
-    testevent.setvalue("EventLat2Std", 0.33)
-    testevent.setvalue("EventLon2", 118.349618)
-    testevent.setvalue("EventLon2Std", 0.34)
-    testevent.setvalue("EventHt2", 69.2098)
-    testevent.setvalue("EventHt2Std", 0.35)
+    testevent.setValue("EventLat2", -32.657057)
+    testevent.setValue("EventLat2Std", 0.33)
+    testevent.setValue("EventLon2", 118.349618)
+    testevent.setValue("EventLon2Std", 0.34)
+    testevent.setValue("EventHt2", 69.2098)
+    testevent.setValue("EventHt2Std", 0.35)
 
     testuuid = "28e4a2d7-4111-4a72-8a30-969f71fc9207"
-    testevent.setvalue("uuid", testuuid)
+    testevent.setValue("uuid", testuuid)
 
     return testevent
 
 def createatestevent07():
 
     testevent = EventContainer("", 0, 0, 0)
-    testevent.setvalue("EventTime", "20230526_205441")
-    testevent.setvalue("TimeTolerance", 60)
-    testevent.setvalue("EventLat", -32.263726)
-    testevent.setvalue("EventLatStd", 0.31)
-    testevent.setvalue("EventLon", 116.016066)
-    testevent.setvalue("EventLonStd", 0.32)
-    testevent.setvalue("EventHt", 89.0537)
-    testevent.setvalue("EventHtStd", 15)
-    testevent.setvalue("CloseRadius", 152)
-    testevent.setvalue("FarRadius", 153)
+    testevent.setValue("EventTime", "20230526_205441")
+    testevent.setValue("TimeTolerance", 60)
+    testevent.setValue("EventLat", -32.263726)
+    testevent.setValue("EventLatStd", 0.31)
+    testevent.setValue("EventLon", 116.016066)
+    testevent.setValue("EventLonStd", 0.32)
+    testevent.setValue("EventHt", 89.0537)
+    testevent.setValue("EventHtStd", 15)
+    testevent.setValue("CloseRadius", 152)
+    testevent.setValue("FarRadius", 153)
 
-    testevent.setvalue("EventLat2", -32.187818)
-    testevent.setvalue("EventLat2Std", 0.33)
-    testevent.setvalue("EventLon2", 116.111370)
-    testevent.setvalue("EventLon2Std", 0.34)
-    testevent.setvalue("EventHt2", 80.8778)
-    testevent.setvalue("EventHt2Std", 0.35)
+    testevent.setValue("EventLat2", -32.187818)
+    testevent.setValue("EventLat2Std", 0.33)
+    testevent.setValue("EventLon2", 116.111370)
+    testevent.setValue("EventLon2Std", 0.34)
+    testevent.setValue("EventHt2", 80.8778)
+    testevent.setValue("EventHt2Std", 0.35)
 
     testuuid = "28e4a2d7-4111-4a72-8a30-969f71fc9207"
-    testevent.setvalue("uuid", testuuid)
+    testevent.setValue("uuid", testuuid)
 
     return testevent
 
@@ -264,7 +264,7 @@ def testdatabasefunctions(em):
     if os.path.exists(dbfile):
       dbfile.unlink()
     em.createEventMonitorDB(testmode = True)
-    em.addevent(createatestevent02())
+    em.addEvent(createatestevent02())
     expectedresult = ['# Required ',
                       'EventTime                : 20230522_183958',
                       'TimeTolerance (s)        : 60',
@@ -324,14 +324,14 @@ def testdatabasefunctions(em):
          print("DB retrieval fail")
          quit()
 
-    if em.addevent(createatestevent02()):
+    if em.addEvent(createatestevent02()):
         print("Quit - added same event twice")
         quit()
     else:
         print("DB rejected duplicate event success")
     pass
 
-    em.markeventasprocessed(eventlist[0])
+    em.markEventAsProcessed(eventlist[0])
 
 
 def testclosestpoint():
@@ -349,7 +349,7 @@ def testclosestpoint():
     shellcommand = "cd {} ; ".format(pathtoplatepars)
     shellcommand += "rm -rf platepars"
     em = EventMonitor(opcon)
-    em.addevent(createatestevent03())
+    em.addEvent(createatestevent03())
     events = em.getUnprocessedEventsfromDB()
     e=events[0]
 
@@ -387,9 +387,9 @@ def testtrajectorythroughfovquick(em):
 
     #Test a trajectory that is inside the FoV of AU0006.
 
-    em.addevent(createatestevent03())
+    em.addEvent(createatestevent03())
 
-    pifov, sd, sa, ed, ea, fovra, fovdec = em.trajectoryvisible(testrp1, em.getUnprocessedEventsfromDB()[0])
+    pifov, sd, sa, ed, ea, fovra, fovdec = em.trajectoryVisible(testrp1, em.getUnprocessedEventsfromDB()[0])
 
     if pifov != 100:
         print("FOV calculations failed - AU0006 false negative")
@@ -401,7 +401,7 @@ def testtrajectorythroughfovquick(em):
     testrp1.read(os.path.join(os.path.expanduser(au0009platepars), "platepar_cmn2010.cal"))
     opcon = cr.parse(os.path.join(os.path.expanduser(au0009platepars), ".config"), os.path.abspath('eventmonitor'))
 
-    pifov, sd, sa, ed, ea, fovra, fovdec = em.trajectoryvisible(testrp1,
+    pifov, sd, sa, ed, ea, fovra, fovdec = em.trajectoryVisible(testrp1,
                                                                 em.getUnprocessedEventsfromDB()[0])
 
     if pifov != 0:
@@ -420,16 +420,16 @@ def testtrajectorythroughfovquick(em):
     testrp1.read(os.path.join(os.path.expanduser(au0006platepars), "platepar_cmn2010.cal"))
     opcon = cr.parse(os.path.join(os.path.expanduser(au0006platepars), ".config"), os.path.abspath(''))
 
-    em.addevent(createatestevent05())
-    pifov06, sd, sa, ed, ea, fovra, fovdec = em.trajectoryvisible(testrp1,
+    em.addEvent(createatestevent05())
+    pifov06, sd, sa, ed, ea, fovra, fovdec = em.trajectoryVisible(testrp1,
                                                                   em.getUnprocessedEventsfromDB()[1])
 
     testrp1.read(
         os.path.join(os.path.expanduser(au0009platepars), "platepar_cmn2010.cal"))
     opcon = cr.parse(os.path.join(os.path.expanduser(au0009platepars), ".config"), os.path.abspath(''))
 
-    em.addevent(createatestevent05())
-    pifov09, sd, sa, ed, ea, fovra, fovdec = em.trajectoryvisible(testrp1,
+    em.addEvent(createatestevent05())
+    pifov09, sd, sa, ed, ea, fovra, fovdec = em.trajectoryVisible(testrp1,
                                                                   em.getUnprocessedEventsfromDB()[1])
 
     if pifov06 != 100 or pifov09 != 100:
@@ -445,13 +445,13 @@ def testtrajectorythroughfovquick(em):
     # refer to
     # https://globalmeteornetwork.org/weblog//AU/AU001B/AU001B_20230526_094222_772451_detected/AU001B_20230526_094222_772451_DETECTED_thumbs.jpg
 
-    em.addevent(createatestevent06())
+    em.addEvent(createatestevent06())
 
     testrp1.read(
         os.path.join(os.path.expanduser(au0009platepars), "platepar_cmn2010.cal"))
     opcon = cr.parse(os.path.join(os.path.expanduser(au0009platepars), ".config"), os.path.abspath(''))
 
-    pifov09, sd, sa, ed, ea, fovra, fovdec = em.trajectoryvisible(testrp1,
+    pifov09, sd, sa, ed, ea, fovra, fovdec = em.trajectoryVisible(testrp1,
                                                                   em.getUnprocessedEventsfromDB()[2])
 
     testrp1.read(
@@ -459,7 +459,7 @@ def testtrajectorythroughfovquick(em):
     opcon = cr.parse(os.path.join(os.path.expanduser(au0006platepars), ".config"), os.path.abspath(''))
 
 
-    pifov06, sd, sa, ed, ea, fovra, fovdec = em.trajectoryvisible(testrp1, em.getUnprocessedEventsfromDB()[2])
+    pifov06, sd, sa, ed, ea, fovra, fovdec = em.trajectoryVisible(testrp1, em.getUnprocessedEventsfromDB()[2])
 
     if pifov06 != 0 or pifov09 != 0:
         print("Fov Calculations failed - AU0006 or AU0009 false postive")
@@ -477,8 +477,8 @@ def testtrajectorythroughfovquick(em):
         os.path.join(os.path.expanduser(au000kplatepars), "platepar_cmn2010.cal"))
     opcon = cr.parse(os.path.join(os.path.expanduser(au000kplatepars), ".config"), os.path.abspath(''))
 
-    em.addevent(createatestevent07())
-    pifov0K, sd, sa, ed, ea, fovra, fovdec = em.trajectoryvisible(testrp1, em.getUnprocessedEventsfromDB()[3])
+    em.addEvent(createatestevent07())
+    pifov0K, sd, sa, ed, ea, fovra, fovdec = em.trajectoryVisible(testrp1, em.getUnprocessedEventsfromDB()[3])
     if pifov0K != 100:
         print("Fov Calculations failed - AU000K false negative")
         quit()
@@ -487,17 +487,7 @@ def testtrajectorythroughfovquick(em):
 
     # now fake the camera alt
     testrp1.alt_centre += 10
-    pifov0K, sd, sa, ed, ea, fovra, fovdec = em.trajectoryvisible(testrp1,
-                                                          em.getUnprocessedEventsfromDB()[3])
-
-    if pifov0K == 100:
-        print("Fov Calculations failed - AU000K with a fake offset returned same value")
-        print("Safe to ignore this fail, because the Alt and Az are now calculated from the Ra Dec")
-    else:
-        print("Fov Calculation success - AU000K returned only partial trajectory - {}%".format(pifov0K))
-
-    testrp1.az_centre += 10
-    pifov0K, sd, sa, ed, ea, fovra, fovdec = em.trajectoryvisible(testrp1,
+    pifov0K, sd, sa, ed, ea, fovra, fovdec = em.trajectoryVisible(testrp1,
                                                                   em.getUnprocessedEventsfromDB()[3])
 
     if pifov0K == 100:
@@ -507,7 +497,17 @@ def testtrajectorythroughfovquick(em):
         print("Fov Calculation success - AU000K returned only partial trajectory - {}%".format(pifov0K))
 
     testrp1.az_centre += 10
-    pifov0K, sd, sa, ed, ea, fovra, fovdec = em.trajectoryvisible(testrp1,
+    pifov0K, sd, sa, ed, ea, fovra, fovdec = em.trajectoryVisible(testrp1,
+                                                                  em.getUnprocessedEventsfromDB()[3])
+
+    if pifov0K == 100:
+        print("Fov Calculations failed - AU000K with a fake offset returned same value")
+        print("Safe to ignore this fail, because the Alt and Az are now calculated from the Ra Dec")
+    else:
+        print("Fov Calculation success - AU000K returned only partial trajectory - {}%".format(pifov0K))
+
+    testrp1.az_centre += 10
+    pifov0K, sd, sa, ed, ea, fovra, fovdec = em.trajectoryVisible(testrp1,
                                                                   em.getUnprocessedEventsfromDB()[3])
 
     if pifov0K !=0 :
@@ -523,7 +523,7 @@ def testtrajectorythroughfovquick(em):
         print("Fov Calculation success - AU000K returned only partial trajectory - {}%".format(pifov0K))
 
     testrp1.RA_d  += 10
-    pifov0K, sd, sa, ed, ea, fovra, fovdec = em.trajectoryvisible(testrp1,
+    pifov0K, sd, sa, ed, ea, fovra, fovdec = em.trajectoryVisible(testrp1,
                                                                   em.getUnprocessedEventsfromDB()[3])
 
     if pifov0K == 100:
@@ -533,7 +533,7 @@ def testtrajectorythroughfovquick(em):
         print("Fov Calculation success - AU000K returned only partial trajectory - {}%".format(pifov0K))
 
     testrp1.RA_d += 10
-    pifov0K, sd, sa, ed, ea, fovra, fovdec = em.trajectoryvisible(testrp1,
+    pifov0K, sd, sa, ed, ea, fovra, fovdec = em.trajectoryVisible(testrp1,
                                                                   em.getUnprocessedEventsfromDB()[3])
 
     if pifov0K != 0:
@@ -637,10 +637,10 @@ def fullsystemtest(config,em):
                                # and write an event_watch.txt file
                                # prepare an event and write to the local file for testing
                                tev = EventContainer(0,0,0,0)
-                               tev.dt, tev.timetolerance      = parser.parse(eventtime).strftime("%Y%m%d_%H%M%S"), 5
+                               tev.dt, tev.time_tolerance      = parser.parse(eventtime).strftime("%Y%m%d_%H%M%S"), 5
                                tev.lat, tev.lon, tev.ht       = float(latbeg), float(lonbeg), float(htbeg)
                                tev.lat2, tev.lon2, tev.ht2    = float(latend), float(lonend), float(htend)
-                               tev.closeradius, tev.farradius = 1, 1000
+                               tev.close_radius, tev.far_radius = 1, 1000
 
                                with open(os.path.expanduser('~/RMS_data/event_watchlist.txt'), 'wt') as watchfh:
                                  watchfh.write(tev.eventtostring() + "\n")
@@ -665,7 +665,7 @@ def fullsystemtest(config,em):
         unprocessedevents = em.getUnprocessedEventsfromDB()
         # because we are in testmode, the events do not get marked as processed,
         for unprocessedevent in unprocessedevents:
-            em.markeventasprocessed(unprocessedevent)
+            em.markEventAsProcessed(unprocessedevent)
 
 
 
@@ -681,7 +681,7 @@ def testindividuals():
 
 
 
-    if convertgmntimetoposix("20210925_163127") == datetime(2021,9,25,16,31,27):
+    if convertGMNTimeToPOSIX("20210925_163127") == datetime(2021, 9, 25, 16, 31, 27):
         print("convertgmntimetoposix success")
     else:
         print("convertgmntimetoposix fail")
