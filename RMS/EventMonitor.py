@@ -400,7 +400,7 @@ class EventMonitor(multiprocessing.Process):
         sql_statement = ""
         sql_statement += "DELETE from event_monitor \n"
         sql_statement += "WHERE                     \n"
-        sql_statement += "timeadded < date('now', '-14 day')"
+        sql_statement += "timeadded < date('now', '-1 day')"
 
         try:
          cursor = self.db_conn.cursor()
