@@ -48,6 +48,7 @@ from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight
 from RMS.RunExternalScript import runExternalScript
 from RMS.UploadManager import UploadManager
+from RMS.EventMonitor import EventMonitor
 
 # Flag indicating that capturing should be stopped
 STOP_CAPTURE = False
@@ -473,6 +474,14 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     upload_manager.stop()
                     del upload_manager
 
+            if eventmonitor is not None:
+
+                # Stop the eventmonitor manager
+                if eventmonitor.is_alive():
+                    log.debug('Closing eventmonitor...')
+                    eventmonitor.stop()
+                    del eventmonitor
+
 
             # Terminate the detector
             if detector is not None:
@@ -542,6 +551,14 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             if upload_manager.is_alive():
                 upload_manager.stop()
                 log.info('Closing upload manager...')
+
+        if 'eventmonitor' in locals():
+         if eventmonitor is not None:
+            # Stop the eventmonitor
+            if eventmonitor.is_alive():
+                log.debug('Closing eventmonitor...')
+                eventmonitor.stop()
+                del eventmonitor
 
         sys.exit()
 
@@ -775,6 +792,13 @@ if __name__ == "__main__":
         upload_manager = UploadManager(config)
         upload_manager.start()
 
+    eventmonitor = None
+
+    if config.event_monitor_enabled:
+        # Init the event monitor
+        log.info('Starting the event monitor...')
+        eventmonitor = EventMonitor(config)
+        eventmonitor.start()
 
     # Automatic running and stopping the capture at sunrise and sunset
     ran_once = False
@@ -868,6 +892,16 @@ if __name__ == "__main__":
                         log.debug('Closing upload manager...')
                         upload_manager.stop()
                         del upload_manager
+
+                if eventmonitor is not None:
+
+                    # Stop the eventmonitor
+                    if eventmonitor.is_alive():
+                        log.debug('Closing eventmonitor...')
+                        eventmonitor.stop()
+                        del eventmonitor
+
+
 
                 sys.exit()
 
@@ -963,9 +997,17 @@ if __name__ == "__main__":
                             upload_manager.stop()
                             del upload_manager
 
+                    if eventmonitor is not None:
+
+                        # Stop the eventmonitor
+                        if eventmonitor.is_alive():
+                             log.debug('Closing eventmonitor...')
+                             eventmonitor.stop()
+                             del eventmonitor
 
                         # Stop the slideshow if it was on
                         if slideshow_view is not None:
+
                             log.info("Stopping slideshow...")
                             slideshow_view.stop()
                             slideshow_view.join()
@@ -1039,3 +1081,11 @@ if __name__ == "__main__":
             log.debug('Closing upload manager...')
             upload_manager.stop()
             del upload_manager
+
+    if eventmonitor is not None:
+
+    # Stop the event monitor
+        if eventmonitor.is_alive():
+             log.debug('Closing eventmonitor...')
+             eventmonitor.stop()
+             del eventmonitor

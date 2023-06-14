@@ -236,6 +236,7 @@ class Config:
         self.cams_code = 0
 
 
+
         # Show this camera on the GMN weblog
         self.weblog_enable = True
 
@@ -351,6 +352,15 @@ class Config:
 
         # 1 - Normal, 2 - Skip uploading FFs, 3 - Skip FFs and FRs
         self.upload_mode = 1
+
+        self.event_monitor_enabled = False
+        self.event_monitor_db_name = "event_monitor.db"
+        self.event_monitor_webpage = "https://globalmeteornetwork.org/data/event_watchlist.txt"
+        self.event_monitor_remote_dir = "files/event_monitor"
+        self.event_monitor_check_interval = 30
+        self.event_monitor_check_interval_fast = 5
+
+
 
 
         ##### Weave compilation arguments
@@ -533,6 +543,10 @@ class Config:
 
         # Maximum distance from shower radiant (degrees)
         self.shower_max_radiant_separation = 7.5
+
+        #### Event Monitor
+
+        self.event_monitor_db_name = "event_monitor.db"
 
 
 def normalizeParameter(param, config, binning=1):
@@ -737,7 +751,10 @@ def parseSystem(config, parser):
 
     if parser.has_option(section, "reboot_lock_file"):
         config.reboot_lock_file = parser.get(section, "reboot_lock_file")
-        
+
+
+    if parser.has_option(section, "event_monitor_db_name"):
+        config.event_monitor_db_name = parser.get(section, "event_monitor_db_name")
 
 
 def parseCapture(config, parser):
@@ -937,8 +954,6 @@ def parseCapture(config, parser):
     if parser.has_option(section, "postprocess_delay"):
         config.postprocess_delay = parser.getint(section, "postprocess_delay")
 
-
-
 def parseUpload(config, parser):
     section = "Upload"
     
@@ -976,7 +991,29 @@ def parseUpload(config, parser):
     # SSH port
     if parser.has_option(section, "upload_mode"):
         config.upload_mode = parser.getint(section, "upload_mode")
-        
+
+    # Event monitor enabled
+    if parser.has_option(section, "event_monitor_enabled"):
+        config.event_monitor_enabled = parser.getboolean(section, "event_monitor_enabled")
+
+
+    # Name to use for eventmonitor database
+    if parser.has_option(section, "event_monitor_db_name"):
+        config.event_monitor_webpage = parser.get(section, "event_monitor_db_name")
+
+    # Address to look for watchlist
+    if parser.has_option(section, "event_monitor_webpage"):
+        config.event_monitor_webpage = parser.get(section, "event_monitor_webpage")
+
+    # Directory on the server where the events will be uploaded to
+    if parser.has_option(section, "event_monitor_remote_dir"):
+        config.event_monitor_remote_dir = parser.get(section, "event_monitor_remote_dir")
+
+    if parser.has_option(section, "event_monitor_check_interval"):
+        config.event_monitor_check_interval = parser.getint(section, "event_monitor_check_interval")
+
+    if parser.has_option(section, "event_monitor_check_interval_fast"):
+        config.event_monitor_check_interval_fast = parser.getint(section, "event_monitor_check_interval_fast")
 
 
 def parseBuildArgs(config, parser):

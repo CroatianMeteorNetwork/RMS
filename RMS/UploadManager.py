@@ -84,7 +84,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
         hostname: [str] Server name or IP address.
         username: [str] Username used for connecting to the server.
         dir_local: [str] Path to the local directory where the local files are located.
-        dir_remove: [str] Path on the server where the files will be stored.
+        dir_remote: [str] Path on the server where the files will be stored.
         file_list: [list or strings] A list of files to the uploaded to the server.
 
     Ketword arguments:
@@ -135,7 +135,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
             # Get the size of the local file
             local_file_size = os.lstat(local_file).st_size
 
-            # Path to the remove file
+            # Path to the remote file
             remote_file = dir_remote + '/' + os.path.basename(fname)
 
             # Check if the remote file already exists and skip it if it has the same size as the local file
@@ -153,7 +153,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
 
             
             # Upload the file to the server if it isn't already there
-            log.info('Copying ' + local_file + ' to ' + remote_file)
+            log.info('Copying ' + local_file + ' ({:3.2f}MB) to '.format(int(local_file_size)/ (1024*1024)) + remote_file)
             sftp.put(local_file, remote_file)
 
 
