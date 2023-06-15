@@ -407,13 +407,14 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
     if os.path.isfile(os.path.join(dir_path, unfiltered_name)):
 
         # if we're reprocessing a folder after config or plate changes we need to remove the 
-        # _unfiltered file so that the ML routine processes the new FTPdetect file. This will be the majority of cases
+        # unfiltered file so that the ML routine processes the new FTPdetect file.
         if clear_prev_run is True:
             os.remove(os.path.join(dir_path, unfiltered_name))
-            log.info("Removing previous run data...")
+            log.info("Removing previous run data " + ftpdetectinfo_path)
 
         else:
-            # however we might want to reprocess the original unfiltered data instead. 
+            # If we are reprocessing with a different threshold 
+            # we want to reprocess the original unfiltered data.
             ftpdetectinfo_path = os.path.join(dir_path, unfiltered_name)
             file_name = unfiltered_name
 
