@@ -376,19 +376,19 @@ def makePNGCrops(FTP_path, FF_dir_path):
 
 def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=False, clear_prev_run=False):
     """ Using machine learning, reject false positivies and only keep real meteors. An updated FTPdetectinfo
-        file will be saved.
+        file will be saved.  
 
-    Arguments:
-        config: [object] RMS config object
-        ftpdetectinfo_path: [str] Path of FTPDetectinfo file.
+    Arguments:  
+        config: [object] RMS config object  
+        ftpdetectinfo_path: [str] Path of FTPDetectinfo file.  
 
-    Keyword arguments:
-        threshold: [float] Threshold meteor/non-meteor classification (0-1 range).
-        keep_pngs: [bool] Whether to keep or delete the temporary PNGs.
-        clear_prev_run: [bool] whether or not to remove any previous run's data - required when reprocessing a folder. 
+    Keyword arguments:  
+        threshold: [float] Threshold meteor/non-meteor classification (0-1 range).  
+        keep_pngs: [bool] Whether to keep or delete the temporary PNGs.  
+        clear_prev_run: [bool] whether or not to remove any previous run's data - required when reprocessing a folder.   
     
-    Return:
-        unfiltered count, filtered count
+    Return:  
+        unfiltered count, filtered count  
     
     """
 
