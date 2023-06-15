@@ -374,16 +374,18 @@ def makePNGCrops(FTP_path, FF_dir_path):
 
 
 
-def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=False):
+def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=False, clear_prev_run=False):
     """ Using machine learning, reject false positivies and only keep real meteors. An updated FTPdetectinfo
         file will be saved.
 
     Arguments:
+        config: [object] RMS config object
         ftpdetectinfo_path: [str] Path of FTPDetectinfo file.
 
     Keyword arguments:
         threshold: [float] Threshold meteor/non-meteor classification (0-1 range).
         keep_pngs: [bool] Whether to keep or delete the temporary PNGs.
+        clear_prev_run: [bool] whether or not to remove any previous run's data - required when reprocessing a folder. 
     
     Return:
         unfiltered count, filtered count
@@ -403,12 +405,20 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
     orig_name = file_name
 
     if os.path.isfile(os.path.join(dir_path, unfiltered_name)):
-        
-        ftpdetectinfo_path = os.path.join(dir_path, unfiltered_name)
-        file_name = unfiltered_name
 
-        log.info("Module was previously run, using the original unfiltered FTPdetect file: " \
-            + ftpdetectinfo_path)
+        # if we're reprocessing a folder after config or plate changes we need to remove the 
+        # _unfiltered file so that the ML routine processes the new FTPdetect file. This will be the majority of cases
+        if clear_prev_run is True:
+            os.remove(os.path.join(dir_path, unfiltered_name))
+            log.info("Removing previous run data...")
+
+        else:
+            # however we might want to reprocess the original unfiltered data instead. 
+            ftpdetectinfo_path = os.path.join(dir_path, unfiltered_name)
+            file_name = unfiltered_name
+
+            log.info("Module was previously run, using the original unfiltered FTPdetect file: " \
+                + ftpdetectinfo_path)
     
     
     # Load the appropriate FTPdetectioninfo file containing unfiltered detections
@@ -564,6 +574,10 @@ if __name__ == "__main__":
     arg_parser.add_argument('--keep_pngs', '-p', action="store_true",
         help='Keep the temporary PNG crops on which the ML filter is run pngs. They will be deleted by default.')
 
+    arg_parser.add_argument('--clear_prev_run', '-r', action="store_true",
+        help='Remove the files created by the last run. Required if reprocessing after a plate change.\n' \
+            'However, if you are reprocessing the same data with a different threshold, set to False')
+
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
                             help="Path to a config file which will be used instead of the default one."
                             " To load the .config file in the given data directory, write '.' (dot).")
@@ -588,4 +602,4 @@ if __name__ == "__main__":
 
     # Run ML filtering
     ftpdetectinfo_path = os.path.abspath(cml_args.ftpdetectinfo_path)
-    filterFTPdetectinfoML(config, ftpdetectinfo_path, cml_args.threshold, cml_args.keep_pngs)
+    filterFTPdetectinfoML(config, ftpdetectinfo_path, cml_args.threshold, cml_args.keep_pngs, cml_args.clear_prev_run)
