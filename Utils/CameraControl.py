@@ -1,3 +1,4 @@
+# noqa:E501,W291
 """ Controls CMS-compatible IP camera 
     This module can read and control the IMX291 Cameras and possibly other IMX cameras
     that comply with the dvrip protocol and can be controlled from CMS.
@@ -66,6 +67,7 @@ import pprint
 import re
 import RMS.ConfigReader as cr
 from time import sleep
+import datetime
 
 # if not present, force update of the submodule
 
@@ -183,8 +185,9 @@ def getNetworkParams(cam, showit=True):
     Returns:
         json block containing the config
     """
-    nc=cam.get_info("NetWork.NetCommon")
-    dh=cam.get_info("NetWork.NetDHCP")
+    nc = cam.get_info("NetWork.NetCommon")
+    dh = cam.get_info("NetWork.NetDHCP")
+    nt = cam.get_info("NetWork.NetNTP")
 
     if showit is True:
         print('IP Address  : ', iptoString(nc['HostIP']))
@@ -192,7 +195,9 @@ def getNetworkParams(cam, showit=True):
         pprint.pprint(nc)
         print('---------')
         pprint.pprint(dh)
-    return nc, dh
+        print('---------')
+        pprint.pprint(nt)
+    return nc, dh, nt
 
 
 def getIP(cam):
@@ -362,6 +367,10 @@ def setNetworkParam(cam, opts):
             print('DHCP disabled')
         #dh = cam.get_info("NetWork.NetDHCP.[0]")
 
+    elif fld == 'setTimezone':
+        val = opts[2]
+        cam.set_info("NetWork.NetNTP.TimeZone", val)
+
     elif fld == 'EnableNTP':
         val = opts[2]
         if val == "0":
@@ -371,6 +380,7 @@ def setNetworkParam(cam, opts):
             # hexval = strIPtoHex(val)
             cam.set_info("NetWork.NetNTP.Server.Name", val)
             cam.set_info("NetWork.NetNTP.Enable", True)
+            cam.set_info("NetWork.NetNTP.UpdatePeriod", 60)
             print('NTP enabled')
     elif fld == 'TransferPlan':
         val = opts[2]
@@ -408,7 +418,7 @@ def setCameraParam(cam, opts):
     elif fld == 'BroadTrends': 
         subfld=opts[2]
         val = int(opts[3])
-        fldToSet='Camera.ParamEx.[0].' + fld 
+        fldToSet='Camera.ParamEx.[0].' + fld
         print('Set {}.{} to {}'.format(fldToSet, subfld, val))
         cam.set_info(fldToSet,{subfld:val})
                 
@@ -532,7 +542,7 @@ def setAutoReboot(cam, opts):
 
 
 def manageCloudConnection(cam, opts):
-    if len(opts) < 1 or opts[0] not in ['on','off','get']: 
+    if len(opts) < 1 or opts[0] not in ['on', 'off', 'get']:
         print('usage: CloudConnection on|off|get')
         return
 
@@ -540,12 +550,12 @@ def manageCloudConnection(cam, opts):
     if opts[0] == 'get':
         print('Enabled', info['NatEnable'])
         return 
-    if opts[0] == 'on': 
+    if opts[0] == 'on':
         info["NatEnable"] = True
     else:
         info["NatEnable"] = False
-    cam.set_info("NetWork.Nat", info) 
-    info = cam.get_info("NetWork.Nat") 
+    cam.set_info("NetWork.Nat", info)
+    info = cam.get_info("NetWork.Nat")
     print('Enabled', info['NatEnable'])
 
 
@@ -553,7 +563,7 @@ def setParameter(cam, opts):
     """ Set a parameter in various sections of the camera config
 
     Args:
-        cam - the camera 
+        cam - the camera
         opts - array of fields, subfields and the value to set
     """
     if len(opts) < 3:
@@ -594,10 +604,10 @@ def dvripCall(cam, cmd, opts):
 
     elif cmd == 'CloudConnection':
         manageCloudConnection(cam, opts)
-    
+
     elif cmd == 'GetCameraParams':
         getCameraParams(cam, True)
-    
+
     elif cmd == 'GetEncodeParams':
         getEncodeParams(cam, True)
 
@@ -610,7 +620,7 @@ def dvripCall(cam, cmd, opts):
         getAutoRebootParams(cam, True)
 
     elif cmd =='SaveSettings':
-        nc, dh = getNetworkParams(cam, False)
+        nc, dh, nt = getNetworkParams(cam, False)
         cs = getCameraParams(cam, False)
         vs = getEncodeParams(cam, False)
         gp = getGuiParams(cam, False)
@@ -631,6 +641,23 @@ def dvripCall(cam, cmd, opts):
 
     elif cmd == 'SetParam':
         setParameter(cam, opts)
+
+    elif cmd == 'CameraTime':
+        if opts[0] == 'get':
+            print(cam.get_time())
+        elif opts[0] == 'set':
+            if cam.get_info("NetWork.NetNTP.Enable") is True:
+                print('cant set the camera time - NTP enabled')
+            else:
+                try:
+                    reqtime = datetime.datetime.strptime(opts[1], '%Y%m%d_%H%M%S')
+                except:
+                    reqtime = datetime.datetime.now()
+                cam.set_time(reqtime)
+                print('time set to', reqtime)
+        else:
+            print('usage CameraTime get|set')
+
 
     elif cmd == 'SetColor':
         setColor(cam, opts)
@@ -685,9 +712,9 @@ if __name__ == '__main__':
     """
 
     # list of supported commands
-    cmd_list = ['reboot', 'GetHostname', 'GetSettings','GetDeviceInformation','GetNetConfig',
-        'GetCameraParams','GetEncodeParams','SetParam','SaveSettings', 'LoadSettings', 
-        'SetColor', 'SetOSD', 'SetAutoReboot', 'GetIP','GetAutoReboot', 'CloudConnection']
+    cmd_list = ['reboot', 'GetHostname', 'GetSettings','GetDeviceInformation', 'GetNetConfig',
+        'GetCameraParams', 'GetEncodeParams', 'SetParam', 'SaveSettings', 'LoadSettings',
+        'SetColor', 'SetOSD', 'SetAutoReboot', 'GetIP', 'GetAutoReboot', 'CloudConnection', 'CameraTime']
     opthelp='optional parameters for SetParam for example Camera ElecLevel 70 \n' \
         'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first. ' \
         'Call a function with no parameters to see the possibilities'
@@ -707,7 +734,7 @@ if __name__ == '__main__':
         opts = cml_args.options
     else:
         opts=''
-        
+
     if cmd not in cmd_list:
         print('Error: command "{}" not supported'.format(cmd))
         exit(1)
@@ -716,14 +743,14 @@ if __name__ == '__main__':
     config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
 
     cameraControlV2(config, cmd, opts)
-    
+
 
 """Known Field mappings
 These are available in Guides/imx2910config-maps.md
 
-To set these values pass split at the dot if there is one, then call SetParam 
-eg 
+To set these values pass split at the dot if there is one, then call SetParam
+eg
   SetParam ExposureParam Level 0
   SetParam DayNightColor 0
-Decimals will be converted to hex strings if necesssary. 
+Decimals will be converted to hex strings if necesssary.
 """
