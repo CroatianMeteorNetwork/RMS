@@ -80,7 +80,12 @@ def loadImage(img_path, flatten=-1):
         img = imread(img_path, flatten)
 
     else:
-        img = imread(img_path, as_gray=bool(flatten))
+
+        try:
+            img = imread(img_path, as_gray=bool(flatten))
+            
+        except TypeError:
+            img = imread(img_path, mode="L")
 
     return img
 

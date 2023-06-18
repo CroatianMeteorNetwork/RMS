@@ -134,24 +134,28 @@ Information about the data is provided in a section below: <a href="#about">Abou
             )
         html_code += img_ref_html
 
-        # Extract reference year results object and name of the plot file
-        shower_all, dir_list_all, plot_name_all, plot_name_all_full = results_all_years[shower_code]
 
-        # Determine the range of used years
-        dt_list = [dt for _, dt in dir_list_all]
-        year_min = min(dt_list).year
-        year_max = max(dt_list).year
+        # Add the image with all years combined
+        if shower_code in results_all_years:
 
-        # Add image with all years combined
-        img_all_html = """
-        <br>
-        <h3>Years {:d} - {:d}</h3>
-        <a href="{:s}" target="_blank"><img src="{:s}" style="width: 80%; height: auto;"/></a>""".format(
-            year_min, year_max, 
-            joinFunc(website_plot_url, plot_name_all_full),
-            joinFunc(website_plot_url, plot_name_all)
-            )
-        html_code += img_all_html
+            # Extract reference year results object and name of the plot file
+            shower_all, dir_list_all, plot_name_all, plot_name_all_full = results_all_years[shower_code]
+
+            # Determine the range of used years
+            dt_list = [dt for _, dt in dir_list_all]
+            year_min = min(dt_list).year
+            year_max = max(dt_list).year
+
+            # Add image with all years combined
+            img_all_html = """
+            <br>
+            <h3>Years {:d} - {:d}</h3>
+            <a href="{:s}" target="_blank"><img src="{:s}" style="width: 80%; height: auto;"/></a>""".format(
+                year_min, year_max, 
+                joinFunc(website_plot_url, plot_name_all_full),
+                joinFunc(website_plot_url, plot_name_all)
+                )
+            html_code += img_all_html
 
     
     ### Generate a table with the used showers ###

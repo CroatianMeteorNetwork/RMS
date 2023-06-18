@@ -1174,7 +1174,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         if ('CALSTARS' in calstars_file) and calstars_file.endswith('.txt'):
             break
     star_list = readCALSTARS(dir_path, calstars_file)
-    print('CALSTARS file: ' + calstars_file + ' loaded!')
+    print('CALSTARS file: {:s} loaded!'.format(calstars_file))
 
 
     # Get FF file every N minutes
@@ -1317,7 +1317,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
 
     # Compute the predicted number of stars on every recalibrated FF file
     predicted_stars = predictStarNumberInFOV(
-        recalibrated_platepars, ff_limiting_magnitude, config, mask, show_plot=show_plots
+        recalibrated_platepars, ff_limiting_magnitude, config, mask=mask, show_plot=show_plots
     )
     # for ff in predicted_stars:
     #     print(ff, matched_count.get(ff), predicted_stars.get(ff), ff_limiting_magnitude.get(ff))
