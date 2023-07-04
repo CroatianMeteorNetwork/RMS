@@ -525,6 +525,17 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # if fixed_duration and (upload_manager is not None):
 
     if upload_manager is not None: # temporary code, will make the script upload after each capture
+
+        # Check if the upload delay is set
+        with upload_manager.next_runtime_lock:
+
+            # Check if the upload delay is up
+            if upload_manager.next_runtime is not None:
+                while (datetime.datetime.utcnow() - upload_manager.next_runtime).total_seconds() < 0:
+                    log.info("Waiting for upload delay to pass: {:.1f} seconds...".format(
+                        abs((datetime.datetime.utcnow() - upload_manager.next_runtime).total_seconds())))
+                    time.sleep(1)
+
         log.info('Uploading data before exiting...')
         upload_manager.uploadData()
 
