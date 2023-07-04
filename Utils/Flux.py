@@ -606,7 +606,12 @@ def loadTimeInvervals(config, dir_path):
             time_interval_json = " ".join(f.readlines())
 
             # Load time intervals back in
-            dt_json = json.loads(time_interval_json)
+            try:
+                dt_json = json.loads(time_interval_json)
+
+            except json.decoder.JSONDecodeError:
+                # If loading the JSON file fails, return None
+                return None
 
             # Check that the station ID is correct
             if str(dt_json['stationID']) == str(config.stationID):
