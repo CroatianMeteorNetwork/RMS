@@ -1323,7 +1323,10 @@ class InputTypeImages(object):
 
 
         # Check the magick number for UWO PNGs
-        if ((img[0][0] == 22121) and (img[0][1] == 17410)) or ((img[0][0] == 86) and (img[0][1] == 105)):
+        print(img[0][0], img[0][1])
+        if ((img[0][0] == 22121) and (img[0][1] == 17410)) \
+            or ((img[0][0] == 86) and (img[0][1] == 105)) \
+            or ((img[0][0] == 22121) and (img[0][1] == 17456)):
             self.uwo_png_mode = True
 
             # Get the beginning time
