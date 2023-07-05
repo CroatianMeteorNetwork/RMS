@@ -43,18 +43,18 @@ log = logging.getLogger("logger")
 
 
 def getPlatepar(config, night_data_dir):
-    """ Downloads a new platepar from the server of uses an existing one. 
+    """ Downloads a new platepar from the server of uses an existing one.   
     
-    Arguments:
-        Config: [Config instance]
-        night_data_dir: [str] Full path to the data directory.
+    Arguments:  
+        Config: [Config instance]  
+        night_data_dir: [str] Full path to the data directory.  
 
-    Return:
-        platepar, platepar_path, platepar_fmt
+    Return:  
+        platepar, platepar_path, platepar_fmt  
     """
 
 
-    # Download a new platepar from the server, if present
+    # Download a new platepar from the server, if present  
     downloadNewPlatepar(config)
 
 
@@ -125,21 +125,21 @@ def getPlatepar(config, night_data_dir):
 
 
 def processNight(night_data_dir, config, detection_results=None, nodetect=False):
-    """ Given the directory with FF files, run detection and archiving. 
+    """ Given the directory with FF files, run detection and archiving.  
     
-    Arguments:
-        night_data_dir: [str] Path to the directory with FF files.
-        config: [Config obj]
+    Arguments:  
+        night_data_dir: [str] Path to the directory with FF files.  
+        config: [Config obj]  
 
-    Keyword arguments:
+    Keyword arguments:  
         detection_results: [list] An optional list of detection. If None (default), detection will be done
-            on the the files in the folder.
-        nodetect: [bool] True if detection should be skipped. False by default.
+            on the the files in the folder.  
+        nodetect: [bool] True if detection should be skipped. False by default.  
 
-    Return:
-        night_archive_dir: [str] Path to the night directory in ArchivedFiles.
-        archive_name: [str] Path to the archive.
-        detector: [QueuedPool instance] Handle to the detector.
+    Return:  
+        night_archive_dir: [str] Path to the night directory in ArchivedFiles.  
+        archive_name: [str] Path to the archive.  
+        detector: [QueuedPool instance] Handle to the detector.  
     """
 
     # Remove final slash in the night dir
@@ -179,9 +179,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         if config.ml_filter > 0:
 
             log.info("Filtering out detections using machine learning...")
-            
+
             ff_detected = filterFTPdetectinfoML(config, os.path.join(night_data_dir, ftpdetectinfo_name), \
-                threshold=config.ml_filter, keep_pngs=False)
+                threshold=config.ml_filter, keep_pngs=False, clear_prev_run=True)
 
 
         # Get the platepar file
