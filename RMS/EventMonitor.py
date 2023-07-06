@@ -37,8 +37,9 @@ import random, string
 from glob import glob
 
 
-from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, latLonAlt2ECEF, vectNorm
-from RMS.Math import angularSeparationVect
+from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm
+from RMS.Astrometry.Conversions import latLonAlt2ECEF, ecef2LatLonAlt, AER2LatLonAlt
+from RMS.Math import angularSeparationVect, polarToCartesian
 from RMS.Formats.Platepar import Platepar
 from datetime import datetime
 from dateutil import parser
@@ -244,6 +245,43 @@ class EventContainer(object):
 
         return reasonable
 
+    def transformToLatLon(self):
+
+        """Take an event, establish how it has been defined, and convert to representation as
+        a pair of Lat,Lon,Ht parameters.
+
+        If either lat2, lon2 or ht2 are not zero, then assume it is already defined as a pair of lat, lon, ht
+
+        As detection uses infinitely extended trajectory, an arbitrary length vector in the direction is sufficient.
+
+        Strategy is to convert lat,lon,ht to cartesian,
+        create a cartesian vector
+        add the cartestian vector to the starting position
+        convert second position back to lat,lon,ht
+
+        """
+
+        azim_elev_definition = True
+        azim_elev_definition = False if self.lon2 != 0 else azim_elev_definition
+        azim_elev_definition = False if self.lat2 != 0 else azim_elev_definition
+        azim_elev_definition = False if self.ht2 != 0 else azim_elev_definition
+
+        if not azim_elev_definition:
+            return
+
+        # Convert starting lat, lon, ht to ECEF
+        self.lat2, self.lon2, self.ht2 = AER2LatLonAlt(self.azim,self.elev, 1, self.lat, self.lon,self.ht)
+        """
+        # As a check compute azimuth from difference
+        X = math.cos(np.radians(self.lat)) * math.sin(np.radians(self.lon2 - self.lon))
+        Y = math.cos(np.radians(self.lat)) * math.sin(np.radians(self.lat2)) - math.sin(np.radians(self.lat)) * math.cos(np.radians(self.lat2)) * math.cos(np.radians(self.lon2 - self.lon))
+        checkaz = np.degrees(math.atan2(X,Y))
+
+        if checkaz < 0:
+            checkaz += 360
+        print("Desired :{} Checked : {}".format(self.azim, checkaz))
+        pass
+        """
 
 class EventMonitor(multiprocessing.Process):
 
@@ -1091,6 +1129,8 @@ class EventMonitor(multiprocessing.Process):
         # Iterate through the work
         for event in unprocessed:
 
+            # Events can be specified in different ways, make sure converted to LatLon
+            event.transformtoLatLon()
             # Get the files
             file_list = self.getfilelist(event)
 
