@@ -1130,7 +1130,7 @@ class EventMonitor(multiprocessing.Process):
         for event in unprocessed:
 
             # Events can be specified in different ways, make sure converted to LatLon
-            event.transformtoLatLon()
+            event.transformToLatLon()
             # Get the files
             file_list = self.getfilelist(event)
 
@@ -1352,6 +1352,7 @@ if __name__ == "__main__":
 
     try:
         # Add a random string after the URL to defeat caching
+        print(syscon.event_monitor_webpage)
         web_page = urllib.request.urlopen(syscon.event_monitor_webpage + "?" + randomword(6)).read().decode("utf-8").splitlines()
     except:
 
