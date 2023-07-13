@@ -618,7 +618,7 @@ def AER2LatLonAlt(azim, elev, r, lat, lon, alt):
         alt: [float] Altitude of observer in meters.
 
     Return:
-        (lat, lon, alt): [tuple of floats] range in meteors, latitude and longitude in degrees, 
+        (lat, lon, alt): [tuple of floats] range in meters, latitude and longitude in degrees,
             WGS84 elevation in meters
 
     """
