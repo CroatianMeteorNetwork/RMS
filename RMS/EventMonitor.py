@@ -38,7 +38,7 @@ from glob import glob
 
 
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm
-from RMS.Astrometry.Conversions import latLonAlt2ECEF, ecef2LatLonAlt, AER2LatLonAlt
+from RMS.Astrometry.Conversions import latLonAlt2ECEF, ecef2LatLonAlt, AER2LatLonAlt, AEH2Range
 from RMS.Math import angularSeparationVect, polarToCartesian
 from RMS.Formats.Platepar import Platepar
 from datetime import datetime
@@ -250,15 +250,6 @@ class EventContainer(object):
         """Take an event, establish how it has been defined, and convert to representation as
         a pair of Lat,Lon,Ht parameters.
 
-        If either lat2, lon2 or ht2 are not zero, then assume it is already defined as a pair of lat, lon, ht
-
-        As detection uses infinitely extended trajectory, an arbitrary length vector in the direction is sufficient.
-
-        Strategy is to convert lat,lon,ht to cartesian,
-        create a cartesian vector
-        add the cartestian vector to the starting position
-        convert second position back to lat,lon,ht
-
         """
 
         azim_elev_definition = True
@@ -269,8 +260,56 @@ class EventContainer(object):
         if not azim_elev_definition:
             return
 
-        # Convert starting lat, lon, ht to ECEF
-        self.lat2, self.lon2, self.ht2 = AER2LatLonAlt(self.azim,self.elev, 1, self.lat, self.lon,self.ht)
+        min_lum_flt_ht, max_lum_flt_ht = 20000, 100000
+
+        # Starting point will be at max_lum_flt_ht
+        # Ending point will usually be at min_luminous_flt_ht or
+        # may be at max_lum_flt_ht for earthgrazers
+
+        # False estimates with too steep a descent may lead to a trajectory terminating too early,
+        # this seems to be the most acceptable outcome from all the compromises considered
+
+        # Strategy
+
+        # Take point in lat, lon, ht , azimuth, elevation and calculate
+        #    line of sight distance to min_lum_flt_ht forwards - may not resolve
+        #    line of sight distance to max_lum_flt_ht forwards - will always resolve
+        #    line of sight distance to max_lum_flt_ht backwards - will always resolve
+
+        # Move the trajectory start to the calculated start of luminous flight
+        # Move the trajectory end to the end of luminous flight, which might be at a min or max
+
+        # This may not resolve for an earth grazer
+        fwd_range_min_lum = AEH2Range(self.azim, self.elev, min_lum_flt_ht, self.lat, self.lon, self.ht * 1000)
+
+        # This will always resolve
+        fwd_range_max_lum = AEH2Range(self.azim, self.elev, max_lum_flt_ht, self.lat, self.lon, self.ht * 1000)
+
+        # Pick the smallest of the two to avoid passing through the earth
+        fwd_range = min(fwd_range_max_lum,fwd_range_min_lum)
+
+        # backwards azimuth, add 180 to values < 180, subtract - 180 from values > 180
+        azim_rev = self.azim + 180 if self.azim < 180 else self.azim - 180
+
+        # since azimuth is reversed, reflect elev in horizontal plane
+        elev_rev = 0 - self.elev
+
+        print("Az and El {},{}".format(self.azim,self.elev))
+        print("Conjugate {},{}".format(azim_rev, elev_rev))
+
+        bwd_range_max_lum = AEH2Range(azim_rev, elev_rev, max_lum_flt_ht, self.lat, self.lon, self.ht * 1000)
+
+        #Move event start point back to intersection with
+        self.lat, self.lon, ht_m =  AER2LatLonAlt(azim_rev, elev_rev,bwd_range_max_lum,self.lat,self.lon,self.ht * 1000)
+        self.ht = ht_m / 1000
+
+        #From start point, calculate range to end point
+        range = bwd_range_max_lum + fwd_range
+
+        #Calculate end point of trajectory
+        self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, self.elev, range, self.lat,self.lon,self.ht * 1000)
+        self.ht2 = ht2_m / 1000
+
         """
         # As a check compute azimuth from difference
         X = math.cos(np.radians(self.lat)) * math.sin(np.radians(self.lon2 - self.lon))
