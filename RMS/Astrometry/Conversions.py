@@ -580,13 +580,13 @@ def AEH2Range(azim, elev, h, lat, lon, alt, accurate=False):
 
     # Compute the angle between the observer and the point
     if rm > rs:
-     beta = np.radians(elev) + np.arcsin((rs*np.cos(np.radians(elev)))/rm)
+        beta = np.radians(elev) + np.arcsin((rs*np.cos(np.radians(elev)))/rm)
     else:
-     beta = np.radians(elev) - np.arcsin((rm*np.cos(np.radians(elev)))/rs)
+        beta = np.radians(elev) - np.arcsin((rm*np.cos(np.radians(elev)))/rs)
 
     # Compute the range
     r = rm*np.cos(beta)/np.cos(np.radians(elev))
-    print("rs, rm ,Angle, Elev, Range {},{},{},{},{}".format(rs, rm, np.degrees(beta), elev, r / 1000))
+
     ### ###
 
 
