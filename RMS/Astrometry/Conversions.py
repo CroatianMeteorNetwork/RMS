@@ -542,6 +542,8 @@ def AEH2Range(azim, elev, h, lat, lon, alt, accurate=False):
         r: [float] Range to point in meters.
 
     """
+
+
     def _heightCostFunction(params, azim, elev, h, lat, lon, alt):
 
         # Get the guessed range
