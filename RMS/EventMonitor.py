@@ -277,8 +277,8 @@ class EventContainer(object):
         elev_rev = 0 - self.elev
 
         # Find range to minimum and maximum heights in forward trajectory direction
-        fwd_range_min_lum = AEH2Range(self.azim, self.elev, min_lum_flt_ht, self.lat, self.lon, self.ht * 1000, True)
-        fwd_range_max_lum = AEH2Range(self.azim, self.elev, max_lum_flt_ht, self.lat, self.lon, self.ht * 1000, True)
+        fwd_range_min_lum = AEH2Range(self.azim, self.elev, min_lum_flt_ht, self.lat, self.lon, self.ht * 1000, accurate=True)
+        fwd_range_max_lum = AEH2Range(self.azim, self.elev, max_lum_flt_ht, self.lat, self.lon, self.ht * 1000, accurate=True)
 
 
         # If range to minimum height is negative or NaN then treat as an earth grazer, or backwards trajectory
@@ -287,8 +287,8 @@ class EventContainer(object):
         fwd_range = fwd_range_max_lum if np.isnan(fwd_range_min_lum) or fwd_range_min_lum < 0.1 else fwd_range_min_lum
 
         # Find range to minimum and maximum heights in reverse trajectory direction
-        bwd_range_min_lum = AEH2Range(azim_rev, elev_rev, min_lum_flt_ht, self.lat, self.lon, self.ht * 1000, True)
-        bwd_range_max_lum = AEH2Range(azim_rev, elev_rev, max_lum_flt_ht, self.lat, self.lon, self.ht * 1000, True)
+        bwd_range_min_lum = AEH2Range(azim_rev, elev_rev, min_lum_flt_ht, self.lat, self.lon, self.ht * 1000, accurate=True)
+        bwd_range_max_lum = AEH2Range(azim_rev, elev_rev, max_lum_flt_ht, self.lat, self.lon, self.ht * 1000, accurate=True)
 
         # If backwards range to minimum height is negative (i.e. meteor is falling normally) treat as a forward trajectory
         # If backwards range to minimum height is NaN then meteor may be an earth grazer
