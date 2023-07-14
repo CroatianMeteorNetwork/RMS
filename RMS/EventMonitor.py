@@ -261,6 +261,9 @@ class EventContainer(object):
         if not azim_elev_definition:
             return
 
+        # Force a reasonable elevation value of -15 if something strange has been entered
+        self.elev = self.elev if -85 < self.elev < -1 else -15
+
         # Move the trajectory start to the calculated start of luminous flight
         # Move the trajectory end to the end of luminous flight, which might be at a min or max
 
