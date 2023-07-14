@@ -37,8 +37,9 @@ import random, string
 from glob import glob
 
 
-from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, latLonAlt2ECEF, vectNorm
-from RMS.Math import angularSeparationVect
+from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm
+from RMS.Astrometry.Conversions import latLonAlt2ECEF, ecef2LatLonAlt, AER2LatLonAlt, AEH2Range
+from RMS.Math import angularSeparationVect, polarToCartesian
 from RMS.Formats.Platepar import Platepar
 from datetime import datetime
 from dateutil import parser
@@ -244,6 +245,79 @@ class EventContainer(object):
 
         return reasonable
 
+    def transformToLatLon(self):
+
+        """Take an event, establish how it has been defined, and convert to representation as
+        a pair of Lat,Lon,Ht parameters.
+
+        """
+
+        # Work out if this is defined by point and azimuth and elevation
+        azim_elev_definition = True
+        azim_elev_definition = False if self.lon2 != 0 else azim_elev_definition
+        azim_elev_definition = False if self.lat2 != 0 else azim_elev_definition
+        azim_elev_definition = False if self.ht2 != 0 else azim_elev_definition
+
+        if not azim_elev_definition:
+            return
+
+        # Move the trajectory start to the calculated start of luminous flight
+        # Move the trajectory end to the end of luminous flight, which might be at a min or max
+
+        # Set minimum and maximum luminous flight heights.
+        # For optical observations, these represent end stops for the trajectory
+        min_lum_flt_ht, max_lum_flt_ht = 20000, 100000
+
+        # Handle estimated start heights are outside normal range of luminous flight
+        max_lum_flt_ht = self.ht*1000 if self.ht*1000 >= max_lum_flt_ht else max_lum_flt_ht
+        min_lum_flt_ht = self.ht*1000 if self.ht*1000 <= min_lum_flt_ht else min_lum_flt_ht
+
+        # Backwards azimuth, add 180 to values < 180, subtract - 180 from values > 180, and reflect elev in horizontal
+        azim_rev = self.azim + 180 if self.azim < 180 else self.azim - 180
+        elev_rev = 0 - self.elev
+
+        # Find range to minimum and maximum heights in forward trajectory direction
+        fwd_range_min_lum = AEH2Range(self.azim, self.elev, min_lum_flt_ht, self.lat, self.lon, self.ht * 1000, accurate=True)
+        fwd_range_max_lum = AEH2Range(self.azim, self.elev, max_lum_flt_ht, self.lat, self.lon, self.ht * 1000, accurate=True)
+
+
+        # If range to minimum height is negative or NaN then treat as an earth grazer, or backwards trajectory
+        # so assign forward will go to max height
+        # Normally range to minimum height will be a positive number, so set fwd as minimum height
+        fwd_range = fwd_range_max_lum if np.isnan(fwd_range_min_lum) or fwd_range_min_lum < 0.1 else fwd_range_min_lum
+
+        # Find range to minimum and maximum heights in reverse trajectory direction
+        bwd_range_min_lum = AEH2Range(azim_rev, elev_rev, min_lum_flt_ht, self.lat, self.lon, self.ht * 1000, accurate=True)
+        bwd_range_max_lum = AEH2Range(azim_rev, elev_rev, max_lum_flt_ht, self.lat, self.lon, self.ht * 1000, accurate=True)
+
+        # If backwards range to minimum height is negative (i.e. meteor is falling normally) treat as a forward trajectory
+        # If backwards range to minimum height is NaN then meteor may be an earth grazer
+        # So set backwards range to the range to the max lum height
+        # For any other case, treat as a reversed trajectory and set bwd range to distance to min_lum
+        bwd_range = bwd_range_max_lum if np.isnan(bwd_range_min_lum) or bwd_range_min_lum < 0.1 else bwd_range_min_lum
+
+        #Move event start point back to intersection with
+        self.lat, self.lon, ht_m =  AER2LatLonAlt(azim_rev, elev_rev,bwd_range,self.lat,self.lon,self.ht * 1000)
+        self.ht = ht_m / 1000
+
+        #From start point, calculate range to end point
+        range = bwd_range + fwd_range
+
+        #Calculate end point of trajectory
+        self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, self.elev, range, self.lat,self.lon,self.ht * 1000)
+        self.ht2 = ht2_m / 1000
+
+        """
+        # As a check compute azimuth from difference
+        X = math.cos(np.radians(self.lat)) * math.sin(np.radians(self.lon2 - self.lon))
+        Y = math.cos(np.radians(self.lat)) * math.sin(np.radians(self.lat2)) - math.sin(np.radians(self.lat)) * math.cos(np.radians(self.lat2)) * math.cos(np.radians(self.lon2 - self.lon))
+        checkaz = np.degrees(math.atan2(X,Y))
+
+        if checkaz < 0:
+            checkaz += 360
+        print("Desired :{} Checked : {}".format(self.azim, checkaz))
+        pass
+        """
 
 class EventMonitor(multiprocessing.Process):
 
@@ -1091,6 +1165,8 @@ class EventMonitor(multiprocessing.Process):
         # Iterate through the work
         for event in unprocessed:
 
+            # Events can be specified in different ways, make sure converted to LatLon
+            event.transformToLatLon()
             # Get the files
             file_list = self.getfilelist(event)
 
@@ -1312,6 +1388,7 @@ if __name__ == "__main__":
 
     try:
         # Add a random string after the URL to defeat caching
+        print(syscon.event_monitor_webpage)
         web_page = urllib.request.urlopen(syscon.event_monitor_webpage + "?" + randomword(6)).read().decode("utf-8").splitlines()
     except:
 

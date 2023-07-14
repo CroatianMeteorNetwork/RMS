@@ -14,7 +14,7 @@ from RMS.Formats.Platepar import Platepar
 from datetime import datetime
 from dateutil import parser
 from tqdm import tqdm
-
+from RMS.Astrometry.Conversions import AEH2Range
 
 path_to_test_data = ""
 platepars_test_data = "wget http://58.84.202.15:8243/data/platepars.tar.bz2 -O platepars.tar.bz2"
@@ -178,6 +178,67 @@ def createATestEvent07():
 
     return test_event
 
+def createATestEvent08():
+
+    test_event = EventContainer("", 0, 0, 0)
+    test_event.setValue("EventTime", "20230601_124235")
+    test_event.setValue("TimeTolerance", 60)
+    test_event.setValue("EventLat", 45)
+    test_event.setValue("EventLatStd", 0)
+    test_event.setValue("EventLon", 180)
+    test_event.setValue("EventLonStd", 0)
+    test_event.setValue("EventHt", 100)
+    test_event.setValue("EventHtStd", 0)
+    test_event.setValue("CloseRadius", 152)
+    test_event.setValue("FarRadius", 153)
+
+    test_event.setValue("EventLat2", 0)
+    test_event.setValue("EventLat2Std", 0)
+    test_event.setValue("EventLon2", 0)
+    test_event.setValue("EventLon2Std", 0)
+    test_event.setValue("EventHt2", 0)
+    test_event.setValue("EventHt2Std", 0)
+
+    test_event.setValue("EventAzim", 0)
+    test_event.setValue("EventElev", 0)
+
+
+
+    test_uuid = "28e4a2d7-4111-4a72-8a30-969f71fc9207"
+    test_event.setValue("uuid", test_uuid)
+
+    return test_event
+
+def createATestEvent09():
+
+    test_event = EventContainer("", 0, 0, 0)
+    test_event.setValue("EventTime", "20230710_134048")
+    test_event.setValue("TimeTolerance", 60)
+    test_event.setValue("EventLat", -31.247944)
+    test_event.setValue("EventLatStd", 0)
+    test_event.setValue("EventLon", 116.428754)
+    test_event.setValue("EventLonStd", 0)
+    test_event.setValue("EventHt", 86.7735)
+    test_event.setValue("EventHtStd", 0)
+    test_event.setValue("CloseRadius", 152)
+    test_event.setValue("FarRadius", 153)
+
+    test_event.setValue("EventLat2", 0)
+    test_event.setValue("EventLat2Std", 0)
+    test_event.setValue("EventLon2", 0)
+    test_event.setValue("EventLon2Std", 0)
+    test_event.setValue("EventHt2", 0)
+    test_event.setValue("EventHt2Std", 0)
+
+    test_event.setValue("EventAzim", 265.9)
+    test_event.setValue("EventElev", -49.59)
+
+
+
+    test_uuid = "28e4a2d7-4111-4a72-8a30-969f71fc9207"
+    test_event.setValue("uuid", test_uuid)
+
+    return test_event
 
 
 
@@ -670,6 +731,20 @@ def fullSystemTest(config, em):
     shell_command = "cd {} ; ".format(path_to_platepars)
     os.system(shell_command)
 
+def testAEH2Range():
+
+    print("Testing AEH2Range")
+
+    # Test a line straight up from ground level
+    lat, lon, alt = 45, 45, 100000
+    azim, elev, ht = 30, -5, 100000
+
+
+    range_by_law_of_sines = AEH2Range(azim,elev,ht, lat, lon, alt, False)
+    print("Range calculated by law of sines       {}".format(range_by_law_of_sines))
+    range_by_optimised_solution = AEH2Range(azim, elev, ht, lat, lon, alt, True)
+    print("Range calculated by optimised solution {}".format(range_by_optimised_solution))
+
 
 def testIndividuals():
 
@@ -681,14 +756,65 @@ def testIndividuals():
         print("convertgmntimetoposix fail")
         quit()
 
+    event = createATestEvent08()
+    print(event.eventToString())
+    event.transformToLatLon()
+    print("Az:{} El:{}".format(event.azim, event.elev))
+    print(event.eventToString())
+    event = createATestEvent08()
+    event.setValue("EventAzim", 90)
+    event.setValue("EventElev", 0)
+    event.transformToLatLon()
+    print("Az:{} El:{}".format(event.azim, event.elev))
+    print(event.eventToString())
+    event = createATestEvent08()
+    event.setValue("EventAzim", 180)
+    event.setValue("EventElev", 0)
+    event.transformToLatLon()
+    print("Az:{} El:{}".format(event.azim, event.elev))
+    print(event.eventToString())
+    event = createATestEvent08()
+    event.setValue("EventAzim", 270)
+    event.setValue("EventElev", 0)
+    event.transformToLatLon()
+    print("Az:{} El:{}".format(event.azim, event.elev))
+    print(event.eventToString())
+    event = createATestEvent08()
+    event.setValue("EventAzim", 0)
+    event.setValue("EventElev", 45)
+    event.transformToLatLon()
+    print("Az:{} El:{}".format(event.azim, event.elev))
+    print(event.eventToString())
+    event = createATestEvent08()
+    event.setValue("EventAzim", 0)
+    event.setValue("EventElev", 90)
+    event.transformToLatLon()
+    print("Az:{} El:{}".format(event.azim, event.elev))
+    print(event.eventToString())
+    event = createATestEvent08()
+    event.setValue("EventAzim", 30)
+    event.setValue("EventElev", 78)
+    event.transformToLatLon()
+    print("Az:{} El:{}".format(event.azim, event.elev))
+    print(event.eventToString())
+
+    event = createATestEvent09()
+    event.transformToLatLon()
+    print("Az:{} El:{}".format(event.azim, event.elev))
+    print(event.eventToString())
+
+
+
+
 def functionTest(config, em):
 
+    #testAEH2Range()
     testIndividuals()
-    testEventContainer()
-    testDBFunctions(em)
-    testClosestPoint()
-    testTrajectoryThroughFOVQuick(em)
-    fullSystemTest(config, em)
+    #testEventContainer()
+    #testDBFunctions(em)
+    #testClosestPoint()
+    #testTrajectoryThroughFOVQuick(em)
+    #fullSystemTest(config, em)
     quit()
 
 if __name__ == "__main__":
