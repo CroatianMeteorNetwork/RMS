@@ -252,6 +252,7 @@ class EventContainer(object):
 
         """
 
+        # Work out if this is defined by point and azimuth and elevation
         azim_elev_definition = True
         azim_elev_definition = False if self.lon2 != 0 else azim_elev_definition
         azim_elev_definition = False if self.lat2 != 0 else azim_elev_definition
@@ -260,51 +261,47 @@ class EventContainer(object):
         if not azim_elev_definition:
             return
 
-        min_lum_flt_ht, max_lum_flt_ht = 20000, 100000
-
-        # Starting point will be at max_lum_flt_ht
-        # Ending point will usually be at min_luminous_flt_ht or
-        # may be at max_lum_flt_ht for earthgrazers
-
-        # False estimates with too steep a descent may lead to a trajectory terminating too early,
-        # this seems to be the most acceptable outcome from all the compromises considered
-
-        # Strategy
-
-        # Take point in lat, lon, ht , azimuth, elevation and calculate
-        #    line of sight distance to min_lum_flt_ht forwards - may not resolve
-        #    line of sight distance to max_lum_flt_ht forwards - will always resolve
-        #    line of sight distance to max_lum_flt_ht backwards - will always resolve
-
         # Move the trajectory start to the calculated start of luminous flight
         # Move the trajectory end to the end of luminous flight, which might be at a min or max
 
-        # This may not resolve for an earth grazer
-        fwd_range_min_lum = AEH2Range(self.azim, self.elev, min_lum_flt_ht, self.lat, self.lon, self.ht * 1000)
+        # Set minimum and maximum luminous flight heights.
+        # For optical observations, these represent end stops for the trajectory
+        min_lum_flt_ht, max_lum_flt_ht = 20000, 100000
 
-        # This will always resolve
-        fwd_range_max_lum = AEH2Range(self.azim, self.elev, max_lum_flt_ht, self.lat, self.lon, self.ht * 1000)
+        # Handle estimated start heights are outside normal range of luminous flight
+        max_lum_flt_ht = self.ht*1000 if self.ht*1000 >= max_lum_flt_ht else max_lum_flt_ht
+        min_lum_flt_ht = self.ht*1000 if self.ht*1000 <= min_lum_flt_ht else min_lum_flt_ht
 
-        # Pick the smallest of the two to avoid passing through the earth
-        fwd_range = min(fwd_range_max_lum,fwd_range_min_lum)
-
-        # backwards azimuth, add 180 to values < 180, subtract - 180 from values > 180
+        # Backwards azimuth, add 180 to values < 180, subtract - 180 from values > 180, and reflect elev in horizontal
         azim_rev = self.azim + 180 if self.azim < 180 else self.azim - 180
-
-        # since azimuth is reversed, reflect elev in horizontal plane
         elev_rev = 0 - self.elev
 
-        print("Az and El {},{}".format(self.azim,self.elev))
-        print("Conjugate {},{}".format(azim_rev, elev_rev))
+        # Find range to minimum and maximum heights in forward trajectory direction
+        fwd_range_min_lum = AEH2Range(self.azim, self.elev, min_lum_flt_ht, self.lat, self.lon, self.ht * 1000, True)
+        fwd_range_max_lum = AEH2Range(self.azim, self.elev, max_lum_flt_ht, self.lat, self.lon, self.ht * 1000, True)
 
-        bwd_range_max_lum = AEH2Range(azim_rev, elev_rev, max_lum_flt_ht, self.lat, self.lon, self.ht * 1000)
+
+        # If range to minimum height is negative or NaN then treat as an earth grazer, or backwards trajectory
+        # so assign forward will go to max height
+        # Normally range to minimum height will be a positive number, so set fwd as minimum height
+        fwd_range = fwd_range_max_lum if np.isnan(fwd_range_min_lum) or fwd_range_min_lum < 0.1 else fwd_range_min_lum
+
+        # Find range to minimum and maximum heights in reverse trajectory direction
+        bwd_range_min_lum = AEH2Range(azim_rev, elev_rev, min_lum_flt_ht, self.lat, self.lon, self.ht * 1000, True)
+        bwd_range_max_lum = AEH2Range(azim_rev, elev_rev, max_lum_flt_ht, self.lat, self.lon, self.ht * 1000, True)
+
+        # If backwards range to minimum height is negative (i.e. meteor is falling normally) treat as a forward trajectory
+        # If backwards range to minimum height is NaN then meteor may be an earth grazer
+        # So set backwards range to the range to the max lum height
+        # For any other case, treat as a reversed trajectory and set bwd range to distance to min_lum
+        bwd_range = bwd_range_max_lum if np.isnan(bwd_range_min_lum) or bwd_range_min_lum < 0.1 else bwd_range_min_lum
 
         #Move event start point back to intersection with
-        self.lat, self.lon, ht_m =  AER2LatLonAlt(azim_rev, elev_rev,bwd_range_max_lum,self.lat,self.lon,self.ht * 1000)
+        self.lat, self.lon, ht_m =  AER2LatLonAlt(azim_rev, elev_rev,bwd_range,self.lat,self.lon,self.ht * 1000)
         self.ht = ht_m / 1000
 
         #From start point, calculate range to end point
-        range = bwd_range_max_lum + fwd_range
+        range = bwd_range + fwd_range
 
         #Calculate end point of trajectory
         self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, self.elev, range, self.lat,self.lon,self.ht * 1000)

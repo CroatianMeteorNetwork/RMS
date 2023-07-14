@@ -543,6 +543,13 @@ def AEH2Range(azim, elev, h, lat, lon, alt, accurate=False):
 
     """
 
+    # Handle simple edge cases
+
+    if elev == 90:
+        return h - alt
+
+    if elev == -90:
+        return alt - h
 
     def _heightCostFunction(params, azim, elev, h, lat, lon, alt):
 
@@ -572,11 +579,14 @@ def AEH2Range(azim, elev, h, lat, lon, alt, accurate=False):
     rm = N + h
 
     # Compute the angle between the observer and the point
-    beta = np.radians(elev) + np.arcsin((rs*np.cos(np.radians(elev)))/rm)
+    if rm > rs:
+     beta = np.radians(elev) + np.arcsin((rs*np.cos(np.radians(elev)))/rm)
+    else:
+     beta = np.radians(elev) - np.arcsin((rm*np.cos(np.radians(elev)))/rs)
 
     # Compute the range
     r = rm*np.cos(beta)/np.cos(np.radians(elev))
-
+    print("rs, rm ,Angle, Elev, Range {},{},{},{},{}".format(rs, rm, np.degrees(beta), elev, r / 1000))
     ### ###
 
 
