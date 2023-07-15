@@ -245,6 +245,8 @@ class EventContainer(object):
 
         return reasonable
 
+
+
     def transformToLatLon(self):
 
         """Take an event, establish how it has been defined, and convert to representation as
@@ -306,7 +308,7 @@ class EventContainer(object):
         # Iterate to find accurate solution - limit iterations to 100
         for n in range(100):
          self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obsvd_lat, obsvd_lon, obsvd_ht)
-         error =  (ht2_m - min_lum_flt_ht) / min_lum_flt_ht
+         error =  (ht2_m - min_lum_flt_ht) / max_lum_flt_ht  # use max to avoid any div zero errors
          fwd_range = fwd_range + fwd_range * error * 0.1
          if error < 0.000005:
              break
@@ -339,21 +341,21 @@ class EventContainer(object):
         min_max_az, min_max_el = ECEF2AltAz(maximum_point, minimum_point)
         obs_max_az, obs_max_el = ECEF2AltAz(maximum_point, observed_point)
 
-        if abs(min_obs_az - min_max_az) > 1 or abs(min_obs_az - obs_max_az) > 1 or \
-                               abs(min_obs_el - min_max_el) > 1 or abs(min_obs_el - obs_max_el) > 1:
+        if angdf(min_obs_az,min_max_az) > 1 or angdf(min_obs_az,obs_max_az) > 1 or \
+                               angdf(min_obs_el,min_max_el) > 1 or angdf(min_obs_el,obs_max_el) > 1:
             print("Observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obsvd_lat, obsvd_lon, obsvd_ht))
             print("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
             print("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim, azim_rev, self.elev))
             print("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon, self.ht * 1000))
             print("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2, self.ht2 * 1000))
-            print("Minimum height to Observed height az,el {},{}".format(min_obs_az, min_obs_el))
-            print("Minimum height to Maximum height az,el {},{}".format(min_max_az, min_max_el))
-            print("Observed height to Maximum height az,el {},{}".format(obs_max_az, obs_max_el))
+            print("Minimum height to Observed height az,el {:.4f},{:.4f}".format(min_obs_az, min_obs_el))
+            print("Minimum height to Maximum height az,el {:.4f},{:.4f}".format(min_max_az, min_max_el))
+            print("Observed height to Maximum height az,el {:4f},{:.4f}".format(obs_max_az, obs_max_el))
 
         # Log any errors
         # Check that az from the minimum to the observation height as the same as the minimum to the maximum height
         # And the minimum to the observation height is the same as the observation to the maximum height
-        if abs(min_obs_az - min_max_az) > 1 or abs(min_obs_az - obs_max_az) > 1:
+        if angdf(min_obs_az,min_max_az) > 1 or angdf(min_obs_az,obs_max_az) > 1:
             log.info("Error in Azimuth calculations")
             log.info("Observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obsvd_lat,obsvd_lon,obsvd_ht))
             log.info("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
@@ -366,7 +368,7 @@ class EventContainer(object):
 
         # Check that el from the minimum to the observation height as the same as the minimum to the maximum height
         # And the minimum to the observation height is the same as the observation to the maximum height
-        if abs(min_obs_el - min_max_el) > 1 or abs(min_obs_el - obs_max_el) > 1:
+        if angdf(min_obs_el,min_max_el) > 1 or angdf(min_obs_el,obs_max_el) > 1:
             log.info("Error in Elevation calculations")
             log.info("Trajectory created from observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obsvd_lat,obsvd_lon,obsvd_ht))
             log.info("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
@@ -1350,6 +1352,9 @@ class EventMonitor(multiprocessing.Process):
                 log.info("Check interval now set to {:2.2f} minutes".format(self.check_interval))
 
 
+def angdf(a1,a2):
+    normalised = a1-a2 % 360
+    return min(360-normalised, normalised)
 
 def convertGMNTimeToPOSIX(timestring):
     """

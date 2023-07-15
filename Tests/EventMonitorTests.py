@@ -2,7 +2,7 @@
 
 from __future__ import print_function, division, absolute_import
 
-from RMS.EventMonitor import EventContainer, EventMonitor, convertGMNTimeToPOSIX
+from RMS.EventMonitor import EventContainer, EventMonitor, convertGMNTimeToPOSIX, angdf
 import RMS.ConfigReader as ConfigReader
 
 import os
@@ -749,6 +749,9 @@ def testAEH2Range():
 def testIndividuals():
 
 
+    print(angdf(3,5))
+    print(angdf(360, 179))
+    print(angdf(359.9,0.1))
 
     if convertGMNTimeToPOSIX("20210925_163127") == datetime(2021, 9, 25, 16, 31, 27):
         print("convertgmntimetoposix success")
