@@ -262,7 +262,7 @@ class EventContainer(object):
             return
 
         # Copy observed lat, lon and height local variables for ease of comprehension and convert to meters
-        observed_lat, observed_lon, observed_ht = self.lat, self.lon, self.ht * 1000
+        obsvd_lat, obsvd_lon, obsvd_ht = self.lat, self.lon, self.ht * 1000
 
         # Set minimum and maximum luminous flight heights
         min_lum_flt_ht, max_lum_flt_ht = 20000, 100000
@@ -271,64 +271,63 @@ class EventContainer(object):
         # Therefore elevation is always positive
 
         # For this routine elevation must always be within 10 - 90 degrees
-        min_elevation_hard, min_elevation, probable_elevation, max_elevation = 0, 10, 45, 90
+        min_elev_hard, min_elev, prob_elev, max_elev = 0, 10, 45, 90
 
         # Detect, fix and log elevations outside range
-        if min_elevation < self.elev < max_elevation:
+        if min_elev < self.elev < max_elev:
             pass
         else:
-            log.info("Elevation {} is not within reasonable range of {} - {} degrees.".format(self.elev, min_elevation, max_elevation))
+            log.info("Elevation {} is not within range of {} - {} degrees.".format(self.elev, min_elev, max_elev))
 
-            # If elevation is not within min_elevation_hard and max_elevation degrees set to probable_elevation
-            self.elev = self.elev if min_elevation_hard < self.elev < max_elevation else probable_elevation
+            # If elevation is not within min_elev_hard and max_elev degrees set to prob_elev
+            self.elev = self.elev if min_elev_hard < self.elev < max_elev else prob_elev
 
-            # If elevation is 0 - 10 degrees set to 10 degrees
-            self.elev = min_elevation if min_elevation_hard < self.elev < min_elevation else self.elev
+            # If elevation is min_elev_hard - min_elev degrees set to min_elev
+            self.elev = min_elev if min_elev_hard < self.elev < min_elev else self.elev
             log.info("Elevation set to {} degrees.".format(self.elev))
 
 
-
         # Handle estimated start heights are outside normal range of luminous flight
-        max_lum_flt_ht = observed_ht if observed_ht >= max_lum_flt_ht else max_lum_flt_ht
-        min_lum_flt_ht = observed_ht if observed_ht <= min_lum_flt_ht else min_lum_flt_ht
+        # Need to add gap so that angles can be calculated for consistency checks
+        gap = 1000
+        max_lum_flt_ht = obsvd_ht + gap if obsvd_ht >= (max_lum_flt_ht - gap) else max_lum_flt_ht
+        min_lum_flt_ht = obsvd_ht - gap if obsvd_ht <= (min_lum_flt_ht + gap) else min_lum_flt_ht
 
-
-        # Backwards azimuth, add 180 to values < 180, subtract - 180 from values > 180, and reflect elev in horizontal
-        azim_rev = self.azim + 180 if self.azim < 180 else self.azim - 180
 
 
         # Find range to maximum heights in reverse trajectory direction
-        bwd_range = AEH2Range(self.azim, self.elev, max_lum_flt_ht, observed_lat, observed_lon, observed_ht)
-        print("Backwards range {}".format(bwd_range))
+        bwd_range = AEH2Range(self.azim, self.elev, max_lum_flt_ht, obsvd_lat, obsvd_lon, obsvd_ht)
 
         # Find range to minimum height in forward trajectory direction.
-        # This is done by reflecting the trajectory in a horizontal plane midway between observed_ht and min_lum_flt_ht
+        # This is done by reflecting the trajectory in a horizontal plane midway between obsvd_ht and min_lum_flt_ht
         # This simplifies the calculation, but introduces a small imprecision
-        fwd_range = AEH2Range(self.azim, self.elev, observed_ht, observed_lat, observed_lon, min_lum_flt_ht)
+        fwd_range = AEH2Range(self.azim, self.elev, obsvd_ht, obsvd_lat, obsvd_lon, min_lum_flt_ht)
 
         # Iterate to find accurate solution - limit iterations to 100
         for n in range(100):
-         self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, observed_lat, observed_lon, observed_ht)
+         self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obsvd_lat, obsvd_lon, obsvd_ht)
          error =  (ht2_m - min_lum_flt_ht) / min_lum_flt_ht
          fwd_range = fwd_range + fwd_range * error * 0.1
          if error < 0.000005:
              break
 
+        # Backwards azimuth
+        azim_rev = self.azim + 180 if self.azim < 180 else self.azim - 180
+
         # Move event start point back to intersection with max_lum_flt_ht
-        self.lat, self.lon, ht_m =  AER2LatLonAlt(azim_rev, self.elev, bwd_range,observed_lat, observed_lon,observed_ht)
+        self.lat, self.lon, ht_m =  AER2LatLonAlt(azim_rev, self.elev, bwd_range,obsvd_lat, obsvd_lon,obsvd_ht)
         self.ht = ht_m / 1000
 
-        # Calculate end point of trajectory
-        self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, observed_lat, observed_lon,observed_ht)
+        # Calculate end point of trajectory and convert to km
+        self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obsvd_lat, obsvd_lon,obsvd_ht)
         self.ht2 = ht2_m / 1000
 
-        # Checking
+        # Post calculation checks - not required for operation
 
         # Convert to ECEF
-
         x1, y1, z1 = latLonAlt2ECEF(np.radians(self.lat), np.radians(self.lon), self.ht * 1000)
         x2, y2, z2 = latLonAlt2ECEF(np.radians(self.lat2), np.radians(self.lon2), self.ht2 * 1000)
-        x_obs, y_obs, z_obs = latLonAlt2ECEF(np.radians(observed_lat), np.radians(observed_lon), observed_ht)
+        x_obs, y_obs, z_obs = latLonAlt2ECEF(np.radians(obsvd_lat), np.radians(obsvd_lon), obsvd_ht)
 
         # Calculate vectors of three points on trajectory
         maximum_point = np.array([x1, y1, z1])
@@ -340,15 +339,23 @@ class EventContainer(object):
         min_max_az, min_max_el = ECEF2AltAz(maximum_point, minimum_point)
         obs_max_az, obs_max_el = ECEF2AltAz(maximum_point, observed_point)
 
+        if abs(min_obs_az - min_max_az) > 1 or abs(min_obs_az - obs_max_az) > 1 or \
+                               abs(min_obs_el - min_max_el) > 1 or abs(min_obs_el - obs_max_el) > 1:
+            print("Observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obsvd_lat, obsvd_lon, obsvd_ht))
+            print("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
+            print("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim, azim_rev, self.elev))
+            print("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon, self.ht * 1000))
+            print("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2, self.ht2 * 1000))
+            print("Minimum height to Observed height az,el {},{}".format(min_obs_az, min_obs_el))
+            print("Minimum height to Maximum height az,el {},{}".format(min_max_az, min_max_el))
+            print("Observed height to Maximum height az,el {},{}".format(obs_max_az, obs_max_el))
 
         # Log any errors
-
         # Check that az from the minimum to the observation height as the same as the minimum to the maximum height
         # And the minimum to the observation height is the same as the observation to the maximum height
-
         if abs(min_obs_az - min_max_az) > 1 or abs(min_obs_az - obs_max_az) > 1:
-            log.info("Error in Elevation calculations")
-            log.info("Trajectory created from observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(observed_lat,observed_lon,observed_ht))
+            log.info("Error in Azimuth calculations")
+            log.info("Observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obsvd_lat,obsvd_lon,obsvd_ht))
             log.info("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
             log.info("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim, azim_rev, self.elev))
             log.info("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon, self.ht * 1000))
@@ -359,10 +366,9 @@ class EventContainer(object):
 
         # Check that el from the minimum to the observation height as the same as the minimum to the maximum height
         # And the minimum to the observation height is the same as the observation to the maximum height
-
         if abs(min_obs_el - min_max_el) > 1 or abs(min_obs_el - obs_max_el) > 1:
             log.info("Error in Elevation calculations")
-            log.info("Trajectory created from observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(observed_lat,observed_lon,observed_ht))
+            log.info("Trajectory created from observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obsvd_lat,obsvd_lon,obsvd_ht))
             log.info("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
             log.info("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim,azim_rev, self.elev))
             log.info("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon,self.ht * 1000))
@@ -371,7 +377,7 @@ class EventContainer(object):
             log.info("Minimum height to Maximum height az,el {},{}".format(min_max_az, min_max_el))
             log.info("Observed height to Maximum height az,el {},{}".format(obs_max_az, obs_max_el))
 
-
+        # End of post calculation checks
 
 class EventMonitor(multiprocessing.Process):
 
