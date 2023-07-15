@@ -1341,9 +1341,7 @@ class EventMonitor(multiprocessing.Process):
         time.sleep(20)
         while not self.exit.is_set():
 
-            log.info("EventMonitor webpage check starting")
             self.getEventsAndCheck()
-            log.info("EventMonitor webpage check completed")
             # Wait for the next check
             self.exit.wait(60 * self.check_interval)
             #We are running fast, but have not made an upload, then check more slowly next time
