@@ -139,6 +139,8 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
                     shutil.copy2(os.path.join(source_dir, file_name), os.path.join(dest_dir, file_name))
             except shutil.SameFileError:
                 pass
+            except FileNotFoundError:
+                log.warning('file {} not found '.format(os.path.join(source_dir, file_name)))
         else:
             shutil.copy2(os.path.join(source_dir, file_name), os.path.join(dest_dir, file_name))
 
@@ -153,6 +155,8 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
                         shutil.copy2(file_path, os.path.join(dest_dir, os.path.basename(file_path)))
                 except shutil.SameFileError:
                     pass
+                except FileNotFoundError:
+                    log.warning('file {} not found'.format(file_path))
             else:
                 shutil.copy2(file_path, os.path.join(dest_dir, os.path.basename(file_path)))
 
@@ -249,6 +253,7 @@ class SegmentedScale(mscale.ScaleBase):
 
         def transform_non_affine(self, a):
             return np.interp(a, np.arange(len(self.points)), self.points)
+        
         def inverted(self):
             return SegmentedScale.SegTrans(self.lb, self.ub, self.points)
 
@@ -333,10 +338,10 @@ def checkListEquality(t1, t2):
     """
 
     # Check if they are tuples or lists
-    if not (type(t1) is list) and not(type(t1) is tuple):
+    if not (type(t1) is list) and not (type(t1) is tuple):
         return False
 
-    if not (type(t2) is list) and not(type(t2) is tuple):
+    if not (type(t2) is list) and not (type(t2) is tuple):
         return False
 
 
@@ -358,8 +363,7 @@ def checkListEquality(t1, t2):
         elif hasattr(e1, '__dict__') and hasattr(e2, '__dict__'):
 
             # Check if they are functions or classes, compare them directly
-            if (inspect.isroutine(e1) and inspect.isroutine(e2)) or \
-                (inspect.isclass(e1) and inspect.isclass(e2)):
+            if (inspect.isroutine(e1) and inspect.isroutine(e2)) or (inspect.isclass(e1) and inspect.isclass(e2)):
 
                 if e1 == e2: 
                     return True
