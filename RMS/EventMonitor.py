@@ -38,7 +38,7 @@ from glob import glob
 
 
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm
-from RMS.Astrometry.Conversions import latLonAlt2ECEF, ecef2LatLonAlt, AER2LatLonAlt, AEH2Range
+from RMS.Astrometry.Conversions import latLonAlt2ECEF, ecef2LatLonAlt, AER2LatLonAlt, AEH2Range, ECEF2AltAz
 from RMS.Math import angularSeparationVect, polarToCartesian
 from RMS.Formats.Platepar import Platepar
 from datetime import datetime
@@ -267,7 +267,7 @@ class EventContainer(object):
         # Set minimum and maximum luminous flight heights
         min_lum_flt_ht, max_lum_flt_ht = 20000, 100000
 
-        # Elevation is always relative to intersection of extended trajectory with a plane below
+        # Elevation is always relative to intersection of trajectory with a horizontal plane below
         # Therefore elevation is always positive
 
         # For this routine elevation must always be within 10 - 90 degrees
@@ -286,20 +286,24 @@ class EventContainer(object):
             self.elev = min_elevation if min_elevation_hard < self.elev < min_elevation else self.elev
             log.info("Elevation set to {} degrees.".format(self.elev))
 
+
+
         # Handle estimated start heights are outside normal range of luminous flight
         max_lum_flt_ht = observed_ht if observed_ht >= max_lum_flt_ht else max_lum_flt_ht
         min_lum_flt_ht = observed_ht if observed_ht <= min_lum_flt_ht else min_lum_flt_ht
 
+
         # Backwards azimuth, add 180 to values < 180, subtract - 180 from values > 180, and reflect elev in horizontal
         azim_rev = self.azim + 180 if self.azim < 180 else self.azim - 180
 
+
         # Find range to maximum heights in reverse trajectory direction
-        bwd_range = AEH2Range(azim_rev, self.elev, max_lum_flt_ht, observed_lat, observed_lon, observed_ht)
+        bwd_range = AEH2Range(self.azim, self.elev, max_lum_flt_ht, observed_lat, observed_lon, observed_ht)
+        print("Backwards range {}".format(bwd_range))
 
         # Find range to minimum height in forward trajectory direction.
         # This is done by reflecting the trajectory in a horizontal plane midway between observed_ht and min_lum_flt_ht
         # This simplifies the calculation, but introduces a small imprecision
-
         fwd_range = AEH2Range(self.azim, self.elev, observed_ht, observed_lat, observed_lon, min_lum_flt_ht)
 
         # Iterate to find accurate solution - limit iterations to 100
@@ -311,30 +315,62 @@ class EventContainer(object):
              break
 
         # Move event start point back to intersection with max_lum_flt_ht
-        self.lat, self.lon, ht_m =  AER2LatLonAlt(self.azim, self.elev, bwd_range,observed_lat, observed_lon,observed_ht)
+        self.lat, self.lon, ht_m =  AER2LatLonAlt(azim_rev, self.elev, bwd_range,observed_lat, observed_lon,observed_ht)
         self.ht = ht_m / 1000
 
         # Calculate end point of trajectory
         self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, observed_lat, observed_lon,observed_ht)
         self.ht2 = ht2_m / 1000
 
-        if True:
-         print("Trajectory created from observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(observed_lat, observed_lon, observed_ht))
-         print("Propagate forwards, backwards by  {:.0f},{:.0f} metres at elevation {:.4f}".format(fwd_range, bwd_range, self.elev))
-         print("Start point                            lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat ,self.lon ,self.ht * 1000))
-         print("End point                              lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2,self.lon2,self.ht2 * 1000))
+        # Checking
+
+        # Convert to ECEF
+
+        x1, y1, z1 = latLonAlt2ECEF(np.radians(self.lat), np.radians(self.lon), self.ht * 1000)
+        x2, y2, z2 = latLonAlt2ECEF(np.radians(self.lat2), np.radians(self.lon2), self.ht2 * 1000)
+        x_obs, y_obs, z_obs = latLonAlt2ECEF(np.radians(observed_lat), np.radians(observed_lon), observed_ht)
+
+        # Calculate vectors of three points on trajectory
+        maximum_point = np.array([x1, y1, z1])
+        minimum_point = np.array([x2, y2, z2])
+        observed_point = np.array([x_obs, y_obs, z_obs])
+
+        # Calculate Alt Az between three points
+        min_obs_az, min_obs_el = ECEF2AltAz(observed_point, minimum_point)
+        min_max_az, min_max_el = ECEF2AltAz(maximum_point, minimum_point)
+        obs_max_az, obs_max_el = ECEF2AltAz(maximum_point, observed_point)
 
 
+        # Log any errors
 
-        # As a check compute azimuth from difference
-        X = math.cos(np.radians(self.lat)) * math.sin(np.radians(self.lon2 - self.lon))
-        Y = math.cos(np.radians(self.lat)) * math.sin(np.radians(self.lat2)) - math.sin(np.radians(self.lat)) * math.cos(np.radians(self.lat2)) * math.cos(np.radians(self.lon2 - self.lon))
-        checkaz = np.degrees(math.atan2(X,Y))
+        # Check that az from the minimum to the observation height as the same as the minimum to the maximum height
+        # And the minimum to the observation height is the same as the observation to the maximum height
 
-        if checkaz < 0:
-            checkaz += 360
-        print("Desired :{:.2f} Checked : {:.2f}".format(self.azim, checkaz))
-        pass
+        if abs(min_obs_az - min_max_az) > 1 or abs(min_obs_az - obs_max_az) > 1:
+            log.info("Error in Elevation calculations")
+            log.info("Trajectory created from observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(observed_lat,observed_lon,observed_ht))
+            log.info("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
+            log.info("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim, azim_rev, self.elev))
+            log.info("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon, self.ht * 1000))
+            log.info("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2, self.ht2 * 1000))
+            log.info("Minimum height to Observed height az,el {},{}".format(min_obs_az, min_obs_el))
+            log.info("Minimum height to Maximum height az,el {},{}".format(min_max_az, min_max_el))
+            log.info("Observed height to Maximum height az,el {},{}".format(obs_max_az, obs_max_el))
+
+        # Check that el from the minimum to the observation height as the same as the minimum to the maximum height
+        # And the minimum to the observation height is the same as the observation to the maximum height
+
+        if abs(min_obs_el - min_max_el) > 1 or abs(min_obs_el - obs_max_el) > 1:
+            log.info("Error in Elevation calculations")
+            log.info("Trajectory created from observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(observed_lat,observed_lon,observed_ht))
+            log.info("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
+            log.info("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim,azim_rev, self.elev))
+            log.info("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon,self.ht * 1000))
+            log.info("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2,self.ht2 * 1000))
+            log.info("Minimum height to Observed height az,el {},{}".format(min_obs_az, min_obs_el))
+            log.info("Minimum height to Maximum height az,el {},{}".format(min_max_az, min_max_el))
+            log.info("Observed height to Maximum height az,el {},{}".format(obs_max_az, obs_max_el))
+
 
 
 class EventMonitor(multiprocessing.Process):
@@ -1062,7 +1098,7 @@ class EventMonitor(multiprocessing.Process):
     def trajectoryThroughFOV(self, event):
 
         """
-        For the trajectory contained in the event, calculate if it passed through the FoV defined by the platepar
+        For the trajectory contained in the event, calculate if it passed through the FoV defined by the
         of the time of the event
 
         Args:
