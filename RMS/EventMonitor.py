@@ -302,7 +302,6 @@ class EventContainer(object):
 
         fwd_range = AEH2Range(self.azim, self.elev, observed_ht, observed_lat, observed_lon, min_lum_flt_ht)
 
-
         # Iterate to find accurate solution - limit iterations to 100
         for n in range(100):
          self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, observed_lat, observed_lon, observed_ht)
