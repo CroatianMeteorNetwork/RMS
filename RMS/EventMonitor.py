@@ -261,37 +261,72 @@ class EventContainer(object):
         if not azim_elev_definition:
             return
 
-        # Force a reasonable elevation value of +15 if something strange has been entered
-        self.elev = self.elev if 1 < self.elev < 85 else 15
+        # Copy observed lat, lon and height local variables for ease of comprehension and convert to meters
+        observed_lat, observed_lon, observed_ht = self.lat, self.lon, self.ht * 1000
 
         # Set minimum and maximum luminous flight heights
         min_lum_flt_ht, max_lum_flt_ht = 20000, 100000
 
+        # Elevation is always relative to intersection of extended trajectory with a plane below
+        # Therefore elevation is always positive
+
+        # For this routine elevation must always be within 10 - 90 degrees
+        min_elevation_hard, min_elevation, probable_elevation, max_elevation = 0, 10, 45, 90
+
+        # Detect, fix and log elevations outside range
+        if min_elevation < self.elev < max_elevation:
+            pass
+        else:
+            log.info("Elevation {} is not within reasonable range of {} - {} degrees.".format(self.elev, min_elevation, max_elevation))
+
+            # If elevation is not within min_elevation_hard and max_elevation degrees set to probable_elevation
+            self.elev = self.elev if min_elevation_hard < self.elev < max_elevation else probable_elevation
+
+            # If elevation is 0 - 10 degrees set to 10 degrees
+            self.elev = min_elevation if min_elevation_hard < self.elev < min_elevation else self.elev
+            log.info("Elevation set to {} degrees.".format(self.elev))
+
         # Handle estimated start heights are outside normal range of luminous flight
-        max_lum_flt_ht = self.ht*1000 if self.ht*1000 >= max_lum_flt_ht else max_lum_flt_ht
-        min_lum_flt_ht = self.ht*1000 if self.ht*1000 <= min_lum_flt_ht else min_lum_flt_ht
+        max_lum_flt_ht = observed_ht if observed_ht >= max_lum_flt_ht else max_lum_flt_ht
+        min_lum_flt_ht = observed_ht if observed_ht <= min_lum_flt_ht else min_lum_flt_ht
 
         # Backwards azimuth, add 180 to values < 180, subtract - 180 from values > 180, and reflect elev in horizontal
         azim_rev = self.azim + 180 if self.azim < 180 else self.azim - 180
 
-        # Find range to minimum and maximum heights in forward trajectory direction
-        fwd_range = 0 - AEH2Range(self.azim, self.elev, min_lum_flt_ht  ,  self.lat, self.lon, self.ht*1000)
+        # Find range to maximum heights in reverse trajectory direction
+        bwd_range = AEH2Range(azim_rev, self.elev, max_lum_flt_ht, observed_lat, observed_lon, observed_ht)
 
-        # Find range to minimum and maximum heights in reverse trajectory direction
-        bwd_range = AEH2Range(azim_rev, self.elev, max_lum_flt_ht, self.lat, self.lon, self.ht*1000)
+        # Find range to minimum height in forward trajectory direction.
+        # This is done by reflecting the trajectory in a horizontal plane midway between observed_ht and min_lum_flt_ht
+        # This simplifies the calculation, but introduces a small imprecision
 
-        #Move event start point back to intersection with
-        self.lat, self.lon, ht_m =  AER2LatLonAlt(self.azim, self.elev, bwd_range,self.lat,self.lon,self.ht * 1000)
+        fwd_range = AEH2Range(self.azim, self.elev, observed_ht, observed_lat, observed_lon, min_lum_flt_ht)
+
+
+        # Iterate to find accurate solution - limit iterations to 100
+        for n in range(100):
+         self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, observed_lat, observed_lon, observed_ht)
+         error =  (ht2_m - min_lum_flt_ht) / min_lum_flt_ht
+         fwd_range = fwd_range + fwd_range * error * 0.1
+         if error < 0.000005:
+             break
+
+        # Move event start point back to intersection with max_lum_flt_ht
+        self.lat, self.lon, ht_m =  AER2LatLonAlt(self.azim, self.elev, bwd_range,observed_lat, observed_lon,observed_ht)
         self.ht = ht_m / 1000
 
-        #From start point, calculate range to end point
-        range = bwd_range + fwd_range
-
-        #Calculate end point of trajectory
-        self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, range, self.lat,self.lon,self.ht * 1000)
+        # Calculate end point of trajectory
+        self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, observed_lat, observed_lon,observed_ht)
         self.ht2 = ht2_m / 1000
 
-        """
+        if True:
+         print("Trajectory created from observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(observed_lat, observed_lon, observed_ht))
+         print("Propagate forwards, backwards by  {:.0f},{:.0f} metres at elevation {:.4f}".format(fwd_range, bwd_range, self.elev))
+         print("Start point                            lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat ,self.lon ,self.ht * 1000))
+         print("End point                              lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2,self.lon2,self.ht2 * 1000))
+
+
+
         # As a check compute azimuth from difference
         X = math.cos(np.radians(self.lat)) * math.sin(np.radians(self.lon2 - self.lon))
         Y = math.cos(np.radians(self.lat)) * math.sin(np.radians(self.lat2)) - math.sin(np.radians(self.lat)) * math.cos(np.radians(self.lat2)) * math.cos(np.radians(self.lon2 - self.lon))
@@ -299,9 +334,9 @@ class EventContainer(object):
 
         if checkaz < 0:
             checkaz += 360
-        print("Desired :{} Checked : {}".format(self.azim, checkaz))
+        print("Desired :{:.2f} Checked : {:.2f}".format(self.azim, checkaz))
         pass
-        """
+
 
 class EventMonitor(multiprocessing.Process):
 
