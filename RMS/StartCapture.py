@@ -29,6 +29,7 @@ import ctypes
 import logging
 import multiprocessing
 import traceback
+import git
 
 import numpy as np
 
@@ -524,6 +525,17 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # if fixed_duration and (upload_manager is not None):
 
     if upload_manager is not None: # temporary code, will make the script upload after each capture
+
+        # Check if the upload delay is set
+        with upload_manager.next_runtime_lock:
+
+            # Check if the upload delay is up
+            if upload_manager.next_runtime is not None:
+                while (datetime.datetime.utcnow() - upload_manager.next_runtime).total_seconds() < 0:
+                    log.info("Waiting for upload delay to pass: {:.1f} seconds...".format(
+                        abs((datetime.datetime.utcnow() - upload_manager.next_runtime).total_seconds())))
+                    time.sleep(1)
+
         log.info('Uploading data before exiting...')
         upload_manager.uploadData()
 
@@ -693,6 +705,22 @@ if __name__ == "__main__":
 
     log.info("Program start")
     log.info("Station code: {:s}".format(str(config.stationID)))
+
+    # Get the program version
+    try:
+        # Get latest version's commit hash and time of commit
+        repo = git.Repo(search_parent_directories=True)
+        commit_unix_time = repo.head.object.committed_date
+        sha = repo.head.object.hexsha
+        commit_time = datetime.datetime.fromtimestamp(commit_unix_time).strftime('%Y%m%d_%H%M%S')
+
+    except:
+        commit_time = ""
+        sha = ""
+
+    log.info("Program version: {:s}, {:s}".format(commit_time, sha))
+
+    
 
     # Change the Ctrl+C action to the special handle
     setSIGINT()
