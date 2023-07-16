@@ -305,7 +305,7 @@ class EventContainer(object):
         # This simplifies the calculation, but introduces a small imprecision
         fwd_range = AEH2Range(self.azim, self.elev, obsvd_ht, obsvd_lat, obsvd_lon, min_lum_flt_ht)
 
-        # Iterate to find accurate solution - limit iterations to 100
+        # Iterate to find accurate solution - limit iterations to 100, generally requires fewer than 10 iterations
         for n in range(100):
          self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obsvd_lat, obsvd_lon, obsvd_ht)
          # Use trignometery to estimate the error - the perpendicular height error is the opposite side to the elevation
@@ -344,8 +344,11 @@ class EventContainer(object):
         min_max_az, min_max_el = ECEF2AltAz(maximum_point, minimum_point)
         obs_max_az, obs_max_el = ECEF2AltAz(maximum_point, observed_point)
 
+        # set showtrajectories true to enable print out of all trajectories for debugging
+        showtrajectories  = True
+
         if angdf(min_obs_az,min_max_az) > 1 or angdf(min_obs_az,obs_max_az) > 1 or \
-                               angdf(min_obs_el,min_max_el) > 1 or angdf(min_obs_el,obs_max_el) > 1:
+                               angdf(min_obs_el,min_max_el) > 1 or angdf(min_obs_el,obs_max_el) > 1 or showtrajectories:
             print("Observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obsvd_lat, obsvd_lon, obsvd_ht))
             print("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
             print("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim, azim_rev, self.elev))
