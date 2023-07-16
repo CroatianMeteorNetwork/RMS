@@ -308,9 +308,12 @@ class EventContainer(object):
         # Iterate to find accurate solution - limit iterations to 100
         for n in range(100):
          self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obsvd_lat, obsvd_lon, obsvd_ht)
-         error =  (ht2_m - min_lum_flt_ht) / max_lum_flt_ht  # use max to avoid any div zero errors
-         fwd_range = fwd_range + fwd_range * error * 0.1
-         if error < 0.000005:
+         # Use trignometery to estimate the error - the perpendicular height error is the opposite side to the elevation
+         # so error / sin(elev) gives the hypotenuse, which is the amount of extension or contraction of the trajectory
+         error =  (ht2_m - min_lum_flt_ht) / np.sin(np.radians(self.elev))
+         #print("Iteration error : {}".format(error))
+         fwd_range = fwd_range + error
+         if error < 1e-8:
              break
 
         # Backwards azimuth
