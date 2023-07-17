@@ -345,6 +345,8 @@ class EventContainer(object):
         obs_max_az, obs_max_el = ECEF2AltAz(maximum_point, observed_point)
 
         # set showtrajectories true to enable print out of all trajectories for debugging
+        # leave false only to print trajectories with anomolies
+
         showtrajectories  = True
 
         if angdf(min_obs_az,min_max_az) > 1 or angdf(min_obs_az,obs_max_az) > 1 or \
@@ -1193,7 +1195,7 @@ class EventMonitor(multiprocessing.Process):
              log.info("Base name : {}".format(upload_filename))
              log.info("Root dir  : {}".format(root_dir))
              log.info("Base dir  : {}".format(base_dir))
-             archive_name = shutil.make_archive(base_name, 'bztar', root_dir, base_dir)
+             archive_name = shutil.make_archive(base_name, 'bztar', root_dir, logger=log) # removed base_dir) for testing
             else:
              log.info("Not making an archive of {}, not sensible.".format(os.path.join(event_monitor_directory, upload_filename)))
 
@@ -1202,20 +1204,41 @@ class EventMonitor(multiprocessing.Process):
             if os.path.exists(this_event_directory) and this_event_directory != "":
                 shutil.rmtree(this_event_directory)
 
+
         if not no_upload and not test_mode:
-         archives = glob(os.path.join(event_monitor_directory,"*.bz2"))
-         upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,rsa_private_key=self.config.rsa_private_key)
-         # set to the fast check rate after an upload
-         self.check_interval = self.syscon.event_monitor_check_interval_fast
-         log.info("Now checking at {:2.2f} minute intervals".format(self.check_interval))
-         pass
+            # Loop round for a maximum of 30 tries to carry out the upload
+            # Progressively lengthen the delay time, with some random element
+            # Return the status of the upload
+            log.info("Upload of {} - first attempt".format(event_monitor_directory))
+            for retry in range[30]:
+
+                archives = glob(os.path.join(event_monitor_directory,"*.bz2"))
+                upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,rsa_private_key=self.config.rsa_private_key)
+                if upload_status:
+                    log.info("Upload of {} - attempt no {} was successful".format(event_monitor_directory, retry))
+                    # set to the fast check rate after an upload
+                    self.check_interval = self.syscon.event_monitor_check_interval_fast
+                    log.info("Now checking at {:2.2f} minute intervals".format(self.check_interval))
+                    #Do not keep retrying if upload was successful
+                    break
+                else:
+                    log.info("Upload of {} - attempt no {} failed".format(event_monitor_directory, retry))
+                    retry_delay = (retry * 180 * random())
+                    log.error("Upload failed on attempt {}. Retry after {:.1f} seconds.".format(retry))
+                    time.sleep(retry_delay)
+                    log.info("Retrying upload of {}. This is retry {}".format(event_monitor_directory, retry))
+
+
         else:
-         upload_status = False
+            upload_status = False
 
 
-        # Remove the directory
+
+        # Remove the directory - even if the upload was not successful
         if not keep_files and upload_status:
             shutil.rmtree(event_monitor_directory)
+
+        return upload_status
 
     def checkEvents(self, ev_con, test_mode = False):
 
@@ -1270,10 +1293,12 @@ class EventMonitor(multiprocessing.Process):
                 log.info("Event at {} was {:4.1f}km away, inside {:4.1f}km so is uploaded with no further checks.".format(event.dt, min_dist / 1000, event.close_radius))
                 count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
                     event)
-                self.doUpload(event, ev_con, file_list, test_mode)
-                self.markEventAsProcessed(event)
-                if len(file_list) > 0:
-                    self.markEventAsUploaded(event, file_list)
+                if self.doUpload(event, ev_con, file_list, test_mode):
+                    self.markEventAsProcessed(event)
+                    if len(file_list) > 0:
+                        self.markEventAsUploaded(event, file_list)
+                else:
+                    log.error("Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
                 # Do no more work
                 continue
 
@@ -1285,8 +1310,12 @@ class EventMonitor(multiprocessing.Process):
                 count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(event)
                 if count != 0:
                     log.info("Event at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(event.dt, count))
-                    self.doUpload(event, ev_con, file_list, test_mode=test_mode)
-                    self.markEventAsUploaded(event, file_list)
+                    if self.doUpload(event, ev_con, file_list, test_mode=test_mode):
+                        self.markEventAsUploaded(event, file_list)
+                        if not test_mode:
+                            self.markEventAsProcessed(event)
+                    else:
+                        log.error("Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
                     if test_mode:
                         rp = Platepar()
                         rp.read(self.getPlateparFilePath(event))
@@ -1298,8 +1327,8 @@ class EventMonitor(multiprocessing.Process):
                                     rp.fov_v, event.start_angle, event.end_angle))
                 else:
                     log.info("Event at {} did not pass through FOV.".format(event.dt))
-                if not test_mode:
-                    self.markEventAsProcessed(event)
+                    if not test_mode:
+                        self.markEventAsProcessed(event)
                 # Do no more work
                 continue
         return None
