@@ -266,9 +266,6 @@ class EventContainer(object):
         # Copy observed lat, lon and height local variables for ease of comprehension and convert to meters
         obsvd_lat, obsvd_lon, obsvd_ht = self.lat, self.lon, self.ht * 1000
 
-        # Set minimum and maximum luminous flight heights
-        min_lum_flt_ht, max_lum_flt_ht = 20000, 100000
-
         # Elevation is always relative to intersection of trajectory with a horizontal plane below
         # Therefore elevation is always positive
 
@@ -291,27 +288,26 @@ class EventContainer(object):
 
         # Handle estimated start heights are outside normal range of luminous flight
         # Need to add gap so that angles can be calculated for consistency checks
-        gap = 1000
+        # Set minimum and maximum luminous flight heights
+
+        min_lum_flt_ht, max_lum_flt_ht, gap = 20000, 100000, 1000
         max_lum_flt_ht = obsvd_ht + gap if obsvd_ht >= (max_lum_flt_ht - gap) else max_lum_flt_ht
         min_lum_flt_ht = obsvd_ht - gap if obsvd_ht <= (min_lum_flt_ht + gap) else min_lum_flt_ht
-
-
 
         # Find range to maximum heights in reverse trajectory direction
         bwd_range = AEH2Range(self.azim, self.elev, max_lum_flt_ht, obsvd_lat, obsvd_lon, obsvd_ht)
 
         # Find range to minimum height in forward trajectory direction.
         # This is done by reflecting the trajectory in a horizontal plane midway between obsvd_ht and min_lum_flt_ht
-        # This simplifies the calculation, but introduces a small imprecision
+        # This simplifies the calculation, but introduces a small imprecision, caused by curvature of earth
         fwd_range = AEH2Range(self.azim, self.elev, obsvd_ht, obsvd_lat, obsvd_lon, min_lum_flt_ht)
 
         # Iterate to find accurate solution - limit iterations to 100, generally requires fewer than 10 iterations
         for n in range(100):
          self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obsvd_lat, obsvd_lon, obsvd_ht)
-         # Use trignometery to estimate the error - the perpendicular height error is the opposite side to the elevation
+         # Use trigonometry to estimate the error - perpendicular error is the opposite side to the elevation
          # so error / sin(elev) gives the hypotenuse, which is the amount of extension or contraction of the trajectory
          error =  (ht2_m - min_lum_flt_ht) / np.sin(np.radians(self.elev))
-         #print("Iteration error : {}".format(error))
          fwd_range = fwd_range + error
          if error < 1e-8:
              break
@@ -326,6 +322,7 @@ class EventContainer(object):
         # Calculate end point of trajectory and convert to km
         self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obsvd_lat, obsvd_lon,obsvd_ht)
         self.ht2 = ht2_m / 1000
+
 
         # Post calculation checks - not required for operation
 
