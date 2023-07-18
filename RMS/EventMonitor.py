@@ -264,7 +264,6 @@ class EventContainer(object):
 
         # Create a list of event copies
         for pop_num in range(0,pop_to_create):
-            print("Creating deviated trajectory {}".format(pop_num))
             population.append(copy.copy(self))
 
         for tr in population:
