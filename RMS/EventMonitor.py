@@ -526,8 +526,9 @@ class EventMonitor(multiprocessing.Process):
         # Commit the changes
         conn.commit()
 
-        # Close the connection
+        # Set the connection
         self.db_conn = conn
+        return conn
 
     def delEventMonitorDB(self):
 
