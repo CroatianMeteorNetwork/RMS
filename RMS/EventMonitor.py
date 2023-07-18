@@ -373,7 +373,7 @@ class EventContainer(object):
         # set showtrajectories true to enable print out of all trajectories for debugging
         # leave false only to print trajectories with anomolies
 
-        showtrajectories  = True
+        showtrajectories  = False
 
         if angdf(min_obs_az,min_max_az) > 1 or angdf(min_obs_az,obs_max_az) > 1 or \
                                angdf(min_obs_el,min_max_el) > 1 or angdf(min_obs_el,obs_max_el) > 1 or showtrajectories:
