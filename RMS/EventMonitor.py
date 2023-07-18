@@ -38,8 +38,8 @@ from glob import glob
 
 
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm
-from RMS.Astrometry.Conversions import latLonAlt2ECEF, ecef2LatLonAlt, AER2LatLonAlt, AEH2Range, ECEF2AltAz
-from RMS.Math import angularSeparationVect, polarToCartesian
+from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz
+from RMS.Math import angularSeparationVect
 from RMS.Formats.Platepar import Platepar
 from datetime import datetime
 from dateutil import parser
@@ -266,9 +266,6 @@ class EventContainer(object):
         # Copy observed lat, lon and height local variables for ease of comprehension and convert to meters
         obsvd_lat, obsvd_lon, obsvd_ht = self.lat, self.lon, self.ht * 1000
 
-        # Elevation is always relative to intersection of trajectory with a horizontal plane below
-        # Therefore elevation is always positive
-
         # For this routine elevation must always be within 10 - 90 degrees
         min_elev_hard, min_elev, prob_elev, max_elev = 0, 10, 45, 90
 
@@ -286,7 +283,7 @@ class EventContainer(object):
             log.info("Elevation set to {} degrees.".format(self.elev))
 
 
-        # Handle estimated start heights are outside normal range of luminous flight
+        # Handle estimated start heights outside normal range of luminous flight
         # Need to add gap so that angles can be calculated for consistency checks
         # Set minimum and maximum luminous flight heights
 
@@ -305,11 +302,11 @@ class EventContainer(object):
         # Iterate to find accurate solution - limit iterations to 100, generally requires fewer than 10 iterations
         for n in range(100):
          self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obsvd_lat, obsvd_lon, obsvd_ht)
-         # Use trigonometry to estimate the error - perpendicular error is the opposite side to the elevation
-         # so error / sin(elev) gives the hypotenuse, which is the amount of extension or contraction of the trajectory
-         error =  (ht2_m - min_lum_flt_ht) / np.sin(np.radians(self.elev))
-         fwd_range = fwd_range + error
-         if error < 1e-8:
+         # Use trigonometry to estimate the error - vertical error is the opposite side to the elevation
+         # so vertical error / sin(elev) gives the hypotenuse, which is the trajectory error
+         traj_error =  (ht2_m - min_lum_flt_ht) / np.sin(np.radians(self.elev))
+         fwd_range = fwd_range + traj_error
+         if traj_error < 1e-8:
              break
 
         # Backwards azimuth
@@ -317,11 +314,11 @@ class EventContainer(object):
 
         # Move event start point back to intersection with max_lum_flt_ht
         self.lat, self.lon, ht_m =  AER2LatLonAlt(azim_rev, self.elev, bwd_range,obsvd_lat, obsvd_lon,obsvd_ht)
-        self.ht = ht_m / 1000
-
         # Calculate end point of trajectory and convert to km
         self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obsvd_lat, obsvd_lon,obsvd_ht)
-        self.ht2 = ht2_m / 1000
+
+        # Convert to km and store
+        self.ht, self.ht2 = ht_m / 1000, ht2_m / 1000
 
 
         # Post calculation checks - not required for operation
@@ -332,14 +329,12 @@ class EventContainer(object):
         x_obs, y_obs, z_obs = latLonAlt2ECEF(np.radians(obsvd_lat), np.radians(obsvd_lon), obsvd_ht)
 
         # Calculate vectors of three points on trajectory
-        maximum_point = np.array([x1, y1, z1])
-        minimum_point = np.array([x2, y2, z2])
-        observed_point = np.array([x_obs, y_obs, z_obs])
+        max_pt, min_pt, obs_pt = np.array([x1, y1, z1]), np.array([x2, y2, z2]), np.array([x_obs, y_obs, z_obs])
 
         # Calculate Alt Az between three points
-        min_obs_az, min_obs_el = ECEF2AltAz(observed_point, minimum_point)
-        min_max_az, min_max_el = ECEF2AltAz(maximum_point, minimum_point)
-        obs_max_az, obs_max_el = ECEF2AltAz(maximum_point, observed_point)
+        min_obs_az, min_obs_el = ECEF2AltAz(obs_pt, min_pt)
+        min_max_az, min_max_el = ECEF2AltAz(max_pt, min_pt)
+        obs_max_az, obs_max_el = ECEF2AltAz(max_pt, obs_pt)
 
         # set showtrajectories true to enable print out of all trajectories for debugging
         # leave false only to print trajectories with anomolies
@@ -358,6 +353,7 @@ class EventContainer(object):
             print("Observed height to Maximum height az,el {:4f},{:.4f}".format(obs_max_az, obs_max_el))
 
         # Log any errors
+
         # Check that az from the minimum to the observation height as the same as the minimum to the maximum height
         # And the minimum to the observation height is the same as the observation to the maximum height
         if angdf(min_obs_az,min_max_az) > 1 or angdf(min_obs_az,obs_max_az) > 1:
@@ -1201,14 +1197,17 @@ class EventMonitor(multiprocessing.Process):
             if os.path.exists(this_event_directory) and this_event_directory != "":
                 shutil.rmtree(this_event_directory)
 
+        # Set the upload status to false - every path through the code will set this.
+        upload_status = False
 
         if not no_upload and not test_mode:
             # Loop round for a maximum of 30 tries to carry out the upload
             # Progressively lengthen the delay time, with some random element
             # Return the status of the upload
             log.info("Upload of {} - first attempt".format(event_monitor_directory))
-            for retry in range[30]:
 
+            # Don't include a delay before uploading
+            for retry in range[30]:
                 archives = glob(os.path.join(event_monitor_directory,"*.bz2"))
                 upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,rsa_private_key=self.config.rsa_private_key)
                 if upload_status:
@@ -1216,25 +1215,19 @@ class EventMonitor(multiprocessing.Process):
                     # set to the fast check rate after an upload
                     self.check_interval = self.syscon.event_monitor_check_interval_fast
                     log.info("Now checking at {:2.2f} minute intervals".format(self.check_interval))
-                    #Do not keep retrying if upload was successful
+                    # Exit loop if upload was successful
                     break
                 else:
-                    log.info("Upload of {} - attempt no {} failed".format(event_monitor_directory, retry))
-                    retry_delay = (retry * 180 * random())
+                    retry_delay = (retry * 180 * (1+ random()))
                     log.error("Upload failed on attempt {}. Retry after {:.1f} seconds.".format(retry))
                     time.sleep(retry_delay)
                     log.info("Retrying upload of {}. This is retry {}".format(event_monitor_directory, retry))
-
-
         else:
             upload_status = False
 
-
-
         # Remove the directory - even if the upload was not successful
-        if not keep_files and upload_status:
+        if not keep_files:
             shutil.rmtree(event_monitor_directory)
-
         return upload_status
 
     def checkEvents(self, ev_con, test_mode = False):
@@ -1290,6 +1283,7 @@ class EventMonitor(multiprocessing.Process):
                 log.info("Event at {} was {:4.1f}km away, inside {:4.1f}km so is uploaded with no further checks.".format(event.dt, min_dist / 1000, event.close_radius))
                 count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
                     event)
+                # If doUpload returned True mark the event as processed and uploaded
                 if self.doUpload(event, ev_con, file_list, test_mode):
                     self.markEventAsProcessed(event)
                     if len(file_list) > 0:
