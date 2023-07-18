@@ -1351,7 +1351,7 @@ class EventMonitor(multiprocessing.Process):
 
                 # If trajectory outside the farradius, do nothing, and mark as processed
                 if min_dist > event.far_radius * 1000 and not test_mode:
-                    log.info("Event at {}, lat:{:.3f}, lon:{:.3f}, was {:.0f}km away, outside {:.0f}km, so was ignored".format(event.dt, event.lat, event.lon,min_dist / 1000, event.far_radius))
+                    #log.info("Event at {}, lat:{:.3f}, lon:{:.3f}, was {:.0f}km away, outside {:.0f}km, so was ignored".format(event.dt, event.lat, event.lon,min_dist / 1000, event.far_radius))
                     # self.markEventAsProcessed(event)
                     # Do no more work on this version of the trajectory
                     continue
