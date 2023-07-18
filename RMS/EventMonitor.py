@@ -1207,7 +1207,7 @@ class EventMonitor(multiprocessing.Process):
             log.info("Upload of {} - first attempt".format(event_monitor_directory))
 
             # Don't include a delay before uploading
-            for retry in range(30):
+            for retry in range(1,30):
                 archives = glob(os.path.join(event_monitor_directory,"*.bz2"))
                 upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,rsa_private_key=self.config.rsa_private_key)
                 if upload_status:
