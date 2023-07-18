@@ -266,6 +266,7 @@ class EventContainer(object):
         for pop_num in range(0,pop_to_create):
             population.append(copy.copy(self))
 
+        # Apply the deviations
         for tr in population:
             tr.lat = tr.lat + np.random.normal(0,20,1)[0] * self.lat_std
             tr.lon = tr.lon + np.random.normal(0,20,1)[0] * self.lon_std
