@@ -1400,9 +1400,12 @@ class EventMonitor(multiprocessing.Process):
                     else:
                         #log.info("Event at {} did not pass through FOV.".format(event.dt))
                         if not test_mode:
-                            self.markEventAsProcessed(observed_event)
+                            pass
+
                     # Continue with other trajectories from this population
                     continue
+            # End of the processing loop for this event
+            self.markEventAsProcessed(observed_event)
         return None
 
 
