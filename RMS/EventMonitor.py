@@ -1338,7 +1338,9 @@ class EventMonitor(multiprocessing.Process):
             event_population = observed_event.apply_sd(1000)
             log.info("Testing {} variants of a trajectory at {}".format(len(event_population),observed_event.dt))
             for event in event_population:
-
+                # check if this has already been handled
+                if observed_event.stations_required.find(ev_con.stationID) != -1:
+                    break # do no more work on any version of this trajectory - break exits loop
                 # From the infinitely extended trajectory, work out the closest point to the camera
                 start_dist, end_dist, atmos_dist = self.calculateclosestpoint(event.lat, event.lon, event.ht * 1000,
                                                                           event.lat2,
@@ -1365,10 +1367,10 @@ class EventMonitor(multiprocessing.Process):
                         self.markEventAsProcessed(event)
                         if len(file_list) > 0:
                             self.markEventAsUploaded(event, file_list)
+                        break # Do no more work on any version of this trajectory - break exits loop
                     else:
                         log.error("Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
-                    # Do no more work on any version of this trajectory - break exits loop
-                    break
+
 
 
             # If trajectory inside the farradius, then check if the trajectory went through the FoV
@@ -1382,6 +1384,7 @@ class EventMonitor(multiprocessing.Process):
                             self.markEventAsUploaded(event, file_list)
                             if not test_mode:
                                 self.markEventAsProcessed(event)
+                            break # Do no more work on any version of this trajectory
                         else:
                             log.error("Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
                         if test_mode:
