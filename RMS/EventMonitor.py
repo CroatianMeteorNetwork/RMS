@@ -1365,9 +1365,9 @@ class EventMonitor(multiprocessing.Process):
                         event)
                     # If doUpload returned True mark the event as processed and uploaded
                     if self.doUpload(event, ev_con, file_list, test_mode):
-                        self.markEventAsProcessed(event)
+                        self.markEventAsProcessed(observed_event)
                         if len(file_list) > 0:
-                            self.markEventAsUploaded(event, file_list)
+                            self.markEventAsUploaded(observed_event, file_list)
                         break # Do no more work on any version of this trajectory - break exits loop
                     else:
                         log.error("Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
@@ -1381,10 +1381,10 @@ class EventMonitor(multiprocessing.Process):
                     count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(event)
                     if count != 0:
                         log.info("Event at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(event.dt, count))
-                        if self.doUpload(event, ev_con, file_list, test_mode=test_mode):
-                            self.markEventAsUploaded(event, file_list)
+                        if self.doUpload(observed_event, ev_con, file_list, test_mode=test_mode):
+                            self.markEventAsUploaded(observed_event, file_list)
                             if not test_mode:
-                                self.markEventAsProcessed(event)
+                                self.markEventAsProcessed(observed_event)
                             break # Do no more work on any version of this trajectory
                         else:
                             log.error("Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
@@ -1400,7 +1400,7 @@ class EventMonitor(multiprocessing.Process):
                     else:
                         log.info("Event at {} did not pass through FOV.".format(event.dt))
                         if not test_mode:
-                            self.markEventAsProcessed(event)
+                            self.markEventAsProcessed(observed_event)
                     # Continue with other trajectories from this population
                     continue
         return None
