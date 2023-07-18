@@ -1218,7 +1218,7 @@ class EventMonitor(multiprocessing.Process):
                     # Exit loop if upload was successful
                     break
                 else:
-                    retry_delay = (retry * 180 * (1+ random()))
+                    retry_delay = (retry * 180 * (1+ random.random()))
                     log.error("Upload failed on attempt {}. Retry after {:.1f} seconds.".format(retry))
                     time.sleep(retry_delay)
                     log.info("Retrying upload of {}. This is retry {}".format(event_monitor_directory, retry))
