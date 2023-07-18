@@ -428,8 +428,8 @@ class EventMonitor(multiprocessing.Process):
 
         super(EventMonitor, self).__init__()
         # Hold two configs - one for the locations of folders - syscon, and one for the lats and lons etc. - config
-        self.config = config        #the config that will be used for all data processing - lats, lons etc.
-        self.syscon = config        #the config that describes where the folders are
+        self.config = config        # the config that will be used for all data processing - lats, lons etc.
+        self.syscon = config        # the config that describes where the folders are
         # The path to the event monitor database
         self.event_monitor_db_path = os.path.join(os.path.abspath(self.config.data_dir),
                                                   self.config.event_monitor_db_name)
@@ -744,7 +744,7 @@ class EventMonitor(multiprocessing.Process):
             log.info("Added event at {} to the database".format(event.dt))
             return True
         else:
-            log.info("Event at {} already in the database".format(event.dt))
+            # log.info("Event at {} already in the database".format(event.dt))
             return False
 
     def markEventAsProcessed(self, event):
