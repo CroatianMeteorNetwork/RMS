@@ -1377,7 +1377,7 @@ class EventMonitor(multiprocessing.Process):
             # If trajectory inside the farradius, then check if the trajectory went through the FoV
             # The returned count is the number of 100th parts of the trajectory observed through the FoV
                 if min_dist < event.far_radius * 1000 or test_mode:
-                    log.info("Event at {} was {:4.1f}km away, inside {:4.1f}km, consider FOV.".format(event.dt, min_dist / 1000, event.far_radius))
+                    #log.info("Event at {} was {:4.1f}km away, inside {:4.1f}km, consider FOV.".format(event.dt, min_dist / 1000, event.far_radius))
                     count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(event)
                     if count != 0:
                         log.info("Event at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(event.dt, count))
@@ -1398,7 +1398,7 @@ class EventMonitor(multiprocessing.Process):
                                         rp.lat, rp.lon, event.start_distance / 1000, event.end_distance / 1000, rp.fov_h,
                                         rp.fov_v, event.start_angle, event.end_angle))
                     else:
-                        log.info("Event at {} did not pass through FOV.".format(event.dt))
+                        #log.info("Event at {} did not pass through FOV.".format(event.dt))
                         if not test_mode:
                             self.markEventAsProcessed(observed_event)
                     # Continue with other trajectories from this population
