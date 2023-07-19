@@ -323,7 +323,6 @@ class EventContainer(object):
         """
 
         lat,lon,ht = ecef2LatLonAlt(ecef_vect[0], ecef_vect[1], ecef_vect[2])
-        print("lat,lon,ht {:.3f},{:.3f},{:3f}".format(lat, lon, ht))
         return np.degrees(lat),np.degrees(lon),ht / 1000
 
     def applyCartesianSDToPoint(self,pt,cart_std):
