@@ -38,7 +38,6 @@ from RMS.DetectionTools import loadImageCalibration
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
 from RMS.QueuedPool import QueuedPool
-from RMS.Logger import initLogging
 
 # Morphology - Cython init
 import pyximport

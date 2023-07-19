@@ -363,7 +363,7 @@ def checkListEquality(t1, t2):
         elif hasattr(e1, '__dict__') and hasattr(e2, '__dict__'):
 
             # Check if they are functions or classes, compare them directly
-            if (inspect.isroutine(e1) and inspect.isroutine(e2)) or 
+            if (inspect.isroutine(e1) and inspect.isroutine(e2)) or \
                 (inspect.isclass(e1) and inspect.isclass(e2)):
 
                 if e1 == e2: 
