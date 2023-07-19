@@ -329,20 +329,16 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
 
         # Crop the star segment to take 3 sigma portion around the star
         crop_y_min = int(yo - 3*sigma_y) + 1
-        if crop_y_min < 0: 
-            crop_y_min = 0
+        if crop_y_min < 0: crop_y_min = 0
         
         crop_y_max = int(yo + 3*sigma_y) + 1
-        if crop_y_max >= star_seg.shape[0]: 
-            crop_y_max = star_seg.shape[0] - 1
+        if crop_y_max >= star_seg.shape[0]: crop_y_max = star_seg.shape[0] - 1
 
         crop_x_min = int(xo - 3*sigma_x) + 1
-        if crop_x_min < 0: 
-            crop_x_min = 0
+        if crop_x_min < 0: crop_x_min = 0
 
         crop_x_max = int(xo + 3*sigma_x) + 1
-        if crop_x_max >= star_seg.shape[1]: 
-            crop_x_max = star_seg.shape[1] - 1
+        if crop_x_max >= star_seg.shape[1]: crop_x_max = star_seg.shape[1] - 1
 
         # If the segment is too small, set a fixed size
         if (y_max - y_min) < 3:
@@ -545,10 +541,10 @@ if __name__ == "__main__":
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Extract stars on FF files in the given folder.")
 
-    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, 
+    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
         help='Path to the folder with FF files.')
 
-    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, 
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
 
     arg_parser.add_argument('-s', '--showstd', action="store_true", help="""Show a histogram of stddevs of PSFs of all detected stars. """)
@@ -584,7 +580,7 @@ if __name__ == "__main__":
     y_list = []
 
 
-    # display found stars
+    # Print found stars
     for ff_name, star_data in star_list:
 
         log.info('----')
@@ -649,7 +645,7 @@ if __name__ == "__main__":
         y_min = np.percentile(fwhm_list[~np.isnan(fwhm_list)], 0.5)
         y_max = np.percentile(fwhm_list[~np.isnan(fwhm_list)], 99.5)
 
-        plt.hexbin(lsp_list, fwhm_list, gridsize=(hexbin_grid, hexbin_grid), extent=(x_min, x_max, 
+        plt.hexbin(lsp_list, fwhm_list, gridsize=(hexbin_grid, hexbin_grid), extent=(x_min, x_max, \
             y_min, y_max))
         plt.xlabel('Uncalibrated magnitude')
         plt.ylabel('PSF FWHM')
@@ -669,7 +665,7 @@ if __name__ == "__main__":
 
         x_min = np.min(x_list)
         x_max = np.max(x_list)
-        ax1.hexbin(x_list, fwhm_list, gridsize=(hexbin_grid, hexbin_grid), extent=(x_min, x_max, 
+        ax1.hexbin(x_list, fwhm_list, gridsize=(hexbin_grid, hexbin_grid), extent=(x_min, x_max, \
             y_min, y_max))
 
         
@@ -682,7 +678,7 @@ if __name__ == "__main__":
 
         x_min = np.min(y_list)
         x_max = np.max(y_list)
-        ax2.hexbin(y_list, fwhm_list, gridsize=(hexbin_grid, hexbin_grid), extent=(x_min, x_max, 
+        ax2.hexbin(y_list, fwhm_list, gridsize=(hexbin_grid, hexbin_grid), extent=(x_min, x_max,  \
             y_min, y_max))
 
         ax2.set_ylabel('PSF FWHM')
