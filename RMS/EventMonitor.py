@@ -38,7 +38,7 @@ from glob import glob
 
 
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm
-from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz
+from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt
 from RMS.Math import angularSeparationVect
 from RMS.Formats.Platepar import Platepar
 from datetime import datetime
@@ -61,8 +61,8 @@ class EventContainer(object):
 
         self.dt,self.time_tolerance = dt, 0
 
-        self.lat, self.lat_std, self.lon, self.lon_std, self.ht, self.ht_std = lat, 0, lon, 0, ht,0
-        self.lat2, self.lat2_std, self.lon2, self.lon2_std, self.ht2, self.ht2_std = 0,0,0,0,0,0
+        self.lat, self.lat_std, self.lon, self.lon_std, self.ht, self.ht_std, self.cart_std = lat, 0, lon, 0, ht,0,0
+        self.lat2, self.lat2_std, self.lon2, self.lon2_std, self.ht2, self.ht2_std, self.cart2_std = 0,0,0,0,0,0,0
         self.close_radius, self.far_radius = 0,0
 
         # Or trajectory information from the first point
@@ -100,7 +100,7 @@ class EventContainer(object):
 
         if value == "":
             return
-
+        print("Name, Value {},{}".format(variable_name, value))
         # Mandatory parameters
 
         self.dt = value if "EventTime" == variable_name else self.dt
@@ -111,6 +111,7 @@ class EventContainer(object):
         self.lon_std = float(value) if "EventLonStd" == variable_name else self.lon_std
         self.ht = float(value) if "EventHt" == variable_name else self.ht
         self.ht_std = float(value) if "EventHtStd" == variable_name else self.ht_std
+        self.cart_std = float(value) if "EventCartStd" == variable_name else self.cart_std
 
         # radii
 
@@ -125,6 +126,7 @@ class EventContainer(object):
         self.lon2_std = float(value) if "EventLon2Std" == variable_name else self.lon2_std
         self.ht2 = float(value) if "EventHt2" == variable_name else self.ht2
         self.ht2_std = float(value) if "EventHt2Std" == variable_name else self.ht2_std
+        self.cart2_std = float(value) if "EventCart2Std" == variable_name else self.cart2_std
 
         # Optional parameters for defining trajectory by a start point, and a direction
 
@@ -183,6 +185,7 @@ class EventContainer(object):
         output += ("EventLonStd (deg)        : {:3.2f}\n".format(self.lon_std))
         output += ("EventHt (km)             : {:3.2f}\n".format(self.ht))
         output += ("EventHtStd (km)          : {:3.2f}\n".format(self.ht_std))
+        output += ("EventCartStd (km)          : {:3.2f}\n".format(self.cart_std))
         output += ("CloseRadius(km)          : {:3.2f}\n".format(self.close_radius))
         output += ("FarRadius (km)           : {:3.2f}\n".format(self.far_radius))
         output += "\n"
@@ -193,6 +196,7 @@ class EventContainer(object):
         output += ("EventLon2Std (deg)       : {:3.2f}\n".format(self.lon2_std))
         output += ("EventHt2 (km)            : {:3.2f}\n".format(self.ht2))
         output += ("EventHtStd2 (km)         : {:3.2f}\n".format(self.ht2_std))
+        output += ("EventCartStd2 (km)         : {:3.2f}\n".format(self.cart2_std))
         output += "\n"
         output += "# Or a trajectory instead    \n"
         output += ("EventAzim (deg +E of N)  : {:3.2f}\n".format(self.azim))
@@ -245,31 +249,75 @@ class EventContainer(object):
 
         return reasonable
 
-    def apply_sd(self,population_size):
 
-        population = []
+    def hasCartSD(self):
 
-        pop_to_create = 1
+        sd_used = False
+        print("cart_std {}, cart2_std {}".format(self.cart_std,self.cart2_std))
+        # Find out if any standard deviations are set to non-zero
+        sd_used = True if self.cart_std != 0 else sd_used
+        sd_used = True if self.cart2_std != 0 else sd_used
 
+        return sd_used
+
+    def hasPolarSD(self):
+
+        sd_used = False
 
         # Find out if any standard deviations are set to non-zero
-        pop_to_create = population_size if self.lat_std != 0 else pop_to_create
-        pop_to_create = population_size if self.lon_std != 0 else pop_to_create
-        pop_to_create = population_size if self.ht_std != 0 else pop_to_create
-        pop_to_create = population_size if self.lat2_std != 0 else pop_to_create
-        pop_to_create = population_size if self.lon2_std != 0 else pop_to_create
-        pop_to_create = population_size if self.ht2_std != 0 else pop_to_create
-        pop_to_create = population_size if self.azim_std != 0 else pop_to_create
-        pop_to_create = population_size if self.elev_std != 0 else pop_to_create
+        sd_used = True if self.lat_std != 0 else sd_used
+        sd_used = True if self.lon_std != 0 else sd_used
+        sd_used = True if self.ht_std != 0 else sd_used
+        sd_used = True if self.lat2_std != 0 else sd_used
+        sd_used = True if self.lon2_std != 0 else sd_used
+        sd_used = True if self.ht2_std != 0 else sd_used
+        sd_used = True if self.azim_std != 0 else sd_used
+        sd_used = True if self.elev_std != 0 else sd_used
 
-        # Create a list of event copies
-        for pop_num in range(0,pop_to_create):
-            population.append(copy.copy(self))
+        return sd_used
+
+    def createPopulation(self,population_size):
+
+        population = []
+        if self.hasCartSD() or self.hasPolarSD():
+            for pop_num in range(0, population_size):
+                population.append(copy.copy(self))
+        return population
+
+    def eventToECEF(self):
+
+        v1,v2 = latLonAlt2ECEF(self.lat,  self.lon,self.ht*1000), latLonAlt2ECEF(self.lat2, self.lon2, self.ht2*1000)
+        vector = np.array([v1,v2])
+        return vector
+
+    def ecefV2LatLonAlt(self,ecef_vect):
+
+        return ecef2LatLonAlt(ecef_vect[0], ecef_vect[1], ecef_vect[2])
+
+    def applyCartesianSDToPoint(self,pt,cart_std):
+
+        print("Vector x:{:.0f} y:{:.0f} z:{:.0f} SD:{:.3f}".format(pt[0],pt[1],pt[2],cart_std))
+
+        return pt
+
+    def applyCartesianSD(self,population):
+
+        ecef_vector = self.eventToECEF()
+
+        if self.hasCartesianSD():
+            for tr in population:
+                start_vect = self.applyCartesianSDToPoint(ecef_vector[1],self.cart_std)
+                end_vect = self.applyCartesianSDToPoint(ecef_vector[2],self.cart2_std)
+                tr.lat, tr.lon, tr.ht = self.ecefV2LatLonAlt(start_vect)
+                tr.lat2, tr.lon2, tr.ht2 = self.ecefV2LatLonAlt(end_vect)
+        return population
+
+    def applyPolarSD(self,population):
 
         # Apply the deviations
         for tr in population:
-            tr.lat = tr.lat + np.random.normal(0,20,1)[0] * self.lat_std
-            tr.lon = tr.lon + np.random.normal(0,20,1)[0] * self.lon_std
+            tr.lat = tr.lat + np.random.normal(0, 20, 1)[0] * self.lat_std
+            tr.lon = tr.lon + np.random.normal(0, 20, 1)[0] * self.lon_std
             tr.ht = tr.ht + np.random.normal(0, 20, 1)[0] * self.ht_std
             tr.lat2 = tr.lat2 + np.random.normal(0, 20, 1)[0] * self.lat2_std
             tr.lon2 = tr.lon2 + np.random.normal(0, 20, 1)[0] * self.lon2_std
@@ -277,9 +325,8 @@ class EventContainer(object):
             tr.azim = tr.azim + np.random.normal(0, 20, 1)[0] * self.azim_std
             tr.elev = tr.elev + np.random.normal(0, 20, 1)[0] * self.elev_std
 
+
         return population
-
-
 
     def transformToLatLon(self):
 
@@ -431,8 +478,26 @@ class EventMonitor(multiprocessing.Process):
         self.config = config        # the config that will be used for all data processing - lats, lons etc.
         self.syscon = config        # the config that describes where the folders are
         # The path to the event monitor database
+
+        self.event_monitor_db_name = "event_monitor.db"
         self.event_monitor_db_path = os.path.join(os.path.abspath(self.config.data_dir),
                                                   self.config.event_monitor_db_name)
+
+        self.createDB()
+
+        # Load the event monitor database. Any problems, delete and recreate.
+        self.db_conn = self.getConnectionToEventMonitorDB()
+
+        self.check_interval = self.syscon.event_monitor_check_interval
+        self.exit = multiprocessing.Event()
+
+        log.info("Started EventMonitor")
+        log.info("Monitoring {} at {:3.2f} minute intervals".format(self.syscon.event_monitor_webpage,self.syscon.event_monitor_check_interval))
+        log.info("Local db path name {}".format(self.syscon.event_monitor_db_name))
+        log.info("Reporting data to {}/{}".format(self.syscon.hostname, self.syscon.event_monitor_remote_dir))
+
+
+    def createDB(self):
 
         for createdb_attempts in range(30):
             self.conn = self.createEventMonitorDB()
@@ -443,19 +508,6 @@ class EventMonitor(multiprocessing.Process):
                 os.unlink(self.event_monitor_db_path)
             time.sleep(30)
             log.info("Retrying database creation")
-
-        # Load the event monitor database. Any problems, delete and recreate.
-        self.db_conn = self.getConnectionToEventMonitorDB()
-        self.exit = multiprocessing.Event()
-        self.event_monitor_db_name = "event_monitor.db"
-
-        self.check_interval = self.syscon.event_monitor_check_interval
-
-
-        log.info("Started EventMonitor")
-        log.info("Monitoring {} at {:3.2f} minute intervals".format(self.syscon.event_monitor_webpage,self.syscon.event_monitor_check_interval))
-        log.info("Local db path name {}".format(self.syscon.event_monitor_db_name))
-        log.info("Reporting data to {}/{}".format(self.syscon.hostname, self.syscon.event_monitor_remote_dir))
 
 
     def createEventMonitorDB(self, test_mode = False):
@@ -499,6 +551,7 @@ class EventMonitor(multiprocessing.Process):
                             EventLonStd REAL NOT NULL,
                             EventHt REAL NOT NULL,
                             EventHtStd REAL NOT NULL,
+                            EventCartStd REAL NOT NULL,
                             CloseRadius REAL NOT NULL,
                             FarRadius REAL NOT NULL,
                             EventLat2 REAL NOT NULL,
@@ -507,6 +560,7 @@ class EventMonitor(multiprocessing.Process):
                             EventLon2Std REAL NOT NULL,
                             EventHt2 REAL NOT NULL,
                             EventHt2Std REAL NOT NULL,
+                            EventCart2Std REAL NOT NULL,
                             EventAzim REAL NOT NULL,
                             EventAzimStd REAL NOT NULL,
                             EventElev REAL NOT NULL,
@@ -518,6 +572,7 @@ class EventMonitor(multiprocessing.Process):
                             timecompleted TEXT,
                             observedstatus BOOL,
                             processedstatus BOOL,
+                            uploadedstatus BOOL,
                             receivedbyserver BOOL,
                             uuid TEXT,              
                             RespondTo TEXT
@@ -529,6 +584,12 @@ class EventMonitor(multiprocessing.Process):
         # Set the connection
         self.db_conn = conn
         return conn
+
+    def recoverFromDatabaseError(self):
+
+        log.error("Attempting to recover from database error")
+        self.createDB()
+        log.info("Database recovered")
 
     def delEventMonitorDB(self):
 
@@ -608,7 +669,6 @@ class EventMonitor(multiprocessing.Process):
 
             Arguments:
 
-
             Return:
                 connection: [connection] A connection to the database
 
@@ -660,7 +720,6 @@ class EventMonitor(multiprocessing.Process):
          log.info("Check for event exists failed")
          return False
 
-
     def delOldRecords(self):
 
         """
@@ -671,14 +730,10 @@ class EventMonitor(multiprocessing.Process):
 
         """
 
-
-
         sql_statement = ""
         sql_statement += "DELETE from event_monitor \n"
         sql_statement += "WHERE                     \n"
         sql_statement += "timeadded < date('now', '-14 day')"
-
-
 
         try:
             cursor = self.db_conn.cursor()
@@ -712,39 +767,39 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "INSERT INTO event_monitor \n"
             sql_statement += "("
             sql_statement += "EventTime, TimeTolerance,                   \n"
-            sql_statement += "EventLat ,EventLatStd ,EventLon , EventLonStd , EventHt ,EventHtStd,        \n"
+            sql_statement += "EventLat ,EventLatStd ,EventLon , EventLonStd , EventHt ,EventHtStd, EventCartStd,     \n"
             sql_statement += "CloseRadius, FarRadius,                     \n"
-            sql_statement += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std,      \n"
+            sql_statement += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, EventCart2Std,    \n"
             sql_statement += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax,    \n"
-            sql_statement += "processedstatus, uuid, RespondTo, StationsRequired, timeadded \n"
+            sql_statement += "processedstatus, uploadedstatus, uuid, RespondTo, StationsRequired, timeadded \n"
             sql_statement += ")                                           \n"
 
             sql_statement += "VALUES "
             sql_statement += "(                            \n"
             sql_statement += "'{}',{},                     \n".format(event.dt, event.time_tolerance)
-            sql_statement += "{},  {}, {}, {}, {}, {},     \n".format(event.lat, event.lat_std, event.lon, event.lon_std,
-                                                                      event.ht, event.ht_std)
+            sql_statement += "{},  {}, {}, {}, {}, {}, {}, \n".format(event.lat, event.lat_std, event.lon, event.lon_std,
+                                                                      event.ht, event.ht_std, event.cart_std)
             sql_statement += "{},  {},                     \n".format(event.close_radius, event.far_radius)
-            sql_statement += "{},  {}, {}, {}, {}, {},     \n".format(event.lat2, event.lat2_std, event.lon2,
-                                                                      event.lon2_std, event.ht2, event.ht2_std)
+            sql_statement += "{},  {}, {}, {}, {}, {}, {}, \n".format(event.lat2, event.lat2_std, event.lon2,
+                                                                      event.lon2_std, event.ht2, event.ht2_std, event.cart2_std)
             sql_statement += "{},  {}, {}, {}, {} ,        \n".format(event.azim, event.azim_std, event.elev,
                                                                       event.elev_std,
                                                                       event.elev_is_max)
-            sql_statement += "{}, '{}', '{}', '{}' ,       \n".format(0, uuid.uuid4(), event.respond_to, event.stations_required)
+            sql_statement += "{},  {}, '{}', '{}', '{}' ,       \n".format(0, 0,uuid.uuid4(), event.respond_to, event.stations_required)
             sql_statement += "CURRENT_TIMESTAMP ) \n"
 
-            try:
-                cursor = self.db_conn.cursor()
-                cursor.execute(sql_statement)
-                self.db_conn.commit()
+            #try:
+            cursor = self.db_conn.cursor()
+            cursor.execute(sql_statement)
+            self.db_conn.commit()
 
-            except:
-                log.info("Add event failed")
+            #except:
+                #log.info("Add event failed")
 
             log.info("Added event at {} to the database".format(event.dt))
             return True
         else:
-            # log.info("Event at {} already in the database".format(event.dt))
+            # log.info("Event {} already in database".format(event.dt))
             return False
 
     def markEventAsProcessed(self, event):
@@ -772,10 +827,65 @@ class EventMonitor(multiprocessing.Process):
         except:
          log.info("Database error")
 
+    def eventProcessed(self, uuid):
+
+        """ Return processed status from uuid
+
+        Arguments:
+            uuid: [event] Locally generated uuid of the event to be queried
+
+        Return: [bool] True if processed, False if unprocessed or does not exist
+
+        """
+
+        sql_statement = ""
+        sql_statement += "SELECT COUNT(processedstatus)                        \n"
+        sql_statement += "  from event_monitor                                 \n"
+        sql_statement += "    WHERE                                            \n"
+        sql_statement += "    processedstatus = 1                              \n"
+        sql_statement += "    AND                                              \n"
+        sql_statement += "    uuid   = '{}'                                    \n".format(uuid)
+
+        try:
+            return (self.db_conn.cursor().execute(sql_statement).fetchone())[0] != 0
+
+        except:
+            log.info("Database error - attempting to recreate database")
+            self.recoverFromDatabaseError()
+
+    def eventUploaded(self, uuid):
+
+        """ Return uploaded status from uuid
+
+        Arguments:
+            uuid: [event] Locally generated uuid of the event to be queried
+
+        Return: [bool] True if uploaded, False if not uploaded or does not exist
+
+        """
+
+        sql_statement = ""
+        sql_statement += "SELECT COUNT(processedstatus)                        \n"
+        sql_statement += "  from event_monitor                                 \n"
+        sql_statement += "    WHERE                                            \n"
+        sql_statement += "    uploadedstatus = 1                               \n"
+        sql_statement += "    AND                                              \n"
+        sql_statement += "    uuid   = '{}'                                    \n".format(uuid)
+
+        try:
+            return (self.db_conn.cursor().execute(sql_statement).fetchone())[0] != 0
+
+        except:
+            log.info("Database error in eventUploaded")
+            self.recoverFromDatabaseError()
+
+
+
+
 
     def markEventAsUploaded(self, event, file_list):
 
-        """ Checks to see if an event exists, if not then add to the database
+        """ Mark an event as uploaded in the database
 
             Arguments:
                 event: [event] Event to be marked as uploaded
@@ -789,12 +899,13 @@ class EventMonitor(multiprocessing.Process):
             files_uploaded += os.path.basename(file) + " "
 
         sql_statement = ""
-        sql_statement += "UPDATE event_monitor \n"
-        sql_statement += "SET                  \n"
-        sql_statement += "filesuploaded  = '{}'\n".format(files_uploaded)
-        sql_statement += "                     \n"
-        sql_statement += "WHERE                \n"
-        sql_statement += "uuid = '{}'          \n".format(event.uuid)
+        sql_statement += "UPDATE event_monitor  \n"
+        sql_statement += "SET                   \n"
+        sql_statement += "filesuploaded  = '{}',\n".format(files_uploaded)
+        sql_statement += "uploadedstatus = 1    \n"
+        sql_statement += "                      \n"
+        sql_statement += "WHERE                 \n"
+        sql_statement += "uuid = '{}'           \n".format(event.uuid)
 
         try:
          cursor = self.db_conn.cursor()
@@ -892,7 +1003,8 @@ class EventMonitor(multiprocessing.Process):
         sql_query_cols += "EventTime,TimeTolerance,EventLat,EventLatStd,EventLon, EventLonStd, EventHt, EventHtStd, "
         sql_query_cols += "FarRadius,CloseRadius, uuid,"
         sql_query_cols += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, "
-        sql_query_cols += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax, RespondTo, StationsRequired"
+        sql_query_cols += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax, RespondTo, StationsRequired,"
+        sql_query_cols += "EventCartStd, EventCart2Std"
         sql_statement += sql_query_cols
         sql_statement += " \n"
         sql_statement += "FROM event_monitor "
@@ -1084,8 +1196,8 @@ class EventMonitor(multiprocessing.Process):
 
         # Consider whether vector is zero length by looking at start and end
         if [beg_lat, beg_lon, beg_ele] != [end_lat, end_lon, end_ele]:
-         # Vector start and end points are different, so possible to
-         # calculate the projection of the reference vector onto the trajectory vector
+
+         # Vector start and end points are different, calculate the projection of the ref vect onto the traje vector
          proj_vec = beg_ecef + np.dot(start_vec, traj_vec) * traj_vec
 
          # Hence, calculate the vector at the nearest point, and the closest distance
@@ -1192,7 +1304,7 @@ class EventMonitor(multiprocessing.Process):
     def doUpload(self, event, evcon, file_list, keep_files = False, no_upload = False, test_mode = False):
 
         """Move all the files to a single directory. Make MP4s, stacks and jpgs
-           Archive into a bz2 file and upload, using rsync. Delete all working folders.
+           Archive into a bz2 file and upload, using paramiko. Delete all working folders.
 
         Args:
             event: [event] the event to be uploaded
@@ -1203,8 +1315,16 @@ class EventMonitor(multiprocessing.Process):
             test_mode: [bool] if True prevents upload
 
         Returns:
+            uploadstatus: [bool] status of upload
 
         """
+
+        if self.eventUploaded(event.uuid):
+            log.error("Call to doUpload for already uploaded event {}".format(event.dt))
+
+        if self.eventProcessed(event.uuid):
+            log.error("Call to doUpload for already processed event {}".format(event.dt))
+
 
         event_monitor_directory = os.path.expanduser(os.path.join(self.syscon.data_dir, "EventMonitor"))
         upload_filename = "{}_{}".format(evcon.stationID, event.dt)
@@ -1220,8 +1340,14 @@ class EventMonitor(multiprocessing.Process):
             os.makedirs(this_event_directory)
 
         # put all the files from the filelist into the event directory
+        pack_size = 0
+        for file in file_list:
+            pack_size += os.path.getsize(file)
+
+        log.info("File pack {:.0f}MB assembly started".format(pack_size/1024/1024))
         for file in file_list:
             shutil.copy(file, this_event_directory)
+        log.info("File pack assembled")
 
         # make a stack
         stackFFs(this_event_directory, "jpg", captured_stack=True)
@@ -1263,9 +1389,8 @@ class EventMonitor(multiprocessing.Process):
             # Loop round for a maximum of 30 tries to carry out the upload
             # Progressively lengthen the delay time, with some random element
             # Return the status of the upload
-            log.info("Upload of {} - first attempt".format(event_monitor_directory))
-
             # Don't include a delay before uploading
+            log.info("Upload of {} - first attempt".format(event_monitor_directory))
             for retry in range(1,30):
                 archives = glob(os.path.join(event_monitor_directory,"*.bz2"))
                 upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,rsa_private_key=self.config.rsa_private_key)
@@ -1288,10 +1413,6 @@ class EventMonitor(multiprocessing.Process):
         if not keep_files:
             shutil.rmtree(event_monitor_directory)
         return upload_status
-
-
-
-
 
     def checkEvents(self, ev_con, test_mode = False):
 
@@ -1316,8 +1437,9 @@ class EventMonitor(multiprocessing.Process):
 
             # If there are no files based on time, then mark as processed and continue
             if (len(file_list) == 0 or file_list == [None]) and not test_mode:
-                log.info("No files for event at {}".format(observed_event.dt))
+                log.info("No files for event - marking {} as processed".format(observed_event.dt))
                 self.markEventAsProcessed(observed_event)
+                # This moves to next observed_event
                 continue
 
             # If there is a .config file then parse it as evcon - not the station config
@@ -1327,8 +1449,8 @@ class EventMonitor(multiprocessing.Process):
 
             # Look for the station code in the stations_required string
             if observed_event.stations_required.find(ev_con.stationID) != -1:
-                log.info("This station is required to upload event at {}".format(observed_event.dt))
                 if self.doUpload(observed_event, ev_con, file_list, test_mode):
+                    log.info("In Stations_Required - marking {} as processed".format(observed_event.dt))
                     self.markEventAsProcessed(observed_event)
                     if len(file_list) > 0:
                         self.markEventAsUploaded(observed_event, file_list)
@@ -1336,23 +1458,31 @@ class EventMonitor(multiprocessing.Process):
                     log.error("Upload failed for event at {}. Event retained in database for retry.".format(observed_event.dt))
                 continue
 
-            event_population = observed_event.apply_sd(1000)
+            # If we have any standard deviation definitions then create a population of 1000, else create a population of 1
+            if observed_event.hasCartSD() or observed_event.hasPolarSD():
+                event_population = observed_event.createPopulation(1000)
+            else:
+                event_population = observed_event.createPopulation(1)
+
+            # Apply SD to the population
+            if observed_event.hasCartSD():
+                event_population = observed_event.applyCartesianSD(event_population)
+            if observed_event.hasPolarSD():
+                event_population = observed_event.applyPolarSD(event_population)
+
             log.info("Testing {} variants of a trajectory at {}".format(len(event_population),observed_event.dt))
             for event in event_population:
                 # check if this has already been handled
-                if observed_event.stations_required.find(ev_con.stationID) != -1:
+                if self.eventProcessed(observed_event.uuid):
                     break # do no more work on any version of this trajectory - break exits loop
                 # From the infinitely extended trajectory, work out the closest point to the camera
                 start_dist, end_dist, atmos_dist = self.calculateclosestpoint(event.lat, event.lon, event.ht * 1000,
-                                                                          event.lat2,
-                                                                          event.lon2, event.ht2 * 1000, ev_con.latitude,
-                                                                          ev_con.longitude, ev_con.elevation)
+                                                                           event.lat2, event.lon2, event.ht2 * 1000,
+                                                                ev_con.latitude, ev_con.longitude, ev_con.elevation)
                 min_dist = min([start_dist, end_dist, atmos_dist])
 
-                # If trajectory outside the farradius, do nothing, and mark as processed
+                # If this version of the trajectory outside the farradius, continue
                 if min_dist > event.far_radius * 1000 and not test_mode:
-                    #log.info("Event at {}, lat:{:.3f}, lon:{:.3f}, was {:.0f}km away, outside {:.0f}km, so was ignored".format(event.dt, event.lat, event.lon,min_dist / 1000, event.far_radius))
-                    # self.markEventAsProcessed(event)
                     # Do no more work on this version of the trajectory
                     continue
 
@@ -1365,6 +1495,7 @@ class EventMonitor(multiprocessing.Process):
                         event)
                     # If doUpload returned True mark the event as processed and uploaded
                     if self.doUpload(event, ev_con, file_list, test_mode):
+                        log.info("Inside close radius - marking {} as processed".format(observed_event.dt))
                         self.markEventAsProcessed(observed_event)
                         if len(file_list) > 0:
                             self.markEventAsUploaded(observed_event, file_list)
@@ -1384,6 +1515,7 @@ class EventMonitor(multiprocessing.Process):
                         if self.doUpload(observed_event, ev_con, file_list, test_mode=test_mode):
                             self.markEventAsUploaded(observed_event, file_list)
                             if not test_mode:
+                                log.info("Trajectory through FoV - marking {} as processed".format(observed_event.dt))
                                 self.markEventAsProcessed(observed_event)
                             break # Do no more work on any version of this trajectory
                         else:
@@ -1405,7 +1537,11 @@ class EventMonitor(multiprocessing.Process):
                     # Continue with other trajectories from this population
                     continue
             # End of the processing loop for this event
-            self.markEventAsProcessed(observed_event)
+            if self.eventProcessed(observed_event.uuid):
+                log.info("Reached end of checks - {} is processed".format(observed_event.dt))
+            else:
+                log.info("Reached end of checks, not processed - marking {} as processed".format(observed_event.dt))
+                self.markEventAsProcessed(observed_event)
         return None
 
 
@@ -1625,7 +1761,7 @@ if __name__ == "__main__":
 
 
         # Delay to get everything else done first
-        time.sleep(20)
+        time.sleep(5)
         while not self.exit.is_set():
 
             self.getEventsAndCheck()
