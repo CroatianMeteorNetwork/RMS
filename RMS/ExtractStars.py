@@ -38,6 +38,7 @@ from RMS.DetectionTools import loadImageCalibration
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
 from RMS.QueuedPool import QueuedPool
+from RMS.Logger import initLogging
 
 # Morphology - Cython init
 import pyximport
@@ -478,7 +479,7 @@ def extractStarsAndSave(config, ff_dir):
 
     # Add jobs for the pool
     for ff_name in extraction_list:
-        log.info('Adding for extraction:', ff_name)
+        log.info('Adding for extraction: ' + ff_name)
         workpool.addJob([ff_dir, ff_name, config, None, None, None, None, flat_struct, dark, mask])
 
 
@@ -560,6 +561,7 @@ if __name__ == "__main__":
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
 
+    initLogging(config)
     
     # Get paths to every FF bin file in a directory 
     ff_dir = os.path.abspath(cml_args.dir_path[0])
@@ -618,7 +620,7 @@ if __name__ == "__main__":
     # Show the histogram of PSF FWHMs
     if cml_args.showstd:
 
-        log.info('Median FWHM:', np.median(fwhm_list))
+        log.info('Median FWHM: {:.3f}'.format(np.median(fwhm_list)))
 
         # Compute the bin number
         nbins = int(np.ceil(np.sqrt(len(fwhm_list))))
