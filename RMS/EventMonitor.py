@@ -304,7 +304,7 @@ class EventContainer(object):
 
         ecef_vector = self.eventToECEF()
 
-        if self.hasCartesianSD():
+        if self.hasCartSD():
             for tr in population:
                 start_vect = self.applyCartesianSDToPoint(ecef_vector[1],self.cart_std)
                 end_vect = self.applyCartesianSDToPoint(ecef_vector[2],self.cart2_std)
