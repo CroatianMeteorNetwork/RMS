@@ -237,7 +237,6 @@ class EventContainer(object):
             reasonable: [bool] The event is reasonable
         """
 
-
         reasonable = True
 
         reasonable = False if self.lat == "" else reasonable
@@ -252,15 +251,24 @@ class EventContainer(object):
 
     def hasCartSD(self):
 
-        sd_used = False
+        """
+        Check to see if event contains any non-zero cartesian deviation parameters
 
-        # Find out if any standard deviations are set to non-zero
-        sd_used = True if self.cart_std != 0 else sd_used
-        sd_used = True if self.cart2_std != 0 else sd_used
+        returns: [bool]
 
-        return sd_used
+        """
+
+        return self.cart_std != 0 or self.cart2_std != 0
+
 
     def hasPolarSD(self):
+
+        """
+        Check to see if event contains any non-zero polar deviation parameters
+
+        returns: [bool]
+
+        """
 
         sd_used = False
 
@@ -278,14 +286,26 @@ class EventContainer(object):
 
     def createPopulation(self,population_size):
 
+        """
+        Create a population of identical copies of self event
+
+        return: [list] population of events
+
+        """
+
         population = []
         if self.hasCartSD() or self.hasPolarSD():
             for pop_num in range(0, population_size):
                 population.append(copy.copy(self))
         return population
 
-    def eventToECEF(self):
+    def eventToECEFVector(self):
 
+        """
+        Convert lat(deg),lon(deg),ht(km) to a vector of ECEF
+
+        returns: [vector] ECEF vector
+        """
         v1 = latLonAlt2ECEF(np.radians(self.lat),  np.radians(self.lon),self.ht*1000)
         v2 = latLonAlt2ECEF(np.radians(self.lat2), np.radians(self.lon2), self.ht2*1000)
 
@@ -293,6 +313,14 @@ class EventContainer(object):
 
     def ecefV2LatLonAlt(self,ecef_vect):
 
+        """
+        Convert ECEF vector to lat(deg),lon(deg),ht(km)
+
+        arguments: ecef_vector
+
+        returns: lat,lon,ht
+
+        """
 
         lat,lon,ht = ecef2LatLonAlt(ecef_vect[0], ecef_vect[1], ecef_vect[2])
         print("lat,lon,ht {:.3f},{:.3f},{:3f}".format(lat, lon, ht))
@@ -300,16 +328,33 @@ class EventContainer(object):
 
     def applyCartesianSDToPoint(self,pt,cart_std):
 
-        # Set a sigma of 5000 meters
+        """
+        Apply cartesian standard deviation to an ECEF point
+
+        arguments:
+            pt: [vector] ecef vector of point
+            cart_std: [float] sigma to apply
+
+        """
+
+        # Set a sigma of 5000m
         sigma = 5000
-        x = pt[0] + np.random.normal(scale=sigma) * cart_std
-        y = pt[1] + np.random.normal(scale=sigma) * cart_std
-        z = pt[2] + np.random.normal(scale=sigma) * cart_std
-        return [x,y,z]
+        pt = pt + np.random.normal(scale=sigma,size=3) * cart_std
+        return pt
 
     def applyCartesianSD(self,population):
 
-        ecef_vector = self.eventToECEF()
+
+        """
+        Apply standard deviation using Cartesian deviations to a population of trajectories
+
+        arguments: population of events
+
+        returns: population of events
+
+        """
+
+        ecef_vector = self.eventToECEFVector()
 
         if self.hasCartSD():
             for tr in population:
@@ -317,23 +362,34 @@ class EventContainer(object):
                 end_vect = self.applyCartesianSDToPoint(ecef_vector[1],self.cart2_std)
                 tr.lat, tr.lon, tr.ht = self.ecefV2LatLonAlt(start_vect)
                 tr.lat2, tr.lon2, tr.ht2 = self.ecefV2LatLonAlt(end_vect)
+                print("lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat, self.lon ,self.ht))
+                print("lat,lon,alt {:.3f},{:.3f},{:3f}".format(tr.lat, tr.lon, tr.ht))
+                print("Deviation lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat-tr.lat, self.lon-tr.lon, self.ht-tr.ht))
+                print("Deviation lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat2 - tr.lat2, self.lon2 - tr.lon2, self.ht2 - tr.ht2))
 
         return population
 
     def applyPolarSD(self,population):
 
+        """
+        Apply standard deviation using Cartesian deviations to a population of trajectories
+
+        arguments: population of events
+
+        returns: population of events
+
+        """
+
         # Apply the deviations
         for tr in population:
-            tr.lat = tr.lat + np.random.normal(0, 20, 1)[0] * self.lat_std
-            tr.lon = tr.lon + np.random.normal(0, 20, 1)[0] * self.lon_std
-            tr.ht = tr.ht + np.random.normal(0, 20, 1)[0] * self.ht_std
-            tr.lat2 = tr.lat2 + np.random.normal(0, 20, 1)[0] * self.lat2_std
-            tr.lon2 = tr.lon2 + np.random.normal(0, 20, 1)[0] * self.lon2_std
-            tr.ht2 = tr.ht2 + np.random.normal(0, 20, 1)[0] * self.ht2_std
-            tr.azim = tr.azim + np.random.normal(0, 20, 1)[0] * self.azim_std
-            tr.elev = tr.elev + np.random.normal(0, 20, 1)[0] * self.elev_std
-
-
+            tr.lat = tr.lat + np.random.normal(scale = 1) * self.lat_std
+            tr.lon = tr.lon + np.random.normal(scale = 1) * self.lon_std
+            tr.ht = tr.ht + np.random.normal(scale = 1) * self.ht_std
+            tr.lat2 = tr.lat2 + np.random.normal(scale = 1) * self.lat2_std
+            tr.lon2 = tr.lon2 + np.random.normal(scale = 1) * self.lon2_std
+            tr.ht2 = tr.ht2 + np.random.normal(scale = 1) * self.ht2_std
+            tr.azim = tr.azim + np.random.normal(scale = 1) * self.azim_std
+            tr.elev = tr.elev + np.random.normal(scale = 1) * self.elev_std
         return population
 
     def transformToLatLon(self):
