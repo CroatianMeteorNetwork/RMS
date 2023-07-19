@@ -531,10 +531,25 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             # Check if the upload delay is up
             if upload_manager.next_runtime is not None:
+
+                # Wait for the upload delay to pass
+                sleep_time = None
                 while (datetime.datetime.utcnow() - upload_manager.next_runtime).total_seconds() < 0:
-                    log.info("Waiting for upload delay to pass: {:.1f} seconds...".format(
-                        abs((datetime.datetime.utcnow() - upload_manager.next_runtime).total_seconds())))
-                    time.sleep(1)
+                    
+                    wait_time = (datetime.datetime.utcnow() - upload_manager.next_runtime).total_seconds()
+                    log.info("Waiting for upload delay to pass: {:.1f} seconds...".format(abs(wait_time)))
+
+                    # Sleep for a short interval between 1 and 30 seconds
+                    if sleep_time is None:
+
+                        sleep_time = wait_time/10
+
+                        if sleep_time < 1:
+                            sleep_time = 1
+                        elif sleep_time > 30:
+                            sleep_time = 30
+
+                    time.sleep(sleep_time)
 
         log.info('Uploading data before exiting...')
         upload_manager.uploadData()
