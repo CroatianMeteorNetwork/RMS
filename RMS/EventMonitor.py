@@ -100,7 +100,7 @@ class EventContainer(object):
 
         if value == "":
             return
-        print("Name, Value {},{}".format(variable_name, value))
+
         # Mandatory parameters
 
         self.dt = value if "EventTime" == variable_name else self.dt
@@ -253,7 +253,7 @@ class EventContainer(object):
     def hasCartSD(self):
 
         sd_used = False
-        print("cart_std {}, cart2_std {}".format(self.cart_std,self.cart2_std))
+
         # Find out if any standard deviations are set to non-zero
         sd_used = True if self.cart_std != 0 else sd_used
         sd_used = True if self.cart2_std != 0 else sd_used
