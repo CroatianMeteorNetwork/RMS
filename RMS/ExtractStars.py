@@ -557,8 +557,6 @@ if __name__ == "__main__":
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
 
-    initLogging(config)
-    
     # Get paths to every FF bin file in a directory 
     ff_dir = os.path.abspath(cml_args.dir_path[0])
     ff_list = [ff_name for ff_name in os.listdir(ff_dir) if FFfile.validFFName(ff_name)]
@@ -583,9 +581,9 @@ if __name__ == "__main__":
     # Print found stars
     for ff_name, star_data in star_list:
 
-        log.info('----')
-        log.info(ff_name)
-        log.info('  ROW     COL       amp  intens FWHM')
+        print()
+        print(ff_name)
+        print('  ROW     COL       amp  intens FWHM')
         for x, y, max_ampl, level, fwhm in star_data:
             log.info(' {:7.2f} {:7.2f} {:6d} {:6d} {:5.2f}'.format(round(y, 2), round(x, 2), int(max_ampl), 
                 int(level), fwhm))
@@ -616,7 +614,7 @@ if __name__ == "__main__":
     # Show the histogram of PSF FWHMs
     if cml_args.showstd:
 
-        log.info('Median FWHM: {:.3f}'.format(np.median(fwhm_list)))
+        print('Median FWHM: {:.3f}'.format(np.median(fwhm_list)))
 
         # Compute the bin number
         nbins = int(np.ceil(np.sqrt(len(fwhm_list))))
@@ -678,7 +676,7 @@ if __name__ == "__main__":
 
         x_min = np.min(y_list)
         x_max = np.max(y_list)
-        ax2.hexbin(y_list, fwhm_list, gridsize=(hexbin_grid, hexbin_grid), extent=(x_min, x_max,  \
+        ax2.hexbin(y_list, fwhm_list, gridsize=(hexbin_grid, hexbin_grid), extent=(x_min, x_max, \
             y_min, y_max))
 
         ax2.set_ylabel('PSF FWHM')
@@ -702,7 +700,7 @@ if __name__ == "__main__":
         radius_min = 0
         radius_max = np.hypot(config.width/2, config.height/2)
 
-        plt.hexbin(radius_list, np.array(fwhm_list), gridsize=(hexbin_grid, hexbin_grid), 
+        plt.hexbin(radius_list, np.array(fwhm_list), gridsize=(hexbin_grid, hexbin_grid), \
             extent=(radius_min, radius_max, y_min, y_max))
 
 
