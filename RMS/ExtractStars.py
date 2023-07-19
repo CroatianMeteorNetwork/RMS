@@ -585,7 +585,7 @@ if __name__ == "__main__":
     # display found stars
     for ff_name, star_data in star_list:
 
-        log.info()
+        log.info('----')
         log.info(ff_name)
         log.info('  ROW     COL       amp  intens FWHM')
         for x, y, max_ampl, level, fwhm in star_data:
