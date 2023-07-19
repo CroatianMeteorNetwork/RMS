@@ -286,19 +286,26 @@ class EventContainer(object):
 
     def eventToECEF(self):
 
-        v1,v2 = latLonAlt2ECEF(self.lat,  self.lon,self.ht*1000), latLonAlt2ECEF(self.lat2, self.lon2, self.ht2*1000)
-        vector = np.array([v1,v2])
-        return vector
+        v1 = latLonAlt2ECEF(np.radians(self.lat),  np.radians(self.lon),self.ht*1000)
+        v2 = latLonAlt2ECEF(np.radians(self.lat2), np.radians(self.lon2), self.ht2*1000)
+
+        return [v1,v2]
 
     def ecefV2LatLonAlt(self,ecef_vect):
 
-        return ecef2LatLonAlt(ecef_vect[0], ecef_vect[1], ecef_vect[2])
+
+        lat,lon,ht = ecef2LatLonAlt(ecef_vect[0], ecef_vect[1], ecef_vect[2])
+        print("lat,lon,ht {:.3f},{:.3f},{:3f}".format(lat, lon, ht))
+        return np.degrees(lat),np.degrees(lon),ht / 1000
 
     def applyCartesianSDToPoint(self,pt,cart_std):
 
-        print("Vector x:{:.0f} y:{:.0f} z:{:.0f} SD:{:.3f}".format(pt[0],pt[1],pt[2],cart_std))
-
-        return pt
+        # Set a sigma of 5000 meters
+        sigma = 5000
+        x = pt[0] + np.random.normal(scale=sigma) * cart_std
+        y = pt[1] + np.random.normal(scale=sigma) * cart_std
+        z = pt[2] + np.random.normal(scale=sigma) * cart_std
+        return [x,y,z]
 
     def applyCartesianSD(self,population):
 
@@ -306,10 +313,11 @@ class EventContainer(object):
 
         if self.hasCartSD():
             for tr in population:
-                start_vect = self.applyCartesianSDToPoint(ecef_vector[1],self.cart_std)
-                end_vect = self.applyCartesianSDToPoint(ecef_vector[2],self.cart2_std)
+                start_vect = self.applyCartesianSDToPoint(ecef_vector[0],self.cart_std)
+                end_vect = self.applyCartesianSDToPoint(ecef_vector[1],self.cart2_std)
                 tr.lat, tr.lon, tr.ht = self.ecefV2LatLonAlt(start_vect)
                 tr.lat2, tr.lon2, tr.ht2 = self.ecefV2LatLonAlt(end_vect)
+
         return population
 
     def applyPolarSD(self,population):
@@ -420,7 +428,7 @@ class EventContainer(object):
         # set showtrajectories true to enable print out of all trajectories for debugging
         # leave false only to print trajectories with anomolies
 
-        showtrajectories  = False
+        showtrajectories  = True
 
         if angdf(min_obs_az,min_max_az) > 1 or angdf(min_obs_az,obs_max_az) > 1 or \
                                angdf(min_obs_el,min_max_el) > 1 or angdf(min_obs_el,obs_max_el) > 1 or showtrajectories:
