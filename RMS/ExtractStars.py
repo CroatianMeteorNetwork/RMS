@@ -302,7 +302,7 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
         try:
             # Fit the 2D Gaussian with the limited number of iterations - this reduces the processing time
             # and most of the bad star candidates take more iterations to fit
-            popt, pcov = opt.curve_fit(twoDGaussian, (y_ind, x_ind, saturation), star_seg.ravel(), 
+            popt, pcov = opt.curve_fit(twoDGaussian, (y_ind, x_ind, saturation), star_seg.ravel(), \
                 p0=initial_guess, maxfev=200)
             # print(popt)
         except RuntimeError:
@@ -584,7 +584,7 @@ if __name__ == "__main__":
         print(ff_name)
         print('  ROW     COL       amp  intens FWHM')
         for x, y, max_ampl, level, fwhm in star_data:
-            print(' {:7.2f} {:7.2f} {:6d} {:6d} {:5.2f}'.format(round(y, 2), round(x, 2), int(max_ampl), 
+            print(' {:7.2f} {:7.2f} {:6d} {:6d} {:5.2f}'.format(round(y, 2), round(x, 2), int(max_ampl), \
                 int(level), fwhm))
 
 
@@ -714,3 +714,6 @@ if __name__ == "__main__":
         plt.savefig(os.path.join(ff_dir, 'PSF_radius_vs_FWHM.png'), dpi=300)
 
         plt.show()
+
+
+
