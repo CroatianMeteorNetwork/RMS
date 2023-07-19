@@ -336,11 +336,7 @@ class EventContainer(object):
             cart_std: [float] sigma to apply
 
         """
-
-        # Set a sigma of 5000m
-        sigma = 5000
-        pt = pt + np.random.normal(scale=sigma,size=3) * cart_std
-        return pt
+        return pt + np.random.normal(scale=cart_std,size=3) * cart_std
 
     def applyCartesianSD(self,population):
 
