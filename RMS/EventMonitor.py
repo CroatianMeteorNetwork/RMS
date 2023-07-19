@@ -362,10 +362,39 @@ class EventContainer(object):
                 end_vect = self.applyCartesianSDToPoint(ecef_vector[1],self.cart2_std)
                 tr.lat, tr.lon, tr.ht = self.ecefV2LatLonAlt(start_vect)
                 tr.lat2, tr.lon2, tr.ht2 = self.ecefV2LatLonAlt(end_vect)
-                print("lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat, self.lon ,self.ht))
-                print("lat,lon,alt {:.3f},{:.3f},{:3f}".format(tr.lat, tr.lon, tr.ht))
-                print("Deviation lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat-tr.lat, self.lon-tr.lon, self.ht-tr.ht))
-                print("Deviation lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat2 - tr.lat2, self.lon2 - tr.lon2, self.ht2 - tr.ht2))
+                #print("lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat, self.lon ,self.ht))
+                #print("lat,lon,alt {:.3f},{:.3f},{:3f}".format(tr.lat, tr.lon, tr.ht))
+                #print("Deviation lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat-tr.lat, self.lon-tr.lon, self.ht-tr.ht))
+                #print("Deviation lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat2 - tr.lat2, self.lon2 - tr.lon2, self.ht2 - tr.ht2))
+
+        """
+        print("Cartesian deviation analysis")
+
+        minlat = (min(event.lat for event in population))
+        minlon = (min(event.lon for event in population))
+        minht = (min(event.ht for event in population))
+
+
+        maxlat = (max(event.lat for event in population))
+        maxlon = (max(event.lon for event in population))
+        maxht = (max(event.ht for event in population))
+
+        print("Original lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat, self.lon, self.ht))
+        print("Minimum  lat,lon,alt {:.3f},{:.3f},{:3f}".format(minlat, minlon, minht))
+        print("Maximum  lat,lon,alt {:.3f},{:.3f},{:3f}".format(maxlat, maxlon, maxht))
+
+        minlat = (min(event.lat2 for event in population))
+        minlon = (min(event.lat2 for event in population))
+        minht = (min(event.ht2 for event in population))
+
+        maxlat = (max(event.lat2 for event in population))
+        maxlon = (max(event.lon2 for event in population))
+        maxht = (max(event.ht2 for event in population))
+
+        print("Original lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat, self.lon, self.ht))
+        print("Minimum  lat,lon,alt {:.3f},{:.3f},{:3f}".format(minlat, minlon, minht))
+        print("Maximum  lat,lon,alt {:.3f},{:.3f},{:3f}".format(maxlat, maxlon, maxht))
+        """
 
         return population
 
@@ -390,6 +419,38 @@ class EventContainer(object):
             tr.ht2 = tr.ht2 + np.random.normal(scale = 1) * self.ht2_std
             tr.azim = tr.azim + np.random.normal(scale = 1) * self.azim_std
             tr.elev = tr.elev + np.random.normal(scale = 1) * self.elev_std
+
+
+        """
+        print("Polar deviation analysis")
+        
+        minlat = (min(event.lat for event in population))
+        minlon = (min(event.lon for event in population))
+        minht = (min(event.ht for event in population))
+
+
+        maxlat = (max(event.lat for event in population))
+        maxlon = (max(event.lon for event in population))
+        maxht = (max(event.ht for event in population))
+
+        print("Original lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat, self.lon, self.ht))
+        print("Minimum  lat,lon,alt {:.3f},{:.3f},{:3f}".format(minlat, minlon, minht))
+        print("Maximum  lat,lon,alt {:.3f},{:.3f},{:3f}".format(maxlat, maxlon, maxht))
+
+        minlat = (min(event.lat2 for event in population))
+        minlon = (min(event.lat2 for event in population))
+        minht = (min(event.ht2 for event in population))
+
+        maxlat = (max(event.lat2 for event in population))
+        maxlon = (max(event.lon2 for event in population))
+        maxht = (max(event.ht2 for event in population))
+
+        print("Original lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat, self.lon, self.ht))
+        print("Minimum  lat,lon,alt {:.3f},{:.3f},{:3f}".format(minlat, minlon, minht))
+        print("Maximum  lat,lon,alt {:.3f},{:.3f},{:3f}".format(maxlat, maxlon, maxht))
+        
+        """
+
         return population
 
     def transformToLatLon(self):
@@ -484,7 +545,7 @@ class EventContainer(object):
         # set showtrajectories true to enable print out of all trajectories for debugging
         # leave false only to print trajectories with anomolies
 
-        showtrajectories  = True
+        showtrajectories  = False
 
         if angdf(min_obs_az,min_max_az) > 1 or angdf(min_obs_az,obs_max_az) > 1 or \
                                angdf(min_obs_el,min_max_el) > 1 or angdf(min_obs_el,obs_max_el) > 1 or showtrajectories:
@@ -502,28 +563,28 @@ class EventContainer(object):
         # Check that az from the minimum to the observation height as the same as the minimum to the maximum height
         # And the minimum to the observation height is the same as the observation to the maximum height
         if angdf(min_obs_az,min_max_az) > 1 or angdf(min_obs_az,obs_max_az) > 1:
-            log.info("Error in Azimuth calculations")
-            log.info("Observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obsvd_lat,obsvd_lon,obsvd_ht))
-            log.info("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
-            log.info("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim, azim_rev, self.elev))
-            log.info("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon, self.ht * 1000))
-            log.info("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2, self.ht2 * 1000))
-            log.info("Minimum height to Observed height az,el {},{}".format(min_obs_az, min_obs_el))
-            log.info("Minimum height to Maximum height az,el {},{}".format(min_max_az, min_max_el))
-            log.info("Observed height to Maximum height az,el {},{}".format(obs_max_az, obs_max_el))
+            log.error("Error in Azimuth calculations")
+            log.error("Observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obsvd_lat,obsvd_lon,obsvd_ht))
+            log.error("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
+            log.error("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim, azim_rev, self.elev))
+            log.error("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon, self.ht * 1000))
+            log.error("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2, self.ht2 * 1000))
+            log.error("Minimum height to Observed height az,el {},{}".format(min_obs_az, min_obs_el))
+            log.error("Minimum height to Maximum height az,el {},{}".format(min_max_az, min_max_el))
+            log.error("Observed height to Maximum height az,el {},{}".format(obs_max_az, obs_max_el))
 
         # Check that el from the minimum to the observation height as the same as the minimum to the maximum height
         # And the minimum to the observation height is the same as the observation to the maximum height
         if angdf(min_obs_el,min_max_el) > 1 or angdf(min_obs_el,obs_max_el) > 1:
-            log.info("Error in Elevation calculations")
-            log.info("Trajectory created from observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obsvd_lat,obsvd_lon,obsvd_ht))
-            log.info("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
-            log.info("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim,azim_rev, self.elev))
-            log.info("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon,self.ht * 1000))
-            log.info("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2,self.ht2 * 1000))
-            log.info("Minimum height to Observed height az,el {},{}".format(min_obs_az, min_obs_el))
-            log.info("Minimum height to Maximum height az,el {},{}".format(min_max_az, min_max_el))
-            log.info("Observed height to Maximum height az,el {},{}".format(obs_max_az, obs_max_el))
+            log.error("Error in Elevation calculations")
+            log.error("Trajectory created from observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obsvd_lat,obsvd_lon,obsvd_ht))
+            log.error("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
+            log.error("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim,azim_rev, self.elev))
+            log.error("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon,self.ht * 1000))
+            log.error("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2,self.ht2 * 1000))
+            log.error("Minimum height to Observed height az,el {},{}".format(min_obs_az, min_obs_el))
+            log.error("Minimum height to Maximum height az,el {},{}".format(min_max_az, min_max_el))
+            log.error("Observed height to Maximum height az,el {},{}".format(obs_max_az, obs_max_el))
 
         # End of post calculation checks
 
