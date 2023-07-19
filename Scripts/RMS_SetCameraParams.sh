@@ -17,10 +17,14 @@ currip=$(python -m Utils.CameraControl GetIP)
 
 echo "Camera Address is $currip"
 
-# a few miscellaneous things - onscreen date/camera Id off, colour settings, autoreboot at 1500 every day
+# a few miscellaneous things - onscreen date/camera Id off, colour settings, autoreboot at 1500 every day, set time
 python -m Utils.CameraControl SetOSD off
 python -m Utils.CameraControl SetColor 100,50,50,50,0,0
 python -m Utils.CameraControl SetAutoReboot Everyday,15
+python -m Utils.CameraControl CameraTime set
+
+# disable phone-home remote connectivity to server in China
+python -m Utils.CameraControl CloudConnection off
 
 # set the Video Encoder parameters
 python -m Utils.CameraControl SetParam Encode Video Compression H.264
