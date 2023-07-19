@@ -304,9 +304,9 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
             # and most of the bad star candidates take more iterations to fit
             popt, pcov = opt.curve_fit(twoDGaussian, (y_ind, x_ind, saturation), star_seg.ravel(), 
                 p0=initial_guess, maxfev=200)
-            # log.info(popt)
+            # print(popt)
         except RuntimeError:
-            # log.info('Fitting failed!')
+            # print('Fitting failed!')
 
             # Skip stars that can't be fitted in 200 iterations
             continue
@@ -368,7 +368,7 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
         if intensity <= 0:
             continue
 
-        # log.info(intensity)
+        # print(intensity)
         # plt.imshow(star_seg_crop - bg_corrected, cmap='gray', vmin=0, vmax=255)
         # plt.show()
 
@@ -584,7 +584,7 @@ if __name__ == "__main__":
         print(ff_name)
         print('  ROW     COL       amp  intens FWHM')
         for x, y, max_ampl, level, fwhm in star_data:
-            log.info(' {:7.2f} {:7.2f} {:6d} {:6d} {:5.2f}'.format(round(y, 2), round(x, 2), int(max_ampl), 
+            print(' {:7.2f} {:7.2f} {:6d} {:6d} {:5.2f}'.format(round(y, 2), round(x, 2), int(max_ampl), 
                 int(level), fwhm))
 
 
