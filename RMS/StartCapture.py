@@ -29,6 +29,7 @@ import ctypes
 import logging
 import multiprocessing
 import traceback
+import git
 
 import numpy as np
 
@@ -533,6 +534,32 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # if fixed_duration and (upload_manager is not None):
 
     if upload_manager is not None: # temporary code, will make the script upload after each capture
+
+        # Check if the upload delay is set
+        with upload_manager.next_runtime_lock:
+
+            # Check if the upload delay is up
+            if upload_manager.next_runtime is not None:
+
+                # Wait for the upload delay to pass
+                sleep_time = None
+                while (datetime.datetime.utcnow() - upload_manager.next_runtime).total_seconds() < 0:
+                    
+                    wait_time = (datetime.datetime.utcnow() - upload_manager.next_runtime).total_seconds()
+                    log.info("Waiting for upload delay to pass: {:.1f} seconds...".format(abs(wait_time)))
+
+                    # Sleep for a short interval between 1 and 30 seconds
+                    if sleep_time is None:
+
+                        sleep_time = wait_time/10
+
+                        if sleep_time < 1:
+                            sleep_time = 1
+                        elif sleep_time > 30:
+                            sleep_time = 30
+
+                    time.sleep(sleep_time)
+
         log.info('Uploading data before exiting...')
         upload_manager.uploadData()
 
@@ -710,6 +737,22 @@ if __name__ == "__main__":
 
     log.info("Program start")
     log.info("Station code: {:s}".format(str(config.stationID)))
+
+    # Get the program version
+    try:
+        # Get latest version's commit hash and time of commit
+        repo = git.Repo(search_parent_directories=True)
+        commit_unix_time = repo.head.object.committed_date
+        sha = repo.head.object.hexsha
+        commit_time = datetime.datetime.fromtimestamp(commit_unix_time).strftime('%Y%m%d_%H%M%S')
+
+    except:
+        commit_time = ""
+        sha = ""
+
+    log.info("Program version: {:s}, {:s}".format(commit_time, sha))
+
+    
 
     # Change the Ctrl+C action to the special handle
     setSIGINT()
