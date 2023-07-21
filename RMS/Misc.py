@@ -135,7 +135,8 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
 
         if hasattr(shutil, "SameFileError"):
             try:
-                shutil.copy2(os.path.join(source_dir, file_name), os.path.join(dest_dir, file_name))
+                if os.path.isfile(os.path.join(source_dir, file_name)):
+                    shutil.copy2(os.path.join(source_dir, file_name), os.path.join(dest_dir, file_name))
             except shutil.SameFileError:
                 pass
         else:
@@ -144,15 +145,16 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
 
     # Copy the additional files to the archive directory
     if extra_files is not None:
-        for file_name in extra_files:
+        for file_path in extra_files:
 
             if hasattr(shutil, "SameFileError"):
                 try:
-                    shutil.copy2(file_name, os.path.join(dest_dir, os.path.basename(file_name)))
+                    if os.path.isfile(file_path):
+                        shutil.copy2(file_path, os.path.join(dest_dir, os.path.basename(file_path)))
                 except shutil.SameFileError:
                     pass
             else:
-                shutil.copy2(file_name, os.path.join(dest_dir, os.path.basename(file_name)))
+                shutil.copy2(file_path, os.path.join(dest_dir, os.path.basename(file_path)))
 
 
     # Compress the archive directory
