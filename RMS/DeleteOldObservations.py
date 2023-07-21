@@ -349,8 +349,22 @@ def deleteOldLogfiles(data_dir, config, days_to_keep=None):
 
     # Only going to purge RMS log files
     flist = glob.glob1(log_dir, 'log*.log*')
+
     for fl in flist:
-        file_mtime = os.stat(os.path.join(log_dir, fl)).st_mtime
-        if file_mtime < date_to_purge_to:
-            log.info("deleted {}".format(fl))
-            os.remove(os.path.join(log_dir, fl))
+
+        log_file_path = os.path.join(log_dir, fl)
+
+        # Check if the file exists and check if it should be purged
+        if os.path.isfile(log_file_path):
+
+            # Get the file modification time
+            file_mtime = os.stat(log_file_path).st_mtime
+
+            # If the file is older than the date to purge to, delete it
+            if file_mtime < date_to_purge_to:
+                try:
+                    os.remove(log_file_path)
+                    log.info("deleted {}".format(fl))
+                except Exception as e:
+                    log.warning('unable to delete {}: '.format(log_file_path) + repr(e)) 
+                
