@@ -24,7 +24,7 @@ import sqlite3
 import multiprocessing
 import RMS.ConfigReader as cr
 import urllib.request
-import os
+import os, socket
 import shutil
 import time
 import copy
@@ -225,7 +225,7 @@ class EventContainer(object):
 
         return output
 
-    def checkReasonable(self):
+    def isReasonable(self):
 
         """ Receive an event, check if it is reasonable, and optionally try to fix it up
             Crucially, this function prevents any excessive requests being made that may compromise capture
@@ -448,12 +448,8 @@ class EventContainer(object):
 
         return population
 
-    def transformToLatLon(self):
 
-        """Take an event, establish how it has been defined, and convert to representation as
-        a pair of Lat,Lon,Ht parameters.
-
-        """
+    def hasAzEl(self):
 
         # Work out if this is defined by point and azimuth and elevation
         azim_elev_definition = True
@@ -461,14 +457,10 @@ class EventContainer(object):
         azim_elev_definition = False if self.lat2 != 0 else azim_elev_definition
         azim_elev_definition = False if self.ht2 != 0 else azim_elev_definition
 
-        if not azim_elev_definition:
-            return
+        return azim_elev_definition
 
-        # Copy observed lat, lon and height local variables for ease of comprehension and convert to meters
-        obsvd_lat, obsvd_lon, obsvd_ht = self.lat, self.lon, self.ht * 1000
 
-        # For this routine elevation must always be within 10 - 90 degrees
-        min_elev_hard, min_elev, prob_elev, max_elev = 0, 10, 45, 90
+    def limitAzEl(self, min_elev_hard, min_elev, prob_elev, max_elev):
 
         # Detect, fix and log elevations outside range
         if min_elev < self.elev < max_elev:
@@ -484,13 +476,14 @@ class EventContainer(object):
             log.info("Elevation set to {} degrees.".format(self.elev))
 
 
-        # Handle estimated start heights outside normal range of luminous flight
-        # Need to add gap so that angles can be calculated for consistency checks
-        # Set minimum and maximum luminous flight heights
+    def limitHeights(self, obsvd_ht, min_lum_flt_ht, max_lum_flt_ht, gap):
 
-        min_lum_flt_ht, max_lum_flt_ht, gap = 20000, 100000, 1000
         max_lum_flt_ht = obsvd_ht + gap if obsvd_ht >= (max_lum_flt_ht - gap) else max_lum_flt_ht
         min_lum_flt_ht = obsvd_ht - gap if obsvd_ht <= (min_lum_flt_ht + gap) else min_lum_flt_ht
+
+        return min_lum_flt_ht,max_lum_flt_ht
+
+    def getRanges(self,obsvd_lat,obsvd_lon,obsvd_ht,min_lum_flt_ht,max_lum_flt_ht):
 
         # Find range to maximum heights in reverse trajectory direction
         bwd_range = AEH2Range(self.azim, self.elev, max_lum_flt_ht, obsvd_lat, obsvd_lon, obsvd_ht)
@@ -502,28 +495,63 @@ class EventContainer(object):
 
         # Iterate to find accurate solution - limit iterations to 100, generally requires fewer than 10 iterations
         for n in range(100):
-         self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obsvd_lat, obsvd_lon, obsvd_ht)
-         # Use trigonometry to estimate the error - vertical error is the opposite side to the elevation
-         # so vertical error / sin(elev) gives the hypotenuse, which is the trajectory error
-         traj_error =  (ht2_m - min_lum_flt_ht) / np.sin(np.radians(self.elev))
-         fwd_range = fwd_range + traj_error
-         if traj_error < 1e-8:
-             break
+            self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obsvd_lat, obsvd_lon, obsvd_ht)
+            # Use trigonometry to estimate the error - vertical error is the opposite side to the elevation
+            # so vertical error / sin(elev) gives the hypotenuse, which is the trajectory error
+            traj_error = (ht2_m - min_lum_flt_ht) / np.sin(np.radians(self.elev))
+            fwd_range = fwd_range + traj_error
+            if traj_error < 1e-8:
+                break
 
-        # Backwards azimuth
-        azim_rev = self.azim + 180 if self.azim < 180 else self.azim - 180
+        return bwd_range,fwd_range
+
+    def revAz(self,azim):
+
+        azim_rev = azim + 180 if azim < 180 else azim - 180
+
+        return azim_rev
+
+    def adjustTrajectoryLimits(self, bwd_range, fwd_range, obsvd_lat, obsvd_lon, obsvd_ht):
+
+
 
         # Move event start point back to intersection with max_lum_flt_ht
-        self.lat, self.lon, ht_m =  AER2LatLonAlt(azim_rev, self.elev, bwd_range,obsvd_lat, obsvd_lon,obsvd_ht)
+        self.lat, self.lon, ht_m = AER2LatLonAlt(self.revAz(self.azim), self.elev, bwd_range, obsvd_lat, obsvd_lon, obsvd_ht)
         # Calculate end point of trajectory and convert to km
-        self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obsvd_lat, obsvd_lon,obsvd_ht)
+        self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obsvd_lat, obsvd_lon, obsvd_ht)
 
         # Convert to km and store
         self.ht, self.ht2 = ht_m / 1000, ht2_m / 1000
 
 
-        # Post calculation checks - not required for operation
+    def latLonAzEltoLatLonLatLon(self):
 
+        """Take an event, establish how it has been defined, and convert to representation as
+        a pair of Lat,Lon,Ht parameters.
+
+        """
+
+        if not self.hasAzEl():
+            return
+
+        # Copy observed lat, lon and height local variables for ease of comprehension and convert to meters
+        obsvd_lat, obsvd_lon, obsvd_ht = self.lat, self.lon, self.ht * 1000
+
+        # For this routine elevation must always be within 10 - 90 degrees
+        min_elev_hard, min_elev, prob_elev, max_elev = 0, 10, 45, 90
+        self.limitAzEl(min_elev_hard, min_elev, prob_elev, max_elev)
+
+        # Handle estimated start heights outside normal range of luminous flight
+        # Need to add gap so that angles can be calculated for consistency checks
+        # Set minimum and maximum luminous flight heights
+        min_lum_flt_ht, max_lum_flt_ht, gap = 20000, 100000, 1000
+        min_lum_flt_ht, max_lum_flt_ht = self.limitHeights(obsvd_ht, min_lum_flt_ht, max_lum_flt_ht, gap)
+        bwd_range, fwd_range = self.getRanges(obsvd_lat,obsvd_lon,obsvd_ht,min_lum_flt_ht,max_lum_flt_ht)
+
+        # Move the end points
+        self.adjustTrajectoryLimits(bwd_range, fwd_range, obsvd_lat, obsvd_lon, obsvd_ht)
+
+        # Post calculation checks - not required for operation
         # Convert to ECEF
         x1, y1, z1 = latLonAlt2ECEF(np.radians(self.lat), np.radians(self.lon), self.ht * 1000)
         x2, y2, z2 = latLonAlt2ECEF(np.radians(self.lat2), np.radians(self.lon2), self.ht2 * 1000)
@@ -541,6 +569,8 @@ class EventContainer(object):
         # leave false only to print trajectories with anomolies
 
         showtrajectories  = False
+
+        azim_rev= self.revAz(self.azim)
 
         if angdf(min_obs_az,min_max_az) > 1 or angdf(min_obs_az,obs_max_az) > 1 or \
                                angdf(min_obs_el,min_max_el) > 1 or angdf(min_obs_el,obs_max_el) > 1 or showtrajectories:
@@ -583,6 +613,20 @@ class EventContainer(object):
 
         # End of post calculation checks
 
+
+    def latLonlatLonToLatLonAzEl(self):
+
+        print("Lat, Lon, Ht {:.3f},{:.3f},{:.3f}".format(self.lat,self.lon,self.ht))
+        print("Lat, Lon, Ht {:.3f},{:.3f},{:.3f}".format(self.lat2, self.lon2, self.ht2))
+        x1, y1, z1 = latLonAlt2ECEF(np.radians(self.lat), np.radians(self.lon), self.ht * 1000)
+        x2, y2, z2 = latLonAlt2ECEF(np.radians(self.lat2), np.radians(self.lon2), self.ht2 * 1000)
+        start_pt, end_pt = np.array([x1, y1, z1]), np.array([x2, y2, z2])
+        end_start_az, end_start_el = ECEF2AltAz(end_pt, start_pt)
+
+        print("Az, El".format(end_start_az,end_start_el))
+        return end_start_az,end_start_el
+
+
 class EventMonitor(multiprocessing.Process):
 
     def __init__(self, config):
@@ -599,9 +643,13 @@ class EventMonitor(multiprocessing.Process):
         self.syscon = config        # the config that describes where the folders are
         # The path to the event monitor database
 
-        self.event_monitor_db_name = "event_monitor.db"
-        self.event_monitor_db_path = os.path.join(os.path.abspath(self.config.data_dir),
-                                                  self.config.event_monitor_db_name)
+        log.info("Running on {}".format(socket.gethostname()))
+
+        self.syscon.event_monitor_db_name = "test.db" if socket.gethostname() == "svr08" else self.syscon.event_monitor_db_name
+
+        self.event_monitor_db_path = os.path.join(os.path.abspath(self.syscon.data_dir),
+                                                  self.sycon.event_monitor_db_name)
+
 
         self.createDB()
 
@@ -635,7 +683,7 @@ class EventMonitor(multiprocessing.Process):
 
         # Create the event monitor database
         if test_mode:
-            self.event_monitor_db_path = os.path.expanduser(os.path.join(self.syscon.data_dir, self.event_monitor_db_name))
+            self.event_monitor_db_path = os.path.expanduser(os.path.join(self.syscon.data_dir, self.syscon.event_monitor_db_name))
             if os.path.exists(self.event_monitor_db_path):
                 os.unlink(self.event_monitor_db_path)
 
@@ -1463,8 +1511,8 @@ class EventMonitor(multiprocessing.Process):
         pack_size = 0
         for file in file_list:
             pack_size += os.path.getsize(file)
-
         log.info("File pack {:.0f}MB assembly started".format(pack_size/1024/1024))
+
         for file in file_list:
             shutil.copy(file, this_event_directory)
         log.info("File pack assembled")
@@ -1534,6 +1582,15 @@ class EventMonitor(multiprocessing.Process):
             shutil.rmtree(event_monitor_directory)
         return upload_status
 
+
+
+    def addMultipleElevations(self,observed_event,population,min_elevation):
+
+        for elev in range(min_elevation,observed_event.elev,1):
+            print("Creating a trajectory elevation {:.2f} degrees".format(elev))
+
+        return population
+
     def checkEvents(self, ev_con, test_mode = False):
 
         """
@@ -1551,7 +1608,7 @@ class EventMonitor(multiprocessing.Process):
         for observed_event in unprocessed:
 
             # Events can be specified in different ways, make sure converted to LatLon
-            observed_event.transformToLatLon()
+            observed_event.latLonAzEltoLatLonLatLon()
             # Get the files
             file_list = self.getfilelist(observed_event)
 
@@ -1590,6 +1647,11 @@ class EventMonitor(multiprocessing.Process):
             if observed_event.hasPolarSD():
                 event_population = observed_event.applyPolarSD(event_population)
 
+            # Add trajectories with elevations from observed value to 15 deg
+            if observed_event.elev_is_max:
+                event_population = observed_event.addMultipleElevations(event_population,observed_event.elev,15)
+
+            # Start testing trajectories from the population
             log.info("Testing {} variants of a trajectory at {}".format(len(event_population),observed_event.dt))
             for event in event_population:
                 # check if this has already been handled
@@ -1605,6 +1667,7 @@ class EventMonitor(multiprocessing.Process):
                 if min_dist > event.far_radius * 1000 and not test_mode:
                     # Do no more work on this version of the trajectory
                     continue
+
 
 
             # If trajectory inside the closeradius, then do the upload and mark as processed
@@ -1695,7 +1758,7 @@ class EventMonitor(multiprocessing.Process):
 
         events = self.getEventsfromWebPage(testmode)
         for event in events:
-            if event.checkReasonable():
+            if event.isReasonable():
                 self.addEvent(event)
 
         # Go through all events and check if they need to be uploaded - this iterates through the database
@@ -1824,9 +1887,8 @@ if __name__ == "__main__":
 
         log.info("Nothing found at {}".format(syscon.event_monitor_webpage))
 
-
-    if cml_args.delete_db and os.path.isfile(os.path.expanduser("~/RMS_data/event_monitor.db")):
-        os.unlink(os.path.expanduser("~/RMS_data/event_monitor.db"))
+    if cml_args.delete_db and os.path.isfile(syscon.event_monitor_db_path):
+        os.unlink(syscon.event_monitor_db_path)
 
     em = EventMonitor(syscon)
 
@@ -1871,7 +1933,7 @@ if __name__ == "__main__":
 
         events = self.getEventsfromWebPage(testmode)
         for event in events:
-            if event.checkReasonable():
+            if event.isReasonable():
                 self.addEvent(event)
 
         # Go through all events and check if they need to be uploaded - this iterates through the database
@@ -2000,9 +2062,8 @@ if __name__ == "__main__":
 
         log.info("Nothing found at {}".format(syscon.event_monitor_webpage))
 
-
-    if cml_args.delete_db and os.path.isfile(os.path.expanduser("~/RMS_data/event_monitor.db")):
-        os.unlink(os.path.expanduser("~/RMS_data/event_monitor.db"))
+    if cml_args.delete_db and os.path.isfile(syscon.event_monitor_db_path):
+        os.unlink(syscon.event_monitor_db_path)
 
     em = EventMonitor(syscon)
 
