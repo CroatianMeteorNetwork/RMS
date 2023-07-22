@@ -43,6 +43,7 @@ from RMS.Formats.Platepar import Platepar
 from datetime import datetime
 from dateutil import parser
 from Utils.StackFFs import stackFFs
+from Utils.FRbinViewer import view
 from Utils.BatchFFtoImage import batchFFtoImage
 from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 from RMS.UploadManager import uploadSFTP
@@ -1531,6 +1532,14 @@ class EventMonitor(multiprocessing.Process):
         # make a stack
         stackFFs(this_event_directory, "jpg", captured_stack=True)
 
+        # convert bins to MP4
+        for file in file_list:
+            if file.endswith(".bin"):
+                binpath, fr_file = os.path.dirname(file), os.path.basename(file)
+                ff_file = ("FF" + fr_file[2:]).replace(".bin",".fits")
+                view(this_event_directory, ff_file, fr_file ,self.syscon,hide=True,add_timestamp=True, extract_format="mp4")
+
+
         if True:
             batchFFtoImage(os.path.join(event_monitor_directory, upload_filename), "jpg", add_timestamp=True,
                            ff_component='maxpixel')
@@ -1548,10 +1557,6 @@ class EventMonitor(multiprocessing.Process):
              log.info("Making archive of {}".format(os.path.join(event_monitor_directory, upload_filename)))
              base_name = os.path.join(event_monitor_directory,upload_filename)
              root_dir = os.path.join(event_monitor_directory,upload_filename)
-             base_dir = os.path.join(event_monitor_directory,upload_filename)
-             log.info("Base name : {}".format(upload_filename))
-             log.info("Root dir  : {}".format(root_dir))
-             log.info("Base dir  : {}".format(base_dir))
              archive_name = shutil.make_archive(base_name, 'bztar', root_dir, logger=log) # removed base_dir) for testing
             else:
              log.info("Not making an archive of {}, not sensible.".format(os.path.join(event_monitor_directory, upload_filename)))
