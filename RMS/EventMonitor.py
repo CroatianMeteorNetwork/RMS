@@ -15,7 +15,6 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
-
 """"" Automatically uploads data files based on time and trajectory information given on a website. """
 
 from __future__ import print_function, division, absolute_import
@@ -49,6 +48,8 @@ from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 from RMS.UploadManager import uploadSFTP
 import logging
 
+
+LOGLEVEL = 3
 
 log = logging.getLogger("logger")
 
@@ -155,7 +156,10 @@ class EventContainer(object):
                 self.elev_std = float(value)
 
         if "EventElevIsMax" == variable_name:
-            if value == "True":
+            # This code is used for reading event_watchlist.txt and database queries
+            # Text stores as True, database stores as 0 and 1
+            print("Event at {} has {} as {}  ".format(self.dt,variable_name, value))
+            if value == "True" or value == 1:
                 self.elev_is_max = True
             else:
                 self.elev_is_max = False
@@ -284,19 +288,17 @@ class EventContainer(object):
 
         return sd_used
 
-    def createPopulation(self,population_size):
+    def appendPopulation(self, population, population_size):
 
         """
-        Create a population of identical copies of self event
+        Append to a population identical copies of self event
 
         return: [list] population of events
 
         """
 
-        population = []
-        if self.hasCartSD() or self.hasPolarSD():
-            for pop_num in range(0, population_size):
-                population.append(copy.copy(self))
+        for pop_num in range(0, population_size):
+            population.append(copy.copy(self))
         return population
 
     def eventToECEFVector(self):
@@ -524,14 +526,14 @@ class EventContainer(object):
         self.ht, self.ht2 = ht_m / 1000, ht2_m / 1000
 
 
-    def latLonAzEltoLatLonLatLon(self):
+    def latLonAzElToLatLonLatLon(self, force = False):
 
         """Take an event, establish how it has been defined, and convert to representation as
         a pair of Lat,Lon,Ht parameters.
 
         """
-
-        if not self.hasAzEl():
+        log.info("Lat, lon, ht, az, el {},{},{},{} ".format(self.lat,self.lon,self.ht,self.azim,self.elev))
+        if not self.hasAzEl() and not force:
             return
 
         # Copy observed lat, lon and height local variables for ease of comprehension and convert to meters
@@ -566,7 +568,7 @@ class EventContainer(object):
         obs_max_az, obs_max_el = ECEF2AltAz(max_pt, obs_pt)
 
         # set showtrajectories true to enable print out of all trajectories for debugging
-        # leave false only to print trajectories with anomolies
+        # leave false only to print trajectories with anomalies
 
         showtrajectories  = False
 
@@ -616,15 +618,14 @@ class EventContainer(object):
 
     def latLonlatLonToLatLonAzEl(self):
 
-        print("Lat, Lon, Ht {:.3f},{:.3f},{:.3f}".format(self.lat,self.lon,self.ht))
-        print("Lat, Lon, Ht {:.3f},{:.3f},{:.3f}".format(self.lat2, self.lon2, self.ht2))
+        log.info("latlontoAzEl Lat, Lon, Ht {:.3f},{:.3f},{:.3f}".format(self.lat,self.lon,self.ht))
+        log.info("latlontoAzEl Lat, Lon, Ht {:.3f},{:.3f},{:.3f}".format(self.lat2, self.lon2, self.ht2))
         x1, y1, z1 = latLonAlt2ECEF(np.radians(self.lat), np.radians(self.lon), self.ht * 1000)
         x2, y2, z2 = latLonAlt2ECEF(np.radians(self.lat2), np.radians(self.lon2), self.ht2 * 1000)
         start_pt, end_pt = np.array([x1, y1, z1]), np.array([x2, y2, z2])
         end_start_az, end_start_el = ECEF2AltAz(end_pt, start_pt)
-
-        print("Az, El".format(end_start_az,end_start_el))
-        return end_start_az,end_start_el
+        log.info("End to start (Az, El) {:.1f},{:.1f}".format(end_start_az,end_start_el))
+        return self.revAz(end_start_az),end_start_el
 
 
 class EventMonitor(multiprocessing.Process):
@@ -648,9 +649,9 @@ class EventMonitor(multiprocessing.Process):
         self.syscon.event_monitor_db_name = "test.db" if socket.gethostname() == "svr08" else self.syscon.event_monitor_db_name
 
         self.event_monitor_db_path = os.path.join(os.path.abspath(self.syscon.data_dir),
-                                                  self.sycon.event_monitor_db_name)
+                                                  self.syscon.event_monitor_db_name)
 
-
+        log.info("Using {} as database".format(self.event_monitor_db_path))
         self.createDB()
 
         # Load the event monitor database. Any problems, delete and recreate.
@@ -1584,10 +1585,29 @@ class EventMonitor(multiprocessing.Process):
 
 
 
-    def addMultipleElevations(self,observed_event,population,min_elevation):
+    def addElevationRange(self, population, ob_ev, min_elevation):
 
-        for elev in range(min_elevation,observed_event.elev,1):
-            print("Creating a trajectory elevation {:.2f} degrees".format(elev))
+        ob_ev.azim, ob_ev.elev = ob_ev.latLonlatLonToLatLonAzEl()
+        for elev in range(min_elevation, int(ob_ev.elev), 1):
+            s = copy.copy(ob_ev)
+            s.elev = elev
+            s.latLonAzElToLatLonLatLon(force = True)
+            population.append(s)
+            ch_az,ch_el = s.latLonlatLonToLatLonAzEl()
+            start, end, closest = self.calculateclosestpoint(s.lat, s.lon, s.ht * 1000, s.lat2, s.lon2, s.ht2 * 1000,
+                                                             ob_ev.lat, ob_ev.lon, ob_ev.ht * 1000)
+            start, end, closest = start/1000, end / 1000, closest / 1000
+
+            if start>1000 or end>1000 or closest > 0.2:
+                log.error("Original             Az, El {:.3f},{:.3f} degrees".format(ob_ev.azim, ob_ev.elev))
+                log.error("Final                Az, El {:.3f},{:.3f} degrees".format(ch_az, ch_el))
+                log.error("Final    Start Lat,Lon,Alt  {:.3f},{:.3f},{:.3f}".format(s.lat, s.lon, s.ht))
+                log.error("Original Start Lat,Lon,Alt  {:.3f},{:.3f},{:.3f}".format(ob_ev.lat, ob_ev.lon, ob_ev.ht))
+                log.error("Original End   Lat,Lon,Alt  {:.3f},{:.3f},{:.3f}".format(ob_ev.lat2, ob_ev.lon2, ob_ev.ht2))
+                log.error("Final    End   Lat,Lon,Alt  {:.3f},{:.3f},{:.3f}".format(s.lat2, s.lon2, s.ht2))
+                log.error("Distance from original start to trajectory")
+                log.error("Start, End, Closest, Elev {:.2f},{:.2f},{:.2f},{:.2f}".format(start,end,closest, ch_el))
+            pass
 
         return population
 
@@ -1602,13 +1622,16 @@ class EventMonitor(multiprocessing.Process):
         """
 
         # Get the work to be done
+
         unprocessed = self.getUnprocessedEventsfromDB()
 
         # Iterate through the work
         for observed_event in unprocessed:
-
+            if socket.gethostname() == "svr08":
+                log.info("Checking event at {}".format(observed_event.dt))
+                print(observed_event.eventToString())
             # Events can be specified in different ways, make sure converted to LatLon
-            observed_event.latLonAzEltoLatLonLatLon()
+            observed_event.latLonAzElToLatLonLatLon()
             # Get the files
             file_list = self.getfilelist(observed_event)
 
@@ -1635,21 +1658,29 @@ class EventMonitor(multiprocessing.Process):
                     log.error("Upload failed for event at {}. Event retained in database for retry.".format(observed_event.dt))
                 continue
 
+            # Initialise the population of trajectories
+            event_population = []
             # If we have any standard deviation definitions then create a population of 1000, else create a population of 1
             if observed_event.hasCartSD() or observed_event.hasPolarSD():
-                event_population = observed_event.createPopulation(1000)
+                log.info("Working with standard deviations")
+                event_population = observed_event.appendPopulation(event_population,1000)
             else:
-                event_population = observed_event.createPopulation(1)
+                log.info("Working without standard deviations")
+                event_population = observed_event.appendPopulation(event_population,1)
+
+
 
             # Apply SD to the population
             if observed_event.hasCartSD():
+                log.info("Applying cartesian standard deviations")
                 event_population = observed_event.applyCartesianSD(event_population)
             if observed_event.hasPolarSD():
+                log.info("Applying polar standard deviations")
                 event_population = observed_event.applyPolarSD(event_population)
 
             # Add trajectories with elevations from observed value to 15 deg
             if observed_event.elev_is_max:
-                event_population = observed_event.addMultipleElevations(event_population,observed_event.elev,15)
+                event_population = self.addElevationRange(event_population, observed_event, 15)
 
             # Start testing trajectories from the population
             log.info("Testing {} variants of a trajectory at {}".format(len(event_population),observed_event.dt))
@@ -1658,6 +1689,7 @@ class EventMonitor(multiprocessing.Process):
                 if self.eventProcessed(observed_event.uuid):
                     break # do no more work on any version of this trajectory - break exits loop
                 # From the infinitely extended trajectory, work out the closest point to the camera
+                # ev_con.elevation is the height above sea level of the station in metres, no conversion required
                 start_dist, end_dist, atmos_dist = self.calculateclosestpoint(event.lat, event.lon, event.ht * 1000,
                                                                            event.lat2, event.lon2, event.ht2 * 1000,
                                                                 ev_con.latitude, ev_con.longitude, ev_con.elevation)
@@ -1667,8 +1699,6 @@ class EventMonitor(multiprocessing.Process):
                 if min_dist > event.far_radius * 1000 and not test_mode:
                     # Do no more work on this version of the trajectory
                     continue
-
-
 
             # If trajectory inside the closeradius, then do the upload and mark as processed
                 if min_dist < event.close_radius * 1000 and not test_mode:
@@ -1685,8 +1715,6 @@ class EventMonitor(multiprocessing.Process):
                         break # Do no more work on any version of this trajectory - break exits loop
                     else:
                         log.error("Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
-
-
 
             # If trajectory inside the farradius, then check if the trajectory went through the FoV
             # The returned count is the number of 100th parts of the trajectory observed through the FoV
@@ -2024,6 +2052,10 @@ def raDec2ECI(ra, dec):
 
     return x, y, z
 
+def logcon(string,level=0):
+
+    if level >= LOGLEVEL:
+        log.info(string)
 
 if __name__ == "__main__":
 
