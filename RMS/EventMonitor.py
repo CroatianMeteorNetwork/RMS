@@ -132,37 +132,21 @@ class EventContainer(object):
         # Optional parameters for defining trajectory by a start point, and a direction
 
         if "EventAzim" == variable_name:
-            if value is None:
-                self.azim = 0
-            else:
-                self.azim = float(value)
+            self.azim = 0 if value is None else float(value)
 
         if "EventAzimStd" == variable_name:
-            if value is None:
-                self.azim_std = 0
-            else:
-                self.azim_std = float(value)
+            self.azim_std = 0 if value is None else float(value)
 
         if "EventElev" == variable_name:
-            if value is None:
-                self.elev = 0
-            else:
-                self.elev = float(value)
+            self.elev = 0 if value is None else float(value)
 
         if "EventElevStd" == variable_name:
-            if value is None:
-                self.elev_std = 0
-            else:
-                self.elev_std = float(value)
+            self.elev_std = 0 if value is None else float(value)
 
+        # This code is used for reading event_watchlist.txt and database queries
+        # Text stores as True, database stores as 0 and 1
         if "EventElevIsMax" == variable_name:
-            # This code is used for reading event_watchlist.txt and database queries
-            # Text stores as True, database stores as 0 and 1
-            print("Event at {} has {} as {}  ".format(self.dt,variable_name, value))
-            if value == "True" or value == 1:
-                self.elev_is_max = True
-            else:
-                self.elev_is_max = False
+             self.elev_is_max = True if value == "True" or value == 1 else False
 
         # Control information
 
@@ -532,7 +516,7 @@ class EventContainer(object):
         a pair of Lat,Lon,Ht parameters.
 
         """
-        log.info("Lat, lon, ht, az, el {},{},{},{} ".format(self.lat,self.lon,self.ht,self.azim,self.elev))
+
         if not self.hasAzEl() and not force:
             return
 
@@ -618,15 +602,11 @@ class EventContainer(object):
 
     def latLonlatLonToLatLonAzEl(self):
 
-        log.info("latlontoAzEl Lat, Lon, Ht {:.3f},{:.3f},{:.3f}".format(self.lat,self.lon,self.ht))
-        log.info("latlontoAzEl Lat, Lon, Ht {:.3f},{:.3f},{:.3f}".format(self.lat2, self.lon2, self.ht2))
         x1, y1, z1 = latLonAlt2ECEF(np.radians(self.lat), np.radians(self.lon), self.ht * 1000)
         x2, y2, z2 = latLonAlt2ECEF(np.radians(self.lat2), np.radians(self.lon2), self.ht2 * 1000)
         start_pt, end_pt = np.array([x1, y1, z1]), np.array([x2, y2, z2])
         end_start_az, end_start_el = ECEF2AltAz(end_pt, start_pt)
-        log.info("End to start (Az, El) {:.1f},{:.1f}".format(end_start_az,end_start_el))
         return self.revAz(end_start_az),end_start_el
-
 
 class EventMonitor(multiprocessing.Process):
 
@@ -636,18 +616,13 @@ class EventMonitor(multiprocessing.Process):
             config: [Config] Configuration object.
         """
 
-
-
         super(EventMonitor, self).__init__()
         # Hold two configs - one for the locations of folders - syscon, and one for the lats and lons etc. - config
         self.config = config        # the config that will be used for all data processing - lats, lons etc.
         self.syscon = config        # the config that describes where the folders are
+
         # The path to the event monitor database
-
-        log.info("Running on {}".format(socket.gethostname()))
-
         self.syscon.event_monitor_db_name = "test.db" if socket.gethostname() == "svr08" else self.syscon.event_monitor_db_name
-
         self.event_monitor_db_path = os.path.join(os.path.abspath(self.syscon.data_dir),
                                                   self.syscon.event_monitor_db_name)
 
@@ -656,11 +631,10 @@ class EventMonitor(multiprocessing.Process):
 
         # Load the event monitor database. Any problems, delete and recreate.
         self.db_conn = self.getConnectionToEventMonitorDB()
-
         self.check_interval = self.syscon.event_monitor_check_interval
         self.exit = multiprocessing.Event()
 
-        log.info("Started EventMonitor")
+        log.info("EventMonitor is starting")
         log.info("Monitoring {} at {:3.2f} minute intervals".format(self.syscon.event_monitor_webpage,self.syscon.event_monitor_check_interval))
         log.info("Local db path name {}".format(self.syscon.event_monitor_db_name))
         log.info("Reporting data to {}/{}".format(self.syscon.hostname, self.syscon.event_monitor_remote_dir))
@@ -673,8 +647,12 @@ class EventMonitor(multiprocessing.Process):
             if self.conn is not None:
                 break
             log.info("Database creation failed, waiting to retry")
-            if os.path.exists(self.event_monitor_db_path):
-                os.unlink(self.event_monitor_db_path)
+            # try block because os.path.exists seems to lag behind the file system state
+            try:
+                if os.path.exists(self.event_monitor_db_path):
+                    os.unlink(self.event_monitor_db_path)
+            except:
+                pass
             time.sleep(30)
             log.info("Retrying database creation")
 
@@ -957,13 +935,15 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "{},  {}, '{}', '{}', '{}' ,       \n".format(0, 0,uuid.uuid4(), event.respond_to, event.stations_required)
             sql_statement += "CURRENT_TIMESTAMP ) \n"
 
-            #try:
-            cursor = self.db_conn.cursor()
-            cursor.execute(sql_statement)
-            self.db_conn.commit()
+            try:
+                cursor = self.db_conn.cursor()
+                cursor.execute(sql_statement)
+                self.db_conn.commit()
 
-            #except:
-                #log.info("Add event failed")
+            except:
+                log.info("Add event failed")
+                self.recoverFromDatabaseError()
+                return False
 
             log.info("Added event at {} to the database".format(event.dt))
             return True
@@ -1625,11 +1605,11 @@ class EventMonitor(multiprocessing.Process):
 
         unprocessed = self.getUnprocessedEventsfromDB()
 
+        log.info("Starting checks on trajectory population")
+        check_time_start = datetime.now()
         # Iterate through the work
         for observed_event in unprocessed:
-            if socket.gethostname() == "svr08":
-                log.info("Checking event at {}".format(observed_event.dt))
-                print(observed_event.eventToString())
+
             # Events can be specified in different ways, make sure converted to LatLon
             observed_event.latLonAzElToLatLonLatLon()
             # Get the files
@@ -1680,10 +1660,10 @@ class EventMonitor(multiprocessing.Process):
 
             # Add trajectories with elevations from observed value to 15 deg
             if observed_event.elev_is_max:
+                log.info("Rotating trajectory around observed point")
                 event_population = self.addElevationRange(event_population, observed_event, 15)
 
             # Start testing trajectories from the population
-            log.info("Testing {} variants of a trajectory at {}".format(len(event_population),observed_event.dt))
             for event in event_population:
                 # check if this has already been handled
                 if self.eventProcessed(observed_event.uuid):
@@ -1704,6 +1684,9 @@ class EventMonitor(multiprocessing.Process):
                 if min_dist < event.close_radius * 1000 and not test_mode:
                     # this is just for info
                     log.info("Event at {} was {:.0f}km away, inside {:.0f}km so is uploaded with no further checks.".format(event.dt, min_dist / 1000, event.close_radius))
+                    check_time_end = datetime.now()
+                    check_time_seconds = (check_time_end- check_time_start).total_seconds()
+                    log.info("Check of trajectories took {:2f} seconds".format(check_time_seconds))
                     count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
                         event)
                     # If doUpload returned True mark the event as processed and uploaded
@@ -1723,6 +1706,9 @@ class EventMonitor(multiprocessing.Process):
                     count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(event)
                     if count != 0:
                         log.info("Event at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(event.dt, count))
+                        check_time_end = datetime.now()
+                        check_time_seconds = (check_time_end - check_time_start).total_seconds()
+                        log.info("Check of trajectories took {:2f} seconds".format(check_time_seconds))
                         if self.doUpload(observed_event, ev_con, file_list, test_mode=test_mode):
                             self.markEventAsUploaded(observed_event, file_list)
                             if not test_mode:
@@ -1750,9 +1736,16 @@ class EventMonitor(multiprocessing.Process):
             # End of the processing loop for this event
             if self.eventProcessed(observed_event.uuid):
                 log.info("Reached end of checks - {} is processed".format(observed_event.dt))
+                check_time_end = datetime.now()
+                check_time_seconds = (check_time_end - check_time_start).total_seconds()
+                log.info("Check of trajectories took {:2f} seconds".format(check_time_seconds))
             else:
                 log.info("Reached end of checks, not processed - marking {} as processed".format(observed_event.dt))
+                check_time_end = datetime.now()
+                check_time_seconds = (check_time_end - check_time_start).total_seconds()
+                log.info("Check of trajectories took {:2f} seconds".format(check_time_seconds))
                 self.markEventAsProcessed(observed_event)
+
         return None
 
 
