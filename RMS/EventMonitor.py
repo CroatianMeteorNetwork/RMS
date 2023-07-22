@@ -1753,10 +1753,9 @@ class EventMonitor(multiprocessing.Process):
                             with open(os.path.expanduser(os.path.join(self.syscon.data_dir, "testlog")), 'at') as logfile:
                                 logfile.write(
                                     "{} LOC {} Az:{:3.1f} El:{:3.1f} sta_lat:{:3.4f} sta_lon:{:3.4f} sta_dist:{:3.0f} end_dist:{:3.0f} fov_h:{:3.1f} fov_v:{:3.1f} sa:{:3.1f} ea::{:3.1f} \n".format(
-                                        convertGMNTimeToPOSIX(event.dt), ev_con.stationID, rp.az_centre, rp.alt_centre,
-                                        rp.lat, rp.lon, event.start_distance / 1000, event.end_distance / 1000, rp.fov_h,
-                                        rp.fov_v, event.start_angle, event.end_angle))
-                                        rp.fov_v, event.start_angle, event.end_angle))
+                                    convertGMNTimeToPOSIX(event.dt), ev_con.stationID, rp.az_centre, rp.alt_centre,
+                                    rp.lat, rp.lon, event.start_distance / 1000, event.end_distance / 1000, rp.fov_h,
+                                    rp.fov_v, event.start_angle, event.end_angle))
                     else:
                         #log.info("Event at {} did not pass through FOV.".format(event.dt))
                         if not test_mode:
