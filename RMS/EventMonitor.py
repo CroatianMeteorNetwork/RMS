@@ -47,6 +47,7 @@ from Utils.FRbinViewer import view
 from Utils.BatchFFtoImage import batchFFtoImage
 from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 from RMS.UploadManager import uploadSFTP
+from Utils.SkyFit2 import convertFRNameToFF
 import logging
 
 
@@ -1529,16 +1530,16 @@ class EventMonitor(multiprocessing.Process):
             shutil.copy(file, this_event_directory)
         log.info("File pack assembled")
 
-        # make a stack
         stackFFs(this_event_directory, "jpg", captured_stack=True)
 
         # convert bins to MP4
         for file in file_list:
             if file.endswith(".bin"):
-                binpath, fr_file = os.path.dirname(file), os.path.basename(file)
-                ff_file = ("FF" + fr_file[2:]).replace(".bin",".fits")
-                view(this_event_directory, ff_file, fr_file ,self.syscon,hide=True,add_timestamp=True, extract_format="mp4")
-
+                fr_file = os.path.dirname(file)
+                try:
+                    view(this_event_directory, convertFRNameToFF(fr_file), fr_file ,self.syscon,hide=True,add_timestamp=True, extract_format="mp4")
+                except:
+                    log.error("Converting {} to mp4 failed".format(fr_file))
 
         if True:
             batchFFtoImage(os.path.join(event_monitor_directory, upload_filename), "jpg", add_timestamp=True,
@@ -1597,7 +1598,6 @@ class EventMonitor(multiprocessing.Process):
         if not keep_files:
             shutil.rmtree(event_monitor_directory)
         return upload_status
-
 
 
     def addElevationRange(self, population, ob_ev, min_elevation):
@@ -1798,6 +1798,14 @@ class EventMonitor(multiprocessing.Process):
         self.join()
         log.info("EventMonitor has stopped")
 
+    def checkDBExists(self):
+
+        if not os.path.exists(self.event_monitor_db_path):
+            self.conn = self.createEventMonitorDB()
+
+        return True
+
+
     def getEventsAndCheck(self, testmode=False):
         """
         Gets event(s) from the webpage, or a local file.
@@ -1824,6 +1832,7 @@ class EventMonitor(multiprocessing.Process):
         # Delay to allow capture to check existing folders - keep the logs tidy
         time.sleep(30)
         while not self.exit.is_set():
+            self.checkDBExists()
             self.getEventsAndCheck()
             # Wait for the next check
             self.exit.wait(60 * self.check_interval)
