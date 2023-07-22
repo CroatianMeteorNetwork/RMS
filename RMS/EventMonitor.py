@@ -1716,7 +1716,7 @@ class EventMonitor(multiprocessing.Process):
                     log.info("Event at {} was {:.0f}km away, inside {:.0f}km so is uploaded with no further checks.".format(event.dt, min_dist / 1000, event.close_radius))
                     check_time_end = datetime.now()
                     check_time_seconds = (check_time_end- check_time_start).total_seconds()
-                    log.info("Check of trajectories took {:2f} seconds".format(check_time_seconds))
+                    log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
                     count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
                         event)
                     # If doUpload returned True mark the event as processed and uploaded
@@ -1768,14 +1768,14 @@ class EventMonitor(multiprocessing.Process):
                 log.info("Reached end of checks - {} is processed".format(observed_event.dt))
                 check_time_end = datetime.now()
                 check_time_seconds = (check_time_end - check_time_start).total_seconds()
-                log.info("Check of trajectories took {:2f} seconds".format(check_time_seconds))
+                log.info("Check of trajectories time elapsed {:2f} seconds".format(check_time_seconds))
             else:
-                log.info("Reached end of checks, not processed - marking {} as processed".format(observed_event.dt))
+                log.info("Reached end of checks, event at {} had no match for {}, marking as processed".format(observed_event.dt, syscon.stationID))
                 check_time_end = datetime.now()
                 check_time_seconds = (check_time_end - check_time_start).total_seconds()
-                log.info("Check of trajectories took {:2f} seconds".format(check_time_seconds))
+                log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
                 self.markEventAsProcessed(observed_event)
-        log.info("Completed checks on events")
+
         return None
 
 
@@ -1828,7 +1828,7 @@ class EventMonitor(multiprocessing.Process):
             #We are running fast, but have not made an upload, then check more slowly next time
             if self.check_interval < self.syscon.event_monitor_check_interval:
                 self.check_interval = self.check_interval * 1.1
-                log.info("Check interval now set to {:2.2f} minutes".format(self.check_interval))
+                log.info("Check interval now set to {:.2f} minutes".format(self.check_interval))
 
 
 def angdf(a1,a2):
