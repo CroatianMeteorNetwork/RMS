@@ -2022,7 +2022,7 @@ def convertGMNTimeToPOSIX(timestring):
     except:
         log.error("Badly formatted time {}".format(timestring.strip()))
         # return a time which will be safe but cannot produce any output
-        return datetime.strptime("20000101_000000".strip(), "%Y%m%d_%H%M%S")
+        dt_object = datetime.strptime("20000101_000000".strip(), "%Y%m%d_%H%M%S")
     return dt_object
 
 #https://stackoverflow.com/questions/2030053/how-to-generate-random-strings-in-python
