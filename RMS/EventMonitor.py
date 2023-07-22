@@ -2017,8 +2017,12 @@ def convertGMNTimeToPOSIX(timestring):
     Returns:
         posix compatible time
     """
-
-    dt_object = datetime.strptime(timestring.strip(), "%Y%m%d_%H%M%S")
+    try:
+        dt_object = datetime.strptime(timestring.strip(), "%Y%m%d_%H%M%S")
+    except:
+        log.error("Badly formatted time {}".format(timestring.strip()))
+        # return a time which will be safe but cannot produce any output
+        return "20000101_000000"
     return dt_object
 
 #https://stackoverflow.com/questions/2030053/how-to-generate-random-strings-in-python
