@@ -1756,6 +1756,7 @@ class EventMonitor(multiprocessing.Process):
                                         convertGMNTimeToPOSIX(event.dt), ev_con.stationID, rp.az_centre, rp.alt_centre,
                                         rp.lat, rp.lon, event.start_distance / 1000, event.end_distance / 1000, rp.fov_h,
                                         rp.fov_v, event.start_angle, event.end_angle))
+                                        rp.fov_v, event.start_angle, event.end_angle))
                     else:
                         #log.info("Event at {} did not pass through FOV.".format(event.dt))
                         if not test_mode:
@@ -1770,7 +1771,6 @@ class EventMonitor(multiprocessing.Process):
                 check_time_seconds = (check_time_end - check_time_start).total_seconds()
                 log.info("Check of trajectories time elapsed {:2f} seconds".format(check_time_seconds))
             else:
-                log.info("Reached end of checks, event at {} had no match for {}, marking as processed".format(observed_event.dt, syscon.stationID))
                 check_time_end = datetime.now()
                 check_time_seconds = (check_time_end - check_time_start).total_seconds()
                 log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
