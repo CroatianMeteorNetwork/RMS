@@ -970,11 +970,12 @@ class EventMonitor(multiprocessing.Process):
         sql_statement += "WHERE                                \n"
         sql_statement += "uuid = '{}'                          \n".format(event.uuid)
         try:
-         self.db_conn.cursor().execute(sql_statement)
-         self.db_conn.commit()
-         log.info("Event at {} marked as processed".format(event.dt))
+            self.db_conn.cursor().execute(sql_statement)
+            self.db_conn.commit()
+            log.info("Event at {} marked as processed".format(event.dt))
         except:
-         log.info("Database error")
+            log.info("Database error")
+            self.recoverFromDatabaseError()
 
     def eventProcessed(self, uuid):
 
@@ -1493,6 +1494,11 @@ class EventMonitor(multiprocessing.Process):
         for file in file_list:
             pack_size += os.path.getsize(file)
         log.info("File pack {:.0f}MB assembly started".format(pack_size/1024/1024))
+
+        # Don't upload things which are too large
+        if pack_size > 1000*1024*1024:
+            log.error("File pack too large")
+            return False
 
         for file in file_list:
             shutil.copy(file, this_event_directory)
