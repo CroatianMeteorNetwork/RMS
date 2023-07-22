@@ -1817,15 +1817,13 @@ class EventMonitor(multiprocessing.Process):
 
     def run(self):
 
-
-        # Delay to get everything else done first
-        time.sleep(20)
+        # Delay to allow capture to check existing folders - keep the logs tidy
+        time.sleep(30)
         while not self.exit.is_set():
-
             self.getEventsAndCheck()
             # Wait for the next check
             self.exit.wait(60 * self.check_interval)
-            #We are running fast, but have not made an upload, then check more slowly next time
+            # Increase the check interval
             if self.check_interval < self.syscon.event_monitor_check_interval:
                 self.check_interval = self.check_interval * 1.1
                 log.info("Check interval now set to {:.2f} minutes".format(self.check_interval))
