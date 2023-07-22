@@ -437,6 +437,15 @@ class EventContainer(object):
 
     def hasAzEl(self):
 
+        """
+        Arguments:
+            None
+
+        Returns: [bool]
+            True if end point lats or lons and heights, therefore infer defined using a point and Az El
+
+        """
+
         # Work out if this is defined by point and azimuth and elevation
         azim_elev_definition = True
         azim_elev_definition = False if self.lon2 != 0 else azim_elev_definition
@@ -447,6 +456,23 @@ class EventContainer(object):
 
 
     def limitAzEl(self, min_elev_hard, min_elev, prob_elev, max_elev):
+
+
+
+        """
+
+        Acts on self to correct any strange elevations
+
+        Arguments
+            min_elev_hard: [float] minimum elevation considered reasonable
+            min_elev: [float] minimum elevation conisdered correct
+    `       prob_elev: [float] set any unreasonable elevations
+            max_elev: [float] maximum elevation considered reasonable
+
+        Returns:
+            Nothing
+
+        """
 
         # Detect, fix and log elevations outside range
         if min_elev < self.elev < max_elev:
@@ -742,9 +768,7 @@ class EventMonitor(multiprocessing.Process):
 
         """ Delete the event monitor database.
 
-
         Arguments:
-
 
         Return:
             Status: [bool] True if a db was found at that location, otherwise false
@@ -1611,11 +1635,11 @@ class EventMonitor(multiprocessing.Process):
 
         unprocessed = self.getUnprocessedEventsfromDB()
 
-        log.info("Starting checks on trajectory population")
-        check_time_start = datetime.now()
-        # Iterate through the work
-        for observed_event in unprocessed:
 
+        for observed_event in unprocessed:
+            log.info("Starting checks on trajectories for event at {}".format(observed_event.dt))
+            check_time_start = datetime.now()
+            # Iterate through the work
             # Events can be specified in different ways, make sure converted to LatLon
             observed_event.latLonAzElToLatLonLatLon()
             # Get the files
@@ -1751,7 +1775,7 @@ class EventMonitor(multiprocessing.Process):
                 check_time_seconds = (check_time_end - check_time_start).total_seconds()
                 log.info("Check of trajectories took {:2f} seconds".format(check_time_seconds))
                 self.markEventAsProcessed(observed_event)
-
+        log.info("Completed checks on events")
         return None
 
 
