@@ -427,8 +427,8 @@ class QueuedPool(object):
                     prev_output_qsize = self.output_queue.qsize()
                     output_qsize_last_change = time.time()
 
-                # If the output queue size is zero, meaning no jobs are done, increase the time by the delay
-                #   time
+                # If the output queue size is zero, meaning no jobs are done, and workers are active
+                # increase the time by the delay time
                 if prev_output_qsize == 0 and self.active_workers.value == 0:
                     worker_timeout = self.worker_timeout + self.delay_start
 
