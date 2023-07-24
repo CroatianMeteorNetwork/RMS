@@ -417,6 +417,8 @@ class QueuedPool(object):
                     self.printAndLog('Idle worker threads:', self.available_workers.value())
                     self.printAndLog('Total jobs:', self.total_jobs.value())
                     self.printAndLog('Finished jobs:', self.output_queue.qsize())
+                    self.printAndLog('Worker timeout:', worker_timeout)
+                    self.printAndLog('Output queue size last change:', output_qsize_last_change)
 
 
                 # Keep track of the changes of the output queue size
