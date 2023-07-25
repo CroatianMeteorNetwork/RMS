@@ -435,7 +435,7 @@ def ecef2LatLonAlt(x, y, z):
 
 
 def ECEF2AltAz(s_vect, p_vect):
-    """ Given two sets of ECEF coordinates, compute alt/az which points from the point S to the point P.
+    """ Given two sets of ECEF coordinates, compute alt/az which point from the point S to the point P.
 
     Source: https://gis.stackexchange.com/a/58926
     
