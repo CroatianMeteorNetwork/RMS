@@ -1,5 +1,5 @@
 # RPi Meteor Station
-# Copyright (C) 2016
+# Copyright (C) 2023
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -33,10 +33,9 @@ import datetime
 import argparse
 import math
 import random, string, statistics
-from glob import glob
+import logging
 
-
-from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm
+from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt
 from RMS.Math import angularSeparationVect
 from RMS.Formats.Platepar import Platepar
@@ -48,7 +47,8 @@ from Utils.BatchFFtoImage import batchFFtoImage
 from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 from RMS.UploadManager import uploadSFTP
 from Utils.SkyFit2 import convertFRNameToFF
-import logging
+from glob import glob
+
 
 
 log = logging.getLogger("logger")
@@ -58,27 +58,22 @@ class EventContainer(object):
 
     """ Contains the specification of the search for an event.
 
-
     """
 
     def __init__(self, dt, lat, lon, ht):
 
         # Required parameters
-
         self.dt,self.time_tolerance = dt, 0
-
         self.lat, self.lat_std, self.lon, self.lon_std, self.ht, self.ht_std, self.cart_std = lat, 0, lon, 0, ht,0,0
         self.lat2, self.lat2_std, self.lon2, self.lon2_std, self.ht2, self.ht2_std, self.cart2_std = 0,0,0,0,0,0,0
         self.close_radius, self.far_radius = 0,0
 
         # Or trajectory information from the first point
         self.azim, self.azim_std, self.elev, self.elev_std, self.elev_is_max = 0,0,0,0,False
-
         self.stations_required = ""
         self.respond_to = ""
 
         # These are internal control properties
-
         self.uuid = ""
         self.event_spec_type = 0
         self.files_uploaded = []
@@ -108,7 +103,6 @@ class EventContainer(object):
             return
 
         # Mandatory parameters
-
         self.dt = value if "EventTime" == variable_name else self.dt
         self.time_tolerance = value if "TimeTolerance" == variable_name else self.time_tolerance
         self.lat = float(value) if "EventLat" == variable_name else self.lat
@@ -119,13 +113,11 @@ class EventContainer(object):
         self.ht_std = float(value) if "EventHtStd" == variable_name else self.ht_std
         self.cart_std = float(value) if "EventCartStd" == variable_name else self.cart_std
 
-        # radii
-
+        # Radii
         self.close_radius = float(value) if "CloseRadius" == variable_name else self.close_radius
         self.far_radius = float(value) if "FarRadius" == variable_name else self.far_radius
 
         # Optional parameters, if trajectory is set by a start and an end
-
         self.lat2 = float(value) if "EventLat2" == variable_name else self.lat2
         self.lat2_std = float(value) if "EventLat2Std" == variable_name else self.lat2_std
         self.lon2 = float(value) if "EventLon2" == variable_name else self.lon2
@@ -135,7 +127,6 @@ class EventContainer(object):
         self.cart2_std = float(value) if "EventCart2Std" == variable_name else self.cart2_std
 
         # Optional parameters for defining trajectory by a start point, and a direction
-
         if "EventAzim" == variable_name:
             self.azim = 0 if value is None else float(value)
 
@@ -154,7 +145,6 @@ class EventContainer(object):
              self.elev_is_max = True if value == "True" or value == 1 else False
 
         # Control information
-
         self.stations_required = str(value) if "StationsRequired" == variable_name else self.stations_required
         self.uuid = str(value) if "uuid" == variable_name else self.uuid
         self.respond_to = str(value) if "RespondTo" == variable_name else self.respond_to
@@ -202,7 +192,6 @@ class EventContainer(object):
         output += ("StationsRequired         : {}\n".format(self.stations_required))
         output += ("uuid                     : {}\n".format(self.uuid))
         output += ("RespondTo                : {}\n".format(self.respond_to))
-
         output += "# Trajectory information     \n"
         output += ("Start Distance (km)      : {:3.2f}\n".format(self.start_distance / 1000))
         output += ("Start Angle              : {:3.2f}\n".format(self.start_angle))
@@ -211,27 +200,23 @@ class EventContainer(object):
         output += "# Station information        \n"
         output += ("Field of view RA         : {:3.2f}\n".format(self.fovra))
         output += ("Field of view Dec        : {:3.2f}\n".format(self.fovdec))
-
         output += "\n"
         output += "END"
         output += "\n"
-
         return output
 
     def isReasonable(self):
 
-        """ Receive an event, check if it is reasonable, and optionally try to fix it up
+        """ Check if self is reasonable, and optionally try to fix it up
             Crucially, this function prevents any excessive requests being made that may compromise capture
 
         Arguments:
-
 
         Return:
             reasonable: [bool] The event is reasonable
         """
 
         reasonable = True
-
         reasonable = False if self.lat == "" else reasonable
         reasonable = False if self.lat is None else reasonable
         reasonable = False if self.lon == "" else reasonable
@@ -266,8 +251,6 @@ class EventContainer(object):
         """
 
         sd_used = False
-
-        # Find out if any standard deviations are set to non-zero
         sd_used = True if self.lat_std != 0 else sd_used
         sd_used = True if self.lon_std != 0 else sd_used
         sd_used = True if self.ht_std != 0 else sd_used
@@ -299,10 +282,12 @@ class EventContainer(object):
     def eventToECEFVector(self):
 
         """
-        Return ECEF vector representation of event
+        Return ECEF vector (meters) representation of search trajectory
 
-        returns: [vector] ECEF vector
+        return:
+            [vector] ECEF vector
         """
+
         v1 = latLonAlt2ECEF(np.radians(self.lat),  np.radians(self.lon),self.ht*1000)
         v2 = latLonAlt2ECEF(np.radians(self.lat2), np.radians(self.lon2), self.ht2*1000)
 
@@ -311,7 +296,7 @@ class EventContainer(object):
     def ecefV2LatLonAlt(self,ecef_vect):
 
         """
-        Convert ECEF vector to lat(deg),lon(deg),ht(km)
+        Convert ECEF vector (meters) to lat(deg),lon(deg),ht(km)
 
         arguments: ecef_vector
 
@@ -325,7 +310,7 @@ class EventContainer(object):
     def applyCartesianSDToPoint(self,pt,std):
 
         """
-        Apply random number from normal distrbution to each component of a vector containing three terms
+        Apply random number from normal distribution to each component of a 3 dimension vector
 
         arguments:
             pt: [vector] vector
@@ -335,7 +320,6 @@ class EventContainer(object):
         return pt + np.random.normal(scale=std,size=3)
 
     def applyCartesianSD(self,population):
-
 
         """
         Apply standard deviation using Cartesian deviations to a population of trajectories
@@ -349,49 +333,12 @@ class EventContainer(object):
         """
 
         ecef_vector = self.eventToECEFVector()
-
         if self.hasCartSD():
             for tr in population:
                 start_vect = self.applyCartesianSDToPoint(ecef_vector[0],self.cart_std)
                 end_vect = self.applyCartesianSDToPoint(ecef_vector[1],self.cart2_std)
                 tr.lat, tr.lon, tr.ht = self.ecefV2LatLonAlt(start_vect)
                 tr.lat2, tr.lon2, tr.ht2 = self.ecefV2LatLonAlt(end_vect)
-
-        """
-
-                print("lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat, self.lon ,self.ht))
-                print("lat,lon,alt {:.3f},{:.3f},{:3f}".format(tr.lat, tr.lon, tr.ht))
-                print("Deviation lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat-tr.lat, self.lon-tr.lon, self.ht-tr.ht))
-                print("Deviation lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat2 - tr.lat2, self.lon2 - tr.lon2, self.ht2 - tr.ht2))
-
-
-        print("Cartesian deviation analysis")
-
-        minlat = (min(event.lat for event in population))
-        minlon = (min(event.lon for event in population))
-        minht = (min(event.ht for event in population))
-
-
-        maxlat = (max(event.lat for event in population))
-        maxlon = (max(event.lon for event in population))
-        maxht = (max(event.ht for event in population))
-
-        print("Original lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat, self.lon, self.ht))
-        print("Minimum  lat,lon,alt {:.3f},{:.3f},{:3f}".format(minlat, minlon, minht))
-        print("Maximum  lat,lon,alt {:.3f},{:.3f},{:3f}".format(maxlat, maxlon, maxht))
-
-        minlat = (min(event.lat2 for event in population))
-        minlon = (min(event.lat2 for event in population))
-        minht = (min(event.ht2 for event in population))
-
-        maxlat = (max(event.lat2 for event in population))
-        maxlon = (max(event.lon2 for event in population))
-        maxht = (max(event.ht2 for event in population))
-
-        print("Original lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat, self.lon, self.ht))
-        print("Minimum  lat,lon,alt {:.3f},{:.3f},{:3f}".format(minlat, minlon, minht))
-        print("Maximum  lat,lon,alt {:.3f},{:.3f},{:3f}".format(maxlat, maxlon, maxht))
-        """
 
         return population
 
@@ -408,7 +355,6 @@ class EventContainer(object):
 
         """
 
-        # Apply the deviations
         for tr in population:
             tr.lat = tr.lat + np.random.normal(scale = 1) * self.lat_std
             tr.lon = tr.lon + np.random.normal(scale = 1) * self.lon_std
@@ -419,37 +365,6 @@ class EventContainer(object):
             tr.azim = tr.azim + np.random.normal(scale = 1) * self.azim_std
             tr.elev = tr.elev + np.random.normal(scale = 1) * self.elev_std
 
-
-        """
-        print("Polar deviation analysis")
-        
-        minlat = (min(event.lat for event in population))
-        minlon = (min(event.lon for event in population))
-        minht = (min(event.ht for event in population))
-
-
-        maxlat = (max(event.lat for event in population))
-        maxlon = (max(event.lon for event in population))
-        maxht = (max(event.ht for event in population))
-
-        print("Original lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat, self.lon, self.ht))
-        print("Minimum  lat,lon,alt {:.3f},{:.3f},{:3f}".format(minlat, minlon, minht))
-        print("Maximum  lat,lon,alt {:.3f},{:.3f},{:3f}".format(maxlat, maxlon, maxht))
-
-        minlat = (min(event.lat2 for event in population))
-        minlon = (min(event.lat2 for event in population))
-        minht = (min(event.ht2 for event in population))
-
-        maxlat = (max(event.lat2 for event in population))
-        maxlon = (max(event.lon2 for event in population))
-        maxht = (max(event.ht2 for event in population))
-
-        print("Original lat,lon,alt {:.3f},{:.3f},{:3f}".format(self.lat, self.lon, self.ht))
-        print("Minimum  lat,lon,alt {:.3f},{:.3f},{:3f}".format(minlat, minlon, minht))
-        print("Maximum  lat,lon,alt {:.3f},{:.3f},{:3f}".format(maxlat, maxlon, maxht))
-        
-        """
-
         return population
 
 
@@ -457,14 +372,13 @@ class EventContainer(object):
 
         """
         Arguments:
-            None
+
 
         Returns: [bool]
             True if end point lats or lons or heights are not zero
 
         """
 
-        # Work out if this is defined by point and azimuth and elevation
         azim_elev_definition = True
         azim_elev_definition = False if self.lon2 != 0 else azim_elev_definition
         azim_elev_definition = False if self.lat2 != 0 else azim_elev_definition
@@ -475,9 +389,7 @@ class EventContainer(object):
 
     def limitAzEl(self, min_elev_hard, min_elev, prob_elev, max_elev):
 
-
         """
-
         Acts on self to correct any strange elevations
 
         Arguments
@@ -512,7 +424,7 @@ class EventContainer(object):
         between the observation and the limit to allow accurate angles to be calculated
 
         Arguments
-            observd_ht: [float] height of observation in meters
+            observd_ht: [float] height of observation
             min_lum_flt_ht: [float] minimum expected illuminated flight
             max_lum_flt_ht: [float] maximum expected illuminated flight
             gap : [float] minimum gap between the observed_bt and either of the limits
@@ -668,7 +580,7 @@ class EventContainer(object):
 
         # Check that az from the minimum to the observation height as the same as the minimum to the maximum height
         # And the minimum to the observation height is the same as the observation to the maximum height
-        if angdf(min_obs_az,min_max_az) > 1 or angdf(min_obs_az,obs_max_az) > 1:
+        if angDif(min_obs_az, min_max_az) > 1 or angDif(min_obs_az, obs_max_az) > 1:
 
             log.error("Error in Azimuth calculations")
             log.error("Observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obsvd_lat,obsvd_lon,obsvd_ht))
@@ -682,7 +594,7 @@ class EventContainer(object):
 
         # Check that el from the minimum to the observation height as the same as the minimum to the maximum height
         # And the minimum to the observation height is the same as the observation to the maximum height
-        if angdf(min_obs_el,min_max_el) > 1 or angdf(min_obs_el,obs_max_el) > 1:
+        if angDif(min_obs_el, min_max_el) > 1 or angDif(min_obs_el, obs_max_el) > 1:
             log.error("Error in Elevation calculations")
             log.error("Trajectory created from observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obsvd_lat,obsvd_lon,obsvd_ht))
             log.error("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
@@ -698,7 +610,6 @@ class EventContainer(object):
 
         """
         Populate azimuth and elevation for an event defined with two Lat,Lons and Hts
-
         """
 
         x1, y1, z1 = latLonAlt2ECEF(np.radians(self.lat), np.radians(self.lon), self.ht * 1000)
@@ -746,7 +657,6 @@ class EventMonitor(multiprocessing.Process):
 
         """
 
-
         for createdb_attempts in range(30):
             self.conn = self.createEventMonitorDB()
             if self.conn is not None:
@@ -771,11 +681,7 @@ class EventMonitor(multiprocessing.Process):
         returns:
             conn: [connection] connection to database if success else None
 
-
         """
-
-
-
 
         # Create the event monitor database
         if test_mode:
@@ -852,9 +758,10 @@ class EventMonitor(multiprocessing.Process):
     def recoverFromDatabaseError(self):
 
         """
-        Called if a database error is detected, and tries to recreate the database and connection.
 
+        Called if a database error is detected, and tries to recreate the database and connection.
         """
+
         log.error("Attempting to recover from database error")
         self.createDB()
         log.info("Database recovered")
@@ -916,7 +823,7 @@ class EventMonitor(multiprocessing.Process):
         sql_statement = ""
         sql_statement += "DELETE from event_monitor \n"
         sql_statement += "WHERE                     \n"
-        sql_statement += "timeadded < date('now', '-1 day')"
+        sql_statement += "timeadded < date('now', '-14 day')"
 
         try:
          cursor = self.db_conn.cursor()
@@ -933,12 +840,11 @@ class EventMonitor(multiprocessing.Process):
     def getConnectionToEventMonitorDB(self):
         """ Loads the event monitor database
 
-            Arguments:
+        Arguments:
 
-            Return:
-                connection: [connection] A connection to the database
-
-            """
+        Return:
+             connection: [connection] A connection to the database
+        """
 
         # Create the event monitor database if it does not exist
         if not os.path.isfile(self.event_monitor_db_path):
@@ -962,7 +868,6 @@ class EventMonitor(multiprocessing.Process):
             exists: [bool]
 
         """
-
 
         sql_statement = ""
         sql_statement += "SELECT COUNT(*) FROM event_monitor \n"
@@ -1027,11 +932,11 @@ class EventMonitor(multiprocessing.Process):
 
         Checks to see if an event exists, if not then add to the database
 
-            Arguments:
-                event: [event] Event to be added to the database
+        Arguments:
+            event: [event] Event to be added to the database
 
-            Return:
-                added: [bool] True if added, else false
+        Return:
+            added: [bool] True if added, else false
 
             """
 
@@ -1155,19 +1060,15 @@ class EventMonitor(multiprocessing.Process):
             log.info("Database error in eventUploaded")
             self.recoverFromDatabaseError()
 
-
-
-
-
     def markEventAsUploaded(self, event, file_list):
 
         """ Mark an event as uploaded in the database
 
-            Arguments:
-                event: [event] Event to be marked as uploaded
-                file_list: [list of strings] Files uploaded
+        Arguments:
+            event: [event] Event to be marked as uploaded
+            file_list: [list of strings] Files uploaded
 
-            Return:
+        Return:
         """
 
         files_uploaded = ""
@@ -1196,11 +1097,11 @@ class EventMonitor(multiprocessing.Process):
         """ Updates table when server publishes UUID of an event which has been sent
             This allows public acknowledgement of a stations transmission to be obfuscated
 
-            Arguments:
-                   uuid: [string] uuid of event received by server
+        rguments:
+             uuid: [string] uuid of event received by server
 
-            Return:
-                   Nothing
+        Return:
+             Nothing
         """
 
         sql_statement = ""
@@ -1221,8 +1122,8 @@ class EventMonitor(multiprocessing.Process):
 
             Arguments:
 
-            Return:
-                events : [list of events]
+        Return:
+            events : [list of events]
         """
 
         event = EventContainer(0, 0, 0, 0)  # Initialise it empty
@@ -1533,7 +1434,7 @@ class EventMonitor(multiprocessing.Process):
         # calculate Field of View RA and Dec at event time, and
         fov_ra, fov_dec = altAz2RADec(az_centre, alt_centre, jul_date, rp.lat, rp.lon)
 
-        fov_vec = np.array(raDec2ECI(fov_ra, fov_dec))
+        fov_vec = np.array(raDec2Vector(fov_ra, fov_dec))
 
         # iterate along the trajectory counting points in the field of view
         points_in_fov = 0
@@ -1702,6 +1603,27 @@ class EventMonitor(multiprocessing.Process):
 
     def addElevationRange(self, population, ob_ev, min_elevation):
 
+        """
+        Take a single observed point on a trajectory, and a minimum elevation
+        Create a population of trajectories from the min_elevation through to observed elevation
+        in steps of 1 degree.
+
+        The trajectories pivot around the observed lat, lon and height, and this function checks that
+        this point is close to all the produced trajectories
+
+        arguments:
+            population: [list] list of trajectories to be appended to
+            ob_ev: An observed event, specified as a lat (degrees), lon (degress), ht (km) and elevation (degrees)
+            min_elevation: [degrees] observed elevation, which will always be the minimum
+
+        returns:
+            population: [list] list of trajectories
+
+
+
+        """
+
+
         ob_ev.azim, ob_ev.elev = ob_ev.latLonlatLonToLatLonAzEl()
         for elev in range(min_elevation, int(ob_ev.elev), 1):
             s = copy.copy(ob_ev)
@@ -1729,10 +1651,10 @@ class EventMonitor(multiprocessing.Process):
     def checkEvents(self, ev_con, test_mode = False):
 
         """
-        Args:
+        argunments:
             ev_con: configuration object at the time of this event
 
-        Returns:
+        returns:
             Nothing
         """
 
@@ -1900,6 +1822,10 @@ class EventMonitor(multiprocessing.Process):
 
     def checkDBExists(self):
 
+        """
+        Check that the database file exists
+        """
+
         if not os.path.exists(self.event_monitor_db_path):
             self.conn = self.createEventMonitorDB()
 
@@ -1929,6 +1855,11 @@ class EventMonitor(multiprocessing.Process):
 
     def run(self):
 
+        """
+        Call to start the event monitor loop.
+
+        """
+
         # Delay to allow capture to check existing folders - keep the logs tidy
         time.sleep(30)
         while not self.exit.is_set():
@@ -1942,9 +1873,6 @@ class EventMonitor(multiprocessing.Process):
                 log.info("Check interval now set to {:.2f} minutes".format(self.check_interval))
 
 
-def angdf(a1,a2):
-    normalised = a1-a2 % 360
-    return min(360-normalised, normalised)
 
 def convertGMNTimeToPOSIX(timestring):
     """
@@ -1960,19 +1888,30 @@ def convertGMNTimeToPOSIX(timestring):
     dt_object = datetime.strptime(timestring.strip(), "%Y%m%d_%H%M%S")
     return dt_object
 
-#https://stackoverflow.com/questions/2030053/how-to-generate-random-strings-in-python
+
 def randomword(length):
-   letters = string.ascii_lowercase
-   return ''.join(random.choice(letters) for i in range(length))
+
+    """
+    https://stackoverflow.com/questions/2030053/how-to-generate-random-strings-in-python
+    
+    Generates a random string of letters    
+    
+    """
+
+
+    letters = string.ascii_lowercase
+    return ''.join(random.choice(letters) for i in range(length))
+
+
 
 def platepar2AltAz(rp):
 
     """
 
-    Args:
+    arguments:
         rp: Platepar
 
-    Returns:
+    returns:
         Ra_d : [degrees] Ra of the platepar at its creation date
         dec_d : [degrees] Dec of the platepar at its creation date
         JD : [float] JD of the platepar creation
@@ -1989,27 +1928,6 @@ def platepar2AltAz(rp):
 
     return np.degrees(cyTrueRaDec2ApparentAltAz(RA_d, dec_d, JD, lat, lon))
 
-
-def raDec2ECI(ra, dec):
-
-    """
-
-    Convert right ascension and declination to Earth-centered inertial vector.
-
-    Arguments:
-        ra: [float] right ascension in degrees
-        dec: [float] declination in degrees
-
-    Return:
-        (x, y, z): [tuple of floats] Earth-centered inertial coordinates in metres
-
-    """
-
-    x = np.cos(np.radians(dec)) * np.cos(np.radians(ra))
-    y = np.cos(np.radians(dec)) * np.sin(np.radians(ra))
-    z = np.sin(np.radians(dec))
-
-    return x, y, z
 
 
 if __name__ == "__main__":
@@ -2043,7 +1961,6 @@ if __name__ == "__main__":
 
     try:
         # Add a random string after the URL to defeat caching
-        print(syscon.event_monitor_webpage)
         web_page = urllib.request.urlopen(syscon.event_monitor_webpage + "?" + randomword(6)).read().decode("utf-8").splitlines()
     except:
 
@@ -2120,8 +2037,8 @@ if __name__ == "__main__":
                 log.info("Check interval now set to {:2.2f} minutes".format(self.check_interval))
 
 
-def angdf(a1,a2):
-    normalised = a1-a2 % 360
+def angDif(a1, a2):
+    normalised = abs(a1-a2) % 360
     return min(360-normalised, normalised)
 
 def convertGMNTimeToPOSIX(timestring):
@@ -2173,26 +2090,6 @@ def platepar2AltAz(rp):
     return np.degrees(cyTrueRaDec2ApparentAltAz(RA_d, dec_d, JD, lat, lon))
 
 
-def raDec2ECI(ra, dec):
-
-    """
-
-    Convert right ascension and declination to Earth-centered inertial vector.
-
-    Arguments:
-        ra: [float] right ascension in degrees
-        dec: [float] declination in degrees
-
-    Return:
-        (x, y, z): [tuple of floats] Earth-centered inertial coordinates in metres
-
-    """
-
-    x = np.cos(np.radians(dec)) * np.cos(np.radians(ra))
-    y = np.cos(np.radians(dec)) * np.sin(np.radians(ra))
-    z = np.sin(np.radians(dec))
-
-    return x, y, z
 
 
 def createATestEvent07():
@@ -2257,6 +2154,22 @@ def createATestEvent08():
 
 def gcdistdeg(lat1,lon1, lat2,lon2):
 
+    """
+    Uses Haversine formula to return great circle distance. This function is only used for testing other
+    functions
+
+    arguments:
+        lat1: [float] latitude of point 1 (degrees)
+        lon1: [float] latitude of point 1 (degrees)
+        lat2: [float] latitude of point 2 (degrees)
+        lon2: [float] latitude of point 2 (degrees)
+
+    returns:
+        [float] great circle distance (km)
+
+
+    """
+
     lat1, lon1 = np.radians(lat1), np.radians(lon1)
     lat2, lon2 = np.radians(lat2), np.radians(lon2)
     delta_lat, delta_lon = (lat2 - lat1)/2 , (lon2 - lon1)/2
@@ -2268,6 +2181,23 @@ def gcdistdeg(lat1,lon1, lat2,lon2):
         return 0
     else:
         return 2 * np.arcsin((t1 + t2) ** 0.5) * 6371.009
+
+def testRevAz():
+
+    t = EventContainer("", 0, 0, 0)
+    t.azim = 0
+    success = True
+
+
+
+    for test in range(3000):
+        test_azim = random.uniform(-5000,5000)
+        success = success if angDif(test_azim, t.revAz(test_azim)) == 180 else False
+        if not success:
+            return False
+            break
+
+    return success
 
 
 def testIsReasonable():
@@ -2566,6 +2496,12 @@ def testIndividuals():
 
     individuals_success = True
 
+    if testRevAz():
+        log.info("revAz passed tests")
+    else:
+        log.error("revAz failed tests")
+        individuals_success = False
+
     if testIsReasonable():
         log.info("isReasonable passed tests")
     else:
@@ -2575,7 +2511,7 @@ def testIndividuals():
     if testHasCartSD():
         log.info("hasCartSD passed tests")
     else:
-        log.error("angDf failed tests")
+        log.error("hasCartSD failed tests")
         individuals_success = False
 
 
@@ -2624,9 +2560,6 @@ def testIndividuals():
         log.error("Apply Polar SD fail")
         individuals_success = False
 
-
-
-
     return individuals_success
 
 
@@ -2665,8 +2598,10 @@ if __name__ == "__main__":
 
     if testIndividuals():
         log.info("Individual function test success")
+        print("Individual function test success")
     else:
         log.error("Individual function test fail")
+        print("Individual function test fail")
 
 
     try:
