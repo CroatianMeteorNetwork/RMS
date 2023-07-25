@@ -2094,6 +2094,17 @@ def platepar2AltAz(rp):
 
 def createATestEvent07():
 
+
+    """
+    Creates an event for testing
+
+    arguments:
+
+    returns:
+        event: [event]
+
+    """
+
     test_event = EventContainer("", 0, 0, 0)
     test_event.setValue("EventTime", "20230526_205441")
     test_event.setValue("TimeTolerance", 60)
@@ -2121,6 +2132,16 @@ def createATestEvent07():
 
 
 def createATestEvent08():
+
+    """
+    Creates an event for testing
+
+    arguments:
+
+    returns:
+        event: [event]
+
+    """
 
     test_event = EventContainer("", 0, 0, 0)
     test_event.setValue("EventTime", "20230601_124235")
@@ -2184,11 +2205,16 @@ def gcdistdeg(lat1,lon1, lat2,lon2):
 
 def testRevAz():
 
-    t = EventContainer("", 0, 0, 0)
-    t.azim = 0
+    """
+    Generates random angles and confirms that the angle difference to reversed is 180 degrees
+
+
+    return:
+        [bool]
+
+    """
+
     success = True
-
-
 
     for test in range(3000):
         test_azim = random.uniform(-5000,5000)
@@ -2201,6 +2227,14 @@ def testRevAz():
 
 
 def testIsReasonable():
+    """
+    Checks isReasonble function by generating events
+
+
+    return:
+        [bool]
+
+    """
 
     t = EventContainer("",0,0,0)
     t.setValue("EventLat", "45")
@@ -2225,6 +2259,16 @@ def testIsReasonable():
     return success
 
 def testHasCartSD():
+
+    """
+    tests hasCardSD function by testing events
+
+
+    return:
+        [bool]
+
+    """
+
     t = EventContainer("", 0, 0, 0)
     t.setValue("EventLat", "45")
     t.setValue("EventLon", "-27")
@@ -2273,6 +2317,16 @@ def testHasPolarSD():
 
 def testEventToECEFVector():
 
+    """
+
+    Tests conversion of events to ECEF vectors by reversing and using haversine
+
+
+    return:
+        [bool]
+
+    """
+
     t = EventContainer("", 0, 0, 0)
 
     success = True
@@ -2312,6 +2366,15 @@ def testEventToECEFVector():
         # Convert to radians
 
 def testEventCreation():
+
+    """
+
+    Tests creation and modification of events
+
+
+    return:
+        [bool]
+    """
 
     success = True
 
@@ -2399,6 +2462,18 @@ def testEventCreation():
 
 def testApplyCartesianSD():
 
+
+    """
+
+    Tests application of standard deviation to cartesian coordinates
+
+
+    return:
+        [bool]
+    """
+
+
+
     success = True
     event = createATestEvent07()
     event_population = []
@@ -2442,6 +2517,15 @@ def testApplyCartesianSD():
     return success
 
 def testApplyPolarSD():
+
+    """
+
+    Tests application of standard deviation to polar coordinates
+
+
+    return:
+         [bool]
+    """
 
     success = True
     event = createATestEvent07()
@@ -2493,6 +2577,17 @@ def testApplyPolarSD():
 
 def testIndividuals():
 
+
+    """
+    Control function to check individual functions
+
+    arguments:
+
+    return:
+        [bool]
+
+
+    """
 
     individuals_success = True
 
