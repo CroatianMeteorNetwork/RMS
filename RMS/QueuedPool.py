@@ -92,7 +92,7 @@ class QueuedPool(object):
         The workers will process the queue until the pool is deliberately closed. All results are stored in an 
         output queue. It is also possible to change the number of workers in a pool during runtime.
 
-        The default worker timeout time is 2000 seconds.
+        The default worker timeout time is 1000 seconds.
 
         Arguments:
             func: [function] Worker function to which the arguments from the queue will be passed
@@ -424,72 +424,17 @@ class QueuedPool(object):
                     prev_output_qsize = self.output_queue.qsize()
                     output_qsize_last_change = time.time()
 
-                # If the output queue size is zero, meaning no jobs are done, and workers are active
-                # increase the time by the delay time - which is usually the length of the observation session
-                # If any worker has been active, then stop applying delay start.
-                # This catches the case where the pool gets stuck on the first job
-
-                # log extract demonstrating the problem below
-
-                """
-                2023/07/23 22:46:49-DEBUG-StartCapture-line:410 - Compression stopped
-                2023/07/23 22:46:49-INFO-StartCapture-line:431 - Finishing up the detection, 4234 files to process...
-                2023/07/23 22:46:49-INFO-StartCapture-line:452 - Running the detection on 2 cores...
-                2023/07/23 22:46:49-INFO-QueuedPool-line:201 - Closing pool...
-                2023/07/23 22:46:49-INFO-QueuedPool-line:201 - Terminating pool...
-                2023/07/23 22:46:49-INFO-QueuedPool-line:201 - Joining pool...
-                2023/07/23 22:46:49-INFO-QueuedPool-line:201 - Setting new number of cores to: 2
-                2023/07/23 22:46:49-INFO-QueuedPool-line:201 - Starting new pool...
-                2023/07/23 22:46:49-INFO-QueuedPool-line:201 - Using 2 cores
-                2023/07/23 22:46:49-INFO-StartCapture-line:458 - Waiting for the detection to finish...
-                2023/07/23 22:47:40-INFO-QueuedPool-line:201 - -----
-                2023/07/23 22:47:40-INFO-QueuedPool-line:201 - Cores in use: 2
-                2023/07/23 22:47:40-INFO-QueuedPool-line:201 - Active worker threads: 0
-                2023/07/23 22:47:40-INFO-QueuedPool-line:201 - Idle worker threads: 1
-                2023/07/23 22:47:40-INFO-QueuedPool-line:201 - Total jobs: 4234
-                2023/07/23 22:47:40-INFO-QueuedPool-line:201 - Finished jobs: 0
-                2023/07/23 22:48:30-INFO-QueuedPool-line:201 - -----
-                2023/07/23 22:48:30-INFO-QueuedPool-line:201 - Cores in use: 2
-                2023/07/23 22:48:30-INFO-QueuedPool-line:201 - Active worker threads: 0
-                2023/07/23 22:48:30-INFO-QueuedPool-line:201 - Idle worker threads: 1
-                2023/07/23 22:48:30-INFO-QueuedPool-line:201 - Total jobs: 4234
-                2023/07/23 22:48:30-INFO-QueuedPool-line:201 - Finished jobs: 0
-                2023/07/23 22:48:55-INFO-DetectStarsAndMeteors-line:63 - Running detection on file: FF_AU002A_20230723_104258_012_0000000.fits
-                2023/07/23 22:48:55-INFO-DetectStarsAndMeteors-line:63 - Running detection on file: FF_AU002A_20230723_104306_220_0000256.fits
-                2023/07/23 22:48:55-INFO-DetectionTools-line:61 - Loaded mask: mask.bmp
-                2023/07/23 22:48:55-INFO-DetectionTools-line:61 - Loaded mask: mask.bmp
-                2023/07/23 22:48:57-INFO-DetectStarsAndMeteors-line:89 - Detected stars: 91
-                2023/07/23 22:48:57-DEBUG-DetectStarsAndMeteors-line:95 - More than 20 stars, detecting meteors...
-                2023/07/23 22:48:57-INFO-DetectStarsAndMeteors-line:89 - Detected stars: 96
-                2023/07/23 22:48:57-DEBUG-DetectStarsAndMeteors-line:95 - More than 20 stars, detecting meteors...
-                2023/07/23 22:49:20-INFO-QueuedPool-line:201 - -----
-                2023/07/23 22:49:20-INFO-QueuedPool-line:201 - Cores in use: 2
-                2023/07/23 22:49:20-INFO-QueuedPool-line:201 - Active worker threads: 2
-                2023/07/23 22:49:20-INFO-QueuedPool-line:201 - Idle worker threads: 0
-                2023/07/23 22:49:20-INFO-QueuedPool-line:201 - Total jobs: 4234
-                2023/07/23 22:49:20-INFO-QueuedPool-line:201 - Finished jobs: 0
-                2023/07/23 22:50:10-INFO-QueuedPool-line:201 - -----
-                2023/07/23 22:50:10-INFO-QueuedPool-line:201 - Cores in use: 2
-                2023/07/23 22:50:10-INFO-QueuedPool-line:201 - Active worker threads: 2
-                2023/07/23 22:50:10-INFO-QueuedPool-line:201 - Idle worker threads: 0
-                2023/07/23 22:50:10-INFO-QueuedPool-line:201 - Total jobs: 4234
-                2023/07/23 22:50:10-INFO-QueuedPool-line:201 - Finished jobs: 0
-                2023/07/23 22:51:01-INFO-QueuedPool-line:201 - -----
-                2023/07/23 22:51:01-INFO-QueuedPool-line:201 - Cores in use: 2
-                2023/07/23 22:51:01-INFO-QueuedPool-line:201 - Active worker threads: 2
-                2023/07/23 22:51:01-INFO-QueuedPool-line:201 - Idle worker threads: 0
-              
-                """
-
-
+                # If the output queue size is zero, meaning no jobs are done, increase the time by the delay
+                #   time
                 if prev_output_qsize == 0:
                     worker_timeout = self.worker_timeout + self.delay_start
+
                 else:
                     worker_timeout = self.worker_timeout
 
                 # If the queue has been idle for too long, kill it
                 if (time.time() - output_qsize_last_change) > worker_timeout:
-                    self.printAndLog('One of the workers got stuck longer then {:d} seconds, killing multiprocessing...'.format(int(worker_timeout)))
+                    self.printAndLog('One of the workers got stuck longer then {:d} seconds, killing multiprocessing...'.format(worker_timeout))
 
                     self.printAndLog('Terminating pool...')
                     self.pool.terminate()
