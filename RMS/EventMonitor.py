@@ -1504,8 +1504,8 @@ class EventMonitor(multiprocessing.Process):
 
 
         event_monitor_directory = os.path.expanduser(os.path.join(self.syscon.data_dir, "EventMonitor"))
-        upload_filename = "{}_{}_{}".format(evcon.stationID, event.dt,"_event")
-        this_event_directory = os.path.join(event_monitor_directory, upload_filename) + "_event"
+        upload_filename = "{}_{}_{}".format(evcon.stationID, event.dt,"event")
+        this_event_directory = os.path.join(event_monitor_directory, upload_filename)
 
         # get rid of the eventdirectory, should never be needed
         if not keep_files:
@@ -2213,7 +2213,7 @@ def testRevAz():
         [bool]
 
     """
-
+    t = EventContainer("",0,0,0)
     success = True
 
     for test in range(3000):
