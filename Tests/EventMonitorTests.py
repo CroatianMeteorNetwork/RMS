@@ -14,12 +14,146 @@ from RMS.Formats.Platepar import Platepar
 from datetime import datetime
 from dateutil import parser
 from tqdm import tqdm
-from RMS.Astrometry.Conversions import AEH2Range
+from RMS.Astrometry.Conversions import AEH2Range, ecef2LatLonAlt, latLonAlt2ECEF
+import numpy as np
+import logging
+import statistics
 
 path_to_test_data = ""
 platepars_test_data = "wget http://58.84.202.15:8243/data/platepars.tar.bz2 -O platepars.tar.bz2"
 path_to_platepars = os.path.expanduser("~/RMS_data/test")
 file_name = "platepars.tar.bz2"
+log = logging.getLogger("logger")
+
+def testIsReasonable():
+
+    t = EventContainer("",0,0,0)
+    t.setValue("EventLat", "45")
+    t.setValue("EventLon", "-27")
+    t.setValue("TimeTolerance", "5")
+
+    success = True
+    success = success if t.isReasonable() else False
+    t.setValue("TimeTolerance", "301")
+    success = success if not t.isReasonable() else False
+    t.setValue("TimeTolerance", "299")
+    success = success if t.isReasonable() else False
+    t.lat = ""
+    success = success if not t.isReasonable() else False
+    t.setValue("EventLat", "-180")
+    success = success if t.isReasonable() else False
+    t.lon = ""
+    success = success if not t.isReasonable() else False
+    t.setValue("EventLon", "-32")
+    success = success if t.isReasonable() else False
+
+    return success
+
+def testHasCartSD():
+    t = EventContainer("", 0, 0, 0)
+    t.setValue("EventLat", "45")
+    t.setValue("EventLon", "-27")
+    t.setValue("TimeTolerance", "5")
+
+    success = True
+    success = success if not t.hasCartSD() else False
+    t.setValue("EventCartStd",1)
+    success = success if t.hasCartSD() else False
+    t.setValue("EventCartStd", 0)
+    success = success if not t.hasCartSD() else False
+    t.setValue("EventCart2Std", 1)
+    success = success if t.hasCartSD() else False
+    t.setValue("EventCart2Std", 0)
+    success = success if not t.hasCartSD() else False
+
+    return success
+
+def testHasPolarSD():
+
+    t = EventContainer("", 0, 0, 0)
+    t.setValue("EventLat", "45")
+    t.setValue("EventLon", "-27")
+    t.setValue("TimeTolerance", "5")
+
+    success = True
+    success = success if not t.hasPolarSD() else False
+    t.setValue("EventLatStd",1)
+    success = success if t.hasPolarSD() else False
+    t.setValue("EventLatStd", 0)
+    success = success if not t.hasPolarSD() else False
+    t.setValue("EventLonStd", 1)
+    success = success if t.hasPolarSD() else False
+    t.setValue("EventLonStd", 0)
+    success = success if not t.hasPolarSD() else False
+    t.setValue("EventLat2Std", 1)
+    success = success if t.hasPolarSD() else False
+    t.setValue("EventLat2Std", 0)
+    success = success if not t.hasPolarSD() else False
+    t.setValue("EventLon2Std", 1)
+    success = success if t.hasPolarSD() else False
+    t.setValue("EventLon2Std", 0)
+    success = success if not t.hasPolarSD() else False
+
+    return success
+
+def gcdistdeg(lat1,lon1, lat2,lon2):
+
+    lat1, lon1 = np.radians(lat1), np.radians(lon1)
+    lat2, lon2 = np.radians(lat2), np.radians(lon2)
+    delta_lat, delta_lon = (lat2 - lat1)/2 , (lon2 - lon1)/2
+
+    t1 = np.sin(delta_lat) ** 2
+    t2 = np.sin(delta_lon) ** 2 * np.cos(lat1) * np.cos(lat2)
+
+    if (abs(t1) - abs(t2)) < 1e-10:
+        return 0
+    else:
+        return 2 * np.arcsin((t1 + t2) ** 0.5) * 6371.009
+
+
+def testEventToECEFVector():
+
+    t = EventContainer("", 0, 0, 0)
+
+    success = True
+
+    for test in range(1000):
+        iLon, iLon2, iLat,iLat2 = np.random.uniform(-1000,1000,4)
+
+        iHt, iHt2 = np.random.uniform(-50,1000,2)
+
+        t.setValue("EventLat", iLat)
+        t.setValue("EventLon", iLon)
+        t.setValue("EventHt", iHt)
+        t.setValue("EventLat2", iLat2)
+        t.setValue("EventLon2", iLon2)
+        t.setValue("EventHt2", iHt2)
+
+        v1,v2 = t.eventToECEFVector()
+        lat,lon,ht = ecef2LatLonAlt(v1[0],v1[1],v1[2])
+        lat,lon, ht = np.degrees(lat), np.degrees(lon), ht / 1000
+        lat2, lon2, ht2 = ecef2LatLonAlt(v2[0], v2[1], v2[2])
+        lat2, lon2, ht2 = np.degrees(lat2), np.degrees(lon2), ht2 / 1000
+
+
+        success = success if gcdistdeg(iLat, iLon, lat, lon) < 0.01  else False
+        success = success if gcdistdeg(iLat2, iLon2, lat2, lon2) < 0.01 else False
+
+        success = success if abs(iHt-ht) < 0.1 else False
+        success = success if abs(iHt2 - ht2) < 0.1 else False
+
+        if not success:
+            print("fail")
+            print(gcdistdeg(iLat, iLon, lat, lon))
+            print(gcdistdeg(iLat2, iLon2, lat2, lon2))
+            time.sleep(30)
+
+        pass
+        # Convert to radians
+
+
+    return success
+
 
 def createATestEvent02():
 
@@ -745,67 +879,254 @@ def testAEH2Range():
     range_by_optimised_solution = AEH2Range(azim, elev, ht, lat, lon, alt, True)
     print("Range calculated by optimised solution {}".format(range_by_optimised_solution))
 
+def testEventCreation():
+
+    success = True
+
+
+    event = createATestEvent08()
+    # print(event.eventToString())
+    event.latLonAzElToLatLonLatLon()
+
+    success = success if event.azim == 0 and event.elev == 45 else False
+
+    # print(event.eventToString())
+    event = createATestEvent08()
+    event.setValue("EventAzim", 91)
+    event.setValue("EventElev", 0)
+    event.latLonAzElToLatLonLatLon()
+
+    success = success if event.azim == 91 and event.elev == 45 else False
+    success = success if gcdistdeg(45,178,event.lat,event.lon) < 0.1 else False
+    success = success if gcdistdeg(45, -179, event.lat2, event.lon2) < 0.1 else False
+    success = success if abs(event.ht - 101) < 0.1 else False
+    success = success if abs(event.ht2 - 20) < 0.1 else False
+
+    # print(event.eventToString())
+    event = createATestEvent08()
+    event.setValue("EventAzim", 179)
+    event.setValue("EventElev", 0)
+    event.latLonAzElToLatLonLatLon()
+
+    success = success if event.azim == 179 and event.elev == 45 else False
+    success = success if gcdistdeg(45, 178, event.lat, event.lon) < 0.1 else False
+    success = success if gcdistdeg(44.278, 179.017, event.lat2, event.lon2) < 0.1 else False
+    success = success if abs(event.ht - 101) < 0.1 else False
+    success = success if abs(event.ht2 - 20) < 0.1 else False
+
+    event = createATestEvent08()
+    event.setValue("EventAzim", 270)
+    event.setValue("EventElev", 0)
+    event.latLonAzElToLatLonLatLon()
+    success = success if event.azim == 270 and event.elev == 45 else False
+    success = success if gcdistdeg(45, 179, event.lat, event.lon) < 0.1 else False
+    success = success if gcdistdeg(45, 178, event.lat2, event.lon2) < 0.1 else False
+    success = success if abs(event.ht - 101) < 0.1 else False
+    success = success if abs(event.ht2 - 20) < 0.1 else False
+
+    event = createATestEvent08()
+    event.setValue("EventAzim", 1)
+    event.setValue("EventElev", 45)
+    event.latLonAzElToLatLonLatLon()
+    success = success if event.azim == 1 and event.elev == 45 else False
+
+    success = success if gcdistdeg(44.99, 179, event.lat, event.lon) < 0.1 else False
+
+    success = success if gcdistdeg(45.722, 179.018, event.lat2, event.lon2) < 0.1 else False
+    success = success if abs(event.ht - 101) < 0.1 else False
+    success = success if abs(event.ht2 - 20) < 0.1 else False
+
+    # print(event.eventToString())
+    event = createATestEvent08()
+    event.setValue("EventAzim", -1)
+    event.setValue("EventElev", 90)
+    event.latLonAzElToLatLonLatLon()
+
+    success = success if event.azim == -1 and event.elev == 45 else False
+    success = success if gcdistdeg(44.99, 179, event.lat, event.lon) < 0.1 else False
+    success = success if gcdistdeg(45.722, 179, event.lat2, event.lon2) < 0.1 else False
+    success = success if abs(event.ht - 101) < 0.1 else False
+    success = success if abs(event.ht2 - 20) < 0.1 else False
+
+
+    # print(event.eventToString())
+    event = createATestEvent08()
+    event.setValue("EventAzim", 30)
+    event.setValue("EventElev", 78)
+    event.latLonAzElToLatLonLatLon()
+
+    success = success if event.azim == 30 and event.elev == 78 else False
+    success = success if event.azim == 30 and event.elev == 78 else False
+    success = success if gcdistdeg(44.998, 178.998, event.lat, event.lon) < 0.1 else False
+    success = success if gcdistdeg(45.132, 179.108, event.lat2, event.lon2) < 0.1 else False
+    success = success if abs(event.ht - 101) < 0.1 else False
+    success = success if abs(event.ht2 - 20) < 0.1 else False
+
+    return success
+
+
+def testApplyCartesianSD():
+
+    success = True
+    event = createATestEvent07()
+    event_population = []
+    event.cart_std, event.cart2_std = 1000,2000
+    event_population = event.appendPopulation(event_population, 1000)
+    event_population = event.applyCartesianSD(event_population)
+
+    x1l,y1l,z1l = [],[],[]
+    x2l,y2l,z2l = [],[],[]
+
+    for e in event_population:
+
+        x1, y1, z1 = latLonAlt2ECEF(np.radians(e.lat),np.radians(e.lon),e.ht * 1000)
+        x2, y2, z2 = latLonAlt2ECEF(np.radians(e.lat2), np.radians(e.lon2), e.ht2 * 1000)
+        x1l.append(x1)
+        y1l.append(y1)
+        z1l.append(z1)
+        x2l.append(x2)
+        y2l.append(y2)
+        z2l.append(z2)
+    xstd, ystd, zstd = statistics.pstdev(x1l),statistics.pstdev(y1l),statistics.pstdev(z1l)
+    success = success if abs(xstd - event.cart_std) < 100 else False
+    success = success if abs(ystd - event.cart_std) < 100 else False
+    success = success if abs(zstd - event.cart_std) < 100 else False
+
+    x2std, y2std, z2std = statistics.pstdev(x2l), statistics.pstdev(y2l), statistics.pstdev(z2l)
+    success = success if abs(x2std - event.cart2_std) < 100 else False
+    success = success if abs(y2std - event.cart2_std) < 100 else False
+    success = success if abs(z2std - event.cart2_std) < 100 else False
+
+
+
+    xmn, ymn, zmn = statistics.mean(x1l), statistics.mean(y1l), statistics.mean(z1l)
+    x2mn, y2mn, z2mn = statistics.mean(x2l), statistics.mean(y2l), statistics.mean(z2l)
+    lat,lon,ht = ecef2LatLonAlt(xmn,ymn,zmn)
+    lat2, lon2, ht2 = ecef2LatLonAlt(x2mn+50, y2mn+50 , z2mn+50 )
+    lat, lon, lat2, lon2 = np.degrees(lat) , np.degrees(lon),np.degrees(lat2), np.degrees(lon2)
+    success = success if gcdistdeg(lat, lon, event.lat, event.lon) < 0.1 else False
+    success = success if gcdistdeg(lat2, lon2, event.lat2, event.lon2) < 0.1 else False
+    success = success if abs(e.ht - ht/1000) < 10 and (e.ht2 -  ht2/1000) < 10 else False
+    return success
+
+def testApplyPolarSD():
+
+    success = True
+    event = createATestEvent07()
+    event_population = []
+    event.lat_std, event.lon_std, event.ht_std, event.lat2_std, event.lon2_std,event.ht2_std = 0.01,0.02,1,0.05,0.6,5
+    event_population = event.appendPopulation(event_population, 10000)
+    event_population = event.applyPolarSD(event_population)
+
+    lat1l,lon1l,ht1l = [],[],[]
+    lat2l,lon2l,ht2l = [],[],[]
+
+    for e in event_population:
+
+        lat1l.append(e.lat)
+        lon1l.append(e.lon)
+        ht1l.append(e.ht)
+
+        lat2l.append(e.lat2)
+        lon2l.append(e.lon2)
+        ht2l.append(e.ht2)
+
+
+
+    lat1std, lon1std, ht1std = statistics.pstdev(lat1l),statistics.pstdev(lon1l),statistics.pstdev(ht1l)
+    success = success if abs(lat1std - event.lat_std) < 0.01 else False
+    success = success if abs(lon1std - event.lon_std) < 0.01 else False
+    success = success if abs(ht1std - event.ht_std) < 0.1 else False
+
+    lat2std, lon2std, ht2std = statistics.pstdev(lat2l), statistics.pstdev(lon2l), statistics.pstdev(ht2l)
+    success = success if abs(lat2std - event.lat2_std) < 0.01 else False
+    success = success if abs(lon2std - event.lon2_std) < 0.01 else False
+    success = success if abs(ht2std - event.ht2_std) < 0.1 else False
+
+
+
+
+
+
+    lat1mn, lon1mn, ht1mn = statistics.mean(lat1l), statistics.mean(lon1l), statistics.mean(ht1l)
+    lat2mn, lon2mn, ht2mn = statistics.mean(lat2l), statistics.mean(lon2l), statistics.mean(ht2l)
+
+    success = success if gcdistdeg(lat1mn, lon1mn, event.lat, event.lon) < 0.1 else False
+    success = success if gcdistdeg(lat2mn, lon2mn, event.lat2, event.lon2) < 0.1 else False
+    success = success if abs(e.ht - ht1mn) < 5 and (e.ht2 - ht2mn) < 5 else False
+    return success
+
+
+
+
 
 def testIndividuals():
 
 
-    print(angdf(3,5))
-    print(angdf(360, 179))
-    print(angdf(359.9,0.1))
+    individuals_success = True
+
+    if testIsReasonable():
+        log.info("isReasonable passed tests")
+    else:
+        log.error("isReasonable failed tests")
+        individuals_success = False
+
+    if testHasCartSD():
+        log.info("hasCartSD passed tests")
+    else:
+        log.error("angDf failed tests")
+        individuals_success = False
+
+
+    if testHasPolarSD():
+        log.info("hasPolarSD passed tests")
+    else:
+        log.error("hasPolarSD failed tests")
+        individuals_success = False
+
+    if abs(gcdistdeg(31.7,26.3,45.1,31.2) - 1549.2) < 0.5:
+        log.info("GC Dist passed test")
+    else:
+        log.error("GC Dist failed test")
+        individuals_success = False
+
+
+
+    if testEventToECEFVector():
+        log.info("eventToECEFVector passed tests")
+    else:
+        log.error("eventToECEFVector failed tests")
+        individuals_success = False
+
 
     if convertGMNTimeToPOSIX("20210925_163127") == datetime(2021, 9, 25, 16, 31, 27):
-        print("convertgmntimetoposix success")
+        log.info("convertgmntimetoposix success")
     else:
-        print("convertgmntimetoposix fail")
-        quit()
+        log.error("convertgmntimetoposix fail")
+        individuals_success = False
 
-    event = createATestEvent08()
-    #print(event.eventToString())
-    event.latLonAzEltoLatLonLatLon()
-    print("Az:{} El:{}".format(event.azim, event.elev))
-    #print(event.eventToString())
-    event = createATestEvent08()
-    event.setValue("EventAzim", 91)
-    event.setValue("EventElev", 0)
-    event.latLonAzEltoLatLonLatLon()
-    print("Az:{} El:{}".format(event.azim, event.elev))
-    #print(event.eventToString())
-    event = createATestEvent08()
-    event.setValue("EventAzim", 179)
-    event.setValue("EventElev", 0)
-    event.latLonAzEltoLatLonLatLon()
-    print("Az:{} El:{}".format(event.azim, event.elev))
-    #print(event.eventToString())
-    event = createATestEvent08()
-    event.setValue("EventAzim", 270)
-    event.setValue("EventElev", 0)
-    event.latLonAzEltoLatLonLatLon()
-    print("Az:{} El:{}".format(event.azim, event.elev))
-    #print(event.eventToString())
-    event = createATestEvent08()
-    event.setValue("EventAzim", 1)
-    event.setValue("EventElev", 45)
-    event.latLonAzEltoLatLonLatLon()
-    print("Az:{} El:{}".format(event.azim, event.elev))
-    #print(event.eventToString())
-    event = createATestEvent08()
-    event.setValue("EventAzim", -1)
-    event.setValue("EventElev", 90)
-    event.latLonAzEltoLatLonLatLon()
-    print("Az:{} El:{}".format(event.azim, event.elev))
-    #print(event.eventToString())
-    event = createATestEvent08()
-    event.setValue("EventAzim", 30)
-    event.setValue("EventElev", 78)
-    event.latLonAzEltoLatLonLatLon()
-    print("Az:{} El:{}".format(event.azim, event.elev))
-    #print(event.eventToString())
 
-    event = createATestEvent09()
-    event.latLonAzEltoLatLonLatLon()
-    print("Az:{} El:{}".format(event.azim, event.elev))
-    #print(event.eventToString())
+    if testEventCreation():
+        log.info("Event Creation success")
+    else:
+        log.error("Event Creation fail")
 
+    if testApplyCartesianSD():
+        log.info("Apply Cartesian SD success")
+    else:
+        log.error("Apply Cartesian SD fail")
+        individuals_success = False
+
+    if testApplyPolarSD():
+        log.info("Apply Polar SD success")
+    else:
+        log.error("Apply Polar SD fail")
+        individuals_success = False
+
+
+
+
+    return individuals_success
 
 
 
@@ -815,7 +1136,7 @@ def functionTest(config, em):
     testIndividuals()
     #testEventContainer()
     #testDBFunctions(em)
-    #testClosestPoint()
+    testClosestPoint()
     #testTrajectoryThroughFOVQuick(em)
     #fullSystemTest(config, em)
     quit()
