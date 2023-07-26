@@ -1533,11 +1533,11 @@ class EventMonitor(multiprocessing.Process):
             if file.endswith(".bin"):
 
                 try:
-                    view(this_event_directory, convertFRNameToFF(file), file, self.syscon, hide=True, add_timestamp=True, extract_format="mp4")
+                    view(this_event_directory, convertFRNameToFF(os.path.basename(file)), file, self.syscon, hide=True, add_timestamp=True, extract_format="mp4")
                 except:
                     log.error("Converting {} to mp4 failed".format(file))
                     log.error("this_event_directory {}".format(this_event_directory))
-                    log.error("convertFRNameToFF {}".format(convertFRNameToFF(file)))
+                    log.error("convertFRNameToFF {}".format(convertFRNameToFF(os.path.basename(file))))
                     log.error("fr_file {}".format(file))
 
         if True:
