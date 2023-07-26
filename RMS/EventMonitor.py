@@ -15,7 +15,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
-""""" Automatically uploads data files based on time and trajectory information given on a website. """
+""""" Automatically uploads data files based on search specification information given on a website. """
 
 from __future__ import print_function, division, absolute_import
 
@@ -50,9 +50,7 @@ from Utils.SkyFit2 import convertFRNameToFF
 from glob import glob
 
 
-
 log = logging.getLogger("logger")
-
 
 class EventContainer(object):
 
@@ -83,7 +81,6 @@ class EventContainer(object):
 
         self.start_distance, self.start_angle, self.end_distance, self.end_angle = 0,0,0,0
         self.fovra, self.fovdec = 0 , 0
-
 
     def setValue(self, variable_name, value):
 
@@ -226,7 +223,6 @@ class EventContainer(object):
 
         return reasonable
 
-
     def hasCartSD(self):
 
         """
@@ -238,7 +234,6 @@ class EventContainer(object):
         """
 
         return self.cart_std != 0 or self.cart2_std != 0
-
 
     def hasPolarSD(self):
 
@@ -322,7 +317,7 @@ class EventContainer(object):
     def applyCartesianSD(self,population):
 
         """
-        Apply standard deviation using Cartesian deviations to a population of trajectories
+        Apply standard deviation to the Cartesian coordinate of a population of trajectories
 
         arguments:
             population: [list] population of events
@@ -345,7 +340,7 @@ class EventContainer(object):
     def applyPolarSD(self,population):
 
         """
-        Apply standard deviation using Cartesian deviations to a population of trajectories
+        Apply standard deviation to the Polar coordinates of a population of trajectories
 
         arguments:
             population: [list] of events
@@ -367,12 +362,12 @@ class EventContainer(object):
 
         return population
 
-
     def hasAzEl(self):
 
         """
-        Arguments:
+        Are polar end points non-zero for trajectory?
 
+        Arguments:
 
         Returns: [bool]
             True if end point lats or lons or heights are not zero
@@ -385,7 +380,6 @@ class EventContainer(object):
         azim_elev_definition = False if self.ht2 != 0 else azim_elev_definition
 
         return azim_elev_definition
-
 
     def limitAzEl(self, min_elev_hard, min_elev, prob_elev, max_elev):
 
@@ -407,15 +401,14 @@ class EventContainer(object):
         if min_elev < self.elev < max_elev:
             pass
         else:
-            log.info("Elevation {} is not within range of {} - {} degrees.".format(self.elev, min_elev, max_elev))
+            log.info("Elevation {} is not within range of {} - {} degrees".format(self.elev, min_elev, max_elev))
 
             # If elevation is not within min_elev_hard and max_elev degrees set to prob_elev
             self.elev = self.elev if min_elev_hard < self.elev < max_elev else prob_elev
 
             # If elevation is min_elev_hard - min_elev degrees set to min_elev
             self.elev = min_elev if min_elev_hard < self.elev < min_elev else self.elev
-            log.info("Elevation set to {} degrees.".format(self.elev))
-
+            log.info("Elevation set to {} degrees".format(self.elev))
 
     def limitHeights(self, obsvd_ht, min_lum_flt_ht, max_lum_flt_ht, gap):
 
@@ -500,7 +493,7 @@ class EventContainer(object):
         """
         Move the start and end of a trajectory
 
-        Extend the trajectory of this event backwards by bwd range and forwards by fwd_range maintaining the same
+        Extend the trajectory of this event backwards by bwd_range and forwards by fwd_range maintaining the same
         azimuth and elevation. One application for this function could be to extend a trajectory to the expected
         limits of illuminated flight.
 
@@ -524,15 +517,13 @@ class EventContainer(object):
         # Convert to km and store in event
         self.ht, self.ht2 = ht_m / 1000, ht2_m / 1000
 
-
     def latLonAzElToLatLonLatLon(self, force = False):
 
         """Take an event, establish how it has been defined, and convert to representation as
         a pair of Lat,Lon,Ht parameters. If force is True (default False), then any existing end point
-        lat and lon will be overwritten by the value calculated from the azimuth.
+        lat(deg), lon(deg), ht(km) will be overwritten by the value calculated from the azimuth.
 
-        Results are checked, and significant errors are sent to log error
-
+        Results are checked, and significant errors are sent to error log.
 
         arguments:
             force: [bool] force conversion
@@ -605,11 +596,17 @@ class EventContainer(object):
             log.error("Minimum height to Maximum height az,el {},{}".format(min_max_az, min_max_el))
             log.error("Observed height to Maximum height az,el {},{}".format(obs_max_az, obs_max_el))
 
-
     def latLonlatLonToLatLonAzEl(self):
 
         """
         Populate azimuth and elevation for an event defined with two Lat,Lons and Hts
+
+        Elevation is always positive.
+
+        arguments:
+
+        return:
+            azimuth(degrees), elevation(degrees)
         """
 
         x1, y1, z1 = latLonAlt2ECEF(np.radians(self.lat), np.radians(self.lon), self.ht * 1000)
@@ -649,7 +646,6 @@ class EventMonitor(multiprocessing.Process):
         log.info("Local db path name {}".format(self.syscon.event_monitor_db_name))
         log.info("Reporting data to {}/{}".format(self.syscon.hostname, self.syscon.event_monitor_remote_dir))
 
-
     def createDB(self):
 
         """
@@ -670,7 +666,6 @@ class EventMonitor(multiprocessing.Process):
                 pass
             time.sleep(30)
             log.info("Retrying database creation")
-
 
     def createEventMonitorDB(self, test_mode = False):
 
@@ -835,7 +830,6 @@ class EventMonitor(multiprocessing.Process):
          self.delEventMonitorDB()
          self.createEventMonitorDB()
         return None
-
 
     def getConnectionToEventMonitorDB(self):
         """ Loads the event monitor database
@@ -1041,7 +1035,8 @@ class EventMonitor(multiprocessing.Process):
         Arguments:
             uuid: [event] Locally generated uuid of the event to be queried
 
-        Return: [bool] True if uploaded, False if not uploaded or does not exist
+        Return:
+            [bool] True if uploaded, False if not uploaded or does not exist
 
         """
 
@@ -1600,7 +1595,6 @@ class EventMonitor(multiprocessing.Process):
             shutil.rmtree(event_monitor_directory)
         return upload_status
 
-
     def addElevationRange(self, population, ob_ev, min_elevation):
 
         """
@@ -1804,7 +1798,6 @@ class EventMonitor(multiprocessing.Process):
 
         return None
 
-
     def start(self):
         """ Starts the event monitor. """
 
@@ -1831,7 +1824,6 @@ class EventMonitor(multiprocessing.Process):
 
         return True
 
-
     def getEventsAndCheck(self, testmode=False):
         """
         Gets event(s) from the webpage, or a local file.
@@ -1856,7 +1848,11 @@ class EventMonitor(multiprocessing.Process):
     def run(self):
 
         """
-        Call to start the event monitor loop.
+        Call to start the event monitor loop. If the loop has been accelerated following a match
+        then this loop slows it down by multiplying the check interval by 1.1.
+
+        The time between checks is the sum of the delay interval, and the time to perform the check.
+        No further randomisation is applied.
 
         """
 
@@ -1872,8 +1868,6 @@ class EventMonitor(multiprocessing.Process):
                 self.check_interval = self.check_interval * 1.1
                 log.info("Check interval now set to {:.2f} minutes".format(self.check_interval))
 
-
-
 def convertGMNTimeToPOSIX(timestring):
     """
     Converts the filenaming time convention used by GMN into posix
@@ -1888,7 +1882,6 @@ def convertGMNTimeToPOSIX(timestring):
     dt_object = datetime.strptime(timestring.strip(), "%Y%m%d_%H%M%S")
     return dt_object
 
-
 def randomword(length):
 
     """
@@ -1901,8 +1894,6 @@ def randomword(length):
 
     letters = string.ascii_lowercase
     return ''.join(random.choice(letters) for i in range(length))
-
-
 
 def platepar2AltAz(rp):
 
@@ -1928,8 +1919,21 @@ def platepar2AltAz(rp):
 
     return np.degrees(cyTrueRaDec2ApparentAltAz(RA_d, dec_d, JD, lat, lon))
 
-
 def angDif(a1, a2):
+
+    """
+    Get the minimum difference between two angles, always positive
+
+    arguments:
+        a1:[float] angle(degrees)
+        a2:[float] angle(degrees)
+
+    return:
+        [float] difference between angles
+
+
+    """
+
     normalised = abs(a1-a2) % 360
     return min(360-normalised, normalised)
 
@@ -1938,10 +1942,10 @@ def convertGMNTimeToPOSIX(timestring):
     """
     Converts the filenaming time convention used by GMN into posix
 
-    Args:
+    arguments:
         timestring: [string] time represented as a string e.g. 20230527_032115
 
-    Returns:
+    returns:
         posix compatible time
     """
     try:
@@ -1951,11 +1955,6 @@ def convertGMNTimeToPOSIX(timestring):
         # return a time which will be safe but cannot produce any output
         dt_object = datetime.strptime("20000101_000000".strip(), "%Y%m%d_%H%M%S")
     return dt_object
-
-#https://stackoverflow.com/questions/2030053/how-to-generate-random-strings-in-python
-
-
-
 
 def createATestEvent07():
 
@@ -1993,8 +1992,6 @@ def createATestEvent07():
     test_event.setValue("uuid", test_uuid)
 
     return test_event
-
-
 
 def createATestEvent08():
 
@@ -2036,7 +2033,6 @@ def createATestEvent08():
     test_event.setValue("uuid", test_uuid)
 
     return test_event
-
 
 def gcdistdeg(lat1,lon1, lat2,lon2):
 
@@ -2089,7 +2085,6 @@ def testRevAz():
             break
 
     return success
-
 
 def testIsReasonable():
     """
@@ -2151,6 +2146,7 @@ def testHasCartSD():
     success = success if not t.hasCartSD() else False
 
     return success
+
 def testHasPolarSD():
 
     t = EventContainer("", 0, 0, 0)
@@ -2179,11 +2175,9 @@ def testHasPolarSD():
 
     return success
 
-
 def testEventToECEFVector():
 
     """
-
     Tests conversion of events to ECEF vectors by reversing and using haversine
 
 
@@ -2233,7 +2227,6 @@ def testEventToECEFVector():
 def testEventCreation():
 
     """
-
     Tests creation and modification of events
 
 
@@ -2324,12 +2317,10 @@ def testEventCreation():
 
     return success
 
-
 def testApplyCartesianSD():
 
 
     """
-
     Tests application of standard deviation to cartesian coordinates
 
 
@@ -2384,7 +2375,6 @@ def testApplyCartesianSD():
 def testApplyPolarSD():
 
     """
-
     Tests application of standard deviation to polar coordinates
 
 
@@ -2436,9 +2426,6 @@ def testApplyPolarSD():
     success = success if gcdistdeg(lat2mn, lon2mn, event.lat2, event.lon2) < 0.1 else False
     success = success if abs(e.ht - ht1mn) < 5 and (e.ht2 - ht2mn) < 10 else False
     return success
-
-
-
 
 def testIndividuals():
 
@@ -2521,12 +2508,6 @@ def testIndividuals():
         individuals_success = False
 
     return individuals_success
-
-
-
-
-
-
 
 if __name__ == "__main__":
 
