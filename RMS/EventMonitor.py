@@ -1537,7 +1537,7 @@ class EventMonitor(multiprocessing.Process):
                 except:
                     log.error("Converting {} to mp4 failed".format(file))
                     log.error("this_event_directory {}".format(this_event_directory))
-                    log.error("convertFRNameToFF {}".format(ff_file)
+                    log.error("convertFRNameToFF {}".format(ff_file))
                     log.error("fr_file {}".format(file))
 
         if True:
