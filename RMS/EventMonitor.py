@@ -1536,6 +1536,9 @@ class EventMonitor(multiprocessing.Process):
                     view(this_event_directory, convertFRNameToFF(fr_file), fr_file, self.syscon, hide=True, add_timestamp=True, extract_format="mp4")
                 except:
                     log.error("Converting {} to mp4 failed".format(fr_file))
+                    log.error("this_event_directory {}".format(this_event_directory))
+                    log.error("convertFRNameToFF {}".format(convertFRNameToFF(fr_file)))
+                    log.error("fr_file {}".format(fr_file))
 
         if True:
             batchFFtoImage(os.path.join(event_monitor_directory, upload_filename), "jpg", add_timestamp=True,
