@@ -629,7 +629,7 @@ class EventMonitor(multiprocessing.Process):
         self.syscon = config        # the config that describes where the folders are
 
         # The path to the event monitor database
-        self.syscon.event_monitor_db_name = "test.db" if socket.gethostname() == "svr08" else self.syscon.event_monitor_db_name
+        self.syscon.event_monitor_db_name = "test.db" if socket.gethostname() == "X220" else self.syscon.event_monitor_db_name
         self.event_monitor_db_path = os.path.join(os.path.abspath(self.syscon.data_dir),
                                                   self.syscon.event_monitor_db_name)
 
@@ -1515,7 +1515,7 @@ class EventMonitor(multiprocessing.Process):
         pack_size = 0
         for file in file_list:
             pack_size += os.path.getsize(file)
-        log.info("File pack {:.0f}MB assembly started".format(pack_size/1024/1024))
+        log.info("File pack ({:.0f}MB) assembly started".format(pack_size/1024/1024))
 
         # Don't upload things which are too large
         if pack_size > 1000*1024*1024:
@@ -1533,7 +1533,7 @@ class EventMonitor(multiprocessing.Process):
             if file.endswith(".bin"):
                 fr_file = os.path.dirname(file)
                 try:
-                    view(this_event_directory, convertFRNameToFF(fr_file), fr_file ,self.syscon,hide=True,add_timestamp=True, extract_format="mp4")
+                    view(this_event_directory, convertFRNameToFF(fr_file), fr_file, self.syscon, hide=True, add_timestamp=True, extract_format="mp4")
                 except:
                     log.error("Converting {} to mp4 failed".format(fr_file))
 
@@ -1554,7 +1554,7 @@ class EventMonitor(multiprocessing.Process):
              log.info("Making archive of {}".format(os.path.join(event_monitor_directory, upload_filename)))
              base_name = os.path.join(event_monitor_directory,upload_filename)
              root_dir = os.path.join(event_monitor_directory,upload_filename)
-             archive_name = shutil.make_archive(base_name, 'bztar', root_dir, logger=log) # removed base_dir) for testing
+             archive_name = shutil.make_archive(base_name, 'bztar', root_dir, logger=log)
             else:
              log.info("Not making an archive of {}, not sensible.".format(os.path.join(event_monitor_directory, upload_filename)))
 
@@ -1574,7 +1574,7 @@ class EventMonitor(multiprocessing.Process):
             log.info("Upload of {} - first attempt".format(event_monitor_directory))
             for retry in range(1,30):
                 archives = glob(os.path.join(event_monitor_directory,"*.bz2"))
-                upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,rsa_private_key=self.config.rsa_private_key)
+                #upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,rsa_private_key=self.config.rsa_private_key)
                 if upload_status:
                     log.info("Upload of {} - attempt no {} was successful".format(event_monitor_directory, retry))
                     # set to the fast check rate after an upload
@@ -1763,7 +1763,7 @@ class EventMonitor(multiprocessing.Process):
                         if self.doUpload(observed_event, ev_con, file_list, test_mode=test_mode):
                             self.markEventAsUploaded(observed_event, file_list)
                             if not test_mode:
-                                log.info("Trajectory through FoV - marking {} as processed".format(observed_event.dt))
+                                log.info("Trajectory passed through FoV - marking {} as processed".format(observed_event.dt))
                                 self.markEventAsProcessed(observed_event)
                             break # Do no more work on any version of this trajectory
                         else:
@@ -1778,7 +1778,7 @@ class EventMonitor(multiprocessing.Process):
                                     rp.lat, rp.lon, event.start_distance / 1000, event.end_distance / 1000, rp.fov_h,
                                     rp.fov_v, event.start_angle, event.end_angle))
                     else:
-                        #log.info("Event at {} did not pass through FOV.".format(event.dt))
+
                         if not test_mode:
                             pass
 
@@ -1793,6 +1793,7 @@ class EventMonitor(multiprocessing.Process):
             else:
                 check_time_end = datetime.now()
                 check_time_seconds = (check_time_end - check_time_start).total_seconds()
+                log.info("Reached end of checks - {} is processed, nothing to upload".format(observed_event.dt))
                 log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
                 self.markEventAsProcessed(observed_event)
 
@@ -1868,19 +1869,7 @@ class EventMonitor(multiprocessing.Process):
                 self.check_interval = self.check_interval * 1.1
                 log.info("Check interval now set to {:.2f} minutes".format(self.check_interval))
 
-def convertGMNTimeToPOSIX(timestring):
-    """
-    Converts the filenaming time convention used by GMN into posix
 
-    Args:
-        timestring: [string] time represented as a string e.g. 20230527_032115
-
-    Returns:
-        posix compatible time
-    """
-
-    dt_object = datetime.strptime(timestring.strip(), "%Y%m%d_%H%M%S")
-    return dt_object
 
 def randomword(length):
 
