@@ -23,7 +23,8 @@ import sqlite3
 import multiprocessing
 import RMS.ConfigReader as cr
 import urllib.request
-import os, socket
+import os
+import socket
 import shutil
 import time
 import copy
@@ -32,7 +33,9 @@ import numpy as np
 import datetime
 import argparse
 import math
-import random, string, statistics
+import random
+import string
+import statistics
 import logging
 
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
@@ -52,6 +55,7 @@ from glob import glob
 
 log = logging.getLogger("logger")
 
+
 class EventContainer(object):
 
     """ Contains the specification of the search for an event.
@@ -61,13 +65,13 @@ class EventContainer(object):
     def __init__(self, dt, lat, lon, ht):
 
         # Required parameters
-        self.dt,self.time_tolerance = dt, 0
-        self.lat, self.lat_std, self.lon, self.lon_std, self.ht, self.ht_std, self.cart_std = lat, 0, lon, 0, ht,0,0
-        self.lat2, self.lat2_std, self.lon2, self.lon2_std, self.ht2, self.ht2_std, self.cart2_std = 0,0,0,0,0,0,0
-        self.close_radius, self.far_radius = 0,0
+        self.dt, self.time_tolerance = dt, 0
+        self.lat, self.lat_std, self.lon, self.lon_std, self.ht, self.ht_std, self.cart_std = lat, 0, lon, 0, ht, 0, 0
+        self.lat2, self.lat2_std, self.lon2, self.lon2_std, self.ht2, self.ht2_std, self.cart2_std = 0, 0, 0, 0, 0, 0, 0
+        self.close_radius, self.far_radius = 0, 0
 
         # Or trajectory information from the first point
-        self.azim, self.azim_std, self.elev, self.elev_std, self.elev_is_max = 0,0,0,0,False
+        self.azim, self.azim_std, self.elev, self.elev_std, self.elev_is_max = 0, 0, 0, 0, False
         self.stations_required = ""
         self.respond_to = ""
 
@@ -79,8 +83,8 @@ class EventContainer(object):
         self.observed_status = None
         self.processed_status = False
 
-        self.start_distance, self.start_angle, self.end_distance, self.end_angle = 0,0,0,0
-        self.fovra, self.fovdec = 0 , 0
+        self.start_distance, self.start_angle, self.end_distance, self.end_angle = 0, 0, 0, 0
+        self.fovra, self.fovdec = 0, 0
 
     def setValue(self, variable_name, value):
 
@@ -139,7 +143,7 @@ class EventContainer(object):
         # This code is used for reading event_watchlist.txt and database queries
         # Text stores as True, database stores as 0 and 1
         if "EventElevIsMax" == variable_name:
-             self.elev_is_max = True if value == "True" or value == 1 else False
+            self.elev_is_max = True if value == "True" or value == 1 else False
 
         # Control information
         self.stations_required = str(value) if "StationsRequired" == variable_name else self.stations_required
@@ -283,12 +287,12 @@ class EventContainer(object):
             [vector] ECEF vector
         """
 
-        v1 = latLonAlt2ECEF(np.radians(self.lat),  np.radians(self.lon),self.ht*1000)
+        v1 = latLonAlt2ECEF(np.radians(self.lat), np.radians(self.lon), self.ht*1000)
         v2 = latLonAlt2ECEF(np.radians(self.lat2), np.radians(self.lon2), self.ht2*1000)
 
-        return [v1,v2]
+        return [v1, v2]
 
-    def ecefV2LatLonAlt(self,ecef_vect):
+    def ecefV2LatLonAlt(self, ecef_vect):
 
         """
         Convert ECEF vector (meters) to lat(deg),lon(deg),ht(km)
@@ -302,7 +306,7 @@ class EventContainer(object):
         lat, lon, ht = ecef2LatLonAlt(ecef_vect[0], ecef_vect[1], ecef_vect[2])
         return np.degrees(lat), np.degrees(lon), ht / 1000
 
-    def applyCartesianSDToPoint(self,pt,std):
+    def applyCartesianSDToPoint(self, pt, std):
 
         """
         Apply random number from normal distribution to each component of a 3 dimension vector
@@ -312,9 +316,9 @@ class EventContainer(object):
             std: [float] sigma to apply
 
         """
-        return pt + np.random.normal(scale=std,size=3)
+        return pt + np.random.normal(scale=std, size=3)
 
-    def applyCartesianSD(self,population):
+    def applyCartesianSD(self, population):
 
         """
         Apply standard deviation to the Cartesian coordinate of a population of trajectories
@@ -330,14 +334,14 @@ class EventContainer(object):
         ecef_vector = self.eventToECEFVector()
         if self.hasCartSD():
             for tr in population:
-                start_vect = self.applyCartesianSDToPoint(ecef_vector[0],self.cart_std)
-                end_vect = self.applyCartesianSDToPoint(ecef_vector[1],self.cart2_std)
+                start_vect = self.applyCartesianSDToPoint(ecef_vector[0], self.cart_std)
+                end_vect = self.applyCartesianSDToPoint(ecef_vector[1], self.cart2_std)
                 tr.lat, tr.lon, tr.ht = self.ecefV2LatLonAlt(start_vect)
                 tr.lat2, tr.lon2, tr.ht2 = self.ecefV2LatLonAlt(end_vect)
 
         return population
 
-    def applyPolarSD(self,population):
+    def applyPolarSD(self, population):
 
         """
         Apply standard deviation to the Polar coordinates of a population of trajectories
@@ -351,14 +355,14 @@ class EventContainer(object):
         """
 
         for tr in population:
-            tr.lat = tr.lat + np.random.normal(scale = 1) * self.lat_std
-            tr.lon = tr.lon + np.random.normal(scale = 1) * self.lon_std
-            tr.ht = tr.ht + np.random.normal(scale = 1) * self.ht_std
-            tr.lat2 = tr.lat2 + np.random.normal(scale = 1) * self.lat2_std
-            tr.lon2 = tr.lon2 + np.random.normal(scale = 1) * self.lon2_std
-            tr.ht2 = tr.ht2 + np.random.normal(scale = 1) * self.ht2_std
-            tr.azim = tr.azim + np.random.normal(scale = 1) * self.azim_std
-            tr.elev = tr.elev + np.random.normal(scale = 1) * self.elev_std
+            tr.lat = tr.lat + np.random.normal(scale=1) * self.lat_std
+            tr.lon = tr.lon + np.random.normal(scale=1) * self.lon_std
+            tr.ht = tr.ht + np.random.normal(scale=1) * self.ht_std
+            tr.lat2 = tr.lat2 + np.random.normal(scale=1) * self.lat2_std
+            tr.lon2 = tr.lon2 + np.random.normal(scale=1) * self.lon2_std
+            tr.ht2 = tr.ht2 + np.random.normal(scale=1) * self.ht2_std
+            tr.azim = tr.azim + np.random.normal(scale=1) * self.azim_std
+            tr.elev = tr.elev + np.random.normal(scale=1) * self.elev_std
 
         return population
 
@@ -431,7 +435,7 @@ class EventContainer(object):
 
         return min_lum_flt_ht, max_lum_flt_ht
 
-    def getRanges(self, obsvd_lat, obsvd_lon, obsvd_ht, min_lum_flt_ht, max_lum_flt_ht):
+    def getRanges(self, obs_lat, obs_lon, obs_ht, min_lum_flt_ht, max_lum_flt_ht):
 
         """
         For an event containing a trajectory specified with two lat,lon, heights, calculate the range from
@@ -452,16 +456,16 @@ class EventContainer(object):
         """
 
         # Find range to maximum heights in reverse trajectory direction
-        bwd_range = AEH2Range(self.azim, self.elev, max_lum_flt_ht, obsvd_lat, obsvd_lon, obsvd_ht)
+        bwd_range = AEH2Range(self.azim, self.elev, max_lum_flt_ht, obs_lat, obs_lon, obs_ht)
 
         # Find range to minimum height in forward trajectory direction.
-        # This is done by reflecting the trajectory in a horizontal plane midway between obsvd_ht and min_lum_flt_ht
+        # This is done by reflecting the trajectory in a horizontal plane midway between obs_ht and min_lum_flt_ht
         # This simplifies the calculation, but introduces a small imprecision, caused by curvature of earth
-        fwd_range = AEH2Range(self.azim, self.elev, obsvd_ht, obsvd_lat, obsvd_lon, min_lum_flt_ht)
+        fwd_range = AEH2Range(self.azim, self.elev, obs_ht, obs_lat, obs_lon, min_lum_flt_ht)
 
         # Iterate to find accurate solution - limit iterations to 100, generally requires fewer than 10 iterations
         for n in range(100):
-            self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obsvd_lat, obsvd_lon, obsvd_ht)
+            self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obs_lat, obs_lon, obs_ht)
             # Use trigonometry to estimate the error - vertical error is the opposite side to the elevation
             # so vertical error / sin(elev) gives the hypotenuse, which is the trajectory error
             traj_error = (ht2_m - min_lum_flt_ht) / np.sin(np.radians(self.elev))
@@ -471,7 +475,7 @@ class EventContainer(object):
 
         return bwd_range, fwd_range
 
-    def revAz(self,azim):
+    def revAz(self, azim):
 
         """
         Reverse an azimuth by normalising and reversing
@@ -488,7 +492,7 @@ class EventContainer(object):
 
         return azim_rev
 
-    def adjustTrajectoryLimits(self, bwd_range, fwd_range, obsvd_lat, obsvd_lon, obsvd_ht):
+    def adjustTrajectoryLimits(self, bwd_range, fwd_range, obs_lat, obs_lon, obs_ht):
 
         """
         Move the start and end of a trajectory
@@ -510,14 +514,14 @@ class EventContainer(object):
         """
 
         # Move event start point back to intersection with max_lum_flt_ht
-        self.lat, self.lon, ht_m = AER2LatLonAlt(self.revAz(self.azim), self.elev, bwd_range, obsvd_lat, obsvd_lon, obsvd_ht)
+        self.lat, self.lon, ht_m = AER2LatLonAlt(self.revAz(self.azim), self.elev, bwd_range, obs_lat, obs_lon, obs_ht)
         # Calculate end point of trajectory and convert to km
-        self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obsvd_lat, obsvd_lon, obsvd_ht)
+        self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obs_lat, obs_lon, obs_ht)
 
         # Convert to km and store in event
         self.ht, self.ht2 = ht_m / 1000, ht2_m / 1000
 
-    def latLonAzElToLatLonLatLon(self, force = False):
+    def latLonAzElToLatLonLatLon(self, force=False):
 
         """Take an event, establish how it has been defined, and convert to representation as
         a pair of Lat,Lon,Ht parameters. If force is True (default False), then any existing end point
@@ -537,7 +541,7 @@ class EventContainer(object):
             return
 
         # Copy observed lat, lon and height local variables for ease of comprehension and convert to meters
-        obsvd_lat, obsvd_lon, obsvd_ht = self.lat, self.lon, self.ht * 1000
+        obs_lat, obs_lon, obs_ht = self.lat, self.lon, self.ht * 1000
 
         # For this routine elevation must always be within 10 - 90 degrees
         min_elev_hard, min_elev, prob_elev, max_elev = 0, 10, 45, 90
@@ -547,17 +551,17 @@ class EventContainer(object):
         # Need to add gap so that angles can be calculated for consistency checks
         # Set minimum and maximum luminous flight heights
         min_lum_flt_ht, max_lum_flt_ht, gap = 20000, 100000, 1000
-        min_lum_flt_ht, max_lum_flt_ht = self.limitHeights(obsvd_ht, min_lum_flt_ht, max_lum_flt_ht, gap)
-        bwd_range, fwd_range = self.getRanges(obsvd_lat,obsvd_lon,obsvd_ht,min_lum_flt_ht,max_lum_flt_ht)
+        min_lum_flt_ht, max_lum_flt_ht = self.limitHeights(obs_ht, min_lum_flt_ht, max_lum_flt_ht, gap)
+        bwd_range, fwd_range = self.getRanges(obs_lat, obs_lon, obs_ht, min_lum_flt_ht, max_lum_flt_ht)
 
         # Move the end points
-        self.adjustTrajectoryLimits(bwd_range, fwd_range, obsvd_lat, obsvd_lon, obsvd_ht)
+        self.adjustTrajectoryLimits(bwd_range, fwd_range, obs_lat, obs_lon, obs_ht)
 
         # Post calculation checks - not required for operation
         # Convert to ECEF
         x1, y1, z1 = latLonAlt2ECEF(np.radians(self.lat), np.radians(self.lon), self.ht * 1000)
         x2, y2, z2 = latLonAlt2ECEF(np.radians(self.lat2), np.radians(self.lon2), self.ht2 * 1000)
-        x_obs, y_obs, z_obs = latLonAlt2ECEF(np.radians(obsvd_lat), np.radians(obsvd_lon), obsvd_ht)
+        x_obs, y_obs, z_obs = latLonAlt2ECEF(np.radians(obs_lat), np.radians(obs_lon), obs_ht)
 
         # Calculate vectors of three points on trajectory
         max_pt, min_pt, obs_pt = np.array([x1, y1, z1]), np.array([x2, y2, z2]), np.array([x_obs, y_obs, z_obs])
@@ -574,7 +578,7 @@ class EventContainer(object):
         if angDif(min_obs_az, min_max_az) > 1 or angDif(min_obs_az, obs_max_az) > 1:
 
             log.error("Error in Azimuth calculations")
-            log.error("Observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obsvd_lat,obsvd_lon,obsvd_ht))
+            log.error("Observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obs_lat, obs_lon, obs_ht))
             log.error("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
             log.error("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim, self.revAz(self.azim) , self.elev))
             log.error("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon, self.ht * 1000))
@@ -587,11 +591,11 @@ class EventContainer(object):
         # And the minimum to the observation height is the same as the observation to the maximum height
         if angDif(min_obs_el, min_max_el) > 1 or angDif(min_obs_el, obs_max_el) > 1:
             log.error("Error in Elevation calculations")
-            log.error("Trajectory created from observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obsvd_lat,obsvd_lon,obsvd_ht))
+            log.error("Traj from observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obs_lat, obs_lon, obs_ht))
             log.error("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
             log.error("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim, self.revAz(self.azim), self.elev))
-            log.error("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon,self.ht * 1000))
-            log.error("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2,self.ht2 * 1000))
+            log.error("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon, self.ht * 1000))
+            log.error("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2, self.ht2 * 1000))
             log.error("Minimum height to Observed height az,el {},{}".format(min_obs_az, min_obs_el))
             log.error("Minimum height to Maximum height az,el {},{}".format(min_max_az, min_max_el))
             log.error("Observed height to Maximum height az,el {},{}".format(obs_max_az, obs_max_el))
@@ -613,7 +617,8 @@ class EventContainer(object):
         x2, y2, z2 = latLonAlt2ECEF(np.radians(self.lat2), np.radians(self.lon2), self.ht2 * 1000)
         start_pt, end_pt = np.array([x1, y1, z1]), np.array([x2, y2, z2])
         end_start_az, end_start_el = ECEF2AltAz(end_pt, start_pt)
-        return self.revAz(end_start_az),end_start_el
+        return self.revAz(end_start_az), end_start_el
+
 
 class EventMonitor(multiprocessing.Process):
 
@@ -629,10 +634,8 @@ class EventMonitor(multiprocessing.Process):
         self.syscon = config        # the config that describes where the folders are
 
         # The path to the event monitor database
-        self.syscon.event_monitor_db_name = "test.db" if socket.gethostname() == "X220" else self.syscon.event_monitor_db_name
         self.event_monitor_db_path = os.path.join(os.path.abspath(self.syscon.data_dir),
                                                   self.syscon.event_monitor_db_name)
-
         log.info("Using {} as database".format(self.event_monitor_db_path))
         self.createDB()
 
@@ -642,7 +645,7 @@ class EventMonitor(multiprocessing.Process):
         self.exit = multiprocessing.Event()
 
         log.info("EventMonitor is starting")
-        log.info("Monitoring {} at {:3.2f} minute intervals".format(self.syscon.event_monitor_webpage,self.syscon.event_monitor_check_interval))
+        log.info("Monitoring {} at {:3.2f} minute intervals".format(self.syscon.event_monitor_webpage, self.syscon.event_monitor_check_interval))
         log.info("Local db path name {}".format(self.syscon.event_monitor_db_name))
         log.info("Reporting data to {}/{}".format(self.syscon.hostname, self.syscon.event_monitor_remote_dir))
 
@@ -667,7 +670,7 @@ class EventMonitor(multiprocessing.Process):
             time.sleep(30)
             log.info("Retrying database creation")
 
-    def createEventMonitorDB(self, test_mode = False):
+    def createEventMonitorDB(self, test_mode=False):
 
         """ Creates the event monitor database. Tries only once.
 
@@ -806,9 +809,7 @@ class EventMonitor(multiprocessing.Process):
 
     def deleteDBoldrecords(self):
 
-
         """
-
         Remove old record from the database, notional time of 14 days selected.
         The deletion is made on the criteria of when the record was added to the database, not the event date
         If the event is still listed on the website, then it will be added, and uploaded.
@@ -821,14 +822,14 @@ class EventMonitor(multiprocessing.Process):
         sql_statement += "timeadded < date('now', '-14 day')"
 
         try:
-         cursor = self.db_conn.cursor()
-         cursor.execute(sql_statement)
-         self.db_conn.commit()
+            cursor = self.db_conn.cursor()
+            cursor.execute(sql_statement)
+            self.db_conn.commit()
 
         except:
-         log.info("Database purge failed")
-         self.delEventMonitorDB()
-         self.createEventMonitorDB()
+            log.info("Database purge failed")
+            self.delEventMonitorDB()
+            self.createEventMonitorDB()
         return None
 
     def getConnectionToEventMonitorDB(self):
@@ -846,10 +847,10 @@ class EventMonitor(multiprocessing.Process):
 
         # Load the event monitor database - only gets done here
         try:
-         self.conn = sqlite3.connect(self.event_monitor_db_path)
+            self.conn = sqlite3.connect(self.event_monitor_db_path)
         except:
-         os.unlink(self.event_monitor_db_path)
-         self.createEventMonitorDB()
+            os.unlink(self.event_monitor_db_path)
+            self.createEventMonitorDB()
 
         return self.conn
 
@@ -889,10 +890,10 @@ class EventMonitor(multiprocessing.Process):
         # query gets the number of rows matching, not the actual rows
 
         try:
-         return (self.db_conn.cursor().execute(sql_statement).fetchone())[0] != 0
+            return (self.db_conn.cursor().execute(sql_statement).fetchone())[0] != 0
         except:
-         log.info("Check for event exists failed")
-         return False
+            log.info("Check for event exists failed")
+            return False
 
     def delOldRecords(self):
 
@@ -1080,12 +1081,12 @@ class EventMonitor(multiprocessing.Process):
         sql_statement += "uuid = '{}'           \n".format(event.uuid)
 
         try:
-         cursor = self.db_conn.cursor()
-         cursor.execute(sql_statement)
-         self.db_conn.commit()
-         log.info("Event at {} marked as uploaded".format(event.dt))
+            cursor = self.db_conn.cursor()
+            cursor.execute(sql_statement)
+            self.db_conn.commit()
+            log.info("Event at {} marked as uploaded".format(event.dt))
         except:
-         log.info("Database error")
+            log.info("Database error")
 
     def markEventAsReceivedByServer(self, uuid):
 
@@ -1369,17 +1370,17 @@ class EventMonitor(multiprocessing.Process):
         # Consider whether vector is zero length by looking at start and end
         if [beg_lat, beg_lon, beg_ele] != [end_lat, end_lon, end_ele]:
 
-         # Vector start and end points are different, calculate the projection of the ref vect onto the traje vector
-         proj_vec = beg_ecef + np.dot(start_vec, traj_vec) * traj_vec
+            # Vector start and end points are different, calculate the projection of the ref vect onto the traj vector
+            proj_vec = beg_ecef + np.dot(start_vec, traj_vec) * traj_vec
 
-         # Hence, calculate the vector at the nearest point, and the closest distance
-         closest_vec = ref_ecef - proj_vec
-         closest_dist = (np.sqrt(np.sum(closest_vec ** 2)))
+            # Hence, calculate the vector at the nearest point, and the closest distance
+            closest_vec = ref_ecef - proj_vec
+            closest_dist = (np.sqrt(np.sum(closest_vec ** 2)))
 
         else:
 
-         # Vector has zero length, do not try to calculate projection
-         closest_dist = start_dist
+            # Vector has zero length, do not try to calculate projection
+            closest_dist = start_dist
 
         return start_dist, end_dist, closest_dist
 
@@ -1473,7 +1474,7 @@ class EventMonitor(multiprocessing.Process):
         pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC = self.trajectoryVisible(rp, event)
         return pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC
 
-    def doUpload(self, event, evcon, file_list, keep_files = False, no_upload = False, test_mode = False):
+    def doUpload(self, event, evcon, file_list, keep_files=False, no_upload=False, test_mode=False):
 
         """Move all the files to a single directory. Make MP4s, stacks and jpgs
            Archive into a bz2 file and upload, using paramiko. Delete all working folders.
@@ -1497,9 +1498,8 @@ class EventMonitor(multiprocessing.Process):
         if self.eventProcessed(event.uuid):
             log.error("Call to doUpload for already processed event {}".format(event.dt))
 
-
         event_monitor_directory = os.path.expanduser(os.path.join(self.syscon.data_dir, "EventMonitor"))
-        upload_filename = "{}_{}_{}".format(evcon.stationID, event.dt,"event")
+        upload_filename = "{}_{}_{}".format(evcon.stationID, event.dt, "event")
         this_event_directory = os.path.join(event_monitor_directory, upload_filename)
 
         # get rid of the eventdirectory, should never be needed
@@ -1574,7 +1574,7 @@ class EventMonitor(multiprocessing.Process):
             log.info("Upload of {} - first attempt".format(event_monitor_directory))
             for retry in range(1,30):
                 archives = glob(os.path.join(event_monitor_directory,"*.bz2"))
-                #upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,rsa_private_key=self.config.rsa_private_key)
+                upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,rsa_private_key=self.config.rsa_private_key)
                 if upload_status:
                     log.info("Upload of {} - attempt no {} was successful".format(event_monitor_directory, retry))
                     # set to the fast check rate after an upload
