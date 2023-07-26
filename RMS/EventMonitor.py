@@ -1874,7 +1874,6 @@ class EventMonitor(multiprocessing.Process):
             # Increase the check interval
             if self.check_interval < self.syscon.event_monitor_check_interval:
                 self.check_interval = self.check_interval * 1.1
-                log.info("Check interval now set to {:.2f} minutes".format(self.check_interval))
 
 
 
