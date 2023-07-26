@@ -1531,16 +1531,18 @@ class EventMonitor(multiprocessing.Process):
         # convert bins to MP4
         for file in file_list:
             if file.endswith(".bin"):
-                ff_file = convertFRNameToFF(os.path.basename(file))
+                fr_file = os.path.basename(file)
+                ff_file = convertFRNameToFF(fr_file)
+
                 try:
                     log.info("this_event_directory {}".format(this_event_directory))
-                    log.info("ff_file {}, fr_file {}".format(ff_file, file))
-                    view(this_event_directory, ff_file, file, self.syscon, hide=True, add_timestamp=True, extract_format="mp4")
+                    log.info("ff_file {}, fr_file {}".format(ff_file, fr_file))
+                    view(this_event_directory, ff_file, fr_file, self.syscon, hide=True, add_timestamp=True, extract_format="mp4")
                 except:
                     log.error("Converting {} to mp4 failed".format(file))
                     log.error("this_event_directory {}".format(this_event_directory))
                     log.error("convertFRNameToFF {}".format(ff_file))
-                    log.error("fr_file {}".format(file))
+                    log.error("fr_file {}".format(fr_file))
 
         if True:
             batchFFtoImage(os.path.join(event_monitor_directory, upload_filename), "jpg", add_timestamp=True,
