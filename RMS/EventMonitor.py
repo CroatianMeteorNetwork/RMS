@@ -1311,7 +1311,7 @@ class EventMonitor(multiprocessing.Process):
 
         return file_list
 
-    def getfilelist(self, event):
+    def getFileList(self, event):
 
         """Take an event, return paths to files
 
@@ -1332,7 +1332,7 @@ class EventMonitor(multiprocessing.Process):
 
         return file_list
 
-    def calculateclosestpoint(self, beg_lat, beg_lon, beg_ele, end_lat, end_lon, end_ele, ref_lat, ref_lon, ref_ele):
+    def calculateClosestPoint(self, beg_lat, beg_lon, beg_ele, end_lat, end_lon, end_ele, ref_lat, ref_lon, ref_ele):
 
         """
         Calculate the closest approach of a trajectory to a reference point
@@ -1632,7 +1632,7 @@ class EventMonitor(multiprocessing.Process):
             s.latLonAzElToLatLonLatLon(force = True)
             population.append(s)
             ch_az,ch_el = s.latLonlatLonToLatLonAzEl()
-            start, end, closest = self.calculateclosestpoint(s.lat, s.lon, s.ht * 1000, s.lat2, s.lon2, s.ht2 * 1000,
+            start, end, closest = self.calculateClosestPoint(s.lat, s.lon, s.ht * 1000, s.lat2, s.lon2, s.ht2 * 1000,
                                                              ob_ev.lat, ob_ev.lon, ob_ev.ht * 1000)
             start, end, closest = start/1000, end / 1000, closest / 1000
 
@@ -1671,7 +1671,7 @@ class EventMonitor(multiprocessing.Process):
             # Events can be specified in different ways, make sure converted to LatLon
             observed_event.latLonAzElToLatLonLatLon()
             # Get the files
-            file_list = self.getfilelist(observed_event)
+            file_list = self.getFileList(observed_event)
 
             # If there are no files based on time, then mark as processed and continue
             if (len(file_list) == 0 or file_list == [None]) and not test_mode:
@@ -1728,9 +1728,9 @@ class EventMonitor(multiprocessing.Process):
                     break # do no more work on any version of this trajectory - break exits loop
                 # From the infinitely extended trajectory, work out the closest point to the camera
                 # ev_con.elevation is the height above sea level of the station in metres, no conversion required
-                start_dist, end_dist, atmos_dist = self.calculateclosestpoint(event.lat, event.lon, event.ht * 1000,
-                                                                           event.lat2, event.lon2, event.ht2 * 1000,
-                                                                ev_con.latitude, ev_con.longitude, ev_con.elevation)
+                start_dist, end_dist, atmos_dist = self.calculateClosestPoint(event.lat, event.lon, event.ht * 1000,
+                                                                              event.lat2, event.lon2, event.ht2 * 1000,
+                                                                              ev_con.latitude, ev_con.longitude, ev_con.elevation)
                 min_dist = min([start_dist, end_dist, atmos_dist])
 
                 # If this version of the trajectory outside the farradius, continue
@@ -2030,7 +2030,7 @@ def createATestEvent08():
 
     return test_event
 
-def gcdistdeg(lat1,lon1, lat2,lon2):
+def gcDistDeg(lat1, lon1, lat2, lon2):
 
     """
     Uses Haversine formula to return great circle distance. This function is only used for testing other
@@ -2205,16 +2205,16 @@ def testEventToECEFVector():
         lat2, lon2, ht2 = np.degrees(lat2), np.degrees(lon2), ht2 / 1000
 
 
-        success = success if gcdistdeg(iLat, iLon, lat, lon) < 0.1  else False
-        success = success if gcdistdeg(iLat2, iLon2, lat2, lon2) < 0.1 else False
+        success = success if gcDistDeg(iLat, iLon, lat, lon) < 0.1  else False
+        success = success if gcDistDeg(iLat2, iLon2, lat2, lon2) < 0.1 else False
 
         success = success if abs(iHt-ht) < 0.1 else False
         success = success if abs(iHt2 - ht2) < 0.1 else False
 
         if not success:
             print("fail")
-            print(gcdistdeg(iLat, iLon, lat, lon))
-            print(gcdistdeg(iLat2, iLon2, lat2, lon2))
+            print(gcDistDeg(iLat, iLon, lat, lon))
+            print(gcDistDeg(iLat2, iLon2, lat2, lon2))
             time.sleep(30)
 
     return success
@@ -2246,8 +2246,8 @@ def testEventCreation():
     event.latLonAzElToLatLonLatLon()
 
     success = success if event.azim == 91 and event.elev == 45 else False
-    success = success if gcdistdeg(45,178,event.lat,event.lon) < 0.1 else False
-    success = success if gcdistdeg(45, -179, event.lat2, event.lon2) < 0.1 else False
+    success = success if gcDistDeg(45, 178, event.lat, event.lon) < 0.1 else False
+    success = success if gcDistDeg(45, -179, event.lat2, event.lon2) < 0.1 else False
     success = success if abs(event.ht - 101) < 0.1 else False
     success = success if abs(event.ht2 - 20) < 0.1 else False
 
@@ -2258,8 +2258,8 @@ def testEventCreation():
     event.latLonAzElToLatLonLatLon()
 
     success = success if event.azim == 179 and event.elev == 45 else False
-    success = success if gcdistdeg(45, 178, event.lat, event.lon) < 0.1 else False
-    success = success if gcdistdeg(44.278, 179.017, event.lat2, event.lon2) < 0.1 else False
+    success = success if gcDistDeg(45, 178, event.lat, event.lon) < 0.1 else False
+    success = success if gcDistDeg(44.278, 179.017, event.lat2, event.lon2) < 0.1 else False
     success = success if abs(event.ht - 101) < 0.1 else False
     success = success if abs(event.ht2 - 20) < 0.1 else False
 
@@ -2268,8 +2268,8 @@ def testEventCreation():
     event.setValue("EventElev", 0)
     event.latLonAzElToLatLonLatLon()
     success = success if event.azim == 270 and event.elev == 45 else False
-    success = success if gcdistdeg(45, 179, event.lat, event.lon) < 0.1 else False
-    success = success if gcdistdeg(45, 178, event.lat2, event.lon2) < 0.1 else False
+    success = success if gcDistDeg(45, 179, event.lat, event.lon) < 0.1 else False
+    success = success if gcDistDeg(45, 178, event.lat2, event.lon2) < 0.1 else False
     success = success if abs(event.ht - 101) < 0.1 else False
     success = success if abs(event.ht2 - 20) < 0.1 else False
 
@@ -2279,9 +2279,9 @@ def testEventCreation():
     event.latLonAzElToLatLonLatLon()
     success = success if event.azim == 1 and event.elev == 45 else False
 
-    success = success if gcdistdeg(44.99, 179, event.lat, event.lon) < 0.1 else False
+    success = success if gcDistDeg(44.99, 179, event.lat, event.lon) < 0.1 else False
 
-    success = success if gcdistdeg(45.722, 179.018, event.lat2, event.lon2) < 0.1 else False
+    success = success if gcDistDeg(45.722, 179.018, event.lat2, event.lon2) < 0.1 else False
     success = success if abs(event.ht - 101) < 0.1 else False
     success = success if abs(event.ht2 - 20) < 0.1 else False
 
@@ -2292,8 +2292,8 @@ def testEventCreation():
     event.latLonAzElToLatLonLatLon()
 
     success = success if event.azim == -1 and event.elev == 45 else False
-    success = success if gcdistdeg(44.99, 179, event.lat, event.lon) < 0.1 else False
-    success = success if gcdistdeg(45.722, 179, event.lat2, event.lon2) < 0.1 else False
+    success = success if gcDistDeg(44.99, 179, event.lat, event.lon) < 0.1 else False
+    success = success if gcDistDeg(45.722, 179, event.lat2, event.lon2) < 0.1 else False
     success = success if abs(event.ht - 101) < 0.1 else False
     success = success if abs(event.ht2 - 20) < 0.1 else False
 
@@ -2306,8 +2306,8 @@ def testEventCreation():
 
     success = success if event.azim == 30 and event.elev == 78 else False
     success = success if event.azim == 30 and event.elev == 78 else False
-    success = success if gcdistdeg(44.998, 178.998, event.lat, event.lon) < 0.1 else False
-    success = success if gcdistdeg(45.132, 179.108, event.lat2, event.lon2) < 0.1 else False
+    success = success if gcDistDeg(44.998, 178.998, event.lat, event.lon) < 0.1 else False
+    success = success if gcDistDeg(45.132, 179.108, event.lat2, event.lon2) < 0.1 else False
     success = success if abs(event.ht - 101) < 0.1 else False
     success = success if abs(event.ht2 - 20) < 0.1 else False
 
@@ -2363,8 +2363,8 @@ def testApplyCartesianSD():
     lat,lon,ht = ecef2LatLonAlt(xmn,ymn,zmn)
     lat2, lon2, ht2 = ecef2LatLonAlt(x2mn+50, y2mn+50 , z2mn+50 )
     lat, lon, lat2, lon2 = np.degrees(lat) , np.degrees(lon),np.degrees(lat2), np.degrees(lon2)
-    success = success if gcdistdeg(lat, lon, event.lat, event.lon) < 0.1 else False
-    success = success if gcdistdeg(lat2, lon2, event.lat2, event.lon2) < 0.1 else False
+    success = success if gcDistDeg(lat, lon, event.lat, event.lon) < 0.1 else False
+    success = success if gcDistDeg(lat2, lon2, event.lat2, event.lon2) < 0.1 else False
     success = success if abs(e.ht - ht/1000) < 10 and (e.ht2 -  ht2/1000) < 10 else False
     return success
 
@@ -2418,8 +2418,8 @@ def testApplyPolarSD():
     lat1mn, lon1mn, ht1mn = statistics.mean(lat1l), statistics.mean(lon1l), statistics.mean(ht1l)
     lat2mn, lon2mn, ht2mn = statistics.mean(lat2l), statistics.mean(lon2l), statistics.mean(ht2l)
 
-    success = success if gcdistdeg(lat1mn, lon1mn, event.lat, event.lon) < 0.1 else False
-    success = success if gcdistdeg(lat2mn, lon2mn, event.lat2, event.lon2) < 0.1 else False
+    success = success if gcDistDeg(lat1mn, lon1mn, event.lat, event.lon) < 0.1 else False
+    success = success if gcDistDeg(lat2mn, lon2mn, event.lat2, event.lon2) < 0.1 else False
     success = success if abs(e.ht - ht1mn) < 5 and (e.ht2 - ht2mn) < 10 else False
     return success
 
@@ -2464,7 +2464,7 @@ def testIndividuals():
         log.error("hasPolarSD failed tests")
         individuals_success = False
 
-    if abs(gcdistdeg(31.7,26.3,45.1,31.2) - 1549.2) < 0.5:
+    if abs(gcDistDeg(31.7, 26.3, 45.1, 31.2) - 1549.2) < 0.5:
         log.info("GC Dist passed test")
     else:
         log.error("GC Dist failed test")
