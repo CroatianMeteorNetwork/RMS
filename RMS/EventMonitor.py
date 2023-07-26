@@ -1531,9 +1531,9 @@ class EventMonitor(multiprocessing.Process):
         # convert bins to MP4
         for file in file_list:
             if file.endswith(".bin"):
-
+                fr_file = os.path.join(this_event_directory, convertFRNameToFF(os.path.basename(file)))
                 try:
-                    view(this_event_directory, convertFRNameToFF(os.path.basename(file)), file, self.syscon, hide=True, add_timestamp=True, extract_format="mp4")
+                    view(this_event_directory, fr_file, file, self.syscon, hide=True, add_timestamp=True, extract_format="mp4")
                 except:
                     log.error("Converting {} to mp4 failed".format(file))
                     log.error("this_event_directory {}".format(this_event_directory))
