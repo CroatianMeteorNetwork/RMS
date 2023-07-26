@@ -1534,7 +1534,7 @@ class EventMonitor(multiprocessing.Process):
                 ff_file = convertFRNameToFF(os.path.basename(file))
                 try:
                     log.info("this_event_directory {}".format(this_event_directory))
-                    log.info("ff_file {}, fr_file {}".format(ff_file, fr_file))
+                    log.info("ff_file {}, fr_file {}".format(ff_file, file))
                     view(this_event_directory, ff_file, file, self.syscon, hide=True, add_timestamp=True, extract_format="mp4")
                 except:
                     log.error("Converting {} to mp4 failed".format(file))
