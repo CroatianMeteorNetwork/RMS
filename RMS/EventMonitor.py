@@ -1149,7 +1149,8 @@ class EventMonitor(multiprocessing.Process):
                     value = line.split(":")[1].strip()  # get value
                     event.setValue(variable_name, value)  # and put into this event container
                 except:
-                    pass
+                    log.error("Unable to read line from webpage...")
+                    log.error("{}".format(line))
 
             else:
                 if "END" in line:
