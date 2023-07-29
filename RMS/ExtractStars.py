@@ -89,7 +89,6 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
         neighborhood_size = config.neighborhood_size
         intensity_threshold = config.intensity_threshold
         
-
     # Load the FF bin file
     ff = FFfile.read(ff_dir, ff_name)
 
@@ -184,6 +183,7 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     fwhm = 2.355*sigma_fitted
 
 
+    log.info('extracted ' + str(len(xy)) + ' stars from ' + ff_name)
     return ff_name, x2, y2, amplitude, intensity, fwhm
 
 
