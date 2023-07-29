@@ -434,7 +434,7 @@ class QueuedPool(object):
 
                 # If the queue has been idle for too long, kill it
                 if (time.time() - output_qsize_last_change) > worker_timeout:
-                    self.printAndLog('One of the workers got stuck longer than {:.1f} seconds, killing multiprocessing...'.format(worker_timeout))
+                    self.printAndLog('One of the workers got stuck longer than {:.1f} seconds, killing multiprocessing...'.format(float(worker_timeout)))
 
                     self.printAndLog('Terminating pool...')
                     self.pool.terminate()
