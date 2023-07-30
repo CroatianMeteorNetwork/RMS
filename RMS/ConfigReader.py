@@ -353,9 +353,9 @@ class Config:
         # 1 - Normal, 2 - Skip uploading FFs, 3 - Skip FFs and FRs
         self.upload_mode = 1
 
-        self.event_monitor_enabled = False
+        self.event_monitor_enabled = True
         self.event_monitor_db_name = "event_monitor.db"
-        self.event_monitor_webpage = "https://globalmeteornetwork.org/data/event_watchlist.txt"
+        self.event_monitor_webpage = "https://globalmeteornetwork.org/events/event_watchlist.txt"
         self.event_monitor_remote_dir = "files/event_monitor"
         self.event_monitor_check_interval = 30
         self.event_monitor_check_interval_fast = 5
