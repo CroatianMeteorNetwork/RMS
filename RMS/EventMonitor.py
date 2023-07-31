@@ -24,7 +24,6 @@ import multiprocessing
 import RMS.ConfigReader as cr
 import urllib.request
 import os
-import socket
 import shutil
 import time
 import copy
@@ -287,24 +286,14 @@ class EventContainer(object):
             [vector] ECEF vector
         """
 
-        v1 = latLonAlt2ECEF(np.radians(self.lat), np.radians(self.lon), self.ht*1000)
-        v2 = latLonAlt2ECEF(np.radians(self.lat2), np.radians(self.lon2), self.ht2*1000)
+        v1 = latLonAlt2ECEFDeg(self.lat, self.lon, self.ht * 1000)
+        v2 = latLonAlt2ECEFDeg(self.lat2, self.lon2, self.ht2 * 1000)
 
         return [v1, v2]
 
-    def ecefV2LatLonAlt(self, ecef_vect):
 
-        """
-        Convert ECEF vector (meters) to lat(deg),lon(deg),ht(km)
 
-        arguments: ecef_vector
 
-        returns: lat,lon,ht
-
-        """
-
-        lat, lon, ht = ecef2LatLonAlt(ecef_vect[0], ecef_vect[1], ecef_vect[2])
-        return np.degrees(lat), np.degrees(lon), ht / 1000
 
     def applyCartesianSDToPoint(self, pt, std):
 
@@ -336,8 +325,8 @@ class EventContainer(object):
             for tr in population:
                 start_vect = self.applyCartesianSDToPoint(ecef_vector[0], self.cart_std)
                 end_vect = self.applyCartesianSDToPoint(ecef_vector[1], self.cart2_std)
-                tr.lat, tr.lon, tr.ht = self.ecefV2LatLonAlt(start_vect)
-                tr.lat2, tr.lon2, tr.ht2 = self.ecefV2LatLonAlt(end_vect)
+                tr.lat, tr.lon, tr.ht = ecefV2LatLonAlt(start_vect)
+                tr.lat2, tr.lon2, tr.ht2 = ecefV2LatLonAlt(end_vect)
 
         return population
 
@@ -520,22 +509,8 @@ class EventContainer(object):
 
         return population
 
-    def revAz(self, azim):
 
-        """
-        Reverse an azimuth by normalising and reversing
 
-        arguments:
-            azim: [float] azimuth in degrees
-        returns:
-            azim_rev: [float] azimuth in the reverse direction in degrees
-
-        """
-
-        azim_nrm = azim % 360
-        azim_rev = azim_nrm + 180 if azim_nrm < 180 else azim_nrm - 180
-
-        return azim_rev
 
     def adjustTrajectoryLimits(self, bwd_range, fwd_range, obs_lat, obs_lon, obs_ht):
 
@@ -559,7 +534,7 @@ class EventContainer(object):
         """
 
         # Move event start point back to intersection with max_lum_flt_ht
-        self.lat, self.lon, ht_m = AER2LatLonAlt(self.revAz(self.azim), self.elev, bwd_range, obs_lat, obs_lon, obs_ht)
+        self.lat, self.lon, ht_m = AER2LatLonAlt(revAz(self.azim), self.elev, bwd_range, obs_lat, obs_lon, obs_ht)
         # Calculate end point of trajectory and convert to km
         self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obs_lat, obs_lon, obs_ht)
 
@@ -604,9 +579,9 @@ class EventContainer(object):
 
         # Post calculation checks - not required for operation
         # Convert to ECEF
-        x1, y1, z1 = latLonAlt2ECEF(np.radians(self.lat), np.radians(self.lon), self.ht * 1000)
-        x2, y2, z2 = latLonAlt2ECEF(np.radians(self.lat2), np.radians(self.lon2), self.ht2 * 1000)
-        x_obs, y_obs, z_obs = latLonAlt2ECEF(np.radians(obs_lat), np.radians(obs_lon), obs_ht)
+        x1, y1, z1 = latLonAlt2ECEFDeg(self.lat, self.lon, self.ht * 1000)
+        x2, y2, z2 = latLonAlt2ECEFDeg(self.lat2, self.lon2, self.ht2 * 1000)
+        x_obs, y_obs, z_obs = latLonAlt2ECEFDeg(obs_lat, obs_lon, obs_ht)
 
         # Calculate vectors of three points on trajectory
         max_pt, min_pt, obs_pt = np.array([x1, y1, z1]), np.array([x2, y2, z2]), np.array([x_obs, y_obs, z_obs])
@@ -625,7 +600,7 @@ class EventContainer(object):
             log.error("Error in Azimuth calculations")
             log.error("Observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obs_lat, obs_lon, obs_ht))
             log.error("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
-            log.error("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim, self.revAz(self.azim) , self.elev))
+            log.error("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim, revAz(self.azim) , self.elev))
             log.error("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon, self.ht * 1000))
             log.error("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2, self.ht2 * 1000))
             log.error("Minimum height to Observed height az,el {},{}".format(min_obs_az, min_obs_el))
@@ -638,7 +613,7 @@ class EventContainer(object):
             log.error("Error in Elevation calculations")
             log.error("Traj from observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obs_lat, obs_lon, obs_ht))
             log.error("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
-            log.error("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim, self.revAz(self.azim), self.elev))
+            log.error("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim, revAz(self.azim), self.elev))
             log.error("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon, self.ht * 1000))
             log.error("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2, self.ht2 * 1000))
             log.error("Minimum height to Observed height az,el {},{}".format(min_obs_az, min_obs_el))
@@ -658,13 +633,11 @@ class EventContainer(object):
             azimuth(degrees), elevation(degrees)
         """
 
-        x1, y1, z1 = latLonAlt2ECEF(np.radians(self.lat), np.radians(self.lon), self.ht * 1000)
-        x2, y2, z2 = latLonAlt2ECEF(np.radians(self.lat2), np.radians(self.lon2), self.ht2 * 1000)
+        x1, y1, z1 = latLonAlt2ECEFDeg(self.lat, self.lon, self.ht * 1000)
+        x2, y2, z2 = latLonAlt2ECEFDeg(self.lat2, self.lon2, self.ht2 * 1000)
         start_pt, end_pt = np.array([x1, y1, z1]), np.array([x2, y2, z2])
         end_start_az, end_start_el = ECEF2AltAz(end_pt, start_pt)
-        return self.revAz(end_start_az), end_start_el
-
-
+        return revAz(end_start_az), end_start_el
 
 class EventMonitor(multiprocessing.Process):
 
@@ -1433,15 +1406,15 @@ class EventMonitor(multiprocessing.Process):
         points_in_fov = 0
         for i in range(0, 100):
             point = (stapt_rel + i * traj_inc)
-            point_fov = np.degrees(angularSeparationVect(vectNorm(point), vectNorm(fov_vec)))
+            point_fov = angularSeparationVectDeg(vectNorm(point), vectNorm(fov_vec))
             if point_fov < diagonal_fov / 2:
                 points_in_fov += 1
 
         # calculate some additional information for confidence
         start_distance = (np.sqrt(np.sum(stapt_rel ** 2)))
-        start_angle = math.degrees(angularSeparationVect(vectNorm(stapt_rel), vectNorm(fov_vec)))
+        start_angle = angularSeparationVectDeg(vectNorm(stapt_rel), vectNorm(fov_vec))
         end_distance = (np.sqrt(np.sum(endpt_rel ** 2)))
-        end_angle = math.degrees(angularSeparationVect(vectNorm(endpt_rel), vectNorm(fov_vec)))
+        end_angle = angularSeparationVectDeg(vectNorm(endpt_rel), vectNorm(fov_vec))
 
         return points_in_fov, start_distance, start_angle, end_distance, end_angle, fov_ra, fov_dec
 
@@ -1671,7 +1644,7 @@ class EventMonitor(multiprocessing.Process):
             # Add trajectories with elevations from observed value to 15 deg
             if observed_event.elev_is_max:
                 log.info("Rotating trajectory around observed point")
-                event_population = self.addElevationRange(event_population, observed_event, 15)
+                event_population = observed_event.addElevationRange(event_population, observed_event, 15)
 
             # Start testing trajectories from the population
             for event in event_population:
@@ -1827,6 +1800,32 @@ class EventMonitor(multiprocessing.Process):
             if self.check_interval < self.syscon.event_monitor_check_interval:
                 self.check_interval = self.check_interval * 1.1
 
+
+def latLonAlt2ECEFDeg(lat, lon, h):
+    """ Convert geographical coordinates to Earth centered - Earth fixed coordinates.
+
+    Arguments:
+        lat: [float] latitude in degrees (+north)
+        lon: [float] longitude in degrees (+east)
+        h: [float] elevation in metres (WGS84)
+
+    Return:
+        (x, y, z): [tuple of floats] ECEF coordinates
+
+    """
+
+    # Call library function, after converting to radians
+    return latLonAlt2ECEF(np.radians(lat), np.radians(lon), h)
+
+def angularSeparationVectDeg(vect1, vect2):
+    """ Calculates angle between vectors in radians.
+        Uses library function, but converts return to degrees"""
+
+    return np.degrees(angularSeparationVect(vect1,vect2))
+
+
+
+
 def calculateClosestPoint(beg_lat, beg_lon, beg_ele, end_lat, end_lon, end_ele, ref_lat, ref_lon, ref_ele):
 
         """
@@ -1854,9 +1853,9 @@ def calculateClosestPoint(beg_lat, beg_lon, beg_ele, end_lat, end_lon, end_ele, 
         """
 
         # Convert coordinates to ECEF
-        beg_ecef = np.array(latLonAlt2ECEF(np.radians(beg_lat), np.radians(beg_lon), beg_ele))
-        end_ecef = np.array(latLonAlt2ECEF(np.radians(end_lat), np.radians(end_lon), end_ele))
-        ref_ecef = np.array(latLonAlt2ECEF(np.radians(ref_lat), np.radians(ref_lon), ref_ele))
+        beg_ecef = np.array(latLonAlt2ECEFDeg(beg_lat, beg_lon, beg_ele))
+        end_ecef = np.array(latLonAlt2ECEFDeg(end_lat, end_lon, end_ele))
+        ref_ecef = np.array(latLonAlt2ECEFDeg(ref_lat, ref_lon, ref_ele))
 
         traj_vec = vectNorm(end_ecef - beg_ecef)
         start_vec, end_vec = (ref_ecef - beg_ecef), (ref_ecef - end_ecef)
@@ -1878,6 +1877,39 @@ def calculateClosestPoint(beg_lat, beg_lon, beg_ele, end_lat, end_lon, end_ele, 
             closest_dist = start_dist
 
         return start_dist, end_dist, closest_dist
+
+
+
+
+def revAz(azim):
+
+    """
+        Reverse an azimuth by normalising and reversing
+
+        arguments:
+            azim: [float] azimuth in degrees
+        returns:
+            azim_rev: [float] azimuth in the reverse direction in degrees
+
+        """
+
+    azim_nrm = azim % 360
+    azim_rev = azim_nrm + 180 if azim_nrm < 180 else azim_nrm - 180
+    return azim_rev
+
+
+def ecefV2LatLonAlt(ecef_vect):
+    """
+        Convert ECEF vector (meters) to lat(deg),lon(deg),ht(km)
+
+        arguments: ecef_vector
+
+        returns: lat,lon,ht
+
+        """
+
+    lat, lon, ht = ecef2LatLonAlt(ecef_vect[0], ecef_vect[1], ecef_vect[2])
+    return np.degrees(lat), np.degrees(lon), ht / 1000
 
 def randomword(length):
 
@@ -2076,10 +2108,10 @@ def testRevAz():
 
     for test in range(3000):
         test_azim = random.uniform(-5000,5000)
-        success = success if angDif(test_azim, t.revAz(test_azim)) == 180 else False
+        success = success if angDif(test_azim, revAz(test_azim)) == 180 else False
         if not success:
             return False
-            break
+
 
     return success
 
@@ -2201,10 +2233,9 @@ def testEventToECEFVector():
 
         v1,v2 = t.eventToECEFVector()
         lat,lon,ht = ecef2LatLonAlt(v1[0],v1[1],v1[2])
-        lat,lon, ht = np.degrees(lat), np.degrees(lon), ht / 1000
         lat2, lon2, ht2 = ecef2LatLonAlt(v2[0], v2[1], v2[2])
-        lat2, lon2, ht2 = np.degrees(lat2), np.degrees(lon2), ht2 / 1000
-
+        ht, ht2 = ht / 1000, ht2 / 1000
+        lat, lon, lat2, lon2 = np.degrees(lat), np.degrees(lon), np.degrees(lat2), np.degrees(lon2)
 
         success = success if gcDistDeg(iLat, iLon, lat, lon) < 0.1  else False
         success = success if gcDistDeg(iLat2, iLon2, lat2, lon2) < 0.1 else False
@@ -2337,10 +2368,11 @@ def testApplyCartesianSD():
     x1l,y1l,z1l = [],[],[]
     x2l,y2l,z2l = [],[],[]
 
+    e = event
     for e in event_population:
 
-        x1, y1, z1 = latLonAlt2ECEF(np.radians(e.lat),np.radians(e.lon),e.ht * 1000)
-        x2, y2, z2 = latLonAlt2ECEF(np.radians(e.lat2), np.radians(e.lon2), e.ht2 * 1000)
+        x1, y1, z1 = latLonAlt2ECEFDeg(e.lat, e.lon, e.ht * 1000)
+        x2, y2, z2 = latLonAlt2ECEFDeg(e.lat2, e.lon2, e.ht2 * 1000)
         x1l.append(x1)
         y1l.append(y1)
         z1l.append(z1)
@@ -2389,6 +2421,7 @@ def testApplyPolarSD():
     lat1l,lon1l,ht1l = [],[],[]
     lat2l,lon2l,ht2l = [],[],[]
 
+    e = event
     for e in event_population:
 
         lat1l.append(e.lat)
@@ -2511,7 +2544,7 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="""Check a web page for trajectories, and upload relevant data. \
         """, formatter_class=argparse.RawTextHelpFormatter)
 
-    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
                             help="Path to a config file which will be used instead of the default one.")
 
     arg_parser.add_argument('-o', '--oneshot', dest='one_shot', default=False, action="store_true",
