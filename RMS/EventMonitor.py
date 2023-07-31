@@ -475,6 +475,51 @@ class EventContainer(object):
 
         return bwd_range, fwd_range
 
+    def addElevationRange(self, population, ob_ev, min_elevation):
+
+        """
+        Take a single observed point on a trajectory, and a minimum elevation
+        Create a population of trajectories from the min_elevation through to observed elevation
+        in steps of 1 degree.
+
+        The trajectories pivot around the observed lat, lon and height, and this function checks that
+        this point is close to all the produced trajectories
+
+        arguments:
+            population: [list] list of trajectories to be appended to
+            ob_ev: An observed event, specified as a lat (degrees), lon (degress), ht (km) and elevation (degrees)
+            min_elevation: [degrees] observed elevation, which will always be the minimum
+
+        returns:
+            population: [list] list of trajectories
+
+        """
+
+
+        ob_ev.azim, ob_ev.elev = ob_ev.latLonlatLonToLatLonAzEl()
+        for elev in range(min_elevation, int(ob_ev.elev), 1):
+            s = copy.copy(ob_ev)
+            s.elev = elev
+            s.latLonAzElToLatLonLatLon(force=True)
+            population.append(s)
+            ch_az, ch_el = s.latLonlatLonToLatLonAzEl()
+            start, end, closest = calculateClosestPoint(s.lat, s.lon, s.ht * 1000, s.lat2, s.lon2, s.ht2 * 1000,
+                                                        ob_ev.lat, ob_ev.lon, ob_ev.ht * 1000)
+            start, end, closest = start / 1000, end / 1000, closest / 1000
+
+            if start > 1000 or end > 1000 or closest > 0.2:
+                log.error("Original             Az, El {:.3f},{:.3f} degrees".format(ob_ev.azim, ob_ev.elev))
+                log.error("Final                Az, El {:.3f},{:.3f} degrees".format(ch_az, ch_el))
+                log.error("Final    Start Lat,Lon,Alt  {:.3f},{:.3f},{:.3f}".format(s.lat, s.lon, s.ht))
+                log.error("Original Start Lat,Lon,Alt  {:.3f},{:.3f},{:.3f}".format(ob_ev.lat, ob_ev.lon, ob_ev.ht))
+                log.error("Original End   Lat,Lon,Alt  {:.3f},{:.3f},{:.3f}".format(ob_ev.lat2, ob_ev.lon2, ob_ev.ht2))
+                log.error("Final    End   Lat,Lon,Alt  {:.3f},{:.3f},{:.3f}".format(s.lat2, s.lon2, s.ht2))
+                log.error("Distance from original start to trajectory")
+                log.error("Start, End, Closest, Elev {:.2f},{:.2f},{:.2f},{:.2f}".format(start, end, closest, ch_el))
+            pass
+
+        return population
+
     def revAz(self, azim):
 
         """
@@ -618,6 +663,7 @@ class EventContainer(object):
         start_pt, end_pt = np.array([x1, y1, z1]), np.array([x2, y2, z2])
         end_start_az, end_start_el = ECEF2AltAz(end_pt, start_pt)
         return self.revAz(end_start_az), end_start_el
+
 
 
 class EventMonitor(multiprocessing.Process):
@@ -1333,57 +1379,7 @@ class EventMonitor(multiprocessing.Process):
 
         return file_list
 
-    def calculateClosestPoint(self, beg_lat, beg_lon, beg_ele, end_lat, end_lon, end_ele, ref_lat, ref_lon, ref_ele):
 
-        """
-        Calculate the closest approach of a trajectory to a reference point
-
-        refer to https://globalmeteornetwork.groups.io/g/main/topic/96374390#8250
-
-
-        Args:
-            beg_lat: [float] Starting latitude of the trajectory
-            beg_lon: [float] Starting longitude of the trajectory
-            beg_ele: [float] Beginning height of the trajectory
-            end_lat: [float] Ending latitude of the trajectory
-            end_lon: [float] Ending longitude of the trajectory
-            end_ele: [float] Ending height of the trajectory
-            ref_lat: [float] Station latitude
-            ref_lon: [float] Station longitude
-            ref_ele: [float] Station height
-
-        Returns:
-            start_dis: Distance from station to start of trajectory
-            end_dist: Distance from station to end of trajectory
-            closest_dist: Distance at the closest point (possibly outside the start and end)
-
-        """
-
-        # Convert coordinates to ECEF
-        beg_ecef = np.array(latLonAlt2ECEF(np.radians(beg_lat), np.radians(beg_lon), beg_ele))
-        end_ecef = np.array(latLonAlt2ECEF(np.radians(end_lat), np.radians(end_lon), end_ele))
-        ref_ecef = np.array(latLonAlt2ECEF(np.radians(ref_lat), np.radians(ref_lon), ref_ele))
-
-        traj_vec = vectNorm(end_ecef - beg_ecef)
-        start_vec, end_vec = (ref_ecef - beg_ecef), (ref_ecef - end_ecef)
-        start_dist, end_dist = (np.sqrt((np.sum(start_vec ** 2)))), (np.sqrt((np.sum(end_vec ** 2))))
-
-        # Consider whether vector is zero length by looking at start and end
-        if [beg_lat, beg_lon, beg_ele] != [end_lat, end_lon, end_ele]:
-
-            # Vector start and end points are different, calculate the projection of the ref vect onto the traj vector
-            proj_vec = beg_ecef + np.dot(start_vec, traj_vec) * traj_vec
-
-            # Hence, calculate the vector at the nearest point, and the closest distance
-            closest_vec = ref_ecef - proj_vec
-            closest_dist = (np.sqrt(np.sum(closest_vec ** 2)))
-
-        else:
-
-            # Vector has zero length, do not try to calculate projection
-            closest_dist = start_dist
-
-        return start_dist, end_dist, closest_dist
 
     def trajectoryVisible(self, rp, event):
 
@@ -1603,52 +1599,7 @@ class EventMonitor(multiprocessing.Process):
             shutil.rmtree(event_monitor_directory)
         return upload_status
 
-    def addElevationRange(self, population, ob_ev, min_elevation):
 
-        """
-        Take a single observed point on a trajectory, and a minimum elevation
-        Create a population of trajectories from the min_elevation through to observed elevation
-        in steps of 1 degree.
-
-        The trajectories pivot around the observed lat, lon and height, and this function checks that
-        this point is close to all the produced trajectories
-
-        arguments:
-            population: [list] list of trajectories to be appended to
-            ob_ev: An observed event, specified as a lat (degrees), lon (degress), ht (km) and elevation (degrees)
-            min_elevation: [degrees] observed elevation, which will always be the minimum
-
-        returns:
-            population: [list] list of trajectories
-
-
-
-        """
-
-
-        ob_ev.azim, ob_ev.elev = ob_ev.latLonlatLonToLatLonAzEl()
-        for elev in range(min_elevation, int(ob_ev.elev), 1):
-            s = copy.copy(ob_ev)
-            s.elev = elev
-            s.latLonAzElToLatLonLatLon(force = True)
-            population.append(s)
-            ch_az,ch_el = s.latLonlatLonToLatLonAzEl()
-            start, end, closest = self.calculateClosestPoint(s.lat, s.lon, s.ht * 1000, s.lat2, s.lon2, s.ht2 * 1000,
-                                                             ob_ev.lat, ob_ev.lon, ob_ev.ht * 1000)
-            start, end, closest = start/1000, end / 1000, closest / 1000
-
-            if start>1000 or end>1000 or closest > 0.2:
-                log.error("Original             Az, El {:.3f},{:.3f} degrees".format(ob_ev.azim, ob_ev.elev))
-                log.error("Final                Az, El {:.3f},{:.3f} degrees".format(ch_az, ch_el))
-                log.error("Final    Start Lat,Lon,Alt  {:.3f},{:.3f},{:.3f}".format(s.lat, s.lon, s.ht))
-                log.error("Original Start Lat,Lon,Alt  {:.3f},{:.3f},{:.3f}".format(ob_ev.lat, ob_ev.lon, ob_ev.ht))
-                log.error("Original End   Lat,Lon,Alt  {:.3f},{:.3f},{:.3f}".format(ob_ev.lat2, ob_ev.lon2, ob_ev.ht2))
-                log.error("Final    End   Lat,Lon,Alt  {:.3f},{:.3f},{:.3f}".format(s.lat2, s.lon2, s.ht2))
-                log.error("Distance from original start to trajectory")
-                log.error("Start, End, Closest, Elev {:.2f},{:.2f},{:.2f},{:.2f}".format(start,end,closest, ch_el))
-            pass
-
-        return population
 
     def checkEvents(self, ev_con, test_mode = False):
 
@@ -1729,7 +1680,7 @@ class EventMonitor(multiprocessing.Process):
                     break # do no more work on any version of this trajectory - break exits loop
                 # From the infinitely extended trajectory, work out the closest point to the camera
                 # ev_con.elevation is the height above sea level of the station in metres, no conversion required
-                start_dist, end_dist, atmos_dist = self.calculateClosestPoint(event.lat, event.lon, event.ht * 1000,
+                start_dist, end_dist, atmos_dist = calculateClosestPoint(event.lat, event.lon, event.ht * 1000,
                                                                               event.lat2, event.lon2, event.ht2 * 1000,
                                                                               ev_con.latitude, ev_con.longitude, ev_con.elevation)
                 min_dist = min([start_dist, end_dist, atmos_dist])
@@ -1876,7 +1827,57 @@ class EventMonitor(multiprocessing.Process):
             if self.check_interval < self.syscon.event_monitor_check_interval:
                 self.check_interval = self.check_interval * 1.1
 
+def calculateClosestPoint(beg_lat, beg_lon, beg_ele, end_lat, end_lon, end_ele, ref_lat, ref_lon, ref_ele):
 
+        """
+        Calculate the closest approach of a trajectory to a reference point
+
+        refer to https://globalmeteornetwork.groups.io/g/main/topic/96374390#8250
+
+
+        Args:
+            beg_lat: [float] Starting latitude of the trajectory
+            beg_lon: [float] Starting longitude of the trajectory
+            beg_ele: [float] Beginning height of the trajectory
+            end_lat: [float] Ending latitude of the trajectory
+            end_lon: [float] Ending longitude of the trajectory
+            end_ele: [float] Ending height of the trajectory
+            ref_lat: [float] Station latitude
+            ref_lon: [float] Station longitude
+            ref_ele: [float] Station height
+
+        Returns:
+            start_dis: Distance from station to start of trajectory
+            end_dist: Distance from station to end of trajectory
+            closest_dist: Distance at the closest point (possibly outside the start and end)
+
+        """
+
+        # Convert coordinates to ECEF
+        beg_ecef = np.array(latLonAlt2ECEF(np.radians(beg_lat), np.radians(beg_lon), beg_ele))
+        end_ecef = np.array(latLonAlt2ECEF(np.radians(end_lat), np.radians(end_lon), end_ele))
+        ref_ecef = np.array(latLonAlt2ECEF(np.radians(ref_lat), np.radians(ref_lon), ref_ele))
+
+        traj_vec = vectNorm(end_ecef - beg_ecef)
+        start_vec, end_vec = (ref_ecef - beg_ecef), (ref_ecef - end_ecef)
+        start_dist, end_dist = (np.sqrt((np.sum(start_vec ** 2)))), (np.sqrt((np.sum(end_vec ** 2))))
+
+        # Consider whether vector is zero length by looking at start and end
+        if [beg_lat, beg_lon, beg_ele] != [end_lat, end_lon, end_ele]:
+
+            # Vector start and end points are different, calculate the projection of the ref vect onto the traj vector
+            proj_vec = beg_ecef + np.dot(start_vec, traj_vec) * traj_vec
+
+            # Hence, calculate the vector at the nearest point, and the closest distance
+            closest_vec = ref_ecef - proj_vec
+            closest_dist = (np.sqrt(np.sum(closest_vec ** 2)))
+
+        else:
+
+            # Vector has zero length, do not try to calculate projection
+            closest_dist = start_dist
+
+        return start_dist, end_dist, closest_dist
 
 def randomword(length):
 
