@@ -1023,7 +1023,7 @@ def computeClearSkyTimeIntervals(cloud_ratio_dict, ratio_threshold=0.5, time_gap
 
 
 def detectMoon(file_list, platepar, config):
-    """ If moon is within 3 degrees of the FOV and the phase of the moon is above 25% then the moon
+    """ If moon is within 15 degrees of the FOV and the phase of the moon is above 25% then the moon
     is visible in view, and a picture with the moon in it will not be used
 
     Arguments:
@@ -1034,6 +1034,7 @@ def detectMoon(file_list, platepar, config):
     Returns:
         new_file_list: [list] FF file list which don't have a moon in it
     """
+    
     # setting up observer
     o = ephem.Observer()
     o.lat = str(config.latitude)
@@ -1114,8 +1115,8 @@ def detectMoon(file_list, platepar, config):
             x = x[0]
             y = y[0]
 
-            # Compute the exclusion border in pixels (5 degrees)
-            border = 5*platepar.F_scale
+            # Compute the exclusion border in pixels (15 degrees)
+            border = 15*platepar.F_scale
 
             if not (
                 ((x > -border) and (x < platepar.X_res + border))
