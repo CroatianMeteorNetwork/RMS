@@ -1023,7 +1023,7 @@ def computeClearSkyTimeIntervals(cloud_ratio_dict, ratio_threshold=0.5, time_gap
 
 
 def detectMoon(file_list, platepar, config):
-    """ If moon is within 15 degrees of the FOV and the phase of the moon is above 25% then the moon
+    """ If moon is within 25 degrees of the FOV and the phase of the moon is above 25% then the moon
     is visible in view, and a picture with the moon in it will not be used
 
     Arguments:
@@ -1036,7 +1036,7 @@ def detectMoon(file_list, platepar, config):
     """
 
     # Minimum distance between the Moon and the camera FOV
-    min_moon_ang_dist = 15
+    min_moon_ang_dist = 25
 
     # Setting up observer
     o = ephem.Observer()
