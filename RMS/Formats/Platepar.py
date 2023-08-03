@@ -998,6 +998,13 @@ class Platepar(object):
             # Add the default vignetting coeff
             self.addVignettingCoeff(use_flat=use_flat)
 
+        # Limit the vignetting coefficient in case a too high value was set
+        if self.vignetting_coeff is not None:
+
+            self.vignetting_coeff = RMS.Astrometry.ApplyAstrometry.limitVignettingCoefficient(
+                self.X_res, self.Y_res, self.vignetting_coeff
+                )
+
         # Add keeping the vignetting coefficient fixed
         if not 'vignetting_fixed' in self.__dict__:
             self.vignetting_fixed = False
@@ -1320,6 +1327,13 @@ class Platepar(object):
             # self.alt_centre = np.degrees(pyRefractionTrueToApparent(np.radians(self.alt_centre)))
 
             self.updateRefRADec(preserve_rotation=True)
+
+
+    def rotationWrtHorizon(self):
+        """Return the rotation of the camera wrt horizon in degrees."""
+
+        # Compute the rotation of the camera wrt horizon
+        return RMS.Astrometry.ApplyAstrometry.rotationWrtHorizon(self)
 
     def __repr__(self):
 

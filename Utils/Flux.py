@@ -606,7 +606,12 @@ def loadTimeInvervals(config, dir_path):
             time_interval_json = " ".join(f.readlines())
 
             # Load time intervals back in
-            dt_json = json.loads(time_interval_json)
+            try:
+                dt_json = json.loads(time_interval_json)
+
+            except json.decoder.JSONDecodeError:
+                # If loading the JSON file fails, return None
+                return None
 
             # Check that the station ID is correct
             if str(dt_json['stationID']) == str(config.stationID):
@@ -1018,7 +1023,7 @@ def computeClearSkyTimeIntervals(cloud_ratio_dict, ratio_threshold=0.5, time_gap
 
 
 def detectMoon(file_list, platepar, config):
-    """ If moon is within 3 degrees of the FOV and the phase of the moon is above 25% then the moon
+    """ If moon is within 25 degrees of the FOV and the phase of the moon is above 25% then the moon
     is visible in view, and a picture with the moon in it will not be used
 
     Arguments:
@@ -1029,19 +1034,27 @@ def detectMoon(file_list, platepar, config):
     Returns:
         new_file_list: [list] FF file list which don't have a moon in it
     """
-    # setting up observer
+
+    # Minimum distance between the Moon and the camera FOV
+    min_moon_ang_dist = 25
+
+    # Setting up observer
     o = ephem.Observer()
     o.lat = str(config.latitude)
     o.long = str(config.longitude)
     o.elevation = config.elevation
     o.horizon = '0:0'
 
+    # Get the radius of the FOV
     radius = getFOVSelectionRadius(platepar)
+
+
     new_file_list = []
 
-    # going through all ff files to check if moon is in fov
+    # Going through all FF files to check if the Moon is in the FOV
     for filename in file_list:
-        # getting right ascension and declination of middle of fov
+
+        # Getting right ascension and declination of middle of the FOV
         _, ra_mid, dec_mid, _ = xyToRaDecPP(
             [FFfile.getMiddleTimeFF(filename, config.fps)],
             [platepar.X_res/2],
@@ -1061,7 +1074,7 @@ def detectMoon(file_list, platepar, config):
         phase = (o.date - pnm)/(nnm - pnm)  # from 0 to 1 for 360 deg
         lunar_area = 1 - np.abs(2*phase - 1)  # using sawtooth function for fraction of moon visible
 
-        # Calculating angular distance from middle of fov to correct for checking after the xy mapping
+        # Calculating angular distance from middle of FOV to correct for checking after the xy mapping
         angular_distance = np.degrees(angularSeparation(ra_mid, dec_mid, float(m.ra), float(m.dec)))
 
 
@@ -1090,12 +1103,12 @@ def detectMoon(file_list, platepar, config):
             continue
 
         # If it's brighter and up, only take observations when the Moon is outside the FOV
-        elif angular_distance > radius:
+        elif angular_distance > (radius + min_moon_ang_dist):
 
             new_file_list.append(filename)
             continue
 
-        # If it's witin the radius, check that it's not within the actual FOV
+        # If it's within the radius, check that it's not within the actual FOV
         else:
 
             # Compute X, Y coordinates of the Moon in the image
@@ -1109,8 +1122,8 @@ def detectMoon(file_list, platepar, config):
             x = x[0]
             y = y[0]
 
-            # Compute the exclusion border in pixels (5 degrees)
-            border = 5*platepar.F_scale
+            # Compute the exclusion border in pixels
+            border = min_moon_ang_dist*platepar.F_scale
 
             if not (
                 ((x > -border) and (x < platepar.X_res + border))
@@ -1174,7 +1187,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         if ('CALSTARS' in calstars_file) and calstars_file.endswith('.txt'):
             break
     star_list = readCALSTARS(dir_path, calstars_file)
-    print('CALSTARS file: ' + calstars_file + ' loaded!')
+    print('CALSTARS file: {:s} loaded!'.format(calstars_file))
 
 
     # Get FF file every N minutes
@@ -1317,7 +1330,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
 
     # Compute the predicted number of stars on every recalibrated FF file
     predicted_stars = predictStarNumberInFOV(
-        recalibrated_platepars, ff_limiting_magnitude, config, mask, show_plot=show_plots
+        recalibrated_platepars, ff_limiting_magnitude, config, mask=mask, show_plot=show_plots
     )
     # for ff in predicted_stars:
     #     print(ff, matched_count.get(ff), predicted_stars.get(ff), ff_limiting_magnitude.get(ff))

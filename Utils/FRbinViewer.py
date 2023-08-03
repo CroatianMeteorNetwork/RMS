@@ -32,7 +32,7 @@ from RMS.Formats import FFfile, FRbin
 
 
 def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=None, hide=False,
-        avg_background=False, split=False):
+        avg_background=False, split=False, add_timestamp=False):
     """ Shows the detected fireball stored in the FR file. 
     
     Arguments:
@@ -47,14 +47,13 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
         hide: [bool] Don't show frames on the screen.
         avg_background: [bool] Avepixel as background. False by default, in which case the maxpixel will be
             used.
+        split: [bool] Split the video into multiple videos, one for each line. False by default.
+        add_timestamp: [bool] Add timestamp to the image. False by default.
 
     """
 
     if extract_format is None:
         extract_format = 'png'
-
-    else:
-        save_frames = True
     
     name = fr_path
     fr = FRbin.read(dir_path, fr_path)
@@ -131,6 +130,9 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
 
         frame_num = 0
 
+        # Track the first frame
+        first_frame = np.inf
+
         for frame in video:        
         
             img = np.copy(background)
@@ -148,6 +150,10 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
                 size = fr.size[current_line][z]
                 
                 print("  {:3d}, {:3d}, {:3d}, {:d}".format(t, yc, xc, size))
+
+                # Set the first frame
+                if t < first_frame:
+                    first_frame = t
                 
                 # Paste the frames onto the big image
                 y_img = np.arange(yc - size//2, yc + size//2)
@@ -162,11 +168,23 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
 
                 img[Y_img, X_img] = fr.frames[current_line][z][Y_frame, X_frame]
 
+            # Add timestamp
+            if add_timestamp:
+
+                # Put the name of the FR file, followed by the frame number
+                # Put a black shadow
+                cv2.putText(img, fr_path + " frame = {:3d}".format(t), (10, 20), 
+                            fontFace=cv2.FONT_HERSHEY_SIMPLEX , fontScale=0.5, color=[0, 0, 0], 
+                            lineType=cv2.LINE_AA, thickness=2)
+                cv2.putText(img, fr_path + " frame = {:3d}".format(t), (10, 20), 
+                            fontFace=cv2.FONT_HERSHEY_SIMPLEX , fontScale=0.5, color=[255, 255, 255], 
+                            lineType=cv2.LINE_AA, thickness=1)
+
 
             # Save frame to disk
-            if save_frames:
+            if save_frames or makevideo:
                 frame_file_name = fr_path.replace('.bin', '') \
-                    + "_line_{:02d}_frame_{:03d}.{:s}".format(video_num, frame[0][1] if split else frame_num, extract_format)
+                    + "_line_{:02d}_frame_{:03d}.{:s}".format(video_num, t, extract_format)
                 cv2.imwrite(os.path.join(dir_path, frame_file_name), img)
                 framefiles.append(frame_file_name)
                 img_patt = os.path.join(dir_path, fr_path.replace('.bin', '')
@@ -217,16 +235,19 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
                 elif key == ord("q"): 
                     os._exit(0)
 
+
         if makevideo is True:
+
             root = os.path.dirname(__file__)
             ffmpeg_path = os.path.join(root, "ffmpeg.exe")
-            first_frame = video[0][0][1] if split else 0
+            
             mp4_path = os.path.join(dir_path, fr_path.replace('.bin', '') + '_line_{:02d}.mp4'.format(video_num))
 
             # If running on Windows, use ffmpeg.exe
             if platform.system() == 'Windows':
                 com = ffmpeg_path + " -y -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(first_frame) + " -i " + img_patt +" " + mp4_path
-                subprocess.call(com, shell=True, cwd=dir_path)
+                
+
             else:
                 software_name = "avconv"
                 if os.system(software_name + " --help > /dev/null"):
@@ -238,9 +259,18 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
                         + software_name + " -v quiet -r 30 -y -start_number " + str(first_frame) + " -i " + img_patt \
                         + " -vcodec libx264 -pix_fmt yuv420p -crf 25 -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.97)\" " \
                         + mp4_path
-                subprocess.call(com, shell=True, cwd=dir_path)
-            for frame in framefiles:
-                os.remove(os.path.join(dir_path, frame))
+            
+            # Print the command
+            print("Command:")
+            print(com)
+
+            # Run the command
+            subprocess.call(com, shell=True, cwd=dir_path)
+
+            # Delete frames unless the user specified to keep them
+            if not save_frames:
+                for frame in framefiles:
+                    os.remove(os.path.join(dir_path, frame))
 
         video_num += 1
 
@@ -279,6 +309,8 @@ if __name__ == "__main__":
         help="Path to a config file which will be used instead of the default one.")
 
     arg_parser.add_argument('-s', '--split', action="store_true", help="Use legacy mode where lines are displayed one-by-one.")
+
+    arg_parser.add_argument("-t", "--timestamp", action="store_true", help="Show timestamp on the image.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -334,7 +366,8 @@ if __name__ == "__main__":
         
         # View the fireball detection
         retval = view(dir_path, ff_match, fr, config, save_frames=cml_args.extract,
-            extract_format=cml_args.extractformat, hide=cml_args.hide, avg_background=cml_args.avg, split=cml_args.split)
+            extract_format=cml_args.extractformat, hide=cml_args.hide, avg_background=cml_args.avg, 
+            split=cml_args.split, add_timestamp=cml_args.timestamp)
 
         # Return to previous file
         if retval == -1:

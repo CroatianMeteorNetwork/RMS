@@ -23,17 +23,18 @@ from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats import CALSTARS
+from RMS.MLFilter import filterFTPdetectinfoML
 from RMS.UploadManager import UploadManager
 from RMS.Routines.Image import saveImage
 from RMS.Routines.MaskImage import loadMask
 from Utils.CalibrationReport import generateCalibrationReport
 from Utils.Flux import prepareFluxFiles
 from Utils.FOVKML import fovKML
+from Utils.GenerateTimelapse import generateTimelapse
 from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 from Utils.ShowerAssociation import showerAssociation
-from RMS.MLFilter import filterFTPdetectinfoML
 
 
 # Get the logger from the main module
@@ -42,18 +43,18 @@ log = logging.getLogger("logger")
 
 
 def getPlatepar(config, night_data_dir):
-    """ Downloads a new platepar from the server of uses an existing one. 
+    """ Downloads a new platepar from the server of uses an existing one.   
     
-    Arguments:
-        Config: [Config instance]
-        night_data_dir: [str] Full path to the data directory.
+    Arguments:  
+        Config: [Config instance]  
+        night_data_dir: [str] Full path to the data directory.  
 
-    Return:
-        platepar, platepar_path, platepar_fmt
+    Return:  
+        platepar, platepar_path, platepar_fmt  
     """
 
 
-    # Download a new platepar from the server, if present
+    # Download a new platepar from the server, if present  
     downloadNewPlatepar(config)
 
 
@@ -63,7 +64,7 @@ def getPlatepar(config, night_data_dir):
     # Load the default platepar from the RMS if it is available
     platepar = None
     platepar_fmt = None
-    platepar_path = os.path.join(os.getcwd(), config.platepar_name)
+    platepar_path = os.path.join(config.config_file_path, config.platepar_name)
     if os.path.exists(platepar_path):
         platepar = Platepar()
         platepar_fmt = platepar.read(platepar_path, use_flat=config.use_flat)
@@ -124,21 +125,21 @@ def getPlatepar(config, night_data_dir):
 
 
 def processNight(night_data_dir, config, detection_results=None, nodetect=False):
-    """ Given the directory with FF files, run detection and archiving. 
+    """ Given the directory with FF files, run detection and archiving.  
     
-    Arguments:
-        night_data_dir: [str] Path to the directory with FF files.
-        config: [Config obj]
+    Arguments:  
+        night_data_dir: [str] Path to the directory with FF files.  
+        config: [Config obj]  
 
-    Keyword arguments:
+    Keyword arguments:  
         detection_results: [list] An optional list of detection. If None (default), detection will be done
-            on the the files in the folder.
-        nodetect: [bool] True if detection should be skipped. False by default.
+            on the the files in the folder.  
+        nodetect: [bool] True if detection should be skipped. False by default.  
 
-    Return:
-        night_archive_dir: [str] Path to the night directory in ArchivedFiles.
-        archive_name: [str] Path to the archive.
-        detector: [QueuedPool instance] Handle to the detector.
+    Return:  
+        night_archive_dir: [str] Path to the night directory in ArchivedFiles.  
+        archive_name: [str] Path to the archive.  
+        detector: [QueuedPool instance] Handle to the detector.  
     """
 
     # Remove final slash in the night dir
@@ -178,9 +179,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         if config.ml_filter > 0:
 
             log.info("Filtering out detections using machine learning...")
-            
+
             ff_detected = filterFTPdetectinfoML(config, os.path.join(night_data_dir, ftpdetectinfo_name), \
-                threshold=config.ml_filter, keep_pngs=False)
+                threshold=config.ml_filter, keep_pngs=False, clear_prev_run=True)
 
 
         # Get the platepar file
@@ -264,13 +265,16 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 mask_path = None
                 mask = None
 
-                # Try loading the mask
+                # Get the path to the default mask
+                mask_path_default = os.path.join(config.config_file_path, config.mask_file)
+
+                # Try loading the mask from the night directory
                 if os.path.exists(os.path.join(night_data_dir, config.mask_file)):
                     mask_path = os.path.join(night_data_dir, config.mask_file)
 
-                # Try loading the default mask
-                elif os.path.exists(config.mask_file):
-                    mask_path = os.path.abspath(config.mask_file)
+                # Try loading the default mask if the mask is not in the night directory
+                elif os.path.exists(mask_path_default):
+                    mask_path = os.path.abspath(mask_path_default)
 
                 # Load the mask if given
                 if mask_path:
@@ -367,6 +371,30 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         log.info('Making flat image FAILED!')
 
 
+
+    # Generate a timelapse
+    if config.timelapse_generate_captured:
+        
+        log.info('Generating a timelapse...')
+        try:
+
+            # Make the name of the timelapse file
+            timelapse_file_name = night_data_dir_name.replace("_detected", "") + "_timelapse.mp4"
+
+            # Generate the timelapse
+            generateTimelapse(night_data_dir, output_file=timelapse_file_name)
+
+            timelapse_path = os.path.join(night_data_dir, timelapse_file_name)
+
+            # Add the timelapse to the extra files
+            extra_files.append(timelapse_path)
+
+        except Exception as e:
+            log.debug('Generating a timelapse failed with message:\n' + repr(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+
+
     ### Add extra files to archive
 
     # Add the config file to the archive too
@@ -374,8 +402,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     # Add the mask
     if (not nodetect):
-        if os.path.exists(config.mask_file):
-            mask_path = os.path.abspath(config.mask_file)
+        mask_path_default = os.path.join(config.config_file_path, config.mask_file)
+        if os.path.exists(mask_path_default):
+            mask_path = os.path.abspath(mask_path_default)
             extra_files.append(mask_path)
 
 

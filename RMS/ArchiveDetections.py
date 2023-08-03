@@ -195,27 +195,46 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
         # Load the mask for stack
         mask = None
-        if os.path.exists(config.mask_file) and config.stack_mask:
-            mask_path = os.path.abspath(config.mask_file)
+        mask_path_default = os.path.join(config.config_file_path, config.mask_file)
+        if os.path.exists(mask_path_default) and config.stack_mask:
+            mask_path = os.path.abspath(mask_path_default)
             mask = MaskImage.loadMask(mask_path)
-            
 
-        # Make a co-added image of all detection. Filter out possible clouds
-        stack_path, _ = stackFFs(captured_path, 'jpg', deinterlace=(config.deinterlace_order > 0), subavg=True, \
-            filter_bright=True, file_list=sorted(file_list), mask=mask)
 
-        if stack_path is not None:
+        # Make a co-added image of all captured images
+        captured_stack_path, _ = stackFFs(captured_path, 'jpg', deinterlace=(config.deinterlace_order > 0), 
+            subavg=True, mask=mask, captured_stack=True)
 
-            log.info("Stack saved to: {:s}".format(stack_path))
+        if captured_stack_path is not None:
+
+            log.info("Captured stack saved to: {:s}".format(captured_stack_path))
 
             # Extract the name of the stack image
-            stack_file = os.path.basename(stack_path)
+            stack_file = os.path.basename(captured_stack_path)
             
             # Add the stack path to the list of files to put in the archive
             file_list.append(stack_file)
 
         else:
-            log.info("Stack could not be saved!")
+            log.info("Captured stack could not be saved!")
+
+
+        # Make a co-added image of all detections. Filter out possible clouds
+        detected_stack_path, _ = stackFFs(captured_path, 'jpg', deinterlace=(config.deinterlace_order > 0), 
+            subavg=True, filter_bright=True, file_list=sorted(file_list), mask=mask)
+
+        if detected_stack_path is not None:
+
+            log.info("Detected stack saved to: {:s}".format(detected_stack_path))
+
+            # Extract the name of the stack image
+            stack_file = os.path.basename(detected_stack_path)
+            
+            # Add the stack path to the list of files to put in the archive
+            file_list.append(stack_file)
+
+        else:
+            log.info("Detected stack could not be saved!")
 
 
     except Exception as e:

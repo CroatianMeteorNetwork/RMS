@@ -56,7 +56,7 @@ We recommend buying the DS3231 RTC module. See under [Guides/rpi3_rtc_setup.md](
 What cameras are supported? Basically any cameras that can be read as video devices in Linux and all network IP cameras. Read the sections below for ways how to configure RMS to use different devices.
 
 1. **IP camera**
-Preferably an IMX291 or IMX307 based camera. Contact us for more details!
+Preferably an IMX291 IP camera. Contact us for more details!
 
 ---------
 

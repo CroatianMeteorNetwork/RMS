@@ -17,7 +17,7 @@ from RMS.Routines import MaskImage
 
 
 def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_bright=False, flat_path=None,
-    file_list=None, mask=None):
+    file_list=None, mask=None, captured_stack=False):
     """ Stack FF files in the given folder. 
 
     Arguments:
@@ -35,6 +35,8 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
         file_list: [list] A list of file for stacking. False by default, in which case all FF files in the
             given directory will be used.
         mask: [MaskStructure] Mask to apply to the stack. None by default.
+        captured_stack: [bool] True if all files are used and "_captured_stack" will be used in the file name.
+            False by default.
 
     Return:
         stack_path, merge_img:
@@ -154,7 +156,14 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
     # Extract the name of the night directory which contains the FF files
     night_dir = os.path.basename(dir_path)
 
-    stack_path = os.path.join(dir_path, night_dir + '_stack_{:d}_meteors.'.format(n_stacked) + file_format)
+    # If the stack was captured, add "_captured_stack" to the file name
+    if captured_stack:
+        filename_suffix = "_captured_stack."
+    else:
+        filename_suffix = "_stack_{:d}_meteors.".format(n_stacked)
+
+
+    stack_path = os.path.join(dir_path, night_dir + filename_suffix + file_format)
 
     print("Saving stack to:", stack_path)
 

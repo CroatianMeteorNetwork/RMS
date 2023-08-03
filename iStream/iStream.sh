@@ -86,13 +86,6 @@ else
    METEOR_COUNT="$(sed -n 1p $FTP_DETECT_INFO | awk '{ print $NF }')"
 fi
 
-function generate_captured_stack {	
-	if ($LEVEL_1); then
-		cd ~/source/RMS
-		python -m Utils.StackFFs $CAPTURED_DIR_NAME bmp -s -x
-	fi
-}
-
 function generate_timelapse {
 	SECONDS_LIMIT=$(expr $REMAINING_SECONDS - 120)
 	if ($LEVEL_1); then
@@ -112,7 +105,7 @@ function upload_info {
 }
 
 function upload_captured_stack {
-	CAPTURED_STACK_FILE="$(find $CAPTURED_DIR_NAME -name '*.bmp' | grep 'stack')"
+	CAPTURED_STACK_FILE="$(find $CAPTURED_DIR_NAME -name '*.jpg' | grep '_captured_stack.')"
 	TMP_CAPTURED_STACK_FILE="$CAPTURED_DIR_NAME/captured_stacck.jpg"
 	if [ -f "$CAPTURED_STACK_FILE" ]; then
 		convert $CAPTURED_STACK_FILE $TMP_CAPTURED_STACK_FILE
@@ -258,13 +251,10 @@ VAR_1="1"
 VAR_2="1"
 
 if [ $VAR_1 = $VAR_2 ]; then	
-	echo "GENERATE CAPTURED STACK..."
-	generate_captured_stack
-	echo ""
 	
-	echo "GENERATE VIDEO..."
-	generate_timelapse
-	echo ""
+	# echo "GENERATE TIMELAPSE VIDEO..."
+	# generate_timelapse
+	# echo ""
 	
 	echo "UPLOAD INFO..."
 	upload_info
