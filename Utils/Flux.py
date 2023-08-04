@@ -1036,7 +1036,7 @@ def detectMoon(file_list, platepar, config):
     """
 
     # Minimum distance between the Moon and the camera FOV
-    min_moon_ang_dist = 25
+    min_moon_ang_dist = 15
 
     # Setting up observer
     o = ephem.Observer()
