@@ -2,6 +2,7 @@
 
 import os
 import json
+import datetime
 from collections import OrderedDict
 
 import pandas as pd
@@ -10,8 +11,11 @@ import scipy.optimize
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
+from RMS.Astrometry.Conversions import datetime2JD
+from RMS.Formats.Showers import FluxShowers
 from RMS.Misc import formatScientific
 from RMS.Math import lineFunc
+from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
 from Utils.Flux import calculateZHR
 
 def showerActivity(sol, sol_peak, background_flux, peak_flux, bp, bm):
@@ -268,7 +272,6 @@ class ShowerActivityModel(object):
 
         # Parameters of the base fit
         self.base_fit = None
-        self.base_zhr = None
 
         # Initial parameters of additional peaks
         self.additional_peaks = []
@@ -1061,6 +1064,107 @@ class ShowerActivityModel(object):
         self.loadFromDict(model_dict)    
 
 
+def computeCurrentPeakZHR(shower_models, dt=None, time_window=24, sporadic_zhr=25):
+    """ Compute the peak ZHR at the current time (or at the given datetime) in the given time window (24 hrs 
+        by default). 
+    
+    Arguments:
+        shower_models: [dict] Dictionary of ShowerActivityModel objects.
+
+    Keyword arguments:
+        dt: [datetime.datetime] Datetime object. If None, the current time is used.
+        time_window: [float] Time window in hours. Default is 24 hours.
+        sporadic_zhr: [float] A fixed sporadic ZHR. Default is 25.
+
+    Return:
+        [float] Peak ZHR at the given time and time window.
+
+    """
+
+    # If no datetime is given, use the current time
+    if dt is None:
+        dt = datetime.datetime.utcnow()
+
+    # Convert the time window from hours to degrees of the solar longitude
+    time_window_deg = time_window*360/365.25
+
+    # Compute the solar longitude at the given time
+    sol_lon = np.degrees(jd2SolLonSteyaert(datetime2JD(dt)))
+
+    # Create 100 points in the given time window
+    sol_lon_points = np.linspace(sol_lon, sol_lon + time_window_deg, 100)
+
+    
+    zhr_total = np.zeros_like(sol_lon_points)
+
+    # Add sporadic ZHR
+    zhr_total += sporadic_zhr
+
+    # Compute the ZHR at each point using all showers
+    for shower in shower_models:
+        zhr_total += shower_models[shower].evaluateZHR(sol_lon_points)
+
+        # Subtract the background ZHR
+        zhr_total -= shower_models[shower].base_fit.background_zhr
+
+    # Find the maximum ZHR
+    max_zhr = np.max(zhr_total)
+
+    return max_zhr
+
+
+def loadFluxActivity(config):
+    """ Load the flux activity file into ShowerActivityModel objects. """
+
+    # Init the flux shower object
+    flux_showers = FluxShowers(config)
+
+    flux_activity_path = os.path.join(config.shower_path, config.shower_activity_file_name)
+
+    shower_models = {}
+
+    # Load the CSV file (separated by |)
+    # Columns: # Shower | Year   | Comp. | Sol peak | Flux bg | Flux peak | ZHR bg | ZHR peak | Bp    | Bm
+    # Skip lines starting with #
+    with open(flux_activity_path, "r") as f:
+        for line in f:
+            if line[0] == "#":
+                continue
+            
+            # Remove newline character
+            line = line.replace("\n", "")
+
+            # Split the line into parameters
+            line_split = line.split("|")
+            shower, year, comp, sol_peak, flux_bg, flux_peak, zhr_bg, zhr_peak, bp, bm = line_split
+            shower = shower.strip()
+            year = year.strip()
+            sol_peak = float(sol_peak.strip())
+            flux_bg = float(flux_bg.strip())
+            flux_peak = float(flux_peak.strip())
+            zhr_bg = float(zhr_bg.strip())
+            zhr_peak = float(zhr_peak.strip())
+            bp = float(bp.strip())
+            bm = float(bm.strip())
+
+            # Create a parameter container
+            params = ShowerActivityParameters(sol_peak, flux_bg, flux_peak, bp, bm)
+
+            # Find the shower in the flux shower list and get its population index
+            shw_obj = flux_showers.showerObjectFromCode(shower)
+            population_index = shw_obj.population_index
+
+            # Compute the ZHR parameters based on the population index
+            params.computeZHR(population_index)
+
+            # If the shower is not in the list, create a new model and set the parameters as the base model
+            if shower not in shower_models:
+                shower_models[shower] = ShowerActivityModel()
+                shower_models[shower].base_fit = params
+            else:
+                shower_models[shower].additional_peaks.append(params)
+
+    return shower_models
 
 if __name__ == "__main__":
 

@@ -19,10 +19,67 @@ from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
 from Utils.FluxBatch import fluxBatch, plotBatchFlux, FluxBatchBinningParams, saveBatchFluxCSV, \
     reportCameraTally
 from RMS.Misc import mkdirP, walkDirsToDepth
+from Utils.FluxFitActivityCurve import computeCurrentPeakZHR, loadFluxActivity
+
+
+def generateZHRDialSVG(ref_svg_path, zhr, sporadic_zhr):
+    """ Load the ZHR dial SVG and set the ZHR to the given number. 
+    
+    Arguments:
+        ref_svg_path: [str] Path to the reference SVG file.
+        zhr: [float] Current ZHR.
+        sporadic_zhr: [float] Current sporadic ZHR.
+
+    Return:
+        svg: [list of str] A string containing the SVG file.
+        
+    """
+
+    # Load the reference SVG file as a string
+    with open(ref_svg_path, "r") as f:
+        svg = f.readlines()
+
+    # ZHR cannot be negative
+    if zhr < 0:
+        zhr = 0
+
+    # Compute the angle of the ZHR hand
+    # 0 ZHR = -180 deg
+    # 50 ZHR = -90 deg
+    # 100 ZHR = 0 deg
+    # >110 ZHR = 9 deg (this is the upper limit)
+    hand_angle = -180 + (zhr*9/5)
+    if zhr > 110:
+        hand_angle = 9
+
+    # Compute the angle of the sporadic zhr
+    sporadic_pie_angle = -180 + (sporadic_zhr*9/5)
+
+    
+    for i, line in enumerate(svg):
+
+        # Find a line with the dial hand (id="hand") and replace the angle
+        if "id=\"hand\"" in line:
+            svg[i] = line.replace("rotate(-90 ", "rotate({:.2f} ".format(hand_angle))
+
+        # Insert the ZHR value
+        if "ZHR_NUM" in line:
+            svg[i] = line.replace("ZHR_NUM", "{:.0f}".format(zhr))
+
+        # Set the size of the sporadic pie
+        if "id=\"sporadic-portion\"" in line:
+            svg[i] = line.replace("270 315 1@2e9970e6", "270 {:.2f} 1@2e9970e6".format(sporadic_pie_angle))
+
+    
+    # Merge the list of strings into a single string
+    svg_str = "\n".join(svg)
+            
+
+    return svg_str
 
 
 def generateWebsite(index_dir, flux_showers, ref_dt, results_all_years, results_ref_year, 
-    website_plot_url):
+    website_plot_url, dial_svg_str):
     
 
     # Decide which joining function to use, considering the given website URL or local path
@@ -81,6 +138,16 @@ def generateWebsite(index_dir, flux_showers, ref_dt, results_all_years, results_
     <hr>
 """
     html_code += website_header
+
+
+    # Add the ZHR dial
+    html_code += """
+<p style="max-width: 600px; width: 100%;">
+    """
+    html_code += dial_svg_str
+    html_code += """
+    </p>
+    """
 
 
     html_code += """
@@ -740,8 +807,20 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
 
         print("Generating website...")
 
+        # Load the flux activity file
+        shower_models = loadFluxActivity(config)
+
+        # Compute the current peak ZHR
+        peak_zhr = computeCurrentPeakZHR(shower_models, sporadic_zhr=config.background_sporadic_zhr)
+        
+        # Set the ZHR dial
+        dial_svg_str = generateZHRDialSVG(config.flux_dial_template_svg, peak_zhr, 
+                                          config.background_sporadic_zhr)
+
+        # Generate the website
         generateWebsite(index_dir, flux_showers, ref_dt, results_all_years, results_ref_year, 
-            website_plot_url)
+            website_plot_url, dial_svg_str)
+        
 
         print("   ... done!")
 
