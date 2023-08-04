@@ -136,6 +136,10 @@ def generateWebsite(index_dir, flux_showers, ref_dt, results_all_years, results_
 </table>
 
     <hr>
+    
+    <h1>Meteor shower activity level</h1>
+    <br>
+
 """
     html_code += website_header
 
@@ -151,6 +155,42 @@ def generateWebsite(index_dir, flux_showers, ref_dt, results_all_years, results_
 
 
     html_code += """
+<div style="max-width: 800px; margin: 0px auto; text-align: left;">
+    <br>
+    <p>
+        The dial shows the peak sum of activity from all currently active showers and the sporadic background 
+        in the next 24 hours. The numbers are based on previous observations and predictions of future activity.
+        The real activity might be lower or higher than the predicted value, as meteor showers can have 
+        unexpected outbursts. See the plots below for the latest real-time meteor shower activity measurements.
+    </p>
+
+    <h3>How many meteors will I see?</h3>
+    <p>
+        ZHR stands for Zenithal Hourly Rate and is the number of meteors a single observer would see in 
+        one hour in ideal conditions: under a clear, moonless dark sky with the radiant directly overhead. 
+    </p>
+    <p>
+        The ZHR is not the number of meteors an observer will see in reality - for example, during the 
+        peak of the Perseids when their ZHR is about 100, you can expect to see about one Persied every minute.
+        However, if the Moon is full this number is easily halved, and if the radiant is low in the sky
+        (below 30 degrees) you will see even less.
+    </p>
+
+    <h3>When should I observe?</h3>
+    <p>
+        An average observer will notice significantly increased meteor activity when the ZHR is above ~50 
+        (the needle is in the green), which corresponds to the peak activity of the top 10 most active 
+        showers.
+    </p>
+    <p>
+        Outside rare meteor shower outbursts, the three showers which put on a regular annual show that is
+        worth watching (ZHR > 100) are the Perseids (Aug 11 - 13), Geminids (Dec 13 - 14) and Quadrantids (Jan 3 - 4).
+        <br>
+        Be sure to check this website around those dates for the latest predictions and measurements.
+    </p>
+</div>
+<br>
+
 <h1> Currently active showers </h1>
     """
 
