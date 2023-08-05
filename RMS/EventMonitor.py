@@ -1551,7 +1551,11 @@ class EventMonitor(multiprocessing.Process):
             log.info("Upload of {} - first attempt".format(event_monitor_directory))
             for retry in range(1,30):
                 archives = glob(os.path.join(event_monitor_directory,"*.bz2"))
+                # todo: remove this line which shadows uploads to local server
+                uploadSFTP("192.168.1.241", self.syscon.stationID.lower(), event_monitor_directory,
+                           self.syscon.event_monitor_remote_dir, archives, rsa_private_key=self.config.rsa_private_key)
                 upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,rsa_private_key=self.config.rsa_private_key)
+
                 if upload_status:
                     log.info("Upload of {} - attempt no {} was successful".format(event_monitor_directory, retry))
                     # set to the fast check rate after an upload
