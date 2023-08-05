@@ -1470,9 +1470,9 @@ class EventMonitor(multiprocessing.Process):
 
         event_monitor_directory = os.path.expanduser(os.path.join(self.syscon.data_dir, "EventMonitor"))
         upload_filename = "{}_{}_{}".format(evcon.stationID, event.dt, "event")
-        if evcon.network_name is not None and evcon.group_name is not None:
-            this_event_directory = os.path.join(event_monitor_directory, evcon.network_name, evcon.group_name, upload_filename)
-            log.info("Network {} and group {} so creating {}".format(evcon.network_name, evcon.group_name, this_event_directory))
+        if evcon.network_name is not None and evcon.camera_group_name is not None:
+            this_event_directory = os.path.join(event_monitor_directory, evcon.network_name, evcon.camera_group_name, upload_filename)
+            log.info("Network {} and group {} so creating {}".format(evcon.network_name, evcon.camera_group_name, this_event_directory))
         else:
             this_event_directory = os.path.join(event_monitor_directory, upload_filename)
             log.info("Network and group not defined so creating {}".format(this_event_directory))
