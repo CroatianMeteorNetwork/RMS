@@ -1463,19 +1463,25 @@ class EventMonitor(multiprocessing.Process):
         """
 
         if self.eventUploaded(event.uuid):
-            log.error("Call to doUpload for already uploaded event {}".format(event.dt))
+            log.warn("Call to doUpload for already uploaded event {}".format(event.dt))
 
         if self.eventProcessed(event.uuid):
-            log.error("Call to doUpload for already processed event {}".format(event.dt))
+            log.warn("Call to doUpload for already processed event {}".format(event.dt))
 
         event_monitor_directory = os.path.expanduser(os.path.join(self.syscon.data_dir, "EventMonitor"))
         upload_filename = "{}_{}_{}".format(evcon.stationID, event.dt, "event")
-        this_event_directory = os.path.join(event_monitor_directory, upload_filename)
+        if evcon.network_name is not None and evcon.group_name is not None:
+            this_event_directory = os.path.join(event_monitor_directory, evcon.network_name, evcon.group_name, upload_filename)
+            log.info("Network {} and group {} so creating {}".format(evcon.network_name, evcon.group_name, this_event_directory))
+        else:
+            this_event_directory = os.path.join(event_monitor_directory, upload_filename)
+            log.info("Network and group not defined so creating {}".format(this_event_directory))
 
         # get rid of the eventdirectory, should never be needed
         if not keep_files:
             if os.path.exists(this_event_directory) and event_monitor_directory != "" and upload_filename != "":
                 shutil.rmtree(this_event_directory)
+
 
         # create a new event directory
         if not os.path.exists(this_event_directory):
