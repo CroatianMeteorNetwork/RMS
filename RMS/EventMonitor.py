@@ -1463,10 +1463,10 @@ class EventMonitor(multiprocessing.Process):
         """
 
         if self.eventUploaded(event.uuid):
-            log.warn("Call to doUpload for already uploaded event {}".format(event.dt))
+            log.warning("Call to doUpload for already uploaded event {}".format(event.dt))
 
         if self.eventProcessed(event.uuid):
-            log.warn("Call to doUpload for already processed event {}".format(event.dt))
+            log.warning("Call to doUpload for already processed event {}".format(event.dt))
 
         event_monitor_directory = os.path.expanduser(os.path.join(self.syscon.data_dir, "EventMonitor"))
         upload_filename = "{}_{}_{}".format(evcon.stationID, event.dt, "event")
