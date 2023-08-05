@@ -1471,7 +1471,7 @@ class EventMonitor(multiprocessing.Process):
         event_monitor_directory = os.path.expanduser(os.path.join(self.syscon.data_dir, "EventMonitor"))
         upload_filename = "{}_{}_{}".format(evcon.stationID, event.dt, "event")
         if evcon.network_name is not None and evcon.camera_group_name is not None:
-            this_event_directory = os.path.join(event_monitor_directory, evcon.network_name, evcon.camera_group_name, upload_filename)
+            this_event_directory = os.path.join(event_monitor_directory, upload_filename, evcon.network_name, evcon.camera_group_name)
             log.info("Network {} and group {} so creating {}".format(evcon.network_name, evcon.camera_group_name, this_event_directory))
         else:
             this_event_directory = os.path.join(event_monitor_directory, upload_filename)
@@ -1521,10 +1521,10 @@ class EventMonitor(multiprocessing.Process):
                     log.error("fr_file {}".format(fr_file))
 
         if True:
-            batchFFtoImage(os.path.join(event_monitor_directory, upload_filename), "jpg", add_timestamp=True,
+            batchFFtoImage(os.path.join(this_event_directory), "jpg", add_timestamp=True,
                            ff_component='maxpixel')
 
-        with open(os.path.join(event_monitor_directory, upload_filename, "event_report.txt"), "w") as info:
+        with open(os.path.join(this_event_directory, "event_report.txt"), "w") as info:
             info.write(event.eventToString())
 
         # remove any leftover .bz2 files
