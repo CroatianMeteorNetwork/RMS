@@ -38,6 +38,7 @@ import statistics
 import logging
 
 
+
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt
 from RMS.Math import angularSeparationVect
@@ -1328,18 +1329,23 @@ class EventMonitor(multiprocessing.Process):
                 # get the directory into name order
                 dirlist = os.listdir(directory)
                 dirlist.sort()
-                last_file = dirlist[0]
+                fits_files = glob(os.path.join(directory, '*.fits'))
+                last_fits_file = fits_files[0]
+                handled_short = False
                 for file in dirlist:
                     if file.endswith(file_extension):
                         file_POSIX_time = convertGMNTimeToPOSIX(file[10:25])
                         if abs((file_POSIX_time - event_time).total_seconds()) < event.time_tolerance:
                             file_list.append(os.path.join(directory, file))
-                        # If a very short tolerance is defined at the end of a fits file, then no file
-                        # might match the test above. Append the previous file, or the first
-                        # file if this is our first iteration
-                        if last_file is not None and last_file not in file_list and file_extension == ".fits":
-                            file_list.append(os.path.join(directory, last_file))
-                        last_file = file
+
+                        if file_extension == ".fits":
+                        # if this is the first file after the event time, and the previous file was not added
+                        # possibly because a very short time tolerance was specified, add the previous fits file
+                            if (file_POSIX_time > event_time):
+                                if last_fits_file not in file_list and file_extension == ".fits" and handled_short == False:
+                                    file_list.append(os.path.join(directory, last_fits_file))
+                                    handled_short = True
+                            last_fits_file = file
         return file_list
 
     def getFileList(self, event):
