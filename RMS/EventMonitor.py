@@ -1331,7 +1331,7 @@ class EventMonitor(multiprocessing.Process):
                 dirlist.sort()
                 if file_extension == ".fits":
                     last_fits_file = dirlist[0]
-                    log.info("Set last_fits_file to {}".last_fits_file)
+                    log.info("Set last_fits_file to {}".format(last_fits_file))
                 handled_short = False
                 for file in dirlist:
                     if file.endswith(file_extension):
