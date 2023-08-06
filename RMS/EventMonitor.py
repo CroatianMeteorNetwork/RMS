@@ -1331,7 +1331,7 @@ class EventMonitor(multiprocessing.Process):
                 dirlist.sort()
                 if file_extension == ".fits":
                     fits_list = glob(os.path.join(directory,"*.fits"))
-                    fits_list.sorted()
+                    fits_list.sort()
                     last_fits_file = fits_list[0]
                     log.info("Set last_fits_file to {}".format(last_fits_file))
                 seeking_first_fits_after_event = True
