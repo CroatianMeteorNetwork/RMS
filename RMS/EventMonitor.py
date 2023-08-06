@@ -1342,7 +1342,7 @@ class EventMonitor(multiprocessing.Process):
                         if file_extension == ".fits":
                         # if this is the first fits file after the event time, and the previous fits file was not added
                         # possibly because a very short time tolerance was specified, add the previous fits file
-                            if (file_POSIX_time > event_time):
+                            if file_POSIX_time > event_time:
                                 if last_fits_file not in file_list and file_extension == ".fits" and handled_short == False:
                                     file_list.append(os.path.join(directory, last_fits_file))
                                     handled_short = True
