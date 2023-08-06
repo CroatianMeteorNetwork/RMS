@@ -1335,7 +1335,7 @@ class EventMonitor(multiprocessing.Process):
                         if abs((file_POSIX_time - event_time).total_seconds()) < event.time_tolerance:
                             file_list.append(os.path.join(directory, file))
                         # If a very short tolerance is defined at the end of a fits file, then no file
-                        # might match the test above. So append the previous file, or the first
+                        # might match the test above. Append the previous file, or the first
                         # file if this is our first iteration
                         if last_file is not None and last_file not in file_list and file_extension == ".fits":
                             file_list.append(os.path.join(directory, last_file))
