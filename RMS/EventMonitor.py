@@ -1330,9 +1330,9 @@ class EventMonitor(multiprocessing.Process):
                 dirlist = os.listdir(directory)
                 dirlist.sort()
                 if file_extension == ".fits":
-                    last_fits_file = dirlist[0]
+                    last_fits_file = glob(os.path.join(directory,"*.fits"))[0]
                     log.info("Set last_fits_file to {}".format(last_fits_file))
-                handled_short = False
+                seeking_first_fits_after_event = True
                 for file in dirlist:
                     if file.endswith(file_extension):
                         file_POSIX_time = convertGMNTimeToPOSIX(file[10:25])
@@ -1342,10 +1342,10 @@ class EventMonitor(multiprocessing.Process):
                         if file_extension == ".fits":
                         # if this is the first fits file after the event time, and the previous fits file was not added
                         # possibly because a very short time tolerance was specified, add the previous fits file
-                            if file_POSIX_time > event_time:
-                                if last_fits_file not in file_list and file_extension == ".fits" and handled_short == False:
+                            if file_POSIX_time > event_time and seeking_first_fits_after_event:
+                                if last_fits_file not in file_list:
                                     file_list.append(os.path.join(directory, last_fits_file))
-                                    handled_short = True
+                                    seeking_first_fits_after_event = False
                             last_fits_file = file
         return file_list
 
