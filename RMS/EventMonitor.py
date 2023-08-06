@@ -37,6 +37,7 @@ import string
 import statistics
 import logging
 
+
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt
 from RMS.Math import angularSeparationVect
@@ -1321,14 +1322,24 @@ class EventMonitor(multiprocessing.Process):
 
         file_list = []
         # Iterate through the directory list, appending files with the correct extension
+
         for directory in directory_list:
             for file_extension in file_extension_list:
-                for file in os.listdir(directory):
+                # get the directory into name order
+                dirlist = os.listdir(directory)
+                dirlist.sort()
+                last_file = dirlist[0]
+                for file in dirlist:
                     if file.endswith(file_extension):
                         file_POSIX_time = convertGMNTimeToPOSIX(file[10:25])
                         if abs((file_POSIX_time - event_time).total_seconds()) < event.time_tolerance:
                             file_list.append(os.path.join(directory, file))
-
+                        # If a very short tolerance is defined at the end of a fits file, then no file
+                        # might match the test above. So append the previous file, or the first
+                        # file if this is our first iteration
+                        if last_file is not None and last_file not in file_list and file_extension == ".fits":
+                            file_list.append(os.path.join(directory, last_file))
+                        last_file = file
         return file_list
 
     def getFileList(self, event):
@@ -1470,6 +1481,7 @@ class EventMonitor(multiprocessing.Process):
 
         event_monitor_directory = os.path.expanduser(os.path.join(self.syscon.data_dir, "EventMonitor"))
         upload_filename = "{}_{}_{}".format(evcon.stationID, event.dt, "event")
+        # Try and bake the camera network name and group name into the path structure of the archive
         if evcon.network_name is not None and evcon.camera_group_name is not None:
             this_event_directory = os.path.join(event_monitor_directory, upload_filename, evcon.network_name, evcon.camera_group_name, evcon.stationID)
             log.info("Network {} and group {} so creating {}".format(evcon.network_name, evcon.camera_group_name, this_event_directory))
