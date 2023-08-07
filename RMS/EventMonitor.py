@@ -1307,6 +1307,7 @@ class EventMonitor(multiprocessing.Process):
     def findEventFiles(self, event, directory_list, file_extension_list):
 
         """Take an event, directory list and an extension list and return paths to files
+           For .fits files always return at least the closest previous event
 
            Arguments:
                 event: [event] Event of interest
