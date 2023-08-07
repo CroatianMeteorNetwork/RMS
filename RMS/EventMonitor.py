@@ -1324,6 +1324,8 @@ class EventMonitor(multiprocessing.Process):
         file_list = []
         # Iterate through the directory list, appending files with the correct extension
 
+
+        last_fits_file = None
         for directory in directory_list:
             for file_extension in file_extension_list:
                 # get the directory into name order
@@ -1342,8 +1344,8 @@ class EventMonitor(multiprocessing.Process):
                             file_list.append(os.path.join(directory, file))
 
                         if file_extension == ".fits":
-                        # if this is the first fits file after the event time, and the previous fits file was not added
-                        # possibly because a very short time tolerance was specified, add the previous fits file
+                        # if this is the first fits file after the event time, add the previous fits file
+                        # unless already in the list
                             if file_POSIX_time > event_time and seeking_first_fits_after_event:
                                 if last_fits_file not in file_list:
                                     file_list.append(os.path.join(directory, last_fits_file))
