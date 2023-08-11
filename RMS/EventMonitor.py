@@ -105,11 +105,11 @@ class EventContainer(object):
             return
 
         if ";" in value:
-            log.warning("Unexpected characters in value")
+            log.warning("Unexpected character ; in value {}".format(value))
             return
 
         if "=" in value:
-            log.warning("Unexpected character = {} in value".format(value))
+            log.warning("Unexpected character = in value {}".format(value))
             return
 
 
