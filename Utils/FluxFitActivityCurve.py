@@ -1162,7 +1162,7 @@ def loadFluxActivity(config):
                 shower_models[shower] = ShowerActivityModel()
                 shower_models[shower].base_fit = params
             else:
-                shower_models[shower].additional_peaks.append(params)
+                shower_models[shower].additional_fits.append(params)
 
     return shower_models
 
