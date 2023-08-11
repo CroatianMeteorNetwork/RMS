@@ -104,6 +104,16 @@ class EventContainer(object):
         if value == "":
             return
 
+        if ";" in value:
+            log.warning("Unexpected characters in value")
+            return
+
+        if "=" in value:
+            log.warning("Unexpected character = {} in value".format(value))
+            return
+
+
+
         # Mandatory parameters
         self.dt = value if "EventTime" == variable_name else self.dt
         self.time_tolerance = value if "TimeTolerance" == variable_name else self.time_tolerance
