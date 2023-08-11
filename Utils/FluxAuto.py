@@ -43,14 +43,17 @@ def generateZHRDialSVG(ref_svg_path, zhr, sporadic_zhr):
     if zhr < 0:
         zhr = 0
 
+    # Maximum ZHR on the dial
+    max_zhr = 110
+
     # Compute the angle of the ZHR hand
     # 0 ZHR = -180 deg
     # 50 ZHR = -90 deg
     # 100 ZHR = 0 deg
     # >110 ZHR = 9 deg (this is the upper limit)
     hand_angle = -180 + (zhr*9/5)
-    if zhr > 110:
-        hand_angle = 9
+    if zhr > max_zhr:
+        hand_angle = -180 + (max_zhr*9/5)
 
     # Compute the angle of the sporadic zhr
     sporadic_pie_angle = -180 + (sporadic_zhr*9/5)
