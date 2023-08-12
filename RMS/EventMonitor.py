@@ -31,13 +31,10 @@ import uuid
 import numpy as np
 import datetime
 import argparse
-import math
 import random
 import string
 import statistics
 import logging
-
-
 
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt
@@ -53,9 +50,7 @@ from RMS.UploadManager import uploadSFTP
 from Utils.SkyFit2 import convertFRNameToFF
 from glob import glob
 
-
 log = logging.getLogger("logger")
-
 
 class EventContainer(object):
 
@@ -293,10 +288,6 @@ class EventContainer(object):
 
         return [v1, v2]
 
-
-
-
-
     def applyCartesianSDToPoint(self, pt, std):
 
         """
@@ -510,9 +501,6 @@ class EventContainer(object):
             pass
 
         return population
-
-
-
 
     def adjustTrajectoryLimits(self, bwd_range, fwd_range, obs_lat, obs_lon, obs_ht):
 
@@ -1335,7 +1323,7 @@ class EventMonitor(multiprocessing.Process):
         except:
             event_time = convertGMNTimeToPOSIX(event.dt)
 
-        file_list = []
+        file_list: list[str] = []
         # Iterate through the directory list, appending files with the correct extension
 
 
@@ -1349,9 +1337,15 @@ class EventMonitor(multiprocessing.Process):
                     fits_list = glob(os.path.join(directory,"*.fits"))
                     fits_list.sort()
                     log.info("Searching for first fits file in {}".format(directory))
-                    last_fits_file = fits_list[0]
-                    log.info("Set last_fits_file to {}".format(last_fits_file))
-                seeking_first_fits_after_event = True
+                    if len(fits_list) == 0:
+                        # If fits_list is empty then return an empty list
+                        log.info("No fits files in {}".format(directory))
+                        return file_list
+                    else:
+                        # Initialise last_fits_file with the first from the list
+                        last_fits_file = fits_list[0]
+                        log.info("Intialised last_fits_file with {}".format(last_fits_file))
+                        seeking_first_fits_after_event = True
                 for file in dirlist:
                     if file.endswith(file_extension):
                         file_POSIX_time = convertGMNTimeToPOSIX(file[10:25])
@@ -1388,8 +1382,6 @@ class EventMonitor(multiprocessing.Process):
             file_list += self.getFile("platepar_cmn2010.cal", self.getDirectoryList(event)[0])
 
         return file_list
-
-
 
     def trajectoryVisible(self, rp, event):
 
@@ -1620,8 +1612,6 @@ class EventMonitor(multiprocessing.Process):
             shutil.rmtree(event_monitor_directory)
         return upload_status
 
-
-
     def checkEvents(self, ev_con, test_mode = False):
 
         """
@@ -1848,7 +1838,6 @@ class EventMonitor(multiprocessing.Process):
             if self.check_interval < self.syscon.event_monitor_check_interval:
                 self.check_interval = self.check_interval * 1.1
 
-
 def latLonAlt2ECEFDeg(lat, lon, h):
     """ Convert geographical coordinates to Earth centered - Earth fixed coordinates.
 
@@ -1870,9 +1859,6 @@ def angularSeparationVectDeg(vect1, vect2):
         Uses library function, but converts return to degrees"""
 
     return np.degrees(angularSeparationVect(vect1,vect2))
-
-
-
 
 def calculateClosestPoint(beg_lat, beg_lon, beg_ele, end_lat, end_lon, end_ele, ref_lat, ref_lon, ref_ele):
 
@@ -1926,9 +1912,6 @@ def calculateClosestPoint(beg_lat, beg_lon, beg_ele, end_lat, end_lon, end_ele, 
 
         return start_dist, end_dist, closest_dist
 
-
-
-
 def revAz(azim):
 
     """
@@ -1944,7 +1927,6 @@ def revAz(azim):
     azim_nrm = azim % 360
     azim_rev = azim_nrm + 180 if azim_nrm < 180 else azim_nrm - 180
     return azim_rev
-
 
 def ecefV2LatLonAlt(ecef_vect):
     """
