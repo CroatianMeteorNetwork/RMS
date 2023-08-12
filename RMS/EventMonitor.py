@@ -1768,9 +1768,9 @@ class EventMonitor(multiprocessing.Process):
                 self.markEventAsProcessed(observed_event)
 
         if len(unprocessed) > 1:
-            log.info("{} events were processed, event_monitor work completed".format(unprocessed))
+            log.info("{} events were processed, event_monitor work completed".format(len(unprocessed)))
         if len(unprocessed) == 1:
-            log.info("{} event was processed, event_monitor work completed".format(unprocessed))
+            log.info("{} event was processed, event_monitor work completed".format(len(unprocessed)))
 
         return None
 
