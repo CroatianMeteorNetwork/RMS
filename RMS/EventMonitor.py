@@ -104,16 +104,6 @@ class EventContainer(object):
         if value == "":
             return
 
-        if ";" in value:
-            log.warning("Unexpected character ; in value {}".format(value))
-            return
-
-        if "=" in value:
-            log.warning("Unexpected character = in value {}".format(value))
-            return
-
-
-
         # Mandatory parameters
         self.dt = value if "EventTime" == variable_name else self.dt
         self.time_tolerance = value if "TimeTolerance" == variable_name else self.time_tolerance
@@ -1173,8 +1163,21 @@ class EventMonitor(multiprocessing.Process):
 
             line = line.split('#')[0]  # remove anything to the right of comments
 
+            # Protect database against primitive injection techniques
+
+            if ";" in line:
+                log.warning("Detected attempt to use ; in database query")
+                return
+            if "--" in line:
+                log.warning("Detected attempt to use -- in database query")
+                return
+            if "=" in line:
+                log.warning("Detected attempt to use = in database query")
+                return
+
             if ":" in line:  # then it is a value pair
 
+                # All this in a try block, in case a type conversion fails
                 try:
                     variable_name = line.split(":")[0].strip()  # get variable name
                     value = line.split(":")[1].strip()  # get value
