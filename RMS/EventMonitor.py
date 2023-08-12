@@ -1767,6 +1767,11 @@ class EventMonitor(multiprocessing.Process):
                 log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
                 self.markEventAsProcessed(observed_event)
 
+        if len(unprocessed) > 1:
+            log.info("{} events were processed, event_monitor work completed".format(unprocessed))
+        if len(unprocessed) == 1:
+            log.info("{} event was processed, event_monitor work completed".format(unprocessed))
+
         return None
 
     def start(self):
