@@ -1352,7 +1352,7 @@ if __name__ == "__main__":
     # Define the shower model for the 2020 Perseids
     per_2020 = ShowerActivityModel(
         initial_param_estimation='manual', sol_peak0=138.0, bg_flux0=0.5, peak_flux0=2.0, bp0=0.03, bm0=0.07,
-        refine_fits_individually=False, mc_error_estimation=False)
+        refine_fits_individually=False, mc_error_estimation=True)
     per_2020.addPeak(140, 23, 0.3, 0.4)
     # per_2020 = ShowerActivityModel(initial_param_estimation='auto')
 
