@@ -1232,9 +1232,9 @@ if __name__ == "__main__":
     cap_all_years = ShowerActivityModel(initial_param_estimation='manual', sol_peak0=128, bg_flux0=0.5,
         peak_flux0=1.5, bp0=0.05, bm0=0.05, refine_fits_individually=False, mc_error_estimation=True)
     
-    showers["CAP"] = [
-        ["all_years", cap_all_years]
-    ]
+    # showers["CAP"] = [
+    #     ["all_years", cap_all_years]
+    # ]
 
     ### ###
 
@@ -1245,9 +1245,9 @@ if __name__ == "__main__":
         peak_flux0=15, bp0=0.3, bm0=0.3, refine_fits_individually=False, mc_error_estimation=True)
     eta_all_years.addPeak(47, 15, 0.3, 0.3)
 
-    showers['ETA'] = [
-        ["year_2022", eta_all_years]
-    ]
+    # showers['ETA'] = [
+    #     ["year_2022", eta_all_years]
+    # ]
 
     ### ###
 
@@ -1258,9 +1258,9 @@ if __name__ == "__main__":
         mc_error_estimation=True)
     gem_all_years.addPeak(261.7, 5, 0.7, 0.7)
 
-    showers['GEM'] = [
-        ["all_years", gem_all_years],
-    ]
+    # showers['GEM'] = [
+    #     ["all_years", gem_all_years],
+    # ]
 
     ### ###
 
@@ -1272,9 +1272,9 @@ if __name__ == "__main__":
         sol_peak0=255.0, bg_flux0=1.8, peak_flux0=6.0, bp0=0.1, bm0=0.1, refine_fits_individually=False,
         mc_error_estimation=True)
 
-    showers['HYD'] = [
-        ["all_years", hyd_all_years],
-    ]
+    # showers['HYD'] = [
+    #     ["all_years", hyd_all_years],
+    # ]
 
     ###
 
@@ -1285,9 +1285,9 @@ if __name__ == "__main__":
     kcg_2021 = ShowerActivityModel(initial_param_estimation='auto', refine_fits_individually=False, 
         mc_error_estimation=True)
     
-    showers["KCG"] = [
-        ["year_2021", kcg_2021]
-    ]
+    # showers["KCG"] = [
+    #     ["year_2021", kcg_2021]
+    # ]
 
     ### ###
 
@@ -1296,9 +1296,9 @@ if __name__ == "__main__":
     # Define the shower model for the Leonids
     leo_all_years = ShowerActivityModel(initial_param_estimation='auto', mc_error_estimation=True)
 
-    showers['LEO'] = [
-        ["all_years", leo_all_years],
-    ]
+    # showers['LEO'] = [
+    #     ["all_years", leo_all_years],
+    # ]
 
     ### ###
 
@@ -1309,9 +1309,9 @@ if __name__ == "__main__":
         sol_peak0=210.0, bg_flux0=0.0, peak_flux0=1.6, bp0=0.1, bm0=0.1,
         mc_error_estimation=True)
 
-    showers['LMI'] = [
-        ["all_years", lmi_all_years],
-    ]
+    # showers['LMI'] = [
+    #     ["all_years", lmi_all_years],
+    # ]
 
     ### ###
 
@@ -1320,9 +1320,9 @@ if __name__ == "__main__":
     # Define the shower model for the Lyrids
     lyr_all_years = ShowerActivityModel(initial_param_estimation='auto', mc_error_estimation=True)
 
-    showers['LYR'] = [
-        ["all_years", lyr_all_years],
-    ]
+    # showers['LYR'] = [
+    #     ["all_years", lyr_all_years],
+    # ]
 
     ### ###
 
@@ -1330,18 +1330,19 @@ if __name__ == "__main__":
     # Define the shower model for the Monocerotids
     mon_2022 = ShowerActivityModel(initial_param_estimation='auto', mc_error_estimation=True)
     
-    showers['MON'] = [
-        ["year_2022", mon_2022],
-    ]
+    # showers['MON'] = [
+    #     ["year_2022", mon_2022],
+    # ]
 
 
     ### ORIONIDS ###
 
     # Define the shower model for the Orionids
     ori_2022 = ShowerActivityModel(initial_param_estimation='auto', mc_error_estimation=True)
-    showers['ORI'] = [
-        ["year_2022", ori_2022],
-    ]
+
+    # showers['ORI'] = [
+    #     ["year_2022", ori_2022],
+    # ]
 
     ###
 
@@ -1350,8 +1351,8 @@ if __name__ == "__main__":
 
     # Define the shower model for the 2020 Perseids
     per_2020 = ShowerActivityModel(
-        initial_param_estimation='manual', sol_peak0=138.0, bg_flux0=0.5, peak_flux0=7.0, bp0=0.03, bm0=0.07,
-        refine_fits_individually=False, mc_error_estimation=True)
+        initial_param_estimation='manual', sol_peak0=138.0, bg_flux0=0.5, peak_flux0=2.0, bp0=0.03, bm0=0.07,
+        refine_fits_individually=False, mc_error_estimation=False)
     per_2020.addPeak(140, 23, 0.3, 0.4)
     # per_2020 = ShowerActivityModel(initial_param_estimation='auto')
 
@@ -1375,7 +1376,7 @@ if __name__ == "__main__":
         #                sol,    peak, bp0, bm0        
         #["all_years", [ [139,    5.0, 0.01, 0.02], [141.7, 30.0, 1.0, 1.0] ] ],
         ["year_2020", per_2020 ],
-        ["year_2021", per_2021 ],
+        # ["year_2021", per_2021 ],
         #["year_2022", per_2022 ],
     ]
 
@@ -1396,12 +1397,12 @@ if __name__ == "__main__":
         mc_error_estimation=True)
     qua_2022.addPeak(283.3, 10, 0.8, 0.8)
     
-    showers['QUA'] = [
-        ["all_years", qua_all_years],
-        ["year_2020", qua_2020],
-        ["year_2021", qua_2021],
-        ["year_2022", qua_2022],
-    ]
+    # showers['QUA'] = [
+    #     ["all_years", qua_all_years],
+    #     ["year_2020", qua_2020],
+    #     ["year_2021", qua_2021],
+    #     ["year_2022", qua_2022],
+    # ]
 
     ### ###
 
@@ -1409,9 +1410,10 @@ if __name__ == "__main__":
     ### SOUTHERN DELTA AQUARIIDS ###
     # Define the shower model for the Southern Delta Aquariids
     sda_all_years = ShowerActivityModel(initial_param_estimation='auto', mc_error_estimation=True)
-    showers['SDA'] = [
-        ["all_years", sda_all_years],
-    ]
+
+    # showers['SDA'] = [
+    #     ["all_years", sda_all_years],
+    # ]
 
     ### ###
 
@@ -1422,9 +1424,9 @@ if __name__ == "__main__":
         sol_peak0=166.55, bg_flux0=0.7, peak_flux0=1.0, bp0=0.6, bm0=0.5, refine_fits_individually=False,
         )
 
-    showers['SPE'] = [
-        ["all_years", spe_all_years],
-    ]
+    # showers['SPE'] = [
+    #     ["all_years", spe_all_years],
+    # ]
 
     # ### ###
 
@@ -1433,9 +1435,10 @@ if __name__ == "__main__":
     urs_all_years = ShowerActivityModel(initial_param_estimation='manual', 
         sol_peak0=270.3, bg_flux0=0, peak_flux0=1.0, bp0=1.0, bm0=1.0, refine_fits_individually=False,
         mc_error_estimation=True)
-    showers['URS'] = [
-        ["all_years", urs_all_years],
-    ]
+    
+    # showers['URS'] = [
+    #     ["all_years", urs_all_years],
+    # ]
 
     ### ###
 
@@ -1447,9 +1450,9 @@ if __name__ == "__main__":
         sol_peak0=158.0, bg_flux0=1.0, peak_flux0=3.0, bp0=0.1, bm0=0.1, refine_fits_individually=False,
         mc_error_estimation=True)
 
-    showers['AUR'] = [
-        ["year_2021", aur_2021],
-    ]
+    # showers['AUR'] = [
+    #     ["year_2021", aur_2021],
+    # ]
 
     ### ###
 
@@ -1458,9 +1461,10 @@ if __name__ == "__main__":
 
     # Define the shower model for the 2022 Tau Herculid outburst
     tah_2022 = ShowerActivityModel(initial_param_estimation='auto', mc_error_estimation=True)
-    showers['oTAH2022'] = [
-        ["year_2022", tah_2022],
-    ]
+
+    # showers['oTAH2022'] = [
+    #     ["year_2022", tah_2022],
+    # ]
 
     ### ###
 
