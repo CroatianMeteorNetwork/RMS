@@ -189,10 +189,12 @@ def generateWebsite(index_dir, flux_showers, ref_dt, results_all_years, results_
     </p>
     <p>
         Outside rare meteor shower outbursts, the three showers which put on a regular annual show that is
-        worth watching (ZHR > 100) are the Perseids (Aug 11 - 13), Geminids (Dec 13 - 14) and Quadrantids (Jan 3 - 4),
-        as shown in the plot below which summarizes the usual activity of annual meteor showers (but excludes outbursts).
+        worth watching (ZHR > 100) are the Perseids (Aug 11 - 13), Geminids (Dec 13 - 14) and Quadrantids (Jan 3 - 4).
         <br>
-        Be sure to check this website for the latest predictions and measurements.
+        The plot below which summarizes the usual activity of annual meteor showers but excludes outbursts.
+        Northern hemisphere showers (declination > 30 deg) are shown in blue, while southern hemisphere showers
+        (declination < -30 deg) are shown in red (none currently). The showers in between are shown in black and are usually visible
+        from both hemispheres.
     </p>
 </div>
 <br> """
