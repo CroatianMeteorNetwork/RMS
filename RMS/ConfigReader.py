@@ -532,6 +532,9 @@ class Config:
         # Path to the template flux dial SVG file
         self.flux_dial_template_svg = os.path.join(self.rms_root_dir, 'share', 'flux_dial_template.svg')
 
+        # Name of the yearly ZHR overview plot
+        self.yearly_zhr_plot_name = 'yearly_zhr_overview.png'
+
         # colour scheme to use for showers
         self.shower_color_map = 'viridis'
 

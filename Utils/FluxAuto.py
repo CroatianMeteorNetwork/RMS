@@ -19,7 +19,7 @@ from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
 from Utils.FluxBatch import fluxBatch, plotBatchFlux, FluxBatchBinningParams, saveBatchFluxCSV, \
     reportCameraTally
 from RMS.Misc import mkdirP, walkDirsToDepth
-from Utils.FluxFitActivityCurve import computeCurrentPeakZHR, loadFluxActivity
+from Utils.FluxFitActivityCurve import computeCurrentPeakZHR, loadFluxActivity, plotYearlyZHR
 
 
 def generateZHRDialSVG(ref_svg_path, zhr, sporadic_zhr):
@@ -81,8 +81,9 @@ def generateZHRDialSVG(ref_svg_path, zhr, sporadic_zhr):
     return svg_str
 
 
+
 def generateWebsite(index_dir, flux_showers, ref_dt, results_all_years, results_ref_year, 
-    website_plot_url, dial_svg_str):
+    website_plot_url, dial_svg_str, yearly_zhr_plot_name):
     
 
     # Decide which joining function to use, considering the given website URL or local path
@@ -187,12 +188,22 @@ def generateWebsite(index_dir, flux_showers, ref_dt, results_all_years, results_
     </p>
     <p>
         Outside rare meteor shower outbursts, the three showers which put on a regular annual show that is
-        worth watching (ZHR > 100) are the Perseids (Aug 11 - 13), Geminids (Dec 13 - 14) and Quadrantids (Jan 3 - 4).
+        worth watching (ZHR > 100) are the Perseids (Aug 11 - 13), Geminids (Dec 13 - 14) and Quadrantids (Jan 3 - 4),
+        as shown in the plot below which summarizes the usual activity of annual meteor showers (but excludes outbursts).
         <br>
-        Be sure to check this website around those dates for the latest predictions and measurements.
+        Be sure to check this website for the latest predictions and measurements.
     </p>
 </div>
-<br>
+<br> """
+
+    # Add the image with the yearly ZHR
+    html_code += """
+        <a href="{:s}" target="_blank"><img src="{:s}" style="width: 80%; height: auto;"/></a>""".format(
+            joinFunc(website_plot_url, yearly_zhr_plot_name), 
+            joinFunc(website_plot_url, yearly_zhr_plot_name)
+            )
+    
+    html_code += """
 
 <h1> Currently active showers </h1>
     """
@@ -859,10 +870,14 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
         # Set the ZHR dial
         dial_svg_str = generateZHRDialSVG(config.flux_dial_template_svg, peak_zhr, 
                                           config.background_sporadic_zhr)
+        
+        # Make a plot of the ZHR across the year
+        plotYearlyZHR(config, os.path.join(output_dir, config.yearly_zhr_plot_name), 
+                      sporadic_zhr=config.background_sporadic_zhr)
 
         # Generate the website
         generateWebsite(index_dir, flux_showers, ref_dt, results_all_years, results_ref_year, 
-            website_plot_url, dial_svg_str)
+            website_plot_url, dial_svg_str, config.yearly_zhr_plot_name)
         
 
         print("   ... done!")

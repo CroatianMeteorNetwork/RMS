@@ -1166,6 +1166,183 @@ def loadFluxActivity(config):
 
     return shower_models
 
+
+def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
+    """ Load the flux activity file and plot the variation of the ZHR throughout the year. 
+    
+    Arguments:
+        config: [Config] RMS configuration object.
+        plot_path: [str] Path to the output plot.
+
+    Keyword arguments:
+        sporadic_zhr: [float] Sporadic ZHR.
+        dt_ref: [datetime] Reference datetime. If not provided, the current time is used.
+
+    """
+
+    # If the reference datetime is not provided, use the current time
+    if dt_ref is None:
+        dt_ref = datetime.datetime.utcnow()
+
+    # Load the flux activity file
+    shower_models = loadFluxActivity(config)
+
+    # Sample the year at 1 hour intervals
+    sol_lon_points = np.linspace(0, 360, 365*24)
+
+    
+    zhr_total = np.zeros_like(sol_lon_points)
+
+    # Add sporadic ZHR
+    zhr_total += sporadic_zhr
+
+    # Compute the ZHR at each point using all showers
+    for shower in shower_models:
+        zhr_total += shower_models[shower].evaluateZHR(sol_lon_points)
+
+        # Subtract the background ZHR
+        zhr_total -= shower_models[shower].base_fit.background_zhr
+
+
+    plt.figure(figsize=(12, 5))
+    
+    # Plot the total ZHR
+    total_zhr_plot = plt.plot(sol_lon_points, zhr_total, linewidth=1, color="black")
+
+
+    # Vary the text ZHR in steps from the nominal value, to avoid overlapping text
+    text_zhr_steps = 2.0*np.array([-15, -5, -10, 0, 10, 5, 15])
+
+    # Set the ZHR of the shower name above the peak ZHR
+    text_zhr = 1.1*np.max(zhr_total) + np.abs(np.min(text_zhr_steps))
+
+    # Sort shower models by solar longitude
+    shower_models = OrderedDict(sorted(shower_models.items(), key=lambda x: x[1].base_fit.sol_peak))
+
+    # Add shower names at the peak times
+    for i, shower in enumerate(shower_models):
+
+        # Plot only the shower activity curve
+        shower_zhr = shower_models[shower].evaluateZHR(sol_lon_points)
+        shower_zhr -= shower_models[shower].base_fit.background_zhr
+        shower_zhr_plot = plt.plot(sol_lon_points, shower_zhr, linewidth=0.5, color="black", alpha=0.5)
+
+        # Take the reference sol at the highest ZHR
+        shower_peaks = np.array([shower_models[shower].base_fit.sol_peak] 
+                                + [x.sol_peak for x in shower_models[shower].additional_fits])
+        shower_zhr_peaks = np.array([shower_models[shower].base_fit.peak_zhr] 
+                                    + [x.peak_zhr for x in shower_models[shower].additional_fits])
+        shower_ref_sol = shower_peaks[np.argmax(shower_zhr_peaks)]
+
+        # Find the ZHR at the time of the shower peak
+        peak_sol_index = np.argmin(np.abs(sol_lon_points - shower_ref_sol))
+        peak_zhr = shower_zhr[peak_sol_index]
+
+        # Scale the shower text size by ZHR (larger ZHR = larger text)
+        # ZHR 10 = 8pt, ZHR 100 = 14pt
+        text_size = 8 + 6*(peak_zhr - 10)/90
+        if text_size < 8:
+            text_size = 8
+        elif text_size > 14:
+            text_size = 14
+
+        # Get the shower name ZHR position
+        text_zhr_shower = text_zhr + text_zhr_steps[i%len(text_zhr_steps)]
+
+        # Choose the text alignment so that the text is not outside the 0-360 range
+        horizontalalignment = "center"
+        if shower_ref_sol < 10:
+            horizontalalignment = "left"
+        elif shower_ref_sol > 350:
+            horizontalalignment = "right"
+
+        # Add the shower name
+        plt.text(shower_ref_sol, text_zhr_shower, shower, fontsize=text_size,
+                 horizontalalignment=horizontalalignment, verticalalignment="bottom")
+        
+        # Add a line connecting the shower name to the ZHR curve
+        plt.plot([shower_ref_sol, shower_ref_sol],
+                 [text_zhr_shower, peak_zhr], linewidth=0.5, linestyle="dotted", color="black")
+    
+    # Get the plot Y limits
+    y_min, y_max = plt.gca().get_ylim()
+
+    # Shift the plot minimum to accomodate the lower text
+    y_min = -0.25*(y_max - y_min)
+
+    # Plot month names at the 1st of that month (start in April of this year)
+    for month_no, year_modifier in [[ 4, 0],
+                                    [ 5, 0],
+                                    [ 6, 0],
+                                    [ 7, 0],
+                                    [ 8, 0],
+                                    [ 9, 0],
+                                    [10, 0],
+                                    [11, 0],
+                                    [12, 0],
+                                    [ 1, 1],
+                                    [ 2, 1],
+                                    [ 3, 1]]:
+
+        # Get the solar longitude of the 15th date of the month
+        curr_year = datetime.datetime.now().year
+        dt = datetime.datetime(curr_year + year_modifier, month_no, 15, 0, 0, 0)
+        sol = np.degrees(jd2SolLonSteyaert(datetime2JD(dt)))%360
+
+        month_text_y = y_min/2
+
+        # Plot the month name in the background of the plot
+        plt.text(sol, month_text_y, dt.strftime("%b").upper(), alpha=0.3, rotation=90, size=20, \
+            zorder=1, color='black', va='center', ha='center')
+
+        # Get the solar longitude of the 1st date of the month
+        curr_year = datetime.datetime.now().year
+        dt = datetime.datetime(curr_year + year_modifier, month_no, 1, 0, 0, 0)
+        sol = np.degrees(jd2SolLonSteyaert(datetime2JD(dt)))%360
+
+        # Plot the month begin line
+        y_arr = np.linspace(y_min, 0, 5)
+        plt.plot(np.zeros_like(y_arr) + sol, y_arr, linestyle='dotted', alpha=0.3, zorder=3, color='black')
+
+    
+    # Add a thin red line between 0 and the current zhr
+    sol_ref = np.degrees(jd2SolLonSteyaert(datetime2JD(dt_ref)))%360
+    zhr_ref_time = zhr_total[np.argmin(np.abs(sol_lon_points - sol_ref))]
+    plt.plot([sol_ref, sol_ref], [y_min, zhr_ref_time], color="red", linewidth=1)
+
+
+    # Set the plot limits
+    plt.xlim([0, 360])
+    plt.ylim([y_min, y_max])
+
+    # Exclude all tick labels on the Y axis that are < 0
+    y_ticks = plt.gca().get_yticks()
+    plt.gca().set_yticks(y_ticks[y_ticks >= 0])
+
+    # Set the plot labels
+    plt.xlabel("Solar Longitude (deg)")
+    plt.ylabel("ZHR")
+
+    # Add a legend
+    plt.legend(
+        [total_zhr_plot[0], shower_zhr_plot[0]], 
+        ["Total ZHR", "Per-shower ZHR"], 
+        framealpha=1.0, frameon=True
+        )
+
+    # Set the reference year in the title
+    plt.title("Years {:d}/{:d} (does not include possible outbursts)".format(dt_ref.year, dt_ref.year + 1))
+
+    plt.tight_layout()
+
+    # Save the plot
+    plt.savefig(plot_path, dpi=300)
+
+    # Close the plot
+    plt.close()
+
+
+
 if __name__ == "__main__":
 
     import argparse
