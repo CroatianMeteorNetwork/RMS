@@ -1188,6 +1188,10 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
     # Load the flux activity file
     shower_models = loadFluxActivity(config)
 
+    # Init the flux shower object
+    flux_showers = FluxShowers(config)
+
+
     # Sample the year at 1 hour intervals
     sol_lon_points = np.linspace(0, 360, 365*24)
 
@@ -1212,7 +1216,7 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
 
 
     # Vary the text ZHR in steps from the nominal value, to avoid overlapping text
-    text_zhr_steps = 2.0*np.array([-15, -5, -10, 0, 10, 5, 15])
+    text_zhr_steps = 3.0*np.array([-15, -5, -10, 0, 10, 5, 15])
 
     # Set the ZHR of the shower name above the peak ZHR
     text_zhr = 1.1*np.max(zhr_total) + np.abs(np.min(text_zhr_steps))
@@ -1257,9 +1261,22 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
         elif shower_ref_sol > 350:
             horizontalalignment = "right"
 
+        # Find the shower in the flux shower list and determine if it's a northern or southern hemisphere 
+        # shower. Showers +/- 30 deg are considered to be visible in both hemispheres.
+        # The hemispheres are marked by color
+        shw_obj = flux_showers.showerObjectFromCode(shower)
+        if shw_obj.dec_g > 30:
+            text_color = "#0000FF" # Dark blue
+        elif shw_obj.dec_g < -30:
+            text_color = "#FF0000" # Dark red
+        else:
+            text_color = "black"
+
+
+
         # Add the shower name
         plt.text(shower_ref_sol, text_zhr_shower, shower, fontsize=text_size,
-                 horizontalalignment=horizontalalignment, verticalalignment="bottom")
+                 horizontalalignment=horizontalalignment, verticalalignment="bottom", color=text_color)
         
         # Add a line connecting the shower name
         plt.plot([shower_ref_sol, shower_ref_sol],
@@ -1690,8 +1707,22 @@ if __name__ == "__main__":
         mc_error_estimation=False)
     sta_2020.addPeak(210.0, 0.3, 0.05, 0.05)
 
-    showers['STA'] = [
-        ["year_2020", sta_2020],
+    # showers['STA'] = [
+    #     ["year_2020", sta_2020],
+    # ]
+
+    ### ###
+
+    ### Eta Eridanids (ERI) ###
+
+    # Define the shower model for the Eta Eridanids
+    eri_all = ShowerActivityModel(initial_param_estimation='manual',
+        sol_peak0=134.6, bg_flux0=1.5, peak_flux0=2.7, bp0=0.1, bm0=0.1, refine_fits_individually=False,
+        mc_error_estimation=False)
+    eri_all.addPeak(123.0, 0.5, 0.2, 0.2)
+
+    showers['ERI'] = [
+        ["all_years", eri_all],
     ]
 
     ### ###
