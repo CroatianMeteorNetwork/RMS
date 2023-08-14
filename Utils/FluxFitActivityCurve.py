@@ -3,6 +3,7 @@
 import os
 import json
 import datetime
+import calendar
 from collections import OrderedDict
 
 import pandas as pd
@@ -1260,9 +1261,9 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
         plt.text(shower_ref_sol, text_zhr_shower, shower, fontsize=text_size,
                  horizontalalignment=horizontalalignment, verticalalignment="bottom")
         
-        # Add a line connecting the shower name to the ZHR curve
+        # Add a line connecting the shower name
         plt.plot([shower_ref_sol, shower_ref_sol],
-                 [text_zhr_shower, peak_zhr], linewidth=0.5, linestyle="dotted", color="black")
+                 [text_zhr_shower, 0], linewidth=0.5, linestyle="dotted", color="black")
     
     # Get the plot Y limits
     y_min, y_max = plt.gca().get_ylim()
@@ -1302,7 +1303,32 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
 
         # Plot the month begin line
         y_arr = np.linspace(y_min, 0, 5)
-        plt.plot(np.zeros_like(y_arr) + sol, y_arr, linestyle='dotted', alpha=0.3, zorder=3, color='black')
+        plt.plot(np.zeros_like(y_arr) + sol, y_arr, alpha=0.3, zorder=3, color='black', linewidth=1.0)
+
+        # Get the number of days in the month
+        num_days = calendar.monthrange(curr_year + year_modifier, month_no)[1]
+
+        # Mark every 10th day of the month with a short vertical line and every 5th day with a shorter line
+        # and every day with an even shorter line
+        for day in range(1, num_days + 1):
+
+            # Get the solar longitude of the day
+            dt = datetime.datetime(curr_year + year_modifier, month_no, day, 0, 0, 0)
+            sol = np.degrees(jd2SolLonSteyaert(datetime2JD(dt)))%360
+
+            # Plot the day line
+            if day%10 == 0:
+                y_arr = np.linspace(0, -10, 5)
+                plt.plot(np.zeros_like(y_arr) + sol, y_arr, alpha=0.3, zorder=3, color='black', linewidth=0.7)
+
+            elif day%5 == 0:
+                y_arr = np.linspace(0, -6, 5)
+                plt.plot(np.zeros_like(y_arr) + sol, y_arr, alpha=0.3, zorder=3, color='black', linewidth=0.4)
+
+            else:
+                y_arr = np.linspace(0, -4, 5)
+                plt.plot(np.zeros_like(y_arr) + sol, y_arr, alpha=0.3, zorder=3, color='black', linewidth=0.2)
+
 
     
     # Add a thin red line between 0 and the current zhr

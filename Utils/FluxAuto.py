@@ -9,6 +9,7 @@ import time
 import datetime
 import copy
 import json
+import traceback
 
 import numpy as np
 
@@ -871,9 +872,15 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
         dial_svg_str = generateZHRDialSVG(config.flux_dial_template_svg, peak_zhr, 
                                           config.background_sporadic_zhr)
         
-        # Make a plot of the ZHR across the year
-        plotYearlyZHR(config, os.path.join(output_dir, config.yearly_zhr_plot_name), 
-                      sporadic_zhr=config.background_sporadic_zhr)
+        try:
+            # Make a plot of the ZHR across the year
+            plotYearlyZHR(config, os.path.join(output_dir, config.yearly_zhr_plot_name), 
+                          sporadic_zhr=config.background_sporadic_zhr)
+        
+        except:
+            # Log the error
+            print("Error generating yearly ZHR plot!")
+            traceback.print_exc()
 
         # Generate the website
         generateWebsite(index_dir, flux_showers, ref_dt, results_all_years, results_ref_year, 
