@@ -1371,14 +1371,14 @@ if __name__ == "__main__":
     # per_2022.addPeak(140, 23, 0.3, 0.4)
     # #per_2022.addPeak(141.7, 5.0, 3.0, 3.0) # Small outburst?
 
-    showers['PER'] = [
-        # Define additional peaks
-        #                sol,    peak, bp0, bm0        
-        #["all_years", [ [139,    5.0, 0.01, 0.02], [141.7, 30.0, 1.0, 1.0] ] ],
-        ["year_2020", per_2020 ],
-        # ["year_2021", per_2021 ],
-        #["year_2022", per_2022 ],
-    ]
+    # showers['PER'] = [
+    #     # Define additional peaks
+    #     #                sol,    peak, bp0, bm0        
+    #     # ["all_years", [ [139,    5.0, 0.01, 0.02], [141.7, 30.0, 1.0, 1.0] ] ],
+    #     ["year_2020", per_2020 ],
+    #     ["year_2021", per_2021 ],
+    #     #["year_2022", per_2022 ],
+    # ]
 
     ###
 
@@ -1467,6 +1467,33 @@ if __name__ == "__main__":
     # ]
 
     ### ###
+
+    ### 2020 North Taurids ###
+
+    # Define the shower model for the 2020 North Taurids
+    nta_2020 = ShowerActivityModel(initial_param_estimation='auto', mc_error_estimation=False)
+
+    # showers['NTA'] = [
+    #     ["year_2020", nta_2020],
+    # ]
+
+    ### ###
+
+    ### 2020 Southern Taurids ###
+
+    # Define the shower model for the 2020 Southern Taurids
+    sta_2020 = ShowerActivityModel(initial_param_estimation='manual',
+        sol_peak0=202.0, bg_flux0=0.4, peak_flux0=0.4, bp0=0.15, bm0=0.15, refine_fits_individually=False,
+        mc_error_estimation=False)
+    sta_2020.addPeak(210.0, 0.3, 0.05, 0.05)
+
+    showers['STA'] = [
+        ["year_2020", sta_2020],
+    ]
+
+    ### ###
+
+
 
 
     # List for storing the fit results
