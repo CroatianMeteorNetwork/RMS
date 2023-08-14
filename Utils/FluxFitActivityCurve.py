@@ -1334,7 +1334,7 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
     # Add a thin red line between 0 and the current zhr
     sol_ref = np.degrees(jd2SolLonSteyaert(datetime2JD(dt_ref)))%360
     zhr_ref_time = zhr_total[np.argmin(np.abs(sol_lon_points - sol_ref))]
-    plt.plot([sol_ref, sol_ref], [y_min, zhr_ref_time], color="red", linewidth=1)
+    current_time_line = plt.plot([sol_ref, sol_ref], [y_min, zhr_ref_time], color="red", linewidth=1)
 
 
     # Set the plot limits
@@ -1351,8 +1351,8 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
 
     # Add a legend
     plt.legend(
-        [total_zhr_plot[0], shower_zhr_plot[0]], 
-        ["Total ZHR", "Per-shower ZHR"], 
+        [total_zhr_plot[0], shower_zhr_plot[0], current_time_line[0]],
+        ["Total ZHR", "Per-shower ZHR", "Current time"],
         framealpha=1.0, frameon=True
         )
 
