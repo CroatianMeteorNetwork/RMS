@@ -48,13 +48,21 @@ def _agentAuth(transport, username, rsa_private_key):
         ki = paramiko.RSAKey.from_private_key_file(rsa_private_key)
 
     except Exception as e:
-        log.error('Failed loading ' + rsa_private_key + str(e))
+        log.error('Failed loading SSH key given in the config ' + rsa_private_key + str(e))
 
-    # Find all available keys
-    agent = paramiko.Agent()
-    agent_keys = agent.get_keys() + (ki,)
+
+    # Find all available keys if the private key was not found
+    if ki is None:
+        log.info("Loading all available keys from the SSH agent...")
+        agent = paramiko.Agent()
+        agent_keys = agent.get_keys()
+
+    else:
+        agent_keys = (ki,)
+
 
     if len(agent_keys) == 0:
+        log.warning('No keys found, cannot authenticate!')
         return False
 
     # Try a key until finding the one which works
