@@ -34,6 +34,8 @@ import datetime
 import argparse
 import random
 import string
+
+# Handle Python 2.7
 if sys.hexversion < 0x03000000:
     import requests
 else:
