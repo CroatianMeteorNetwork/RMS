@@ -35,12 +35,9 @@ import argparse
 import random
 import string
 
-# Handle Python 2.7
-if sys.hexversion < 0x03000000:
-    import requests
-else:
-    import statistics
-    import urllib.request
+import statistics
+import requests
+import urllib.request
 import logging
 
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
