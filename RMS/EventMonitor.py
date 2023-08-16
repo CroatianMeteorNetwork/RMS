@@ -22,8 +22,9 @@ from __future__ import print_function, division, absolute_import
 import sqlite3
 import multiprocessing
 import RMS.ConfigReader as cr
-import urllib.request
+
 import os
+import sys
 import shutil
 import time
 import copy
@@ -33,7 +34,11 @@ import datetime
 import argparse
 import random
 import string
-import statistics
+if sys.hexversion < 0x03000000:
+    import requests
+else:
+    import statistics
+    import urllib.request
 import logging
 
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
@@ -57,7 +62,6 @@ class EventContainer(object):
     """ Contains the specification of the search for an event.
 
     """
-
     def __init__(self, dt, lat, lon, ht):
 
         # Required parameters
@@ -1136,7 +1140,10 @@ class EventMonitor(multiprocessing.Process):
 
         if not testmode:
             try:
-                web_page = urllib.request.urlopen(self.syscon.event_monitor_webpage).read().decode("utf-8").splitlines()
+                if sys.hexversion < 0x03000000:
+                    web_page = requests.get(self.syscon.event_monitor_webpage).text.splitlines()
+                else:
+                    web_page = urllib.request.urlopen(self.syscon.event_monitor_webpage).read().decode("utf-8").splitlines()
 
             except:
                 # Return an empty list
@@ -1155,13 +1162,13 @@ class EventMonitor(multiprocessing.Process):
 
             if ";" in line:
                 log.warning("Detected attempt to use ; in database query")
-                return
+                continue
             if "--" in line:
                 log.warning("Detected attempt to use -- in database query")
-                return
+                continue
             if "=" in line:
                 log.warning("Detected attempt to use = in database query")
-                return
+                continue
 
             if ":" in line:  # then it is a value pair
 
@@ -1323,7 +1330,7 @@ class EventMonitor(multiprocessing.Process):
         except:
             event_time = convertGMNTimeToPOSIX(event.dt)
 
-        file_list: list[str] = []
+        file_list = []
         # Iterate through the directory list, appending files with the correct extension
 
 
@@ -2391,6 +2398,9 @@ def testApplyCartesianSD():
         [bool]
     """
 
+    # If Python version less than 3, return true.
+    if sys.hexversion < 0x03000000:
+        return True
 
 
     success = True
@@ -2613,7 +2623,13 @@ if __name__ == "__main__":
     try:
         # Add a random string after the URL to defeat caching
         print(syscon.event_monitor_webpage)
-        web_page = urllib.request.urlopen(syscon.event_monitor_webpage + "?" + randomword(6)).read().decode("utf-8").splitlines()
+
+        if sys.hexversion < 0x03000000:
+            web_page = requests.get(syscon.event_monitor_webpage).text.splitlines()
+        else:
+            web_page = urllib.request.urlopen(syscon.event_monitor_webpage).read().decode("utf-8").splitlines()
+
+
     except:
 
         log.info("Nothing found at {}".format(syscon.event_monitor_webpage))
