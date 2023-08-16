@@ -11,12 +11,13 @@ import numpy as np
 import scipy.optimize
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+import ephem
 
-from RMS.Astrometry.Conversions import datetime2JD
+from RMS.Astrometry.Conversions import datetime2JD, jd2Date
 from RMS.Formats.Showers import FluxShowers
 from RMS.Misc import formatScientific
 from RMS.Math import lineFunc
-from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
+from RMS.Routines.SolarLongitude import jd2SolLonSteyaert, solLon2jdSteyaert
 from Utils.Flux import calculateZHR
 
 def showerActivity(sol, sol_peak, background_flux, peak_flux, bp, bm):
@@ -1288,6 +1289,7 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
     # Shift the plot minimum to accomodate the lower text
     y_min = -0.25*(y_max - y_min)
 
+
     # Plot month names at the 1st of that month (start in April of this year)
     for month_no, year_modifier in [[ 4, 0],
                                     [ 5, 0],
@@ -1303,7 +1305,7 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
                                     [ 3, 1]]:
 
         # Get the solar longitude of the 15th date of the month
-        curr_year = datetime.datetime.now().year
+        curr_year = dt_ref.year
         dt = datetime.datetime(curr_year + year_modifier, month_no, 15, 0, 0, 0)
         sol = np.degrees(jd2SolLonSteyaert(datetime2JD(dt)))%360
 
@@ -1314,7 +1316,6 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
             zorder=1, color='black', va='center', ha='center')
 
         # Get the solar longitude of the 1st date of the month
-        curr_year = datetime.datetime.now().year
         dt = datetime.datetime(curr_year + year_modifier, month_no, 1, 0, 0, 0)
         sol = np.degrees(jd2SolLonSteyaert(datetime2JD(dt)))%360
 
@@ -1346,6 +1347,52 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
                 y_arr = np.linspace(0, -4, 5)
                 plt.plot(np.zeros_like(y_arr) + sol, y_arr, alpha=0.3, zorder=3, color='black', linewidth=0.2)
 
+
+
+
+    # Get the date of 0 solar longitude in the current year
+    beg_dt = jd2Date(solLon2jdSteyaert(dt_ref.year, 3, 0), dt_obj=True)
+    end_dt = jd2Date(solLon2jdSteyaert(dt_ref.year + 1, 3, 0), dt_obj=True)
+
+    # Create an array of points every 12 hours for the whole year
+    dt_arr = np.array([beg_dt + datetime.timedelta(hours=x) for x in range(0, int((end_dt - beg_dt).total_seconds()/3600) + 12, 12)])
+        
+    # Compute the solar longitude of each point
+    sol_arr = np.degrees(jd2SolLonSteyaert(np.array([datetime2JD(dt) for dt in dt_arr])))%360
+
+    # Setting up observer for Moon phase calculation
+    o = ephem.Observer()
+    o.lat = str(config.latitude)
+    o.long = str(config.longitude)
+    o.elevation = config.elevation
+    o.horizon = '0:0'
+
+    moon_sol_array = []
+    moon_phase_array = []
+    
+    # Get the Moon phase for each point
+    for dt, sol in zip(dt_arr, sol_arr):
+
+        o.date = dt
+        m = ephem.Moon()
+        m.compute(o)
+
+        # Save the solar longitude and the lunar phase
+        moon_sol_array.append(sol)
+        moon_phase_array.append(m.phase)
+
+
+    # Sort by solar longitude
+    moon_phase_array = np.array(moon_phase_array)
+    moon_sol_array = np.array(moon_sol_array)
+    sort_ind = np.argsort(moon_sol_array)
+    moon_sol_array = moon_sol_array[sort_ind]
+    moon_phase_array = moon_phase_array[sort_ind]
+
+    # Plot the Moon phase between y_min and 0
+    moon_phase_array = (moon_phase_array - np.min(moon_phase_array))/(np.max(moon_phase_array) - np.min(moon_phase_array))
+    moon_phase_array = moon_phase_array*np.abs(y_min) - np.abs(y_min)
+    plt.plot(moon_sol_array, moon_phase_array, linewidth=0.5, alpha=0.25, color="black")
 
     
     # Add a thin red line between 0 and the current zhr
