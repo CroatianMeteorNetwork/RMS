@@ -1821,6 +1821,10 @@ class EventMonitor(multiprocessing.Process):
         """
 
         events = self.getEventsfromWebPage(testmode)
+        # Don't try to iterate over None - this check should never be needed
+        if events is None:
+            log.warning("Attempt to iterate over None")
+            return
         for event in events:
             if event.isReasonable():
                 self.addEvent(event)
