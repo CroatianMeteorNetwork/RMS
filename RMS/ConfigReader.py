@@ -250,6 +250,7 @@ class Config:
 
         self.external_script_run = False
         self.auto_reprocess_external_script_run = False
+        self.prioritise_capture_over_reprocess = False
         self.external_script_path = None
         self.external_function_name = "rmsExternal"
 
@@ -928,6 +929,11 @@ def parseCapture(config, parser):
     # Enable/disable auto reprocessing
     if parser.has_option(section, "auto_reprocess"):
         config.auto_reprocess = parser.getboolean(section, "auto_reprocess")
+
+    # Enable/disable auto reprocessing
+    if parser.has_option(section, "prioritise_capture_over_reprocess"):
+        config.prioritise_capture_over_reprocess = parser.getboolean(section, "prioritise_capture_over_reprocess")
+
 
 
     # Load name of the capture resume flag file

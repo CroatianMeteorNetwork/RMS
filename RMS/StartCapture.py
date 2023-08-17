@@ -673,8 +673,8 @@ def processIncompleteCaptures(config, upload_manager):
         # If capture should have started do not process any more incomplete directories
         start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
         if isinstance(start_time, bool):
-            if start_time:
-                log.info("Stopping reprocess, capture due to start")
+            if start_time and config.prioritise_capture_over_reprocess:
+                log.info("Capture should have started, do not start reprocessing another directory")
                 break
 
 
@@ -899,7 +899,7 @@ if __name__ == "__main__":
         # Don't start the capture if there's less than 15 minutes left
         if duration < 15*60:
 
-            log.debug('Less than 15 minues left to record, waiting for a new recording session tonight...')
+            log.debug('Less than 15 minutes left to record, waiting for a new recording session tonight...')
 
             # Reset the Ctrl+C to KeyboardInterrupt
             resetSIGINT()
