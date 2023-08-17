@@ -1169,7 +1169,7 @@ def loadFluxActivity(config):
     return shower_models
 
 
-def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
+def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None, plot_current_time=True):
     """ Load the flux activity file and plot the variation of the ZHR throughout the year. 
     
     Arguments:
@@ -1179,12 +1179,20 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
     Keyword arguments:
         sporadic_zhr: [float] Sporadic ZHR.
         dt_ref: [datetime] Reference datetime. If not provided, the current time is used.
+        plot_current_time: [bool] Plot the current time as a vertical line.
 
     """
 
     # If the reference datetime is not provided, use the current time
     if dt_ref is None:
         dt_ref = datetime.datetime.utcnow()
+
+
+    # If the date is before the vernal equinox, use the previous year for the plot
+    if (dt_ref.month < 4) and (np.degrees(jd2SolLonSteyaert(datetime2JD(dt_ref))) > 180):
+        dt_ref_plot = dt_ref - datetime.timedelta(days=365)
+    else:
+        dt_ref_plot = dt_ref
 
     # Load the flux activity file
     shower_models = loadFluxActivity(config)
@@ -1281,13 +1289,13 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
         
         # Add a line connecting the shower name
         plt.plot([shower_ref_sol, shower_ref_sol],
-                 [text_zhr_shower, 0], linewidth=0.5, linestyle="dotted", color="black")
+                 [text_zhr_shower, -200], linewidth=0.5, linestyle="dotted", color="black")
     
     # Get the plot Y limits
-    y_min, y_max = plt.gca().get_ylim()
+    _, y_max = plt.gca().get_ylim()
 
     # Shift the plot minimum to accomodate the lower text
-    y_min = -0.25*(y_max - y_min)
+    y_min = -0.25*y_max
 
 
     # Plot month names at the 1st of that month (start in April of this year)
@@ -1305,7 +1313,7 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
                                     [ 3, 1]]:
 
         # Get the solar longitude of the 15th date of the month
-        curr_year = dt_ref.year
+        curr_year = dt_ref_plot.year
         dt = datetime.datetime(curr_year + year_modifier, month_no, 15, 0, 0, 0)
         sol = np.degrees(jd2SolLonSteyaert(datetime2JD(dt)))%360
 
@@ -1328,7 +1336,7 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
 
         # Mark every 10th day of the month with a short vertical line and every 5th day with a shorter line
         # and every day with an even shorter line
-        for day in range(1, num_days + 1):
+        for day in range(2, num_days + 1):
 
             # Get the solar longitude of the day
             dt = datetime.datetime(curr_year + year_modifier, month_no, day, 0, 0, 0)
@@ -1350,55 +1358,85 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
 
 
 
+    ### Plot the moon phases ### 
+
     # Get the date of 0 solar longitude in the current year
-    beg_dt = jd2Date(solLon2jdSteyaert(dt_ref.year, 3, 0), dt_obj=True)
-    end_dt = jd2Date(solLon2jdSteyaert(dt_ref.year + 1, 3, 0), dt_obj=True)
+    beg_dt = jd2Date(solLon2jdSteyaert(dt_ref_plot.year, 3, np.radians(0)), dt_obj=True)
+    end_dt = jd2Date(solLon2jdSteyaert(dt_ref_plot.year + 1, 3, np.radians(0)), dt_obj=True)
 
     # Create an array of points every 12 hours for the whole year
-    dt_arr = np.array([beg_dt + datetime.timedelta(hours=x) for x in range(0, int((end_dt - beg_dt).total_seconds()/3600) + 12, 12)])
+    dt_arr = np.array([beg_dt + datetime.timedelta(hours=x) 
+                       for x in range(0, int((end_dt - beg_dt).total_seconds()/3600) + 12, 12)])
+    
         
     # Compute the solar longitude of each point
-    sol_arr = np.degrees(jd2SolLonSteyaert(np.array([datetime2JD(dt) for dt in dt_arr])))%360
+    moon_sol_array = np.degrees(jd2SolLonSteyaert(np.array([datetime2JD(dt) for dt in dt_arr])))
 
     # Setting up observer for Moon phase calculation
     o = ephem.Observer()
-    o.lat = str(config.latitude)
-    o.long = str(config.longitude)
-    o.elevation = config.elevation
+    o.lat = str(0)
+    o.long = str(0)
+    o.elevation = 0
     o.horizon = '0:0'
-
-    moon_sol_array = []
-    moon_phase_array = []
     
     # Get the Moon phase for each point
-    for dt, sol in zip(dt_arr, sol_arr):
+    moon_phase_array = []
+    for dt, sol in zip(dt_arr, moon_sol_array):
 
         o.date = dt
         m = ephem.Moon()
         m.compute(o)
 
-        # Save the solar longitude and the lunar phase
-        moon_sol_array.append(sol)
+        # Save the lunar phase
         moon_phase_array.append(m.phase)
+
+        # print("{:s} - sol {:10.6f} deg: {:.2f} moon phase".format(dt.strftime("%Y-%m-%d %H:%M:%S"), sol, m.phase))
 
 
     # Sort by solar longitude
     moon_phase_array = np.array(moon_phase_array)
-    moon_sol_array = np.array(moon_sol_array)
     sort_ind = np.argsort(moon_sol_array)
     moon_sol_array = moon_sol_array[sort_ind]
     moon_phase_array = moon_phase_array[sort_ind]
 
     # Plot the Moon phase between y_min and 0
     moon_phase_array = (moon_phase_array - np.min(moon_phase_array))/(np.max(moon_phase_array) - np.min(moon_phase_array))
-    moon_phase_array = moon_phase_array*np.abs(y_min) - np.abs(y_min)
+    moon_phase_scale = lambda x: x*np.abs(y_min) - np.abs(y_min)
+    moon_phase_array = moon_phase_scale(moon_phase_array)
     plt.plot(moon_sol_array, moon_phase_array, linewidth=0.5, alpha=0.25, color="black")
 
+    # Compute the first dates of the new moon, full moon, first quarter and last quarter
+    moon_search_dt = beg_dt + datetime.timedelta(days=10)
+    new_moon_dt = ephem.next_new_moon(moon_search_dt).datetime()
+    new_moon_sol = np.degrees(jd2SolLonSteyaert(datetime2JD(new_moon_dt)))%360
+    full_moon_dt = ephem.next_full_moon(moon_search_dt).datetime()
+    full_moon_sol = np.degrees(jd2SolLonSteyaert(datetime2JD(full_moon_dt)))%360
+    first_quarter_dt = ephem.next_first_quarter_moon(moon_search_dt).datetime()
+    first_quarter_sol = np.degrees(jd2SolLonSteyaert(datetime2JD(first_quarter_dt)))%360
+    last_quarter_dt = ephem.next_last_quarter_moon(moon_search_dt).datetime()
+    last_quarter_sol = np.degrees(jd2SolLonSteyaert(datetime2JD(last_quarter_dt)))%360
+
+    plt.plot(new_moon_sol, moon_phase_scale(0.05), markeredgecolor='None', markerfacecolor='black', 
+             markersize=5, marker='$\u25CF$')
+    plt.plot(full_moon_sol, moon_phase_scale(0.95), markeredgecolor='None', markerfacecolor='black',
+             markersize=5, marker='$\u25CB$')
+    plt.plot(first_quarter_sol, moon_phase_scale(0.5), markeredgecolor='None', markerfacecolor='black',
+                markersize=5, marker='$\u25D0$')
+    plt.plot(last_quarter_sol, moon_phase_scale(0.5), markeredgecolor='None', markerfacecolor='black',
+                markersize=5, marker='$\u25D1$')
     
-    # Add a thin red line between 0 and the current zhr
-    sol_ref = np.degrees(jd2SolLonSteyaert(datetime2JD(dt_ref)))%360
-    zhr_ref_time = zhr_total[np.argmin(np.abs(sol_lon_points - sol_ref))]
-    current_time_line = plt.plot([sol_ref, sol_ref], [y_min, zhr_ref_time], color="red", linewidth=1)
+    #plt.plot(fullMoon,1,markeredgecolor='black',markerfacecolor='black',markersize=markersize,marker='$\u25CB$')
+    #plt.plot(firstQuarter,1,markeredgecolor='black',markerfacecolor='black',markersize=markersize,marker='$\u25D0$')
+    #plt.plot(lastQuarter,1,markeredgecolor='black',markerfacecolor='black',markersize=markersize,marker='$\u25D1$')
+
+    ### ###
+
+    
+    # Add the current time - a thin red vertical line
+    if plot_current_time:
+        sol_ref = np.degrees(jd2SolLonSteyaert(datetime2JD(dt_ref)))%360
+        zhr_ref_time = zhr_total[np.argmin(np.abs(sol_lon_points - sol_ref))]
+        current_time_line = plt.plot([sol_ref, sol_ref], [y_min, zhr_ref_time], color="red", linewidth=1)
 
 
     # Set the plot limits
@@ -1408,6 +1446,13 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
     # Exclude all tick labels on the Y axis that are < 0
     y_ticks = plt.gca().get_yticks()
     plt.gca().set_yticks(y_ticks[y_ticks >= 0])
+
+    # Major X axis ticks are multiplies of 20 and minor ticks are multiplies of 5
+    plt.gca().xaxis.set_major_locator(ticker.MultipleLocator(20))
+    plt.gca().xaxis.set_major_formatter('{x:.0f}')
+    # For the minor ticks, use no labels; default NullFormatter.
+    plt.gca().xaxis.set_minor_locator(ticker.MultipleLocator(5))
+    
 
     # Set the plot labels
     plt.xlabel("Solar Longitude (deg)")
@@ -1421,7 +1466,8 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None):
         )
 
     # Set the reference year in the title
-    plt.title("Years {:d}/{:d} (does not include possible outbursts)".format(dt_ref.year, dt_ref.year + 1))
+    plt.title("Years {:d}/{:d} (does not include possible outbursts)".format(
+        dt_ref_plot.year, dt_ref_plot.year + 1))
 
     plt.tight_layout()
 
