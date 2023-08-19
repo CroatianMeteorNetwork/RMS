@@ -1287,10 +1287,8 @@ class EventMonitor(multiprocessing.Process):
 
         if len(self.getDirectoryList(event)) > 0:
             file_list += self.getFile("platepar_cmn2010.cal", self.getDirectoryList(event)[0])
-        if len(file_list) != 0:
-            return file_list[0]
-        else:
-            return False
+        return file_list
+
 
     def getDirectoryList(self, event):
 
