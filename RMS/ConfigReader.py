@@ -251,7 +251,6 @@ class Config:
 
         self.external_script_run = False
         self.auto_reprocess_external_script_run = False
-        self.prioritise_capture_over_reprocess = False
         self.external_script_path = None
         self.external_function_name = "rmsExternal"
 
@@ -314,6 +313,7 @@ class Config:
 
         # Automatically reprocess broken capture directories
         self.auto_reprocess = True
+        self.prioritise_capture_over_reprocess = True
 
         # Flag file which indicates that the previously processed files are loaded during capture resume
         self.capture_resume_flag_file = ".capture_resuming"
