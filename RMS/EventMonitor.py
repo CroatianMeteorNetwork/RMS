@@ -979,15 +979,16 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "{},  {}, '{}', '{}', '{}' ,       \n".format(0, 0,uuid.uuid4(), event.respond_to, event.stations_required)
             sql_statement += "CURRENT_TIMESTAMP ) \n"
 
-#            try:
-            cursor = self.db_conn.cursor()
-            cursor.execute(sql_statement)
-            self.db_conn.commit()
+            try:
+                cursor = self.db_conn.cursor()
+                print(sql_statement)
+                cursor.execute(sql_statement)
+                self.db_conn.commit()
 
-#            except:
-#                log.info("Add event failed")
-#                self.recoverFromDatabaseError()
-#                return False
+            except:
+                log.info("Add event failed")
+                self.recoverFromDatabaseError()
+                return False
             log.info("Added event at {} to the database".format(event.dt))
             return True
         else:
