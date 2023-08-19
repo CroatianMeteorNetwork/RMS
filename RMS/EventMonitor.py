@@ -953,6 +953,10 @@ class EventMonitor(multiprocessing.Process):
 
         self.delOldRecords()
 
+        # required for Jessie
+        qry_elev_is_max = 1 if event.elev_is_max else 0
+
+
         if not self.eventExists(event):
             sql_statement = ""
             sql_statement += "INSERT INTO event_monitor \n"
@@ -975,7 +979,7 @@ class EventMonitor(multiprocessing.Process):
                                                                       event.lon2_std, event.ht2, event.ht2_std, event.cart2_std)
             sql_statement += "{},  {}, {}, {}, {} ,        \n".format(event.azim, event.azim_std, event.elev,
                                                                       event.elev_std,
-                                                                      event.elev_is_max)
+                                                                      qry_elev_is_max)
             sql_statement += "{},  {}, '{}', '{}', '{}' ,       \n".format(0, 0,uuid.uuid4(), event.respond_to, event.stations_required)
             sql_statement += "CURRENT_TIMESTAMP ) \n"
 
