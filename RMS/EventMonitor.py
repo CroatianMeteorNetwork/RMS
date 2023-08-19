@@ -1483,7 +1483,7 @@ class EventMonitor(multiprocessing.Process):
 
         # Read in the platepar for the event
         rp = Platepar()
-        if not self.getPlateparFilePath(event):
+        if len(self.getPlateparFilePath(event)) == 0:
             rp.read(os.path.abspath('.'))
 
         pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC = self.trajectoryVisible(rp, event)
