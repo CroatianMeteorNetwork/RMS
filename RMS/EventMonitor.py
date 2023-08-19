@@ -35,9 +35,12 @@ import argparse
 import random
 import string
 
-import statistics
-import requests
-import urllib.request
+if sys.hexversion < 0x03000000:
+    import requests
+else:
+    import statistics
+    import urllib.request
+
 import logging
 
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
@@ -2401,7 +2404,7 @@ def testApplyCartesianSD():
         [bool]
     """
 
-    # If Python version less than 3, return true.
+    # If Python version less than 3, return true - can't run this testcode without 3.x
     if sys.hexversion < 0x03000000:
         return True
 
