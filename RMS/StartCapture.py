@@ -915,7 +915,7 @@ if __name__ == "__main__":
         # Don't start the capture if there's less than 15 minutes left
         if duration < 15*60:
 
-            log.debug('Less than 15 minues left to record, waiting for a new recording session tonight...')
+            log.debug('Less than 15 minutes left to record, waiting for a new recording session tonight...')
 
             # Reset the Ctrl+C to KeyboardInterrupt
             resetSIGINT()
