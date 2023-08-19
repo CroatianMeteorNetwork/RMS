@@ -687,6 +687,14 @@ def processIncompleteCaptures(config, upload_manager):
             log.error(repr(e))
             log.error(repr(traceback.format_exception(*sys.exc_info())))
 
+        # If capture should have started do not process any more incomplete directories
+        start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
+        if isinstance(start_time, bool):
+            if start_time and config.prioritise_capture_over_reprocess:
+                log.info("Capture should have started, do not start reprocessing another directory")
+                break
+
+
 
 
 if __name__ == "__main__":
