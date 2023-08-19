@@ -40,6 +40,7 @@ if sys.hexversion < 0x03000000:
 else:
     import statistics
     import urllib.request
+    from Utils.SkyFit2 import convertFRNameToFF
 
 import logging
 
@@ -54,7 +55,7 @@ from Utils.FRbinViewer import view
 from Utils.BatchFFtoImage import batchFFtoImage
 from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 from RMS.UploadManager import uploadSFTP
-from Utils.SkyFit2 import convertFRNameToFF
+
 from glob import glob
 
 log = logging.getLogger("logger")
