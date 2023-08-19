@@ -1338,6 +1338,7 @@ class EventMonitor(multiprocessing.Process):
         except:
             event_time = convertGMNTimeToPOSIX(event.dt)
 
+        seeking_first_fits_after_event = True # to prevent warning of uninitialised
         file_list = []
         # Iterate through the directory list, appending files with the correct extension
 
@@ -1482,7 +1483,7 @@ class EventMonitor(multiprocessing.Process):
 
         # Read in the platepar for the event
         rp = Platepar()
-        if not rp.read(self.getPlateparFilePath(event)):
+        if not self.getPlateparFilePath(event):
             rp.read(os.path.abspath('.'))
 
         pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC = self.trajectoryVisible(rp, event)
