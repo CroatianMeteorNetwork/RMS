@@ -754,6 +754,9 @@ def parseSystem(config, parser):
         config.auto_reprocess_external_script_run = parser.getboolean(section, \
             "auto_reprocess_external_script_run")
 
+    if parser.has_option(section, "prioritize_capture_over_reprocess"):
+        config.prioritize_capture_over_reprocess = parser.getboolean(section, \
+            "prioritize_capture_over_reprocess")
 
     if parser.has_option(section, "external_script_path"):
         config.external_script_path = parser.get(section, "external_script_path")
