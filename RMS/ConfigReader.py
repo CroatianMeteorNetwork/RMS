@@ -313,7 +313,7 @@ class Config:
 
         # Automatically reprocess broken capture directories
         self.auto_reprocess = True
-        self.prioritise_capture_over_reprocess = True
+        self.prioritize_capture_over_reprocess = False
 
         # Flag file which indicates that the previously processed files are loaded during capture resume
         self.capture_resume_flag_file = ".capture_resuming"
