@@ -1282,11 +1282,11 @@ class EventMonitor(multiprocessing.Process):
                 file: [string] Path to platepar
         """
 
-        file_list = []
+        platepar_file = ""
 
         if len(self.getDirectoryList(event)) > 0:
-            file_list += self.getFile("platepar_cmn2010.cal", self.getDirectoryList(event)[0])
-        return file_list[0]
+            platepar_file = self.getFile("platepar_cmn2010.cal", self.getDirectoryList(event)[0])
+        return platepar_file
 
 
     def getDirectoryList(self, event):
@@ -1480,10 +1480,10 @@ class EventMonitor(multiprocessing.Process):
 
         # Read in the platepar for the event
         rp = Platepar()
-        if len(self.getPlateparFilePath(event)) == 0:
+        if self.getPlateparFilePath(event) == "":
             rp.read(os.path.abspath('.'))
         else:
-            rp.read(self.getPlateparFilePath(event)[0])
+            rp.read(self.getPlateparFilePath(event))
 
         pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC = self.trajectoryVisible(rp, event)
         return pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC
