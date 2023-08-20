@@ -1285,7 +1285,9 @@ class EventMonitor(multiprocessing.Process):
         platepar_file = ""
 
         if len(self.getDirectoryList(event)) > 0:
-            platepar_file = str(self.getFile("platepar_cmn2010.cal", self.getDirectoryList(event))[0])
+            print("Directory list {}".format(self.getFile(event)))
+            print("Get file {}".format(self.getFile("platepar_cmn2010.cal", self.getDirectoryList(event)[0])))
+            platepar_file = str(self.getFile("platepar_cmn2010.cal", self.getDirectoryList(event)[0]))
         return platepar_file
 
 
