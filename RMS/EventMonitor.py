@@ -1643,7 +1643,7 @@ class EventMonitor(multiprocessing.Process):
 
 
         for observed_event in unprocessed:
-            log.info("Starting checks on trajectories for event at {}".format(observed_event.dt))
+            log.info("Checks on trajectories for event at {}".format(observed_event.dt))
             check_time_start = datetime.now()
             # Iterate through the work
             # Events can be specified in different ways, make sure converted to LatLon
