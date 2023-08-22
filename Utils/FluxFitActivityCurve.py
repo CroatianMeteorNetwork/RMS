@@ -618,7 +618,7 @@ class ShowerActivityModel(object):
 
 
         # Sample the solar longitude
-        sol_arr = np.linspace(np.min(sol_data), np.max(sol_data), 1000)
+        sol_arr = np.linspace(np.min(sol_data) - 5, np.max(sol_data) + 5, 1000)
 
         # Get the full model fit
         flux_arr = self.evaluateFlux(sol_arr)
@@ -640,6 +640,10 @@ class ShowerActivityModel(object):
             # Plot the base peak
             base_arr = showerActivityVect(sol_arr, *self.base_fit.fluxParameters())
             plt.plot(sol_arr, base_arr, linestyle='dotted', color='0.5', alpha=0.5)
+
+            # Plot the background flux
+            plt.axhline(self.base_fit.background_flux, linestyle='dotted', color='0.5', alpha=0.5, 
+                        label='Background')
 
             # Plot the additional peaks
             for peak in self.additional_fits:
@@ -731,7 +735,7 @@ class ShowerActivityModel(object):
 
         
         # Sample the solar longitude
-        sol_arr = np.linspace(np.min(sol_data), np.max(sol_data), 1000)
+        sol_arr = np.linspace(np.min(sol_data) - 5, np.max(sol_data) + 5, 1000)
 
         # Get the full model fit
         zhr_arr = self.evaluateZHR(sol_arr)
@@ -743,14 +747,18 @@ class ShowerActivityModel(object):
         # Plot the base peak and the additional peaks individually
         if plot_individual_models and (len(self.additional_fits) > 0):
                 
-                # Plot the base peak
-                zhr_arr = showerActivityVect(sol_arr, *self.base_fit.zhrParameters())
-                plt.plot(sol_arr, zhr_arr, linestyle='dotted', color='0.5', alpha=0.5)
-    
-                # Plot the additional peaks
-                for peak in self.additional_fits:
-                    zhr_arr = showerActivityVect(sol_arr, *peak.zhrParameters())
-                    plt.plot(sol_arr, zhr_arr, linestyle='dotted', color='k', alpha=0.5)
+            # Plot the base peak
+            zhr_arr = showerActivityVect(sol_arr, *self.base_fit.zhrParameters())
+            plt.plot(sol_arr, zhr_arr, linestyle='dotted', color='0.5', alpha=0.5)
+
+            # Plot the background ZHR
+            plt.axhline(self.base_fit.background_zhr, linestyle='dotted', color='0.5', alpha=0.5,
+                        label='Background')
+
+            # Plot the additional peaks
+            for peak in self.additional_fits:
+                zhr_arr = showerActivityVect(sol_arr, *peak.zhrParameters())
+                plt.plot(sol_arr, zhr_arr, linestyle='dotted', color='k', alpha=0.5)
 
         ###
 
@@ -1664,9 +1672,9 @@ if __name__ == "__main__":
 
     # Define the shower model for the 2020 Perseids
     per_2020 = ShowerActivityModel(
-        initial_param_estimation='manual', sol_peak0=138.0, bg_flux0=0.5, peak_flux0=2.0, bp0=0.03, bm0=0.07,
-        refine_fits_individually=False, mc_error_estimation=True)
-    per_2020.addPeak(140, 23, 0.3, 0.4)
+        initial_param_estimation='manual', sol_peak0=137.0, bg_flux0=0.5, peak_flux0=5.0, bp0=0.03, bm0=0.3,
+        refine_fits_individually=False, mc_error_estimation=False)
+    per_2020.addPeak(140, 20, 0.3, 0.4)
     # per_2020 = ShowerActivityModel(initial_param_estimation='auto')
 
     # Define the shower model for the 2021 Perseids
@@ -1684,14 +1692,14 @@ if __name__ == "__main__":
     # per_2022.addPeak(140, 23, 0.3, 0.4)
     # #per_2022.addPeak(141.7, 5.0, 3.0, 3.0) # Small outburst?
 
-    # showers['PER'] = [
-    #     # Define additional peaks
-    #     #                sol,    peak, bp0, bm0        
-    #     # ["all_years", [ [139,    5.0, 0.01, 0.02], [141.7, 30.0, 1.0, 1.0] ] ],
-    #     ["year_2020", per_2020 ],
-    #     ["year_2021", per_2021 ],
-    #     #["year_2022", per_2022 ],
-    # ]
+    showers['PER'] = [
+        # Define additional peaks
+        #                sol,    peak, bp0, bm0        
+        # ["all_years", [ [139,    5.0, 0.01, 0.02], [141.7, 30.0, 1.0, 1.0] ] ],
+        ["year_2020", per_2020 ],
+        # ["year_2021", per_2021 ],
+        #["year_2022", per_2022 ],
+    ]
 
     ###
 
@@ -1814,9 +1822,9 @@ if __name__ == "__main__":
         mc_error_estimation=False)
     eri_all.addPeak(123.0, 0.5, 0.2, 0.2)
 
-    showers['ERI'] = [
-        ["all_years", eri_all],
-    ]
+    # showers['ERI'] = [
+    #     ["all_years", eri_all],
+    # ]
 
     ### ###
 
