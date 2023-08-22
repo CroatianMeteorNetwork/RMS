@@ -367,6 +367,24 @@ Information about the data is provided in a section below: <a href="#about">Abou
     <li>Vida, D., Segon, D., Gural, P.S., Brown, P.G., McIntyre, M.J., Dijkema, T.J., Pavletic, L., Kukic, P., Mazur, M.J., Eschman, P. and Roggemans, P., 2021. The Global Meteor Network - Methodology and first results. <i>Monthly Notices of the Royal Astronomical Society</i>, 506(4), pp.5046-5074. <a href="https://academic.oup.com/mnras/article-abstract/506/4/5046/6347233" target="_blank">MNRAS</a>, <a href="https://arxiv.org/abs/2107.12335" target="_blank">arxiv</a>.</li>
     </ul>
 </div>
+<br>
+<h1 id="about">Data usage</h1>
+<div style="max-width: 800px; margin: 0px auto; text-align: left;">
+    <p>
+    The data are released under the <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0 license</a>. If you are using the data for scientific purposes, we kindly ask you to reference the following papers:
+
+    <ul>
+        <li>Vida, D., Segon, D., Gural, P.S., Brown, P.G., McIntyre, M.J., Dijkema, T.J., Pavletic, L., Kukic, P., Mazur, M.J., Eschman, P. and Roggemans, P., 2021. The Global Meteor Network - Methodology and first results. Monthly Notices of the Royal Astronomical Society, 506(4), pp.5046-5074. </li>
+        <li>Vida, D., Blaauw Erskine, R.C., Brown, P.G., Kambulow, J., Campbell-Brown, M. and Mazur, M.J., 2022. Computing optical meteor flux using global meteor network data. Monthly Notices of the Royal Astronomical Society, 515(2), pp.2322-2339. </li>
+    </ul>
+    </p>
+    <p>
+    Also, we kindly ask you to add this text in the acknowledgements of any publications: 
+    <br>
+    <i>The Global Meteor Network (GMN) data are released under the CC BY 4.0 license. The authors acknowledge that the GMN data collection was supported in part by the NASA Meteoroid Environment Office under cooperative agreement 80NSSC21M0073 with the Western Meteor Physics Group.</i>
+    </p>
+</div>
+
 <hr>
 <footer>
 <center>Supporting data supplied by the <a href="https://globalmeteornetwork.org/" target="_blank">Global Meteor Network</a>
