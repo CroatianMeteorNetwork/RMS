@@ -21,8 +21,6 @@ do
 done
 echo "System clock is synced - sytem time is $(date)"
 
-
-
 echo "Updating RMS code..."
 
 # Make the backup directory
