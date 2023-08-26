@@ -19,7 +19,7 @@ do
   echo "Wait for real time clock to sync - system time is $(date)"
   sleep 60
 done
-echo "System clock is synced - sytem time is $(date)"
+echo "System clock is synced           - system time is $(date)"
 
 echo "Updating RMS code..."
 
