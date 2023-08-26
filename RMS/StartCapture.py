@@ -49,6 +49,7 @@ from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight
 from RMS.RunExternalScript import runExternalScript
 from RMS.UploadManager import UploadManager
+from RMS.EventMonitor import EventMonitor
 
 # Flag indicating that capturing should be stopped
 STOP_CAPTURE = False
@@ -365,9 +366,20 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config,
         detector=detector)
 
+    pi_platform = False
+    if os.path.exists("/sys/firmware/devicetree/base/model"):
+        with open('/sys/firmware/devicetree/base/model') as f:
+            if 'Raspberry Pi' in f.read():
+                log.info("Platform is Raspberry Pi")
+                pi_platform = True
 
     # Start buffered capture
+    if config.disable_wifi_during_capture and pi_platform:
+        log.info("Stopping wifi")
+        os.system("~/localscripts/precapture.sh")
+        os.system("rfkill block wifi")
     bc.startCapture()
+
 
     # Init and start the compression
     compressor.start()
@@ -375,11 +387,16 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Capture until Ctrl+C is pressed
     wait(duration, compressor, bc, video_file)
+    if config.disable_wifi_during_capture and pi_platform:
+        log.info("Restarting wifi")
+        os.system("~/localscripts/postcapture.sh")
+        os.system("rfkill unblock wifi")
 
     # If capture was manually stopped, end capture
     if STOP_CAPTURE:
         log.info('Ending capture...')
-
+        if config.disable_wifi_during_capture:
+            os.system("rfkill unblock wifi")
 
     # Stop the capture
     log.debug('Stopping capture...')
@@ -473,6 +490,14 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     log.debug('Closing upload manager...')
                     upload_manager.stop()
                     del upload_manager
+
+            if eventmonitor is not None:
+
+                # Stop the eventmonitor manager
+                if eventmonitor.is_alive():
+                    log.debug('Closing eventmonitor...')
+                    eventmonitor.stop()
+                    del eventmonitor
 
 
             # Terminate the detector
@@ -569,6 +594,14 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             if upload_manager.is_alive():
                 upload_manager.stop()
                 log.info('Closing upload manager...')
+
+        if 'eventmonitor' in locals():
+         if eventmonitor is not None:
+            # Stop the eventmonitor
+            if eventmonitor.is_alive():
+                log.debug('Closing eventmonitor...')
+                eventmonitor.stop()
+                del eventmonitor
 
         sys.exit()
 
@@ -670,6 +703,14 @@ def processIncompleteCaptures(config, upload_manager):
             log.error(repr(e))
             log.error(repr(traceback.format_exception(*sys.exc_info())))
 
+        # If capture should have started do not process any more incomplete directories
+        start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
+        if isinstance(start_time, bool):
+            if start_time and config.prioritize_capture_over_reprocess:
+                log.info("Capture should have started, do not start reprocessing another directory")
+                break
+
+
 
 
 if __name__ == "__main__":
@@ -735,7 +776,17 @@ if __name__ == "__main__":
 
     log.info("Program version: {:s}, {:s}".format(commit_time, sha))
 
-    
+    pi_platform = False
+    if os.path.exists("/sys/firmware/devicetree/base/model"):
+        with open('/sys/firmware/devicetree/base/model') as f:
+            if 'Raspberry Pi' in f.read():
+                log.info("Platform is Raspberry Pi")
+                pi_platform = True
+
+    if config.disable_wifi_during_capture and pi_platform:
+        log.info("Starting wifi")
+        os.system("rfkill unblock wifi")
+
 
     # Change the Ctrl+C action to the special handle
     setSIGINT()
@@ -807,7 +858,7 @@ if __name__ == "__main__":
         # Capture the video frames from the video file
         runCapture(config, duration=None, video_file=video_file, nodetect=cml_args.nodetect,
             resume_capture=cml_args.resume)
-				
+
         sys.exit()
 
     upload_manager = None
@@ -818,6 +869,13 @@ if __name__ == "__main__":
         upload_manager = UploadManager(config)
         upload_manager.start()
 
+    eventmonitor = None
+
+    if config.event_monitor_enabled:
+        # Init the event monitor
+        log.info('Starting the event monitor...')
+        eventmonitor = EventMonitor(config)
+        eventmonitor.start()
 
     # Automatic running and stopping the capture at sunrise and sunset
     ran_once = False
@@ -891,7 +949,7 @@ if __name__ == "__main__":
         # Don't start the capture if there's less than 15 minutes left
         if duration < 15*60:
 
-            log.debug('Less than 15 minues left to record, waiting for a new recording session tonight...')
+            log.debug('Less than 15 minutes left to record, waiting for a new recording session tonight...')
 
             # Reset the Ctrl+C to KeyboardInterrupt
             resetSIGINT()
@@ -911,6 +969,16 @@ if __name__ == "__main__":
                         log.debug('Closing upload manager...')
                         upload_manager.stop()
                         del upload_manager
+
+                if eventmonitor is not None:
+
+                    # Stop the eventmonitor
+                    if eventmonitor.is_alive():
+                        log.debug('Closing eventmonitor...')
+                        eventmonitor.stop()
+                        del eventmonitor
+
+
 
                 sys.exit()
 
@@ -976,7 +1044,7 @@ if __name__ == "__main__":
 
             # Check if waiting is needed to start capture
             if not isinstance(start_time, bool):
-            
+
                 # Calculate how many seconds to wait until capture starts, and with for that time
                 time_now = datetime.datetime.utcnow()
                 waiting_time = start_time - time_now
@@ -988,7 +1056,7 @@ if __name__ == "__main__":
                 resetSIGINT()
 
                 try:
-                    
+
                     # Wait until sunset
                     waiting_time_seconds = int(waiting_time.total_seconds())
                     if waiting_time_seconds > 0:
@@ -997,7 +1065,7 @@ if __name__ == "__main__":
                 except KeyboardInterrupt:
 
                     log.info('Ctrl + C pressed, exiting...')
-                    
+
                     if upload_manager is not None:
 
                         # Stop the upload manager
@@ -1006,9 +1074,17 @@ if __name__ == "__main__":
                             upload_manager.stop()
                             del upload_manager
 
+                    if eventmonitor is not None:
+
+                        # Stop the eventmonitor
+                        if eventmonitor.is_alive():
+                             log.debug('Closing eventmonitor...')
+                             eventmonitor.stop()
+                             del eventmonitor
 
                         # Stop the slideshow if it was on
                         if slideshow_view is not None:
+
                             log.info("Stopping slideshow...")
                             slideshow_view.stop()
                             slideshow_view.join()
@@ -1082,3 +1158,11 @@ if __name__ == "__main__":
             log.debug('Closing upload manager...')
             upload_manager.stop()
             del upload_manager
+
+    if eventmonitor is not None:
+
+    # Stop the event monitor
+        if eventmonitor.is_alive():
+             log.debug('Closing eventmonitor...')
+             eventmonitor.stop()
+             del eventmonitor
