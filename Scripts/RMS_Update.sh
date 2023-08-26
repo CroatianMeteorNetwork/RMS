@@ -25,8 +25,6 @@ echo "System clock is synced - sytem time is $(date)"
 
 echo "Updating RMS code..."
 
-
-
 # Make the backup directory
 mkdir $RMSBACKUPDIR
 
@@ -88,3 +86,4 @@ echo "0" > $UPDATEINPROGRESSFILE
 
 echo "Update finished! Update exiting in 5 seconds..."
 sleep 5
+
