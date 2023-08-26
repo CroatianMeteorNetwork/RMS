@@ -322,6 +322,9 @@ class Config:
         #   systems for a staggered capture start
         self.capture_wait_seconds = 0
 
+        # Disable wifi during capture - generally required for ribbon cable connected sensors on Pi platform
+        self.disable_wifi_during_capture = False
+
         # Randomize the wait time between 0 and capture_wait_seconds. Used for multi-camera systems
         self.capture_wait_randomize = False
 
@@ -972,6 +975,11 @@ def parseCapture(config, parser):
     # Load the time for waiting before postprocessing begins
     if parser.has_option(section, "postprocess_delay"):
         config.postprocess_delay = parser.getint(section, "postprocess_delay")
+
+    # Disable wifi during capture on Pi plaform only
+    if parser.has_option(section, "disable_wifi_during_capture"):
+        config.disable_wifi_during_capture = parser.getboolean(section, "disable_wifi_during_capture")
+
 
 def parseUpload(config, parser):
     section = "Upload"
