@@ -1,5 +1,5 @@
 #!/bin/sh
-cd /home/pi/source/raspberrypi/i2c_cmd/bin
+cd ~/source/raspberrypi/i2c_cmd/bin
 chmod 777 *.sh
 sleep 1
 ./veye_mipi_i2c.sh -w -f videoformat -p1 PAL

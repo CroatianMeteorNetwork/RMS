@@ -1,5 +1,5 @@
 #!/bin/sh
-cd /home/pi/source/raspberrypi/i2c_cmd/bin
+cd ~/source/raspberrypi/i2c_cmd/bin
 chmod 777 *.sh
 sleep 1
 ./veye_mipi_i2c.sh -w -f videoformat -p1 PAL
@@ -20,7 +20,7 @@ sleep 1
 sleep 1
 ./veye_mipi_i2c.sh -w -f new_mshutter -p1 40000 # fixed 40 ms 
 sleep 1
-./veye_mipi_i2c.sh -w -f new_mgain -p1 26	# 0.1 - 0.3
+./veye_mipi_i2c.sh -w -f new_mgain -p1 20	# 0.1 - 0.3
 sleep 1
 ./veye_mipi_i2c.sh -w -f brightness -p1 0
 sleep 1
