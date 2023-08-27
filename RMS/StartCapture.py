@@ -639,10 +639,11 @@ def processIncompleteCaptures(config, upload_manager):
         #   processed
         FTPdetectinfo_files = glob.glob('{:s}/FTPdetectinfo_*.txt'.format(captured_dir_path))
         any_ftpdetectinfo_files = False
+        platepar_newer_than_FTPfile = False
         if len(FTPdetectinfo_files) > 0:
             any_ftpdetectinfo_files = True
             # Check it the platepar file is newer than the newest FTPdetectinfo file
-            platepar_newer_than_FTPfile = False
+
             for FTPfile in FTPdetectinfo_files:
                 print(FTPdetectinfo_files)
                 if os.path.getmtime(FTPfile) < os.path.getmtime(os.path.join(captured_dir_path,"platepar_cmn2010.cal")):
@@ -654,6 +655,8 @@ def processIncompleteCaptures(config, upload_manager):
         # Auto reprocess criteria:
         #   - Any backup pickle files
         #   - No pickle and no FTPdetectinfo files
+        #   - An FTPfile which is older than the platpar - i.e. a new platepar has been generated
+
         run_reprocess = False
         if any_pickle_files:
             run_reprocess = True
