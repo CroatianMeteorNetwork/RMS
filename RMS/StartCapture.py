@@ -644,13 +644,15 @@ def processIncompleteCaptures(config, upload_manager):
             any_ftpdetectinfo_files = True
 
             # Has the platepar been replaced since latest FTP file?
+            newest_FTPfile_older_than_platepar = True
             for FTPfile in FTPdetectinfo_files:
                 capture_platepar = os.path.join(captured_dir_path,config.platepar_name)
                 if os.path.exists(capture_platepar):
-                    # Assume FPTfile is older tha platepar
-                    newest_FTPfile_older_than_platepar = True
                     # Any FTPfile newer than platepar - no need to reprocess
+                    log.info("FTPfile time {}".format(os.path.getmtime(FTPfile)))
+                    log.info("Platepar time time {}".format(os.path.getmtime(capture_platepar)))
                     if os.path.getmtime(FTPfile) > os.path.getmtime(capture_platepar):
+                        log.info("Found an FTP file newer than platepar")
                         newest_FTPfile_older_than_platepar = False
 
 
