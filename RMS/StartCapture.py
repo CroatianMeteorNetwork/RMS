@@ -639,17 +639,15 @@ def processIncompleteCaptures(config, upload_manager):
         #   processed
         FTPdetectinfo_files = glob.glob('{:s}/FTPdetectinfo_*.txt'.format(captured_dir_path))
         any_ftpdetectinfo_files = False
-        platepar_newer_than_FTPfile = False
+        FTPfile_older_than_platepar = False
         if len(FTPdetectinfo_files) > 0:
             any_ftpdetectinfo_files = True
             # Check it the platepar file is newer than the newest FTPdetectinfo file
 
             for FTPfile in FTPdetectinfo_files:
                 print(FTPdetectinfo_files)
-                if os.path.getmtime(FTPfile) < os.path.getmtime(os.path.join(captured_dir_path,"platepar_cmn2010.cal")):
-                    print(os.path.getmtime(FTPfile), os.path.getmtime(os.path.join(captured_dir_path,"platepar_cmn2010.cal")))
-                    print("Found a newer plateparfile than FTP file")
-                    platepar_newer_than_FTPfile = True
+                if os.path.getmtime(FTPfile) < os.path.getmtime(os.path.join(captured_dir_path,config.platepar_name)):
+                    FTPfile_older_than_platepar = True
 
 
         # Auto reprocess criteria:
@@ -663,7 +661,7 @@ def processIncompleteCaptures(config, upload_manager):
         else:
             if not any_ftpdetectinfo_files:
                 run_reprocess = True
-        if platepar_newer_than_FTPfile:
+        if FTPfile_older_than_platepar:
                 run_reprocess = True
                 log.info("Reprocessing because FTPDetect file older than platepar file")
 
