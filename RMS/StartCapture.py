@@ -665,6 +665,7 @@ def processIncompleteCaptures(config, upload_manager):
                 run_reprocess = True
         if platepar_newer_than_FTPfile:
                 run_reprocess = True
+                log.info("Reprocessing because FTPDetect file older than platepar file")
 
         # Skip the folder if it doesn't need to be reprocessed
         if not run_reprocess:
