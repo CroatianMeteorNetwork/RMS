@@ -652,7 +652,7 @@ def processIncompleteCaptures(config, upload_manager):
                     log.info("FTPfile time {}".format(os.path.getmtime(FTPfile)))
                     log.info("Platepar time time {}".format(os.path.getmtime(capture_platepar)))
                     if os.path.getmtime(FTPfile) > os.path.getmtime(capture_platepar):
-                        log.info("Found an FTP file newer than platepar")
+                        log.info("Found an FTP file newer than platepar in {}".format(captured_dir_name))
                         newest_FTPfile_older_than_platepar = False
                 else:
                     newest_FTPfile_older_than_platepar = False
