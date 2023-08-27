@@ -754,9 +754,6 @@ def parseSystem(config, parser):
         config.auto_reprocess_external_script_run = parser.getboolean(section, \
             "auto_reprocess_external_script_run")
 
-    if parser.has_option(section, "prioritize_capture_over_reprocess"):
-        config.prioritize_capture_over_reprocess = parser.getboolean(section, \
-            "prioritize_capture_over_reprocess")
 
     if parser.has_option(section, "external_script_path"):
         config.external_script_path = parser.get(section, "external_script_path")
@@ -928,10 +925,8 @@ def parseCapture(config, parser):
     if parser.has_option(section, "mask"):
         config.mask_file = os.path.basename(parser.get(section, "mask"))
 
-
     if parser.has_option(section, "extra_space_gb"):
         config.extra_space_gb = parser.getfloat(section, "extra_space_gb")
-
 
     # Enable/disable showing maxpixel on the screen
     if parser.has_option(section, "live_maxpixel_enable"):
@@ -945,11 +940,13 @@ def parseCapture(config, parser):
     if parser.has_option(section, "slideshow_enable"):
         config.slideshow_enable = parser.getboolean(section, "slideshow_enable")
 
-
     # Enable/disable auto reprocessing
     if parser.has_option(section, "auto_reprocess"):
         config.auto_reprocess = parser.getboolean(section, "auto_reprocess")
 
+    if parser.has_option(section, "prioritize_capture_over_reprocess"):
+        config.prioritize_capture_over_reprocess = parser.getboolean(section, \
+            "prioritize_capture_over_reprocess")
 
     # Load name of the capture resume flag file
     if parser.has_option(section, "capture_resume_flag_file"):
