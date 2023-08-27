@@ -645,7 +645,6 @@ def processIncompleteCaptures(config, upload_manager):
             # Check it the platepar file is newer than the newest FTPdetectinfo file
 
             for FTPfile in FTPdetectinfo_files:
-                print(FTPdetectinfo_files)
                 if os.path.getmtime(FTPfile) < os.path.getmtime(os.path.join(captured_dir_path,config.platepar_name)):
                     FTPfile_older_than_platepar = True
 
