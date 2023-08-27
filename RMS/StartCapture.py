@@ -654,7 +654,8 @@ def processIncompleteCaptures(config, upload_manager):
                     if os.path.getmtime(FTPfile) > os.path.getmtime(capture_platepar):
                         log.info("Found an FTP file newer than platepar")
                         newest_FTPfile_older_than_platepar = False
-
+                else:
+                    newest_FTPfile_older_than_platepar = False
 
         # Auto reprocess criteria:
         #   - Any backup pickle files
