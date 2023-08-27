@@ -639,20 +639,25 @@ def processIncompleteCaptures(config, upload_manager):
         #   processed
         FTPdetectinfo_files = glob.glob('{:s}/FTPdetectinfo_*.txt'.format(captured_dir_path))
         any_ftpdetectinfo_files = False
-        FTPfile_older_than_platepar = False
+        Newest_FTPfile_older_than_platepar = False
         if len(FTPdetectinfo_files) > 0:
             any_ftpdetectinfo_files = True
-            # Check it the platepar file is newer than the newest FTPdetectinfo file
 
+            # Has the platepar been replaced since latest FTP file?
             for FTPfile in FTPdetectinfo_files:
-                if os.path.getmtime(FTPfile) < os.path.getmtime(os.path.join(captured_dir_path,config.platepar_name)):
-                    FTPfile_older_than_platepar = True
+                capture_platepar = os.path.join(captured_dir_path,config.platepar_name)
+                if os.path.exists(capture_platepar):
+                    # Assume FPTfile is older tha platepar
+                    Newest_FTPfile_older_than_platepar = True
+                    # Any FTPfile newer than platepar - no need to reprocess
+                    if os.path.getmtime(FTPfile) > os.path.getmtime(capture_platepar):
+                        Newest_FTPfile_older_than_platepar = False
 
 
         # Auto reprocess criteria:
         #   - Any backup pickle files
         #   - No pickle and no FTPdetectinfo files
-        #   - An FTPfile which is older than the platpar - i.e. a new platepar has been generated
+        #   - Newest FTP file older than platepar in capture directory
 
         run_reprocess = False
         if any_pickle_files:
@@ -660,9 +665,9 @@ def processIncompleteCaptures(config, upload_manager):
         else:
             if not any_ftpdetectinfo_files:
                 run_reprocess = True
-        if FTPfile_older_than_platepar:
+        if Newest_FTPfile_older_than_platepar:
                 run_reprocess = True
-                log.info("Reprocessing because FTPDetect file older than platepar file")
+                log.info("Reprocessing because newest FTPDetect file older than platepar file")
 
         # Skip the folder if it doesn't need to be reprocessed
         if not run_reprocess:
