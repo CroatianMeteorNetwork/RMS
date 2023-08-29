@@ -611,7 +611,7 @@ def processIncompleteCaptures(config, upload_manager):
 
         captured_dir_path = os.path.join(captured_data_path, captured_dir_name)
 
-        # Check that the dir stars with the correct station code, that it really is a directory, and that
+        # Check that the dir starts with the correct station code, that it really is a directory, and that
         #   there are some FF files inside
         if captured_dir_name.startswith(config.stationID):
 
@@ -643,7 +643,8 @@ def processIncompleteCaptures(config, upload_manager):
         if len(FTPdetectinfo_files) > 0:
             any_ftpdetectinfo_files = True
 
-            # Has the platepar been replaced since latest FTP file?
+            # Is the platepar in the captured_dir_path newer than latest FTP file?
+            # i.e. has the operator replaced the platepar because of bad calibraton?
             newest_FTPfile_older_than_platepar = True
             for FTPfile in FTPdetectinfo_files:
                 capture_platepar = os.path.join(captured_dir_path,config.platepar_name)
@@ -652,6 +653,7 @@ def processIncompleteCaptures(config, upload_manager):
                     if os.path.getmtime(FTPfile) > os.path.getmtime(capture_platepar):
                         newest_FTPfile_older_than_platepar = False
                 else:
+                    # if there is no platepar in the captured_dir_path
                     newest_FTPfile_older_than_platepar = False
 
         # Auto reprocess criteria:
