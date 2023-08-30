@@ -299,18 +299,23 @@ class EventContainer(object):
 
         """
         Apply random number from normal distribution to each component of a 3 dimension vector
+        If this fails, just return the point.
 
         arguments:
             pt: [vector] vector
             std: [float] sigma to apply
 
         """
-        return pt + np.random.normal(scale=std, size=3)
+        try:
+            return pt + np.random.normal(scale=std, size=3)
+        except:
+            return pt
 
     def applyCartesianSD(self, population):
 
         """
         Apply standard deviation to the Cartesian coordinate of a population of trajectories
+        Take the absolute value, in case a negative value was passed
 
         arguments:
             population: [list] population of events
@@ -323,8 +328,8 @@ class EventContainer(object):
         ecef_vector = self.eventToECEFVector()
         if self.hasCartSD():
             for tr in population:
-                start_vect = self.applyCartesianSDToPoint(ecef_vector[0], self.cart_std)
-                end_vect = self.applyCartesianSDToPoint(ecef_vector[1], self.cart2_std)
+                start_vect = self.applyCartesianSDToPoint(ecef_vector[0], abs(self.cart_std))
+                end_vect = self.applyCartesianSDToPoint(ecef_vector[1], abs(self.cart2_std))
                 tr.lat, tr.lon, tr.ht = ecefV2LatLonAlt(start_vect)
                 tr.lat2, tr.lon2, tr.ht2 = ecefV2LatLonAlt(end_vect)
 
@@ -334,6 +339,7 @@ class EventContainer(object):
 
         """
         Apply standard deviation to the Polar coordinates of a population of trajectories
+        This function can handle negative standard deviations
 
         arguments:
             population: [list] of events
@@ -363,7 +369,7 @@ class EventContainer(object):
         Arguments:
 
         Returns: [bool]
-            True if end point lats or lons or heights are not zero
+            True if end point latitudes or longitudes or heights are not zero
 
         """
 
@@ -381,7 +387,7 @@ class EventContainer(object):
 
         Arguments
             min_elev_hard: [float] minimum elevation considered reasonable
-            min_elev: [float] minimum elevation conisdered correct
+            min_elev: [float] minimum elevation considered correct
     `       prob_elev: [float] set any unreasonable elevations
             max_elev: [float] maximum elevation considered reasonable
 
