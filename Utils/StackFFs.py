@@ -168,7 +168,8 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
 
     stack_path = os.path.join(dir_path, night_dir + filename_suffix + file_format)
 
-    print("Saving stack to:", stack_path)
+    if print_progress:
+        print("Saving stack to:", stack_path)
 
     # Stretch the levels
     merge_img = adjustLevels(merge_img, np.percentile(merge_img, 0.5), 1.3, np.percentile(merge_img, 99.9))
