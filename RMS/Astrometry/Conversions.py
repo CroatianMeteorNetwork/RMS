@@ -444,7 +444,7 @@ def ECEF2AltAz(s_vect, p_vect):
         p_vect: [ndarray] px, py, pz - P point ECEF coordiantes
 
     Return:
-        (azim, alt): Horizontal coordiantes in degrees.
+        (azim, alt): Horizontal coordinates in degrees.
 
     """
 

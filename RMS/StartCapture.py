@@ -611,7 +611,7 @@ def processIncompleteCaptures(config, upload_manager):
 
         captured_dir_path = os.path.join(captured_data_path, captured_dir_name)
 
-        # Check that the dir stars with the correct station code, that it really is a directory, and that
+        # Check that the dir starts with the correct station code, that it really is a directory, and that
         #   there are some FF files inside
         if captured_dir_name.startswith(config.stationID):
 
@@ -635,22 +635,41 @@ def processIncompleteCaptures(config, upload_manager):
         if len(pickle_files) > 0:
             any_pickle_files = True
 
-        # Check if there is an FTPdetectinfo file in the directory, indicating the the folder was fully
+        # Check if there is an FTPdetectinfo file in the directory, indicating the folder was fully
         #   processed
         FTPdetectinfo_files = glob.glob('{:s}/FTPdetectinfo_*.txt'.format(captured_dir_path))
         any_ftpdetectinfo_files = False
+        newest_FTPfile_older_than_platepar = False
         if len(FTPdetectinfo_files) > 0:
             any_ftpdetectinfo_files = True
+
+            # Is the platepar in the captured_dir_path newer than latest FTP file?
+            # i.e. has the operator replaced the platepar because of bad calibraton?
+            newest_FTPfile_older_than_platepar = True
+            for FTPfile in FTPdetectinfo_files:
+                capture_platepar = os.path.join(captured_dir_path,config.platepar_name)
+                if os.path.exists(capture_platepar):
+                    # Any FTPfile newer than platepar - no need to reprocess
+                    if os.path.getmtime(FTPfile) > os.path.getmtime(capture_platepar):
+                        newest_FTPfile_older_than_platepar = False
+                else:
+                    # if there is no platepar in the captured_dir_path
+                    newest_FTPfile_older_than_platepar = False
 
         # Auto reprocess criteria:
         #   - Any backup pickle files
         #   - No pickle and no FTPdetectinfo files
+        #   - Newest FTP file older than platepar in capture directory
+
         run_reprocess = False
         if any_pickle_files:
             run_reprocess = True
         else:
             if not any_ftpdetectinfo_files:
                 run_reprocess = True
+        if newest_FTPfile_older_than_platepar:
+                run_reprocess = True
+                log.info("Reprocessing because newest FTPDetect file older than platepar file")
 
         # Skip the folder if it doesn't need to be reprocessed
         if not run_reprocess:
@@ -683,9 +702,19 @@ def processIncompleteCaptures(config, upload_manager):
 
 
         except Exception as e:
-            log.error("An error occured when trying to reprocess partially processed data!")
+            log.error("An error occurred when trying to reprocess partially processed data!")
             log.error(repr(e))
             log.error(repr(traceback.format_exception(*sys.exc_info())))
+
+        # If capture should have started do not process any more incomplete directories
+        start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
+        if isinstance(start_time, bool):
+
+            if start_time and config.prioritize_capture_over_reprocess:
+
+                log.info("Capture should have started, do not start reprocessing another directory")
+                break
+
 
 
 
@@ -752,7 +781,7 @@ if __name__ == "__main__":
 
     log.info("Program version: {:s}, {:s}".format(commit_time, sha))
 
-    
+
 
     # Change the Ctrl+C action to the special handle
     setSIGINT()
@@ -824,7 +853,7 @@ if __name__ == "__main__":
         # Capture the video frames from the video file
         runCapture(config, duration=None, video_file=video_file, nodetect=cml_args.nodetect,
             resume_capture=cml_args.resume)
-				
+
         sys.exit()
 
     upload_manager = None
@@ -915,7 +944,7 @@ if __name__ == "__main__":
         # Don't start the capture if there's less than 15 minutes left
         if duration < 15*60:
 
-            log.debug('Less than 15 minues left to record, waiting for a new recording session tonight...')
+            log.debug('Less than 15 minutes left to record, waiting for a new recording session tonight...')
 
             # Reset the Ctrl+C to KeyboardInterrupt
             resetSIGINT()
@@ -1010,7 +1039,7 @@ if __name__ == "__main__":
 
             # Check if waiting is needed to start capture
             if not isinstance(start_time, bool):
-            
+
                 # Calculate how many seconds to wait until capture starts, and with for that time
                 time_now = datetime.datetime.utcnow()
                 waiting_time = start_time - time_now
@@ -1022,7 +1051,7 @@ if __name__ == "__main__":
                 resetSIGINT()
 
                 try:
-                    
+
                     # Wait until sunset
                     waiting_time_seconds = int(waiting_time.total_seconds())
                     if waiting_time_seconds > 0:
@@ -1031,7 +1060,7 @@ if __name__ == "__main__":
                 except KeyboardInterrupt:
 
                     log.info('Ctrl + C pressed, exiting...')
-                    
+
                     if upload_manager is not None:
 
                         # Stop the upload manager
@@ -1131,4 +1160,6 @@ if __name__ == "__main__":
         if eventmonitor.is_alive():
              log.debug('Closing eventmonitor...')
              eventmonitor.stop()
+
              del eventmonitor
+

@@ -313,6 +313,7 @@ class Config:
 
         # Automatically reprocess broken capture directories
         self.auto_reprocess = True
+        self.prioritize_capture_over_reprocess = False
 
         # Flag file which indicates that the previously processed files are loaded during capture resume
         self.capture_resume_flag_file = ".capture_resuming"
@@ -358,9 +359,9 @@ class Config:
         # 1 - Normal, 2 - Skip uploading FFs, 3 - Skip FFs and FRs
         self.upload_mode = 1
 
-        self.event_monitor_enabled = False
+        self.event_monitor_enabled = True
         self.event_monitor_db_name = "event_monitor.db"
-        self.event_monitor_webpage = "https://globalmeteornetwork.org/data/event_watchlist.txt"
+        self.event_monitor_webpage = "https://globalmeteornetwork.org/events/event_watchlist.txt"
         self.event_monitor_remote_dir = "files/event_monitor"
         self.event_monitor_check_interval = 30
         self.event_monitor_check_interval_fast = 5
@@ -753,6 +754,9 @@ def parseSystem(config, parser):
         config.auto_reprocess_external_script_run = parser.getboolean(section, \
             "auto_reprocess_external_script_run")
 
+    if parser.has_option(section, "prioritize_capture_over_reprocess"):
+        config.prioritize_capture_over_reprocess = parser.getboolean(section, \
+            "prioritize_capture_over_reprocess")
 
     if parser.has_option(section, "external_script_path"):
         config.external_script_path = parser.get(section, "external_script_path")
@@ -946,6 +950,10 @@ def parseCapture(config, parser):
     if parser.has_option(section, "auto_reprocess"):
         config.auto_reprocess = parser.getboolean(section, "auto_reprocess")
 
+    # Prioritize capture over reprocessing - do not start reprocessing a new directory if should be capturing
+    if parser.has_option(section, "prioritize_capture_over_reprocess"):
+        config.prioritize_capture_over_reprocess = parser.getboolean(section, \
+            "prioritize_capture_over_reprocess")
 
     # Load name of the capture resume flag file
     if parser.has_option(section, "capture_resume_flag_file"):
@@ -968,6 +976,8 @@ def parseCapture(config, parser):
     # Load the time for waiting before postprocessing begins
     if parser.has_option(section, "postprocess_delay"):
         config.postprocess_delay = parser.getint(section, "postprocess_delay")
+
+
 
 def parseUpload(config, parser):
     section = "Upload"
