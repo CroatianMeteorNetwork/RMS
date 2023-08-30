@@ -251,7 +251,6 @@ class Config:
 
         self.external_script_run = False
         self.auto_reprocess_external_script_run = False
-        self.prioritise_capture_over_reprocess = False
         self.external_script_path = None
         self.external_function_name = "rmsExternal"
 
