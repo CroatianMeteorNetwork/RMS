@@ -440,14 +440,12 @@ class EventContainer(object):
         if min_elev < self.elev < max_elev:
             pass
         else:
-            log.info("Elevation {} is not within range of {} - {} degrees".format(self.elev, min_elev, max_elev))
-
             # If elevation is not within min_elev_hard and max_elev degrees set to prob_elev
             self.elev = self.elev if min_elev_hard < self.elev < max_elev else prob_elev
 
             # If elevation is min_elev_hard - min_elev degrees set to min_elev
             self.elev = min_elev if min_elev_hard < self.elev < min_elev else self.elev
-            log.info("Elevation set to {} degrees".format(self.elev))
+
 
     def limitHeights(self, obsvd_ht, min_lum_flt_ht, max_lum_flt_ht, gap):
 
