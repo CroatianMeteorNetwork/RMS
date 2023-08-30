@@ -18,44 +18,63 @@
 
 from __future__ import print_function, division, absolute_import
 
-import sqlite3
-import multiprocessing
-import RMS.ConfigReader as cr
 
 import os
 import sys
 import shutil
+
+import datetime
 import time
+import dateutil
+import glob
+import sqlite3
+import multiprocessing
+import logging
 import copy
 import uuid
-import numpy as np
-import datetime
-import argparse
 import random
 import string
 
-if sys.hexversion < 0x03000000:
-    import requests
+
+if sys.version_info[0] < 3:
+
+    import urllib2
+
+    # Fix Python 2 SSL certs
+    try:
+        import os, ssl
+        if (not os.environ.get('PYTHONHTTPSVERIFY', '') and
+            getattr(ssl, '_create_unverified_context', None)):
+            ssl._create_default_https_context = ssl._create_unverified_context
+    except:
+        # Print the error
+        print("Error: {}".format(sys.exc_info()[0]))
+
 else:
     import statistics
     import urllib.request
-    from Utils.SkyFit2 import convertFRNameToFF
 
-import logging
 
+import numpy as np
+
+import RMS.ConfigReader as cr
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt
 from RMS.Math import angularSeparationVect
+from RMS.Formats.FFfile import convertFRNameToFF
 from RMS.Formats.Platepar import Platepar
-from datetime import datetime
-from dateutil import parser
+from RMS.UploadManager import uploadSFTP
 from Utils.StackFFs import stackFFs
 from Utils.FRbinViewer import view
 from Utils.BatchFFtoImage import batchFFtoImage
-from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
-from RMS.UploadManager import uploadSFTP
 
-from glob import glob
+
+
+# Import Cython functions
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
+
 
 log = logging.getLogger("logger")
 
@@ -1055,7 +1074,7 @@ class EventMonitor(multiprocessing.Process):
         sql_statement += "UPDATE event_monitor                 \n"
         sql_statement += "SET                                  \n"
         sql_statement += "processedstatus = 1,                 \n"
-        sql_statement += "timecompleted   = CURRENT_TIMESTAMP  \n".format(datetime.now())
+        sql_statement += "timecompleted   = CURRENT_TIMESTAMP  \n".format(datetime.datetime.utcnow())
         sql_statement += "                                     \n"
         sql_statement += "WHERE                                \n"
         sql_statement += "uuid = '{}'                          \n".format(event.uuid)
@@ -1191,8 +1210,8 @@ class EventMonitor(multiprocessing.Process):
 
         if not testmode:
             try:
-                if sys.hexversion < 0x03000000:
-                    web_page = requests.get(self.syscon.event_monitor_webpage).text.splitlines()
+                if sys.version_info[0] < 3:
+                    web_page = urllib2.urlopen(self.syscon.event_monitor_webpage).read().splitlines()
                 else:
                     web_page = urllib.request.urlopen(self.syscon.event_monitor_webpage).read().decode("utf-8").splitlines()
 
@@ -1378,8 +1397,10 @@ class EventMonitor(multiprocessing.Process):
            Return:
                 file_list: [list of paths] List of paths to files
         """
+
         try:
-            event_time = parser.parse(event.dt)
+            event_time = dateutil.parser.parse(event.dt)
+
         except:
             event_time = convertGMNTimeToPOSIX(event.dt)
 
@@ -1395,7 +1416,7 @@ class EventMonitor(multiprocessing.Process):
                 dirlist = os.listdir(directory)
                 dirlist.sort()
                 if file_extension == ".fits":
-                    fits_list = glob(os.path.join(directory,"*.fits"))
+                    fits_list = glob.glob(os.path.join(directory,"*.fits"))
                     fits_list.sort()
                     log.info("Searching for first fits file in {}".format(directory))
                     if len(fits_list) == 0:
@@ -1599,7 +1620,7 @@ class EventMonitor(multiprocessing.Process):
 
         # convert bins to MP4
         for file in file_list:
-            if file.endswith(".bin") and sys.hexversion >= 0x03000000:
+            if file.endswith(".bin") and sys.version_info[0] >= 3:
                 fr_file = os.path.basename(file)
                 ff_file = convertFRNameToFF(fr_file)
 
@@ -1649,7 +1670,7 @@ class EventMonitor(multiprocessing.Process):
             # Don't include a delay before uploading
             log.info("Upload of {} - first attempt".format(event_monitor_directory))
             for retry in range(1,30):
-                archives = glob(os.path.join(event_monitor_directory,"*.bz2"))
+                archives = glob.glob(os.path.join(event_monitor_directory,"*.bz2"))
                 # todo: remove this line which shadows uploads to local server
                 uploadSFTP("192.168.1.241", self.syscon.stationID.lower(), event_monitor_directory,
                            self.syscon.event_monitor_remote_dir, archives, rsa_private_key=self.config.rsa_private_key)
@@ -1692,7 +1713,7 @@ class EventMonitor(multiprocessing.Process):
 
         for observed_event in unprocessed:
             log.info("Checks on trajectories for event at {}".format(observed_event.dt))
-            check_time_start = datetime.now()
+            check_time_start = datetime.datetime.utcnow()
             # Iterate through the work
             # Events can be specified in different ways, make sure converted to LatLon
             observed_event.latLonAzElToLatLonLatLon()
@@ -1768,7 +1789,7 @@ class EventMonitor(multiprocessing.Process):
                 if min_dist < event.close_radius * 1000 and not test_mode:
                     # this is just for info
                     log.info("Event at {} was {:.0f}km away, inside {:.0f}km so is uploaded with no further checks.".format(event.dt, min_dist / 1000, event.close_radius))
-                    check_time_end = datetime.now()
+                    check_time_end = datetime.datetime.utcnow()
                     check_time_seconds = (check_time_end- check_time_start).total_seconds()
                     log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
                     count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
@@ -1790,7 +1811,7 @@ class EventMonitor(multiprocessing.Process):
                     count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(event)
                     if count != 0:
                         log.info("Event at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(event.dt, count))
-                        check_time_end = datetime.now()
+                        check_time_end = datetime.datetime.utcnow()
                         check_time_seconds = (check_time_end - check_time_start).total_seconds()
                         log.info("Check of trajectories took {:2f} seconds".format(check_time_seconds))
                         if self.doUpload(observed_event, ev_con, file_list, test_mode=test_mode):
@@ -1820,11 +1841,11 @@ class EventMonitor(multiprocessing.Process):
             # End of the processing loop for this event
             if self.eventProcessed(observed_event.uuid):
                 log.info("Reached end of checks - {} is processed".format(observed_event.dt))
-                check_time_end = datetime.now()
+                check_time_end = datetime.datetime.utcnow()
                 check_time_seconds = (check_time_end - check_time_start).total_seconds()
                 log.info("Check of trajectories time elapsed {:2f} seconds".format(check_time_seconds))
             else:
-                check_time_end = datetime.now()
+                check_time_end = datetime.datetime.utcnow()
                 check_time_seconds = (check_time_end - check_time_start).total_seconds()
                 log.info("Reached end of checks - {} is processed, nothing to upload".format(observed_event.dt))
                 log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
@@ -2087,11 +2108,11 @@ def convertGMNTimeToPOSIX(timestring):
         posix compatible time
     """
     try:
-        dt_object = datetime.strptime(timestring.strip(), "%Y%m%d_%H%M%S")
+        dt_object = datetime.datetime.strptime(timestring.strip(), "%Y%m%d_%H%M%S")
     except:
         log.error("Badly formatted time {}".format(timestring.strip()))
         # return a time which will be safe but cannot produce any output
-        dt_object = datetime.strptime("20000101_000000".strip(), "%Y%m%d_%H%M%S")
+        dt_object = datetime.datetime.strptime("20000101_000000".strip(), "%Y%m%d_%H%M%S")
     return dt_object
 
 def createATestEvent07():
@@ -2466,7 +2487,7 @@ def testApplyCartesianSD():
     """
 
     # If Python version less than 3, return true - can't run this testcode without 3.x
-    if sys.hexversion < 0x03000000:
+    if sys.version_info[0] < 3:
         return True
 
 
@@ -2523,6 +2544,10 @@ def testApplyPolarSD():
          [bool]
     """
 
+    # If Python version less than 3, return true - can't run this testcode without 3.x
+    if sys.version_info[0] < 3:
+        return True
+
     success = True
     event = createATestEvent07()
     event_population = []
@@ -2568,6 +2593,7 @@ def testApplyPolarSD():
     success = success if gcDistDeg(lat2mn, lon2mn, event.lat2, event.lon2) < 0.1 else False
     success = success if abs(e.ht - ht1mn) < 5 and (e.ht2 - ht2mn) < 10 else False
     return success
+
 
 def testIndividuals(logging = True):
 
@@ -2631,7 +2657,7 @@ def testIndividuals(logging = True):
         individuals_success = False
 
 
-    if convertGMNTimeToPOSIX("20210925_163127") == datetime(2021, 9, 25, 16, 31, 27):
+    if convertGMNTimeToPOSIX("20210925_163127") == datetime.datetime(2021, 9, 25, 16, 31, 27):
         if logging:
             log.info("convertgmntimetoposix success")
     else:
@@ -2662,6 +2688,8 @@ def testIndividuals(logging = True):
     return individuals_success
 
 if __name__ == "__main__":
+
+    import argparse
 
     arg_parser = argparse.ArgumentParser(description="""Check a web page for trajectories, and upload relevant data. \
         """, formatter_class=argparse.RawTextHelpFormatter)
@@ -2701,8 +2729,8 @@ if __name__ == "__main__":
         # Add a random string after the URL to defeat caching
         print(syscon.event_monitor_webpage)
 
-        if sys.hexversion < 0x03000000:
-            web_page = requests.get(syscon.event_monitor_webpage).text.splitlines()
+        if sys.version_info[0] < 3:
+            web_page = urllib2.urlopen(syscon.event_monitor_webpage).read().splitlines()
         else:
             web_page = urllib.request.urlopen(syscon.event_monitor_webpage).read().decode("utf-8").splitlines()
 
