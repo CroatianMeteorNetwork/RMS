@@ -2531,6 +2531,10 @@ def testApplyPolarSD():
          [bool]
     """
 
+    # If Python version less than 3, return true - can't run this testcode without 3.x
+    if sys.version_info[0] < 3:
+        return True
+
     success = True
     event = createATestEvent07()
     event_population = []
@@ -2576,6 +2580,7 @@ def testApplyPolarSD():
     success = success if gcDistDeg(lat2mn, lon2mn, event.lat2, event.lon2) < 0.1 else False
     success = success if abs(e.ht - ht1mn) < 5 and (e.ht2 - ht2mn) < 10 else False
     return success
+
 
 def testIndividuals(logging = True):
 
