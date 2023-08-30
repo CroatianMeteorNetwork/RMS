@@ -13,10 +13,6 @@ RMSBACKUPDIR=~/.rms_backup
 # File for indicating that the update is in progress
 UPDATEINPROGRESSFILE=$RMSBACKUPDIR/update_in_progress
 
-echo "Enabling wifi"
-/usr/sbin/rfkill unblock all
-sleep 10
-
 
 while [ $(timedatectl | grep "synchronized" | cut -d":" -f2 | xargs) != 'yes' ]
 
