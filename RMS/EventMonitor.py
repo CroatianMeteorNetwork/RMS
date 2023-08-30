@@ -36,7 +36,7 @@ import random
 import string
 
 if sys.version_info[0] < 3:
-    import requests
+    import urllib2
 else:
     import statistics
     import urllib.request
@@ -1198,7 +1198,7 @@ class EventMonitor(multiprocessing.Process):
         if not testmode:
             try:
                 if sys.version_info[0] < 3:
-                    web_page = requests.get(self.syscon.event_monitor_webpage).text.splitlines()
+                    web_page = urllib2.urlopen(self.syscon.event_monitor_webpage).read().splitlines()
                 else:
                     web_page = urllib.request.urlopen(self.syscon.event_monitor_webpage).read().decode("utf-8").splitlines()
 
@@ -2712,7 +2712,7 @@ if __name__ == "__main__":
         print(syscon.event_monitor_webpage)
 
         if sys.version_info[0] < 3:
-            web_page = requests.get(syscon.event_monitor_webpage).text.splitlines()
+            web_page = urllib2.urlopen(syscon.event_monitor_webpage).read().splitlines()
         else:
             web_page = urllib.request.urlopen(syscon.event_monitor_webpage).read().decode("utf-8").splitlines()
 
