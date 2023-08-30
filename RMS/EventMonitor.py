@@ -35,8 +35,21 @@ import uuid
 import random
 import string
 
+
 if sys.version_info[0] < 3:
+
     import urllib2
+
+    # Fix Python 2 SSL certs
+    try:
+        import os, ssl
+        if (not os.environ.get('PYTHONHTTPSVERIFY', '') and
+            getattr(ssl, '_create_unverified_context', None)): 
+            ssl._create_default_https_context = ssl._create_unverified_context
+    except:
+        # Print the error
+        print("Error: {}".format(sys.exc_info()[0]))
+
 else:
     import statistics
     import urllib.request
