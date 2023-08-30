@@ -2639,7 +2639,7 @@ def testIndividuals(logging = True):
         individuals_success = False
 
 
-    if convertGMNTimeToPOSIX("20210925_163127") == datetime(2021, 9, 25, 16, 31, 27):
+    if convertGMNTimeToPOSIX("20210925_163127") == datetime.datetime(2021, 9, 25, 16, 31, 27):
         if logging:
             log.info("convertgmntimetoposix success")
     else:
