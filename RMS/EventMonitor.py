@@ -1320,7 +1320,11 @@ class EventMonitor(multiprocessing.Process):
     def findEventFiles(self, event, directory_list, file_extension_list):
 
         """Take an event, directory list and an extension list and return paths to files
+
            For .fits files always return at least the closest previous event
+           This is a pretty ugly process, where the previous file compared to the event time is held in a variable.
+           If the file being compared is the first file after the event time, put the previous file into the list,
+           if it is not already there.
 
            Arguments:
                 event: [event] Event of interest
@@ -1335,7 +1339,7 @@ class EventMonitor(multiprocessing.Process):
         except:
             event_time = convertGMNTimeToPOSIX(event.dt)
 
-        seeking_first_fits_after_event = True # to prevent warning of uninitialised
+        seeking_first_fits_after_event = True # to prevent warning of possibly uninitialised variable
         file_list = []
         # Iterate through the directory list, appending files with the correct extension
 
@@ -1846,8 +1850,8 @@ class EventMonitor(multiprocessing.Process):
         Call to start the event monitor loop. If the loop has been accelerated following a match
         then this loop slows it down by multiplying the check interval by 1.1.
 
-        The time between checks is the sum of the delay interval, and the time to perform the check.
-        No further randomisation is applied.
+        The time between checks is the sum of the delay interval, and the time to perform the check and upload.
+        No further randomisation is applied, as this is a congestion, not contention problem.
 
         """
 
@@ -1880,7 +1884,8 @@ def latLonAlt2ECEFDeg(lat, lon, h):
 
 def angularSeparationVectDeg(vect1, vect2):
     """ Calculates angle between vectors in radians.
-        Uses library function, but converts return to degrees"""
+        Uses library function, in radions , but converts return to degrees
+        This function is to reduce inline conversion calls """
 
     return np.degrees(angularSeparationVect(vect1,vect2))
 
