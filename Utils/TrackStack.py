@@ -50,6 +50,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         out_dir: target folder to save into
         scalefactor: factor to scale the canvas by; default 1, increase if image cropped
     """
+
     # normalise the path in a platform neutral way
     # done here so that trackStack() can be called from other modules
     dir_paths = [os.path.normpath(dir_path) for dir_path in dir_paths]
@@ -73,20 +74,27 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
 
     if showers is not None:
         associations = {}
+
         # Get FTP file so we can filter by shower
         for dir_path in dir_paths: 
+
             if os.path.isfile(os.path.join(dir_path,'.config')):
                 tmpcfg = cr.loadConfigFromDirectory('.config', dir_path)
             else:
                 tmpcfg = config
+
             ftp_list = glob(os.path.join(dir_path, 'FTPdetectinfo_{}*.txt'.format(tmpcfg.stationID)))
             ftp_list = [x for x in ftp_list if 'backup' not in x and 'unfiltered' not in x]
             ftp_list.sort() 
+
             if len(ftp_list) < 1:
                 print('unable to find FTPdetect file in {}'.format(dir_path))
                 return False
+            
             ftp_file = ftp_list[0] 
-            print('Determining shower details from {}'.format(ftp_file))
+
+            print('Performing shower association using {}'.format(ftp_file))
+
             associations_per_dir, _ = showerAssociation(config, [ftp_file], 
                 shower_code=None, show_plot=False, save_plot=False, plot_activity=False)
             associations.update(associations_per_dir)
@@ -95,6 +103,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         ff_list = []
         for key in associations:
             ff_list.append(key[0])
+
     else:
         # Get a list of FF files in the folder
         ff_list = []
@@ -246,12 +255,16 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
 
     # Load individual FFs and map them to the stack
     num_plotted = 0
+
     if got_tqdm is True:
         enumlist = tqdm(ff_found_list)
+
     else:
         enumlist = ff_found_list
+
     for i, ff_name in enumerate(enumlist):
         ff_basename = os.path.basename(ff_name)
+
         if showers is not None:
             try:
                 shower = associations[(ff_basename, 1.0)][1]
@@ -265,6 +278,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         if showers is not None and showername not in showers:
             #print("Skipping, showername =", showername)
             continue
+
         num_plotted += 1
         if not got_tqdm:
             print("Stacking {:s}, {:.1f}% done".format(ff_basename, 100*num_plotted/num_ffs))
@@ -308,7 +322,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         avepixel = copy.deepcopy(ff.avepixel)
         avepixel[mask.img == 0] = 0
 
-        # Compute deaveraged maxpixel
+        # Compute deaveraged maxpixel image
         max_deavg = maxpixel - avepixel
 
 
@@ -345,6 +359,12 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         max_deaveraged[stack_y, stack_x] = np.max(np.dstack([max_deaveraged[stack_y, stack_x],
                                                              max_deavg[y_coords, x_coords]]), axis=2)
 
+
+    # End if the number of plotted FFs is zero
+    if num_plotted == 0:
+        print()
+        print("No FFs plotted! Check the shower association or the detections.")
+        return False
 
     # Compute the blended avepixel background
     stack_img = avg_stack_sum

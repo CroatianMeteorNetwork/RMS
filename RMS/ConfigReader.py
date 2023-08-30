@@ -251,6 +251,7 @@ class Config:
 
         self.external_script_run = False
         self.auto_reprocess_external_script_run = False
+        self.prioritise_capture_over_reprocess = False
         self.external_script_path = None
         self.external_function_name = "rmsExternal"
 
@@ -321,6 +322,9 @@ class Config:
         # Wait an additional time (seconds) after the capture is supposed to start. Used for multi-camera 
         #   systems for a staggered capture start
         self.capture_wait_seconds = 0
+
+        # Disable wifi during capture - generally required for ribbon cable connected sensors on Pi platform
+        self.disable_wifi_during_capture = False
 
         # Randomize the wait time between 0 and capture_wait_seconds. Used for multi-camera systems
         self.capture_wait_randomize = False
@@ -754,6 +758,9 @@ def parseSystem(config, parser):
         config.auto_reprocess_external_script_run = parser.getboolean(section, \
             "auto_reprocess_external_script_run")
 
+    if parser.has_option(section, "prioritize_capture_over_reprocess"):
+        config.prioritize_capture_over_reprocess = parser.getboolean(section, \
+            "prioritize_capture_over_reprocess")
 
     if parser.has_option(section, "external_script_path"):
         config.external_script_path = parser.get(section, "external_script_path")
@@ -944,6 +951,7 @@ def parseCapture(config, parser):
     if parser.has_option(section, "auto_reprocess"):
         config.auto_reprocess = parser.getboolean(section, "auto_reprocess")
 
+    # Prioritize capture over reprocessing - do not start reprocessing a new directory if should be capturing
     if parser.has_option(section, "prioritize_capture_over_reprocess"):
         config.prioritize_capture_over_reprocess = parser.getboolean(section, \
             "prioritize_capture_over_reprocess")
@@ -969,6 +977,11 @@ def parseCapture(config, parser):
     # Load the time for waiting before postprocessing begins
     if parser.has_option(section, "postprocess_delay"):
         config.postprocess_delay = parser.getint(section, "postprocess_delay")
+
+    # Disable wifi during capture on Pi plaform only
+    if parser.has_option(section, "disable_wifi_during_capture"):
+        config.disable_wifi_during_capture = parser.getboolean(section, "disable_wifi_during_capture")
+
 
 def parseUpload(config, parser):
     section = "Upload"
