@@ -1595,7 +1595,7 @@ class EventMonitor(multiprocessing.Process):
             shutil.copy(file, this_event_directory)
         log.info("File pack assembled")
 
-        stackFFs(this_event_directory, "jpg", captured_stack=True)
+        stackFFs(this_event_directory, "jpg", captured_stack=True, print_progress=False)
 
         # convert bins to MP4
         for file in file_list:
