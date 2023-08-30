@@ -1398,7 +1398,6 @@ class EventMonitor(multiprocessing.Process):
                 file_list: [list of paths] List of paths to files
         """
 
-
         try:
             event_time = dateutil.parser.parse(event.dt)
 
