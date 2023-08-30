@@ -4,6 +4,7 @@ sleep 10
 source ~/vRMS/bin/activate
 cd ~/source/RMS
 
+
 # Init log file
 LOGPATH=~/RMS_data/logs/
 LOGDATE=$(date +"%Y%m%d_%H%M%S")
