@@ -34,18 +34,18 @@ import argparse
 import random
 import string
 
-if sys.hexversion < 0x03000000:
+if sys.version_info[0] < 3:
     import requests
 else:
     import statistics
     import urllib.request
-    from Utils.SkyFit2 import convertFRNameToFF
 
 import logging
 
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt
 from RMS.Math import angularSeparationVect
+from RMS.Formats.FFfile import convertFRNameToFF
 from RMS.Formats.Platepar import Platepar
 from datetime import datetime
 from dateutil import parser
@@ -1191,7 +1191,7 @@ class EventMonitor(multiprocessing.Process):
 
         if not testmode:
             try:
-                if sys.hexversion < 0x03000000:
+                if sys.version_info[0] < 3:
                     web_page = requests.get(self.syscon.event_monitor_webpage).text.splitlines()
                 else:
                     web_page = urllib.request.urlopen(self.syscon.event_monitor_webpage).read().decode("utf-8").splitlines()
@@ -1599,7 +1599,7 @@ class EventMonitor(multiprocessing.Process):
 
         # convert bins to MP4
         for file in file_list:
-            if file.endswith(".bin") and sys.hexversion >= 0x03000000:
+            if file.endswith(".bin") and sys.version_info[0] >= 3:
                 fr_file = os.path.basename(file)
                 ff_file = convertFRNameToFF(fr_file)
 
@@ -2466,7 +2466,7 @@ def testApplyCartesianSD():
     """
 
     # If Python version less than 3, return true - can't run this testcode without 3.x
-    if sys.hexversion < 0x03000000:
+    if sys.version_info[0] < 3:
         return True
 
 
@@ -2701,7 +2701,7 @@ if __name__ == "__main__":
         # Add a random string after the URL to defeat caching
         print(syscon.event_monitor_webpage)
 
-        if sys.hexversion < 0x03000000:
+        if sys.version_info[0] < 3:
             web_page = requests.get(syscon.event_monitor_webpage).text.splitlines()
         else:
             web_page = urllib.request.urlopen(syscon.event_monitor_webpage).read().decode("utf-8").splitlines()
