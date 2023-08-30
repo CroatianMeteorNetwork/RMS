@@ -366,9 +366,20 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config,
         detector=detector)
 
+    pi_platform = False
+    if os.path.exists("/sys/firmware/devicetree/base/model"):
+        with open('/sys/firmware/devicetree/base/model') as f:
+            if 'Raspberry Pi' in f.read():
+                log.info("Platform is Raspberry Pi")
+                pi_platform = True
 
     # Start buffered capture
+    if config.disable_wifi_during_capture and pi_platform:
+        log.info("Stopping wifi")
+        os.system("~/localscripts/precapture.sh")
+        os.system("rfkill block wifi")
     bc.startCapture()
+
 
     # Init and start the compression
     compressor.start()
@@ -376,11 +387,16 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Capture until Ctrl+C is pressed
     wait(duration, compressor, bc, video_file)
+    if config.disable_wifi_during_capture and pi_platform:
+        log.info("Restarting wifi")
+        os.system("~/localscripts/postcapture.sh")
+        os.system("rfkill unblock wifi")
 
     # If capture was manually stopped, end capture
     if STOP_CAPTURE:
         log.info('Ending capture...')
-
+        if config.disable_wifi_during_capture:
+            os.system("rfkill unblock wifi")
 
     # Stop the capture
     log.debug('Stopping capture...')
@@ -709,7 +725,9 @@ def processIncompleteCaptures(config, upload_manager):
         # If capture should have started do not process any more incomplete directories
         start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
         if isinstance(start_time, bool):
+
             if start_time and config.prioritize_capture_over_reprocess:
+
                 log.info("Capture should have started, do not start reprocessing another directory")
                 break
 
@@ -779,7 +797,17 @@ if __name__ == "__main__":
 
     log.info("Program version: {:s}, {:s}".format(commit_time, sha))
 
-    
+    pi_platform = False
+    if os.path.exists("/sys/firmware/devicetree/base/model"):
+        with open('/sys/firmware/devicetree/base/model') as f:
+            if 'Raspberry Pi' in f.read():
+                log.info("Platform is Raspberry Pi")
+                pi_platform = True
+
+    if config.disable_wifi_during_capture and pi_platform:
+        log.info("Starting wifi")
+        os.system("rfkill unblock wifi")
+
 
     # Change the Ctrl+C action to the special handle
     setSIGINT()
@@ -851,7 +879,7 @@ if __name__ == "__main__":
         # Capture the video frames from the video file
         runCapture(config, duration=None, video_file=video_file, nodetect=cml_args.nodetect,
             resume_capture=cml_args.resume)
-				
+
         sys.exit()
 
     upload_manager = None
@@ -1037,7 +1065,7 @@ if __name__ == "__main__":
 
             # Check if waiting is needed to start capture
             if not isinstance(start_time, bool):
-            
+
                 # Calculate how many seconds to wait until capture starts, and with for that time
                 time_now = datetime.datetime.utcnow()
                 waiting_time = start_time - time_now
@@ -1049,7 +1077,7 @@ if __name__ == "__main__":
                 resetSIGINT()
 
                 try:
-                    
+
                     # Wait until sunset
                     waiting_time_seconds = int(waiting_time.total_seconds())
                     if waiting_time_seconds > 0:
@@ -1058,7 +1086,7 @@ if __name__ == "__main__":
                 except KeyboardInterrupt:
 
                     log.info('Ctrl + C pressed, exiting...')
-                    
+
                     if upload_manager is not None:
 
                         # Stop the upload manager
@@ -1158,4 +1186,6 @@ if __name__ == "__main__":
         if eventmonitor.is_alive():
              log.debug('Closing eventmonitor...')
              eventmonitor.stop()
+
              del eventmonitor
+

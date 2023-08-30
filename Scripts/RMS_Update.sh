@@ -13,6 +13,19 @@ RMSBACKUPDIR=~/.rms_backup
 # File for indicating that the update is in progress
 UPDATEINPROGRESSFILE=$RMSBACKUPDIR/update_in_progress
 
+echo "Enabling wifi"
+/usr/sbin/rfkill unblock all
+sleep 10
+
+
+while [ $(timedatectl | grep "synchronized" | cut -d":" -f2 | xargs) != 'yes' ]
+
+do
+  echo "Wait for real time clock to sync - system time is $(date)"
+  sleep 60
+done
+echo "System clock is synced           - system time is $(date)"
+
 echo "Updating RMS code..."
 
 # Make the backup directory

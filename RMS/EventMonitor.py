@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+
 # A full event definition is shown below
 
 
@@ -57,6 +58,7 @@ END						                    #Event delimiter - everything after this is associa
 """
 
 """ Automatically uploads data files based on search specification information given on a website. """
+
 
 from __future__ import print_function, division, absolute_import
 
@@ -340,22 +342,27 @@ class EventContainer(object):
 
         """
         Apply random number from normal distribution to each component of a 3 dimension vector
+
         If this fails, just return the point.
+
 
         arguments:
             pt: [vector] vector
             std: [float] sigma to apply
 
         """
+
         try:
             return pt + np.random.normal(scale=std, size=3)
         except:
             return pt
 
+
     def applyCartesianSD(self, population):
 
         """
         Apply standard deviation to the Cartesian coordinate of a population of trajectories
+
         Take the absolute value, in case a negative value was passed
 
         arguments:
@@ -369,8 +376,10 @@ class EventContainer(object):
         ecef_vector = self.eventToECEFVector()
         if self.hasCartSD():
             for tr in population:
+
                 start_vect = self.applyCartesianSDToPoint(ecef_vector[0], abs(self.cart_std))
                 end_vect = self.applyCartesianSDToPoint(ecef_vector[1], abs(self.cart2_std))
+
                 tr.lat, tr.lon, tr.ht = ecefV2LatLonAlt(start_vect)
                 tr.lat2, tr.lon2, tr.ht2 = ecefV2LatLonAlt(end_vect)
 
@@ -380,6 +389,7 @@ class EventContainer(object):
 
         """
         Apply standard deviation to the Polar coordinates of a population of trajectories
+
         This function can handle negative standard deviations
 
         arguments:
@@ -410,6 +420,7 @@ class EventContainer(object):
         Arguments:
 
         Returns: [bool]
+
             True if end point latitudes or longitudes or heights are not zero
 
         """
@@ -699,7 +710,6 @@ class EventMonitor(multiprocessing.Process):
         # The path to the event monitor database
         self.event_monitor_db_path = os.path.join(os.path.abspath(self.syscon.data_dir),
                                                   self.syscon.event_monitor_db_name)
-
         self.createDB()
 
         # Load the event monitor database. Any problems, delete and recreate.
@@ -708,6 +718,7 @@ class EventMonitor(multiprocessing.Process):
         self.exit = multiprocessing.Event()
 
         log.info("EventMonitor is starting")
+
         log.info("Monitoring {} ".format(self.syscon.event_monitor_webpage))
         log.info("At {:3.2f} minute intervals".format(self.syscon.event_monitor_check_interval))
         log.info("Reporting data to {}/{}".format(self.syscon.hostname, self.syscon.event_monitor_remote_dir))
@@ -964,6 +975,7 @@ class EventMonitor(multiprocessing.Process):
 
         Remove old record from the database, notional time of 14 days selected.
         The deletion is made on the criteria of when the record was added to the database, not the event date
+
         If the event is still listed on the website, then it will be added, and uploaded.
 
         """
@@ -1368,6 +1380,7 @@ class EventMonitor(multiprocessing.Process):
 
         """Take an event, directory list and an extension list and return paths to files
 
+
            For .fits files always return at least the closest previous event
            This is a pretty ugly process, where the previous file compared to the event time is held in a variable.
            If the file being compared is the first file after the event time, put the previous file into the list,
@@ -1385,6 +1398,7 @@ class EventMonitor(multiprocessing.Process):
             event_time = parser.parse(event.dt)
         except:
             event_time = convertGMNTimeToPOSIX(event.dt)
+
 
         seeking_first_fits_after_event = True # to prevent warning of possibly uninitialised variable
         file_list = []
@@ -1635,6 +1649,7 @@ class EventMonitor(multiprocessing.Process):
              root_dir = os.path.join(event_monitor_directory,upload_filename)
              archive_name = shutil.make_archive(base_name, 'bztar', root_dir, logger=log)
             else:
+
              log.info("Not making an archive of {}, not sensible.".format(os.path.join(event_monitor_directory)))
 
         # Remove the directory where the files were assembled
@@ -1845,6 +1860,7 @@ class EventMonitor(multiprocessing.Process):
 
 
 
+
         if testIndividuals():
             log.info("EventMonitor function test success")
             super(EventMonitor, self).start()
@@ -1905,6 +1921,7 @@ class EventMonitor(multiprocessing.Process):
         Call to start the event monitor loop. If the loop has been accelerated following a match
         then this loop slows it down by multiplying the check interval by 1.1.
 
+
         The time between checks is the sum of the delay interval, and the time to perform the check and upload.
         No further randomisation is applied, as this is a congestion, not contention problem.
 
@@ -1939,7 +1956,8 @@ def latLonAlt2ECEFDeg(lat, lon, h):
 
 def angularSeparationVectDeg(vect1, vect2):
     """ Calculates angle between vectors in radians.
-        Uses library function, in radions , but converts return to degrees
+
+        Uses library function, in radians , but converts return to degrees
         This function is to reduce inline conversion calls """
 
     return np.degrees(angularSeparationVect(vect1,vect2))
