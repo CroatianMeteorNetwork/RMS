@@ -37,6 +37,7 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
         mask: [MaskStructure] Mask to apply to the stack. None by default.
         captured_stack: [bool] True if all files are used and "_captured_stack" will be used in the file name.
             False by default.
+        print_progress: [bool] Allow print calls to show files being stacked. True by default
 
     Return:
         stack_path, merge_img:
