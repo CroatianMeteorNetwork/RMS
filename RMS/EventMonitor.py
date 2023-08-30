@@ -18,45 +18,7 @@
 
 
 
-"""
 
-# Reference event
-
-# Required
-EventTime                : 20230821_110845	#Time as YYYYMMDD_HHMMSS
-TimeTolerance (s)        : 20			    #Width of time to take
-EventLat (deg +N)        : -33			    #Event start latitude
-EventLon (deg +E)        : 116.0		    #Event start longitude
-EventHt (km)             : 100			    #Event height in km
-CloseRadius(km)          : 10			    #Radius of stations to trajectory which must upload information for time
-FarRadius (km)           : 1000			    #Radius of stations to trajectory which must upload if trajectory passed through field of view
-
-#Either
-EventLat2Std (deg)       : 1.0			    #Event end latitude standard deviation
-EventLon2 (deg +E)       : 116.0		    #Event end longitude
-EventHt2 (km)            : 90			    #Event height standard deviation
-
-#Or
-EventAzim                : 45			    #Azimuth from North +E from point of view of object
-EventElev		         : 20			    #Elevation as perceived by observer on ground, hence always +ve
-
-#Optional
-EventCartStd		     : 10000		    #Event start cartesian standard deviation (m)
-EventCart2Std		     : 10000		    #Event end cartesian standard deviation (m)
-
-
-#Optional - not preferred as sensitive to different latitudes
-EventLatStd (deg)	     : 1.0			    #Event start latitude polar standard deviation
-EventLonStd (deg)	     : 1.0		        #Event start longitude polar standard deviation
-EventLat2 (deg +N)       : -31			    #Event end latitude
-EventLon2Std (deg)	     : 1.0			    #Event end longitude standard deviation
-
-
-END						                    #Event delimiter - everything after this is associated with a new event
-
-"""
-
-""" Automatically uploads data files based on search specification information given on a website. """
 
 from __future__ import print_function, division, absolute_import
 
@@ -100,6 +62,47 @@ from RMS.UploadManager import uploadSFTP
 from glob import glob
 
 log = logging.getLogger("logger")
+
+"""
+
+# Reference event
+
+# Required
+EventTime                : 20230821_110845	#Time as YYYYMMDD_HHMMSS
+TimeTolerance (s)        : 20			    #Width of time to take
+EventLat (deg +N)        : -33			    #Event start latitude
+EventLon (deg +E)        : 116.0		    #Event start longitude
+EventHt (km)             : 100			    #Event height in km
+CloseRadius(km)          : 10			    #Radius of stations to trajectory which must upload information for time
+FarRadius (km)           : 1000			    #Radius of stations to trajectory which must upload if trajectory passed through field of view
+
+#Either
+EventLat2Std (deg)       : 1.0			    #Event end latitude standard deviation
+EventLon2 (deg +E)       : 116.0		    #Event end longitude
+EventHt2 (km)            : 90			    #Event height standard deviation
+
+#Or
+EventAzim                : 45			    #Azimuth from North +E from point of view of object
+EventElev		         : 20			    #Elevation as perceived by observer on ground, hence always +ve
+
+#Optional
+EventCartStd		     : 10000		    #Event start cartesian standard deviation (m)
+EventCart2Std		     : 10000		    #Event end cartesian standard deviation (m)
+
+
+#Optional - not preferred as sensitive to different latitudes
+EventLatStd (deg)	     : 1.0			    #Event start latitude polar standard deviation
+EventLonStd (deg)	     : 1.0		        #Event start longitude polar standard deviation
+EventLat2 (deg +N)       : -31			    #Event end latitude
+EventLon2Std (deg)	     : 1.0			    #Event end longitude standard deviation
+
+
+END						                    #Event delimiter - everything after this is associated with a new event
+
+"""
+
+""" Automatically uploads data files based on search specification information given on a website. """
+
 
 class EventContainer(object):
 
