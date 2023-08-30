@@ -44,15 +44,6 @@ from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
 
 
 
-def convertFRNameToFF(fr_name):
-    """ Convert the FR name format to an FF format. """
-
-    if fr_name.startswith("FR_") and fr_name.endswith(".bin"):
-        fr_name = fr_name.replace("FR_", "FF_", 1).replace(".bin", ".fits")
-
-    return fr_name
-
-
 class QFOVinputDialog(QtWidgets.QDialog):
 
     def __init__(self, *args, **kwargs):
