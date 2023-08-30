@@ -1842,8 +1842,6 @@ class EventMonitor(multiprocessing.Process):
     def start(self):
         """ Starts the event monitor. """
 
-
-
         if testIndividuals(logging = False):
             log.info("EventMonitor function test success")
             super(EventMonitor, self).start()
