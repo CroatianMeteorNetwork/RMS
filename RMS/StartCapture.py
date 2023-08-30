@@ -370,7 +370,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Start buffered capture
     bc.startCapture()
 
-
     # Init and start the compression
     compressor.start()
 
@@ -381,6 +380,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # If capture was manually stopped, end capture
     if STOP_CAPTURE:
         log.info('Ending capture...')
+
 
     # Stop the capture
     log.debug('Stopping capture...')
@@ -780,6 +780,7 @@ if __name__ == "__main__":
         sha = ""
 
     log.info("Program version: {:s}, {:s}".format(commit_time, sha))
+
 
 
     # Change the Ctrl+C action to the special handle
