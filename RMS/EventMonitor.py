@@ -1844,7 +1844,7 @@ class EventMonitor(multiprocessing.Process):
 
 
 
-        if testIndividuals():
+        if testIndividuals(logging = False):
             log.info("EventMonitor function test success")
             super(EventMonitor, self).start()
             log.info("EventMonitor was started")
@@ -2573,7 +2573,7 @@ def testApplyPolarSD():
     success = success if abs(e.ht - ht1mn) < 5 and (e.ht2 - ht2mn) < 10 else False
     return success
 
-def testIndividuals():
+def testIndividuals(logging = True):
 
 
     """
@@ -2590,32 +2590,37 @@ def testIndividuals():
     individuals_success = True
 
     if testRevAz():
-        log.info("revAz passed tests")
+        if logging:
+            log.info("revAz passed tests")
     else:
         log.error("revAz failed tests")
         individuals_success = False
 
     if testIsReasonable():
-        log.info("isReasonable passed tests")
+        if logging:
+            log.info("isReasonable passed tests")
     else:
         log.error("isReasonable failed tests")
         individuals_success = False
 
     if testHasCartSD():
-        log.info("hasCartSD passed tests")
+        if logging:
+            log.info("hasCartSD passed tests")
     else:
         log.error("hasCartSD failed tests")
         individuals_success = False
 
 
     if testHasPolarSD():
-        log.info("hasPolarSD passed tests")
+        if logging:
+            log.info("hasPolarSD passed tests")
     else:
         log.error("hasPolarSD failed tests")
         individuals_success = False
 
     if abs(gcDistDeg(31.7, 26.3, 45.1, 31.2) - 1549.2) < 0.5:
-        log.info("GC Dist passed test")
+        if logging:
+            log.info("GC Dist passed test")
     else:
         log.error("GC Dist failed test")
         individuals_success = False
@@ -2623,32 +2628,37 @@ def testIndividuals():
 
 
     if testEventToECEFVector():
-        log.info("eventToECEFVector passed tests")
+        if logging:
+            log.info("eventToECEFVector passed tests")
     else:
         log.error("eventToECEFVector failed tests")
         individuals_success = False
 
 
     if convertGMNTimeToPOSIX("20210925_163127") == datetime(2021, 9, 25, 16, 31, 27):
-        log.info("convertgmntimetoposix success")
+        if logging:
+            log.info("convertgmntimetoposix success")
     else:
         log.error("convertgmntimetoposix fail")
         individuals_success = False
 
 
     if testEventCreation():
-        log.info("Event Creation success")
+        if logging:
+            log.info("Event Creation success")
     else:
         log.error("Event Creation fail")
 
     if testApplyCartesianSD():
-        log.info("Apply Cartesian SD success")
+        if logging:
+            log.info("Apply Cartesian SD success")
     else:
         log.error("Apply Cartesian SD fail")
         individuals_success = False
 
     if testApplyPolarSD():
-        log.info("Apply Polar SD success")
+        if logging:
+            log.info("Apply Polar SD success")
     else:
         log.error("Apply Polar SD fail")
         individuals_success = False
