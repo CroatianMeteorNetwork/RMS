@@ -44,14 +44,13 @@ if sys.version_info[0] < 3:
     try:
         import os, ssl
         if (not os.environ.get('PYTHONHTTPSVERIFY', '') and
-            getattr(ssl, '_create_unverified_context', None)):
+            getattr(ssl, '_create_unverified_context', None)): 
             ssl._create_default_https_context = ssl._create_unverified_context
     except:
         # Print the error
         print("Error: {}".format(sys.exc_info()[0]))
 
 else:
-    import statistics
     import urllib.request
 
 
@@ -1397,7 +1396,7 @@ class EventMonitor(multiprocessing.Process):
            Return:
                 file_list: [list of paths] List of paths to files
         """
-
+        
         try:
             event_time = dateutil.parser.parse(event.dt)
 
@@ -2380,7 +2379,7 @@ def testEventToECEFVector():
             time.sleep(30)
 
     return success
-        # Convert to radians
+
 
 def testEventCreation():
 
@@ -2486,10 +2485,6 @@ def testApplyCartesianSD():
         [bool]
     """
 
-    # If Python version less than 3, return true - can't run this testcode without 3.x
-    if sys.version_info[0] < 3:
-        return True
-
 
     success = True
     event = createATestEvent07()
@@ -2512,26 +2507,27 @@ def testApplyCartesianSD():
         x2l.append(x2)
         y2l.append(y2)
         z2l.append(z2)
-    xstd, ystd, zstd = statistics.pstdev(x1l),statistics.pstdev(y1l),statistics.pstdev(z1l)
+    xstd, ystd, zstd = np.std(x1l), np.std(y1l), np.std(z1l)
     success = success if abs(xstd - event.cart_std) < 100 else False
     success = success if abs(ystd - event.cart_std) < 100 else False
     success = success if abs(zstd - event.cart_std) < 100 else False
 
-    x2std, y2std, z2std = statistics.pstdev(x2l), statistics.pstdev(y2l), statistics.pstdev(z2l)
+    x2std, y2std, z2std = np.std(x2l), np.std(y2l), np.std(z2l)
     success = success if abs(x2std - event.cart2_std) < 100 else False
     success = success if abs(y2std - event.cart2_std) < 100 else False
     success = success if abs(z2std - event.cart2_std) < 100 else False
 
 
 
-    xmn, ymn, zmn = statistics.mean(x1l), statistics.mean(y1l), statistics.mean(z1l)
-    x2mn, y2mn, z2mn = statistics.mean(x2l), statistics.mean(y2l), statistics.mean(z2l)
+    xmn, ymn, zmn = np.mean(x1l), np.mean(y1l), np.mean(z1l)
+    x2mn, y2mn, z2mn = np.mean(x2l), np.mean(y2l), np.mean(z2l)
     lat,lon,ht = ecef2LatLonAlt(xmn,ymn,zmn)
     lat2, lon2, ht2 = ecef2LatLonAlt(x2mn+50, y2mn+50 , z2mn+50 )
     lat, lon, lat2, lon2 = np.degrees(lat) , np.degrees(lon),np.degrees(lat2), np.degrees(lon2)
     success = success if gcDistDeg(lat, lon, event.lat, event.lon) < 0.1 else False
     success = success if gcDistDeg(lat2, lon2, event.lat2, event.lon2) < 0.1 else False
     success = success if abs(e.ht - ht/1000) < 10 and (e.ht2 -  ht2/1000) < 10 else False
+
     return success
 
 def testApplyPolarSD():
@@ -2543,10 +2539,6 @@ def testApplyPolarSD():
     return:
          [bool]
     """
-
-    # If Python version less than 3, return true - can't run this testcode without 3.x
-    if sys.version_info[0] < 3:
-        return True
 
     success = True
     event = createATestEvent07()
@@ -2571,12 +2563,12 @@ def testApplyPolarSD():
 
 
 
-    lat1std, lon1std, ht1std = statistics.pstdev(lat1l),statistics.pstdev(lon1l),statistics.pstdev(ht1l)
+    lat1std, lon1std, ht1std = np.std(lat1l), np.std(lon1l), np.std(ht1l)
     success = success if abs(lat1std - event.lat_std) < 0.01 else False
     success = success if abs(lon1std - event.lon_std) < 0.01 else False
     success = success if abs(ht1std - event.ht_std) < 0.1 else False
 
-    lat2std, lon2std, ht2std = statistics.pstdev(lat2l), statistics.pstdev(lon2l), statistics.pstdev(ht2l)
+    lat2std, lon2std, ht2std = np.std(lat2l), np.std(lon2l), np.std(ht2l)
     success = success if abs(lat2std - event.lat2_std) < 0.01 else False
     success = success if abs(lon2std - event.lon2_std) < 0.01 else False
     success = success if abs(ht2std - event.ht2_std) < 0.1 else False
@@ -2586,8 +2578,8 @@ def testApplyPolarSD():
 
 
 
-    lat1mn, lon1mn, ht1mn = statistics.mean(lat1l), statistics.mean(lon1l), statistics.mean(ht1l)
-    lat2mn, lon2mn, ht2mn = statistics.mean(lat2l), statistics.mean(lon2l), statistics.mean(ht2l)
+    lat1mn, lon1mn, ht1mn = np.mean(lat1l), np.mean(lon1l), np.mean(ht1l)
+    lat2mn, lon2mn, ht2mn = np.mean(lat2l), np.mean(lon2l), np.mean(ht2l)
 
     success = success if gcDistDeg(lat1mn, lon1mn, event.lat, event.lon) < 0.1 else False
     success = success if gcDistDeg(lat2mn, lon2mn, event.lat2, event.lon2) < 0.1 else False
