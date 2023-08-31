@@ -35,7 +35,7 @@ import uuid
 import random
 import string
 import paramiko
-from UploadManager import _agentAuth
+from RMS.UploadManager import _agentAuth
 
 if sys.version_info[0] < 3:
 
@@ -1701,6 +1701,7 @@ class EventMonitor(multiprocessing.Process):
                 except Exception as e:
                     log.info("Remote directory '" + self.syscon.event_monitor_remote_dir + "' does not exist!")
                     sftp.mkdir(self.syscon.event_monitor_remote_dir)
+                    log.info("Remote directory '" + self.syscon.event_monitor_remote_dir + "' created")
 
                 t.close()
 
