@@ -393,7 +393,7 @@ class EventContainer(object):
 
         return population
 
-    def applyPolarSD(self, population):
+    def applyPolarSD(self, population, seed = None):
 
         """
         Apply standard deviation to the Polar coordinates of a population of trajectories
@@ -401,11 +401,15 @@ class EventContainer(object):
 
         arguments:
             population: [list] of events
+            seed: optional, set the seed for the standard deviation generation
 
         returns:
             population: [list] of events
 
         """
+
+        if seed not None:
+            np.random.seed(seed)
 
         for tr in population:
             tr.lat = tr.lat + np.random.normal(scale=1) * self.lat_std
@@ -2546,7 +2550,7 @@ def testApplyPolarSD():
     event_population = []
     event.lat_std, event.lon_std, event.ht_std, event.lat2_std, event.lon2_std,event.ht2_std = 0.01,0.02,1,0.05,0.6,5
     event_population = event.appendPopulation(event_population, 10000)
-    event_population = event.applyPolarSD(event_population)
+    event_population = event.applyPolarSD(event_population, seed = 0 ) # pass a seed for repeatbility
 
     lat1l,lon1l,ht1l = [],[],[]
     lat2l,lon2l,ht2l = [],[],[]
