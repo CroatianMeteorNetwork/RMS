@@ -2485,10 +2485,6 @@ def testApplyCartesianSD():
         [bool]
     """
 
-    # If Python version less than 3, return true - can't run this testcode without 3.x
-    if sys.version_info[0] < 3:
-        return True
-
 
     success = True
     event = createATestEvent07()
@@ -2544,10 +2540,6 @@ def testApplyPolarSD():
          [bool]
     """
 
-    # If Python version less than 3, return true - can't run this testcode without 3.x
-    if sys.version_info[0] < 3:
-        return True
-
     success = True
     event = createATestEvent07()
     event_population = []
@@ -2571,7 +2563,7 @@ def testApplyPolarSD():
 
 
 
-    lat1std, lon1std, ht1std = np.std(lat1l),np.std(lon1l),np.std(ht1l)
+    lat1std, lon1std, ht1std = np.std(lat1l), np.std(lon1l), np.std(ht1l)
     success = success if abs(lat1std - event.lat_std) < 0.01 else False
     success = success if abs(lon1std - event.lon_std) < 0.01 else False
     success = success if abs(ht1std - event.ht_std) < 0.1 else False
