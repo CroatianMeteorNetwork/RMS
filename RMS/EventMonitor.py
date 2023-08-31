@@ -364,12 +364,15 @@ class EventContainer(object):
             std: [float] sigma to apply
 
         """
+
+
+
         try:
             return pt + np.random.normal(scale=std, size=3)
         except:
             return pt
 
-    def applyCartesianSD(self, population):
+    def applyCartesianSD(self, population, seed = None):
 
         """
         Apply standard deviation to the Cartesian coordinate of a population of trajectories
@@ -382,6 +385,9 @@ class EventContainer(object):
             population: [list] population of events
 
         """
+
+        if seed is not None:
+            np.random.seed(seed)
 
         ecef_vector = self.eventToECEFVector()
         if self.hasCartSD():
@@ -2284,7 +2290,7 @@ def testIsReasonable():
 def testHasCartSD():
 
     """
-    tests hasCardSD function by testing events
+    tests hasCartSD function by testing events
 
 
     return:
@@ -2496,7 +2502,7 @@ def testApplyCartesianSD():
     event_population = []
     event.cart_std, event.cart2_std = 1000,2000
     event_population = event.appendPopulation(event_population, 1000)
-    event_population = event.applyCartesianSD(event_population)
+    event_population = event.applyCartesianSD(event_population, seed = 0) # pass a seed for repeatability
 
     x1l,y1l,z1l = [],[],[]
     x2l,y2l,z2l = [],[],[]
@@ -2551,6 +2557,7 @@ def testApplyPolarSD():
     event.lat_std, event.lon_std, event.ht_std, event.lat2_std, event.lon2_std,event.ht2_std = 0.01,0.02,1,0.05,0.6,5
     event_population = event.appendPopulation(event_population, 10000)
     event_population = event.applyPolarSD(event_population, seed = 0 ) # pass a seed for repeatbility
+
 
     lat1l,lon1l,ht1l = [],[],[]
     lat2l,lon2l,ht2l = [],[],[]
