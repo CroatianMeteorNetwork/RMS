@@ -2379,7 +2379,7 @@ def testEventToECEFVector():
             time.sleep(30)
 
     return success
-        # Convert to radians
+
 
 def testEventCreation():
 
