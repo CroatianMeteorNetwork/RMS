@@ -1682,7 +1682,7 @@ class EventMonitor(multiprocessing.Process):
             for retry in range(1,30):
                 archives = glob.glob(os.path.join(event_monitor_directory,"*.bz2"))
 
-                # Establish a connection and see if target directory exists
+                # Establish a connection and see if target directory exists, if not create
                 t = paramiko.Transport((self.syscon.hostname, 22))
                 t.start_client()
 
