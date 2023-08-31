@@ -408,7 +408,7 @@ class EventContainer(object):
 
         """
 
-        if seed not None:
+        if seed is not None:
             np.random.seed(seed)
 
         for tr in population:
