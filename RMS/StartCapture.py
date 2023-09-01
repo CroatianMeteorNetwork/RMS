@@ -1106,6 +1106,7 @@ if __name__ == "__main__":
             slideshow_view = None
 
 
+
         # Determine how long to wait before the capture starts (include randomization if set)
         capture_wait_time = config.capture_wait_seconds
         if config.capture_wait_randomize and (config.capture_wait_seconds > 0):
