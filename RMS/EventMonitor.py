@@ -2554,7 +2554,7 @@ def testApplyPolarSD():
     event_population = []
     event.lat_std, event.lon_std, event.ht_std, event.lat2_std, event.lon2_std,event.ht2_std = 0.01,0.02,1,0.05,0.6,5
     event_population = event.appendPopulation(event_population, 10000)
-    event_population = event.applyPolarSD(event_population, seed = 0 ) # pass a seed for repeatbility
+    event_population = event.applyPolarSD(event_population, seed = 0 ) # pass a seed for repeatability
 
 
     lat1l,lon1l,ht1l = [],[],[]
