@@ -1682,28 +1682,6 @@ class EventMonitor(multiprocessing.Process):
             for retry in range(1,30):
                 archives = glob.glob(os.path.join(event_monitor_directory,"*.bz2"))
 
-                # Establish a connection and see if target directory exists, if not create
-                t = paramiko.Transport((self.syscon.hostname, 22))
-                t.start_client()
-
-                # Authenticate the connection
-                auth_status = _agentAuth(t, self.syscon.stationID.lower(), self.config.rsa_private_key)
-                if not auth_status:
-                    return False
-
-                # Open new SFTP connection
-                sftp = paramiko.SFTPClient.from_transport(t)
-
-                # Check that the remote directory exists if not, create
-                try:
-                    sftp.stat(self.syscon.event_monitor_remote_dir)
-
-                except Exception as e:
-                    log.info("Remote directory '" + self.syscon.event_monitor_remote_dir + "' does not exist!")
-                    sftp.mkdir(self.syscon.event_monitor_remote_dir)
-                    log.info("Remote directory '" + self.syscon.event_monitor_remote_dir + "' created")
-
-                t.close()
 
                 # Make the upload
                 upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
