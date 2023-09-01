@@ -85,6 +85,8 @@ def _agentAuth(transport, username, rsa_private_key):
 def existsRemoteDirectory(sftp,path):
     """
 
+    Checks if the path exists on the connection, and if the path is a directory
+
     Args:
         sftp: connection object
         path: path to the directory to check
@@ -113,6 +115,17 @@ def existsRemoteDirectory(sftp,path):
         return False
 
 def createRemoteDirectory(sftp,path):
+
+    """
+    Creates the path exists on the connection object
+
+    Args:
+        sftp: connection object
+        path: path to the directory to create
+
+    Returns:
+        True if successful else false
+    """
 
     try:
         sftp.mkdir(path)
