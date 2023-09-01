@@ -51,6 +51,12 @@ pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Routines.DynamicFTPCompressionCy import FFMimickInterface
 
 
+# ConstantsO
+UWO_MAGICK_CAMO = 1144018537
+UWO_MAGICK_EMCCD = 1141003881
+UWO_MAGICK_ASGARD = 38037846
+
+
 def getCacheID(first_frame, size):
     """ Get the frame chunk ID. """
 
@@ -1217,6 +1223,8 @@ class InputTypeUWOVid(InputType):
             return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
 
 
+
+    
 class InputTypeImages(object):
     def __init__(self, dir_path, config, beginning_time=None, fps=None, detection=False):
         """ Input file type handle for a folder with images.
@@ -1317,30 +1325,14 @@ class InputTypeImages(object):
         ### Try to detect if the given images are UWO-style PNGs ###
 
         self.uwo_png_mode = False
-        self.uwo_magick_type = None
 
         # Load the first image
         img = self.loadFrame(fr_no=0)
 
-        # Read in the magick number as a uint32
-        magicknum = np.frombuffer(img[0], dtype=np.uint32)[0]
-        
-        # Define the magick numbers for different UWO PNGs
-        magicknum_camo = 1144018537
-        magicknum_emccd = 1141003881
-        magicknum_asgard = 38037846
-        uwo_magick_num_list = [magicknum_camo, magicknum_emccd, magicknum_asgard]
-    
-        # Check the magick number for UWO PNGs
-        if magicknum in uwo_magick_num_list:
+        # Get the magick type
+        self.uwo_magick_type = self.getUWOMagickType(img)
 
-            # Set the magick type
-            if magicknum == magicknum_camo:
-                self.uwo_magick_type = "camo"
-            elif magicknum == magicknum_emccd:
-                self.uwo_magick_type = "emccd"
-            elif magicknum == magicknum_asgard:
-                self.uwo_magick_type = "asgard"
+        if self.uwo_magick_type is not None:
 
             self.uwo_png_mode = True
 
@@ -1960,6 +1952,32 @@ class InputTypeImages(object):
 
         else:
             return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
+        
+
+    def getUWOMagickType(self, img):
+        """ Return the type of the UWO PNG image. """
+
+        # Read in the magick number as a uint32
+        magicknum = np.frombuffer(img[0], dtype=np.uint32)[0]
+
+        # Define the magick numbers for different UWO PNGs
+        uwo_magick_num_list = [UWO_MAGICK_CAMO, UWO_MAGICK_EMCCD, UWO_MAGICK_ASGARD]
+
+        # Check the magick number for UWO PNGs
+        if magicknum in uwo_magick_num_list:
+
+            # Set the magick type
+            if magicknum == UWO_MAGICK_CAMO:
+                uwo_magick_type = "camo"
+            elif magicknum == UWO_MAGICK_EMCCD:
+                uwo_magick_type = "emccd"
+            elif magicknum == UWO_MAGICK_ASGARD:
+                uwo_magick_type = "asgard"
+
+            return uwo_magick_type
+
+        else:
+            return None
 
 
 class InputTypeDFN(InputType):
