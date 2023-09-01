@@ -34,8 +34,6 @@ import copy
 import uuid
 import random
 import string
-import paramiko
-from RMS.UploadManager import _agentAuth
 
 if sys.version_info[0] < 3:
 
@@ -365,8 +363,6 @@ class EventContainer(object):
             std: [float] sigma to apply
 
         """
-
-
 
         try:
             return pt + np.random.normal(scale=std, size=3)
