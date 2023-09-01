@@ -29,6 +29,7 @@ import ctypes
 import logging
 import multiprocessing
 import traceback
+import git
 
 import numpy as np
 
@@ -476,11 +477,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             if eventmonitor is not None:
 
-                # Stop the upload manager
+                # Stop the eventmonitor manager
                 if eventmonitor.is_alive():
                     log.debug('Closing eventmonitor...')
                     eventmonitor.stop()
-                    del upload_manager
+                    del eventmonitor
 
 
             # Terminate the detector
@@ -533,6 +534,32 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # if fixed_duration and (upload_manager is not None):
 
     if upload_manager is not None: # temporary code, will make the script upload after each capture
+
+        # Check if the upload delay is set
+        with upload_manager.next_runtime_lock:
+
+            # Check if the upload delay is up
+            if upload_manager.next_runtime is not None:
+
+                # Wait for the upload delay to pass
+                sleep_time = None
+                while (datetime.datetime.utcnow() - upload_manager.next_runtime).total_seconds() < 0:
+
+                    wait_time = (datetime.datetime.utcnow() - upload_manager.next_runtime).total_seconds()
+                    log.info("Waiting for upload delay to pass: {:.1f} seconds...".format(abs(wait_time)))
+
+                    # Sleep for a short interval between 1 and 30 seconds
+                    if sleep_time is None:
+
+                        sleep_time = wait_time/10
+
+                        if sleep_time < 1:
+                            sleep_time = 1
+                        elif sleep_time > 30:
+                            sleep_time = 30
+
+                    time.sleep(sleep_time)
+
         log.info('Uploading data before exiting...')
         upload_manager.uploadData()
 
@@ -552,12 +579,13 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 upload_manager.stop()
                 log.info('Closing upload manager...')
 
-        if eventmonitor is not None:
+        if 'eventmonitor' in locals():
+         if eventmonitor is not None:
             # Stop the eventmonitor
             if eventmonitor.is_alive():
                 log.debug('Closing eventmonitor...')
                 eventmonitor.stop()
-                del upload_manager
+                del eventmonitor
 
         sys.exit()
 
@@ -583,7 +611,7 @@ def processIncompleteCaptures(config, upload_manager):
 
         captured_dir_path = os.path.join(captured_data_path, captured_dir_name)
 
-        # Check that the dir stars with the correct station code, that it really is a directory, and that
+        # Check that the dir starts with the correct station code, that it really is a directory, and that
         #   there are some FF files inside
         if captured_dir_name.startswith(config.stationID):
 
@@ -607,22 +635,41 @@ def processIncompleteCaptures(config, upload_manager):
         if len(pickle_files) > 0:
             any_pickle_files = True
 
-        # Check if there is an FTPdetectinfo file in the directory, indicating the the folder was fully
+        # Check if there is an FTPdetectinfo file in the directory, indicating the folder was fully
         #   processed
         FTPdetectinfo_files = glob.glob('{:s}/FTPdetectinfo_*.txt'.format(captured_dir_path))
         any_ftpdetectinfo_files = False
+        newest_FTPfile_older_than_platepar = False
         if len(FTPdetectinfo_files) > 0:
             any_ftpdetectinfo_files = True
+
+            # Is the platepar in the captured_dir_path newer than latest FTP file?
+            # i.e. has the operator replaced the platepar because of bad calibraton?
+            newest_FTPfile_older_than_platepar = True
+            for FTPfile in FTPdetectinfo_files:
+                capture_platepar = os.path.join(captured_dir_path,config.platepar_name)
+                if os.path.exists(capture_platepar):
+                    # Any FTPfile newer than platepar - no need to reprocess
+                    if os.path.getmtime(FTPfile) > os.path.getmtime(capture_platepar):
+                        newest_FTPfile_older_than_platepar = False
+                else:
+                    # if there is no platepar in the captured_dir_path
+                    newest_FTPfile_older_than_platepar = False
 
         # Auto reprocess criteria:
         #   - Any backup pickle files
         #   - No pickle and no FTPdetectinfo files
+        #   - Newest FTP file older than platepar in capture directory
+
         run_reprocess = False
         if any_pickle_files:
             run_reprocess = True
         else:
             if not any_ftpdetectinfo_files:
                 run_reprocess = True
+        if newest_FTPfile_older_than_platepar:
+                run_reprocess = True
+                log.info("Reprocessing because newest FTPDetect file older than platepar file")
 
         # Skip the folder if it doesn't need to be reprocessed
         if not run_reprocess:
@@ -655,9 +702,19 @@ def processIncompleteCaptures(config, upload_manager):
 
 
         except Exception as e:
-            log.error("An error occured when trying to reprocess partially processed data!")
+            log.error("An error occurred when trying to reprocess partially processed data!")
             log.error(repr(e))
             log.error(repr(traceback.format_exception(*sys.exc_info())))
+
+        # If capture should have started do not process any more incomplete directories
+        start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
+        if isinstance(start_time, bool):
+
+            if start_time and config.prioritize_capture_over_reprocess:
+
+                log.info("Capture should have started, do not start reprocessing another directory")
+                break
+
 
 
 
@@ -710,6 +767,22 @@ if __name__ == "__main__":
     log.info("Program start")
     log.info("Station code: {:s}".format(str(config.stationID)))
 
+    # Get the program version
+    try:
+        # Get latest version's commit hash and time of commit
+        repo = git.Repo(search_parent_directories=True)
+        commit_unix_time = repo.head.object.committed_date
+        sha = repo.head.object.hexsha
+        commit_time = datetime.datetime.fromtimestamp(commit_unix_time).strftime('%Y%m%d_%H%M%S')
+
+    except:
+        commit_time = ""
+        sha = ""
+
+    log.info("Program version: {:s}, {:s}".format(commit_time, sha))
+
+
+
     # Change the Ctrl+C action to the special handle
     setSIGINT()
 
@@ -753,8 +826,6 @@ if __name__ == "__main__":
             upload_manager.start()
 
 
-
-
         log.info("Running for " + str(duration/60/60) + ' hours...')
 
         # Run the capture for the given number of hours
@@ -767,8 +838,6 @@ if __name__ == "__main__":
                 log.info('Closing upload manager...')
                 upload_manager.stop()
                 del upload_manager
-
-
 
 
         sys.exit()
@@ -784,7 +853,7 @@ if __name__ == "__main__":
         # Capture the video frames from the video file
         runCapture(config, duration=None, video_file=video_file, nodetect=cml_args.nodetect,
             resume_capture=cml_args.resume)
-				
+
         sys.exit()
 
     upload_manager = None
@@ -875,7 +944,7 @@ if __name__ == "__main__":
         # Don't start the capture if there's less than 15 minutes left
         if duration < 15*60:
 
-            log.debug('Less than 15 minues left to record, waiting for a new recording session tonight...')
+            log.debug('Less than 15 minutes left to record, waiting for a new recording session tonight...')
 
             # Reset the Ctrl+C to KeyboardInterrupt
             resetSIGINT()
@@ -902,7 +971,7 @@ if __name__ == "__main__":
                     if eventmonitor.is_alive():
                         log.debug('Closing eventmonitor...')
                         eventmonitor.stop()
-                        del upload_manager
+                        del eventmonitor
 
 
 
@@ -970,7 +1039,7 @@ if __name__ == "__main__":
 
             # Check if waiting is needed to start capture
             if not isinstance(start_time, bool):
-            
+
                 # Calculate how many seconds to wait until capture starts, and with for that time
                 time_now = datetime.datetime.utcnow()
                 waiting_time = start_time - time_now
@@ -982,7 +1051,7 @@ if __name__ == "__main__":
                 resetSIGINT()
 
                 try:
-                    
+
                     # Wait until sunset
                     waiting_time_seconds = int(waiting_time.total_seconds())
                     if waiting_time_seconds > 0:
@@ -991,7 +1060,7 @@ if __name__ == "__main__":
                 except KeyboardInterrupt:
 
                     log.info('Ctrl + C pressed, exiting...')
-                    
+
                     if upload_manager is not None:
 
                         # Stop the upload manager
@@ -1002,14 +1071,15 @@ if __name__ == "__main__":
 
                     if eventmonitor is not None:
 
-                        # Stop the event monitor
+                        # Stop the eventmonitor
                         if eventmonitor.is_alive():
                              log.debug('Closing eventmonitor...')
                              eventmonitor.stop()
-                             del upload_manager
+                             del eventmonitor
 
                         # Stop the slideshow if it was on
                         if slideshow_view is not None:
+
                             log.info("Stopping slideshow...")
                             slideshow_view.stop()
                             slideshow_view.join()
@@ -1090,5 +1160,6 @@ if __name__ == "__main__":
         if eventmonitor.is_alive():
              log.debug('Closing eventmonitor...')
              eventmonitor.stop()
-             del upload_manager
+
+             del eventmonitor
 
