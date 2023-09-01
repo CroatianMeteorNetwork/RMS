@@ -363,12 +363,13 @@ class EventContainer(object):
             std: [float] sigma to apply
 
         """
+
         try:
             return pt + np.random.normal(scale=std, size=3)
         except:
             return pt
 
-    def applyCartesianSD(self, population):
+    def applyCartesianSD(self, population, seed = None):
 
         """
         Apply standard deviation to the Cartesian coordinate of a population of trajectories
@@ -382,6 +383,9 @@ class EventContainer(object):
 
         """
 
+        if seed is not None:
+            np.random.seed(seed)
+
         ecef_vector = self.eventToECEFVector()
         if self.hasCartSD():
             for tr in population:
@@ -392,7 +396,7 @@ class EventContainer(object):
 
         return population
 
-    def applyPolarSD(self, population):
+    def applyPolarSD(self, population, seed = None):
 
         """
         Apply standard deviation to the Polar coordinates of a population of trajectories
@@ -400,11 +404,15 @@ class EventContainer(object):
 
         arguments:
             population: [list] of events
+            seed: optional, set the seed for the standard deviation generation
 
         returns:
             population: [list] of events
 
         """
+
+        if seed is not None:
+            np.random.seed(seed)
 
         for tr in population:
             tr.lat = tr.lat + np.random.normal(scale=1) * self.lat_std
@@ -1669,10 +1677,12 @@ class EventMonitor(multiprocessing.Process):
             log.info("Upload of {} - first attempt".format(event_monitor_directory))
             for retry in range(1,30):
                 archives = glob.glob(os.path.join(event_monitor_directory,"*.bz2"))
-                # todo: remove this line which shadows uploads to local server
-                uploadSFTP("192.168.1.241", self.syscon.stationID.lower(), event_monitor_directory,
-                           self.syscon.event_monitor_remote_dir, archives, rsa_private_key=self.config.rsa_private_key)
-                upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,rsa_private_key=self.config.rsa_private_key)
+
+
+                # Make the upload
+                upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
+                                        event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
+                                           rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
 
                 if upload_status:
                     log.info("Upload of {} - attempt no {} was successful".format(event_monitor_directory, retry))
@@ -2278,7 +2288,7 @@ def testIsReasonable():
 def testHasCartSD():
 
     """
-    tests hasCardSD function by testing events
+    tests hasCartSD function by testing events
 
 
     return:
@@ -2490,7 +2500,7 @@ def testApplyCartesianSD():
     event_population = []
     event.cart_std, event.cart2_std = 1000,2000
     event_population = event.appendPopulation(event_population, 1000)
-    event_population = event.applyCartesianSD(event_population)
+    event_population = event.applyCartesianSD(event_population, seed = 0) # pass a seed for repeatability
 
     x1l,y1l,z1l = [],[],[]
     x2l,y2l,z2l = [],[],[]
@@ -2544,7 +2554,8 @@ def testApplyPolarSD():
     event_population = []
     event.lat_std, event.lon_std, event.ht_std, event.lat2_std, event.lon2_std,event.ht2_std = 0.01,0.02,1,0.05,0.6,5
     event_population = event.appendPopulation(event_population, 10000)
-    event_population = event.applyPolarSD(event_population)
+    event_population = event.applyPolarSD(event_population, seed = 0 ) # pass a seed for repeatbility
+
 
     lat1l,lon1l,ht1l = [],[],[]
     lat2l,lon2l,ht2l = [],[],[]
