@@ -1317,15 +1317,31 @@ class InputTypeImages(object):
         ### Try to detect if the given images are UWO-style PNGs ###
 
         self.uwo_png_mode = False
+        self.uwo_magick_type = None
 
         # Load the first image
         img = self.loadFrame(fr_no=0)
 
-
+        # Read in the magick number as a uint32
+        magicknum = np.frombuffer(img[0], dtype=np.uint32)[0]
+        
+        # Define the magick numbers for different UWO PNGs
+        magicknum_camo = 1144018537
+        magicknum_emccd = 1141003881
+        magicknum_asgard = 38037846
+        uwo_magick_num_list = [magicknum_camo, magicknum_emccd, magicknum_asgard]
+    
         # Check the magick number for UWO PNGs
-        if ((img[0][0] == 22121) and (img[0][1] == 17410)) \
-            or ((img[0][0] == 86) and (img[0][1] == 105)) \
-            or ((img[0][0] == 22121) and (img[0][1] == 17456)):
+        if magicknum in uwo_magick_num_list:
+
+            # Set the magick type
+            if magicknum == magicknum_camo:
+                self.uwo_magick_type = "camo"
+            elif magicknum == magicknum_emccd:
+                self.uwo_magick_type = "emccd"
+            elif magicknum == magicknum_asgard:
+                self.uwo_magick_type = "asgard"
+
             self.uwo_png_mode = True
 
             # Get the beginning time
@@ -1815,13 +1831,20 @@ class InputTypeImages(object):
                     tu = (frame[0][27] << 24) + (frame[0][26] << 16) + (frame[0][25] << 8) + frame[0][24]
 
             else:
-
+                
                 # Byteswap if it's the UWO style 16-bit png
                 frame = frame.byteswap()
 
-                # Read the time from the image for 16 bit images
-                ts = frame[0][6] + (frame[0][7] << 16)
-                tu = frame[0][8] + (frame[0][9] << 16)
+                if self.uwo_magick_type == "emccd":
+                    # Read the time from the image for 16 bit images
+                    ts = frame[0][6] + (frame[0][7] << 16)
+                    tu = frame[0][8] + (frame[0][9] << 16)
+
+                else:
+
+                    # Read the time from the image for 16 bit images
+                    ts = frame[0][10] + (frame[0][11] << 16)
+                    tu = frame[0][12] + (frame[0][13] << 16)
 
 
             frame_dt = unixTime2Date(ts, tu, dt_obj=True)
