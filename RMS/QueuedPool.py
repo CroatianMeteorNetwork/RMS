@@ -92,7 +92,7 @@ class QueuedPool(object):
         The workers will process the queue until the pool is deliberately closed. All results are stored in an 
         output queue. It is also possible to change the number of workers in a pool during runtime.
 
-        The default worker timeout time is 1000 seconds.
+        The default worker timeout time is 2000 seconds.
 
         Arguments:
             func: [function] Worker function to which the arguments from the queue will be passed
@@ -107,7 +107,7 @@ class QueuedPool(object):
             backup_dir: [str] Path to the directory where result backups will be held.
             input_queue_maxsize: [int] Maximum size of the input queue. Used to conserve memory. Can be set
                 to the number of cores, optimally. None by default, meaning there is no size limit.
-            low_priority: [bool] If True, the child processess will run with a lower priority, i.e. larger
+            low_priority: [bool] If True, the child processes will run with a lower priority, i.e. larger
                 'niceness' (available only on Unix).
             func_extra_args: [tuple] Extra arguments for the worker function. Can be used when there
                 arguments are the same for all function calls to conserve memory if they are large. None by
@@ -434,7 +434,7 @@ class QueuedPool(object):
 
                 # If the queue has been idle for too long, kill it
                 if (time.time() - output_qsize_last_change) > worker_timeout:
-                    self.printAndLog('One of the workers got stuck longer then {:d} seconds, killing multiprocessing...'.format(worker_timeout))
+                    self.printAndLog('One of the workers got stuck longer than {:.1f} seconds, killing multiprocessing...'.format(float(worker_timeout)))
 
                     self.printAndLog('Terminating pool...')
                     self.pool.terminate()
