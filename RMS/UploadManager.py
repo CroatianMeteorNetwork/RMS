@@ -82,10 +82,48 @@ def _agentAuth(transport, username, rsa_private_key):
 
     return False
 
+def existsRemoteDirectory(sftp,path):
+    """
+
+    Args:
+        sftp: connection object
+        path: path to the directory to check
+
+    Returns:
+        True if successful else false
+    """
+
+    try:
+        # Get files in directory above target
+        listing = sftp.listdir(os.path.dirname(path))
+        # Is the required directory name in the filelist
+        if os.path.basename(path) in listing:
+            # Is the required directory name actually a directory
+            sftp_return = str(sftp.stat(path))
+            if sftp_return[0] == 'd':
+                return True
+            else:
+                log.error("{} must be a directory, but was not.".format(path))
+                log.error("stat returns {}".format(sftp_return))
+                return False
+        else:
+            return False
+    except:
+        log.error("Failure to check that directory {} exists".format(path))
+        return False
+
+def createRemoteDirectory(sftp,path):
+
+    try:
+        sftp.mkdir(path)
+        return True
+    except:
+        log.error("Unable to create {}".format(path))
+        return False
 
 
 def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22, 
-        rsa_private_key=os.path.expanduser('~/.ssh/id_rsa')):
+        rsa_private_key=os.path.expanduser('~/.ssh/id_rsa'), allow_dir_creation = False):
     """ Upload the given list of files using SFTP. 
 
     Arguments:
@@ -97,7 +135,8 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
 
     Ketword arguments:
         port: [int] SSH port. 22 by default.
-        rsa_private_key: [str] Path to the SSH private key. ~/.ssh/id_rsa by defualt.
+        rsa_private_key: [str] Path to the SSH private key. ~/.ssh/id_rsa by default.
+        allow_dir_creation: [bool] Allow test for and create remote directory. False by default.
 
     Return:
         [bool] True if upload successful, false otherwise.
@@ -126,6 +165,10 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
         # Open new SFTP connection
         sftp = paramiko.SFTPClient.from_transport(t)
 
+        # If permitted, check if directory exists and create
+        if allow_dir_creation:
+            if not existsRemoteDirectory(sftp, dir_remote):
+                createRemoteDirectory(sftp, dir_remote)
         # Check that the remote directory exists
         try:
             sftp.stat(dir_remote)
