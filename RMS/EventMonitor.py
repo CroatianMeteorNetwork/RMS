@@ -35,7 +35,6 @@ import uuid
 import random
 import string
 
-
 if sys.version_info[0] < 3:
 
     import urllib2
