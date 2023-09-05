@@ -2291,9 +2291,15 @@ class PlateTool(QtWidgets.QMainWindow):
                 if self.img_handle.uwo_png_mode:
 
                     if not hasattr(self.img_handle, "uwo_magick_type"):
+
+                        # Disable uwo mode just to read the first frame without issues
+                        self.img_handle.uwo_png_mode = False
                         
                         # Load the first image
                         img = self.img_handle.loadFrame(fr_no=0)
+
+                        # Re-enable uwo mode
+                        self.img_handle.uwo_png_mode = True
 
                         # Get the magick type
                         self.img_handle.uwo_magick_type = self.img_handle.getUWOMagickType(img)
