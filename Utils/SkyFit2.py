@@ -2278,6 +2278,19 @@ class PlateTool(QtWidgets.QMainWindow):
                 if not hasattr(self.img_handle, "cabernet_status"):
                     self.img_handle.cabernet_status = False
 
+            # Make sure an option is not missing from the UWO png mode
+            if self.img_handle.input_type == 'images':
+                if self.img_handle.uwo_png_mode:
+
+                    if not hasattr(self.img_handle, "uwo_magick_type"):
+                        
+                        # Load the first image
+                        img = self.img_handle.loadFrame(fr_no=0)
+
+                        # Get the magick type
+                        self.img_handle.uwo_magick_type = self.img_handle.getUWOMagickType(img)
+
+
         # Update possibly missing input_path variable
         if not hasattr(self, "input_path"):
             self.input_path = dir_path
