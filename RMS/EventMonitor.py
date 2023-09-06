@@ -35,6 +35,7 @@ import uuid
 import random
 import string
 
+
 if sys.version_info[0] < 3:
 
     import urllib2
@@ -385,7 +386,6 @@ class EventContainer(object):
 
         if seed is not None:
             np.random.seed(seed)
-
         ecef_vector = self.eventToECEFVector()
         if self.hasCartSD():
             for tr in population:
@@ -396,7 +396,9 @@ class EventContainer(object):
 
         return population
 
+
     def applyPolarSD(self, population, seed = None):
+
 
         """
         Apply standard deviation to the Polar coordinates of a population of trajectories
@@ -453,7 +455,7 @@ class EventContainer(object):
         Arguments
             min_elev_hard: [float] minimum elevation considered reasonable
             min_elev: [float] minimum elevation considered correct
-    `       prob_elev: [float] set any unreasonable elevations
+            prob_elev: [float] set any unreasonable elevations
             max_elev: [float] maximum elevation considered reasonable
 
         Returns:
@@ -1678,7 +1680,6 @@ class EventMonitor(multiprocessing.Process):
             for retry in range(1,30):
                 archives = glob.glob(os.path.join(event_monitor_directory,"*.bz2"))
 
-
                 # Make the upload
                 upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
                                         event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
@@ -2289,6 +2290,7 @@ def testHasCartSD():
 
     """
     tests hasCartSD function by testing events
+    tests hasCardSD function by testing events
 
 
     return:
@@ -2554,8 +2556,7 @@ def testApplyPolarSD():
     event_population = []
     event.lat_std, event.lon_std, event.ht_std, event.lat2_std, event.lon2_std,event.ht2_std = 0.01,0.02,1,0.05,0.6,5
     event_population = event.appendPopulation(event_population, 10000)
-    event_population = event.applyPolarSD(event_population, seed = 0 ) # pass a seed for repeatbility
-
+    event_population = event.applyPolarSD(event_population, seed = 0) # pass a seed for repeatbility
 
     lat1l,lon1l,ht1l = [],[],[]
     lat2l,lon2l,ht2l = [],[],[]
