@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from RMS.Astrometry.Conversions import (EARTH_CONSTANTS, datetime2JD,
                                         jd2Date, raDec2AltAz, raDec2Vector,
-                                        vector2RaDec)
+                                        vector2RaDec, AEH2Range)
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, readFTPdetectinfo
 from RMS.Formats.Showers import (generateActivityDiagram, loadShowers,
@@ -30,19 +30,21 @@ EARTH = EARTH_CONSTANTS()
 
 
 class MeteorSingleStation(object):
-    def __init__(self, station_id, lat, lon, ff_name):
+    def __init__(self, station_id, lat, lon, elev, ff_name):
         """ Container for single station observations which enables great circle fitting. 
 
         Arguments:
-            station_id: [str]
-            lat: [float] +N latitude (deg).
-            lon: [float] +E longitude (deg).
+            station_id: [str] Station ID.
+            lat: [float] Station +N latitude (deg).
+            lon: [float] Station +E longitude (deg).
+            elev: [float] Station elevation (m).
             ff_name: [str] Name of the FF file on which the meteor was recorded.
         """
 
         self.station_id = station_id
         self.lat = lat
         self.lon = lon
+        self.elev = elev
         self.ff_name = ff_name
 
         self.jd_array = []
@@ -56,6 +58,9 @@ class MeteorSingleStation(object):
 
         self.meteor_begin_cartesian = None
         self.meteor_end_cartesian = None
+
+        self.beg_azim, self.beg_alt = None, None
+        self.end_azim, self.end_alt = None, None
 
         self.duration = None
 
@@ -142,6 +147,16 @@ class MeteorSingleStation(object):
         # Compute the solar longitude of the beginning (degrees)
         self.lasun = np.degrees(jd2SolLonSteyaert(self.jdt_ref))
 
+        # Meteor peak magnitude
+        self.peak_mag = None
+
+        # Only computed if the meteor belongs to a shower (height has to be assumed)
+        self.peak_azim = None
+        self.peak_alt = None
+        self.abs_mag = None
+
+        # Radiant elevation above the horizon (degrees) if the meteor belongs to a shower
+        self.shower_elev = None
 
 
     def sampleGC(self, phase_angles):
@@ -213,7 +228,57 @@ class MeteorSingleStation(object):
                 np.radians(dec), np.radians(self.normal_ra), np.radians(self.normal_dec))))
 
         return ang_separation
+    
 
+    def computeMag(self, shower=None):
+        """ Compute peak and absolute magnitude (if the shower is given).
+        
+        Keyword arguments:
+            shower: [Shower instance] Shower object. Optional.
+        """
+
+        # Compute the apparent peak magnitude
+        self.peak_mag = None
+        peak_mag_index = None
+        if np.any(self.mag_array):
+
+            # Get the index of the peak magnitude
+            peak_mag_index = np.argmin(self.mag_array)
+
+            # Get the peak magnitude
+            self.peak_mag = self.mag_array[peak_mag_index]
+
+
+        # If the meteor belongs to a meteor shower
+        if (shower is not None) and (self.peak_mag is not None):
+
+            ### Compute the absolute magnitude assuming the meteor height ###
+
+            # Get the reference meteor height
+            if shower.ref_height is not None:
+                    
+                # Read from table if given
+                ref_height = 1000*shower.ref_height
+
+            else:
+                    
+                # Otherwise compute from the model
+                ref_height = (heightModel(shower.v_init, ht_type='beg') + \
+                    heightModel(shower.v_init, ht_type='end'))/2
+            
+
+            # Compute alt/az at the peak magnitude point
+            self.peak_azim, self.peak_alt = raDec2AltAz(
+                self.ra_array[peak_mag_index], self.dec_array[peak_mag_index], \
+                self.jd_array[peak_mag_index], self.lat, self.lon)
+
+            # Get the range to the meteor at the reference height
+            r = AEH2Range(self.peak_azim, self.peak_alt, ref_height, self.lat, self.lon, self.elev)
+
+            # Compute the peak absolute magnitude (apparent mag at 100 km distance)
+            self.abs_mag = self.peak_mag + 5*np.log10((10**5)/r)
+
+            ### ###
 
 
 
@@ -431,7 +496,8 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
 
         # Init container for meteor observation
-        meteor_obj = MeteorSingleStation(cam_code, config.latitude, config.longitude, ff_name)
+        meteor_obj = MeteorSingleStation(cam_code, config.latitude, config.longitude, config.elevation, 
+                                         ff_name)
 
         # Infill the meteor structure
         for entry in meteor_meas:
@@ -618,6 +684,12 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
             # Store the associated shower
             associations[(ff_name, meteor_No)] = [meteor_obj, best_match_shower]
+
+
+    # Compute apparent and absolute magnitudes for all meteors (if they belong to a shower)
+    for key in associations:
+        meteor_obj, shower = associations[key]
+        meteor_obj.computeMag(shower=shower)
 
 
     # Find shower frequency and sort by count
@@ -905,7 +977,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                             shower_name = shower.name
 
                             # Create link to the IAU database of showers
-                            iau_link = "https://www.ta3.sk/IAUC22DB/MDC2007/Roje/pojedynczy_obiekt.php?kodstrumienia={:05d}".format(shower.iau_code_int)
+                            iau_link = "https://www.ta3.sk/IAUC22DB/MDC2022/Roje/pojedynczy_obiekt.php?kodstrumienia={:05d}".format(shower.iau_code_int)
 
                         else:
                             shower_name = "..."
@@ -918,7 +990,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                     f.write("# \n")
                     f.write("# Meteor parameters:\n")
                     f.write("# ------------------\n")
-                    f.write("#          Date And Time,      Beg Julian date,     La Sun, Shower, RA beg, Dec beg, RA end, Dec end, RA rad, Dec rad, GC theta0,  GC phi0, GC beg phase, GC end phase,  Mag\n")
+                    f.write("#          Date And Time,      Beg Julian date,     La Sun, Shower, RA beg, Dec beg, RA end, Dec end, RA rad, Dec rad, GC theta0,  GC phi0, GC beg phase, GC end phase, AppMag, AbsMag, RadElev\n")
 
 
                     # Create a sorted list of meteor associations by time
@@ -928,31 +1000,46 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                     # Write out meteor parameters
                     for meteor_obj, shower in associations_list:
 
-                        # Find peak magnitude
-                        if np.any(meteor_obj.mag_array):
-                            peak_mag = "{:+.1f}".format(np.min(meteor_obj.mag_array))
+                        # Format the peak magnitude
+                        if meteor_obj.peak_mag is not None:
+                            peak_mag = "{:+.2f}".format(meteor_obj.peak_mag)
 
                         else:
                             peak_mag = "None"
 
+                        # Format the absolute magnitude
+                        if meteor_obj.abs_mag is not None:
+                            abs_mag = "{:+.2f}".format(meteor_obj.abs_mag)
+
+                        else:
+                            abs_mag = "None"
+
+                        # Format the radiant elevation
+                        if shower is not None:
+                            rad_elev = "{:.2f}".format(shower.elev)
+
+                        else:
+                            rad_elev = "None"
+                        
+
 
                         if shower is not None:
 
-                            f.write("{:24s}, {:20.12f}, {:>10.6f}, {:>6s}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:9.3f}, {:8.3f}, {:12.3f}, {:12.3f}, {:4s}\n".format(jd2Date(meteor_obj.jdt_ref, dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f"), \
+                            f.write("{:24s}, {:20.12f}, {:>10.6f}, {:>6s}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:9.3f}, {:8.3f}, {:12.3f}, {:12.3f}, {:>6s}, {:>6s}, {:>7s}\n".format(jd2Date(meteor_obj.jdt_ref, dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f"), \
                                 meteor_obj.jdt_ref, meteor_obj.lasun, shower.name, \
                                 meteor_obj.ra_array[0]%360, meteor_obj.dec_array[0], \
                                 meteor_obj.ra_array[-1]%360, meteor_obj.dec_array[-1], \
                                 meteor_obj.radiant_ra%360, meteor_obj.radiant_dec, \
                                 np.degrees(meteor_obj.theta0), np.degrees(meteor_obj.phi0), \
-                                meteor_obj.gc_beg_phase, meteor_obj.gc_end_phase, peak_mag))
+                                meteor_obj.gc_beg_phase, meteor_obj.gc_end_phase, peak_mag, abs_mag, rad_elev))
 
                         else:
-                            f.write("{:24s}, {:20.12f}, {:>10.6f}, {:>6s}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:>6s}, {:>7s}, {:9.3f}, {:8.3f}, {:12.3f}, {:12.3f}, {:4s}\n".format(jd2Date(meteor_obj.jdt_ref, dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f"), \
+                            f.write("{:24s}, {:20.12f}, {:>10.6f}, {:>6s}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:>6s}, {:>7s}, {:9.3f}, {:8.3f}, {:12.3f}, {:12.3f}, {:>6s}, {:>6s}, {:>7s}\n".format(jd2Date(meteor_obj.jdt_ref, dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f"), \
                                 meteor_obj.jdt_ref, meteor_obj.lasun, '...', meteor_obj.ra_array[0]%360, \
                                 meteor_obj.dec_array[0], meteor_obj.ra_array[-1]%360, \
                                 meteor_obj.dec_array[-1], "None", "None", np.degrees(meteor_obj.theta0), \
                                 np.degrees(meteor_obj.phi0), meteor_obj.gc_beg_phase, \
-                                meteor_obj.gc_end_phase, peak_mag))
+                                meteor_obj.gc_end_phase, peak_mag, abs_mag, rad_elev))
 
 
 
