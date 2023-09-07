@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# Exit immediately as Istrastream is not longer used
+exit 0
+
 echo ""
 echo "START EXTERNAL SCRIPT..." 
 echo ""
