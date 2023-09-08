@@ -15,6 +15,9 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #!/bin/bash
 #
+# Version 1.5   - added support for non English locales where user user directories may not include a directory named Desktop
+#                 i.e. this enables support of RMS on a non English distro install
+#
 # Version 1.4   - moved codebase into RMS/Scripts/MultiCamLinux
 #
 # Version 1.3	- fixed path to CMN desktop shortcut
@@ -25,6 +28,11 @@
 # Changes	- added station arguments to  Launch scripts
 #		- changed desktop links  for StartCapture to symbolic links of the scripts within .config/autostart
 # 
+# Check if the user's desktop directory environment variable is set
+if [ -n "$xdg-user-dir DESKTOP" ]; then
+    Desktop=`xdg-user-dir DESKTOP`
+fi
+#
 if [[ "$#" -eq 0 ]]	#called with no arg
 then
 	RMS_data=~/RMS_data
