@@ -257,8 +257,8 @@ def detectStarsAndMeteorsDirectory(dir_path, config, throttle_queue = False):
                 if throttle_queue:
                     # Delay loading by the size of the queue, so that if the worker is reset
                     # the whole night's observation session is not lost
-                    log.info('Delaying queue loading by {} seconds'.format(queue_size))
-                    time.sleep(queue_size)
+                    log.info('Queue has {} jobs, delaying queue loading by {} seconds'.format(queue_size, queue_size/10))
+                    time.sleep(queue_size/10)
                 break
             else:
                 time.sleep(0.1)
