@@ -210,7 +210,7 @@ def saveDetections(detection_results, ff_dir, config):
 
 
 
-def detectStarsAndMeteorsDirectory(dir_path, config):
+def detectStarsAndMeteorsDirectory(dir_path, config, throttle_queue = False):
     """ Extract stars and detect meteors on all FF files in the given folder. 
 
     Arguments:
@@ -253,7 +253,12 @@ def detectStarsAndMeteorsDirectory(dir_path, config):
             # Add a job as long as there are available workers to receive it
             if detector.available_workers.value() > 0:
                 log.info('Adding for detection: {}'.format(ff_name))
-                detector.addJob([ff_dir, ff_name, config], wait_time=0)
+                queue_size = detector.addJob([ff_dir, ff_name, config], wait_time=0)
+                if throttle_queue:
+                    # Delay loading by the size of the queue, so that if the worker is reset
+                    # the whole night's observation session is not lost
+                    log.info('Delaying queue loading by {} seconds'.format(queue_size))
+                    time.sleep(queue_size)
                 break
             else:
                 time.sleep(0.1)

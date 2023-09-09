@@ -613,6 +613,7 @@ class QueuedPool(object):
 
 
         time.sleep(wait_time)
+        return self.total_jobs.value() - self.output_queue.qsize()
 
 
     def allDone(self):
