@@ -1721,13 +1721,31 @@ class EventMonitor(multiprocessing.Process):
 
 
         for observed_event in unprocessed:
+
+            # Check to see if the end of this event is in the future
+            if convertGMNTimeToPOSIX(observed_event.dt) > datetime.datetime.utcnow():
+                time_until_event_end_seconds = int((convertGMNTimeToPOSIX(observed_event.dt) - datetime.datetime.utcnow() + datetime.timedelta(seconds=3)).total_seconds())
+                log.info("The end of event at {} is in the future by {} seconds".format(observed_event.dt, time_until_event_end_seconds))
+                if time_until_event_end_seconds < self.check_interval:
+                    log.info("Check interval is set to {} seconds, however end of future event is only {} seconds away".format(self.check_interval,time_until_event_end_seconds))
+                    self.check_interval = int(time_until_event_end_seconds + random.randint(0,30))
+                    log.info("Check interval set to {} seconds, so that future event is reported quickly")
+                else:
+                    log.info("Check interval is set to {} seconds, end of future event {} seconds away, no action required".format(self.check_interval,time_until_event_end_seconds))
+                continue
+
+
             log.info("Checks on trajectories for event at {}".format(observed_event.dt))
             check_time_start = datetime.datetime.utcnow()
             # Iterate through the work
             # Events can be specified in different ways, make sure converted to LatLon
             observed_event.latLonAzElToLatLonLatLon()
+
             # Get the files
             file_list = self.getFileList(observed_event)
+
+
+
 
             # If there are no files based on time, then mark as processed and continue
             if (len(file_list) == 0 or file_list == [None]) and not test_mode:
