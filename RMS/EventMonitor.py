@@ -1731,7 +1731,7 @@ class EventMonitor(multiprocessing.Process):
                     self.check_interval = int(time_until_event_end_seconds + random.randint(0,30)) / 60
                     log.info("Check interval set to {} seconds, so that future event is reported quickly".int(self.check_interval * 60))
                 else:
-                    log.info("Check interval is set to {} seconds, end of future event {} seconds away, no action required".format(self.check_interval,time_until_event_end_seconds))
+                    log.info("Check interval is set to {} seconds, end of future event {} seconds away, no action required".format(self.check_interval * 60,time_until_event_end_seconds))
                 continue
 
 
