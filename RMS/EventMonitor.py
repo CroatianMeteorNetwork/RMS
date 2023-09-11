@@ -1730,11 +1730,11 @@ class EventMonitor(multiprocessing.Process):
                                                     datetime.timedelta(seconds=int(observed_event.time_tolerance))).total_seconds())
                 log.info("The end of event at {} is in the future by {} seconds".format(observed_event.dt, time_until_event_end_seconds))
                 if time_until_event_end_seconds < int(self.check_interval) * 60:
-                    log.info("Check interval is set to {} seconds, however end of future event is only {} seconds away".format(self.check_interval * 60,time_until_event_end_seconds))
+                    log.info("Check interval is set to {} seconds, however end of future event is only {} seconds away".format(float(self.check_interval) * 60,time_until_event_end_seconds))
                     self.check_interval = int(time_until_event_end_seconds + random.randint(0,30)) / 60
-                    log.info("Check interval set to {} seconds, so that future event is reported quickly".format(int(self.check_interval * 60)))
+                    log.info("Check interval set to {} seconds, so that future event is reported quickly".format(float(self.check_interval) * 60))
                 else:
-                    log.info("Check interval is set to {} seconds, end of future event {} seconds away, no action required".format(self.check_interval * 60,time_until_event_end_seconds))
+                    log.info("Check interval is set to {} seconds, end of future event {} seconds away, no action required".format(float(self.check_interval) * 60,time_until_event_end_seconds))
                 continue
 
 
