@@ -1687,8 +1687,8 @@ class EventMonitor(multiprocessing.Process):
 
                 if upload_status:
                     log.info("Upload of {} - attempt no {} was successful".format(event_monitor_directory, retry))
-                    # set to the fast check rate after an upload
-                    self.check_interval = self.syscon.event_monitor_check_interval_fast
+                    # set to the fast check rate after an upload, unless already set to run faster than that, possibly for future event reporting
+                    self.check_interval = self.syscon.event_monitor_check_interval_fast if self.check_interval > self.syscon.event_monitor_check_interval_fast else self.check_interval
                     log.info("Now checking at {:2.2f} minute intervals".format(self.check_interval))
                     # Exit loop if upload was successful
                     break
@@ -1723,7 +1723,7 @@ class EventMonitor(multiprocessing.Process):
         for observed_event in unprocessed:
 
             # Check to see if the end of this event is in the future, if it is then do not process
-            # If the end of the event is before the next execution of event monitor loop, then set the loop to execute after the event ends
+            # If the end of the event is before the next scheduled execution of event monitor loop, then set the loop to execute after the event ends
             if convertGMNTimeToPOSIX(observed_event.dt) + datetime.timedelta(seconds=int(observed_event.time_tolerance)) > datetime.datetime.utcnow():
                 time_until_event_end_seconds = (convertGMNTimeToPOSIX(observed_event.dt) -
                                                     datetime.datetime.utcnow() +
@@ -1731,7 +1731,7 @@ class EventMonitor(multiprocessing.Process):
                 log.info("The end of event at {} is in the future by {} seconds".format(observed_event.dt, time_until_event_end_seconds))
                 if time_until_event_end_seconds < float(self.check_interval) * 60:
                     log.info("Check interval is set to {} seconds, however end of future event is only {} seconds away".format(float(self.check_interval) * 60,time_until_event_end_seconds))
-                    self.check_interval = int(time_until_event_end_seconds + random.randint(0,30)) / 60
+                    self.check_interval = str(float(time_until_event_end_seconds + random.randint(0,30)) / 60)
                     log.info("Check interval set to {} seconds, so that future event is reported quickly".format(float(self.check_interval) * 60))
                 else:
                     log.info("Check interval is set to {} seconds, end of future event {} seconds away, no action required".format(float(self.check_interval) * 60,time_until_event_end_seconds))
