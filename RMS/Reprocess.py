@@ -161,7 +161,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
             # Run detection on the given directory
             calstars_name, ftpdetectinfo_name, ff_detected, \
-                detector = detectStarsAndMeteorsDirectory(night_data_dir, config)
+                detector = detectStarsAndMeteorsDirectory(night_data_dir, config, throttle_queue=True)
 
         # Otherwise, save detection results
         else:
