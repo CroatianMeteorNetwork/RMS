@@ -65,7 +65,7 @@ from RMS.UploadManager import uploadSFTP
 from Utils.StackFFs import stackFFs
 from Utils.FRbinViewer import view
 from Utils.BatchFFtoImage import batchFFtoImage
-
+from RMS.CaptureDuration import captureDuration
 
 
 # Import Cython functions
@@ -1964,6 +1964,7 @@ class EventMonitor(multiprocessing.Process):
         # Delay to allow capture to check existing folders - keep the logs tidy
         time.sleep(30)
         while not self.exit.is_set():
+            log.info("Event monitor check started")
             self.checkDBExists()
             self.getEventsAndCheck()
             # Wait for the next check
@@ -1971,6 +1972,8 @@ class EventMonitor(multiprocessing.Process):
             # Increase the check interval
             if self.check_interval < self.syscon.event_monitor_check_interval:
                 self.check_interval = self.check_interval * 1.1
+            start_time, duration = captureDuration(syscon.latitude, syscon.longitude, syscon.elevation)
+            log.info('Next start time: ' + str(start_time) + ' UTC')
 
 def latLonAlt2ECEFDeg(lat, lon, h):
     """ Convert geographical coordinates to Earth centered - Earth fixed coordinates.
