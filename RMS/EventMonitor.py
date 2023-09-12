@@ -1947,7 +1947,8 @@ class EventMonitor(multiprocessing.Process):
             if self.check_interval < self.syscon.event_monitor_check_interval:
                 self.check_interval = self.check_interval * 1.1
             start_time, duration = captureDuration(syscon.latitude, syscon.longitude, syscon.elevation)
-            log.info('Next start time: ' + str(start_time) + ' UTC')
+            if not isinstance(start_time, bool):
+                log.info('Next start time: ' + str(start_time) + ' UTC')
 
 def latLonAlt2ECEFDeg(lat, lon, h):
     """ Convert geographical coordinates to Earth centered - Earth fixed coordinates.
