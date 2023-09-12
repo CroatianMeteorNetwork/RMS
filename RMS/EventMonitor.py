@@ -1636,7 +1636,8 @@ class EventMonitor(multiprocessing.Process):
 
         # convert bins to MP4
         for file in file_list:
-            if file.endswith(".bin") and sys.version_info[0] >= 3:
+            #Guard against FS files getting into binViewer
+            if file.endswith(".bin") and sys.version_info[0] >= 3 and file[0:2] != "FS":
                 fr_file = os.path.basename(file)
                 ff_file = convertFRNameToFF(fr_file)
 
