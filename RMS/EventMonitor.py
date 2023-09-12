@@ -1726,7 +1726,7 @@ class EventMonitor(multiprocessing.Process):
 
             # Check to see if the end of this event is in the future, if it is then do not process
             # If the end of the event is before the next scheduled execution of event monitor loop,
-            # then set the loop to execute after the event ends
+            # then adjust the delay time to execute shortly after the future event ends
             try:
                 if convertGMNTimeToPOSIX(observed_event.dt) + \
                         datetime.timedelta(seconds=int(observed_event.time_tolerance)) > \
