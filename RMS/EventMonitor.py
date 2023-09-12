@@ -1724,26 +1724,28 @@ class EventMonitor(multiprocessing.Process):
 
             # Check to see if the end of this event is in the future, if it is then do not process
             # If the end of the event is before the next scheduled execution of event monitor loop, then set the loop to execute after the event ends
-            if convertGMNTimeToPOSIX(observed_event.dt) + datetime.timedelta(seconds=int(observed_event.time_tolerance)) > datetime.datetime.utcnow():
-                time_until_event_end_seconds = (convertGMNTimeToPOSIX(observed_event.dt) -
-                                                    datetime.datetime.utcnow() +
-                                                    datetime.timedelta(seconds=int(observed_event.time_tolerance))).total_seconds()
-                log.info("The end of event at {} is in the future by {:.2f} seconds"
-                         .format(observed_event.dt, time_until_event_end_seconds))
+            try:
+                if convertGMNTimeToPOSIX(observed_event.dt) + datetime.timedelta(seconds=int(observed_event.time_tolerance)) > datetime.datetime.utcnow():
+                    time_until_event_end_seconds = (convertGMNTimeToPOSIX(observed_event.dt) -
+                                                        datetime.datetime.utcnow() +
+                                                        datetime.timedelta(seconds=int(observed_event.time_tolerance))).total_seconds()
+                    log.info("The end of event at {} is in the future by {:.2f} seconds"
+                             .format(observed_event.dt, time_until_event_end_seconds))
 
-                if time_until_event_end_seconds < float(self.check_interval) * 60:
+                    if time_until_event_end_seconds < float(self.check_interval) * 60:
 
-                    log.info("Check interval is set to {:.2f} seconds, however end of future event is only {:.2f} seconds away"
-                             .format(float(self.check_interval) * 60,time_until_event_end_seconds))
-                    self.check_interval = float((time_until_event_end_seconds + (random.randint(20,60))) / 60 )
-                    log.info("Check interval set to {:.2f} seconds, so that future event is reported quickly"
-                             .format(float(self.check_interval) * 60))
-                else:
+                        log.info("Check interval is set to {:.2f} seconds, however end of future event is only {:.2f} seconds away"
+                                 .format(float(self.check_interval) * 60,time_until_event_end_seconds))
+                        self.check_interval = float((time_until_event_end_seconds + (random.randint(20,60))) / 60 )
+                        log.info("Check interval set to {:.2f} seconds, so that future event is reported quickly"
+                                 .format(float(self.check_interval) * 60))
+                    else:
 
-                    log.info("Check interval is set to {:.2f} seconds, end of future event {:.2f} seconds away, no action required"
-                             .format(float(self.check_interval) * 60,time_until_event_end_seconds))
-                continue
-
+                        log.info("Check interval is set to {:.2f} seconds, end of future event {:.2f} seconds away, no action required"
+                                 .format(float(self.check_interval) * 60,time_until_event_end_seconds))
+                    continue
+            except:
+                    log.warning("Could not handle future event at {}".format(observed_event.dt))
 
             log.info("Checks on trajectories for event at {}".format(observed_event.dt))
             check_time_start = datetime.datetime.utcnow()
