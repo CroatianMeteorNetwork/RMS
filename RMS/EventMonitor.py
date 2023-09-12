@@ -1593,8 +1593,16 @@ class EventMonitor(multiprocessing.Process):
         upload_filename = "{}_{}_{}".format(evcon.stationID, event.dt, "event")
         # Try and bake the camera network name and group name into the path structure of the archive
         if evcon.network_name is not None and evcon.camera_group_name is not None:
-            this_event_directory = os.path.join(event_monitor_directory, upload_filename, evcon.network_name, evcon.camera_group_name, evcon.stationID)
-            log.info("Network {} and group {} so creating {}".format(evcon.network_name, evcon.camera_group_name, this_event_directory))
+            #create path for this_event_directory
+            #get rid of spaces from network name and group name
+            this_event_directory = os.path.join(event_monitor_directory,
+                                                    upload_filename,
+                                                        evcon.network_name.replace(" ",""),
+                                                            evcon.camera_group_name.replace(" ",""),
+                                                                evcon.stationID)
+
+            log.info("Network {} and group {} so creating {}"
+                                .format(evcon.network_name,evcon.camera_group_name, this_event_directory))
         else:
             this_event_directory = os.path.join(event_monitor_directory, upload_filename, evcon.stationID)
             log.info("Network and group not defined so creating {}".format(this_event_directory))
