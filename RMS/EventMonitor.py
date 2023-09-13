@@ -1897,10 +1897,10 @@ class EventMonitor(multiprocessing.Process):
                      .format(len(unprocessed) - future_events))
 
         if future_events == 1:
-            log.info("{} future event is scheduled, running again in {:.1f} minutes at {}"
+            log.info("{} future event is scheduled, running again in {:.1f} minutes at {:.0f}"
                      .format(future_events, self.check_interval, datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval)))
         if future_events > 1:
-            log.info("{} future events are scheduled, running again in {:.1f} minutes at {}"
+            log.info("{} future events are scheduled, running again in {:.1f} minutes at {:.0f}"
                      .format(future_events, self.check_interval, datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval)))
 
         return None
