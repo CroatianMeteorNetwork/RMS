@@ -1937,18 +1937,20 @@ class EventMonitor(multiprocessing.Process):
 
         # Delay to allow capture to check existing folders - keep the logs tidy
         time.sleep(30)
+        start_time, duration = captureDuration(self.syscon.latitude, self.syscon.longitude, self.syscon.elevation)
         while not self.exit.is_set():
-            log.info("Event monitor check started")
             self.checkDBExists()
             self.getEventsAndCheck()
+            log.info("Event monitor check completed")
+            if not isinstance(start_time, bool):
+                log.info('Next capture start time: ' + str(start_time) + ' UTC')
             # Wait for the next check
             self.exit.wait(60 * self.check_interval)
             # Increase the check interval
             if self.check_interval < self.syscon.event_monitor_check_interval:
                 self.check_interval = self.check_interval * 1.1
-            start_time, duration = captureDuration(self.syscon.latitude, self.syscon.longitude, self.syscon.elevation)
-            if not isinstance(start_time, bool):
-                log.info('Next start time: ' + str(start_time) + ' UTC')
+
+
 
 def latLonAlt2ECEFDeg(lat, lon, h):
     """ Convert geographical coordinates to Earth centered - Earth fixed coordinates.
