@@ -1874,12 +1874,14 @@ class EventMonitor(multiprocessing.Process):
 
                     # Continue with other trajectories from this population
                     continue
+
             # End of the processing loop for this event
             if self.eventProcessed(observed_event.uuid):
                 log.info("Reached end of checks - {} is processed".format(observed_event.dt))
                 check_time_end = datetime.datetime.utcnow()
                 check_time_seconds = (check_time_end - check_time_start).total_seconds()
                 log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
+
             else:
                 check_time_end = datetime.datetime.utcnow()
                 check_time_seconds = (check_time_end - check_time_start).total_seconds()
@@ -1887,14 +1889,13 @@ class EventMonitor(multiprocessing.Process):
                 log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
                 self.markEventAsProcessed(observed_event)
 
-
-
         if len(unprocessed) - future_events > 1:
             log.info("{} events were processed, EventMonitor work completed"
                      .format(len(unprocessed) - future_events))
         if len(unprocessed) - future_events == 1:
             log.info("{} event was processed, EventMonitor work completed"
                      .format(len(unprocessed) - future_events))
+
         next_run = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval)).replace(microsecond = 0)
         if future_events == 1:
             log.info("{} future event is scheduled, running again at {}"
