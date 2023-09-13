@@ -1879,7 +1879,7 @@ class EventMonitor(multiprocessing.Process):
                 log.info("Reached end of checks - {} is processed".format(observed_event.dt))
                 check_time_end = datetime.datetime.utcnow()
                 check_time_seconds = (check_time_end - check_time_start).total_seconds()
-                log.info("Check of trajectories time elapsed {:2f} seconds".format(check_time_seconds))
+                log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
             else:
                 check_time_end = datetime.datetime.utcnow()
                 check_time_seconds = (check_time_end - check_time_start).total_seconds()
