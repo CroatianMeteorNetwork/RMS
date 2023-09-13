@@ -1889,7 +1889,7 @@ class EventMonitor(multiprocessing.Process):
 
 
 
-        if len(unprocessed) > 1:
+        if len(unprocessed) - future_events > 1:
             log.info("{} events were processed, EventMonitor work completed"
                      .format(len(unprocessed) - future_events))
         if len(unprocessed) - future_events == 1:
