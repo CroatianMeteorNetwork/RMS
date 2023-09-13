@@ -35,7 +35,6 @@ import uuid
 import random
 import string
 
-
 if sys.version_info[0] < 3:
 
     import urllib2
@@ -66,7 +65,7 @@ from RMS.UploadManager import uploadSFTP
 from Utils.StackFFs import stackFFs
 from Utils.FRbinViewer import view
 from Utils.BatchFFtoImage import batchFFtoImage
-
+from RMS.CaptureDuration import captureDuration
 
 
 # Import Cython functions
@@ -1593,8 +1592,16 @@ class EventMonitor(multiprocessing.Process):
         upload_filename = "{}_{}_{}".format(evcon.stationID, event.dt, "event")
         # Try and bake the camera network name and group name into the path structure of the archive
         if evcon.network_name is not None and evcon.camera_group_name is not None:
-            this_event_directory = os.path.join(event_monitor_directory, upload_filename, evcon.network_name, evcon.camera_group_name, evcon.stationID)
-            log.info("Network {} and group {} so creating {}".format(evcon.network_name, evcon.camera_group_name, this_event_directory))
+            #create path for this_event_directory
+            #get rid of spaces from network name and group name
+            this_event_directory = os.path.join(event_monitor_directory,
+                                                    upload_filename,
+                                                        evcon.network_name.replace(" ",""),
+                                                            evcon.camera_group_name.replace(" ",""),
+                                                                evcon.stationID)
+
+            log.info("Network {} and group {} so creating {}"
+                                .format(evcon.network_name,evcon.camera_group_name, this_event_directory))
         else:
             this_event_directory = os.path.join(event_monitor_directory, upload_filename, evcon.stationID)
             log.info("Network and group not defined so creating {}".format(this_event_directory))
@@ -1628,7 +1635,8 @@ class EventMonitor(multiprocessing.Process):
 
         # convert bins to MP4
         for file in file_list:
-            if file.endswith(".bin") and sys.version_info[0] >= 3:
+            #Guard against FS files getting into binViewer
+            if file.endswith(".bin") and sys.version_info[0] >= 3 and file[0:2] != "FS":
                 fr_file = os.path.basename(file)
                 ff_file = convertFRNameToFF(fr_file)
 
@@ -1680,6 +1688,7 @@ class EventMonitor(multiprocessing.Process):
             for retry in range(1,30):
                 archives = glob.glob(os.path.join(event_monitor_directory,"*.bz2"))
 
+
                 # Make the upload
                 upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
                                         event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
@@ -1689,7 +1698,9 @@ class EventMonitor(multiprocessing.Process):
                     log.info("Upload of {} - attempt no {} was successful".format(event_monitor_directory, retry))
                     # set to the fast check rate after an upload, unless already set to run faster than that, possibly for future event reporting
                     self.check_interval = self.syscon.event_monitor_check_interval_fast if self.check_interval > self.syscon.event_monitor_check_interval_fast else self.check_interval
+
                     log.info("Now checking at {:.1f} minute intervals".format(self.check_interval))
+
                     # Exit loop if upload was successful
                     break
                 else:
@@ -1722,6 +1733,7 @@ class EventMonitor(multiprocessing.Process):
         future_events = 0
         for observed_event in unprocessed:
 
+
             # check to see if the end of this event is in the future, if it is then do not process
             # if the end of the event is before the next scheduled execution of event monitor loop,
             # then set the loop to execute after the event ends
@@ -1745,6 +1757,7 @@ class EventMonitor(multiprocessing.Process):
                 else:
                     log.info("Check interval is set to {:.1f} minutes, end of future event {:.1f} minutes away, no action required"
                              .format(float(self.check_interval),time_until_event_end_seconds / 60 ))
+
                 continue
 
 
@@ -1977,6 +1990,7 @@ class EventMonitor(multiprocessing.Process):
         # Delay to allow capture to check existing folders - keep the logs tidy
         time.sleep(30)
         while not self.exit.is_set():
+            log.info("Event monitor check started")
             self.checkDBExists()
             self.getEventsAndCheck()
             # Wait for the next check
@@ -1984,6 +1998,8 @@ class EventMonitor(multiprocessing.Process):
             # Increase the check interval
             if self.check_interval < self.syscon.event_monitor_check_interval:
                 self.check_interval = self.check_interval * 1.1
+            start_time, duration = captureDuration(syscon.latitude, syscon.longitude, syscon.elevation)
+            log.info('Next start time: ' + str(start_time) + ' UTC')
 
 def latLonAlt2ECEFDeg(lat, lon, h):
     """ Convert geographical coordinates to Earth centered - Earth fixed coordinates.
@@ -2329,7 +2345,6 @@ def testHasCartSD():
 
     """
     tests hasCartSD function by testing events
-    tests hasCardSD function by testing events
 
 
     return:
@@ -2596,6 +2611,7 @@ def testApplyPolarSD():
     event.lat_std, event.lon_std, event.ht_std, event.lat2_std, event.lon2_std,event.ht2_std = 0.01,0.02,1,0.05,0.6,5
     event_population = event.appendPopulation(event_population, 10000)
     event_population = event.applyPolarSD(event_population, seed = 0) # pass a seed for repeatbility
+
 
     lat1l,lon1l,ht1l = [],[],[]
     lat2l,lon2l,ht2l = [],[],[]

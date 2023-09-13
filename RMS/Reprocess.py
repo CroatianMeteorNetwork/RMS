@@ -65,15 +65,11 @@ def getPlatepar(config, night_data_dir):
     platepar = None
     platepar_fmt = None
     platepar_path = os.path.join(config.config_file_path, config.platepar_name)
-    if os.path.exists(platepar_path):
-        platepar = Platepar()
-        platepar_fmt = platepar.read(platepar_path, use_flat=config.use_flat)
-
-        log.info('Loaded platepar from RMS directory: ' + platepar_path)
 
 
-    # Otherwise, try to find the platepar in the data directory
-    elif os.path.exists(platepar_night_dir_path):
+
+    # Try to find the platepar in the data directory
+    if os.path.exists(platepar_night_dir_path):
 
         platepar_path = platepar_night_dir_path
 
@@ -81,6 +77,14 @@ def getPlatepar(config, night_data_dir):
         platepar_fmt = platepar.read(platepar_path, use_flat=config.use_flat)
 
         log.info('Loaded platepar from night directory: ' + platepar_path)
+
+    # else load from default directory
+
+    elif os.path.exists(platepar_path):
+        platepar = Platepar()
+        platepar_fmt = platepar.read(platepar_path, use_flat=config.use_flat)
+
+        log.info('Loaded platepar from RMS directory: ' + platepar_path)
 
     else:
 
@@ -161,7 +165,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
             # Run detection on the given directory
             calstars_name, ftpdetectinfo_name, ff_detected, \
-                detector = detectStarsAndMeteorsDirectory(night_data_dir, config)
+                detector = detectStarsAndMeteorsDirectory(night_data_dir, config, throttle_queue=True)
 
         # Otherwise, save detection results
         else:
