@@ -1722,8 +1722,8 @@ class EventMonitor(multiprocessing.Process):
 
         for observed_event in unprocessed:
 
-            # Check to see if the end of this event is in the future, if it is then do not process
-            # If the end of the event is before the next scheduled execution of event monitor loop,
+            # check to see if the end of this event is in the future, if it is then do not process
+            # if the end of the event is before the next scheduled execution of event monitor loop,
             # then set the loop to execute after the event ends
             if convertGMNTimeToPOSIX(observed_event.dt) + \
                     datetime.timedelta(seconds=int(observed_event.time_tolerance)) > datetime.datetime.utcnow():
@@ -1735,9 +1735,9 @@ class EventMonitor(multiprocessing.Process):
                 if time_until_event_end_seconds < float(self.check_interval) * 60:
                     log.info("Check interval is set to {:.2f} seconds, however end of future event is only {:.2f} seconds away"
                              .format(float(self.check_interval) * 60,time_until_event_end_seconds))
-                    #set the check_interval to the time until the end of the event
+                    # set the check_interval to the time until the end of the event
                     self.check_interval = float(time_until_event_end_seconds) / 60
-                    #add some random time to reduce congestion
+                    # random time offset to reduce congestion
                     self.check_interval += random.randint(20, 60) / 60
                     log.info("Check interval set to {:.2f} seconds, so that future event is reported quickly".format(float(self.check_interval) * 60))
                 else:
