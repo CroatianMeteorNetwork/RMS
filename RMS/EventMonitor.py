@@ -1733,15 +1733,15 @@ class EventMonitor(multiprocessing.Process):
                 log.info("The end of event at {} is in the future by {:.2f} seconds"
                          .format(observed_event.dt, time_until_event_end_seconds))
                 if time_until_event_end_seconds < float(self.check_interval) * 60:
-                    log.info("Check interval is set to {:.2f} seconds, however end of future event is only {:.2f} seconds away"
-                             .format(float(self.check_interval) * 60,time_until_event_end_seconds))
+                    log.info("Check interval is set to {:.2f} minutes, however end of future event is only {:.2f} minutes away"
+                             .format(float(self.check_interval),time_until_event_end_seconds / 60))
                     # set the check_interval to the time until the end of the event
                     self.check_interval = float(time_until_event_end_seconds) / 60
                     # random time offset to reduce congestion
                     self.check_interval += random.randint(20, 60) / 60
-                    log.info("Check interval set to {:.2f} seconds, so that future event is reported quickly".format(float(self.check_interval) * 60))
+                    log.info("Check interval set to {:.2f} minutes, so that future event is reported quickly".format(float(self.check_interval)))
                 else:
-                    log.info("Check interval is set to {:.2f} seconds, end of future event {:.2f} seconds away, no action required".format(float(self.check_interval) * 60,time_until_event_end_seconds))
+                    log.info("Check interval is set to {:.2f} minutes, end of future event {:.2f} minutes away, no action required".format(float(self.check_interval),time_until_event_end_seconds / 60 ))
                 continue
 
 
