@@ -1937,11 +1937,12 @@ class EventMonitor(multiprocessing.Process):
 
         # Delay to allow capture to check existing folders - keep the logs tidy
         time.sleep(30)
-        start_time, duration = captureDuration(self.syscon.latitude, self.syscon.longitude, self.syscon.elevation)
+
         while not self.exit.is_set():
             self.checkDBExists()
             self.getEventsAndCheck()
             log.info("Event monitor check completed")
+            start_time, duration = captureDuration(self.syscon.latitude, self.syscon.longitude, self.syscon.elevation)
             if not isinstance(start_time, bool):
                 log.info('Next capture start time: ' + str(start_time) + ' UTC')
             # Wait for the next check
