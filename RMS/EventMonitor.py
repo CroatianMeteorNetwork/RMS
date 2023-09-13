@@ -1687,7 +1687,8 @@ class EventMonitor(multiprocessing.Process):
 
                 if upload_status:
                     log.info("Upload of {} - attempt no {} was successful".format(event_monitor_directory, retry))
-                    # set to the fast check rate after an upload, unless already set to run faster than that, possibly for future event reporting
+                    # set to the fast check rate after an upload,
+                    # unless already set to run faster than that, possibly for future event reporting
                     self.check_interval = self.syscon.event_monitor_check_interval_fast if self.check_interval > self.syscon.event_monitor_check_interval_fast else self.check_interval
                     log.info("Now checking at {:.1f} minute intervals".format(self.check_interval))
                     # Exit loop if upload was successful
