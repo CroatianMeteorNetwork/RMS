@@ -1719,7 +1719,7 @@ class EventMonitor(multiprocessing.Process):
 
         unprocessed = self.getUnprocessedEventsfromDB()
 
-
+        future_events = 0
         for observed_event in unprocessed:
 
             # check to see if the end of this event is in the future, if it is then do not process
@@ -1730,19 +1730,20 @@ class EventMonitor(multiprocessing.Process):
                 time_until_event_end_seconds = (convertGMNTimeToPOSIX(observed_event.dt) -
                                                     datetime.datetime.utcnow() +
                                                     datetime.timedelta(seconds=int(observed_event.time_tolerance))).total_seconds()
-                log.info("The end of event at {} is in the future by {:.2f} seconds"
-                         .format(observed_event.dt, time_until_event_end_seconds))
+                future_events += 1
+                log.info("The end of event at {} is in the future by {:.1f} minutes"
+                         .format(observed_event.dt, time_until_event_end_seconds / 60))
                 if time_until_event_end_seconds < float(self.check_interval) * 60:
-                    log.info("Check interval is set to {:.2f} minutes, however end of future event is only {:.2f} minutes away"
+                    log.info("Check interval is set to {:.1f} minutes, however end of future event is only {:.2f} minutes away"
                              .format(float(self.check_interval),time_until_event_end_seconds / 60))
                     # set the check_interval to the time until the end of the event
                     self.check_interval = float(time_until_event_end_seconds) / 60
                     # random time offset to reduce congestion
                     self.check_interval += random.randint(20, 60) / 60
-                    log.info("Check interval set to {:.2f} minutes, so that future event is reported quickly"
+                    log.info("Check interval set to {:.1f} minutes, so that future event is reported quickly"
                              .format(float(self.check_interval)))
                 else:
-                    log.info("Check interval is set to {:.2f} minutes, end of future event {:.2f} minutes away, no action required"
+                    log.info("Check interval is set to {:.1f} minutes, end of future event {:.1f} minutes away, no action required"
                              .format(float(self.check_interval),time_until_event_end_seconds / 60 ))
                 continue
 
@@ -1886,10 +1887,21 @@ class EventMonitor(multiprocessing.Process):
                 log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
                 self.markEventAsProcessed(observed_event)
 
+
+
         if len(unprocessed) > 1:
-            log.info("{} events were processed, event_monitor work completed".format(len(unprocessed)))
-        if len(unprocessed) == 1:
-            log.info("{} event was processed, event_monitor work completed".format(len(unprocessed)))
+            log.info("{} events were processed, EventMonitor work completed"
+                     .format(len(unprocessed) - future_events))
+        if len(unprocessed) - future_events == 1:
+            log.info("{} event was processed, EventMonitor work completed"
+                     .format(len(unprocessed)))
+
+        if future_events == 1:
+            log.info("{} future event is scheduled, running again in {} minutes"
+                     .format(future_events, self.check_interval))
+        if future_events > 1:
+            log.info("{} future events are scheduled, running again in {} minutes"
+                     .format(future_events, self.check_interval))
 
         return None
 
