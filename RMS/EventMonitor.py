@@ -1894,7 +1894,7 @@ class EventMonitor(multiprocessing.Process):
                      .format(len(unprocessed) - future_events))
         if len(unprocessed) - future_events == 1:
             log.info("{} event was processed, EventMonitor work completed"
-                     .format(len(unprocessed - future_events)))
+                     .format(len(unprocessed) - future_events))
 
         if future_events == 1:
             log.info("{} future event is scheduled, running again in {:.1f} minutes"
