@@ -17,7 +17,7 @@ from RMS.Routines import MaskImage
 
 
 def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_bright=False, flat_path=None,
-    file_list=None, mask=None, captured_stack=False):
+    file_list=None, mask=None, captured_stack=False, print_progress=True):
     """ Stack FF files in the given folder. 
 
     Arguments:
@@ -37,6 +37,7 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
         mask: [MaskStructure] Mask to apply to the stack. None by default.
         captured_stack: [bool] True if all files are used and "_captured_stack" will be used in the file name.
             False by default.
+        print_progress: [bool] Allow print calls to show files being stacked. True by default
 
     Return:
         stack_path, merge_img:
@@ -118,7 +119,8 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
                 # Reject all images where the median brightness is high
                 # Preserve images with very bright detections
                 if (median > 10) and (top_brightness < (2**(8*img.itemsize) - 10)):
-                    print('Skipping: ', ff_name, 'median:', median, 'top brightness:', top_brightness)
+                    if print_progress:
+                        print('Skipping: ', ff_name, 'median:', median, 'top brightness:', top_brightness)
                     continue
 
 
@@ -135,7 +137,8 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
                 n_stacked += 1
                 continue
 
-            print('Stacking: ', ff_name)
+            if print_progress:
+                print('Stacking: ', ff_name)
 
             # Blend images 'if lighter'
             merge_img = blendLighten(merge_img, img)
@@ -165,7 +168,8 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
 
     stack_path = os.path.join(dir_path, night_dir + filename_suffix + file_format)
 
-    print("Saving stack to:", stack_path)
+    if print_progress:
+        print("Saving stack to:", stack_path)
 
     # Stretch the levels
     merge_img = adjustLevels(merge_img, np.percentile(merge_img, 0.5), 1.3, np.percentile(merge_img, 99.9))
