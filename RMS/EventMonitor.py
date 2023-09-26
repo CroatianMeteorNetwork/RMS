@@ -1924,7 +1924,6 @@ class EventMonitor(multiprocessing.Process):
             log.info("EventMonitor function test success")
             super(EventMonitor, self).start()
             log.info("EventMonitor was started")
-
         else:
             log.error("EventMonitor function test fail - not starting EventMonitor")
 
