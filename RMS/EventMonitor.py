@@ -1335,9 +1335,10 @@ class EventMonitor(multiprocessing.Process):
             file_list.append(str(os.path.join(directory, file_name)))
             return file_list
         else:
-
-            if os.path.isfile(os.path.join(os.path.expanduser("~/source/RMS"), file_name)):
-                file_list.append(str(os.path.join(os.path.expanduser("~/source/RMS"), file_name)))
+            log.debug("Unable to find {} in {}".format(file_name,directory))
+            log.debug("Looking in {}".format(self.syscon.rms_root_dir))
+            if os.path.isfile(os.path.join(os.path.expanduser(self.syscon.rms_root_dir), file_name)):
+                file_list.append(str(os.path.join(os.path.expanduser(self.syscon.rms_root_dir), file_name)))
                 return file_list
         return []
 
@@ -1923,6 +1924,7 @@ class EventMonitor(multiprocessing.Process):
             log.info("EventMonitor function test success")
             super(EventMonitor, self).start()
             log.info("EventMonitor was started")
+            log.info("RMS root directory is {}".format(self.syscon.rms_root_dir))
         else:
             log.error("EventMonitor function test fail - not starting EventMonitor")
 
