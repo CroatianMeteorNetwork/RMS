@@ -1924,7 +1924,7 @@ class EventMonitor(multiprocessing.Process):
             log.info("EventMonitor function test success")
             super(EventMonitor, self).start()
             log.info("EventMonitor was started")
-            log.info("RMS root directory is {}".format(self.syscon.rms_root_dir))
+
         else:
             log.error("EventMonitor function test fail - not starting EventMonitor")
 
