@@ -1319,7 +1319,7 @@ class EventMonitor(multiprocessing.Process):
     def getFile(self, file_name, directory):
 
         """ Get the path to the file in the directory if it exists.
-            If not, then return the path to ~/source/RMS
+            If not, then return the path to RMS root directory
 
 
             Arguments:
@@ -1335,9 +1335,10 @@ class EventMonitor(multiprocessing.Process):
             file_list.append(str(os.path.join(directory, file_name)))
             return file_list
         else:
-
-            if os.path.isfile(os.path.join(os.path.expanduser("~/source/RMS"), file_name)):
-                file_list.append(str(os.path.join(os.path.expanduser("~/source/RMS"), file_name)))
+            log.debug("Unable to find {} in {}".format(file_name,directory))
+            log.debug("Looking in {}".format(self.syscon.rms_root_dir))
+            if os.path.isfile(os.path.join(os.path.expanduser(self.syscon.rms_root_dir), file_name)):
+                file_list.append(str(os.path.join(os.path.expanduser(self.syscon.rms_root_dir), file_name)))
                 return file_list
         return []
 
