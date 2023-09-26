@@ -1096,7 +1096,7 @@ def computeCurrentPeakZHR(shower_models, dt=None, time_window=24, sporadic_zhr=2
         dt = datetime.datetime.utcnow()
 
     # Convert the time window from hours to degrees of the solar longitude
-    time_window_deg = time_window*360/365.25
+    time_window_deg = (time_window/24)*360/365.25
 
     # Compute the solar longitude at the given time
     sol_lon = np.degrees(jd2SolLonSteyaert(datetime2JD(dt)))
