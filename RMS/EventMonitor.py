@@ -1319,7 +1319,7 @@ class EventMonitor(multiprocessing.Process):
     def getFile(self, file_name, directory):
 
         """ Get the path to the file in the directory if it exists.
-            If not, then return the path to ~/source/RMS
+            If not, then return the path to RMS root directory
 
 
             Arguments:
