@@ -1474,8 +1474,9 @@ class EventMonitor(multiprocessing.Process):
         file_list = []
 
         file_list += self.findEventFiles(event, self.getDirectoryList(event), [".fits", ".bin"])
+        log.info("Using {} as .config file name".format(event.config_file_name))
         if len(self.getDirectoryList(event)) > 0:
-            file_list += self.getFile(".config", self.getDirectoryList(event)[0])
+            file_list += self.getFile(os.path.basename(event.config_file_name), self.getDirectoryList(event)[0])
             file_list += self.getFile(self.syscon.platepar_name, self.getDirectoryList(event)[0])
 
         return file_list
@@ -1932,6 +1933,7 @@ class EventMonitor(multiprocessing.Process):
             super(EventMonitor, self).start()
             log.info("EventMonitor was started")
             log.info("Using {} as fallback .config and platepar directory".format(os.path.join(os.path.abspath("."),self.syscon.config_file_path)))
+            log.info("Using {} as config filename".format(self.syscon.config_file_name))
         else:
             log.error("EventMonitor function test fail - not starting EventMonitor")
 
