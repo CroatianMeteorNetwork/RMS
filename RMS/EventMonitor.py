@@ -1935,7 +1935,7 @@ class EventMonitor(multiprocessing.Process):
             log.info("EventMonitor was started")
             log.info("Using {} as fallback directory".format(os.path.join(os.path.abspath("."))))
             log.info("Using {} as config filename".format(self.syscon.config_file_name))
-            log.info("Using {} as platepar filename".format(self.syscon.platepar_file_name))
+            log.info("Using {} as platepar filename".format(self.syscon.platepar_name))
         else:
             log.error("EventMonitor function test fail - not starting EventMonitor")
 
