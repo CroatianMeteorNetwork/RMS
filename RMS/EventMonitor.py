@@ -1785,7 +1785,7 @@ class EventMonitor(multiprocessing.Process):
 
             # If there is a .config file then parse it as evcon - not the station config
             for file in file_list:
-                if file.endswith(".config"):
+                if file.endswith(self.syscon.config_file_name):
                     ev_con = cr.parse(file)
 
             # Look for the station code in the stations_required string
@@ -1935,7 +1935,7 @@ class EventMonitor(multiprocessing.Process):
             log.info("EventMonitor was started")
             log.info("Using {} as fallback directory".format(os.path.join(os.path.abspath("."))
             log.info("Using {} as config filename".format(self.syscon.config_file_name))
-            log.info("Using {} as platepar filename".format(self.syscon.platepar_file_name))
+            log.info("Using {} as platepar filename".format(self.syscon.platepar_file_name)
         else:
             log.error("EventMonitor function test fail - not starting EventMonitor")
 
