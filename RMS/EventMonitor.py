@@ -1471,7 +1471,7 @@ class EventMonitor(multiprocessing.Process):
         file_list += self.findEventFiles(event, self.getDirectoryList(event), [".fits", ".bin"])
         if len(self.getDirectoryList(event)) > 0:
             file_list += self.getFile(".config", self.getDirectoryList(event)[0])
-            file_list += self.getFile("platepar_cmn2010.cal", self.getDirectoryList(event)[0])
+            file_list += self.getFile(self.evcon.platepar_name, self.getDirectoryList(event)[0])
 
         return file_list
 
@@ -1925,7 +1925,7 @@ class EventMonitor(multiprocessing.Process):
             log.info("EventMonitor function test success")
             super(EventMonitor, self).start()
             log.info("EventMonitor was started")
-            log.info("Using {} as fallback .config and platepar directory".format(self.syscon.config_file_path))
+            log.info("Using {} as fallback .config and platepar directory".format(os.path.join(os.path.abspath("."),self.syscon.config_file_path)))
         else:
             log.error("EventMonitor function test fail - not starting EventMonitor")
 
