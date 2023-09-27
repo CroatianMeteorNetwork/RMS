@@ -1329,18 +1329,20 @@ class EventMonitor(multiprocessing.Process):
             Return:
                  file: [string] Path to platepar
         """
-
+        log.info("Seeking {} in {}".format(file_name,directory))
         file_list = []
         if os.path.isfile(os.path.join(directory, file_name)):
             file_list.append(str(os.path.join(directory, file_name)))
             return file_list
         else:
             log.debug("Unable to find {} in {}".format(file_name,directory))
-            log.debug("Looking in {}".format(self.syscon.rms_root_dir))
-            if os.path.isfile(os.path.join(os.path.expanduser(self.syscon.rms_root_dir), file_name)):
-                file_list.append(str(os.path.join(os.path.expanduser(self.syscon.rms_root_dir), file_name)))
+            log.debug("Looking in {}".format(os.path.join(os.path.abspath("."),self.syscon.config_file_path)))
+            if os.path.isfile(os.path.join(os.path.abspath("."),self.syscon.config_file_path, file_name)):
+                file_list.append(str(os.path.join(os.path.abspath("."),self.syscon.config_file_path, file_name)))
+                log.info("Returning {}".format(file_list[0]))
                 return file_list
         return []
+
 
     def getPlateparFilePath(self, event):
 
@@ -1357,7 +1359,11 @@ class EventMonitor(multiprocessing.Process):
         platepar_file = ""
 
         if len(self.getDirectoryList(event)) > 0:
-            platepar_file = self.getFile("platepar_cmn2010.cal", self.getDirectoryList(event)[0])[0]
+            try:
+                platepar_file = self.getFile(self.syscon.platepar_name, self.getDirectoryList(event)[0])[0]
+            except:
+                platepar_file = ""
+                log.warning("Failed to get a platepar file")
         return platepar_file
 
 
@@ -1468,9 +1474,11 @@ class EventMonitor(multiprocessing.Process):
         file_list = []
 
         file_list += self.findEventFiles(event, self.getDirectoryList(event), [".fits", ".bin"])
+        #have to use system .config file_name here because we have not yet identified the files for the event
+        log.info("Using {} as .config file name".format(self.syscon.config_file_name))
         if len(self.getDirectoryList(event)) > 0:
-            file_list += self.getFile(".config", self.getDirectoryList(event)[0])
-            file_list += self.getFile("platepar_cmn2010.cal", self.getDirectoryList(event)[0])
+            file_list += self.getFile(os.path.basename(self.syscon.config_file_name), self.getDirectoryList(event)[0])
+            file_list += self.getFile(self.syscon.platepar_name, self.getDirectoryList(event)[0])
 
         return file_list
 
@@ -1559,6 +1567,7 @@ class EventMonitor(multiprocessing.Process):
         # Read in the platepar for the event
         rp = Platepar()
         if self.getPlateparFilePath(event) == "":
+            log.info("Reading platepar from {}".format(os.path.abspath('.')))
             rp.read(os.path.abspath('.'))
         else:
             rp.read(self.getPlateparFilePath(event))
@@ -1776,7 +1785,7 @@ class EventMonitor(multiprocessing.Process):
 
             # If there is a .config file then parse it as evcon - not the station config
             for file in file_list:
-                if file.endswith(".config"):
+                if file.endswith(self.syscon.config_file_name):
                     ev_con = cr.parse(file)
 
             # Look for the station code in the stations_required string
@@ -1924,6 +1933,9 @@ class EventMonitor(multiprocessing.Process):
             log.info("EventMonitor function test success")
             super(EventMonitor, self).start()
             log.info("EventMonitor was started")
+            log.info("Using {} as fallback directory".format(os.path.join(os.path.abspath("."))))
+            log.info("Using {} as config filename".format(self.syscon.config_file_name))
+            log.info("Using {} as platepar filename".format(self.syscon.platepar_name))
         else:
             log.error("EventMonitor function test fail - not starting EventMonitor")
 
@@ -1986,12 +1998,14 @@ class EventMonitor(multiprocessing.Process):
         """
 
         # Delay to allow capture to check existing folders - keep the logs tidy
+
         time.sleep(30)
 
         while not self.exit.is_set():
             self.checkDBExists()
             self.getEventsAndCheck()
             log.info("Event monitor check completed")
+
             start_time, duration = captureDuration(self.syscon.latitude, self.syscon.longitude, self.syscon.elevation)
             if not isinstance(start_time, bool):
                 log.info('Next capture start time: ' + str(start_time) + ' UTC')
