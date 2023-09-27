@@ -1358,7 +1358,7 @@ class EventMonitor(multiprocessing.Process):
         platepar_file = ""
 
         if len(self.getDirectoryList(event)) > 0:
-            platepar_file = self.getFile("platepar_cmn2010.cal", self.getDirectoryList(event)[0])[0]
+            platepar_file = self.getFile(self.syscon.platepar_name, self.getDirectoryList(event)[0])[0]
         return platepar_file
 
 
@@ -1994,6 +1994,7 @@ class EventMonitor(multiprocessing.Process):
             self.checkDBExists()
             self.getEventsAndCheck()
             log.info("Event monitor check completed")
+            log.info("Using {} as fallback .config and platepar directory".format(self.syscon.config_file_path))
             start_time, duration = captureDuration(self.syscon.latitude, self.syscon.longitude, self.syscon.elevation)
             if not isinstance(start_time, bool):
                 log.info('Next capture start time: ' + str(start_time) + ' UTC')
