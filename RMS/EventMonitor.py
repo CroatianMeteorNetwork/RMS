@@ -1358,7 +1358,10 @@ class EventMonitor(multiprocessing.Process):
         platepar_file = ""
 
         if len(self.getDirectoryList(event)) > 0:
-            platepar_file = self.getFile(self.syscon.platepar_name, self.getDirectoryList(event)[0])[0]
+            try:
+                platepar_file = self.getFile(self.syscon.platepar_name, self.getDirectoryList(event)[0])[0]
+            except:
+                platepar_file = ""
         return platepar_file
 
 
@@ -1988,7 +1991,7 @@ class EventMonitor(multiprocessing.Process):
         """
 
         # Delay to allow capture to check existing folders - keep the logs tidy
-        log.info("Using {} as fallback .config and platepar directory".format(self.syscon.config_file_path))
+
         time.sleep(30)
 
         while not self.exit.is_set():
