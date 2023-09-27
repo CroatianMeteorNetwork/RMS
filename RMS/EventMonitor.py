@@ -1477,7 +1477,7 @@ class EventMonitor(multiprocessing.Process):
         #have to use system .config file_name here because we have not yet identified the files for the event
         log.info("Using {} as .config file name".format(self.syscon.config_file_name))
         if len(self.getDirectoryList(event)) > 0:
-            file_list += self.getFile(os.path.basename(event.config_file_name), self.getDirectoryList(event)[0])
+            file_list += self.getFile(os.path.basename(self.syscon.config_file_name), self.getDirectoryList(event)[0])
             file_list += self.getFile(self.syscon.platepar_name, self.getDirectoryList(event)[0])
 
         return file_list
