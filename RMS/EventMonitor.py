@@ -1336,9 +1336,9 @@ class EventMonitor(multiprocessing.Process):
             return file_list
         else:
             log.debug("Unable to find {} in {}".format(file_name,directory))
-            log.debug("Looking in {}".format(self.syscon.rms_root_dir))
-            if os.path.isfile(os.path.join(os.path.expanduser(self.syscon.config_file_path), file_name)):
-                file_list.append(str(os.path.join(os.path.expanduser(self.syscon.config_file_path), file_name)))
+            log.debug("Looking in {}".format(os.path.join(os.path.abspath("."),self.syscon.config_file_path)))
+            if os.path.isfile(os.path.join(os.path.abspath("."),self.syscon.config_file_path, file_name)):
+                file_list.append(str(os.path.join(os.path.abspath("."),self.syscon.config_file_path, file_name)))
                 return file_list
         return []
 
@@ -1925,7 +1925,7 @@ class EventMonitor(multiprocessing.Process):
             log.info("EventMonitor function test success")
             super(EventMonitor, self).start()
             log.info("EventMonitor was started")
-            log.info("Using {} as fallback .config and platepar directory".format(os.path.join(os.path.abspath("."),self.syscon.config_file_path)))
+            log.info("Using {} as fallback .config and platepar directory".format(os.path.join(os.path.("."),self.syscon.config_file_path)))
         else:
             log.error("EventMonitor function test fail - not starting EventMonitor")
 
