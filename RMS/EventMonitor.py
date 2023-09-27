@@ -1362,6 +1362,7 @@ class EventMonitor(multiprocessing.Process):
                 platepar_file = self.getFile(self.syscon.platepar_name, self.getDirectoryList(event)[0])[0]
             except:
                 platepar_file = ""
+                log.warning("Failed to get a platepar file")
         return platepar_file
 
 
@@ -1563,6 +1564,7 @@ class EventMonitor(multiprocessing.Process):
         # Read in the platepar for the event
         rp = Platepar()
         if self.getPlateparFilePath(event) == "":
+            log.info("Reading platepar from {}".format(os.path.abspath('.')))
             rp.read(os.path.abspath('.'))
         else:
             rp.read(self.getPlateparFilePath(event))
