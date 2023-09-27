@@ -1339,6 +1339,7 @@ class EventMonitor(multiprocessing.Process):
             log.debug("Looking in {}".format(os.path.join(os.path.abspath("."),self.syscon.config_file_path)))
             if os.path.isfile(os.path.join(os.path.abspath("."),self.syscon.config_file_path, file_name)):
                 file_list.append(str(os.path.join(os.path.abspath("."),self.syscon.config_file_path, file_name)))
+                log.info("Returning {}".format(file_list[0]))
                 return file_list
         return []
 
