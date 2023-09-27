@@ -1475,7 +1475,7 @@ class EventMonitor(multiprocessing.Process):
         file_list += self.findEventFiles(event, self.getDirectoryList(event), [".fits", ".bin"])
         if len(self.getDirectoryList(event)) > 0:
             file_list += self.getFile(".config", self.getDirectoryList(event)[0])
-            file_list += self.getFile(self.evcon.platepar_name, self.getDirectoryList(event)[0])
+            file_list += self.getFile(self.syscon.platepar_name, self.getDirectoryList(event)[0])
 
         return file_list
 
