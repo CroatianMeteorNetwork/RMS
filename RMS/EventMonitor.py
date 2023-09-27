@@ -1337,10 +1337,11 @@ class EventMonitor(multiprocessing.Process):
         else:
             log.debug("Unable to find {} in {}".format(file_name,directory))
             log.debug("Looking in {}".format(self.syscon.rms_root_dir))
-            if os.path.isfile(os.path.join(os.path.expanduser(self.syscon.rms_root_dir), file_name)):
-                file_list.append(str(os.path.join(os.path.expanduser(self.syscon.rms_root_dir), file_name)))
+            if os.path.isfile(os.path.join(os.path.expanduser(self.syscon.config_file_path), file_name)):
+                file_list.append(str(os.path.join(os.path.expanduser(self.syscon.config_file_path), file_name)))
                 return file_list
         return []
+
 
     def getPlateparFilePath(self, event):
 
@@ -1924,6 +1925,7 @@ class EventMonitor(multiprocessing.Process):
             log.info("EventMonitor function test success")
             super(EventMonitor, self).start()
             log.info("EventMonitor was started")
+            log.info("Using {} as fallback .config and platepar directory".format(self.syscon.config_file_path))
         else:
             log.error("EventMonitor function test fail - not starting EventMonitor")
 
