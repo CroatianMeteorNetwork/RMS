@@ -1786,7 +1786,25 @@ class EventMonitor(multiprocessing.Process):
             # If there is a .config file then parse it as evcon - not the station config
             for file in file_list:
                 if file.endswith(self.syscon.config_file_name):
-                    ev_con = cr.parse(file)
+
+                    log.info("Attempt to parse {} as the .config for the event".format(file))
+                    if os.path.isfile(file):
+                        log.info("Contemporary .config file found")
+                        if os.path.getsize(file) != 0:
+                            try:
+                                ev_con = cr.parse(file)
+                            except:
+                                log.warning("Unknown error loading .config file; reverting to station .config")
+                                ev_con = cr.parse(self.syscon.config_file_name)
+                        else:
+                            log.warning("Zero size .config file found")
+                            ev_con = cr.parse(self.syscon.config_file_name)
+                            log.warning("Used the station .config file as night directory .config file had zero length")
+                    else:
+                        log.info("No .config file found at {}".format(file))
+                        ev_con = cr.parse(self.syscon.config_file_name)
+                        log.warning("Used the station .config file as no contemporary .config file was found")
+
 
             # Look for the station code in the stations_required string
             if observed_event.stations_required.find(ev_con.stationID) != -1:
