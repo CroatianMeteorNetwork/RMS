@@ -1775,7 +1775,7 @@ class EventMonitor(multiprocessing.Process):
 
             # If there is a .config file then parse it as evcon - not the station config
             for file in file_list:
-                if file.endswith(".config"):
+                if file.endswith(self.syscon.config_file_name):
                     log.info("Attempt to parse {} as the .config for the event".format(file))
                     if os.path.isfile(file):
                         log.info("Contemporary .config file found")
