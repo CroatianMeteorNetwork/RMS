@@ -76,6 +76,8 @@ from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 
 
 log = logging.getLogger("logger")
+EM_RAISE = True
+
 
 """
 
@@ -103,6 +105,16 @@ EventElev		         : 20			    #Elevation as perceived by observer on ground, he
 EventCartStd		     : 10000		    #Event start cartesian standard deviation (m)
 EventCart2Std		     : 10000		    #Event end cartesian standard deviation (m)
 
+# Used for requesting views of portions of the sky during time ranges
+
+ObsLat(deg)              : -32.0080         #Latitude of observer - optional
+ObsLon(deg)              : 116.1344         #Longitude of observer - optional;
+ObsRange(km)             : 30               #Great Circle range around ObsLat, ObsLon - if not specified then global
+Ra(deg)                  : 89.11            #Right ascension of target
+Dec(deg)                 : 7.4              #Declination of target
+SkyRadius(deg)           : 10               #SkyRadius around target
+MinElev(deg)             : 15               #Minimum elevation above horizon
+MinStars                 : 10               #Minimum number of stars, if not specified uses default from config
 
 #Optional - not preferred as sensitive to different latitudes
 EventLatStd (deg)	     : 1.0			    #Event start latitude polar standard deviation
@@ -135,6 +147,12 @@ class EventContainer(object):
         self.azim, self.azim_std, self.elev, self.elev_std, self.elev_is_max = 0, 0, 0, 0, False
         self.stations_required = ""
         self.respond_to = ""
+
+        # Used for requesting views of portions of the sky during time ranges
+
+        self.obs_lat, self.obs_lon, self.obs_range, self.ra, self.dec = 0,0,"None",0,0
+        self.sky_radius, self.min_elev = 10, 15
+        self.min_stars = 20
 
         # These are internal control properties
         self.uuid = ""
@@ -206,6 +224,19 @@ class EventContainer(object):
         # Text stores as True, database stores as 0 and 1
         if "EventElevIsMax" == variable_name:
             self.elev_is_max = True if value == "True" or value == 1 else False
+
+        # RaDec specifications for events
+
+        self.obs_lat = str(value) if "ObsLat" == variable_name else self.obs_lat
+        self.obs_lon = str(value) if "ObsLon" == variable_name else self.obs_lon
+        self.obs_range = str(value) if "ObsRange" == variable_name else self.obs_range
+        self.ra = str(value) if "Ra" == variable_name else self.ra
+        self.dec = str(value) if "dec" == variable_name else self.dec
+        self.sky_radius = str(value) if "SkyRadius" == variable_name else self.sky_radius
+        self.min_elev = str(value) if "MinElev" == variable_name else self.min_elev
+        self.min_stars = str(value) if "MinStars" == variable_name else self.min_stars
+
+
 
         # Control information
         self.stations_required = str(value) if "StationsRequired" == variable_name else self.stations_required
@@ -798,6 +829,8 @@ class EventMonitor(multiprocessing.Process):
                 self.upgradeDB(conn)
                 return conn
         except:
+            if EM_RAISE:
+                raise
             return None
 
         conn.execute("""CREATE TABLE event_monitor (
@@ -824,6 +857,13 @@ class EventMonitor(multiprocessing.Process):
                             EventAzimStd REAL NOT NULL,
                             EventElev REAL NOT NULL,
                             EventElevStd REAL NOT NULL,
+                            ObsLat REAL NOT NULL,
+                            ObsLon REAL NOT NULL,
+                            ObsRange TEXT,
+                            Ra REAL NOT NULL,
+                            Dec REAL NOT NULL,
+                            SkyRadius REAL NOT NULL,
+                            MinStars REAL NOt NULL,
                             EventElevIsMax BOOL,
                             StationsRequired TEXT,
                             filesuploaded TEXT,
@@ -837,6 +877,7 @@ class EventMonitor(multiprocessing.Process):
                             RespondTo TEXT,
                             Suffix TEXT
                             )""")
+
 
         # Commit the changes
         conn.commit()
@@ -881,12 +922,44 @@ class EventMonitor(multiprocessing.Process):
             log.info("Missing db column Suffix")
             self.addDBcol("Suffix","TEXT")
 
+        if not self.checkDBcol(conn,"ObsLat"):
+            log.info("Missing db column ObsLat")
+            self.addDBcol("ObsLat","REAL NOT NULL")
+
+        if not self.checkDBcol(conn,"Suffix"):
+            log.info("Missing db column ObsLon")
+            self.addDBcol("ObsLon","REAL NOT NULL")
+
+        if not self.checkDBcol(conn,"Suffix"):
+            log.info("Missing db column ObsRamge")
+            self.addDBcol("ObsRange","TEXT")
+
+        if not self.checkDBcol(conn,"Ra"):
+            log.info("Missing db column Ra")
+            self.addDBcol("Ra","REAL NOT NULL")
+
+        if not self.checkDBcol(conn,"Dec"):
+            log.info("Missing db column Dec")
+            self.addDBcol("Dec","REAL NOT NULL")
+
+        if not self.checkDBcol(conn,"SkyRadius"):
+            log.info("Missing db column SkyRadius")
+            self.addDBcol("SkyRadius","REAL NOT NULL")
+
+        if not self.checkDBcol(conn,"MinElev"):
+            log.info("Missing db column MinElev")
+            self.addDBcol("MinElev","REAL")
+
+        if not self.checkDBcol(conn,"MinStars"):
+            log.info("Missing db column MinStars")
+            self.addDBcol("MinStars","TEXT")
+
     def addDBcol(self, column, coltype):
         """ Add a new column to the database
 
         Arguments:
             column: [string] Name of column to add
-            coltype: [string] type of columnd to add
+            coltype: [string] type of column to add
 
         Return:
             Status: [bool] True if successful otherwise false
@@ -898,11 +971,14 @@ class EventMonitor(multiprocessing.Process):
         sql_command += "ADD {} {}; ".format(column, coltype)
 
         try:
+
             conn = sqlite3.connect(self.event_monitor_db_path)
             conn.execute(sql_command)
             conn.close()
             return True
         except:
+            if EM_RAISE:
+                raise
             return False
 
     def checkDBcol(self, conn,column):
@@ -991,7 +1067,7 @@ class EventMonitor(multiprocessing.Process):
         sql_statement = ""
         sql_statement += "SELECT COUNT(*) FROM event_monitor \n"
         sql_statement += "WHERE \n"
-        sql_statement += "EventTime = '{}'          AND \n".format(event.dt)
+        sql_statement += "EventTime = '{}'              AND \n".format(event.dt)
         sql_statement += "EventLat = '{}'               AND \n".format(event.lat)
         sql_statement += "EventLon = '{}'               AND \n".format(event.lon)
         sql_statement += "EventHt = '{}'                AND \n".format(event.ht)
@@ -1006,6 +1082,14 @@ class EventMonitor(multiprocessing.Process):
         sql_statement += "EventHt2Std = '{}'            AND \n".format(event.ht2_std)
         sql_statement += "FarRadius = '{}'              AND \n".format(event.far_radius)
         sql_statement += "CloseRadius = '{}'            AND \n".format(event.close_radius)
+        sql_statement += "ObsLat = '{}'                 AND \n".format(event.obs_lat)
+        sql_statement += "ObsLon = '{}'                 AND \n".format(event.obs_lon)
+        sql_statement += "ObsRange = '{}'               AND \n".format(event.obs_range)
+        sql_statement += "Ra = '{}'                     AND \n".format(event.ra)
+        sql_statement += "Dec = '{}'                    AND \n".format(event.dec)
+        sql_statement += "SkyRadius = '{}'              AND \n".format(event.sky_radius)
+        sql_statement += "MinElev = '{}'                AND \n".format(event.min_elev)
+        sql_statement += "MinStars = '{}'               AND \n".format(event.min_stars)
         sql_statement += "TimeTolerance = '{}'          AND \n".format(event.time_tolerance)
         sql_statement += "StationsRequired = '{}'       AND \n".format(event.stations_required)
         sql_statement += "RespondTo = '{}'                  \n".format(event.respond_to)
@@ -1017,6 +1101,8 @@ class EventMonitor(multiprocessing.Process):
             return (self.db_conn.cursor().execute(sql_statement).fetchone())[0] != 0
         except:
             log.info("Check for event exists failed")
+            if EM_RAISE:
+                raise
             return False
 
     def delOldRecords(self):
@@ -1064,7 +1150,6 @@ class EventMonitor(multiprocessing.Process):
         # required for Jessie
         qry_elev_is_max = 1 if event.elev_is_max else 0
 
-
         if not self.eventExists(event):
             sql_statement = ""
             sql_statement += "INSERT INTO event_monitor \n"
@@ -1074,6 +1159,7 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "CloseRadius, FarRadius,                     \n"
             sql_statement += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, EventCart2Std,    \n"
             sql_statement += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax,    \n"
+            sql_statement += "ObsLat, ObsLon, ObsRange, Ra, Dec, SkyRadius, MinElev, MinStars,    \n"
             sql_statement += "processedstatus, uploadedstatus, uuid, RespondTo, StationsRequired, Suffix, timeadded \n"
             sql_statement += ")                                           \n"
 
@@ -1088,6 +1174,10 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "{},  {}, {}, {}, {} ,        \n".format(event.azim, event.azim_std, event.elev,
                                                                       event.elev_std,
                                                                       qry_elev_is_max)
+            sql_statement += "{},  {}, {}, {}, {} , {}, {}, {}, \n".format(event.obs_lat,event.obs_lon, event.obs_range,
+                                                                      event.ra, event.dec, event.sky_radius,
+                                                                      event.min_elev,event.min_stars)
+
             sql_statement += "{},  {}, '{}', '{}', '{}' , '{}',    \n".format(0, 0,uuid.uuid4(), event.respond_to, event.stations_required, event.suffix)
             sql_statement += "CURRENT_TIMESTAMP ) \n"
 
@@ -1314,6 +1404,7 @@ class EventMonitor(multiprocessing.Process):
                 events : [list of events]
         """
 
+
         sql_statement = ""
         sql_statement += "SELECT "
         sql_statement += ""
@@ -1322,6 +1413,7 @@ class EventMonitor(multiprocessing.Process):
         sql_query_cols += "FarRadius,CloseRadius, uuid,"
         sql_query_cols += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, "
         sql_query_cols += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax, RespondTo, StationsRequired,"
+        sql_query_cols += "ObsLat, ObsLon, ObsRange, Ra, Dec, SkyRadius, MinElev, MinStars,"
         sql_query_cols += "EventCartStd, EventCart2Std, Suffix"
         sql_statement += sql_query_cols
         sql_statement += " \n"
@@ -1331,6 +1423,8 @@ class EventMonitor(multiprocessing.Process):
         try:
             cursor = self.db_conn.cursor().execute(sql_statement)
         except:
+            if EM_RAISE:
+                raise
             log.info("Database access error. Delete and recreate.")
             self.delEventMonitorDB()
             self.createEventMonitorDB()
