@@ -226,14 +226,14 @@ class EventContainer(object):
 
         # RaDec specifications for events
 
-        self.obs_lat = str(value) if "ObsLat" == variable_name else self.obs_lat
-        self.obs_lon = str(value) if "ObsLon" == variable_name else self.obs_lon
+        self.obs_lat = float(value) if "ObsLat" == variable_name else self.obs_lat
+        self.obs_lon = float(value) if "ObsLon" == variable_name else self.obs_lon
         self.obs_range = str(value) if "ObsRange" == variable_name else self.obs_range
-        self.ra = str(value) if "Ra" == variable_name else self.ra
-        self.dec = str(value) if "Dec" == variable_name else self.dec
-        self.sky_radius = str(value) if "SkyRadius" == variable_name else self.sky_radius
-        self.min_elev = str(value) if "MinElev" == variable_name else self.min_elev
-        self.min_stars = str(value) if "MinStars" == variable_name else self.min_stars
+        self.ra = float(value) if "Ra" == variable_name else self.ra
+        self.dec = float(value) if "Dec" == variable_name else self.dec
+        self.sky_radius = float(value) if "SkyRadius" == variable_name else self.sky_radius
+        self.min_elev = float(value) if "MinElev" == variable_name else self.min_elev
+        self.min_stars = float(value) if "MinStars" == variable_name else self.min_stars
 
 
 
@@ -1634,6 +1634,7 @@ class EventMonitor(multiprocessing.Process):
         # Calculate diagonal FoV of camera
         diagonal_fov = np.sqrt(rp.fov_v ** 2 + rp.fov_h ** 2)
 
+
         # the az_centre, alt_centre of the camera
         az_c, alt_c = platepar2AltAz(rp)
 
@@ -1646,8 +1647,10 @@ class EventMonitor(multiprocessing.Process):
         # normalise
         fov_vec, target_vec = vectNorm(fov_vec), vectNorm(target_vec)
 
+        log.info("Event Time {}".format(event.dt))
+        log.info("Camera Alt, Az {},{}".format(az_c,alt_c))
         log.info("Field of view RaDec {:.2f},{:.2f}".format(fov_ra,fov_dec))
-        log.info("Target RaDec {:.2f},{:.2f}".format(event.ra, event.ra))
+        log.info("Target RaDec {:.2f},{:.2f}".format(event.ra, event.dec))
         log.info("Angular separation {:.2f}".format(angularSeparationVectDeg(target_vec, fov_vec)))
 
         # return whether the targets sky_radius is in the FoV
@@ -1883,9 +1886,11 @@ class EventMonitor(multiprocessing.Process):
 
                 # Make the upload
 
-                upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
-                                 event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
-                                  rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
+                #upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
+                #                 event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
+                #                  rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
+
+                upload_status = True
 
                 if upload_status:
                     log.info("Upload of {} - attempt no {} was successful".format(event_monitor_directory, retry))
@@ -2075,18 +2080,18 @@ class EventMonitor(multiprocessing.Process):
             self.markEventAsProcessed(observed_event)
 
 
-    def checkRaDECEvent(self, observed_event, ev_con, test_mode = False):
+    def checkRaDECEvent(self, target, ev_con, test_mode = False):
 
-        log.info("Checks on RaDec for event at {}".format(observed_event.dt))
+        log.info("Checks on RaDec for event at {}".format(target.dt))
         check_time_start = datetime.datetime.utcnow()
 
         # Get the files
-        file_list = self.getFileList(observed_event)
+        file_list = self.getFileList(target)
 
         # If there are no files based on time, then mark as processed and continue
         if (len(file_list) == 0 or file_list == [None]) and not test_mode:
-            log.info("No files for event - marking {} as processed".format(observed_event.dt))
-            self.markEventAsProcessed(observed_event)
+            log.info("No files for event - marking {} as processed".format(target.dt))
+            self.markEventAsProcessed(target)
             return
 
         # If there is a .config file then parse it as evcon - not the station config
@@ -2113,29 +2118,35 @@ class EventMonitor(multiprocessing.Process):
 
         # is the radec in the FoV
 
-        rp = self.getEventPlatepar(observed_event)
+        rp = self.getEventPlatepar(target)
 
-        if self.raDecVisible(rp,observed_event):
-            log.info("Event in FoV")
+        if self.raDecVisible(rp, target):
+            if self.doUpload(target, ev_con, file_list, test_mode):
+                log.info("Event {} at Ra,Dec {},{} in FoV".format(target.dt,target.ra, target.dec))
+                self.markEventAsProcessed(target)
+                if len(file_list) > 0:
+                    self.markEventAsUploaded(target, file_list)
+                return
+            else:
+                log.error("Upload failed for event at {}. Event retained in database for retry.".format(target.dt))
+
         else:
-            log.info("Event not in FoV")
-
-
-
+            log.info("Event {} at Ra,Dec {},{} not in FoV".format(target.dt,target.ra, target.dec))
+            self.markEventAsProcessed(target)
 
         # End of the processing for this event
-        if self.eventProcessed(observed_event.uuid):
-            log.info("Reached end of checks - {} is processed".format(observed_event.dt))
+        if self.eventProcessed(target.uuid):
+            log.info("Reached end of checks - {} is processed".format(target.dt))
             check_time_end = datetime.datetime.utcnow()
             check_time_seconds = (check_time_end - check_time_start).total_seconds()
-            log.info("Check of radec event time elapsed {:.2f} seconds".format(check_time_seconds))
+            log.info("Check of RaRec event time elapsed {:.2f} seconds".format(check_time_seconds))
 
         else:
             check_time_end = datetime.datetime.utcnow()
             check_time_seconds = (check_time_end - check_time_start).total_seconds()
-            log.info("Reached end of checks - {} is processed, nothing to upload".format(observed_event.dt))
-            log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
-            self.markEventAsProcessed(observed_event)
+            log.info("Reached end of checks - {} is processed, nothing to upload".format(target.dt))
+            log.info("Check of RaRec event time elapsed {:.2f} seconds".format(check_time_seconds))
+            self.markEventAsProcessed(target)
 
     def checkEvents(self, ev_con, test_mode = False):
 
