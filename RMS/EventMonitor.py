@@ -1617,6 +1617,49 @@ class EventMonitor(multiprocessing.Process):
 
         return file_list
 
+    def raDecVisible(self, rp, event):
+
+        """
+        Given a platepar and an event, which includes RadDec coordinates
+        deduce if the RaDec plus the SkyRadius would be in the FoV.
+
+        No modification of RaDec with time is considered.
+
+        Working is in ECI vectors.
+
+        Args:
+            rp: [platepar] reference platepar
+            event: [event] event of interest
+
+        Returns:
+            [bool] : True if RaDEC in FoV
+
+        """
+        # Calculate diagonal FoV of camera
+        diagonal_fov = np.sqrt(rp.fov_v ** 2 + rp.fov_h ** 2)
+
+        # the az_centre, alt_centre of the camera
+        az_c, alt_c = platepar2AltAz(rp)
+
+        # calculate Field of View RA and Dec at event time
+        fov_ra, fov_dec = altAz2RADec(az_c, alt_c, datetime2JD(convertGMNTimeToPOSIX(event.dt)), rp.lat, rp.lon)
+
+        # calculate fov_vec and target_vec
+        fov_vec, target_vec = np.array(raDec2Vector(fov_ra, fov_dec)), np.array(raDec2Vector(event.ra, event.dec))
+
+        # normalise
+        fov_vec, target_vec = vectNorm(fov_vec), vectNorm(target_vec)
+
+        log.info("Field of view RaDec {:.2f},{:.2f}".format(fov_ra,fov_dec))
+        log.info("Target RaDec {:.2f},{:.2f}".format(event.ra, event.ra))
+        log.info("Angular separation {:.2f}".format(angularSeparationVectDeg(target_vec, fov_vec)))
+
+        # return whether the targets sky_radius is in the FoV
+        return angularSeparationVectDeg(target_vec, fov_vec) < (diagonal_fov + abs(event.sky_radius))
+
+
+
+
     def trajectoryVisible(self, rp, event):
 
         """
@@ -2064,7 +2107,10 @@ class EventMonitor(multiprocessing.Process):
                     ev_con = cr.parse(self.syscon.config_file_name)
                     log.warning("Used the station .config file as no contemporary .config file was found")
 
+        # is the radec in the FoV
 
+        # strategy:
+        # convert platepar at time of the event to RaDec
 
 
         # End of the processing for this event
