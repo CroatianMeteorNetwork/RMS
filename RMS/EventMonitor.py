@@ -15,7 +15,6 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
-
 from __future__ import print_function, division, absolute_import
 
 
@@ -231,7 +230,7 @@ class EventContainer(object):
         self.obs_lon = str(value) if "ObsLon" == variable_name else self.obs_lon
         self.obs_range = str(value) if "ObsRange" == variable_name else self.obs_range
         self.ra = str(value) if "Ra" == variable_name else self.ra
-        self.dec = str(value) if "dec" == variable_name else self.dec
+        self.dec = str(value) if "Dec" == variable_name else self.dec
         self.sky_radius = str(value) if "SkyRadius" == variable_name else self.sky_radius
         self.min_elev = str(value) if "MinElev" == variable_name else self.min_elev
         self.min_stars = str(value) if "MinStars" == variable_name else self.min_stars
@@ -2028,9 +2027,58 @@ class EventMonitor(multiprocessing.Process):
             self.markEventAsProcessed(observed_event)
 
 
-    def checkRaDECEvent(self, ev_con, testmode = False):
+    def checkRaDECEvent(self, observed_event, ev_con, test_mode = False):
 
-        pass
+        log.info("Checks on RaDec for event at {}".format(observed_event.dt))
+        check_time_start = datetime.datetime.utcnow()
+
+        # Get the files
+        file_list = self.getFileList(observed_event)
+
+        # If there are no files based on time, then mark as processed and continue
+        if (len(file_list) == 0 or file_list == [None]) and not test_mode:
+            log.info("No files for event - marking {} as processed".format(observed_event.dt))
+            self.markEventAsProcessed(observed_event)
+            return
+
+        # If there is a .config file then parse it as evcon - not the station config
+        for file in file_list:
+            if file.endswith(self.syscon.config_file_name):
+
+                log.info("Attempt to parse {} as the .config for the event".format(file))
+                if os.path.isfile(file):
+                    log.info("Contemporary .config file found")
+                    if os.path.getsize(file) != 0:
+                        try:
+                            ev_con = cr.parse(file)
+                        except:
+                            log.warning("Unknown error loading .config file; reverting to station .config")
+                            ev_con = cr.parse(self.syscon.config_file_name)
+                    else:
+                        log.warning("Zero size .config file found")
+                        ev_con = cr.parse(self.syscon.config_file_name)
+                        log.warning("Used the station .config file as night directory .config file had zero length")
+                else:
+                    log.info("No .config file found at {}".format(file))
+                    ev_con = cr.parse(self.syscon.config_file_name)
+                    log.warning("Used the station .config file as no contemporary .config file was found")
+
+
+
+
+        # End of the processing for this event
+        if self.eventProcessed(observed_event.uuid):
+            log.info("Reached end of checks - {} is processed".format(observed_event.dt))
+            check_time_end = datetime.datetime.utcnow()
+            check_time_seconds = (check_time_end - check_time_start).total_seconds()
+            log.info("Check of radec event time elapsed {:.2f} seconds".format(check_time_seconds))
+
+        else:
+            check_time_end = datetime.datetime.utcnow()
+            check_time_seconds = (check_time_end - check_time_start).total_seconds()
+            log.info("Reached end of checks - {} is processed, nothing to upload".format(observed_event.dt))
+            log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
+            self.markEventAsProcessed(observed_event)
 
     def checkEvents(self, ev_con, test_mode = False):
 
@@ -2074,7 +2122,14 @@ class EventMonitor(multiprocessing.Process):
                              .format(float(self.check_interval),time_until_event_end_seconds / 60 ))
                 continue
 
-            self.checkTrajectoryEvent(observed_event,ev_con, test_mode)
+            # If either lat or lon is non zero, handle as a trajectory specification
+            if observed_event.lat != 0 and observed_event.lon !=0:
+                log.info("Event at {} is a trajectory specification".format(observed_event.dt))
+                self.checkTrajectoryEvent(observed_event,ev_con, test_mode)
+            elif observed_event.ra != 0 and observed_event.dec != 0:
+                log.info("Event at {} is a RaDec specification".format(observed_event.dt))
+                self.checkRaDECEvent(observed_event,ev_con, test_mode)
+
 
         if len(unprocessed) - future_events > 1:
             log.info("{} events were processed, EventMonitor work completed"
