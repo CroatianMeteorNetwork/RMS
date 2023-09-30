@@ -1620,12 +1620,8 @@ class EventMonitor(multiprocessing.Process):
     def raDecVisible(self, rp, event):
 
         """
-        Given a platepar and an event, which includes RadDec coordinates
+        Given a platepar and an event, which includes RaDec coordinates
         deduce if the RaDec plus the SkyRadius would be in the FoV.
-
-        No modification of RaDec with time is considered.
-
-        Working is in ECI vectors.
 
         Args:
             rp: [platepar] reference platepar
@@ -1724,6 +1720,18 @@ class EventMonitor(multiprocessing.Process):
 
         return points_in_fov, start_distance, start_angle, end_distance, end_angle, fov_ra, fov_dec
 
+
+    def getEventPlatepar(self,event):
+
+        rp = Platepar()
+        if self.getPlateparFilePath(event) == "":
+            log.info("Reading platepar from {}".format(os.path.abspath('.')))
+            rp.read(os.path.abspath('.'))
+        else:
+            rp.read(self.getPlateparFilePath(event))
+        return rp
+
+
     def trajectoryThroughFOV(self, event):
 
         """
@@ -1743,12 +1751,8 @@ class EventMonitor(multiprocessing.Process):
         """
 
         # Read in the platepar for the event
-        rp = Platepar()
-        if self.getPlateparFilePath(event) == "":
-            log.info("Reading platepar from {}".format(os.path.abspath('.')))
-            rp.read(os.path.abspath('.'))
-        else:
-            rp.read(self.getPlateparFilePath(event))
+
+        rp = self.getEventPlatepar(event)
 
         pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC = self.trajectoryVisible(rp, event)
         return pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC
@@ -2109,8 +2113,14 @@ class EventMonitor(multiprocessing.Process):
 
         # is the radec in the FoV
 
-        # strategy:
-        # convert platepar at time of the event to RaDec
+        rp = self.getEventPlatepar(observed_event)
+
+        if self.raDecVisible(rp,observed_event):
+            log.info("Event in FoV")
+        else:
+            log.info("Event not in FoV")
+
+
 
 
         # End of the processing for this event
