@@ -577,7 +577,7 @@ def isRaspberryPi():
 
     return False
 
-def sanitise(unsanitised, lower = False, space_substitution = "", log_changes = True):
+def sanitise(unsanitised, lower = False, space_substitution = "", log_changes = False):
     """ Strictly sanitise an input string so it is suitable for all filesystems
         known to be running RMS
 
