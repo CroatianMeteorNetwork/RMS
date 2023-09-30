@@ -924,11 +924,11 @@ class EventMonitor(multiprocessing.Process):
 
         if not self.checkDBcol(conn,"ObsLat"):
             log.info("Missing db column ObsLat")
-            self.addDBcol("ObsLat","REAL NOT NULL")
+            self.addDBcol("ObsLat","REAL")
 
         if not self.checkDBcol(conn,"Suffix"):
             log.info("Missing db column ObsLon")
-            self.addDBcol("ObsLon","REAL NOT NULL")
+            self.addDBcol("ObsLon","REAL")
 
         if not self.checkDBcol(conn,"Suffix"):
             log.info("Missing db column ObsRamge")
@@ -936,15 +936,15 @@ class EventMonitor(multiprocessing.Process):
 
         if not self.checkDBcol(conn,"Ra"):
             log.info("Missing db column Ra")
-            self.addDBcol("Ra","REAL NOT NULL")
+            self.addDBcol("Ra","REAL")
 
         if not self.checkDBcol(conn,"Dec"):
             log.info("Missing db column Dec")
-            self.addDBcol("Dec","REAL NOT NULL")
+            self.addDBcol("Dec","REAL")
 
         if not self.checkDBcol(conn,"SkyRadius"):
             log.info("Missing db column SkyRadius")
-            self.addDBcol("SkyRadius","REAL NOT NULL")
+            self.addDBcol("SkyRadius","REAL")
 
         if not self.checkDBcol(conn,"MinElev"):
             log.info("Missing db column MinElev")
