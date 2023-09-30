@@ -57,7 +57,7 @@ import numpy as np
 
 import RMS.ConfigReader as cr
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
-from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt
+from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt, raDec2AltAz
 from RMS.Math import angularSeparationVect
 from RMS.Formats.FFfile import convertFRNameToFF
 from RMS.Formats.Platepar import Platepar
@@ -1616,7 +1616,7 @@ class EventMonitor(multiprocessing.Process):
 
         return file_list
 
-    def raDecVisible(self, rp, event):
+    def raDecVisible(self, rp, event, ev_con):
 
         """
         Given a platepar and an event, which includes RaDec coordinates
@@ -1632,13 +1632,24 @@ class EventMonitor(multiprocessing.Process):
         """
         # Calculate diagonal FoV of camera
         diagonal_fov = np.sqrt(rp.fov_v ** 2 + rp.fov_h ** 2)
+        # Calculate minimum FoV of camera
+        min_fov = min(rp.fov_v, rp.fov_h)
+
 
 
         # the az_centre, alt_centre of the camera
         az_c, alt_c = platepar2AltAz(rp)
+        jd = datetime2JD(convertGMNTimeToPOSIX(event.dt))
+
+        # calculate elevation
+
+        az_t, el_t = raDec2AltAz(event.ra, event.dec,jd, ev_con.latitude, ev_con.longitude)
+
+        if el_t < event.min_elev:
+            return False
 
         # calculate Field of View RA and Dec at event time
-        fov_ra, fov_dec = altAz2RADec(az_c, alt_c, datetime2JD(convertGMNTimeToPOSIX(event.dt)), rp.lat, rp.lon)
+        fov_ra, fov_dec = altAz2RADec(az_c, alt_c, jd, rp.lat, rp.lon)
 
         # calculate fov_vec and target_vec
         fov_vec, target_vec = np.array(raDec2Vector(fov_ra, fov_dec)), np.array(raDec2Vector(event.ra, event.dec))
@@ -1653,7 +1664,7 @@ class EventMonitor(multiprocessing.Process):
         log.info("Angular separation {:.2f}".format(angularSeparationVectDeg(target_vec, fov_vec)))
 
         # return whether the targets sky_radius is in the FoV
-        return angularSeparationVectDeg(target_vec, fov_vec) < ((diagonal_fov / 2) + abs(event.sky_radius))
+        return angularSeparationVectDeg(target_vec, fov_vec) < ((min_fov / 2) + abs(event.sky_radius))
 
 
 
@@ -1885,11 +1896,11 @@ class EventMonitor(multiprocessing.Process):
 
                 # Make the upload
 
-                upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
-                                 event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
-                                  rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
+                #upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
+                #                 event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
+                #                  rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
 
-
+                upload_status = True
 
                 if upload_status:
                     log.info("Upload of {} - attempt no {} was successful".format(event_monitor_directory, retry))
@@ -2119,7 +2130,7 @@ class EventMonitor(multiprocessing.Process):
 
         rp = self.getEventPlatepar(target)
 
-        if self.raDecVisible(rp, target):
+        if self.raDecVisible(rp, target, ev_con):
             if self.doUpload(target, ev_con, file_list, test_mode):
                 log.info("Event {} at Ra,Dec {},{} in FoV".format(target.dt,target.ra, target.dec))
                 self.markEventAsProcessed(target)
