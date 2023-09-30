@@ -926,7 +926,7 @@ class EventMonitor(multiprocessing.Process):
             log.info("Missing db column ObsLat")
             self.addDBcol("ObsLat","REAL")
 
-        if not self.checkDBcol(conn,"Suffix"):
+        if not self.checkDBcol(conn,"ObsLon"):
             log.info("Missing db column ObsLon")
             self.addDBcol("ObsLon","REAL")
 
@@ -952,7 +952,7 @@ class EventMonitor(multiprocessing.Process):
 
         if not self.checkDBcol(conn,"MinStars"):
             log.info("Missing db column MinStars")
-            self.addDBcol("MinStars","TEXT")
+            self.addDBcol("MinStars","REAL")
 
     def addDBcol(self, column, coltype):
         """ Add a new column to the database
