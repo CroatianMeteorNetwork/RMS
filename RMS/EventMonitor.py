@@ -1575,7 +1575,7 @@ class EventMonitor(multiprocessing.Process):
                     else:
                         # Initialise last_fits_file with the first from the list
                         last_fits_file = fits_list[0]
-                        log.info("Intialised last_fits_file with {}".format(last_fits_file))
+                        log.info("Initialised last_fits_file with {}".format(last_fits_file))
                         seeking_first_fits_after_event = True
                 for file in dirlist:
                     if file.endswith(file_extension):
@@ -1653,7 +1653,7 @@ class EventMonitor(multiprocessing.Process):
         log.info("Angular separation {:.2f}".format(angularSeparationVectDeg(target_vec, fov_vec)))
 
         # return whether the targets sky_radius is in the FoV
-        return angularSeparationVectDeg(target_vec, fov_vec) < (diagonal_fov + abs(event.sky_radius))
+        return angularSeparationVectDeg(target_vec, fov_vec) < ((diagonal_fov / 2) + abs(event.sky_radius))
 
 
 
