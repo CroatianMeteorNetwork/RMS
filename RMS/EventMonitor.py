@@ -1174,7 +1174,7 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "{},  {}, {}, {}, {} ,        \n".format(event.azim, event.azim_std, event.elev,
                                                                       event.elev_std,
                                                                       qry_elev_is_max)
-            sql_statement += "{},  {}, {}, {}, {} , {}, {}, {}, \n".format(event.obs_lat,event.obs_lon, event.obs_range,
+            sql_statement += "{},  {}, '{}', {}, {} , {}, {}, {}, \n".format(event.obs_lat,event.obs_lon, event.obs_range,
                                                                       event.ra, event.dec, event.sky_radius,
                                                                       event.min_elev,event.min_stars)
 
@@ -1183,10 +1183,14 @@ class EventMonitor(multiprocessing.Process):
 
             try:
                 cursor = self.db_conn.cursor()
+                print(sql_statement)
                 cursor.execute(sql_statement)
                 self.db_conn.commit()
 
             except:
+                print(sql_statement)
+                if EM_RAISE:
+                    raise
                 log.info("Add event failed")
                 self.recoverFromDatabaseError()
                 return False
