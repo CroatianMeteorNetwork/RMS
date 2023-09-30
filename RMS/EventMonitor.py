@@ -1835,10 +1835,11 @@ class EventMonitor(multiprocessing.Process):
                 archives = glob.glob(os.path.join(event_monitor_directory,"*.bz2"))
 
                 # Make the upload
-                # upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
-                #                       event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
-                #                           rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
-                upload_status = True
+
+                upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
+                                 event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
+                                  rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
+
                 if upload_status:
                     log.info("Upload of {} - attempt no {} was successful".format(event_monitor_directory, retry))
                     # set to the fast check rate after an upload,
