@@ -1861,6 +1861,177 @@ class EventMonitor(multiprocessing.Process):
             shutil.rmtree(event_monitor_directory)
         return upload_status
 
+    def checkTrajectoryEvent(self, observed_event, ev_con, test_mode = False):
+
+        log.info("Checks on trajectories for event at {}".format(observed_event.dt))
+        check_time_start = datetime.datetime.utcnow()
+
+        # Events can be specified in different ways, make sure converted to LatLon
+        observed_event.latLonAzElToLatLonLatLon()
+        # Get the files
+        file_list = self.getFileList(observed_event)
+
+        # If there are no files based on time, then mark as processed and continue
+        if (len(file_list) == 0 or file_list == [None]) and not test_mode:
+            log.info("No files for event - marking {} as processed".format(observed_event.dt))
+            self.markEventAsProcessed(observed_event)
+            # This moves to next observed_event
+            return
+
+        # If there is a .config file then parse it as evcon - not the station config
+        for file in file_list:
+            if file.endswith(self.syscon.config_file_name):
+
+                log.info("Attempt to parse {} as the .config for the event".format(file))
+                if os.path.isfile(file):
+                    log.info("Contemporary .config file found")
+                    if os.path.getsize(file) != 0:
+                        try:
+                            ev_con = cr.parse(file)
+                        except:
+                            log.warning("Unknown error loading .config file; reverting to station .config")
+                            ev_con = cr.parse(self.syscon.config_file_name)
+                    else:
+                        log.warning("Zero size .config file found")
+                        ev_con = cr.parse(self.syscon.config_file_name)
+                        log.warning("Used the station .config file as night directory .config file had zero length")
+                else:
+                    log.info("No .config file found at {}".format(file))
+                    ev_con = cr.parse(self.syscon.config_file_name)
+                    log.warning("Used the station .config file as no contemporary .config file was found")
+
+        # Look for the station code in the stations_required string
+        if observed_event.stations_required.find(ev_con.stationID) != -1:
+            if self.doUpload(observed_event, ev_con, file_list, test_mode):
+                log.info("In Stations_Required - marking {} as processed".format(observed_event.dt))
+                self.markEventAsProcessed(observed_event)
+                if len(file_list) > 0:
+                    self.markEventAsUploaded(observed_event, file_list)
+            else:
+                log.error(
+                    "Upload failed for event at {}. Event retained in database for retry.".format(observed_event.dt))
+            return
+
+        # Initialise the population of trajectories
+        event_population = []
+        # If we have any standard deviation definitions then create a population of 1000, else create a population of 1
+        if observed_event.hasCartSD() or observed_event.hasPolarSD():
+            log.info("Working with standard deviations")
+            event_population = observed_event.appendPopulation(event_population, 1000)
+        else:
+            log.info("Working without standard deviations")
+            event_population = observed_event.appendPopulation(event_population, 1)
+
+        # Apply SD to the population
+        if observed_event.hasCartSD():
+            log.info("Applying cartesian standard deviations")
+            event_population = observed_event.applyCartesianSD(event_population)
+        if observed_event.hasPolarSD():
+            log.info("Applying polar standard deviations")
+            event_population = observed_event.applyPolarSD(event_population)
+
+        # Add trajectories with elevations from observed value to 15 deg
+        if observed_event.elev_is_max:
+            log.info("Rotating trajectory around observed point")
+            event_population = observed_event.addElevationRange(event_population, observed_event, 15)
+
+        # Start testing trajectories from the population
+        for event in event_population:
+            # check if this has already been handled
+            if self.eventProcessed(observed_event.uuid):
+                break  # do no more work on any version of this trajectory - break exits loop
+            # From the infinitely extended trajectory, work out the closest point to the camera
+            # ev_con.elevation is the height above sea level of the station in metres, no conversion required
+            start_dist, end_dist, atmos_dist = calculateClosestPoint(event.lat, event.lon, event.ht * 1000,
+                                                                     event.lat2, event.lon2, event.ht2 * 1000,
+                                                                     ev_con.latitude, ev_con.longitude,
+                                                                     ev_con.elevation)
+            min_dist = min([start_dist, end_dist, atmos_dist])
+
+            # If this version of the trajectory outside the farradius, continue
+            if min_dist > event.far_radius * 1000 and not test_mode:
+                # Do no more work on this version of the trajectory
+                continue
+
+            # If trajectory inside the closeradius, then do the upload and mark as processed
+            if min_dist < event.close_radius * 1000 and not test_mode:
+                # this is just for info
+                log.info(
+                    "Event at {} was {:.0f}km away, inside {:.0f}km so is uploaded with no further checks.".format(
+                        event.dt, min_dist / 1000, event.close_radius))
+                check_time_end = datetime.datetime.utcnow()
+                check_time_seconds = (check_time_end - check_time_start).total_seconds()
+                log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
+                count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
+                    event)
+                # If doUpload returned True mark the event as processed and uploaded
+                if self.doUpload(event, ev_con, file_list, test_mode):
+                    log.info("Inside close radius - marking {} as processed".format(observed_event.dt))
+                    self.markEventAsProcessed(observed_event)
+                    if len(file_list) > 0:
+                        self.markEventAsUploaded(observed_event, file_list)
+                    break  # Do no more work on any version of this trajectory - break exits loop
+                else:
+                    log.error("Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
+
+            # If trajectory inside the farradius, then check if the trajectory went through the FoV
+            # The returned count is the number of 100th parts of the trajectory observed through the FoV
+            if min_dist < event.far_radius * 1000 or test_mode:
+                # log.info("Event at {} was {:4.1f}km away, inside {:4.1f}km, consider FOV.".format(event.dt, min_dist / 1000, event.far_radius))
+                count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
+                    event)
+                if count != 0:
+                    log.info("Event at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(
+                        event.dt, count))
+                    check_time_end = datetime.datetime.utcnow()
+                    check_time_seconds = (check_time_end - check_time_start).total_seconds()
+                    log.info("Check of trajectories took {:2f} seconds".format(check_time_seconds))
+                    if self.doUpload(observed_event, ev_con, file_list, test_mode=test_mode):
+                        self.markEventAsUploaded(observed_event, file_list)
+                        if not test_mode:
+                            log.info(
+                                "Trajectory passed through FoV - marking {} as processed".format(observed_event.dt))
+                            self.markEventAsProcessed(observed_event)
+                        break  # Do no more work on any version of this trajectory
+                    else:
+                        log.error(
+                            "Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
+                    if test_mode:
+                        rp = Platepar()
+                        rp.read(self.getPlateparFilePath(event))
+                        with open(os.path.expanduser(os.path.join(self.syscon.data_dir, "testlog")), 'at') as logfile:
+                            logfile.write(
+                                "{} LOC {} Az:{:3.1f} El:{:3.1f} sta_lat:{:3.4f} sta_lon:{:3.4f} sta_dist:{:3.0f} end_dist:{:3.0f} fov_h:{:3.1f} fov_v:{:3.1f} sa:{:3.1f} ea::{:3.1f} \n".format(
+                                    convertGMNTimeToPOSIX(event.dt), ev_con.stationID, rp.az_centre, rp.alt_centre,
+                                    rp.lat, rp.lon, event.start_distance / 1000, event.end_distance / 1000, rp.fov_h,
+                                    rp.fov_v, event.start_angle, event.end_angle))
+                else:
+
+                    if not test_mode:
+                        pass
+
+                # Continue with other trajectories from this population
+                continue
+
+        # End of the processing loop for this event
+        if self.eventProcessed(observed_event.uuid):
+            log.info("Reached end of checks - {} is processed".format(observed_event.dt))
+            check_time_end = datetime.datetime.utcnow()
+            check_time_seconds = (check_time_end - check_time_start).total_seconds()
+            log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
+
+        else:
+            check_time_end = datetime.datetime.utcnow()
+            check_time_seconds = (check_time_end - check_time_start).total_seconds()
+            log.info("Reached end of checks - {} is processed, nothing to upload".format(observed_event.dt))
+            log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
+            self.markEventAsProcessed(observed_event)
+
+
+    def checkRaDECEvent(self, ev_con, testmode = False):
+
+        pass
+
     def checkEvents(self, ev_con, test_mode = False):
 
         """
@@ -1903,165 +2074,7 @@ class EventMonitor(multiprocessing.Process):
                              .format(float(self.check_interval),time_until_event_end_seconds / 60 ))
                 continue
 
-
-            log.info("Checks on trajectories for event at {}".format(observed_event.dt))
-            check_time_start = datetime.datetime.utcnow()
-            # Iterate through the work
-            # Events can be specified in different ways, make sure converted to LatLon
-            observed_event.latLonAzElToLatLonLatLon()
-            # Get the files
-            file_list = self.getFileList(observed_event)
-
-            # If there are no files based on time, then mark as processed and continue
-            if (len(file_list) == 0 or file_list == [None]) and not test_mode:
-                log.info("No files for event - marking {} as processed".format(observed_event.dt))
-                self.markEventAsProcessed(observed_event)
-                # This moves to next observed_event
-                continue
-
-            # If there is a .config file then parse it as evcon - not the station config
-            for file in file_list:
-                if file.endswith(self.syscon.config_file_name):
-
-                    log.info("Attempt to parse {} as the .config for the event".format(file))
-                    if os.path.isfile(file):
-                        log.info("Contemporary .config file found")
-                        if os.path.getsize(file) != 0:
-                            try:
-                                ev_con = cr.parse(file)
-                            except:
-                                log.warning("Unknown error loading .config file; reverting to station .config")
-                                ev_con = cr.parse(self.syscon.config_file_name)
-                        else:
-                            log.warning("Zero size .config file found")
-                            ev_con = cr.parse(self.syscon.config_file_name)
-                            log.warning("Used the station .config file as night directory .config file had zero length")
-                    else:
-                        log.info("No .config file found at {}".format(file))
-                        ev_con = cr.parse(self.syscon.config_file_name)
-                        log.warning("Used the station .config file as no contemporary .config file was found")
-
-
-            # Look for the station code in the stations_required string
-            if observed_event.stations_required.find(ev_con.stationID) != -1:
-                if self.doUpload(observed_event, ev_con, file_list, test_mode):
-                    log.info("In Stations_Required - marking {} as processed".format(observed_event.dt))
-                    self.markEventAsProcessed(observed_event)
-                    if len(file_list) > 0:
-                        self.markEventAsUploaded(observed_event, file_list)
-                else:
-                    log.error("Upload failed for event at {}. Event retained in database for retry.".format(observed_event.dt))
-                continue
-
-            # Initialise the population of trajectories
-            event_population = []
-            # If we have any standard deviation definitions then create a population of 1000, else create a population of 1
-            if observed_event.hasCartSD() or observed_event.hasPolarSD():
-                log.info("Working with standard deviations")
-                event_population = observed_event.appendPopulation(event_population,1000)
-            else:
-                log.info("Working without standard deviations")
-                event_population = observed_event.appendPopulation(event_population,1)
-
-
-
-            # Apply SD to the population
-            if observed_event.hasCartSD():
-                log.info("Applying cartesian standard deviations")
-                event_population = observed_event.applyCartesianSD(event_population)
-            if observed_event.hasPolarSD():
-                log.info("Applying polar standard deviations")
-                event_population = observed_event.applyPolarSD(event_population)
-
-            # Add trajectories with elevations from observed value to 15 deg
-            if observed_event.elev_is_max:
-                log.info("Rotating trajectory around observed point")
-                event_population = observed_event.addElevationRange(event_population, observed_event, 15)
-
-            # Start testing trajectories from the population
-            for event in event_population:
-                # check if this has already been handled
-                if self.eventProcessed(observed_event.uuid):
-                    break # do no more work on any version of this trajectory - break exits loop
-                # From the infinitely extended trajectory, work out the closest point to the camera
-                # ev_con.elevation is the height above sea level of the station in metres, no conversion required
-                start_dist, end_dist, atmos_dist = calculateClosestPoint(event.lat, event.lon, event.ht * 1000,
-                                                                              event.lat2, event.lon2, event.ht2 * 1000,
-                                                                              ev_con.latitude, ev_con.longitude, ev_con.elevation)
-                min_dist = min([start_dist, end_dist, atmos_dist])
-
-                # If this version of the trajectory outside the farradius, continue
-                if min_dist > event.far_radius * 1000 and not test_mode:
-                    # Do no more work on this version of the trajectory
-                    continue
-
-            # If trajectory inside the closeradius, then do the upload and mark as processed
-                if min_dist < event.close_radius * 1000 and not test_mode:
-                    # this is just for info
-                    log.info("Event at {} was {:.0f}km away, inside {:.0f}km so is uploaded with no further checks.".format(event.dt, min_dist / 1000, event.close_radius))
-                    check_time_end = datetime.datetime.utcnow()
-                    check_time_seconds = (check_time_end- check_time_start).total_seconds()
-                    log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
-                    count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
-                        event)
-                    # If doUpload returned True mark the event as processed and uploaded
-                    if self.doUpload(event, ev_con, file_list, test_mode):
-                        log.info("Inside close radius - marking {} as processed".format(observed_event.dt))
-                        self.markEventAsProcessed(observed_event)
-                        if len(file_list) > 0:
-                            self.markEventAsUploaded(observed_event, file_list)
-                        break # Do no more work on any version of this trajectory - break exits loop
-                    else:
-                        log.error("Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
-
-            # If trajectory inside the farradius, then check if the trajectory went through the FoV
-            # The returned count is the number of 100th parts of the trajectory observed through the FoV
-                if min_dist < event.far_radius * 1000 or test_mode:
-                    #log.info("Event at {} was {:4.1f}km away, inside {:4.1f}km, consider FOV.".format(event.dt, min_dist / 1000, event.far_radius))
-                    count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(event)
-                    if count != 0:
-                        log.info("Event at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(event.dt, count))
-                        check_time_end = datetime.datetime.utcnow()
-                        check_time_seconds = (check_time_end - check_time_start).total_seconds()
-                        log.info("Check of trajectories took {:2f} seconds".format(check_time_seconds))
-                        if self.doUpload(observed_event, ev_con, file_list, test_mode=test_mode):
-                            self.markEventAsUploaded(observed_event, file_list)
-                            if not test_mode:
-                                log.info("Trajectory passed through FoV - marking {} as processed".format(observed_event.dt))
-                                self.markEventAsProcessed(observed_event)
-                            break # Do no more work on any version of this trajectory
-                        else:
-                            log.error("Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
-                        if test_mode:
-                            rp = Platepar()
-                            rp.read(self.getPlateparFilePath(event))
-                            with open(os.path.expanduser(os.path.join(self.syscon.data_dir, "testlog")), 'at') as logfile:
-                                logfile.write(
-                                    "{} LOC {} Az:{:3.1f} El:{:3.1f} sta_lat:{:3.4f} sta_lon:{:3.4f} sta_dist:{:3.0f} end_dist:{:3.0f} fov_h:{:3.1f} fov_v:{:3.1f} sa:{:3.1f} ea::{:3.1f} \n".format(
-                                    convertGMNTimeToPOSIX(event.dt), ev_con.stationID, rp.az_centre, rp.alt_centre,
-                                    rp.lat, rp.lon, event.start_distance / 1000, event.end_distance / 1000, rp.fov_h,
-                                    rp.fov_v, event.start_angle, event.end_angle))
-                    else:
-
-                        if not test_mode:
-                            pass
-
-                    # Continue with other trajectories from this population
-                    continue
-
-            # End of the processing loop for this event
-            if self.eventProcessed(observed_event.uuid):
-                log.info("Reached end of checks - {} is processed".format(observed_event.dt))
-                check_time_end = datetime.datetime.utcnow()
-                check_time_seconds = (check_time_end - check_time_start).total_seconds()
-                log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
-
-            else:
-                check_time_end = datetime.datetime.utcnow()
-                check_time_seconds = (check_time_end - check_time_start).total_seconds()
-                log.info("Reached end of checks - {} is processed, nothing to upload".format(observed_event.dt))
-                log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
-                self.markEventAsProcessed(observed_event)
+            self.checkTrajectoryEvent(observed_event,ev_con, test_mode)
 
         if len(unprocessed) - future_events > 1:
             log.info("{} events were processed, EventMonitor work completed"
