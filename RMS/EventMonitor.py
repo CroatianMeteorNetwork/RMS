@@ -1183,7 +1183,6 @@ class EventMonitor(multiprocessing.Process):
 
             try:
                 cursor = self.db_conn.cursor()
-                print(sql_statement)
                 cursor.execute(sql_statement)
                 self.db_conn.commit()
 
