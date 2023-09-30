@@ -930,8 +930,8 @@ class EventMonitor(multiprocessing.Process):
             log.info("Missing db column ObsLon")
             self.addDBcol("ObsLon","REAL")
 
-        if not self.checkDBcol(conn,"Suffix"):
-            log.info("Missing db column ObsRamge")
+        if not self.checkDBcol(conn,"ObsRange"):
+            log.info("Missing db column ObsRange")
             self.addDBcol("ObsRange","TEXT")
 
         if not self.checkDBcol(conn,"Ra"):
