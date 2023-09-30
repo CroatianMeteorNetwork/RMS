@@ -2138,13 +2138,13 @@ class EventMonitor(multiprocessing.Process):
             log.info("Reached end of checks - {} is processed".format(target.dt))
             check_time_end = datetime.datetime.utcnow()
             check_time_seconds = (check_time_end - check_time_start).total_seconds()
-            log.info("Check of RaRec event time elapsed {:.2f} seconds".format(check_time_seconds))
+            log.info("Check of RaDec event time elapsed {:.2f} seconds".format(check_time_seconds))
 
         else:
             check_time_end = datetime.datetime.utcnow()
             check_time_seconds = (check_time_end - check_time_start).total_seconds()
             log.info("Reached end of checks - {} is processed, nothing to upload".format(target.dt))
-            log.info("Check of RaRec event time elapsed {:.2f} seconds".format(check_time_seconds))
+            log.info("Check of RaDec event time elapsed {:.2f} seconds".format(check_time_seconds))
             self.markEventAsProcessed(target)
 
     def checkEvents(self, ev_con, test_mode = False):
