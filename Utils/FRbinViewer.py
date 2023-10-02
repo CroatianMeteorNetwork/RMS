@@ -265,7 +265,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
                 if os.system(software_name + " --help > /dev/null"):
                     software_name = "ffmpeg"
                     # Construct the ecommand for ffmpeg           
-                    com = software_name + " -y -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(first_frame) + " -i " + img_patt +" " + mp4_path
+                    com = software_name + " -y -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(first_frame) + " -i " + img_patt +" -pix_fmt yuv420p " + mp4_path
                 else:
                     com = "cd " + dir_path + ";" \
                         + software_name + " -v quiet -r 30 -y -start_number " + str(first_frame) + " -i " + img_patt \
