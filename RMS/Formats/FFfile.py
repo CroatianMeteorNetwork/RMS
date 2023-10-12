@@ -337,6 +337,13 @@ def validFFName(ff_file, fmt=None):
     return False
 
 
+def convertFRNameToFF(fr_name):
+    """ Convert the FR name format to an FF format. """
+
+    if fr_name.startswith("FR_") and fr_name.endswith(".bin"):
+        fr_name = fr_name.replace("FR_", "FF_", 1).replace(".bin", ".fits")
+
+    return fr_name
 
 
 if __name__ == '__main__':
