@@ -51,6 +51,12 @@ pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Routines.DynamicFTPCompressionCy import FFMimickInterface
 
 
+# ConstantsO
+UWO_MAGICK_CAMO = 1144018537
+UWO_MAGICK_EMCCD = 1141003881
+UWO_MAGICK_ASGARD = 38037846
+
+
 def getCacheID(first_frame, size):
     """ Get the frame chunk ID. """
 
@@ -1217,6 +1223,8 @@ class InputTypeUWOVid(InputType):
             return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
 
 
+
+    
 class InputTypeImages(object):
     def __init__(self, dir_path, config, beginning_time=None, fps=None, detection=False):
         """ Input file type handle for a folder with images.
@@ -1321,11 +1329,11 @@ class InputTypeImages(object):
         # Load the first image
         img = self.loadFrame(fr_no=0)
 
+        # Get the magick type
+        self.uwo_magick_type = self.getUWOMagickType(img)
 
-        # Check the magick number for UWO PNGs
-        if ((img[0][0] == 22121) and (img[0][1] == 17410)) \
-            or ((img[0][0] == 86) and (img[0][1] == 105)) \
-            or ((img[0][0] == 22121) and (img[0][1] == 17456)):
+        if self.uwo_magick_type is not None:
+
             self.uwo_png_mode = True
 
             # Get the beginning time
@@ -1815,13 +1823,20 @@ class InputTypeImages(object):
                     tu = (frame[0][27] << 24) + (frame[0][26] << 16) + (frame[0][25] << 8) + frame[0][24]
 
             else:
-
+                
                 # Byteswap if it's the UWO style 16-bit png
                 frame = frame.byteswap()
 
-                # Read the time from the image for 16 bit images
-                ts = frame[0][6] + (frame[0][7] << 16)
-                tu = frame[0][8] + (frame[0][9] << 16)
+                if self.uwo_magick_type == "emccd":
+                    # Read the time from the image for 16 bit images
+                    ts = frame[0][6] + (frame[0][7] << 16)
+                    tu = frame[0][8] + (frame[0][9] << 16)
+
+                else:
+
+                    # Read the time from the image for 16 bit images
+                    ts = frame[0][10] + (frame[0][11] << 16)
+                    tu = frame[0][12] + (frame[0][13] << 16)
 
 
             frame_dt = unixTime2Date(ts, tu, dt_obj=True)
@@ -1937,6 +1952,32 @@ class InputTypeImages(object):
 
         else:
             return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
+        
+
+    def getUWOMagickType(self, img):
+        """ Return the type of the UWO PNG image. """
+
+        # Read in the magick number as a uint32
+        magicknum = np.frombuffer(img[0], dtype=np.uint32)[0]
+
+        # Define the magick numbers for different UWO PNGs
+        uwo_magick_num_list = [UWO_MAGICK_CAMO, UWO_MAGICK_EMCCD, UWO_MAGICK_ASGARD]
+
+        # Check the magick number for UWO PNGs
+        if magicknum in uwo_magick_num_list:
+
+            # Set the magick type
+            if magicknum == UWO_MAGICK_CAMO:
+                uwo_magick_type = "camo"
+            elif magicknum == UWO_MAGICK_EMCCD:
+                uwo_magick_type = "emccd"
+            elif magicknum == UWO_MAGICK_ASGARD:
+                uwo_magick_type = "asgard"
+
+            return uwo_magick_type
+
+        else:
+            return None
 
 
 class InputTypeDFN(InputType):
