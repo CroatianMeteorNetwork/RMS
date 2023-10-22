@@ -1630,21 +1630,18 @@ class EventMonitor(multiprocessing.Process):
             [bool] : True if RaDEC in FoV
 
         """
-        # Calculate diagonal FoV of camera
-        diagonal_fov = np.sqrt(rp.fov_v ** 2 + rp.fov_h ** 2)
-        # Calculate minimum FoV of camera
+
+        # Calculate minimum FoV of camera - not using diagonal as not restrictive enough
         min_fov = min(rp.fov_v, rp.fov_h)
-
-
 
         # the az_centre, alt_centre of the camera
         az_c, alt_c = platepar2AltAz(rp)
         jd = datetime2JD(convertGMNTimeToPOSIX(event.dt))
 
-        # calculate elevation
-
+        # calculate elevation of RaDec to tangent of surface of earth at camera.
         az_t, el_t = raDec2AltAz(event.ra, event.dec,jd, ev_con.latitude, ev_con.longitude)
 
+        # if not above min_elev
         if el_t < event.min_elev:
             return False
 
@@ -1657,13 +1654,14 @@ class EventMonitor(multiprocessing.Process):
         # normalise
         fov_vec, target_vec = vectNorm(fov_vec), vectNorm(target_vec)
 
-        log.info("Event Time {}".format(event.dt))
-        log.info("Camera Alt, Az {},{}".format(az_c,alt_c))
-        log.info("Field of view RaDec {:.2f},{:.2f}".format(fov_ra,fov_dec))
-        log.info("Target RaDec {:.2f},{:.2f}".format(event.ra, event.dec))
-        log.info("Angular separation {:.2f}".format(angularSeparationVectDeg(target_vec, fov_vec)))
+        # temporary logging for debugging
+        log.info("RADecEvent Time {}".format(event.dt))
+        log.info("    Camera Alt, Az, min_fov {:.2f}, {:.2f}, {:.2f}".format(az_c,alt_c, min_fov))
+        log.info("        Field of view RaDec {:.2f}, {:.2f}".format(fov_ra,fov_dec))
+        log.info("        Target RaDec        {:.2f}, {:.2f}".format(event.ra, event.dec))
+        log.info("        Angular separation  {:.2f}".format(angularSeparationVectDeg(target_vec, fov_vec)))
 
-        # return whether the targets sky_radius is in the FoV
+        # return whether any part of the targets sky_radius is in the FoV
         return angularSeparationVectDeg(target_vec, fov_vec) < ((min_fov / 2) + abs(event.sky_radius))
 
 
@@ -1897,7 +1895,7 @@ class EventMonitor(multiprocessing.Process):
                 # Make the upload
 
                 upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
-                                 event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
+                                  event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
                                   rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
 
 
@@ -1927,6 +1925,9 @@ class EventMonitor(multiprocessing.Process):
 
         log.info("Checks on trajectories for event at {}".format(observed_event.dt))
         check_time_start = datetime.datetime.utcnow()
+
+        log.info("Checking event with lat, lon, ht  {},{},{}".format(observed_event.lat, observed_event.lon, observed_event.ht))
+        log.info("                    lat2,lon2,ht2 {},{},{}".format(observed_event.lat2,observed_event.lon2, observed_event.ht2))
 
         # Events can be specified in different ways, make sure converted to LatLon
         observed_event.latLonAzElToLatLonLatLon()
@@ -2000,6 +2001,8 @@ class EventMonitor(multiprocessing.Process):
         # Start testing trajectories from the population
         for event in event_population:
             # check if this has already been handled
+
+
             if self.eventProcessed(observed_event.uuid):
                 break  # do no more work on any version of this trajectory - break exits loop
             # From the infinitely extended trajectory, work out the closest point to the camera
