@@ -1358,7 +1358,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         fig, ax = plt.subplots(2, sharex=True)
         plot_format = mdates.DateFormatter('%H:%M')
 
-        ax[0].set_title("Total observing time = {:.2f} h".format(total_observing_time))
+        ax[0].set_title("Flux total observing time = {:.2f} h".format(total_observing_time))
 
         ax[0].xaxis.set_major_formatter(plot_format)
 
