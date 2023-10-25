@@ -336,7 +336,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     plt.savefig(filenam, bbox_inches='tight', pad_inches=0, dpi=dpi, facecolor='k', edgecolor='k')
     print('saved to {}'.format(filenam))
     #
-    print("Staking time: {}".format(datetime.timedelta(seconds=(int(time.time() - start_time)))))
+    print("Stacking time: {}".format(datetime.timedelta(seconds=(int(time.time() - start_time)))))
     if hide_plot is False:
         plt.show()
 
