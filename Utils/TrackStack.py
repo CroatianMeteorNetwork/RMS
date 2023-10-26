@@ -1,4 +1,4 @@
-
+from __future__ import print_function
 
 import os
 import json
@@ -441,10 +441,11 @@ def shouldInclude(shower_list, ff_name, associations):
             return False
 
 def printProgress(current, total):
+    symbol = u'\u2588'.encode('utf-8')
     progress_bar_len = 20
     progress = int(progress_bar_len * current / total)
     percent = 100 * current / total
-    print("\rStacking : {:02.0f}%|{}{}| {}/{} ".format(percent, "█" * progress, " " * (progress_bar_len - progress), current, total), end="")
+    print("\rStacking : {:02.0f}%|{}{}| {}/{} ".format(percent, symbol * progress, " " * (progress_bar_len - progress), current, total), end="")
     if current == total:
         print("")
 
