@@ -1,6 +1,6 @@
 from __future__ import print_function
 
-import os
+import os, sys
 import json
 import copy
 from glob import glob
@@ -440,8 +440,13 @@ def shouldInclude(shower_list, ff_name, associations):
         except:
             return False
 
+
 def printProgress(current, total):
-    symbol = u'\u2588'.encode('utf-8')
+    symbol = u'\u2588'
+    try:
+        symbol = str(symbol)
+    except UnicodeEncodeError:
+        symbol = symbol.encode('utf-8')
     progress_bar_len = 20
     progress = int(progress_bar_len * current / total)
     percent = 100 * current / total
