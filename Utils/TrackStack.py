@@ -256,7 +256,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     cores = mp.cpu_count()
     if one_core_free and cores > 1:
         cores -= 1
-    thead_pool = QueuedPool(stackFrame, cores=cores, backup_dir=None, func_extra_args=(recalibrated_platepars, mask, border,
+    thead_pool = QueuedPool(stackFrame, cores=cores, backup_dir=None, print_state=False, func_extra_args=(recalibrated_platepars, mask, border,
                                                                                    pp_ref, img_size, jd_middle, pp_stack, config,
                                                                                    avg_stack_sum_shared, avg_stack_count_shared, max_deaveraged_shared,
                                                                                    background_compensation, finished_count, num_ffs))
