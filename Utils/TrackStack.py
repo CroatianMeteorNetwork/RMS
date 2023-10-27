@@ -253,21 +253,20 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
 
     enumlist = ff_found_list
     # Create task pool
-    symbol = getProgressSymbol()
     cores = mp.cpu_count()
     if one_core_free and cores > 1:
         cores -= 1
     thead_pool = QueuedPool(stackFrame, cores=cores, backup_dir=None, print_state=False, func_extra_args=(recalibrated_platepars, mask, border,
                                                                                    pp_ref, img_size, jd_middle, pp_stack, config,
                                                                                    avg_stack_sum_shared, avg_stack_count_shared, max_deaveraged_shared,
-                                                                                   background_compensation, finished_count, num_ffs, symbol))
+                                                                                   background_compensation, finished_count, num_ffs))
     thead_pool.startPool()
     # add jobs
     for i, ff_name in enumerate(enumlist):
         if shouldInclude(showers, ff_name, associations):
             num_plotted += 1
             thead_pool.addJob([ff_name])
-    printProgress(0, num_plotted, symbol)
+    printProgress(0, num_plotted)
     thead_pool.closePool()
 
     # End if the number of plotted FFs is zero
@@ -346,7 +345,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
 
 
 def stackFrame(ff_name, recalibrated_platepars, mask, border, pp_ref, img_size, jd_middle, pp_stack, conf, avg_stack_sum_arr,
-               avg_stack_count_arr, max_deaveraged_arr, background_compensation, finished_count, num_ffs, symbol):
+               avg_stack_count_arr, max_deaveraged_arr, background_compensation, finished_count, num_ffs):
     ff_basename = os.path.basename(ff_name)
 
     avg_stack_sum = getArray(img_size, avg_stack_sum_arr)
@@ -428,7 +427,7 @@ def stackFrame(ff_name, recalibrated_platepars, mask, border, pp_ref, img_size, 
     with finished_count.get_lock():
         finished_count.value += 1
     # print progress
-    printProgress(finished_count.value, num_ffs, symbol)
+    printProgress(finished_count.value, num_ffs)
 
 
 def shouldInclude(shower_list, ff_name, associations):
@@ -443,11 +442,11 @@ def shouldInclude(shower_list, ff_name, associations):
             return False
 
 
-def printProgress(current, total, symbol):
+def printProgress(current, total):
     progress_bar_len = 20
     progress = int(progress_bar_len * current / total)
     percent = 100 * current / total
-    print("\rStacking : {:02.0f}%|{}{}| {}/{} ".format(percent, symbol * progress, " " * (progress_bar_len - progress), current, total), end="")
+    print("\rStacking : {:02.0f}%|{}{}| {}/{} ".format(percent, "#" * progress, " " * (progress_bar_len - progress), current, total), end="")
     if current == total:
         print("")
 
@@ -455,23 +454,6 @@ def printProgress(current, total, symbol):
 def getArray(size, shared_arr):
     numpy_arr = np.ctypeslib.as_array(shared_arr.get_obj())
     return numpy_arr.reshape(size, size)
-
-
-def getProgressSymbol():
-    # unicode "full block" symbol
-    symbol = u'\u2588'
-    try:
-        # will fail for python 2 and ascii codec - need encode
-        symbol = str(symbol)
-        try:
-            # will fail for python 3 and non unicode locale (i.e. for latin-1) - need replace by ascii symbol
-            "{}".format(symbol)
-        except UnicodeEncodeError:
-            symbol = "#"
-    except UnicodeEncodeError:
-        # on python 2 we need encode to unicode
-        symbol = symbol.encode('utf-8')
-    return symbol
 
 
 if __name__ == "__main__":
