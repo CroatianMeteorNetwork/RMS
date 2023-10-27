@@ -264,8 +264,9 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     # add jobs
     for i, ff_name in enumerate(enumlist):
         if shouldInclude(showers, ff_name, associations):
-            num_plotted = + 1
+            num_plotted += 1
             thead_pool.addJob([ff_name])
+    printProgress(0, num_plotted)
     thead_pool.closePool()
 
     # End if the number of plotted FFs is zero
