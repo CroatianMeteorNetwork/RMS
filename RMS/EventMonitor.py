@@ -1357,7 +1357,7 @@ class EventMonitor(multiprocessing.Process):
         platepar_file = ""
 
         if len(self.getDirectoryList(event)) > 0:
-            platepar_file_list = self.getFile("platepar_cmn2010.cal", self.getDirectoryList(event)[0])
+            platepar_file_list = self.getFile(self.syscon.platepar_name, self.getDirectoryList(event)[0])
             if len(platepar_file_list) > 0:
                 platepar_file = platepar_file_list[0]
             else:
