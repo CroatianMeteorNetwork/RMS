@@ -67,7 +67,7 @@ from Utils.StackFFs import stackFFs
 from Utils.FRbinViewer import view
 from Utils.BatchFFtoImage import batchFFtoImage
 from RMS.CaptureDuration import captureDuration
-
+from RMS.Misc import sanitise
 
 # Import Cython functions
 import pyximport
@@ -109,7 +109,7 @@ EventLatStd (deg)	     : 1.0			    #Event start latitude polar standard deviatio
 EventLonStd (deg)	     : 1.0		        #Event start longitude polar standard deviation
 EventLat2 (deg +N)       : -31			    #Event end latitude
 EventLon2Std (deg)	     : 1.0			    #Event end longitude standard deviation
-
+Suffix                   : event            #Free text suffix to the uploaded archive
 
 END						                    #Event delimiter - everything after this is associated with a new event
 
@@ -146,6 +146,7 @@ class EventContainer(object):
 
         self.start_distance, self.start_angle, self.end_distance, self.end_angle = 0, 0, 0, 0
         self.fovra, self.fovdec = 0, 0
+        self.suffix = "event"
 
     def setValue(self, variable_name, value):
 
@@ -210,6 +211,7 @@ class EventContainer(object):
         self.stations_required = str(value) if "StationsRequired" == variable_name else self.stations_required
         self.uuid = str(value) if "uuid" == variable_name else self.uuid
         self.respond_to = str(value) if "RespondTo" == variable_name else self.respond_to
+        self.suffix = sanitise(str(value).strip(), space_substitution="_") if "Suffix" == variable_name else self.suffix
 
     def eventToString(self):
 
@@ -262,6 +264,7 @@ class EventContainer(object):
         output += "# Station information        \n"
         output += ("Field of view RA         : {:3.2f}\n".format(self.fovra))
         output += ("Field of view Dec        : {:3.2f}\n".format(self.fovdec))
+        output += ("Suffix                   : {}\n".format(self.suffix))
         output += "\n"
         output += "END"
         output += "\n"
@@ -792,6 +795,7 @@ class EventMonitor(multiprocessing.Process):
                 """SELECT name FROM sqlite_master WHERE type = 'table' and name = 'event_monitor';""").fetchall()
 
             if tables:
+                self.upgradeDB(conn)
                 return conn
         except:
             return None
@@ -830,7 +834,8 @@ class EventMonitor(multiprocessing.Process):
                             uploadedstatus BOOL,
                             receivedbyserver BOOL,
                             uuid TEXT,              
-                            RespondTo TEXT
+                            RespondTo TEXT,
+                            Suffix TEXT
                             )""")
 
         # Commit the changes
@@ -870,6 +875,12 @@ class EventMonitor(multiprocessing.Process):
         else:
             return False
 
+    def upgradeDB(self,conn):
+
+        if not self.checkDBcol(conn,"Suffix"):
+            log.info("Missing db column Suffix")
+            self.addDBcol("Suffix","TEXT")
+
     def addDBcol(self, column, coltype):
         """ Add a new column to the database
 
@@ -893,6 +904,32 @@ class EventMonitor(multiprocessing.Process):
             return True
         except:
             return False
+
+    def checkDBcol(self, conn,column):
+
+        """ Check column exists
+
+        Arguments:
+            conn: [connection] database connection
+            column: [string] Name of column to check for
+
+
+        Return:
+            Status: [bool] True if column exists
+
+        """
+
+        sql_command = ""
+        sql_command += "SELECT COUNT(*) AS COL"
+        sql_command += " FROM pragma_table_info('event_monitor')"
+        sql_command += " WHERE name='{}'  \n".format(column)
+
+        try:
+            return (conn.cursor().execute(sql_command).fetchone())[0] != 0
+        except:
+            return False
+
+
 
     def deleteDBoldrecords(self):
 
@@ -1037,7 +1074,7 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "CloseRadius, FarRadius,                     \n"
             sql_statement += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, EventCart2Std,    \n"
             sql_statement += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax,    \n"
-            sql_statement += "processedstatus, uploadedstatus, uuid, RespondTo, StationsRequired, timeadded \n"
+            sql_statement += "processedstatus, uploadedstatus, uuid, RespondTo, StationsRequired, Suffix, timeadded \n"
             sql_statement += ")                                           \n"
 
             sql_statement += "VALUES "
@@ -1051,7 +1088,7 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "{},  {}, {}, {}, {} ,        \n".format(event.azim, event.azim_std, event.elev,
                                                                       event.elev_std,
                                                                       qry_elev_is_max)
-            sql_statement += "{},  {}, '{}', '{}', '{}' ,       \n".format(0, 0,uuid.uuid4(), event.respond_to, event.stations_required)
+            sql_statement += "{},  {}, '{}', '{}', '{}' , '{}',    \n".format(0, 0,uuid.uuid4(), event.respond_to, event.stations_required, event.suffix)
             sql_statement += "CURRENT_TIMESTAMP ) \n"
 
             try:
@@ -1285,7 +1322,7 @@ class EventMonitor(multiprocessing.Process):
         sql_query_cols += "FarRadius,CloseRadius, uuid,"
         sql_query_cols += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, "
         sql_query_cols += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax, RespondTo, StationsRequired,"
-        sql_query_cols += "EventCartStd, EventCart2Std"
+        sql_query_cols += "EventCartStd, EventCart2Std, Suffix"
         sql_statement += sql_query_cols
         sql_statement += " \n"
         sql_statement += "FROM event_monitor "
@@ -1319,7 +1356,7 @@ class EventMonitor(multiprocessing.Process):
     def getFile(self, file_name, directory):
 
         """ Get the path to the file in the directory if it exists.
-            If not, then return the path to ~/source/RMS
+            If not, then return the path to RMS root directory
 
 
             Arguments:
@@ -1329,18 +1366,22 @@ class EventMonitor(multiprocessing.Process):
             Return:
                  file: [string] Path to platepar
         """
-
+        log.info("Seeking {} in {}".format(file_name,directory))
         file_list = []
         if os.path.isfile(os.path.join(directory, file_name)):
             file_list.append(str(os.path.join(directory, file_name)))
             return file_list
         else:
 
+
             if os.path.isfile(os.path.join(os.path.expanduser(self.config.config_file_name), file_name)):
                 file_list.append(str(os.path.join(os.path.expanduser(self.config.config_file_name), file_name)))
                 log.info("Using {} as fallback .config file".format(self.config.config_file_name))
+
+
                 return file_list
         return []
+
 
     def getPlateparFilePath(self, event):
 
@@ -1357,6 +1398,7 @@ class EventMonitor(multiprocessing.Process):
         platepar_file = ""
 
         if len(self.getDirectoryList(event)) > 0:
+
             platepar_file_list = self.getFile("platepar_cmn2010.cal", self.getDirectoryList(event)[0])
             if len(platepar_file_list) > 0:
                 platepar_file = platepar_file_list[0]
@@ -1476,9 +1518,11 @@ class EventMonitor(multiprocessing.Process):
         file_list = []
 
         file_list += self.findEventFiles(event, self.getDirectoryList(event), [".fits", ".bin"])
+        #have to use system .config file_name here because we have not yet identified the files for the event
+        log.info("Using {} as .config file name".format(self.syscon.config_file_name))
         if len(self.getDirectoryList(event)) > 0:
-            file_list += self.getFile(".config", self.getDirectoryList(event)[0])
-            file_list += self.getFile("platepar_cmn2010.cal", self.getDirectoryList(event)[0])
+            file_list += self.getFile(os.path.basename(self.syscon.config_file_name), self.getDirectoryList(event)[0])
+            file_list += self.getFile(self.syscon.platepar_name, self.getDirectoryList(event)[0])
 
         return file_list
 
@@ -1567,6 +1611,7 @@ class EventMonitor(multiprocessing.Process):
         # Read in the platepar for the event
         rp = Platepar()
         if self.getPlateparFilePath(event) == "":
+            log.info("Reading platepar from {}".format(os.path.abspath('.')))
             rp.read(os.path.abspath('.'))
         else:
             rp.read(self.getPlateparFilePath(event))
@@ -1599,21 +1644,21 @@ class EventMonitor(multiprocessing.Process):
             log.warning("Call to doUpload for already processed event {}".format(event.dt))
 
         event_monitor_directory = os.path.expanduser(os.path.join(self.syscon.data_dir, "EventMonitor"))
-        upload_filename = "{}_{}_{}".format(evcon.stationID, event.dt, "event")
+        upload_filename = "{}_{}_{}".format(evcon.stationID, event.dt, sanitise(event.suffix))
         # Try and bake the camera network name and group name into the path structure of the archive
         if evcon.network_name is not None and evcon.camera_group_name is not None:
             #create path for this_event_directory
             #get rid of spaces from network name and group name
             this_event_directory = os.path.join(event_monitor_directory,
                                                     upload_filename,
-                                                        evcon.network_name.replace(" ",""),
-                                                            evcon.camera_group_name.replace(" ",""),
-                                                                evcon.stationID)
+                                                        sanitise(evcon.network_name),
+                                                            sanitise(evcon.camera_group_name),
+                                                                sanitise(evcon.stationID))
 
             log.info("Network {} and group {} so creating {}"
-                                .format(evcon.network_name,evcon.camera_group_name, this_event_directory))
+                                .format(sanitise(evcon.network_name),sanitise(evcon.camera_group_name), this_event_directory))
         else:
-            this_event_directory = os.path.join(event_monitor_directory, upload_filename, evcon.stationID)
+            this_event_directory = os.path.join(event_monitor_directory, upload_filename, sanitise(evcon.stationID))
             log.info("Network and group not defined so creating {}".format(this_event_directory))
 
         # get rid of the eventdirectory, should never be needed
@@ -1784,8 +1829,26 @@ class EventMonitor(multiprocessing.Process):
 
             # If there is a .config file then parse it as evcon - not the station config
             for file in file_list:
-                if file.endswith(".config"):
-                    ev_con = cr.parse(file)
+                if file.endswith(self.syscon.config_file_name):
+
+                    log.info("Attempt to parse {} as the .config for the event".format(file))
+                    if os.path.isfile(file):
+                        log.info("Contemporary .config file found")
+                        if os.path.getsize(file) != 0:
+                            try:
+                                ev_con = cr.parse(file)
+                            except:
+                                log.warning("Unknown error loading .config file; reverting to station .config")
+                                ev_con = cr.parse(self.syscon.config_file_name)
+                        else:
+                            log.warning("Zero size .config file found")
+                            ev_con = cr.parse(self.syscon.config_file_name)
+                            log.warning("Used the station .config file as night directory .config file had zero length")
+                    else:
+                        log.info("No .config file found at {}".format(file))
+                        ev_con = cr.parse(self.syscon.config_file_name)
+                        log.warning("Used the station .config file as no contemporary .config file was found")
+
 
             # Look for the station code in the stations_required string
             if observed_event.stations_required.find(ev_con.stationID) != -1:
@@ -1932,6 +1995,9 @@ class EventMonitor(multiprocessing.Process):
             log.info("EventMonitor function test success")
             super(EventMonitor, self).start()
             log.info("EventMonitor was started")
+            log.info("Using {} as fallback directory".format(os.path.join(os.path.abspath("."))))
+            log.info("Using {} as config filename".format(self.syscon.config_file_name))
+            log.info("Using {} as platepar filename".format(self.syscon.platepar_name))
         else:
             log.error("EventMonitor function test fail - not starting EventMonitor")
 
@@ -1994,12 +2060,14 @@ class EventMonitor(multiprocessing.Process):
         """
 
         # Delay to allow capture to check existing folders - keep the logs tidy
+
         time.sleep(30)
 
         while not self.exit.is_set():
             self.checkDBExists()
             self.getEventsAndCheck()
             log.info("Event monitor check completed")
+
             start_time, duration = captureDuration(self.syscon.latitude, self.syscon.longitude, self.syscon.elevation)
             if not isinstance(start_time, bool):
                 log.info('Next capture start time: ' + str(start_time) + ' UTC')
@@ -2662,6 +2730,33 @@ def testApplyPolarSD():
     success = success if abs(e.ht - ht1mn) < 5 and (e.ht2 - ht2mn) < 10 else False
     return success
 
+def testsanitise():
+
+    success = True
+
+    if "This_string_is_safe" == sanitise("This string is safe", space_substitution="_", log_changes= False):
+        success = success
+    else:
+        success = False
+
+    if "Thisstringis_alsosafebuthasspacesstripped" == sanitise("This string is _ also safe but has spaces stripped", log_changes= False):
+        success = success
+    else:
+        success = False
+
+    if "This_string_is_-_also_safe_but_has_spaces_converted_to_us" == sanitise("This string is - also safe but has spaces converted to us", space_substitution="_", log_changes= False):
+        success = success
+    else:
+        success = False
+
+
+    if "This string is - not  safe but has spaces left in place" == sanitise("This string is - not ?.,`?/%%^&* safe but has spaces left in place", space_substitution=" ", log_changes= False):
+        success = success
+    else:
+        success = False
+
+    return success
+
 
 def testIndividuals(logging = True):
 
@@ -2678,6 +2773,16 @@ def testIndividuals(logging = True):
     """
 
     individuals_success = True
+
+
+
+    if testsanitise():
+        if logging:
+            log.info("santise passed tests")
+    else:
+        log.error("sanitise failed tests")
+        individuals_success = False
+
 
     if testRevAz():
         if logging:
