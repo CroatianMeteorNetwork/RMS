@@ -534,6 +534,18 @@ class Config:
         # Path to flux showers
         self.showers_flux_file_name = 'flux_showers.csv'
 
+        # Path to file with shower activity parameters
+        self.shower_activity_file_name = "flux_activity.csv"
+
+        # Sporadic ZHR to be used in the dial on the flux website
+        self.background_sporadic_zhr = 25
+
+        # Path to the template flux dial SVG file
+        self.flux_dial_template_svg = os.path.join(self.rms_root_dir, 'share', 'flux_dial_template.svg')
+
+        # Name of the yearly ZHR overview plot
+        self.yearly_zhr_plot_name = 'yearly_zhr_overview.png'
+
         # colour scheme to use for showers
         self.shower_color_map = 'viridis'
 
