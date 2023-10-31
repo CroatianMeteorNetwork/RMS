@@ -1384,7 +1384,7 @@ class EventMonitor(multiprocessing.Process):
             for night_directory in os.listdir(
                     os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
                 #Skip over any directory which does not start with the stationID and warn
-                if night_directory[0:6] != self.config.stationID:
+                if night_directory[0:len(self.config.stationID)] != self.config.stationID:
                     log.warning("Skipping directory {} - not the expected format for a captured files directory".format(night_directory))
                     continue
                 directory_POSIX_time = convertGMNTimeToPOSIX(night_directory[7:22])
