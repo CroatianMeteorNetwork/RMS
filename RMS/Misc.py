@@ -576,3 +576,27 @@ def isRaspberryPi():
         pass
 
     return False
+
+def sanitise(unsanitised, lower = False, space_substitution = "", log_changes = True):
+    """ Strictly sanitise an input string so it is suitable for all filesystems
+        known to be running RMS
+
+        Return:
+            [string] Sanitised string
+        """
+
+    permitted = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890_-"
+    sanitised = ""
+    for c in unsanitised:
+        if c == " ":
+            sanitised += space_substitution
+        else:
+            if c in permitted:
+                sanitised += c
+
+
+    if unsanitised != sanitised and log_changes:
+        log.info("String {} was sanitised to {}".format(unsanitised, sanitised))
+
+    return sanitised
+
