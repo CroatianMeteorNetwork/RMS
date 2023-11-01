@@ -29,10 +29,11 @@ import numpy as np
 
 import RMS.ConfigReader as cr
 from RMS.Formats import FFfile, FRbin
+import datetime
 
 
 def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=None, hide=False,
-        avg_background=False, split=False, add_timestamp=False):
+        avg_background=False, split=False, add_timestamp=False, add_frame_number=False):
     """ Shows the detected fireball stored in the FR file. 
     
     Arguments:
@@ -49,6 +50,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
             used.
         split: [bool] Split the video into multiple videos, one for each line. False by default.
         add_timestamp: [bool] Add timestamp to the image. False by default.
+        add_frame_number: [bool] Add frame number to the image. False by default.
 
     """
 
@@ -168,8 +170,8 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
 
                 img[Y_img, X_img] = fr.frames[current_line][z][Y_frame, X_frame]
 
-            # Add timestamp
-            if add_timestamp:
+            # Add frame number
+            if add_frame_number:
 
                 # Put the name of the FR file, followed by the frame number
                 # Put a black shadow
@@ -180,6 +182,16 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
                             fontFace=cv2.FONT_HERSHEY_SIMPLEX , fontScale=0.5, color=[255, 255, 255], 
                             lineType=cv2.LINE_AA, thickness=1)
 
+            # Add timestamp
+            if add_timestamp:
+                height = img.shape[0]
+                title = getTimestampTitle(fr_path)
+                cv2.putText(img, title, (15, height - 20),
+                            fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=[0, 0, 0],
+                            lineType=cv2.LINE_AA, thickness=2)
+                cv2.putText(img, title, (15, height - 20),
+                            fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=[255, 255, 255],
+                            lineType=cv2.LINE_AA, thickness=1)
 
             # Save frame to disk
             if save_frames or makevideo:
@@ -196,7 +208,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
             
                 # Show the frame
                 try:
-                    cv2.imshow(name, img)
+                    cv2.imshow(name, resizeImageIfNeed(img))
                 except:
                     print("imshow not available in OpenCV, Rebuild the library with Windows, GTK+ 2.x or Cocoa support. If you are on Ubuntu or Debian, install libgtk2.0-dev and pkg-config, then re-run cmake or configure script in function 'cvShowImage'")
                     hide = True
@@ -253,7 +265,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
                 if os.system(software_name + " --help > /dev/null"):
                     software_name = "ffmpeg"
                     # Construct the ecommand for ffmpeg           
-                    com = software_name + " -y -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(first_frame) + " -i " + img_patt +" " + mp4_path
+                    com = software_name + " -y -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(first_frame) + " -i " + img_patt +" -pix_fmt yuv420p " + mp4_path
                 else:
                     com = "cd " + dir_path + ";" \
                         + software_name + " -v quiet -r 30 -y -start_number " + str(first_frame) + " -i " + img_patt \
@@ -276,7 +288,28 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
 
     if not hide:
         cv2.destroyWindow(name)
-            
+
+
+# Resize image to fit window to screen (for images larger than 1280x720)
+# By default resize to HD (with=1280 same as for regular camera resolution)
+def resizeImageIfNeed(image, width=1280):
+
+    (h, w) = image.shape[:2]
+    #  Resize only if image larger than required
+    if w > width:
+        r = width / float(w)
+        dim = (width, int(h * r))
+        return cv2.resize(image, dim, interpolation=cv2.INTER_AREA)
+    else:
+        return image
+
+def getTimestampTitle(fr_path):
+    _, fname = os.path.split(fr_path)
+    splits = fname.split('_')
+    dtstr = splits[2] + '_' + splits[3] + '.' + splits[4]
+    imgdt = datetime.datetime.strptime(dtstr, '%Y%m%d_%H%M%S.%f')
+    return splits[1] + ' ' + imgdt.strftime('%Y-%m-%d %H:%M:%S UTC')
+
 
 if __name__ == "__main__":
 
@@ -311,6 +344,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-s', '--split', action="store_true", help="Use legacy mode where lines are displayed one-by-one.")
 
     arg_parser.add_argument("-t", "--timestamp", action="store_true", help="Show timestamp on the image.")
+
+    arg_parser.add_argument("-n", "--framenumber", action="store_true", help="Show frame number on the image.")
+
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -367,7 +403,7 @@ if __name__ == "__main__":
         # View the fireball detection
         retval = view(dir_path, ff_match, fr, config, save_frames=cml_args.extract,
             extract_format=cml_args.extractformat, hide=cml_args.hide, avg_background=cml_args.avg, 
-            split=cml_args.split, add_timestamp=cml_args.timestamp)
+            split=cml_args.split, add_timestamp=cml_args.timestamp, add_frame_number=cml_args.framenumber)
 
         # Return to previous file
         if retval == -1:
