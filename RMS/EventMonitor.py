@@ -1372,11 +1372,10 @@ class EventMonitor(multiprocessing.Process):
             file_list.append(str(os.path.join(directory, file_name)))
             return file_list
         else:
-            log.debug("Unable to find {} in {}".format(file_name,directory))
-            log.debug("Looking in {}".format(os.path.join(os.path.abspath("."),self.syscon.config_file_path)))
-            if os.path.isfile(os.path.join(os.path.abspath("."),self.syscon.config_file_path, file_name)):
-                file_list.append(str(os.path.join(os.path.abspath("."),self.syscon.config_file_path, file_name)))
-                log.info("Returning {}".format(file_list[0]))
+
+            if os.path.isfile(os.path.join(os.path.expanduser(self.config.config_file_name), file_name)):
+                file_list.append(str(os.path.join(os.path.expanduser(self.config.config_file_name), file_name)))
+                log.info("Using {} as fallback .config file".format(self.config.config_file_name))
                 return file_list
         return []
 
@@ -1396,11 +1395,11 @@ class EventMonitor(multiprocessing.Process):
         platepar_file = ""
 
         if len(self.getDirectoryList(event)) > 0:
-            try:
-                platepar_file = self.getFile(self.syscon.platepar_name, self.getDirectoryList(event)[0])[0]
-            except:
-                platepar_file = ""
-                log.warning("Failed to get a platepar file")
+            platepar_file_list = self.getFile(self.syscon.platepar_name, self.getDirectoryList(event)[0])
+            if len(platepar_file_list) > 0:
+                platepar_file = platepar_file_list[0]
+            else:
+                log.warning("No platepar file found processing event at {}".format(event.dt))
         return platepar_file
 
 
@@ -1422,6 +1421,10 @@ class EventMonitor(multiprocessing.Process):
         if os.path.exists(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
             for night_directory in os.listdir(
                     os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
+                #Skip over any directory which does not start with the stationID and warn
+                if night_directory[0:len(self.config.stationID)] != self.config.stationID:
+                    log.warning("Skipping directory {} - not the expected format for a captured files directory".format(night_directory))
+                    continue
                 directory_POSIX_time = convertGMNTimeToPOSIX(night_directory[7:22])
 
                 # if the POSIX time representation is before the event, and within 16 hours add to the list of directories
