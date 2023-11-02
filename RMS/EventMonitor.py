@@ -15,7 +15,6 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
-
 from __future__ import print_function, division, absolute_import
 
 
@@ -58,7 +57,7 @@ import numpy as np
 
 import RMS.ConfigReader as cr
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
-from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt
+from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt, raDec2AltAz
 from RMS.Math import angularSeparationVect
 from RMS.Formats.FFfile import convertFRNameToFF
 from RMS.Formats.Platepar import Platepar
@@ -76,6 +75,8 @@ from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 
 
 log = logging.getLogger("logger")
+EM_RAISE = True
+
 
 """
 
@@ -103,6 +104,16 @@ EventElev		         : 20			    #Elevation as perceived by observer on ground, he
 EventCartStd		     : 10000		    #Event start cartesian standard deviation (m)
 EventCart2Std		     : 10000		    #Event end cartesian standard deviation (m)
 
+# Used for requesting views of portions of the sky during time ranges
+
+ObsLat(deg)              : -32.0080         #Latitude of observer - optional
+ObsLon(deg)              : 116.1344         #Longitude of observer - optional;
+ObsRange(km)             : 30               #Great Circle range around ObsLat, ObsLon - if not specified then global
+Ra(deg)                  : 89.11            #Right ascension of target
+Dec(deg)                 : 7.4              #Declination of target
+SkyRadius(deg)           : 10               #SkyRadius around target
+MinElev(deg)             : 15               #Minimum elevation above horizon
+MinStars                 : 10               #Minimum number of stars, if not specified uses default from config
 
 #Optional - not preferred as sensitive to different latitudes
 EventLatStd (deg)	     : 1.0			    #Event start latitude polar standard deviation
@@ -135,6 +146,12 @@ class EventContainer(object):
         self.azim, self.azim_std, self.elev, self.elev_std, self.elev_is_max = 0, 0, 0, 0, False
         self.stations_required = ""
         self.respond_to = ""
+
+        # Used for requesting views of portions of the sky during time ranges
+
+        self.obs_lat, self.obs_lon, self.obs_range, self.ra, self.dec = 0,0,"None",0,0
+        self.sky_radius, self.min_elev = 10, 15
+        self.min_stars = 20
 
         # These are internal control properties
         self.uuid = ""
@@ -206,6 +223,19 @@ class EventContainer(object):
         # Text stores as True, database stores as 0 and 1
         if "EventElevIsMax" == variable_name:
             self.elev_is_max = True if value == "True" or value == 1 else False
+
+        # RaDec specifications for events
+
+        self.obs_lat = float(value) if "ObsLat" == variable_name else self.obs_lat
+        self.obs_lon = float(value) if "ObsLon" == variable_name else self.obs_lon
+        self.obs_range = str(value) if "ObsRange" == variable_name else self.obs_range
+        self.ra = float(value) if "Ra" == variable_name else self.ra
+        self.dec = float(value) if "Dec" == variable_name else self.dec
+        self.sky_radius = float(value) if "SkyRadius" == variable_name else self.sky_radius
+        self.min_elev = float(value) if "MinElev" == variable_name else self.min_elev
+        self.min_stars = float(value) if "MinStars" == variable_name else self.min_stars
+
+
 
         # Control information
         self.stations_required = str(value) if "StationsRequired" == variable_name else self.stations_required
@@ -798,6 +828,8 @@ class EventMonitor(multiprocessing.Process):
                 self.upgradeDB(conn)
                 return conn
         except:
+            if EM_RAISE:
+                raise
             return None
 
         conn.execute("""CREATE TABLE event_monitor (
@@ -824,6 +856,14 @@ class EventMonitor(multiprocessing.Process):
                             EventAzimStd REAL NOT NULL,
                             EventElev REAL NOT NULL,
                             EventElevStd REAL NOT NULL,
+                            ObsLat REAL NOT NULL,
+                            ObsLon REAL NOT NULL,
+                            ObsRange TEXT,
+                            Ra REAL NOT NULL,
+                            Dec REAL NOT NULL,
+                            SkyRadius REAL NOT NULL,
+                            MinStars REAL NOT NULL,
+                            MinElev REAL NOT NULL,
                             EventElevIsMax BOOL,
                             StationsRequired TEXT,
                             filesuploaded TEXT,
@@ -837,6 +877,7 @@ class EventMonitor(multiprocessing.Process):
                             RespondTo TEXT,
                             Suffix TEXT
                             )""")
+
 
         # Commit the changes
         conn.commit()
@@ -881,12 +922,44 @@ class EventMonitor(multiprocessing.Process):
             log.info("Missing db column Suffix")
             self.addDBcol("Suffix","TEXT")
 
+        if not self.checkDBcol(conn,"ObsLat"):
+            log.info("Missing db column ObsLat")
+            self.addDBcol("ObsLat","REAL")
+
+        if not self.checkDBcol(conn,"ObsLon"):
+            log.info("Missing db column ObsLon")
+            self.addDBcol("ObsLon","REAL")
+
+        if not self.checkDBcol(conn,"ObsRange"):
+            log.info("Missing db column ObsRange")
+            self.addDBcol("ObsRange","TEXT")
+
+        if not self.checkDBcol(conn,"Ra"):
+            log.info("Missing db column Ra")
+            self.addDBcol("Ra","REAL")
+
+        if not self.checkDBcol(conn,"Dec"):
+            log.info("Missing db column Dec")
+            self.addDBcol("Dec","REAL")
+
+        if not self.checkDBcol(conn,"SkyRadius"):
+            log.info("Missing db column SkyRadius")
+            self.addDBcol("SkyRadius","REAL")
+
+        if not self.checkDBcol(conn,"MinElev"):
+            log.info("Missing db column MinElev")
+            self.addDBcol("MinElev","REAL")
+
+        if not self.checkDBcol(conn,"MinStars"):
+            log.info("Missing db column MinStars")
+            self.addDBcol("MinStars","REAL")
+
     def addDBcol(self, column, coltype):
         """ Add a new column to the database
 
         Arguments:
             column: [string] Name of column to add
-            coltype: [string] type of columnd to add
+            coltype: [string] type of column to add
 
         Return:
             Status: [bool] True if successful otherwise false
@@ -898,11 +971,14 @@ class EventMonitor(multiprocessing.Process):
         sql_command += "ADD {} {}; ".format(column, coltype)
 
         try:
+
             conn = sqlite3.connect(self.event_monitor_db_path)
             conn.execute(sql_command)
             conn.close()
             return True
         except:
+            if EM_RAISE:
+                raise
             return False
 
     def checkDBcol(self, conn,column):
@@ -991,7 +1067,7 @@ class EventMonitor(multiprocessing.Process):
         sql_statement = ""
         sql_statement += "SELECT COUNT(*) FROM event_monitor \n"
         sql_statement += "WHERE \n"
-        sql_statement += "EventTime = '{}'          AND \n".format(event.dt)
+        sql_statement += "EventTime = '{}'              AND \n".format(event.dt)
         sql_statement += "EventLat = '{}'               AND \n".format(event.lat)
         sql_statement += "EventLon = '{}'               AND \n".format(event.lon)
         sql_statement += "EventHt = '{}'                AND \n".format(event.ht)
@@ -1006,6 +1082,14 @@ class EventMonitor(multiprocessing.Process):
         sql_statement += "EventHt2Std = '{}'            AND \n".format(event.ht2_std)
         sql_statement += "FarRadius = '{}'              AND \n".format(event.far_radius)
         sql_statement += "CloseRadius = '{}'            AND \n".format(event.close_radius)
+        sql_statement += "ObsLat = '{}'                 AND \n".format(event.obs_lat)
+        sql_statement += "ObsLon = '{}'                 AND \n".format(event.obs_lon)
+        sql_statement += "ObsRange = '{}'               AND \n".format(event.obs_range)
+        sql_statement += "Ra = '{}'                     AND \n".format(event.ra)
+        sql_statement += "Dec = '{}'                    AND \n".format(event.dec)
+        sql_statement += "SkyRadius = '{}'              AND \n".format(event.sky_radius)
+        sql_statement += "MinElev = '{}'                AND \n".format(event.min_elev)
+        sql_statement += "MinStars = '{}'               AND \n".format(event.min_stars)
         sql_statement += "TimeTolerance = '{}'          AND \n".format(event.time_tolerance)
         sql_statement += "StationsRequired = '{}'       AND \n".format(event.stations_required)
         sql_statement += "RespondTo = '{}'                  \n".format(event.respond_to)
@@ -1017,6 +1101,8 @@ class EventMonitor(multiprocessing.Process):
             return (self.db_conn.cursor().execute(sql_statement).fetchone())[0] != 0
         except:
             log.info("Check for event exists failed")
+            if EM_RAISE:
+                raise
             return False
 
     def delOldRecords(self):
@@ -1064,7 +1150,6 @@ class EventMonitor(multiprocessing.Process):
         # required for Jessie
         qry_elev_is_max = 1 if event.elev_is_max else 0
 
-
         if not self.eventExists(event):
             sql_statement = ""
             sql_statement += "INSERT INTO event_monitor \n"
@@ -1074,6 +1159,7 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "CloseRadius, FarRadius,                     \n"
             sql_statement += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, EventCart2Std,    \n"
             sql_statement += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax,    \n"
+            sql_statement += "ObsLat, ObsLon, ObsRange, Ra, Dec, SkyRadius, MinElev, MinStars,    \n"
             sql_statement += "processedstatus, uploadedstatus, uuid, RespondTo, StationsRequired, Suffix, timeadded \n"
             sql_statement += ")                                           \n"
 
@@ -1088,6 +1174,10 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "{},  {}, {}, {}, {} ,        \n".format(event.azim, event.azim_std, event.elev,
                                                                       event.elev_std,
                                                                       qry_elev_is_max)
+            sql_statement += "{},  {}, '{}', {}, {} , {}, {}, {}, \n".format(event.obs_lat,event.obs_lon, event.obs_range,
+                                                                      event.ra, event.dec, event.sky_radius,
+                                                                      event.min_elev,event.min_stars)
+
             sql_statement += "{},  {}, '{}', '{}', '{}' , '{}',    \n".format(0, 0,uuid.uuid4(), event.respond_to, event.stations_required, event.suffix)
             sql_statement += "CURRENT_TIMESTAMP ) \n"
 
@@ -1097,6 +1187,9 @@ class EventMonitor(multiprocessing.Process):
                 self.db_conn.commit()
 
             except:
+                print(sql_statement)
+                if EM_RAISE:
+                    raise
                 log.info("Add event failed")
                 self.recoverFromDatabaseError()
                 return False
@@ -1314,6 +1407,7 @@ class EventMonitor(multiprocessing.Process):
                 events : [list of events]
         """
 
+
         sql_statement = ""
         sql_statement += "SELECT "
         sql_statement += ""
@@ -1322,6 +1416,7 @@ class EventMonitor(multiprocessing.Process):
         sql_query_cols += "FarRadius,CloseRadius, uuid,"
         sql_query_cols += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, "
         sql_query_cols += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax, RespondTo, StationsRequired,"
+        sql_query_cols += "ObsLat, ObsLon, ObsRange, Ra, Dec, SkyRadius, MinElev, MinStars,"
         sql_query_cols += "EventCartStd, EventCart2Std, Suffix"
         sql_statement += sql_query_cols
         sql_statement += " \n"
@@ -1331,6 +1426,8 @@ class EventMonitor(multiprocessing.Process):
         try:
             cursor = self.db_conn.cursor().execute(sql_statement)
         except:
+            if EM_RAISE:
+                raise
             log.info("Database access error. Delete and recreate.")
             self.delEventMonitorDB()
             self.createEventMonitorDB()
@@ -1481,7 +1578,7 @@ class EventMonitor(multiprocessing.Process):
                     else:
                         # Initialise last_fits_file with the first from the list
                         last_fits_file = fits_list[0]
-                        log.info("Intialised last_fits_file with {}".format(last_fits_file))
+                        log.info("Initialised last_fits_file with {}".format(last_fits_file))
                         seeking_first_fits_after_event = True
                 for file in dirlist:
                     if file.endswith(file_extension):
@@ -1521,6 +1618,57 @@ class EventMonitor(multiprocessing.Process):
             file_list += self.getFile(self.syscon.platepar_name, self.getDirectoryList(event)[0])
 
         return file_list
+
+    def raDecVisible(self, rp, event, ev_con):
+
+        """
+        Given a platepar and an event, which includes RaDec coordinates
+        deduce if the RaDec plus the SkyRadius would be in the FoV.
+
+        Args:
+            rp: [platepar] reference platepar
+            event: [event] event of interest
+
+        Returns:
+            [bool] : True if RaDEC in FoV
+
+        """
+
+        # Calculate minimum FoV of camera - not using diagonal as not restrictive enough
+        min_fov = min(rp.fov_v, rp.fov_h)
+
+        # the az_centre, alt_centre of the camera
+        az_c, alt_c = platepar2AltAz(rp)
+        jd = datetime2JD(convertGMNTimeToPOSIX(event.dt))
+
+        # calculate elevation of RaDec to tangent of surface of earth at camera.
+        az_t, el_t = raDec2AltAz(event.ra, event.dec,jd, ev_con.latitude, ev_con.longitude)
+
+        # if not above min_elev
+        if el_t < event.min_elev:
+            return False
+
+        # calculate Field of View RA and Dec at event time
+        fov_ra, fov_dec = altAz2RADec(az_c, alt_c, jd, rp.lat, rp.lon)
+
+        # calculate fov_vec and target_vec
+        fov_vec, target_vec = np.array(raDec2Vector(fov_ra, fov_dec)), np.array(raDec2Vector(event.ra, event.dec))
+
+        # normalise
+        fov_vec, target_vec = vectNorm(fov_vec), vectNorm(target_vec)
+
+        # temporary logging for debugging
+        log.info("RADecEvent Time {}".format(event.dt))
+        log.info("    Camera Alt, Az, min_fov {:.2f}, {:.2f}, {:.2f}".format(az_c,alt_c, min_fov))
+        log.info("        Field of view RaDec {:.2f}, {:.2f}".format(fov_ra,fov_dec))
+        log.info("        Target RaDec        {:.2f}, {:.2f}".format(event.ra, event.dec))
+        log.info("        Angular separation  {:.2f}".format(angularSeparationVectDeg(target_vec, fov_vec)))
+
+        # return whether any part of the targets sky_radius is in the FoV
+        return angularSeparationVectDeg(target_vec, fov_vec) < ((min_fov / 2) + abs(event.sky_radius))
+
+
+
 
     def trajectoryVisible(self, rp, event):
 
@@ -1586,6 +1734,18 @@ class EventMonitor(multiprocessing.Process):
 
         return points_in_fov, start_distance, start_angle, end_distance, end_angle, fov_ra, fov_dec
 
+
+    def getEventPlatepar(self,event):
+
+        rp = Platepar()
+        if self.getPlateparFilePath(event) == "":
+            log.info("Reading platepar from {}".format(os.path.abspath('.')))
+            rp.read(os.path.abspath('.'))
+        else:
+            rp.read(self.getPlateparFilePath(event))
+        return rp
+
+
     def trajectoryThroughFOV(self, event):
 
         """
@@ -1605,12 +1765,8 @@ class EventMonitor(multiprocessing.Process):
         """
 
         # Read in the platepar for the event
-        rp = Platepar()
-        if self.getPlateparFilePath(event) == "":
-            log.info("Reading platepar from {}".format(os.path.abspath('.')))
-            rp.read(os.path.abspath('.'))
-        else:
-            rp.read(self.getPlateparFilePath(event))
+
+        rp = self.getEventPlatepar(event)
 
         pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC = self.trajectoryVisible(rp, event)
         return pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC
@@ -1740,9 +1896,12 @@ class EventMonitor(multiprocessing.Process):
                 archives = glob.glob(os.path.join(event_monitor_directory,"*.bz2"))
 
                 # Make the upload
+
                 upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
-                                        event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
-                                           rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
+                                  event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
+                                  rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
+
+
 
                 if upload_status:
                     log.info("Upload of {} - attempt no {} was successful".format(event_monitor_directory, retry))
@@ -1764,6 +1923,246 @@ class EventMonitor(multiprocessing.Process):
         if not keep_files:
             shutil.rmtree(event_monitor_directory)
         return upload_status
+
+    def checkTrajectoryEvent(self, observed_event, ev_con, test_mode = False):
+
+        log.info("Checks on trajectories for event at {}".format(observed_event.dt))
+        check_time_start = datetime.datetime.utcnow()
+
+        log.info("Checking event with lat, lon, ht  {},{},{}".format(observed_event.lat, observed_event.lon, observed_event.ht))
+        log.info("                    lat2,lon2,ht2 {},{},{}".format(observed_event.lat2,observed_event.lon2, observed_event.ht2))
+
+        # Events can be specified in different ways, make sure converted to LatLon
+        observed_event.latLonAzElToLatLonLatLon()
+        # Get the files
+        file_list = self.getFileList(observed_event)
+
+        # If there are no files based on time, then mark as processed and continue
+        if (len(file_list) == 0 or file_list == [None]) and not test_mode:
+            log.info("No files for event - marking {} as processed".format(observed_event.dt))
+            self.markEventAsProcessed(observed_event)
+            # This moves to next observed_event
+            return
+
+        # If there is a .config file then parse it as evcon - not the station config
+        for file in file_list:
+            if file.endswith(self.syscon.config_file_name):
+
+                log.info("Attempt to parse {} as the .config for the event".format(file))
+                if os.path.isfile(file):
+                    log.info("Contemporary .config file found")
+                    if os.path.getsize(file) != 0:
+                        try:
+                            ev_con = cr.parse(file)
+                        except:
+                            log.warning("Unknown error loading .config file; reverting to station .config")
+                            ev_con = cr.parse(self.syscon.config_file_name)
+                    else:
+                        log.warning("Zero size .config file found")
+                        ev_con = cr.parse(self.syscon.config_file_name)
+                        log.warning("Used the station .config file as night directory .config file had zero length")
+                else:
+                    log.info("No .config file found at {}".format(file))
+                    ev_con = cr.parse(self.syscon.config_file_name)
+                    log.warning("Used the station .config file as no contemporary .config file was found")
+
+        # Look for the station code in the stations_required string
+        if observed_event.stations_required.find(ev_con.stationID) != -1:
+            if self.doUpload(observed_event, ev_con, file_list, test_mode):
+                log.info("In Stations_Required - marking {} as processed".format(observed_event.dt))
+                self.markEventAsProcessed(observed_event)
+                if len(file_list) > 0:
+                    self.markEventAsUploaded(observed_event, file_list)
+            else:
+                log.error(
+                    "Upload failed for event at {}. Event retained in database for retry.".format(observed_event.dt))
+            return
+
+        # Initialise the population of trajectories
+        event_population = []
+        # If we have any standard deviation definitions then create a population of 1000, else create a population of 1
+        if observed_event.hasCartSD() or observed_event.hasPolarSD():
+            log.info("Working with standard deviations")
+            event_population = observed_event.appendPopulation(event_population, 1000)
+        else:
+            log.info("Working without standard deviations")
+            event_population = observed_event.appendPopulation(event_population, 1)
+
+        # Apply SD to the population
+        if observed_event.hasCartSD():
+            log.info("Applying cartesian standard deviations")
+            event_population = observed_event.applyCartesianSD(event_population)
+        if observed_event.hasPolarSD():
+            log.info("Applying polar standard deviations")
+            event_population = observed_event.applyPolarSD(event_population)
+
+        # Add trajectories with elevations from observed value to 15 deg
+        if observed_event.elev_is_max:
+            log.info("Rotating trajectory around observed point")
+            event_population = observed_event.addElevationRange(event_population, observed_event, 15)
+
+        # Start testing trajectories from the population
+        for event in event_population:
+            # check if this has already been handled
+
+
+            if self.eventProcessed(observed_event.uuid):
+                break  # do no more work on any version of this trajectory - break exits loop
+            # From the infinitely extended trajectory, work out the closest point to the camera
+            # ev_con.elevation is the height above sea level of the station in metres, no conversion required
+            start_dist, end_dist, atmos_dist = calculateClosestPoint(event.lat, event.lon, event.ht * 1000,
+                                                                     event.lat2, event.lon2, event.ht2 * 1000,
+                                                                     ev_con.latitude, ev_con.longitude,
+                                                                     ev_con.elevation)
+            min_dist = min([start_dist, end_dist, atmos_dist])
+
+            # If this version of the trajectory outside the farradius, continue
+            if min_dist > event.far_radius * 1000 and not test_mode:
+                # Do no more work on this version of the trajectory
+                continue
+
+            # If trajectory inside the closeradius, then do the upload and mark as processed
+            if min_dist < event.close_radius * 1000 and not test_mode:
+                # this is just for info
+                log.info(
+                    "Event at {} was {:.0f}km away, inside {:.0f}km so is uploaded with no further checks.".format(
+                        event.dt, min_dist / 1000, event.close_radius))
+                check_time_end = datetime.datetime.utcnow()
+                check_time_seconds = (check_time_end - check_time_start).total_seconds()
+                log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
+                count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
+                    event)
+                # If doUpload returned True mark the event as processed and uploaded
+                if self.doUpload(event, ev_con, file_list, test_mode):
+                    log.info("Inside close radius - marking {} as processed".format(observed_event.dt))
+                    self.markEventAsProcessed(observed_event)
+                    if len(file_list) > 0:
+                        self.markEventAsUploaded(observed_event, file_list)
+                    break  # Do no more work on any version of this trajectory - break exits loop
+                else:
+                    log.error("Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
+
+            # If trajectory inside the farradius, then check if the trajectory went through the FoV
+            # The returned count is the number of 100th parts of the trajectory observed through the FoV
+            if min_dist < event.far_radius * 1000 or test_mode:
+                # log.info("Event at {} was {:4.1f}km away, inside {:4.1f}km, consider FOV.".format(event.dt, min_dist / 1000, event.far_radius))
+                count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
+                    event)
+                if count != 0:
+                    log.info("Event at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(
+                        event.dt, count))
+                    check_time_end = datetime.datetime.utcnow()
+                    check_time_seconds = (check_time_end - check_time_start).total_seconds()
+                    log.info("Check of trajectories took {:2f} seconds".format(check_time_seconds))
+                    if self.doUpload(observed_event, ev_con, file_list, test_mode=test_mode):
+                        self.markEventAsUploaded(observed_event, file_list)
+                        if not test_mode:
+                            log.info(
+                                "Trajectory passed through FoV - marking {} as processed".format(observed_event.dt))
+                            self.markEventAsProcessed(observed_event)
+                        break  # Do no more work on any version of this trajectory
+                    else:
+                        log.error(
+                            "Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
+                    if test_mode:
+                        rp = Platepar()
+                        rp.read(self.getPlateparFilePath(event))
+                        with open(os.path.expanduser(os.path.join(self.syscon.data_dir, "testlog")), 'at') as logfile:
+                            logfile.write(
+                                "{} LOC {} Az:{:3.1f} El:{:3.1f} sta_lat:{:3.4f} sta_lon:{:3.4f} sta_dist:{:3.0f} end_dist:{:3.0f} fov_h:{:3.1f} fov_v:{:3.1f} sa:{:3.1f} ea::{:3.1f} \n".format(
+                                    convertGMNTimeToPOSIX(event.dt), ev_con.stationID, rp.az_centre, rp.alt_centre,
+                                    rp.lat, rp.lon, event.start_distance / 1000, event.end_distance / 1000, rp.fov_h,
+                                    rp.fov_v, event.start_angle, event.end_angle))
+                else:
+
+                    if not test_mode:
+                        pass
+
+                # Continue with other trajectories from this population
+                continue
+
+        # End of the processing loop for this event
+        if self.eventProcessed(observed_event.uuid):
+            log.info("Reached end of checks - {} is processed".format(observed_event.dt))
+            check_time_end = datetime.datetime.utcnow()
+            check_time_seconds = (check_time_end - check_time_start).total_seconds()
+            log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
+
+        else:
+            check_time_end = datetime.datetime.utcnow()
+            check_time_seconds = (check_time_end - check_time_start).total_seconds()
+            log.info("Reached end of checks - {} is processed, nothing to upload".format(observed_event.dt))
+            log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
+            self.markEventAsProcessed(observed_event)
+
+
+    def checkRaDECEvent(self, target, ev_con, test_mode = False):
+
+        log.info("Checks on RaDec for event at {}".format(target.dt))
+        check_time_start = datetime.datetime.utcnow()
+
+        # Get the files
+        file_list = self.getFileList(target)
+
+        # If there are no files based on time, then mark as processed and continue
+        if (len(file_list) == 0 or file_list == [None]) and not test_mode:
+            log.info("No files for event - marking {} as processed".format(target.dt))
+            self.markEventAsProcessed(target)
+            return
+
+        # If there is a .config file then parse it as evcon - not the station config
+        for file in file_list:
+            if file.endswith(self.syscon.config_file_name):
+
+                log.info("Attempt to parse {} as the .config for the event".format(file))
+                if os.path.isfile(file):
+                    log.info("Contemporary .config file found")
+                    if os.path.getsize(file) != 0:
+                        try:
+                            ev_con = cr.parse(file)
+                        except:
+                            log.warning("Unknown error loading .config file; reverting to station .config")
+                            ev_con = cr.parse(self.syscon.config_file_name)
+                    else:
+                        log.warning("Zero size .config file found")
+                        ev_con = cr.parse(self.syscon.config_file_name)
+                        log.warning("Used the station .config file as night directory .config file had zero length")
+                else:
+                    log.info("No .config file found at {}".format(file))
+                    ev_con = cr.parse(self.syscon.config_file_name)
+                    log.warning("Used the station .config file as no contemporary .config file was found")
+
+        # is the radec in the FoV
+
+        rp = self.getEventPlatepar(target)
+
+        if self.raDecVisible(rp, target, ev_con):
+            if self.doUpload(target, ev_con, file_list, test_mode):
+                log.info("Event {} at Ra,Dec {},{} in FoV".format(target.dt,target.ra, target.dec))
+                self.markEventAsProcessed(target)
+                if len(file_list) > 0:
+                    self.markEventAsUploaded(target, file_list)
+                return
+            else:
+                log.error("Upload failed for event at {}. Event retained in database for retry.".format(target.dt))
+
+        else:
+            log.info("Event {} at Ra,Dec {},{} not in FoV".format(target.dt,target.ra, target.dec))
+            self.markEventAsProcessed(target)
+
+        # End of the processing for this event
+        if self.eventProcessed(target.uuid):
+            log.info("Reached end of checks - {} is processed".format(target.dt))
+            check_time_end = datetime.datetime.utcnow()
+            check_time_seconds = (check_time_end - check_time_start).total_seconds()
+            log.info("Check of RaDec event time elapsed {:.2f} seconds".format(check_time_seconds))
+
+        else:
+            check_time_end = datetime.datetime.utcnow()
+            check_time_seconds = (check_time_end - check_time_start).total_seconds()
+            log.info("Reached end of checks - {} is processed, nothing to upload".format(target.dt))
+            log.info("Check of RaDec event time elapsed {:.2f} seconds".format(check_time_seconds))
+            self.markEventAsProcessed(target)
 
     def checkEvents(self, ev_con, test_mode = False):
 
@@ -1807,165 +2206,14 @@ class EventMonitor(multiprocessing.Process):
                              .format(float(self.check_interval),time_until_event_end_seconds / 60 ))
                 continue
 
+            # If either lat or lon is non zero, handle as a trajectory specification
+            if observed_event.lat != 0 and observed_event.lon !=0:
+                log.info("Event at {} is a trajectory specification".format(observed_event.dt))
+                self.checkTrajectoryEvent(observed_event,ev_con, test_mode)
+            elif observed_event.ra != 0 and observed_event.dec != 0:
+                log.info("Event at {} is a RaDec specification".format(observed_event.dt))
+                self.checkRaDECEvent(observed_event,ev_con, test_mode)
 
-            log.info("Checks on trajectories for event at {}".format(observed_event.dt))
-            check_time_start = datetime.datetime.utcnow()
-            # Iterate through the work
-            # Events can be specified in different ways, make sure converted to LatLon
-            observed_event.latLonAzElToLatLonLatLon()
-            # Get the files
-            file_list = self.getFileList(observed_event)
-
-            # If there are no files based on time, then mark as processed and continue
-            if (len(file_list) == 0 or file_list == [None]) and not test_mode:
-                log.info("No files for event - marking {} as processed".format(observed_event.dt))
-                self.markEventAsProcessed(observed_event)
-                # This moves to next observed_event
-                continue
-
-            # If there is a .config file then parse it as evcon - not the station config
-            for file in file_list:
-                if file.endswith(self.syscon.config_file_name):
-
-                    log.info("Attempt to parse {} as the .config for the event".format(file))
-                    if os.path.isfile(file):
-                        log.info("Contemporary .config file found")
-                        if os.path.getsize(file) != 0:
-                            try:
-                                ev_con = cr.parse(file)
-                            except:
-                                log.warning("Unknown error loading .config file; reverting to station .config")
-                                ev_con = cr.parse(self.syscon.config_file_name)
-                        else:
-                            log.warning("Zero size .config file found")
-                            ev_con = cr.parse(self.syscon.config_file_name)
-                            log.warning("Used the station .config file as night directory .config file had zero length")
-                    else:
-                        log.info("No .config file found at {}".format(file))
-                        ev_con = cr.parse(self.syscon.config_file_name)
-                        log.warning("Used the station .config file as no contemporary .config file was found")
-
-
-            # Look for the station code in the stations_required string
-            if observed_event.stations_required.find(ev_con.stationID) != -1:
-                if self.doUpload(observed_event, ev_con, file_list, test_mode):
-                    log.info("In Stations_Required - marking {} as processed".format(observed_event.dt))
-                    self.markEventAsProcessed(observed_event)
-                    if len(file_list) > 0:
-                        self.markEventAsUploaded(observed_event, file_list)
-                else:
-                    log.error("Upload failed for event at {}. Event retained in database for retry.".format(observed_event.dt))
-                continue
-
-            # Initialise the population of trajectories
-            event_population = []
-            # If we have any standard deviation definitions then create a population of 1000, else create a population of 1
-            if observed_event.hasCartSD() or observed_event.hasPolarSD():
-                log.info("Working with standard deviations")
-                event_population = observed_event.appendPopulation(event_population,1000)
-            else:
-                log.info("Working without standard deviations")
-                event_population = observed_event.appendPopulation(event_population,1)
-
-
-
-            # Apply SD to the population
-            if observed_event.hasCartSD():
-                log.info("Applying cartesian standard deviations")
-                event_population = observed_event.applyCartesianSD(event_population)
-            if observed_event.hasPolarSD():
-                log.info("Applying polar standard deviations")
-                event_population = observed_event.applyPolarSD(event_population)
-
-            # Add trajectories with elevations from observed value to 15 deg
-            if observed_event.elev_is_max:
-                log.info("Rotating trajectory around observed point")
-                event_population = observed_event.addElevationRange(event_population, observed_event, 15)
-
-            # Start testing trajectories from the population
-            for event in event_population:
-                # check if this has already been handled
-                if self.eventProcessed(observed_event.uuid):
-                    break # do no more work on any version of this trajectory - break exits loop
-                # From the infinitely extended trajectory, work out the closest point to the camera
-                # ev_con.elevation is the height above sea level of the station in metres, no conversion required
-                start_dist, end_dist, atmos_dist = calculateClosestPoint(event.lat, event.lon, event.ht * 1000,
-                                                                              event.lat2, event.lon2, event.ht2 * 1000,
-                                                                              ev_con.latitude, ev_con.longitude, ev_con.elevation)
-                min_dist = min([start_dist, end_dist, atmos_dist])
-
-                # If this version of the trajectory outside the farradius, continue
-                if min_dist > event.far_radius * 1000 and not test_mode:
-                    # Do no more work on this version of the trajectory
-                    continue
-
-            # If trajectory inside the closeradius, then do the upload and mark as processed
-                if min_dist < event.close_radius * 1000 and not test_mode:
-                    # this is just for info
-                    log.info("Event at {} was {:.0f}km away, inside {:.0f}km so is uploaded with no further checks.".format(event.dt, min_dist / 1000, event.close_radius))
-                    check_time_end = datetime.datetime.utcnow()
-                    check_time_seconds = (check_time_end- check_time_start).total_seconds()
-                    log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
-                    count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
-                        event)
-                    # If doUpload returned True mark the event as processed and uploaded
-                    if self.doUpload(event, ev_con, file_list, test_mode):
-                        log.info("Inside close radius - marking {} as processed".format(observed_event.dt))
-                        self.markEventAsProcessed(observed_event)
-                        if len(file_list) > 0:
-                            self.markEventAsUploaded(observed_event, file_list)
-                        break # Do no more work on any version of this trajectory - break exits loop
-                    else:
-                        log.error("Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
-
-            # If trajectory inside the farradius, then check if the trajectory went through the FoV
-            # The returned count is the number of 100th parts of the trajectory observed through the FoV
-                if min_dist < event.far_radius * 1000 or test_mode:
-                    #log.info("Event at {} was {:4.1f}km away, inside {:4.1f}km, consider FOV.".format(event.dt, min_dist / 1000, event.far_radius))
-                    count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(event)
-                    if count != 0:
-                        log.info("Event at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(event.dt, count))
-                        check_time_end = datetime.datetime.utcnow()
-                        check_time_seconds = (check_time_end - check_time_start).total_seconds()
-                        log.info("Check of trajectories took {:2f} seconds".format(check_time_seconds))
-                        if self.doUpload(observed_event, ev_con, file_list, test_mode=test_mode):
-                            self.markEventAsUploaded(observed_event, file_list)
-                            if not test_mode:
-                                log.info("Trajectory passed through FoV - marking {} as processed".format(observed_event.dt))
-                                self.markEventAsProcessed(observed_event)
-                            break # Do no more work on any version of this trajectory
-                        else:
-                            log.error("Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
-                        if test_mode:
-                            rp = Platepar()
-                            rp.read(self.getPlateparFilePath(event))
-                            with open(os.path.expanduser(os.path.join(self.syscon.data_dir, "testlog")), 'at') as logfile:
-                                logfile.write(
-                                    "{} LOC {} Az:{:3.1f} El:{:3.1f} sta_lat:{:3.4f} sta_lon:{:3.4f} sta_dist:{:3.0f} end_dist:{:3.0f} fov_h:{:3.1f} fov_v:{:3.1f} sa:{:3.1f} ea::{:3.1f} \n".format(
-                                    convertGMNTimeToPOSIX(event.dt), ev_con.stationID, rp.az_centre, rp.alt_centre,
-                                    rp.lat, rp.lon, event.start_distance / 1000, event.end_distance / 1000, rp.fov_h,
-                                    rp.fov_v, event.start_angle, event.end_angle))
-                    else:
-
-                        if not test_mode:
-                            pass
-
-                    # Continue with other trajectories from this population
-                    continue
-
-            # End of the processing loop for this event
-            if self.eventProcessed(observed_event.uuid):
-                log.info("Reached end of checks - {} is processed".format(observed_event.dt))
-                check_time_end = datetime.datetime.utcnow()
-                check_time_seconds = (check_time_end - check_time_start).total_seconds()
-                log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
-
-            else:
-                check_time_end = datetime.datetime.utcnow()
-                check_time_seconds = (check_time_end - check_time_start).total_seconds()
-                log.info("Reached end of checks - {} is processed, nothing to upload".format(observed_event.dt))
-                log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
-                self.markEventAsProcessed(observed_event)
 
         if len(unprocessed) - future_events > 1:
             log.info("{} events were processed, EventMonitor work completed"
