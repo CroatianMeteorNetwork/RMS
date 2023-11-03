@@ -1941,7 +1941,7 @@ class EventMonitor(multiprocessing.Process):
 
         if True:
             batchFFtoImage(os.path.join(this_event_directory), "jpg", add_timestamp=True,
-                           ff_component='maxpixel')
+                           ff_component='maxpixel', image_note = event.suffix)
 
         with open(os.path.join(this_event_directory, "event_report.txt"), "w") as info:
             info.write(event.eventToString())
