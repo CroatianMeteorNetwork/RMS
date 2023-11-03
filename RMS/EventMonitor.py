@@ -2305,16 +2305,28 @@ class EventMonitor(multiprocessing.Process):
 
         # Delay to allow capture to check existing folders - keep the logs tidy
 
-        time.sleep(30)
+        time.sleep(1)
 
         while not self.exit.is_set():
             self.checkDBExists()
             self.getEventsAndCheck()
-            log.info("Event monitor check completed")
+            next_run_time = (datetime.datetime.utcnow() + datetime.timedelta(minutes = self.check_interval)).replace(microsecond = 0).strftime('%H:%M:%S')
+
 
             start_time, duration = captureDuration(self.syscon.latitude, self.syscon.longitude, self.syscon.elevation)
+
             if not isinstance(start_time, bool):
-                log.info('Next capture start time: ' + str(start_time) + ' UTC')
+
+                time_left_before_start = (start_time - datetime.datetime.utcnow())
+                time_left_before_start = time_left_before_start - datetime.timedelta(microseconds=time_left_before_start.microseconds)
+                time_left_before_start_minutes = int(time_left_before_start.total_seconds() / 60)
+                log.info('Next EventMonitor run {} UTC'.format(next_run_time))
+                if time_left_before_start_minutes < 120:
+                    log.info('Next capture start: {} UTC, {} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),time_left_before_start_minutes))
+                else:
+                    log.info('Next capture start: {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
+            else:
+                log.info("Next EventMonitor run at {}".format(next_run_time))
             # Wait for the next check
             self.exit.wait(60 * self.check_interval)
             # Increase the check interval
