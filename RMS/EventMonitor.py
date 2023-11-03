@@ -58,7 +58,8 @@ import numpy as np
 import RMS.ConfigReader as cr
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt, raDec2AltAz
-from RMS.Math import angularSeparationVect
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
+from RMS.Math import angularSeparationVect, pointInsideConvexPolygonSphere
 from RMS.Formats.FFfile import convertFRNameToFF
 from RMS.Formats.Platepar import Platepar
 from RMS.UploadManager import uploadSFTP
@@ -1634,6 +1635,87 @@ class EventMonitor(multiprocessing.Process):
 
         """
 
+
+        jd = datetime2JD(convertGMNTimeToPOSIX(event.dt))
+
+        x, y = rp.X_res, rp.Y_res
+        x_vert = [0, x / 4, x / 2, 3 / 4 * x, x,      x,    x,         x,         x, 3 / 4 * x, x / 2, x / 4, 0,         0,     0,     0]
+        y_vert = [0,     0,     0,         0, 0, y / 4, y / 2, 3 / 4 * y,         y,         y,     y,     y, y, 3 / 4 * y, y / 2, y / 4]
+
+        _, ra_vertices, dec_vertices, _ = xyToRaDecPP(
+            [jd] * len(x_vert),
+            list(reversed(x_vert)),
+            list(reversed(y_vert)),
+            [1] * len(x_vert),
+            rp,
+            jd_time = True,
+            extinction_correction=False,
+        )
+
+        # Calculate minimum FoV of camera - not using diagonal as not restrictive enough
+        min_fov = min(rp.fov_v, rp.fov_h)
+        # the az_centre, alt_centre of the camera
+        az_c, alt_c = platepar2AltAz(rp)
+
+        # calculate elevation of RaDec to tangent of surface of earth at camera.
+        az_t, el_t = raDec2AltAz(event.ra, event.dec,jd, ev_con.latitude, ev_con.longitude)
+
+        # if not above min_elev
+        if el_t < event.min_elev:
+            log.info("Event at {} has elevation {:4.1f}, which is less than {:4.1f} elevation".format(event.dt,el_t,event.min_elev))
+            return False
+
+        # calculate Field of View RA and Dec at event time - only for logging
+        fov_ra, fov_dec = altAz2RADec(az_c, alt_c, jd, rp.lat, rp.lon)
+
+        # calculate fov_vec and target_vec
+        fov_vec, target_vec = np.array(raDec2Vector(fov_ra, fov_dec)), np.array(raDec2Vector(event.ra, event.dec))
+
+        # normalise - only for logging
+        fov_vec, target_vec = vectNorm(fov_vec), vectNorm(target_vec)
+
+        # temporary logging for debugging
+        log.info("RADecEvent Time {}".format(event.dt))
+        log.info("    Camera Alt, Az, min_fov {:.2f}, {:.2f}, {:.2f}".format(az_c,alt_c, min_fov))
+        log.info("        Field of view RaDec {:.2f}, {:.2f}".format(fov_ra,fov_dec))
+        log.info("        Target RaDec        {:.2f}, {:.2f}".format(event.ra, event.dec))
+        log.info("        Angular separation  {:.2f}".format(angularSeparationVectDeg(target_vec, fov_vec)))
+
+        # return whether any part of the targets sky_radius is in the FoV
+
+
+        ra ,dec  = (np.array([[event.ra, event.dec]]).astype(np.float64)).T
+
+        target_array = np.array([ra, dec]).T
+        fov_array = np.array([ra_vertices, dec_vertices]).T
+        inside = pointInsideConvexPolygonSphere(target_array,fov_array)
+
+
+        if inside:
+            log.info("Inside FOV")
+        else:
+            log.info("Outside FOV")
+
+        return inside
+
+
+
+
+    def raDecVisibleOld(self, rp, event, ev_con):
+
+        """
+        Given a platepar and an event, which includes RaDec coordinates
+        deduce if the RaDec plus the SkyRadius would be in the FoV.
+
+        Args:
+            rp: [platepar] reference platepar
+            event: [event] event of interest
+
+        Returns:
+            [bool] : True if RaDEC in FoV
+
+        """
+
         # Calculate minimum FoV of camera - not using diagonal as not restrictive enough
         min_fov = min(rp.fov_v, rp.fov_h)
 
@@ -1739,8 +1821,8 @@ class EventMonitor(multiprocessing.Process):
 
         rp = Platepar()
         if self.getPlateparFilePath(event) == "":
-            log.info("Reading platepar from {}".format(os.path.abspath('.')))
-            rp.read(os.path.abspath('.'))
+            log.info("Reading platepar from {}".format(self.config.platepar_name))
+            rp.read(self.config.platepar_name)
         else:
             rp.read(self.getPlateparFilePath(event))
         return rp
@@ -2322,9 +2404,9 @@ class EventMonitor(multiprocessing.Process):
                 time_left_before_start_minutes = int(time_left_before_start.total_seconds() / 60)
                 log.info('Next EventMonitor run {} UTC'.format(next_run_time))
                 if time_left_before_start_minutes < 120:
-                    log.info('Next capture start: {} UTC, {} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),time_left_before_start_minutes))
+                    log.info('Capture start: {} UTC, {} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),time_left_before_start_minutes))
                 else:
-                    log.info('Next capture start: {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
+                    log.info('Capture start: {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
             else:
                 log.info("Next EventMonitor run at {}".format(next_run_time))
             # Wait for the next check
