@@ -754,13 +754,13 @@ class EventMonitor(multiprocessing.Process):
         self.config = config        # the config that will be used for all data processing - lats, lons etc.
         self.syscon = config        # the config that describes where the folders are
 
-        # The path to the event monitor database
+        # The path to the EventMonitor database
         self.event_monitor_db_path = os.path.join(os.path.abspath(self.syscon.data_dir),
                                                   self.syscon.event_monitor_db_name)
 
         self.createDB()
 
-        # Load the event monitor database. Any problems, delete and recreate.
+        # Load the EventMonitor database. Any problems, delete and recreate.
         self.db_conn = self.getConnectionToEventMonitorDB()
         self.check_interval = self.syscon.event_monitor_check_interval
         self.exit = multiprocessing.Event()
@@ -793,7 +793,7 @@ class EventMonitor(multiprocessing.Process):
 
     def createEventMonitorDB(self, test_mode=False):
 
-        """ Creates the event monitor database. Tries only once.
+        """ Creates the EventMonitor database. Tries only once.
 
         arguments:
 
@@ -802,7 +802,7 @@ class EventMonitor(multiprocessing.Process):
 
         """
 
-        # Create the event monitor database
+        # Create the EventMonitor database
         if test_mode:
             self.event_monitor_db_path = os.path.expanduser(os.path.join(self.syscon.data_dir, self.syscon.event_monitor_db_name))
             if os.path.exists(self.event_monitor_db_path):
@@ -900,7 +900,7 @@ class EventMonitor(multiprocessing.Process):
 
     def delEventMonitorDB(self):
 
-        """ Delete the event monitor database.
+        """ Delete the EventMonitor database.
 
         Arguments:
 
@@ -1034,7 +1034,7 @@ class EventMonitor(multiprocessing.Process):
         return None
 
     def getConnectionToEventMonitorDB(self):
-        """ Loads the event monitor database
+        """ Loads the EventMonitor database
 
         Arguments:
 
@@ -1042,11 +1042,11 @@ class EventMonitor(multiprocessing.Process):
              connection: [connection] A connection to the database
         """
 
-        # Create the event monitor database if it does not exist
+        # Create the EventMonitor database if it does not exist
         if not os.path.isfile(self.event_monitor_db_path):
             self.createEventMonitorDB()
 
-        # Load the event monitor database - only gets done here
+        # Load the EventMonitor database - only gets done here
         try:
             self.conn = sqlite3.connect(self.event_monitor_db_path)
         except:
@@ -1356,7 +1356,7 @@ class EventMonitor(multiprocessing.Process):
 
             except:
                 # Return an empty list
-                log.info("Event monitor found no page at {}".format(self.syscon.event_monitor_webpage))
+                log.info("EventMonitor found no page at {}".format(self.syscon.event_monitor_webpage))
                 return events
         else:
             f = open(os.path.expanduser("~/RMS_data/event_watchlist.txt"), "r")
@@ -1675,10 +1675,10 @@ class EventMonitor(multiprocessing.Process):
 
         # temporary logging for debugging
         log.info("RADecEvent Time {}".format(event.dt))
-        log.info("    Camera Alt, Az, min_fov {:.2f}, {:.2f}, {:.2f}".format(az_c,alt_c, min_fov))
-        log.info("        Field of view RaDec {:.2f}, {:.2f}".format(fov_ra,fov_dec))
-        log.info("        Target RaDec        {:.2f}, {:.2f}".format(event.ra, event.dec))
-        log.info("        Angular separation  {:.2f}".format(angularSeparationVectDeg(target_vec, fov_vec)))
+        log.info("    Camera Alt, Az, min_fov {:.2f}°, {:.2f}°, {:.2f}°".format(az_c,alt_c, min_fov))
+        log.info("        Field of view RaDec {:.2f}°, {:.2f}°".format(fov_ra,fov_dec))
+        log.info("        Target RaDec        {:.2f}°, {:.2f}°".format(event.ra, event.dec))
+        log.info("        Angular separation  {:.2f}°".format(angularSeparationVectDeg(target_vec, fov_vec)))
 
         # return whether any part of the targets sky_radius is in the FoV
 
@@ -1740,10 +1740,10 @@ class EventMonitor(multiprocessing.Process):
 
         # temporary logging for debugging
         log.info("RADecEvent Time {}".format(event.dt))
-        log.info("    Camera Alt, Az, min_fov {:.2f}, {:.2f}, {:.2f}".format(az_c,alt_c, min_fov))
-        log.info("        Field of view RaDec {:.2f}, {:.2f}".format(fov_ra,fov_dec))
-        log.info("        Target RaDec        {:.2f}, {:.2f}".format(event.ra, event.dec))
-        log.info("        Angular separation  {:.2f}".format(angularSeparationVectDeg(target_vec, fov_vec)))
+        log.info("    Camera Alt, Az, min_fov {:.2f}°, {:.2f}°, {:.2f}°".format(az_c,alt_c, min_fov))
+        log.info("        Field of view RaDec {:.2f}°, {:.2f}°".format(fov_ra,fov_dec))
+        log.info("        Target RaDec        {:.2f}°, {:.2f}°".format(event.ra, event.dec))
+        log.info("        Angular separation  {:.2f}°".format(angularSeparationVectDeg(target_vec, fov_vec)))
 
         # return whether any part of the targets sky_radius is in the FoV
         return angularSeparationVectDeg(target_vec, fov_vec) < ((min_fov / 2) + abs(event.sky_radius))
@@ -2026,8 +2026,8 @@ class EventMonitor(multiprocessing.Process):
         log.info("Station           at Lat:{:7.4f}° Lon:{:7.4f}°".format(float(ev_con.latitude),float(ev_con.longitude)))
         log.info("Observer defined  at Lat:{:7.4f}° Lon:{:7.4f}°".format(float(target.obs_lat), float(target.obs_lon)))
         gc_dist = gcDistDeg(ev_con.latitude, ev_con.longitude, target.obs_lat, target.obs_lon)
-        log.info("Great circle distance :{:6.1f}km".format(float(gc_dist)))
-        log.info("Radius set at         :{:6.1f}km".format(float(target.obs_range)))
+        log.info("Great circle distance   :{:6.1f}km".format(float(gc_dist)))
+        log.info("Radius set at           :{:6.1f}km".format(float(target.obs_range)))
         return float(gc_dist) < float(target.obs_range)
 
     def checkTrajectoryEvent(self, observed_event, ev_con, test_mode = False):
@@ -2035,8 +2035,8 @@ class EventMonitor(multiprocessing.Process):
         log.info("Checks on trajectories for event at {}".format(observed_event.dt))
         check_time_start = datetime.datetime.utcnow()
 
-        log.info("Checking event with lat, lon, ht  {},{},{}".format(observed_event.lat, observed_event.lon, observed_event.ht))
-        log.info("                    lat2,lon2,ht2 {},{},{}".format(observed_event.lat2,observed_event.lon2, observed_event.ht2))
+        log.info("Checking event with lat, lon, ht  {}°,{}°,{}km".format(observed_event.lat, observed_event.lon, observed_event.ht))
+        log.info("                    lat2,lon2,ht2 {}°,{}°,{}km".format(observed_event.lat2,observed_event.lon2, observed_event.ht2))
 
         # Events can be specified in different ways, make sure converted to LatLon
         observed_event.latLonAzElToLatLonLatLon()
@@ -2211,9 +2211,9 @@ class EventMonitor(multiprocessing.Process):
         file_list = self.getFileList(target)
 
         if self.inRangeForRaDec(target, ev_con):
-            log.info("Inside great circle distance {:6.1f}km for RaDec target".format(float(target.obs_range)))
+            log.info("Inside observer range : {:6.1f}km for RaDec target".format(float(target.obs_range)))
         else:
-            log.info("Outside great circle distance {:6.1f}km for RaDec target".format(float(target.obs_range)))
+            log.info("Outside observer range : {:6.1f}km for RaDec target".format(float(target.obs_range)))
             return
 
 
@@ -2295,7 +2295,7 @@ class EventMonitor(multiprocessing.Process):
         for observed_event in unprocessed:
 
             # check to see if the end of this event is in the future, if it is then do not process
-            # if the end of the event is before the next scheduled execution of event monitor loop,
+            # if the end of the event is before the next scheduled execution of EventMonitor loop,
             # then set the loop to execute after the event ends
             if convertGMNTimeToPOSIX(observed_event.dt) + \
                     datetime.timedelta(seconds=int(observed_event.time_tolerance)) > datetime.datetime.utcnow():
@@ -2346,7 +2346,7 @@ class EventMonitor(multiprocessing.Process):
         return None
 
     def start(self):
-        """ Starts the event monitor. """
+        """ Starts the EventMonitor """
 
         if testIndividuals(logging = False):
             log.info("EventMonitor function test success")
@@ -2361,7 +2361,7 @@ class EventMonitor(multiprocessing.Process):
 
 
     def stop(self):
-        """ Stops the event monitor. """
+        """ Stops the EventMonitor. """
 
         self.db_conn.close()
         time.sleep(2)
@@ -2408,7 +2408,7 @@ class EventMonitor(multiprocessing.Process):
     def run(self):
 
         """
-        Call to start the event monitor loop. If the loop has been accelerated following a match
+        Call to start the EventMonitor loop. If the loop has been accelerated following a match
         then this loop slows it down by multiplying the check interval by 1.1.
 
         The time between checks is the sum of the delay interval, and the time to perform the check and upload.
@@ -2435,9 +2435,9 @@ class EventMonitor(multiprocessing.Process):
                 time_left_before_start_minutes = int(time_left_before_start.total_seconds() / 60)
                 log.info('Next EventMonitor run: {} UTC'.format(next_run_time))
                 if time_left_before_start_minutes < 120:
-                    log.info('   Next Capture start: {} UTC, {} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),time_left_before_start_minutes))
+                    log.info('Next Capture start   : {} UTC, {} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),time_left_before_start_minutes))
                 else:
-                    log.info('   Next Capture start: {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
+                    log.info('Next Capture start   : {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
             else:
                 log.info("Next EventMonitor run at {}".format(next_run_time))
             # Wait for the next check
