@@ -1940,6 +1940,10 @@ class EventMonitor(multiprocessing.Process):
                     log.error("fr_file {}".format(fr_file))
 
         if True:
+            image_note = event.suffix
+            if event.ra != 0 and event.dec != 0:
+                image_note += " Ra:{:4.1f}° Dec:{:4.1f}°".format(event.ra, event.dec`)
+            image_note = "{} Ra{}format(event.suffix
             batchFFtoImage(os.path.join(this_event_directory), "jpg", add_timestamp=True,
                            ff_component='maxpixel', image_note = event.suffix)
 
