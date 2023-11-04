@@ -2012,10 +2012,10 @@ class EventMonitor(multiprocessing.Process):
 
     def inRangeForRaDec(self, target, ev_con):
         log.info("Checking range for event at {}".format(target.dt))
-        log.info("Station           at Lat:{}° Lon:{}°".format(ev_con.latitude,ev_con.longitude))
-        log.info("Observer defined  at Lat:{}° Lon:{}°".format(target.obs_lat, target.obs_lon))
+        log.info("Station           at Lat:{:6.4f}° Lon:{:6.4f}°".format(ev_con.latitude,ev_con.longitude))
+        log.info("Observer defined  at Lat:{:6.4f}° Lon:{:6.4f}°".format(target.obs_lat, target.obs_lon))
         gc_dist = gcDistDeg(ev_con.latitude, ev_con.longitude, target.obs_lat, target.obs_lon)
-        log.info("Great circle distance           :{}km".format(gc_dist))
+        log.info("Great circle distance   :{:6.1f}km".format(gc_dist))
         return True
 
     def checkTrajectoryEvent(self, observed_event, ev_con, test_mode = False):
