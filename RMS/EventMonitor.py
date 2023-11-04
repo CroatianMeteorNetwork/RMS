@@ -2012,11 +2012,12 @@ class EventMonitor(multiprocessing.Process):
 
     def inRangeForRaDec(self, target, ev_con):
         log.info("Checking range for event at {}".format(target.dt))
-        log.info("Station           at Lat:{:6.4f}° Lon:{:6.4f}°".format(ev_con.latitude,ev_con.longitude))
-        log.info("Observer defined  at Lat:{:6.4f}° Lon:{:6.4f}°".format(target.obs_lat, target.obs_lon))
+        log.info("Station           at Lat:{:7.4f}° Lon:{:7.4f}°".format(float(ev_con.latitude),float(ev_con.longitude)))
+        log.info("Observer defined  at Lat:{:7.4f}° Lon:{:7.4f}°".format(float(target.obs_lat), float(target.obs_lon)))
         gc_dist = gcDistDeg(ev_con.latitude, ev_con.longitude, target.obs_lat, target.obs_lon)
-        log.info("Great circle distance   :{:6.1f}km".format(gc_dist))
-        return True
+        log.info("Great circle distance :{:6.1f}km".format(gc_dist))
+        log.info("Radius set at         :{:6.1f}km".format(target.obs_range))
+        return gc_dist < target.obs_range
 
     def checkTrajectoryEvent(self, observed_event, ev_con, test_mode = False):
 
@@ -2199,9 +2200,9 @@ class EventMonitor(multiprocessing.Process):
         file_list = self.getFileList(target)
 
         if self.inRangeForRaDec(target, ev_con):
-            log.info("Inside great circle distance {} for RaDec target".format(target.obs_range))
+            log.info("Inside great circle distance {:6.1f}km for RaDec target".format(target.obs_range))
         else:
-            log.info("Outside great circle distance {} for RaDec target".format(target.obs_range))
+            log.info("Outside great circle distance {:6.1f}km for RaDec target".format(target.obs_range))
             return
 
 
