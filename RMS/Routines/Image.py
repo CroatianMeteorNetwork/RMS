@@ -90,7 +90,7 @@ def loadImage(img_path, flatten=-1):
     return img
 
 
-def saveImage(img_path, img, add_timestamp=False):
+def saveImage(img_path, img, add_timestamp=False, image_note=""):
     """ Save image to disk.
 
     Arguments:
@@ -110,7 +110,7 @@ def saveImage(img_path, img, add_timestamp=False):
             splits = fname.split('_')
             dtstr = splits[2] + '_' + splits[3] + '.' + splits[4]
             imgdt = datetime.datetime.strptime(dtstr, '%Y%m%d_%H%M%S.%f')
-            title = splits[1] + ' ' + imgdt.strftime('%Y-%m-%d %H:%M:%S UTC') 
+            title = splits[1] + ' ' + imgdt.strftime('%Y-%m-%d %H:%M:%S UTC') + " " + image_note
             #fnt = ImageFont.truetype("arial.ttf", 15)
             fnt = ImageFont.load_default()
             image_editable.text((15,height-20), title, font=fnt, fill=(255))
