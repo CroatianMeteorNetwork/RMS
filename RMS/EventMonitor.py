@@ -1521,7 +1521,6 @@ class EventMonitor(multiprocessing.Process):
                     os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
                 #Skip over any directory which does not start with the stationID and warn
                 if night_directory[0:len(self.config.stationID)] != self.config.stationID:
-                    log.warning("Skipping directory {} - not the expected format for a captured files directory".format(night_directory))
                     continue
                 directory_POSIX_time = convertGMNTimeToPOSIX(night_directory[7:22])
 
@@ -1946,7 +1945,7 @@ class EventMonitor(multiprocessing.Process):
                 image_note += " Ra:{:4.1f}° Dec:{:4.1f}°".format(event.ra, event.dec)
                 log.info("Added RaDec suffix {}".format(image_note))
             batchFFtoImage(os.path.join(this_event_directory), "jpg", add_timestamp=True,
-                           ff_component='maxpixel', image_note = event.suffix)
+                           ff_component='maxpixel', image_note = image_note)
 
         with open(os.path.join(this_event_directory, "event_report.txt"), "w") as info:
             info.write(event.eventToString())
