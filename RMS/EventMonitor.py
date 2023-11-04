@@ -2224,6 +2224,7 @@ class EventMonitor(multiprocessing.Process):
             log.info("Inside observer range   :{:6.1f}km for RaDec target".format(float(target.obs_range)))
         else:
             log.info("Outside observer range  :{:6.1f}km for RaDec target".format(float(target.obs_range)))
+            self.markEventAsProcessed(target)
             return
 
 
@@ -2390,6 +2391,43 @@ class EventMonitor(multiprocessing.Process):
 
         return True
 
+    def theta_GMST1982(self,jd_ut1, fraction_ut1=0.0):
+        """Return the angle of Greenwich Mean Standard Time 1982 given the JD.
+
+        This angle defines the difference between the idiosyncratic True
+        Equator Mean Equinox (TEME) frame of reference used by SGP4 and the
+        more standard Pseudo Earth Fixed (PEF) frame of reference.  The UT1
+        time should be provided as a Julian date.  Theta is returned in
+        radians, and its velocity in radians per day of UT1 time.
+
+        From AIAA 2006-6753 Appendix C.
+
+        """
+        DAY_S = 86400.0
+        tau = 6.283185307179586476925287
+        T0 = 2451545.0
+
+        t = (jd_ut1 - T0 + fraction_ut1) / 36525.0
+        g = 67310.54841 + (8640184.812866 + (0.093104 + (-6.2e-6) * t) * t) * t
+        dg = 8640184.812866 + (0.093104 * 2.0 + (-6.2e-6 * 3.0) * t) * t
+        theta = (jd_ut1 % 1.0 + fraction_ut1 + g / DAY_S % 1.0) % 1.0 * tau
+        theta_dot = (1.0 + dg / (DAY_S * 36525.0)) * tau
+        return theta, theta_dot
+
+    def precompute_for_TEME(self,jd_ut1):
+        _zero_zero_minus_one = np.array((0.0, 0.0, -1.0))
+        theta, theta_dot = self.theta_GMST1982(jd_ut1)
+        angular_velocity = np.multiply.outer(_zero_zero_minus_one, theta_dot)
+        R = self.rot_z(-theta)
+        return angular_velocity, R
+
+    def rot_z(self,theta):
+        c = np.cos(theta)
+        s = np.sin(theta)
+        zero = theta * 0.0
+        one = zero + 1.0
+        return np.array(((c, -s, zero), (s, c, zero), (zero, zero, one)))
+
     def process_tle(self,event):
 
         if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 !=0:
@@ -2401,11 +2439,24 @@ class EventMonitor(multiprocessing.Process):
             jd, fr = int(datetime2JD(datetime.datetime.utcnow())),datetime2JD(datetime.datetime.utcnow()) % 1
             log.info("Working with jd {} fr {}".format(jd,fr))
             e,r,v = satellite.sgp4(jd,fr)
+
             log.info("e {}".format(e))
             log.info("r {}".format(r))
             log.info("v {}".format(v))
             log.info("End of TLE")
-
+            angular_velocity, R = self.precompute_for_TEME(jd)
+            theta, theta_dot = self.theta_GMST1982(jd,fr)
+            rPEF = (R).dot(r)
+            vPEF = (R).dot(v) + np.cross(angular_velocity, rPEF)
+            log.info("rPEF {}".format(rPEF))
+            log.info("vPEF {}".format(vPEF))
+            x,y,z = rPEF
+            x, y, z = x * 1000, y * 1000, z * 1000
+            log.info("x,y,z, {},{},{}".format(x,y,z))
+            lat,lon,alt = ecefV2LatLonAlt([x,y,z])
+            log.info("UTC time {}".format(datetime.datetime.utcnow()))
+            log.info("lat,lon,alt {},{},{}".format(lat, lon, alt))
+            pass
 
 
     def getEventsAndCheck(self, testmode=False):
