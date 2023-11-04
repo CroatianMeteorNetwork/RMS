@@ -33,7 +33,7 @@ import copy
 import uuid
 import random
 import string
-
+from sgp4.api import Satrec
 
 if sys.version_info[0] < 3:
 
@@ -149,10 +149,12 @@ class EventContainer(object):
         self.respond_to = ""
 
         # Used for requesting views of portions of the sky during time ranges
-
         self.obs_lat, self.obs_lon, self.obs_range, self.ra, self.dec = 0,0,"None",0,0
         self.sky_radius, self.min_elev = 10, 15
         self.min_stars = 20
+
+        # tle containers for strings
+        self.tle_0, self.tle_1, self.tle_2 = "", "", ""
 
         # These are internal control properties
         self.uuid = ""
@@ -165,6 +167,8 @@ class EventContainer(object):
         self.start_distance, self.start_angle, self.end_distance, self.end_angle = 0, 0, 0, 0
         self.fovra, self.fovdec = 0, 0
         self.suffix = "event"
+
+
 
     def setValue(self, variable_name, value):
 
@@ -236,6 +240,11 @@ class EventContainer(object):
         self.min_elev = float(value) if "MinElev" == variable_name else self.min_elev
         self.min_stars = float(value) if "MinStars" == variable_name else self.min_stars
 
+        # TLE definitions
+
+        self.tle_0 = str(value) if "tle_0" == variable_name else self.tle_0
+        self.tle_1 = str(value) if "tle_1" == variable_name else self.tle_1
+        self.tle_2 = str(value) if "tle_2" == variable_name else self.tle_2
 
 
         # Control information
@@ -1145,6 +1154,7 @@ class EventMonitor(multiprocessing.Process):
             added: [bool] True if added, else false
 
             """
+
 
         self.delOldRecords()
 
@@ -2211,9 +2221,9 @@ class EventMonitor(multiprocessing.Process):
         file_list = self.getFileList(target)
 
         if self.inRangeForRaDec(target, ev_con):
-            log.info("Inside observer range   : {:6.1f}km for RaDec target".format(float(target.obs_range)))
+            log.info("Inside observer range   :{:6.1f}km for RaDec target".format(float(target.obs_range)))
         else:
-            log.info("Outside observer range  : {:6.1f}km for RaDec target".format(float(target.obs_range)))
+            log.info("Outside observer range  :{:6.1f}km for RaDec target".format(float(target.obs_range)))
             return
 
 
@@ -2380,6 +2390,24 @@ class EventMonitor(multiprocessing.Process):
 
         return True
 
+    def process_tle(self,event):
+
+        if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 !=0:
+            log.info("TLE specification found")
+            log.info("{}".format(event.tle_0))
+            log.info("{}".format(event.tle_1))
+            log.info("{}".format(event.tle_2))
+            satellite = Satrec.twoline2rv(event.tle_1, event.tle_2)
+            jd, fr = int(datetime2JD(datetime.datetime.utcnow())),datetime2JD(datetime.datetime.utcnow()) % 1
+            log.info("Working with jd {} fr {}".format(jd,fr))
+            e,r,v = satellite.sgp4(jd,fr)
+            log.info("e {}".format(e))
+            log.info("r {}".format(r))
+            log.info("v {}".format(v))
+            log.info("End of TLE")
+
+
+
     def getEventsAndCheck(self, testmode=False):
         """
         Gets event(s) from the webpage, or a local file.
@@ -2398,6 +2426,12 @@ class EventMonitor(multiprocessing.Process):
         if events is None:
             log.warning("Attempt to iterate over None")
             return
+
+        tle_events = []
+        for event in events:
+
+            tle_events.append(self.process_tle(event))
+
         for event in events:
             if event.isReasonable():
                 self.addEvent(event)
