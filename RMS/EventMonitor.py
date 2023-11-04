@@ -2198,7 +2198,7 @@ class EventMonitor(multiprocessing.Process):
         # Get the files
         file_list = self.getFileList(target)
 
-        if self.inRangeForRaDec(target):
+        if self.inRangeForRaDec(target, ev_con):
             log.info("Inside great circle distance {} for RaDec target".format(target.ObsRange))
         else:
             log.info("Outside great circle distance {} for RaDec target".format(target.ObsRange))
