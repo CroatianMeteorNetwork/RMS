@@ -8,7 +8,7 @@ from RMS.Formats.FFfile import validFFName
 from RMS.Routines.Image import saveImage
 
 
-def batchFFtoImage(dir_path, fmt, add_timestamp=False, ff_component='maxpixel'):
+def batchFFtoImage(dir_path, fmt, add_timestamp=False, ff_component='maxpixel', image_note=""):
     """ Batch convert FF files to image files, jpg, png, etc.
 
     Arguments:
@@ -40,7 +40,7 @@ def batchFFtoImage(dir_path, fmt, add_timestamp=False, ff_component='maxpixel'):
             print('Saving: ', img_file_name)
 
             # Save the maxpixel to disk
-            saveImage(os.path.join(dir_path, img_file_name), getattr(ff, ff_component), add_timestamp)
+            saveImage(os.path.join(dir_path, img_file_name), getattr(ff, ff_component), add_timestamp, image_note)
 
 
 if __name__ == "__main__":
