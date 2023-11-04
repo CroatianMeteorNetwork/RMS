@@ -2028,7 +2028,7 @@ class EventMonitor(multiprocessing.Process):
         gc_dist = gcDistDeg(ev_con.latitude, ev_con.longitude, target.obs_lat, target.obs_lon)
         log.info("Great circle distance :{:6.1f}km".format(float(gc_dist)))
         log.info("Radius set at         :{:6.1f}km".format(float(target.obs_range)))
-        return gc_dist < target.obs_range
+        return float(gc_dist) < float(target.obs_range)
 
     def checkTrajectoryEvent(self, observed_event, ev_con, test_mode = False):
 
