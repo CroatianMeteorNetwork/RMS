@@ -2010,6 +2010,14 @@ class EventMonitor(multiprocessing.Process):
             shutil.rmtree(event_monitor_directory)
         return upload_status
 
+    def inRangeForRaDec(self, target, ev_con):
+        log.info("Checking range for event at {}".format(target.dt))
+        log.info("Station           at Lat:{} Lon:{}".format(ev_con.lat,ev_con.lon))
+        log.info("Observer defined  at Lat:{} Lon:{}".format(target.obs_lat, target.obs_lon))
+        gc_dist = gcDistDeg(ev_con.lat, ev_con.lon, target.obs_lat, target.obs_lon)
+        log.info("Great circle distance          :{}km".format(gc_dist))
+        return True
+
     def checkTrajectoryEvent(self, observed_event, ev_con, test_mode = False):
 
         log.info("Checks on trajectories for event at {}".format(observed_event.dt))
@@ -2189,6 +2197,13 @@ class EventMonitor(multiprocessing.Process):
 
         # Get the files
         file_list = self.getFileList(target)
+
+        if self.inRangeForRaDec(target):
+            log.info("Inside great circle distance {} for RaDec target".format(target.ObsRange))
+        else:
+            log.info("Outside great circle distance {} for RaDec target".format(target.ObsRange))
+            return
+
 
         # If there are no files based on time, then mark as processed and continue
         if (len(file_list) == 0 or file_list == [None]) and not test_mode:
