@@ -2014,7 +2014,7 @@ class EventMonitor(multiprocessing.Process):
         log.info("Checking range for event at {}".format(target.dt))
         log.info("Station           at Lat:{} Lon:{}".format(ev_con.lat,ev_con.lon))
         log.info("Observer defined  at Lat:{} Lon:{}".format(target.obs_lat, target.obs_lon))
-        gc_dist = gcDistDeg(ev_con.lat, ev_con.lon, target.obs_lat, target.obs_lon)
+        gc_dist = gcDistDeg(ev_con.latitude, ev_con.longitude, target.obs_lat, target.obs_lon)
         log.info("Great circle distance          :{}km".format(gc_dist))
         return True
 
