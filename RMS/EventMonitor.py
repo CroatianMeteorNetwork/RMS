@@ -2433,11 +2433,11 @@ class EventMonitor(multiprocessing.Process):
                 time_left_before_start = (start_time - datetime.datetime.utcnow())
                 time_left_before_start = time_left_before_start - datetime.timedelta(microseconds=time_left_before_start.microseconds)
                 time_left_before_start_minutes = int(time_left_before_start.total_seconds() / 60)
-                log.info('Next EventMonitor run: {} UTC'.format(next_run_time))
+                log.info('Next EventMonitor run : {} UTC'.format(next_run_time))
                 if time_left_before_start_minutes < 120:
-                    log.info('Next Capture start   : {} UTC, {} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),time_left_before_start_minutes))
+                    log.info('Next Capture start    : {} UTC, {} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),time_left_before_start_minutes))
                 else:
-                    log.info('Next Capture start   : {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
+                    log.info('Next Capture start    : {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
             else:
                 log.info("Next EventMonitor run at {}".format(next_run_time))
             # Wait for the next check
