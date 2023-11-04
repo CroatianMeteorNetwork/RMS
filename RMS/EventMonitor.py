@@ -1521,7 +1521,6 @@ class EventMonitor(multiprocessing.Process):
                     os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
                 #Skip over any directory which does not start with the stationID and warn
                 if night_directory[0:len(self.config.stationID)] != self.config.stationID:
-                    log.warning("Skipping directory {} - not the expected format for a captured files directory".format(night_directory))
                     continue
                 directory_POSIX_time = convertGMNTimeToPOSIX(night_directory[7:22])
 
@@ -1946,7 +1945,7 @@ class EventMonitor(multiprocessing.Process):
                 image_note += " Ra:{:4.1f}° Dec:{:4.1f}°".format(event.ra, event.dec)
                 log.info("Added RaDec suffix {}".format(image_note))
             batchFFtoImage(os.path.join(this_event_directory), "jpg", add_timestamp=True,
-                           ff_component='maxpixel')
+                           ff_component='maxpixel', image_note = image_note)
 
         with open(os.path.join(this_event_directory, "event_report.txt"), "w") as info:
             info.write(event.eventToString())
@@ -2010,6 +2009,15 @@ class EventMonitor(multiprocessing.Process):
         if not keep_files:
             shutil.rmtree(event_monitor_directory)
         return upload_status
+
+    def inRangeForRaDec(self, target, ev_con):
+        log.info("Checking range for event at {}".format(target.dt))
+        log.info("Station           at Lat:{:7.4f}° Lon:{:7.4f}°".format(float(ev_con.latitude),float(ev_con.longitude)))
+        log.info("Observer defined  at Lat:{:7.4f}° Lon:{:7.4f}°".format(float(target.obs_lat), float(target.obs_lon)))
+        gc_dist = gcDistDeg(ev_con.latitude, ev_con.longitude, target.obs_lat, target.obs_lon)
+        log.info("Great circle distance :{:6.1f}km".format(gc_dist))
+        log.info("Radius set at         :{:6.1f}km".format(target.obs_range))
+        return gc_dist < target.obs_range
 
     def checkTrajectoryEvent(self, observed_event, ev_con, test_mode = False):
 
@@ -2190,6 +2198,13 @@ class EventMonitor(multiprocessing.Process):
 
         # Get the files
         file_list = self.getFileList(target)
+
+        if self.inRangeForRaDec(target, ev_con):
+            log.info("Inside great circle distance {:6.1f}km for RaDec target".format(target.obs_range))
+        else:
+            log.info("Outside great circle distance {:6.1f}km for RaDec target".format(target.obs_range))
+            return
+
 
         # If there are no files based on time, then mark as processed and continue
         if (len(file_list) == 0 or file_list == [None]) and not test_mode:
