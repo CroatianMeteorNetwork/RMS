@@ -1953,7 +1953,7 @@ class EventMonitor(multiprocessing.Process):
             image_note = event.suffix
 
             if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 != "":
-                image_note += "\n " + event.tle_1 + "\n" + event.tle_2
+                image_note += " " + event.tle_1 + " " + event.tle_2
 
             if event.ra != "" and event.dec != "" and event.ra != 0 and event.dec != 0:
                 image_note += " Ra:{:4.1f}° Dec:{:4.1f}°".format(event.ra, event.dec)
