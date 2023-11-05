@@ -2568,6 +2568,8 @@ class EventMonitor(multiprocessing.Process):
         for event in events:
             tle_events.append(self.process_tle(event, start_time, end_time))
 
+        log.info("Finished check for TLE events")
+
         for event in events:
             if event.isReasonable():
                 self.addEvent(event)
