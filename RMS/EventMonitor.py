@@ -2522,6 +2522,9 @@ class EventMonitor(multiprocessing.Process):
             if not self.eventExists(event):
                 start_time = datetime.datetime.utcnow() - datetime.timedelta(days=30)
             log.info("Working on a TLE defined event from {} to {}".format(start_time, end_time))
+            log.info("{}".format(event.tle_0))
+            log.info("{}".format(event.tle_1))
+            log.info("{}".format(event.tle_2))
             duration = (end_time - start_time).total_seconds()
 
             rp = self.getEventPlatepar(event)
