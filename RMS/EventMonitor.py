@@ -33,7 +33,7 @@ import copy
 import uuid
 import random
 import string
-from sgp4.api import Satrec
+from skyfield.api import EarthSatellite, load, wgs84
 
 if sys.version_info[0] < 3:
 
@@ -1483,7 +1483,7 @@ class EventMonitor(multiprocessing.Process):
 
             if os.path.isfile(os.path.join(os.path.expanduser(self.config.config_file_name), file_name)):
                 file_list.append(str(os.path.join(os.path.expanduser(self.config.config_file_name), file_name)))
-                log.info("Using {} as fallback .config file".format(self.config.config_file_name))
+                log.info("Was looking for {}, returning {} as fallback .config file".format(file_name, self.config.config_file_name))
                 return file_list
         return []
 
@@ -1830,7 +1830,7 @@ class EventMonitor(multiprocessing.Process):
 
         rp = Platepar()
         if self.getPlateparFilePath(event) == "":
-            log.info("Reading platepar from {}".format(self.config.platepar_name))
+            log.info("No platepar found in {} for event at {}, reading from {}".format(self.config.captured_dir, event.dt, self.config.platepar_name))
             rp.read(self.config.platepar_name)
         else:
             rp.read(self.getPlateparFilePath(event))
@@ -2308,6 +2308,7 @@ class EventMonitor(multiprocessing.Process):
             # check to see if the end of this event is in the future, if it is then do not process
             # if the end of the event is before the next scheduled execution of EventMonitor loop,
             # then set the loop to execute after the event ends
+
             if convertGMNTimeToPOSIX(observed_event.dt) + \
                     datetime.timedelta(seconds=int(observed_event.time_tolerance)) > datetime.datetime.utcnow():
                 time_until_event_end_seconds = (convertGMNTimeToPOSIX(observed_event.dt) -
@@ -2428,50 +2429,143 @@ class EventMonitor(multiprocessing.Process):
         one = zero + 1.0
         return np.array(((c, -s, zero), (s, c, zero), (zero, zero, one)))
 
-    def process_tle(self,event):
+    def tleEventTime2Geo(self,satellite, event, time_gmn):
 
-        if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 !=0:
+
+        ts = load.timescale()
+        year, month, day = int(time_gmn[0:4]), int(time_gmn[4:6]), int(time_gmn[6:8])
+        hour, minute, second = int(time_gmn[9:11]), int(time_gmn[11:13]), int(time_gmn[13:15])
+        print("{}{}{}_{}{}{}".format(year, month, day, hour, minute, second))
+        t = ts.utc(year, month, day, hour, minute, second)
+        geocentric = satellite.at(t)
+        target_lat, target_lon = wgs84.latlon_of(geocentric)
+        target_height = wgs84.height_of(geocentric)
+
+        log.info("At {} target at lat:{:4.2f}, lon:{:4.2f}, ht:{:4.2f}km".format(t.utc_strftime("%Y%m%d_%H%M%S"),
+                                                                                 target_lat.degrees,
+                                                                                 target_lon.degrees,
+                                                                                 target_height.m / 1000))
+        #jul_date = datetime2JD(convertGMNTimeToPOSIX(event.dt))
+        #target_ECEF = np.array(geo2Cartesian(target_lat.degrees, target_lon.degrees, target_height.m, jul_date))
+        #log.info("Target ECEF     {}".format(target_ECEF))
+        # the az_centre, alt_centre of the camera
+        # az_centre, alt_centre = platepar2AltAz(rp)
+
+        # calculate Field of View RA and Dec at event time, and
+
+        #print("Station coordinates Lat:{}, Lon:{}, ht:{}".format(self.config.latitude, self.config.longitude, rp.elev))
+        #station_ECEF = np.array(geo2Cartesian(self.config.latitude, self.config.longitude, rp.elev, jul_date))
+        #log.info("Station ECEF     {}".format(station_ECEF))
+        #vector_to_target = target_ECEF - station_ECEF
+        #log.info("Vector to target {}".format(vector_to_target))
+        #fov_ra, fov_dec = altAz2RADec(az_centre, alt_centre, jul_date, rp.lat, rp.lon)
+        #fov_vec = np.array(raDec2Vector(fov_ra, fov_dec))
+        #point_fov = angularSeparationVectDeg(vectNorm(vector_to_target), vectNorm(fov_vec))
+
+        #target_az, target_alt = ECEF2AltAz(station_ECEF, target_ECEF)
+        #log.info("Target Az:{} Alt:{}".format(target_az, target_alt))
+        #log.info("Angle from centre of FOV :{}".format(point_fov))
+
+        return target_lat.degrees, target_lon.degrees, target_height.km
+    def tleEventCreateTrajectory(self, event,start_time, end_time):
+
+        satellite = EarthSatellite(event.tle_1, event.tle_2, event.tle_0)
+        start_time = convertPOSIXTimeToGMN(start_time)
+        end_time = convertPOSIXTimeToGMN(end_time)
+        event.lat,event.lon,event.ht = self.tleEventTime2Geo(satellite,event,start_time)
+        event.lat2, event.lon2, event.ht2 = self.tleEventTime2Geo(satellite, event, end_time)
+
+
+
+
+
+        return event
+
+    def process_tle(self,event, start_time, end_time):
+
+
+
+        #target_date = "20231123_191334"
+        #event.dt = target_date
+        if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 !=0 and event.dt != "":
+            log.info("Working on a TLE defined event at time {}, tolerance {}s".format(event.dt, event.time_tolerance))
+            #stations_url = 'http://celestrak.org/NORAD/elements/stations.txt'
+            #satellites = load.tle_file(stations_url)
+            #satellite = by_name['ISS (ZARYA)']
+            #print('Loaded', len(satellites), 'satellites')
+            #by_name = {sat.name: sat for sat in satellites}
+            #print(satellite)
+
             log.info("TLE specification found")
+            log.info("Searching at time {} with tolerance {} seconds".format(event.dt, event.time_tolerance))
+            search_start = convertGMNTimeToPOSIX(event.dt) - datetime.timedelta(seconds = int(event.time_tolerance))
+            search_end = convertGMNTimeToPOSIX(event.dt) + datetime.timedelta(seconds = int(event.time_tolerance))
+            log.info("Searching from {} to {} using TLE".format(search_start, search_end))
             log.info("{}".format(event.tle_0))
             log.info("{}".format(event.tle_1))
             log.info("{}".format(event.tle_2))
-            satellite = Satrec.twoline2rv(event.tle_1, event.tle_2)
-            jd, fr = int(datetime2JD(datetime.datetime.utcnow())),datetime2JD(datetime.datetime.utcnow()) % 1
-            log.info("Working with jd {} fr {}".format(jd,fr))
-            e,r,v = satellite.sgp4(jd,fr)
+            rp = self.getEventPlatepar(event)
 
-            log.info("e {}".format(e))
-            log.info("r {}".format(r))
-            log.info("v {}".format(v))
-            log.info("End of TLE")
-            angular_velocity, R = self.precompute_for_TEME(jd)
-            theta, theta_dot = self.theta_GMST1982(jd,fr)
-            rPEF = (R).dot(r)
-            vPEF = (R).dot(v) + np.cross(angular_velocity, rPEF)
-            log.info("rPEF {}".format(rPEF))
-            log.info("vPEF {}".format(vPEF))
-            x,y,z = rPEF
-            x, y, z = x * 1000, y * 1000, z * 1000
-            log.info("x,y,z, {},{},{}".format(x,y,z))
-            lat,lon,alt = ecefV2LatLonAlt([x,y,z])
-            log.info("UTC time {}".format(datetime.datetime.utcnow()))
-            log.info("lat,lon,alt {},{},{}".format(lat, lon, alt))
+            evaluation_step = 20
+            for seconds_offset in range(0,int(event.time_tolerance),evaluation_step):
+                traj_start_time = search_start + datetime.timedelta(seconds = seconds_offset)
+                traj_end_time = traj_start_time + datetime.timedelta(seconds = evaluation_step)
+                log.info("Searching between {}".format(traj_start_time, traj_end_time))
+                created_event = self.tleEventCreateTrajectory(event, traj_start_time, traj_end_time)
+
+                created_event.dt = convertPOSIXTimeToGMN(traj_start_time + datetime.timedelta(seconds = evaluation_step /2 ))
+                created_event.time_tolerance = evaluation_step / 2
+                count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
+                    created_event)
+                log.info("Points in FoV {}".format(count))
+                created_event.suffix = event.tle_0 if created_event.suffix == "" else created_event.suffix
+
+                if count != 0:
+                    self.addEvent(created_event)
+
+
             pass
 
+            #log.info("Working with jd {} fr {}".format(jd,fr))
+            #e,r,v = satellite.sgp4(jd,fr)
 
-    def getEventsAndCheck(self, testmode=False):
+            #log.info("e {}".format(e))
+            #log.info("r {}".format(r))
+            #log.info("v {}".format(v))
+            #log.info("End of TLE")
+            #angular_velocity, R = self.precompute_for_TEME(jd)
+            #theta, theta_dot = self.theta_GMST1982(jd,fr)
+            #rPEF = (R).dot(r)
+            #vPEF = (R).dot(v) + np.cross(angular_velocity, rPEF)
+            #log.info("rPEF {}".format(rPEF))
+            #log.info("vPEF {}".format(vPEF))
+            #x,y,z = rPEF
+            #x, y, z = x * 1000, y * 1000, z * 1000
+            #log.info("x,y,z, {},{},{}".format(x,y,z))
+            #lat,lon,alt = ecefV2LatLonAlt([x,y,z])
+            #log.info("UTC time {}".format(datetime.datetime.utcnow()))
+            #log.info("lat,lon,alt {},{},{}".format(lat, lon, alt))
+            #pass
+        else:
+            log.info("Not a tle event")
+
+
+    def getEventsAndCheck(self, start_time, end_time, testmode=False):
         """
         Gets event(s) from the webpage, or a local file.
         Calls self.addevent to add them to the database
         Calls self.checkevents to see if the database holds any unprocessed events
 
         Args:
+            start_time: time to start checking from
+            end_time: time to start checking to
             testmode: [bool] if set true looks for a local file, rather than a web address
 
         Returns:
             Nothing
         """
 
+        log.info("Checking for events from {} to {}".format(start_time, end_time))
         events = self.getEventsfromWebPage(testmode)
         # Don't try to iterate over None - this check should never be needed
         if events is None:
@@ -2481,7 +2575,7 @@ class EventMonitor(multiprocessing.Process):
         tle_events = []
         for event in events:
 
-            tle_events.append(self.process_tle(event))
+            tle_events.append(self.process_tle(event, start_time, end_time))
 
         for event in events:
             if event.isReasonable():
@@ -2504,12 +2598,14 @@ class EventMonitor(multiprocessing.Process):
         # Delay to allow capture to check existing folders - keep the logs tidy
 
         time.sleep(1)
-
+        last_check_start_time = datetime.datetime.utcnow()
         while not self.exit.is_set():
+            check_start_time = datetime.datetime.utcnow()
+            next_check_start_time = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval))
+            next_run_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
             self.checkDBExists()
-            self.getEventsAndCheck()
-            next_run_time = (datetime.datetime.utcnow() + datetime.timedelta(minutes = self.check_interval)).replace(microsecond = 0).strftime('%H:%M:%S')
-
+            self.getEventsAndCheck(last_check_start_time,next_check_start_time)
+            last_check_start_time = check_start_time
 
             start_time, duration = captureDuration(self.syscon.latitude, self.syscon.longitude, self.syscon.elevation)
 
@@ -2518,13 +2614,13 @@ class EventMonitor(multiprocessing.Process):
                 time_left_before_start = (start_time - datetime.datetime.utcnow())
                 time_left_before_start = time_left_before_start - datetime.timedelta(microseconds=time_left_before_start.microseconds)
                 time_left_before_start_minutes = int(time_left_before_start.total_seconds() / 60)
-                log.info('Next EventMonitor run : {} UTC'.format(next_run_time))
+                log.info('Next EventMonitor run : {} UTC'.format(next_check_start_time))
                 if time_left_before_start_minutes < 120:
                     log.info('Next Capture start    : {} UTC, {} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),time_left_before_start_minutes))
                 else:
                     log.info('Next Capture start    : {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
             else:
-                log.info("Next EventMonitor run at {}".format(next_run_time))
+                log.info("Next EventMonitor run at {}".format(next_run_time_str))
             # Wait for the next check
             self.exit.wait(60 * self.check_interval)
             # Increase the check interval
@@ -2692,6 +2788,21 @@ def angDif(a1, a2):
     normalised = abs(a1-a2) % 360
     return min(360-normalised, normalised)
 
+def convertPOSIXTimeToGMN(t):
+    """
+    Converts the filenaming time convention used by GMN into posix
+
+    arguments:
+        t: [datetime object]
+
+    returns:
+        time represented as a string e.g. 20230527_032115
+    """
+
+    time_string = t.strftime('%Y%m%d_%H%M%S')
+    log.info("Returning {}".format(time_string))
+    return time_string
+
 def convertGMNTimeToPOSIX(timestring):
 
     """
@@ -2703,6 +2814,8 @@ def convertGMNTimeToPOSIX(timestring):
     returns:
         posix compatible time
     """
+
+
     try:
         dt_object = datetime.datetime.strptime(timestring.strip(), "%Y%m%d_%H%M%S")
     except:
