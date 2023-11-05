@@ -1183,7 +1183,7 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, EventCart2Std,    \n"
             sql_statement += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax,    \n"
             sql_statement += "ObsLat, ObsLon, ObsRange, Ra, Dec, SkyRadius, MinElev, MinStars,    \n"
-            sql_statement += "tle_0, tle_1, tle_2    \n"
+            sql_statement += "tle_0, tle_1, tle_2,   \n"
             sql_statement += "processedstatus, uploadedstatus, uuid, RespondTo, StationsRequired, Suffix, timeadded \n"
             sql_statement += ")                                           \n"
 
@@ -1202,7 +1202,7 @@ class EventMonitor(multiprocessing.Process):
                                                                       event.ra, event.dec, event.sky_radius,
                                                                       event.min_elev,event.min_stars)
 
-            sql_statement += "{},  {}, {}, \n".format(event.tle_0,event.tle_1,event.tle_2)
+            sql_statement += "'{}',  '{}', '{}', \n".format(event.tle_0,event.tle_1,event.tle_2)
             sql_statement += "{},  {}, '{}', '{}', '{}' , '{}',    \n".format(0, 0,uuid.uuid4(), event.respond_to, event.stations_required, event.suffix)
             sql_statement += "CURRENT_TIMESTAMP ) \n"
 
@@ -2594,9 +2594,7 @@ class EventMonitor(multiprocessing.Process):
         for event in events:
             tle_events.append(self.process_tle(event, start_time, end_time))
 
-        for event in tle_events:
-            if event.isReasonable():
-                self.addEvent(event)
+
 
         for event in events:
             if event.isReasonable():
