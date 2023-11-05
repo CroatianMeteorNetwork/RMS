@@ -1445,6 +1445,7 @@ class EventMonitor(multiprocessing.Process):
         sql_query_cols += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, "
         sql_query_cols += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax, RespondTo, StationsRequired,"
         sql_query_cols += "ObsLat, ObsLon, ObsRange, Ra, Dec, SkyRadius, MinElev, MinStars,"
+        sql_query_cols += "tle_0, tle_1, tle_2,"
         sql_query_cols += "EventCartStd, EventCart2Std, Suffix"
         sql_statement += sql_query_cols
         sql_statement += " \n"
@@ -2596,8 +2597,6 @@ class EventMonitor(multiprocessing.Process):
         tle_events = []
         for event in events:
             tle_events.append(self.process_tle(event, start_time, end_time))
-
-
 
         for event in events:
             if event.isReasonable():
