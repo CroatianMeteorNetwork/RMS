@@ -1496,7 +1496,7 @@ class EventMonitor(multiprocessing.Process):
             Return:
                  file: [string] Path to platepar
         """
-        log.info("Seeking {} in {}".format(file_name,directory))
+
         file_list = []
         if os.path.isfile(os.path.join(directory, file_name)):
             file_list.append(str(os.path.join(directory, file_name)))
@@ -1529,7 +1529,8 @@ class EventMonitor(multiprocessing.Process):
             if len(platepar_file_list) > 0:
                 platepar_file = platepar_file_list[0]
             else:
-                log.warning("No platepar file found processing event at {}".format(event.dt))
+                pass
+
         return platepar_file
 
 
