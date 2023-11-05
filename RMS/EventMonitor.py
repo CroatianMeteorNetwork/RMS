@@ -2596,10 +2596,9 @@ class EventMonitor(multiprocessing.Process):
         last_check_start_time = datetime.datetime.utcnow()
         while not self.exit.is_set():
             check_start_time = datetime.datetime.utcnow()
+
             self.checkDBExists()
             self.getEventsAndCheck(last_check_start_time,next_check_start_time)
-            next_check_start_time = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval))
-            next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
             last_check_start_time = check_start_time
 
             start_time, duration = captureDuration(self.syscon.latitude, self.syscon.longitude, self.syscon.elevation)
@@ -2609,6 +2608,8 @@ class EventMonitor(multiprocessing.Process):
                 time_left_before_start = (start_time - datetime.datetime.utcnow())
                 time_left_before_start = time_left_before_start - datetime.timedelta(microseconds=time_left_before_start.microseconds)
                 time_left_before_start_minutes = int(time_left_before_start.total_seconds() / 60)
+                next_check_start_time = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval))
+                next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
                 log.info('Next EventMonitor run : {} UTC'.format(next_check_start_time_str))
                 if time_left_before_start_minutes < 120:
                     log.info('Next Capture start    : {} UTC, {} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),time_left_before_start_minutes))
