@@ -2519,7 +2519,7 @@ class EventMonitor(multiprocessing.Process):
                     created_event)
                 log.info("Points in FoV {}".format(count))
                 created_event.suffix = event.tle_0 if created_event.suffix == "event" else created_event.suffix
-
+                created_event.stations_required = self.syscon.stationID
                 if count != 0:
                     self.addEvent(created_event)
 
