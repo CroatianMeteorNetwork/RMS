@@ -2573,7 +2573,7 @@ class EventMonitor(multiprocessing.Process):
         for event in events:
             if event.isReasonable():
                 log.info("Adding event")
-                print(event.eventToString)
+                print(event.eventToString())
                 self.addEvent(event)
 
         # Go through all events and check if they need to be uploaded - this iterates through the database
