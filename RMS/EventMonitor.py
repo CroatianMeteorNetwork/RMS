@@ -2565,8 +2565,8 @@ class EventMonitor(multiprocessing.Process):
             return
 
         tle_events = []
-        for event in events:
-            tle_events.append(self.process_tle(event, start_time, end_time))
+        for tle_event in events:
+            tle_events.append(self.process_tle(tle_event, start_time, end_time))
 
         log.info("Finished check for TLE events")
 
