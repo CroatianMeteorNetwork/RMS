@@ -2623,6 +2623,7 @@ class EventMonitor(multiprocessing.Process):
             next_check_start_time = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval))
             next_run_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
             self.checkDBExists()
+            self.upgradeDB()
             self.getEventsAndCheck(last_check_start_time,next_check_start_time)
             last_check_start_time = check_start_time
 
