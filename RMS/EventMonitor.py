@@ -2616,6 +2616,8 @@ class EventMonitor(multiprocessing.Process):
                 else:
                     log.info('Next Capture start    : {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
             else:
+                next_check_start_time = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval))
+                next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
                 log.info("Next EventMonitor run at {}".format(next_check_start_time_str))
             # Wait for the next check
             self.exit.wait(60 * self.check_interval)
