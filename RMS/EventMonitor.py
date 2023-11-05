@@ -2257,7 +2257,10 @@ class EventMonitor(multiprocessing.Process):
         file_list = self.getFileList(target)
 
         if self.inRangeForRaDec(target, ev_con):
-            log.info("Inside observer range   :{:6.1f}km for RaDec target".format(float(target.obs_range)))
+            try:
+                log.info("Inside observer range   :{:6.1f}km for RaDec target".format(float(target.obs_range)))
+            except:
+                pass
         else:
             log.info("Outside observer range  :{:6.1f}km for RaDec target".format(float(target.obs_range)))
             self.markEventAsProcessed(target)
