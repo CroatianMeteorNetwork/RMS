@@ -2821,7 +2821,6 @@ def convertPOSIXTimeToGMN(t):
     """
 
     time_string = t.strftime('%Y%m%d_%H%M%S')
-    log.info("Returning {}".format(time_string))
     return time_string
 
 def convertGMNTimeToPOSIX(timestring):
