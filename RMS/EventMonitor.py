@@ -1952,6 +1952,10 @@ class EventMonitor(multiprocessing.Process):
         if True:
             image_note = event.suffix
 
+            log.info("TLE lines")
+            log.info("{}".format(event.tle_0))
+            log.info("{}".format(event.tle_1))
+            log.info("{}".format(event.tle_2))
             if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 != "":
                 image_note += " " + event.tle_1 + " " + event.tle_2
                 log.info("Added tle {}".format(image_note))
