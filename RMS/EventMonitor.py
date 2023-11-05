@@ -2623,7 +2623,7 @@ class EventMonitor(multiprocessing.Process):
         while not self.exit.is_set():
             check_start_time = datetime.datetime.utcnow()
             next_check_start_time = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval))
-            next_run_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
+            next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
             self.checkDBExists()
             self.getEventsAndCheck(last_check_start_time,next_check_start_time)
             last_check_start_time = check_start_time
@@ -2641,7 +2641,7 @@ class EventMonitor(multiprocessing.Process):
                 else:
                     log.info('Next Capture start    : {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
             else:
-                log.info("Next EventMonitor run at {}".format(next_run_time_str))
+                log.info("Next EventMonitor run at {}".format(next_check_start_time_str))
             # Wait for the next check
             self.exit.wait(60 * self.check_interval)
             # Increase the check interval
