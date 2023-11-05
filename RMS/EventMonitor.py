@@ -1952,6 +1952,9 @@ class EventMonitor(multiprocessing.Process):
         if True:
             image_note = event.suffix
 
+            if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 != "":
+                image_note += "\n " + event.tle_1 + "\n" + event.tle_2
+
             if event.ra != "" and event.dec != "" and event.ra != 0 and event.dec != 0:
                 image_note += " Ra:{:4.1f}° Dec:{:4.1f}°".format(event.ra, event.dec)
                 log.info("Added RaDec suffix {}".format(image_note))
@@ -2480,10 +2483,6 @@ class EventMonitor(multiprocessing.Process):
 
     def process_tle(self,event, start_time, end_time):
 
-
-
-        #target_date = "20231123_191334"
-        #event.dt = target_date
         if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 !=0 and event.dt != "":
             log.info("Working on a TLE defined event at time {}, tolerance {}s".format(event.dt, event.time_tolerance))
             #stations_url = 'http://celestrak.org/NORAD/elements/stations.txt'
