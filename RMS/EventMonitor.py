@@ -76,7 +76,7 @@ from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 
 
 log = logging.getLogger("logger")
-EM_RAISE = True
+EM_RAISE = False
 
 
 """
@@ -2468,7 +2468,6 @@ class EventMonitor(multiprocessing.Process):
         ts = load.timescale()
         year, month, day = int(time_gmn[0:4]), int(time_gmn[4:6]), int(time_gmn[6:8])
         hour, minute, second = int(time_gmn[9:11]), int(time_gmn[11:13]), int(time_gmn[13:15])
-        print("{}{}{}_{}{}{}".format(year, month, day, hour, minute, second))
         t = ts.utc(year, month, day, hour, minute, second)
         geocentric = satellite.at(t)
         target_lat, target_lon = wgs84.latlon_of(geocentric)
@@ -3492,7 +3491,7 @@ if __name__ == "__main__":
 
     try:
         # Add a random string after the URL to defeat caching
-        print(syscon.event_monitor_webpage)
+
 
         if sys.version_info[0] < 3:
             web_page = urllib2.urlopen(syscon.event_monitor_webpage).read().splitlines()
@@ -3512,10 +3511,10 @@ if __name__ == "__main__":
 
 
     if cml_args.one_shot:
-        print("EventMonitor running once")
+
         em.getEventsAndCheck()
 
     else:
-        print("EventMonitor running indefinitely")
+
         em.start()
 
