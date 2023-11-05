@@ -2519,6 +2519,8 @@ class EventMonitor(multiprocessing.Process):
 
 
         if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 != 0 and event.dt == 0:
+            if not self.eventExists(event):
+                start_time = datetime.datetime.utcnow() - datetime.timedelta(days=30)
             log.info("Working on a TLE defined event from {} to {}".format(start_time, end_time))
             duration = (end_time - start_time).total_seconds()
             log.info("Check duration {} seconds".format(duration))
