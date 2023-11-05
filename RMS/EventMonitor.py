@@ -2596,7 +2596,8 @@ class EventMonitor(multiprocessing.Process):
         last_check_start_time = datetime.datetime.utcnow()
         while not self.exit.is_set():
             check_start_time = datetime.datetime.utcnow()
-
+            next_check_start_time = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval))
+            next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
             self.checkDBExists()
             self.getEventsAndCheck(last_check_start_time,next_check_start_time)
             last_check_start_time = check_start_time
