@@ -2074,8 +2074,8 @@ class EventMonitor(multiprocessing.Process):
         log.info("Checks on trajectories for event at {}".format(observed_event.dt))
         check_time_start = datetime.datetime.utcnow()
 
-        log.info("Checking event with lat, lon, ht  {}°,{}°,{}km".format(observed_event.lat, observed_event.lon, observed_event.ht))
-        log.info("                    lat2,lon2,ht2 {}°,{}°,{}km".format(observed_event.lat2,observed_event.lon2, observed_event.ht2))
+        log.info("Checking event with lat, lon, ht  {:.3f}°,{:.3f}°,{:.1f}km".format(observed_event.lat, observed_event.lon, observed_event.ht))
+        log.info("                    lat2,lon2,ht2 {:.3f}°,{:.3f}°,{:.1f}km".format(observed_event.lat2,observed_event.lon2, observed_event.ht2))
 
         # Events can be specified in different ways, make sure converted to LatLon
         observed_event.latLonAzElToLatLonLatLon()
