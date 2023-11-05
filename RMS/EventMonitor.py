@@ -2483,15 +2483,9 @@ class EventMonitor(multiprocessing.Process):
 
     def process_tle(self,event, start_time, end_time):
 
-        if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 !=0 and event.dt != "":
+        if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 !=0 and event.dt != "" and event.dt != 0:
+            log.info("event.dt {}".format(event.dt))
             log.info("Working on a TLE defined event at time {}, tolerance {}s".format(event.dt, event.time_tolerance))
-            #stations_url = 'http://celestrak.org/NORAD/elements/stations.txt'
-            #satellites = load.tle_file(stations_url)
-            #satellite = by_name['ISS (ZARYA)']
-            #print('Loaded', len(satellites), 'satellites')
-            #by_name = {sat.name: sat for sat in satellites}
-            #print(satellite)
-
             log.info("TLE specification found")
             log.info("Searching at time {} with tolerance {} seconds".format(event.dt, event.time_tolerance))
             search_start = convertGMNTimeToPOSIX(event.dt) - datetime.timedelta(seconds = int(event.time_tolerance))
@@ -2506,7 +2500,7 @@ class EventMonitor(multiprocessing.Process):
             for seconds_offset in range(0,int(event.time_tolerance),evaluation_step):
                 traj_start_time = search_start + datetime.timedelta(seconds = seconds_offset)
                 traj_end_time = traj_start_time + datetime.timedelta(seconds = evaluation_step)
-                log.info("Searching between {}".format(traj_start_time, traj_end_time))
+                log.info("Searching between {} and {}".format(traj_start_time, traj_end_time))
                 created_event = self.tleEventCreateTrajectory(event, traj_start_time, traj_end_time)
 
                 created_event.dt = convertPOSIXTimeToGMN(traj_start_time + datetime.timedelta(seconds = evaluation_step /2 ))
@@ -2522,31 +2516,31 @@ class EventMonitor(multiprocessing.Process):
                     self.addEvent(created_event)
 
 
-            pass
 
-            #log.info("Working with jd {} fr {}".format(jd,fr))
-            #e,r,v = satellite.sgp4(jd,fr)
 
-            #log.info("e {}".format(e))
-            #log.info("r {}".format(r))
-            #log.info("v {}".format(v))
-            #log.info("End of TLE")
-            #angular_velocity, R = self.precompute_for_TEME(jd)
-            #theta, theta_dot = self.theta_GMST1982(jd,fr)
-            #rPEF = (R).dot(r)
-            #vPEF = (R).dot(v) + np.cross(angular_velocity, rPEF)
-            #log.info("rPEF {}".format(rPEF))
-            #log.info("vPEF {}".format(vPEF))
-            #x,y,z = rPEF
-            #x, y, z = x * 1000, y * 1000, z * 1000
-            #log.info("x,y,z, {},{},{}".format(x,y,z))
-            #lat,lon,alt = ecefV2LatLonAlt([x,y,z])
-            #log.info("UTC time {}".format(datetime.datetime.utcnow()))
-            #log.info("lat,lon,alt {},{},{}".format(lat, lon, alt))
-            #pass
-        else:
-            pass
+        if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 != 0 and event.dt == 0:
+            log.info("Working on a TLE defined event from {} to {}".format(start_time, end_time))
+            duration = (end_time - start_time).total_seconds()
+            log.info("Check duration {} seconds".format(duration))
+            rp = self.getEventPlatepar(event)
+            search_start = start_time
+            evaluation_step = 20
+            for seconds_offset in range(0, int(duration), evaluation_step):
+                traj_start_time = search_start + datetime.timedelta(seconds=seconds_offset)
+                traj_end_time = traj_start_time + datetime.timedelta(seconds=evaluation_step)
+                log.info("Searching between {} and {}".format(traj_start_time, traj_end_time))
+                created_event = self.tleEventCreateTrajectory(event, traj_start_time, traj_end_time)
+                created_event.dt = convertPOSIXTimeToGMN(traj_start_time + datetime.timedelta(seconds=evaluation_step / 2))
+                created_event.time_tolerance = evaluation_step / 2
+                count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
+                            created_event)
+                log.info("Points in FoV {}".format(count))
+                created_event.suffix = event.tle_0 if created_event.suffix == "event" else created_event.suffix
+                created_event.tle_0, created_event.tle_1, created_event.tle_2 = event.tle_0, event.tle_1, event.tle_2
 
+                if count != 0:
+                    created_event.stations_required = self.syscon.stationID
+                    self.addEvent(created_event)
 
     def getEventsAndCheck(self, start_time, end_time, testmode=False):
         """
@@ -2815,7 +2809,7 @@ def convertGMNTimeToPOSIX(timestring):
     try:
         dt_object = datetime.datetime.strptime(timestring.strip(), "%Y%m%d_%H%M%S")
     except:
-        log.error("Badly formatted time {}".format(timestring.strip()))
+        log.error("Badly formatted time {}".format(timestring))
         # return a time which will be safe but cannot produce any output
         dt_object = datetime.datetime.strptime("20000101_000000".strip(), "%Y%m%d_%H%M%S")
     return dt_object
