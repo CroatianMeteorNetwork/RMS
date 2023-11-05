@@ -2476,10 +2476,6 @@ class EventMonitor(multiprocessing.Process):
         event.lat,event.lon,event.ht = self.tleEventTime2Geo(satellite,event,start_time)
         event.lat2, event.lon2, event.ht2 = self.tleEventTime2Geo(satellite, event, end_time)
 
-
-
-
-
         return event
 
     def process_tle(self,event, start_time, end_time):
@@ -2548,7 +2544,7 @@ class EventMonitor(multiprocessing.Process):
             #log.info("lat,lon,alt {},{},{}".format(lat, lon, alt))
             #pass
         else:
-            log.info("Not a tle event")
+            pass
 
 
     def getEventsAndCheck(self, start_time, end_time, testmode=False):
