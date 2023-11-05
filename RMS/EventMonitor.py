@@ -1860,6 +1860,7 @@ class EventMonitor(multiprocessing.Process):
         rp = self.getEventPlatepar(event)
 
         pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC = self.trajectoryVisible(rp, event)
+
         return pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC
 
     def doUpload(self, event, evcon, file_list, keep_files=False, no_upload=False, test_mode=False):
@@ -1950,8 +1951,8 @@ class EventMonitor(multiprocessing.Process):
 
         if True:
             image_note = event.suffix
-            log.info("Preparing image note {} for event at Ra:{} Dec:{}".format(image_note, event.ra, event.dec))
-            if event.ra != "" and event.dec != "":
+
+            if event.ra != "" and event.dec != "" and event.ra != 0 and event.dec != 0:
                 image_note += " Ra:{:4.1f}° Dec:{:4.1f}°".format(event.ra, event.dec)
                 log.info("Added RaDec suffix {}".format(image_note))
             batchFFtoImage(os.path.join(this_event_directory), "jpg", add_timestamp=True,
