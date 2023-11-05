@@ -301,6 +301,10 @@ class EventContainer(object):
         output += ("Start Angle              : {:3.2f}\n".format(self.start_angle))
         output += ("End Distance (km)        : {:3.2f}\n".format(self.end_distance / 1000))
         output += ("End Angle                : {:3.2f}\n".format(self.end_angle))
+        output += "# TLE information     \n"
+        output += ("                         : {}\n".format(self.tle_0))
+        output += ("                         : {}\n".format(self.tle_1))
+        output += ("                         : {}\n".format(self.tle_2))
         output += "# Station information        \n"
         output += ("Field of view RA         : {:3.2f}\n".format(self.fovra))
         output += ("Field of view Dec        : {:3.2f}\n".format(self.fovdec))
