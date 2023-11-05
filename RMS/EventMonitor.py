@@ -771,6 +771,7 @@ class EventMonitor(multiprocessing.Process):
 
         # Load the EventMonitor database. Any problems, delete and recreate.
         self.db_conn = self.getConnectionToEventMonitorDB()
+        self.upgradeDB(self.db_conn)
         self.check_interval = self.syscon.event_monitor_check_interval
         self.exit = multiprocessing.Event()
 
@@ -1067,9 +1068,11 @@ class EventMonitor(multiprocessing.Process):
         if not os.path.isfile(self.event_monitor_db_path):
             self.createEventMonitorDB()
 
+
         # Load the EventMonitor database - only gets done here
         try:
             self.conn = sqlite3.connect(self.event_monitor_db_path)
+            self.upgradeDB(self.conn)
         except:
             os.unlink(self.event_monitor_db_path)
             self.createEventMonitorDB()
@@ -2623,7 +2626,6 @@ class EventMonitor(multiprocessing.Process):
             next_check_start_time = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval))
             next_run_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
             self.checkDBExists()
-            self.upgradeDB()
             self.getEventsAndCheck(last_check_start_time,next_check_start_time)
             last_check_start_time = check_start_time
 
