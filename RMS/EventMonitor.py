@@ -2523,24 +2523,23 @@ class EventMonitor(multiprocessing.Process):
                 start_time = datetime.datetime.utcnow() - datetime.timedelta(days=30)
             log.info("Working on a TLE defined event from {} to {}".format(start_time, end_time))
             duration = (end_time - start_time).total_seconds()
-            log.info("Check duration {} seconds".format(duration))
+
             rp = self.getEventPlatepar(event)
             search_start = start_time
             evaluation_step = 20
             for seconds_offset in range(0, int(duration), evaluation_step):
                 traj_start_time = search_start + datetime.timedelta(seconds=seconds_offset)
                 traj_end_time = traj_start_time + datetime.timedelta(seconds=evaluation_step)
-                log.info("Searching between {} and {}".format(traj_start_time, traj_end_time))
                 created_event = self.tleEventCreateTrajectory(event, traj_start_time, traj_end_time)
                 created_event.dt = convertPOSIXTimeToGMN(traj_start_time + datetime.timedelta(seconds=evaluation_step / 2))
                 created_event.time_tolerance = evaluation_step / 2
                 count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
                             created_event)
-                log.info("Points in FoV {}".format(count))
                 created_event.suffix = event.tle_0 if created_event.suffix == "event" else created_event.suffix
                 created_event.tle_0, created_event.tle_1, created_event.tle_2 = event.tle_0, event.tle_1, event.tle_2
 
                 if count != 0:
+                    log.info("Points in FoV {}".format(count))
                     created_event.stations_required = self.syscon.stationID
                     self.addEvent(created_event)
 
