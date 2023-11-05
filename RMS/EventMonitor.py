@@ -1955,6 +1955,8 @@ class EventMonitor(multiprocessing.Process):
             if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 != "":
                 image_note += " " + event.tle_1 + " " + event.tle_2
                 log.info("Added tle {}".format(image_note))
+            else:
+                log.info("Did not add tle")
 
             if event.ra != "" and event.dec != "" and event.ra != 0 and event.dec != 0:
                 image_note += " Ra:{:4.1f}° Dec:{:4.1f}°".format(event.ra, event.dec)
