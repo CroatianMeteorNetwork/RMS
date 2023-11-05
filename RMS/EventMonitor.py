@@ -265,7 +265,7 @@ class EventContainer(object):
 
         output = "# Required \n"
         output += ("EventTime                : {}\n".format(self.dt))
-        output += ("TimeTolerance (s)        : {:.0f}\n".format(self.time_tolerance))
+        output += ("TimeTolerance (s)        : {}\n".format(self.time_tolerance))
         output += ("EventLat (deg +N)        : {:3.2f}\n".format(self.lat))
         output += ("EventLatStd (deg)        : {:3.2f}\n".format(self.lat_std))
         output += ("EventLon (deg +E)        : {:3.2f}\n".format(self.lon))
