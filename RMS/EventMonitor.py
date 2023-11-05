@@ -1852,7 +1852,7 @@ class EventMonitor(multiprocessing.Process):
 
         rp = Platepar()
         if self.getPlateparFilePath(event) == "":
-            log.info("No platepar found in {} for event at {}, reading from {}".format(self.config.captured_dir, event.dt, self.config.platepar_name))
+            #log.info("No platepar found in {} for event at {}, reading from {}".format(self.config.captured_dir, event.dt, self.config.platepar_name))
             rp.read(self.config.platepar_name)
         else:
             rp.read(self.getPlateparFilePath(event))
@@ -2445,10 +2445,10 @@ class EventMonitor(multiprocessing.Process):
         target_lat, target_lon = wgs84.latlon_of(geocentric)
         target_height = wgs84.height_of(geocentric)
 
-        log.info("At {} target at lat:{:4.2f}, lon:{:4.2f}, ht:{:4.2f}km".format(t.utc_strftime("%Y%m%d_%H%M%S"),
-                                                                                 target_lat.degrees,
-                                                                                 target_lon.degrees,
-                                                                                 target_height.m / 1000))
+        #log.info("At {} target at lat:{:4.2f}, lon:{:4.2f}, ht:{:4.2f}km".format(t.utc_strftime("%Y%m%d_%H%M%S"),
+        #                                                                         target_lat.degrees,
+        #                                                                         target_lon.degrees,
+        #                                                                         target_height.m / 1000))
         #jul_date = datetime2JD(convertGMNTimeToPOSIX(event.dt))
         #target_ECEF = np.array(geo2Cartesian(target_lat.degrees, target_lon.degrees, target_height.m, jul_date))
         #log.info("Target ECEF     {}".format(target_ECEF))
