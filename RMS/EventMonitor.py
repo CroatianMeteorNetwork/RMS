@@ -2566,14 +2566,13 @@ class EventMonitor(multiprocessing.Process):
 
         tle_events = []
         for tle_event in events:
-            self.process_tle(tle_event, start_time, end_time)
+            created_event = copy.copy(tle_event)
+            self.process_tle(created_event, start_time, end_time)
 
         log.info("Finished check for TLE events")
 
         for event in events:
             if event.isReasonable():
-                log.info("Adding event")
-
                 self.addEvent(event)
 
         # Go through all events and check if they need to be uploaded - this iterates through the database
