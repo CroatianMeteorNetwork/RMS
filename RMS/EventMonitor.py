@@ -2646,6 +2646,7 @@ class EventMonitor(multiprocessing.Process):
                     break
                 last_directory = directory
 
+        log.info("Searching in target directory {}".format(target_directory))
         fits_list = glob.glob(os.path.join(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir), target_directory, "*.fits"))
         fits_list.sort()
 
@@ -2694,11 +2695,12 @@ class EventMonitor(multiprocessing.Process):
                 self.doUpload(event, ev_con, file_list, test_mode)
                 log.info("For {} set database tle_last_processed {}".format(event.uuid, end_time_in_fov))
                 self.setTLELastProcessed(event, end_time_in_fov)
+                log.info("Part processed directory {}".format(target_directory))
                 # After uploading one observation
                 return
             last_fits_file = fits_file
 
-        log.info("Finished processing {}".format(target_directory))
+        log.info("Finished processing directory {}".format(target_directory))
 
         pick_next_directory = False
         for directory in night_directory_list:
@@ -2876,7 +2878,7 @@ class EventMonitor(multiprocessing.Process):
             else:
                 next_check_start_time = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval))
                 next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
-                log.info('Next EventMonitor run : {} UTC {} minutes from now'.format(next_check_start_time_str, self.check_interval))
+                log.info('Next EventMonitor run : {} UTC {:3.1f} minutes from now'.format(next_check_start_time_str, self.check_interval))
             # Wait for the next check
             self.exit.wait(60 * self.check_interval)
             # Increase the check interval
