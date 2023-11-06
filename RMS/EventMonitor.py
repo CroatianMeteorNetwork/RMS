@@ -1983,12 +1983,13 @@ class EventMonitor(multiprocessing.Process):
         if True:
             image_note = event.suffix
 
-            log.info("TLE lines")
-            log.info("{}".format(event.tle_0))
-            log.info("{}".format(event.tle_1))
-            log.info("{}".format(event.tle_2))
+
             if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 != "":
                 image_note += " " + event.tle_1 + " " + event.tle_2
+                log.info("TLE lines")
+                log.info("{}".format(event.tle_0))
+                log.info("{}".format(event.tle_1))
+                log.info("{}".format(event.tle_2))
                 log.info("Added tle {}".format(image_note))
             else:
                 log.info("Did not add tle")
@@ -2379,6 +2380,15 @@ class EventMonitor(multiprocessing.Process):
                              .format(float(self.check_interval),time_until_event_end_seconds / 60 ))
                 continue
 
+            log.info("Event {}".format(this_event.dt))
+            log.info("Lat   {}".format(this_event.lat))
+            log.info("Lat   {}".format(this_event.lon))
+            log.info("Ra    {}".format(this_event.ra))
+            log.info("Dec   {}".format(this_event.dec))
+            log.info("tle   {}".format(this_event.tle_0))
+            log.info("      {}".format(this_event.tle_1))
+            log.info("      {}".format(this_event.tle_2))
+
             # If either lat or lon is non zero, handle as a trajectory specification
             if this_event.lat != 0 and this_event.lon !=0:
                 log.info("Event at {} is a trajectory specification".format(this_event.dt))
@@ -2730,9 +2740,9 @@ class EventMonitor(multiprocessing.Process):
                 time_left_before_start_minutes = int(time_left_before_start.total_seconds() / 60)
                 next_check_start_time = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval))
                 next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
-                log.info('Next EventMonitor run : {} UTC {} minutes from now'.format(next_check_start_time_str, self.check_interval))
+                log.info('Next EventMonitor run : {} UTC {:3.1f} minutes from now'.format(next_check_start_time_str, int(self.check_interval)))
                 if time_left_before_start_minutes < 120:
-                    log.info('Next Capture start    : {} UTC, {} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),time_left_before_start_minutes))
+                    log.info('Next Capture start    : {} UTC, {:3.1f} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),time_left_before_start_minutes))
                 else:
                     log.info('Next Capture start    : {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
             else:
