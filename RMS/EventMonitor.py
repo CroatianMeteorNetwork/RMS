@@ -2631,8 +2631,8 @@ class EventMonitor(multiprocessing.Process):
         night_directory_list.sort()
         if event.tle_last_processed == "" and len(night_directory_list) != 0:
             log.info("{}".format(night_directory_list))
-            directory = night_directory_list[0]
-            log.info("This TLE has not had any processing pick earliest directory {}".format(directory))
+            target_directory = night_directory_list[0]
+            log.info("This TLE has not had any processing pick earliest directory {}".format(target_directory))
         else:
             first_run = True
             for directory in night_directory_list:
