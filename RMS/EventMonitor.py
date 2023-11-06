@@ -981,6 +981,11 @@ class EventMonitor(multiprocessing.Process):
             log.info("Missing db column tle_2")
             self.addDBcol("tle_2","text")
 
+        if not self.checkDBcol(conn,"tle_last_processed"):
+            log.info("Missing db column tle_last_processed")
+            self.addDBcol("tle_last_processed","text")
+
+
     def addDBcol(self, column, coltype):
         """ Add a new column to the database
 
@@ -1887,6 +1892,8 @@ class EventMonitor(multiprocessing.Process):
 
         return pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC
 
+
+
     def doUpload(self, event, evcon, file_list, keep_files=False, no_upload=False, test_mode=False):
 
         """Move all the files to a single directory. Make MP4s, stacks and jpgs
@@ -2344,20 +2351,20 @@ class EventMonitor(multiprocessing.Process):
         unprocessed = self.getUnprocessedEventsfromDB()
 
         future_events = 0
-        for observed_event in unprocessed:
+        for this_event in unprocessed:
 
             # check to see if the end of this event is in the future, if it is then do not process
             # if the end of the event is before the next scheduled execution of EventMonitor loop,
             # then set the loop to execute after the event ends
 
-            if convertGMNTimeToPOSIX(observed_event.dt) + \
-                    datetime.timedelta(seconds=int(observed_event.time_tolerance)) > datetime.datetime.utcnow():
-                time_until_event_end_seconds = (convertGMNTimeToPOSIX(observed_event.dt) -
+            if convertGMNTimeToPOSIX(this_event.dt) + \
+                    datetime.timedelta(seconds=int(this_event.time_tolerance)) > datetime.datetime.utcnow():
+                time_until_event_end_seconds = (convertGMNTimeToPOSIX(this_event.dt) -
                                                     datetime.datetime.utcnow() +
-                                                    datetime.timedelta(seconds=int(observed_event.time_tolerance))).total_seconds()
+                                                    datetime.timedelta(seconds=int(this_event.time_tolerance))).total_seconds()
                 future_events += 1
                 log.info("The end of event at {} is in the future by {:.1f} minutes"
-                         .format(observed_event.dt, time_until_event_end_seconds / 60))
+                         .format(this_event.dt, time_until_event_end_seconds / 60))
                 if time_until_event_end_seconds < float(self.check_interval) * 60:
                     log.info("Check interval is set to {:.1f} minutes, however end of future event is only {:.1f} minutes away"
                              .format(float(self.check_interval),time_until_event_end_seconds / 60))
@@ -2373,13 +2380,26 @@ class EventMonitor(multiprocessing.Process):
                 continue
 
             # If either lat or lon is non zero, handle as a trajectory specification
-            if observed_event.lat != 0 and observed_event.lon !=0:
-                log.info("Event at {} is a trajectory specification".format(observed_event.dt))
-                self.checkTrajectoryEvent(observed_event,ev_con, test_mode)
-            elif observed_event.ra != 0 and observed_event.dec != 0:
-                log.info("Event at {} is a RaDec specification".format(observed_event.dt))
-                self.checkRaDECEvent(observed_event,ev_con, test_mode)
-
+            if this_event.lat != 0 and this_event.lon !=0:
+                log.info("Event at {} is a trajectory specification".format(this_event.dt))
+                self.checkTrajectoryEvent(this_event,ev_con, test_mode)
+            elif this_event.ra != 0 and this_event.dec != 0:
+                log.info("Event at {} is a RaDec specification".format(this_event.dt))
+                self.checkRaDECEvent(this_event,ev_con, test_mode)
+            elif this_event.tle_0 != "" and this_event.tle_1 != "" and \
+                    this_event.tle_2 !="" and this_event.dt != "" and this_event.dt != 0:
+                log.info("Event at {}, is a TLE specification".format(this_event.dt))
+                log.info("{}".format(this_event.tle_0))
+                log.info("{}".format(this_event.tle_1))
+                log.info("{}".format(this_event.tle_2))
+                self.checkTLEEvent(this_event)
+            elif this_event.tle_0 != "" and this_event.tle_1 != "" and \
+                this_event.tle_2 != "" and this_event.dt == 0:
+                log.info("Event is an TLE specification without time constraint")
+                log.info("{}".format(this_event.tle_0))
+                log.info("{}".format(this_event.tle_1))
+                log.info("{}".format(this_event.tle_2))
+                self.checkTLEEventWithoutTime(this_event)
 
         if len(unprocessed) - future_events > 1:
             log.info("{} events were processed, EventMonitor work completed"
@@ -2489,7 +2509,89 @@ class EventMonitor(multiprocessing.Process):
 
         return event
 
-    def process_tle(self,event, start_time, end_time):
+
+
+
+    def checkTLEEvent(self, tle_event, test_mode = False):
+
+        check_time_start = datetime.datetime.utcnow()
+        file_list = self.getFileList(tle_event)
+
+        # If there are no files based on time, then mark as processed and continue
+        if (len(file_list) == 0 or file_list == [None]) and not test_mode:
+            log.info("No files for event - marking {} as processed".format(tle_event.dt))
+            self.markEventAsProcessed(tle_event)
+            # This moves to next observed_event
+            return
+
+        # If there is a .config file then parse it as evcon - not the station config
+        for file in file_list:
+            if file.endswith(self.syscon.config_file_name):
+
+                log.info("Attempt to parse {} as the .config for the event".format(file))
+                if os.path.isfile(file):
+                    log.info("Contemporary .config file found")
+                    if os.path.getsize(file) != 0:
+                        try:
+                            ev_con = cr.parse(file)
+                        except:
+                            log.warning("Unknown error loading .config file; reverting to station .config")
+                            ev_con = cr.parse(self.syscon.config_file_name)
+                    else:
+                        log.warning("Zero size .config file found")
+                        ev_con = cr.parse(self.syscon.config_file_name)
+                        log.warning("Used the station .config file as night directory .config file had zero length")
+                else:
+                    log.info("No .config file found at {}".format(file))
+                    ev_con = cr.parse(self.syscon.config_file_name)
+                    log.warning("Used the station .config file as no contemporary .config file was found")
+
+            count = self.checkTLEThroughFOV(tle_event)
+            if count != 0:
+                log.info("TLE at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(tle_event.dt, count))
+                check_time_end = datetime.datetime.utcnow()
+                check_time_seconds = (check_time_end - check_time_start).total_seconds()
+                log.info("Check of TLE took {:2f} seconds".format(check_time_seconds))
+                if self.doUpload(tle_event, ev_con, file_list, test_mode=test_mode):
+                    self.markEventAsUploaded(tle_event, file_list)
+                    if not test_mode:
+                        log.info(
+                            "TLE passed through FoV - marking {} as processed".format(tle_event.dt))
+                        self.markEventAsProcessed(tle_event)
+                    break  # Do no more work on this TLE
+                else:
+                    log.error(
+                        "Upload failed for event at {}. Event retained in database for retry.".format(tle_event.dt))
+
+            else:
+
+                if not test_mode:
+                    pass
+
+    def checkTLEEventWithoutTime(self, event):
+        log.info("Processing TLE without time not yet implemented")
+        pass
+
+    def checkTLEThroughFOV(self, event,  evaluation_step = 10):
+
+        search_start = convertGMNTimeToPOSIX(event.dt) - datetime.timedelta(seconds=int(event.time_tolerance))
+
+
+        for seconds_offset in range(0, int(event.time_tolerance), evaluation_step):
+            traj_start_time = search_start + datetime.timedelta(seconds=seconds_offset)
+            traj_end_time = traj_start_time + datetime.timedelta(seconds=evaluation_step)
+            log.info("Searching between {} and {}".format(traj_start_time, traj_end_time))
+            created_event = self.tleEventCreateTrajectory(event, traj_start_time, traj_end_time)
+
+            created_event.dt = convertPOSIXTimeToGMN(traj_start_time + datetime.timedelta(seconds=evaluation_step / 2))
+            created_event.time_tolerance = evaluation_step / 2
+            count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
+                created_event)
+            log.info("Points in FoV {}".format(count))
+
+        return count
+
+    def processTLEOld(self, event, start_time, end_time):
 
         if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 !=0 and event.dt != "" and event.dt != 0:
             log.info("event.dt {}".format(event.dt))
@@ -2527,6 +2629,10 @@ class EventMonitor(multiprocessing.Process):
 
 
         if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 != 0 and event.dt == 0:
+
+            #Query database to get last date for which TLE was evaluated
+
+
             if not self.eventExists(event):
                 start_time = datetime.datetime.utcnow() - datetime.timedelta(days=30)
             log.info("Working on a TLE defined event from {} to {}".format(start_time, end_time))
@@ -2576,12 +2682,12 @@ class EventMonitor(multiprocessing.Process):
             log.warning("Attempt to iterate over None")
             return
 
-        tle_events = []
-        for tle_event in events:
-            created_event = copy.copy(tle_event)
-            self.process_tle(created_event, start_time, end_time)
+        #tle_events = []
+        #for tle_event in events:
+        #    created_event = copy.copy(tle_event)
+        #    self.processTLE(created_event, start_time, end_time)
 
-        log.info("Finished check for TLE events")
+        #log.info("Finished check for TLE events")
 
         for event in events:
             if event.isReasonable():
