@@ -2637,15 +2637,19 @@ class EventMonitor(multiprocessing.Process):
             log.info("This TLE has not had any processing pick earliest directory {}".format(target_directory))
         else:
             first_run = True
+            target_directory_set = False
             for directory in night_directory_list:
                 if first_run:
                     last_directory = directory
                     first_run = False
                 if convertGMNTimeToPOSIX(directory[7:21]) > dateutil.parser.parse(event.tle_last_processed):
                     target_directory = last_directory
+                    target_directory_set = True
                     break
                 last_directory = directory
-
+            if not target_directory_set:
+                log.info("No more work to do on {}".event.tle_0)
+                return
         log.info("Searching in target directory {}".format(target_directory))
         fits_list = glob.glob(os.path.join(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir), target_directory, "*.fits"))
         fits_list.sort()
