@@ -2697,12 +2697,12 @@ class EventMonitor(multiprocessing.Process):
                 return
             last_fits_file = fits_file
 
-        log.info("Finished processing {}".format(night_directory))
+        log.info("Finished processing {}".format(target_directory))
 
         pick_next_directory = False
         for directory in night_directory_list:
             if pick_next_directory:
-                self.setTLELastProcessed(event, str(convertGMNTimeToPOSIX(os.path.basename(directory)[7:21])))
+                self.setTLELastProcessed(event, str(convertGMNTimeToPOSIX(os.path.basename(directory)[7:22])))
                 return
             if target_directory == directory:
                 pick_next_directory = True
