@@ -2689,6 +2689,7 @@ class EventMonitor(multiprocessing.Process):
                 log.info("{} left FOV at {}".format(event.tle_0, traj_end_time))
                 in_fov = False
                 end_time_in_fov = traj_start_time
+                event.suffix = event.tle_0
                 self.doUpload(event, ev_con, file_list, test_mode)
                 log.info("For {} set database tle_last_processed {}".format(event.uuid, end_time_in_fov))
                 self.setTLELastProcessed(event, end_time_in_fov)
