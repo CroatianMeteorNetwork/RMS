@@ -2706,6 +2706,7 @@ class EventMonitor(multiprocessing.Process):
         for directory in night_directory_list:
             if pick_next_directory:
                 self.setTLELastProcessed(event, str(convertGMNTimeToPOSIX(os.path.basename(directory)[7:22])))
+                self.check_interval = self.syscon.event_monitor_check_interval_fast if self.check_interval > self.syscon.event_monitor_check_interval_fast else self.check_interval
                 return
             if target_directory == directory:
                 pick_next_directory = True
