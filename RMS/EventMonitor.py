@@ -2605,7 +2605,7 @@ class EventMonitor(multiprocessing.Process):
 
         log.info("Night directory list")
 
-        if event.tle_last_processed is None:
+        if event.tle_last_processed == "":
             directory_to_evaluate = night_directory_list.sort()[0]
             log.info("This TLE has not had any processing, pick the earliest directory")
             log.info("{}".format(directory_to_evaluate))
