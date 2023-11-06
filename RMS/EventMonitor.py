@@ -2628,7 +2628,6 @@ class EventMonitor(multiprocessing.Process):
             return
 
         log.info("tle_last_processed {}".format(event.tle_last_processed))
-        log.info("night directory list {}".format(night_directory_list))
         night_directory_list.sort()
         if event.tle_last_processed == "" and len(night_directory_list) != 0:
             log.info("{}".format(night_directory_list))
