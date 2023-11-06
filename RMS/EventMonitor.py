@@ -2648,7 +2648,7 @@ class EventMonitor(multiprocessing.Process):
                     break
                 last_directory = directory
             if not target_directory_set:
-                log.info("No more work to do on {}".event.tle_0)
+                log.info("No more work to do on {}".format(event.tle_0))
                 return
         log.info("Searching in target directory {}".format(target_directory))
         fits_list = glob.glob(os.path.join(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir), target_directory, "*.fits"))
