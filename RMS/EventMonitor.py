@@ -1214,7 +1214,7 @@ class EventMonitor(multiprocessing.Process):
                                                                       event.ra, event.dec, event.sky_radius,
                                                                       event.min_elev,event.min_stars)
 
-            sql_statement += "'{}',  '{}', '{}',  '{}}, \n".format(event.tle_0,event.tle_1,event.tle_2, event.tle_last_processed)
+            sql_statement += "'{}',  '{}', '{}',  '{}', \n".format(event.tle_0,event.tle_1,event.tle_2, event.tle_last_processed)
             sql_statement += "{},  {}, '{}', '{}', '{}' , '{}',    \n".format(0, 0,uuid.uuid4(), event.respond_to, event.stations_required, event.suffix)
             sql_statement += "CURRENT_TIMESTAMP ) \n"
 
