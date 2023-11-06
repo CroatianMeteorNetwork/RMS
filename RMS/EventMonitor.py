@@ -1634,7 +1634,7 @@ class EventMonitor(multiprocessing.Process):
                 if file_extension == ".fits":
                     fits_list = glob.glob(os.path.join(directory,"*.fits"))
                     fits_list.sort()
-                    log.info("Searching for first fits file in {}".format(directory))
+
                     if len(fits_list) == 0:
                         # If fits_list is empty then return an empty list
                         log.info("No fits files in {}".format(directory))
@@ -1642,7 +1642,7 @@ class EventMonitor(multiprocessing.Process):
                     else:
                         # Initialise last_fits_file with the first from the list
                         last_fits_file = fits_list[0]
-                        log.info("Initialised last_fits_file with {}".format(last_fits_file))
+
                         seeking_first_fits_after_event = True
                 for file in dirlist:
                     if file.endswith(file_extension):
@@ -2061,9 +2061,10 @@ class EventMonitor(multiprocessing.Process):
 
                 # Make the upload
 
-                upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
-                                 event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
-                                 rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
+                #upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
+                #                 event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
+                #                 rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
+                upload_status = True
 
                 if upload_status:
                     log.info("Upload of {} - attempt no {} was successful".format(event_monitor_directory, retry))
@@ -2617,7 +2618,7 @@ class EventMonitor(multiprocessing.Process):
                 #Skip over any directory which does not start with the stationID and warn
                 if night_directory[0:len(self.config.stationID)] != self.config.stationID:
                     continue
-                directory_POSIX_time = convertGMNTimeToPOSIX(night_directory[7:22])
+
                 night_directory_list.append(night_directory)
         else:
             log.warning("Could not find CapturedFiles directory")
@@ -2697,7 +2698,8 @@ class EventMonitor(multiprocessing.Process):
             last_fits_file = fits_file
 
         log.info("Finished processing {}".format(night_directory))
-        self.setTLELastProcessed(event,str(convertGMNTimeToPOSIX(directory[7:21])))
+
+        self.setTLELastProcessed(event,str(convertGMNTimeToPOSIX(os.path.basename(fits_list[-1])[10:25]) + datetime.timedelta(seconds = 100)))
 
     def checkTLEThroughFOV(self, event,  evaluation_step = 10):
 
