@@ -2589,6 +2589,7 @@ class EventMonitor(multiprocessing.Process):
                 created_event)
             log.info("Points in FoV {}".format(count))
             if count !=0:
+                event.suffix = event.tle_0 if created_event.suffix == "event" else created_event.suffix
                 return count
         return count
 
