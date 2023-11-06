@@ -1281,7 +1281,7 @@ class EventMonitor(multiprocessing.Process):
         try:
             self.db_conn.cursor().execute(sql_statement)
             self.db_conn.commit()
-            log.info("Event at {} marked as processed".format(event.dt))
+            log.info("TLE {} processed up to {}".format(event.tle_0, time))
         except:
             log.info("Database error")
             self.recoverFromDatabaseError()
