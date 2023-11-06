@@ -2652,6 +2652,10 @@ class EventMonitor(multiprocessing.Process):
         file_list=[]
         for fits_file in fits_list:
 
+            # Initialise empty tle_last processed
+            if event.tle_last_processed == "":
+                event.tle_last_processed = convertGMNTimeToPOSIX(os.path.basename(fits_file)[10:25])
+                self.setTLELastProcessed(event,convertGMNTimeToPOSIX(os.path.basename(fits_file)[10:25]))
 
 
             if convertGMNTimeToPOSIX(os.path.basename(fits_file)[10:25]) < dateutil.parser.parse(event.tle_last_processed):
