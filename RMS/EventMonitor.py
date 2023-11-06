@@ -2633,6 +2633,8 @@ class EventMonitor(multiprocessing.Process):
             log.info("Night directory list is empty")
             return
 
+        log.info("tle_last_processed {}".format(event.tle_processed))
+        log.info("night directory list {}".format(night_directory_list))
         if event.tle_last_processed == "" and len(night_directory_list) != 0:
             night_directory_list.sort()
             log.info("{}".format(night_directory_list))
