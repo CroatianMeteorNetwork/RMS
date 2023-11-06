@@ -2588,7 +2588,8 @@ class EventMonitor(multiprocessing.Process):
             count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
                 created_event)
             log.info("Points in FoV {}".format(count))
-
+            if count !=0:
+                return count
         return count
 
     def processTLEOld(self, event, start_time, end_time):
