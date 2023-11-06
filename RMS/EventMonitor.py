@@ -1261,7 +1261,7 @@ class EventMonitor(multiprocessing.Process):
             log.info("Database error")
             self.recoverFromDatabaseError()
 
-    def setTLELastProcessed(self, time, event):
+    def setTLELastProcessed(self, event, time):
 
         """ Marks an event as having been processed
 
@@ -1274,7 +1274,7 @@ class EventMonitor(multiprocessing.Process):
         sql_statement = ""
         sql_statement += "UPDATE event_monitor                 \n"
         sql_statement += "SET                                  \n"
-        sql_statement += "tle_last_processed = {}              \n".format(time)
+        sql_statement += "tle_last_processed = '{}'            \n".format(time)
         sql_statement += "WHERE                                \n"
         sql_statement += "uuid = '{}'                          \n".format(event.uuid)
         try:
@@ -2061,11 +2061,11 @@ class EventMonitor(multiprocessing.Process):
 
                 # Make the upload
 
-                upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
-                                  event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
-                                  rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
+                #upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
+                #                 event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
+                #                 rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
 
-
+                upload_status = True
 
                 if upload_status:
                     log.info("Upload of {} - attempt no {} was successful".format(event_monitor_directory, retry))
@@ -2611,10 +2611,6 @@ class EventMonitor(multiprocessing.Process):
         #If not, then pick the next directory
         #Iterate though .fits files see if at that time, with that platepar
         #The tle would be in the FOV
-        log.info("uuid is              {}".format(event.uuid))
-        log.info("tle_last processed   {}".format(event.tle_last_processed))
-
-
 
         night_directory_list = []
         if os.path.exists(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
@@ -2633,40 +2629,53 @@ class EventMonitor(multiprocessing.Process):
             log.info("Night directory list is empty")
             return
 
-        log.info("tle_last_processed {}".format(event.tle_processed))
+        log.info("tle_last_processed {}".format(event.tle_last_processed))
         log.info("night directory list {}".format(night_directory_list))
+        night_directory_list.sort()
         if event.tle_last_processed == "" and len(night_directory_list) != 0:
-            night_directory_list.sort()
             log.info("{}".format(night_directory_list))
             directory = night_directory_list[0]
-            log.info("This TLE has not had any processing, pick the earliest directory")
-            log.info("{}".format(directory))
+            log.info("This TLE has not had any processing pick earliest directory {}".format(directory))
+        else:
+            first_run = True
+            for directory in night_directory_list:
+                if first_run:
+                    last_directory = directory
+                    first_run = False
+                if convertGMNTimeToPOSIX(directory[7:21]) > dateutil.parser.parse(event.tle_last_processed):
+                    directory = last_directory
+                    continue
+                last_directory = directory
 
-        dirlist = os.listdir(directory)
-        dirlist.sort()
-
-        fits_list = glob.glob(os.path.join(directory, "*.fits"))
+        fits_list = glob.glob(os.path.join(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir), directory, "*.fits"))
         fits_list.sort()
 
         in_fov, first_run = False, True
         file_list=[]
         for fits_file in fits_list:
 
-            if first_run:
-                last_fits_file = fits_file
+
+
+            if convertGMNTimeToPOSIX(os.path.basename(fits_file)[10:25]) < dateutil.parser.parse(event.tle_last_processed):
+                log.info("{} {}".format(os.path.basename(fits_file)[10:25],convertGMNTimeToPOSIX(os.path.basename(fits_file)[10:25])))
                 continue
 
-            traj_start_time = convertGMNTimeToPOSIX(last_fits_file[10:25])
-            traj_end_time = convertGMNTimeToPOSIX(fits_file[10:25])
+            if first_run:
+                last_fits_file = fits_file
+                first_run = False
+                continue
+
+            traj_start_time = convertGMNTimeToPOSIX(os.path.basename(last_fits_file)[10:25])
+            traj_end_time = convertGMNTimeToPOSIX(os.path.basename(fits_file)[10:25])
             traj_duration = (traj_end_time - traj_start_time).total_seconds()
 
-            log.info("For file {} searching between {} and {}".format(last_fits_file, traj_start_time, traj_end_time))
+            #log.info("For file {} searching between {} and {}".format(last_fits_file, traj_start_time, traj_end_time))
             created_event = self.tleEventCreateTrajectory(event, traj_start_time, traj_end_time)
             created_event.dt = convertPOSIXTimeToGMN(traj_start_time + datetime.timedelta(seconds=traj_duration / 2))
             created_event.time_tolerance = traj_duration / 2
             count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
                 created_event)
-            log.info("Points in FoV {}".format(count))
+            #log.info("Points in FoV {}".format(count))
             if count != 0 and not in_fov:
                 log.info("Entered FOV")
                 in_fov = True
@@ -2681,12 +2690,12 @@ class EventMonitor(multiprocessing.Process):
                 self.doUpload(event, ev_con, file_list, test_mode)
                 log.info("For {} set database tle_last_processed {}".format(event.uuid, end_time_in_fov))
                 self.setTLELastProcessed(event, end_time_in_fov)
-
-
+                # After uploading one observation
+                return
             last_fits_file = fits_file
 
-
-
+        log.info("Finished processing {}".format(night_directory))
+        self.setTLELastProcessed(event,traj_end_time)
 
     def checkTLEThroughFOV(self, event,  evaluation_step = 10):
 
