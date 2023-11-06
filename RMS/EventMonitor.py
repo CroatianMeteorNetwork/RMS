@@ -2642,7 +2642,7 @@ class EventMonitor(multiprocessing.Process):
                     first_run = False
                 if convertGMNTimeToPOSIX(directory[7:21]) > dateutil.parser.parse(event.tle_last_processed):
                     target_directory = last_directory
-                    continue
+                    break
                 last_directory = directory
 
         fits_list = glob.glob(os.path.join(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir), target_directory, "*.fits"))
@@ -2699,7 +2699,15 @@ class EventMonitor(multiprocessing.Process):
 
         log.info("Finished processing {}".format(night_directory))
 
-        self.setTLELastProcessed(event,str(convertGMNTimeToPOSIX(os.path.basename(fits_list[-1])[10:25]) + datetime.timedelta(seconds = 100)))
+        pick_next_directory = False
+        for directory in night_directory_list:
+            if pick_next_directory:
+                self.setTLELastProcessed(event, str(convertGMNTimeToPOSIX(os.path.basename(directory)[7:21])))
+                return
+            if target_directory == directory:
+                pick_next_directory = True
+
+
 
     def checkTLEThroughFOV(self, event,  evaluation_step = 10):
 
