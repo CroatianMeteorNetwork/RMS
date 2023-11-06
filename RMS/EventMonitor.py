@@ -2430,7 +2430,7 @@ class EventMonitor(multiprocessing.Process):
                 self.checkTLEEvent(this_event, ev_con)
             elif this_event.tle_0 != "" and this_event.tle_1 != "" and \
                 this_event.tle_2 != "" and this_event.dt == "0":
-                log.info("Event is an TLE specification without time constraint")
+                log.info("Event is a TLE specification without time constraint")
                 log.info("{}".format(this_event.tle_0))
                 log.info("{}".format(this_event.tle_1))
                 log.info("{}".format(this_event.tle_2))
@@ -2629,13 +2629,13 @@ class EventMonitor(multiprocessing.Process):
             log.info("Night directory list is empty")
             return
 
-        log.info("tle_last_processed {}".format(event.tle_last_processed))
+
         night_directory_list.sort()
         if event.tle_last_processed == "" and len(night_directory_list) != 0:
-
             target_directory = night_directory_list[0]
             log.info("This TLE has not had any processing pick earliest directory {}".format(target_directory))
         else:
+            log.info("tle_last_processed {}".format(event.tle_last_processed))
             first_run = True
             target_directory_set = False
             for directory in night_directory_list:
