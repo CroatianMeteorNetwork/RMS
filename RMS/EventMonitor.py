@@ -2392,7 +2392,7 @@ class EventMonitor(multiprocessing.Process):
                 log.info("{}".format(this_event.tle_0))
                 log.info("{}".format(this_event.tle_1))
                 log.info("{}".format(this_event.tle_2))
-                self.checkTLEEvent(this_event)
+                self.checkTLEEvent(this_event, ev_con)
             elif this_event.tle_0 != "" and this_event.tle_1 != "" and \
                 this_event.tle_2 != "" and this_event.dt == 0:
                 log.info("Event is an TLE specification without time constraint")
@@ -2512,7 +2512,7 @@ class EventMonitor(multiprocessing.Process):
 
 
 
-    def checkTLEEvent(self, tle_event, test_mode = False):
+    def checkTLEEvent(self, tle_event, ev_con, test_mode = False):
 
         check_time_start = datetime.datetime.utcnow()
         file_list = self.getFileList(tle_event)
