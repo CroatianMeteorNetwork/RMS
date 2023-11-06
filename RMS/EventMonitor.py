@@ -154,7 +154,7 @@ class EventContainer(object):
         self.min_stars = 20
 
         # tle containers for strings
-        self.tle_0, self.tle_1, self.tle_2 = "", "", ""
+        self.tle_0, self.tle_1, self.tle_2, self.tle_last_processed = "", "", "", ""
 
         # These are internal control properties
         self.uuid = ""
@@ -245,7 +245,7 @@ class EventContainer(object):
         self.tle_0 = str(value) if "tle_0" == variable_name else self.tle_0
         self.tle_1 = str(value) if "tle_1" == variable_name else self.tle_1
         self.tle_2 = str(value) if "tle_2" == variable_name else self.tle_2
-
+        self.tle_last_processed = str(value) if "tle_last_processed" == variable_name else self.tle_last_processed
 
         # Control information
         self.stations_required = str(value) if "StationsRequired" == variable_name else self.stations_required
@@ -1455,7 +1455,7 @@ class EventMonitor(multiprocessing.Process):
         sql_query_cols += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax, RespondTo, StationsRequired,"
         sql_query_cols += "ObsLat, ObsLon, ObsRange, Ra, Dec, SkyRadius, MinElev, MinStars,"
         sql_query_cols += "tle_0, tle_1, tle_2,"
-        sql_query_cols += "EventCartStd, EventCart2Std, Suffix"
+        sql_query_cols += "EventCartStd, EventCart2Std, Suffix, tle_last_processed"
         sql_statement += sql_query_cols
         sql_statement += " \n"
         sql_statement += "FROM event_monitor "
@@ -2579,8 +2579,39 @@ class EventMonitor(multiprocessing.Process):
                     pass
 
     def checkTLEEventWithoutTime(self, event):
+
         log.info("Processing TLE without time not yet implemented")
-        pass
+        #Get a list of directories in the CapturedFiles directory
+        #If tle_last_processed is empty then pick the earliest directory
+        #If not, then pick the next directory
+        #Iterate though .fits files see if at that time, with that platepar
+        #The tle would be in the FOV
+        log.info("uuid is              {}".format(event.uuid))
+        log.info("tle_last processed   {}".format(event.tle_last_processed))
+
+
+
+        night_directory_list = []
+        if os.path.exists(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
+            for night_directory in os.listdir(
+                    os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
+                #Skip over any directory which does not start with the stationID and warn
+                if night_directory[0:len(self.config.stationID)] != self.config.stationID:
+                    continue
+                directory_POSIX_time = convertGMNTimeToPOSIX(night_directory[7:22])
+                night_directory_list.append(night_directory)
+        else:
+            log.warning("Could not find CapturedFiles directory")
+
+        log.info("Night directory list")
+
+        if event.tle_last_processed is None:
+            directory_to_evaluate = night_directory_list.sort()[0]
+            log.info("This TLE has not had any processing, pick the earliest directory")
+            log.info("{}".format(directory_to_evaluate))
+
+
+
 
     def checkTLEThroughFOV(self, event,  evaluation_step = 10):
 
