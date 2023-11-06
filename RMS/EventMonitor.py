@@ -2659,7 +2659,7 @@ class EventMonitor(multiprocessing.Process):
 
 
             if convertGMNTimeToPOSIX(os.path.basename(fits_file)[10:25]) < dateutil.parser.parse(event.tle_last_processed):
-                log.info("{} {}".format(os.path.basename(fits_file)[10:25],convertGMNTimeToPOSIX(os.path.basename(fits_file)[10:25])))
+
                 continue
 
             if first_run:
