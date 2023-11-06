@@ -2679,14 +2679,14 @@ class EventMonitor(multiprocessing.Process):
                 created_event)
             #log.info("Points in FoV {}".format(count))
             if count != 0 and not in_fov:
-                log.info("Entered FOV at {}".format(traj_start_time))
+                log.info("{} entered FOV at {}".format(event.tle_0, traj_start_time))
                 in_fov = True
 
             if count != 0 and in_fov:
                 file_list.append(last_fits_file)
 
             if count == 0 and in_fov:
-                log.info("Left FOV at {}".format(traj_end_time))
+                log.info("{} left FOV at {}".format(event.tle_0, traj_end_time))
                 in_fov = False
                 end_time_in_fov = traj_start_time
                 self.doUpload(event, ev_con, file_list, test_mode)
