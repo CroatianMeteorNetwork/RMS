@@ -2762,7 +2762,7 @@ class EventMonitor(multiprocessing.Process):
         log.info("Finished processing directory {}".format(target_directory))
         if len(fits_list) != 0:
             log.info("Setting TLE Last processed to last fits file processed")
-            self.setTLELastProcessed(event, traj_end_time)
+            self.setTLELastProcessed(event, str(convertGMNTimeToPOSIX(os.path.basename(fits_file)[10:25])))
         else:
             log.info("No fits files - make no changes to TLE last processed")
 
@@ -2846,7 +2846,7 @@ class EventMonitor(multiprocessing.Process):
                     tle_event = self.tleEventCreateTrajectory(tle_event,enter_fov_time, leave_fov_time)
                     tle_event.stations_required = self.syscon.stationID
                     tle_event.dt = convertPOSIXTimeToGMN(enter_fov_time + datetime.timedelta((leave_fov_time - enter_fov_time)/2))
-                    tle_event.time_tolerance = datetime.timedelta((leave_fov_time - enter_fov_time)/2)
+                    tle_event.time_tolerance = datetime.timedelta((leave_fov_time - enter_fov_time)/2).total_seconds()
                     self.addEvent(tle_event)
 
             #reach end of loop and still in FoV
@@ -2857,7 +2857,7 @@ class EventMonitor(multiprocessing.Process):
                 tle_event.stations_required = self.syscon.stationID
                 tle_event.dt = convertPOSIXTimeToGMN(
                     enter_fov_time + datetime.timedelta((leave_fov_time - enter_fov_time) / 2))
-                tle_event.time_tolerance = datetime.timedelta((leave_fov_time - enter_fov_time) / 2)
+                tle_event.time_tolerance = datetime.timedelta((leave_fov_time - enter_fov_time) / 2).total_seconds()
                 self.addEvent(tle_event)
                 self.setTLELastProcessed(event,traj_end_time)
 
