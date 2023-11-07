@@ -2803,7 +2803,6 @@ class EventMonitor(multiprocessing.Process):
             traj_end_time = traj_start_time + datetime.timedelta(seconds=evaluation_step)
             #log.info("Searching between {} and {}".format(traj_start_time, traj_end_time))
             created_event = self.tleEventCreateTrajectory(event, traj_start_time, traj_end_time)
-
             created_event.dt = convertPOSIXTimeToGMN(traj_start_time + datetime.timedelta(seconds=evaluation_step / 2))
             created_event.time_tolerance = evaluation_step / 2
             count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
