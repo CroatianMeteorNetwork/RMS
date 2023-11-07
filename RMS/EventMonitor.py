@@ -2677,20 +2677,21 @@ class EventMonitor(multiprocessing.Process):
                     os.path.join(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir),
                                  target_directory, "*.fits"))
                 fits_list.sort()
-                final_fits_file = os.path.basename(fits_list[-1])
-                log.info("Working on tle {}, last processed {}".format(event.tle_0, event.tle_last_processed))
-                log.info("Working in last CapturedFiles directory {} found last fits file {}".format(target_directory, final_fits_file))
+                if len(fits_list) != 0:
+                    final_fits_file = os.path.basename(fits_list[-1])
+                    log.info("Working on tle {}, last processed {}".format(event.tle_0, event.tle_last_processed))
+                    log.info("Working in last CapturedFiles directory {} found last fits file {}".format(target_directory, final_fits_file))
 
-                if convertGMNTimeToPOSIX(final_fits_file[10:25]) > dateutil.parser.parse(event.tle_last_processed):
-                    log.info("Still more to scan in this directory")
-                    target_directory = directory
-                    target_directory_set = True
-                else:
-                    log.info("No more to scan in this directory - start creating future events goes here")
+                    if convertGMNTimeToPOSIX(final_fits_file[10:25]) > dateutil.parser.parse(event.tle_last_processed):
+                        log.info("Still more to scan in this directory")
+                        target_directory = directory
+                        target_directory_set = True
+
 
             if not target_directory_set:
                 log.info("No more work to do on {}".format(event.tle_0))
                 return
+
         log.info("Searching in target directory {}".format(target_directory))
         fits_list = glob.glob(os.path.join(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir), target_directory, "*.fits"))
         fits_list.sort()
@@ -2786,6 +2787,7 @@ class EventMonitor(multiprocessing.Process):
             window_end = window_start + datetime.timedelta(minutes = self.check_interval)
             log.info("Checking for TLE though FoV between {} and {}".format(window_start, window_end))
             future_event = copy.copy(event)
+            future_event.dt = self.check_interval / 2
             self.createTLEEvent(future_event,window_start, window_end)
 
 
@@ -2816,9 +2818,10 @@ class EventMonitor(multiprocessing.Process):
 
         if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 !=0 and event.dt != "" and event.dt != 0:
 
-            evaluation_step = (end_time - start_time) / 20
+            duration = int((end_time - start_time).total_seconds())
+            evaluation_step = 2
             in_fov = False
-            for seconds_offset in range(0,int(event.time_tolerance),evaluation_step):
+            for seconds_offset in range(0,duration, evaluation_step):
                 traj_start_time = start_time + datetime.timedelta(seconds = seconds_offset)
                 traj_end_time = traj_start_time + datetime.timedelta(seconds = evaluation_step)
                 log.info("Searching between {} and {}".format(traj_start_time, traj_end_time))
