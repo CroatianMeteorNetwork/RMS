@@ -2784,7 +2784,7 @@ class EventMonitor(multiprocessing.Process):
         if working_in_final_captured_files_directory == True and found_new_tle == False:
             #If we have handled the history then search the next EventMonitor delay window
             window_start = dateutil.parser.parse(event.tle_last_processed)
-            window_end = window_start + datetime.timedelta(minutes = self.check_interval)
+            window_end = datetime.datetime.utcnow() + datetime.timedelta(minutes = self.check_interval)
             log.info("Checking for TLE {} though FoV between {} and {}".format(event.tle_0, window_start, window_end))
             future_event = copy.copy(event)
             future_event.dt = self.check_interval / 2
@@ -2849,7 +2849,9 @@ class EventMonitor(multiprocessing.Process):
                     tle_event.stations_required = self.syscon.stationID
                     tle_event.dt = convertPOSIXTimeToGMN(enter_fov_time + datetime.timedelta((leave_fov_time - enter_fov_time)/2))
                     tle_event.time_tolerance = datetime.timedelta((leave_fov_time - enter_fov_time)/2).total_seconds()
+                    log.info("Adding a future event for tle {} at {}".format(tle_event.dt))
                     self.addEvent(tle_event)
+                    self.setTLELastProcessed(event, traj_end_time)
 
             #reach end of loop and still in FoV
             if count != 0 and in_fov:
