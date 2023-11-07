@@ -2671,6 +2671,8 @@ class EventMonitor(multiprocessing.Process):
 
                 #This pair of variables will be used to let us know if we can start creating future events
                 working_in_final_captured_files_directory, found_new_tle = True, False
+                target_directory = directory
+                target_directory_set = True
                 fits_list = glob.glob(
                     os.path.join(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir),
                                  target_directory, "*.fits"))
