@@ -2818,7 +2818,7 @@ class EventMonitor(multiprocessing.Process):
         if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 !=0 and event.dt != "" and event.dt != 0:
 
             duration = int((end_time - start_time).total_seconds())
-            evaluation_step = 2
+            evaluation_step = 10
             in_fov = False
             for seconds_offset in range(0,duration, evaluation_step):
                 traj_start_time = start_time + datetime.timedelta(seconds = seconds_offset)
@@ -2863,7 +2863,9 @@ class EventMonitor(multiprocessing.Process):
                     enter_fov_time + datetime.timedelta((leave_fov_time - enter_fov_time) / 2))
                 tle_event.time_tolerance = datetime.timedelta((leave_fov_time - enter_fov_time) / 2).total_seconds()
                 self.addEvent(tle_event)
-                self.setTLELastProcessed(event,traj_end_time)
+
+
+            self.setTLELastProcessed(event,traj_end_time)
 
 
         if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 != 0 and event.dt == 0:
