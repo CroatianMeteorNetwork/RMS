@@ -2065,9 +2065,12 @@ class EventMonitor(multiprocessing.Process):
 
                 # Make the upload
 
-                upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
-                                 event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
-                                 rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
+                upload_status = True
+
+                #upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
+                #                 event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
+                #                 rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
+
 
 
                 if upload_status:
@@ -2545,6 +2548,7 @@ class EventMonitor(multiprocessing.Process):
         event.lat,event.lon,event.ht = self.tleEventTime2Geo(satellite,event,start_time)
         event.lat2, event.lon2, event.ht2 = self.tleEventTime2Geo(satellite, event, end_time)
 
+
         return event
 
 
@@ -2608,48 +2612,80 @@ class EventMonitor(multiprocessing.Process):
 
     def checkTLEEventWithoutTime(self, event, ev_con, test_mode = False):
 
-
-        #Get a list of directories in the CapturedFiles directory
-        #If tle_last_processed is empty then pick the earliest directory
-        #If not, then pick the next directory
-        #Iterate though .fits files see if at that time, with that platepar
-        #The tle would be in the FOV
-
+        #Initialise the list of night_directories, and populate with the directories from CapturedFiles
         night_directory_list = []
+
         if os.path.exists(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
             for night_directory in os.listdir(
                     os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
                 #Skip over any directory which does not start with the stationID and warn
                 if night_directory[0:len(self.config.stationID)] != self.config.stationID:
                     continue
-
                 night_directory_list.append(night_directory)
         else:
+            # if we can't find the CapturedFiles directory then return
             log.warning("Could not find CapturedFiles directory")
             return
 
+        #If there are no night_directories return
         if len(night_directory_list) == 0:
             log.info("Night directory list is empty")
             return
 
+        if len(night_directory_list) > 1:
+            log.info("Night directory list has more than more directory")
 
+
+        #Sort into date order
         night_directory_list.sort()
+
+        found_new_tle, working_in_final_captured_files_directory = False, False
+        #If this is a newly loaded tle the tle_last_processed will be empty
         if event.tle_last_processed == "" and len(night_directory_list) != 0:
+            #Set the target_directory to be the first CapturedFiles directory
             target_directory = night_directory_list[0]
             log.info("This TLE has not had any processing pick earliest directory {}".format(target_directory))
         else:
+            #It is not a newly loaded tle, so we have the time to start processing from
             log.info("tle_last_processed {}".format(event.tle_last_processed))
-            first_run = True
-            target_directory_set = False
+
+            first_run, target_directory_set = True, False
             for directory in night_directory_list:
+                #We always need to hold the previous directory from the iterations
+                #The first directory to have a timestamp after the timestamp of the last processed tle
+                #Is the directory after the one that we need
                 if first_run:
                     last_directory = directory
                     first_run = False
+                #If this directory has a timestamp after the last processed event
                 if convertGMNTimeToPOSIX(directory[7:21]) > dateutil.parser.parse(event.tle_last_processed):
                     target_directory = last_directory
                     target_directory_set = True
                     break
                 last_directory = directory
+            #If we get here and target_directory_set is still false, then we have iterated through to the last directory
+            if not target_directory_set:
+                #we are now working in the final CapturedFiles directory - capture may still be in progress
+                #strategy here is find the newest .fits file in the directory and see if it is after tle_last_processed
+                #if it is then we can do more work in this directory
+
+                #This pair of variables will be used to let us know if we can start creating future events
+                working_in_final_captured_files_directory, found_new_tle = True, False
+                fits_list = glob.glob(
+                    os.path.join(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir),
+                                 target_directory, "*.fits"))
+                fits_list.sort()
+                final_fits_file = os.path.basename(fits_list[-1])
+                log.info("Working on tle {}, last processed {}".format(event.tle_0, event.tle_last_processed))
+                log.info("Working in last CapturedFiles directory {} found last fits file {}".format(target_directory, final_fits_file))
+
+                if convertGMNTimeToPOSIX(final_fits_file[10:25]) > dateutil.parser.parse(event.tle_last_processed):
+                    log.info("Still more to scan in this directory")
+                    target_directory = directory
+                    target_directory_set = True
+                else:
+                    log.info("No more to scan in this directory - start creating future events goes here")
+
             if not target_directory_set:
                 log.info("No more work to do on {}".format(event.tle_0))
                 return
@@ -2659,18 +2695,14 @@ class EventMonitor(multiprocessing.Process):
 
         in_fov, first_run = False, True
         file_list=[]
-        for fits_file in fits_list:
 
+        for fits_file in fits_list:
             # Initialise empty tle_last processed
             if event.tle_last_processed == "":
                 event.tle_last_processed = str(convertGMNTimeToPOSIX(os.path.basename(fits_file)[10:25]))
                 self.setTLELastProcessed(event,convertGMNTimeToPOSIX(os.path.basename(fits_file)[10:25]))
-
-
             if convertGMNTimeToPOSIX(os.path.basename(fits_file)[10:25]) < dateutil.parser.parse(event.tle_last_processed):
-
                 continue
-
             if first_run:
                 last_fits_file = fits_file
                 first_run = False
@@ -2686,10 +2718,14 @@ class EventMonitor(multiprocessing.Process):
             created_event.time_tolerance = traj_duration / 2
             count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
                 created_event)
-            #log.info("Points in FoV {}".format(count))
+
             if count != 0 and not in_fov:
                 log.info("{} entered FOV at {}".format(event.tle_0, traj_start_time))
                 in_fov = True
+                if working_in_final_captured_files_directory and not found_new_tle:
+                    found_new_tle = True
+                    log.info("Found a new tle for {} in the final directory".format(event.tle_0))
+
 
             if count != 0 and in_fov:
                 file_list.append(last_fits_file)
@@ -2697,7 +2733,7 @@ class EventMonitor(multiprocessing.Process):
             if count == 0 and in_fov:
                 log.info("{} left FOV at {}".format(event.tle_0, traj_end_time))
                 in_fov = False
-                end_time_in_fov = traj_start_time
+                end_time_in_fov = traj_end_time
                 event.suffix = event.tle_0
                 self.doUpload(event, ev_con, file_list, test_mode)
                 log.info("For {} set database tle_last_processed {}".format(event.uuid, end_time_in_fov))
@@ -2705,9 +2741,26 @@ class EventMonitor(multiprocessing.Process):
                 log.info("Part processed directory {}".format(target_directory))
                 # After uploading one observation
                 return
+
             last_fits_file = fits_file
 
+        #Finished iterating through fits files
+
+        #In case a target entered the FoV but did not leave before the end of the files in the directory
+        if in_fov:
+            in_fov = False
+            end_time_in_fov = traj_end_time
+            event.suffix = event.tle_0
+            self.doUpload(event, ev_con, file_list, test_mode)
+            log.info("For {} set database tle_last_processed {}".format(event.uuid, end_time_in_fov))
+            self.setTLELastProcessed(event, end_time_in_fov)
+            return
+
         log.info("Finished processing directory {}".format(target_directory))
+        self.setTLELastProcessed(event, traj_end_time)
+
+        #iterate through this loop to set the database record of the last tle_processed to the start of the next directory
+        #if the target_directory is the last directory, then the loop ends without calling self.setTLELastProcessed
 
         pick_next_directory = False
         for directory in night_directory_list:
@@ -2717,6 +2770,16 @@ class EventMonitor(multiprocessing.Process):
                 return
             if target_directory == directory:
                 pick_next_directory = True
+
+        #Check to see if we have handled the history
+        if working_in_final_captured_files_directory == True and found_new_tle == False:
+            #If we have handled the history then search the next EventMonitor delay window
+            window_start = dateutil.parser.parse(event.tle_last_processed)
+            window_end = window_start + datetime.timedelta(minutes = self.check_interval)
+            log.info("Checking for TLE though FoV between {} and {}".format(window_start, window_end))
+            future_event = copy.copy(event)
+            self.createTLEEvent(event,window_start, window_end)
+
 
 
 
@@ -2741,27 +2804,18 @@ class EventMonitor(multiprocessing.Process):
                 return count
         return count
 
-    def processTLEOld(self, event, start_time, end_time):
+    def createTLEEvent(self, event, start_time, end_time):
 
         if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 !=0 and event.dt != "" and event.dt != 0:
-            log.info("event.dt {}".format(event.dt))
-            log.info("Working on a TLE defined event at time {}, tolerance {}s".format(event.dt, event.time_tolerance))
-            log.info("TLE specification found")
-            log.info("Searching at time {} with tolerance {} seconds".format(event.dt, event.time_tolerance))
-            search_start = convertGMNTimeToPOSIX(event.dt) - datetime.timedelta(seconds = int(event.time_tolerance))
-            search_end = convertGMNTimeToPOSIX(event.dt) + datetime.timedelta(seconds = int(event.time_tolerance))
-            log.info("Searching from {} to {} using TLE".format(search_start, search_end))
-            log.info("{}".format(event.tle_0))
-            log.info("{}".format(event.tle_1))
-            log.info("{}".format(event.tle_2))
-            rp = self.getEventPlatepar(event)
 
-            evaluation_step = 20
+            evaluation_step = (end_time - start_time) / 20
+            in_fov = False
             for seconds_offset in range(0,int(event.time_tolerance),evaluation_step):
-                traj_start_time = search_start + datetime.timedelta(seconds = seconds_offset)
+                traj_start_time = start_time + datetime.timedelta(seconds = seconds_offset)
                 traj_end_time = traj_start_time + datetime.timedelta(seconds = evaluation_step)
                 log.info("Searching between {} and {}".format(traj_start_time, traj_end_time))
-                created_event = self.tleEventCreateTrajectory(event, traj_start_time, traj_end_time)
+                created_event = copy.copy(event)
+                created_event = self.tleEventCreateTrajectory(created_event, traj_start_time, traj_end_time)
 
                 created_event.dt = convertPOSIXTimeToGMN(traj_start_time + datetime.timedelta(seconds = evaluation_step /2 ))
                 created_event.time_tolerance = evaluation_step / 2
@@ -2771,11 +2825,33 @@ class EventMonitor(multiprocessing.Process):
                 created_event.suffix = event.tle_0 if created_event.suffix == "event" else created_event.suffix
                 created_event.tle_0, created_event.tle_1, created_event.tle_2 = event.tle_0, event.tle_1, event.tle_2
 
-                if count != 0:
-                    created_event.stations_required = self.syscon.stationID
-                    self.addEvent(created_event)
+                if count != 0 and not in_fov:
+                    #We have entered the field of view
+                    in_fov = True
+                    enter_fov_time = traj_start_time
 
+                if count == 0 and in_fov:
+                    #This segment does not include any of the TLE, so use the traj_start_time
+                    in_fov = False
+                    leave_fov_time = traj_start_time
+                    tle_event = copy.copy(event)
+                    tle_event = self.tleEventCreateTrajectory(tle_event,enter_fov_time, leave_fov_time)
+                    tle_event.stations_required = self.syscon.stationID
+                    tle_event.dt = convertPOSIXTimeToGMN(enter_fov_time + datetime.timedelta((leave_fov_time - enter_fov_time)/2))
+                    tle_event.time_tolerance = datetime.timedelta((leave_fov_time - enter_fov_time)/2)
+                    self.addEvent(tle_event)
 
+            #reach end of loop and still in FoV
+            if count != 0 and in_fov:
+                leave_fov_time = traj_end_time
+                tle_event = copy.copy(event)
+                tle_event = self.tleEventCreateTrajectory(tle_event, enter_fov_time, leave_fov_time)
+                tle_event.stations_required = self.syscon.stationID
+                tle_event.dt = convertPOSIXTimeToGMN(
+                    enter_fov_time + datetime.timedelta((leave_fov_time - enter_fov_time) / 2))
+                tle_event.time_tolerance = datetime.timedelta((leave_fov_time - enter_fov_time) / 2)
+                self.addEvent(tle_event)
+                self.setTLELastProcessed(event,traj_end_time)
 
 
         if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 != 0 and event.dt == 0:
