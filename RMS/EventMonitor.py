@@ -3156,7 +3156,7 @@ def convertGMNTimeToPOSIX(timestring):
         posix compatible time
     """
 
-    if timestring = "0":
+    if timestring == "0":
         return datetime.datetime.strptime("20000101_000000".strip(), "%Y%m%d_%H%M%S")
 
     try:
