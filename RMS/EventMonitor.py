@@ -2757,6 +2757,7 @@ class EventMonitor(multiprocessing.Process):
             return
 
         log.info("Finished processing directory {}".format(target_directory))
+        log.info("Setting TLE Last processed to last fits file processed")
         self.setTLELastProcessed(event, traj_end_time)
 
         #iterate through this loop to set the database record of the last tle_processed to the start of the next directory
@@ -2765,6 +2766,7 @@ class EventMonitor(multiprocessing.Process):
         pick_next_directory = False
         for directory in night_directory_list:
             if pick_next_directory:
+                log.info("Setting TLE Last processed to time stamp of next directory to process")
                 self.setTLELastProcessed(event, str(convertGMNTimeToPOSIX(os.path.basename(directory)[7:22])))
                 self.check_interval = self.syscon.event_monitor_check_interval_fast if self.check_interval > self.syscon.event_monitor_check_interval_fast else self.check_interval
                 return
