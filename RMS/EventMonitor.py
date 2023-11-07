@@ -2801,14 +2801,14 @@ class EventMonitor(multiprocessing.Process):
         for seconds_offset in range(0, int(event.time_tolerance), evaluation_step):
             traj_start_time = search_start + datetime.timedelta(seconds=seconds_offset)
             traj_end_time = traj_start_time + datetime.timedelta(seconds=evaluation_step)
-            log.info("Searching between {} and {}".format(traj_start_time, traj_end_time))
+            #log.info("Searching between {} and {}".format(traj_start_time, traj_end_time))
             created_event = self.tleEventCreateTrajectory(event, traj_start_time, traj_end_time)
 
             created_event.dt = convertPOSIXTimeToGMN(traj_start_time + datetime.timedelta(seconds=evaluation_step / 2))
             created_event.time_tolerance = evaluation_step / 2
             count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
                 created_event)
-            log.info("Points in FoV {}".format(count))
+            #log.info("Points in FoV {}".format(count))
             if count !=0:
                 event.suffix = event.tle_0 if created_event.suffix == "event" else created_event.suffix
                 return count
