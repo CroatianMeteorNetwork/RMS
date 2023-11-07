@@ -2847,9 +2847,9 @@ class EventMonitor(multiprocessing.Process):
                     tle_event = copy.copy(event)
                     tle_event = self.tleEventCreateTrajectory(tle_event,enter_fov_time, leave_fov_time)
                     tle_event.stations_required = self.syscon.stationID
-                    tle_event.dt = convertPOSIXTimeToGMN(enter_fov_time + datetime.timedelta((leave_fov_time - enter_fov_time)/2))
-                    tle_event.time_tolerance = datetime.timedelta((leave_fov_time - enter_fov_time)/2).total_seconds()
-                    log.info("Adding a future event for tle {} at {}".format(tle_event.dt))
+                    tle_event.dt = convertPOSIXTimeToGMN(enter_fov_time + (leave_fov_time - enter_fov_time)/2)
+                    tle_event.time_tolerance = ((leave_fov_time - enter_fov_time).total_seconds())/2
+                    log.info("Adding a future event for tle {} at {}".format(tle_event.tle_0, tle_event.dt))
                     self.addEvent(tle_event)
                     self.setTLELastProcessed(event, traj_end_time)
 
