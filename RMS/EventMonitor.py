@@ -2696,6 +2696,7 @@ class EventMonitor(multiprocessing.Process):
         in_fov, first_run = False, True
         file_list=[]
 
+
         for fits_file in fits_list:
             # Initialise empty tle_last processed
             if event.tle_last_processed == "":
@@ -2757,8 +2758,11 @@ class EventMonitor(multiprocessing.Process):
             return
 
         log.info("Finished processing directory {}".format(target_directory))
-        log.info("Setting TLE Last processed to last fits file processed")
-        self.setTLELastProcessed(event, traj_end_time)
+        if len(fits_list) != 0:
+            log.info("Setting TLE Last processed to last fits file processed")
+            self.setTLELastProcessed(event, traj_end_time)
+        else:
+            log.info("No fits files - make no changes to TLE last processed")
 
         #iterate through this loop to set the database record of the last tle_processed to the start of the next directory
         #if the target_directory is the last directory, then the loop ends without calling self.setTLELastProcessed
@@ -2780,7 +2784,7 @@ class EventMonitor(multiprocessing.Process):
             window_end = window_start + datetime.timedelta(minutes = self.check_interval)
             log.info("Checking for TLE though FoV between {} and {}".format(window_start, window_end))
             future_event = copy.copy(event)
-            self.createTLEEvent(event,window_start, window_end)
+            self.createTLEEvent(future_event,window_start, window_end)
 
 
 
