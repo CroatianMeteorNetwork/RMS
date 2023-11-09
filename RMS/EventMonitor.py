@@ -52,10 +52,9 @@ if sys.version_info[0] < 3:
 else:
     import urllib.request
 
-
 import numpy as np
-
 import RMS.ConfigReader as cr
+
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt, raDec2AltAz
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
@@ -129,7 +128,6 @@ END						                    #Event delimiter - everything after this is associa
 
 """ Automatically uploads data files based on search specification information given on a website. """
 
-
 class EventContainer(object):
 
     """ Contains the specification of the search for an event.
@@ -167,8 +165,6 @@ class EventContainer(object):
         self.start_distance, self.start_angle, self.end_distance, self.end_angle = 0, 0, 0, 0
         self.fovra, self.fovdec = 0, 0
         self.suffix = "event"
-
-
 
     def setValue(self, variable_name, value):
 
@@ -443,7 +439,6 @@ class EventContainer(object):
 
         return population
 
-
     def applyPolarSD(self, population, seed = None):
 
 
@@ -519,7 +514,6 @@ class EventContainer(object):
 
             # If elevation is min_elev_hard - min_elev degrees set to min_elev
             self.elev = min_elev if min_elev_hard < self.elev < min_elev else self.elev
-
 
     def limitHeights(self, obsvd_ht, min_lum_flt_ht, max_lum_flt_ht, gap):
 
@@ -985,7 +979,6 @@ class EventMonitor(multiprocessing.Process):
             log.info("Missing db column tle_last_processed")
             self.addDBcol("tle_last_processed","text")
 
-
     def addDBcol(self, column, coltype):
         """ Add a new column to the database
 
@@ -1036,8 +1029,6 @@ class EventMonitor(multiprocessing.Process):
             return (conn.cursor().execute(sql_command).fetchone())[0] != 0
         except:
             return False
-
-
 
     def deleteDBoldrecords(self):
 
@@ -1288,7 +1279,6 @@ class EventMonitor(multiprocessing.Process):
         except:
             log.info("Database error")
             self.recoverFromDatabaseError()
-
 
     def eventProcessed(self, uuid):
 
@@ -1543,7 +1533,6 @@ class EventMonitor(multiprocessing.Process):
                 return file_list
         return []
 
-
     def getPlateparFilePath(self, event):
 
         """ Get the path to the best platepar from the directory matching the event time
@@ -1567,7 +1556,6 @@ class EventMonitor(multiprocessing.Process):
                 pass
 
         return platepar_file
-
 
     def getDirectoryList(self, event):
 
@@ -1765,9 +1753,6 @@ class EventMonitor(multiprocessing.Process):
 
         return inside
 
-
-
-
     def raDecVisibleOld(self, rp, event, ev_con):
 
         """
@@ -1815,9 +1800,6 @@ class EventMonitor(multiprocessing.Process):
 
         # return whether any part of the targets sky_radius is in the FoV
         return angularSeparationVectDeg(target_vec, fov_vec) < ((min_fov / 2) + abs(event.sky_radius))
-
-
-
 
     def trajectoryVisible(self, rp, event):
 
@@ -1883,7 +1865,6 @@ class EventMonitor(multiprocessing.Process):
 
         return points_in_fov, start_distance, start_angle, end_distance, end_angle, fov_ra, fov_dec
 
-
     def getEventPlatepar(self,event):
 
         rp = Platepar()
@@ -1893,7 +1874,6 @@ class EventMonitor(multiprocessing.Process):
         else:
             rp.read(self.getPlateparFilePath(event))
         return rp
-
 
     def trajectoryThroughFOV(self, event):
 
@@ -1920,8 +1900,6 @@ class EventMonitor(multiprocessing.Process):
         pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC = self.trajectoryVisible(rp, event)
 
         return pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC
-
-
 
     def doUpload(self, event, evcon, file_list, keep_files=False, no_upload=False, test_mode=False):
 
@@ -2288,7 +2266,6 @@ class EventMonitor(multiprocessing.Process):
             log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
             self.markEventAsProcessed(observed_event)
 
-
     def checkRaDECEvent(self, target, ev_con, test_mode = False):
 
         log.info("Checks on RaDec for event at {}".format(target.dt))
@@ -2472,8 +2449,6 @@ class EventMonitor(multiprocessing.Process):
         else:
             log.error("EventMonitor function test fail - not starting EventMonitor")
 
-
-
     def stop(self):
         """ Stops the EventMonitor. """
 
@@ -2494,15 +2469,6 @@ class EventMonitor(multiprocessing.Process):
 
         return True
 
-
-
-    def rot_z(self,theta):
-        c = np.cos(theta)
-        s = np.sin(theta)
-        zero = theta * 0.0
-        one = zero + 1.0
-        return np.array(((c, -s, zero), (s, c, zero), (zero, zero, one)))
-
     def tleEventTime2Geo(self,satellite, event, time_gmn):
 
 
@@ -2514,32 +2480,8 @@ class EventMonitor(multiprocessing.Process):
         target_lat, target_lon = wgs84.latlon_of(geocentric)
         target_height = wgs84.height_of(geocentric)
 
-        #log.info("At {} target at lat:{:4.2f}, lon:{:4.2f}, ht:{:4.2f}km".format(t.utc_strftime("%Y%m%d_%H%M%S"),
-        #                                                                         target_lat.degrees,
-        #                                                                         target_lon.degrees,
-        #                                                                         target_height.m / 1000))
-        #jul_date = datetime2JD(convertGMNTimeToPOSIX(event.dt))
-        #target_ECEF = np.array(geo2Cartesian(target_lat.degrees, target_lon.degrees, target_height.m, jul_date))
-        #log.info("Target ECEF     {}".format(target_ECEF))
-        # the az_centre, alt_centre of the camera
-        # az_centre, alt_centre = platepar2AltAz(rp)
-
-        # calculate Field of View RA and Dec at event time, and
-
-        #print("Station coordinates Lat:{}, Lon:{}, ht:{}".format(self.config.latitude, self.config.longitude, rp.elev))
-        #station_ECEF = np.array(geo2Cartesian(self.config.latitude, self.config.longitude, rp.elev, jul_date))
-        #log.info("Station ECEF     {}".format(station_ECEF))
-        #vector_to_target = target_ECEF - station_ECEF
-        #log.info("Vector to target {}".format(vector_to_target))
-        #fov_ra, fov_dec = altAz2RADec(az_centre, alt_centre, jul_date, rp.lat, rp.lon)
-        #fov_vec = np.array(raDec2Vector(fov_ra, fov_dec))
-        #point_fov = angularSeparationVectDeg(vectNorm(vector_to_target), vectNorm(fov_vec))
-
-        #target_az, target_alt = ECEF2AltAz(station_ECEF, target_ECEF)
-        #log.info("Target Az:{} Alt:{}".format(target_az, target_alt))
-        #log.info("Angle from centre of FOV :{}".format(point_fov))
-
         return target_lat.degrees, target_lon.degrees, target_height.km
+
     def tleEventCreateTrajectory(self, event,start_time, end_time):
 
         satellite = EarthSatellite(event.tle_1, event.tle_2, event.tle_0)
@@ -2548,11 +2490,7 @@ class EventMonitor(multiprocessing.Process):
         event.lat,event.lon,event.ht = self.tleEventTime2Geo(satellite,event,start_time)
         event.lat2, event.lon2, event.ht2 = self.tleEventTime2Geo(satellite, event, end_time)
 
-
         return event
-
-
-
 
     def checkTLEEvent(self, tle_event, ev_con, test_mode = False):
 
@@ -2790,9 +2728,6 @@ class EventMonitor(multiprocessing.Process):
             future_event.dt = self.check_interval / 2
             self.createTLEEvent(future_event,window_start, window_end)
 
-
-
-
     def checkTLEThroughFOV(self, event,  evaluation_step = 10):
 
         search_start = convertGMNTimeToPOSIX(event.dt) - datetime.timedelta(seconds=int(event.time_tolerance))
@@ -2820,6 +2755,7 @@ class EventMonitor(multiprocessing.Process):
             duration = int((end_time - start_time).total_seconds())
             evaluation_step = 10
             in_fov, count = False, 0
+            enter_fov_time = start_time
             for seconds_offset in range(0,duration, evaluation_step):
                 traj_start_time = start_time + datetime.timedelta(seconds = seconds_offset)
                 traj_end_time = traj_start_time + datetime.timedelta(seconds = evaluation_step)
@@ -2855,7 +2791,7 @@ class EventMonitor(multiprocessing.Process):
 
             #reach end of loop and still in FoV
             if count != 0 and in_fov:
-                leave_fov_time = traj_end_time
+                leave_fov_time = end_time
                 tle_event = copy.copy(event)
                 tle_event = self.tleEventCreateTrajectory(tle_event, enter_fov_time, leave_fov_time)
                 tle_event.stations_required = self.syscon.stationID
@@ -2982,8 +2918,6 @@ class EventMonitor(multiprocessing.Process):
             # Increase the check interval
             if self.check_interval < self.syscon.event_monitor_check_interval:
                 self.check_interval = self.check_interval * 1.1
-
-
 
 def latLonAlt2ECEFDeg(lat, lon, h):
     """ Convert geographical coordinates to Earth centered - Earth fixed coordinates.
