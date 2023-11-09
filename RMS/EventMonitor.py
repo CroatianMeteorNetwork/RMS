@@ -2819,7 +2819,7 @@ class EventMonitor(multiprocessing.Process):
 
             duration = int((end_time - start_time).total_seconds())
             evaluation_step = 10
-            in_fov = False
+            in_fov, count = False, 0
             for seconds_offset in range(0,duration, evaluation_step):
                 traj_start_time = start_time + datetime.timedelta(seconds = seconds_offset)
                 traj_end_time = traj_start_time + datetime.timedelta(seconds = evaluation_step)
@@ -2860,7 +2860,7 @@ class EventMonitor(multiprocessing.Process):
                 tle_event = self.tleEventCreateTrajectory(tle_event, enter_fov_time, leave_fov_time)
                 tle_event.stations_required = self.syscon.stationID
                 tle_event.dt = convertPOSIXTimeToGMN(
-                    enter_fov_time + datetime.timedelta((leave_fov_time - enter_fov_time) / 2))
+                    enter_fov_time + datetime.timedelta((leave_fov_time - enter_fov_time) / 2).total_seconds())
                 tle_event.time_tolerance = datetime.timedelta((leave_fov_time - enter_fov_time) / 2).total_seconds()
                 self.addEvent(tle_event)
 
