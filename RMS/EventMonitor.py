@@ -2731,7 +2731,7 @@ class EventMonitor(multiprocessing.Process):
                 future_event.dt = self.check_interval / 2
                 self.createTLEEvent(future_event,window_start, window_end)
             else:
-                log.info("Start {} is not before end {}, Ignore.".format(window_start, window_end))
+                log.info("For {} start {} is not before end {}, Ignore.".format(event.tle_0, window_start, window_end))
 
     def checkTLEThroughFOV(self, event,  evaluation_step = 10):
 
