@@ -2723,10 +2723,15 @@ class EventMonitor(multiprocessing.Process):
             #If we have handled the history then search the next EventMonitor delay window
             window_start = dateutil.parser.parse(event.tle_last_processed)
             window_end = datetime.datetime.utcnow() + datetime.timedelta(minutes = self.check_interval)
-            log.info("Checking for TLE {} though FoV between {} and {}".format(event.tle_0, window_start, window_end))
-            future_event = copy.copy(event)
-            future_event.dt = self.check_interval / 2
-            self.createTLEEvent(future_event,window_start, window_end)
+
+            if window_start < window_end:
+                log.info(
+                    "Checking for TLE {} though FoV between {} and {}".format(event.tle_0, window_start, window_end))
+                future_event = copy.copy(event)
+                future_event.dt = self.check_interval / 2
+                self.createTLEEvent(future_event,window_start, window_end)
+            else:
+                log.info("Start {} is not before end {}, Ignore.".format(window_start, window_end))
 
     def checkTLEThroughFOV(self, event,  evaluation_step = 10):
 
