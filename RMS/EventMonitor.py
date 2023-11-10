@@ -2728,9 +2728,8 @@ class EventMonitor(multiprocessing.Process):
             window_end = datetime.datetime.utcnow() + datetime.timedelta(minutes = int(self.check_interval))
 
             if window_start < window_end:
-                log.info(
-                    "Checking for TLE {} though FoV between {} and {}".format(event.tle_0, window_start,
-                                                                              window_end + datetime.timedelta(seconds =  int(event.time_tolerance))))
+                window_end_str = (window_end + datetime.timedelta(seconds =  int(event.time_tolerance))).replace(microsecond=0).strftime('%H:%M:%S')
+                log.info("Checking for TLE {} though FoV between {} and {}".format(event.tle_0, window_start, window_end_str))
                 future_event = copy.copy(event)
                 self.createTLEEvent(future_event,window_start, window_end)
             else:
@@ -2869,12 +2868,7 @@ class EventMonitor(multiprocessing.Process):
             log.warning("Attempt to iterate over None")
             return
 
-        #tle_events = []
-        #for tle_event in events:
-        #    created_event = copy.copy(tle_event)
-        #    self.processTLE(created_event, start_time, end_time)
 
-        #log.info("Finished check for TLE events")
 
         for event in events:
             if event.isReasonable():
