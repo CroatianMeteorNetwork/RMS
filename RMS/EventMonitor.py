@@ -2805,8 +2805,8 @@ class EventMonitor(multiprocessing.Process):
                     tle_event.time_tolerance = ((leave_fov_time - enter_fov_time).total_seconds())/2
                     log.info("Adding a future event for tle {} at {}".format(tle_event.tle_0, tle_event.dt))
                     log.info("This event has a time tolerance of {} seconds".format(tle_event.time_tolerance))
-                    log.info("Start time {}".format(convertGMNTimeToPOSIX(event.dt) - datetime.timedelta(seconds=int(tle_event.time_tolerance))))
-                    log.info("End time   {}".format(convertGMNTimeToPOSIX(event.dt) + datetime.timedelta(seconds=int(tle_event.time_tolerance))))
+                    log.info("Start time {}".format(convertGMNTimeToPOSIX(tle_event.dt) - datetime.timedelta(seconds=int(tle_event.time_tolerance))))
+                    log.info("End time   {}".format(convertGMNTimeToPOSIX(tle_event.dt) + datetime.timedelta(seconds=int(tle_event.time_tolerance))))
                     self.addEvent(tle_event)
                     self.setTLELastProcessed(event, traj_end_time)
 
