@@ -2417,10 +2417,11 @@ class EventMonitor(multiprocessing.Process):
                 self.checkTLEEvent(this_event, ev_con)
             elif this_event.tle_0 != "" and this_event.tle_1 != "" and \
                 this_event.tle_2 != "" and this_event.dt == "0":
-                log.info("Event is a TLE specification without time constraint")
-                log.info("{}".format(this_event.tle_0))
-                log.info("{}".format(this_event.tle_1))
-                log.info("{}".format(this_event.tle_2))
+                if False:
+                    log.info("Event is a TLE specification without time constraint")
+                    log.info("{}".format(this_event.tle_0))
+                    log.info("{}".format(this_event.tle_1))
+                    log.info("{}".format(this_event.tle_2))
                 self.checkTLEEventWithoutTime(this_event, ev_con, test_mode)
 
         if len(unprocessed) - future_events > 1:
