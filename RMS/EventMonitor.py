@@ -2725,7 +2725,7 @@ class EventMonitor(multiprocessing.Process):
         if working_in_final_captured_files_directory == True and found_new_tle == False:
             #If we have handled the history then search the next EventMonitor delay window
             window_start = dateutil.parser.parse(event.tle_last_processed)
-            window_end = datetime.datetime.utcnow() + datetime.timedelta(minutes = self.check_interval)
+            window_end = datetime.datetime.utcnow() + datetime.timedelta(minutes = int(self.check_interval))
 
             if window_start < window_end:
                 log.info(
