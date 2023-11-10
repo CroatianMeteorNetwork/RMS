@@ -2558,6 +2558,8 @@ class EventMonitor(multiprocessing.Process):
         #Initialise the list of night_directories, and populate with the directories from CapturedFiles
         night_directory_list = []
 
+        log.info("Started processing {}".format(event.tle_0))
+
         if os.path.exists(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
             for night_directory in os.listdir(
                     os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
@@ -2590,7 +2592,7 @@ class EventMonitor(multiprocessing.Process):
             log.info("{} has not had any processing pick earliest directory {}".format(event.tle_0,target_directory))
         else:
             #It is not a newly loaded tle, so we have the time to start processing from
-            log.info("tle_last_processed {}".format(event.tle_last_processed))
+            log.info("{} last processed {}".format(event.tle_0, event.tle_last_processed))
 
             first_run, target_directory_set = True, False
             for directory in night_directory_list:
