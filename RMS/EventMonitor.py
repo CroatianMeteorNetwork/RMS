@@ -2730,7 +2730,7 @@ class EventMonitor(multiprocessing.Process):
             if window_start < window_end:
                 log.info(
                     "Checking for TLE {} though FoV between {} and {}".format(event.tle_0, window_start,
-                                                                              window_end + datetime.timedelta(seconds =  event.time_tolerance)))
+                                                                              window_end + datetime.timedelta(seconds =  int(event.time_tolerance))))
                 future_event = copy.copy(event)
                 self.createTLEEvent(future_event,window_start, window_end)
             else:
