@@ -2391,14 +2391,15 @@ class EventMonitor(multiprocessing.Process):
                              .format(float(self.check_interval),time_until_event_end_seconds / 60 ))
                 continue
 
-            log.info("dt    {}".format(this_event.dt))
-            log.info("Lat   {}".format(this_event.lat))
-            log.info("Lat   {}".format(this_event.lon))
-            log.info("Ra    {}".format(this_event.ra))
-            log.info("Dec   {}".format(this_event.dec))
-            log.info("tle   {}".format(this_event.tle_0))
-            log.info("      {}".format(this_event.tle_1))
-            log.info("      {}".format(this_event.tle_2))
+            if False:
+                log.info("dt    {}".format(this_event.dt))
+                log.info("Lat   {}".format(this_event.lat))
+                log.info("Lat   {}".format(this_event.lon))
+                log.info("Ra    {}".format(this_event.ra))
+                log.info("Dec   {}".format(this_event.dec))
+                log.info("tle   {}".format(this_event.tle_0))
+                log.info("      {}".format(this_event.tle_1))
+                log.info("      {}".format(this_event.tle_2))
 
             # If either lat or lon is non zero, handle as a trajectory specification
             if this_event.lat != 0 and this_event.lon !=0:
