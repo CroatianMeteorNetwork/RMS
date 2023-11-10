@@ -2585,7 +2585,7 @@ class EventMonitor(multiprocessing.Process):
         if event.tle_last_processed == "" and len(night_directory_list) != 0:
             #Set the target_directory to be the first CapturedFiles directory
             target_directory = night_directory_list[0]
-            log.info("This TLE has not had any processing pick earliest directory {}".format(target_directory))
+            log.info("{} has not had any processing pick earliest directory {}".format(event.tle_0,target_directory))
         else:
             #It is not a newly loaded tle, so we have the time to start processing from
             log.info("tle_last_processed {}".format(event.tle_last_processed))
@@ -2679,7 +2679,15 @@ class EventMonitor(multiprocessing.Process):
                 in_fov = False
                 end_time_in_fov = traj_end_time
                 event.suffix = event.tle_0
-                self.doUpload(event, ev_con, file_list, test_mode)
+                data_to_upload = False
+                for test_file in file_list:
+                    if test_file.endswith("fits") or test_file.endswith("bin")
+                        data_to_upload = True
+                        break
+                if data_to_upload:
+                    doUpload(event, ev_con, file_list, test_mode)
+                else:
+                    log.info("No observations to upload")
                 log.info("For {} set database tle_last_processed {}".format(event.uuid, end_time_in_fov))
                 self.setTLELastProcessed(event, end_time_in_fov)
                 log.info("Part processed directory {}".format(target_directory))
