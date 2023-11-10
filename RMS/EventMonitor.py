@@ -2681,11 +2681,11 @@ class EventMonitor(multiprocessing.Process):
                 event.suffix = event.tle_0
                 data_to_upload = False
                 for test_file in file_list:
-                    if test_file.endswith("fits") or test_file.endswith("bin")
+                    if test_file.endswith("fits") or test_file.endswith("bin"):
                         data_to_upload = True
                         break
                 if data_to_upload:
-                    doUpload(event, ev_con, file_list, test_mode)
+                    self.doUpload(event, ev_con, file_list, test_mode)
                 else:
                     log.info("No observations to upload")
                 log.info("For {} set database tle_last_processed {}".format(event.uuid, end_time_in_fov))
