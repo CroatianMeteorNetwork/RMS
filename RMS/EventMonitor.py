@@ -2622,7 +2622,6 @@ class EventMonitor(multiprocessing.Process):
                     final_fits_file = os.path.basename(fits_list[-1])
                     log.info("Working on tle {}, last processed {}".format(event.tle_0, event.tle_last_processed))
                     log.info("Working in last CapturedFiles directory {} found last fits file {}".format(target_directory, final_fits_file))
-
                     if convertGMNTimeToPOSIX(final_fits_file[10:25]) > dateutil.parser.parse(event.tle_last_processed):
                         log.info("Still more to scan in this directory")
                         target_directory = directory
@@ -2702,7 +2701,8 @@ class EventMonitor(multiprocessing.Process):
             return
 
         log.info("Finished processing directory {}".format(target_directory))
-        if len(fits_list) != 0:
+        time_of_last_fits_file = str(convertGMNTimeToPOSIX(os.path.basename(fits_file)[10:25])
+        if len(fits_list) != 0
             log.info("Setting TLE Last processed to last fits file processed")
             self.setTLELastProcessed(event, str(convertGMNTimeToPOSIX(os.path.basename(fits_file)[10:25])))
         else:
@@ -2794,6 +2794,9 @@ class EventMonitor(multiprocessing.Process):
                     tle_event.dt = convertPOSIXTimeToGMN(enter_fov_time + (leave_fov_time - enter_fov_time)/2)
                     tle_event.time_tolerance = ((leave_fov_time - enter_fov_time).total_seconds())/2
                     log.info("Adding a future event for tle {} at {}".format(tle_event.tle_0, tle_event.dt))
+                    log.info("This even has a time tolerance of {} seconds".format(tle_event.time_tolerance))
+                    log.info("Start time {}".format(event.dt - datetime.timedelta(seconds = tle_event.time_tolerance)))
+                    log.info("End time   {}".format(event.dt + datetime.timedelta(seconds=tle_event.time_tolerance)))
                     self.addEvent(tle_event)
                     self.setTLELastProcessed(event, traj_end_time)
 
