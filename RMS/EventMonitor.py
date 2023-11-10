@@ -2803,7 +2803,7 @@ class EventMonitor(multiprocessing.Process):
                     tle_event.stations_required = self.syscon.stationID
                     tle_event.dt = convertPOSIXTimeToGMN(enter_fov_time + (leave_fov_time - enter_fov_time)/2)
                     tle_event.time_tolerance = ((leave_fov_time - enter_fov_time).total_seconds())/2
-                    log.info("Adding a future event for tle {} at {}".format(tle_event.tle_0, event.dt))
+                    log.info("Adding a future event for tle {} at {}".format(tle_event.tle_0, tle_event.dt))
                     log.info("This event has a time tolerance of {} seconds".format(tle_event.time_tolerance))
                     log.info("Start time {}".format(convertGMNTimeToPOSIX(event.dt) - datetime.timedelta(seconds=int(tle_event.time_tolerance))))
                     log.info("End time   {}".format(convertGMNTimeToPOSIX(event.dt) + datetime.timedelta(seconds=int(tle_event.time_tolerance))))
