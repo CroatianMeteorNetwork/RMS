@@ -2702,7 +2702,7 @@ class EventMonitor(multiprocessing.Process):
 
         log.info("Finished processing directory {}".format(target_directory))
         time_of_last_fits_file = str(convertGMNTimeToPOSIX(os.path.basename(fits_file)[10:25])
-        if len(fits_list) != 0
+        if len(fits_list) != 0:
             log.info("Setting TLE Last processed to last fits file processed")
             self.setTLELastProcessed(event, str(convertGMNTimeToPOSIX(os.path.basename(fits_file)[10:25])))
         else:
