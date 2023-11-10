@@ -1224,7 +1224,7 @@ class EventMonitor(multiprocessing.Process):
                 log.info("Add event failed")
                 self.recoverFromDatabaseError()
                 return False
-            if event.dt == "0":
+            if str(event.dt) == "0":
                 log.info("Added TLE {} to the database".format(event.tle_0))
             else:
                 log.info("Added event at {} to the database".format(event.dt))
