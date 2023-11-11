@@ -927,6 +927,19 @@ class EventMonitor(multiprocessing.Process):
 
     def upgradeDB(self,conn):
 
+
+        """
+
+        Checks that any columns required by subsequent releases of EventMonitor are present. If they are not,
+        then they are added.
+
+        Args:
+            conn: Connection to the EventMonitor database
+
+        Returns: Nothing
+
+        """
+
         if not self.checkDBcol(conn,"Suffix"):
             log.info("Missing db column Suffix")
             self.addDBcol("Suffix","TEXT")
@@ -980,7 +993,9 @@ class EventMonitor(multiprocessing.Process):
             self.addDBcol("tle_last_processed","text")
 
     def addDBcol(self, column, coltype):
-        """ Add a new column to the database
+
+
+        """ Add a new column to the database. This is used when upgrading the database to later features.
 
         Arguments:
             column: [string] Name of column to add
@@ -1677,233 +1692,6 @@ class EventMonitor(multiprocessing.Process):
             file_list += self.getFile(self.syscon.platepar_name, self.getDirectoryList(event)[0])
 
         return file_list
-
-    def raDecVisible(self, rp, event, ev_con):
-
-        """
-        Given a platepar and an event, which includes RaDec coordinates
-        deduce if the RaDec plus the SkyRadius would be in the FoV.
-
-        Args:
-            rp: [platepar] reference platepar
-            event: [event] event of interest
-
-        Returns:
-            [bool] : True if RaDEC in FoV
-
-        """
-
-
-        jd = datetime2JD(convertGMNTimeToPOSIX(event.dt))
-
-        x, y = rp.X_res, rp.Y_res
-        x_vert = [0, x / 4, x / 2, 3 / 4 * x, x,      x,    x,         x,         x, 3 / 4 * x, x / 2, x / 4, 0,         0,     0,     0]
-        y_vert = [0,     0,     0,         0, 0, y / 4, y / 2, 3 / 4 * y,         y,         y,     y,     y, y, 3 / 4 * y, y / 2, y / 4]
-
-        _, ra_vertices, dec_vertices, _ = xyToRaDecPP(
-            [jd] * len(x_vert),
-            list(reversed(x_vert)),
-            list(reversed(y_vert)),
-            [1] * len(x_vert),
-            rp,
-            jd_time = True,
-            extinction_correction=False,
-        )
-
-        # Calculate minimum FoV of camera - not using diagonal as not restrictive enough
-        min_fov = min(rp.fov_v, rp.fov_h)
-        # the az_centre, alt_centre of the camera
-        az_c, alt_c = platepar2AltAz(rp)
-
-        # calculate elevation of RaDec to tangent of surface of earth at camera.
-        az_t, el_t = raDec2AltAz(event.ra, event.dec,jd, ev_con.latitude, ev_con.longitude)
-
-        # if not above min_elev
-        if el_t < event.min_elev:
-            log.info("Event at {} has elevation {:4.1f}, which is less than {:4.1f} elevation".format(event.dt,el_t,event.min_elev))
-            return False
-
-        # calculate Field of View RA and Dec at event time - only for logging
-        fov_ra, fov_dec = altAz2RADec(az_c, alt_c, jd, rp.lat, rp.lon)
-
-        # calculate fov_vec and target_vec
-        fov_vec, target_vec = np.array(raDec2Vector(fov_ra, fov_dec)), np.array(raDec2Vector(event.ra, event.dec))
-
-        # normalise - only for logging
-        fov_vec, target_vec = vectNorm(fov_vec), vectNorm(target_vec)
-
-        # temporary logging for debugging
-        log.info("RADecEvent Time {}".format(event.dt))
-        log.info("    Camera Alt, Az, min_fov {:.2f}°, {:.2f}°, {:.2f}°".format(az_c,alt_c, min_fov))
-        log.info("        Field of view RaDec {:.2f}°, {:.2f}°".format(fov_ra,fov_dec))
-        log.info("        Target RaDec        {:.2f}°, {:.2f}°".format(event.ra, event.dec))
-        log.info("        Angular separation  {:.2f}°".format(angularSeparationVectDeg(target_vec, fov_vec)))
-
-        # return whether any part of the targets sky_radius is in the FoV
-
-
-        ra ,dec  = (np.array([[event.ra, event.dec]]).astype(np.float64)).T
-
-        target_array = np.array([ra, dec]).T
-        fov_array = np.array([ra_vertices, dec_vertices]).T
-        inside = pointInsideConvexPolygonSphere(target_array,fov_array)
-
-
-        if inside:
-            log.info("Inside FOV")
-        else:
-            log.info("Outside FOV")
-
-        return inside
-
-    def raDecVisibleOld(self, rp, event, ev_con):
-
-        """
-        Given a platepar and an event, which includes RaDec coordinates
-        deduce if the RaDec plus the SkyRadius would be in the FoV.
-
-        Args:
-            rp: [platepar] reference platepar
-            event: [event] event of interest
-
-        Returns:
-            [bool] : True if RaDEC in FoV
-
-        """
-
-        # Calculate minimum FoV of camera - not using diagonal as not restrictive enough
-        min_fov = min(rp.fov_v, rp.fov_h)
-
-        # the az_centre, alt_centre of the camera
-        az_c, alt_c = platepar2AltAz(rp)
-        jd = datetime2JD(convertGMNTimeToPOSIX(event.dt))
-
-        # calculate elevation of RaDec to tangent of surface of earth at camera.
-        az_t, el_t = raDec2AltAz(event.ra, event.dec,jd, ev_con.latitude, ev_con.longitude)
-
-        # if not above min_elev
-        if el_t < event.min_elev:
-            return False
-
-        # calculate Field of View RA and Dec at event time
-        fov_ra, fov_dec = altAz2RADec(az_c, alt_c, jd, rp.lat, rp.lon)
-
-        # calculate fov_vec and target_vec
-        fov_vec, target_vec = np.array(raDec2Vector(fov_ra, fov_dec)), np.array(raDec2Vector(event.ra, event.dec))
-
-        # normalise
-        fov_vec, target_vec = vectNorm(fov_vec), vectNorm(target_vec)
-
-        # temporary logging for debugging
-        log.info("RADecEvent Time {}".format(event.dt))
-        log.info("    Camera Alt, Az, min_fov {:.2f}°, {:.2f}°, {:.2f}°".format(az_c,alt_c, min_fov))
-        log.info("        Field of view RaDec {:.2f}°, {:.2f}°".format(fov_ra,fov_dec))
-        log.info("        Target RaDec        {:.2f}°, {:.2f}°".format(event.ra, event.dec))
-        log.info("        Angular separation  {:.2f}°".format(angularSeparationVectDeg(target_vec, fov_vec)))
-
-        # return whether any part of the targets sky_radius is in the FoV
-        return angularSeparationVectDeg(target_vec, fov_vec) < ((min_fov / 2) + abs(event.sky_radius))
-
-    def trajectoryVisible(self, rp, event):
-
-        """
-        Given a platepar and an event, calculate the centiles of the trajectory which would be in the FoV.
-        Working is in ECI, relative to the station coordinates.
-
-        Args:
-            rp: [platepar] reference platepar
-            event: [event] event of interest
-
-        Returns:
-            points_in_fov: [integer] the number of points out of 100 in the field of view
-            start_distance: [float] the distance in metres from the station to the trajectory start
-            start_angle: [float] the angle between the vector from the station to start of the trajectory
-                        and the vector of the centre of the FOV
-            end_distance: [float] the distance in metres from the station to the trajectort end
-            end_angle: [float] the angle between the vector from the station to end of the trajectory
-                        and the vector of the centre of the FOV
-            fov_ra: [float]  field of view Ra (degrees)
-            fov_dec: [float] fov_dec of view Dec (degrees)
-
-        """
-        # Calculate diagonal FoV of camera
-        diagonal_fov = np.sqrt(rp.fov_v ** 2 + rp.fov_h ** 2)
-
-        # Calculation origin will be the ECI of the station taken from the platepar
-        jul_date = datetime2JD(convertGMNTimeToPOSIX(event.dt))
-        origin = np.array(geo2Cartesian(rp.lat, rp.lon, rp.elev, jul_date))
-
-        # Convert trajectory start and end point coordinates to cartesian ECI at JD of event
-        traj_sta_pt = np.array(geo2Cartesian(event.lat, event.lon, event.ht * 1000, jul_date))
-        traj_end_pt = np.array(geo2Cartesian(event.lat2, event.lon2, event.ht2 * 1000, jul_date))
-
-        # Make relative (_rel) to station coordinates
-        stapt_rel, endpt_rel = traj_sta_pt - origin, traj_end_pt - origin
-
-        # trajectory vector, and vector for traverse
-        traj_vec = traj_end_pt - traj_sta_pt
-        traj_inc = traj_vec / 100
-
-        # the az_centre, alt_centre of the camera
-        az_centre, alt_centre = platepar2AltAz(rp)
-
-        # calculate Field of View RA and Dec at event time, and
-        fov_ra, fov_dec = altAz2RADec(az_centre, alt_centre, jul_date, rp.lat, rp.lon)
-
-        fov_vec = np.array(raDec2Vector(fov_ra, fov_dec))
-
-        # iterate along the trajectory counting points in the field of view
-        points_in_fov = 0
-        for i in range(0, 100):
-            point = (stapt_rel + i * traj_inc)
-            point_fov = angularSeparationVectDeg(vectNorm(point), vectNorm(fov_vec))
-            if point_fov < diagonal_fov / 2:
-                points_in_fov += 1
-
-        # calculate some additional information for confidence
-        start_distance = (np.sqrt(np.sum(stapt_rel ** 2)))
-        start_angle = angularSeparationVectDeg(vectNorm(stapt_rel), vectNorm(fov_vec))
-        end_distance = (np.sqrt(np.sum(endpt_rel ** 2)))
-        end_angle = angularSeparationVectDeg(vectNorm(endpt_rel), vectNorm(fov_vec))
-
-        return points_in_fov, start_distance, start_angle, end_distance, end_angle, fov_ra, fov_dec
-
-    def getEventPlatepar(self,event):
-
-        rp = Platepar()
-        if self.getPlateparFilePath(event) == "":
-            #log.info("No platepar found in {} for event at {}, reading from {}".format(self.config.captured_dir, event.dt, self.config.platepar_name))
-            rp.read(self.config.platepar_name)
-        else:
-            rp.read(self.getPlateparFilePath(event))
-        return rp
-
-    def trajectoryThroughFOV(self, event):
-
-        """
-        For the trajectory contained in the event, calculate if it passed through the FoV defined by the
-        of the time of the event
-
-        Args:
-            event: [event] Calculate if the trajectory of this event passed through the field of view
-
-        Returns:
-            pts_in_FOV: [integer] Number of points of the trajectory split into 100 parts
-                                   apparently in the FOV of the camera
-            sta_dist: [float] Distance from station to the start of the trajectory
-            sta_ang: [float] Angle from the centre of the FoV to the start of the trajectory
-            end_dist: [float] Distance from station to the end of the trajectory
-            end_ang: [float] Angle from the centre of the FoV to the end of the trajectory
-        """
-
-        # Read in the platepar for the event
-
-        rp = self.getEventPlatepar(event)
-
-        pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC = self.trajectoryVisible(rp, event)
-
-        return pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC
-
     def doUpload(self, event, evcon, file_list, keep_files=False, no_upload=False, test_mode=False):
 
         """Move all the files to a single directory. Make MP4s, stacks and jpgs
@@ -2075,30 +1863,263 @@ class EventMonitor(multiprocessing.Process):
             shutil.rmtree(event_monitor_directory)
         return upload_status
 
-    def inRangeForRaDec(self, target, ev_con):
+    def raDecVisible(self, rp, event, ev_con):
 
         """
+        Given a platepar and an event, which includes RaDec coordinates
+        deduce if the RaDec plus the SkyRadius would be in the FoV.
 
         Args:
-            target: the target event
-            ev_con: the configuration at the time of the event
+            rp: [platepar] reference platepar
+            event: [event] event of interest
 
-        Returns: [bool] true if the station is within the radius allowed for this RaDEC specification
+        Returns:
+            [bool] : True if RaDEC in FoV
 
         """
 
-        log.info("Checking range for event at {}".format(target.dt))
-        log.info("Station           at Lat:{:7.4f}° Lon:{:7.4f}°".format(float(ev_con.latitude),float(ev_con.longitude)))
-        log.info("Observer defined  at Lat:{:7.4f}° Lon:{:7.4f}°".format(float(target.obs_lat), float(target.obs_lon)))
-        gc_dist = gcDistDeg(ev_con.latitude, ev_con.longitude, target.obs_lat, target.obs_lon)
-        log.info("Great circle distance   :{:6.1f}km".format(float(gc_dist)))
-        try:
-            log.info("Radius set at           :{:6.1f}km".format(float(target.obs_range)))
-            return float(gc_dist) < float(target.obs_range)
-        except:
-            return True
+
+        jd = datetime2JD(convertGMNTimeToPOSIX(event.dt))
+
+        x, y = rp.X_res, rp.Y_res
+        x_vert = [0, x / 4, x / 2, 3 / 4 * x, x,      x,    x,         x,         x, 3 / 4 * x, x / 2, x / 4, 0,         0,     0,     0]
+        y_vert = [0,     0,     0,         0, 0, y / 4, y / 2, 3 / 4 * y,         y,         y,     y,     y, y, 3 / 4 * y, y / 2, y / 4]
+
+        _, ra_vertices, dec_vertices, _ = xyToRaDecPP(
+            [jd] * len(x_vert),
+            list(reversed(x_vert)),
+            list(reversed(y_vert)),
+            [1] * len(x_vert),
+            rp,
+            jd_time = True,
+            extinction_correction=False,
+        )
+
+        # Calculate minimum FoV of camera - not using diagonal as not restrictive enough
+        min_fov = min(rp.fov_v, rp.fov_h)
+        # the az_centre, alt_centre of the camera
+        az_c, alt_c = platepar2AltAz(rp)
+
+        # calculate elevation of RaDec to tangent of surface of earth at camera.
+        az_t, el_t = raDec2AltAz(event.ra, event.dec,jd, ev_con.latitude, ev_con.longitude)
+
+        # if not above min_elev
+        if el_t < event.min_elev:
+            log.info("Event at {} has elevation {:4.1f}°, which is less than {:4.1f}° elevation".format(event.dt,el_t,event.min_elev))
+            return False
+
+        # calculate Field of View RA and Dec at event time - only for logging
+        fov_ra, fov_dec = altAz2RADec(az_c, alt_c, jd, rp.lat, rp.lon)
+
+        # calculate fov_vec and target_vec
+        fov_vec, target_vec = np.array(raDec2Vector(fov_ra, fov_dec)), np.array(raDec2Vector(event.ra, event.dec))
+
+        # normalise - only for logging
+        fov_vec, target_vec = vectNorm(fov_vec), vectNorm(target_vec)
+
+        # temporary logging for debugging
+        log.info("RADecEvent Time {}".format(event.dt))
+        log.info("    Camera Alt, Az, min_fov {:.2f}°, {:.2f}°, {:.2f}°".format(az_c,alt_c, min_fov))
+        log.info("        Field of view RaDec {:.2f}°, {:.2f}°".format(fov_ra,fov_dec))
+        log.info("        Target RaDec        {:.2f}°, {:.2f}°".format(event.ra, event.dec))
+        log.info("        Angular separation  {:.2f}°".format(angularSeparationVectDeg(target_vec, fov_vec)))
+
+        # return whether any part of the targets sky_radius is in the FoV
+
+
+        ra ,dec  = (np.array([[event.ra, event.dec]]).astype(np.float64)).T
+
+        target_array = np.array([ra, dec]).T
+        fov_array = np.array([ra_vertices, dec_vertices]).T
+        inside = pointInsideConvexPolygonSphere(target_array,fov_array)
+
+
+        if inside:
+            log.info("Inside FOV")
+        else:
+            log.info("Outside FOV")
+
+        return inside
+
+    def raDecVisibleOld(self, rp, event, ev_con):
+
+        """
+        Given a platepar and an event, which includes RaDec coordinates
+        deduce if the RaDec plus the SkyRadius would be in the FoV.
+
+        Args:
+            rp: [platepar] reference platepar
+            event: [event] event of interest
+
+        Returns:
+            [bool] : True if RaDEC in FoV
+
+        """
+
+        # Calculate minimum FoV of camera - not using diagonal as not restrictive enough
+        min_fov = min(rp.fov_v, rp.fov_h)
+
+        # the az_centre, alt_centre of the camera
+        az_c, alt_c = platepar2AltAz(rp)
+        jd = datetime2JD(convertGMNTimeToPOSIX(event.dt))
+
+        # calculate elevation of RaDec to tangent of surface of earth at camera.
+        az_t, el_t = raDec2AltAz(event.ra, event.dec,jd, ev_con.latitude, ev_con.longitude)
+
+        # if not above min_elev
+        if el_t < event.min_elev:
+            return False
+
+        # calculate Field of View RA and Dec at event time
+        fov_ra, fov_dec = altAz2RADec(az_c, alt_c, jd, rp.lat, rp.lon)
+
+        # calculate fov_vec and target_vec
+        fov_vec, target_vec = np.array(raDec2Vector(fov_ra, fov_dec)), np.array(raDec2Vector(event.ra, event.dec))
+
+        # normalise
+        fov_vec, target_vec = vectNorm(fov_vec), vectNorm(target_vec)
+
+        # temporary logging for debugging
+        if False:
+            log.info("RADecEvent Time {}".format(event.dt))
+            log.info("    Camera Alt, Az, min_fov {:.2f}°, {:.2f}°, {:.2f}°".format(az_c,alt_c, min_fov))
+            log.info("        Field of view RaDec {:.2f}°, {:.2f}°".format(fov_ra,fov_dec))
+            log.info("        Target RaDec        {:.2f}°, {:.2f}°".format(event.ra, event.dec))
+            log.info("        Angular separation  {:.2f}°".format(angularSeparationVectDeg(target_vec, fov_vec)))
+
+        # return whether any part of the targets sky_radius is in the FoV
+        return angularSeparationVectDeg(target_vec, fov_vec) < ((min_fov / 2) + abs(event.sky_radius))
+
+    def trajectoryVisible(self, rp, event):
+
+        """
+        Given a platepar and an event, calculate the centiles of the trajectory which would be in the FoV.
+        Working is in ECI, relative to the station coordinates.
+
+        Args:
+            rp: [platepar] reference platepar
+            event: [event] event of interest
+
+        Returns:
+            points_in_fov: [integer] the number of points out of 100 in the field of view
+            start_distance: [float] the distance in metres from the station to the trajectory start
+            start_angle: [float] the angle between the vector from the station to start of the trajectory
+                        and the vector of the centre of the FOV
+            end_distance: [float] the distance in metres from the station to the trajectort end
+            end_angle: [float] the angle between the vector from the station to end of the trajectory
+                        and the vector of the centre of the FOV
+            fov_ra: [float]  field of view Ra (degrees)
+            fov_dec: [float] fov_dec of view Dec (degrees)
+
+        """
+        # Calculate diagonal FoV of camera
+        diagonal_fov = np.sqrt(rp.fov_v ** 2 + rp.fov_h ** 2)
+
+        # Calculation origin will be the ECI of the station taken from the platepar
+        jul_date = datetime2JD(convertGMNTimeToPOSIX(event.dt))
+        origin = np.array(geo2Cartesian(rp.lat, rp.lon, rp.elev, jul_date))
+
+        # Convert trajectory start and end point coordinates to cartesian ECI at JD of event
+        traj_sta_pt = np.array(geo2Cartesian(event.lat, event.lon, event.ht * 1000, jul_date))
+        traj_end_pt = np.array(geo2Cartesian(event.lat2, event.lon2, event.ht2 * 1000, jul_date))
+
+        # Make relative (_rel) to station coordinates
+        stapt_rel, endpt_rel = traj_sta_pt - origin, traj_end_pt - origin
+
+        # trajectory vector, and vector for traverse
+        traj_vec = traj_end_pt - traj_sta_pt
+        traj_inc = traj_vec / 100
+
+        # the az_centre, alt_centre of the camera
+        az_centre, alt_centre = platepar2AltAz(rp)
+
+        # calculate Field of View RA and Dec at event time, and
+        fov_ra, fov_dec = altAz2RADec(az_centre, alt_centre, jul_date, rp.lat, rp.lon)
+
+        fov_vec = np.array(raDec2Vector(fov_ra, fov_dec))
+
+        # iterate along the trajectory counting points in the field of view
+        points_in_fov = 0
+        for i in range(0, 100):
+            point = (stapt_rel + i * traj_inc)
+            point_fov = angularSeparationVectDeg(vectNorm(point), vectNorm(fov_vec))
+            if point_fov < diagonal_fov / 2:
+                points_in_fov += 1
+
+        # calculate some additional information for confidence
+        start_distance, end_distance = (np.sqrt(np.sum(stapt_rel ** 2))), (np.sqrt(np.sum(endpt_rel ** 2)))
+        start_angle = angularSeparationVectDeg(vectNorm(stapt_rel), vectNorm(fov_vec))
+        end_angle = angularSeparationVectDeg(vectNorm(endpt_rel), vectNorm(fov_vec))
+
+        return points_in_fov, start_distance, start_angle, end_distance, end_angle, fov_ra, fov_dec
+
+    def getEventPlatepar(self,event):
+
+
+        """
+
+        Returns the platepar which may be the most appropriate for the event
+
+        Args:
+            event: the event of interest
+
+        Returns:
+            [platepar]: the platepar which appears to be the best for the event.
+        """
+
+        rp = Platepar()
+        if self.getPlateparFilePath(event) == "":
+            #log.info("No platepar found in {} for event at {}, reading from {}".format(self.config.captured_dir, event.dt, self.config.platepar_name))
+            rp.read(self.config.platepar_name)
+        else:
+            rp.read(self.getPlateparFilePath(event))
+        return rp
+
+    def trajectoryThroughFOV(self, event):
+
+        """
+        For the trajectory contained in the event, calculate if it passed through the FoV defined by the
+        of the time of the event
+
+        Args:
+            event: [event] Calculate if the trajectory of this event passed through the field of view
+
+        Returns:
+            pts_in_FOV: [integer] Number of points of the trajectory split into 100 parts
+                                   apparently in the FOV of the camera
+            sta_dist: [float] Distance from station to the start of the trajectory
+            sta_ang: [float] Angle from the centre of the FoV to the start of the trajectory
+            end_dist: [float] Distance from station to the end of the trajectory
+            end_ang: [float] Angle from the centre of the FoV to the end of the trajectory
+        """
+
+        # Read in the platepar for the event
+
+        rp = self.getEventPlatepar(event)
+
+        pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC = self.trajectoryVisible(rp, event)
+
+        return pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC
 
     def checkTrajectoryEvent(self, observed_event, ev_con, test_mode = False):
+
+
+
+        """
+
+        Takes an event, handles uncertainty, and if it has passed through the field of view uploads the event
+        Then updates the database to show that the file has been processed, and if and what was uploaded.
+
+        Args:
+            observed_event: the event being tested
+            ev_con: the config appropriate for this event
+            test_mode: when set to true disables uploads
+
+        Returns:
+            Nothing
+
+        """
+
 
         log.info("Checks on trajectories for event at {}".format(observed_event.dt))
         check_time_start = datetime.datetime.utcnow()
@@ -2269,7 +2290,47 @@ class EventMonitor(multiprocessing.Process):
             log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
             self.markEventAsProcessed(observed_event)
 
+            def inRangeForRaDec(self, target, ev_con):
+
+                """
+
+                Args:
+                    target: the target event
+                    ev_con: the configuration at the time of the event
+
+                Returns: [bool] true if the station is within the radius allowed for this RaDEC specification
+
+                """
+
+                log.info("Checking range for event at {}".format(target.dt))
+                log.info("Station           at Lat:{:7.4f}° Lon:{:7.4f}°".format(float(ev_con.latitude),
+                                                                                 float(ev_con.longitude)))
+                log.info("Observer defined  at Lat:{:7.4f}° Lon:{:7.4f}°".format(float(target.obs_lat),
+                                                                                 float(target.obs_lon)))
+                gc_dist = gcDistDeg(ev_con.latitude, ev_con.longitude, target.obs_lat, target.obs_lon)
+                log.info("Great circle distance   :{:6.1f}km".format(float(gc_dist)))
+                try:
+                    log.info("Radius set at           :{:6.1f}km".format(float(target.obs_range)))
+                    return float(gc_dist) < float(target.obs_range)
+                except:
+                    return True
+
     def checkRaDECEvent(self, target, ev_con, test_mode = False):
+
+
+        """
+        Evaluates if a RaDec event has passed through the FoV of a camera within a certain radius of an
+        observation point
+
+        Args:
+            target: an event object with the RaDec set
+            ev_con: the configuration for the event
+            test_mode:
+
+        Returns:
+
+        """
+
 
         log.info("Checks on RaDec for event at {}".format(target.dt))
         check_time_start = datetime.datetime.utcnow()
@@ -2322,7 +2383,7 @@ class EventMonitor(multiprocessing.Process):
 
         if self.raDecVisible(rp, target, ev_con):
             if self.doUpload(target, ev_con, file_list, test_mode):
-                log.info("Event {} at Ra,Dec {},{} in FoV".format(target.dt,target.ra, target.dec))
+                log.info("Event {} at Ra,Dec {}°,{}° in FoV".format(target.dt,target.ra, target.dec))
                 self.markEventAsProcessed(target)
                 if len(file_list) > 0:
                     self.markEventAsUploaded(target, file_list)
@@ -2331,7 +2392,7 @@ class EventMonitor(multiprocessing.Process):
                 log.error("Upload failed for event at {}. Event retained in database for retry.".format(target.dt))
 
         else:
-            log.info("Event {} at Ra,Dec {},{} not in FoV".format(target.dt,target.ra, target.dec))
+            log.info("Event {} at Ra,Dec {}°,{}° not in FoV".format(target.dt,target.ra, target.dec))
             self.markEventAsProcessed(target)
 
         # End of the processing for this event
@@ -2347,211 +2408,6 @@ class EventMonitor(multiprocessing.Process):
             log.info("Reached end of checks - {} is processed, nothing to upload".format(target.dt))
             log.info("Check of RaDec event time elapsed {:.2f} seconds".format(check_time_seconds))
             self.markEventAsProcessed(target)
-
-    def checkEvents(self, ev_con, test_mode = False):
-
-        """
-        argunments:
-            ev_con: configuration object at the time of this event
-
-        returns:
-            Nothing
-        """
-
-        # Get the work to be done
-
-        unprocessed = self.getUnprocessedEventsfromDB()
-
-        future_events = 0
-        for this_event in unprocessed:
-
-            # check to see if the end of this event is in the future, if it is then do not process
-            # if the end of the event is before the next scheduled execution of EventMonitor loop,
-            # then set the loop to execute after the event ends
-
-            if convertGMNTimeToPOSIX(this_event.dt) + \
-                    datetime.timedelta(seconds=int(this_event.time_tolerance)) > datetime.datetime.utcnow():
-                time_until_event_end_seconds = (convertGMNTimeToPOSIX(this_event.dt) -
-                                                    datetime.datetime.utcnow() +
-                                                    datetime.timedelta(seconds=int(this_event.time_tolerance))).total_seconds()
-                future_events += 1
-                log.info("The end of event at {} is in the future by {:.1f} minutes"
-                         .format(this_event.dt, time_until_event_end_seconds / 60))
-                if time_until_event_end_seconds < float(self.check_interval) * 60:
-                    log.info("Check interval is set to {:.1f} minutes, however end of future event is only {:.1f} minutes away"
-                             .format(float(self.check_interval),time_until_event_end_seconds / 60))
-                    # set the check_interval to the time until the end of the event
-                    self.check_interval = float(time_until_event_end_seconds) / 60
-                    # random time offset to reduce congestion
-                    self.check_interval += random.randint(20, 60) / 60
-                    log.info("Check interval set to {:.1f} minutes, so that future event is reported quickly"
-                             .format(float(self.check_interval)))
-                else:
-                    log.info("Check interval is set to {:.1f} minutes, end of future event {:.1f} minutes away, no action required"
-                             .format(float(self.check_interval),time_until_event_end_seconds / 60 ))
-                continue
-
-            if False:
-                log.info("dt    {}".format(this_event.dt))
-                log.info("Lat   {}".format(this_event.lat))
-                log.info("Lat   {}".format(this_event.lon))
-                log.info("Ra    {}".format(this_event.ra))
-                log.info("Dec   {}".format(this_event.dec))
-                log.info("tle   {}".format(this_event.tle_0))
-                log.info("      {}".format(this_event.tle_1))
-                log.info("      {}".format(this_event.tle_2))
-
-            # If either lat or lon is non zero, handle as a trajectory specification
-            if this_event.lat != 0 and this_event.lon !=0:
-                log.info("Event at {} is a trajectory specification".format(this_event.dt))
-                self.checkTrajectoryEvent(this_event,ev_con, test_mode)
-            elif this_event.ra != 0 and this_event.dec != 0:
-                log.info("Event at {} is a RaDec specification".format(this_event.dt))
-                self.checkRaDECEvent(this_event,ev_con, test_mode)
-            elif this_event.tle_0 != "" and this_event.tle_1 != "" and \
-                    this_event.tle_2 !="" and this_event.dt != "" and this_event.dt != "0":
-                log.info("Event at {}, is a TLE specification".format(this_event.dt))
-                log.info("{}".format(this_event.tle_0))
-                log.info("{}".format(this_event.tle_1))
-                log.info("{}".format(this_event.tle_2))
-                self.checkTLEEvent(this_event, ev_con)
-            elif this_event.tle_0 != "" and this_event.tle_1 != "" and \
-                this_event.tle_2 != "" and this_event.dt == "0":
-                if False:
-                    log.info("Event is a TLE specification without time constraint")
-                    log.info("{}".format(this_event.tle_0))
-                    log.info("{}".format(this_event.tle_1))
-                    log.info("{}".format(this_event.tle_2))
-                self.checkTLEEventWithoutTime(this_event, ev_con, test_mode)
-
-        if len(unprocessed) - future_events > 1:
-            log.info("{} events were processed, EventMonitor work completed"
-                     .format(len(unprocessed) - future_events))
-        if len(unprocessed) - future_events == 1:
-            log.info("{} event was processed, EventMonitor work completed"
-                     .format(len(unprocessed) - future_events))
-
-        next_run = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval)).replace(microsecond = 0)
-        if future_events == 1:
-            log.info("{} future event is scheduled, running again at {}"
-                     .format(future_events, next_run))
-        if future_events > 1:
-            log.info("{} future events are scheduled, running again at {}"
-                     .format(future_events, next_run))
-
-        return None
-
-    def start(self):
-        """ Starts the EventMonitor """
-
-        if testIndividuals(logging = False):
-            log.info("EventMonitor function test success")
-            super(EventMonitor, self).start()
-            log.info("EventMonitor was started")
-            log.info("Using {} as fallback directory".format(os.path.join(os.path.abspath("."))))
-            log.info("Using {} as config filename".format(self.syscon.config_file_name))
-            log.info("Using {} as platepar filename".format(self.syscon.platepar_name))
-        else:
-            log.error("EventMonitor function test fail - not starting EventMonitor")
-
-    def stop(self):
-        """ Stops the EventMonitor. """
-
-        self.db_conn.close()
-        time.sleep(2)
-        self.exit.set()
-        self.join()
-        log.info("EventMonitor has stopped")
-
-    def checkDBExists(self):
-
-        """
-        Check that the database file exists
-        """
-
-        if not os.path.exists(self.event_monitor_db_path):
-            self.conn = self.createEventMonitorDB()
-
-        return True
-
-    def tleEventTime2Geo(self,satellite, event, time_gmn):
-
-
-        ts = load.timescale()
-        year, month, day = int(time_gmn[0:4]), int(time_gmn[4:6]), int(time_gmn[6:8])
-        hour, minute, second = int(time_gmn[9:11]), int(time_gmn[11:13]), int(time_gmn[13:15])
-        t = ts.utc(year, month, day, hour, minute, second)
-        geocentric = satellite.at(t)
-        target_lat, target_lon = wgs84.latlon_of(geocentric)
-        target_height = wgs84.height_of(geocentric)
-
-        return target_lat.degrees, target_lon.degrees, target_height.km
-
-    def tleEventCreateTrajectory(self, event,start_time, end_time):
-
-        satellite = EarthSatellite(event.tle_1, event.tle_2, event.tle_0)
-        start_time = convertPOSIXTimeToGMN(start_time)
-        end_time = convertPOSIXTimeToGMN(end_time)
-        event.lat,event.lon,event.ht = self.tleEventTime2Geo(satellite,event,start_time)
-        event.lat2, event.lon2, event.ht2 = self.tleEventTime2Geo(satellite, event, end_time)
-
-        return event
-
-    def checkTLEEvent(self, tle_event, ev_con, test_mode = False):
-
-        check_time_start = datetime.datetime.utcnow()
-        file_list = self.getFileList(tle_event)
-
-        # If there are no files based on time, then mark as processed and continue
-        if (len(file_list) == 0 or file_list == [None]) and not test_mode:
-            log.info("No files for event - marking {} as processed".format(tle_event.dt))
-            self.markEventAsProcessed(tle_event)
-            # This moves to next observed_event
-            return
-
-        # If there is a .config file then parse it as evcon - not the station config
-        for file in file_list:
-            if file.endswith(self.syscon.config_file_name):
-
-                log.info("Attempt to parse {} as the .config for the event".format(file))
-                if os.path.isfile(file):
-                    log.info("Contemporary .config file found")
-                    if os.path.getsize(file) != 0:
-                        try:
-                            ev_con = cr.parse(file)
-                        except:
-                            log.warning("Unknown error loading .config file; reverting to station .config")
-                            ev_con = cr.parse(self.syscon.config_file_name)
-                    else:
-                        log.warning("Zero size .config file found")
-                        ev_con = cr.parse(self.syscon.config_file_name)
-                        log.warning("Used the station .config file as night directory .config file had zero length")
-                else:
-                    log.info("No .config file found at {}".format(file))
-                    ev_con = cr.parse(self.syscon.config_file_name)
-                    log.warning("Used the station .config file as no contemporary .config file was found")
-
-            count = self.checkTLEThroughFOV(tle_event)
-            if count != 0:
-                log.info("TLE at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(tle_event.dt, count))
-                check_time_end = datetime.datetime.utcnow()
-                check_time_seconds = (check_time_end - check_time_start).total_seconds()
-                log.info("Check of TLE took {:2f} seconds".format(check_time_seconds))
-                if self.doUpload(tle_event, ev_con, file_list, test_mode=test_mode):
-                    self.markEventAsUploaded(tle_event, file_list)
-                    if not test_mode:
-                        log.info(
-                            "TLE passed through FoV - marking {} as processed".format(tle_event.dt))
-                        self.markEventAsProcessed(tle_event)
-                    break  # Do no more work on this TLE
-                else:
-                    log.error(
-                        "Upload failed for event at {}. Event retained in database for retry.".format(tle_event.dt))
-
-            else:
-
-                if not test_mode:
-                    pass
 
     def checkTLEEventWithoutTime(self, event, ev_con, test_mode = False):
 
@@ -2859,6 +2715,211 @@ class EventMonitor(multiprocessing.Process):
                     log.info("Points in FoV {}".format(count))
                     created_event.stations_required = self.syscon.stationID
                     self.addEvent(created_event)
+
+    def tleEventCreateTrajectory(self, event,start_time, end_time):
+
+        satellite = EarthSatellite(event.tle_1, event.tle_2, event.tle_0)
+        start_time = convertPOSIXTimeToGMN(start_time)
+        end_time = convertPOSIXTimeToGMN(end_time)
+        event.lat,event.lon,event.ht = self.tleEventTime2Geo(satellite,event,start_time)
+        event.lat2, event.lon2, event.ht2 = self.tleEventTime2Geo(satellite, event, end_time)
+
+        return event
+
+    def checkTLEEvent(self, tle_event, ev_con, test_mode = False):
+
+        check_time_start = datetime.datetime.utcnow()
+        file_list = self.getFileList(tle_event)
+
+        # If there are no files based on time, then mark as processed and continue
+        if (len(file_list) == 0 or file_list == [None]) and not test_mode:
+            log.info("No files for event - marking {} as processed".format(tle_event.dt))
+            self.markEventAsProcessed(tle_event)
+            # This moves to next observed_event
+            return
+
+        # If there is a .config file then parse it as evcon - not the station config
+        for file in file_list:
+            if file.endswith(self.syscon.config_file_name):
+
+                log.info("Attempt to parse {} as the .config for the event".format(file))
+                if os.path.isfile(file):
+                    log.info("Contemporary .config file found")
+                    if os.path.getsize(file) != 0:
+                        try:
+                            ev_con = cr.parse(file)
+                        except:
+                            log.warning("Unknown error loading .config file; reverting to station .config")
+                            ev_con = cr.parse(self.syscon.config_file_name)
+                    else:
+                        log.warning("Zero size .config file found")
+                        ev_con = cr.parse(self.syscon.config_file_name)
+                        log.warning("Used the station .config file as night directory .config file had zero length")
+                else:
+                    log.info("No .config file found at {}".format(file))
+                    ev_con = cr.parse(self.syscon.config_file_name)
+                    log.warning("Used the station .config file as no contemporary .config file was found")
+
+            count = self.checkTLEThroughFOV(tle_event)
+            if count != 0:
+                log.info("TLE at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(tle_event.dt, count))
+                check_time_end = datetime.datetime.utcnow()
+                check_time_seconds = (check_time_end - check_time_start).total_seconds()
+                log.info("Check of TLE took {:2f} seconds".format(check_time_seconds))
+                if self.doUpload(tle_event, ev_con, file_list, test_mode=test_mode):
+                    self.markEventAsUploaded(tle_event, file_list)
+                    if not test_mode:
+                        log.info(
+                            "TLE passed through FoV - marking {} as processed".format(tle_event.dt))
+                        self.markEventAsProcessed(tle_event)
+                    break  # Do no more work on this TLE
+                else:
+                    log.error(
+                        "Upload failed for event at {}. Event retained in database for retry.".format(tle_event.dt))
+
+            else:
+
+                if not test_mode:
+                    pass
+
+    def checkEvents(self, ev_con, test_mode = False):
+
+        """
+        argunments:
+            ev_con: configuration object at the time of this event
+
+        returns:
+            Nothing
+        """
+
+        # Get the work to be done
+
+        unprocessed = self.getUnprocessedEventsfromDB()
+
+        future_events = 0
+        for this_event in unprocessed:
+
+            # check to see if the end of this event is in the future, if it is then do not process
+            # if the end of the event is before the next scheduled execution of EventMonitor loop,
+            # then set the loop to execute after the event ends
+
+            if convertGMNTimeToPOSIX(this_event.dt) + \
+                    datetime.timedelta(seconds=int(this_event.time_tolerance)) > datetime.datetime.utcnow():
+                time_until_event_end_seconds = (convertGMNTimeToPOSIX(this_event.dt) -
+                                                    datetime.datetime.utcnow() +
+                                                    datetime.timedelta(seconds=int(this_event.time_tolerance))).total_seconds()
+                future_events += 1
+                log.info("The end of event at {} is in the future by {:.1f} minutes"
+                         .format(this_event.dt, time_until_event_end_seconds / 60))
+                if time_until_event_end_seconds < float(self.check_interval) * 60:
+                    log.info("Check interval is set to {:.1f} minutes, however end of future event is only {:.1f} minutes away"
+                             .format(float(self.check_interval),time_until_event_end_seconds / 60))
+                    # set the check_interval to the time until the end of the event
+                    self.check_interval = float(time_until_event_end_seconds) / 60
+                    # random time offset to reduce congestion
+                    self.check_interval += random.randint(20, 60) / 60
+                    log.info("Check interval set to {:.1f} minutes, so that future event is reported quickly"
+                             .format(float(self.check_interval)))
+                else:
+                    log.info("Check interval is set to {:.1f} minutes, end of future event {:.1f} minutes away, no action required"
+                             .format(float(self.check_interval),time_until_event_end_seconds / 60 ))
+                continue
+
+            if False:
+                log.info("dt    {}".format(this_event.dt))
+                log.info("Lat   {}".format(this_event.lat))
+                log.info("Lat   {}".format(this_event.lon))
+                log.info("Ra    {}".format(this_event.ra))
+                log.info("Dec   {}".format(this_event.dec))
+                log.info("tle   {}".format(this_event.tle_0))
+                log.info("      {}".format(this_event.tle_1))
+                log.info("      {}".format(this_event.tle_2))
+
+            # If either lat or lon is non zero, handle as a trajectory specification
+            if this_event.lat != 0 and this_event.lon !=0:
+                log.info("Event at {} is a trajectory specification".format(this_event.dt))
+                self.checkTrajectoryEvent(this_event,ev_con, test_mode)
+            elif this_event.ra != 0 and this_event.dec != 0:
+                log.info("Event at {} is a RaDec specification".format(this_event.dt))
+                self.checkRaDECEvent(this_event,ev_con, test_mode)
+            elif this_event.tle_0 != "" and this_event.tle_1 != "" and \
+                    this_event.tle_2 !="" and this_event.dt != "" and this_event.dt != "0":
+                log.info("Event at {}, is a TLE specification".format(this_event.dt))
+                log.info("{}".format(this_event.tle_0))
+                log.info("{}".format(this_event.tle_1))
+                log.info("{}".format(this_event.tle_2))
+                self.checkTLEEvent(this_event, ev_con)
+            elif this_event.tle_0 != "" and this_event.tle_1 != "" and \
+                this_event.tle_2 != "" and this_event.dt == "0":
+                if False:
+                    log.info("Event is a TLE specification without time constraint")
+                    log.info("{}".format(this_event.tle_0))
+                    log.info("{}".format(this_event.tle_1))
+                    log.info("{}".format(this_event.tle_2))
+                self.checkTLEEventWithoutTime(this_event, ev_con, test_mode)
+
+        if len(unprocessed) - future_events > 1:
+            log.info("{} events were processed, EventMonitor work completed"
+                     .format(len(unprocessed) - future_events))
+        if len(unprocessed) - future_events == 1:
+            log.info("{} event was processed, EventMonitor work completed"
+                     .format(len(unprocessed) - future_events))
+
+        next_run = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval)).replace(microsecond = 0)
+        if future_events == 1:
+            log.info("{} future event is scheduled, running again at {}"
+                     .format(future_events, next_run))
+        if future_events > 1:
+            log.info("{} future events are scheduled, running again at {}"
+                     .format(future_events, next_run))
+
+        return None
+
+    def start(self):
+        """ Starts the EventMonitor """
+
+        if testIndividuals(logging = False):
+            log.info("EventMonitor function test success")
+            super(EventMonitor, self).start()
+            log.info("EventMonitor was started")
+            log.info("Using {} as fallback directory".format(os.path.join(os.path.abspath("."))))
+            log.info("Using {} as config filename".format(self.syscon.config_file_name))
+            log.info("Using {} as platepar filename".format(self.syscon.platepar_name))
+        else:
+            log.error("EventMonitor function test fail - not starting EventMonitor")
+
+    def stop(self):
+        """ Stops the EventMonitor. """
+
+        self.db_conn.close()
+        time.sleep(2)
+        self.exit.set()
+        self.join()
+        log.info("EventMonitor has stopped")
+
+    def checkDBExists(self):
+
+        """
+        Check that the database file exists
+        """
+
+        if not os.path.exists(self.event_monitor_db_path):
+            self.conn = self.createEventMonitorDB()
+
+        return True
+
+    def tleEventTime2Geo(self,satellite, event, time_gmn):
+
+
+        ts = load.timescale()
+        year, month, day = int(time_gmn[0:4]), int(time_gmn[4:6]), int(time_gmn[6:8])
+        hour, minute, second = int(time_gmn[9:11]), int(time_gmn[11:13]), int(time_gmn[13:15])
+        t = ts.utc(year, month, day, hour, minute, second)
+        geocentric = satellite.at(t)
+        target_lat, target_lon = wgs84.latlon_of(geocentric)
+        target_height = wgs84.height_of(geocentric)
+
+        return target_lat.degrees, target_lon.degrees, target_height.km
 
     def getEventsAndCheck(self, start_time, end_time, testmode=False):
         """
