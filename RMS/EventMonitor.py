@@ -2290,30 +2290,30 @@ class EventMonitor(multiprocessing.Process):
             log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
             self.markEventAsProcessed(observed_event)
 
-            def inRangeForRaDec(self, target, ev_con):
+    def inRangeForRaDec(self, target, ev_con):
 
-                """
+        """
 
-                Args:
-                    target: the target event
-                    ev_con: the configuration at the time of the event
+        Args:
+            target: the target event
+            ev_con: the configuration at the time of the event
 
-                Returns: [bool] true if the station is within the radius allowed for this RaDEC specification
+            Returns: [bool] true if the station is within the radius allowed for this RaDEC specification
 
-                """
+        """
 
-                log.info("Checking range for event at {}".format(target.dt))
-                log.info("Station           at Lat:{:7.4f}° Lon:{:7.4f}°".format(float(ev_con.latitude),
+        log.info("Checking range for event at {}".format(target.dt))
+        log.info("Station           at Lat:{:7.4f}° Lon:{:7.4f}°".format(float(ev_con.latitude),
                                                                                  float(ev_con.longitude)))
-                log.info("Observer defined  at Lat:{:7.4f}° Lon:{:7.4f}°".format(float(target.obs_lat),
+        log.info("Observer defined  at Lat:{:7.4f}° Lon:{:7.4f}°".format(float(target.obs_lat),
                                                                                  float(target.obs_lon)))
-                gc_dist = gcDistDeg(ev_con.latitude, ev_con.longitude, target.obs_lat, target.obs_lon)
-                log.info("Great circle distance   :{:6.1f}km".format(float(gc_dist)))
-                try:
-                    log.info("Radius set at           :{:6.1f}km".format(float(target.obs_range)))
-                    return float(gc_dist) < float(target.obs_range)
-                except:
-                    return True
+        gc_dist = gcDistDeg(ev_con.latitude, ev_con.longitude, target.obs_lat, target.obs_lon)
+        log.info("Great circle distance   :{:6.1f}km".format(float(gc_dist)))
+        try:
+            log.info("Radius set at           :{:6.1f}km".format(float(target.obs_range)))
+            return float(gc_dist) < float(target.obs_range)
+        except:
+            return True
 
     def checkRaDECEvent(self, target, ev_con, test_mode = False):
 
