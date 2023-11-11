@@ -14,7 +14,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-
 from __future__ import print_function, division, absolute_import
 
 
@@ -73,10 +72,8 @@ import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 
-
 log = logging.getLogger("logger")
 EM_RAISE = False
-
 
 """
 
@@ -3462,7 +3459,6 @@ def testEventToECEFVector():
 
     return success
 
-
 def testEventCreation():
 
     """
@@ -3694,7 +3690,6 @@ def testsanitise():
         success = False
 
     return success
-
 
 def testIndividuals(logging = True):
 
