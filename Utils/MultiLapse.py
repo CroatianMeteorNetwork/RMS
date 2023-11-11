@@ -120,9 +120,6 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
 
     print("Computing a stack at {}".format(str(stack_time)))
 
-    for dir_path in dir_paths:
-        print("{}".format(dir_path))
-
     start_time = time.time()
     # normalise the path in a platform neutral way
     # done here so that camStack() can be called from other modules
@@ -502,7 +499,8 @@ if __name__ == "__main__":
     arg_parser.add_argument('--end', type=str,
                             help="""End time of plot e.g. 20231231_040506""")
 
-
+    arg_parser.add_argument('--interval', type=int,
+                            help="""Time between frames""")
 
 
 
@@ -555,7 +553,12 @@ if __name__ == "__main__":
 
     timerange = int((end - start).total_seconds())
 
-    for time_offset in range(0,timerange,10):
+    if cml_args.interval is not None:
+        interval = int(cml_args.interval)
+    else:
+        interval = 10
+
+    for time_offset in range(0,timerange,interval):
 
         print(start + datetime.timedelta(seconds = time_offset))
         stack_time = start + datetime.timedelta(seconds = time_offset)
