@@ -2625,7 +2625,8 @@ class EventMonitor(multiprocessing.Process):
                 if len(fits_list) != 0:
                     final_fits_file = os.path.basename(fits_list[-1])
                     log.info("Working on tle {}, last processed {}".format(event.tle_0, event.tle_last_processed))
-                    log.info("Working in last CapturedFiles directory {} found last fits file {}".format(target_directory, final_fits_file))
+                    log.info("Working in last CapturedFiles directory {}".format(target_directory))
+                    log.info("Found last fits file {}".format(final_fits_file))
                     if convertGMNTimeToPOSIX(final_fits_file[10:25]) > dateutil.parser.parse(event.tle_last_processed):
                         log.info("Still more to scan in this directory")
                         target_directory = directory
