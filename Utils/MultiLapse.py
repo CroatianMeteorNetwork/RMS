@@ -119,7 +119,7 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
 
 
     print("Computing a stack at {}".format(str(stack_time)))
-    print("Working from directories")
+
     for dir_path in dir_paths:
         print("{}".format(dir_path))
 
@@ -136,7 +136,7 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
     config_list, captured_files_dir_list, platepar_file_list, mask_file_list, matching_fits_list = [],[],[],[],[]
 
     for config_path in config_path_list:
-        print("Reading .config from {}".format(os.path.expanduser(config_path)))
+
         this_config = cr.parse(os.path.expanduser(config_path))
         config_list.append(this_config)
 
@@ -148,7 +148,7 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
         file_extension_list = ['.fits']
         directory_list = getDirectoryList(this_config, stack_time)
 
-        print(directory_list)
+
         finding_first_file = True
 
         for directory in directory_list:
@@ -159,7 +159,7 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
                 if file_extension == ".fits":
                     fits_list = glob(os.path.join(directory, "*.fits"))
                     fits_list.sort()
-                    #print("Searching for first fits file in {}".format(directory))
+
                     if len(fits_list) == 0:
                         # If fits_list is empty then return an empty list
                         print("No fits files in {}".format(directory))
@@ -181,7 +181,7 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
         matching_fits_list.append(os.path.join(directory,closest_file))
         mask_file_list.append(os.path.join(os.path.dirname(os.path.expanduser(config_path)), this_config.mask_file))
 
-    if True:
+    if False:
         for config, captured_files_dir, platepar_file, mask_file, fits in zip(config_list, captured_files_dir_list, platepar_file_list, mask_file_list, matching_fits_list):
             print("Using {}, {}, {}".format(platepar_file,mask_file,fits))
 
@@ -221,11 +221,11 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
         mask = None
         if mask_file is not None:
             mask = loadMask(mask_file)
-            print("Loaded mask:", mask_file)
+
 
         print("Reading {}".format(ff_path))
         ff = readFF(os.path.dirname(ff_path), os.path.basename(ff_path))
-        print("Read    {}".format(ff_path))
+
         # Make a list of X and Y image coordinates
         x_coords, y_coords = np.meshgrid(np.arange(border, pp_ref.X_res - border),
                                          np.arange(border, pp_ref.Y_res - border))
@@ -541,8 +541,7 @@ if __name__ == "__main__":
     plot_date = cml_args.end.split('_')[0]
     plot_time = cml_args.end.split('_')[1]
 
-    print("Plotting on date {}".format(plot_date))
-    print("         at time {}".format(plot_time))
+
 
     pyr = int(plot_date[0:4])
     pmth = int(plot_date[4:6])
