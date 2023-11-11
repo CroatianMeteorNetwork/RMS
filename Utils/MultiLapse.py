@@ -556,7 +556,7 @@ if __name__ == "__main__":
 
     timerange = int((end - start).total_seconds())
 
-    for time_offset in range(0,timerange,20):
+    for time_offset in range(0,timerange,10):
 
         print(start + datetime.timedelta(seconds = time_offset))
         stack_time = start + datetime.timedelta(seconds = time_offset)
