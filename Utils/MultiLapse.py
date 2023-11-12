@@ -164,7 +164,6 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
                         print("No fits files in {}".format(directory))
 
 
-
                 for file in dirlist:
 
                     if file.endswith(file_extension):
@@ -176,8 +175,9 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
                         else:
                             if abs((file_time - stack_time).total_seconds()) < smallest_delta_seconds:
                                 closest_file = file
-                                print("file         :{}".format(file))
-                                print("closest file :{}".format(closest_file))
+                                if False:
+                                    print("file         :{}".format(file))
+                                    print("closest file :{}".format(closest_file))
                                 smallest_delta_seconds = abs((file_time - stack_time).total_seconds())
         print("Closest file is ".format(closest_file))
         matching_fits_list.append(os.path.join(directory,closest_file))
