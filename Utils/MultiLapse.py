@@ -175,7 +175,7 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
                             if abs((file_time - stack_time).total_seconds()) < smallest_delta_seconds:
                                 closest_file = file
                                 smallest_delta_seconds = abs((file_time - stack_time).total_seconds())
-
+        print("Closest file is ".format(closest_file))
         matching_fits_list.append(os.path.join(directory,closest_file))
         mask_file_list.append(os.path.join(os.path.dirname(os.path.expanduser(config_path)), this_config.mask_file))
 
