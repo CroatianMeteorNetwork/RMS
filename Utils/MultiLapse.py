@@ -144,7 +144,8 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
 
         file_extension_list = ['.fits']
         directory_list = getDirectoryList(this_config, stack_time)
-
+        print("Directories to search")
+        print(directory_list)
 
         finding_first_file = True
 
