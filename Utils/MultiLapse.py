@@ -165,6 +165,7 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
                 closest_file = ""
 
                 for file in dirlist:
+                    print(file)
                     if file.endswith(file_extension):
                         file_time = filenameToDatetime(file)
                         if finding_first_file:
