@@ -149,6 +149,7 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
 
         finding_first_file = True
 
+        closest_file = ""
         for directory in directory_list:
             for file_extension in file_extension_list:
                 # get the directory into name order
@@ -162,7 +163,7 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
                         # If fits_list is empty then return an empty list
                         print("No fits files in {}".format(directory))
 
-                closest_file = ""
+
 
                 for file in dirlist:
 
