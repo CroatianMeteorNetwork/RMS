@@ -262,7 +262,7 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
 
 
         # Compute deaveraged maxpixel image
-        max_deavg = maxpixel - avepixel
+        max_deavg = maxpixel # - avepixel
 
         if True:
             # # Apply a median filter to the avepixel to get an estimate of the background brightness
