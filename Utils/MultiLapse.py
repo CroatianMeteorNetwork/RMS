@@ -225,36 +225,43 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
             mask = loadMask(mask_file)
 
 
-        print("Reading {}".format(ff_path))
-        ff = readFF(os.path.dirname(ff_path), os.path.basename(ff_path))
-
         # Make a list of X and Y image coordinates
         x_coords, y_coords = np.meshgrid(np.arange(border, pp_ref.X_res - border),
                                          np.arange(border, pp_ref.Y_res - border))
+
+        # turn the grid of coordinates into a long pair of lists
         x_coords = x_coords.ravel()
         y_coords = y_coords.ravel()
+
         # Map image pixels to sky
+        # Process is to take the lists of x_coordinates and y_coordinates and produce matching lists of ra and dec
         ff_basename = os.path.basename(ff_path)
-
-
-
-
         jd_arr, ra_coords, dec_coords, _ = xyToRaDecPP(
             len(x_coords) * [getMiddleTimeFF(ff_basename, config.fps, ret_milliseconds=True)], x_coords, y_coords,
             len(x_coords) * [1], pp_temp, extinction_correction=False)
 
+        # Now take the lists of ra and dec and convert to stack_x and stack_y
         stack_x, stack_y = raDecToXYPP(ra_coords, dec_coords, jd_middle, pp_stack)
+
+
 
         # Round pixel coordinates
         stack_x = np.round(stack_x, decimals=0).astype(int)
         stack_y = np.round(stack_y, decimals=0).astype(int)
 
         # Cut the image to limits
-        filter_arr = (stack_x > 0) & (stack_x < img_size) & (stack_y > 0) & (stack_y < img_size)
+        # filter_arr = (stack_x > 0) & (stack_x < img_size) & (stack_y > 0) & (stack_y < img_size)
+        img_cent = img_size / 2
+        # try to make a round filter
+        filter_arr =  (0.3 * img_size) ** 2 < ((img_cent - stack_x) ** 2 + (img_cent - stack_y) ** 2)
         x_coords = x_coords[filter_arr].astype(int)
         y_coords = y_coords[filter_arr].astype(int)
         stack_x = stack_x[filter_arr]
         stack_y = stack_y[filter_arr]
+
+
+        print("Reading {}".format(ff_path))
+        ff = readFF(os.path.dirname(ff_path), os.path.basename(ff_path))
 
         # Apply the mask to maxpixel and avepixel
         maxpixel = copy.deepcopy(ff.maxpixel)
