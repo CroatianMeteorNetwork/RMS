@@ -253,6 +253,7 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
         # filter_arr = (stack_x > 0) & (stack_x < img_size) & (stack_y > 0) & (stack_y < img_size)
         img_cent = img_size / 2
         # try to make a round filter
+
         filter_arr =  ((0.1 * img_size) ** 2) > ((img_cent - stack_x) ** 2 + (img_cent - stack_y) ** 2)
         x_coords = x_coords[filter_arr].astype(int)
         y_coords = y_coords[filter_arr].astype(int)
