@@ -149,9 +149,9 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
 
         finding_first_file = True
 
-
+        closest_file = "Nothing found"
         for directory in directory_list:
-            closest_file = "Nothing found"
+
             for file_extension in file_extension_list:
                 # get the directory into name order
                 dirlist = os.listdir(directory)
@@ -173,13 +173,12 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
                             closest_file = file
                             smallest_delta_seconds = abs((file_time - stack_time).total_seconds())
                             finding_first_file = False
-                        else:
-                            if abs((file_time - stack_time).total_seconds()) < smallest_delta_seconds:
-                                closest_file = os.path.join(directory,file)
-                                if False:
-                                    print("file         :{}".format(file))
-                                    print("closest file :{}".format(closest_file))
-                                smallest_delta_seconds = abs((file_time - stack_time).total_seconds())
+                        if abs((file_time - stack_time).total_seconds()) < smallest_delta_seconds:
+                            closest_file = os.path.join(directory,file)
+                            if False:
+                                print("file         :{}".format(file))
+                                print("closest file :{}".format(closest_file))
+                            smallest_delta_seconds = abs((file_time - stack_time).total_seconds())
         print("Closest file is {}".format(closest_file))
         matching_fits_list.append(closest_file)
         mask_file_list.append(os.path.join(os.path.dirname(os.path.expanduser(config_path)), this_config.mask_file))
