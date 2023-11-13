@@ -300,6 +300,11 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
     stack_img = np.clip(stack_img, 0, 255)
     stack_img = stack_img.astype(np.uint8)
 
+    for y in range(0,img_size):
+        for x in range(0,img_size):
+            print(avg_stack_count[x,y])
+
+
 
     # Plot and save the stack ###
 
