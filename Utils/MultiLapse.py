@@ -196,7 +196,7 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
     jd_middle = date2JD(stack_time.year, stack_time.month, stack_time.day,stack_time.hour,stack_time.minute, stack_time.second)
 
     img_size = 4000
-    scale = 1.0
+    scale = 2.0
 
     pp_stack = copy.deepcopy(pp_ref)
     pp_stack.resetDistortionParameters()
