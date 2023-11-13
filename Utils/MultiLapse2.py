@@ -304,7 +304,7 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
     for y in range(0,img_size):
         for x in range(0,img_size):
             if avg_stack_count[x,y] == 0:
-                empty_list = [x,y]
+                empty_list.append([x,y])
     print(empty_list)
 
 
