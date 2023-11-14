@@ -9,6 +9,7 @@ import time
 import datetime
 import copy
 import json
+import traceback
 
 import numpy as np
 
@@ -19,10 +20,71 @@ from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
 from Utils.FluxBatch import fluxBatch, plotBatchFlux, FluxBatchBinningParams, saveBatchFluxCSV, \
     reportCameraTally
 from RMS.Misc import mkdirP, walkDirsToDepth
+from Utils.FluxFitActivityCurve import computeCurrentPeakZHR, loadFluxActivity, plotYearlyZHR
+
+
+def generateZHRDialSVG(ref_svg_path, zhr, sporadic_zhr):
+    """ Load the ZHR dial SVG and set the ZHR to the given number. 
+    
+    Arguments:
+        ref_svg_path: [str] Path to the reference SVG file.
+        zhr: [float] Current ZHR.
+        sporadic_zhr: [float] Current sporadic ZHR.
+
+    Return:
+        svg: [list of str] A string containing the SVG file.
+        
+    """
+
+    # Load the reference SVG file as a string
+    with open(ref_svg_path, "r") as f:
+        svg = f.readlines()
+
+    # ZHR cannot be negative
+    if zhr < 0:
+        zhr = 0
+
+    # Maximum ZHR on the dial
+    max_zhr = 110
+
+    # Compute the angle of the ZHR hand
+    # 0 ZHR = -180 deg
+    # 50 ZHR = -90 deg
+    # 100 ZHR = 0 deg
+    # >110 ZHR = 9 deg (this is the upper limit)
+    hand_angle = -180 + (zhr*9/5)
+    if zhr > max_zhr:
+        hand_angle = -180 + (max_zhr*9/5)
+
+    # Compute the angle of the sporadic zhr
+    sporadic_pie_angle = -180 + (sporadic_zhr*9/5)
+
+    
+    for i, line in enumerate(svg):
+
+        # Find a line with the dial hand (id="hand") and replace the angle
+        if "id=\"hand\"" in line:
+            svg[i] = line.replace("rotate(-90 ", "rotate({:.2f} ".format(hand_angle))
+
+        # Insert the ZHR value
+        if "ZHR_NUM" in line:
+            svg[i] = line.replace("ZHR_NUM", "{:.0f}".format(zhr))
+
+        # Set the size of the sporadic pie
+        if "id=\"sporadic-portion\"" in line:
+            svg[i] = line.replace("270 315 1@2e9970e6", "270 {:.2f} 1@2e9970e6".format(sporadic_pie_angle))
+
+    
+    # Merge the list of strings into a single string
+    svg_str = "\n".join(svg)
+            
+
+    return svg_str
+
 
 
 def generateWebsite(index_dir, flux_showers, ref_dt, results_all_years, results_ref_year, 
-    website_plot_url):
+    website_plot_url, dial_svg_str, yearly_zhr_plot_name):
     
 
     # Decide which joining function to use, considering the given website URL or local path
@@ -79,11 +141,73 @@ def generateWebsite(index_dir, flux_showers, ref_dt, results_all_years, results_
 </table>
 
     <hr>
+    
+    <h1>Meteor shower activity level</h1>
+    <br>
+
 """
     html_code += website_header
 
 
+    # Add the ZHR dial
     html_code += """
+<p style="max-width: 600px; width: 100%;">
+    """
+    html_code += dial_svg_str
+    html_code += """
+    </p>
+    """
+
+
+    html_code += """
+<div style="max-width: 800px; margin: 0px auto; text-align: left;">
+    <br>
+    <p>
+        The dial shows the peak sum of activity from all currently active showers and the sporadic background 
+        in the next 24 hours. The numbers are based on previous observations and predictions of future activity.
+        The real activity might be lower or higher than the predicted value, as meteor showers can have 
+        unexpected outbursts. See the plots below for the latest real-time meteor shower activity measurements.
+    </p>
+
+    <h3>How many meteors will I see?</h3>
+    <p>
+        ZHR stands for Zenithal Hourly Rate and is the number of meteors a single observer would see in 
+        one hour in ideal conditions: under a clear, moonless dark sky with the radiant directly overhead. 
+    </p>
+    <p>
+        The ZHR is not the number of meteors an observer will see in reality - for example, during the 
+        peak of the Perseids when their ZHR is about 100, you can expect to see about one Persied every minute.
+        However, if the Moon is full this number is easily halved, and if the radiant is low in the sky
+        (below 30 degrees) you will see even less.
+    </p>
+
+    <h3>When should I observe?</h3>
+    <p>
+        An average observer will notice significantly increased meteor activity when the ZHR is above ~50 
+        (the needle is in the green), which corresponds to the peak activity of the top 10 most active 
+        showers.
+    </p>
+    <p>
+        Outside rare meteor shower outbursts, the three showers which put on a regular annual show that is
+        worth watching (ZHR > 100) are the Perseids (Aug 11 - 13), Geminids (Dec 13 - 14) and Quadrantids (Jan 3 - 4).
+        <br>
+        The plot below which summarizes the usual activity of annual meteor showers but excludes outbursts.
+        Northern hemisphere showers (declination > 30 deg) are shown in blue, while southern hemisphere showers
+        (declination < -30 deg) are shown in red (none currently). The showers in between are shown in black and are usually visible
+        from both hemispheres.
+    </p>
+</div>
+<br> """
+
+    # Add the image with the yearly ZHR
+    html_code += """
+        <a href="{:s}" target="_blank"><img src="{:s}" style="width: 80%; height: auto;"/></a>""".format(
+            joinFunc(website_plot_url, yearly_zhr_plot_name), 
+            joinFunc(website_plot_url, yearly_zhr_plot_name)
+            )
+    
+    html_code += """
+
 <h1> Currently active showers </h1>
     """
 
@@ -243,6 +367,24 @@ Information about the data is provided in a section below: <a href="#about">Abou
     <li>Vida, D., Segon, D., Gural, P.S., Brown, P.G., McIntyre, M.J., Dijkema, T.J., Pavletic, L., Kukic, P., Mazur, M.J., Eschman, P. and Roggemans, P., 2021. The Global Meteor Network - Methodology and first results. <i>Monthly Notices of the Royal Astronomical Society</i>, 506(4), pp.5046-5074. <a href="https://academic.oup.com/mnras/article-abstract/506/4/5046/6347233" target="_blank">MNRAS</a>, <a href="https://arxiv.org/abs/2107.12335" target="_blank">arxiv</a>.</li>
     </ul>
 </div>
+<br>
+<h1 id="about">Data usage</h1>
+<div style="max-width: 800px; margin: 0px auto; text-align: left;">
+    <p>
+    The data are released under the <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0 license</a>. If you are using the data for scientific purposes, we kindly ask you to reference the following papers:
+
+    <ul>
+        <li>Vida, D., Segon, D., Gural, P.S., Brown, P.G., McIntyre, M.J., Dijkema, T.J., Pavletic, L., Kukic, P., Mazur, M.J., Eschman, P. and Roggemans, P., 2021. The Global Meteor Network - Methodology and first results. Monthly Notices of the Royal Astronomical Society, 506(4), pp.5046-5074. </li>
+        <li>Vida, D., Blaauw Erskine, R.C., Brown, P.G., Kambulow, J., Campbell-Brown, M. and Mazur, M.J., 2022. Computing optical meteor flux using global meteor network data. Monthly Notices of the Royal Astronomical Society, 515(2), pp.2322-2339. </li>
+    </ul>
+    </p>
+    <p>
+    Also, we kindly ask you to add this text in the acknowledgements of any publications: 
+    <br>
+    <i>The Global Meteor Network (GMN) data are released under the CC BY 4.0 license. The authors acknowledge that the GMN data collection was supported in part by the NASA Meteoroid Environment Office under cooperative agreement 80NSSC21M0073 with the Western Meteor Physics Group.</i>
+    </p>
+</div>
+
 <hr>
 <footer>
 <center>Supporting data supplied by the <a href="https://globalmeteornetwork.org/" target="_blank">Global Meteor Network</a>
@@ -740,8 +882,30 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
 
         print("Generating website...")
 
+        # Load the flux activity file
+        shower_models = loadFluxActivity(config)
+
+        # Compute the current peak ZHR
+        peak_zhr = computeCurrentPeakZHR(shower_models, sporadic_zhr=config.background_sporadic_zhr)
+        
+        # Set the ZHR dial
+        dial_svg_str = generateZHRDialSVG(config.flux_dial_template_svg, peak_zhr, 
+                                          config.background_sporadic_zhr)
+        
+        try:
+            # Make a plot of the ZHR across the year
+            plotYearlyZHR(config, os.path.join(output_dir, config.yearly_zhr_plot_name), 
+                          sporadic_zhr=config.background_sporadic_zhr)
+        
+        except:
+            # Log the error
+            print("Error generating yearly ZHR plot!")
+            traceback.print_exc()
+
+        # Generate the website
         generateWebsite(index_dir, flux_showers, ref_dt, results_all_years, results_ref_year, 
-            website_plot_url)
+            website_plot_url, dial_svg_str, config.yearly_zhr_plot_name)
+        
 
         print("   ... done!")
 

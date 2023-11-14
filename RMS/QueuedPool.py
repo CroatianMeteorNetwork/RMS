@@ -85,7 +85,7 @@ class BackupContainer(object):
 class QueuedPool(object):
     def __init__(self, func, cores=None, log=None, delay_start=0, worker_timeout=2000, backup_dir='.', \
         input_queue_maxsize=None, low_priority=False, func_extra_args=None, func_kwargs=None, 
-        worker_wait_inbetween_jobs=0.1):
+        worker_wait_inbetween_jobs=0.1, print_state=True):
         """ Provides capability of creating a pool of workers which will process jobs in a given queue, and 
         the input queue can be updated in another thread. 
 
@@ -117,6 +117,7 @@ class QueuedPool(object):
                 default.
             worker_wait_inbetween_jobs: [float] Wait this number of seconds after finished a job and putting
                 the result in the output queue. 0.1 s by default.
+            print_state: [bool] Print state of workers during execution, True by default.
         """
 
 
@@ -189,6 +190,8 @@ class QueuedPool(object):
             self.loadBackupFiles()
 
         ### ###
+
+        self.print_state = print_state
 
 
     def printAndLog(self, *args):
@@ -410,7 +413,7 @@ class QueuedPool(object):
 
                 c += 1
 
-                if c%500 == 0:
+                if c%500 == 0 and self.print_state:
                     self.printAndLog('-----')
                     self.printAndLog('Cores in use:', self.cores.value())
                     self.printAndLog('Active worker threads:', self.active_workers.value())
