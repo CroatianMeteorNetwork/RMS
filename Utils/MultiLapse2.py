@@ -25,6 +25,7 @@ import ctypes
 from RMS.QueuedPool import QueuedPool
 import time
 import datetime
+from random import randrange
 
 
 def dirNameToDatetime(file_name):
@@ -130,51 +131,7 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
     #get the platepar file
     #get the .fits files closest to the time of interest
 
-    config_list, captured_files_dir_list, platepar_file_list, mask_file_list, matching_fits_list = [],[],[],[],[]
-
-    for config_path in config_path_list:
-
-        this_config = cr.parse(os.path.expanduser(config_path))
-        config_list.append(this_config)
-        captured_files_dir_list.append(os.path.join(this_config.data_dir, this_config.captured_dir))
-        platepar_file_list.append(os.path.join(os.path.dirname(os.path.expanduser(config_path)), this_config.platepar_name))
-        file_extension_list = ['.fits']
-        directory_list = getDirectoryList(this_config, stack_time)
-
-        print("Directories to search")
-        print(directory_list)
-
-        finding_first_file = True
-
-        closest_file = "Nothing found"
-        for directory in directory_list:
-            for file_extension in file_extension_list:
-                # get the directory into name order
-                dirlist = os.listdir(directory)
-                dirlist.sort()
-                if file_extension == ".fits":
-                    fits_list = glob(os.path.join(directory, "*.fits"))
-                    fits_list.sort()
-                    if len(fits_list) == 0:
-                        # If fits_list is empty then return an empty list
-                        print("No fits files in {}".format(directory))
-
-                for file in dirlist:
-                    if file.endswith(file_extension):
-                        file_time = filenameToDatetime(file)
-                        if finding_first_file:
-                            closest_file = file
-                            smallest_delta_seconds = abs((file_time - stack_time).total_seconds())
-                            finding_first_file = False
-                        if abs((file_time - stack_time).total_seconds()) < smallest_delta_seconds:
-                            closest_file = os.path.join(directory,file)
-                            if False:
-                                print("file         :{}".format(file))
-                                print("closest file :{}".format(closest_file))
-                            smallest_delta_seconds = abs((file_time - stack_time).total_seconds())
-        print("Closest file is {}".format(closest_file))
-        matching_fits_list.append(closest_file)
-        mask_file_list.append(os.path.join(os.path.dirname(os.path.expanduser(config_path)), this_config.mask_file))
+    config_list, mask_file_list, matching_fits_list, platepar_file_list = timeToFiles(config_path_list, stack_time)
 
     if False:
         for config, captured_files_dir, platepar_file, mask_file, fits in zip(config_list, captured_files_dir_list, platepar_file_list, mask_file_list, matching_fits_list):
@@ -189,7 +146,7 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
 
     jd_middle = date2JD(stack_time.year, stack_time.month, stack_time.day,stack_time.hour,stack_time.minute, stack_time.second)
 
-    img_size = 2000
+    img_size = 1600
     scale = 0.5
 
     pp_stack = copy.deepcopy(pp_ref)
@@ -207,92 +164,12 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
 
     for ff_path, config, platepar_file, mask_file in zip(matching_fits_list, config_list, platepar_file_list, mask_file_list):
         
-        # Load the platepar
-        pp_temp = Platepar()
-        pp_temp.read(platepar_file, use_flat=config.use_flat)
+        avg_stack_count, avg_stack_sum, max_deaveraged = addFFToStack(avg_stack_count_shared, avg_stack_sum_shared,
+                                                                      border, config, ff_path, img_size, jd_middle,
+                                                                      mask_file, max_deaveraged_shared, platepar_file,
+                                                                      pp_ref, pp_stack)
 
-
-        mask = None
-        if mask_file is not None:
-            mask = loadMask(mask_file)
-
-        # Make a list of X and Y image coordinates
-        x_coords, y_coords = np.meshgrid(np.arange(border, pp_ref.X_res - border),
-                                         np.arange(border, pp_ref.Y_res - border))
-
-        # turn the grid of coordinates into a long pair of lists
-        x_coords = x_coords.ravel()
-        y_coords = y_coords.ravel()
-
-        # Map image pixels to sky
-        # Process is to take the lists of x_coordinates and y_coordinates and produce matching lists of ra and dec
-        ff_basename = os.path.basename(ff_path)
-        jd_arr, ra_coords, dec_coords, _ = xyToRaDecPP(
-            len(x_coords) * [getMiddleTimeFF(ff_basename, config.fps, ret_milliseconds=True)], x_coords, y_coords,
-            len(x_coords) * [1], pp_temp, extinction_correction=False)
-
-        # Now take the lists of ra and dec and convert to stack_x and stack_y
-        stack_x, stack_y = raDecToXYPP(ra_coords, dec_coords, jd_middle, pp_stack)
-
-
-
-        # Round pixel coordinates
-        stack_x = np.round(stack_x, decimals=0).astype(int)
-        stack_y = np.round(stack_y, decimals=0).astype(int)
-
-        # Cut the image to limits
-        # filter_arr = (stack_x > 0) & (stack_x < img_size) & (stack_y > 0) & (stack_y < img_size)
-        img_cent = img_size / 2
-        # try to make a round filter
-
-        filter_arr =  ((0.2 * img_size) ** 2) > ((img_cent - stack_x) ** 2 + (img_cent - stack_y) ** 2)
-        x_coords = x_coords[filter_arr].astype(int)
-        y_coords = y_coords[filter_arr].astype(int)
-        stack_x = stack_x[filter_arr]
-        stack_y = stack_y[filter_arr]
-
-
-        print("Reading {}".format(ff_path))
-        ff = readFF(os.path.dirname(ff_path), os.path.basename(ff_path))
-
-        # Apply the mask to maxpixel and avepixel
-        maxpixel = copy.deepcopy(ff.maxpixel)
-        avepixel = copy.deepcopy(ff.avepixel)
-
-
-        # Compute deaveraged maxpixel image
-        max_deavg = maxpixel # - avepixel
-
-        if False:
-            # # Apply a median filter to the avepixel to get an estimate of the background brightness
-            # avepixel_median = scipy.ndimage.median_filter(ff.avepixel, size=101)
-            avepixel_median = cv2.medianBlur(ff.avepixel, 301)
-
-            # Make sure to avoid zero division
-            avepixel_median[avepixel_median < 1] = 1
-
-            # Normalize the avepixel by subtracting out the background brightness
-            avepixel = avepixel.astype(float)
-            avepixel /= avepixel_median
-            avepixel *= 50  # Normalize to a good background value, which is usually 50
-            avepixel = np.clip(avepixel, 0, 255)
-            avepixel = avepixel.astype(np.uint8)
-
-        #plt.imshow(avepixel, cmap='gray', vmin=0, vmax=255)
-        #plt.show()
-
-        avg_stack_sum = getArray(img_size, avg_stack_sum_shared)
-        avg_stack_count = getArray(img_size, avg_stack_count_shared)
-        max_deaveraged = getArray(img_size, max_deaveraged_shared)
-
-        avg_stack_sum[stack_y, stack_x] += avepixel[y_coords, x_coords]
-        ones_img = np.ones_like(avepixel)
-        ones_img[avepixel == 0] = 0
-        avg_stack_count[stack_y, stack_x] += ones_img[y_coords, x_coords]
-        max_deaveraged[stack_y, stack_x] = np.max(np.dstack([max_deaveraged[stack_y, stack_x],
-                                                                 max_deavg[y_coords, x_coords]]), axis=2)
-
-
+        # Plot and save the stack ###
 
     stack_img = avg_stack_sum
     stack_img[avg_stack_count > 0] /= avg_stack_count[avg_stack_count > 0]
@@ -300,21 +177,10 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
     stack_img = np.clip(stack_img, 0, 255)
     stack_img = stack_img.astype(np.uint8)
 
-    empty_list  = []
-    for y in range(0,img_size):
-        for x in range(0,img_size):
-            if avg_stack_count[x,y] == 0:
-                empty_list.append([x,y])
-    print(empty_list)
-
-
-
-    # Plot and save the stack ###
-
     non_empty_columns = np.where(stack_img.max(axis=0) > 0)[0]
     non_empty_rows = np.where(stack_img.max(axis=1) > 0)[0]
     crop_box = (np.min(non_empty_rows), np.max(non_empty_rows), np.min(non_empty_columns),
-        np.max(non_empty_columns))
+            np.max(non_empty_columns))
     stack_img = stack_img[crop_box[0]:crop_box[1]+1, crop_box[2]:crop_box[3]+1]
 
     dpi = 200
@@ -327,6 +193,10 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
     if darkbackground is True:
         vmin = np.quantile(stack_img[stack_img>0], 0.05)
     plt.imshow(stack_img, cmap='gray', vmin=vmin, vmax=256, interpolation='nearest')
+
+
+
+
     if draw_constellations:
         constellations_img = constellations_img[crop_box[0]:crop_box[1]+1, crop_box[2]:crop_box[3]+1]
         plt.imshow(constellations_img)
@@ -351,11 +221,238 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
     plt.savefig(filenam, bbox_inches='tight', pad_inches=0, dpi=dpi, facecolor='k', edgecolor='k')
     print('saved to {}'.format(filenam))
     #
+
+
+
+    #create a stack to show unpopulated areas.
+    stack_missing = np.ones_like(stack_img)
+    stack_missing[avg_stack_count != 0] = 0
+
+    missing_x_list, missing_y_list,missing_jd_list, missing_ar_list, missing_mag_list = [], [], [],[],[]
+    for y in range(0,img_size):
+        for x in range(0, img_size):
+            if stack_missing[x,y] == 0:
+                continue
+            else:
+                missing_x_list.append(x)
+                missing_y_list.append(x)
+                missing_jd_list.append(jd_middle)
+                missing_ar_list.append(0)
+                missing_mag_list.append(1)
+
+
+
+
+    jd_data, missing_ra_list, missing_dec_list, missing_mag = xyToRaDecPP(missing_jd_list, missing_x_list, missing_y_list, missing_mag_list,
+                                                                   pp_stack, jd_time=True)
+
+        #select a RaDec pair at random
+    min_error_ff_file_list = []
+    for missing_ra, missing_dec, missing_x, missing_y in zip(missing_ra_list, missing_dec_list, missing_x_list, missing_y_list):
+
+        for seconds_deviation in range(0,3600,20):
+
+            target_time_backwards = stack_time + datetime.timedelta(seconds = 0 - seconds_deviation)
+            config_list, mask_file_list, matching_fits_list, platepar_file_list = timeToFiles(config_path_list, target_time_backwards)
+            ff_angle_error, ff_files = [] , []
+            for conf, search_fits, search_platepar in zip(config_list, matching_fits_list,platepar_file_list):
+                test_platepar = Platepar()
+                test_platepar.read(search_platepar)
+                ff_basename = os.path.basename(search_fits)
+                x_coords, y_coords = [test_platepar.X_res / 2] , [test_platepar.Y_res / 2]
+                jd, img_centre_ra, img_centre_dec , _ = xyToRaDecPP(
+                        len(x_coords) * [getMiddleTimeFF(ff_basename, conf.fps, ret_milliseconds=True)], x_coords,
+                        y_coords,
+                        len(x_coords) * [1], test_platepar, extinction_correction=False)
+
+                ff_angle_error.append(np.degrees(angularSeparation(np.radians(missing_ra),np.radians(missing_dec), np.radians(img_centre_ra[0]), np.radians(img_centre_dec[0]))))
+                ff_files.append(search_fits)
+        min_error_pos = ff_angle_error.index(min(ff_angle_error))
+        min_error_file = ff_files[min_error_pos]
+        print("File {} has minimum error of {:3.2f}".format(min_error_file,min(ff_angle_error)))
+        if min_error_file not in min_error_file_list:
+            min_error_file_list.append(min_error_file)
+
+
+
+        avg_stack_count, avg_stack_sum, max_deaveraged = addFFToStack(avg_stack_count_shared, avg_stack_sum_shared,
+                                                                  border, conf, min_error_file, img_size, jd_middle,
+                                                                  mask_file, max_deaveraged_shared, search_platepar,
+                                                                  pp_ref, pp_stack)
+
+
+
+
+        # Plot and save the stack ###
+
+        non_empty_columns = np.where(stack_img.max(axis=0) > 0)[0]
+        non_empty_rows = np.where(stack_img.max(axis=1) > 0)[0]
+        crop_box = (np.min(non_empty_rows), np.max(non_empty_rows), np.min(non_empty_columns),
+            np.max(non_empty_columns))
+        stack_img = stack_img[crop_box[0]:crop_box[1]+1, crop_box[2]:crop_box[3]+1]
+
+        dpi = 200
+        extrapix = 80 # space for annotations across the bottom (not handled by this module)
+        fig = plt.figure(figsize=(stack_img.shape[1]/dpi, (stack_img.shape[0]+extrapix)/dpi), dpi=dpi)
+        fig.patch.set_facecolor("black")
+        ax = fig.add_axes([0, 0, 1, 1])
+
+        vmin = 0
+        if darkbackground is True:
+            vmin = np.quantile(stack_img[stack_img>0], 0.05)
+        plt.imshow(stack_img, cmap='gray', vmin=vmin, vmax=256, interpolation='nearest')
+
+
+
+
+        if draw_constellations:
+            constellations_img = constellations_img[crop_box[0]:crop_box[1]+1, crop_box[2]:crop_box[3]+1]
+            plt.imshow(constellations_img)
+
+        ax.set_axis_off()
+
+        ax.set_xlim([0, stack_img.shape[1]])
+        ax.set_ylim([stack_img.shape[0]+extrapix, 0])
+
+        if showers is not None:
+            msg = 'Filtered for {}'.format(showers)
+            ax.text(10, stack_img.shape[0] - 10, msg, color='gray', fontsize=6, fontname='Source Sans Pro', weight='ultralight')
+
+        # Remove the margins (top and right are set to 0.9999, as setting them to 1.0 makes the image blank in
+        #   some matplotlib versions)
+        plt.subplots_adjust(left=0, bottom=0, right=0.9999, top=0.9999, wspace=0, hspace=0)
+
+        if out_dir is not None:
+            filenam = os.path.join(os.path.expanduser(out_dir), stack_time.strftime("%Y%m%d_%H%M%S") + "_cam_stack.jpg")
+        else:
+            filenam = os.path.join(dir_path, os.path.basename(dir_path) + "_track_stack.jpg")
+        plt.savefig(filenam, bbox_inches='tight', pad_inches=0, dpi=dpi, facecolor='k', edgecolor='k')
+        print('saved to {}'.format(filenam))
+    #
     print("Stacking time: {}".format(datetime.timedelta(seconds=(int(time.time() - start_time)))))
     if hide_plot is False:
         plt.show()
 
     return True
+
+
+def addFFToStack(avg_stack_count_shared, avg_stack_sum_shared, border, config, ff_path, img_size, jd_middle, mask_file,
+                 max_deaveraged_shared, platepar_file, pp_ref, pp_stack):
+    # Load the platepar
+    pp_temp = Platepar()
+    pp_temp.read(platepar_file, use_flat=config.use_flat)
+    mask = None
+    if mask_file is not None:
+        mask = loadMask(mask_file)
+    # Make a list of X and Y image coordinates
+    x_coords, y_coords = np.meshgrid(np.arange(border, pp_ref.X_res - border),
+                                     np.arange(border, pp_ref.Y_res - border))
+    # turn the grid of coordinates into a long pair of lists
+    x_coords = x_coords.ravel()
+    y_coords = y_coords.ravel()
+    # Map image pixels to sky
+    # Process is to take the lists of x_coordinates and y_coordinates and produce matching lists of ra and dec
+    ff_basename = os.path.basename(ff_path)
+    jd_arr, ra_coords, dec_coords, _ = xyToRaDecPP(
+        len(x_coords) * [getMiddleTimeFF(ff_basename, config.fps, ret_milliseconds=True)], x_coords, y_coords,
+        len(x_coords) * [1], pp_temp, extinction_correction=False)
+    # Now take the lists of ra and dec and convert to stack_x and stack_y
+    stack_x, stack_y = raDecToXYPP(ra_coords, dec_coords, jd_middle, pp_stack)
+    # Round pixel coordinates
+    stack_x = np.round(stack_x, decimals=0).astype(int)
+    stack_y = np.round(stack_y, decimals=0).astype(int)
+    # Cut the image to limits
+    filter_arr = (stack_x > 0) & (stack_x < img_size) & (stack_y > 0) & (stack_y < img_size)
+    # img_cent = img_size / 2
+    # try to make a round filter
+    #filter_arr =  ((0.2 * img_size) ** 2) > ((img_cent - stack_x) ** 2 + (img_cent - stack_y) ** 2)
+    x_coords = x_coords[filter_arr].astype(int)
+    y_coords = y_coords[filter_arr].astype(int)
+    stack_x = stack_x[filter_arr]
+    stack_y = stack_y[filter_arr]
+    print("Reading {}".format(ff_path))
+    ff = readFF(os.path.dirname(ff_path), os.path.basename(ff_path))
+    # Apply the mask to maxpixel and avepixel
+    maxpixel = copy.deepcopy(ff.maxpixel)
+    avepixel = copy.deepcopy(ff.avepixel)
+    # Compute deaveraged maxpixel image
+    max_deavg = maxpixel - avepixel
+    if False:
+        # # Apply a median filter to the avepixel to get an estimate of the background brightness
+        # avepixel_median = scipy.ndimage.median_filter(ff.avepixel, size=101)
+        avepixel_median = cv2.medianBlur(ff.avepixel, 301)
+
+        # Make sure to avoid zero division
+        avepixel_median[avepixel_median < 1] = 1
+
+        # Normalize the avepixel by subtracting out the background brightness
+        avepixel = avepixel.astype(float)
+        avepixel /= avepixel_median
+        avepixel *= 50  # Normalize to a good background value, which is usually 50
+        avepixel = np.clip(avepixel, 0, 255)
+        avepixel = avepixel.astype(np.uint8)
+    # plt.imshow(avepixel, cmap='gray', vmin=0, vmax=255)
+    # plt.show()
+    avg_stack_sum = getArray(img_size, avg_stack_sum_shared)
+    avg_stack_count = getArray(img_size, avg_stack_count_shared)
+    max_deaveraged = getArray(img_size, max_deaveraged_shared)
+    avg_stack_sum[stack_y, stack_x] += avepixel[y_coords, x_coords]
+    ones_img = np.ones_like(avepixel)
+    ones_img[avepixel == 0] = 0
+    avg_stack_count[stack_y, stack_x] += ones_img[y_coords, x_coords]
+    max_deaveraged[stack_y, stack_x] = np.max(np.dstack([max_deaveraged[stack_y, stack_x],
+                                                         max_deavg[y_coords, x_coords]]), axis=2)
+    return avg_stack_count, avg_stack_sum, max_deaveraged
+
+
+def timeToFiles(config_path_list, stack_time):
+    config_list, captured_files_dir_list, platepar_file_list, mask_file_list, matching_fits_list = [], [], [], [], []
+    for config_path in config_path_list:
+
+        this_config = cr.parse(os.path.expanduser(config_path))
+        config_list.append(this_config)
+        captured_files_dir_list.append(os.path.join(this_config.data_dir, this_config.captured_dir))
+        platepar_file_list.append(
+            os.path.join(os.path.dirname(os.path.expanduser(config_path)), this_config.platepar_name))
+        file_extension_list = ['.fits']
+        directory_list = getDirectoryList(this_config, stack_time)
+
+        #print("Directories to search")
+        #print(directory_list)
+
+        finding_first_file = True
+
+        closest_file = "Nothing found"
+        for directory in directory_list:
+            for file_extension in file_extension_list:
+                # get the directory into name order
+                dirlist = os.listdir(directory)
+                dirlist.sort()
+                if file_extension == ".fits":
+                    fits_list = glob(os.path.join(directory, "*.fits"))
+                    fits_list.sort()
+                    if len(fits_list) == 0:
+                        # If fits_list is empty then return an empty list
+                        # print("No fits files in {}".format(directory))
+                        pass
+
+                for file in dirlist:
+                    if file.endswith(file_extension):
+                        file_time = filenameToDatetime(file)
+                        if finding_first_file:
+                            closest_file = file
+                            smallest_delta_seconds = abs((file_time - stack_time).total_seconds())
+                            finding_first_file = False
+                        if abs((file_time - stack_time).total_seconds()) < smallest_delta_seconds:
+                            closest_file = os.path.join(directory, file)
+                            if False:
+                                print("file         :{}".format(file))
+                                print("closest file :{}".format(closest_file))
+                            smallest_delta_seconds = abs((file_time - stack_time).total_seconds())
+        #print("Closest file is {}".format(closest_file))
+        matching_fits_list.append(closest_file)
+        mask_file_list.append(os.path.join(os.path.dirname(os.path.expanduser(config_path)), this_config.mask_file))
+    return config_list, mask_file_list, matching_fits_list, platepar_file_list
 
 
 def stackFrame(ff_name, pp_temp, mask, border, pp_ref, img_size, jd_middle, pp_stack, conf, avg_stack_sum_arr,

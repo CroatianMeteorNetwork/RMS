@@ -1831,12 +1831,12 @@ class EventMonitor(multiprocessing.Process):
 
                 # Make the upload
 
-                #upload_status = True
+
 
                 upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
                                  event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
                                  rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
-
+                upload_status = True
 
 
                 if upload_status:
@@ -2602,7 +2602,7 @@ class EventMonitor(multiprocessing.Process):
             else:
                 log.info("For {} start {} is not before end {}, Ignore.".format(event.tle_0, window_start, window_end))
 
-    def checkTLEThroughFOV(self, event,  evaluation_step = 10):
+    def checkTLEThroughFOV(self, event,  evaluation_step = 10, maximum_magnitude = 6):
 
         search_start = convertGMNTimeToPOSIX(event.dt) - datetime.timedelta(seconds=int(event.time_tolerance))
 
@@ -2907,7 +2907,7 @@ class EventMonitor(multiprocessing.Process):
 
     def tleEventTime2Geo(self,satellite, event, time_gmn):
 
-
+        sun_eph = load('de421.bsp')
         ts = load.timescale()
         year, month, day = int(time_gmn[0:4]), int(time_gmn[4:6]), int(time_gmn[6:8])
         hour, minute, second = int(time_gmn[9:11]), int(time_gmn[11:13]), int(time_gmn[13:15])
@@ -2916,7 +2916,7 @@ class EventMonitor(multiprocessing.Process):
         target_lat, target_lon = wgs84.latlon_of(geocentric)
         target_height = wgs84.height_of(geocentric)
 
-        return target_lat.degrees, target_lon.degrees, target_height.km
+        return target_lat.degrees, target_lon.degrees, target_height.km, geocentric.is_sunlit(sun_eph)
 
     def getEventsAndCheck(self, start_time, end_time, testmode=False):
         """
