@@ -2636,7 +2636,6 @@ class EventMonitor(multiprocessing.Process):
                 #log.info("Searching between {} and {}".format(traj_start_time, traj_end_time))
                 created_event = copy.copy(event)
                 created_event = self.tleEventCreateTrajectory(created_event, traj_start_time, traj_end_time)
-
                 created_event.dt = convertPOSIXTimeToGMN(traj_start_time + datetime.timedelta(seconds = evaluation_step /2 ))
                 created_event.time_tolerance = evaluation_step / 2
                 count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
@@ -2720,6 +2719,8 @@ class EventMonitor(multiprocessing.Process):
         end_time = convertPOSIXTimeToGMN(end_time)
         event.lat,event.lon,event.ht = self.tleEventTime2Geo(satellite,event,start_time)
         event.lat2, event.lon2, event.ht2 = self.tleEventTime2Geo(satellite, event, end_time)
+        event.lit = False
+
 
         return event
 
@@ -2916,7 +2917,7 @@ class EventMonitor(multiprocessing.Process):
         target_lat, target_lon = wgs84.latlon_of(geocentric)
         target_height = wgs84.height_of(geocentric)
 
-        return target_lat.degrees, target_lon.degrees, target_height.km, geocentric.is_sunlit(sun_eph)
+        return target_lat.degrees, target_lon.degrees, target_height.km
 
     def getEventsAndCheck(self, start_time, end_time, testmode=False):
         """
