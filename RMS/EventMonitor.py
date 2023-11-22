@@ -2717,9 +2717,12 @@ class EventMonitor(multiprocessing.Process):
         satellite = EarthSatellite(event.tle_1, event.tle_2, event.tle_0)
         start_time = convertPOSIXTimeToGMN(start_time)
         end_time = convertPOSIXTimeToGMN(end_time)
-        event.lat,event.lon,event.ht = self.tleEventTime2Geo(satellite,event,start_time)
-        event.lat2, event.lon2, event.ht2 = self.tleEventTime2Geo(satellite, event, end_time)
-        event.lit = False
+        event.lat,event.lon,event.ht, illum_start = self.tleEventTime2Geo(satellite,event,start_time)
+        event.lat2, event.lon2, event.ht2, illum_end = self.tleEventTime2Geo(satellite, event, end_time)
+        if illum_start or illum_end:
+            event.lit = True
+        else:
+            event.lit = False
 
 
         return event
