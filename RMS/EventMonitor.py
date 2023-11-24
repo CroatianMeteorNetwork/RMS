@@ -848,6 +848,7 @@ class EventMonitor(multiprocessing.Process):
         """
 
         log.error("Attempting to recover from database error")
+        self.delEventMonitorDB()
         self.createDB()
         log.info("Database recovered")
 
