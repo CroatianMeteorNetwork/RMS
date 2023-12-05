@@ -32,7 +32,7 @@ import copy
 import uuid
 import random
 import string
-from skyfield.api import EarthSatellite, load, wgs84
+from skyfield.api import EarthSatellite, load, wgs84, Loader
 from skyfield.timelib import Time, utc
 
 
@@ -2754,7 +2754,8 @@ class EventMonitor(multiprocessing.Process):
             except:
                 log.info("Creating a trajectory for {} between {} and {}".format(event.tle_0, start_time_gmn, end_time_gmn))
                 log.error("Error trying to evaluate if {} was sunlit at {}".format(event.tle_0, evaluation_time))
-
+                log.info("Force redownload of sun ephemeris")
+                eph_sun =  Loader.download('de421.bsp')
         return event
 
     def checkTLEEvent(self, tle_event, ev_con, test_mode = False):
