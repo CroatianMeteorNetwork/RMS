@@ -2518,9 +2518,15 @@ class EventMonitor(multiprocessing.Process):
             traj_start_time = convertGMNTimeToPOSIX(os.path.basename(last_fits_file)[10:25])
             traj_end_time = convertGMNTimeToPOSIX(os.path.basename(fits_file)[10:25])
             traj_duration = (traj_end_time - traj_start_time).total_seconds()
+            last_fits_file = fits_file
 
             #log.info("For file {} searching between {} and {}".format(last_fits_file, traj_start_time, traj_end_time))
             created_event = self.tleEventCreateTrajectory(event, traj_start_time, traj_end_time)
+
+            if not created_event.lit:
+                log.info("Skipping event for {} between {} and {}, not sunlit".format(event.tle_0, traj_start_time, traj_end_time))
+                continue
+
             created_event.dt = convertPOSIXTimeToGMN(traj_start_time + datetime.timedelta(seconds=traj_duration / 2))
             created_event.time_tolerance = traj_duration / 2
             count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
@@ -2557,7 +2563,7 @@ class EventMonitor(multiprocessing.Process):
                 # After uploading one observation
                 return
 
-            last_fits_file = fits_file
+
 
         #Finished iterating through fits files
 
@@ -2617,6 +2623,9 @@ class EventMonitor(multiprocessing.Process):
             traj_end_time = traj_start_time + datetime.timedelta(seconds=evaluation_step)
             #log.info("Searching between {} and {}".format(traj_start_time, traj_end_time))
             created_event = self.tleEventCreateTrajectory(event, traj_start_time, traj_end_time)
+            if not created_event.lit:
+                log.info("Skipping event for {} between {} and {}, not sunlit".format(event.tle_0, traj_start_time, traj_end_time))
+                continue
             created_event.dt = convertPOSIXTimeToGMN(traj_start_time + datetime.timedelta(seconds=evaluation_step / 2))
             created_event.time_tolerance = evaluation_step / 2
             count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
@@ -2641,6 +2650,12 @@ class EventMonitor(multiprocessing.Process):
                 #log.info("Searching between {} and {}".format(traj_start_time, traj_end_time))
                 created_event = copy.copy(event)
                 created_event = self.tleEventCreateTrajectory(created_event, traj_start_time, traj_end_time)
+
+                if not created_event.lit:
+                    log.info("Skipping event for {} between {} and {}, not sunlit".format(event.tle_0, traj_start_time,
+                                                                                          traj_end_time))
+                    continue
+
                 created_event.dt = convertPOSIXTimeToGMN(traj_start_time + datetime.timedelta(seconds = evaluation_step /2 ))
                 created_event.time_tolerance = evaluation_step / 2
                 count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
