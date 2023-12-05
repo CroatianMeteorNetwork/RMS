@@ -2733,7 +2733,7 @@ class EventMonitor(multiprocessing.Process):
         for time_offset in range(0,trajectory_duration):
             evaluation_time = start_time + datetime.timedelta(seconds = time_offset)
 
-            evaluation_time = ts.from_datetime(evaluation_time).astimezone(utc)
+            evaluation_time = ts.from_datetime(evaluation_time.astimezone(utc))
 
             if satellite.at(ts.utc(evaluation_time)).is_sunlit(eph_sun):
                 event.lit = True
