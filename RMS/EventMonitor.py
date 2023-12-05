@@ -33,7 +33,9 @@ import uuid
 import random
 import string
 from skyfield.api import EarthSatellite, load, wgs84
-from skyfield.positionlib import ICRF
+
+
+
 
 if sys.version_info[0] < 3:
 
@@ -2715,6 +2717,9 @@ class EventMonitor(multiprocessing.Process):
                     self.addEvent(created_event)
 
     def tleEventCreateTrajectory(self, event,start_time, end_time):
+
+        ts = load.timescale()
+        eph_sun = load('de421.bsp')
 
         satellite = EarthSatellite(event.tle_1, event.tle_2, event.tle_0)
         start_time_gmn = convertPOSIXTimeToGMN(start_time)
