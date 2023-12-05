@@ -2524,7 +2524,6 @@ class EventMonitor(multiprocessing.Process):
             created_event = self.tleEventCreateTrajectory(event, traj_start_time, traj_end_time)
 
             if not created_event.lit:
-                log.info("Skipping event for {} between {} and {}, not sunlit".format(event.tle_0, traj_start_time, traj_end_time))
                 continue
 
             created_event.dt = convertPOSIXTimeToGMN(traj_start_time + datetime.timedelta(seconds=traj_duration / 2))
@@ -2624,7 +2623,7 @@ class EventMonitor(multiprocessing.Process):
             #log.info("Searching between {} and {}".format(traj_start_time, traj_end_time))
             created_event = self.tleEventCreateTrajectory(event, traj_start_time, traj_end_time)
             if not created_event.lit:
-                log.info("Skipping event for {} between {} and {}, not sunlit".format(event.tle_0, traj_start_time, traj_end_time))
+
                 continue
             created_event.dt = convertPOSIXTimeToGMN(traj_start_time + datetime.timedelta(seconds=evaluation_step / 2))
             created_event.time_tolerance = evaluation_step / 2
@@ -2652,8 +2651,7 @@ class EventMonitor(multiprocessing.Process):
                 created_event = self.tleEventCreateTrajectory(created_event, traj_start_time, traj_end_time)
 
                 if not created_event.lit:
-                    log.info("Skipping event for {} between {} and {}, not sunlit".format(event.tle_0, traj_start_time,
-                                                                                          traj_end_time))
+
                     continue
 
                 created_event.dt = convertPOSIXTimeToGMN(traj_start_time + datetime.timedelta(seconds = evaluation_step /2 ))
