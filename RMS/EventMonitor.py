@@ -2727,7 +2727,13 @@ class EventMonitor(multiprocessing.Process):
         for time_offset in range(0,trajectory_duration):
             evaluation_time = start_time + datetime.timedelta(seconds = time_offset)
             log.info("Evaluting sunlit at {}".format(evaluation_time))
+            if satellite.at(evaluation_time).is_sunlit(eph_sun):
+                event.lit = True
 
+        if event.lit == True:
+            log.info("{} was illuminated".format(event.tle_0))
+        else:
+            log.info("{} was not illuminated".format(event.tle_0))
 
         return event
 
