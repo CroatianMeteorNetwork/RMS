@@ -2729,7 +2729,7 @@ class EventMonitor(multiprocessing.Process):
         event.lat2, event.lon2, event.ht2 = self.tleEventTime2Geo(satellite, event, end_time_gmn)
         event.lit = False
         trajectory_duration = int((end_time - start_time).total_seconds())
-        log.info("Creating a trajectory of duration {} seconds".format(trajectory_duration))
+
         for time_offset in range(0,trajectory_duration):
             evaluation_time = start_time + datetime.timedelta(seconds = time_offset)
             evaluation_time = ts.from_datetime(evaluation_time.astimezone(utc))
@@ -2737,9 +2737,7 @@ class EventMonitor(multiprocessing.Process):
                 event.lit = True
 
         if event.lit == True:
-            log.info("{} was illuminated".format(event.tle_0))
-        else:
-            log.info("{} was not illuminated".format(event.tle_0))
+            log.info("{} was illuminated between {} and {}".format(event.tle_0, start_time, end_time))
 
         return event
 
