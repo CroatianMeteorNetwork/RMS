@@ -32,7 +32,8 @@ import copy
 import uuid
 import random
 import string
-from skyfield.api import EarthSatellite, load, wgs84, utc
+from skyfield.api import EarthSatellite, load, wgs84
+from skyfield.timelib import Time, utc
 
 
 
@@ -2730,8 +2731,8 @@ class EventMonitor(multiprocessing.Process):
         trajectory_duration = int((end_time - start_time).total_seconds())
         log.info("Creating a trajectory of duration {} seconds".format(trajectory_duration))
         for time_offset in range(0,trajectory_duration):
-            evaluation_time = start_time + datetime.timedelta(seconds = time_offset)
-            evaluation_time.replace(tzinfo=utc)
+            evaluation_time = from_datetime(start_time + datetime.timedelta(seconds = time_offset))
+
             if satellite.at(ts.utc(evaluation_time)).is_sunlit(eph_sun):
                 event.lit = True
 
