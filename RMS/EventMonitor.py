@@ -2754,9 +2754,8 @@ class EventMonitor(multiprocessing.Process):
             except:
                 log.info("Creating a trajectory for {} between {} and {}".format(event.tle_0, start_time_gmn, end_time_gmn))
                 log.error("Error trying to evaluate if {} was sunlit at {}".format(event.tle_0, evaluation_time))
-                url_sun = Loader.build_url('de421.sbp')
-                log.info("Force redownload of sun ephemeris from {}".format(url_sun))
-                eph_sun = Loader.download(url_sun)
+                eph_sun_file = os.path.join(syscon.rms_root_dir, 'de421.bsp')
+                log.error("Suspect file {} is corrupted".format(eph_sun_file))
         return event
 
     def checkTLEEvent(self, tle_event, ev_con, test_mode = False):
