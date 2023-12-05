@@ -2751,9 +2751,6 @@ class EventMonitor(multiprocessing.Process):
             if satellite.at(evaluation_time).is_sunlit(eph_sun):
                 event.lit = True
 
-        if event.lit == True:
-            log.info("{} was illuminated between {} and {}".format(event.tle_0, start_time, end_time))
-
         return event
 
     def checkTLEEvent(self, tle_event, ev_con, test_mode = False):
