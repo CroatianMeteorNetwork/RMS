@@ -2738,7 +2738,8 @@ class EventMonitor(multiprocessing.Process):
         satellite = EarthSatellite(event.tle_1, event.tle_2, event.tle_0)
         start_time_gmn = convertPOSIXTimeToGMN(start_time)
         end_time_gmn = convertPOSIXTimeToGMN(end_time)
-        log.info("Creating a trajectory for {} between {} and {}".format(event.tle_0, start_time_gmn, end_time_gmn))
+
+        #log.info("Creating a trajectory for {} between {} and {}".format(event.tle_0, start_time_gmn, end_time_gmn))
         event.lat,event.lon,event.ht= self.tleEventTime2Geo(satellite,event,start_time_gmn)
         event.lat2, event.lon2, event.ht2 = self.tleEventTime2Geo(satellite, event, end_time_gmn)
         event.lit = False
@@ -2751,7 +2752,7 @@ class EventMonitor(multiprocessing.Process):
                 if satellite.at(evaluation_time).is_sunlit(eph_sun):
                     event.lit = True
             except:
-                log.error("Error trying to evalute if {} was sunlit at {}".format(event.tle_0, evaluation_time))
+                log.error("Error trying to evaluate if {} was sunlit at {}".format(event.tle_0, evaluation_time))
 
         return event
 
