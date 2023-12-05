@@ -2756,7 +2756,10 @@ class EventMonitor(multiprocessing.Process):
                 log.error("Error trying to evaluate if {} was sunlit at {}".format(event.tle_0, evaluation_time))
                 eph_sun_file = os.path.join(self.syscon.rms_root_dir, 'de421.bsp')
                 log.error("Suspect file {} is corrupted".format(eph_sun_file))
-                os.unlink(eph_sun_file)
+                if os.path.exists(eph_sun_file):
+                    os.unlink(eph_sun_file)
+                eph_sun = load('de421.bsp')
+
         return event
 
     def checkTLEEvent(self, tle_event, ev_con, test_mode = False):
