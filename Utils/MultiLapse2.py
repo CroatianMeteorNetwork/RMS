@@ -200,7 +200,7 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
 
     if draw_constellations:
         constellations_img = constellations_img[crop_box[0]:crop_box[1]+1, crop_box[2]:crop_box[3]+1]
-        plt.imshow(constellations_img)
+        #plt.imshow(constellations_img)
 
     ax.set_axis_off()
 
