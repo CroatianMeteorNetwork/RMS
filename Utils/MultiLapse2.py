@@ -130,7 +130,8 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
     #get the .config file
     #get the platepar file
     #get the .fits files closest to the time of interest
-
+    print(config_path_list)
+    print(stack_time)
     config_list, mask_file_list, matching_fits_list, platepar_file_list = timeToFiles(config_path_list, stack_time)
 
     if False:
@@ -220,114 +221,58 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
         filenam = os.path.join(dir_path, os.path.basename(dir_path) + "_track_stack.jpg")
     plt.savefig(filenam, bbox_inches='tight', pad_inches=0, dpi=dpi, facecolor='k', edgecolor='k')
     print('saved to {}'.format(filenam))
-    #
-
-
-
-    #create a stack to show unpopulated areas.
-    stack_missing = np.ones_like(stack_img)
-    stack_missing[avg_stack_count != 0] = 0
-
-    missing_x_list, missing_y_list,missing_jd_list, missing_ar_list, missing_mag_list = [], [], [],[],[]
-    for y in range(0,img_size):
-        for x in range(0, img_size):
-            if stack_missing[x,y] == 0:
-                continue
-            else:
-                missing_x_list.append(x)
-                missing_y_list.append(x)
-                missing_jd_list.append(jd_middle)
-                missing_ar_list.append(0)
-                missing_mag_list.append(1)
 
 
 
 
-    jd_data, missing_ra_list, missing_dec_list, missing_mag = xyToRaDecPP(missing_jd_list, missing_x_list, missing_y_list, missing_mag_list,
-                                                                   pp_stack, jd_time=True)
-
-        #select a RaDec pair at random
-    min_error_ff_file_list = []
-    for missing_ra, missing_dec, missing_x, missing_y in zip(missing_ra_list, missing_dec_list, missing_x_list, missing_y_list):
-
-        for seconds_deviation in range(0,3600,20):
-
-            target_time_backwards = stack_time + datetime.timedelta(seconds = 0 - seconds_deviation)
-            config_list, mask_file_list, matching_fits_list, platepar_file_list = timeToFiles(config_path_list, target_time_backwards)
-            ff_angle_error, ff_files = [] , []
-            for conf, search_fits, search_platepar in zip(config_list, matching_fits_list,platepar_file_list):
-                test_platepar = Platepar()
-                test_platepar.read(search_platepar)
-                ff_basename = os.path.basename(search_fits)
-                x_coords, y_coords = [test_platepar.X_res / 2] , [test_platepar.Y_res / 2]
-                jd, img_centre_ra, img_centre_dec , _ = xyToRaDecPP(
-                        len(x_coords) * [getMiddleTimeFF(ff_basename, conf.fps, ret_milliseconds=True)], x_coords,
-                        y_coords,
-                        len(x_coords) * [1], test_platepar, extinction_correction=False)
-
-                ff_angle_error.append(np.degrees(angularSeparation(np.radians(missing_ra),np.radians(missing_dec), np.radians(img_centre_ra[0]), np.radians(img_centre_dec[0]))))
-                ff_files.append(search_fits)
-        min_error_pos = ff_angle_error.index(min(ff_angle_error))
-        min_error_file = ff_files[min_error_pos]
-        print("File {} has minimum error of {:3.2f}".format(min_error_file,min(ff_angle_error)))
-        if min_error_file not in min_error_file_list:
-            min_error_file_list.append(min_error_file)
 
 
 
-        avg_stack_count, avg_stack_sum, max_deaveraged = addFFToStack(avg_stack_count_shared, avg_stack_sum_shared,
-                                                                  border, conf, min_error_file, img_size, jd_middle,
-                                                                  mask_file, max_deaveraged_shared, search_platepar,
-                                                                  pp_ref, pp_stack)
+    # Plot and save the stack ###
 
-
-
-
-        # Plot and save the stack ###
-
-        non_empty_columns = np.where(stack_img.max(axis=0) > 0)[0]
-        non_empty_rows = np.where(stack_img.max(axis=1) > 0)[0]
-        crop_box = (np.min(non_empty_rows), np.max(non_empty_rows), np.min(non_empty_columns),
+    non_empty_columns = np.where(stack_img.max(axis=0) > 0)[0]
+    non_empty_rows = np.where(stack_img.max(axis=1) > 0)[0]
+    crop_box = (np.min(non_empty_rows), np.max(non_empty_rows), np.min(non_empty_columns),
             np.max(non_empty_columns))
-        stack_img = stack_img[crop_box[0]:crop_box[1]+1, crop_box[2]:crop_box[3]+1]
+    stack_img = stack_img[crop_box[0]:crop_box[1]+1, crop_box[2]:crop_box[3]+1]
 
-        dpi = 200
-        extrapix = 80 # space for annotations across the bottom (not handled by this module)
-        fig = plt.figure(figsize=(stack_img.shape[1]/dpi, (stack_img.shape[0]+extrapix)/dpi), dpi=dpi)
-        fig.patch.set_facecolor("black")
-        ax = fig.add_axes([0, 0, 1, 1])
+    dpi = 200
+    extrapix = 80 # space for annotations across the bottom (not handled by this module)
+    fig = plt.figure(figsize=(stack_img.shape[1]/dpi, (stack_img.shape[0]+extrapix)/dpi), dpi=dpi)
+    fig.patch.set_facecolor("black")
+    ax = fig.add_axes([0, 0, 1, 1])
 
-        vmin = 0
-        if darkbackground is True:
-            vmin = np.quantile(stack_img[stack_img>0], 0.05)
-        plt.imshow(stack_img, cmap='gray', vmin=vmin, vmax=256, interpolation='nearest')
-
-
+    vmin = 0
+    if darkbackground is True:
+        vmin = np.quantile(stack_img[stack_img>0], 0.05)
+    plt.imshow(stack_img, cmap='gray', vmin=vmin, vmax=256, interpolation='nearest')
 
 
-        if draw_constellations:
-            constellations_img = constellations_img[crop_box[0]:crop_box[1]+1, crop_box[2]:crop_box[3]+1]
-            plt.imshow(constellations_img)
 
-        ax.set_axis_off()
 
-        ax.set_xlim([0, stack_img.shape[1]])
-        ax.set_ylim([stack_img.shape[0]+extrapix, 0])
+    if draw_constellations:
+        constellations_img = constellations_img[crop_box[0]:crop_box[1]+1, crop_box[2]:crop_box[3]+1]
+        plt.imshow(constellations_img)
 
-        if showers is not None:
-            msg = 'Filtered for {}'.format(showers)
-            ax.text(10, stack_img.shape[0] - 10, msg, color='gray', fontsize=6, fontname='Source Sans Pro', weight='ultralight')
+    ax.set_axis_off()
 
-        # Remove the margins (top and right are set to 0.9999, as setting them to 1.0 makes the image blank in
-        #   some matplotlib versions)
-        plt.subplots_adjust(left=0, bottom=0, right=0.9999, top=0.9999, wspace=0, hspace=0)
+    ax.set_xlim([0, stack_img.shape[1]])
+    ax.set_ylim([stack_img.shape[0]+extrapix, 0])
 
-        if out_dir is not None:
-            filenam = os.path.join(os.path.expanduser(out_dir), stack_time.strftime("%Y%m%d_%H%M%S") + "_cam_stack.jpg")
-        else:
-            filenam = os.path.join(dir_path, os.path.basename(dir_path) + "_track_stack.jpg")
-        plt.savefig(filenam, bbox_inches='tight', pad_inches=0, dpi=dpi, facecolor='k', edgecolor='k')
-        print('saved to {}'.format(filenam))
+    if showers is not None:
+        msg = 'Filtered for {}'.format(showers)
+        ax.text(10, stack_img.shape[0] - 10, msg, color='gray', fontsize=6, fontname='Source Sans Pro', weight='ultralight')
+
+    # Remove the margins (top and right are set to 0.9999, as setting them to 1.0 makes the image blank in
+    #   some matplotlib versions)
+    plt.subplots_adjust(left=0, bottom=0, right=0.9999, top=0.9999, wspace=0, hspace=0)
+
+    if out_dir is not None:
+        filenam = os.path.join(os.path.expanduser(out_dir), stack_time.strftime("%Y%m%d_%H%M%S") + "_cam_stack.jpg")
+    else:
+        filenam = os.path.join(dir_path, os.path.basename(dir_path) + "_track_stack.jpg")
+    plt.savefig(filenam, bbox_inches='tight', pad_inches=0, dpi=dpi, facecolor='k', edgecolor='k')
+    print('saved to {}'.format(filenam))
     #
     print("Stacking time: {}".format(datetime.timedelta(seconds=(int(time.time() - start_time)))))
     if hide_plot is False:
@@ -417,8 +362,8 @@ def timeToFiles(config_path_list, stack_time):
         file_extension_list = ['.fits']
         directory_list = getDirectoryList(this_config, stack_time)
 
-        #print("Directories to search")
-        #print(directory_list)
+        print("Directories to search")
+        print(directory_list)
 
         finding_first_file = True
 
