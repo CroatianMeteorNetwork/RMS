@@ -1613,7 +1613,7 @@ class EventMonitor(multiprocessing.Process):
         """Take an event, directory list and an extension list and return paths to files
 
            For .fits files always return at least the closest previous event
-           This is a pretty ugly process, where the previous file compared to the event time is held in a variable.
+           The previous file compared to the event time is held in a variable.
            If the file being compared is the first file after the event time, put the previous file into the list,
            if it is not already there.
 
@@ -2413,6 +2413,21 @@ class EventMonitor(multiprocessing.Process):
 
     def checkTLEEventWithoutTime(self, event, ev_con, test_mode = False):
 
+        """
+
+        Discover if a TLE event which is not time bound passes through the FoV.
+
+        Args:
+            event: event containing the tle
+            ev_con: the configuration for this event
+            test_mode: test_mode
+
+        Returns:
+            Nothing
+
+        """
+
+
         #Initialise the list of night_directories, and populate with the directories from CapturedFiles
         night_directory_list = []
 
@@ -2435,6 +2450,7 @@ class EventMonitor(multiprocessing.Process):
             log.info("Night directory list is empty")
             return
 
+
         if len(night_directory_list) > 1:
             log.info("Night directory list has more than more directory")
 
@@ -2444,6 +2460,9 @@ class EventMonitor(multiprocessing.Process):
 
         found_new_tle, working_in_final_captured_files_directory = False, False
         #If this is a newly loaded tle the tle_last_processed will be empty
+
+
+        #If there is no last_processed, then look back through the CapturedFiles directory
         if event.tle_last_processed == "" and len(night_directory_list) != 0:
             #Set the target_directory to be the first CapturedFiles directory
             target_directory = night_directory_list[0]
@@ -2452,6 +2471,7 @@ class EventMonitor(multiprocessing.Process):
             #It is not a newly loaded tle, so we have the time to start processing from
             log.info("{} last processed {}".format(event.tle_0, event.tle_last_processed))
 
+            # Start iterating through the history
             first_run, target_directory_set = True, False
             for directory in night_directory_list:
                 #We always need to hold the previous directory from the iterations
@@ -2460,18 +2480,18 @@ class EventMonitor(multiprocessing.Process):
                 if first_run:
                     last_directory = directory
                     first_run = False
-                #If this directory has a timestamp after the last processed event
+                #If this directory has a timestamp after the last processed event then this is the directory to start processing
                 if convertGMNTimeToPOSIX(directory[7:21]) > dateutil.parser.parse(event.tle_last_processed):
                     target_directory = last_directory
                     target_directory_set = True
-                    break
+                    break # get out of the loop, and start doing the work
                 last_directory = directory
+
             #If we get here and target_directory_set is still false, then we have iterated through to the last directory
             if not target_directory_set:
                 #we are now working in the final CapturedFiles directory - capture may still be in progress
                 #strategy here is find the newest .fits file in the directory and see if it is after tle_last_processed
                 #if it is then we can do more work in this directory
-
                 #This pair of variables will be used to let us know if we can start creating future events
                 working_in_final_captured_files_directory, found_new_tle = True, False
                 target_directory = directory
@@ -2490,7 +2510,7 @@ class EventMonitor(multiprocessing.Process):
                         target_directory = directory
                         target_directory_set = True
 
-
+            #Find out if we have completed all the work on history - we won't get here if capture is in process
             if not target_directory_set:
                 log.info("No more work to do on {}".format(event.tle_0))
                 return
@@ -2521,16 +2541,27 @@ class EventMonitor(multiprocessing.Process):
             last_fits_file = fits_file
 
             #log.info("For file {} searching between {} and {}".format(last_fits_file, traj_start_time, traj_end_time))
+            #Create the trajectory for the object
             created_event = self.tleEventCreateTrajectory(event, traj_start_time, traj_end_time)
 
+            #If it is not illuminated, then skip
+            #Could make this optional if someone really wanted to capture an occultation
             if not created_event.lit:
                 continue
 
+
+            #How many points were in the FoV
             created_event.dt = convertPOSIXTimeToGMN(traj_start_time + datetime.timedelta(seconds=traj_duration / 2))
             created_event.time_tolerance = traj_duration / 2
             count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
                 created_event)
 
+
+            #The following code implements an edge transition state machine
+            #For a slow moving object such as a sattelite, the object many spend tens of seconds in the FoV.
+            #This system combines multiple time segments into a single upload
+
+            #Transition into the FoV - don't add the file here
             if count != 0 and not in_fov:
                 log.info("{} entered FOV at {}".format(event.tle_0, traj_start_time))
                 in_fov = True
@@ -2538,10 +2569,11 @@ class EventMonitor(multiprocessing.Process):
                     found_new_tle = True
                     log.info("Found a new tle for {} in the final directory".format(event.tle_0))
 
-
+            #In the FoV - add the file here
             if count != 0 and in_fov:
                 file_list.append(last_fits_file)
 
+            #This is after the transition out of the FoV. Don't add the file, but do the upload of the accumulated files
             if count == 0 and in_fov:
                 log.info("{} left FOV at {}".format(event.tle_0, traj_end_time))
                 in_fov = False
@@ -2565,8 +2597,10 @@ class EventMonitor(multiprocessing.Process):
 
 
         #Finished iterating through fits files
+        #Edge case -  a target entered the FoV but did not leave before the end of the files in the directory
+        #Rather than delay this upload until the transit has completed, upload the data now, and get the rest of the
+        #tranit on the next iteration
 
-        #In case a target entered the FoV but did not leave before the end of the files in the directory
         if in_fov:
             in_fov = False
             end_time_in_fov = traj_end_time
@@ -2614,6 +2648,20 @@ class EventMonitor(multiprocessing.Process):
 
     def checkTLEThroughFOV(self, event,  evaluation_step = 10, maximum_magnitude = 6):
 
+        """
+
+        Discover if a TLE goes through the FOV
+
+        Args:
+            event: event containing a tle definition
+            evaluation_step: size of the evaluation step in seconds
+            maximum_magnitude: not yet implemented
+
+        Returns:
+            [int] number of steps visible in the FoV
+        """
+
+
         search_start = convertGMNTimeToPOSIX(event.dt) - datetime.timedelta(seconds=int(event.time_tolerance))
 
 
@@ -2636,6 +2684,18 @@ class EventMonitor(multiprocessing.Process):
         return count
 
     def createTLEEvent(self, event, start_time, end_time):
+
+        """
+
+        Args:
+            event:  event object containg the tle
+            start_time: start time for evaluation
+            end_time: end time for evaluation
+
+        Returns:
+
+        """
+
 
         if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 !=0 and event.dt != "" and event.dt != 0:
 
@@ -2732,6 +2792,19 @@ class EventMonitor(multiprocessing.Process):
 
     def tleEventCreateTrajectory(self, event,start_time, end_time):
 
+        """
+        given and event with a TLE and a start and end_time, populate it with a trajectory
+
+        Args:
+            event: event with tle only
+            start_time: start of event
+            end_time: end of event
+
+        Returns:
+            reference to the event
+        """
+
+
         ts = load.timescale()
         eph_sun = load('de421.bsp')
 
@@ -2763,6 +2836,19 @@ class EventMonitor(multiprocessing.Process):
         return event
 
     def checkTLEEvent(self, tle_event, ev_con, test_mode = False):
+
+        """
+
+        Check a TLE Event which has a start and end time, and if passed the the FoV, do the upload
+
+        Args:
+            tle_event: tle_event with a time specification
+            ev_con: the configuation for this event
+            test_mode:
+
+        Returns:
+            Nothing
+        """
 
         check_time_start = datetime.datetime.utcnow()
         file_list = self.getFileList(tle_event)
@@ -2946,7 +3032,19 @@ class EventMonitor(multiprocessing.Process):
 
     def tleEventTime2Geo(self,satellite, event, time_gmn):
 
-        sun_eph = load('de421.bsp')
+        """
+
+        Args:
+            satellite: skyfield object
+            event:
+            time_gmn: gmn_time_specification
+
+        Returns:
+            latitude (degrees), longitude (degrees), height (km)
+
+        """
+
+
         ts = load.timescale()
         year, month, day = int(time_gmn[0:4]), int(time_gmn[4:6]), int(time_gmn[6:8])
         hour, minute, second = int(time_gmn[9:11]), int(time_gmn[11:13]), int(time_gmn[13:15])
