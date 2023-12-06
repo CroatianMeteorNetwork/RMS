@@ -193,7 +193,7 @@ def camStack(config_path_list, stack_time = datetime.datetime.utcnow() - datetim
     vmin = 0
     if darkbackground is True:
         vmin = np.quantile(stack_img[stack_img>0], 0.05)
-    plt.imshow(stack_img, cmap='gray', vmin=vmin, vmax=256, interpolation='nearest')
+    #plt.imshow(stack_img, cmap='gray', vmin=vmin, vmax=256, interpolation='nearest')
 
 
 
