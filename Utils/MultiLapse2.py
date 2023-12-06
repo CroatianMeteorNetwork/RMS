@@ -83,7 +83,7 @@ def getDirectoryList(config, stack_time):
                 os.path.join(os.path.expanduser(config.data_dir), config.captured_dir)):
             # Skip over any directory which does not start with the stationID and warn
             if night_directory[0:len(config.stationID)] != config.stationID:
-                print("Skipping directory {} - not the expected format for a captured files directory".format(night_directory))
+                print("Skipping directory {} - not the expected format for a captured files directory for {}".format(night_directory, config.stationID))
                 continue
             directory_POSIX_time = dirNameToDatetime(night_directory)
 
