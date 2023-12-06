@@ -1295,7 +1295,7 @@ class EventMonitor(multiprocessing.Process):
         try:
             self.db_conn.cursor().execute(sql_statement)
             self.db_conn.commit()
-            log.info("TLE {} processed up to {}".format(event.tle_0, time))
+            #log.info("TLE {} processed up to {}".format(event.tle_0, time))
         except:
             log.info("Database error")
             self.recoverFromDatabaseError()
@@ -1688,7 +1688,7 @@ class EventMonitor(multiprocessing.Process):
 
         file_list += self.findEventFiles(event, self.getDirectoryList(event), [".fits", ".bin"])
         #have to use system .config file_name here because we have not yet identified the files for the event
-        log.info("Using {} as .config file name".format(self.syscon.config_file_name))
+        #log.info("Using {} as .config file name".format(self.syscon.config_file_name))
         if len(self.getDirectoryList(event)) > 0:
             file_list += self.getFile(os.path.basename(self.syscon.config_file_name), self.getDirectoryList(event)[0])
             file_list += [self.getPlateparFilePath(event)]
@@ -2452,8 +2452,8 @@ class EventMonitor(multiprocessing.Process):
 
 
         if len(night_directory_list) > 1:
-            log.info("Night directory list has more than more directory")
-
+            #log.info("Night directory list has more than more directory")
+            pass
 
         #Sort into date order
         night_directory_list.sort()
@@ -2515,7 +2515,7 @@ class EventMonitor(multiprocessing.Process):
                 log.info("No more work to do on {}".format(event.tle_0))
                 return
 
-        log.info("Searching in target directory {}".format(target_directory))
+        #log.info("Searching in target directory {}".format(target_directory))
         fits_list = glob.glob(os.path.join(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir), target_directory, "*.fits"))
         fits_list.sort()
 
