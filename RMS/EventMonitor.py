@@ -2691,7 +2691,7 @@ class EventMonitor(multiprocessing.Process):
         """
 
         Args:
-            event:  event object containg the tle
+            event:  event object containing the tle
             start_time: start time for evaluation
             end_time: end time for evaluation
 
@@ -2972,7 +2972,7 @@ class EventMonitor(multiprocessing.Process):
                 self.checkRaDECEvent(this_event,ev_con, test_mode)
             elif this_event.tle_0 != "" and this_event.tle_1 != "" and \
                     this_event.tle_2 !="" and this_event.dt != "" and this_event.dt != "0":
-                log.info("Event at {}, is a TLE specification".format(this_event.dt))
+                log.info("Event at {}, tolerance {}s, is a TLE specification".format(this_event.dt, this_event.time_tolerance))
                 log.info("{}".format(this_event.tle_0))
                 log.info("{}".format(this_event.tle_1))
                 log.info("{}".format(this_event.tle_2))
