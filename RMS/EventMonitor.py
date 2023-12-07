@@ -2842,11 +2842,12 @@ class EventMonitor(multiprocessing.Process):
 
         """
 
-        Check a TLE Event which has a start and end time, and if passed the the FoV, do the upload
+        Check a TLE Event which has a start and end time, and if passed through the FoV, do the upload
+        and mark as processed
 
         Args:
             tle_event: tle_event with a time specification
-            ev_con: the configuation for this event
+            ev_con: the configuration for this event
             test_mode:
 
         Returns:
