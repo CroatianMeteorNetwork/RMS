@@ -1692,7 +1692,7 @@ class EventMonitor(multiprocessing.Process):
         if len(self.getDirectoryList(event)) > 0:
             file_list += self.getFile(os.path.basename(self.syscon.config_file_name), self.getDirectoryList(event)[0])
             file_list += [self.getPlateparFilePath(event)]
-            log.info("File list {}".format(file_list))
+            #log.info("File list {}".format(file_list))
         return file_list
     def doUpload(self, event, evcon, file_list, keep_files=False, no_upload=False, test_mode=False):
 
