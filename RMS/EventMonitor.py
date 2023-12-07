@@ -2854,7 +2854,7 @@ class EventMonitor(multiprocessing.Process):
         """
 
         if self.syscon.tle_processing_level > 1:
-            log.info("Skipping {} TLE processing not enabled in config file".format(event.tle_0))
+            log.info("Skipping {} TLE processing not enabled in config file".format(tle_event.tle_0))
 
         check_time_start = datetime.datetime.utcnow()
         file_list = self.getFileList(tle_event)
