@@ -3076,7 +3076,7 @@ class EventMonitor(multiprocessing.Process):
             Nothing
         """
 
-        log.info("Checking for events from {} to {}".format(start_time, end_time))
+        #log.info("Checking for events from {} to {}".format(start_time, end_time))
         events = self.getEventsfromWebPage(testmode)
         # Don't try to iterate over None - this check should never be needed
         if events is None:
