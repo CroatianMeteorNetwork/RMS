@@ -2755,6 +2755,7 @@ class EventMonitor(multiprocessing.Process):
                 tle_event.dt = convertPOSIXTimeToGMN(
                     enter_fov_time + datetime.timedelta(seconds = (leave_fov_time - enter_fov_time).total_seconds()/2))
                 tle_event.time_tolerance = datetime.timedelta(seconds = ((leave_fov_time - enter_fov_time)).total_seconds()/2)
+                log.info("Created an event for {} with a time tolerance of {}".format(tle_event.tle_0, tle_event.time_tolerance))
                 self.addEvent(tle_event)
 
 
