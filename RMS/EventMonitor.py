@@ -2974,8 +2974,8 @@ class EventMonitor(multiprocessing.Process):
                     this_event.tle_2 !="" and this_event.dt != "" and this_event.dt != "0":
                 log.info("Event at {}, tolerance {}s, is a TLE specification".format(this_event.dt, this_event.time_tolerance))
                 log.info("{}".format(this_event.tle_0))
-                log.info("{}".format(this_event.tle_1))
-                log.info("{}".format(this_event.tle_2))
+                #log.info("{}".format(this_event.tle_1))
+                #log.info("{}".format(this_event.tle_2))
                 self.checkTLEEvent(this_event, ev_con)
             elif this_event.tle_0 != "" and this_event.tle_1 != "" and \
                 this_event.tle_2 != "" and this_event.dt == "0":
