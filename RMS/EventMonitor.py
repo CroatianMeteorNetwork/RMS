@@ -2427,11 +2427,14 @@ class EventMonitor(multiprocessing.Process):
 
         """
 
+        if self.syscon.tle_processing_level < 2:
+            log.info("Processing of TLE events wihthout time limits not enabled in config")
+            return
 
         #Initialise the list of night_directories, and populate with the directories from CapturedFiles
         night_directory_list = []
 
-        log.info("Started processing {}".format(event.tle_0))
+        #log.info("Started processing {}".format(event.tle_0))
 
         if os.path.exists(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
             for night_directory in os.listdir(
@@ -2503,8 +2506,8 @@ class EventMonitor(multiprocessing.Process):
                 if len(fits_list) != 0:
                     final_fits_file = os.path.basename(fits_list[-1])
                     log.info("Working on tle {}, last processed {}".format(event.tle_0, event.tle_last_processed))
-                    log.info("Working in last CapturedFiles directory {}".format(target_directory))
-                    log.info("Found last fits file {}".format(final_fits_file))
+                    #log.info("Working in last CapturedFiles directory {}".format(target_directory))
+                    #log.info("Found last fits file {}".format(final_fits_file))
                     if convertGMNTimeToPOSIX(final_fits_file[10:25]) > dateutil.parser.parse(event.tle_last_processed):
                         log.info("Still more to scan in this directory")
                         target_directory = directory
@@ -2849,6 +2852,9 @@ class EventMonitor(multiprocessing.Process):
         Returns:
             Nothing
         """
+
+        if self.syscon.tle_processing_level > 1:
+            log.info("TLE processing not enabled in config file")
 
         check_time_start = datetime.datetime.utcnow()
         file_list = self.getFileList(tle_event)
