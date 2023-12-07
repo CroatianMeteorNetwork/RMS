@@ -2561,7 +2561,7 @@ class EventMonitor(multiprocessing.Process):
 
 
             #The following code implements an edge transition state machine
-            #For a slow moving object such as a sattelite, the object many spend tens of seconds in the FoV.
+            #For a slow moving object such as a satellite, the object many spend tens of seconds in the FoV.
             #This system combines multiple time segments into a single upload
 
             #Transition into the FoV - don't add the file here
@@ -2703,7 +2703,7 @@ class EventMonitor(multiprocessing.Process):
         if event.tle_0 != "" and event.tle_1 != "" and event.tle_2 !=0 and event.dt != "" and event.dt != 0:
 
             duration = int((end_time - start_time).total_seconds())
-            evaluation_step = 10
+            evaluation_step = 30
             in_fov, count = False, 0
             enter_fov_time = start_time
             for seconds_offset in range(0,duration, evaluation_step):
