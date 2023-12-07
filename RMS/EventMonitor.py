@@ -2428,7 +2428,7 @@ class EventMonitor(multiprocessing.Process):
         """
 
         if self.syscon.tle_processing_level < 2:
-            log.info("Skipping {}, processing of TLE events without time limits not enabled in config".format(event.tle_0))
+            #log.info("Skipping {}, processing of TLE events without time limits not enabled in config".format(event.tle_0))
             return
 
         #Initialise the list of night_directories, and populate with the directories from CapturedFiles
