@@ -2908,7 +2908,7 @@ class EventMonitor(multiprocessing.Process):
             else:
 
                 if not test_mode:
-                    pass
+                    self.markEventAsProcessed(tle_event)
 
     def checkEvents(self, ev_con, test_mode = False):
 
