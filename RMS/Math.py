@@ -1,7 +1,6 @@
 """ Common math functions. """
 
 import numpy as np
-from numpy.core.umath_tests import inner1d
 
 
 
